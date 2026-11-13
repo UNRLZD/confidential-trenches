@@ -46,8 +46,9 @@
 //   The bound is the route's (HOLDINGS_THROTTLE_MAX_MS): no wait is begun past 30 s of the route throttled with no round
 //   through since, so one W whose rounds keep drawing 429s (a provider refusing one method for good) is refused within
 //   it, and every W after it on the route is refused without asking while that lasts: the list ends at the bound. A
-//   429 late in a long list, after rounds went through, starts its own 30 s. Within it, SOL_HOLDINGS_ROUNDS or
-//   EVM_HOLDINGS_ROUNDS.
+//   429 late in a long list, after rounds went through, starts its own 30 s. A throttled round never counts toward
+//   SOL_HOLDINGS_ROUNDS (rounds whose slots differ), so a W is refused for 429s only at that bound (card
+//   solana-holdings-reads-inside-the-public-limit).
 // - One failure never hides the rest: a pool that fails reports its error and the others still list.
 // - Privacy: every request these reads make names one W and nothing else of the user's: no batch, no call carries two
 //   Ws, so no public provider is given two Ws in one request. One read elsewhere batches: the rent backs' find read
@@ -128,8 +129,6 @@ export const HOLDINGS_THROTTLE_MAX_MS = 30_000;
  *  doubling to THROTTLE_PAUSE_MAX_MS, put the rounds at 0, 1, 3, 7, 15, 25, 35, 45 and 55 s. Before the gate a
  *  devnet read asked about 2 getTokenAccountsByOwner a second (app-a2-e2e run 4: 638 in 300 s). */
 export const HOLDINGS_THROTTLED_ROUNDS_60S = 9;
-/** An EVM W's reads are made again after the helper's 429 at most this many times before a refusal. */
-export const EVM_HOLDINGS_ROUNDS = 4;
 /** The holdings readers' own pace on a helper route (M367), both chains: one Solana round (getBalance and the two
  * getTokenAccountsByOwner) in any 3 s, booked as one unit: `total` is the round's three calls and binds, so the round's
  * calls, made in one tick, start at one instant (calls spread over the finalized slot, which moves about every 400 ms,
@@ -163,6 +162,16 @@ export const EVM_HOLDINGS_ROUNDS = 4;
  * It also paces the EVM readers on the helper's /v1/rpc/base and /v1/rpc/robinhood: 18 calls in 10 s against the 30 a
  * caller may send each (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED). Two tabs hold two routes, so their finders take 36 of a caller's 42 on /v1/rpc/solana. */
 export const HOLDINGS_RPC_LIMIT: SolanaRpcLimit = /* @__PURE__ */ Object.freeze({ windowMs: 1_667, total: 3, perMethod: 2 });
+/** The holdings readers' pace on a public Solana host the device reaches directly (solanaHoldingsAt), one round in
+ * 2.5 s: 8 getTokenAccountsByOwner in any 10 s, under the 10 the host names. Read 2026-11-13 17:09-17:14Z from this
+ * Mac (card solana-holdings-reads-inside-the-public-limit): api.mainnet-beta.solana.com and api.devnet.solana.com answer
+ * every call with x-ratelimit-method-limit 10 for getTokenAccountsByOwner (150 for getBalance; x-ratelimit-rps-limit
+ * 250), a window of 10 s (one call each 1.33 s held x-ratelimit-method-remaining at 2), a 429 past it with Retry-After
+ * 10, and a 429 counted in the window (remaining went to -6 while 429s were asked again 1.7 s apart). The helper's
+ * pace (12 in 10 s) drew 6 429s of 69 calls there (helper live run 43466118275, 16:47Z). The 2 spare calls keep a
+ * round sent late or early by up to 2.5 s inside the 10. Pocket (-32010, the Token program out of its indexes) and
+ * publicnode (HTTP 403) answer no getTokenAccountsByOwner, so no other keyless host takes these reads. */
+export const HOLDINGS_PUBLIC_RPC_LIMIT: SolanaRpcLimit = /* @__PURE__ */ Object.freeze({ windowMs: 2_500, total: 3, perMethod: 2 });
 /** Solana's JSON-RPC code for a minContextSlot the node has not reached. */
 const MIN_CONTEXT_SLOT_NOT_REACHED = "-32016";
 /** The JSON-RPC code of an eth_call that reverted ("execution reverted"); every other error is the provider's. */
@@ -553,7 +562,7 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
       };
       // Each round reads all three at the highest slot seen (none in the first). A round fails when they answer at
       // different slots, or on a 429 (the next waits the route's gate); the next round asks again, and SOL_HOLDINGS_ROUNDS
-      // failed rounds are a refusal. A backend behind the slot asked (-32016) is asked again a slot later, SOL_LAG_SLOTS
+      // rounds at different slots are a refusal (a 429's only the route's bound). A backend behind the slot asked (-32016) is asked again a slot later, SOL_LAG_SLOTS
       // waits at most, as every Solana read of the wallet (./solana.ts solanaLagRetry): it waits for the chain.
       let r: Awaited<ReturnType<typeof once>> | undefined;
       let min: number | undefined;
@@ -584,8 +593,11 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
           await sleep(SOL_LAG_WAIT_MS);
           continue;
         }
-        const why = ended === "429" ? "drew the helper's 429" : "met at no one slot";
-        if (round++ >= SOL_HOLDINGS_ROUNDS) throw new Error(`its reads ${why} in ${SOL_HOLDINGS_ROUNDS} rounds`);
+        // a throttle spends no slot round: the next round waits the route's gate (the host's Retry-After, its window),
+        // and only the route's bound (held: HOLDINGS_THROTTLE_MAX_MS in doubt, or `by`) refuses a W for it (card
+        // solana-holdings-reads-inside-the-public-limit: W j=3 of the 17:02Z run spent 3 of its 8 on 429s)
+        if (ended === "429") continue;
+        if (round++ >= SOL_HOLDINGS_ROUNDS) throw new Error(`its reads met at no one slot in ${SOL_HOLDINGS_ROUNDS} rounds`);
       }
       if (r === undefined) throw new Error("no read");
       const keys = new Set<string>();
@@ -609,10 +621,16 @@ export function solanaHelperHoldings(origin: string): HoldingsReader {
 }
 /** The Solana reader on a provider the device reaches directly (the testnet build's devnet RPC): one try a call and the
  *  route's gate, as the helper's, never the trade pair's client, whose retry asks a throttled provider up to four times
- *  a call; paced in the URL's one queue, the pair's own, so the host's calls never rise past that one budget. */
+ *  a call; paced in the URL's one queue, the pair's own, so the host's calls never rise past that one budget, and its
+ *  rounds on a queue of their own at HOLDINGS_PUBLIC_RPC_LIMIT, so the host's getTokenAccountsByOwner stays under the
+ *  10 in 10 s it names (the URL's keyless limit is 40 a method). The route's other readers (solanaBuysAt) ask no
+ *  getTokenAccountsByOwner and keep the URL's pace. */
+const publicHoldings = new WeakMap<Route, SolanaRpc>();
 export function solanaHoldingsAt(url: string): HoldingsReader {
   const r = holdingsRoute((fetch) => solanaJsonRpc(url, { fetch }), "url");
-  return solanaHoldingsReader(r.rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane });
+  let rpc = publicHoldings.get(r);
+  if (rpc === undefined) publicHoldings.set(r, (rpc = solanaPacedRpc((method, params) => r.rpc(method, params), HOLDINGS_PUBLIC_RPC_LIMIT)));
+  return solanaHoldingsReader(rpc, { wait429: r.wait429, gate: r.gate, lane: r.lane });
 }
 
 /** A Solana pool's restored notes to its buys' Ws: its spends must be exactly its SPENT notes, each at jOf(ref). */
@@ -648,9 +666,10 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
   return {
     chain: "evm",
     async read(address, signal, by = Infinity) {
-      // a 429 fails the round (the next waits the route's gate): the next reads again from a new block, and
-      // EVM_HOLDINGS_ROUNDS failed rounds are a refusal
-      for (let round = 1; ; round++) {
+      // a 429 fails the round (the next waits the route's gate: the Retry-After, its window): the next reads again from
+      // a new block, and only the route's bound (held: HOLDINGS_THROTTLE_MAX_MS in doubt, or `by`) is a refusal, as on
+      // Solana (card solana-holdings-reads-inside-the-public-limit)
+      for (;;) {
         const h = await inTurn(a.gate, by, sleep, signal, async (sentIn) => {
           try {
             const got = await once(address, signal);
@@ -662,7 +681,6 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
           }
         }, a.lane);
         if (h !== null) return h;
-        if (round >= EVM_HOLDINGS_ROUNDS) throw new Error(`its reads drew the helper's 429 in ${EVM_HOLDINGS_ROUNDS} rounds`);
       }
     },
   };

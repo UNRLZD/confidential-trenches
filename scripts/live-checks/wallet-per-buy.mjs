@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 // Live check of card wallet-per-buy: a restore reads every fresh wallet a buy used, at one state each, within the
 // public RPCs' limits. It runs the wallet's own restore reads (packages/wallet/scripts/buy-wallets-live.ts: buyWallets
-// and the readers the device runs, at HOLDINGS_RPC_LIMIT) for Ws j = 0..3 of the published A.8 test seed
+// and the readers the device runs: the helper's at HOLDINGS_RPC_LIMIT, Solana's device-direct at HOLDINGS_PUBLIC_RPC_LIMIT) for Ws j = 0..3 of the published A.8 test seed
 // (packages/wallet/test/vectors/a8.json, the all-zero seed; never any other key), on Solana mainnet and Base, each on
 // two RPCs: the helper's /v1/rpc/{chain}, the device's route, and a public RPC device-direct. PASS needs:
 //   - every W read on every route, four distinct Ws, j 0 and 1 at the A.8 vector's addresses;
 //   - each Solana W's last round (getBalance and both getTokenAccountsByOwner) answered at one slot, and each Base W's
 //     balance and token reads at one block;
 //   - no HTTP 429 and no other failed answer;
+//   - each route's calls of a method in any 10 s at most the limit its host names for that method
+//     (x-ratelimit-method-limit; api.mainnet-beta names 10 for getTokenAccountsByOwner, read 2026-11-13 17:09Z, so that
+//     route's getTokenAccountsByOwner is held to 10 when the host names none), so a pace past the host's fails every
+//     run, not only a run whose rounds happen to fill the window (card solana-holdings-reads-inside-the-public-limit);
 //   - each W's holdings equal on both RPCs.
 // It prints, per W, the address, the slot or block and the holdings.
 // After: helper
@@ -41,6 +45,31 @@ const href = (u) => {
 };
 const show = (h) => `native ${h.native}${Object.keys(h.tokens).length ? `, ${Object.entries(h.tokens).map(([k, v]) => `${k} ${v.amount}${v.frozen ? " frozen" : ""}`).join(", ")}` : ""}${h.unreadable.length ? `, unreadable ${h.unreadable.join(" ")}` : ""}`;
 
+/** The limit api.mainnet-beta named for getTokenAccountsByOwner (2026-11-13 17:09Z): its route's when it names none. */
+const SOL_PUBLIC_GTABO = 10;
+/** Per route and method with a limit (the least its host named in the run; the Solana public route's
+ *  getTokenAccountsByOwner at least held to SOL_PUBLIC_GTABO): [route, method, limit, the most calls sent in any 10 s]. */
+export function paces(calls) {
+  const out = [];
+  const keys = new Set(calls.map((c) => `${href(c.route)} ${c.method}`));
+  for (const k of keys) {
+    const [route, method] = k.split(" ");
+    const mine = calls.filter((c) => `${href(c.route)} ${c.method}` === k);
+    const named = mine.map((c) => c.methodLimit).filter((n) => Number.isSafeInteger(n) && n > 0);
+    const floor = route === href("https://api.mainnet-beta.solana.com") && method === "getTokenAccountsByOwner" ? SOL_PUBLIC_GTABO : Infinity;
+    const limit = Math.min(floor, ...named);
+    if (!Number.isFinite(limit)) continue;
+    const at = mine.map((c) => c.ms).sort((a, b) => a - b);
+    let most = 0;
+    for (let i = 0, lo = 0; i < at.length; i++) {
+      while (at[lo] <= at[i] - 10_000) lo++;
+      most = Math.max(most, i - lo + 1);
+    }
+    out.push([route, method, limit, most]);
+  }
+  return out;
+}
+
 /** The check on one recorded run: { readAt, routes: [{ chain, rpc, url, wallets: [{ j, address, holdings }], failed }], calls }. */
 export function judge({ routes, calls }) {
   const lines = [];
@@ -48,6 +77,7 @@ export function judge({ routes, calls }) {
   const bad = calls.filter((c) => c.status !== 200);
   say(!calls.some((c) => c.status === 429), `HTTP 429s: ${calls.filter((c) => c.status === 429).length} of ${calls.length} calls`);
   say(bad.length === 0, `failed answers: ${bad.length ? bad.map((c) => `${c.method} ${c.status}`).join(", ") : "none"}`);
+  for (const [route, method, limit, most] of paces(calls)) say(most <= limit, `${route} ${method}: at most ${most} in any 10 s, the host's limit ${limit}`);
   for (const [chain, rpc] of ROUTES) {
     const r = routes.find((x) => x.chain === chain && x.rpc === rpc);
     const tag = `[${chain} ${rpc}]`;
@@ -110,7 +140,7 @@ if (import.meta.main) {
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const { ok, lines } = judge(run);
     for (const l of lines) console.log(l);
-    console.log(`times (ms): ${run.routes.map((r) => `${r.chain} ${r.rpc} ${r.ms}`).join(", ")}; limit ${JSON.stringify(run.limit)}`);
+    console.log(`times (ms): ${run.routes.map((r) => `${r.chain} ${r.rpc} ${r.ms}`).join(", ")}; limit ${JSON.stringify(run.limit)}; public ${JSON.stringify(run.publicLimit)}`);
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${run.readAt})`);
     process.exit(ok ? 0 : 1);
   } catch (e) {
