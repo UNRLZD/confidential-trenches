@@ -4392,6 +4392,8 @@ const limited = (a: unknown) => {
   const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
   return typeof m === "string" && !reverted(a) && /request limit|rate limit|too many requests|exceeded its compute units per second/i.test(m);
 };
+/** `limited` for a call's error object alone (the pool index's reads, pool-index.ts): one copy of the words. */
+export const evmErrorLimited = (e: unknown): boolean => limited({ error: e });
 /** A call that reverted (code 3, or a message "execution reverted…"): its string is the called contract's, never the
  *  provider's state or limit (review LOW-2). */
 const reverted = (a: unknown) => {

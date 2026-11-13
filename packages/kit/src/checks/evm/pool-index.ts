@@ -29,7 +29,9 @@
 // proven at, for a later card to keep on the device. A sync that fails part way returns the index with what it did
 // prove (newest spans first), `coversThrough` null and no pools, so the next sync reads only what is left.
 import type { EvmPoolKey, EvmRpc } from "./quote.ts";
-import { EvmQuoteError } from "./quote.ts";
+// `limited`: a call's error naming the reader's rate limit, in the quote's own words: asked again later, never as halves,
+// which would spend the halves on a reader that is only busy
+import { EvmQuoteError, evmErrorLimited as limited } from "./quote.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -101,9 +103,6 @@ const SEL_EXTSLOAD = "1e2eaeaf"; // PoolManager.extsload(bytes32)
 const POOLS_SLOT = 6n; // v4-core StateLibrary.POOLS_SLOT
 const U24 = 0xffffff;
 
-/** A call's error naming the reader's rate limit (checks/evm/quote.ts `limited`'s words): asked again later, never as
- *  halves, which would spend the halves on a reader that is only busy. */
-const limited = (e: unknown) => /request limit|rate limit|too many requests|exceeded its compute units per second/i.test(String((e as { message?: unknown } | null)?.message ?? ""));
 const hex = (b: Uint8Array) => "0x" + bytesToHex(b);
 const word = (n: bigint) => BigInt.asUintN(256, n).toString(16).padStart(64, "0");
 const keccak = (h: string) => hex(keccak_256(hexToBytes(h)));
