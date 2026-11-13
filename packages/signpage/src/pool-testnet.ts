@@ -1059,6 +1059,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return null;
     }
   };
+  // card evm-first-proof-inside-ten-seconds: the pool's history read once a deposit is in sight (a quote's floor, its
+  // follow, a restore: each asks evmPoolOf), on the pass sync and its hosts' budget while the money is on its way, and
+  // kept in the page's hold (pageEvmHold), so the landing's own round reads only the blocks past it. On a page that
+  // never synced the pool, that round read it whole from the deploy block at the landing (a Base mainnet copy of 13 Nov
+  // 05:38Z: 51 log pages per host in its second). Once a page; a read that fails is asked again at the next deposit
+  const evmWarmed = new Set<"base" | "robinhood">();
+  const evmWarm = (chain: "base" | "robinhood"): void => {
+    const e = evmPool(chain);
+    if (e === null || evmWarmed.has(chain)) return;
+    evmWarmed.add(chain);
+    void e.passSync.events(evmStop.signal).catch(() => void evmWarmed.delete(chain));
+  };
   // the chains whose landing pass is asked in this tick (evmKind's landed)
   const evmLandingAsked = new Set<"base" | "robinhood">();
   const evmKind = (chain: "base" | "robinhood", end?: () => void) => {
@@ -2812,7 +2824,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (ask.chain !== "solana") return evmDeposit(ask.chain)?.(ask, ctx, from) ?? { error: "not_allowed" };
       return pin === undefined || !wayOut("solana") ? { error: "not_allowed" } : deposit(ask, ctx, from);
     },
-    evmPoolOf: (chain) => ((e) => (e === null ? null : { pin: e.pin, rpcs: e.rpcs }))(evmPool(chain)),
+    evmPoolOf: (chain) => ((e) => (e === null ? null : (evmWarm(chain), { pin: e.pin, rpcs: e.rpcs })))(evmPool(chain)),
     host: () => host(),
     settle,
     stateRead,

@@ -130,3 +130,26 @@ test("the notes one round claims start one landing pass, and a page with no land
   assert.ok(calls2.length > 0, "the state reads ran a pass");
   assert.ok(calls2.every((c) => c.startsWith("pass:")), `no landing: the pass pool alone: ${calls2.join(", ")}`);
 });
+
+test("the pool's history is read once a deposit is in sight (evmPoolOf: a quote's floor, its follow, a restore), on the pool's pass sync, once a page; a failed read is asked again", async () => {
+  const { w } = await wallet();
+  let rounds = 0;
+  let fail = true;
+  const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => (rounds++, fail ? Promise.reject(new Error("down")) : { fin: {}, anchor: {}, events: [] }) }),
+  } as never);
+  assert.notEqual(t.evmPoolOf("base"), null);
+  await until(() => rounds === 1);
+  await new Promise((r) => setTimeout(r, 20));
+  fail = false;
+  t.evmPoolOf("base");
+  await until(() => rounds === 2);
+  t.evmPoolOf("base");
+  t.evmPoolOf("base");
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(rounds, 2, "one read after the failed one, then none");
+  assert.equal(t.evmPoolOf("robinhood"), null, "no pin: no pool, nothing read");
+});
