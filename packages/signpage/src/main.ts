@@ -197,7 +197,11 @@ const restore = !framed
       // pool's own pair, card evm-deposit-on-mainnet), and the follow's own deposit (poolFollowDeps below), so a restore
       // and a live pool deposit read U_X and carry it the same way; null on a chain the follow has no reads for (the
       // restore then names U_X unread there)
-      ux: (chain) => restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program, undefined, (c) => testnet?.evmPoolOf(c) ?? null),
+      // and what it reads U_X holds is U_X's op's `left` (state.deposit_wallets; review r3 P2-1)
+      ux: (chain) => {
+        const r = restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program, undefined, (c) => testnet?.evmPoolOf(c) ?? null);
+        return r === null ? null : { ...r, leftAt: async (f, low) => void (await poolFollow?.left(f.chain, f.u, low)) };
+      },
       // each reason a run ends stalled, on this device's console only: lanes, indices, providers, scopes and the user's own
       // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts), a one-time wallet U_X
       // and its balance; no key, no words

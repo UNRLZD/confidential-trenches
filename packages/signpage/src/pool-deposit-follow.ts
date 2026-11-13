@@ -159,6 +159,9 @@ export interface PoolUxReads {
   ladder: Ladder;
   /** The page's pool.deposit on X from U_X, for `amount`, to its end, with the txs its answer named. */
   deposit(f: PoolUx, amount: bigint, signal: AbortSignal): Promise<PoolDepositRun>;
+  /** A restore's: what it read U_X holds, written as U_X's newest ended op's `left` (poolFollows' left; review r3 P2-1):
+   *  0 before a carry from it is sent, its last read once the carry is done. */
+  leftAt?(f: PoolUx, low: bigint): Promise<void>;
 }
 
 export interface PoolFollowDeps extends PoolUxReads {
@@ -588,8 +591,24 @@ export interface PoolFollowHost {
   /** An ended op's U_X read again at a landing (review P2-b of the delta): X's reads on restore's paced queue
    *  (src/pool-restore.ts restoreUxOf), never the follow's burst; none given: the follow's own (tests). */
   again?(chain: PoolChain): Pick<PoolUxReads, "balances" | "costs" | "ladder"> | null;
-  /** The wait before a run of those reads starts, drawn (as the W passes' load start); none given: no wait (tests). */
+  /** The wait before each of those reads, drawn (as the W passes' load start); none given: no wait (tests). */
   againWait?(signal: AbortSignal): Promise<void>;
+  /** The random source their order is drawn from (crypto.getRandomValues when not given). */
+  random?: (out: Uint32Array<ArrayBuffer>) => void;
+}
+
+/** `xs` in an order drawn from `random` (Fisher-Yates, each draw unbiased). */
+function shuffledBy<T>(xs: readonly T[], random: (out: Uint32Array<ArrayBuffer>) => void = (out) => void globalThis.crypto.getRandomValues(out)): T[] {
+  const out = [...xs];
+  const b = new Uint32Array(1);
+  for (let i = out.length - 1; i > 0; i--) {
+    const span = i + 1, max = Math.floor(0x1_0000_0000 / span) * span;
+    do random(b);
+    while (b[0]! >= max);
+    const j = b[0]! % span;
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
 }
 
 /** How long an ended op's U_X is read again at each landing (review P2-b of the delta: the set never grows for good):
@@ -680,6 +699,18 @@ export function poolFollows(h: PoolFollowHost) {
 
   // an ended op's U_X read once: covering one deposit's floor, the op is followed again from in_pool (its money read as
   // landed before, so what arrives is carried and the op ends again past its deadline once U_X is under the floor)
+  // what U_X holds now, written as its newest op's `left` when that op has ended and the value differs (an op still
+  // followed writes its own at its end)
+  const writeLeft = async (chain: PoolChain, u: string, low: bigint): Promise<void> => {
+    const ops = await h.store();
+    let newest: { k: string; v: PoolDepositOp } | undefined;
+    for (const k of await ops.keys("ops")) {
+      const v = await ops.get("ops", k).catch(() => undefined);
+      if (isPoolOp(v) && v.follow.chain === chain && v.follow.u === u && (newest === undefined || v.created_ms > newest.v.created_ms)) newest = { k, v };
+    }
+    if (newest === undefined || !poolFollowEnded(newest.v) || newest.v.follow.left === low.toString()) return;
+    await ops.update("ops", newest.k, (x) => (isPoolOp(x) && poolFollowEnded(x) && x.follow.left !== low.toString() ? { ...x, follow: { ...x.follow, left: low.toString() } } : undefined));
+  };
   const followAgain = async (id: string, v: PoolDepositOp): Promise<void> => {
     if (running.get(id)?.signal.aborted === false) return;
     const d = h.again ? h.again(v.follow.chain) : h.deps(v.follow, { move: async () => v.follow.move, record: async () => Promise.reject(new Error("a read records no refund move")) });
@@ -687,7 +718,9 @@ export function poolFollows(h: PoolFollowHost) {
     try {
       const [a, b] = await d.balances(v.follow);
       const low = a < b ? a : b;
-      if (low < d.ladder.min || low < (await d.costs(v.follow)).floor) return;
+      // under one deposit's floor: nothing to carry, and what U_X holds now is its `left` (review r3 P2-1: a restore's
+      // carry of a top-up leaves no stale row)
+      if (low < d.ladder.min || low < (await d.costs(v.follow)).floor) return void (await writeLeft(v.follow.chain, v.follow.u, low));
     } catch {
       return;
     }
@@ -729,12 +762,13 @@ export function poolFollows(h: PoolFollowHost) {
       void follow(id, f);
     },
     /**
-     * Each signed-in landing: every pool op no follow has ended is followed again. And each U_X whose ops have all ended
-     * is read once (review P2-b of card deposit-takes-each-pools-own-coin): money sent to it after its last op ended (an
-     * address used again, a late send) that covers one deposit's floor follows that U_X's newest op again, so it is
-     * carried in. Those reads run one U_X at a time on the host's paced reads after its drawn wait (review P2-b of the
-     * delta): at a landing, for POOL_AGAIN_FOR_MS from the op's quote or while its end left money there; at a page load
-     * (`load`), every one.
+     * Each signed-in landing (`load`: a page load, a sign-in, a resync) and each reopen of the store (no `load`): every
+     * pool op no follow has ended is followed again. And each U_X whose ops have all ended is read once (review P2-b of
+     * card deposit-takes-each-pools-own-coin): money sent to it after its last op ended (an address used again, a late
+     * send) that covers one deposit's floor follows that U_X's newest op again, so it is carried in; under the floor,
+     * what it holds is written as that op's `left`. Those reads run one U_X at a time on the host's paced reads, in a
+     * drawn order, each after its own drawn wait (review r3 P2-2): at a landing, every one; at a store reopen, those
+     * within POOL_AGAIN_FOR_MS of the op's quote or whose end left money there.
      */
     async settle(o: { load?: boolean } = {}): Promise<void> {
       const ops = await h.store();
@@ -753,27 +787,32 @@ export function poolFollows(h: PoolFollowHost) {
         if (had === undefined || v.created_ms > had.v.created_ms) ended.set(ux, { k, v });
       }
       const t = (h.now ?? Date.now)();
-      // a page load reads every ended U_X (a send to an old address is found at the next load: a load's restore reads
-      // the U_X only while its step 5 is owed, src/pool-restore.ts resume); a landing only the recent and the held ones
+      // a landing reads every ended U_X (a send to an old address is found at the next load: a load's restore reads
+      // the U_X only while its step 5 is owed, src/pool-restore.ts resume); a store reopen only the recent and held ones
       const due = [...ended].filter(([ux, { v }]) => !live.has(ux) && (o.load === true || t - v.created_ms <= POOL_AGAIN_FOR_MS || uxHeldOf([v], v.follow.chain, v.follow.u)));
       if (due.length === 0) return;
-      // one run at a time, one U_X at a time (review P2-b of the delta), after a drawn wait: never a user's U_X read in
+      // one run at a time, one U_X at a time (review P2-b of the delta), each after a drawn wait: never a user's U_X read in
       // one burst, nor at the instant a landing is read. A landing during a run reads again once it ends
       againDue = due.map(([, x]) => x);
       if (againRun !== null) return;
       const signal = abort.signal;
       againRun = (async () => {
         while (againDue !== null && !signal.aborted) {
-          const list = againDue;
+          // in a drawn order, each U_X after its own drawn wait (review r3 P2-2): no two of a user's U_X read back to
+          // back, and a page closed mid-run reaches the others over the next loads
+          const list = shuffledBy(againDue, h.random);
           againDue = null;
-          await (h.againWait?.(signal) ?? Promise.resolve()).catch(() => {});
           for (const { k, v } of list) {
+            if (signal.aborted) break;
+            await (h.againWait?.(signal) ?? Promise.resolve()).catch(() => {});
             if (signal.aborted) break;
             await followAgain(k, v);
           }
         }
       })().finally(() => (againRun = null));
     },
+    /** A U_X's lower balance read by a restore's carry (src/pool-restore.ts carryUx): its newest ended op's `left`. */
+    left: (chain: PoolChain, u: string, low: bigint): Promise<void> => writeLeft(chain, u, low),
     /** This tab's sign out, or the store closing: every follow stops; settle() starts them again. */
     stop(): void {
       abort.abort(new Error("stopped"));

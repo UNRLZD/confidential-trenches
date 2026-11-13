@@ -147,7 +147,7 @@ test("P2-b: settle reads each ended U_X one at a time, after the host's wait, on
   assert.equal(followReads, 0, "never the follow's own burst reads");
 });
 
-test("P2-b: at a landing, an ended op past POOL_AGAIN_FOR_MS whose end left nothing is not read again, one that left money is; at a page load, every one is", async () => {
+test("P2-b: at a store reopen, an ended op past POOL_AGAIN_FOR_MS whose end left nothing is not read again, one that left money is; at a landing (a load, a sign-in, a resync), every one is", async () => {
   const FOR = m.POOL_AGAIN_FOR_MS as number;
   assert.equal(typeof FOR, "number");
   const { rows, store } = opsStore();
@@ -165,7 +165,7 @@ test("P2-b: at a landing, an ended op past POOL_AGAIN_FOR_MS whose end left noth
   await host.settle();
   await host.idle();
   assert.deepEqual(read, ["U_KEPT"]);
-  // a page load reads every ended U_X, old ones too: a late send to an old address is found at the next load
+  // a landing reads every ended U_X, old ones too: a late send to an old address is found at the next load
   read.length = 0;
   await (host.settle as (o?: { load?: boolean }) => Promise<void>)({ load: true });
   await host.idle();
@@ -299,4 +299,83 @@ test("deposit_wallets: a U_X remainder is listed; a top-up reopens its op (none 
   const left = 10_650_239n + FLOOR - 20_000_000n - PER;
   assert.ok(left > 0n && left <= KEEP + PER);
   assert.deepEqual(list(rows), [{ chain: "solana", address: "U_X", asset: "SOL", amount: (Number(left) / 1e9).toString() }]);
+});
+
+// ------------------------------------------------------------------------- the delta review's round 3 (107bf6c0a)
+test("r3 P2-1: a restore's carry of a topped-up U_X: the next landing's read writes what U_X holds as its left, never the carried one", async () => {
+  const { askOf } = m;
+  const depositWalletsOf = m.depositWalletsOf as (ops: readonly unknown[], d: (c: string) => number, a: (c: string) => string) => { amount: string }[];
+  const { rows, store } = opsStore();
+  let bal = 0n, rounds = 0;
+  const pay = (amount: bigint) => void (bal -= amount + BigInt(ladderSplit(SOL_LADDER, amount).notes.length) * PER);
+  const host: ReturnType<typeof poolFollows> = poolFollows({
+    store: async () => store,
+    deps: () => reads({ sleep: async () => void (++rounds > 50 && host.stop()), balances: async () => [bal, bal] as const, deposit: async (_f, a) => (pay(a), { end: "filled", txs: [] }), noted: async () => true }),
+    again: () => ({ balances: async () => [bal, bal] as const, costs: async () => ({ floor: FLOOR, perRung: PER, keep: KEEP }), ladder: SOL_LADDER }),
+    decimals: () => 9,
+    locks: () => null,
+    now: () => 5,
+  } as Parameters<typeof poolFollows>[0]);
+  const list = () => depositWalletsOf([...rows.values()], () => 9, () => "SOL").map((x) => x.amount);
+  await host.quoted("op", "solana", QUOTE("U_X"), UX("U_X"));
+  bal = 23_586_399n;
+  await host.idle();
+  assert.deepEqual(list(), ["0.010650239"]);
+  // a late send of one floor, carried by a restore that writes nothing (an old build's), before any settle reads U_X
+  bal += FLOOR;
+  pay(askOf(SOL_LADDER, bal, PER, KEEP));
+  await host.settle({ load: true });
+  await host.idle();
+  assert.deepEqual(list(), [(Number(bal) / 1e9).toString()], "what U_X holds, never the 0.010650239 the pool now counts");
+});
+
+test("r3 P2-1: a restore's carryUx writes U_X's left: 0 before its deposit is sent, its last read once done", async () => {
+  const { carryUx } = (await import("../src/pool-restore.ts")) as Record<string, any>;
+  assert.equal(typeof carryUx, "function");
+  let bal = 1_300_479n + FLOOR;
+  const wrote: string[] = [];
+  const end = await carryUx(
+    {
+      balances: async () => [bal, bal] as const,
+      costs: async () => ({ floor: FLOOR, perRung: PER, keep: KEEP }),
+      ladder: SOL_LADDER,
+      deposit: async (_f: unknown, a: bigint) => ((wrote.push(`deposit ${a}`), (bal -= a + PER)), { end: "filled", txs: [] }),
+      leftAt: async (_f: unknown, low: bigint) => void wrote.push(`left ${low}`),
+    },
+    { chain: "solana", s: "91", i: 3, u: "U_X", refund_id: "ab".repeat(32) },
+    true,
+    new AbortController().signal,
+  );
+  assert.equal(end, null);
+  assert.deepEqual(wrote, ["left 0", `deposit ${SOL_LADDER.min}`, `left ${1_300_479n + FLOOR - SOL_LADDER.min - PER}`]);
+});
+
+test("r3 P2-2: a landing's run reads its N ended U_X each after its own drawn wait, in a drawn order", async () => {
+  const N = 12;
+  const orders: string[][] = [];
+  for (const seed of [1, 7]) {
+    const { rows, store } = opsStore();
+    for (let i = 0; i < N; i++) rows.set(`k${i}`, { kind: "pool_deposit", stage: "in_pool", txs: [], created_ms: 1, final: true, follow: { ...PLAIN(`U_${i}`), left: "0", cost: (KEEP + PER).toString() } });
+    const events: string[] = [];
+    let x = seed;
+    const host = poolFollows({
+      store: async () => store,
+      deps: () => null,
+      again: () => ({ balances: async (f: { u: string }) => (events.push(f.u), [0n, 0n] as const), costs: async () => ({ floor: FLOOR, perRung: PER, keep: KEEP }), ladder: SOL_LADDER }),
+      againWait: async () => void events.push("wait"),
+      random: (out: Uint32Array) => void (out[0] = x = (Math.imul(x, 1103515245) + 12345) >>> 0),
+      decimals: () => 9,
+      locks: () => null,
+      now: () => 1 + 400 * 24 * 3600_000,
+    } as Parameters<typeof poolFollows>[0]);
+    await host.settle({ load: true });
+    await host.idle();
+    // wait, read, wait, read: never two reads back to back
+    assert.equal(events.length, 2 * N);
+    events.forEach((e, k) => assert.equal(e === "wait", k % 2 === 0, `event ${k}: ${e}`));
+    orders.push(events.filter((e) => e !== "wait"));
+  }
+  assert.deepEqual([...orders[0]!].sort(), [...orders[1]!].sort());
+  assert.notDeepEqual(orders[0], orders[1], "the order is drawn, not the store's");
+  assert.notDeepEqual(orders[0], Array.from({ length: N }, (_, i) => `U_${i}`));
 });
