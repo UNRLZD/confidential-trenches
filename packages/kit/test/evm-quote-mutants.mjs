@@ -425,7 +425,9 @@ export const MUTANTS = [
   [QUOTE, "    if (c.route !== undefined) outOfGas.set(c.at, { route: c.route, amountOut: x });\n", "", S, "GS10 "],
   [QUOTE, "if (q2 === null && route.venue === \"uniswap-v3\" && !gas2) return refuse(\"partial_fill\"", "if (q2 === null && route.venue === \"uniswap-v3\") return refuse(\"partial_fill\"", R, "GS6 "],
   [QUOTE, "const agreed = (a: Answer, b: Answer) => same(a, b) && (a.kind === \"out\" || a.gas === (b as { gas?: true }).gas) && a.used === b.used;", "const agreed = (a: Answer, b: Answer) => same(a, b) && a.used === b.used;", R, "GS5 "],
-  [QUOTE, "      if (m.kind === \"revert\" && m.gas === true) return refuse(", "      if (false) return refuse(", R, "GS3 "],
+  [QUOTE, "      if (m.kind === \"revert\" && m.gas === true) return void (noMain = ", "      if (false) return void (noMain = ", R, "GS3 "],
+  // a route that quotes nothing names R (card evm-buy-and-sell-on-mainnet)
+  [QUOTE, "    return refuse(\"no_quote\", noMain, r);", "    return refuse(\"no_quote\", noMain);", R, "card evm-buy-and-sell-on-mainnet: an asked route with no pool"],
   [BUYU, "  if (!(quoted && route.venue === \"uniswap-v4\")) {", "  if (!quoted) {", R, "D1 "],
   [BUYU, "  return routeData(chain, route, true);", "  return routeData(chain, route, false);", R, "D1 "],
   [BUYU, "  const { data, token: buys } = routeData(chain, route, quoted);", "  const { data, token: buys } = routeData(chain, route, false);", R, "D1 "],
@@ -620,7 +622,7 @@ export const MUTANTS = [
   [QUOTE, "c.alone = subsetsOf(hs).filter((s) => s.length < hs.length).map(", "c.alone = subsetsOf(hs).filter((s) => s.length === 1).map(", R, "review of 72e28658, M1 (sell)"],
   // review of a2d82dc6, F2: every read of the route with a set of its unlisted hooks replaced must answer above 0, or the
   // route is refused (the buy's own) or counts for nothing (routeSet's); never only the read with every hook replaced
-  [QUOTE, "  for (const i of lows) {\n    const x = out(i);\n    if (x === null || x === 0n) return refuse(", "  for (const [n, i] of lows.entries()) {\n    const x = out(i);\n    if ((x === null || x === 0n) && n === lows.length - 1) return refuse(", R, "review of a2d82dc6, F2"],
+  [QUOTE, "  for (const i of noMain === null ? lows : []) {\n    const x = out(i);\n    if (x === null || x === 0n) return refuse(", "  for (const [n, i] of (noMain === null ? lows : []).entries()) {\n    const x = out(i);\n    if ((x === null || x === 0n) && n === lows.length - 1) return refuse(", R, "review of a2d82dc6, F2"],
   [QUOTE, "    if (x === null || x === 0n) return refuse(\"no_quote\", \"the route with a hook the venue does not list replaced", "    if (false) return refuse(\"no_quote\", \"the route with a hook the venue does not list replaced", R, "review of 72e28658, M1 (full set)"],
   [QUOTE, "      if (x === null || x === 0n) return null;\n", "      if (x === null || x === 0n) continue;\n", R, "review of a2d82dc6, F2 (sell)"],
   [QUOTE, "if (hs.length > 1) c.alone = ", "if (false) c.alone = ", R, "N1B (sell"],

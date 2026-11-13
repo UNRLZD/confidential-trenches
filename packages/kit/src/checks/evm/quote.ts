@@ -141,7 +141,7 @@ export type EvmQuoteErrorCode =
   | "no_quoter" // the chain has no pinned quoter for the route's venue
   | "rpc_error" // a provider did not answer, or answered something that is not an answer
   | "rpc_disagree" // the two providers gave different answers at the same block
-  | "no_quote" // the route reverts, or quotes nothing
+  | "no_quote" // the route reverts, or quotes nothing; a buy's names the device's own best route where one fits
   | "partial_fill" // the route runs out of a pool's liquidity
   | "below_reference" // the route is quoted below the device's own standard pool, goes through a pool the device banned, or goes through a hook the venue does not list where a route through listed pools is within the slippage of it
   | "native_first" // the route starts from WETH where a native route quotes at least as much
@@ -156,8 +156,9 @@ export type EvmQuoteErrorCode =
   | "over_gas_floor"; // a buy's route needs more gas than the pool guarantees its swap, with the margin (card evm-buy-gas-floor); `reference` names the best route that fits, or none fits
 export class EvmQuoteError extends Error {
   readonly code: EvmQuoteErrorCode;
-  /** On below_reference, native_first and over_gas_floor: the device's own best route, which the caller may quote
-   *  instead (null on over_gas_floor where no route fits). */
+  /** On below_reference, native_first and over_gas_floor, and on a buy's no_quote of a route that quotes nothing: the
+   *  device's own best route, which the caller may quote instead (null on over_gas_floor and no_quote where no route
+   *  fits). */
   readonly reference: { readonly amountOut: bigint; readonly route: EvmRoute } | null;
   constructor(code: EvmQuoteErrorCode, message: string, reference: EvmQuoteError["reference"] = null) {
     super(`${code}: ${message}`);
@@ -2097,6 +2098,9 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const wethStart = !startsNative(route);
   const firstOut = route.venue === "uniswap-v3" ? route.tokens[1]! : route.hops[0]!.currency;
   const firstHop: { at: number; twice: number }[] = [];
+  // the first round's no_quote of the route itself (a revert, 0 or nothing out, its read out of gas): the quote goes on
+  // to find R as for a route below it, and refuses no_quote naming R (card evm-buy-and-sell-on-mainnet)
+  let noMain = null as string | null;
   const set = await routeSet({
     chain,
     v,
@@ -2131,18 +2135,21 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     // the prune's floor is what the route counts for, the lowest of Q and its reads with unlisted hooks replaced: Q
     // alone is the hook's own answer, and a hook that quotes the quoter high would raise the floor past the token's
     // real market, which the prune then never quotes (review of 72e28658, H1). A read that answers nothing refuses
-    // the quote below (review of a2d82dc6, F2), so it lowers nothing here
+    // the quote below (review of a2d82dc6, F2), so it lowers nothing here. A route that quotes nothing (noMain) counts
+    // for nothing, so every route that fills could be R: the floor is 1 wei, the least a route that fills gives
+    // (fills: an output above 0), and the bounds are ceilings, so it drops only a pool that gives nothing (0n would
+    // also skip the X prune, which then cuts only such pools)
     floor: (out) => lows.reduce((m, i) => {
       const x = out(i);
       return x !== null && x > 0n && x < m ? x : m;
-    }, out(main)!),
+    }, out(main) ?? 1n),
     // The route: a quote, and one that grows with its input
     firstRound: (out, answer) => {
       const q = out(main);
       const m = answer(main);
       if (m.kind === "revert" && m.partial) return refuse("partial_fill", "a hookless hop runs out of liquidity (NotEnoughLiquidity)");
-      if (m.kind === "revert" && m.gas === true) return refuse("no_quote", `the route's quote runs out of its gas read alone (${EVM_READ_CALL_GAS} gas a call)`);
-      if (q === null || q === 0n) return refuse("no_quote", "the route reverts or quotes nothing");
+      if (m.kind === "revert" && m.gas === true) return void (noMain = `the route's quote runs out of its gas read alone (${EVM_READ_CALL_GAS} gas a call)`);
+      if (q === null || q === 0n) return void (noMain = "the route reverts or quotes nothing");
       const q2 = out(twice);
       if (q2 !== null && q2 <= q) return refuse("partial_fill", `twice the amount quotes ${q2}, not more than ${q}: a pool runs out`);
       // a v3 route has no hook: its quote at twice the amount reverts only when a pool cannot fill it. One whose read at
@@ -2175,7 +2182,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // limit and leave out the very read that shows what the route pays (review of a2d82dc6, F2). The cost is a route
   // through an honest cap behind such a hook refused at quote time: no fee lost, nothing banned
   let value = q;
-  for (const i of lows) {
+  for (const i of noMain === null ? lows : []) {
     const x = out(i);
     if (x === null || x === 0n) return refuse("no_quote", "the route with a hook the venue does not list replaced reverts or quotes nothing");
     if (x < value) value = x;
@@ -2220,6 +2227,13 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const natives = ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : [];
   const exits = ownFits && unlisted.length > 0 ? priced.filter((r) => evmSellExits(chain, token, r.route)) : [];
   const all = () => true;
+  // a route that quotes nothing: R is the best of every route that fits, as for a route that does not fit, held to
+  // the same rule a named R is (ranOut), and named on its no_quote; none is named where none fits
+  if (noMain !== null) {
+    const r = (await bestFits([{ l: priced, band: all }]))[0] ?? null;
+    if (r !== null) ranOut(r, "the best route that fits");
+    return refuse("no_quote", noMain, r);
+  }
   const fitted = await bestFits([
     { l: [{ route, amountOut: value }], band: all },
     { l: priced, band: ownFits ? (c) => c.amountOut >= value : all },

@@ -9,9 +9,9 @@
 //   binding holds, the device's own epoch fee read on two RPCs when the queue bound it, and the relay data's fee cap
 //   (what the proof's context commits to) is held to it by the rule.
 // - The quote: the kit's evmPoolBuyQuote, for the chunk less that fee (what the pool swaps), on the kit's pinned
-//   providers; a read names the token, never W. The request names no route, so the device asks the standard pool
-//   shapes in turn (v4 native, then v3 WETH, each fee tier), and a quote the kit refuses below its own best
-//   (below_reference, native_first, over_gas_floor) is asked again on that best route, once.
+//   providers; a read names the token, never W. The request names no route, so the device asks one shape (quoteOf),
+//   then one v3 WETH tier, and a quote the kit refuses below its own best (below_reference, native_first,
+//   over_gas_floor, and a no_quote that names it) is asked again on that best route, once: three quotes at most.
 // - Built by the kit (evmPoolBuildQuoted, through the chain's pinned adapter for the route's venue), checked by the
 //   rule (checkEvmBuy: the quote's own build, the pinned pool and adapter, the ask's token and amount, a min out at least
 //   the quote's agreed output less the ask's own slippage, which the rule derives, the proof's relay data W's and the
@@ -193,7 +193,7 @@ const STOP_POLL_MS = 250;
 const V4_FIRST: readonly (readonly [number, number])[] = [[3000, 60], [10000, 200], [500, 10], [100, 1]];
 const V3_FIRST: readonly number[] = [3000, 500, 10000, 100];
 const ZERO = "0x0000000000000000000000000000000000000000";
-const REQUOTE = new Set(["below_reference", "native_first", "over_gas_floor"]);
+const REQUOTE = new Set(["below_reference", "native_first", "over_gas_floor", "no_quote"]);
 
 type Code = Exclude<EvmPoolBuyAnswer, { stage: TradeStage }>["error"];
 class Refused extends Error {
@@ -216,12 +216,13 @@ export const evmLastRouteReset = (): void => LAST_ROUTE.clear();
 /** The device's quote of the ask, one quote where it can (card evm-buy-and-sell-on-mainnet: 8 standard shapes asked in
  *  turn were 8 quotes a tap, and a token whose pools are a launchpad's answered no_quote on all 8):
  *  - first, the route that last quoted for the token this session;
- *  - then, with the chain's pool index served, the token's own v4 pools in it that a buy may take: paired with the native
- *    asset or WETH, and hookless or a launchpad hook the venue lists with that launchpad's fee and tick spacing (the
- *    kit's one rule, sell-unpinned.ts evmHookListed, the sell builder's: a coin bought through another hook could have
- *    no route out). With no index: the standard hookless shapes and the venue's listed launchpad shapes;
- *  - then the standard v3 fee tiers (the index holds v4 pools only).
- *  A refusal that names the kit's own best route (REQUOTE) asks that route once. No route the rules take at all (the
+ *  - else, with the chain's pool index served, the first of the token's own v4 pools in it that a buy may take: paired
+ *    with the native asset or WETH, and hookless or a launchpad hook the venue lists with that launchpad's fee and tick
+ *    spacing (the kit's one rule, sell-unpinned.ts evmHookListed, the sell builder's: a coin bought through another hook
+ *    could have no route out). With no index: the first standard hookless shape;
+ *  - then the first standard v3 fee tier (the index holds v4 pools only).
+ *  A refusal that names the kit's own best route (REQUOTE) asks that route once where the same hook rule takes it: the
+ *  kit's best route holds every other shape, so three quotes a tap at most. No route the rules take at all (the
  *  index holds pools of the token, none a buy may take, and no v3 pool quotes): not_allowed, the page does not trade
  *  the coin; any other refusal of every route: quote_check_failed. */
 async function quoteOf(h: EvmPoolBuyHost, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
@@ -255,13 +256,20 @@ async function quoteOf(h: EvmPoolBuyHost, network: EvmPoolChain, token: string, 
     LAST_ROUTE.set(known, q.route);
     return q;
   };
+  // three kit quotes a tap at most, however many pools the index holds (anyone can make pools: CASHCAT's 160 hookless
+  // spam-fee pools on Robinhood took 62 quotes and 144 s, 2026-11-13): the first shape, then the first v3 tier, and
+  // after a refusal that names the kit's own best route, that route once where the page's hook rule takes it (v4Of's:
+  // from the native asset or WETH, every hop hookless or a listed launchpad's)
+  const takes = (r: EvmRoute) =>
+    r.venue === "uniswap-v3" || ((r.currencyIn === ZERO || lower(r.currencyIn) === weth) && r.hops.every((p) => p.hooks === ZERO || evmHookListed(network, p.hooks, p.fee, p.tickSpacing)));
+  const tries = [shapes[0]!, ...shapes.slice(1).filter((r) => r.venue === "uniswap-v3").slice(0, 1)];
   let refused = false;
-  for (const route of shapes) {
+  for (const route of tries) {
     try {
       return await ask(route);
     } catch (e) {
       const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
-      if (typeof err?.code === "string" && REQUOTE.has(err.code) && err.reference) return ask(err.reference.route);
+      if (typeof err?.code === "string" && REQUOTE.has(err.code) && err.reference && takes(err.reference.route)) return ask(err.reference.route);
       if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
       if (err?.code !== "no_quote") refused = true;
     }

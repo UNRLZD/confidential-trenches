@@ -785,6 +785,63 @@ test("card evm-buy-and-sell-on-mainnet: with the device's pool index served, a q
   }
 });
 
+// card evm-buy-and-sell-on-mainnet: a route the caller asks that quotes nothing (GOOGLc and xdp on Base answered no_quote
+// on every route the page guessed, their pools a two-hop through a listed middle or a shape the page does not guess)
+// still names R, found as for a route below it: the same candidates, reads and rules
+const noQuoteOf = async (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmRpc) => {
+  try {
+    await evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0), chain(pools, 1)], NOW, scan);
+    return { code: "accepted", reference: null };
+  } catch (e) {
+    if (!(e instanceof EvmQuoteError)) throw e;
+    return { code: e.code, reference: e.reference };
+  }
+};
+// a pool behind a hook the device has not pinned that quotes the quoter 100 times its pool (a tenth with its hook replaced)
+const HOSTILE = "0x00000000000000000000000000000000000030cc";
+const hostile = (token: string): ModelPool => ({ key: keyOf(token, NATIVE, 0, 120, HOSTILE), give: (a) => a / 10n, lie: (a) => 100n * a });
+const realRoute = (token: string): EvmRoute => ({ venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 0, tickSpacing: 60, hooks: UNPINNED, hookData: "0x" }] });
+
+test("card evm-buy-and-sell-on-mainnet: an asked route with no pool refuses no_quote naming R, the real pool the scan, the index or a listed middle holds; a seeded or hostile pool never outranks it, and a hostile hook counts only at its pool's own price", async () => {
+  const token = "0x00000000000000000000000000000000000e01e1";
+  // the asked route (the standard 1% pool) does not exist; a seeded standard 0.3% pool gives a tenth; the hostile pool
+  // counts at the lower of its two reads; the real pool, behind a hook not pinned, only the scan finds
+  const seeded3: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
+  const pools = [seeded3, hostile(token), real(token)];
+  const logs = [{ key: hostile(token).key, at: 4_500_000 }, { key: real(token).key, at: 4_500_001 }];
+  assert.deepEqual(await noQuoteOf(pools, token, seededRoute(token), scanner(5_000_000, logs)), { code: "no_quote", reference: { amountOut: AMOUNT, route: realRoute(token) } });
+  // with the device's pool index served and no log at the scan provider: the index's pool is R the same way
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const t2 = "0x00000000000000000000000000000000000e02e2";
+  const pools2 = [{ ...seeded3, key: keyOf(t2, NATIVE, 3000, 60, NATIVE) }, hostile(t2), real(t2)];
+  try {
+    assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: 4_999_990, pools: [{ key: hostile(t2).key }, { key: real(t2).key }] }), true);
+    assert.deepEqual(await noQuoteOf(pools2, t2, seededRoute(t2), scanner(5_000_000, [])), { code: "no_quote", reference: { amountOut: AMOUNT, route: realRoute(t2) } });
+  } finally {
+    evmPoolIndexReset();
+  }
+  // a token whose only pools are a two-hop through the listed middle (USDC): the standard two-hop is R
+  const t3 = "0x00000000000000000000000000000000000e03e3";
+  const hop1: ModelPool = { key: keyOf(USDC, NATIVE, 3000, 60, NATIVE), give: (a) => a };
+  const hop2: ModelPool = { key: keyOf(t3, USDC, 3000, 60, NATIVE), give: (a) => a };
+  const twoHop: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: USDC, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }, { currency: t3, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
+  const got = await noQuoteOf([hop1, hop2], t3, seededRoute(t3), scanner(5_000_000, []));
+  assert.deepEqual({ code: got.code, reference: got.reference === null ? null : { amountOut: got.reference.amountOut, route: JSON.parse(JSON.stringify(got.reference.route).toLowerCase()) } }, { code: "no_quote", reference: { amountOut: AMOUNT, route: JSON.parse(JSON.stringify(twoHop).toLowerCase()) } });
+  // the hostile pool alone: counted at its tenth, it is R at that tenth, never at what its hook quotes the quoter
+  const t4 = "0x00000000000000000000000000000000000e04e4";
+  const r4 = await noQuoteOf([hostile(t4)], t4, seededRoute(t4), scanner(5_000_000, [{ key: hostile(t4).key, at: 4_500_000 }]));
+  assert.equal(r4.code, "no_quote");
+  assert.equal(r4.reference?.amountOut, AMOUNT / 10n);
+});
+
+test("card evm-buy-and-sell-on-mainnet: a token with no pool at all, or none that fills, still refuses no_quote with no reference", async () => {
+  const token = "0x00000000000000000000000000000000000e05e5";
+  assert.deepEqual(await noQuoteOf([], token, seededRoute(token), scanner(5_000_000, [])), { code: "no_quote", reference: null });
+  // a pool whose hook reverts every quote as it is never counts, so it is no R
+  const dead: ModelPool = { key: keyOf(token, NATIVE, 0, 120, HOSTILE), give: (a) => a, lie: () => null };
+  assert.deepEqual(await noQuoteOf([dead], token, seededRoute(token), scanner(5_000_000, [{ key: dead.key, at: 4_500_000 }])), { code: "no_quote", reference: null });
+});
+
 test("card evm-quote-head-watch: a scan provider that fails a full span (a timeout, too many logs) is asked by halves, and the real pool it finds still holds a seeded one", async () => {
   const token = "0x00000000000000000000000000000000000e71e7";
   const pools = [seeded(token), real(token)];
