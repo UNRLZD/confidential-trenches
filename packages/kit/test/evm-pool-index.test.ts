@@ -673,6 +673,7 @@ test("the Robinhood venue's cold index asks its device-direct reader few calls a
   const own = "https://rpc.mainnet.chain.robinhood.com";
   const helper = "https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only";
   assert.deepEqual([...ix.readers], [own, helper], "Robinhood's own, device-direct, and the helper's keyed route");
+  assert.equal(ix.batchMax, HELPER_RPC_BATCH_MAX, "the index's batchMax is the helper's batch cap");
   const { sync, served } = await evmPoolIndexRefresh("robinhood", null, fake);
   assert.equal(served, true);
   assert.equal(sync!.coversThrough, head);
