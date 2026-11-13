@@ -891,6 +891,8 @@ function signedOutElsewhere(): void {
   poolFollow?.stop();
   withdrawsSignedOut();
   void testnet?.signedOut();
+  // a NEAR seat taken for down is this session's: the next one asks it again
+  seatsUp();
   reloadSignedOut();
 }
 // the resync in flight, which open kinds wait for (openKind)
