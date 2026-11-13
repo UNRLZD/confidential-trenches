@@ -1,8 +1,8 @@
 {
  "good": {
-  "note": "branch card/buy-spends-its-change-in-the-same-tap at a52d02caf, built with build-app.mjs --out, read 2026-11-13T19:33:19.189Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-j1IPzs5JPKpm6fb9p+I+6QbYfp8z5bvy8VWB5fFcTBsnB6Xy1907yx2NcnZU5bau\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-j1IPzs5JPKpm6fb9p+I+6QbYfp8z5bvy8VWB5fFcTBsnB6Xy1907yx2NcnZU5bau",
+  "note": "branch card/buy-spends-its-change-in-the-same-tap at 0ae2c9373, built with build-app.mjs --out, read 2026-11-13T19:38:46.470Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MIBCKshZhFDv0ah068E7oUcJdUQg6I+jSzrepdcCgtlG3xCxM8wrGh8dB6iL4WCb\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-MIBCKshZhFDv0ah068E7oUcJdUQg6I+jSzrepdcCgtlG3xCxM8wrGh8dB6iL4WCb",
   "carry": true,
   "prove": true,
   "round": true
