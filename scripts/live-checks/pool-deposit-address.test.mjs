@@ -33,6 +33,13 @@ for (const k of ["bad", "liveBefore"]) {
   });
 }
 
+// card helper-says-why-a-vendor-refused: pool.address is handed the page's stop; SIGN_HOST before it fails on that mark alone
+test("recorded bad answer beforeStop: FAIL on unfollowed alone", () => {
+  const v = judge(ANSWERS.beforeStop);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, bad("unfollowed"));
+});
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -60,7 +67,9 @@ const PLANTED = [
   ["the first pool, not the asked chain's", new RegExp(`\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===${N}\\)`), ".pools()[0]", ["sameChain", "unfollowed"]],
   ["no follow gate", new RegExp(`(if\\()${N}===void 0\\|\\|${N}\\.checked===void 0\\|\\|`), "$1", ["unfollowed"]],
   ["the answer starts down, not not_allowed", new RegExp(`=\\{error:\`not_allowed\`\\}(;return\\{after:\\(async\\(\\)=>\\{let ${N}=${N}\\.chain,${N}=${N}\\.pools\\(\\))`), "={error:`down`}$1", ["unfollowed"]],
-  ["pool.address wired with no follow", new RegExp(`,checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\)\\}\\)`), "})", ["unfollowed"]],
+  ["pool.address wired with no follow", new RegExp(`,checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),`), ",", ["unfollowed"]],
+  // card helper-says-why-a-vendor-refused: pool.address is handed the page's stop on sign out (src/main.ts quotesStopped)
+  ["pool.address wired with no stop", new RegExp(`(=>${N}\\.quoted\\(${N},${N},${N},${N}\\)),stop:${N}\\}\\)`), "$1})", ["unfollowed"]],
   ["pool.address wired with no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["unfollowed"]],
   ["no floor-read gate", new RegExp(`\\|\\|${N}\\.floor===void 0\\|\\|`), "||", ["unfollowed"]],
   ["no network gate (review F2)", new RegExp(`\\|\\|${N}\\.network!==\`mainnet\`\\)return;`), ")return;", ["unfollowed"]],

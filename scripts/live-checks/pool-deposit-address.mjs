@@ -59,7 +59,7 @@ const HOST_SRC = (h) =>
 const HOST = (h) => new RegExp(HOST_SRC(h));
 // ...and then, with no follow (`checked`) or no floor read passed, it returns before any quote is asked.
 const GATE = (h) => new RegExp(`${HOST_SRC(h)}if\\(\\1===void 0\\|\\|(${N})\\.checked===void 0\\|\\|\\9\\.floor===void 0\\|\\|\\9\\.network!==${Q}mainnet${Q}\\)return;`);
-const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\)\\}\\)`);
+const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),stop:${N}\\}\\)`);
 // pool-deposit-quote.ts: the kit's check with no vault floor, then the quote's own floor (card pool-deposit-follow: the
 // least rung plus the deposit's cost, which that card's live check holds).
 const FLOOR = new RegExp(`let (${N})=${N}\\(${N},${N},\\{\\.\\.\\.${N}\\.check,intoVault:!1\\}\\);return \\1\\.minAmountOut<(${N})\\.floor&&${N}\\(${Q}floor${Q}\\)`);
@@ -94,7 +94,7 @@ export const WHY = {
   namesEach: "the namer does not name each pool's scope (an EVM pool as Base or Robinhood), or one scope that fails stops the rest",
   namesRecord: "a pool's record is not written from its scope's planned index and one-time id, or an EVM pool's carries no EVM address (or its key is not zeroed)",
   sameChain: "pool.address does not answer the asked chain's own pool from that scope's record read back (Solana: the one-time id's key; EVM: the record's address)",
-  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet, is not refused not_allowed before any quote is asked, or pool.address is not wired with its pools, network, read, wait, price, floor read and the follow's quoted",
+  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet, is not refused not_allowed before any quote is asked, or pool.address is not wired with its pools, network, read, wait, price, floor read, the follow's quoted and the page's stop",
   floored: "a pool quote whose min out is under its floor, or whose floor is under the pool's smallest deposit (0.01 SOL; 0.001 ETH on Base and Robinhood), is not refused floor",
 };
 
