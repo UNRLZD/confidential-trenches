@@ -56,10 +56,10 @@ const LIVE_REQ: OneClickRequest = {
 };
 const DRY_REQ = fx.dry.request;
 const at = (a: Answer, ms = 1_000): number => Date.parse(a.timestamp) + ms;
-// 0.4525 NEAR into NEAR USDC on the partner path (F 20, S 15): NEAR's lower read 4.442323 puts the floor exactly at the
-// signed minAmountOut 1,983,085; 4.442324 puts it one base unit above.
+// 0.4525 NEAR into NEAR USDC on the partner path (F 20, S 50 on a priced pair): NEAR's lower read 4.457981 puts the
+// floor exactly at the signed minAmountOut 1,983,085; 4.457982 puts it one base unit above.
 const LIVE_OPTS: OneClickCheckOptions = {
-  path: "partner", pricing: { in: ["4.442323", "4.45"], out: ["1", "1"] }, decimalsIn: 24, decimalsOut: 6, intoVault: false,
+  path: "partner", pricing: { in: ["4.457981", "4.46"], out: ["1", "1"] }, decimalsIn: 24, decimalsOut: 6, intoVault: false,
   now: at(fx.live.answer),
 };
 const DRY_OPTS: OneClickCheckOptions = { path: "keyless", pricing: "usdc", decimalsIn: 6, decimalsOut: 6, intoVault: true, now: at(fx.dry.answer) };
@@ -239,18 +239,18 @@ test("live: an answer with no deposit address is refused", () => {
 
 // Floors (§2.8 deposit quote row at faacb62), on the real answers and on the paper's numbers.
 test("live other-pair floor (F and S taken off): 1Click's own implied $4.44 passes; one base unit each side of the boundary", () => {
-  const p = (lo: string, hi = "4.45", out: readonly [string, string] = ["1", "1"]) => ({ ...LIVE_OPTS, pricing: { in: [lo, hi] as const, out } });
+  const p = (lo: string, hi = "4.46", out: readonly [string, string] = ["1", "1"]) => ({ ...LIVE_OPTS, pricing: { in: [lo, hi] as const, out } });
   assert.doesNotThrow(() => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), p("4.44"))); // 2.0091 / 0.4525
   const f = (px: string) => oneClickFloors({ amountIn: 452_500_000_000_000_000_000_000n, withdrawFee: 0n, slippageBps: 100, feeBps: 20,
     pricing: { in: [px, px], out: ["1", "1"] }, decimalsIn: 24, decimalsOut: 6, intoVault: false }).minAmountOut;
-  assert.equal(f("4.442323"), 1_983_085n); // = the signed minAmountOut: passes
-  assert.equal(f("4.442324"), 1_983_086n); // one base unit above it: refused
+  assert.equal(f("4.457981"), 1_983_085n); // = the signed minAmountOut: passes
+  assert.equal(f("4.457982"), 1_983_086n); // one base unit above it: refused
   assert.doesNotThrow(() => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), LIVE_OPTS));
-  refused("floor", () => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), p("4.442324")));
+  refused("floor", () => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), p("4.457982")));
   // p_in is the lower of the two reads, whichever order they come in
-  assert.doesNotThrow(() => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), p("4.45", "4.442323")));
+  assert.doesNotThrow(() => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), p("4.46", "4.457981")));
   // p_out is the higher of the destination's two reads: the refused NEAR read passes against a USDC read of 1.000002
-  assert.doesNotThrow(() => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), p("4.442324", "4.45", ["1", "1.000002"])));
+  assert.doesNotThrow(() => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), p("4.457982", "4.46", ["1", "1.000002"])));
 });
 test("two price reads further apart than the slippage are refused", () => {
   refused("price", () => checkOneClickQuote(LIVE_REQ, clone(fx.live.answer), { ...LIVE_OPTS, pricing: { in: ["4.40", "4.45"], out: ["1", "1"] } }));
@@ -392,4 +392,43 @@ test("a path outside keyless and partner names no fee, even when a polluted Obje
     delete P.nopath;
   }
   assert.equal(Object.hasOwn(Object.prototype, "nopath"), false);
+});
+
+// Card pool-withdraws-to-any-chain: S is 50 bps on a priced pair, 15 on USDC to USDC. fixtures/oneclick-priced-spread.json
+// holds real SOL to NEAR USDC quotes (amounts only): the copy's two pool exits and 12 keyless dry quotes. A quote meets
+// the floor as checkOneClickQuote reads it: amountOut and minAmountOut each at or above the device's.
+type SpreadQuote = { price: string; amountIn: string; amountOut: string; minAmountOut: string; withdrawFee: string };
+const spread = JSON.parse(readFileSync(new URL("./fixtures/oneclick-priced-spread.json", import.meta.url), "utf8")) as { copy: (SpreadQuote & { run: string })[]; dry: SpreadQuote[] };
+const solFloor = (q: SpreadQuote) => oneClickFloors({ amountIn: BigInt(q.amountIn), withdrawFee: BigInt(q.withdrawFee), slippageBps: 100, feeBps: 20,
+  pricing: { in: [q.price, q.price], out: ["1", "1"] }, decimalsIn: 9, decimalsOut: 6, intoVault: false });
+const meets = (q: SpreadQuote, f = solFloor(q)) => BigInt(q.amountOut) >= f.amountOut && BigInt(q.minAmountOut) >= f.minAmountOut;
+// a quote paying `bps` under the device's price (1Click's fee in that), with its withdrawFee off and its 1% slippage
+const under = (q: SpreadQuote, bps: bigint): SpreadQuote => {
+  const value = (BigInt(q.amountIn) * BigInt(Math.round(Number(q.price) * 1e8)) * 10n ** 6n) / (10n ** 9n * 10n ** 8n);
+  const amountOut = (value * (10_000n - bps)) / 10_000n - BigInt(q.withdrawFee);
+  return { ...q, amountOut: amountOut.toString(), minAmountOut: ((amountOut * 9_900n) / 10_000n).toString() };
+};
+test("the copy's refused exit (45 bps under the device's price, 662 units short at S 15) meets the priced floor at S 50", () => {
+  const copy7 = spread.copy.find((q) => q.run === "copy7")!;
+  // ⌈0.008695 SOL × $79.58334845 × 0.993⌉ × 0.99 − 4,390; it was 678,271 at S 15, over the quote's 677,609
+  assert.deepEqual(solFloor(copy7), { amountOut: 675873n, minAmountOut: 675873n });
+  assert.ok(meets(copy7));
+  assert.ok(meets(spread.copy.find((q) => q.run === "copy8")!));
+});
+test("every recorded live SOL to NEAR USDC quote meets the priced floor", () => {
+  assert.equal(spread.dry.length, 12);
+  for (const q of [...spread.copy, ...spread.dry]) assert.ok(meets(q), JSON.stringify(q));
+});
+test("a priced quote 51 bps over 1Click's fee (71 under the device's price) is refused; 70 meets the floor", () => {
+  const copy7 = spread.copy.find((q) => q.run === "copy7")!;
+  assert.ok(meets(under(copy7, 69n)));
+  assert.ok(!meets(under(copy7, 71n)));
+  for (const q of spread.dry) assert.ok(!meets(under(q, 71n)), JSON.stringify(q));
+});
+test("USDC to USDC keeps S 15: a quote 16 bps over the fee is refused, 15 meets the floor", () => {
+  const f = usdcFloor(2_000_000n, 1, 0n, false);
+  assert.deepEqual(f, { amountOut: 1_996_800n, minAmountOut: 1_976_832n }); // 2,000,000 − ⌊2,000,000 × (1 + 15) / 10,000⌋
+  const q = (bps: bigint) => { const out = 2_000_000n - (2_000_000n * (1n + bps)) / 10_000n; return { amountOut: out, minAmountOut: (out * 9_900n) / 10_000n }; };
+  assert.ok(q(15n).amountOut >= f.amountOut && q(15n).minAmountOut >= f.minAmountOut);
+  assert.ok(q(16n).amountOut < f.amountOut);
 });
