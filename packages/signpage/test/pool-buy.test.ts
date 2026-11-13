@@ -2762,7 +2762,7 @@ async function twoRounds(round1: "lands" | "never") {
   w.host.piecesOwed = owed;
   w.host.ready = async () => (stage === 1 ? [parent, own] : [change, own]);
   w.host.carry = {
-    values: async (ids) => new Map(ids.flatMap((id) => (id === "note-2" ? [[id, 12_000_000n] as const] : id === "note-1" ? [[id, BigInt(r.withdrawn)] as const] : []))),
+    values: async (ids) => new Map(ids.flatMap((id): [string, bigint][] => (id === "note-2" ? [[id, 12_000_000n]] : id === "note-1" ? [[id, BigInt(r.withdrawn)]] : []))),
     prove: async (parentId, to) => {
       log.push(`prove:${parentId}->${to.address === W.address ? "W" : to.address}`);
       stage = 2;
