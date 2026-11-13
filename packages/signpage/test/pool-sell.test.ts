@@ -6921,14 +6921,16 @@ test("round-trip-costs-less P3-e: a sign out and in within the gap sends no left
   const idb = new IDBFactory();
   const ACCOUNT = "rtcl-account";
   // each sign-in's wallet store: the real one, deleted by its sign out (its own name, so its sign out's broadcast does
-  // not close the world's note store, which stands for the next sign-in's)
+  // not close the world's note store, which stands for the next sign-in's); each one closed at the end, a failed
+  // assertion's included, so no store's channel keeps the test's process open
+  const opened: { close(): void }[] = [];
   const account = async () => {
     const s = await openWalletStore({ indexedDB: idb, name: ACCOUNT });
+    opened.push(s);
     const o = owedRentBacks(async () => s, deviceSpacing(idb));
     return { s, o };
   };
   let now = 9_000_000n;
-  let again: Awaited<ReturnType<typeof account>> | undefined;
   try {
   const tab = (o: OwedRentBacks): PoolSellHost => ({ ...w.host, now: () => now, owed: { ...w.host.owed!, spacing: o.spacing, space: o.space, claim: o.claim } });
   const senders = (from: number) => new Set(w.c.calls.slice(from).filter((c) => c.method === "sendTransaction").map((c) => solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65)).staticKeys[0])).size;
@@ -6941,7 +6943,7 @@ test("round-trip-costs-less P3-e: a sign out and in within the gap sends no left
   assert.equal((await idb.databases()).some((d) => d.name === ACCOUNT), false, "signed out: the wallet's database deleted");
   // signed in again a minute later: a new wallet store, the device's spacing kept
   now += 60_000n;
-  again = await account();
+  const again = await account();
   forgetPageLoad();
   from = w.c.calls.length;
   await resumeRentBacks(tab(again.o), fakeLocks());
@@ -6956,7 +6958,7 @@ test("round-trip-costs-less P3-e: a sign out and in within the gap sends no left
   assert.equal(senders(from), 1, "once the gap passed");
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 2);
   } finally {
-    again?.s.close();
+    for (const s of opened) s.close();
   }
 });
 
