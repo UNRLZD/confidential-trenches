@@ -211,8 +211,9 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
     if (set === null) {
       const legs = solanaLegsPlan(live, (id) => byId.get(id)?.leaf?.value, solanaTapSpendOf(rent, venue, tipOf), amount);
       const picks = legs?.map((l) => {
-        const not = new Set(l.ids);
-        return pickPieces(weighed.filter((p) => p.wallet.address === l.address && not.has(p.noteId.replace(/#change$/, ""))), paysAt(l.amount));
+        // the leg's own W and notes, a carried change by its parent's id
+        const ids = new Set(l.ids);
+        return pickPieces(weighed.filter((p) => p.wallet.address === l.address && ids.has(p.noteId.replace(/#change$/, ""))), paysAt(l.amount));
       });
       if (picks === undefined || picks.some((x) => x === null)) return { result: { tap_max: tap } };
       // no `pieces`: the kit's count is one leg's (at most SOLANA_POOL_BUY_PIECES_MAX); the cost is every leg's
