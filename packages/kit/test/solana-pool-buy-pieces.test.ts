@@ -3,7 +3,7 @@
 //   node --test test/solana-pool-buy-pieces.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSolanaPoolBuy, checkSolanaPoolBuy, SOLANA_JITO_TIP_MIN, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_JITO_TIP, solanaPoolBuyMaxSpend, solanaPoolBuyTip } from "../src/index.ts";
+import { buildSolanaPoolBuy, checkSolanaPoolBuy, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_JITO_TIP, solanaPoolBuyMaxSpend, solanaPoolBuyTip } from "../src/index.ts";
 import { TIP, cfg, release, rent, setup } from "./solana-pool-buy-fx.ts";
 
 const failed = (v: ReturnType<typeof checkSolanaPoolBuy>) => v.results.filter((x) => !x.ok).map((x) => x.id);
@@ -41,9 +41,8 @@ test("the bundle's earlier releases: at most three, each a u64 pair, each adding
   assert.deepEqual(failed(checkSolanaPoolBuy(built.wire, cfg, release, s.venue, { ...s.req, before: [piece, piece, piece, piece] }, s.reads)), ["FUNDS"]);
 });
 
-test("solanaPoolBuyTip: one piece on mainnet tips SOLANA_POOL_JITO_TIP, several the least a tag 3 carries (the helper's last transaction tips the bundle), devnet none; a count past the bundle refused", () => {
-  assert.equal(solanaPoolBuyTip("mainnet", 1), SOLANA_POOL_JITO_TIP);
-  for (let k = 2; k <= SOLANA_POOL_BUY_PIECES_MAX; k++) assert.equal(solanaPoolBuyTip("mainnet", k), SOLANA_JITO_TIP_MIN, `${k}`);
+test("solanaPoolBuyTip: on mainnet every count of pieces tips SOLANA_POOL_JITO_TIP (the tag 3 is its own bundle, card owners-solana-buy-lands), devnet none; a count past the most refused", () => {
+  for (let k = 1; k <= SOLANA_POOL_BUY_PIECES_MAX; k++) assert.equal(solanaPoolBuyTip("mainnet", k), SOLANA_POOL_JITO_TIP, `${k}`);
   for (let k = 1; k <= SOLANA_POOL_BUY_PIECES_MAX; k++) assert.equal(solanaPoolBuyTip("devnet", k), 0n);
   for (const k of [0, SOLANA_POOL_BUY_PIECES_MAX + 1, 1.5, Number.NaN]) assert.throws(() => solanaPoolBuyTip("mainnet", k), /pieces: 1 to 4/);
 });

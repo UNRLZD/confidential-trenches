@@ -336,9 +336,7 @@ const once = async (p, kind, params, noEnd = false) => {
 const lastStage = (p, kind) => stages.filter((x) => x.page === p.name && x.kind === kind).at(-1)?.stage ?? null;
 const stageName = (s) => (typeof s === "string" ? s : s?.stage ?? null);
 
-/** Each signature read on both RPCs at finalized: its error, or "missing" once 30 s passed with an RPC not holding it
- *  (the copy's engine stand-in lands a bundle one transaction at a time, each after the one before it confirmed, so
- *  the helper's tip, last, can land after the page saw the tag 3 filled; a real engine lands the bundle at once).
+/** Each signature read on both RPCs at finalized: its error, or "missing" once 30 s passed with an RPC not holding it.
  *  `waited` gets, per signature, the seconds from the read-back's start until both RPCs held it, or null at 30 s. */
 const readBack = async (sigs, waited = {}) => {
   const out = {};
@@ -533,10 +531,12 @@ const buyOf = async (k, slippage = 300, noEnd = false, at = maxOf(k)) => {
 };
 
 if (SCENARIO === "copy-part1") {
-  const bundles = () => copy.engineCalls.filter((x) => x.call === "sendBundle");
+  // each buy of several pieces as the copy's helper carried it (copy-net.mjs, call "pieces"): its answered signatures
+  const bundles = () => copy.engineCalls.filter((x) => x.call === "pieces");
   const landedAll = (rb) => Object.values(rb).every((x) => x.every((st) => st === "confirmed" || st === "finalized"));
-  // the answer names the tag 3 alone; the engine's one bundle holds the k pieces and the tip, every one landed
-  const okBuy = (b, k) => b.end === "filled" && b.spent === k && b.txs.length === 1 && b.bundle?.txs === k + 1 && b.bundle.signatures.at(-2) === b.txs[0] && landedAll(b.readBack) && Object.keys(b.readBack).length === k + 1 && b.holds?.units.every((u) => u !== "0");
+  // the answer names the tag 3 alone; the helper carried the k pieces, the tag 3 last, every one landed (card
+  // owners-solana-buy-lands: the tag 2s plain, then the tag 3 on its own; no tip transaction of the helper's)
+  const okBuy = (b, k) => b.end === "filled" && b.spent === k && b.txs.length === 1 && b.bundle?.txs === k && b.bundle.signatures.length === k && b.bundle.signatures.at(-1) === b.txs[0] && landedAll(b.readBack) && Object.keys(b.readBack).length === k && b.holds?.units.every((u) => u !== "0");
   const filledMs = (b) => b.times.filled ?? b.times['"filled"'] ?? null;
   const lamportsOf = (x) => BigInt(x.split(".")[0]) * 1_000_000_000n + BigInt((x.split(".")[1] ?? "").padEnd(9, "0").slice(0, 9));
   /** pool.buy.dry's tap_max with no amount, once a set of `k` pieces pays it (the tap's Max prices the tip at the proofs'
@@ -589,10 +589,19 @@ if (SCENARIO === "copy-part1") {
   max.readBack = await readBack(max.bundle?.signatures ?? [], max.waitedS);
   max.holds = max.W ? await wHolds(max.W) : null;
   out.max = { tapMax, ...max };
+  // 4. the sell after it (card owners-solana-buy-lands): one pool.sell of all the Max buy's W holds of the coin, the
+  // page's own sell, its return note back in the pool
+  phase = "sell";
+  const units = max.W ? (await both(async (r) => (await r("getTokenAccountsByOwner", [max.W, { mint: MINT }, { encoding: "jsonParsed", commitment: "confirmed" }])).value[0]?.account.data.parsed.info.tokenAmount.uiAmountString ?? null))[0] : null;
+  const sold = units ? await once(A, "pool.sell", { chain: "solana", token: MINT, amount: units, slippage_bps: 300 }) : { answer: null, times: {} };
+  sold.end = stageName(lastStage(A, "pool.sell")) ?? sold.answer?.result?.stage ?? sold.answer?.error ?? null;
+  sold.holds = max.W ? await wHolds(max.W) : null;
+  out.sell = { units, ...sold };
   const notes = (await A.notesOf()).filter((n) => n.scope === scope).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
   out.notes = notes;
   const allSpent = notes.filter((n) => n.ref === "deposit").length === 6 && notes.filter((n) => n.ref === "deposit").every((n) => n.state === "SPENT");
-  finish(okFive && okBuy(two, 2) && okBuy(max, 4) && allSpent && two.W !== max.W, `5 pieces asked (${out.five.amount} SOL, 4 pieces' most ${out.five.fourMost}): ${JSON.stringify(ask5.answer)}, dry ${JSON.stringify(dry5)}, ${out.five.sent} sent, ${out.five.engineCalls} engine calls, ${out.five.helperLines} helper sends, ${out.five.reserved} notes taken; 2 pieces: ${two.end}, ${two.spent} spent, bundle of ${two.bundle?.txs}, W ${two.W} holds ${JSON.stringify(two.holds)}, tap to filled ${filledMs(two) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(two.waitedS ?? {}))}; Max ${tapMax} SOL: ${max.end}, ${max.spent} spent, bundle of ${max.bundle?.txs}, W ${max.W} holds ${JSON.stringify(max.holds)}, tap to filled ${filledMs(max) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(max.waitedS ?? {}))}; every deposit note spent: ${allSpent}`);
+  const okSell = sold.answer?.result !== undefined && sold.holds?.units.every((u) => u === "0") && notes.some((n) => n.ref === "return");
+  finish(okFive && okBuy(two, 2) && okBuy(max, 4) && allSpent && two.W !== max.W && okSell, `sell of ${units}: ${sold.end}, W holds ${JSON.stringify(sold.holds)}, a return note ${notes.some((n) => n.ref === "return")}; 5 pieces asked (${out.five.amount} SOL, 4 pieces' most ${out.five.fourMost}): ${JSON.stringify(ask5.answer)}, dry ${JSON.stringify(dry5)}, ${out.five.sent} sent, ${out.five.engineCalls} engine calls, ${out.five.helperLines} helper sends, ${out.five.reserved} notes taken; 2 pieces: ${two.end}, ${two.spent} spent, bundle of ${two.bundle?.txs}, W ${two.W} holds ${JSON.stringify(two.holds)}, tap to filled ${filledMs(two) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(two.waitedS ?? {}))}; Max ${tapMax} SOL: ${max.end}, ${max.spent} spent, bundle of ${max.bundle?.txs}, W ${max.W} holds ${JSON.stringify(max.holds)}, tap to filled ${filledMs(max) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(max.waitedS ?? {}))}; every deposit note spent: ${allSpent}`);
 }
 
 if (SCENARIO === "copy-takeable") {
@@ -677,10 +686,10 @@ if (SCENARIO === "copy-takeable") {
     const calls = copy.engineCalls.length;
     const b = tapMax ? await once(L, "pool.buy", { chain: "solana", token: MINT, amount: solOf(lamportsOf(tapMax)), slippage_bps: 300 }) : { answer: null, times: {} };
     const end = stageName(lastStage(L, "pool.buy")) ?? b.answer?.result?.stage ?? b.answer?.error ?? null;
-    const bundle = copy.engineCalls.slice(calls).filter((x) => x.call === "sendBundle").at(-1) ?? null;
+    const bundle = copy.engineCalls.slice(calls).filter((x) => x.call === "pieces").at(-1) ?? null;
     const spent = (await L.notesOf()).filter((n) => n.state === "SPENT").length - spentBefore;
     const r = { round, fresh: fresh.answer, boundary, newestReady, tapMax, intoEpoch: tapPool - boundary, pieces: at?.result?.pieces ?? null, answer: b.answer, end, times: b.times, spent, bundleTxs: bundle?.txs ?? null };
-    r.ok = b.answer?.error !== "failed" && (b.answer?.error === "not_funded" ? spent === 0 && bundle === null : end === "filled" && spent === r.pieces && (r.pieces === 1 ? bundle === null || bundle.txs === 2 : bundle?.txs === r.pieces + 1));
+    r.ok = b.answer?.error !== "failed" && (b.answer?.error === "not_funded" ? spent === 0 && bundle === null : end === "filled" && spent === r.pieces && (r.pieces === 1 ? bundle === null : bundle?.txs === r.pieces));
     out.boundaries.push(r);
     log(`boundary ${round}: Max ${tapMax} (${r.pieces} pieces) ${r.intoEpoch} ms past the boundary, newest-root ready before it ${JSON.stringify(newestReady)}: ${end}, ${spent} spent, bundle ${r.bundleTxs}; ok ${r.ok}`);
   }

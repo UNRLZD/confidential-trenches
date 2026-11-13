@@ -664,25 +664,23 @@ export function solanaPoolBuySellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "
 
 /**
  * The most pieces one tap pays its W from (card buy-spends-several-pieces): each piece is one release of one note, all
- * to the same W, the last one the tag 3 that buys; the others tag 2s sent before it in the same bundle, all or none.
- * A Jito bundle holds at most 5 transactions: one release each, and the last the helper's own tip transaction (Jito
- * considers a bundle only when it tips by a transfer instruction; the pool's tip is a lamport write, and W signs every
- * release, so the tip cannot ride in one of them). Two releases in one transaction fit 1,232 bytes (1,207) only with a
+ * to the same W, the last one the tag 3 that buys; the others tag 2s the helper sends and reads landed before it (card
+ * owners-solana-buy-lands; until then one Jito bundle of at most 5 transactions held them and the helper's tip, hence
+ * 4, the count the page's pick, its Max and the helper's route are built and tested for). Two releases in one transaction fit 1,232 bytes (1,207) only with a
  * lookup table holding the state and root pages, which move as the tree grows: a table someone would keep extending.
  */
 export const SOLANA_POOL_BUY_PIECES_MAX = 4;
 
-/** The tip a pool buy's tag 3 pays out of its own chunk: on devnet none (no block engine); on mainnet one piece alone
- *  SOLANA_POOL_JITO_TIP (its tag 3 is the bundle, and its tip is what the auction ranks); several pieces
- *  SOLANA_JITO_TIP_MIN, the least a mainnet tag 3 carries, since the helper's own last transaction tips the auction for
- *  the bundle out of the pieces' relay fees (apps/helper src/pool/solana.ts piecesTipCap). The buy (packages/signpage
+/** The tip a pool buy's tag 3 pays out of its own chunk: on devnet none (no block engine); on mainnet
+ *  SOLANA_POOL_JITO_TIP for any count of pieces, since the helper sends the tag 3 of several pieces as it sends one
+ *  piece's, its own bundle once the tag 2s landed (apps/helper src/pool/solana.ts sendPieces, card
+ *  owners-solana-buy-lands), so its tip is what the auction ranks. The buy (packages/signpage
  *  src/pool-buy.ts) and its Fee (pool.buy.dry's cost) price a set of `pieces` at this tip. The tap's Max does not: it
  *  prices the tip at the largest of the proofs' tip caps (packages/wallet src/pool/balances.ts solanaTapSpendOf,
  *  SOL_TIP_CAP 0.001 SOL), the most a release lets the tap tip, so a Max tap fills at any tip it may pay. */
 export function solanaPoolBuyTip(cluster: "mainnet" | "devnet", pieces: number): bigint {
   if (!Number.isSafeInteger(pieces) || pieces < 1 || pieces > SOLANA_POOL_BUY_PIECES_MAX) throw new Error(`pieces: 1 to ${SOLANA_POOL_BUY_PIECES_MAX}`);
-  if (cluster === "devnet") return 0n;
-  return pieces === 1 ? SOLANA_POOL_JITO_TIP : SOLANA_JITO_TIP_MIN;
+  return cluster === "devnet" ? 0n : SOLANA_POOL_JITO_TIP;
 }
 /** One piece of a buy: a release's withdrawnValue and the relay fee it pays out of it. */
 export type SolanaPoolBuyPiece = Pick<SolanaPoolRelease, "withdrawnValue" | "relayFee">;

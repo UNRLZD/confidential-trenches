@@ -770,10 +770,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     // not awaited here: the buy waits on its own venue's reads only (below, once the reference names the venue), so a
     // slow or hung read of another venue's table never holds it; a rejection no buy awaits is marked handled
     for (const r of tableReads.values()) r.catch(() => {});
-    // the tag 3's tip for a set of k pieces (the kit's solanaPoolBuyTip): on mainnet the helper sends one piece's tag 3
-    // to Jito bundle-only, so it tips enough to win the auction (SOLANA_POOL_JITO_TIP); a bundle of several pieces ends
-    // with the helper's own tip out of the pieces' relay fees, so its tag 3 carries the least (SOLANA_JITO_TIP_MIN);
-    // devnet has no block engine, so no tip
+    // the tag 3's tip for a set of k pieces (the kit's solanaPoolBuyTip): on mainnet the helper sends every tag 3 to
+    // Jito as its own bundle (several pieces' once the tag 2s landed), so it tips enough to win the auction
+    // (SOLANA_POOL_JITO_TIP); devnet has no block engine, so no tip
     const tipOf = (k: number): bigint => solanaPoolBuyTip(h.cluster, k);
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();

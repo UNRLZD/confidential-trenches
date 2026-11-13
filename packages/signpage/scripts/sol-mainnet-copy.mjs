@@ -22,7 +22,8 @@
 //   plain fee recipient in place of the Mayhem one; the run must fail with pump's own error.
 // - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, its engine stand-in landing each bundle,
 //   through pool-buy-pieces-devnet.mjs's copy-part1 in place of the flow: 6 notes of 0.01 SOL, a buy only 5 pay (refused,
-//   nothing sent), a buy of 2 pieces and Max of the 4 left, each one bundle of the pieces and the helper's tip.
+//   nothing sent), a buy of 2 pieces and Max of the 4 left, each carried as the helper's pieces route sends them (the tag 2s
+//   plain, then the tag 3, card owners-solana-buy-lands).
 // - FLOW_RUNG=<lamports> (card round-trip-costs-less, pool-flow-devnet.mjs): the run's one note, 0.01 SOL by default; a
 //   larger rung leaves W enough after its full sell for the sweep, so the record times the sale, teardown and sweep.
 // - Keys are made fresh for the copy and live only in the run's temp folder, removed at the end.
