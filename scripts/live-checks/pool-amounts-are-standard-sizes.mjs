@@ -11,7 +11,8 @@
 // deposit at or after --from is a rung, and every release at or after --from is a rung but the last remainders of notes made before the fix: at most
 // one per deposit before --from (each note's line starts at one deposit and ends in at most one remainder off the
 // ladder, released whole once: the circuit has one input and withdrawnValue is public).
-// After: sign
+// Runs: pending pool-amounts-are-standard-sizes, it needs --from, the time this card's build went live on SIGN_HOST: the
+// release that ships it adds `// After: sign --from <that time>` here, so no run before it reads the old build's sizes
 //   node scripts/live-checks/pool-amounts-are-standard-sizes.mjs --from <ISO time of the fix's first transaction> [--record <file>] [--answer <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 import "../net-window.mjs";
