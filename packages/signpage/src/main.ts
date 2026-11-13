@@ -69,14 +69,14 @@ import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
-import { depositToEnd, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
+import { depositToEnd, depositWalletsOf, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
 import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
-import { PAGE_POOLS, poolBuyDryKind, rentOnce, withPools, withSolanaRent } from "./pools.ts";
+import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -421,7 +421,13 @@ else {
         const owed = s.signed_in && testnet ? await testnet.returning().catch(() => []) : [];
         // the notes the balance counted, so a W whose sweep's note is counted is not listed too
         const counted = owed.some((o) => o.sweep !== undefined) ? await shared().catch(() => null) : [];
-        return withReturning(positioned, returningWallets(owed, prices.get("solana"), counted));
+        const returned = withReturning(positioned, returningWallets(owed, prices.get("solana"), counted));
+        // each U_X a follow left money at (card deposit-takes-each-pools-own-coin): the ops read after the notes above,
+        // from the store alone, so a carry the pools count is never listed here too (pool-deposit-follow.ts
+        // depositWalletsOf)
+        if (!s.signed_in || PAGE_POOLS.length === 0) return returned;
+        const ops = await open().then(async (st) => Promise.all((await st.keys("ops")).map((k) => st.get("ops", k).catch(() => undefined)))).catch(() => null);
+        return ops === null ? returned : withDepositWallets(returned, depositWalletsOf(ops, (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c]));
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {

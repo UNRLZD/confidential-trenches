@@ -40,7 +40,7 @@
 //   send waiting for its money: SLOW_MS, no doubling, until its deadline).
 // Nothing here logs. Every read names one public account (U_X) or the quote's deposit address; no request carries a
 // key, the words, or which note is whose.
-import type { PoolChain, PoolDepositStage, TxRef } from "../../kit/src/signpage/messages.ts";
+import type { PoolAsset, PoolChain, PoolDepositStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
 import type { NoteRecord, NoteState } from "../../wallet/src/notes/store.ts";
 import { followRpc, type MoveRead, type OneClickStatus, readDepositStatus, type StatusRead } from "../../wallet/src/deposit/follow.ts";
@@ -239,6 +239,36 @@ export async function uxHeld(r: Pick<PoolUxReads, "balances" | "costs">, ux: Poo
   if (low === 0n) return false;
   const c = await r.costs(ux);
   return low > c.keep + c.perRung;
+}
+
+/**
+ * state.deposit_wallets (card deposit-takes-each-pools-own-coin; the kit's SignpageState.deposit_wallets): each U_X whose
+ * newest op ended with money left there, at what that end read (`left`, any amount over 0), in whole units of the pool's
+ * coin. From the store alone: no read names U_X. Never in the pool balance and here at once: an op's end is read only
+ * with no note of U_X's landing and U_X under one deposit's floor on the chain, so `left` is what stayed after every
+ * carry the pool counts; and money that arrives later reopens the op (followAgain), which then shows none here until its
+ * own end. The caller reads the notes first and the ops after, so a carry the notes count is one whose op was reopened
+ * by then. A U_X still followed shows none (its op's stage tells it).
+ */
+export function depositWalletsOf(ops: readonly unknown[], decimals: (chain: PoolChain) => number, asset: (chain: PoolChain) => PoolAsset): { chain: PoolChain; address: string; asset: PoolAsset; amount: string }[] {
+  const newest = new Map<string, PoolDepositOp>();
+  for (const v of ops) {
+    if (!isPoolOp(v)) continue;
+    const k = `${v.follow.chain}\n${v.follow.u}`;
+    const had = newest.get(k);
+    if (had === undefined || v.created_ms > had.created_ms) newest.set(k, v);
+  }
+  const out: { chain: PoolChain; address: string; asset: PoolAsset; amount: string }[] = [];
+  for (const v of newest.values()) {
+    if (!poolFollowEnded(v) || v.follow.left === undefined || !/^[0-9]{1,78}$/.test(v.follow.left)) continue;
+    const units = BigInt(v.follow.left);
+    if (units === 0n) continue;
+    const d = decimals(v.follow.chain);
+    const t = units.toString().padStart(d + 1, "0");
+    const frac = t.slice(t.length - d).replace(/0+$/, "");
+    out.push({ chain: v.follow.chain, address: v.follow.u, asset: asset(v.follow.chain), amount: frac === "" ? t.slice(0, t.length - d) : `${t.slice(0, t.length - d)}.${frac}` });
+  }
+  return out;
 }
 
 /**

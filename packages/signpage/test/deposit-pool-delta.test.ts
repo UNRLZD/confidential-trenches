@@ -240,3 +240,58 @@ test("P3-b: on Solana, one RPC lagging at 0 is no expired plain send: the higher
   });
   assert.deepEqual(stages, ["short"]);
 });
+
+// ------------------------------------- state.deposit_wallets: what a follow left at U_X, listed until a carry takes it
+test("deposit_wallets: a U_X remainder is listed; a top-up reopens its op (none listed while followed); the carry's end lists only what is left", async () => {
+  const depositWalletsOf = m.depositWalletsOf as (ops: readonly unknown[], d: (c: string) => number, a: (c: string) => string) => { chain: string; address: string; asset: string; amount: string }[];
+  assert.equal(typeof depositWalletsOf, "function", "the page lists no deposit wallet");
+  const { withDepositWallets } = (await import("../src/pools.ts")) as Record<string, any>;
+  const { signedOutState } = await import("../src/api.ts");
+  const list = (rows: Map<string, unknown>) => depositWalletsOf([...rows.values()], () => 9, () => "SOL");
+  const { rows, store } = opsStore();
+  let bal = 0n, rounds = 0;
+  const carried: bigint[] = [];
+  const host: ReturnType<typeof poolFollows> = poolFollows({
+    store: async () => store,
+    deps: () =>
+      reads({
+        sleep: async () => void (++rounds > 50 && host.stop()),
+        balances: async () => [bal, bal] as const,
+        deposit: async (_f, amount) => ((bal -= amount + BigInt(ladderSplit(SOL_LADDER, amount).notes.length) * PER), carried.push(amount), { end: "filled", txs: [] }),
+        noted: async () => true,
+      }),
+    again: () => ({ balances: async () => [bal, bal] as const, costs: async () => ({ floor: FLOOR, perRung: PER, keep: KEEP }), ladder: SOL_LADDER }),
+    decimals: () => 9,
+    locks: () => null,
+    now: () => 5,
+  } as Parameters<typeof poolFollows>[0]);
+  // nothing ended yet: none listed
+  await host.quoted("op", "solana", QUOTE("U_X"), UX("U_X"));
+  assert.deepEqual(list(rows), []);
+  bal = 23_586_399n;
+  await host.idle();
+  // the end left 10,650,239 lamports at U_X: listed, and the 0.01 SOL carried is the pool's, not here
+  assert.deepEqual(carried, [SOL_LADDER.min]);
+  assert.deepEqual(list(rows), [{ chain: "solana", address: "U_X", asset: "SOL", amount: "0.010650239" }]);
+  const st = withDepositWallets({ ...signedOutState(), signed_in: true, way: "words", code_saved: true }, list(rows));
+  assert.deepEqual(st.deposit_wallets, [{ chain: "solana", address: "U_X", asset: "SOL", amount: "0.010650239" }], "the state carries it (the kit's schema takes it)");
+  assert.equal(withDepositWallets(signedOutState(), list(rows)).deposit_wallets, undefined, "signed out: none");
+  // a top-up of one floor lands at U_X; the next landing's settle reopens the op: while it is followed, none is listed
+  bal += FLOOR;
+  let seenWhileFollowed: unknown[] | null = null;
+  const before = store.update;
+  store.update = async (s, k, change) => {
+    const r = await before(s, k, change);
+    const v = rows.get(k) as { final?: true };
+    if (v.final !== true && seenWhileFollowed === null) seenWhileFollowed = list(rows);
+    return r;
+  };
+  await host.settle();
+  await host.idle();
+  assert.deepEqual(seenWhileFollowed, [], "a U_X followed again is listed nowhere but its op");
+  // its end: both carried as one 0.02 rung; what is left (under one deposit's cost over the rent, still over 0) listed
+  assert.deepEqual(carried, [SOL_LADDER.min, 20_000_000n]);
+  const left = 10_650_239n + FLOOR - 20_000_000n - PER;
+  assert.ok(left > 0n && left <= KEEP + PER);
+  assert.deepEqual(list(rows), [{ chain: "solana", address: "U_X", asset: "SOL", amount: (Number(left) / 1e9).toString() }]);
+});
