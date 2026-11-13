@@ -162,12 +162,14 @@ export const MARKS = Object.freeze({
       return [...js.matchAll(re)].some((m) => rungNote(js, m[1]));
     },
   },
-  "a deposit back under the sell's floor is refused by name: the pool's note floor rounded up to the grid, never under 0.005 SOL": {
+  // card pool-amounts-are-standard-sizes: the floor a rung, so the rule's raw value and the device's rung note agree
+  "a deposit back under the sell's floor is refused by name: the pool's note floor rounded up to a rung, never under 0.005 SOL": {
     test(js) {
       const g = new RegExp(`let (?<k>${I})=${I}-${I}<(?<fl>${I})\\(${I}\\),(?<l>${I})=${I}\\.at\\(-1\\);if\\(\\k<k>&&\\k<l>\\.program===${I}\\.program\\)return ${I}\\(\`deposit_floor\`\\)`).exec(js)?.groups;
-      const f = g && new RegExp(`function ${esc(g.fl)}\\((${I})\\)\\{let (${I})=\\(${I}\\(\\1\\)\\+(?<g>${I})-1n\\)/\\k<g>\\*\\k<g>;return \\2>5000000n\\?\\2:(?<f>${I})\\}`).exec(js)?.groups;
-      const is = (name, v) => new RegExp(`[,; ]${esc(name)}=${v}[,;]`).test(js);
-      return Boolean(f) && is(f.g, "1000000n") && is(f.f, "5000000n");
+      const f = g && new RegExp(`function ${esc(g.fl)}\\((${I})\\)\\{let (${I})=${I}\\(\\1\\);if\\(\\2<=5000000n\\)return (?<m>${I});let (${I})=\\k<m>;for\\(;\\4<\\2;\\)\\4=(?<up>${I})\\((?<r>${I}),\\4\\*3n\\)\\[0\\];return \\4\\}`).exec(js)?.groups;
+      const up = f && new RegExp(`function ${esc(f.up)}\\((${I}),(${I})\\)\\{return (${I})\\(\\1\\.ladder,\\2\\)\\}`).exec(js);
+      const rule = f && new RegExp(`[,; ]${esc(f.r)}=Object\\.freeze\\(\\{grid:(${I}),floor:(${I}),ladder:Object\\.freeze\\(\\{one:\\1,min:\\2\\}\\),least:${I}\\}\\)`).exec(js);
+      return Boolean(up && rule) && rule[2] === f.m && isOf(js, f.m, "5000000n") && isOf(js, rule[1], "1000000n");
     },
   },
   // card pool-amounts-are-standard-sizes: the sweep's note is a rung, the rest stays on W (listed, the user's own), no
@@ -234,7 +236,7 @@ export const MARKS = Object.freeze({
   "a floor end is steady only under the floor at the cheapest deposit, only as the sweep found it, its note the sweep's rung with what W must keep":
     // card pool-amounts-are-standard-sizes: the sweep's rung note with what W must keep, W listed at what it adds once
     // moved, no ride
-    tied(new RegExp(`(?<T>${I})=(?<p>${I})-(?<my>${I})-(?<ue>${I})\\((?<l>${I}),(?<h>${I}),(?<w>${I})\\)-(?<we>${I})\\(\\k<l>,(?<a>${I}),(?<kp>${I})\\),(?<E>${I})=\\k<p>-\\k<my>-\\k<ue>\\(\\k<l>,\\k<h>,\\{\\.\\.\\.\\k<w>,state:\\[(?<z>${I}),\\k<z>\\],label:\\[\\k<z>,\\k<z>\\]\\}\\)-\\k<we>\\(\\k<l>,\\k<a>,\\k<kp>\\),(?<L>${I})=${I}\\(\\k<l>,\\k<we>\\(\\k<l>,\\k<a>,\\k<kp>\\)\\),\\{value:(?<V>${I})\\}=(?<so>${I})\\(\\k<T>,\\k<L>\\),(?<N>${I})=\\k<so>\\(\\k<E>,\\k<L>\\)\\.value,(?<A>${I})=${I}\\(\\k<T>,(?<b>${I})\\);if\\([^;]{0,300}\\)return\\{end:\\k<a>>0\\?\`owed\`:\`floor\`,steady:\\k<N><\\k<b>,`), () => [
+    tied(new RegExp(`(?<T>${I})=(?<p>${I})-(?<my>${I})-(?<ue>${I})\\((?<l>${I}),(?<h>${I}),(?<w>${I})\\)-(?<we>${I})\\(\\k<l>,(?<a>${I}),(?<kp>${I})\\),(?<E>${I})=\\k<p>-\\k<my>-\\k<ue>\\(\\k<l>,\\k<h>,\\{\\.\\.\\.\\k<w>,state:\\[(?<z>${I}),\\k<z>\\],label:\\[\\k<z>,\\k<z>\\]\\}\\)-\\k<we>\\(\\k<l>,\\k<a>,\\k<kp>\\),(?<L>${I})=${I}\\(\\k<l>,\\k<we>\\(\\k<l>,\\k<a>,\\k<kp>\\)\\),\\{value:(?<V>${I})\\}=(?<so>${I})\\(\\k<T>,\\k<L>\\),(?<N>${I})=\\k<so>\\(\\k<E>,\\k<L>\\)\\.value,(?<A>${I})=${I}\\(\\k<T>,(?<b>${I}),\\k<L>\\);if\\([^;]{0,300}\\)return\\{end:\\k<a>>0\\?\`owed\`:\`floor\`,steady:\\k<N><\\k<b>,`), () => [
       `if\\((${I})\\.end!==\`sent\`\\)return\`steady\`in \\1(?:&&\\1\\.steady!==void 0)?\\?(${I})\\(\\1\\.end,\\1\\.detail,(?:\\1\\.end===\`floor\`|\\(\\1\\.end===\`floor\`\\|\\|\\1\\.end===\`kept\`\\))&&\\1\\.steady\\):\\2\\(\\1\\.end,\\1\\.detail\\)`,
     ]),
   "a full sell's record keeps the mints W's record already names": new RegExp(`(?:(${I})\\|\\|\\((${I})\\.mints=(${I})\\(\\(await Promise\\.resolve\\((${I})\\.owed\\?\\.list\\(\\)\\)\\.then\\((${I})=>\\5\\?\\.find\\(\\5=>\\5\\.address===(${I})\\.address\\),\\(\\)=>void 0\\)\\)\\?\\.mints,\\2\\.mints\\),await \\4\\.owed\\?\\.put\\(\\2\\)|if\\(!${I}\\)\\{(?:${I}\\.spaced=${I};)?let (${I})=await Promise\\.resolve\\((${I})\\.owed\\?\\.list\\(\\)\\)\\.then\\((${I})=>\\9\\?\\.find\\(\\9=>\\9\\.address===${I}\\.address\\),\\(\\)=>void 0\\);(${I})\\.mints=${I}\\(\\7\\?\\.mints,\\10\\.mints\\),\\10\\.sell=\\{\\.\\.\\.\\7\\?\\.sell,[^;]*?await \\8\\.owed\\?\\.put\\(\\10\\))`),

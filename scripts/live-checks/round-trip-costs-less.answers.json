@@ -1,13 +1,13 @@
 {
  "_note": {
-  "good": "card pool-amounts-are-standard-sizes's build of packages/signpage, its index.html and public/app.js",
+  "good": "this card's build (pool-amounts-are-standard-sizes, packages/signpage/public/app.js as built locally from 6d5783f00)",
   "bad": "main 6430cba10 build (mainnet), before this card: packages/signpage/index.html and public/app.js as build-app.mjs wrote them there: FAIL, every mark named",
   "beforeDelta": "card/round-trip-costs-less 024e8a89d build (mainnet), the head that review read: FAIL on the reads it moved (a W read empty listed empty while its note is RESERVED; the passes counted; the held W not passed; every rent back claiming the slot; the listing) and on the sale stamp, the trade lock and the load start",
-  "liveBefore": "SIGN_HOST as served at 2026-11-13T21:04Z, before card pool-amounts-are-standard-sizes"
+  "liveBefore": "SIGN_HOST as served at 2026-11-13T21:37Z, before card pool-amounts-are-standard-sizes"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-nQHDW8b1DdyX+zKflBgWSnqm4qcA7XCKh7v5NVFIIxYqg4VsJDIWPjE7KCE0W7rI\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-nQHDW8b1DdyX+zKflBgWSnqm4qcA7XCKh7v5NVFIIxYqg4VsJDIWPjE7KCE0W7rI",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-T1c41lXECTG99RXnv5BWqpuvyuhm7iLADcjElGhKC/BfIBMcfCbhL0179ff9APWQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-T1c41lXECTG99RXnv5BWqpuvyuhm7iLADcjElGhKC/BfIBMcfCbhL0179ff9APWQ",
   "carries": {
    "the sale's owed record keeps W's proven buy": true,
    "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": true,

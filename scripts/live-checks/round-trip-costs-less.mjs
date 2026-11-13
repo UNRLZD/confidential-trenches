@@ -141,9 +141,9 @@ export const MARKS = Object.freeze({
       R`if\(\((${I})\.buy\|\|(${I})!==void 0\)&&\1\.read\?\.\((${I})\),\3===0n\)return\{end:`,
       // under the floor, owed or not: W is listed at its rest (restAdds, card pool-amounts-are-standard-sizes: the
       // sweep's rung, its rest kept rent-exempt on W), unlisted when that is 0, before the floor end
-      R`(${I})=(${I})\(${I},${I}\(${I},${I},${I}\)\),\{value:(${I})\}=(${I})\((${I}),\1\),${I}=\4\(${I},\1\)\.value,(${I})=(${I})\(\5,(${I})\);if\(\3<\8&&\6===0n&&(${I})\.unlisted\?\.\(\),\3<\8&&\6>0n&&\(\9\.buy\|\|(${I})!==void 0\)&&\9\.read\?\.\(\6\),`,
-      // restAdds: the own rung at the floor or over, else the rest itself above 0, else 0
-      R`function (${I})\((${I}),(${I})\)\{let (${I})=(${I})\(\2\)\.value;return \4>=\3\?\4:\2>0n\?\2:0n\}`,
+      R`(${I})=(${I})\(${I},${I}\(${I},${I},${I}\)\),\{value:(${I})\}=(${I})\((${I}),\1\),${I}=\4\(${I},\1\)\.value,(${I})=(${I})\(\5,(${I}),\1\);if\(\3<\8&&\6===0n&&(${I})\.unlisted\?\.\(\),\3<\8&&\6>0n&&\(\9\.buy\|\|(${I})!==void 0\)&&\9\.read\?\.\(\6\),`,
+      // restAdds: the own rung (past what W must keep) at the floor or over, else the rest itself above 0, else 0
+      R`function (${I})\((${I}),(${I}),(${I})=0n\)\{let (${I})=(${I})\(\2,\4\)\.value;return \5>=\3\?\5:\2>0n\?\2:0n\}`,
       // the sweep's record (signature and the note's value) written before its send
       R`await (${I})\.swept\?\.\((${I})\.one\.signature,\2\.value\),await (${I})\(\2\.one\.signed,\2\.one\.signature\)`,
       // a pass whose rest adds nothing carries no amount; a floor end only this pass's (what W adds), never the last

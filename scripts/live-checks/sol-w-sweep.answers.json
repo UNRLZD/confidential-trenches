@@ -1,22 +1,22 @@
 {
  "_note": {
-  "good": "this card's build (pool-amounts-are-standard-sizes, packages/signpage/public/app.js as built locally from 06c1a9abb)",
+  "good": "this card's build (pool-amounts-are-standard-sizes, packages/signpage/public/app.js as built locally from 6d5783f00)",
   "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
   "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
   "beforeFold8": "5697d7a1's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 8's fold (no buy record: the page's holdings, the helper's word on mainnet, decided the pass and were part of what W read as): FAIL on the seen and own-coin rules; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
   "beforeFloor": "main 383b1ffe's build (mainnet; release-102, kit-sol-pool-deposit-floor merged), the committed packages/signpage/index.html and public/app.js there: the sell's rule refuses only a note under the pool's least deposit, so it signs a deposit back under the kit's release floor: FAIL on the sell's rule alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
   "beforeLamport": "the good answer before card every-lamport-can-move (card/round-trip-costs-less build (mainnet; main c32f749c6 merged)): FAIL on that card's seven rules alone",
   "before1d": "card/every-lamport-can-move build at 1d3b96d9c (mainnet), before its review: the rest under the grid paid to the pool's account, by the builder and the rule, and tokens on any account keep W whole: FAIL on those three marks (5, 6, 9) alone",
-  "liveBefore": "SIGN_HOST as served at 2026-11-13T21:16Z, before card pool-amounts-are-standard-sizes"
+  "liveBefore": "SIGN_HOST as served at 2026-11-13T21:37Z, before card pool-amounts-are-standard-sizes"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-t+vGT9Lx27OCS5Lul7xdav4ukXFcSLFM8w2I/U54UgxKf2Y7d7KOOqL6RV/Tkl2u\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-t+vGT9Lx27OCS5Lul7xdav4ukXFcSLFM8w2I/U54UgxKf2Y7d7KOOqL6RV/Tkl2u",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-T1c41lXECTG99RXnv5BWqpuvyuhm7iLADcjElGhKC/BfIBMcfCbhL0179ff9APWQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-T1c41lXECTG99RXnv5BWqpuvyuhm7iLADcjElGhKC/BfIBMcfCbhL0179ff9APWQ",
   "carries": {
    "a full sell carries no deposit back and no reserve, each refused by name, a partial sell's reserve at most the cap of its own constants": true,
    "a partial sell's deposit back is its min out less the reserve as the rules' note of it, a rung, refused by name otherwise": true,
    "the rules' note: the largest rung of the 1-2-5 ladder from 0.005 SOL in 0.001 SOL steps at or under what it is cut from, 0 under 0.005 SOL": true,
-   "a deposit back under the sell's floor is refused by name: the pool's note floor rounded up to the grid, never under 0.005 SOL": true,
+   "a deposit back under the sell's floor is refused by name: the pool's note floor rounded up to a rung, never under 0.005 SOL": true,
    "the sweep's note is the largest rung of what W holds past its costs whose remainder is 0 or at least what W must keep (rent(0) less what its claims keep), 0 under the floor": true,
    "the sweep is its deposit alone, no transfer, no compute budget, its fee read as the signature's alone on both RPCs": true,
    "the sweep's rule takes its deposit alone, its value the sweep's note of what W holds past its costs and what W must keep, a rung and at least 0.005 SOL, each refused by name": true,
@@ -244,7 +244,7 @@
    "a full sell carries no deposit back and no reserve, each refused by name, a partial sell's reserve at most the cap of its own constants": true,
    "a partial sell's deposit back is its min out less the reserve as the rules' note of it, a rung, refused by name otherwise": false,
    "the rules' note: the largest rung of the 1-2-5 ladder from 0.005 SOL in 0.001 SOL steps at or under what it is cut from, 0 under 0.005 SOL": false,
-   "a deposit back under the sell's floor is refused by name: the pool's note floor rounded up to the grid, never under 0.005 SOL": true,
+   "a deposit back under the sell's floor is refused by name: the pool's note floor rounded up to a rung, never under 0.005 SOL": false,
    "the sweep's note is the largest rung of what W holds past its costs whose remainder is 0 or at least what W must keep (rent(0) less what its claims keep), 0 under the floor": false,
    "the sweep is its deposit alone, no transfer, no compute budget, its fee read as the signature's alone on both RPCs": false,
    "the sweep's rule takes its deposit alone, its value the sweep's note of what W holds past its costs and what W must keep, a rung and at least 0.005 SOL, each refused by name": false,

@@ -27,9 +27,9 @@ const MOVED = [11, 12, 14, 26];
 // card every-lamport-can-move's rules, in the places of the full sell's reserve rules it deleted, and the sweep's keep
 // rules it rewrote (7, 8, 9: kept accounts counted, review P2-1): no build before it carries them
 const LAMPORT = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-// card pool-amounts-are-standard-sizes's rules: the rules' note a rung, the sweep's rung note with what W keeps and no
+// card pool-amounts-are-standard-sizes's rules: the rules' note a rung, the sell's floor a rung, the sweep's rung note with what W keeps and no
 // transfer, its rule, the floor end, and W's tail record: no build before it carries them
-const RUNG = [1, 2, 4, 5, 6, 8, 21, 27];
+const RUNG = [1, 2, 3, 4, 5, 6, 8, 21, 27];
 const rung = (list) => [...new Set([...list, ...RUNG])].sort((a, b) => a - b).map((i) => ALL[i]);
 const moved = (...more) => [...new Set([...MOVED, ...LAMPORT, ...RUNG, ...more])].sort((a, b) => a - b).map((i) => ALL[i]);
 
@@ -105,7 +105,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 // The minified lines as the good build spells them, each changed so its rule no longer holds.
 const JS = [
   // card pool-amounts-are-standard-sizes: the rules' note (a rung, its rule the Solana pieces'), the sweep's note, its stay
-  "var BC=1000000n,VC=5000000n;var hD=(e,t)=>pD(e,t)===2n?t*5n/2n:t*2n;function iD(e,t){gD(e);let n=[];for(let r=e.min;r<=t;r=hD(e,r))n.push(r);return n.reverse()}function kD(e,t){if(typeof t!=`bigint`||t<0n)throw Error(`amount: not a whole amount`);let n=t<e.floor?0n:iD(e.ladder,t)[0]??0n;return{note:n,kept:t-n}}function jR(e,t){return typeof t==`bigint`&&fD(e.ladder,t)}var qP=Object.freeze({grid:BC,floor:VC,ladder:Object.freeze({one:BC,min:VC}),least:VC});function JA(e){return typeof e!=`bigint`||e<=0n?0n:kD(qP,e).note}function YA(e){let t=(dx(e)+BC-1n)/BC*BC;return t>5000000n?t:VC}",
+  "var BC=1000000n,VC=5000000n;var hD=(e,t)=>pD(e,t)===2n?t*5n/2n:t*2n;function iD(e,t){gD(e);let n=[];for(let r=e.min;r<=t;r=hD(e,r))n.push(r);return n.reverse()}function kD(e,t){if(typeof t!=`bigint`||t<0n)throw Error(`amount: not a whole amount`);let n=t<e.floor?0n:iD(e.ladder,t)[0]??0n;return{note:n,kept:t-n}}function jR(e,t){return typeof t==`bigint`&&fD(e.ladder,t)}var qP=Object.freeze({grid:BC,floor:VC,ladder:Object.freeze({one:BC,min:VC}),least:VC});function JA(e){return typeof e!=`bigint`||e<=0n?0n:kD(qP,e).note}function MR(e,t){return iD(e.ladder,t)}function YA(e){let t=dx(e);if(t<=5000000n)return VC;let n=VC;for(;n<t;)n=MR(qP,n*3n)[0];return n}",
   "var cj=(e,t,n=0)=>t+n===0?0n:dm(e,0)+BigInt(t)*(wc+dm(e,165))+BigInt(n)*wc;function lj(e,t=0n){if(typeof e!=`bigint`||e<=0n)return{value:0n,under:0n};for(let n=e;;){let r=JA(n);if(r===0n)return{value:0n,under:0n};let i=e-r;if(i===0n||i>=t)return{value:r,under:i};n=r-1n}}var sk=(e,t)=>{let n=dm(e,0)-t;return n>0n?n:0n};function uj(e,t,n,r,i,a,o=0,s=0){let c=NA(t),l=FA(e,n);if(l.signers.length!==1||l.signers[0]!==t.wallet)return X(`signers`);if(l.ixs.length!==1)return X(`instructions`);let u=HA(l.ixs[0],c,t.wallet,t.precommitment,n);if(typeof r!=`bigint`||typeof i?.lamportsPerByte!=`bigint`||typeof i.factor!=`bigint`||i.lamportsPerByte<0n||i.factor<0n||!Number.isSafeInteger(o)||o<0||o>2||!Number.isSafeInteger(s)||s<0)return X(`sweep_reads`);let d=cj(i,o,s);return u===lj(r-5000n-sj(i,n,a)-d,sk(i,d)).value?!jR(qP,u)||u<1000000n||u<oj(i)?X(`amount`):(_A(e),u):X(`sweep_amount`)}",
   "var lc=`11111111111111111111111111111111`,wc=5000n,xm=wc,CY=(e,t,n)=>{let r=new Uint8Array(12),i=new DataView(r.buffer);return i.setUint32(0,2,!0),i.setBigUint64(4,n,!0),{program:lc,accounts:[{key:e,signer:!0,writable:!0},{key:t,signer:!1,writable:!0}],data:r}};",
   "var sd=5000n,ad=1000000n,nE=sd+BigInt(14e5)*ad/1000000n,rE=6960n,iE=nE+145n*rE+2n*216n*rE;",
@@ -126,7 +126,7 @@ const JS = [
   ";t.claims.reduce((e,t)=>e+(t.unwrap?t.amount+t.prefund:0n),0n)",
   ";e.open&&(typeof r!=`bigint`||r<e.prefund||r-e.prefund>kf?y.push(`${o}: ${e.to} opened with ${r??`nothing read`} lamports (want ${e.prefund} there before and at most ${kf} more)`):c+=r-e.prefund)",
   ";g=(e,t,n=e===`holds`||e===`kept`||e===`refused`)=>(h(`rent_back`,e,t),{end:e,steady:n})",
-  ";let M=v-xm-sj(l,b,j)-cj(l,p,h),N=v-xm-sj(l,b,{...j,state:[uX,uX],label:[uX,uX]})-cj(l,p,h),Q=sk(l,cj(l,p,h)),{value:P}=lj(M,Q),I=lj(N,Q).value,L=NY(M,w);if(P<w&&L===0n&&t.unlisted?.(),P<w&&L>0n&&(t.buy||S!==void 0)&&t.read?.(L),P<w)return{end:p>0?`owed`:`floor`,steady:I<w,detail:`W's ${v} would leave ${M} for a note, under ${w}: kept on W${p>0?`, owed ${p} cashback claim${p>1?`s`:``}`:``}`};let R=await ZH(s),{message:z}=Ku(c.address,[jY(t.program,t.pool,c.address,b,k,P)],R.blockhash,[]),te=MY(z),ne=await AJ(s,async e=>BigInt(TJ((await e(`getFeeForMessage`,[B.encode(z),{commitment:`confirmed`}]))?.value)));if(ne[0]!==xm||ne[1]!==xm)throw Error(`the sweep's fee reads ${ne[0]} and ${ne[1]}`);",
+  ";let M=v-xm-sj(l,b,j)-cj(l,p,h),N=v-xm-sj(l,b,{...j,state:[uX,uX],label:[uX,uX]})-cj(l,p,h),Q=sk(l,cj(l,p,h)),{value:P}=lj(M,Q),I=lj(N,Q).value,L=NY(M,w,Q);if(P<w&&L===0n&&t.unlisted?.(),P<w&&L>0n&&(t.buy||S!==void 0)&&t.read?.(L),P<w)return{end:p>0?`owed`:`floor`,steady:I<w,detail:`W's ${v} would leave ${M} for a note, under ${w}: kept on W${p>0?`, owed ${p} cashback claim${p>1?`s`:``}`:``}`};let R=await ZH(s),{message:z}=Ku(c.address,[jY(t.program,t.pool,c.address,b,k,P)],R.blockhash,[]),te=MY(z),ne=await AJ(s,async e=>BigInt(TJ((await e(`getFeeForMessage`,[B.encode(z),{commitment:`confirmed`}]))?.value)));if(ne[0]!==xm||ne[1]!==xm)throw Error(`the sweep's fee reads ${ne[0]} and ${ne[1]}`);",
   ";if(S.end!==`sent`)return`steady`in S?g(S.end,S.detail,S.end===`floor`&&S.steady):g(S.end,S.detail);",
   ";I||(be.mints=iz((await Promise.resolve(e.owed?.list()).then(e=>e?.find(e=>e.address===f.address),()=>void 0))?.mints,be.mints),await e.owed?.put(be)",
   // review P1-2 of 1d3b96d9c: W's own coins' accounts (a found W's every account), the keep count's caller
@@ -170,8 +170,11 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("VC=5000000n", "VC=1000000n"), [1, 2, 3, 4, 5, 6]],
     // the sell's floor: the pool's note floor rounded up to the grid, never under 0.005 SOL, refused by name
     [JS.replace("let y=h-s<YA(v)", "let y=h-s<1000000n"), 3],
-    [JS.replace("return t>5000000n?t:VC}", "return t>1000000n?t:VC}"), 3],
-    [JS.replace("(dx(e)+BC-1n)/BC*BC", "dx(e)/BC*BC"), 3],
+    [JS.replace("if(t<=5000000n)return VC;", "if(t<=1000000n)return VC;"), 3],
+    [JS.replace("n=MR(qP,n*3n)[0]", "n+=BC"), 3],
+    [JS.replace("for(;n<t;)n=MR(", "for(;n<=t;)n=MR("), 3],
+    [JS.replace("return iD(e.ladder,t)}function YA", "return[t]}function YA"), 3],
+    [JS.replace(",L=NY(M,w,Q);if(P<w", ",L=NY(M,w);if(P<w"), 21],
     [JS.replace("if(y&&b.program===l.program)return X(`deposit_floor`);", ""), 3],
     // the sweep's note: the largest rung whose remainder is 0 or at least what W must keep, none paid away
     [JS.replace("if(i===0n||i>=t)return{value:r,under:i}", "if(!0)return{value:r,under:i}"), [4, 5, 6]],
