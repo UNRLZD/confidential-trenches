@@ -159,6 +159,7 @@ export function txRecord(coin, step, signature, tx, watch = {}, decode = (x) => 
     signature,
     found: true,
     slot: tx.slot,
+    blockTime: tx.blockTime ?? null,
     ok: err === null,
     err,
     cu: tx.meta?.computeUnitsConsumed ?? null,

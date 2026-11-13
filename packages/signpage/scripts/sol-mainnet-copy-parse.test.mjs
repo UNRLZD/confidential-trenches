@@ -87,6 +87,9 @@ test("a transaction's record: result, compute units against its limit, fee, logs
   assert.deepEqual(bad.err, { InstructionError: [3, { Custom: 6000 }] });
   assert.deepEqual(bad.logsTail, Array.from({ length: 12 }, (_, i) => `line ${i + 8}`));
   assert.deepEqual(txRecord("x", "sell", "S3", null), { coin: "x", step: "sell", signature: "S3", found: false });
+  // the block time each transaction landed at (s, the copy's clock): the seconds from a sale to its teardown and its sweep
+  assert.equal(txRecord("curve", "sell", "S4", { ...tx(null), blockTime: 1_794_466_487 }).blockTime, 1_794_466_487);
+  assert.equal(txRecord("curve", "sell", "S5", tx(null)).blockTime, null);
   assert.equal(cuLimitOf(["A"], [{ programIdIndex: 0, data: b64(limit) }], (x) => Buffer.from(x, "base64")), null);
 });
 
