@@ -99,8 +99,13 @@ export const MARKS = Object.freeze({
     (g) => [R`(${I})=(${I})\.buy;(${I})===void 0&&\1===void 0&&\((${I})\.rec!==void 0\|\|\4\.none\)&&\(\1=await ${esc(g.pb)}\((${I})\.rpcs\[0\],`],
   ),
   "an unproven W tried again on each load to its third pass, then held as its own state": tied(
-    re(R`(?<c>${I})=(?<o>${I})===void 0&&(?<s>${I})===void 0\?(?<n>${I})\.passes\+1>=3\?` + "`steady`:`again`" + R`:void 0`),
-    (g) => [R`\|\|(${I})\.end===` + "`owed`" + R`\|\|${esc(g.c)}===` + "`again`", R`;try\{if\(!(${I})\.buy\)return (${I})\(` + "`holds`,`no buy of W's is recorded`" + R`,\1\.unproven!==` + "`again`" + R`\);`],
+    // a W found holding SOL with no buy recorded (card buy-spends-several-pieces) is never an unproven one
+    re(R`(?<c>${I})=(?<o>${I})===void 0&&(?<s>${I})===void 0&&(?<n>${I})\.found!==!0\?\k<n>\.passes\+1>=3\?` + "`steady`:`again`" + R`:void 0`),
+    (g) => [R`\|\|(${I})\.end===` + "`owed`" + R`\|\|${esc(g.c)}===` + "`again`", R`;try\{if\(!(${I})\.buy&&\1\.bare!==!0\)return (${I})\(` + "`holds`,`no buy of W's is recorded`" + R`,\1\.unproven!==` + "`again`" + R`\);`,
+      // a found W's pass on the found W's rule (bare), and no `seen` of it kept: its reads name token accounts the
+      // finding read does not, so every load passes it
+      R`\.\.\.${esc(g.n)}\.found===!0\?\{bare:!0\}:${esc(g.c)}\?\{unproven:${esc(g.c)}\}:\{\}`,
+      R`(${I})\.steady&&(${I})\.bare!==!0\?(${I}):void 0`],
   ),
   "the positions' passes held only while a W is read": tied(
     re(R`let\{store:${I},sync:${I},rent:${I}\}=${I},(?<y>${I})=${I}===null,(?<rel>${I})=(?<h>${I})\.preempt\?\.\(\);try\{for\(`),
@@ -117,25 +122,39 @@ export const MARKS = Object.freeze({
       R`if\((${I})!==void 0&&\(typeof \1\.fee!=` + "`bigint`" + R`\|\|\1\.fee<0n\|\|\1\.fee>105000n\)\)return (${I})\(` + "`reserve`" + R`\);if\(\1!==void 0&&\1\.full===!0\)`,
     ],
   ),
-  "a leftover W's rent back is spaced: each rent-back send from a W starts a gap drawn from 10 to 60 minutes, kept in the store; a leftover pass sends nothing while it runs, nor after this load's one sending pass, and takes the device's slot in the store in one compare-and-set so no other tab sends within it (its teardown and its sweep held before their sends and the note's write); a W waiting so is listed on its way, RETURNING at its last read at the pool's price, none once its sweep is sent": tied(
-    re(R`(?<ms>${I})\+\+,await Promise\.resolve\((?<h>${I})\.owed\?\.space\?\.\(\{at:(?<c>${I})\(\),gap:(?<gd>${I})\(\)\}\)\)\.catch\(\(\)=>\{\}\)`),
+  "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": tied(
+    re(R`(?<st>${I})=async (?<v>${I})=>\{try\{if\(!(?<h>${I})\.owed\?\.space\)return;await \k<h>\.owed\.space\(\k<v>\),(?<x>${I})\.stamped\?\.\(\k<v>\.at\)\}catch\{\}\},(?<sd>${I})=async\((?<a>${I}),(?<b>${I})\)=>\{await \k<st>\(\{at:(?<c>${I})\(\),gap:(?<gd>${I})\(\)\}\),await Promise\.allSettled\(${I}\.map\((?<r>${I})=>\k<r>\(` + "`sendTransaction`" + R`,\[${I}\.encode\(\k<a>\),\{encoding:` + "`base64`" + R`,preflightCommitment:` + "`confirmed`" + R`\}\]\)\)\),(?<ms>${I})\+\+,`),
     (g) => [
       // the gap's draw: 10 minutes and up to 50 more, from the device's random source
-      R`[,; ](${I})=6e5,[^]*?[,; ]${esc(g.gd)}=\(\)=>\1\+(${I})\(3e6\+1\);function \2\((${I})\)\{if\(\3<=1\)return 0;`,
-      R`=` + "`owed/rentback-sol-space`",
-      R`let (${I})=\(\)=>(${I})\|\|!(${I})\|\|(${I})!==void 0&&Number\((${I})\.now\?\.\(\)\?\?BigInt\(Date\.now\(\)\)\)<\4\.at\+\4\.gap;`,
-      R`${esc(g.ms)}>(${I})&&\((${I})=!0\)`,
-      // the hold: the load's (quiet), then the device's slot taken in the store (claim), before the teardown's sends and
-      // before the sweep's note is written
-      R`(${I})=async\(\)=>\{if\((${I})\.quiet===!0\)throw (${I});if\(!\(\2\.leftover!==!0\|\|(${I})\|\|(${I})\.owed\?\.claim===void 0\)\)\{if\(!await \5\.owed\.claim\(\{at:(${I})\(\),gap:(${I})\(\)\}\)\.catch\(\(\)=>!1\)\)throw \3;\4=!0\}\}`,
-      R`(${I})\.ok\.signed\.length>0&&await (${I})\(\);for\(let (${I}) of \1\.ok\.signed\)`,
+      R`[,; ](${I})=6e5,(${I})=36e5,[^]*?[,; ]${esc(g.gd)}=\(\)=>\1\+(${I})\(\2-\1\+1\);function \3\((${I})\)\{if\(\4<=1\)return 0;`,
+      // the device's database, its gap rule (own W's exempt, one ending past now + 60 minutes none), the claim in one
+      // readwrite transaction over that rule, the owed store's spacing on it by default
+      R`[,; ](${I})=` + "`ct-device`" + R`,(${I})=` + "`space`" + R`,(${I})=` + "`rentback-sol`" + R`,(${I})=\((${I}),(${I}),(${I})\)=>\5!==void 0&&\5\.at!==\7&&\6<\5\.at\+\5\.gap&&\5\.at\+\5\.gap<=\6\+36e5,`,
+      R`claim:\((${I}),(${I})\)=>(${I})\(` + "`readwrite`" + R`,\((${I}),(${I})\)=>\{let (${I})=\4\.get\((${I})\);\6\.onsuccess=\(\)=>\{if\((${I})\((${I})\(\6\.result\),\1\.at,\2\)\)return \5\(!1\);\4\.put\(\{at:\1\.at,gap:\1\.gap\},\7\),\5\(!0\)\}\}\)`,
+      R`=\((${I}),(${I})=(${I})\(\)\)=>\{let (${I})=` + "`owed/rentback-sol`" + R`;return\{`,
+      R`spacing:\(\)=>(${I})\.spacing\(\),space:(${I})=>\1\.space\(\2\),claim:\((${I}),(${I})\)=>\1\.claim\(\3,\4\)\}`,
+      // the load's hold per W: another W's send this load, a store not read, a gap open that is not W's own
+      R`let (${I})=(${I})=>(${I})!==null&&\3!==\2\.address\|\|!(${I})\|\|(${I})\((${I}),Number\((${I})\.now\?\.\(\)\?\?BigInt\(Date\.now\(\)\)\),\2\.spaced\);`,
+      R`${esc(g.ms)}>(${I})&&\((${I})=(${I})\)\}`,
+      R`quiet:(${I})\((${I})\),leftover:!0,`,
+      R`(${I})=async\(\)=>\{if\((${I})\.quiet===!0\)throw (${I});if\(\2\.leftover!==!0\|\|(${I})\|\|(${I})\.owed\?\.claim===void 0\)return;let (${I})=\{at:(${I})\(\),gap:${esc(g.gd)}\(\)\};if\(!await \5\.owed\.claim\(\6,\2\.own\)\.catch\(\(\)=>!1\)\)throw \3;\2\.stamped\?\.\(\6\.at\),\4=!0\}`,
+      R`(${I})\.ok\.signed\.length>0&&await (${I})\(\);for\(let (${I}) of \1\.ok\.signed\)await ${esc(g.sd)}\(`,
       R`;await (${I})\(\);let (${I})=(${I})\.planned\?\?\(await (${I})\.store\.add\(`,
-      R`claim:async (${I})=>await\(await (${I})\(\)\)\.update\(` + "`meta`" + R`,(${I}),(${I})=>\{let (${I})=\4;return Number\.isSafeInteger\(\5\?\.at\)&&Number\.isSafeInteger\(\5\?\.gap\)&&\1\.at<\5\.at\+\5\.gap\?void 0:\{at:\1\.at,gap:\1\.gap\}\}\)!==void 0`,
-      R`quiet:(${I})\(\),leftover:!0,`,
-      R`if\(t\.read\?\.\((${I})\),\1===0n\)|(${I})\.read\?\.\((${I})\),\3===0n\)`,
-      R`(${I})=(${I})===` + "`sent`" + R`\?void 0:(${I})\.lamports===void 0\?(${I}):\3\.lamports\.toString\(\)`,
-      R`if\(typeof (${I})\.lamports!=` + "`string`" + R`\|\|!/\^\[1-9\]\\d\{0,19\}\$/\.test\(\1\.lamports\)\)continue;let (${I})=(${I})\(BigInt\(\1\.lamports\),(${I}),(${I})\);\2!==null&&(${I})\.push\(\{chain:` + "`solana`" + R`,address:\1\.address,role:` + "`fresh`" + R`,size:\2,state:` + "`RETURNING`" + R`\}\)`,
-      R`(${I})\((${I})\.signed_in&&(${I})\?await \3\.returning\(\)\.catch\(\(\)=>\[\]\):\[\],(${I})\.get\(` + "`solana`" + R`\)\)`,
+      R`catch\((${I})\)\{if\(\1===(${I})\|\|\1===(${I})\)throw \1;(${I})=\1,(${I})\((${I}),` + "`fault`",
+      // W's own last send kept on its record (its own gap never holds it)
+      R`(${I})=(${I})\.spaced\?\?(${I});await (${I})\.owed\?\.put\(`,
+    ],
+  ),
+  "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals": tied(
+    re(R`\[(?<la>${I}),(?<lb>${I})\]=(?<hd>${I})\.map\((?<e>${I})=>\k<e>\[0\]\?\.lamports\?\?0n\);if\((?<x>${I})\.buy&&\k<la>===\k<lb>&&\k<x>\.read\?\.\(\k<la>\),(?<pl>${I})\.close\.length===0\)return\{keep:\k<pl>\.keep,signed:\[\],last:0,unclaimed:void 0,since:${I}\};if\(\k<x>\.quiet===!0\)throw (?<held>${I});`),
+    (g) => [
+      R`if\((${I})\.buy&&\1\.read\?\.\((${I})\),\2===0n\)return\{end:`,
+      "`W holds nothing`" + R`\};if\((${I})\.quiet===!0\)throw ${esc(g.held)};`,
+      R`(${I})\.swept\?\.\((${I})\.one\.signature\),await (${I})\(\2\.one\.signed,\2\.one\.signature\)`,
+      R`(${I})=(${I})\.lamports===void 0\?(${I}):\2\.lamports\.toString\(\),(${I})=(${I})===` + "`sent`" + R`\?\2\.sweep:\2\.lamports===void 0\?(${I}):void 0,`,
+      R`if\(typeof (${I})\.lamports!=` + "`string`" + R`\|\|!/\^\[1-9\]\\d\{0,19\}\$/\.test\(\1\.lamports\)\)continue;if\(\1\.sweep!==void 0\)\{if\((${I})===null\)continue;let (${I})=\2\.find\((${I})=>\4\.sends\?\.some\((${I})=>\5\.signature===\1\.sweep\)\);if\(\3!==void 0&&\3\.state!==` + "`PLANNED`" + R`&&\3\.state!==` + "`INCOMING`" + R`\)continue\}let (${I})=(${I})\(BigInt\(\1\.lamports\),(${I}),(${I})\);\6!==null&&(${I})\.push\(\{chain:` + "`solana`" + R`,address:\1\.address,role:` + "`fresh`" + R`,size:\6,state:` + "`RETURNING`" + R`\}\)`,
+      // the page: the same shared notes read the balance counted
+      R`(${I})=null,(${I})=\(\)=>\1\?\?=(${I})\(\),(${I})=await (${I})\(await (${I})\((${I}),\2,[^]{0,1600}?(${I})=\7\.signed_in&&(${I})\?await \9\.returning\(\)\.catch\(\(\)=>\[\]\):\[\],(${I})=\8\.some\((${I})=>\11\.sweep!==void 0\)\?await \2\(\)\.catch\(\(\)=>null\):\[\];return (${I})\((${I}),(${I})\(\8,(${I})\.get\(` + "`solana`" + R`\),\10\)\)`,
     ],
   ),
 });
