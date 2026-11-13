@@ -24,14 +24,23 @@
 // - badFrameSrc (edited): the frame never loaded but no frame-ancestors refusal was read, as dcad6c9's check ran under
 //   APP_HOST's frame-src 'none'; badLoadedReported (edited): SIGN_HOST loaded though a refusal was reported;
 //   badPressNeverLanded (edited): the early click never landed, which the old check read as ok.
+// Card sign-out-checks-read-the-store-after-the-reload: good re-recorded on main 6430cba10 (release 126, whose sign out
+// deletes the database and reloads into a fresh store), its sign outs read after the reload; goodNov11 the good before
+// it; badKeepsStore a scratch copy of 6430cba10 whose sign out skips deleteDatabase. A record with no store read is
+// judged at the reading it was cut at (SIGN_OUT_BEFORE_RELOAD).
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { HARNESS_UNRESOLVED, judge, watch } from "./signpage-signin-kinds.mjs";
+import { HARNESS_UNRESOLVED, judge as judgeNow, keptAfterSignOut, SIGN_OUT_BEFORE_RELOAD, watch } from "./signpage-signin-kinds.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// card sign-out-checks-read-the-store-after-the-reload: a record cut before it holds no store read after its sign outs
+// and is judged at the reading then (the database gone, SIGN_OUT_BEFORE_RELOAD); every record with one, and every run
+// now, by the store after the page's reload
+const cutBefore = (rec) => !rec?.prf?.signout?.after?.store && !rec?.noPrf?.after?.store;
+const judge = (rec, era) => judgeNow(rec, era ?? (cutBefore(rec) ? SIGN_OUT_BEFORE_RELOAD : undefined));
 const answers = JSON.parse(readFileSync(path.join(HERE, "signpage-signin-kinds.answers.json"), "utf8"));
 const BAD_ALL = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0].slice(4));
 // The terminal-takes-the-state step came after most bads were recorded: a record with no prf.app step was recorded
@@ -240,4 +249,64 @@ test("every live check's harness serves SIGN_HOST as live does: a path with no f
   }
   assert.ok(maps.length >= 2, `the harness host maps: ${maps.map(([f]) => f).join(", ")}`);
   for (const [f, m] of maps) assert.match(m, /\[SIGN_HOST\]: \{ root(?:: [\w.]+)?, spa: true \}/, `${f}: SIGN_HOST served without spa: true`);
+});
+
+// ------------------------------------------------------------------------------------------------ card sign-out-checks-read-the-store-after-the-reload
+const SO_NOW = "prf: Sign out goes back to the app signed out, the store left with no account, no seed, no record and a new K_wrap, nothing in localStorage";
+const NP_NOW = "no-prf: Sign out then leaves the store with nothing but a new K_wrap";
+
+test("sign out is judged by the store after the page's reload: the good run (main 6430cba10, release 126) read every store empty but meta's k_wrap and lane, nothing in localStorage, the K_wrap before refused by the one after", () => {
+  for (const a of [answers.good.prf.signout.after, answers.good.noPrf.after]) {
+    assert.equal(a.store.reloaded, true, "read in the reload's new document");
+    assert.deepEqual(a.store.metaKeys.sort(), ["k_wrap", "lane"]);
+    assert.ok(Object.entries(a.store.stores).every(([n, c]) => (n === "meta" ? c === 2 : c === 0)), JSON.stringify(a.store.stores));
+    assert.equal(a.store.localStorage, 0);
+    assert.equal(a.store.oldKey, "refused");
+    assert.deepEqual(keptAfterSignOut(a), []);
+  }
+  assert.equal(judgeNow(answers.good).pass, true);
+});
+
+test("the build whose sign out skips deleteDatabase (badKeepsStore, a scratch copy of 6430cba10) fails both sign-out lines", () => {
+  const b = BAD_ALL(answers.badKeepsStore);
+  assert.ok(b.includes(SO_NOW) && b.includes(NP_NOW), b.join("\n"));
+  assert.ok(keptAfterSignOut(answers.badKeepsStore.prf.signout.after).some((k) => / record\(s\) in notes$/.test(k)));
+});
+
+test("the release before this card's check (goodNov11, the database gone and nothing reopened then) passes at its own reading, and fails both lines now: its store was never read", () => {
+  assert.equal(judge(answers.goodNov11).pass, true);
+  const now = judgeNow(answers.goodNov11).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0].slice(4));
+  assert.deepEqual(now, [SO_NOW, NP_NOW]);
+  assert.ok(judgeNow(answers.goodNov11).lines.some((l) => l.includes("kept: the store not read")));
+});
+
+test("planted on the good answer, each sign out's kept piece fails its line: a seed record, a record in another store, an owed send, localStorage, the K_wrap before still the store's, never sealed, signed in, an account, the store not read", () => {
+  const plants = [
+    ["a kept seed record", (s) => (s.metaKeys.push("seed"), (s.stores.meta += 1)), "meta seed"],
+    ["a kept note", (s) => (s.stores.notes = 1), "1 record(s) in notes"],
+    ["a kept wallet", (s) => (s.stores.wallets = 2), "2 record(s) in wallets"],
+    ["a kept owed send", (s) => (s.metaKeys.push("owed/*"), (s.stores.meta += 1)), "meta owed/*"],
+    ["localStorage not empty", (s) => (s.localStorage = 1), "1 localStorage item(s)"],
+    ["the K_wrap before still the store's", (s) => (s.oldKey = "opened"), "the K_wrap before still the store's"],
+    ["no block sealed before the press", (s) => (s.oldKey = "not-sealed"), "the K_wrap before not tried (not-sealed)"],
+    ["meta's count past its keys", (s) => (s.stores.meta = 3), "meta's count and keys disagree"],
+  ];
+  for (const [where, line] of [["prf", SO_NOW], ["noPrf", NP_NOW]]) {
+    const step = (r) => (where === "prf" ? r.prf.signout.after : r.noPrf.after);
+    for (const [name, plant, kept] of plants) {
+      const r = structuredClone(answers.good);
+      plant(step(r).store);
+      assert.ok(BAD_ALL(r).includes(line), `${where} ${name}`);
+      assert.ok(keptAfterSignOut(step(r)).includes(kept), `${where} ${name}: ${keptAfterSignOut(step(r)).join("; ")}`);
+    }
+    for (const [name, edit] of [
+      ["still signed in", (a) => (a.state = "signed-in")],
+      ["an account shown", (a) => (a.account = "ab".repeat(32))],
+      ["the store not read", (a) => delete a.store],
+    ]) {
+      const r = structuredClone(answers.good);
+      edit(step(r));
+      assert.ok(BAD_ALL(r).includes(line), `${where} ${name}`);
+    }
+  }
 });

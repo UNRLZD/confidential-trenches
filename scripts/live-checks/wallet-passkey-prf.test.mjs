@@ -21,17 +21,27 @@
 // (the frame inert); badShellTab, the same harness run with the check's old hold (the layer shown over a live frame), and
 // liveShellTab, the deploy's run of that old check on the live hosts (e0b1cd69 and 48008988): the first Tab enters the
 // APP_HOST frame, so Tab then Enter never reaches Sign out, and both fail on that line only.
+// Card sign-out-checks-read-the-store-after-the-reload: goodMain126, main 6430cba10 on the harness (release 126, whose
+// sign out deletes the database and reloads into a fresh store), its sign outs read after the reload, its one BAD the
+// race step (a fault of its own); badKeepsStore, a scratch copy whose sign out skips deleteDatabase. good and every
+// record before hold no store read and are judged at the reading they were cut at (SIGN_OUT_BEFORE_RELOAD).
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { accountOfEntropy, APP_HOST, entropyOfPrf, judge, refusedRead, SIGN_HOST, watch } from "./wallet-passkey-prf.mjs";
+import { accountOfEntropy, APP_HOST, entropyOfPrf, judge as judgeNow, refusedRead, SIGN_HOST, watch } from "./wallet-passkey-prf.mjs";
+import { keptAfterSignOut, SIGN_OUT_BEFORE_RELOAD } from "./signpage-signin-kinds.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-passkey-prf.answers.json"), "utf8"));
 const clone = (x) => structuredClone(x);
+// card sign-out-checks-read-the-store-after-the-reload: a record cut before it holds no store read after its sign outs
+// and is judged at the reading then (the database gone, SIGN_OUT_BEFORE_RELOAD); every record with one, and every run
+// now, by the store after the page's reload
+const cutBefore = (rec) => !rec?.prf?.steps?.signout?.store && !rec?.phone?.still?.after?.store;
+const judge = (rec, era) => judgeNow(rec, era ?? (cutBefore(rec) ? SIGN_OUT_BEFORE_RELOAD : undefined));
 const bad = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD"));
 
 test("the recorded good answer passes", () => {
@@ -427,7 +437,7 @@ test("each in-window press that lands at or past 500 ms, held or acted on, reads
 
 test("a missed window never hides a BAD line elsewhere: the verdict is FAIL", () => {
   const r = clone(answers.live547);
-  r.prf.steps.signout.db = true;
+  r.prf.steps.signout.db = true; // live547 was cut before the store read: a database kept is BAD at its own reading
   assert.equal(judge(r).verdict, "FAIL");
 });
 
@@ -549,4 +559,58 @@ test("the helper's market-read 429s that the page's responses bear out are INCON
   assert.equal(withMarket([{ url: CANDLES, status: 429 }], [line429(CANDLES), "pageerror: boom"]).verdict, "FAIL", "a page error beside it");
   assert.equal(withMarket([{ url: CANDLES, status: 429 }], ["console: Failed to load resource: the server responded with a status of 503 () (https://ct-api.unrealized.trade/v1/market/candles)"]).verdict, "FAIL", "a 503 is no window");
   assert.equal(judge(answers.good).verdict, "PASS");
+});
+
+// ------------------------------------------------------------------------------------------------ card sign-out-checks-read-the-store-after-the-reload
+const SO_NOW = "BAD prf: Sign out leaves the store with no account, no seed, no record and a new K_wrap, nothing in localStorage";
+const STILL_NOW = "BAD phone: a still tap after 500 ms signs out, the store left with nothing but a new K_wrap";
+
+test("each sign out is judged by the store after the page's reload: the good run (main 6430cba10, release 126) read every store empty but meta's k_wrap and lane, nothing in localStorage, the K_wrap before refused by the one after", () => {
+  for (const a of [answers.goodMain126.prf.steps.signout, answers.goodMain126.phone.still.after]) {
+    assert.equal(a.store.reloaded, true, "read in the reload's new document");
+    assert.deepEqual(a.store.metaKeys.sort(), ["k_wrap", "lane"]);
+    assert.ok(Object.entries(a.store.stores).every(([n, c]) => (n === "meta" ? c === 2 : c === 0)), JSON.stringify(a.store.stores));
+    assert.equal(a.store.localStorage, 0);
+    assert.equal(a.store.oldKey, "refused");
+    assert.deepEqual(keptAfterSignOut(a), []);
+  }
+  // its one BAD is the race step, which fails on the harness on main itself (main's own check, 4 runs of 4 on 13 Nov:
+  // tab A's create refused NotAllowedError while tab B's lands), a fault apart from the sign out
+  assert.deepEqual(BAD(answers.goodMain126), ["BAD prf: two tabs that create at once end on one account, the one stored"]);
+});
+
+test("planted on main 6430cba10's run, each sign out's kept piece fails its line: a seed record, a note, a counter, localStorage, the K_wrap before still the store's, never sealed, signed in, the store not read", () => {
+  const plants = [
+    ["a kept seed record", (s) => (s.metaKeys.push("seed"), (s.stores.meta += 1))],
+    ["a kept note", (s) => (s.stores.notes = 1)],
+    ["a kept counter", (s) => (s.stores.counters = 4)],
+    ["localStorage not empty", (s) => (s.localStorage = 1)],
+    ["the K_wrap before still the store's", (s) => (s.oldKey = "opened")],
+    ["no block sealed before the press", (s) => (s.oldKey = "not-sealed")],
+  ];
+  for (const [line, step] of [[SO_NOW, (r) => r.prf.steps.signout], [STILL_NOW, (r) => r.phone.still.after]]) {
+    for (const [name, plant] of plants) {
+      const r = clone(answers.goodMain126);
+      plant(step(r).store);
+      assert.ok(BAD(r).includes(line), `${line} ${name}`);
+    }
+    for (const [name, edit] of [["still signed in", (a) => (a.state = "signed-in")], ["the store not read", (a) => delete a.store]]) {
+      const r = clone(answers.goodMain126);
+      edit(step(r));
+      assert.ok(BAD(r).includes(line), `${line} ${name}`);
+    }
+  }
+});
+
+test("the build whose sign out skips deleteDatabase (badKeepsStore, a scratch copy of 6430cba10) fails both sign-out lines", () => {
+  const b = BAD(answers.badKeepsStore);
+  assert.ok(b.includes(SO_NOW) && b.includes(STILL_NOW), b.join("\n"));
+  assert.equal(judgeNow(answers.badKeepsStore).verdict, "FAIL");
+});
+
+test("a record cut before this card (good, 2 Nov, before the reload) passes its sign outs at its own reading, and fails both now: its store was never read", () => {
+  const old = answers.good;
+  assert.ok(!BAD(old).some((l) => l.startsWith("BAD prf: Sign out") || l.startsWith("BAD phone: a still tap after")), BAD(old).join("\n"));
+  const now = judgeNow(old).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0]);
+  assert.ok(now.includes(SO_NOW) && now.includes(STILL_NOW), now.join("\n"));
 });
