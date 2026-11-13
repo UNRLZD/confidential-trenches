@@ -73,6 +73,7 @@
 import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH, type HelperTokenStatusAnswer } from "@blindfill/kit";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
+import { operatorOf, providerName } from "../rpc/rpc.ts";
 import { openDurableDir, type DurableDir } from "../store/durable.ts";
 
 /** The vault's one token (the kit's VAULT_CONSTANTS.TOKEN, packages/kit/src/vault/shapes.ts). */
@@ -80,9 +81,16 @@ export const USDC = VAULT_CONSTANTS.TOKEN;
 /** The release's pin of USDC's code (the kit's VAULT_TOKEN_CODE_HASH; vault.md:22 "USDC" row). */
 export const USDC_CODE_HASH = VAULT_TOKEN_CODE_HASH;
 
-/** The two NEAR providers: the host's environment, else two public ones from different operators (FastNEAR, dRPC). */
+/**
+ * The two NEAR providers, two companies, each slot's first set name else its company's free endpoint (card
+ * near-pair-on-keyed-providers): FastNear's key (NEAR_RPC_URL_FASTNEAR, the name rpc/rpc.ts RPC_UPSTREAMS.near asks
+ * first), then NEAR_RPC_URL; and NEAR_RPC_URL_B, which holds dRPC's key on the host (research
+ * scripts/deploy/near-drpc-key.sh). Live 13 Nov the host held FastNear's key, but these reads went to the free pair,
+ * whose 429s refused a withdraw fee and a NEAR trade ("rpc 1: block did not answer (block: HTTP 429)": the second,
+ * near.drpc.org).
+ */
 export const WATCH_RPCS = [
-  { env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com" },
+  { keyed: "NEAR_RPC_URL_FASTNEAR", env: "NEAR_RPC_URL", fallback: "https://rpc.mainnet.fastnear.com" },
   { env: "NEAR_RPC_URL_B", fallback: "https://near.drpc.org" },
 ] as const;
 /** Testnet's two providers: the host's environment, else the device's release pair (FastNEAR and dRPC). */
@@ -94,11 +102,13 @@ export const TESTNET_RPCS = [
 export const TESTNET_TOKEN = "bf-usdc-20261101t022248.testnet"; // gitleaks:allow (a public account id)
 
 export type TokenNetwork = "mainnet" | "testnet";
+/** One provider slot: its keyed name (mainnet's), its existing name and its free endpoint, asked in that order. */
+type Slot = { keyed?: string; env: string; fallback: string };
 /** Each network's token and its pair of providers: a network's watch reads only these. */
 export const WATCHED = {
   mainnet: { token: USDC, rpcs: WATCH_RPCS },
   testnet: { token: TESTNET_TOKEN, rpcs: TESTNET_RPCS },
-} as const satisfies Record<TokenNetwork, { token: string; rpcs: readonly [{ env: string; fallback: string }, { env: string; fallback: string }] }>;
+} as const satisfies Record<TokenNetwork, { token: string; rpcs: readonly [Slot, Slot] }>;
 export const READ_TIMEOUT_MS = 2_000; // check 10's reads answer within 1 s at p99 [design, M4.3]; one slow answer holds
 export const CACHE_MS = 1_000; // the display's answer, about one NEAR block, on the monotonic clock
 /** Two providers' finals may stand this many blocks apart at most (withdraw/fee.ts HEIGHT_SPREAD_MAX; status.test.ts: one value). */
@@ -369,12 +379,18 @@ export function vaultOf(env: Record<string, string | undefined>, network: TokenN
   return v;
 }
 
-/** A network's two provider URLs from the host's environment, else its public pair; two of the same are refused. */
-export function readUrls(env: Record<string, string | undefined>, network: TokenNetwork): [string, string] {
-  const pair = WATCHED[network].rpcs;
-  const urls = pair.map(({ env: name, fallback }) => {
-    const v = env[name];
-    if (v === undefined || v === "") return fallback;
+/**
+ * A network's two providers, each slot's first set name (WATCH_RPCS: its keyed one, then its existing one) else its
+ * free endpoint, with the name it came from. Two of the same URL, or two of one company (rpc/rpc.ts operatorOf: dRPC's
+ * lb.drpc.live and *.drpc.org are one), are refused at start: the reads must agree on two companies. Errors name the
+ * variables, never a value: a keyed URL carries its key.
+ */
+function readPair(env: Record<string, string | undefined>, network: TokenNetwork): [{ name: string; url: string }, { name: string; url: string }] {
+  const pair: readonly Slot[] = WATCHED[network].rpcs;
+  const set = pair.map((slot) => {
+    const name = [slot.keyed, slot.env].find((n) => n !== undefined && env[n] !== undefined && env[n] !== "");
+    if (name === undefined) return { name: slot.env, url: slot.fallback };
+    const v = env[name]!;
     let u: URL;
     try {
       u = new URL(v);
@@ -382,11 +398,23 @@ export function readUrls(env: Record<string, string | undefined>, network: Token
       throw new Error(`${name} must be an http(s) URL`);
     }
     if ((u.protocol !== "https:" && u.protocol !== "http:") || u.hash !== "") throw new Error(`${name} must be an http(s) URL with no fragment`);
-    return v;
+    return { name, url: v };
   });
-  if (urls[0] === urls[1]) throw new Error(`${pair[0].env} and ${pair[1].env} must be two different providers`);
-  return [urls[0]!, urls[1]!];
+  const [a, b] = set as [{ name: string; url: string }, { name: string; url: string }];
+  if (a.url === b.url) throw new Error(`${a.name} and ${b.name} must be two different providers`);
+  if (operatorOf(a.url) === operatorOf(b.url)) throw new Error(`${a.name} and ${b.name} must be two different companies (both ${operatorOf(a.url)})`);
+  return [a, b];
 }
+
+/** A network's two provider URLs (readPair). */
+export function readUrls(env: Record<string, string | undefined>, network: TokenNetwork): [string, string] {
+  const [a, b] = readPair(env, network);
+  return [a.url, b.url];
+}
+
+/** Mainnet's pair as GET /v1/health names it (X-Helper-Near-Pair; rpc/rpc.ts providerName): "fastnear.com" and
+ *  "drpc.live" on the two keys, "<company> keyless" on a free endpoint; never a URL or a key. */
+export const pairNames = (env: Record<string, string | undefined>): string[] => readPair(env, "mainnet").map((p) => providerName(p.name, p.url));
 
 /** One view's outcome from a provider's JSON answer: its value's text, its panic's message, or other. */
 export function viewOutcome(j: unknown): ViewOutcome {

@@ -496,6 +496,17 @@ function forms(secrets: string[]): Buffer[] {
   return [...out].map((f) => Buffer.from(f, "utf8"));
 }
 
+/** A URL with no part where a provider puts a key: no user, no password, no query value, no path segment of 16
+ *  characters or more. */
+const isKeyless = (u: URL): boolean => u.username === "" && u.password === "" && [...u.searchParams.values()].every((v) => v === "") && u.pathname.split("/").every((s) => s.length < 16);
+/** A provider as /v1/health names it (card near-pair-on-keyed-providers: X-Helper-Near-Pair): "<company's domain>[
+ *  key<n>][ keyless]", the keyed lists' form less the state; never a path, a query or a key. `name`: the environment
+ *  name it was set under. */
+export const providerName = (name: string, url: string): string => {
+  const u = new URL(url);
+  return `${companyOf(u.host)}${keyTag(name)}${isKeyless(u) ? " keyless" : ""}`;
+};
+
 /**
  * The providers this host uses. A URL set in the environment must be http(s) with no fragment; the start stops on any
  * other, naming the variable, never the value. Its secret parts (the URL itself, user and password, every query value
@@ -518,7 +529,7 @@ export function readUpstreams(env: Record<string, string | undefined>): Record<R
       if ((u.protocol !== "https:" && u.protocol !== "http:") || u.hash !== "" || /\s/.test(set)) throw new Error(`${name} must be an http(s) URL with no fragment`);
       const secrets = [set, u.href, u.username, u.password, ...u.searchParams.values(), ...u.pathname.split("/").filter((s) => s.length >= 16)];
       // the same URL under two names is one provider: asked once, at its first place
-      const keyless = u.username === "" && u.password === "" && [...u.searchParams.values()].every((v) => v === "") && u.pathname.split("/").every((s) => s.length < 16);
+      const keyless = isKeyless(u);
       if (!keyed.some((k) => k.url === set)) keyed.push({ env: name, url: set, host: u.host, forms: forms(secrets.filter((s) => s.length >= 8)), keyless });
     }
     const first = keyed[0];

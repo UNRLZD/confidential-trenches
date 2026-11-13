@@ -19,7 +19,8 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, start, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, NEAR_PAIR_HEADER, start, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
+import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
 
@@ -64,6 +65,22 @@ test("GET /v1/health: 200, proxy up (/v1/proxy/ and /v1/rpc/ are mounted), relay
   assert.equal(r.headers["cache-control"], "no-store");
   assert.ok(Buffer.byteLength(r.body) <= 1024, "1 KB limit (H7)");
   assert.equal(r.headers["set-cookie"], undefined);
+});
+
+// card near-pair-on-keyed-providers: GET /v1/health names, in X-Helper-Near-Pair, the two providers mainnet's
+// two-provider reads agree on (token-status/status.ts pairNames): the free pair keyless with no key set, the two keyed
+// companies when set; never a URL or a key. A header: the body has 11 B left under the kit's 1 KB at its longest config.
+test("GET /v1/health names mainnet NEAR's agreement pair in X-Helper-Near-Pair, never a URL or a key", async (t) => {
+  const free = await call("GET", "/v1/health", { origin: APP });
+  assert.equal(free.headers[NEAR_PAIR_HEADER.toLowerCase()], "fastnear.com keyless, drpc.org keyless", "this test's environment sets no NEAR key");
+  const env = { NEAR_RPC_URL_FASTNEAR: `https://rpc.mainnet.fastnear.com?apiKey=${"f".repeat(32)}`, NEAR_RPC_URL_B: `https://lb.drpc.live/near/${"d".repeat(32)}` };
+  const helper = createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, pairNames(env)));
+  t.after(() => closeServer(helper));
+  await new Promise<void>((ok) => helper.listen(0, "127.0.0.1", () => ok()));
+  const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers[NEAR_PAIR_HEADER.toLowerCase()], "fastnear.com, drpc.live");
+  assert.ok(!JSON.stringify(r.headers).includes("f".repeat(16)) && !JSON.stringify(r.headers).includes("d".repeat(16)) && !r.body.includes("f".repeat(16)), "no key in the answer");
 });
 
 // card helper-release-bump: the release HELPER_RELEASE names (deploy/redeploy.sh raises it per new commit) is in the
