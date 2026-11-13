@@ -16,6 +16,7 @@ import { fundedOrWait, units } from "./fund.ts";
 import { exitAccountAt, exitKey, exitReadStorage, exitRecipient, type ExitRecipient } from "./out.ts";
 import { exitReadPages, exitRpc, ExitRpcRefused, EXIT_NETWORKS } from "./rpc.ts";
 import { exitScanSeed } from "./scan.ts";
+import { exitProver } from "./prover.ts";
 import { exitBuildWithdraw, exitCloseOne, exitReadDelete, exitWithdrawIndex, exitWithdrawOne, type ExitSent, type ExitSigned, type ExitWithdrawSteps } from "./withdraw.ts";
 
 const TGAS = 10n ** 12n;
@@ -107,26 +108,6 @@ function treesOf(s: { leaves: readonly bigint[]; labels: readonly bigint[]; stat
   return { stateTree, labelTree, newestStateRoot: s.stateTree.root, newestLabelRoot: s.labelTree.root };
 }
 
-/** The Node prover: snarkjs on the hash-checked setup files, loaded once. */
-async function nodeProver(): Promise<VaultProver> {
-  const { exitSetupFiles } = await import("./setup.ts");
-  // snarkjs ships no types
-  const snarkjs = (await import("snarkjs" as string)) as { groth16: { fullProve(i: unknown, w: unknown, z: unknown): Promise<{ proof: unknown; publicSignals: string[] }> } };
-  let files: Map<string, Uint8Array> | null = null;
-  return {
-    async load(circuit) {
-      if (circuit !== "withdraw") throw new Error("the exit proves withdrawals only");
-      files ??= await exitSetupFiles(["withdraw.wasm", "withdraw.zkey"]);
-    },
-    async prove(circuit, input) {
-      if (circuit !== "withdraw" || files === null) throw new Error("load the withdraw files first");
-      const t = performance.now();
-      const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, { type: "mem", data: files.get("withdraw.wasm") }, { type: "mem", data: files.get("withdraw.zkey") });
-      return { proof: proof as never, publicSignals, proveMs: Math.round(performance.now() - t) };
-    },
-  };
-}
-
 /** The NEAR vault's ExitChain, with the tests' reads when given. */
 export function nearExitWith(over: NearExitOver = {}): ExitChain {
   return async (ctx: ExitCtx): Promise<ExitResult> => {
@@ -180,7 +161,7 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
       const storage = await exitReadStorage(network, to, vrpcs, sleep);
       const need = nearNeed(await gasPrice(mrpcs), storage.registered ? 0n : storage.storageMin);
       await fundedOrWait({ address: aId, need, unit: { symbol: "NEAR", decimals: 24 }, balance: () => nearBalance(mrpcs, aId), say: ctx.say, sleep });
-      const prover = over.prover ?? (await nodeProver());
+      const prover = over.prover ?? (await exitProver());
       const out = await exitWithdrawOne({
         seed64: ctx.seed,
         network,

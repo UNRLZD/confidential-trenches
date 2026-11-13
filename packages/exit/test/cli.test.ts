@@ -109,7 +109,7 @@ test("words that are not 12 BIP-39 words are refused before any chain runs, and 
 });
 
 test("the fee wallet's wait: says its address and the shortfall once per shortfall, reads again, returns once funded", async () => {
-  const reads = [0n, 0n, 4n, new Error("busy") as unknown as bigint, 10n];
+  const reads: (bigint | Error)[] = [0n, 0n, 4n, new Error("busy"), 10n];
   const said: string[] = [];
   const slept: number[] = [];
   const got = await fundedOrWait({
