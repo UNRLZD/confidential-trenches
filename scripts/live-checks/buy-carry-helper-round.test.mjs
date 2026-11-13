@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { judgeAll, plants, poolsHere, WANT } from "./buy-carry-helper-round.mjs";
+import { loadRecord } from "./helper-sol-fee-payer-mainnet.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./buy-carry-helper-round.answers.json", import.meta.url), "utf8"));
 const edit = (runs, asked, f) => runs.map((run) => ({ ...run, reads: run.reads.map((x) => (x.asked === asked ? f(x) : x)) }));
@@ -42,7 +43,7 @@ test("made from the good answer: a round refused on its shape, a round answered 
 test("the pools: the mainnet deploy record's pool first, then poolsToRead's; the recorded runs read each", () => {
   const want = poolsHere();
   assert.equal(want[0].cluster, "mainnet");
-  assert.equal(want[0].pool, JSON.parse(readFileSync(new URL("../../contracts/pool-solana/deployments/mainnet.json", import.meta.url), "utf8")).pool);
+  assert.equal(want[0].pool, loadRecord().pool, "the pool helper-sol-fee-payer-mainnet reads from the mainnet deploy record");
   assert.deepEqual(A.good.map((r) => `${r.cluster} ${r.pool}`), want.map((w) => `${w.cluster} ${w.pool}`));
 });
 
