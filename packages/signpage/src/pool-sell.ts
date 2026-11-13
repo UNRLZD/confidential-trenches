@@ -1750,7 +1750,7 @@ const wireOf = (message: Uint8Array): Uint8Array => {
 /** `unproven`: no buy of W's proven this time (no record, or the public seat read W's history otherwise than the
  *  rebuild): the pass holds as with no buy, read again on a later state read ("again") until its POOL_RENT_BACK_
  *  UNPROVEN_PASSES-th pass, then as W's own state ("steady"; card round-trip-costs-less, review of 20ba2481b P2-6). */
-type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; bare?: true; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; quiet?: boolean; leftover?: boolean; own?: number; stamped?: (at: number) => void; swept?: (signature: string) => void };
+type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; bare?: true; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; quiet?: boolean; leftover?: boolean; own?: number; stamped?: (at: number) => void; swept?: (signature: string, value: bigint) => Promise<void> };
 
 /**
  * W's rent back (card sol-buy-rent-back), after a full sell filled or at a later load while it is owed: what W's
@@ -2070,6 +2070,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // under the floor: steady (its `seen` kept) only when W stays under it at the cheapest deposit, both pages already
       // open, so a page another deposit opens meanwhile runs the pass again (review 5 of 38e59182, L3)
       const cheapest = lamports - SOLANA_POOL_SELL_FEE - solanaDepositRents(rent, sizes, { ...held, state: [OPEN, OPEN], label: [OPEN, OPEN] }) - solanaSweepKeep(rent, owed);
+      // owed: listed as the note the sweep would make now, never W's whole lamports (the fee, the deposit's rents and the
+      // claim's keep are not on their way); at the floor, nothing (owedAfter)
+      if (value < floor && owed > 0 && x.buy) x.read?.(value > 0n ? value : 0n);
       if (value < floor) return { end: owed > 0 ? ("owed" as const) : ("floor" as const), steady: cheapest < floor, detail: `W's ${lamports} would make a note of ${value}, under ${floor}: kept on W${owed > 0 ? `, owed ${owed} cashback claim${owed > 1 ? "s" : ""}` : ""}` };
       const bh = await blockhashOf(rpcs);
       const { message } = solanaCompileV0(w.address, [depositIx(x.program, x.pool, w.address, sizes, pre, value)], bh.blockhash, []);
@@ -2093,7 +2096,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     await spaced();
     const id = sw.planned ?? (await x.store.add({ ref: sw.ref, scope: x.scope, precommitment: sw.precommitment, state: "PLANNED" })).id;
     await x.store.move(id, "PLANNED", "INCOMING", { send: { signature: sw.one.signature, value: sw.value, last_valid_block_height: BigInt(sw.last) } });
-    x.swept?.(sw.one.signature);
+    // W's record names the sweep before its send, as the note does (review P3-10 of 024e8a89d): a page closed during the
+    // send leaves both, so the next load counts W's SOL once, as the note; a record not written sends nothing
+    await x.swept?.(sw.one.signature, sw.value);
     await send(sw.one.signed, sw.one.signature);
     return end("sent", sw.one.signature);
   } catch (e) {
@@ -2228,7 +2233,13 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
   let lamports: bigint | undefined;
   let spaced: number | undefined;
   let sweep: string | undefined;
-  const r = await rentBack(h, { ...x, ...(o.spaced === undefined ? {} : { own: o.spaced }), read: (v) => (lamports = v), stamped: (at) => (spaced = at), swept: (s) => (sweep = s) }, hold);
+  const r = await rentBack(h, { ...x, ...(o.spaced === undefined ? {} : { own: o.spaced }), read: (v) => (lamports = v), stamped: (at) => (spaced = at), swept: async (s, v) => {
+    sweep = s;
+    // what reaches the pool: the sweep's note value
+    if (x.buy) lamports = v;
+    const now = (await h.owed!.list()).find((r) => r.address === o.address) ?? o;
+    await h.owed!.put({ ...now, sweep: s, ...(lamports === undefined ? {} : { lamports: lamports.toString() }) });
+  } }, hold);
   await owedAfter(h, o, r.end, r.steady && x.bare !== true ? seen : undefined, { ...(proven === undefined ? {} : { buy: proven }), ...(lamports === undefined ? {} : { lamports }), ...(spaced === undefined ? {} : { spaced }), ...(sweep === undefined ? {} : { sweep }) });
   return r.end === "gave_up" || r.end === "sent" || r.end === "owed" || unproven === "again";
 }
@@ -2260,7 +2271,9 @@ async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, seen?
     // a pass that ended at the floor carries none: what W holds under it no pass moves while W stays as it is, so it is
     // never shown as on its way (the record stays, a top-up may make W sweepable, and a later pass's read lists it)
     const lamports = e === "floor" ? undefined : kept.lamports !== undefined ? kept.lamports.toString() : last;
-    const sweep = e === "sent" ? kept.sweep : kept.lamports !== undefined ? undefined : lastSweep;
+    // a later pass that gave up keeps the sweep's signature (review P3-10 of 024e8a89d): its read may be W from before
+    // the sweep landed, so dropping it would count W's SOL beside the note
+    const sweep = e === "sent" ? kept.sweep : kept.lamports !== undefined && e !== "gave_up" ? undefined : lastSweep;
     const spaced = kept.spaced ?? lastSpaced;
     await h.owed?.put({ ...rest, mints: mintsOf(now.mints, o.mints), passes: now.passes + 1, ...(seen !== undefined && (e === "floor" || e === "holds" || e === "kept" || e === "refused") ? { seen } : {}), ...(kept.buy === undefined ? {} : { buy: kept.buy }), ...(lamports === undefined ? {} : { lamports }), ...(sweep === undefined ? {} : { sweep }), ...(spaced === undefined ? {} : { spaced }) });
   } catch {

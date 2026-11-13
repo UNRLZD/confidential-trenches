@@ -7170,3 +7170,79 @@ test("round-trip-costs-less P3-8: a found W kept by a stranger's holding account
   assert.ok(!v.c.accounts.has(held), "closed once empty");
   assert.equal(v.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(v.told.slice(-4)));
 });
+
+// review P3-10 of 024e8a89d: the sweep's signature reached W's record only after its send returned, so a page closed
+// during the send left the note INCOMING and the record with W's lamports and no sweep: once the note counted, W's SOL
+// showed twice (the note, and the record's RETURNING row). The record now names the sweep, at the note's value, before
+// the send, as the note does
+test("round-trip-costs-less P3-10: a page closed during the sweep's send leaves W's record naming the sweep at the note's value: W's SOL counts once at the next load", async () => {
+  const { w } = await soldElsewhere(ENOUGH);
+  let reached!: () => void;
+  const hung = new Promise<void>((r) => (reached = r));
+  for (const p of [0, 1] as const)
+    around(w, p, async (m, params, r) => {
+      // the sweep's send: the note is INCOMING by then; the page closes here (the send never returns)
+      if (m === "sendTransaction" && (await w.ns.list()).some((n) => n.state === "INCOMING")) return reached(), new Promise(() => {});
+      return r(m, params);
+    });
+  void resumeRentBacks(w.host, fakeLocks());
+  await hung;
+  const note = (await w.ns.list()).find((n) => n.state === "INCOMING")!;
+  const send = note.sends!.at(-1)!;
+  const rec = w.owed.get(W.address)!;
+  assert.equal(rec.sweep, send.signature, "the record names the sweep before its send");
+  assert.equal(rec.lamports, send.value.toString(), "at the note's value, not W's whole lamports");
+  assert.ok(BigInt(rec.lamports!) < BigInt(w.c.accounts.get(W.address)!.lamports), "less than W holds");
+  const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 };
+  assert.equal(returningWallets([rec], price, await w.ns.list()).length, 1, "the note not counted yet: listed once");
+  assert.deepEqual(returningWallets([rec], price, [{ ...note, state: "UNSPENT" }]), [], "the note counted: the record lists nothing");
+});
+
+// review P3-10 of 024e8a89d: a later pass that gives up keeps the sweep's signature, so its read of W (from before the
+// sweep landed) never lists W's SOL beside the note
+test("round-trip-costs-less P3-10: a pass that gives up after a sweep was sent keeps the sweep's signature on W's record", async () => {
+  const { w } = await soldElsewhere(ENOUGH);
+  await w.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 1, lamports: "9", sweep: "S1gnature" });
+  const before = w.owed.get(W.address)!;
+  // every send fails: the pass gives up
+  for (const p of [0, 1] as const) around(w, p, (m, params, r) => (m === "sendTransaction" ? Promise.reject(new Error("HTTP 503")) : r(m, params)));
+  await resumeRentBacks(w.host, fakeLocks());
+  const after = w.owed.get(W.address)!;
+  assert.ok(w.told.some((t) => t.step === "rent_back" && t.state === "gave_up"), JSON.stringify(w.told.filter((t) => t.step === "rent_back")));
+  assert.equal(after.sweep, before.sweep, "the sweep's signature kept");
+});
+
+// review 024e8a89d, the owed end and item 5: W's record lists what reaches the pool, the sweep's note value (W's lamports
+// less the fee, the deposit's rents and the claim's keep), never W's whole lamports: at a page boundary, where the
+// deposit opens a page on both trees and its rents are larger, the record follows the note
+test("round-trip-costs-less: a sent sweep's record lists the note's value, also at a page boundary where the deposit's rents differ", async () => {
+  const value = async (leaves?: number) => {
+    const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], lamports: ENOUGH, ...(leaves === undefined ? {} : { leaves }) }, [{ ...wallet(0n), holdings: null } as never]);
+    w.host.rpcs = withBuy(w.c.rpcs, [MINT, MINT]);
+    await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
+    await resumeRentBacks(w.host, fakeLocks());
+    const rec = w.owed.get(W.address)!;
+    const note = (await w.ns.list()).find((n) => n.sends?.some((d) => d.signature === rec.sweep))!;
+    assert.equal(rec.lamports, note.sends!.at(-1)!.value.toString(), `leaves ${leaves ?? "N"}: the record lists the note's value`);
+    return BigInt(rec.lamports!);
+  };
+  const steady = await value();
+  const boundary = await value(1_024);
+  assert.ok(boundary < steady, `a page opened on both trees: ${boundary} listed against ${steady}`);
+});
+
+// the owed end (a claim still owed, the note under the floor): listed as the note the sweep would make now, never W's
+// whole lamports
+test("round-trip-costs-less: an owed end under the floor lists the note the sweep would make, not W's lamports", async () => {
+  const mint = VF.pumpswap.mint;
+  const w = await world({ venue: "pumpswap", cashback: true, buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }], claimFails: true, lamports: OWED_LAMPORTS }, [{ ...wallet(0n, false, mint), holdings: null } as never]);
+  w.host.rpcs = withBuy(w.c.rpcs, [mint, mint]);
+  await w.host.bought!.put(W.address, { mint, program: VF.pumpswap.mintRead.owner, rebuilt: true } as never);
+  await resumeRentBacks(w.host, fakeLocks());
+  const last = w.told.filter((t) => t.step === "rent_back").at(-1)!;
+  assert.equal(last.state, "owed", JSON.stringify(w.told.filter((t) => t.step === "rent_back")));
+  const [, held, note] = /W's (\d+) would make a note of (-?\d+), under/.exec(last.detail)!;
+  assert.ok(BigInt(note!) > 0n && BigInt(note!) < BigInt(held!), last.detail);
+  assert.equal(w.owed.get(W.address)?.lamports, note, `W holds ${held}: listed as the note's ${note}`);
+});
+const OWED_LAMPORTS = 3_400_000;
