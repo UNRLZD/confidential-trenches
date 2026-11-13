@@ -6832,7 +6832,10 @@ test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass 
 // a W whose pass ended at the floor holds SOL no pass moves while W stays as it is: shown as RETURNING it would sit in
 // On the way and in Total for good, a number that never moves. Its record stays (a top-up may make it sweepable) with no
 // amount, so it draws no row and adds nothing; a W that held under the floor before its top-up and is swept after it
-// is listed again once a pass reads it
+// is listed again once a pass reads it. The most a W at the floor can hold, so the most this leaves unshown per W until
+// the owner picks how small money is shown (worked out in the review of 024e8a89d, P2-4a): 3,341,599 lamports when its
+// floor end is W's own state (steady), 4,073,119 mid-page, and 5,536,159 when the deposit sits at both trees' page
+// boundaries
 test("round-trip-costs-less P3-e: a W that ended at the floor draws no RETURNING row and adds nothing to On the way or Total", async () => {
   const floor = await soldElsewhere(500_000);
   await resumeRentBacks(floor.w.host, fakeLocks());

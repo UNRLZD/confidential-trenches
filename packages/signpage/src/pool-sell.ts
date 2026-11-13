@@ -2156,11 +2156,15 @@ export const POOL_RENT_BACK_UNPROVEN_PASSES = 3;
 
 type Findable = { address: string; mints: readonly { mint: string; program: string }[]; evidence: Evidence };
 /** What the rent backs read of the account's Ws, on the second seat alone (h.rpcs[1]: the helper's keyed route on
- *  mainnet, its devnet route on devnet), never the public one: W's own and teardown addresses for every W, with the Rent
- *  sysvar, in getMultipleAccounts calls of FIND_BATCH addresses. Per W: whether any of them is an account, and `seen`,
- *  what W reads as there (their bytes, the rent, the rules' version, W's buy evidence). It names many Ws in one request,
- *  so it is the helper's alone: a helper that lies can hide a W (read empty, or as it read before: no pass) or run a pass
- *  for nothing (its reads then on both seats, one W a request), never move one. Nothing is signed on it. */
+ *  mainnet, its devnet route on devnet), never the public one, as main's pool-found.ts reads by its written rule. The
+ *  Ws it names: every W of the account (each owed record here, and every W derived from the pool's spent notes that
+ *  has no record and is not listed empty), W's own and teardown addresses for each, with the Rent sysvar, in
+ *  getMultipleAccounts calls of FIND_BATCH addresses: the helper, and the provider upstream of it, see that set of Ws
+ *  as one request (up to FIND_BATCH addresses a request). Per W: whether any of them is an account, `seen`, what W
+ *  reads as there (their bytes, the rent, the rules' version, W's buy evidence), and W's own lamports (a held W's
+ *  RETURNING row, display only). It is the helper's alone: a helper that lies can hide a W (read empty, or as it read
+ *  before: no pass), show a held W's amount wrong, or run a pass for nothing (its reads then on both seats, one W a
+ *  request), never move one. Nothing is signed on it. */
 async function findOn(rpc: SolanaRpc, ws: readonly Findable[]): Promise<Map<string, { any: boolean; seen: string; lamports: bigint | undefined }>> {
   const per = ws.map((w) => {
     try {
