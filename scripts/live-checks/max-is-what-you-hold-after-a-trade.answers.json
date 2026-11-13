@@ -1,0 +1,18 @@
+{
+ "good": {
+  "note": "branch card/max-is-what-you-hold-after-a-trade at 5012e6747 + c3a71d37a, built with build-app.mjs --out, read 2026-11-13T18:38:18.019Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5naY27qoeN0YjvjwTaQ0umLAPu+gDyBTFGXH4gV697lrkgdbbB8Qb2HNJBRA0Qty\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-5naY27qoeN0YjvjwTaQ0umLAPu+gDyBTFGXH4gV697lrkgdbbB8Qb2HNJBRA0Qty",
+  "tip": true,
+  "spend": true,
+  "small": true
+ },
+ "bad": {
+  "note": "SIGN_HOST as served 2026-11-13T18:38:18.019Z, before the card",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+  "tip": false,
+  "spend": false,
+  "small": false
+ }
+}

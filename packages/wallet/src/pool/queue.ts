@@ -107,7 +107,7 @@ const UNANSWERED = new Set(["SolanaRpcTransportError", "EvmUnansweredError", "Ev
  *  queue runs the next pass at once, in the new epoch, where the note is under the epoch's cut. */
 class EpochTurned extends Error {}
 const bindFail = (e: unknown): never => failAs(UNANSWERED.has(String((e as { name?: unknown } | null)?.name)) ? "network" : "fee_refused")(e);
-/** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
+/** `small`: the pool's UNSPENT landed notes above 0 below its smallest rung, never proved (none: absent). */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };
 const NOTHING = (): QueuePass => ({ made: [], remade: [], failed: [] });
 
@@ -403,7 +403,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       }
     const byChunk = byChunkThenLeaf(pool);
     const usable = (n: NoteRecord): boolean => n.scope === pool.scope && n.leaf !== undefined && poolChunkOf(pool, n.leaf.value) !== null && !skipped.has(n.id);
-    const small = all.filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && poolChunkOf(pool, n.leaf.value) === null).length;
+    // a whole release's change of 0 holds no money: never small (card max-is-what-you-hold-after-a-trade)
+    const small = all.filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.value > 0n && poolChunkOf(pool, n.leaf.value) === null).length;
     if (small > 0) out.small = small;
     // tier 1: a note with no tier 1 proof, UNSPENT or held by its tier 2 proof
     const open = all.filter((n) => usable(n) && !ready.has(n.id) && (n.state === "UNSPENT" || (n.state === "HELD" && alt.has(n.id)))).sort(byChunk);

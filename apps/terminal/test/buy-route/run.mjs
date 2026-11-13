@@ -76,6 +76,9 @@ function serve(dir) {
 const fails = [];
 const check = (ok, what) => ok || fails.push(what);
 const norm = (s) => s.replace(/\s+/g, " ").trim();
+/** An attribute or the text of the first match, or null with none: never waits (a missing element reads null at once). */
+const attr = (page, sel, n) => page.evaluate(([s, k]) => document.querySelector(s)?.getAttribute(k) ?? null, [sel, n]);
+const textOf = (page, sel) => page.evaluate((s) => (document.querySelector(s)?.textContent ?? "").replace(/\s+/g, " ").trim(), sel);
 async function settle(read, want) {
   const end = Date.now() + 3_000;
   let got = await read();
@@ -151,6 +154,37 @@ try {
       check(external.length === 0, `${tag}: external requests ${external.join(" ")}`);
       check(dialogs.length === 0 && (await page.locator('[role="dialog"], dialog').count()) === 0, `${tag}: a dialog`);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${String(ROWS.findIndex((r) => r[0] === name)).padStart(2, "0")}-${name}-${w.name}.png`) });
+      await ctx.close();
+    }
+    // the coin step draws the coin's own logo (card sell-box-works-like-the-buy-box, owner 13 Nov 18:20Z "Coin's own
+    // logo"), from the helper as the token header and the rail do; a coin with none draws its letters, the rail's fallback
+    for (const [logo, img] of [["1", true], ["none", false]]) {
+      const tag = `coin logo ${logo} @${w.name}`;
+      const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
+      await ctx.addInitScript(INIT);
+      const page = await ctx.newPage();
+      const asked = [];
+      // the helper's logo, answered here: an 8 x 8 PNG of one opaque colour
+      await page.route("https://ct-api.unrealized.trade/v1/logo/**", (r) => {
+        asked.push(r.request().url());
+        return r.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGP4ulQFK2IYWhIAxY1vgUfhbXMAAAAASUVORK5CYII=", "base64") });
+      });
+      await page.goto(`${BASE}/?f=ready&route=1&logo=${logo}`);
+      await page.waitForSelector('[data-testid="trade-box"]');
+      const glyph = page.locator('[data-testid="route-token-glyph"]');
+      if (img) {
+        await page.waitForSelector('[data-testid="route-token-glyph"] img[data-loaded="true"]', { timeout: 5_000 }).catch(() => {});
+        const src = await attr(page, '[data-testid="route-token-glyph"] img', "src");
+        check(src === "https://ct-api.unrealized.trade/v1/logo/solana/Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr", `${tag}: logo src ${src}`);
+        check((await glyph.locator('img[data-loaded="true"]').count()) === 1 && asked.length === 1, `${tag}: logo not shown once loaded (asked ${asked.length})`);
+      } else {
+        check((await glyph.count()) === 1 && (await glyph.locator("img").count()) === 0 && asked.length === 0, `${tag}: no coin step, or an image asked for a coin with none`);
+        const letters = await textOf(page, '[data-testid="route-token-glyph"]');
+        check(letters === "TO", `${tag}: letters "${letters}", want TO`);
+      }
+      const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
+      check(m.smallText.length === 0 && m.violations.length === 0, `${tag}: ${JSON.stringify(m.smallText)} ${JSON.stringify(m.violations)}`);
+      if (SHOTS) await page.locator('[data-testid="route-strip"]').screenshot({ path: path.join(SHOTS, `coin-step-buy-${logo}-${w.name}.png`) });
       await ctx.close();
     }
   }

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { Avatar } from "../market/Avatar.tsx";
+import type { Logo } from "../market/Avatar.tsx";
 import { moveView, stepView } from "./route.ts";
 import type { Route, StepId, StepState } from "./route.ts";
 import { WORDS } from "./words.ts";
@@ -7,8 +9,10 @@ import { WORDS as TOKEN_WORDS } from "../token/words.ts";
 
 // The buy route strip (card app-buy-route-strip; spec docs/drafts/buy-route-strip-spec.md in the research repo; locked
 // design design-lock-r5, assets/private.js P.pvTrade, P.pvGlyph, P.pvLink and the film's four-step path): Private balance,
-// the buy's one-time wallet, the pool, the token, joined by dotted links. It draws what route.ts says and times nothing:
-// a check pops, a link fills and a value fades in on its own CSS clock from the moment its event sets the state.
+// the buy's one-time wallet, the pool, the token, joined by dotted links. A sell draws the same strip reversed (card
+// sell-box-works-like-the-buy-box): the token, its one-time wallet, the pool, Private balance. It draws what route.ts says
+// and times nothing: a check pops, a link fills and a value fades in on its own CSS clock from the moment its event sets
+// the state.
 // A buy that moves its shortfall from Cash first (card one-balance-buys-on-every-chain) grows a move step in before the
 // one-time wallet, its value the move's time (route.ts moveView, on the screen's clock `now` the box ticks while a buy runs).
 
@@ -106,18 +110,32 @@ function Node({ route, step, glyph, label, value, state: given }: { route: Route
   );
 }
 
-/** The token step's picture: the symbol's first letter in a ring (the box has no token image). */
-const TokenGlyph = ({ symbol }: { symbol: string }) => <span className="rs-tk" aria-hidden="true">{symbol.slice(0, 1)}</span>;
+/** The token step's picture (owner 13 Nov 18:20Z, "Coin's own logo"): the coin's own logo as the token header and the
+ *  rail draw it (market/Avatar.tsx, through the helper), with the same fallback, the symbol's letters, while it has none
+ *  or it fails. No badges: the step is the coin alone. */
+const TokenGlyph = ({ symbol, logo }: { symbol: string; logo?: Logo }) => (
+  <span className="rs-tk" data-testid="route-token-glyph">
+    {/* 30 px: the letters are 11 px (Avatar draws them at 0.36 of its size), the box's smallest text */}
+    <Avatar symbol={symbol} size={30} {...(logo ? { logo } : {})} />
+  </span>
+);
 
-export function RouteStrip({ route, symbol, outText, now }: { route: Route; symbol: string; outText: string | null; now: number }) {
+/** `outText` is the token step's value as drawn (a buy's amount out, a sell's amount sold); `logo` whose logo the token
+ *  step draws; `now` the screen's clock for a move step's running time (a sell moves nothing from Cash and passes none). */
+export function RouteStrip({ route, symbol, outText, now, logo }: { route: Route; symbol: string; outText: string | null; now?: number; logo?: Logo }) {
   const v = (s: StepId) => stepView(route, s).value;
-  const move = moveView(route, now);
+  const move = moveView(route, now ?? route.at);
   const poolLabel = route.venue ? `${route.venue} ${WORDS.poolSuffix.text}` : WORDS.poolBare.text;
   const poolDraft = route.venue ? WORDS.poolSuffix.draft : WORDS.poolBare.draft;
+  const sell = route.side === "sell";
+  // a sell's wallet already holds the coin: it is not new
+  const wallet = sell ? WORDS.sellWallet : WORDS.newWallet;
+  const balance = <Node route={route} step="balance" glyph={<Glyph kind="notes" />} label={<Label text={WORDS.privateBalance.text} />} value={v("balance")} />;
+  const token = <Node route={route} step="token" glyph={<TokenGlyph symbol={symbol} {...(logo ? { logo } : {})} />} label={<Label text={symbol} />} value={v("token") === null ? null : outText} />;
   return (
-    <div className="rs" data-testid="route-strip" data-route={route.k} data-steps={route.st.join(" ")}>
+    <div className="rs" data-testid="route-strip" data-side={route.side} data-route={route.k} data-steps={route.st.join(" ")}>
       <div className="rs-flow">
-        <Node route={route} step="balance" glyph={<Glyph kind="notes" />} label={<Label text={WORDS.privateBalance.text} />} value={v("balance")} />
+        {sell ? token : balance}
         <Link full={route.links[0]} id="1" />
         {move !== null && (
           <div className="rs-grp" data-in>
@@ -126,12 +144,12 @@ export function RouteStrip({ route, symbol, outText, now }: { route: Route; symb
           </div>
         )}
         <div className="rs-grp" data-in={route.walletIn || undefined} aria-hidden={!route.walletIn || undefined}>
-          <Node route={route} step="wallet" glyph={<Glyph kind="ghost" />} label={<span data-draft-copy={WORDS.newWallet.text}><Label text={WORDS.newWallet.text} /></span>} value={v("wallet")} />
+          <Node route={route} step="wallet" glyph={<Glyph kind="ghost" />} label={<span {...(wallet.draft ? { "data-draft-copy": wallet.text } : {})}><Label text={wallet.text} /></span>} value={v("wallet")} />
           <Link full={route.links[1]} id="2" />
         </div>
         <Node route={route} step="pool" glyph={<Glyph kind="pool" />} label={<span {...(poolDraft ? { "data-draft-copy": poolLabel } : {})}><Label text={poolLabel} /></span>} value={v("pool")} />
         <Link full={route.links[2]} id="3" />
-        <Node route={route} step="token" glyph={<TokenGlyph symbol={symbol} />} label={<Label text={symbol} />} value={v("token") === null ? null : outText} />
+        {sell ? balance : token}
       </div>
     </div>
   );

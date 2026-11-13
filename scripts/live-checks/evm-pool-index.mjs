@@ -4,9 +4,12 @@
 // entry). For Base and Robinhood it reads, as the index does, the newest SPANS spans of `index.span` blocks below N,
 // the lower of the two readers' heads: on each reader one batch a span, its Initialize logs and its last block. It
 // passes when, on each chain:
-//   - the venue lists an index: two readers on two operators (another registrable domain), neither ours (the helper
-//     is not a reader: the money rule's attacker is a broken-in helper), 10,000-block spans, the card's margin (Base
-//     474, Robinhood 7,119) and a cap;
+//   - the venue lists an index: two readers on two operators (another registrable domain), the first never ours (the
+//     device reaches it directly) and the second at most the helper's keyed route for the chain,
+//     /v1/rpc/{chain}?keyed=only (card signpage-evm-reads-draw-no-refusal: the money rule's attacker is a broken-in
+//     helper, which as one of two readers can make the index refuse, never add or hide a pool), each chain's span (Base
+//     10,000 blocks; Robinhood 500,000, which only Robinhood's own and the helper's keyed route serve), the card's margin
+//     (Base 474, Robinhood 7,119) and a cap;
 //   - each reader answers the browser's CORS preflight of a JSON POST from the app's origin, and its POST, allowing it
 //     (the device reads them from the page);
 //   - every span is answered on both readers, within TRIES tries each (the kit's INDEX_TRIES: a reader a block behind
@@ -34,8 +37,9 @@ import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 export const KEY = "evm-pool-index";
 export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 export const OURS = /(^|\.)unrealized\.trade$/i;
-export const CHAINS = Object.freeze({ base: { margin: 474 }, robinhood: { margin: 7_119 } });
-export const SPAN = 10_000;
+export const CHAINS = Object.freeze({ base: { margin: 474, span: 10_000 }, robinhood: { margin: 7_119, span: 500_000 } });
+/** The one reader of ours an index may name: the helper's keyed route for the chain, second, never first. */
+export const HELPER_READER = (chain) => `https://ct-api.unrealized.trade/v1/rpc/${chain}?keyed=only`;
 export const SPANS = 3;
 export const SPAN_LOGS = 10_000;
 export const TIMEOUT_MS = 10_000;
@@ -67,8 +71,8 @@ export function judge(run) {
     }
     const rs = Array.isArray(ix.readers) ? ix.readers : [];
     say(rs.length === 2 && operator(rs[0]) !== operator(rs[1]), `${chain}: two index readers on two operators: ${rs.join(", ")}`);
-    say(rs.every((u) => !OURS.test(new URL(u).hostname)), `${chain}: no reader is ours (the helper is not a reader)`);
-    say(ix.span === SPAN && ix.margin === want.margin && Number.isInteger(ix.cap) && ix.cap > 0, `${chain}: span ${ix.span}, margin ${ix.margin} (the card's ${want.margin}), cap ${ix.cap}`);
+    say(rs.length === 2 && !OURS.test(new URL(rs[0]).hostname) && (!OURS.test(new URL(rs[1]).hostname) || rs[1] === HELPER_READER(chain)), `${chain}: no reader is ours but the second, the helper's keyed route ${HELPER_READER(chain)}`);
+    say(ix.span === want.span && ix.margin === want.margin && Number.isInteger(ix.cap) && ix.cap > 0, `${chain}: span ${ix.span} (the card's ${want.span}), margin ${ix.margin} (the card's ${want.margin}), cap ${ix.cap}`);
     for (const u of rs) {
       const p = c.preflight?.[u];
       const allows = (v) => v === "*" || v === APP_ORIGIN;
@@ -102,7 +106,7 @@ export function judge(run) {
         say(good === want, `${chain} ${s.a}-${s.b}: reader ${r + 1} answered ${good} of ${want} receipts in the span with their Initialize, try ${tries} at most${good === want ? "" : `: ${JSON.stringify((rs ?? []).find((rc) => !(rc?.init === true)) ?? null)}`}`);
       }
     }
-    say(pools > 0, `${chain}: ${pools} pools in the newest ${SPANS * SPAN} blocks`);
+    say(pools > 0, `${chain}: ${pools} pools in the newest ${SPANS * want.span} blocks`);
   }
   return { pass: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }

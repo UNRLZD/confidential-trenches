@@ -22,8 +22,8 @@
 //   larger of spendOf(the owner's piece alone) and spendOf(the whole set: on a pool with piecesMax above 1, the primary
 //   and its ready tier 2 pieces), each piece its chunk, fee cap and tip cap; never a sum across sets and never below 0.
 //   spendOf is the pool's, from its caller: solanaTapSpendOf (the kit's solanaPoolBuyMaxSpend on the worst
-//   venue, or on the coin's own for pool.buy.dry, at the proof's own tip cap, the most tip its release lets the tap
-//   pay, and the rent the caller read on two RPCs) or evmTapSpendOf (the chunk itself: an EVM tap asks for a whole
+//   venue, or on the coin's own for pool.buy.dry, at the tip the tap pays, the signing page's, at most the proof's own
+//   tip cap, and the rent the caller read on two RPCs) or evmTapSpendOf (the chunk itself: an EVM tap asks for a whole
 //   chunk, the signing page's checkEvmBuy refusing any other amount, and the relay fee comes out on chain). Present only
 //   with ready, and only when every pool on the chain gives a spendOf; "0" when no proof is counted.
 // - making: with `making` (the notes the queue is making a proof for, ./queue.ts readyWith), the value of those HELD
@@ -39,6 +39,7 @@ import {
   CHAINS,
   POOL_ASSETS,
   POOL_ASSET_DECIMALS,
+  SOLANA_POOL_BUY_PIECES_MAX,
   SOLANA_POOL_WORST_BUY_VENUE,
   solanaPoolBuyMaxSpend,
   type Chain,
@@ -127,13 +128,24 @@ export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: b
  * readSolanaPoolBuyVenue reads them on two providers: card max-is-priced-for-the-coin, the 0.01 SOL rung spends
  * 3,371,920 on a Token mint's coin with no cashback, on the curve or on PumpSwap), or, before the tap knows its coin,
  * SOLANA_POOL_WORST_BUY_VENUE (384,880 on that rung), which any coin's venue funds. A proof whose request names no tip
- * cap is refused. */
-export function solanaTapSpendOf(rent: SolanaRent, venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback"> = SOLANA_POOL_WORST_BUY_VENUE): TapSpendOf {
+ * cap is refused. `tipOf` (card max-is-what-you-hold-after-a-trade): the tip the tap pays for a set of k pieces (the
+ * signing page's: the kit's solanaPoolBuyTip, SOLANA_POOL_JITO_TIP on mainnet), so Max is the most the buy's own pick
+ * funds, never the tip cap's 900,000 lamports less (the owner's 13 Nov 18:11Z Max of $0.14 held $0.07 of it); a tip over
+ * a piece's tip cap is no tap (the tag 3 refuses it), so 0. Without it, the tip at the largest tip cap: the most any tap
+ * may tip, the bound a check that knows no tap reads (scripts/live-checks/sol-small-note-buys.mjs). */
+export function solanaTapSpendOf(rent: SolanaRent, venue: Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback"> = SOLANA_POOL_WORST_BUY_VENUE, tipOf?: (pieces: number) => bigint): TapSpendOf {
   return (pieces) => {
     let tip = 0n;
+    let least: bigint | undefined;
     for (const { tipCap } of pieces) {
       if (typeof tipCap !== "bigint" || tipCap < 0n) throw new Error("a Solana proof's request names no tip cap");
       if (tipCap > tip) tip = tipCap;
+      if (least === undefined || tipCap < least) least = tipCap;
+    }
+    if (tipOf !== undefined && pieces.length > 0) {
+      tip = tipOf(Math.min(pieces.length, SOLANA_POOL_BUY_PIECES_MAX));
+      if (typeof tip !== "bigint" || tip < 0n) throw new Error("the tap's tip is not a bigint at least 0");
+      if (tip > least!) return 0n;
     }
     return solanaPoolBuyMaxSpend(pieces.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.feeCap })), venue, tip, rent);
   };

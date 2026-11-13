@@ -44,6 +44,7 @@ const R2 = "R2: one-reader pools' receipts are asked in batches small enough";
 const R3 = "R3: a receipt answer that is not a receipt";
 const S1 = "S1: a liar's";
 const S2 = "S2: a receipt answered with a rate limit inside the batch once";
+const BATCHMAX = "F5's state reads take each reader's batchMax";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -122,6 +123,8 @@ export const MUTANTS = [
   ["for (const p of of) unread.add(p.id);", "", R1],
   ["for (const p of of) unread.add(p.id);", "", Q3],
   ["const INDEX_RECEIPT_BATCH = 10;", "const INDEX_RECEIPT_BATCH = 500;", R2],
+  // card signpage-evm-reads-draw-no-refusal: the state reads past a reader's batchMax (the helper's 10)
+  ["const per = Math.max(1, Math.min(INDEX_STATE_BATCH, c.batchMax ?? INDEX_STATE_BATCH));", "const per = INDEX_STATE_BATCH;", BATCHMAX],
   ["if (typeof a !== \"object\" || Array.isArray(a)) return void unread.add(p.id);", "if (a === undefined) return void unread.add(p.id);", R3],
   // review 4 of 43f8e45f: no receipt budget, or one past the honest reader's means; the pools past it kept (unasked, so
   // never checked), or the liar not named; a rate limit inside a receipt batch unread at once

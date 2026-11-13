@@ -74,7 +74,7 @@ test("a ready proof of the devnet pool reaches state.pools as ready, and as tap_
   const before = await pools.withPools(SIGNED_IN, notes, pools.PAGE_POOLS, ready("n1", "a1"));
   assert.deepEqual(before.pools?.find((p) => p.chain === "solana"), { chain: "solana", asset: "SOL", balance: "0.05", ready: "0.05" });
   const priced = await pools.withPools(SIGNED_IN, notes, pools.withSolanaRent(pools.PAGE_POOLS, RENT), ready("n1", "a1"));
-  const spend = solanaTapSpendOf(RENT)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]);
+  const spend = solanaTapSpendOf(RENT, undefined, pools.pageBuyTip)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]);
   assert.ok(spend > 0n && spend < CHUNK, `the tap spends ${spend} of the ${CHUNK} chunk`);
   const tapMax = `0.${spend.toString().padStart(9, "0")}`.replace(/0+$/, "");
   assert.deepEqual(priced.pools?.find((p) => p.chain === "solana"), { chain: "solana", asset: "SOL", balance: "0.05", ready: "0.05", tap_max: tapMax });
@@ -88,14 +88,15 @@ test("a ready proof of the devnet pool reaches state.pools as ready, and as tap_
   const small = await pools.withPools(SIGNED_IN, async () => [held("s1", "a1", 10_000_000n)], pools.withSolanaRent(pools.PAGE_POOLS, RENT), ready("s1", "a1", 10_000_000n));
   assert.deepEqual(small.pools?.[0], { chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0" });
   // at mainnet's rent (5,080 a byte, factor 1, read on two RPCs 5 Nov 19:10:24Z; card sol-small-note-buys) its proof
-  // binds the 1,300,000 fee and the rung buys: tap_max 384,880 lamports at the worst venue (the itemized table in
-  // ../../wallet/src/pool/balances.ts)
+  // binds the 1,300,000 fee and the rung buys: tap_max 384,880 lamports at the worst venue and the tip cap (the itemized
+  // table in ../../wallet/src/pool/balances.ts), priced at the tip the buy pays (card max-is-what-you-hold-after-a-trade):
+  // this testnet build tips nothing (devnet has no block engine), so 1,384,880; the mainnet build's 100,000 gives 1,284,880
   const MAINNET_RENT = { lamportsPerByte: 5080n, factor: 1n } as const;
   const mainnetFee = solanaEpochFee(MAINNET_RENT).fee;
   assert.equal(mainnetFee, 1_300_000n);
   const smallReady = [{ ...ready("s1", "a1", 10_000_000n)[0]!, binding: { feeCap: mainnetFee, request: { tipCap: SOL_TIP_CAP } } }];
   const buys = await pools.withPools(SIGNED_IN, async () => [held("s1", "a1", 10_000_000n)], pools.withSolanaRent(pools.PAGE_POOLS, MAINNET_RENT), smallReady);
-  assert.deepEqual(buys.pools?.[0], { chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00038488" });
+  assert.deepEqual(buys.pools?.[0], { chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00138488" });
   assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(buys), true);
 });
 

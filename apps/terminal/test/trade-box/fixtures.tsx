@@ -79,6 +79,9 @@ const listeners = new Set<(id: string, stage: Stage) => void>();
 // signpage-buy-route-events), through the live source's own seam (source.tsx liveRoute): the buy's wallet and the quote's
 // venue and pool 100 ms after the tap, the filled amount with the fill (shapes of the film's still)
 const routeFeed = q.get("route") === "1";
+/** ?logo=1: the box has the coin's logo (the helper's /v1/logo, which buy-route/run.mjs answers), ?logo=none a coin with
+ *  none (card sell-box-works-like-the-buy-box); neither: no logo given. */
+const LOGO = q.get("logo") === "1" ? true : q.get("logo") === "none" ? false : null;
 const routeListeners = new Set<(id: string, r: BuyRoute) => void>();
 const WALLET = "9DJaQ4m2x7Vn8Kp3Rt5Yb1Zc6Hf0LsEw9GdUaBZst6";
 const POOL_ADDR = "G19cYh2Wq8Nv4Tp7Kx3Rb5Zm1Dc6Fs0LeAuJgHhTQki";
@@ -207,7 +210,7 @@ function Page() {
   return (
     <TradeSourceProvider value={src}>
       <div className="trb-fx">
-        <TradeBox chain={POOL?.chain ?? "solana"} token={POOL?.chain === "base" ? EVM_TOKEN : MINT} symbol="TORCH" initialAmount={q.get("amt") ?? "25"} />
+        <TradeBox chain={POOL?.chain ?? "solana"} token={POOL?.chain === "base" ? EVM_TOKEN : MINT} symbol="TORCH" initialAmount={q.get("amt") ?? "25"} {...(LOGO === null ? {} : { logo: { chain: "solana", token: MINT, icon: LOGO } })} />
       </div>
     </TradeSourceProvider>
   );
