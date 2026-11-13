@@ -1,0 +1,1240 @@
+{
+  "by": "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs",
+  "run": {
+    "commit": "7a44e333eeaae43ef7400ea8ed9e7f097e00b9d3",
+    "dirty": false,
+    "scriptSha256": "b8a7561538c2028bd50b4310f32b503bf4316b878efd56f62d7e4bb566a93cf8",
+    "forkBlock": 113214618,
+    "book": "packages/signpage/scripts/evm-mainnet-copy-runs/first-proof-robinhood-23.book.json"
+  },
+  "chain": "robinhood",
+  "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+  "anvil": "http://127.0.0.1:48702",
+  "slots": "5",
+  "helperSender": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+  "steps": [
+    {
+      "name": "restore A",
+      "atMs": 35435,
+      "ok": true,
+      "ms": 30890,
+      "block": "113214629",
+      "notes": [],
+      "balance": "0"
+    },
+    {
+      "name": "U_X named",
+      "atMs": 35457,
+      "ok": true,
+      "index": 0,
+      "u": "0xA09Eb78a9D1361e28A7d92E868E4c8745898b569",
+      "refundId": "f076d4bce1a6e1cc8996b47e5bf33c8678bc964b8412b68e1a3d360ce07d1b83"
+    },
+    {
+      "name": "under the least rung",
+      "atMs": 35471,
+      "ok": true,
+      "answer": {
+        "error": "not_allowed"
+      },
+      "sent": 0
+    },
+    {
+      "name": "U_X one wei under the floor",
+      "atMs": 42363,
+      "ok": true,
+      "rounds": 4,
+      "sent": 0,
+      "stages": [
+        "in_transit"
+      ],
+      "uxBalance": "1052659114815999"
+    },
+    {
+      "name": "first leaf: a ready proof inside its first minute",
+      "atMs": 94830,
+      "ok": true,
+      "sizeBefore": 0,
+      "depositBlock": "113214671",
+      "depositAtMs": 1794558383000,
+      "depositEpochStartMs": 1794558360000,
+      "sizeAtDeposit": 1,
+      "reads": 21,
+      "pushReads": 2,
+      "hostWindowMax": {
+        "rpc.mainnet.chain.robinhood.com": {
+          "n": 65,
+          "fromMs": -3165,
+          "by": {
+            "eth_getBlockByNumber": 29,
+            "eth_call 0x4a2b75c8": 3,
+            "eth_call 0x33fd7edb": 3,
+            "eth_chainId": 1,
+            "eth_call 0x33d09200": 1,
+            "eth_call 0xfdab463d": 3,
+            "eth_call 0xa8f0f95a": 3,
+            "eth_call 0x50f3e219": 3,
+            "eth_call 0x4181445b": 3,
+            "eth_getLogs": 3,
+            "eth_getTransactionCount": 2,
+            "eth_getBalance": 2,
+            "eth_estimateGas": 1,
+            "eth_call 0xe2bbb158": 1,
+            "eth_sendRawTransaction": 1,
+            "eth_getTransactionReceipt": 2,
+            "eth_call 0x4b278d9c": 2,
+            "eth_call 0xbbfaea22": 1,
+            "eth_call 0xf5d6ded7": 1
+          }
+        },
+        "robinhood.api.pocket.network": {
+          "n": 57,
+          "fromMs": -3165,
+          "by": {
+            "eth_getBlockByNumber": 22,
+            "eth_call 0x4a2b75c8": 3,
+            "eth_call 0x33fd7edb": 3,
+            "eth_chainId": 1,
+            "eth_call 0x33d09200": 1,
+            "eth_call 0xfdab463d": 3,
+            "eth_call 0xa8f0f95a": 3,
+            "eth_call 0x50f3e219": 3,
+            "eth_call 0x4181445b": 3,
+            "eth_getLogs": 3,
+            "eth_getTransactionCount": 2,
+            "eth_getBalance": 2,
+            "eth_estimateGas": 1,
+            "eth_call 0xe2bbb158": 1,
+            "eth_sendRawTransaction": 1,
+            "eth_getTransactionReceipt": 2,
+            "eth_call 0x4b278d9c": 2,
+            "eth_call 0xbbfaea22": 1
+          }
+        },
+        "robinhood.drpc.org": {
+          "n": 1,
+          "fromMs": 2969,
+          "by": {
+            "eth_call 0xf5d6ded7": 1
+          }
+        }
+      },
+      "deployPages": 0,
+      "poolOfFirstMs": -51635,
+      "readyMsAfterDeposit": 7624,
+      "root": "newest",
+      "proofEpochStartMs": "1794558360000",
+      "deadlineMs": "1794558570000"
+    },
+    {
+      "name": "first leaf: ready inside 10 s, each pool host inside its window",
+      "atMs": 94830,
+      "ok": true,
+      "readyMsAfterDeposit": 7624,
+      "depositIntoPeriodMs": 23000,
+      "stateRefusedInWindow": [],
+      "stateRefusedRun": 0,
+      "readyBoundMs": 10000,
+      "hostWindowMost": 65,
+      "hostWindowBound": 80,
+      "deployPages": 0
+    },
+    {
+      "name": "withdraw: the first leaf, tapped inside its first minute",
+      "atMs": 117530,
+      "ok": true,
+      "sizeBefore": 0,
+      "depositBlock": "113214671",
+      "depositAtMs": 1794558383000,
+      "depositEpochStartMs": 1794558360000,
+      "sizeAtDeposit": 1,
+      "sizeAtTap": 1,
+      "depthAtTap": 0,
+      "tapChainMs": 1794558390000,
+      "tapEpochStartMs": 1794558360000,
+      "tapMsAfterDeposit": 7000,
+      "runMs": 20353,
+      "sentMs": 20353,
+      "end": "sent",
+      "op": {
+        "kind": "withdraw",
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "robinhood",
+            "hash": "0x6a8c5cf588823b2c3bb79ab6ebe53df5f06950a8482438defdd95bca6b8c7cb2"
+          },
+          {
+            "chain": "robinhood",
+            "hash": "0x44f0c5fb0346b16e30a7c455d35b774678ccf54acb9911f5466c7fe1a1d58e80"
+          }
+        ],
+        "created_ms": 1794558391330,
+        "arrived": {
+          "0x44f0c5fb0346b16e30a7c455d35b774678ccf54acb9911f5466c7fe1a1d58e80": "100000000000000"
+        }
+      },
+      "owed": {},
+      "arrived": "100000000000000",
+      "asked": "100000000000000",
+      "noLeaf": {
+        "cut": "no_leaf",
+        "cutMs": 1794558360000,
+        "newestAfterSendStateRoot": "9551848970804013965464829632519880248000730462245808399824058475026173419887",
+        "newestAfterSendSize": 2,
+        "boundStateRoot": "17454893819062231869988906098789296179191091157697037723116395604587990805312",
+        "poolRootAtDeposit": "17454893819062231869988906098789296179191091157697037723116395604587990805312"
+      }
+    },
+    {
+      "name": "withdraw: the second, at depth 1",
+      "atMs": 136591,
+      "ok": true,
+      "changeShownMs": 26,
+      "windowRows": [
+        {
+          "ms": 25,
+          "balance": "0.000839579034",
+          "max": "779158068000000",
+          "refusal": null,
+          "states": [
+            "SPENT",
+            "UNSPENT"
+          ]
+        }
+      ],
+      "sizeAtTap": 2,
+      "depthAtTap": 1,
+      "runMs": 19032,
+      "sentMs": 19032,
+      "end": "sent",
+      "op": {
+        "kind": "withdraw",
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "robinhood",
+            "hash": "0x167c2f07cec1039b28c892fdc81d9805cfd3411966be9d24e18f2a6a8ebbacc3"
+          },
+          {
+            "chain": "robinhood",
+            "hash": "0x91c5e414cd722cf4312a72d989d8017a37b01a756bb4c874c95a3351c55ac63f"
+          }
+        ],
+        "created_ms": 1794558413471,
+        "arrived": {
+          "0x91c5e414cd722cf4312a72d989d8017a37b01a756bb4c874c95a3351c55ac63f": "100000000000000"
+        }
+      },
+      "owed": {},
+      "arrived": "100000000000000",
+      "asked": "100000000000000"
+    },
+    {
+      "name": "carry",
+      "atMs": 147604,
+      "ok": true,
+      "shownMs": 4011,
+      "inPoolMs": 3697,
+      "followEnd": "in_pool",
+      "stages": [
+        "in_transit",
+        "in_pool"
+      ],
+      "txs": [
+        {
+          "chain": "robinhood",
+          "hash": "0x585b3e1930149313af5c94f322634c5120f30a4910bd340ca59c41a0bc74e3d9"
+        }
+      ],
+      "sent": 14,
+      "balance": "679158068000000",
+      "notes": [
+        {
+          "ref": "deposit",
+          "i": 0,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "839579034000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "UNSPENT",
+          "value": "679158068000000"
+        }
+      ],
+      "uxLeft": "44557819795500"
+    },
+    {
+      "name": "restore reads U_X",
+      "atMs": 147605,
+      "ok": true,
+      "balances": [
+        "44557819795500",
+        "44557819795500"
+      ],
+      "helperCalls": 0
+    },
+    {
+      "name": "withdraw: helper 503, the page's state",
+      "atMs": 275257,
+      "ok": true,
+      "ms": 127651,
+      "plantedHit": true,
+      "op": {
+        "kind": "withdraw",
+        "stage": "in_transit",
+        "txs": [],
+        "created_ms": 1794558443526,
+        "owed": "b011c689327a5ceb700f45e1eec2b2d6"
+      },
+      "owed": {
+        "b011c689327a5ceb700f45e1eec2b2d6": {
+          "noteId": "b011c689327a5ceb700f45e1eec2b2d6",
+          "attempt": "6b98b4918dba8b9e60ff59d3f546c9dd",
+          "context": "9276480719102789443992144156246760218784429690285388929634884674065028981468",
+          "to": "0xb128Db46D39632499D268e2F5Ef399f0747868cc",
+          "last": true,
+          "feeCap": "420966000000",
+          "chain": "robinhood",
+          "part": "300000000000000",
+          "nullifier": "10176618228081758649131994332147202342011684252027926522391582944396552349626",
+          "from": "113214306",
+          "deadlineMs": "1794558630000",
+          "chunk": "360420966000000",
+          "fee": "60000000000000"
+        }
+      },
+      "helperSent": 0,
+      "notes": [
+        {
+          "ref": "deposit",
+          "i": 0,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "839579034000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "RESERVED",
+          "value": "679158068000000"
+        }
+      ]
+    },
+    {
+      "name": "withdraw: helper 503, the retry",
+      "atMs": 358057,
+      "ok": true,
+      "retriedAs": "w503-again",
+      "stoppedAtMs": 341476,
+      "stoppedWallMs": 1794558637370,
+      "deadlineMs": "1794558630000",
+      "stopPastDeadlineMs": 7370,
+      "againMs": 16577,
+      "end": "sent",
+      "op": {
+        "kind": "withdraw",
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "robinhood",
+            "hash": "0xd4c49b1fccd7142906320117a6da52b468a568ba452744aefcbe66b929a1d5da"
+          },
+          {
+            "chain": "robinhood",
+            "hash": "0x2b8e3f19f6a1966260810550ac1c3931ca25386b0c2ff10c0eabf60ff65bb12a"
+          }
+        ],
+        "created_ms": 1794558637395,
+        "arrived": {
+          "0x2b8e3f19f6a1966260810550ac1c3931ca25386b0c2ff10c0eabf60ff65bb12a": "300000000000000"
+        }
+      },
+      "owed": {},
+      "arrived": "300000000000000",
+      "asked": "300000000000000",
+      "notes": [
+        {
+          "ref": "deposit",
+          "i": 0,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "839579034000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "679158068000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "UNSPENT",
+          "value": "318737102000000"
+        }
+      ],
+      "balance": "318737102000000"
+    },
+    {
+      "name": "withdraw: onward lost, the run's end",
+      "atMs": 428349,
+      "ok": true,
+      "op": {
+        "kind": "withdraw",
+        "stage": "in_transit",
+        "txs": [
+          {
+            "chain": "robinhood",
+            "hash": "0x7fd910d4561b28250a570fb0f4e98e017e8540e083f14c6d3e6dce0d406853a9"
+          }
+        ],
+        "created_ms": 1794558653973,
+        "owed": "d8a767049dce9585d593c67b2b865758"
+      },
+      "owed": {
+        "d8a767049dce9585d593c67b2b865758": {
+          "noteId": "d8a767049dce9585d593c67b2b865758",
+          "attempt": "ac3203625c2227c9aca01ed6fd5a6a59",
+          "context": "1366994422656054828355728591210157596030522584752885035904673506005725564019",
+          "to": "0xb128Db46D39632499D268e2F5Ef399f0747868cc",
+          "last": true,
+          "feeCap": "420966000000",
+          "chain": "robinhood",
+          "part": "100000000000000",
+          "nullifier": "17717234273670225000816538863820581221286136754991416558135833447394837229008",
+          "from": "113214442",
+          "deadlineMs": "1794558810000",
+          "chunk": "160420966000000",
+          "fee": "60000000000000",
+          "release": "0x7fd910d4561b28250a570fb0f4e98e017e8540e083f14c6d3e6dce0d406853a9",
+          "onward": "0x66cdd1c11f59e374a27e7524f4cf5fb58cd0350b958c512a6db230d956d25e62",
+          "onwards": [
+            "0x66cdd1c11f59e374a27e7524f4cf5fb58cd0350b958c512a6db230d956d25e62"
+          ]
+        }
+      },
+      "dropped": 24,
+      "arrivedYet": "0"
+    },
+    {
+      "name": "withdraw: onward lost, finished on the next load",
+      "atMs": 448417,
+      "ok": true,
+      "end": "sent",
+      "op": {
+        "kind": "withdraw",
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "robinhood",
+            "hash": "0x7fd910d4561b28250a570fb0f4e98e017e8540e083f14c6d3e6dce0d406853a9"
+          },
+          {
+            "chain": "robinhood",
+            "hash": "0x9e031b1be5d8149ae81f03299a97c98edfe44b784e53724d6c92cd1167abe66c"
+          }
+        ],
+        "created_ms": 1794558653973,
+        "arrived": {
+          "0x9e031b1be5d8149ae81f03299a97c98edfe44b784e53724d6c92cd1167abe66c": "100000000000000"
+        }
+      },
+      "owed": {},
+      "arrived": "100000000000000",
+      "asked": "100000000000000",
+      "notes": [
+        {
+          "ref": "deposit",
+          "i": 0,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "839579034000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "679158068000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "318737102000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "UNSPENT",
+          "value": "158316136000000"
+        }
+      ],
+      "balance": "158316136000000"
+    },
+    {
+      "name": "withdraw fee: the device's rule is the helper's",
+      "atMs": 448421,
+      "ok": true,
+      "rows": [
+        {
+          "block": 113214659,
+          "size": 0,
+          "depth": 0,
+          "baseFee": "20046000",
+          "chainFee": "57489827200",
+          "device": "60000000000000",
+          "helper": "60000000000000"
+        },
+        {
+          "block": 113214686,
+          "size": 2,
+          "depth": 1,
+          "baseFee": "20046000",
+          "chainFee": "57489827200",
+          "device": "60000000000000",
+          "helper": "60000000000000"
+        },
+        {
+          "block": 113214797,
+          "size": 3,
+          "depth": 2,
+          "baseFee": "20046000",
+          "chainFee": "57489827200",
+          "device": "60000000000000",
+          "helper": "60000000000000"
+        }
+      ],
+      "depths": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "restore C with notes spent",
+      "atMs": 476802,
+      "ok": true,
+      "ms": 28378,
+      "block": "113214891",
+      "spends": 4,
+      "notes": [
+        {
+          "ref": "change",
+          "i": null,
+          "state": "UNSPENT",
+          "value": "158316136000000"
+        },
+        {
+          "ref": "deposit",
+          "i": 0,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "679158068000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "839579034000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "318737102000000"
+        }
+      ],
+      "balanceC": "158316136000000",
+      "balanceA": "158316136000000"
+    }
+  ],
+  "txs": [
+    {
+      "what": "withdraw first leaf",
+      "hash": "0x6a8c5cf588823b2c3bb79ab6ebe53df5f06950a8482438defdd95bca6b8c7cb2",
+      "from": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+      "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "value": "0",
+      "block": "113214677",
+      "status": "0x1",
+      "gasUsed": "478253",
+      "effectiveGasPrice": "104547284",
+      "signedBytes": 1143
+    },
+    {
+      "what": "withdraw first leaf",
+      "hash": "0x44f0c5fb0346b16e30a7c455d35b774678ccf54acb9911f5466c7fe1a1d58e80",
+      "from": "0x3436653da24212b9f6a100e29e3812cae5a60bd0",
+      "to": "0xb128db46d39632499d268e2f5ef399f0747868cc",
+      "value": "100000000000000",
+      "block": "113214678",
+      "status": "0x1",
+      "gasUsed": "21000",
+      "effectiveGasPrice": "15347719",
+      "signedBytes": 113
+    },
+    {
+      "what": "withdraw second",
+      "hash": "0x167c2f07cec1039b28c892fdc81d9805cfd3411966be9d24e18f2a6a8ebbacc3",
+      "from": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+      "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "value": "0",
+      "block": "113214687",
+      "status": "0x1",
+      "gasUsed": "466427",
+      "effectiveGasPrice": "107197987",
+      "signedBytes": 1143
+    },
+    {
+      "what": "withdraw second",
+      "hash": "0x91c5e414cd722cf4312a72d989d8017a37b01a756bb4c874c95a3351c55ac63f",
+      "from": "0xba7d349a60974c5918e9098e39ad4ab997f0ab79",
+      "to": "0xb128db46d39632499d268e2f5ef399f0747868cc",
+      "value": "100000000000000",
+      "block": "113214689",
+      "status": "0x1",
+      "gasUsed": "21000",
+      "effectiveGasPrice": "17540250",
+      "signedBytes": 113
+    },
+    {
+      "what": "carry: U_X deposit",
+      "hash": "0x585b3e1930149313af5c94f322634c5120f30a4910bd340ca59c41a0bc74e3d9",
+      "from": "0xa09eb78a9d1361e28a7d92e868e4c8745898b569",
+      "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "value": "1000000000000000",
+      "block": "113214671",
+      "status": "0x1",
+      "gasUsed": "294162",
+      "effectiveGasPrice": "27540250",
+      "signedBytes": 187
+    },
+    {
+      "what": "withdraw 503 retry",
+      "hash": "0xd4c49b1fccd7142906320117a6da52b468a568ba452744aefcbe66b929a1d5da",
+      "from": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+      "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "value": "0",
+      "block": "113214835",
+      "status": "0x1",
+      "gasUsed": "462306",
+      "effectiveGasPrice": "108153513",
+      "signedBytes": 1143
+    },
+    {
+      "what": "withdraw 503 retry",
+      "hash": "0x2b8e3f19f6a1966260810550ac1c3931ca25386b0c2ff10c0eabf60ff65bb12a",
+      "from": "0x4a4b2368eff0188c273a1347c5812f5a158e2adf",
+      "to": "0xb128db46d39632499d268e2f5ef399f0747868cc",
+      "value": "300000000000000",
+      "block": "113214836",
+      "status": "0x1",
+      "gasUsed": "21000",
+      "effectiveGasPrice": "15347719",
+      "signedBytes": 114
+    },
+    {
+      "what": "withdraw lost-send",
+      "hash": "0x7fd910d4561b28250a570fb0f4e98e017e8540e083f14c6d3e6dce0d406853a9",
+      "from": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+      "to": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "value": "0",
+      "block": "113214844",
+      "status": "0x1",
+      "gasUsed": "471577",
+      "effectiveGasPrice": "106027298",
+      "signedBytes": 1143
+    },
+    {
+      "what": "withdraw lost-send finished",
+      "hash": "0x9e031b1be5d8149ae81f03299a97c98edfe44b784e53724d6c92cd1167abe66c",
+      "from": "0x07063f6e8a0025fc42968498233beddbb10abf7a",
+      "to": "0xb128db46d39632499d268e2f5ef399f0747868cc",
+      "value": "100000000000000",
+      "block": "113214886",
+      "status": "0x1",
+      "gasUsed": "21000",
+      "effectiveGasPrice": "17540250",
+      "signedBytes": 113
+    }
+  ],
+  "helperCalls": [
+    {
+      "atMs": 35856,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 37869,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 39873,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 41876,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 43880,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 45883,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 47886,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 49890,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 51894,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 53900,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 55902,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 57903,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 59906,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 61908,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 63911,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 65914,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 67917,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 69923,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 71925,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 73927,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 75929,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 77931,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 79935,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 81938,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 83940,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 85945,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 90061,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 90076,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558360000,\"block\":\"0x6bf84c3\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 95174,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558360000,\"block\":\"0x6bf84c3\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 95446,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558360000,\"block\":\"0x6bf84c3\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 97471,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558360000,\"block\":\"0x6bf84c3\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 102106,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": false,
+      "status": 200,
+      "body": "{\"hash\":\"0x6a8c5cf588823b2c3bb79ab6ebe53df5f06950a8482438defdd95bca6b8c7cb2\"}"
+    },
+    {
+      "atMs": 105067,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 117546,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558360000,\"block\":\"0x6bf84c3\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 117571,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558360000,\"block\":\"0x6bf84c3\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 117589,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558360000,\"block\":\"0x6bf84c3\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 119614,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558360000,\"block\":\"0x6bf84c3\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 124367,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": false,
+      "status": 200,
+      "body": "{\"hash\":\"0x167c2f07cec1039b28c892fdc81d9805cfd3411966be9d24e18f2a6a8ebbacc3\"}"
+    },
+    {
+      "atMs": 135222,
+      "verb": "POST",
+      "path": "/v1/rpc/robinhood",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 147620,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558420000,\"block\":\"0x6bf84de\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 147645,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558420000,\"block\":\"0x6bf84de\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 149672,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558420000,\"block\":\"0x6bf84de\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 154445,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": true,
+      "status": 503,
+      "body": "{\"error\":{\"code\":\"down\"}}"
+    },
+    {
+      "atMs": 341492,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558600000,\"block\":\"0x6bf854d\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 341516,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558600000,\"block\":\"0x6bf854d\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 341533,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558600000,\"block\":\"0x6bf854d\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 346309,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": false,
+      "status": 200,
+      "body": "{\"hash\":\"0xd4c49b1fccd7142906320117a6da52b468a568ba452744aefcbe66b929a1d5da\"}"
+    },
+    {
+      "atMs": 358072,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558600000,\"block\":\"0x6bf854d\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 358100,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558600000,\"block\":\"0x6bf854d\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 360134,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794558600000,\"block\":\"0x6bf854d\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 364818,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": false,
+      "status": 200,
+      "body": "{\"hash\":\"0x7fd910d4561b28250a570fb0f4e98e017e8540e083f14c6d3e6dce0d406853a9\"}"
+    }
+  ],
+  "helperLines": [
+    "pool send evm robinhood send outcome=sent status=200 ms=3112",
+    "pool send evm robinhood send outcome=sent status=200 ms=1730",
+    "pool send evm robinhood send outcome=sent status=200 ms=1365",
+    "pool send evm robinhood send outcome=sent status=200 ms=1399"
+  ],
+  "refusedHosts": {},
+  "trace": [
+    {
+      "at": 154445,
+      "host": "helper/v1/pool/evm/send",
+      "methods": [
+        "undefined"
+      ],
+      "status": 503,
+      "answer": "{\"error\":{\"code\":\"down\"}}"
+    },
+    {
+      "at": 348040,
+      "host": "robinhood.api.pocket.network",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"1852\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 358050,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"1889\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 358051,
+      "host": "robinhood.api.pocket.network",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"1890\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 437398,
+      "host": "robinhood.api.pocket.network",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2253\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 447409,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2280\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 447410,
+      "host": "robinhood.api.pocket.network",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2281\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 448428,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2304\",\"error\":{\"code\":-32602,\"message\":\"query spans 200000 blocks (108520674 to 108720673), but only 100000 are allowed for this request; narrow the block range, or send one value per position\"}}"
+    },
+    {
+      "at": 448428,
+      "host": "robinhood.api.pocket.network",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2305\",\"error\":{\"code\":-32602,\"message\":\"query spans 200000 blocks (108520674 to 108720673), but only 100000 are allowed for this request; narrow the block range, or send one value per position\"}}"
+    },
+    {
+      "at": 448432,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2322\",\"error\":{\"code\":-32602,\"message\":\"query spans 200000 blocks (109320674 to 109520673), but only 100000 are allowed for this request; narrow the block range, or send one value per position\"}}"
+    },
+    {
+      "at": 448432,
+      "host": "robinhood.api.pocket.network",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2323\",\"error\":{\"code\":-32602,\"message\":\"query spans 200000 blocks (109320674 to 109520673), but only 100000 are allowed for this request; narrow the block range, or send one value per position\"}}"
+    },
+    {
+      "at": 448438,
+      "host": "robinhood.api.pocket.network",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2355\",\"error\":{\"code\":-32602,\"message\":\"query spans 200000 blocks (110920674 to 111120673), but only 100000 are allowed for this request; narrow the block range, or send one value per position\"}}"
+    },
+    {
+      "at": 448439,
+      "host": "rpc.mainnet.chain.robinhood.com",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"2358\",\"error\":{\"code\":-32602,\"message\":\"query spans 200000 blocks (110920674 to 111120673), but only 100000 are allowed for this request; narrow the block range, or send one value per position\"}}"
+    }
+  ],
+  "sent": {
+    "page": 18,
+    "helper": 8,
+    "dropped": 24
+  },
+  "failures": [],
+  "senderThrows": [],
+  "tapWaitMs": {
+    "wfirst": 1,
+    "wsecond": 1,
+    "w503": 2,
+    "w503-again": 2,
+    "wlost": 1
+  },
+  "plannedAs": {}
+}

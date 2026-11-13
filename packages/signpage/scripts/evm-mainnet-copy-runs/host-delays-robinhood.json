@@ -1,0 +1,84 @@
+{
+  "measuredAt": "2026-11-13T09:37:24.594Z",
+  "chain": "robinhood",
+  "tries": 3,
+  "hosts": {
+    "rpc.mainnet.chain.robinhood.com": {
+      "block": 250,
+      "call": 252,
+      "logs": 254,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 3
+      },
+      "of": 3
+    },
+    "robinhood.api.pocket.network": {
+      "block": 240,
+      "call": 207,
+      "logs": 210,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 3
+      },
+      "of": 3
+    },
+    "robinhood.drpc.org": {
+      "block": null,
+      "call": null,
+      "logs": null,
+      "answered": {
+        "block": 0,
+        "call": 0,
+        "logs": 0
+      },
+      "of": 3
+    },
+    "robinhood-rpc.publicnode.com": {
+      "block": 86,
+      "call": 86,
+      "logs": null,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 0
+      },
+      "of": 3
+    },
+    "robinhood.rpc.blxrbdn.com": {
+      "block": 748,
+      "call": 224,
+      "logs": null,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 0
+      },
+      "of": 3
+    },
+    "rpc-robinhood.globalstake.io": {
+      "block": 230,
+      "call": 294,
+      "logs": 1048,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 3
+      },
+      "of": 3
+    },
+    "robinhood.daybreak-rpc.network": {
+      "block": 317,
+      "call": 303,
+      "logs": 277,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 3
+      },
+      "of": 3
+    }
+  }
+}

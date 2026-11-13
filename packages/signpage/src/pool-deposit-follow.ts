@@ -215,6 +215,9 @@ export function uxNoteOpen(notes: readonly Pick<NoteRecord, "ref" | "scope" | "s
 export const POOL_FOLLOW_FAST_MS = 2_000;
 export const POOL_FOLLOW_SLOW_MS = 15_000;
 export const POOL_FOLLOW_SLOW_MAX_MS = 60_000;
+/** How long a round under the floor keeps the costs it read while U_X's balance stays the one they were read at (card
+ *  evm-first-proof-inside-ten-seconds): a fee that falls under that balance is carried within this. */
+export const POOL_FOLLOW_COSTS_MS = 15_000;
 
 /**
  * The largest ask U_X pays from `have` (its lower balance): rungs whose sum, with `perRung` for each and `keep` left,
@@ -323,6 +326,12 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
   // one reader's word (the helper's on EVM mainnet) never shows a send expired that landed
   let chainSeen = false;
   let slow = POOL_FOLLOW_SLOW_MS;
+  // the costs a round under the floor read, at U_X's lower balance then and the device's clock (card
+  // evm-first-proof-inside-ten-seconds): read again only once that balance moves or POOL_FOLLOW_COSTS_MS passed, so a
+  // follow held under the floor is no fee oracle read every round on the pool's hosts (a Base mainnet copy of 13 Nov:
+  // 30 requests per 10 s on each, every pass's budget there); a carry is only ever decided on costs read in its round
+  type Under = { low: bigint; at: number; c: { floor: bigint; perRung: bigint; keep: bigint } };
+  let under: Under | null = null;
   // the device's clock at this follow's first end attempt (re-check P2): a page opened long past the quote's deadline
   // still reads a failing tx read again for the whole margin
   let endSince: number | null = null;
@@ -414,7 +423,11 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       const low = a < b ? a : b;
       if (plain && low < base) base = low;
       // the costs' reads only once U_X holds at least the least rung (review L2): none while it holds nothing
-      const c = low >= deps.ladder.min ? await costsNow() : null;
+      const t = (deps.now ?? Date.now)();
+      const was = under as Under | null;
+      const keep = was !== null && was.low === low && t >= was.at && t - was.at < POOL_FOLLOW_COSTS_MS ? was : null;
+      const c: Under["c"] | null = low >= deps.ladder.min ? (keep?.c ?? (await costsNow())) : null;
+      under = c !== null && low < c.floor ? (keep ?? { low, at: t, c }) : null;
       if (c !== null && low >= c.floor) {
         if (plain && !landed && low > base) {
           await show("in_transit");

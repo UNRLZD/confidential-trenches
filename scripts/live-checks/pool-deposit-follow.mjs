@@ -107,8 +107,12 @@ const LOOP = new RegExp(
     // reads, in_transit before its carry, written first; the lower balance; the costs only once it holds a rung; at or
     // over the floor, the carry; else, landed, no in_pool and no end while a note of U_X's is landing
     `[^]{0,700}?let (${N})=await \\10\\(\\);\\15&&\\((${N})=!0\\),!\\13&&!\\15&&\\12&&\\5\\.noted!==void 0&&await \\5\\.noted\\(\\7\\)&&\\(\\13=!0\\);` +
-    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\17<\\18\\?\\17:\\18;\\11&&\\19<(${N})&&\\(\\20=\\19\\);let (${N})=\\19>=\\5\\.ladder\\.min\\?await ${N}\\(\\):null;` +
-    `if\\(\\21!==null&&\\19>=\\21\\.floor\\)\\11&&!\\13&&\\19>\\20&&\\(await \\14\\(${Q}in_transit${Q}\\),\\12=!0\\),await \\1\\(\\19,\\21\\)&&\\(\\16=!0\\),\\8&&\\(\\16=!0\\);` +
+    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\17<\\18\\?\\17:\\18;\\11&&\\19<(${N})&&\\(\\20=\\19\\);` +
+    // a cost read held while the balance stays under its floor, at most 15 s and never across a clock set back (card
+    // evm-first-proof-inside-ten-seconds); a carry only on costs read in its round
+    `let (${N})=\\(\\5\\.now\\?\\?Date\\.now\\)\\(\\),(${N})=(${N}),(${N})=\\22!==null&&\\22\\.low===\\19&&\\21>=\\22\\.at&&\\21-\\22\\.at<15e3\\?\\22:null,` +
+    `(${N})=\\19>=\\5\\.ladder\\.min\\?\\24\\?\\.c\\?\\?await ${N}\\(\\):null;if\\(\\23=\\25!==null&&\\19<\\25\\.floor\\?\\24\\?\\?\\{low:\\19,at:\\21,c:\\25\\}:null,\\25!==null&&\\19>=\\25\\.floor\\)` +
+    `\\11&&!\\13&&\\19>\\20&&\\(await \\14\\(${Q}in_transit${Q}\\),\\12=!0\\),await \\1\\(\\19,\\25\\)&&\\(\\16=!0\\),\\8&&\\(\\16=!0\\);` +
     `else if\\(\\13\\)\\{if\\(!\\15&&(${N})!==${Q}in_pool${Q}&&await \\14\\(${Q}in_pool${Q}\\),!\\15&&await \\5\\.past\\(\\7\\)\\)` +
     `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\12=!0\\),`,
 );

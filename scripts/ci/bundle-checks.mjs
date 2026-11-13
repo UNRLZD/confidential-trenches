@@ -104,6 +104,7 @@ export const IN_PROCESS = [
   // the bundle part only (the one rule, the deposit address, the follow's reader, the withdraw): the pools on two RPCs
   // and the helper's fee against the device's are past the build
   { key: "evm-deposit-on-mainnet", host: "sign", load: () => import("../live-checks/evm-deposit-on-mainnet.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  viaRead("evm-first-proof-inside-ten-seconds", () => import("../live-checks/evm-first-proof-inside-ten-seconds.mjs")),
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
   // serves that file; the helper part reads the helper, past the build
   { key: "withdraw-fee-busy-waits", host: "sign", load: () => import("../live-checks/withdraw-fee-busy-waits.mjs"), run: async (m, f, dirs) => m.judgeSign(await m.readSign(SIGN, f, m.pinOf(readFileSync(path.join(dirs.sign, "index.html"), "utf8")))) },
