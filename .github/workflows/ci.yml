@@ -30,7 +30,7 @@ name: ci
 # full run. A push trigger here, or no merge_group one, fails scripts/ci/ci-runs-once.mjs.
 # A pull request runs the fast checks alone (card ci-runs-once-per-change): gitleaks, deep-import, verify-gate,
 # money-gate, the changes job and the path-gated pool-solana and slither. Every heavy job (the test shards and test,
-# the vault sandbox's plan, build, shards and vault-sandbox) runs on the merge queue's group and by hand only, so each
+# browser-e2e, the vault sandbox's plan, build, shards and vault-sandbox) runs on the merge queue's group and by hand only, so each
 # change runs the full checks once, on the commit the queue lands. A job skipped by its if reports success to a
 # required check (GitHub's "Troubleshooting required status checks", Handling skipped but required checks: "A job is
 # skipped by a conditional / The job reports Success", read 13 Nov 12:5xZ), so test and vault-sandbox pass a pull
@@ -659,14 +659,43 @@ jobs:
       - name: the vault's own tests, without the sandbox suite
         run: cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
 
+  # The signing page's browser runs (card e2e-runs-once-in-the-queue): live.yml ran them, with the terminal's browser
+  # chain, on every pull request (about 27 minutes, 25.5 of them the terminal's chain: runs 43440753733 and 43440138300),
+  # and no required check read them, so every pull request waited on them before it could queue and the queue never ran
+  # them. They run here, once, on the queue's group and by hand; the terminal's chain is test-browser's (its three parts
+  # run every command of apps/terminal's test:e2e), so it is not run twice. A shard of test: a failed or skipped one fails
+  # the required check, so a screen break stays off main (scripts/ci/test-shards.test.mjs plants each way it could not).
+  browser-e2e:
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Google Chrome stable, and its sandbox comes up
+        uses: ./.github/actions/chrome
+      - name: the signing page in headless Chrome (its headers, its frame)
+        run: pnpm --filter signpage run test:e2e
+      - name: the signing page's withdraw form at 390 and 1440 wide
+        run: node packages/signpage/test/withdraw-screens/run.mjs
+      - name: the signing page's pool withdraw screen at 390 and 1440 wide, on Solana and Base
+        run: node packages/signpage/test/pool-withdraw-screens/run.mjs
+
   # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
   # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset. The one
   # skip it passes (card ci-pr-light): on a pull request, a shard the changes job, itself passed, said false for (its
   # output named as the shard's id with _ for -). test-mutants is no shard of it: it runs nightly (above). It and its
   # shards run on the queue's group and by hand alone (card ci-runs-once-per-change): skipped by its if on a pull
-  # request, it reports success there, so the planned skip above is never met on a run that has test.
+  # request, it reports success there, so the planned skip above is never met on a run that has test. browser-e2e is a
+  # shard of it like any test-* (card e2e-runs-once-in-the-queue).
   test:
-    needs: [changes, test-wallet, test-packages, test-browser, test-scripts, test-vault]
+    needs: [changes, test-wallet, test-packages, test-browser, test-scripts, test-vault, browser-e2e]
     if: always() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 5

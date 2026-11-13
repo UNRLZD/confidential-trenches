@@ -5,15 +5,16 @@
 //   - every `uses:` of every workflow and action is a local action (./) or a full 40-hex commit sha;
 //   - none reads a secret (the word `secrets` in no line that is not a comment);
 //   - every `permissions:` block is `contents: read` and no workflow lacks the top-level one;
-//   - live.yml: dispatches on inputs host (exactly app, sign, helper: the keys of live-plan's HOSTS) and commit; has the
-//     plan, check, live and browser-e2e jobs; the check job's run is the check its matrix names (a file in
+//   - live.yml: dispatches on inputs host (exactly app, sign, helper: the keys of live-plan's HOSTS) and commit, and runs
+//     on nothing else (card e2e-runs-once-in-the-queue: its pull request job, browser-e2e, made every pull request wait
+//     about 27 minutes before it could queue, and the queue never ran it; the browser runs are ci.yml's, in the group that
+//     test reads); has the plan, check and live jobs and no browser-e2e; the check job's run is the check its matrix names (a file in
 //     scripts/live-checks), its artifact step runs `if: always()`, and the verdict job runs `if: always()`; no run line
 //     names a check that does not exist; the plan job runs on a dispatch alone; no step installs Playwright's own
 //     Chromium (a browser starts only as the installed Chrome, scripts/browsers.mjs); the check job's summary grep keeps
 //     every verdict line a check prints (SUMMARY_LINES: card jupiter-build-budget-503, an INCONCLUSIVE line it dropped);
 //   - live.yml: the dispatched runs of one host share one queue (card live-runs-one-per-host): the top-level concurrency
-//     group is LIVE_GROUP, so a second run on a host waits for the first to end, and cancel-in-progress is false or true on
-//     a pull request alone (a pull request's group is its own ref). On 6 Nov 10:55Z two helper runs at once (42206377652,
+//     group is LIVE_GROUP, so a second run on a host waits for the first to end, and cancel-in-progress is false. On 6 Nov 10:55Z two helper runs at once (42206377652,
 //     42206382978) shared the helper's budgets: helper-token-page-cold read 29 and 28 of 32 cold (floor 30) where a run
 //     alone (42207995804) read 31;
 //   - the check job runs a serial group's checks in one step (scripts/ci/live-serial.mjs, GROUP the matrix's) and a single
@@ -44,6 +45,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOSTS, ROOT, keysOf, listOf, planFor } from "./live-plan.mjs";
+import { triggers } from "./ci-runs-once.mjs";
 import { RERUN, rerun } from "./live-rerun.mjs";
 import { serial } from "./live-serial.mjs";
 
@@ -97,11 +99,11 @@ export const SUMMARY_LINES = [
   "live-check k: ERROR: x",
 ];
 
-/** live.yml's concurrency group: one per host on a dispatch (inputs.host is required there), a pull request's own ref
- *  otherwise, never the commit or the run (card live-runs-one-per-host). */
+/** live.yml's concurrency group: one per host on a dispatch (inputs.host is required there), never the commit or the run
+ *  (card live-runs-one-per-host). */
 export const LIVE_GROUP = "live-${{ inputs.host || github.ref }}";
 /** The cancel-in-progress values that never cancel a dispatched run. */
-export const LIVE_CANCEL = Object.freeze(["false", "${{ github.event_name == 'pull_request' }}"]);
+export const LIVE_CANCEL = Object.freeze(["false"]);
 
 /** The runners live.yml takes from its own commit, and every file they import (relative .mjs imports, followed). */
 export const RUNNERS = Object.freeze(["scripts/ci/live-rerun.mjs", "scripts/ci/live-serial.mjs"]);
@@ -189,7 +191,10 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   const options = /options:\s*\[([^\]]*)\]/.exec(host)?.[1].split(",").map((s) => s.trim()).sort().join(",");
   want(options === [...hosts].sort().join(","), `the host input's options are ${options ?? "missing"}, want ${[...hosts].sort().join(",")}`);
   want(/^ {6}commit:\n(?: {8}.*\n)*? {8}required: true/m.test(text), "no required commit input");
-  for (const job of ["plan", "check", "live", "browser-e2e"]) want(new RegExp(`^  ${job}:`, "m").test(text), `no ${job} job`);
+  for (const job of ["plan", "check", "live"]) want(new RegExp(`^  ${job}:`, "m").test(text), `no ${job} job`);
+  // card e2e-runs-once-in-the-queue: a deploy's runs alone; the browser runs are ci.yml's browser-e2e, in the queue's group
+  for (const t of Object.keys(triggers(text) ?? {})) want(t === "workflow_dispatch", `runs on ${t}: live.yml runs a deploy's checks by dispatch alone, and a pull request waits on no job of it (the browser runs are ci.yml's browser-e2e, in the merge queue's group)`);
+  want(!/^  browser-e2e:/m.test(text), "has a browser-e2e job: the browser runs are ci.yml's browser-e2e, once, in the merge queue's group that the required check test reads");
   want(/^  plan:\n    if: github\.event_name == 'workflow_dispatch'\n/m.test(text), "the plan job runs on something other than a dispatch (a deploy's commit and host come only from its inputs)");
   const jobText = (name) => new RegExp(`^  ${name}:\\n((?:   .*\\n|\\s*\\n|  #.*\\n)*)`, "m").exec(text)?.[0] ?? "";
   want(/uses: actions\/upload-artifact@[0-9a-f]{40}.*\n\s+if: always\(\)\n\s+with:\n\s+name: live-/.test(jobText("check")), "the check job's artifact step does not run `if: always()`");

@@ -54,11 +54,24 @@ test("planted: a host input that drops a host, or no commit input, is refused", 
 });
 
 test("planted: a run that names a check that does not exist, an artifact step that skips a failed run, a verdict that skips one", () => {
-  assert.ok(has(liveProblems(LIVE.replace("pnpm --filter signpage run test:e2e", "node scripts/live-checks/no-such-check.mjs")), /no-such-check, which is no file/));
+  assert.ok(has(liveProblems(LIVE.replace("      - run: pnpm install --frozen-lockfile\n", "      - run: node scripts/live-checks/no-such-check.mjs\n")), /no-such-check, which is no file/));
   assert.ok(has(liveProblems(LIVE.replace("        if: always()\n        with:\n          name: live-", "        with:\n          name: live-")), /artifact step does not run `if: always\(\)`/));
   assert.ok(has(liveProblems(LIVE.replace("    if: always() && needs.plan.result != 'skipped'", "    if: needs.plan.result != 'skipped'")), /live job does not run `if: always\(\)`/));
   assert.ok(has(liveProblems(LIVE.replace('node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS', "node scripts/live-checks/app-shell.mjs")), /single-check step is not the one the gate holds: it must run the check its matrix names/));
-  assert.ok(has(liveProblems(LIVE.replace("  browser-e2e:", "  other-e2e:")), /no browser-e2e job/));
+  assert.ok(has(liveProblems(LIVE.replace("\n  live:\n", "\n  verdict:\n")), /no live job/));
+});
+
+// card e2e-runs-once-in-the-queue: live.yml's browser-e2e ran on every pull request (about 27 minutes), no required
+// check read it, and the merge queue never ran it; its runs are ci.yml's browser-e2e now, in the group test reads
+test("planted: live.yml back on pull requests, on any trigger but a dispatch, or with a browser-e2e job, is refused", () => {
+  const on = "on:\n  workflow_dispatch:\n";
+  assert.ok(LIVE.includes(on), "live.yml's on: block opens with its dispatch");
+  for (const t of ["  pull_request:\n    branches: [main]\n", "  pull_request_target:\n", "  merge_group:\n    types: [checks_requested]\n", "  push:\n    branches: [main]\n"]) {
+    const name = t.trim().split(":")[0];
+    assert.ok(has(liveProblems(LIVE.replace(on, `on:\n${t}  workflow_dispatch:\n`)), new RegExp(`runs on ${name}: live\\.yml runs a deploy's checks by dispatch alone`)), name);
+  }
+  const job = "  browser-e2e:\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-24.04\n    timeout-minutes: 30\n    steps:\n      - run: pnpm --filter terminal run test:e2e\n";
+  assert.ok(has(liveProblems(`${LIVE.trimEnd()}\n\n${job}`), /has a browser-e2e job: the browser runs are ci\.yml's browser-e2e/));
 });
 
 test("planted (card jupiter-build-budget-503): a summary grep that drops a verdict line, an INCONCLUSIVE one included, or no grep at all, is refused", () => {
@@ -631,7 +644,7 @@ test("planted (card live-runs-one-per-host): a live.yml whose dispatched runs do
   assert.ok(conc.test(LIVE), "live.yml has a top-level concurrency block");
   const at = (block) => liveProblems(LIVE.replace(conc, block));
   assert.ok(has(at(""), /no top-level concurrency/), "missing");
-  const group = (g) => at(`concurrency:\n  group: ${g}\n  cancel-in-progress: \${{ github.event_name == 'pull_request' }}\n`);
+  const group = (g) => at(`concurrency:\n  group: ${g}\n  cancel-in-progress: false\n`);
   assert.ok(has(group("live-${{ github.workflow }}-${{ github.ref }}-${{ inputs.host }}-${{ inputs.commit }}"), /concurrency group/), "main's group before this card: one run per commit, so two runs on one host read it at once");
   assert.ok(has(group("live-${{ inputs.host }}-${{ github.run_id }}"), /concurrency group/), "a group per run");
   assert.ok(has(group("live"), /concurrency group/), "one group for every host");
@@ -640,6 +653,7 @@ test("planted (card live-runs-one-per-host): a live.yml whose dispatched runs do
   assert.ok(has(cancel("true"), /cancel-in-progress/), "a second run cancels the first");
   assert.ok(has(cancel("${{ github.event_name == 'workflow_dispatch' }}"), /cancel-in-progress/), "true on a dispatch");
   assert.deepEqual(cancel("false"), []);
+  assert.ok(has(cancel("${{ github.event_name == 'pull_request' }}"), /cancel-in-progress/), "a pull request's cancel, with no pull request trigger left (card e2e-runs-once-in-the-queue)");
 });
 
 // review of 9eaf059a, P2-1: wiring that turns a red check job green. Each planted edit is refused.
