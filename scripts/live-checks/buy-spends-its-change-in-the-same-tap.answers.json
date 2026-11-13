@@ -1,0 +1,18 @@
+{
+ "good": {
+  "note": "branch card/buy-spends-its-change-in-the-same-tap at a52d02caf, built with build-app.mjs --out, read 2026-11-13T19:33:19.189Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-j1IPzs5JPKpm6fb9p+I+6QbYfp8z5bvy8VWB5fFcTBsnB6Xy1907yx2NcnZU5bau\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-j1IPzs5JPKpm6fb9p+I+6QbYfp8z5bvy8VWB5fFcTBsnB6Xy1907yx2NcnZU5bau",
+  "carry": true,
+  "prove": true,
+  "round": true
+ },
+ "bad": {
+  "note": "SIGN_HOST as served before the card, read 2026-11-13T19:33:19.195Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+  "carry": false,
+  "prove": false,
+  "round": false
+ }
+}
