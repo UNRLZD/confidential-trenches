@@ -83,8 +83,9 @@ type Awaitable<T> = T | Promise<T>;
 type DropSeed<T> = T extends (seed64: Uint8Array, ...rest: infer R) => infer O ? (...rest: R) => O : never;
 /** W_{near,l,j} and the token its buy record binds it to (A11): the bound the signer holds a sell to. `coinMin`: the
  *  least of the token on W that is W's coin (its buy's floor over its baseline), less is a stranger's dust and no token
- *  to sell; null: no buy swap of W's, so none is; absent: any of it is. */
-type W = { id: string; l: bigint; j: number; token: string; coinMin?: bigint | null };
+ *  to sell; null: no buy swap of W's, so none is; absent: any of it is. `coinMinFunded`: the least while W holds USDC of
+ *  the least deposit (a fee not known: the signed minimum), read once at the run's first read and kept for the run. */
+type W = { id: string; l: bigint; j: number; token: string; coinMin?: bigint | null; coinMinFunded?: bigint };
 
 export type NearSellDeps = {
   network: NearNetwork;
@@ -187,10 +188,13 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
     }
     if (w === null || typeof w !== "object" || !IMPLICIT.test(w.id) || typeof w.l !== "bigint" || !Number.isSafeInteger(w.j) || typeof w.token !== "string" || w.token === "") return { error: "not_allowed" };
     if (!(w.coinMin === undefined || w.coinMin === null || (typeof w.coinMin === "bigint" && w.coinMin > 0n))) return { error: "not_allowed" };
+    if (!(w.coinMinFunded === undefined || (typeof w.coinMinFunded === "bigint" && w.coinMinFunded > 0n))) return { error: "not_allowed" };
     const wallet: W = { id: w.id, l: w.l, j: w.j, token: w.token, ...(w.coinMin === undefined ? {} : { coinMin: w.coinMin }) };
+    // the run's one least: coinMinFunded when W holds USDC of the least deposit at the first read, else coinMin
+    let least = wallet.coinMin;
     // W's coin: the token at its coinMin or more; under it, a stranger's dust, never sold for and never holding W's
     // USDC back (the vault would refuse what dust sells for, so a sale of it would stop every run before the move)
-    const coin = (held: bigint): boolean => (wallet.coinMin === null ? false : held >= (wallet.coinMin ?? 1n));
+    const coin = (held: bigint): boolean => (least === null ? false : held >= (least ?? 1n));
 
     // W read on both providers, asked again (reads only) until `done` holds, at most NEAR_BUY_READ_TRIES times
     const readUntil = async (step: NearSellStep, side: "buy" | "sell", done: (s: NearSwapWalletState) => boolean, missed: string): Promise<NearSwapWalletState> => {
@@ -232,6 +236,7 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
     };
 
     // 1. what W holds of the token (side sell: the token sent, USDC received)
+    if (w.coinMinFunded !== undefined && (await lightUntil("read", "buy", () => true, "read_failed")).held >= MIN) least = w.coinMinFunded;
     const first = await lightUntil("read", "sell", () => true, "read_failed");
     say("read", coin(first.held) ? "token held" : "no token");
 

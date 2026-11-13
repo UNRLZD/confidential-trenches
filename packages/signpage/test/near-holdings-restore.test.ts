@@ -826,6 +826,59 @@ test("a token that takes a fee on what the exchange sends: the floor is what rea
   assert.deepEqual((await records(v.w))[0]!.swap, { floor: "950", before: "0" });
 });
 
+// a fee not known: while W holds USDC of the least deposit (1,000,000), the signed minimum is the floor
+const unknownFee = async () => ({ buyBps: 0, sellBps: 0, senderPays: false, scope: [] as string[], exempt: [] as string[], unknown: true });
+const failedAt = (min: string) => ({ ...buySwap(TOKEN, BigInt(H - 1)), args: { ...buySwap().args, msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: USDC, token_out: TOKEN, min_amount_out: min }], skip_degen_price_sync: true, skip_unwrap_near: true }) } });
+/** A rebuilt W whose buy swap (min 1,000,000) failed, fee not known, the seat reading `dust` of the coin and `usdc`. */
+async function unknownFeeW(dust: bigint, usdc: bigint) {
+  const v = await world([5_000_000n], [true]);
+  const { w: W, note, nh } = v.ws[0]!;
+  const recs = recordsFrom({ [W]: recordOf(W, TOKEN, [{ tx: relayed(note, register()) }, { tx: relayed(note, failedAt("1000000")), state: "failed" }]) });
+  const p = await nearHoldingsPass(pageOf(v, [], { tokenFee: unknownFee }), { spends: spendsOf([row(nh, W)]), records: recs, seat: seatOf({ [TOKEN]: { [W]: dust }, [USDC]: { [W]: usdc } }) });
+  return { v, W, p, r: (await records(v.w))[0] };
+}
+
+test("P2-H a fee not known with W's USDC unspent: dust of 99 or 100 (the widest floor is 100) is no coin, W is on its way home and the way home takes the 2.5 USDC", async () => {
+  for (const dust of [99n, 100n, 10_000n]) {
+    const { v, W, p, r } = await unknownFeeW(dust, 2_500_000n);
+    assert.deepEqual(p.written, [W], `dust ${dust}`);
+    assert.deepEqual([r!.stage, r!.fill, r!.swap], ["sent", undefined, { floor: "100", before: "0", funded: "1000000" }], `dust ${dust}`);
+    const home = homeOf(dust, 2_500_000n);
+    await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
+    assert.deepEqual(home.st.moved, [2_500_000n], `dust ${dust}: W's USDC in the vault`);
+  }
+});
+
+test("P2-H the seat read no coin, the two providers see 100 of dust on the way home: still no coin while the USDC is unspent, the USDC comes home", async () => {
+  const { v, r } = await unknownFeeW(0n, 2_500_000n);
+  assert.equal(r!.stage, "sent");
+  const home = homeOf(100n, 2_500_000n);
+  await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
+  assert.equal((await records(v.w))[0]!.fill, undefined, "never a position of dust");
+  assert.deepEqual(home.st.moved, [2_500_000n]);
+});
+
+test("P2-H the USDC threshold is the least deposit itself: at exactly 1,000,000 the signed minimum holds; one unit under, the widest floor (W's USDC spent)", async () => {
+  const at = await unknownFeeW(100n, 1_000_000n);
+  assert.deepEqual([at.r!.stage, at.r!.fill], ["sent", undefined], "1,000,000: dust is no coin");
+  const under = await unknownFeeW(100n, 999_999n);
+  assert.deepEqual([under.r!.stage, under.r!.fill?.out], ["filled", "100"], "999,999: W's USDC spent, the widest floor counts it");
+});
+
+test("P2-H a fee not known with W's USDC spent: a real coin under its signed minimum shows and sells", async () => {
+  const { v, W, r } = await unknownFeeW(950_000n, 0n);
+  assert.deepEqual([r!.stage, r!.fill?.out], ["filled", "950000"]);
+  assert.equal((await nearPositions(pageOf(v))).length, 1);
+  const lines: string[] = [];
+  const home = homeOf(950_000n, 0n);
+  const page = pageOf(v, lines, { readWallet: home.readWallet, move: home.move });
+  const run = nearSellKind(page)({ token: TOKEN, slippageBps: 100 }, { id: "s1" } as never);
+  if ("running" in run) await run.after.catch(() => {});
+  assert.ok(lines.includes("near sell read: token held"), lines.join(" | "));
+  assert.ok(!lines.some((l) => l.includes("not_funded") || l.includes("no wallet holds")), lines.join(" | "));
+  void W;
+});
+
 test("a token fee read as not known (code not pinned) is taken at the widest fee the device reads: W is never left unread for good; its USDC comes home and its coin shows", async () => {
   const unknown = async () => ({ buyBps: 0, sellBps: 0, senderPays: false, scope: [] as string[], exempt: [] as string[], unknown: true });
   // W's buy swap failed: 2.5 USDC on W and none of the coin, three passes
@@ -837,7 +890,7 @@ test("a token fee read as not known (code not pinned) is taken at the widest fee
   const pass = () => nearHoldingsPass(page, { spends: spendsOf([row(nh, W)]), records: recs, seat: seatOf({ [USDC]: { [W]: 2_500_000n } }) });
   assert.deepEqual(await pass(), { written: [W], empty: [], unread: [] });
   const r = (await records(v.w))[0]!;
-  assert.deepEqual([r.stage, r.swap], ["sent", { floor: "1", before: "0" }], "1000 at 9,999 bps is under 1: the floor is 1");
+  assert.deepEqual([r.stage, r.swap], ["sent", { floor: "1", before: "0", funded: "1000" }], "1000 at 9,999 bps is under 1: the floor is 1; while W holds its USDC, 1000");
   const home = homeOf(0n, 2_500_000n);
   await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
   assert.deepEqual(home.st.moved, [2_500_000n], "W's USDC in the vault");
