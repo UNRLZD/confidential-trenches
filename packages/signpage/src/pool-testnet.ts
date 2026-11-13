@@ -1513,7 +1513,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // moment on 526-563 ms. Synced once a sign-in, after the state read's proof passes end, each read a "pass" turn on its
   // host's lane (a trade's reads go first); kept in the page's own index store (src/evm-index-store.ts), so a reload
   // serves the kept index at once and syncs only the gap. A sync that ends partial is synced again at the next state
-  // read. One sync a chain at once; none past a sign out. It names no wallet: every pool of the PoolManager.
+  // read. One sync a chain at once on the device, across its tabs (the Web Lock ct-evm-index/{chain}, if available: a
+  // tab that finds it held syncs none and asks again at its next state read, then from the index the other tab kept;
+  // card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each read the whole cold index, 13 Nov CDP
+  // capture); none past a sign out. It names no wallet: every pool of the PoolManager.
   const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
   const evmIndexed = new Set<"base" | "robinhood">();
   const evmIndexing = new Set<"base" | "robinhood">();
@@ -1530,7 +1533,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     evmIndexing.add(chain);
     // each reader's request waits for a pass's turn on its host, so a trade's reads there go first
     const passFetch = (async (url: string, init?: RequestInit) => (await hostLane(url).turn("pass", signal), laneFetch()(url, init))) as typeof fetch;
-    void (async () => {
+    const sync = async (): Promise<void> => {
       if (!evmIndex.has(chain)) {
         const kept = await indexStore?.get(network).catch(() => null);
         if (kept != null && !signal.aborted && evmPoolIndexUse(network, { index: kept, coversThrough: kept.through, pools: kept.pools })) evmIndex.set(chain, kept);
@@ -1548,7 +1551,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         evmIndexed.add(chain);
         await indexStore?.put(network, s.index);
       }
-    })()
+    };
+    void (locks ? locks.request(`ct-evm-index/${chain}`, { ifAvailable: true }, (free) => (free === null ? undefined : sync())) : sync())
       .catch(() => {})
       .finally(() => evmIndexing.delete(chain));
   };

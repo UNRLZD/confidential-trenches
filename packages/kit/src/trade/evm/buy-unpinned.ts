@@ -24,6 +24,7 @@
 // with the digest made here.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { HELPER_RPC_BATCH_MAX } from "../../helper/v1.ts";
 
 export type EvmPoolChain = "base" | "robinhood" | "base-sepolia" | "robinhood-testnet";
 
@@ -101,10 +102,13 @@ export type EvmPoolVenue = {
   readonly poolManager?: string;
   readonly scan?: Readonly<{ url: string; span: number; depth: number; parallel: number; orSpan?: number; spares?: readonly EvmScanSpare[] }>;
   /** The device's index of every pool of the PoolManager (checks/evm/pool-index.ts, card evm-pool-index): its two
-   *  readers, each of another operator and never the helper, `span` blocks a request over the scan's `depth`, `perBatch`
-   *  spans a batch and `parallel` batches at once on each; stored to `margin` blocks below the head (a reorg's reach);
-   *  past `cap` pools it refuses too_many_pools. */
-  readonly index?: Readonly<{ readers: readonly [string, string]; span: number; perBatch: number; parallel: number; margin: number; cap: number }>;
+   *  readers, each of another operator, the first always one the device reaches directly, the second at most the
+   *  helper's keyed route (POST /v1/rpc/{chain}?keyed=only, as the NEAR seat: the helper can make the sync refuse,
+   *  never add or hide a pool, F4a and F5), `span` blocks a request over the scan's `depth`, `perBatch` spans a batch
+   *  and `parallel` batches at once on each, at most `batchMax` calls in any one batch (the helper's
+   *  HELPER_RPC_BATCH_MAX where it reads); stored to `margin` blocks below the head (a reorg's reach); past `cap` pools
+   *  it refuses too_many_pools. */
+  readonly index?: Readonly<{ readers: readonly [string, string]; span: number; perBatch: number; parallel: number; margin: number; cap: number; batchMax?: number }>;
 };
 export type EvmScanSpare = Readonly<{ url: string; span: number; parallel: number; orSpan?: number }>;
 export type EvmHookedPool = { readonly pad: string; readonly from: "native" | "weth"; readonly fee: number; readonly tickSpacing: number; readonly hooks: string };
@@ -500,7 +504,18 @@ export const evmMainnetVenues = () =>
       // (above), so 2 at once of 10 spans: a cold index of the scan's 10M blocks, 1,000 spans and 49,761 pools,
       // took 542.7 s, Robinhood's own answering 144 of its 246 batches 429 and Pocket none of its 102; the gap a minute
       // on, 3 batches each, 2.2 s, no 429 (18:42-18:52Z). The margin: 7,119 blocks; the cap: 131,072 pools.
-      index: bare({ readers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"] as const), span: 10_000, perBatch: 10, parallel: 2, margin: 7_119, cap: 131_072 }),
+      // Card signpage-evm-reads-draw-no-refusal: release 130's page read that cold index (live run 43477001550: 508 s,
+      // Robinhood's own limited 267 times), and Robinhood's own answers its 429 with access-control-allow-origin "*,*",
+      // which a browser refuses as CORS, so each 429 was a console error and a spent try (Chrome CDP capture 13 Nov
+      // 18:0xZ: the 6th post of 20 calls; curl the same, 18:08Z). Pocket caps a getLogs at 10,001 blocks and no other
+      // public Robinhood RPC serves more than 10,000 (dRPC's free plan 10,000, thirdweb 1,000, Daybreak 2,000, PublicNode
+      // archive needs a token; 18:1xZ), while Robinhood's own and the helper's keyed route (Alchemy, ROBINHOOD_RPC_URL)
+      // each answer 1,000,000 blocks in one call (3,562 Initialize logs, 3.4 MB, 4.3 s through the helper). So the
+      // readers are those two, of two operators (Robinhood's own a nitro node, web3_clientVersion; the helper's a
+      // keyed Alchemy URL), in spans of 500,000 blocks (about 1.7 MB, under the helper's 4 MiB answer cap), one span a
+      // batch and one batch at once: a cold index of the scan's 10M blocks is 20 spans, 42 calls on each, where it was
+      // 1,000 spans and 2,001 calls on Robinhood's own.
+      index: bare({ readers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only"] as const), span: 500_000, perBatch: 1, parallel: 1, margin: 7_119, cap: 131_072, batchMax: HELPER_RPC_BATCH_MAX }),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
     // 2026-11-03), whose code scripts/live-checks/evm-venues-pin.mjs reads on the chain's two RPCs against the build

@@ -640,3 +640,62 @@ test("S2: a receipt answered with a rate limit inside the batch once, then prese
   assert.equal(r.coversThrough, head);
   assert.equal(r.pools!.find((p) => p.id === evmPoolIdOf(gap.key))?.block, gap.block);
 });
+
+// Card signpage-evm-reads-draw-no-refusal: the Robinhood venue's cold index, read through evmPoolIndexRefresh as the
+// page reads it, stays inside each reader's limit. Release 130's page asked rpc.mainnet.chain.robinhood.com 1,000
+// spans of 10,000 blocks, 20 calls a post, and its Cloudflare answered the 6th post 429 with access-control-allow-origin
+// "*,*", which a browser refuses as CORS (Chrome CDP capture 13 Nov 18:0xZ; curl the same at the 6th 20-call post).
+// Pocket caps a getLogs at 10,001 blocks, so it cannot carry larger spans; the helper's keyed route answers 1,000,000
+// blocks in one call. So the readers are Robinhood's own and the helper's ?keyed=only route, in spans of
+// ROBINHOOD_INDEX_SPAN, every helper batch inside its HELPER_RPC_BATCH_MAX.
+test("the Robinhood venue's cold index asks its device-direct reader few calls and the helper only batches it takes", async () => {
+  const { evmPoolIndexRefresh } = await import("../src/trade/evm/buy-tap.ts");
+  const { evmPoolVenues } = await import("../src/trade/evm/buy-unpinned.ts");
+  const { HELPER_RPC_BATCH_MAX } = await import("../src/helper/v1.ts");
+  const head = 113_543_798;
+  const calls = new Map<string, number>();
+  const batches = new Map<string, number[]>();
+  const fake = (async (url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[];
+    calls.set(url, (calls.get(url) ?? 0) + body.length);
+    batches.set(url, [...(batches.get(url) ?? []), body.length]);
+    const out = body.map((c) => {
+      if (c.method === "eth_getLogs") return { jsonrpc: "2.0", id: c.id, result: [] };
+      if (c.method === "eth_getBlockByNumber") {
+        const n = c.params[0] === "latest" ? head : Number(c.params[0]);
+        return { jsonrpc: "2.0", id: c.id, result: { number: hx(n), hash: blockHash(n) } };
+      }
+      return { jsonrpc: "2.0", id: c.id, error: { code: -32601, message: "no" } };
+    });
+    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const ix = evmPoolVenues().robinhood!.index!;
+  const own = "https://rpc.mainnet.chain.robinhood.com";
+  const helper = "https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only";
+  assert.deepEqual([...ix.readers], [own, helper], "Robinhood's own, device-direct, and the helper's keyed route");
+  const { sync, served } = await evmPoolIndexRefresh("robinhood", null, fake);
+  assert.equal(served, true);
+  assert.equal(sync!.coversThrough, head);
+  // the measured budget: Robinhood's own served 5 posts of 20 calls (10 getLogs of 10,000 blocks each) and answered
+  // the 6th 429; a cold index asks it at most half of that, whatever the span
+  assert.ok((calls.get(own) ?? 0) <= 50, `Robinhood's own asked ${calls.get(own)} calls`);
+  assert.ok((batches.get(helper) ?? []).every((n) => n <= HELPER_RPC_BATCH_MAX), `the helper asked batches of ${JSON.stringify(batches.get(helper))}`);
+  // the helper's per-client share (RPC_PAGE_NEED.robinhood, 30 calls in any 10 s) holds the page's other reads too
+  assert.ok((calls.get(helper) ?? 0) <= 50, `the helper asked ${calls.get(helper)} calls`);
+});
+
+// Card signpage-evm-reads-draw-no-refusal: a reader that takes at most `batchMax` calls a batch (the helper's
+// HELPER_RPC_BATCH_MAX, 10: a batch past it is its 413) gets the state reads (F5) in batches of at most that many; with
+// 500 a batch, 25 one-reader pools went in one batch of 25 the helper refuses, each pool unread and the sync partial.
+test("F5's state reads take each reader's batchMax: no batch of more calls than it takes", async () => {
+  const head = 1_000_000;
+  const gaps = Array.from({ length: 25 }, (_, i) => ({ key: key(200 + i), block: 940_000 + i * 100 }));
+  const st = new Set(gaps.map((p) => evmPoolIdOf(p.key)));
+  const a: Reader = { head, pools: gaps, receipts: gaps, state: st, calls: [] };
+  const b: Reader = { head, pools: [], receipts: gaps, state: st, throwsOverCalls: 10, calls: [] };
+  const r = await evmPoolIndexSync(null, cfgOf(a, b, { perBatch: 5, batchMax: 10 }));
+  assert.equal(r.error?.message ?? null, null);
+  assert.equal(r.coversThrough, head);
+  assert.equal(gaps.filter((g) => ids(r.pools).has(evmPoolIdOf(g.key))).length, 25);
+  for (const x of [a, b]) assert.ok(x.calls.filter((c) => c[0]?.method === "eth_call").every((c) => c.length <= 10), JSON.stringify(x.calls.map((c) => c.length)));
+});
