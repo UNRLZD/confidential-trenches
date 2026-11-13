@@ -1285,6 +1285,13 @@ export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { r
   INDEXES.set(chain, { from: ix.from, through: n, byCurrency });
   return true;
 }
+/** The pools of `token` the chain's served index holds (every pool of the PoolManager to its N that pairs the token),
+ *  or null where no index is served: what a buy may ask a quote of, never a pool the quote then trusts unread (each is
+ *  read at the agreed block on both providers like any candidate). */
+export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly EvmPoolKey[] | null {
+  const ix = INDEXES.get(chain);
+  return ix === undefined || typeof token !== "string" ? null : [...(ix.byCurrency.get(lower(token)) ?? [])];
+}
 /** For the tests: forgets every chain's index (not in the kit's index). */
 export const evmPoolIndexReset = (): void => INDEXES.clear();
 /** The scan of currency `c` the index holds, from `floor` (the scan's oldest block) to its N, kept as a scan keeps its

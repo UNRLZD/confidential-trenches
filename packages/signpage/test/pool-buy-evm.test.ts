@@ -14,7 +14,7 @@ import { asRecorded, gasRoundAnswers, withMarker } from "../../kit/test/evm-quot
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, type EvmPoolRequest, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
+import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_POSITION_COSTS_KEY, evmLastRouteReset, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused } from "../src/evm-send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import * as R from "../src/rules/pool.ts";
@@ -1046,4 +1046,42 @@ test("a quote read again at W's signature that fails: nothing signed, recorded, 
     assert.ok(zero(seen.seeds[0]!), fail.code);
     assert.equal(h.claimed!.size, 0, `${fail.code}: the proof is released for the next tap`);
   }
+});
+
+test("card evm-buy-and-sell-on-mainnet: a tap asks the route that last quoted for the token first, one quote; the index's listed launchpad pool is asked and an unlisted hook never; a token whose pools no buy may take is not_allowed", async () => {
+  evmLastRouteReset();
+  // the first tap: the first standard shape, refused below the kit's own best route, then that route
+  const a = host({ ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(a.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(a.seen.quotes.length, 2);
+  assert.deepEqual(a.seen.quotes[1], FIXTURE_ROUTE);
+  // the next tap of the token asks that route first: one quote
+  const b = host({ ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(b.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(b.seen.quotes, [FIXTURE_ROUTE]);
+  // with the index served: the token's pools a buy may take, a listed launchpad's first (Doppler's hook, fee and tick
+  // spacing on Base, buy-unpinned.ts hookedPools), never one behind a hook the venue does not list
+  evmLastRouteReset();
+  const t = TOKEN.toLowerCase();
+  const weth = (VENUES.base.weth as string).toLowerCase();
+  const pair = BigInt(weth) < BigInt(t) ? { currency0: weth, currency1: t } : { currency0: t, currency1: weth };
+  const doppler = { ...pair, fee: 0x800000, tickSpacing: 10, hooks: "0xbb7784a4d481184283ed89619a3e3ed143e1adc0" };
+  const unlisted = { ...pair, fee: 3000, tickSpacing: 60, hooks: "0x00000000000000000000000000000000000c0c0c" };
+  const c = host({ ...both([release()]) });
+  const asked: unknown[] = [];
+  const q = await fixtureQuote();
+  c.h.indexPools = () => [unlisted, doppler];
+  c.h.quote = async (req) => (asked.push(req.route), q);
+  assert.deepEqual(await runEvmPoolBuy(c.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(asked, [{ venue: "uniswap-v4", currencyIn: weth, hops: [{ currency: t, fee: 0x800000, tickSpacing: 10, hooks: doppler.hooks, hookData: "0x" }] }], "one quote, the listed pool's");
+  // the index holds the token's pools, none a buy may take, and no v3 tier quotes: the page does not trade it
+  evmLastRouteReset();
+  const d = host();
+  const asked2: unknown[] = [];
+  d.h.indexPools = () => [unlisted];
+  d.h.quote = async (req) => (asked2.push(req.route), Promise.reject(new EvmQuoteError("no_quote", "no pool")));
+  assert.deepEqual(await runEvmPoolBuy(d.h, ASK), { error: "not_allowed" });
+  assert.equal(asked2.length, 4, "the four v3 tiers only");
+  assert.deepEqual(d.seen.sends, []);
+  evmLastRouteReset();
 });
