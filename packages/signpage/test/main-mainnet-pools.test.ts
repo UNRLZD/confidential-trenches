@@ -24,11 +24,19 @@ const wrap = (src: string, name: string, body: string): string => {
   if (!src.includes(anchor)) throw new Error(`${name}: its line moved; update this test's hook`);
   return `${src.replace(anchor, `function ${name}__real(`)}\n${body}\n`;
 };
+// the build's table of the chains whose withdraw it carries (POOL_WITHDRAW_BUILT), read live from globalThis.__ctBuilt so
+// a test can plant a build without one chain's withdraw (unset: the real table)
+const BUILT = "Object.freeze({ solana: true, base: true, robinhood: true })";
+const plantBuilt = (src: string): string => {
+  if (src.split(BUILT).length !== 2) throw new Error("POOL_WITHDRAW_BUILT: its line moved; update this test's hook");
+  const live = ["solana", "base", "robinhood"].map((c) => `get ${c}() { return globalThis.__ctBuilt?.${c} ?? true; }`).join(", ");
+  return src.replace(BUILT, `({ ${live} })`);
+};
 registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
-      return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
+      return { ...r, source: plantBuilt(wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }")) };
     // the restore host main.ts builds, kept for the wiring test below
     if (url.endsWith("/signpage/src/pool-restore.ts"))
       return { ...r, source: wrap(String(r.source), "poolRestore", "export function poolRestore(h) { globalThis.__ctRestoreHost = h; return poolRestore__real(h); }") };
@@ -201,7 +209,7 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   await ns.move(p.id, "INCOMING", "UNSPENT", { leaf: { value: CHUNK, label: 1n, commitment: noteCommitment(CHUNK, 1n, p.precommitment), leafIndex: 0n } });
   // the holding tab's note store stays open, as the queue's does: a closed one is a dead tab, whose HELD notes are freed
   const held = await ns.move(p.id, "UNSPENT", "HELD", { deadlineMs: BigInt(Date.now() + 600_000), context: "1" });
-  g.__ctReady = [{ noteId: held.id, attempt: held.attempt, poolId: `sol:${PROGRAM}`, chunk: CHUNK, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
+  g.__ctReady = [{ noteId: held.id, attempt: held.attempt, poolId: `sol:${PROGRAM}`, chunk: CHUNK, wallet: { l: 1n, j: 0, address: "W" }, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
 
   // review P3-3 (card sol-pools-mainnet-pin): the landing's settle pass (src/pool-testnet.ts settle, a pool.deposit run)
   // holds the seed lock shared across its Solana reads, and a deposit.quote waits for the landing's naming, whose write
@@ -223,7 +231,7 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   assert.ok(quoted, `deposit.quote at boot never answered while the settle pass's Solana reads were held (${heldSeen} held): it waits behind them`);
   assert.ok(heldSeen > 0, "the settle pass's Solana reads never met the hold, so this test held nothing");
 
-  const want = `0.${solanaTapSpendOf(RENT)(CHUNK, FEE_CAP, SOL_TIP_CAP).toString().padStart(9, "0")}`.replace(/0+$/, "");
+  const want = `0.${solanaTapSpendOf(RENT)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;
   // the first state starts the price and Rent reads; each landing is heard, so a later state carries them
   for (let t = 0; t < 300; t++) {
@@ -324,6 +332,35 @@ test("review of 56a57ed2, card evm-deposit-on-mainnet: main.ts's restore host sa
   assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.addressed!(c)]), [["solana", true], ["base", true], ["robinhood", true]]);
   // and each addressed chain has its U_X reads, so a restore reads every U_X it could have paid and none stalls it unread
   assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.ux?.(c) != null]), [["solana", true], ["base", true], ["robinhood", true]]);
+});
+
+test("review P2-1 (G3), the one rule at its doors: a build planted to carry no Base withdraw gives no Base deposit address on pool.address, and its restore host says Base is not addressed; Robinhood as before", async () => {
+  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> => {
+    const id = crypto.randomUUID();
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
+    win.dispatchEvent(e);
+    for (let t = 0; t < 1500; t++) {
+      const a = posted.find((m) => m.id === id);
+      if (a) return a;
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    throw new Error("no answer to pool.address");
+  };
+  const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean } }).__ctRestoreHost;
+  gl.__ctBuilt = { base: false };
+  try {
+    const got = await ask({ chain: "base" });
+    assert.notEqual(got.ok, true, `base: ${JSON.stringify(got)}`);
+    assert.equal(got.error?.code, "not_allowed", `base: ${JSON.stringify(got)}`);
+    assert.equal(h?.addressed?.("base"), false, "the restore host: no Base address on this build");
+    assert.equal(h?.addressed?.("robinhood"), true, "the restore host: Robinhood as before");
+    let rh: { ok?: boolean } = {};
+    for (let t = 0; t < 50 && !rh.ok; t++) rh = await ask({ chain: "robinhood" });
+    assert.equal(rh.ok, true, `robinhood: ${JSON.stringify(rh)}`);
+  } finally {
+    delete gl.__ctBuilt;
+  }
 });
 
 // last in this file: pool.withdraw opens the page's screen, and while a sheet shows the shell reads no message from the

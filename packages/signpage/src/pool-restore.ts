@@ -443,7 +443,7 @@ export function restoreUxSolanaRpcs(): readonly [SolanaRpc, SolanaRpc] | null {
  * on the restore's public pair (restoreUxSolanaRpcs), and the follow's own deposit (`follow`: the page's pool.deposit
  * from U_{s,i}, which reads and sends on the pool kinds' pair as a live deposit does). On Base and Robinhood (card
  * evm-deposit-on-mainnet) the EVM follow's own reader (evmPoolFollowDeps with no wallet reader: each U_X's balance on
- * both of the pool's two public RPCs, `evm`, the pool kinds' pair), for Solana's reason: one restore asks for every one
+ * both of the pool's two public RPCs, `evm`, the pool kinds' pair, each paced as Solana's pair), for Solana's reason: one restore asks for every one
  * of a user's U_X in a row, so never our helper relay; mainnet only, as Solana's (1Click pays a pool deposit out there
  * alone). null on a chain with no pair or no follow here.
  */
@@ -451,7 +451,9 @@ export function restoreUxOf(chain: PoolChain, follow: PoolUxReads | null, progra
   if (chain !== "solana") {
     const e = follow === null || POOL_TESTNET ? null : evm(chain);
     if (e === null) return null;
-    const r = evmPoolFollowDeps({ rpcs: e.rpcs, pin: e.pin, deposit: follow!.deposit });
+    // each of the pair on its own provider's queue at the kit's keyless limit, as Solana's (restoreUxSolanaRpcs): one U_X
+    // a request, never a lane's ids in one burst to a provider (review P2-3)
+    const r = evmPoolFollowDeps({ rpcs: [solanaPacedRpc(e.rpcs[0]), solanaPacedRpc(e.rpcs[1])], pin: e.pin, deposit: follow!.deposit });
     return { balances: r.balances, costs: r.costs, ladder: r.ladder, deposit: follow!.deposit };
   }
   if (follow === null || program === undefined) return null;

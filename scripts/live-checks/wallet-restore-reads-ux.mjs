@@ -159,9 +159,10 @@ const INTENTS = (x) => new RegExp(`[,; ]${esc(x)}=${Q}intents\\.near${Q}[,;]`);
 const UX_PAIR = new RegExp(
   `var (${N})=Object\\.freeze\\(\\[${Q}https://solana-rpc\\.publicnode\\.com${Q},${Q}https://solana\\.api\\.pocket\\.network${Q}\\]\\);function (${N})\\(\\)\\{return\\[(${N})\\((${N})\\(\\1\\[0\\]\\)\\),\\3\\(\\4\\(\\1\\[1\\]\\)\\)\\]\\}` +
     // Base and Robinhood first (card evm-deposit-on-mainnet): the EVM follow's own reader (`\\13`, EVM_FOLLOW_READER) on
-    // the pair the host hands (`\\10`: the pool's two public RPCs), the follow's own deposit
+    // the pair the host hands (`\\10`: the pool's two public RPCs), each on its queue by the same pacer (`\\3`, review
+    // P2-3), the follow's own deposit
     `function (${N})\\((${N}),(${N}),(${N}),(${N})=\\2,(${N})=\\(\\)=>null\\)\\{if\\(\\6!==${Q}solana${Q}\\)\\{let (${N})=\\7===null\\?null:\\10\\(\\6\\);if\\(\\11===null\\)return null;` +
-    `let (${N})=(${N})\\(\\{rpcs:\\11\\.rpcs,pin:\\11\\.pin,deposit:\\7\\.deposit\\}\\);return\\{balances:\\12\\.balances,costs:\\12\\.costs,ladder:\\12\\.ladder,deposit:\\7\\.deposit\\}\\}` +
+    `let (${N})=(${N})\\(\\{rpcs:\\[\\3\\(\\11\\.rpcs\\[0\\]\\),\\3\\(\\11\\.rpcs\\[1\\]\\)\\],pin:\\11\\.pin,deposit:\\7\\.deposit\\}\\);return\\{balances:\\12\\.balances,costs:\\12\\.costs,ladder:\\12\\.ladder,deposit:\\7\\.deposit\\}\\}` +
     `if\\(\\7===null\\|\\|\\8===void 0\\)return null;let (${N})=\\9\\(\\);if\\(\\14===null\\)return null;` +
     `let (${N})=(${N})\\(\\{rpcs:\\14,program:\\8,deposit:\\7\\.deposit\\}\\);return\\{balances:\\15\\.balances,costs:\\15\\.costs,ladder:\\15\\.ladder,deposit:\\7\\.deposit\\}\\}`,
 );
@@ -236,7 +237,7 @@ export const BUNDLE_WHY = {
   ux_read: "step 5 does not read each id's U_X beside it on the pool's two RPCs and hand that reader to the scope's id read, refusing two balances, keeping a held one for the carry and noting each id NEAR reads as money",
   ux_carry: "a U_X is not carried as the follow carries it (its floor and ask, the page's pool.deposit, read again after a fill, named when it does not fill), or one whose index has no deposit note here is not named",
   id_held: "an id NEAR reads as money is not read on both providers by asset and named while it holds more than the kept unit a move out leaves, or the two read it apart",
-  ux_pair: "the restore's U_X pair is not PublicNode and Pocket's Solana gateway, each on its own queue at the kit's keyless limit, through the follow's own reader (on Base and Robinhood the EVM follow's reader on both of the pair handed)",
+  ux_pair: "the restore's U_X pair is not PublicNode and Pocket's Solana gateway, each on its own queue at the kit's keyless limit, through the follow's own reader (on Base and Robinhood the EVM follow's reader on both of the pair handed, each on its queue by the same pacer)",
   ux_wired: "the restore's U_X reads are not built from the follows' own deps, keyed by the pool's chain, with the page's own Base and Robinhood pool pair",
 };
 
