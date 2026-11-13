@@ -52,6 +52,27 @@ export const NEAR_RPC_OPERATORS = Object.freeze({
 export const NEAR_RPC_SEATS = Object.freeze({
   "ct-api.unrealized.trade/v1/rpc/near?keyed=only": { operator: "fastnear", network: "mainnet" },
 });
+/**
+ * "<host>/<network>/" -> { operator, network }: a provider's keyed NEAR endpoint, one path segment (the key) after its
+ * prefix, on a host that serves other chains under other prefixes. dRPC serves a key at lb.drpc.live/<network>/<key>
+ * (drpc.org/docs/gettingstarted/firstrequest), NEAR mainnet under "near" (read 2026-11-13 14:2xZ: lb.drpc.live/near/<a
+ * bad key> answers "Your token is invalid or expired", an unknown network "Couldn't parse request"); the helper's
+ * mainnet pair asks it second (card near-pair-on-keyed-providers, NEAR_RPC_URL_B).
+ */
+export const NEAR_RPC_KEYED = Object.freeze({
+  "lb.drpc.live/near/": { operator: "drpc", network: "mainnet" },
+});
+/** The NEAR_RPC_KEYED prefix a URL is at, its key one segment after it, else null. */
+const keyedOf = (url) => {
+  try {
+    const u = new URL(url);
+    const m = /^(\/[a-z0-9-]+\/)[A-Za-z0-9_-]{16,128}$/.exec(u.pathname);
+    const k = m === null ? null : (u.host + m[1]).toLowerCase();
+    return k !== null && u.search === "" && Object.hasOwn(NEAR_RPC_KEYED, k) ? k : null;
+  } catch {
+    return null;
+  }
+};
 const seatOf = (url) => {
   try {
     const u = new URL(url);
@@ -61,7 +82,7 @@ const seatOf = (url) => {
   }
 };
 /** The map's entry of a host, or a seat's "<host><path>?<query>". */
-const entryOf = (key) => (Object.hasOwn(NEAR_RPC_OPERATORS, key) ? NEAR_RPC_OPERATORS[key] : Object.hasOwn(NEAR_RPC_SEATS, key) ? NEAR_RPC_SEATS[key] : undefined);
+const entryOf = (key) => (Object.hasOwn(NEAR_RPC_OPERATORS, key) ? NEAR_RPC_OPERATORS[key] : Object.hasOwn(NEAR_RPC_SEATS, key) ? NEAR_RPC_SEATS[key] : Object.hasOwn(NEAR_RPC_KEYED, key) ? NEAR_RPC_KEYED[key] : undefined);
 
 const hostOf = (url) => {
   try {
@@ -72,9 +93,9 @@ const hostOf = (url) => {
 };
 
 /** The operator of a NEAR RPC URL, or null when the map does not hold it. */
-export const operatorOf = (url) => (NEAR_RPC_OPERATORS[hostOf(url)] ?? NEAR_RPC_SEATS[seatOf(url)])?.operator ?? null;
+export const operatorOf = (url) => (NEAR_RPC_OPERATORS[hostOf(url)] ?? NEAR_RPC_SEATS[seatOf(url)] ?? NEAR_RPC_KEYED[keyedOf(url)])?.operator ?? null;
 /** The network of a NEAR RPC URL, or null. */
-export const networkOf = (url) => (NEAR_RPC_OPERATORS[hostOf(url)] ?? NEAR_RPC_SEATS[seatOf(url)])?.network ?? null;
+export const networkOf = (url) => (NEAR_RPC_OPERATORS[hostOf(url)] ?? NEAR_RPC_SEATS[seatOf(url)] ?? NEAR_RPC_KEYED[keyedOf(url)])?.network ?? null;
 
 // A URL is a NEAR RPC when the map holds its host, its host and path say both "near" and "rpc" (rpc.ankr.com/near,
 // 1rpc.io/near), or a label of its host is "near" or starts or ends with "near-"/"-near" (near.lava.build,
@@ -162,7 +183,9 @@ function hostsIn(text) {
       continue;
     }
     const seat = seatOf(url);
+    const keyed = keyedOf(url);
     if (Object.hasOwn(NEAR_RPC_SEATS, seat)) found.set(at, { at, host: seat, op: NEAR_RPC_SEATS[seat].operator });
+    else if (keyed !== null) found.set(at, { at, host: keyed, op: NEAR_RPC_KEYED[keyed].operator });
     else if (!Object.hasOwn(NEAR_RPC_OPERATORS, host)) found.set(at, { at, host: url, op: null, why: "is a NEAR RPC the operator map does not hold" });
   }
   for (const m of templateMatches(text)) found.set(m.index, { at: m.index, host: m[0], op: null, why: "is a NEAR RPC host built from a template, which the scan cannot read" });
