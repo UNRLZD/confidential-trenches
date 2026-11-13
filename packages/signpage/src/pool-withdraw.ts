@@ -278,6 +278,11 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
   keepOut?(noteIds: readonly string[], spanMs: bigint): Promise<void>;
   /** The op's stage, its txs so far, the onward send still owed and what reached To, by onward signature. */
   stage?(stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals): void;
+  /** A payout to another chain (card pool-withdraws-to-any-chain): the deposit address of a 1Click quote checked on the
+   *  device (../../kit/src/checks/oneclick-exit.ts), asked with `refundTo`, the run's first W (already public in this
+   *  withdraw: it sends to that address), so a refund names nothing the withdraw does not. Called once, after the plan
+   *  and before any note moves; the address it answers is the run's To, checked as any To is. */
+  exit?(refundTo: string): Promise<string>;
 };
 
 /** A part's onward send still owed: its note (W is the note's own W_{sol, label, j}, derived on the device; the op
@@ -445,6 +450,8 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       }
       return out;
     });
+    // another chain: To is the checked quote's deposit address on this chain, its refund the first W
+    if (h.exit) to = await h.exit(spends[0]!.w);
     if (toRefused(to, h.pin, pool, spends.map((x) => x.w))) stop("to");
     await checkTo(h, to);
     // from here to the run's end no queue in any tab takes a planned note (each part refreshes the record's deadline)

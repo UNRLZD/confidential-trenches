@@ -91,7 +91,7 @@ test("the signing page's own bundle: every marker, and a draft mark written for 
   assert.equal(signMarks("nothing here").bare, false);
   // a key set with a kept word in it, or one missing an unpicked word, is not the set
   assert.ok(!found("sign", js.replace("`min`,`unmatched`", "`min`,`busy`")).includes("the vault form's draft keys"));
-  assert.ok(!found("sign", js.replace(/new Set\(\[`to`,`amount`\]\)/g, "new Set([`to`])")).includes("the pool form's draft keys"));
+  assert.ok(!found("sign", js.replace(/new Set\(\[`to`,`amount`,`chain`,`not-available`\]\)/g, "new Set([`to`,`amount`,`chain`])")).includes("the pool form's draft keys"));
 });
 
 test("the terminal's build: a kept word is final only with its pick and a helper that sets draft:!1", () => {

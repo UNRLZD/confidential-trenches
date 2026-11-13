@@ -33,13 +33,22 @@
 //   "address 5") into one valid key nobody holds, so it is refused. A direction control anywhere (it can show other
 //   characters than the field holds) is refused, and so is anything else not an address, a "solana:" link's prefix
 //   included. The To line drawn before the press shows the address the check passed, the one handed over.
+// - To any chain (card pool-withdraws-to-any-chain; Blindfill v2 lite paper §3 "Exit: to any chain"): a Chain picker
+//   above To, the pool's own chain first and chosen, then every chain the page pays out to through 1Click (deps.exits;
+//   a chain 1Click does not serve from this pool is drawn "Not available" and cannot be picked). The same chain stays as
+//   built. Another chain: To is checked on that chain (checkExitTo: Solana base58, EVM 0x with its checksum, a NEAR
+//   account), the funds are read for a plain send (W pays the quote's deposit address, an account with no code), and
+//   the press hands over the chain with the typed address; the run asks the quote (../pool-exit.ts) and pays its deposit
+//   address, never the typed one on the pool's chain. Chain and Not available are drafts (data-draft-copy).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { PieceRule } from "../../../wallet/src/pool/pieces.ts";
 import { nearestPlannable, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
-import type { PoolChain } from "../rules/pool.ts";
+import { base58 } from "@scure/base";
+import { EVM_ADDRESS, SOL_KEY, SOLANA_RESERVED_KEYS, type PoolChain } from "../rules/pool.ts";
 // the address rule, its own file so the vault form's chains share it with no import cycle (./address.ts)
-import { checkPoolTo, type PoolAddressCheck, type PoolAddressCode, type PoolKeys, toCleaned } from "./address.ts";
+import { checkPoolTo, eip55, EVM_ZERO, type PoolAddressCheck, type PoolAddressCode, type PoolKeys, toCleaned } from "./address.ts";
 import { POOL_CHAIN_MARK } from "./chain-mark.ts";
+import type { ExitChain } from "../../../kit/src/checks/oneclick-exit.ts";
 import { CHECK_IDLE_MS, markDraft, WITHDRAW_WORDS } from "./form.ts";
 
 export { checkPoolTo, eip55, toCleaned, type PoolAddressCheck, type PoolAddressCode, type PoolKeys } from "./address.ts";
@@ -63,10 +72,22 @@ export const POOL_WITHDRAW_WORDS = {
   "fee-rose": "Network fee rose. New max fee: ", // owner 8 Nov 07:55Z, kept (pw.feeRose)
   "fee-redraw": "Send at new fee", // owner 8 Nov 07:55Z, kept (pw.feeRoseSend)
   max: "Max", // owner 12 Nov 13:03Z, "Add Max, the same word the trade box uses": the label of what can be sent, "Max 0.048695 SOL"
+  chain: "Chain", // DRAFT COPY: the picker of the chain the money arrives on (card pool-withdraws-to-any-chain)
+  "not-available": "Not available", // DRAFT COPY: a chain 1Click does not serve from this pool, beside its name
 } as const;
 
 /** The keys of POOL_WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
-export const POOL_DRAFT: ReadonlySet<string> = new Set(["to", "amount"]);
+export const POOL_DRAFT: ReadonlySet<string> = new Set(["to", "amount", "chain", "not-available"]);
+
+/** The chains a payout can arrive on, in the picker's order after the pool's own. */
+export const EXIT_CHAINS: readonly ExitChain[] = Object.freeze(["solana", "base", "robinhood", "near"]);
+/** Each chain's name in the picker: the pool chains' own (./chain-mark.ts), and NEAR. */
+export const EXIT_CHAIN_NAME: Readonly<Record<ExitChain, string>> = Object.freeze({
+  solana: POOL_CHAIN_MARK.solana.name,
+  base: POOL_CHAIN_MARK.base.name,
+  robinhood: POOL_CHAIN_MARK.robinhood.name,
+  near: "NEAR",
+});
 
 /** Each chain's pool asset, as the screen names it. */
 export const POOL_ASSET: Readonly<Record<PoolChain, { symbol: string; decimals: number }>> = Object.freeze({
@@ -82,8 +103,33 @@ export type PoolFunds = { notes: readonly WithdrawSource[]; fee: bigint; wFee: b
 export type PoolAmountCode = "amount" | "insufficient" | "min" | "unread" | "unplannable";
 export type PoolAmountCheck = { ok: true; amount: bigint; parts: number; maxFee: bigint } | { ok: false; code: PoolAmountCode; min?: bigint; below?: bigint; above?: bigint };
 export type PoolFormState = "empty" | "typing" | "refused" | "ready";
-export type PoolReady = Readonly<{ chain: PoolChain; to: string; amount: bigint; maxFee: bigint }>;
+/** `dest`: the chain the money arrives on when it is not `chain` (absent: the pool pays To on its own chain, as built);
+ *  `to` is checked on `dest`. */
+export type PoolReady = Readonly<{ chain: PoolChain; dest?: ExitChain; to: string; amount: bigint; maxFee: bigint }>;
 export type PoolFormView = { state: PoolFormState; address: PoolAddressCheck | null; amount: PoolAmountCheck | null; ready: PoolReady | null };
+
+/** A NEAR account: an implicit one (64 lower hex digits, or 0x and 40 for an ETH-implicit one) or a named one (2 to 64
+ *  characters of lower letters and digits, single - or _ inside a part, parts joined by dots), NEAR's own rules. */
+const NEAR_ACCOUNT = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+const NEAR_ETH_IMPLICIT = /^0x[0-9a-f]{40}$/;
+
+/** To on another chain than the pool's: the address 1Click delivers to, checked on that chain. Nothing of the pool's is
+ *  ruled out here: the pool pays the quote's deposit address, never this one. */
+export function checkExitTo(dest: ExitChain, raw: string): PoolAddressCheck {
+  const to = toCleaned(raw);
+  const no: PoolAddressCheck = { ok: false, code: "address" };
+  if (to === null) return no;
+  if (dest === "solana") {
+    if (!SOL_KEY(to) || base58.encode(base58.decode(to)) !== to || SOLANA_RESERVED_KEYS.includes(to)) return no;
+    return { ok: true, to };
+  }
+  if (dest === "near") return NEAR_ACCOUNT.test(to) || NEAR_ETH_IMPLICIT.test(to) ? { ok: true, to } : no;
+  if (!EVM_ADDRESS.test(to)) return no;
+  const hex = to.slice(2);
+  if (hex !== hex.toLowerCase() && hex !== hex.toUpperCase() && eip55(to) !== to) return no;
+  if (to.toLowerCase() === EVM_ZERO) return no;
+  return { ok: true, to: eip55(to) };
+}
 
 /** A decimal in `decimals` digits as base units; null when it is not one. */
 export function parseUnits(raw: string, decimals: number): bigint | null {
@@ -121,12 +167,12 @@ export function checkPoolAmount(chain: PoolChain, raw: string, funds: PoolFunds 
 export const poolSendable = (funds: PoolFunds): bigint => poolWithdrawable(funds.notes, funds);
 
 /** The screen's view of both fields, checked now. */
-export function evaluatePool(chain: PoolChain, to: string, amount: string, keys: PoolKeys, funds: PoolFunds | null): PoolFormView {
+export function evaluatePool(chain: PoolChain, to: string, amount: string, keys: PoolKeys, funds: PoolFunds | null, dest: ExitChain = chain): PoolFormView {
   const blankTo = toCleaned(to) === "";
   const blankAmount = amount.trim() === "";
-  const a = blankTo ? null : checkPoolTo(chain, to, keys);
+  const a = blankTo ? null : dest === chain ? checkPoolTo(chain, to, keys) : checkExitTo(dest, to);
   const m = blankAmount ? null : checkPoolAmount(chain, amount, funds);
-  const ready = a?.ok && m?.ok ? Object.freeze({ chain, to: a.to, amount: m.amount, maxFee: m.maxFee }) : null;
+  const ready = a?.ok && m?.ok ? Object.freeze({ chain, ...(dest !== chain ? { dest } : {}), to: a.to, amount: m.amount, maxFee: m.maxFee }) : null;
   const state: PoolFormState = blankTo && blankAmount ? "empty" : (a && !a.ok) || (m && !m.ok) ? "refused" : ready ? "ready" : "typing";
   return { state, address: a, amount: m, ready };
 }
@@ -152,6 +198,9 @@ export interface PoolWithdrawFormDeps {
   /** The notes, the epoch fee and the smallest part, read on the device (a rejection leaves them unread). On Base and
    *  Robinhood `to`, the checked To once typed: W's own send to it is priced (an address with code takes more gas). */
   funds(to?: string): Promise<PoolFunds>;
+  /** The other chains this page pays out to through 1Click (../pool-exit.ts); a chain of EXIT_CHAINS left out is drawn
+   *  Not available. Absent: the pool's own chain only, no picker. */
+  exits?: readonly ExitChain[];
   /** The withdraw run; absent while the chain has no flow on this page. */
   handoff?: (r: PoolReady) => void | Promise<void>;
   /** The sends owed whose network fee rose past the Max fee drawn: each op id with the fee it now needs (lamports). */
@@ -217,6 +266,31 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   const chainName = doc.createElement("span");
   chainName.textContent = mark.name;
   head.append(badge, chainName);
+  // the chain the money arrives on: the pool's own first and chosen, then the others; drawn only when the page pays out
+  // to other chains
+  const destRow = doc.createElement("label");
+  Object.assign(destRow.style, { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 8px" });
+  const destName = doc.createElement("span");
+  destName.textContent = POOL_WITHDRAW_WORDS.chain;
+  markDraft(destName, "chain", POOL_DRAFT);
+  Object.assign(destName.style, { flexBasis: "100%" });
+  const destPick = doc.createElement("select");
+  destPick.dataset.input = "dest";
+  Object.assign(destPick.style, { flex: "1 1 0", minWidth: "0", minHeight: "44px" });
+  // no exits: no picker at all, the screen's words as built
+  for (const d of deps.exits === undefined ? [] : [chain, ...EXIT_CHAINS.filter((c) => c !== chain)]) {
+    const o = doc.createElement("option");
+    o.value = d;
+    const served = d === chain || (deps.exits ?? []).includes(d);
+    o.disabled = !served;
+    o.textContent = served ? EXIT_CHAIN_NAME[d] : `${EXIT_CHAIN_NAME[d]} · ${POOL_WITHDRAW_WORDS["not-available"]}`;
+    if (!served) markDraft(o, "not-available", POOL_DRAFT);
+    destPick.append(o);
+  }
+  destPick.value = chain;
+  if (deps.exits !== undefined) destRow.append(destName, destPick);
+  destRow.hidden = deps.exits === undefined;
+  const destOf = (): ExitChain => (EXIT_CHAINS as readonly string[]).includes(destPick.value) && (destPick.value === chain || (deps.exits ?? []).includes(destPick.value as ExitChain)) ? (destPick.value as ExitChain) : chain;
   const to = field("to");
   const amount = field("amount");
   // what can be sent now, a value and its symbol, drawn once the funds are read; a tap puts it in the amount. Its row
@@ -239,7 +313,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   const rose = doc.createElement("div");
   rose.dataset.lines = "fee-rose";
   rose.hidden = true;
-  form.append(head, rose, to.label, to.line, amount.label, canRow, amount.line, shown, go);
+  form.append(head, rose, destRow, to.label, to.line, amount.label, canRow, amount.line, shown, go);
   if (deps.owedFees && deps.redraw) {
     const redraw = deps.redraw;
     const owedFees = deps.owedFees;
@@ -326,7 +400,10 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     shown.replaceChildren();
     shown.hidden = v.ready === null;
     if (v.ready) {
-      for (const [key, value] of [["amount", `${formatUnits(v.ready.amount, decimals)} ${symbol}`], ["to", v.ready.to], ["max-fee", `${formatUnits(v.ready.maxFee, decimals)} ${symbol}`]] as const) {
+      const lines: (readonly [keyof typeof POOL_WITHDRAW_WORDS, string])[] = [["amount", `${formatUnits(v.ready.amount, decimals)} ${symbol}`]];
+      if (v.ready.dest !== undefined) lines.push(["chain", EXIT_CHAIN_NAME[v.ready.dest]]);
+      lines.push(["to", v.ready.to], ["max-fee", `${formatUnits(v.ready.maxFee, decimals)} ${symbol}`]);
+      for (const [key, value] of lines) {
         const dt = doc.createElement("dt");
         dt.textContent = POOL_WITHDRAW_WORDS[key];
         markDraft(dt, key, POOL_DRAFT);
@@ -341,8 +418,10 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   };
   const check = async (): Promise<PoolFormView | null> => {
     const at = ++seq;
+    const dest = destOf();
     if (chain !== "solana") {
-      const a = to.input.value.trim() === "" ? null : checkPoolTo(chain, to.input.value, deps.keys);
+      // another chain: W pays the quote's deposit address, an account with no code, priced as a plain send
+      const a = to.input.value.trim() === "" || dest !== chain ? null : checkPoolTo(chain, to.input.value, deps.keys);
       const t = a?.ok ? a.to : undefined;
       if (t !== fundsTo) {
         fundsTo = t;
@@ -350,7 +429,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
       }
     }
     await loaded;
-    const v = evaluatePool(chain, to.input.value, amount.input.value, deps.keys, funds);
+    const v = evaluatePool(chain, to.input.value, amount.input.value, deps.keys, funds, dest);
     if (at !== seq) return null;
     draw(v);
     return v;
@@ -363,6 +442,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     if (!blank) timer = setTimeout(() => void check(), CHECK_IDLE_MS);
   };
   to.input.addEventListener("input", typed);
+  destPick.addEventListener("change", typed);
   amount.input.addEventListener("input", typed);
   // the tap on what can be sent: that amount in the field, checked now against the same funds
   sendable.addEventListener("click", () => {
@@ -379,7 +459,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     clearTimeout(timer);
     loaded = load();
     const v = await check();
-    if (!v?.ready || v.ready.to !== before.to || v.ready.amount !== before.amount || v.ready.maxFee !== before.maxFee) return;
+    if (!v?.ready || v.ready.dest !== before.dest || v.ready.to !== before.to || v.ready.amount !== before.amount || v.ready.maxFee !== before.maxFee) return;
     await deps.handoff(v.ready);
   }
   draw(view);

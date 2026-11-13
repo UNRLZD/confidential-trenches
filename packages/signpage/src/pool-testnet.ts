@@ -62,6 +62,7 @@ import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, type TradeStore } from "./trade.ts";
 import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_PIECES, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, solanaSettleSpentSet, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
+import { exitsOf, poolExit, type PoolExitDeps } from "./pool-exit.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, resumePieces, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "./pool-buy.ts";
 import { heldWs, ownWs } from "./pool-found.ts";
@@ -3090,6 +3091,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes.close();
     }
   };
+  // a payout to another chain (card pool-withdraws-to-any-chain, src/pool-exit.ts): mainnet only, at the page's prices
+  const exitDeps: PoolExitDeps = {
+    network: POOL_TESTNET ? "testnet" : "mainnet",
+    price: (chain) => page.price?.(chain) ?? null,
+    ...(over.fetch ? { fetch: over.fetch } : {}),
+    stop: () => solanaStop.signal,
+  };
+  const exits = (chain: PoolChain) => ((x) => (x === undefined ? {} : { exits: x }))(exitsOf(exitDeps, chain));
   const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
     if (!locks || !wayOut(ready.chain) || (ready.chain === "solana" ? pin === undefined : evmPool(ready.chain) === null)) return;
     withdrawing.add(opId);
@@ -3190,7 +3199,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const ask = { kind: "pool.withdraw", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 } as const;
         // the run's planned notes out of every tab's proof queue and every other plan until it ends (as the Solana run's)
         const keepOut = async (ids: readonly string[], spanMs: bigint): Promise<void> => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()), spanMs));
-        const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep, keepOut }, { ...ask }, ready.to, ready.amount, ready.maxFee);
+        const exit = poolExit(exitDeps, ready);
+        const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep, keepOut, ...(exit ? { exit } : {}) }, { ...ask }, ready.to, ready.amount, ready.maxFee);
         write(end.stage, end.txs, end.pending, end.arrived, end.held);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
         // why a run or a part ended on a throw, on the record and the page's console (public words only: legCause), as
@@ -3213,7 +3223,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       chain,
       keys: { pool: e?.pin.pool ?? "" },
       funds: (to?: string) => (e === null ? Promise.reject(new Error("no flow for this chain")) : evmFunds(chain, to)),
-      ...(e !== null && locks ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
+      ...(e !== null && locks ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw, ...exits(chain) } : {}),
     };
   };
   const withdrawRun = async (ready: PoolReady, opId: string): Promise<void> => {
@@ -3282,6 +3292,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             marked: () => {
               for (const f of watchers) f();
             },
+            ...((exit) => (exit ? { exit } : {}))(poolExit(exitDeps, ready)),
           },
           { ...ask },
           ready.to,
@@ -3346,7 +3357,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     chain,
     keys: chain === "solana" && pin !== undefined ? { pool: solanaPoolOf(pin.program).pool, program: pin.program, feePayer: pin.feePayer } : { pool: "" },
     funds: () => (chain === "solana" && pin !== undefined ? funds() : Promise.reject(new Error("no flow for this chain"))),
-    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
+    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw, ...exits(chain) } : {}),
   });
   return {
     flow: (ask, ctx) =>

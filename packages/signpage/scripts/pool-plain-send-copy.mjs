@@ -128,7 +128,11 @@ if (UX === null) {
 }
 
 // pool.address, the plain send: below the floor, then at it
-const follow = poolFollows({ store: async () => w, decimals: () => 9, deps: () => null, locks: () => null });
+// pool.address reads a plain send's base on U_X before its address goes out (review P2-c), so its first deps call gets
+// the pair's reads; the follow that call starts gets none, since the follow below is this run's own followPoolQuote
+let baseReads = 1;
+const noDeposit = async () => Promise.reject(new Error("pool.address deposits nothing"));
+const follow = poolFollows({ store: async () => w, decimals: () => 9, deps: () => (baseReads-- > 0 ? solanaPoolFollowDeps({ rpcs, program: PIN.program, deposit: noDeposit }) : null), locks: () => null });
 const host = poolAddressHost({ pools: () => [{ chain: "solana", scope }], network: "mainnet", read: fs.depositRead, named: () => namer.named(), priced: (c, o) => poolQuotePricing(PRICE, o, c), floor: (_c, wallet, signal) => readSolanaPoolFloor(rpcs, PIN.program, wallet, signal), checked: (id, c, q, u) => follow.quoted(id, c, q, u) });
 const origin = POOL_DEPOSIT_DESTINATION.solana;
 const sol = (l) => { const s = l.toString().padStart(10, "0"); return `${s.slice(0, -9)}.${s.slice(-9)}`.replace(/\.?0+$/, ""); };
