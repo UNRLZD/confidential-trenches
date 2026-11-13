@@ -5,7 +5,7 @@
 // never an address, never a line break the vendor sent.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ANSWER_MAX, createProxy, REQUEST_VALUES_MAX, SAID_FOLD_KEYS, SAID_FOLD_MS, safeMessage, VENDOR_MESSAGE_READ } from "./proxy.ts";
+import { ANSWER_MAX, createProxy, REQUEST_VALUES_MAX, requestValues, SAID_FOLD_KEYS, SAID_FOLD_MS, safeMessage, VENDOR_MESSAGE_READ } from "./proxy.ts";
 import { VENDOR_NAMES, VENDORS } from "./vendors.ts";
 
 const ENV = {
@@ -100,7 +100,7 @@ test("the vendor's message never carries a request field, an address or a line b
   const { p, said } = proxy(() => json(400, { message: echo }));
   await p.handle("oneclick", "/v0/quote", "", QUOTE, "203.0.113.7");
   assert.deepEqual(said(), [
-    'proxy oneclick /v0/quote answered 400, the vendor\'s: 400 "<request field> <request field> and <request field> for <request field> at <address> to <address> via <address> and <address> proxy forged line"',
+    'proxy oneclick /v0/quote answered 400, the vendor\'s: 400 "recipient <request field> and <request field> for <request field> at <address> to <address> via <address> and <address> proxy forged line"',
   ]);
   const long = proxy(() => json(400, { message: "No liquidity available ".repeat(30) }));
   await long.p.handle("oneclick", "/v0/quote", "", QUOTE, "203.0.113.7");
@@ -207,7 +207,7 @@ test("a vendor that echoes the caller's dotted property name has handle() search
 });
 
 test("a request with more values than REQUEST_VALUES_MAX has the vendor's message withheld", async () => {
-  const body = JSON.stringify(Object.fromEntries(Array.from({ length: REQUEST_VALUES_MAX + 1 }, (_, i) => [`key${i}`, 0])));
+  const body = JSON.stringify(Object.fromEntries(Array.from({ length: REQUEST_VALUES_MAX + 1 }, (_, i) => [`key${i}`, `value${i}`])));
   const { p, said } = proxy(() => json(400, { message: "Failed to get quote" }));
   await p.handle("oneclick", "/v0/quote", "", body, "203.0.113.7");
   assert.deepEqual(said(), ['proxy oneclick /v0/quote answered 400, the vendor\'s: 400 "(withheld: the request held too many values)"']);
@@ -264,4 +264,78 @@ test("past SAID_FOLD_KEYS distinct lines in one window the rest are counted in o
   await fold();
   assert.equal(said().length, SAID_FOLD_KEYS);
   assert.deepEqual(lines.slice(-1), [`proxy: 5 more answers not 2xx in 10 s, past ${SAID_FOLD_KEYS} distinct lines`]);
+});
+
+// Re-review P2 of card helper-says-why-a-vendor-refused: the line keeps why. The request is the one the wallet sends for a
+// deposit (packages/wallet/src/deposit/quote.ts depositQuoteRequest, written out here: the helper reaches no package past
+// the kit's entry), and the refusals are 1Click's own words as quote.ts quotes them (ABOUT_THE_REQUEST's comment).
+const WALLET_U = "5d".repeat(32);
+const WALLET_QUOTE = JSON.stringify({
+  dry: false,
+  swapType: "EXACT_INPUT",
+  slippageTolerance: 100,
+  originAsset: "nep141:eth.omft.near",
+  depositType: "ORIGIN_CHAIN",
+  destinationAsset: "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", // gitleaks:allow (a public account id)
+  amount: "25000000",
+  refundTo: WALLET_U,
+  refundType: "INTENTS",
+  recipient: WALLET_U,
+  recipientType: "DESTINATION_CHAIN",
+  deadline: "2026-11-12T20:20:00.000Z",
+});
+test("1Click's refusals keep their field names and their numbers; no address, amount or id of the request survives", () => {
+  const safe = (m: string) => safeMessage(m, requestValues(WALLET_QUOTE, ""));
+  assert.deepEqual(
+    [
+      "Amount is too low for bridge, try at least 1000000",
+      "recipient is not valid",
+      "refundTo is not valid",
+      "nep141:eth.omft.near is not supported as origin asset",
+      "nep141:eth.omft.near supports only ORIGIN_CHAIN refundType",
+      "deadline must be at least 60 seconds in the future",
+      "slippageTolerance must not be greater than 10000",
+      "Temporary swap limits: minimum swap amount is $1",
+      `recipient ${WALLET_U} is not valid`,
+      "amount 25000000 is above the limit",
+      "deadline 2026-11-12T20:20:00.000Z has passed",
+    ].map(safe),
+    [
+      "Amount is too low for bridge, try at least 1000000",
+      "recipient is not valid",
+      "refundTo is not valid",
+      "<request field> is not supported as origin asset",
+      "<request field> supports only ORIGIN_CHAIN refundType",
+      "deadline must be at least 60 seconds in the future",
+      "slippageTolerance must not be greater than 10000",
+      "Temporary swap limits: minimum swap amount is $1",
+      "recipient <request field> is not valid",
+      "amount <request field> is above the limit",
+      "deadline <request field> has passed",
+    ],
+  );
+  // a value stands alone or is not the request's: the slippage's 100 inside 1000000, the amount inside a longer number
+  assert.equal(safe("try 100 or 1000000, not 250000000"), "try <request field> or 1000000, not 250000000");
+  // the keys and the all-caps enums are the request's schema, never the user's: out of the values
+  assert.deepEqual(requestValues(WALLET_QUOTE, "")?.filter((v) => /^[A-Z_]+$|^(recipient|refundTo|amount|deadline)$/.test(v)), []);
+});
+
+// Re-review P3: marks a vendor's echo may carry inside an id, and an id spelt percent-encoded, hide nothing.
+test("zero-width and direction marks are stripped and %XX is decoded once before the passes; two dots shorten too", () => {
+  const evm = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+  const sol = "9ddc51SoLAddr2nGeneratedKeyKk5pQwErTy8uiop1";
+  for (const [label, m] of [
+    ["a zero-width mark every 5 characters", `recipient ${evm.match(/.{1,5}/g)!.join("​")} is not valid`],
+    ["a zero-width joiner inside a named account", "refundTo someone‍-private.near is not valid"],
+    ["a word joiner and a BOM", `recipient ${evm.slice(0, 20)}⁠${evm.slice(20)}﻿ is not valid`],
+    ["a percent-encoded dot", "refundTo someone-private%2Enear is not valid"],
+    ["a percent-encoded hyphen and dot", "refundTo someone%2Dprivate%2enear is not valid"],
+    ["two dots in a short form", `deposit ${sol.slice(0, 6)}..${sol.slice(-5)} not found`],
+  ] as const)
+    assert.match(safeMessage(m, []), /^(recipient|refundTo|deposit) <address> (is not valid|not found)$/, label);
+  // a direction override never reaches the line, nor any mark of the stripped ranges
+  const marks = "​‌‍‎‏‪‫‬‭‮⁠⁦⁧⁨⁩﻿";
+  assert.equal(safeMessage(`Failed ‮etouq teg ot‬ ${marks}done`, []), "Failed etouq teg ot done");
+  // a %XX past ASCII is left as written, and %XX is decoded once, not twice
+  assert.equal(safeMessage("50%C3%A9 and 200%252E", []), "50%C3%A9 and 200%2E");
 });

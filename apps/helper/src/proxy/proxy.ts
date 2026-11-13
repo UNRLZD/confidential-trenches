@@ -207,20 +207,22 @@ export const REQUEST_VALUES_MAX = 256;
 /** A request value longer than this is found by its first VALUE_HEAD characters, and the message ends where they stand
  *  (what follows may be the rest of the value). */
 export const VALUE_HEAD = 64;
-/** Every value of the caller's request of 3 characters or more, longest first: its JSON body's keys and leaves and its
- *  query's values. No log line may carry one, since a vendor's message can echo what it was sent, a property name
- *  included (a validation answer's "property X should not exist"). null past REQUEST_VALUES_MAX. */
+/** Every value of the caller's request of 3 characters or more, longest first: its JSON body's leaves and its query's
+ *  values. No log line may carry one, since a vendor's message can echo what it was sent. Left out (re-review P2): the
+ *  body's keys and its all-caps enum leaves (EXACT_INPUT, ORIGIN_CHAIN), the request's own schema, which is what a
+ *  refusal names to say why ("recipient is not valid", "supports only ORIGIN_CHAIN refundType"); an address used as a
+ *  key is still caught as an address (addressWord). null past REQUEST_VALUES_MAX. */
 export function requestValues(body: string, rawQuery: string): string[] | null {
   const out = new Set<string>();
   const add = (v: string): boolean => {
-    if (v.length >= 3) out.add(v);
+    if (v.length >= 3 && !ENUM.test(v)) out.add(v);
     return out.size <= REQUEST_VALUES_MAX;
   };
   const walk = (v: unknown, depth: number): boolean => {
     if (depth > 32) return true;
     if (typeof v === "string" || typeof v === "number" || typeof v === "bigint") return add(String(v));
     if (Array.isArray(v)) return v.every((x) => walk(x, depth + 1));
-    if (typeof v === "object" && v !== null) return Object.entries(v).every(([k, x]) => add(k) && walk(x, depth + 1));
+    if (typeof v === "object" && v !== null) return Object.values(v).every((x) => walk(x, depth + 1));
     return true;
   };
   if (body !== "") {
@@ -235,6 +237,8 @@ export function requestValues(body: string, rawQuery: string): string[] | null {
   for (const v of new URLSearchParams(rawQuery).values()) if (!add(v)) return null;
   return [...out].sort((a, b) => b.length - a.length);
 }
+/** An enum leaf of a request: the vendor's own words, never the user's. */
+const ENUM = /^[A-Z][A-Z_]+$/;
 /** The last label a NEAR named account may end in (near, tg, sweat, testnet), or the 64-hex implicit account a
  *  sub-account sits under. */
 const NEAR_TOP = /^(near|tg|sweat|testnet|[0-9a-f]{64})$/;
@@ -246,12 +250,13 @@ const EDGE = new Set([".", "-", "…"]);
  * True when a word is an address or a part of one, whatever the request held: an EVM address or hash (0x and 6 hex
  * digits or more), a hex id of 32 or more (a NEAR implicit account), a base58 run of 32 or more (a Solana key or
  * address, glued to others by "_", "." or "-" too), a shortened one ("9ddc51…", "0x8335...2913"), or a NEAR named
- * account in any case (a dotted name whose last label is in NEAR_TOP). What no pattern catches: a bare top-level name
+ * account in any case (a dotted name whose last label is in NEAR_TOP). A shortened one is 3 letters or digits and two
+ * dots or more, or the ellipsis. What no pattern catches: a bare top-level name
  * ("alice") or a name under a top-level name not in NEAR_TOP, which reads as any other word; a value of the request is
  * caught however it reads (requestValues).
  */
 function addressWord(w: string): boolean {
-  if (/[0-9A-Za-z]{3}(\.\.\.|…)/.test(w)) return true;
+  if (/[0-9A-Za-z]{3}(\.{2,}|…)/.test(w)) return true;
   let a = 0;
   let b = w.length;
   while (a < b && EDGE.has(w[a]!)) a++;
@@ -261,10 +266,28 @@ function addressWord(w: string): boolean {
   if (/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(lower) && NEAR_TOP.test(lower.slice(lower.lastIndexOf(".") + 1))) return true;
   return t.split(/[_.\-…]+/).some((p) => /^0x[0-9a-f]{6,}$/i.test(p) || /^[0-9a-f]{32,}$/i.test(p) || /^[1-9A-HJ-NP-Za-km-z]{32,}$/.test(p));
 }
+const ALNUM = /[0-9A-Za-z]/;
+const alnumAt = (s: string, i: number): boolean => i >= 0 && i < s.length && ALNUM.test(s[i]!);
+/** `s` with `v` replaced where it stands alone, not inside a longer run of letters or digits (re-review P2: the 100 of
+ *  a slippage inside "1000000" is the vendor's number, not the request's). A value longer than VALUE_HEAD is found by its
+ *  first VALUE_HEAD characters, and the message ends there. */
+function valueReplaced(s: string, v: string): string {
+  const head = v.length > VALUE_HEAD ? v.slice(0, VALUE_HEAD) : v;
+  let out = "";
+  let from = 0;
+  for (let at = s.indexOf(head); at >= 0; at = s.indexOf(head, at + 1)) {
+    if (at < from || alnumAt(s, at - 1)) continue;
+    if (head !== v) return `${out}${s.slice(from, at)}<request field>`;
+    if (alnumAt(s, at + v.length)) continue;
+    out += `${s.slice(from, at)}<request field>`;
+    from = at + v.length;
+  }
+  return out + s.slice(from);
+}
 /**
  * A vendor's message made safe for one log line, every step linear in VENDOR_MESSAGE_READ: cut to it at its last whole
- * word (a word cut in two is one no pattern knows); every request value replaced, and a value's start where the cut
- * message ends; every control and line-separator character a space; every address word replaced (addressWord); cut to
+ * word (a word cut in two is one no pattern knows); zero-width and direction marks stripped and %XX decoded once;
+ * every request value replaced where it stands alone, and a value's start where the cut message ends; every control and line-separator character a space; every address word replaced (addressWord); cut to
  * VENDOR_MESSAGE_MAX characters. `values` null (past REQUEST_VALUES_MAX): the message is withheld.
  */
 export function safeMessage(m: string, values: readonly string[] | null): string {
@@ -276,18 +299,15 @@ export function safeMessage(m: string, values: readonly string[] | null): string
     while (i > 0 && !/\s/.test(s[i - 1]!)) i--;
     s = s.slice(0, i);
   }
-  for (const v of values) {
-    if (v.length <= VALUE_HEAD) s = s.split(v).join("<request field>");
-    else {
-      const at = s.indexOf(v.slice(0, VALUE_HEAD));
-      if (at >= 0) s = `${s.slice(0, at)}<request field>`;
-    }
-  }
+  // marks that hide a word from a search, stripped (never a space, which would split it), then one %XX decode
+  s = s.replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, "");
+  s = s.replace(/%([0-9A-Fa-f]{2})/g, (x, h: string) => (parseInt(h, 16) < 0x80 ? String.fromCharCode(parseInt(h, 16)) : x));
+  for (const v of values) s = valueReplaced(s, v);
   // a value whose start ends the cut message: its first characters, cut from the rest
   if (cut)
     for (const v of values)
       for (let p = Math.max(0, s.length - VALUE_HEAD); p <= s.length - 3; p++)
-        if (v.startsWith(s.slice(p))) {
+        if (!alnumAt(s, p - 1) && v.startsWith(s.slice(p))) {
           s = `${s.slice(0, p)}<request field>`;
           break;
         }
@@ -771,8 +791,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       }
       // card helper-says-why-a-vendor-refused, review P3: a key holding ", \ or / is spelt escaped in JSON; its decoded
-      // strings are read too
-      if (holdsKey(text) || holdsKey(decodedStrings(parsed))) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
+      // strings are read too, only when the text holds an escape (re-review P3: every answer's walk cost 4 times its parse)
+      if (holdsKey(text) || (text.includes("\\") && holdsKey(decodedStrings(parsed)))) return { ...UPSTREAM("answer", `${name} answer`, waits()), said: { status: r.status } };
       const timing = [...waits(), `send;dur=${Math.round(mono() - sentAt)}`];
       return { status: r.status, body: text, fetchedAt, timing, ...(r.status >= 200 && r.status < 300 ? {} : { said }) };
     }
