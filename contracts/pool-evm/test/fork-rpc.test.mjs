@@ -3,7 +3,9 @@
 // for that hash, on every request, while the book grows under it. No network: the upstream is this file's fetch.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answer, keyOf } from "./fork-rpc.mjs";
+// an upstream try's bound, short here (read once, at the import)
+process.env.FORK_RPC_UPSTREAM_MS = "50";
+const { answer, keyOf } = await import("./fork-rpc.mjs");
 
 const H = (c) => `0x${c.repeat(64)}`;
 const ADDR = "0x498581ff718922c3f8e6a244956af099b2652b2b";
@@ -49,4 +51,19 @@ test("a recorded answer is served from the book with the hash resolved, and an u
   assert.deepEqual(await answer(book, "base", byHash(H("a"), 3), false), { jsonrpc: "2.0", id: 3, result: H("0") });
   const miss = await answer(book, "base", byHash(H("d"), 4), false);
   assert.match(miss.error.message, /not recorded for base/);
+});
+
+test("an upstream that never answers is tried twice, each try bounded, then the read is named as failed", async (t) => {
+  const real = globalThis.fetch;
+  t.after(() => (globalThis.fetch = real));
+  let calls = 0;
+  globalThis.fetch = (_url, init) => {
+    calls++;
+    assert.ok(init?.signal instanceof AbortSignal, "each try carries its own bound");
+    return new Promise((_ok, no) => init.signal.addEventListener("abort", () => no(init.signal.reason)));
+  };
+  const at = Date.now();
+  await assert.rejects(answer({ base: {} }, "base", byHash(H("e"), 9), true), /did not answer eth_getStorageAt .* in 2 tries of 0\.05 s/);
+  assert.equal(calls, 2);
+  assert.ok(Date.now() - at < 5_000, "bounded, not held");
 });

@@ -6,7 +6,7 @@
 //   node contracts/pool-evm/test/fork-rpc.mjs -- forge test --root contracts/pool-evm     replay, run forge, exit with its code
 //   node contracts/pool-evm/test/fork-rpc.mjs --record -- forge test --mp test/BuyFork.t.sol --no-storage-caching
 //                                   (from contracts/pool-evm) add what is not recorded yet from the public RPCs below
-//                                   (with up to 5 tries each), then write the file
+//                                   (each read tried twice, 30 s each), then write the file
 // foundry.toml's rpc_endpoints point at http://127.0.0.1:47545/<chain>.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -16,6 +16,8 @@ import { fileURLToPath } from "node:url";
 
 const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/fork-rpc.json");
 const PORT = 47545;
+/** One upstream try's bound (FORK_RPC_UPSTREAM_MS, a test's own; 30 s by default). */
+const UPSTREAM_MS = Number(process.env.FORK_RPC_UPSTREAM_MS ?? 30_000);
 const UPSTREAM = { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" };
 
 // A block named by its hash ({"blockHash": h}, as Foundry 1.8 asks) is the same block as its number (as 1.7 asks):
@@ -55,15 +57,17 @@ export async function answer(book, chain, req, record) {
     console.error(`fork-rpc: not recorded for ${chain}: ${key}`);
     return { jsonrpc: "2.0", id: req.id, error: { code: -32000, message: `fork-rpc: not recorded for ${chain}: ${key}` } };
   }
+  // each try is bounded (UPSTREAM_MS), then one more, then a failure that names the read: an upstream that never
+  // answers once held anvil's fork reads, and so every request to the fork, for 300 s
   let got;
-  for (let i = 0; i < 5 && !got; i++) {
+  for (let i = 0; i < 2 && !got; i++) {
     try {
-      const res = await fetch(UPSTREAM[chain], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...req, id: 1 }) });
+      const res = await fetch(UPSTREAM[chain], { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...req, id: 1 }), signal: AbortSignal.timeout(UPSTREAM_MS) });
       if (res.ok) got = await res.json();
     } catch {}
-    if (!got) await new Promise((r) => setTimeout(r, 500 * 2 ** i));
+    if (!got && i === 0) await new Promise((r) => setTimeout(r, 500));
   }
-  if (!got) throw new Error(`fork-rpc: ${UPSTREAM[chain]} did not answer ${key}`);
+  if (!got) throw new Error(`fork-rpc: ${UPSTREAM[chain]} did not answer ${key} in 2 tries of ${UPSTREAM_MS / 1000} s`);
   const kept = "error" in got ? { error: got.error } : { result: got.result };
   const b = (book[chain] ??= {});
   b[key] = kept;
