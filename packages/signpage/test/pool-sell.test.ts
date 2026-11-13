@@ -6439,6 +6439,23 @@ test("round-trip-costs-less P3-11: a found W that is young and not held carries 
   assert.ok(rec.lamports !== undefined && BigInt(rec.lamports) > 0n, `past its time part: listed (${JSON.stringify(w.told.slice(-2))})`);
 });
 
+// review P3-11 of 024e8a89d, at the teardown: a found W past the rule's time part with a stranger's empty account to
+// close, held by the spacing before the teardown's send, lists the lamports its teardown read on both RPCs (plant c25)
+test("round-trip-costs-less P3-11: a found W held at its teardown lists the lamports its teardown read", async () => {
+  const w = await world({ buy: null }, []);
+  w.c.accounts.delete(VF.pump.ata);
+  const spam = base58.encode(new Uint8Array(32).fill(44));
+  w.c.accounts.set(spam, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(0n, 1, VF.pumpswap.mint) });
+  await w.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  for (const p of [0, 1] as const) around(w, p, (m, params, r) => (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized" ? 2_000_000 : r(m, params)));
+  forgetPageLoad();
+  await resumeRentBacks({ ...w.host, owed: { ...w.host.owed!, claim: async () => false } }, fakeLocks());
+  assert.ok(w.c.accounts.has(spam), "held before the teardown's send");
+  assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+  const rec = w.owed.get(W.address)!;
+  assert.equal(rec.lamports, String(w.c.accounts.get(W.address)!.lamports), JSON.stringify(w.told.slice(-2)));
+});
+
 // the overstatement the held listing keeps (review of 024e8a89d, P2-4b): a W of the account's found holding SOL with
 // no record here (another device's buy in several pieces, not landed yet) shows its SOL while held, counted once; the
 // same W on the device whose buy record names it is that buy's, and is never listed beside it
