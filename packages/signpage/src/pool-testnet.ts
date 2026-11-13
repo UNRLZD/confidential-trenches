@@ -58,6 +58,7 @@ import { chainNow, failAs, type Pool, type ReadyProof } from "../../wallet/src/p
 import { openProofQueue, PassFail, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
+import { proofFront, type ProofFront } from "./proof-front.ts";
 import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, type TradeStore } from "./trade.ts";
 import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_PIECES, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, solanaSettleSpentSet, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
@@ -645,6 +646,9 @@ export type TestnetOver = {
   tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", readonly string[]>>>;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
   locks?: Pick<LockManager, "request" | "query"> | null;
+  /** The device's one proving tab (src/proof-front.ts, on this page's navigator.locks, document and window otherwise):
+   *  tests plant one per tab. */
+  front?: ProofFront;
   /** The Solana pool's pin (PAGE_SOL_PIN otherwise): tests run the page's own flow on a fake pool; null, none (a build
    *  with no Solana pin, as SIGN_HOST's until the pool deploys). */
   pin?: SolanaPoolPin | null;
@@ -934,6 +938,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     solanaStop = new AbortController();
   };
   const prover = over.prover ?? proverHost();
+  // the device's one proving tab (card robinhood-note-spendable): every pool's queue opens only while this tab holds it,
+  // and all close, their notes freed, when it loses it, so a note one tab proved is never stuck HELD out of the tab in use
+  const front: ProofFront =
+    over.front ??
+    proofFront(
+      over.locks === undefined ? (globalThis.navigator?.locks ?? null) : over.locks,
+      typeof document === "undefined" ? null : document,
+      typeof window === "undefined" ? null : window,
+    );
+  const notFront = (): Error => new Error("another tab of this page holds the device's proof queues");
   const solanaDepositKind = over.depositKinds?.solana ?? poolDepositKind;
   const evmDepositKind = over.depositKinds?.evm ?? poolDepositEvmKind;
 
@@ -959,6 +973,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the proof queue: opened at the first landing, closed at sign out
   let open: Promise<OpenQueue> | null = null;
   const openQueue = async (): Promise<OpenQueue> => {
+    if (!front.held()) throw notFront();
     const notes = await openNoteStore(await page.store());
     let seed64: Uint8Array | null = null;
     try {
@@ -1066,11 +1081,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     fillStop.abort();
     fillStop = new AbortController();
     fillAgain = false;
-    // every queue, Solana's and each EVM pool's: its notes freed, its seed copy zeroed, its note store closed
+    const closing = closeQueues();
+    prover.stop();
+    await closing;
+  };
+  // every queue, Solana's and each EVM pool's: its notes freed, its seed copy zeroed, its note store closed
+  const closeQueues = async (): Promise<void> => {
     const all = [open, ...evmQueues.values()];
     open = null;
     evmQueues.clear();
-    prover.stop();
     for (const p of all) {
       if (!p) continue;
       const q = await p.catch(() => null);
@@ -1082,6 +1101,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       }
     }
   };
+  // the front lost (hidden, left, or taken by the tab in use): every queue closed, so that tab proves their notes; the
+  // front taken: a state read, whose passes open the queues and prove, and the app told to read the state again
+  front.onChange((held) => {
+    if (!held) void closeQueues().then(() => watchers.forEach((f) => f()), () => {});
+    else void stateRead().then(() => watchers.forEach((f) => f()), () => {});
+  });
 
   // a deposit's own run reads as a trade, and so does the state reads' settle of the INCOMING notes (settleSolana): it
   // holds POOL_DEPOSIT_LOCK, which a deposit tapped meanwhile waits for (a reader that holds what a trade can wait for
@@ -1174,6 +1199,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return h;
   };
   const openEvmQueue = async (chain: "base" | "robinhood"): Promise<OpenQueue> => {
+    if (!front.held()) throw notFront();
     const e = evmPool(chain);
     if (e === null) throw new Error(`no ${chain} pool on this page's network`);
     const notes = await openNoteStore(await page.store());
@@ -2985,6 +3011,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // Solana pool's part (none pinned: only theirs): neither waits on the other, and one that fails or hangs never stops
   // the other
   const stateRead = (): Promise<void> => {
+    // the tab in use takes the device's proof queues (a hidden one gives them back)
+    front.want();
     armTurn();
     const evm = evmRead().then(() => finishOnward()).catch(() => {});
     if (scope === null) return evm;
