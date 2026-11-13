@@ -14,6 +14,10 @@
 //      - withdrawSites (withdrawSites): the EVM withdraw's host, flow branch, screen deps, run guard and owed finish each
 //        on that rule and bound to one another, the host's first statement the rule call alone, so none of them is
 //        dropped on SIGN_HOST behind a constant the minifier folds away;
+//      - noLeaf (noLeafRead; src/pool-withdraw-evm.ts read): the EVM withdraw's tree read takes a cut refused as holding
+//        no leaf (wallet pool.ts PoolNoLeafError, code no_leaf: an empty pool's first leaf landing this epoch) as a cut
+//        that does not hold the note, and throws every other refusal as it came, so a first deposit's withdraw goes on
+//        to the newest root at once and a read the two RPCs disagree on still ends the run;
 //   2. the chain part (readChain, checkChain), on both of each chain's RPCs (pool-evm-deploy.mjs MAINNETS):
 //      - eth_chainId is the chain's (Base 8453, Robinhood 4663);
 //      - each mainnet pool (evm-pools-on-mainnet.mjs PINS) has code, the same on both, and its SCOPE() is the same
@@ -93,6 +97,17 @@ export function withdrawSites(js, f) {
   const sites = host ? WITHDRAW_SITES(way[1], host[1], host[4]) : {};
   return { host: !!host, ...Object.fromEntries(["flow", "deps", "run", "owed"].map((k) => [k, !!host && once(sites[k], js)])) };
 }
+/** The no-leaf refusal's class (`var C=class extends Error{code=`no_leaf`;...this.name=`PoolNoLeafError`}`), and the
+ *  withdraw's tree read bound to it: `y=(e,t)=>c.trees(e,AbortSignal.timeout(J),t).catch(e=>{if(e instanceof C)return
+ *  null;throw e}),b=e=>e!==null&&g.leafIndex<BigInt(e.stateTree.size)`, its catch that class alone and its rethrow. */
+const NO_LEAF = new RegExp(`var (${N})=class extends Error\\{code=${Q}no_leaf${Q};constructor\\((${N})\\)\\{super\\(\\2\\),this\\.name=${Q}PoolNoLeafError${Q}\\}\\}`);
+const NO_LEAF_READ = (c) =>
+  new RegExp(`[,;{ ](${N})=\\((${N}),(${N})\\)=>${N}\\.trees\\(\\2,AbortSignal\\.timeout\\(${N}\\),\\3\\)\\.catch\\((${N})=>\\{if\\(\\4 instanceof ${esc(c)}\\)return null;throw \\4\\}\\),(${N})=(${N})=>\\6!==null&&${N}\\.leafIndex<BigInt\\(\\6\\.stateTree\\.size\\)[,;]`);
+/** The EVM withdraw's tree read takes no leaf, and no other refusal, as a cut that does not hold the note: each found once. */
+export function noLeafRead(js) {
+  const c = once(NO_LEAF, js) ? NO_LEAF.exec(js) : null;
+  return !!c && once(NO_LEAF_READ(c[1]), js);
+}
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, and each marker found exactly once and bound. */
@@ -109,6 +124,7 @@ export function pageFacts(index, js) {
     reader: !!reader && once(HELPER_AT(reader[6]), js),
     withdraw: WITHDRAW_MARKS.filter((m) => js.includes(m)).length,
     withdrawSites: withdrawSites(js, rule?.[2]),
+    noLeaf: noLeafRead(js),
   };
 }
 
@@ -134,6 +150,7 @@ export function judgeBundle(run) {
   say(p?.withdraw === WITHDRAW_MARKS.length, `[SIGN_HOST] the build carries the EVM withdraw: ${p?.withdraw ?? "not read"}/${WITHDRAW_MARKS.length} marks`);
   const SITES = { host: "its host opens on the rule alone", flow: "pool.withdraw opens its screen", deps: "the screen's funds and run", run: "a tap's run", owed: "a reload finishes an owed withdraw" };
   for (const [k, what] of Object.entries(SITES)) say(p?.withdrawSites?.[k] === true, `[SIGN_HOST] the EVM withdraw on the rule: ${what} (${k})`);
+  say(p?.noLeaf === true, "[SIGN_HOST] the EVM withdraw's tree read takes a cut of no leaf as one without the note and throws every other refusal (noLeaf)");
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), false);
   return { ok: verdict === "PASS", verdict, lines };
 }

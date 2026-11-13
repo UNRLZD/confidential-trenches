@@ -1,12 +1,12 @@
 {
  "key": "evm-deposit-on-mainnet",
- "recorded": "2026-11-13T00:41:12.703Z",
+ "recorded": "2026-11-13T04:11:15.400Z",
  "good": {
-  "readAt": "2026-11-13T00:40:40.394Z",
+  "readAt": "2026-11-13T04:11:15.400Z",
   "from": "local build",
   "page": {
-   "pin": "sha384-MnIHxB8uTXRZCQ5Zml9Wkz+DJxsxd31BZuG/2Nr0FDVeIs8sI/MD26y7JFYqiTRl",
-   "sha384": "sha384-MnIHxB8uTXRZCQ5Zml9Wkz+DJxsxd31BZuG/2Nr0FDVeIs8sI/MD26y7JFYqiTRl",
+   "pin": "sha384-GlCdPGa2ChOIDUt1VoVT60b8UQitEAt6lM8Ktqw83yrzLEdXuwIImq9NUmzfovmt",
+   "sha384": "sha384-GlCdPGa2ChOIDUt1VoVT60b8UQitEAt6lM8Ktqw83yrzLEdXuwIImq9NUmzfovmt",
    "rule": true,
    "addressed": true,
    "reader": true,
@@ -17,7 +17,8 @@
     "deps": true,
     "run": true,
     "owed": true
-   }
+   },
+   "noLeaf": true
   },
   "reads": [
    {
@@ -161,8 +162,8 @@
      "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
      "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
      "epoch_ms": 60000,
-     "epoch_start_ms": 1794530400000,
-     "block": "0x3612cda",
+     "epoch_start_ms": 1794543000000,
+     "block": "0x36222f2",
      "fee": "20000000000000",
      "step": "10000000000000"
     }
@@ -178,9 +179,9 @@
      "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
      "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
      "epoch_ms": 60000,
-     "epoch_start_ms": 1794530400000,
-     "block": "0x6bb74b6",
-     "fee": "60000000000000",
+     "epoch_start_ms": 1794543000000,
+     "block": "0x6bd4d6c",
+     "fee": "70000000000000",
      "step": "10000000000000"
     }
    }
@@ -188,11 +189,11 @@
   "fee": {
    "base": {
     "bind": {
-     "start": "2026-11-13T00:40:00.000Z",
+     "start": "2026-11-13T04:10:00.000Z",
      "ok": true,
-     "block": "56700122",
+     "block": "56763122",
      "depth": 0,
-     "chainFee": "12184272544",
+     "chainFee": "132591617330",
      "baseFeePerGas": "5000000",
      "hosts": [
       "mainnet.base.org",
@@ -214,8 +215,8 @@
       "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
       "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794530400000,
-      "block": "0x3612cda",
+      "epoch_start_ms": 1794543000000,
+      "block": "0x36222f2",
       "fee": "20000000000000",
       "step": "10000000000000"
      }
@@ -231,8 +232,8 @@
       "sell_sender": "0x2139756ab61ad861b4e25a009f092683e7454ee9",
       "fee_collector": "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794530340000,
-      "block": "0x3612bae",
+      "epoch_start_ms": 1794542940000,
+      "block": "0x36221c6",
       "fee": "20000000000000",
       "step": "10000000000000"
      }
@@ -240,12 +241,12 @@
    },
    "robinhood": {
     "bind": {
-     "start": "2026-11-13T00:40:00.000Z",
+     "start": "2026-11-13T04:11:00.000Z",
      "ok": true,
-     "block": "112948406",
+     "block": "113070013",
      "depth": 0,
-     "chainFee": "0",
-     "baseFeePerGas": "20150000",
+     "chainFee": "4644347676800",
+     "baseFeePerGas": "20216000",
      "hosts": [
       "rpc.mainnet.chain.robinhood.com",
       "robinhood.drpc.org"
@@ -266,9 +267,9 @@
       "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
       "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794530400000,
-      "block": "0x6bb74b6",
-      "fee": "60000000000000",
+      "epoch_start_ms": 1794543060000,
+      "block": "0x6bd4fbd",
+      "fee": "70000000000000",
       "step": "10000000000000"
      }
     },
@@ -283,9 +284,9 @@
       "sell_sender": "0x92874bbc2638f644872d911d8b72d734978e24ae",
       "fee_collector": "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
       "epoch_ms": 60000,
-      "epoch_start_ms": 1794530340000,
-      "block": "0x6bb7272",
-      "fee": "60000000000000",
+      "epoch_start_ms": 1794543000000,
+      "block": "0x6bd4d6c",
+      "fee": "70000000000000",
       "step": "10000000000000"
      }
     }
