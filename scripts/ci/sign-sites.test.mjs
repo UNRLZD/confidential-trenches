@@ -44,11 +44,11 @@ const refuses = (name, files, want, links) => {
 test("the tree's sign sites are SIGN_SITES, each with a proof test that exists; the copy reads the same", () => {
   const tree = readTrees(ROOT);
   assert.deepEqual(check(tree, SIGN_SITES, exists), []);
-  assert.equal(Object.keys(SIGN_SITES).length, 20);
+  assert.equal(Object.keys(SIGN_SITES).length, 21);
   assert.deepEqual(census(tree).sites, Object.fromEntries(Object.entries(SIGN_SITES).map(([k, v]) => [k, v.n])));
   assert.ok(Object.keys(tree).some((f) => f.startsWith("packages/exit/src/")));
   assert.deepEqual(plant({}), []);
-  assert.equal(execFileSync(process.execPath, [path.join(ROOT, "scripts/ci/sign-sites.mjs"), ROOT], { encoding: "utf8" }).trim(), "sign-sites: OK (20 sign sites, each with its proof test)");
+  assert.equal(execFileSync(process.execPath, [path.join(ROOT, "scripts/ci/sign-sites.mjs"), ROOT], { encoding: "utf8" }).trim(), "sign-sites: OK (21 sign sites, each with its proof test)");
 });
 
 const W = "packages/wallet/src";

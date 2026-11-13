@@ -162,6 +162,8 @@ export type OwedPieces = { address: string; l: string; j: number; primary: strin
 export type PiecesOwed = { list(): Promise<OwedPieces[]>; put(r: OwedPieces): Promise<void>; drop(address: string): Promise<void> };
 
 export type PoolBuyHost = {
+  /** How this run reads the ready proofs (PoolBuyScope; card buy-any-amount-on-every-chain): set by runPoolBuyScoped. */
+  scope?: PoolBuyScope;
   /** The pinned pool (the wallet's SOL_POOLS of this page's network). */
   pin: SolanaPoolPin;
   /** Where the buy writes W's buy mint before its send (BuyMints); a write that fails sends nothing. */
@@ -794,6 +796,13 @@ export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string):
   return stranded;
 }
 
+/** runPoolBuy in a scope (PoolBuyScope, carried on its host as `scope`): a tap that may split answers its legs' plan
+ *  instead of not_funded when no single W's set pays it and its legs do; a leg's run picks only from its own W's proofs,
+ *  never another leg's note. */
+export function runPoolBuyScoped(host: PoolBuyHost, ask: PoolAsk, waits: ReadWaits, scope: PoolBuyScope): Promise<PoolBuyAnswer | { legs: PoolBuyLeg[] }> {
+  return runPoolBuy({ ...host, scope }, ask, waits);
+}
+
 /** One pool.buy: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). A provider read that still fails
  *  past the page's own retry before W signs makes the buy again from its first read after a wait on the page's one rule
  *  (read-waits.ts readWaits: from 1 s, doubling, at most 10 s, until READ_WAIT_TOTAL_MS), then "down" (card
@@ -801,17 +810,12 @@ export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string):
  *  signs rests on a read from before a wait; the Rent sysvar is kept per provider across the attempts (keptReads). A
  *  sign out ends the wait, and the buy answers failed, nothing taken or signed. */
 export async function runPoolBuy(host: PoolBuyHost, ask: PoolAsk, waits: ReadWaits = readWaits(clockOf(host))): Promise<PoolBuyAnswer> {
-  return runPoolBuyScoped(host, ask, waits, {}) as Promise<PoolBuyAnswer>;
-}
-
-/** runPoolBuy in a scope (PoolBuyScope): a tap that may split answers its legs' plan instead of not_funded when no
- *  single W's set pays it and its legs do; a leg's run picks only from its own W's proofs, never another leg's note. */
-export async function runPoolBuyScoped(host: PoolBuyHost, ask: PoolAsk, waits: ReadWaits, scope: PoolBuyScope): Promise<PoolBuyAnswer | { legs: PoolBuyLeg[] }> {
   const h: PoolBuyHost = Object.assign(Object.create(host) as PoolBuyHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
-  return readsWaited((at) => buyRun(h, ask, at, scope), h.wait, h.signal, waits);
+  // a legs plan only on a host scoped to split (runPoolBuyScoped), never on runPoolBuy's own callers
+  return readsWaited((at) => buyRun(h, ask, at), h.wait, h.signal, waits) as Promise<PoolBuyAnswer>;
 }
 
-async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }, scope: PoolBuyScope = {}): Promise<PoolBuyAnswer | { legs: PoolBuyLeg[] }> {
+async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Promise<PoolBuyAnswer | { legs: PoolBuyLeg[] }> {
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
   let claim: string[] | null = null;
@@ -833,6 +837,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }, sco
     const pool = solanaPoolAccount(h.pin.program);
     // a note this run claimed (a first round's own note, held for the buy's round) stays this run's to pick
     // a leg's run (card buy-any-amount-on-every-chain): only its W's proofs, never a note another leg of the tap holds
+    const scope = h.scope ?? {};
     const leg = scope.leg;
     const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && (!h.claimed?.has(p.noteId) || claim?.includes(p.noteId) === true) && (leg === undefined || (p.wallet.address === leg.address && !leg.not.has(p.noteId))));
     // the ready proofs first: none (or every one held by another tap of this page) and no read is made
@@ -1513,7 +1518,10 @@ export function poolBuyKind(host: () => PoolBuyKindHost, locks: Locks | null = g
     let early = false;
     // the run's final stage, posted once
     let ended = false;
-    // the follow of a run that ended "sent": the one run's host's, or a split tap's legs'
+    // the run's host, and a split tap's hosts for its legs past the first
+    let h: PoolBuyKindHost | null = null;
+    const more: PoolBuyKindHost[] = [];
+    // the follow of a split tap that ended "sent", its legs'; else the one run's host's
     let follow: ((post: (stage: TradeStage) => void) => void) | null = null;
     const end = (stage: TradeStage): void => {
       if (ended) return;
@@ -1523,11 +1531,13 @@ export function poolBuyKind(host: () => PoolBuyKindHost, locks: Locks | null = g
       if (stage !== "sent") return;
       let late = false;
       try {
-        follow?.((x) => {
+        const post = (x: TradeStage): void => {
           if (late) return;
           late = true;
           ctx?.progress(x);
-        });
+        };
+        if (follow) follow(post);
+        else h?.follow?.(post);
       } catch {
         /* the follow never stops the run's end */
       }
@@ -1536,9 +1546,7 @@ export function poolBuyKind(host: () => PoolBuyKindHost, locks: Locks | null = g
     const answered = new Promise<void>((r) => (give = r));
     const run = duringTrade(locks, () =>
       locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
-        const h0 = host();
-        const hosts: PoolBuyKindHost[] = [h0];
-        follow = (post) => h0.follow?.(post);
+        const h0 = (h = host());
         try {
           let a: PoolBuyAnswer | { legs: PoolBuyLeg[] } = await runPoolBuyScoped({ ...h0, sent: (signature) => {
             if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
@@ -1550,7 +1558,8 @@ export function poolBuyKind(host: () => PoolBuyKindHost, locks: Locks | null = g
           if ("legs" in a) {
             // a split tap: the plan run sent nothing; leg 0 runs on its host, every other leg on a new one
             const legs = a.legs;
-            for (let i = 1; i < legs.length; i++) hosts.push(host());
+            for (let i = 1; i < legs.length; i++) more.push(host());
+            const hosts = [h0, ...more];
             const got = await runPoolBuyLegs(hosts, legs, ask, waits, {
               sent: (txs) => {
                 if (!answer) (answer = { result: { stage: "sent", txs } }), (early = true);
@@ -1581,7 +1590,8 @@ export function poolBuyKind(host: () => PoolBuyKindHost, locks: Locks | null = g
           if ("stage" in a) end(a.stage);
           else if (early) end("sent");
         } finally {
-          for (const x of hosts) x.end?.();
+          h0.end?.();
+          for (const x of more) x.end?.();
         }
       }))
       .catch(() => {

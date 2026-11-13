@@ -66,7 +66,7 @@ const replay = (ex: Exchange[]): EvmRpc => async (sent) => {
 };
 const buyQuote = (): Promise<EvmPoolBuyQuote> => {
   const { buys, amountIn, ...rest } = QF.request;
-  return evmPoolBuyQuoteWith({ ...(rest as object), token: buys as string, amountIn: BigInt(amountIn as string) } as never, [replay(QF.exchanges[0]), replay(QF.exchanges[1])], QF.now);
+  return evmPoolBuyQuoteWith({ ...(rest as object), token: buys as string, amountIn: BigInt(amountIn as string) } as never, [replay(QF.exchanges[0]), replay(QF.exchanges[1])], QF.now, undefined, undefined, () => 0);
 };
 
 // Base's USDC, the coin the recorded quote buys
