@@ -127,8 +127,10 @@ export type CashQuote = { address: string; amountIn: bigint; minOut: bigint };
 type Refusal = { error: ErrorCode };
 
 /** A move's op record in the store's "ops" (kit messages.ts Operation kind "move"), under its op id: amounts in whole
- *  units of each side's asset. Nothing secret: no key, note, address of the user's or which note is whose. */
-export type MoveOpRecord = { kind: "move"; from: TradeChain; to: TradeChain; stage: MoveStage; txs: TxRef[]; amount: string; out?: string; created_ms: number };
+ *  units of each side's asset; `cash` (pool to pool, src/pool-to-cash.ts): the deposit quote's least USDC in base units,
+ *  what its onward move from Cash is sized by (kept in the store, never in state.ops). Nothing secret: no key, note,
+ *  address of the user's or which note is whose. */
+export type MoveOpRecord = { kind: "move"; from: TradeChain; to: TradeChain; stage: MoveStage; txs: TxRef[]; amount: string; out?: string; created_ms: number; cash?: string };
 /** What a move's follow op (the quote's pool_deposit op, pool-deposit-follow.ts PoolDepositOp) says, read from the store. */
 export type MoveFollow = { stage: string; final?: true; txs?: readonly TxRef[] };
 
@@ -325,7 +327,8 @@ export function cashMover(d: CashMoverDeps): CashMover {
     // the least of the pool's coin the moves on their way still bring (display only: a tap's most counts it)
     coming: (chain) => ways.filter((w) => w.chain === chain && d.now() - w.since <= CASH_MOVE_WAIT_MS).reduce((a, w) => a + w.lamports, 0n),
     resume: (moves) => {
-      for (const { id, rec } of moves) if (rec.kind === "move" && rec.stage !== "done" && rec.stage !== "failed") tracks.push(followOn(id, `${id}/${d.rails[0] ?? "1click"}`, rec).catch(() => {}));
+      // Cash's own moves only: a move out of a pool is src/pool-to-cash.ts's, its `<op>/1click` a vault deposit's op
+      for (const { id, rec } of moves) if (rec.kind === "move" && rec.from === "near" && rec.stage !== "done" && rec.stage !== "failed") tracks.push(followOn(id, `${id}/${d.rails[0] ?? "1click"}`, rec).catch(() => {}));
     },
     idle: async () => {
       await turn;
@@ -342,18 +345,17 @@ const POOL_TO_CASH_STEPS = (x: PoolChain): PoolMoveDry["steps"] => [{ step: "poo
 const isTrade = (c: unknown): c is TradeChain => (TRADE_CHAINS as readonly unknown[]).includes(c);
 
 /** The pair and the amount of a pool.move or pool.move.dry the page runs, or its refusal: Cash (near) to a pool, the
- *  amount in USDC; a pool to Cash (src/pool-to-cash.ts), the amount in the pool's coin; each above 0 at no more than
- *  its asset's decimals. Pool to pool builds next. */
-function moveAsk(params: Record<string, unknown>): Refusal | { from: "near"; to: PoolChain; usdc: bigint } | { from: PoolChain; to: "near"; units: bigint } {
+ *  amount in USDC; a pool to Cash or to another pool (src/pool-to-cash.ts), the amount in the pool's coin; each above 0
+ *  at no more than its asset's decimals. */
+function moveAsk(params: Record<string, unknown>): Refusal | { from: "near"; to: PoolChain; usdc: bigint } | { from: PoolChain; to: PoolChain | "near"; units: bigint } {
   const { from, to, amount } = params;
   if (!isTrade(from) || !isTrade(to) || from === to || typeof amount !== "string") return { error: "not_allowed" };
-  if (from !== "near" && to !== "near") return { error: "not_allowed" };
   const d = from === "near" ? USDC_DECIMALS : POOL_DECIMALS[from];
   const m = new RegExp(`^(0|[1-9]\\d{0,29})(?:\\.(\\d{1,${d}}))?$`).exec(amount);
   if (m === null) return { error: "not_allowed" };
   const x = BigInt(m[1]!) * 10n ** BigInt(d) + BigInt((m[2] ?? "").padEnd(d, "0"));
   if (x <= 0n) return { error: "not_allowed" };
-  return from === "near" ? { from, to: to as PoolChain, usdc: x } : { from, to: "near", units: x };
+  return from === "near" ? { from, to: to as PoolChain, usdc: x } : { from: from as PoolChain, to: to as PoolChain | "near", units: x };
 }
 
 /** pool.move and pool.move.dry (card one-balance-buys-on-every-chain): each checked here, then the mover's one move
@@ -369,7 +371,7 @@ export function poolMoveKinds(mover: () => CashMover, toCash?: () => PoolToCash)
       if ("error" in ask) return ask;
       if (ask.from !== "near" && toCash === undefined) return { error: "not_allowed" };
       let answer: HostAnswer<"pool.move"> | HostRefusal = { error: "failed" };
-      const after = (ask.from === "near" ? mover().move(ask.to, ask.usdc, ctx.id) : toCash!().move(ask.from, ask.units, ctx.id))
+      const after = (ask.from === "near" ? mover().move(ask.to, ask.usdc, ctx.id) : toCash!().move(ask.from, ask.units, ctx.id, ask.to))
         .then((r) => void (answer = "error" in r ? { error: r.error } : { result: { stage: "leaving", txs: [] } }), () => void (answer = { error: "failed" }));
       return { running: true, after, answer: () => answer };
     },
@@ -380,12 +382,18 @@ export function poolMoveKinds(mover: () => CashMover, toCash?: () => PoolToCash)
       let answer: HostAnswer<"pool.move.dry"> | HostRefusal = { error: "failed" };
       if (ask.from !== "near") {
         const from = ask.from;
+        const to = ask.to;
         const after = toCash!()
           .dry(from, ask.units)
-          .then(
-            (r) => void (answer = "error" in r ? { error: r.error } : { result: { out: unitsText(r.out, USDC_DECIMALS), fee: unitsText(r.fee, POOL_DECIMALS[from]), steps: POOL_TO_CASH_STEPS(from) } }),
-            () => void (answer = { error: "failed" }),
-          );
+          .then(async (r) => {
+            if ("error" in r) return void (answer = { error: r.error });
+            const fee = unitsText(r.fee, POOL_DECIMALS[from]);
+            if (to === "near") return void (answer = { result: { out: unitsText(r.out, USDC_DECIMALS), fee, steps: POOL_TO_CASH_STEPS(from) } });
+            // on to pool `to`: what Cash's move of that USDC less its withdraw fee gives there (the mover's own dry)
+            const usdcFee = await mover().dry(to, 1n).then((x) => ("error" in x ? null : x.fee), () => null);
+            const on = usdcFee === null || r.out <= usdcFee ? null : await mover().dry(to, r.out - usdcFee).catch(() => null);
+            answer = on === null || "error" in on ? { error: on === null ? "not_allowed" : on.error } : { result: { out: unitsText(on.out, POOL_DECIMALS[to]), fee, steps: [...POOL_TO_CASH_STEPS(from), ...CASH_TO_POOL_STEPS(to)] } };
+          }, () => void (answer = { error: "failed" }));
         return { running: true, after, answer: () => answer };
       }
       const after = mover()
