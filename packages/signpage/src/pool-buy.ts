@@ -797,16 +797,21 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       if (own.length === 0) return no("venue_not_pinned");
       // round 2: each ready proof's root indexes not found yet (the sizes name the newest page), the venue, then the
       // device's blockhash and slot, started last (the venue's read and a page past the first start after it: below)
-      const lookups: Promise<void>[] = [];
-      // the proofs the pick will read, at the take's own time: a proof the pick takes has its roots looked up here
-      // (review P3-2 of b57f4eb28: on the last-seen time a proof in the gap was picked with no lookup, then failed)
-      for (const p of mine(await h.ready(early)))
-        for (const [tree, size, root] of [[0, sizes.state, p.publicSignals[3]], [1, sizes.label, p.publicSignals[5]]] as const) {
-          const k = rootKey(tree, root);
-          if (roots.has(k)) continue;
-          roots.set(k, null);
-          lookups.push(rootIndex(h, tree, size, dec(root)).then((i) => void roots.set(k, i), (e) => (e instanceof Refused ? undefined : Promise.reject(e))));
-        }
+      const lookUp = (list: readonly Ready[]): Promise<void> => {
+        const got: Promise<void>[] = [];
+        for (const p of mine(list))
+          for (const [tree, size, root] of [[0, sizes.state, p.publicSignals[3]], [1, sizes.label, p.publicSignals[5]]] as const) {
+            const k = rootKey(tree, root);
+            if (roots.has(k)) continue;
+            roots.set(k, null);
+            got.push(rootIndex(h, tree, size, dec(root)).then((i) => void roots.set(k, i), (e) => (e instanceof Refused ? undefined : Promise.reject(e))));
+          }
+        return Promise.all(got).then(() => {});
+      };
+      // the roots of the proofs listed now, at once, and of those the pick reads on the take's own time once the early
+      // read is in, in this round beside the venue and the blockhash: a proof only the take's clock lists is looked up
+      // too (review P3-2 of b57f4eb28), and the round never waits for the early read first (review P2-1 of 92ae9ded1)
+      const lookups: Promise<void>[] = [lookUp(await h.ready()), h.ready(early).then(lookUp)];
       const venueRead: Promise<SolanaPoolBuyVenue> = readSolanaPoolBuyVenue(h.rpcs, kind, token, ...(h.pick ? [h.pick] : []));
       // the slot is read before some of its round's reads end (the venue's a microtask on, a root page past the first
       // after the page before it): when the round ends over POOL_BUY_SLOT_STALE_MS after the slot was answered, the

@@ -721,18 +721,19 @@ test("a take that hands back another attempt's proof, or other proof bytes, is r
 });
 
 test("fold 1 (6): the pick reads the ready proofs again after the quote: a proof remade during the reads is the one bought", async () => {
-  const w = await world({ readies: [[readyProof()], [readyProof()], [readyProof({ attempt: "attempt-2" })]] });
+  // the ready lists asked in order: the gate, round 1's lookups now and on the take's clock, then the pick
+  const w = await world({ readies: [[readyProof()], [readyProof()], [readyProof()], [readyProof({ attempt: "attempt-2" })]] });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
   assert.equal(w.state(), "SPENT");
   // remade onto a newer root (one the pool's pages hold at leaf 4) during the reads: its root is looked up, the reads run
   // once more, and that proof is bought with its own root index
   const p2 = readyProof({ attempt: "attempt-2", stateRoot: 1004n });
-  const n = await world({ readies: [[readyProof()], [readyProof()], [p2]] });
+  const n = await world({ readies: [[readyProof()], [readyProof()], [readyProof()], [p2]] });
   assert.deepEqual(await runPoolBuy(n.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
   assert.equal(n.state(), "SPENT");
   assert.equal(n.log.filter((x) => x === "0:getLatestBlockhash").length, 2, "the quote and slot read again for it");
   // gone during the reads (taken by another tab): none to buy with, nothing taken
-  const g = await world({ readies: [[readyProof()], [readyProof()], []] });
+  const g = await world({ readies: [[readyProof()], [readyProof()], [readyProof()], []] });
   assert.deepEqual(await runPoolBuy(g.host, ASK), { error: "not_funded" });
   assert.ok(!g.log.some((x) => x.startsWith("take")));
 });
@@ -2449,6 +2450,37 @@ test("pieces: a piece only the take's own clock lists has its roots looked up: t
   const a = await runPoolBuy(w.host, { ...ASK, amount: spend });
   assert.deepEqual(takes, [["note-2", "note-1"]], `the set taken: ${JSON.stringify(a)}`);
   assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+});
+
+// review P2-1 of 92ae9ded1: the round of the root lookups, the venue and the blockhash runs beside the early read of the
+// pool's time, never after it, so a buy pays the slower of the two, not their sum. The early read here answers only once
+// the round's blockhash read has started; a round that waits for it first never starts that read, and the early read is
+// let go after many turns of the event loop instead, which the test refuses.
+test("the buy's round 2 (root lookups, venue, blockhash) starts before the early read of the pool's time answers", async () => {
+  const w = await world();
+  let open!: () => void;
+  const answered = new Promise<void>((ok) => (open = ok));
+  let started = false;
+  let forced = false;
+  const read = (p: 0 | 1): SolanaRpc => (async (m: string, q: readonly unknown[]) => {
+    if (m === "getLatestBlockhash" && !started) (started = true), open();
+    return w.host.rpcs[p](m, q);
+  }) as SolanaRpc;
+  void (async () => {
+    for (let k = 0; k < 2_000 && !started; k++) await new Promise((ok) => setImmediate(ok));
+    if (!started) (forced = true), open();
+  })();
+  const list = w.host.ready;
+  const host: PoolBuyHost = {
+    ...w.host,
+    rpcs: [read(0), read(1)],
+    chainNow: () => answered.then(() => ({ ms: 1n, at: performance.now(), wall: Date.now() })),
+    // as the page's host does: ready(early) is the queue's readyAt, which waits for the early read (queue.ts takeNow)
+    ready: async (early) => (early !== undefined && (await early.catch(() => undefined)), list()),
+  };
+  const a = (await runPoolBuy(host, ASK)) as { stage?: string };
+  assert.equal(a.stage, "filled", JSON.stringify(a));
+  assert.equal(forced, false, "round 2 waited for the early read before its blockhash read");
 });
 
 test("pieces: the releases land and the buy does not (a helper that sent the tag 2s alone): the answer is not_landed, never filled; each landed piece is settled SPENT and the buy's own note is not", async () => {
