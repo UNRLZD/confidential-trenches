@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/evm-deposit-on-mainnet.test.mjs: card evm-deposit-on-mainnet's live check, replayed.
-// evm-deposit-on-mainnet.answers.json holds two real runs from the Mac (`--record`, 13 Nov 04:11Z and 00:41Z), none edited:
+// evm-deposit-on-mainnet.answers.json holds two real runs from the Mac (`--record`, 13 Nov 04:46Z and 00:41Z), none edited:
 // - good: `--local`, this card's SIGN_HOST build (its no-leaf read marked) in SIGN_HOST's place, both mainnet pools on both of their RPCs, the
 //   device's bind reads and the deployed helper read live: PASS;
 // - bad_live_before: SIGN_HOST as served before this card (no Base or Robinhood deposit address, no EVM withdraw in the
