@@ -135,6 +135,8 @@ export interface Deferred<K extends SignpageKind> {
 /** A host-answered kind's refusal with its own code; RETRY_CODES are not kept for the id. */
 export interface HostRefusal {
   error: ErrorCode;
+  /** The fixed word naming the rule that refused (refusal-rule.ts), for the page's own record: give posts `error` alone. */
+  rule?: string;
 }
 
 /**

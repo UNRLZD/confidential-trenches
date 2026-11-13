@@ -69,6 +69,7 @@ import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type PoolAsk } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmReleaseRead } from "./evm-send.ts";
 import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
+import { refusalRule } from "./refusal-rule.ts";
 import { TRADE_HELPER } from "./trade.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -159,7 +160,9 @@ export type EvmPoolBuyHost = {
   wait?(ms: number): Promise<void>;
 };
 
-export type EvmPoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" };
+/** A refusal's `rule` (refusal-rule.ts): the fixed word naming the device rule or kit code that refused it, for the page's
+ *  own record; never posted to the app. */
+export type EvmPoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed"; rule?: string };
 
 /** The tap's read-back from the send, on the wall clock (the Solana buy's POOL_BUY_SETTLE_MS). */
 export const EVM_BUY_SETTLE_MS = 120_000;
@@ -191,13 +194,15 @@ const STOP_POLL_MS = 250;
 type Code = Exclude<EvmPoolBuyAnswer, { stage: TradeStage }>["error"];
 class Refused extends Error {
   readonly code: Code;
-  constructor(code: Code) {
+  readonly rule: string | undefined;
+  constructor(code: Code, rule?: string) {
     super(code);
     this.code = code;
+    this.rule = rule;
   }
 }
-const no = (code: Code = "failed"): never => {
-  throw new Refused(code);
+const no = (code: Code = "failed", rule?: string): never => {
+  throw new Refused(code, rule);
 };
 const lower = (s: string): string => s.toLowerCase();
 
@@ -211,7 +216,7 @@ async function quoteOf(h: EvmPoolBuyHost, network: EvmPoolChain, token: string, 
   try {
     return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
   } catch (e) {
-    if (e instanceof EvmBuyTapRefused) return no(e.code);
+    if (e instanceof EvmBuyTapRefused) return no(e.code, refusalRule(e));
     throw e;
   }
 }
@@ -267,7 +272,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       const quoted = async () => {
         const q = await quoteOf(h, network, token, r.chunk - fee, ask.slippageBps);
         const adapter = q.route.venue === "uniswap-v4" ? pins.v4 : pins.v3;
-        if (adapter === undefined) return no("quote_check_failed");
+        if (adapter === undefined) return no("quote_check_failed", "adapter");
         const built = h.build(adapter, q);
         const ctx = { nowMs: clock(), wallet: r.wallet.address, feeCap: fee, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
         checkEvmBuy(built, h.pin.pool, binding, relay, ask, ctx, { token: q.token, amountIn: q.amountIn, amountOut: q.amountOut }, h.testnet);
@@ -378,9 +383,9 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
     // pending record is removed (a removal that fails leaves it to the load's follow)
     const mine = written as Written | null;
     if (mine !== null) await h.unrecord(mine.w, mine.nullifier, mine.deadlineMs).catch(() => {});
-    if (e instanceof Refused) return { error: e.code };
-    if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
-    if ((e as { name?: unknown })?.name === "EvmQuoteError" || (e as { name?: unknown })?.name === "EvmPoolBuyError") return { error: "quote_check_failed" };
+    if (e instanceof Refused) return e.rule === undefined ? { error: e.code } : { error: e.code, rule: e.rule };
+    if (e instanceof PoolRuleRefused) return { error: "quote_check_failed", rule: refusalRule(e) };
+    if ((e as { name?: unknown })?.name === "EvmQuoteError" || (e as { name?: unknown })?.name === "EvmPoolBuyError") return { error: "quote_check_failed", rule: refusalRule(e) };
     return { error: "failed" };
   } finally {
     (seed as Uint8Array | null)?.fill(0);
@@ -638,7 +643,7 @@ export function poolBuyEvmKind(host: () => EvmPoolBuyHost & { end?(): void }, lo
           },
           ask,
         );
-        if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
+        if (!answer) answer = "error" in a ? (a.rule === undefined ? { error: a.error } : { error: a.error, rule: a.rule }) : { result: a };
         if ("stage" in a) ctx?.progress(a.stage);
       } finally {
         h.end?.();
