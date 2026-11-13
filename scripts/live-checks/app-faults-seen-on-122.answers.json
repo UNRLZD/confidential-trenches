@@ -1,0 +1,156 @@
+{
+ "good": {
+  "check": "app-faults-seen-on-122",
+  "at": "2026-11-12T17:13:37.012Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "near",
+      "asset": "USDC",
+      "balance": "73180000",
+      "ready": "none",
+      "pending": "none"
+     },
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "ready": "0",
+      "pending": "30426000"
+     }
+    ],
+    "warm": true,
+    "parts": {
+     "open": true,
+     "tile": "$0.69",
+     "parts": [
+      {
+       "part": "coins",
+       "cents": "0",
+       "chains": null
+      },
+      {
+       "part": "reserve",
+       "cents": "69",
+       "chains": "solana"
+      }
+     ],
+     "words": [
+      "Coins",
+      "Reserve"
+     ]
+    },
+    "control": {
+     "open": 1,
+     "closed": 1,
+     "tapped": true
+    },
+    "firstState": "S4.3"
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "near",
+      "asset": "USDC",
+      "balance": "73180000",
+      "ready": "none",
+      "pending": "none"
+     },
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "ready": "0",
+      "pending": "30426000"
+     }
+    ],
+    "warm": true,
+    "parts": {
+     "open": true,
+     "tile": "$0.69",
+     "parts": [
+      {
+       "part": "coins",
+       "cents": "0",
+       "chains": null
+      },
+      {
+       "part": "reserve",
+       "cents": "69",
+       "chains": "solana"
+      }
+     ],
+     "words": [
+      "Coins",
+      "Reserve"
+     ]
+    },
+    "alloc": "69",
+    "firstState": "S4.3"
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-faults-seen-on-122",
+  "at": "2026-11-12T17:13:53.316Z",
+  "source": "harness, terminal build of main 2498306e9 (before this card), the stand-in shell signed in",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "ready": "0",
+      "pending": "30426000"
+     }
+    ],
+    "warm": false,
+    "parts": {
+     "open": false,
+     "tile": "$0.69",
+     "parts": [],
+     "words": []
+    },
+    "control": {
+     "open": 0,
+     "closed": 0,
+     "tapped": false
+    },
+    "firstState": "S4.3"
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "ready": "0",
+      "pending": "30426000"
+     }
+    ],
+    "warm": false,
+    "parts": {
+     "open": false,
+     "tile": "$0.69",
+     "parts": [],
+     "words": []
+    },
+    "alloc": null,
+    "firstState": "S4.3"
+   }
+  ]
+ }
+}

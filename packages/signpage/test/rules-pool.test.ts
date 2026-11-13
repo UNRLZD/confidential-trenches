@@ -17,6 +17,8 @@ import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022
 import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import {
   buildSolanaPoolBuy,
+  solanaPoolBuyMaxSpend,
+  solanaPoolTag2Accounts,
   solanaEncodePoolRelease,
   solanaPoolPage,
   solanaPoolReleaseAccounts,
@@ -431,6 +433,50 @@ test("Solana buy: the kit's tag 3 on the pinned pool for W, the request's token 
   assert.throws(() => checkSolanaBuy(bent, ask, ctx, fxRelease, venue, req, reads), (e: unknown) => e instanceof PoolRuleRefused && e.rule.startsWith("buy_"));
 });
 
+test("Solana buy of several pieces: each tag 2 to the same W at its own state index, then the tag 3 funded by all; any other wallet, index, note or sum is refused", async () => {
+  const cfg = { program: FX_PROGRAM, pool: solanaProgramAddress([enc("pool")], FX_PROGRAM) };
+  const base = await setup("pump");
+  const piece = (n: number, over: Partial<SolanaPoolRelease> = {}): SolanaPoolRelease => ({ ...fxRelease, existingNullifierHash: Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0)), withdrawnValue: 5_000_000n, ...over });
+  const p1 = piece(1), p2 = piece(2);
+  const spend = solanaPoolBuyMaxSpend([p1, p2, fxRelease], base.venue, base.req.tip, base.reads.rent);
+  const { venue, req: req0, chain, reads: reads0 } = await setup("pump", spend);
+  // the pool's size read is 6: the two tag 2s' change notes go at 6 and 7, the tag 3's at 8
+  const tag2 = (r: SolanaPoolRelease, at: number, w = FX_W, extra: Ixx[] = []) =>
+    wire(FEE_PAYER, [cuLimit, { program: FX_PROGRAM, accounts: solanaPoolTag2Accounts(cfg, w, FEE_PAYER, r, at), data: solanaEncodePoolRelease(r) }, ...extra], [FEE_PAYER, w], reads0.blockhash);
+  const req = { ...req0, before: [p1, p2].map((p) => ({ withdrawnValue: p.withdrawnValue, relayFee: p.relayFee })) };
+  const built = buildSolanaPoolBuy(cfg, fxRelease, venue, req, { ...chain, stateSize: 8 }, { pick: () => 3 });
+  const reads = { ...reads0, stateSize: 8 };
+  const ctx: PoolContext = { nowMs: NOW, wallet: FX_W, feeCap: 3_000_000n, solana: { program: FX_PROGRAM, feePayer: FEE_PAYER } };
+  const ask: PoolAsk = { kind: "pool.buy", chain: "solana", token: req.token, amount: spend, slippageBps: 300, decimals: 9 };
+  const pieces = [{ wire: tag2(p1, 6), release: p1 }, { wire: tag2(p2, 7), release: p2 }];
+  const d = checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, req, reads, pieces);
+  assert.equal(d.to, FX_W);
+  assert.equal(d.feeCap, 3n * fxRelease.relayFeeCap, "the draw's fee cap is every release's");
+  // the tag 3 alone does not pay this spend: its pieces are what fund it
+  assert.throws(() => checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, req0, reads), refusedAs("buy_FUNDS"));
+  const W2 = key(64);
+  for (const [list, r, rule] of [
+    // a piece that pays another wallet: its signer is not this W
+    [[{ wire: tag2(p1, 6, W2), release: p1 }, pieces[1]!], req, "signers"],
+    // a piece's change note on another page than the one its index lands on
+    [[{ wire: tag2(p1, 6 + 1024), release: p1 }, pieces[1]!], req, "release_accounts"],
+    // a piece that is not the device's release
+    [[{ wire: tag2(piece(1, { withdrawnValue: 5_000_001n }), 6), release: p1 }, pieces[1]!], req, "release_not_devices"],
+    // anything after a piece's release
+    [[{ wire: tag2(p1, 6, FX_W, [{ program: SOLANA_SYSTEM_PROGRAM, accounts: [acc(FX_W, true, true), acc(W2, false, true)], data: Uint8Array.of(2, 0, 0, 0, ...u64(1n)) }]), release: p1 }, pieces[1]!], req, "instructions"],
+    // one note twice: the tag 3's own note as a piece
+    [[{ wire: tag2(fxRelease, 6), release: fxRelease }, pieces[1]!], { ...req, before: [{ withdrawnValue: fxRelease.withdrawnValue, relayFee: fxRelease.relayFee }, req.before[1]!] }, "pieces"],
+    // the request's pieces not the ones checked: more than they pay, or none sent for them
+    [pieces, { ...req, before: [{ ...req.before[0]!, withdrawnValue: 6_000_000n }, req.before[1]!] }, "pieces"],
+    [[], req, "pieces"],
+    [pieces.slice(0, 1), req, "pieces"],
+    // five pieces before the tag 3: over the five one tap carries
+    [[...pieces, ...pieces, ...pieces], req, "pieces"],
+  ] as const) {
+    assert.throws(() => checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, r, reads, list), refusedAs(rule), rule);
+  }
+});
+
 // ---------- Solana sell ----------
 
 test("Solana sell: the kit's venue sell from W at or above the device's floor, then a deposit of exactly min out less the device's reserve into the pinned pool, passes and draws it; each bad field is refused", async () => {
@@ -698,6 +744,9 @@ test("EVM withdraw: Withdraw(nullifier, context, value) on the pinned pool to W 
   const sig = signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, proof);
   const rec = secp256k1.Signature.fromBytes(sig.slice(0, 64), "compact").addRecoveryBit(sig[64]! - 27).recoverPublicKey(evmWithdrawDigest(BigInt(B.chainId), EVM_POOL, proof));
   assert.equal(hex(keccak_256(rec.toBytes(false).slice(1)).slice(12)), EVM_W, "the signature recovers to W");
+  // at the edges: a relay fee cap equal to the device's, a deadline a millisecond ahead of its clock
+  checkEvmWithdraw(EVM_POOL, proofOf(r), r, ask, evmCtx({ feeCap: r.feeCap }));
+  checkEvmWithdraw(EVM_POOL, proofOf(r), r, ask, evmCtx({ nowMs: r.deadlineMs - 1n }));
   const other = "0x2222222222222222222222222222222222222222";
   for (const [f, rule] of [
     [() => checkEvmWithdraw(other, proof, r, ask, evmCtx()), "pool"],
@@ -710,9 +759,43 @@ test("EVM withdraw: Withdraw(nullifier, context, value) on the pinned pool to W 
     // a venue list whose chain id is not a safe integer above 0 signs no domain
     [() => checkEvmWithdraw(EVM_POOL, proof, r, ask, evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 0 }) }), feeRecipient: FEE_TO } })), "chain"],
     [() => checkEvmWithdraw(EVM_POOL, proof, r, ask, evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 2 ** 53 }) }), feeRecipient: FEE_TO } })), "chain"],
+    // the relay fee paid to anyone but the pinned fee recipient, the proof bound to that relay data
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(relay({ feeRecipient: other })), relay({ feeRecipient: other }), ask, evmCtx()), "fee_recipient"],
+    // a fee cap one wei over the device's
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(relay({ feeCap: 10n ** 15n + 1n })), relay({ feeCap: 10n ** 15n + 1n }), ask, evmCtx()), "fee_cap_over_device_cap"],
+    // a deadline already behind the device's clock
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(relay({ deadlineMs: NOW - 1n })), relay({ deadlineMs: NOW - 1n }), ask, evmCtx()), "deadline_past"],
+    // the context the check recomputes from the relay data on the pinned pool and chain id: a proof bound on another
+    // pool, another chain id, or other relay data is not this one
+    [() => checkEvmWithdraw(EVM_POOL, { ...proof, context: ctxOf(r, other) }, r, ask, evmCtx()), "context"],
+    [() => checkEvmWithdraw(EVM_POOL, { ...proof, context: evmPoolContextOf({ processooor: EVM_POOL, relay: r }, evmPoolScopeOf(EVM_POOL, 1n)) }, r, ask, evmCtx()), "context"],
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(relay({ salt: "0x" + "cd".repeat(16) })), r, ask, evmCtx()), "context"],
+    // a pool that is not the pin, named in any case
+    [() => checkEvmWithdraw(other.toUpperCase().replace("0X", "0x"), proof, r, ask, evmCtx()), "pool"],
+    // nothing withdrawn
+    [() => checkEvmWithdraw(EVM_POOL, proofOf(r, 0n), r, ask, evmCtx()), "amount"],
   ] as const) {
     assert.throws(f, refusedAs(rule), rule);
   }
+  // the signer: only a binding checkEvmWithdraw passed, as it read it
+  // one no check saw, though it reads the same
+  assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, proofOf(r)), refusedAs("unchecked"));
+  // one the check refused at its last rule
+  const late = proofOf(relay({ feeRecipient: other }));
+  assert.throws(() => checkEvmWithdraw(EVM_POOL, late, relay({ feeRecipient: other }), ask, evmCtx()), refusedAs("fee_recipient"));
+  assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, late), refusedAs("unchecked"));
+  // one that passed, its value changed after
+  const moved = proofOf(r);
+  checkEvmWithdraw(EVM_POOL, moved, r, ask, evmCtx());
+  moved.value += 1n;
+  assert.throws(() => signEvmWithdraw(EVM_SECRET, evmCtx(), ask, EVM_POOL, moved), refusedAs("unchecked"));
+  // the passed one, under a context handed to the signer after with another chain id: the digest is the check's
+  const otherCtx = evmCtx({ evm: { venues: Object.freeze({ base: pin(B, { pool: EVM_POOL, chainId: 1 }) }), feeRecipient: FEE_TO } });
+  assert.deepEqual(signEvmWithdraw(EVM_SECRET, otherCtx, ask, EVM_POOL, proof), sig);
+  // r ‖ s ‖ v, s low, v 27 or 28
+  assert.equal(sig.length, 65);
+  assert.ok(sig[64] === 27 || sig[64] === 28);
+  assert.ok(BigInt(hex(sig.slice(32, 64))) <= secp256k1.Point.CURVE().n / 2n, "low s");
 });
 
 test("EVM sell and authorization: W's own Sell, built from the device's sell quote, into the pinned pool and the pinned delegate at W's two-RPC nonce pass and sign; each bad field is refused", async () => {

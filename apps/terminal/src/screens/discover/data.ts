@@ -51,7 +51,9 @@ export async function readChainLists(chain: ListChain, fetchFn: typeof fetch = f
 /** Each chain's own read time (as_of_ms) in a merged snapshot, so one chain's view dates its lists by its own read. */
 const AS_OF = new WeakMap<MarketSnapshot, Partial<Record<MarketChain, number>>>();
 
-/** The chains' snapshots as one: each list the chains' rows in LIST_CHAINS order, dated by the oldest read. */
+/** The chains' snapshots as one: each list the chains' rows in LIST_CHAINS order, dated by the newest read (card
+ *  app-faults-seen-on-122: one slow chain aged the whole page's stamp under All); a single chain's pick dates its lists
+ *  by that chain's own read (pickSnapshot). */
 export function mergeLists(parts: readonly MarketSnapshot[]): MarketSnapshot {
   const lists: Record<string, MarketRow[]> = {};
   const asOf: Partial<Record<MarketChain, number>> = {};
@@ -64,7 +66,7 @@ export function mergeLists(parts: readonly MarketSnapshot[]): MarketSnapshot {
   }
   lists.new ??= [];
   lists.trending ??= [];
-  const s: MarketSnapshot = { chain: "all", as_of_ms: Math.min(...parts.map((p) => p.as_of_ms)), lists: lists as unknown as MarketSnapshot["lists"] };
+  const s: MarketSnapshot = { chain: "all", as_of_ms: Math.max(...parts.map((p) => p.as_of_ms)), lists: lists as unknown as MarketSnapshot["lists"] };
   AS_OF.set(s, asOf);
   return s;
 }

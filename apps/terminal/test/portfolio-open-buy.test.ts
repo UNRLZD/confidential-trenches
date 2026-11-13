@@ -79,3 +79,40 @@ test("end state 4: the chart's ticks read distinct at any range", () => {
   }
   assert.deepEqual(axisLabels(2.5, 3.4, 4).map((x) => x.label), ["$2.61", "$2.84", "$3.06", "$3.29"]);
 });
+
+// card app-faults-seen-on-122, item 7 (owner 12 Nov 16:17:50Z, option B): the Positions tile opens to its two parts, as
+// the Cash tile does: the coins' value and what the open buys' wallets hold (asset_held), each the exact sum rounded
+// down once, the two adding up to the tile; with nothing held the tile has one part (no Reserve) and does not open.
+test("item 7: the Positions tile's parts: Coins and Reserve add up to the tile, each rounded down once", () => {
+  const s = base();
+  const t = portfolio(snap(s), data(s), NOW).totals!;
+  // the coin's $0.0099210 rounds down to 0 in the tile; the wallet's $0.6983 to 69
+  assert.equal(t.coins, 0n);
+  assert.equal(t.held, 69n);
+  assert.equal(t.coins + t.held, t.inPos);
+  assert.deepEqual(t.heldChains, ["solana"]);
+});
+
+test("item 7: nothing held: Reserve is 0 on no chain, the tile is its coins alone", () => {
+  const s = base({ positions: [{ chain: "solana", token: MINT, amount: "34210.5", cost: "0.0099999", wallets: ["W1"], decimals: 6 }] });
+  const t = portfolio(snap(s), data(s), NOW).totals!;
+  assert.equal(t.held, 0n);
+  assert.deepEqual(t.heldChains, []);
+  assert.equal(t.coins, t.inPos);
+});
+
+test("item 7: open buys on two chains: Reserve is the exact sum over both, rounded down once (0.6¢ + 0.6¢ is 1¢, never 0)", () => {
+  const px = (usd: number) => ({ price: String(usd * 1e8), expo: -8, published_s: Math.floor(NOW / 1000) - 2, read_ms: NOW - 1000 });
+  const s = base({
+    // $100 a SOL and $3,000 an ETH: 0.00006 SOL and 0.000002 ETH are $0.006 each
+    pools: [{ chain: "solana", asset: "SOL", balance: "0", price: px(100) }, { chain: "base", asset: "ETH", balance: "0", price: px(3000) }],
+    positions: [
+      { chain: "solana", token: MINT, amount: "34210.5", cost: "0.0099999", wallets: ["W1"], decimals: 6, asset_held: "0.00006" },
+      { chain: "base", token: "0x00000000000000000000000000000000000000b1", amount: "1", cost: "0.01", wallets: ["0xW2"], decimals: 18, asset_held: "0.000002" },
+    ],
+  });
+  const t = portfolio(snap(s), data(s), NOW).totals!;
+  assert.equal(t.held, 1n);
+  assert.deepEqual(t.heldChains, ["solana", "base"]);
+  assert.equal(t.coins + t.held, t.inPos);
+});

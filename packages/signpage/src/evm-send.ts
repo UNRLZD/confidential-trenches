@@ -90,6 +90,19 @@ export function evmBuyCalldata(pool: string, relay: EvmRelayData, proof: VaultSn
   return cat([BUY_SELECTOR, word(BigInt(32 * HEAD)), ...evmProofWords(proof, signals), word(fee), word(32n * buyAt), word(32n * sigAt), ...withdrawal, ...buy, ...tail(signature)]);
 }
 
+/** PrivacyPool.withdraw's signature, as the pool compiles it (contracts/pool-evm/abi.json). */
+export const EVM_WITHDRAW_SIGNATURE = "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)";
+/** withdraw(Withdrawal{pool, abi.encode(relay)}, proof, fee, W's 65-byte signature), in its one canonical encoding: the
+ *  head (the Withdrawal's offset, the proof's 16 words, the fee, the signature's offset), the Withdrawal, the
+ *  signature; 1,028 bytes (the helper's WITHDRAW_LEN). */
+export function evmWithdrawCalldata(pool: string, relay: EvmRelayData, proof: VaultSnarkjsProof, signals: VaultWithdrawSignals, fee: bigint, signature: Uint8Array): Uint8Array {
+  if (!(signature instanceof Uint8Array) || signature.length !== 65) throw new Error("calldata: not a 65-byte signature");
+  const HEAD = 19;
+  const withdrawal = [addressWord(pool), word(0x40n), ...tail(evmRelayDataBytes(relay))];
+  const sigAt = BigInt(HEAD) + BigInt(withdrawal.reduce((n, p) => n + p.length, 0) / 32);
+  return cat([selectorOf(EVM_WITHDRAW_SIGNATURE), word(BigInt(32 * HEAD)), ...evmProofWords(proof, signals), word(fee), word(32n * sigAt), ...withdrawal, ...tail(signature)]);
+}
+
 /** The helper's busy answer (429): the same body again after its wait. */
 export class EvmSendBusy extends Error {
   readonly retryAfterMs: number;

@@ -43,13 +43,21 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
-import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
+import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import { POOL_TESTNET } from "./network.ts";
 import type { Ladder } from "./ladder.ts";
 import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** SOL's ladder: one = 0.001 SOL (the program's MIN_DEPOSIT), from 0.01 SOL [design: the owner's $2 floor, OD:268, in kind]. */
 export const SOL_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 10_000_000n });
+/**
+ * The rungs a release withdraws (card buy-spends-several-pieces): the same 1-2-5 ladder, from 0.005 SOL. A note gives
+ * one piece a buy, the largest of these at or below its value; its change gives its next on the next buy. The floor is
+ * the program's: the backstop refuses a release under twice its relay fee (lib.rs MAX_RELAY_FEE_BPS), 2,600,000 at the
+ * epoch fee of 1,300,000, so 0.002 SOL can never be released and 0.005 is the least rung that can. Deposits stay on
+ * SOL_LADDER: the least note a move into the pool makes is still 0.01 SOL.
+ */
+export const SOL_PIECE_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 5_000_000n });
 export const SOL_EPOCH_MS = 60_000n;
 /** The kit's send margin (M356 (1)): 90 s. */
 export const SOL_SEND_MARGIN_MS = SOLANA_POOL_SEND_MARGIN_MS;
@@ -554,7 +562,8 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
     id: `sol:${program}`,
     chain: "sol",
     scope,
-    ladder: SOL_LADDER,
+    ladder: SOL_PIECE_LADDER,
+    piecesMax: SOLANA_POOL_BUY_PIECES_MAX,
     epochMs: SOL_EPOCH_MS,
     lifeMs: SOL_LIFE_MS,
     sendMarginMs: SOL_SEND_MARGIN_MS,
