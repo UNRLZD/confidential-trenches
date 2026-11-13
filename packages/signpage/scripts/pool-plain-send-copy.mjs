@@ -218,11 +218,16 @@ check("plain: under the floor", stages.includes("short") && !stages.includes("in
 phase = "deposit";
 const top = await outsideSend("plain send, the top-up to the floor", floor - (await uxBalance()));
 phase = "deposit";
+// the note shows once its deposit is final, through the page's state reads (the app asks state for what it shows; the
+// 09:32Z run, with no state read, saw the carry land and no UNSPENT note in 4 min)
 let note = null;
+const uxNotes = async () => (await readNotes(w)).filter((n) => n.ref.kind === "deposit" && n.ref.i === f.i && n.scope === scope);
 for (let k = 0; k < 240 && note === null; k++) {
   await sleep(1_000);
-  note = (await readNotes(w)).find((n) => n.ref.kind === "deposit" && n.ref.i === f.i && n.scope === scope && n.state === "UNSPENT" && n.leaf !== undefined) ?? null;
+  await t.stateRead().catch(() => {});
+  note = (await uxNotes()).find((n) => n.state === "UNSPENT" && n.leaf !== undefined) ?? null;
 }
+record.uxNoteStates = (await uxNotes()).map((n) => n.state);
 // the carry's txs: the follow reads them landed (both names) in the next rounds
 for (let k = 0; k < 30 && (carried.length === 0 || !stages.includes("in_pool")); k++) await sleep(1_000);
 ctl.abort();
