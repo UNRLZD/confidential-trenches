@@ -399,6 +399,8 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
     ["dust on a W whose buy stopped before its swap", "register", { token: 1n, usdc: 2_000_000n } as { token: bigint; usdc: bigint }, true],
     // a buy stopped at its swap, its floor written and the swap landed, no fill read yet: its coin is its own
     ["a buy at its swap, the floor written, the swap landed", "swap", { token: 5n, usdc: 2_000_000n }, false],
+    // W held 500 of the token before its swap (the baseline): 1200 is under 500 + its floor of 1000, so no coin of its
+    ["a coin under its floor over its baseline", "before", { token: 1200n, usdc: 2_000_000n }, true],
     ["W not read", null, {}, false],
   ] as const) {
     const v = await world([5_000_000n]);
@@ -427,6 +429,7 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
       const { swap: _s, ...r } = await recOf(v, "b1");
       await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...r, stage: "sent", step: "register", resumes: NEAR_BUY_RESUMES });
     }
+    if (set === "before") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", step: "swap", resumes: NEAR_BUY_RESUMES, swap: { floor: "1000", before: "500" } });
     if (set === "swap") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", step: "swap", resumes: NEAR_BUY_RESUMES, swap: { floor: "5", before: "0" } });
     reads(page, w);
     // the dust row: W's USDC is moved into the vault (the move given, so the amount is seen), never stopped at a quote
@@ -644,6 +647,27 @@ test("a tap's W pick passes over a W holding only a stranger's dust (under its r
   s1.release();
   assert.equal(got?.id, w2.id, "W2, the W with the coin");
   assert.equal((await recOf(v, "b1")).sell, undefined, "the dust W1 is not taken");
+});
+
+test("a live buy that landed under its floor (floor 1000, fill 900, 900 on W): a position that a tap sells, never passed over as dust", async () => {
+  const v = await world([5_000_000n]);
+  const { page } = pageOf(v);
+  const w1 = (await paid(page, v, "b1")).w;
+  await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", code: "received_below_floor", swap: { floor: "1000", before: "0" }, fill: { out: "900", decimals: 18 } });
+  page.readWallet = async (a) => ({ account: a.wallet, height: 1, blockHash: "b", nonce: 1n, held: a.side === "sell" ? 900n : 0n, registered: true, storageMin: 0n, lostfound: 0n });
+  assert.equal((await nearPositions(page)).length, 1, "a position");
+  const d = sellDepsOf(page, null, "s1", 100);
+  const got = await d.wallet(TOKEN);
+  assert.equal(got?.id, w1.id, "the tap takes W");
+  assert.equal(got?.coinMin, 900n, "its coin counts from what it received");
+  d.release();
+  // the sell run on it reads the coin as held (it goes on to the quote), never ends not_funded
+  const lines: string[] = [];
+  page.log = (l) => void lines.push(l);
+  const run = nearSellKind(page)({ token: TOKEN, slippageBps: 100 }, { id: "s2" } as never);
+  if ("running" in run) await run.after.catch(() => {});
+  assert.ok(lines.includes("near sell read: token held"), lines.join(" | "));
+  assert.ok(!lines.some((l) => l.includes("not_funded")), lines.join(" | "));
 });
 
 test("D5b: a sell that ends part_filled (the token sold, under the least deposit left in W) is recorded part_filled, a sale done: never refused, never taken again", async () => {
