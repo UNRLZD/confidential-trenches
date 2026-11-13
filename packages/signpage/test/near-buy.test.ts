@@ -223,8 +223,9 @@ async function paid(page: NearBuyPage, v: { ns: NoteStore }, id: string, stage: 
   const d = depsOf(page, null, id);
   const b = (await d.begin(ASK))!;
   await d.payout();
-  // filled first, so the next buy of the token is a new one; then the stage asked
-  await d.progress({ step: "receive", stage: "filled", txs: [{ chain: "near", hash: TX }] });
+  // filled first, so the next buy of the token is a new one; then the stage asked. The floor as the flow writes it
+  // before its swap leaves (src/near-trade.ts): a coin of 1 or more is W's
+  await d.progress({ step: "receive", stage: "filled", txs: [{ chain: "near", hash: TX }], swap: { floor: "1", before: "0" } });
   d.release();
   const store = await page.store();
   const rec = nearBuyRecordOf(await store.get("quotes", `${NEAR_BUY_KEY}${id}`))!;
@@ -243,7 +244,7 @@ test("sell: W is the oldest paid buy of the token (its note SPENT), its sell and
   const d = sellDepsOf(page, null, "s1", 150);
   const got = await d.wallet(TOKEN);
   d.release();
-  assert.deepEqual(got, { ...w1, token: TOKEN }, "the older paid buy, with the token its record names");
+  assert.deepEqual(got, { ...w1, token: TOKEN, coinMin: 1n }, "the older paid buy, with the token its record names");
   const rec = await recOf(v, "b1");
   assert.deepEqual({ ...rec.sell, created_ms: 0 }, { id: "s1", slippage_bps: 150, created_ms: 0, resumes: 0, stage: "pending", step: "read", txs: [] });
   assert.deepEqual(await v.w.get("ops", "s1"), { kind: "sell", chain: "near", token: TOKEN, stage: "pending", txs: [], created_ms: rec.sell!.created_ms });
@@ -395,7 +396,7 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
     ["the token held, no sell asked", "floor", { token: 5n, usdc: 2_000_000n }, false],
     // a buy stopped before its swap (no floor: no swap ever left W) past its resumes: a stranger's dust on W never holds
     // its USDC back
-    ["dust on a W whose buy stopped before its swap", "register", { token: 1n, usdc: 2_000_000n }, true],
+    ["dust on a W whose buy stopped before its swap", "register", { token: 1n, usdc: 2_000_000n } as { token: bigint; usdc: bigint }, true],
     // a buy stopped at its swap, its floor written and the swap landed, no fill read yet: its coin is its own
     ["a buy at its swap, the floor written, the swap landed", "swap", { token: 5n, usdc: 2_000_000n }, false],
     ["W not read", null, {}, false],
@@ -421,15 +422,26 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
       await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...r, sell: { id: "s0", slippage_bps: 100, created_ms: 1, resumes: 0, stage: "part_filled", step: "done", txs: [] } });
     }
     if (set === "floor") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), swap: { floor: "5", before: "0" } });
-    if (set === "register") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", step: "register", resumes: NEAR_BUY_RESUMES });
+    if (set === "register") {
+      // stopped before its swap: no floor written
+      const { swap: _s, ...r } = await recOf(v, "b1");
+      await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...r, stage: "sent", step: "register", resumes: NEAR_BUY_RESUMES });
+    }
     if (set === "swap") await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", step: "swap", resumes: NEAR_BUY_RESUMES, swap: { floor: "5", before: "0" } });
     reads(page, w);
+    // the dust row: W's USDC is moved into the vault (the move given, so the amount is seen), never stopped at a quote
+    const moved: bigint[] = [];
+    if (set === "register") page.move = async (_x, _n, amount) => (moved.push(amount), w.usdc !== undefined && (w.usdc -= amount), { kind: "deposited", txs: [TX], height: 1 });
     const lines: string[] = [];
     page.log = (l) => void lines.push(l);
     await resumeNearSells(page);
     const took = lines.some((l) => l.startsWith("near sell recorded") || l.startsWith("near sell resumed"));
     assert.equal(took, want, `${name}: ${lines.join(" | ")}`);
     if (took) assert.ok((await recOf(v, "b1")).sell, name);
+    if (set === "register") {
+      assert.ok(lines.includes("near sell move: in the vault"), `${name}: the move reached: ${lines.join(" | ")}`);
+      assert.deepEqual(moved, [2_000_000n], `${name}: W's USDC in the vault`);
+    }
   }
 });
 
@@ -569,17 +581,17 @@ test("D5: a sell of W1 that ended refused amount_too_low (dust) does not hold up
   ]);
   page.readWallet = async (a) => ({ account: a.wallet, height: 1, blockHash: "b", nonce: 1n, held: a.side === "sell" ? held.get(a.wallet)!.token : held.get(a.wallet)!.usdc, registered: true, storageMin: 0n, lostfound: 0n });
   const s1 = sellDepsOf(page, null, "s1", 100);
-  assert.deepEqual(await s1.wallet(TOKEN), { ...w1, token: TOKEN });
+  assert.deepEqual(await s1.wallet(TOKEN), { ...w1, token: TOKEN, coinMin: 1n });
   await s1.end({ error: "amount_too_low" });
   s1.release();
   const s2 = sellDepsOf(page, null, "s2", 100);
-  assert.deepEqual(await s2.wallet(TOKEN), { ...w2, token: TOKEN }, "W2, not the dust W1 again");
+  assert.deepEqual(await s2.wallet(TOKEN), { ...w2, token: TOKEN, coinMin: 1n }, "W2, not the dust W1 again");
   await s2.end({ result: { stage: "filled", txs: [{ chain: "near", hash: TX }] } });
   s2.release();
   assert.equal((await recOf(v, "b2")).sell!.stage, "filled");
   // with W2 sold, the dust W1 is the one left: asked again (its price may have moved)
   const s3 = sellDepsOf(page, null, "s3", 100);
-  assert.deepEqual(await s3.wallet(TOKEN), { ...w1, token: TOKEN });
+  assert.deepEqual(await s3.wallet(TOKEN), { ...w1, token: TOKEN, coinMin: 1n });
   s3.release();
 });
 
@@ -598,18 +610,40 @@ test("D5: a paid W that holds no token and under the least deposit in USDC is pa
     return { account: a.wallet, height: 1, blockHash: "b", nonce: 1n, held: a.side === "sell" ? h!.token : h!.usdc, registered: true, storageMin: 0n, lostfound: 0n };
   };
   const s1 = sellDepsOf(page, null, "s1", 100);
-  assert.deepEqual(await s1.wallet(TOKEN), { ...w2, token: TOKEN });
+  assert.deepEqual(await s1.wallet(TOKEN), { ...w2, token: TOKEN, coinMin: 1n });
   s1.release();
   assert.equal((await recOf(v, "b1")).sell, undefined, "the empty W1 is not taken");
   held.set(w1.id, null);
   const s2 = sellDepsOf(page, null, "s2", 100);
   // W2's sell is open (recorded by s1): it goes first; with it ended, the unread W1 is taken
-  assert.deepEqual(await s2.wallet(TOKEN), { ...w2, token: TOKEN });
+  assert.deepEqual(await s2.wallet(TOKEN), { ...w2, token: TOKEN, coinMin: 1n });
   await s2.end({ result: { stage: "filled", txs: [] } });
   s2.release();
   const s3 = sellDepsOf(page, null, "s3", 100);
-  assert.deepEqual(await s3.wallet(TOKEN), { ...w1, token: TOKEN });
+  assert.deepEqual(await s3.wallet(TOKEN), { ...w1, token: TOKEN, coinMin: 1n });
   s3.release();
+});
+
+test("a tap's W pick passes over a W holding only a stranger's dust (under its record's floor): the W with the coin is sold", async () => {
+  const v = await world([5_000_000n, 5_000_000n]);
+  const { page } = pageOf(v);
+  const w1 = (await paid(page, v, "b1")).w;
+  const w2 = (await paid(page, v, "b2")).w;
+  // both buys' floors at 1000: W1 holds 1 unit a stranger sent and under the least deposit, W2 its coin
+  for (const id of ["b1", "b2"]) await v.w.put("quotes", `${NEAR_BUY_KEY}${id}`, { ...(await recOf(v, id)), swap: { floor: "1000", before: "0" } });
+  const held = new Map([
+    [w1.id, { token: 1n, usdc: 999_999n }],
+    [w2.id, { token: 7_000n, usdc: 0n }],
+  ]);
+  page.readWallet = async (a) => {
+    const h = held.get(a.wallet)!;
+    return { account: a.wallet, height: 1, blockHash: "b", nonce: 1n, held: a.side === "sell" ? h.token : h.usdc, registered: true, storageMin: 0n, lostfound: 0n };
+  };
+  const s1 = sellDepsOf(page, null, "s1", 100);
+  const got = await s1.wallet(TOKEN);
+  s1.release();
+  assert.equal(got?.id, w2.id, "W2, the W with the coin");
+  assert.equal((await recOf(v, "b1")).sell, undefined, "the dust W1 is not taken");
 });
 
 test("D5b: a sell that ends part_filled (the token sold, under the least deposit left in W) is recorded part_filled, a sale done: never refused, never taken again", async () => {
@@ -638,7 +672,7 @@ test("D3: the sell's record keeps the last trade delegate signed (before it is s
   await s1.end({ error: "not_known" }); // ended refused, nothing known sold
   s1.release();
   const s2 = sellDepsOf(page, null, "s2", 100);
-  assert.deepEqual(await s2.wallet(TOKEN), { ...w1, token: TOKEN });
+  assert.deepEqual(await s2.wallet(TOKEN), { ...w1, token: TOKEN, coinMin: 1n });
   assert.deepEqual(await s2.lastTrade(), { nonce: 52n, mbh: 1_120n }, "a new sell on the W keeps it");
   s2.release();
   const store = await page.store();
@@ -707,7 +741,7 @@ test("a buy that ended sent with a fill (its swap's token on W): a tap sells it 
   // a tap: W is the sell's, as a filled buy's
   page.readWallet = async (a) => ({ account: a.wallet, height: 1, blockHash: "b", nonce: 1n, held: a.side === "sell" ? 7_000n : 0n, registered: true, storageMin: 0n, lostfound: 0n });
   const d = sellDepsOf(page, null, "s1", 100);
-  assert.deepEqual(await d.wallet(TOKEN), { ...w1, token: TOKEN });
+  assert.deepEqual(await d.wallet(TOKEN), { ...w1, token: TOKEN, coinMin: 1n });
   d.release();
   assert.equal((await recOf(v, "b1")).sell!.id, "s1");
 });

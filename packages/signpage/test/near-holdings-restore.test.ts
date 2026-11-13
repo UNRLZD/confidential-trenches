@@ -404,6 +404,20 @@ test("finding 7: the coin in the exchange's lost-found leaves W unread, never ke
   assert.deepEqual(await keptEmpty(v.w), []);
 });
 
+test("a stranger's dust in the exchange's lost-found for W (under W's own floor) holds nothing back: W's USDC is on its way home", async () => {
+  const v = await world([5_000_000n], [true]);
+  const { w: W, note, nh } = v.ws[0]!;
+  const swap = { ...buySwap(TOKEN, BigInt(H - 1)), args: { ...buySwap().args, msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: USDC, token_out: TOKEN, min_amount_out: "1000" }], skip_degen_price_sync: true, skip_unwrap_near: true }) } };
+  const recs = recordsFrom({ [W]: recordOf(W, TOKEN, [{ tx: relayed(note, register()) }, { tx: relayed(note, swap), state: "failed" }]) });
+  const seat = (lost: bigint) => seatOf({ [USDC]: { [W]: 2_500_000n } }, { lost });
+  assert.deepEqual(await nearHoldingsPass(pageOf(v), { spends: spendsOf([row(nh, W)]), records: recs, seat: seat(999n) }), { written: [W], empty: [], unread: [] });
+  // W's own output at its floor in the lost-found: read again later, as finding 7
+  const v2 = await world([5_000_000n], [true]);
+  const x = v2.ws[0]!;
+  const recs2 = recordsFrom({ [x.w]: recordOf(x.w, TOKEN, [{ tx: relayed(x.note, register()) }, { tx: relayed(x.note, swap), state: "failed" }]) });
+  assert.deepEqual(await nearHoldingsPass(pageOf(v2), { spends: spendsOf([row(x.nh, x.w)]), records: recs2, seat: seatOf({ [USDC]: { [x.w]: 2_500_000n } }, { lost: 1000n }) }), { written: [], empty: [], unread: [x.w] });
+});
+
 test("a W the helper has no record of rebuilds nothing and is not kept empty for good; under the least deposit it is read again", async () => {
   const v = await world([5_000_000n], [true]);
   const { w: W, nh } = v.ws[0]!;
@@ -677,6 +691,20 @@ test("a sold W's own USDC registration and its claim of USDC from the exchange's
 
 // ---- a stranger's dust: a coin counts only at the floor W itself signed ----
 
+/** W on the two providers as the way home sees it: `coin` of the token and the USDC, which the move takes into the vault
+ *  (each amount moved kept), so a run that reaches the move ends with W's USDC in the vault. */
+const homeOf = (coin: bigint, usdc: bigint) => {
+  const st = { usdc, moved: [] as bigint[] };
+  const readWallet = async (x: { wallet: string; side: string }) =>
+    ({ account: x.wallet, height: 1, blockHash: "h", nonce: 1n, held: x.side === "sell" ? coin : st.usdc, registered: true, storageMin: 0n, lostfound: 0n, exists: true }) as never;
+  const move = async (_w: unknown, _note: string, amount: bigint) => {
+    st.moved.push(amount);
+    st.usdc -= amount;
+    return { kind: "deposited" as const, txs: ["11111111111111111111111111111111"], height: 1 };
+  };
+  return { st, readWallet, move };
+};
+
 const sold = (n: NoteRecord) => [{ tx: relayed(n, register()) }, { tx: relayed(n, buySwap()) }, { tx: relayed(n, sellSwap()), state: "landed" as const, side: "sell" as const }];
 
 test("a sold W a stranger sends 1 unit of its coin shows nothing: under what W's own sell sent in, the coin is not W's position", async () => {
@@ -696,10 +724,12 @@ test("a W whose buy swap failed, holding its USDC and a stranger's 1 unit of the
   assert.equal(r.stage, "sent");
   assert.deepEqual(r.swap, { floor: "1000", before: "0" });
   const log: string[] = [];
-  const page = pageOf(v, log, { readWallet: twoProviders(1n, 2_500_000n), bindRpcs: () => [{ name: "x", query: async () => Promise.reject(new Error("no")) }, { name: "y", query: async () => Promise.reject(new Error("no")) }] as never });
-  await resumeNearSells(page).catch(() => {});
+  const home = homeOf(1n, 2_500_000n);
+  await resumeNearSells(pageOf(v, log, { readWallet: home.readWallet, move: home.move }));
   assert.equal((await records(v.w))[0]!.fill, undefined, "never made a position by dust");
-  assert.ok(log.includes("near sell recorded"), "its USDC asked home");
+  assert.ok(log.includes("near sell move: in the vault"), `the move reached: ${log.join(" | ")}`);
+  assert.deepEqual(home.st.moved, [2_500_000n], "W's USDC in the vault");
+  assert.equal((await records(v.w))[0]!.sell?.stage, "filled", "dust under the floor leaves W empty");
 });
 
 test("a W no call of names a token keeps Rhea's wrapped NEAR as a stand-in that never becomes a position: a stranger's 1 yocto of it leaves the USDC on its way home", async () => {
@@ -712,9 +742,11 @@ test("a W no call of names a token keeps Rhea's wrapped NEAR as a stand-in that 
   assert.equal(r.token, NEAR_RHEA.mainnet.wrap);
   assert.equal(r.swap, undefined, "no floor: no coin of it ever counts");
   const log: string[] = [];
-  await resumeNearSells(pageOf(v, log, { readWallet: twoProviders(1n, 2_500_000n), bindRpcs: () => [{ name: "x", query: async () => Promise.reject(new Error("no")) }, { name: "y", query: async () => Promise.reject(new Error("no")) }] as never })).catch(() => {});
+  const home = homeOf(1n, 2_500_000n);
+  await resumeNearSells(pageOf(v, log, { readWallet: home.readWallet, move: home.move }));
   assert.equal((await records(v.w))[0]!.stage, "sent");
-  assert.ok(log.includes("near sell recorded"), "its USDC asked home");
+  assert.ok(log.includes("near sell move: in the vault"), `the move reached: ${log.join(" | ")}`);
+  assert.deepEqual(home.st.moved, [2_500_000n], "W's USDC in the vault");
 });
 
 test("a live buy's record (not rebuilt) whose swap was sent: dust under its own floor never holds its USDC back; the coin at its floor does", async () => {
@@ -724,8 +756,10 @@ test("a live buy's record (not rebuilt) whose swap was sent: dust under its own 
   await v.w.put("quotes", `${NEAR_BUY_KEY}req-7`, live);
   const bind = () => [{ name: "x", query: async () => Promise.reject(new Error("no")) }, { name: "y", query: async () => Promise.reject(new Error("no")) }] as never;
   const log: string[] = [];
-  await resumeNearSells(pageOf(v, log, { readWallet: twoProviders(1n, 2_500_000n), bindRpcs: bind })).catch(() => {});
-  assert.ok(log.includes("near sell recorded"), "dust: home");
+  const home = homeOf(1n, 2_500_000n);
+  await resumeNearSells(pageOf(v, log, { readWallet: home.readWallet, move: home.move }));
+  assert.ok(log.includes("near sell move: in the vault"), `dust: the move reached: ${log.join(" | ")}`);
+  assert.deepEqual(home.st.moved, [2_500_000n], "dust: W's USDC in the vault");
   const v2 = await world([5_000_000n], [true]);
   const n2 = v2.ws[0]!.note;
   await v2.w.put("quotes", `${NEAR_BUY_KEY}req-7`, { ...live, w: v2.ws[0]!.w, note: n2.id, l: n2.leaf!.label.toString(), j: jOf(n2.ref) });
