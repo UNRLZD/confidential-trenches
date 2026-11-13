@@ -4,13 +4,18 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"test/*.test.ts\"",
+    "start": "node src/bin.ts",
     "live-sol": "node scripts/sol-live.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@blindfill/kit": "workspace:*"
+    "@blindfill/kit": "workspace:*",
+    "snarkjs": "0.7.5"
   },
   "devDependencies": {
     "@types/node": "24.10.1"
+  },
+  "bin": {
+    "blindfill-exit": "src/bin.ts"
   }
 }

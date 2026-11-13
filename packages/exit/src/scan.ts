@@ -99,3 +99,16 @@ export async function scanAtGap(a: ExitScanArgs, gap: number): Promise<ExitScan>
   );
   return { ...r, network, vault, token };
 }
+
+/**
+ * exitScan from seed64 the caller made (the exit command's, ./cli.ts, which makes it once for every chain and zeroes
+ * it): the same restore, at the release's RESTORE_GAP, on `rpcs`, which must be named as the release's pair on `network`.
+ */
+export async function exitScanSeed(seed64: Uint8Array, network: NearNetwork, rpcs: readonly [VaultSyncRpc, VaultSyncRpc]): Promise<ExitScan> {
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
+  const { vault } = EXIT_NETWORKS[network];
+  const token = EXIT_TOKENS[network];
+  const r = await restoreNotes({ seed64, vault, token, rpcs, gap: RESTORE_GAP });
+  return { ...r, network, vault, token };
+}
