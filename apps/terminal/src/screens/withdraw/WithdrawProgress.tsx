@@ -5,6 +5,7 @@ import { ROUTES } from "../../routes/routes.ts";
 import { usd } from "../deposit/model.ts";
 import { HopLine } from "../signin/HopLine.tsx";
 import { Icon } from "../signin/Icon.tsx";
+import { useDepositIntent } from "../deposit/source.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { usd as usdCents } from "../signin/model.ts";
 import { close, current, EMPTY, observe, txLink } from "./model.ts";
@@ -41,6 +42,7 @@ const TONE: Record<WithdrawView, { col: string; frac: number; check: boolean }> 
 
 export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
   const src = useWithdrawSource();
+  const intent = useDepositIntent();
   const openWithdraw = useWithdrawOpen();
   const { pathname } = useLocation();
   const state = src.snapshot.state;
@@ -109,7 +111,7 @@ export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
         </div>
         <div className="dbody">
           <div className="dseg">
-            <button type="button" data-control="withdraw-deposit" onClick={() => (done(), onDeposit())}><W id="deposit" /></button>
+            <button type="button" data-control="withdraw-deposit" {...intent} onClick={() => (done(), onDeposit())}><W id="deposit" /></button>
             <button type="button" className="on" id="wdr-seg-on"><W id="withdraw" /></button>
           </div>
           <div className="wdone">

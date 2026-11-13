@@ -1,6 +1,95 @@
 {
- "_note": "Recorded 12 Nov by app-faults-seen-on-124.mjs --record on the test machine: good = this card's build (--harness, apps/terminal/dist at 9df7be7ea, the stand-in shell signed out); bad = the deployed SIGN_HOST and APP_HOST of release 124, signed out, before this card.",
+ "_note": "Recorded by app-faults-seen-on-124.mjs --record on the test machine: good = this card's build with fault 9 (--harness, 13 Nov, apps/terminal/dist after 459a7df78, the stand-in shell signed out); beforeFault9 = the good answer of 12 Nov (apps/terminal/dist at 9df7be7ea: the shell's warm read asked once, by the first load); bad = the deployed SIGN_HOST and APP_HOST of release 124, signed out, before this card.",
  "good": {
+  "check": "app-faults-seen-on-124",
+  "at": "2026-11-13T01:24:39.261Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed out",
+  "browser": "157.0.8103.51",
+  "loads": [
+   {
+    "route": "/discover",
+    "atMs": 1794533079456,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/profile",
+    "atMs": 1794533081137,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/orders",
+    "atMs": 1794533082705,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/terms",
+    "atMs": 1794533084265,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/portfolio",
+    "atMs": 1794533085832,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/token/solana/6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
+    "atMs": 1794533087391,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/discover",
+    "atMs": 1794533088959,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/profile",
+    "atMs": 1794533090531,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/orders",
+    "atMs": 1794533092093,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   },
+   {
+    "route": "/terms",
+    "atMs": 1794533093686,
+    "ready": true,
+    "assets": 0,
+    "oneclick": [],
+    "oneclickSent": []
+   }
+  ],
+  "shot": "app-faults-seen-on-124-1440.png"
+ },
+ "beforeFault9": {
   "check": "app-faults-seen-on-124",
   "at": "2026-11-12T22:05:07.132Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed out",

@@ -7,6 +7,10 @@
 //         Processing and Deposited $73.18 from the op's stages, Recent empty before and the Deposited row after, and
 //         closes on Done: PASS;
 //   bad:  main's build before this card (--harness --build of main): the header's Deposit opens nothing: FAIL.
+//   beforeFault9: the build before card app-faults-seen-on-124's fault 9 (--harness --build of c32f749c6 with card
+//         verify-row-survives-one-provider, 13 Nov): the page asks deposit.assets at load, before Deposit is touched,
+//         and twice in all: FAIL. The good answer is re-recorded on that card's build the same day (none before the
+//         touch, once in all): PASS.
 // Planted from the good run: a phone tap on the amount field or on nothing, a body layer under Get address, a dry
 // quote per key, a quote with an extra field, the heading NEAR NEAR, a stage drawn out of turn, a Done that leaves the
 // sheet, two sheets, a missing run, a terminal outside the shell.
@@ -35,6 +39,21 @@ test("recorded good answer: the header's Deposit opens the sheet, which runs the
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   for (const x of ANSWERS.good.runs) assert.deepEqual([x.opened, x.heading, x.credited], [1, ["NEAR"], "73.18"], `${x.width} ${x.scheme}`);
+});
+
+test("recorded bad answer: the build before fault 9 asks deposit.assets at load, before Deposit is touched: FAIL", () => {
+  const r = judge(ANSWERS.beforeFault9);
+  assert.equal(r.ok, false);
+  for (const x of ANSWERS.beforeFault9.runs) {
+    assert.ok(bad(r).includes(`BAD ${x.width} ${x.scheme}: before its Deposit is touched the page asks deposit.assets 1 time(s), want none`), r.lines.join("\n"));
+  }
+  for (const x of ANSWERS.good.runs) assert.deepEqual([x.assetsBeforeTouch, x.assetsAsks], [0, 1], `${x.width} ${x.scheme}`);
+});
+
+test("planted: an ask before the touch, two asks for one open, or none recorded fail", () => {
+  fails(mut((rec) => (run(rec, "phone", "dark").assetsBeforeTouch = 1)), /^BAD phone dark: before its Deposit is touched the page asks deposit\.assets 1 time\(s\), want none/);
+  fails(mut((rec) => (run(rec, "desktop", "light").assetsAsks = 2)), /^BAD desktop light: pointing at, pressing and opening Deposit ask deposit\.assets 2 time\(s\), want once/);
+  fails(mut((rec) => delete run(rec, "desktop", "dark").assetsBeforeTouch), /^BAD desktop dark: before its Deposit is touched the page asks deposit\.assets an unknown number of time\(s\)/);
 });
 
 test("recorded bad answer: main's build before this card opens nothing from the header's Deposit: FAIL", () => {

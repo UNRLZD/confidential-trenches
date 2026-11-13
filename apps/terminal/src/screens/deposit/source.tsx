@@ -71,14 +71,16 @@ const assetsAsk =
   () =>
     client.request("deposit.assets", {}).outcome.then((o) => (o.ok ? { ok: true, list: o.result.assets.map(assetOf) } : { ok: false, code: refusal(o.error.code) }));
 
-/** The shell's warm read (DepositMount): the asset list asked once the signing page is READY, before any sheet opens,
- *  and held (assets.ts DEPOSIT_ASSETS), so the first open draws it at once; skipped while a list is held or one was
- *  asked in the last minute (card app-faults-seen-on-124: one ask a minute per device). */
-export function useDepositAssetsWarm(): void {
+/** A Deposit control's intent (card app-faults-seen-on-124, fault 9): pointed at, focused or pressed, the asset list is
+ *  asked (assets.ts intent: only with no list held, none out and none asked in the last minute), so the sheet mostly
+ *  opens on it; no page load asks it. Spread on every control that opens the sheet: the header's Deposit, the phone's
+ *  +, Portfolio's Deposit and the withdraw progress's Deposit. */
+export function useDepositIntent(): { onPointerEnter(): void; onFocus(): void; onPointerDown(): void; onTouchStart(): void } {
   const { client, moneyOn } = useSignpage();
-  useEffect(() => {
-    if (client && moneyOn) DEPOSIT_ASSETS.warm(assetsAsk(client));
+  const go = useCallback(() => {
+    if (client && moneyOn) DEPOSIT_ASSETS.intent(assetsAsk(client));
   }, [client, moneyOn]);
+  return { onPointerEnter: go, onFocus: go, onPointerDown: go, onTouchStart: go };
 }
 
 export function useDepositSource(): DepositSource {
@@ -94,6 +96,12 @@ export function useDepositSource(): DepositSource {
     if (fixture || !client || !moneyOn) return;
     DEPOSIT_ASSETS.ask(assetsAsk(client));
   }, [fixture, client, moneyOn, asks]);
+  // the sheet closed (it unmounts) or the account signed out: no ask waits on a busy answer any more (assets.ts stop)
+  const signedIn = snapshot.state?.signed_in === true;
+  useEffect(() => {
+    if (!signedIn) return void DEPOSIT_ASSETS.stop();
+    return () => DEPOSIT_ASSETS.stop();
+  }, [signedIn]);
   const typed = useRef(0);
   const dryQuote = useCallback<DepositSource["dryQuote"]>(
     async (asset, amount) => {

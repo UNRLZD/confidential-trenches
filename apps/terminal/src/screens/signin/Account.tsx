@@ -10,7 +10,7 @@ import { firstShape, hintOf, readHint, shapeOf, writeHint } from "./hint.ts";
 import type { Hint } from "./hint.ts";
 import { headerModel, usd } from "./model.ts";
 import type { HeaderModel } from "./model.ts";
-import { useDepositSheet } from "../deposit/source.tsx";
+import { useDepositIntent, useDepositSheet } from "../deposit/source.tsx";
 import { useSigninSheet, useSigninSource } from "./source.tsx";
 import { useWithdrawOpen } from "../withdraw/WithdrawPick.tsx";
 import type { SigninSource } from "./source.tsx";
@@ -46,6 +46,7 @@ export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean 
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
   const deposit = useDepositSheet();
+  const intent = useDepositIntent();
   const m = headerModel(src.snapshot, useBalance(src.snapshot));
   const shape = useAccountShape();
   const [menu, setMenu] = useState(initialMenu);
@@ -91,7 +92,7 @@ export function AccountCluster({ initialMenu = false }: { initialMenu?: boolean 
       <div className="balblock">
         <Balance m={m} />
       </div>
-      <button type="button" className="btn-dep" disabled={!src.moneyOn || m.kind === "loading"} data-action="deposit" onClick={() => deposit.setOpen(true)}>
+      <button type="button" className="btn-dep" disabled={!src.moneyOn || m.kind === "loading"} data-action="deposit" {...intent} onClick={() => deposit.setOpen(true)}>
         <W id="deposit" />
       </button>
       <button type="button" className={menu ? "acct open" : "acct"} aria-label={text("account")} aria-expanded={menu} disabled={m.kind === "loading"} onClick={() => setMenu(!menu)}>
@@ -159,6 +160,7 @@ export function PhoneAccount() {
   const src = useSigninSource();
   const { setOpen } = useSigninSheet();
   const deposit = useDepositSheet();
+  const intent = useDepositIntent();
   const m = headerModel(src.snapshot, useBalance(src.snapshot));
   const shape = useAccountShape();
   // as on desktop: the skeleton, Sign in and the balance pill are each their own key, so one replaces another (BAR-04);
@@ -185,7 +187,7 @@ export function PhoneAccount() {
     );
   return (
     <div className="tbr-ph" key={m.kind === "loading" ? "loading" : "in"}>
-      <button type="button" className="hit44" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} data-action="deposit" disabled={!src.moneyOn || m.kind === "loading"} onClick={() => deposit.setOpen(true)}>
+      <button type="button" className="hit44" data-header={m.kind === "loading" ? "S1.2" : m.kind === "empty" ? "S1.3" : "S1.4"} data-action="deposit" disabled={!src.moneyOn || m.kind === "loading"} {...intent} onClick={() => deposit.setOpen(true)}>
         <span className="balp">
           <Balance m={m} />
           <span className="plus">

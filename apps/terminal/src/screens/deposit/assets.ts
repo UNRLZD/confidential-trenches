@@ -19,11 +19,23 @@ import type { Asset, QuoteRefusal } from "./model.ts";
 // read asks only when no list is held and nothing was asked in the last minute; a sheet opening asks only when no list
 // younger than a minute is held. So a device asks it at most once a minute, and a sheet still opens on a list. The page
 // is right without the store (blocked, full or unreadable): the list is then held in memory only, as before.
+//
+// Card app-faults-seen-on-124, fault 9 (release 126's app live run 43335415608: 429s on /v1/proxy/oneclick from /terms,
+// /discover and /profile): the helper counts its 1Click share per caller address (apps/helper/src/limits/limits.ts
+// clientOf), so every fresh tab or device behind one address shares it, and no store in a tab can hold that down. Now no
+// page load asks the list: it is asked on intent, when a Deposit control is pointed at, focused or pressed (source.tsx
+// useDepositIntent), and as the sheet opens, the fallback. A busy answer (the helper's 429, the signing page's "busy")
+// while the sheet is open is asked once more by itself after BUSY_RETRY_MS, then the sheet's busy state and its Retry
+// stand; closing the sheet or signing out stops that ask.
 
 /** How long a held list is fresh, and the least time between two asks: longer than the 10 s window the helper counts a
  *  device's 1Click share in (apps/helper/src/limits/limits.ts LIMIT_WINDOW_MS), so two asks never share one, and as
  *  long as the window 1Click's own total is counted over (apps/helper/src/proxy/proxy.ts VENDOR_WINDOW_MS). */
 export const ASSETS_FRESH_MS = 60_000;
+/** The wait before a busy answer's one automatic ask: the helper's 10 s share window (apps/helper/src/limits/limits.ts
+ *  LIMIT_WINDOW_MS), the longest Retry-After a share refusal names. The signing page passes "busy" on, not the
+ *  Retry-After (packages/signpage/src/rules/deposit-dry.ts statusCode), so the page waits the window's whole length. */
+export const BUSY_RETRY_MS = 10_000;
 const KEY = "ct.deposit.assets";
 
 export interface AssetsView {
@@ -35,13 +47,17 @@ export type AssetsAsk = () => Promise<{ ok: true; list: Asset[] } | { ok: false;
 
 export interface AssetsStore {
   view(): AssetsView;
-  /** A sheet's ask: asks unless an ask is out or a list younger than ASSETS_FRESH_MS is held; an older ask's answer
-   *  never lands over a newer one's. */
+  /** The open sheet's ask (its opening, and Retry): asks unless an ask is out or a list younger than ASSETS_FRESH_MS
+   *  is held; an older ask's answer never lands over a newer one's. Until stop(), one busy answer is asked again by
+   *  itself after BUSY_RETRY_MS; an ask made meanwhile (Retry) goes at once, in its place. */
   ask(read: AssetsAsk): void;
-  /** The shell's warm read: asks only when no list is held, no ask is out and none was made in the last ASSETS_FRESH_MS. */
-  warm(read: AssetsAsk): void;
+  /** A Deposit control's intent: asks only when no list is held, no ask is out and none was made in the last
+   *  ASSETS_FRESH_MS. */
+  intent(read: AssetsAsk): void;
   /** Drops a refusal so the next ask draws the skeleton (Retry after busy); a held list stays. */
   retry(): void;
+  /** The sheet closed or the account signed out: no ask waits on a busy answer any more. */
+  stop(): void;
   subscribe(fn: () => void): () => void;
 }
 
@@ -70,9 +86,17 @@ function load(storage: AssetsStorage | null): { list: Asset[] | null; at: number
   }
 }
 
-export function createAssetsStore(deps: { now?: () => number; storage?: AssetsStorage | null } = {}): AssetsStore {
+/** The store's timer: the page's, or a test's stand-in. */
+export interface AssetsTimer {
+  set(fn: () => void, ms: number): unknown;
+  clear(handle: unknown): void;
+}
+const PAGE_TIMER: AssetsTimer = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) };
+
+export function createAssetsStore(deps: { now?: () => number; storage?: AssetsStorage | null; timer?: AssetsTimer } = {}): AssetsStore {
   const now = deps.now ?? Date.now;
   const storage = deps.storage ?? null;
+  const timer = deps.timer ?? PAGE_TIMER;
   const held = load(storage);
   let view: AssetsView = { list: held.list, refused: null };
   // when the held list was read, and when the last ask went out
@@ -80,6 +104,11 @@ export function createAssetsStore(deps: { now?: () => number; storage?: AssetsSt
   let lastAsk = held.asked;
   let out = 0;
   let asked = 0;
+  // the open sheet's busy handling: the ask waiting on a busy answer, and whether this open's one automatic ask is still
+  // to come
+  let waiting: unknown = null;
+  let open = false;
+  let autoLeft = false;
   const subs = new Set<() => void>();
   const save = () => {
     try {
@@ -110,6 +139,7 @@ export function createAssetsStore(deps: { now?: () => number; storage?: AssetsSt
       .then((v) => {
         out--;
         if (n !== asked) return;
+        if (v.refused === "busy" && open && autoLeft) later(read);
         if (v.refused === null && v !== view) {
           at = now();
           set(v);
@@ -117,18 +147,37 @@ export function createAssetsStore(deps: { now?: () => number; storage?: AssetsSt
         } else if (v !== view) set(v);
       });
   };
+  /** One ask after BUSY_RETRY_MS, the open sheet's one automatic ask spent on it. */
+  const later = (read: AssetsAsk) => {
+    autoLeft = false;
+    waiting = timer.set(() => {
+      waiting = null;
+      if (open && out === 0) send(read);
+    }, BUSY_RETRY_MS);
+  };
+  const unwait = () => {
+    if (waiting !== null) timer.clear(waiting);
+    waiting = null;
+  };
   return {
     view: () => view,
     ask(read) {
+      if (!open) (open = true), (autoLeft = true);
       if (out > 0 || (view.list !== null && within(at))) return;
+      unwait();
       send(read);
     },
-    warm(read) {
+    intent(read) {
       if (out > 0 || view.list !== null || within(lastAsk)) return;
       send(read);
     },
     retry() {
       if (view.refused !== null) set({ list: view.list, refused: null });
+    },
+    stop() {
+      unwait();
+      open = false;
+      autoLeft = false;
     },
     subscribe(fn) {
       subs.add(fn);
