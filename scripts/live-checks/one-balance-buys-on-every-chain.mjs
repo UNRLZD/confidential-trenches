@@ -20,7 +20,10 @@
 //     into the vault, and the page quotes each pool coin (SOL, Base's and Robinhood's ETH on 1Click) into Cash;
 //   - poolToPool: a pool's money moves into another chain's pool through Cash (src/pool-to-cash.ts onward): its dry
 //     names the six steps (out of the pool and into the vault, then out of the vault and into the other pool), and
-//     once in the vault Cash's own move of the USDC less its fee runs under `<op>/on`.
+//     once in the vault Cash's own move of the USDC less its fee runs under `<op>/on`;
+//   - leftCounted: every leftover counts in the balance (state.deposit_wallets): the deposit follow writes what U_X
+//     holds each in_pool round (0 before a carry), the list counts an in_pool op's left before its end, and the page
+//     reads each W's tail record (meta `w-tail/`) from its own store.
 // The numbers (sizes, the wait's bound, each refusal) are packages/signpage/test/cash-to-pool.test.ts,
 // pool-kinds-cash.test.ts and kit-version.test.ts at the released commit. The recorded answers are facts() over
 // packages/signpage/scripts/build-app.mjs's build (mainnet, as SIGN_HOST serves) and SIGN_HOST as served before.
@@ -82,6 +85,15 @@ const POOL_TO_POOL = (js) => {
   const onward = new RegExp(`\\.onward\\.move\\(${N},${N}-${N},\`\\$\\{${N}\\}/on\`\\)`);
   return six.test(js) && onward.test(js);
 };
+/** The leftovers counted: the follow's holds (0 before a carry, and its write), an in_pool op's left listed, W tails read. */
+const HOLDS_ZERO = new RegExp(`\\.floor\\)await ${N}\\.holds\\?\\.\\(0n\\),`);
+const HOLDS_WRITE = new RegExp(`(${N})=async (${N})=>\\{let (${N})=\\2\\.toString\\(\\);await ${N}\\.update\\(\`ops\`,${N},(${N})=>${N}\\(\\4\\)&&\\4\\.follow\\.left!==\\3&&\\(\\2!==0n\\|\\|\\4\\.follow\\.left!==void 0\\)\\?\\{\\.\\.\\.\\4,follow:\\{\\.\\.\\.\\4\\.follow,left:\\3\\}\\}:void 0\\)\\};[^;]{0,200}holds:\\1,`);
+const LISTED = new RegExp(`if\\((${N})\\.stage!==\`in_pool\`\\|\\|\\1\\.follow\\.left===void 0\\|\\|`);
+const TAILS = new RegExp(`async function ${N}\\((${N})\\)\\{let (${N})=\\(await \\1\\.keys\\(\`meta\`\\)\\)\\.filter\\((${N})=>\\3\\.startsWith\\((${N})\\)\\);return Promise\\.all\\(\\2\\.map\\((${N})=>\\1\\.get\\(\`meta\`,\\5\\)`);
+const leftCounted = (js) => {
+  const t = TAILS.exec(js);
+  return HOLDS_ZERO.test(js) && HOLDS_WRITE.test(js) && LISTED.test(js) && t !== null && new RegExp(`[,;]${esc(t[4])}=\`w-tail/\``).test(js);
+};
 const MOVE_STEPS = new RegExp(`\\[\\{step:\`vault_out\`,chain:\`near\`\\},\\{step:\`intents\`,chain:(${N})\\},\\{step:\`pool_in\`,chain:\\1\\}\\]`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the marks read from it. */
@@ -98,6 +110,7 @@ export function facts(index, js) {
     poolMove: MOVE_KIND.test(js) && /"pool\.move\.dry":(?:\([\w$,]*\)|[\w$]+)=>\{/.test(js) && MOVE_STEPS.test(js),
     toCash: TO_CASH_STEPS.test(js) && ["sol", "base", "hood"].every((c) => js.includes(`nep141:${c}.omft.near`)),
     poolToPool: POOL_TO_POOL(js),
+    leftCounted: leftCounted(js),
   };
 }
 
@@ -110,6 +123,7 @@ export const SAYS = Object.freeze({
   poolMove: "the signing page answers no pool.move or pool.move.dry of its own, checked first, with Cash's route out of the vault, over NEAR Intents and into the pool: Portfolio's Move cannot move money between chains",
   toCash: "the signing page moves no pool's money back to Cash (out of the pool, over NEAR Intents, into the vault, for SOL and both ETH pools): money in a pool cannot reach Cash or another chain",
   poolToPool: "the signing page moves no pool's money into another chain's pool (out of the pool into the vault, then Cash's own move into the other pool): Portfolio's Move between two pools cannot run",
+  leftCounted: "the balance does not count every leftover (what U_X holds after a deposit, written each round and 0 before a carry; a W's tail under the least size): money the user still has reads as gone",
 });
 
 /** The verdict on an answer { index, sha384, move, tap, max, level, version, poolMove }. */
