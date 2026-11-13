@@ -3230,6 +3230,42 @@ test("W2f a gap read later keeps what a newer quote kept meanwhile: the next quo
   assert.ok(q3asked.length > 0 && q3asked.every(([x]) => x >= 5_000_021), JSON.stringify(q3asked));
 });
 
+// card robinhood-quotes-inside-provider-limits: a warm Robinhood tap sent rpc.mainnet.chain.robinhood.com, the scan
+// provider, 12 to 252 posts (real mainnet reads from the Mac, 2026-11-14 23:0xZ: FOBO's 298 other currencies, each one's
+// gap left for later read alone), past its pace of 1 post a second (apps/helper/src/limits/limits.ts PROVIDER_PACE), and
+// got hundreds of 429s (live run 43519510822). A warm quote's scan posts, its gaps left for later included, fit that
+// pace's bucket within the warm bound (evm-buy-and-sell-on-mainnet.mjs WARM_MAX_MS, 2 s): the currencies with the same
+// blocks left share each request, as the scan's own gaps do.
+const RH_SCAN = "https://rpc.mainnet.chain.robinhood.com";
+const rhPace = (() => {
+  const src = readFileSync(new URL("../../../apps/helper/src/limits/limits.ts", import.meta.url), "utf8");
+  const m = new RegExp(`"${RH_SCAN.replace(/[./]/g, "\\$&")}": \\{ perS: ([\\d.]+), burst: (\\d+), unit: "post" \\}`).exec(src);
+  assert.ok(m, "limits.ts paces the Robinhood scan provider by the post");
+  return { perS: Number(m[1]), burst: Number(m[2]) };
+})();
+test("card robinhood-quotes-inside-provider-limits: a warm Robinhood quote of a token with 40 other currencies sends the scan provider no more posts than its pace takes in 2 s", async () => {
+  const token = "0x0000000000000000000000000000000000ee1401";
+  const xs = Array.from({ length: 40 }, (_, i) => "0x" + (0x7d0000 + i).toString(16).padStart(40, "0"));
+  // the token's best pool, and a pool with each X as deep (so the X prune keeps each) beside X's own market
+  const viaX = xs.map((x): ModelPool => ({ key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => 10n * a, state: pricedAt(10n) }));
+  const pools = [best(token), ...viaX, ...xs.map(marketOf)];
+  const logs = pools.map((p, i) => ({ key: p.key, at: RC_HEAD - 1_000_000 + i }));
+  const req = { chain: "robinhood" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  const cold = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, scanner(RC_HEAD, logs, [], 100_000), undefined, () => 0));
+  assert.equal(cold.accepted, true, String((cold as { code?: string }).code));
+  await pause(20);
+  // ten blocks on, within Robinhood's maxLag: every currency's gap is left for later and read beside the quote
+  const posts: string[][] = [];
+  const inner = scanner(RC_HEAD + 10, logs, [], 100_000);
+  const scan: EvmRpc = (calls, s) => (posts.push(calls.map((c) => c.method)), inner(calls, s));
+  const warm = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD + 10), chain(pools, 1, RC_HEAD + 10)], NOW, scan, undefined, () => 0));
+  assert.equal(warm.accepted, true, String((warm as { code?: string }).code));
+  await pause(50);
+  const bound = rhPace.burst + rhPace.perS * 2;
+  assert.ok(posts.some((p) => p.includes("eth_getLogs")), "the gaps were read");
+  assert.ok(posts.length <= bound, `${posts.length} posts to the scan provider, ${bound} at most (pace ${rhPace.perS}/s, burst ${rhPace.burst}): ${JSON.stringify(posts.map((p) => p.length))}`);
+});
+
 test("W3 a kept route whose pool vanished inside the range counts for nothing: the second quote decides without it", async () => {
   const token = "0x00000000000000000000000000000000000ee0e3";
   const x = xAt(0x3a20);
