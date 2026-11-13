@@ -190,6 +190,7 @@ export const OUT = {
   "app-token-route": "a browser and the helper",
   "app-chains-evm": "a browser and the helper",
   "app-chains-evm-rail": "a browser and the helper",
+  "rail-open-pushes-the-middle": "a browser and the helper",
   "app-trade-box-mount": "a browser",
   "app-a2-e2e": "the helper's market and devnet RPC answers, and the response headers APP_HOST adds",
   "app-token-chart": "a browser and the helper",
