@@ -44,8 +44,8 @@ test("the plants: two wallets sign the two_wallets pair, one W both of one_walle
 });
 
 test("the one_wallet plant reaches the helper's reads on mainnet: at the epoch fee, no priority, the bundle's tip cap is over SOLANA_JITO_TIP_MIN at any rent up to 100 times today's (3,480 a byte); a fee_below_cost answer FAILs", () => {
-  // the helper's cap (apps/helper/src/pool/solana-pieces.ts piecesTipCap): each W-signed transaction's budget less its
-  // priority fee (the plant sets none), less the tip transaction's 5,000
+  // the cap the helper's bundle tip had until card owners-solana-buy-lands (each W-signed transaction's budget less its
+  // priority fee, the plant sets none, less a tip transaction's 5,000): the plant's relay fees still clear it
   for (const lamportsPerByte of [1n, 3_480n, 5_080n, 348_000n]) {
     const rent = { lamportsPerByte, factor: 2n };
     const cap = 2n * solanaPoolPriorityBudget(rent, solanaPoolFee(rent)) - 5_000n;

@@ -131,8 +131,9 @@ export const HELPER_V1_PATHS = [
   // longer), never a short timeout
   { method: "GET", path: "/v1/pool/fee", part: "relay", limitBytes: 1024 },
   { method: "POST", path: "/v1/pool/solana/send", part: "relay", limitBytes: 4096 },
-  // a buy made of several pieces (card buy-spends-several-pieces): every tag 2, then the tag 3, all of one W, carried as
-  // one bundle, all landing or none; on mainnet answered, like a tag 3, only once the fill is decided
+  // a buy made of several pieces (card buy-spends-several-pieces): every tag 2, then the tag 3, all of one W; the tag 2s
+  // sent plain, then the tag 3 as one send is (card owners-solana-buy-lands), so a tag 2 can land without the buy and
+  // its money waits in W; on mainnet answered, like a tag 3, only once the fill is decided
   // (POOL_SOLANA_PIECES_BODY_MAX, 8 KB)
   { method: "POST", path: "/v1/pool/solana/pieces", part: "relay", limitBytes: 8192 },
   { method: "POST", path: "/v1/pool/evm/send", part: "relay", limitBytes: 4096 },
