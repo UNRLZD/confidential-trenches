@@ -39,6 +39,14 @@ test("the source: the label only while a bar is GeckoTerminal's; the header wins
   assert.equal(isGecko(null), false);
 });
 
+test("RED at 6856d0c9: CoinGecko's paid bars (src coingecko, or chain,coingecko on a Base or Solana chart) carry the same label as GeckoTerminal's", () => {
+  assert.equal(isGecko("coingecko"), true);
+  assert.equal(isGecko("chain,coingecko"), true);
+  assert.equal(isGecko("notcoingecko"), false);
+  assert.equal((toCandleData({ ...good(), src: "chain" }, "15m", "chain,coingecko") as { gecko: boolean }).gecko, true);
+  assert.equal((toCandleData({ ...good(), src: "coingecko" }, "15m", null) as { gecko: boolean }).gecko, true, "no header: the body's src");
+});
+
 test("no bars is the empty state, with its source", () => {
   assert.deepEqual(toCandleData({ ...good(), candles: [] }, "15m", "chain"), { status: "empty", gecko: false, held: true });
   assert.deepEqual(toCandleData({ ...good(), candles: [] }, "15m", "geckoterminal"), { status: "empty", gecko: true, held: true });

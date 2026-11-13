@@ -697,3 +697,17 @@ test("card helper-live-run-green-after-122: read() reads each shared key's logs 
   assert.deepEqual(again.chain.shared.map((x) => [x.key, x.logs.length]), [[BUSY, 2], [SIDE, 0]]);
   assert.equal(again.chain.poolLogs.key, BUSY);
 });
+
+test("card charts-say-coingecko: a Base chart from CoinGecko's paid plan before our first bar (recorded good_coingecko, X-Helper-Source chain,coingecko) PASSES; the same chart named by the vendor alone, or by a name the helper never gives, FAILs", () => {
+  const r = run(A.good_coingecko);
+  assert.deepEqual(bad(r), []);
+  assert.equal(r.ok, true);
+  assert.equal(A.good_coingecko.reads.candles.headers["x-helper-source"], "chain,coingecko");
+  for (const src of ["coingecko", "chain,coingeckox"]) {
+    const rec = structuredClone(A.good_coingecko);
+    rec.reads.candles.headers["x-helper-source"] = src;
+    body(rec, "candles", (b) => (b.src = src));
+    assert.equal(run(rec).ok, false, src);
+  }
+  assert.equal(run(A.bad_not_deployed).ok, false);
+});
