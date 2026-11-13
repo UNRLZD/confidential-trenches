@@ -102,7 +102,7 @@ const field = (n) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0
 const u64 = (n) => Array.from({ length: 8 }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn));
 
 /** One plant: a v0 transaction the fee payer pays (slot 0 empty) and a throwaway W signs. */
-export function plant({ program, pool, feePayer, relayFee, kind, nowMs = Date.now(), w = generateKeyPairSync("ed25519").privateKey, nullifier = Uint8Array.from([0, ...randomBytes(31)]), blockhash = b58encode(Buffer.alloc(32, 1)) }) {
+export function plant({ program, pool, feePayer, relayFee, kind, nowMs = Date.now(), w = generateKeyPairSync("ed25519").privateKey, nullifier = Uint8Array.from([0, ...randomBytes(31)]), blockhash = b58encode(Buffer.alloc(32, 1)), cuPrice }) {
   const W = b58encode(createPublicKey(w).export({ format: "der", type: "spki" }).subarray(-32));
   const r = {
     proof: new Uint8Array(256).fill(7),
@@ -135,7 +135,9 @@ export function plant({ program, pool, feePayer, relayFee, kind, nowMs = Date.no
     data = solanaEncodePoolRelease(r);
   }
   const cu = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([2, 0x80, 0x1a, 0x06, 0]) }; // 400,000 CU
-  const { message } = solanaCompileV0(feePayer, [cu, { program, accounts, data }], blockhash, [], [feePayer, W]);
+  // a priority fee W sets, micro-lamports a CU, when asked (card owners-solana-buy-lands); none by default
+  const price = cuPrice === undefined ? [] : [{ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([3, ...u64(BigInt(cuPrice))]) }];
+  const { message } = solanaCompileV0(feePayer, [cu, ...price, { program, accounts, data }], blockhash, [], [feePayer, W]);
   return Buffer.concat([Buffer.from([2]), Buffer.alloc(64), sign(null, message, w), Buffer.from(message)]);
 }
 

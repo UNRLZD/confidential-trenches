@@ -20,7 +20,7 @@
 // - SOL_COPY_ONLY=<kind,...> runs those kinds only; SOL_COPY_STEPS=buy stops each after its buy.
 // - SOL_COPY_PLANT=mayhem-drop: the Mayhem coin's buy is built with its curve read as not Mayhem, so the buy names the
 //   plain fee recipient in place of the Mayhem one; the run must fail with pump's own error.
-// - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, its engine stand-in landing each bundle,
+// - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, on SOL_COPY_ENGINE (swallow by default),
 //   through pool-buy-pieces-devnet.mjs's copy-part1 in place of the flow: 6 notes of 0.01 SOL, a buy only 5 pay (refused,
 //   nothing sent), a buy of 2 pieces and Max of the 4 left, each carried as the helper's pieces route sends them (the tag 2s
 //   plain, then the tag 3, card owners-solana-buy-lands).
@@ -50,8 +50,9 @@ const PIECES = FLOW === "pieces";
 const SCENARIO = process.env.SOL_COPY_SCENARIO ?? "copy-part1";
 if (!["copy-part1", "copy-takeable"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1 or copy-takeable, not ${SCENARIO}`);
 if (PIECES && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=pieces runs the curve coin alone, with no plant and every step");
-const ENGINE = process.env.SOL_COPY_ENGINE ?? (PIECES ? "lands" : "swallow");
-if (PIECES && ENGINE !== "lands") throw new Error("SOL_COPY_FLOW=pieces needs the stand-in that lands each bundle");
+// since card owners-solana-buy-lands a buy of several pieces needs no engine to land (its tag 2s go plain, its tag 3 with
+// a plain copy), so the pieces flow runs on the default stand-in too, the one that never lands a bundle
+const ENGINE = process.env.SOL_COPY_ENGINE ?? "swallow";
 if (!["swallow", "busy", "refused", "lands"].includes(ENGINE)) throw new Error(`SOL_COPY_ENGINE: swallow, busy, refused or lands, not ${ENGINE}`);
 const log = (s) => console.log(`${new Date().toISOString()} copy: ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
