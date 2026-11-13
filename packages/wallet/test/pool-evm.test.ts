@@ -561,6 +561,9 @@ const blockRounds = (r: EvmRpc) => {
   let live = 0;
   out.rpc = Object.assign(async (m: string, p: readonly unknown[]) => {
     if (m !== "eth_getBlockByNumber" || !/^0x/.test(String(p[0]))) return r(m, p);
+    // a search needs each block's time only: headers, never the block's transactions (a fork's upstream log of 13 Nov
+    // showed full blocks, anvil's own fetches below its fork block)
+    assert.equal(p[1], false, `block ${String(p[0])} asked with its transactions`);
     if (live++ === 0) out.rounds++;
     out.most = Math.max(out.most, live);
     out.reads.push(String(p[0]));
