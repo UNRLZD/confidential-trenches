@@ -502,9 +502,10 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
     return wire(o.w ?? SOL_W, [cuLimit, ...steps, ...(o.extra ?? []), depositIx({ value: solanaNoteOf((o.minOut ?? floor) - RESERVE), ...o.dep })]);
   };
   const RESERVE = 5_000n;
-  // card every-lamport-can-move: the note on the grid, the rest under it left on W
+  // card every-lamport-can-move, card pool-amounts-are-standard-sizes: the note the largest rung of min out less the
+  // reserve, the rest past it left on W
   const NOTE = solanaNoteOf(floor - RESERVE);
-  assert.ok(NOTE % SOL_GRID === 0n && NOTE >= SOL_NOTE_FLOOR && floor - RESERVE - NOTE < SOL_GRID && NOTE !== floor - RESERVE, "the fixture's note is off its min out, on the grid");
+  assert.ok(isRung({ one: SOL_GRID, min: SOL_NOTE_FLOOR }, NOTE) && NOTE >= SOL_NOTE_FLOOR && solanaNoteOf(floor - RESERVE) === NOTE && NOTE !== floor - RESERVE, "the fixture's note is off its min out, a rung");
   // a partial sell's reads: the rent both RPCs read, the kit's release floor's (card sol-sell-deposit-back-floor)
   const PART: SolanaSellSurplus = { full: false, fee: 5_000n, rent: { lamportsPerByte: 5_080n, factor: 1n } };
   const d = checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART);
