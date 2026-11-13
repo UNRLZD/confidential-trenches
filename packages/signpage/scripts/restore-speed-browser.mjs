@@ -59,8 +59,8 @@ import { RTT_MS, SLOT, solanaAccount, solanaAnswer } from "../test/restore-speed
 
 const SHIPPED_GAP = 10_000;
 const WORKER_PATH = "/walk-worker.js";
-const CONTINUE = '#signin[data-signin="words"] button[data-action="next"]';
-const STEP_MS = 60_000;
+export const CONTINUE = '#signin[data-signin="words"] button[data-action="next"]';
+export const STEP_MS = 60_000;
 const secs = (ms) => (ms === null || ms === undefined ? "-" : (ms / 1000).toFixed(2));
 
 // ------------------------------------------------------------------------------------------------ the chains' answers
@@ -119,7 +119,7 @@ const POOL_VIEWS = ["SCOPE()", "currentRoot()", "currentTreeSize()", "currentLab
 
 /** An EVM chain: its pinned pool empty, its head `span` blocks past the pin at the run's start and one block each 2 s
  *  after, each block's time on the clock; Chainlink ETH/USD at 3,000 USD updated at the head's time. */
-function evmChain(chain, span, start) {
+export function evmChain(chain, span, start) {
   const pin = EVM_POOLS[chain];
   const id = EVM_CHAIN_IDS[chain];
   const scope = evmPoolScopeOf(pin.pool.toLowerCase(), id);
@@ -156,7 +156,7 @@ function evmChain(chain, span, start) {
 }
 
 /** The mainnet NEAR vault, empty: its views as contracts/vault writes them, at one final block. */
-function nearVault() {
+export function nearVault() {
   const net = NEAR_NETWORKS.mainnet;
   const H = 190_000_000;
   const hashAt = (h) => base58.encode(keccak_256(new TextEncoder().encode(`near ${h}`)));
@@ -256,7 +256,7 @@ const PROBE = ({ sign, app, button }) => {
 // ------------------------------------------------------------------------------------------------ one run
 /** The context's routes: the sites (served by the harness, or here from their folders with their _headers for an engine
  *  the harness cannot map), /walk-worker.js 404 in page mode, every chain read answered RTT_MS late, the rest refused. */
-async function route(context, { mode, sites, evm, near, out }) {
+export async function route(context, { mode, sites, evm, near, out }) {
   const log = (k, key) => (out[k][key] = (out[k][key] ?? 0) + 1);
   await context.route(
     () => true,
