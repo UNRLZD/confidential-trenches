@@ -12,7 +12,7 @@ import { SOLANA_ANSWER_MAX_BYTES, VaultTree, solanaJsonRpc, vaultLabelOf, type S
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
 import * as solRestoreModule from "../src/pool/solana-restore.ts";
-import { SOL_MARK_BUCKET, SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, SOL_MARK_TAG, SOL_PRE_MARK_LEN, SOL_SETTLE_ROUNDS, SOL_SPENT_MARK_LEN, type SolanaPoolCache, type SolanaSettled, solanaMarkOf, solanaMarksListed, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleReserved, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
+import { SOL_MARK_BUCKET, SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, SOL_MARK_TAG, SOL_PRE_MARK_LEN, SOL_SETTLE_ROUNDS, SOL_SPENT_MARK_LEN, type SolanaPoolCache, type SolanaSettled, solanaMarkOf, solanaMarksListed, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleReserved, solanaSettleSpent, type SolanaSpentMark, solanaSettleSpentSet } from "../src/pool/solana-restore.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { createRpc as createHelperRpc } from "../../../apps/helper/src/rpc/rpc.ts";
 import { SOLANA_RPC_WINDOW_RETRY, solanaHelperRpc, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
@@ -1491,6 +1491,34 @@ test("already spent: a send refused as spent marks the note SPENT with its chang
   await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: pair(chain, chain) }));
   // a note of another pool is refused before any read
   await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: b58(R.pool), rpcs: pair(chain, chain) }), /not a landed note of this pool/);
+});
+
+test("card buy-spends-several-pieces: solanaSettleSpentSet settles several notes on one listing of the marks, each note's verdict its own", async () => {
+  const { chain, l0 } = restorePool();
+  const a = await reservedDeposit0(l0);
+  // a second landed note of the pool with no spent mark, and an id the store does not hold
+  const ref1 = { kind: "deposit", s: SCOPE, i: 1 } as const;
+  const P1 = noteSecrets(SEED, ref1).precommitment;
+  const n1 = await a.ns.add({ ref: ref1, scope: SCOPE, precommitment: P1, state: "UNSPENT", leaf: { value: 50_000_000n, label: l0 + 1n, commitment: noteCommitment(50_000_000n, l0 + 1n, P1), leafIndex: 2n } });
+  let lists = 0;
+  const counted: SolanaRpc = async (m, p) => {
+    if (m === "getProgramAccounts") lists++;
+    return lister(chain)(m, p);
+  };
+  const got = await solanaSettleSpentSet({ seed64: SEED, notes: a.ns, noteIds: [a.id, n1.id, "nope"], program: PROGRAM, lister: counted, rpcs: pair(chain, chain) });
+  const once = lists;
+  assert.ok(once >= 1);
+  assert.deepEqual(got.map((x) => ("error" in x ? `error ${(x.error as Error).message}` : x.kind)), ["spent", "unspent", "error note nope: not a landed note of this pool"]);
+  assert.equal((await a.ns.get(a.id))!.state, "SPENT");
+  assert.equal((await a.ns.get(n1.id))!.state, "UNSPENT");
+  // one note at a time lists the marks once a note: the set's one listing is the count of a single settle's
+  lists = 0;
+  await solanaSettleSpent({ seed64: SEED, notes: a.ns, noteId: n1.id, program: PROGRAM, lister: counted, rpcs: pair(chain, chain) });
+  assert.equal(lists, once, "the set listed the marks as often as one note's settle does");
+  // no landed note of the pool among them: nothing read
+  lists = 0;
+  assert.deepEqual((await solanaSettleSpentSet({ seed64: SEED, notes: a.ns, noteIds: ["nope"], program: PROGRAM, lister: counted, rpcs: pair(chain, chain) })).length, 1);
+  assert.equal(lists, 0);
 });
 
 test("a pass over RESERVED notes: spent is settled; no mark and both RPCs' block time past the deadline frees; else it is held", async () => {

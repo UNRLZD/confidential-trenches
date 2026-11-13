@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   SOLANA_JITO_TIP_MIN,
+  SOLANA_POOL_BUY_PIECES_MAX,
   SOLANA_POOL_WORST_BUY_VENUE,
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_ACCOUNT_MAX_SIZE,
@@ -134,4 +135,65 @@ test("Solana: a buy that would leave W short of its sell's up-front need is refu
 test("Solana: never below 0: a chunk the fee, the tip and the accounts eat is 0", () => {
   const rent = RENTS[0]!;
   for (const chunk of [0n, 1n, 1_300_000n, 5_000_000n]) assert.equal(solanaPoolBuyMaxSpend(release(chunk, solanaPoolFee(rent)), SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent), 0n, String(chunk));
+});
+
+// Card buy-spends-several-pieces: one tap pays its W from several releases (pieces), one note each, and buys once. The
+// account of 12 Nov 2026 holds four notes, 19,425,404, 9,966,767, 5,487,104 and 5,547,107 lamports (the mainnet pool's
+// marks), whose pieces on the 1-2-5 ladder from 0.005 SOL are 10,000,000, 5,000,000, 5,000,000 and 5,000,000: Max is
+// their sum less four relay fees, less the per-buy costs once (the tip cap, W's accounts, the sell's need), not one
+// piece's.
+const PIECES_OF_THE_ACCOUNT = [10_000_000n, 5_000_000n, 5_000_000n, 5_000_000n];
+const perBuy = (rent: SolanaRent, v: { kind: "pump-curve" | "pumpswap"; tokenAccountSize: number; cashback: boolean }): bigint =>
+  solanaRentMin(rent, v.tokenAccountSize) + solanaRentMin(rent, 137) + (v.kind === "pumpswap" && v.cashback ? solanaRentMin(rent, 165) : 0n) + sellNeedAfter(rent, v);
+test("Solana pieces: Max over the account's four pieces is 25,000,000 less four relay fees, less the tip cap and the venue's per-buy costs once", () => {
+  const rent = RENTS[0]!;
+  const fee = solanaPoolFee(rent); // 1,300,000
+  const tipCap = 1_000_000n; // the wallet's SOL_TIP_CAP, the most the release lets the tap tip
+  const pieces = PIECES_OF_THE_ACCOUNT.map((w) => release(w, fee));
+  const coin = { kind: "pump-curve" as const, tokenAccountSize: 165, cashback: false };
+  assert.equal(solanaPoolBuyMaxSpend(pieces, coin, tipCap, rent), 25_000_000n - 5_200_000n - tipCap - perBuy(rent, coin));
+  assert.equal(solanaPoolBuyMaxSpend(pieces, coin, tipCap, rent), 14_471_920n);
+  // one piece's Max, today's, is far under it
+  assert.equal(solanaPoolBuyMaxSpend(release(10_000_000n, fee), coin, tipCap, rent), 3_371_920n);
+  for (const v of VENUES) {
+    const max = solanaPoolBuyMaxSpend(pieces, v, tipCap, rent);
+    assert.equal(max, 25_000_000n - 5_200_000n - tipCap - perBuy(rent, v), JSON.stringify(v));
+    assert.equal(solanaPoolBuyFunds(pieces, venue(v), { spend: max, tip: tipCap }, rent).problem, null, JSON.stringify(v));
+    assert.notEqual(solanaPoolBuyFunds(pieces, venue(v), { spend: max + 1n, tip: tipCap }, rent).problem, null, `${JSON.stringify(v)}: max + 1`);
+  }
+});
+
+test("Solana pieces: the chunk is every piece's withdrawn value less its own relay fee, less the tip once", () => {
+  const rent = RENTS[0]!;
+  const fee = solanaPoolFee(rent);
+  const v = venue({ kind: "pumpswap", tokenAccountSize: 165, cashback: false });
+  assert.equal(solanaPoolBuyFunds([release(20_000_000n, fee), release(5_000_000n, fee)], v, { spend: 0n, tip: 100_000n }, rent).chunk, 25_000_000n - 2n * fee - 100_000n);
+  // one piece as a list reads as the one release
+  assert.deepEqual(solanaPoolBuyFunds([release(SOL / 10n, fee)], v, { spend: 1n, tip: 100_000n }, rent), solanaPoolBuyFunds(release(SOL / 10n, fee), v, { spend: 1n, tip: 100_000n }, rent));
+});
+
+test("Solana pieces: Max counts only pieces that add more than their fee, and at most SOLANA_POOL_BUY_PIECES_MAX of them, the ones that add the most", () => {
+  const rent = RENTS[0]!;
+  const fee = solanaPoolFee(rent);
+  const coin = { kind: "pump-curve" as const, tokenAccountSize: 165, cashback: false };
+  const tip = 1_000_000n;
+  assert.equal(SOLANA_POOL_BUY_PIECES_MAX, 4);
+  // a piece of the fee or under it adds nothing: Max is the same with it as without it
+  assert.equal(solanaPoolBuyMaxSpend([release(10_000_000n, fee), release(fee, fee), release(1_000_000n, fee)], coin, tip, rent), solanaPoolBuyMaxSpend([release(10_000_000n, fee)], coin, tip, rent));
+  // seven pieces: the four largest
+  const seven = [5_000_000n, 50_000_000n, 10_000_000n, 5_000_000n, 20_000_000n, 10_000_000n, 5_000_000n].map((w) => release(w, fee));
+  const four = [50_000_000n, 20_000_000n, 10_000_000n, 10_000_000n].map((w) => release(w, fee));
+  assert.equal(solanaPoolBuyMaxSpend(seven, coin, tip, rent), solanaPoolBuyMaxSpend(four, coin, tip, rent));
+  assert.equal(solanaPoolBuyMaxSpend(four, coin, tip, rent), 90_000_000n - 4n * fee - tip - perBuy(rent, coin));
+  // none: 0
+  assert.equal(solanaPoolBuyMaxSpend([], coin, tip, rent), 0n);
+});
+
+test("Solana pieces: the funds rule refuses no piece, more pieces than one tap carries, and a piece that adds nothing past its fee", () => {
+  const rent = RENTS[0]!;
+  const fee = solanaPoolFee(rent);
+  const v = venue({ kind: "pump-curve", tokenAccountSize: 165, cashback: false });
+  assert.equal(solanaPoolBuyFunds([], v, { spend: 1n, tip: 0n }, rent).problem, "no release");
+  assert.match(String(solanaPoolBuyFunds(Array.from({ length: SOLANA_POOL_BUY_PIECES_MAX + 1 }, () => release(SOL, fee)), v, { spend: 1n, tip: 0n }, rent).problem), /over the 4 one tap carries/);
+  assert.equal(solanaPoolBuyFunds([release(SOL, fee), release(fee, fee)], v, { spend: 1n, tip: 0n }, rent).problem, "a piece adds nothing past its relay fee");
 });
