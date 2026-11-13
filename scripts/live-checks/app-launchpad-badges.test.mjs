@@ -136,32 +136,57 @@ test("planted: an image that never settles fails the run naming it, and the wait
   rec.loads[1].pending = ["ct-api.unrealized.trade/v1/logo/solana/never"];
   assert.deepEqual(bad(judge(rec).lines), ["BAD desktop /discover: image never settled in 8 s: ct-api.unrealized.trade/v1/logo/solana/never"]);
   // SETTLE in a stand-in page: one eager image that never answers, one that loads, one lazy image below the fold and one
-  // lazy image in a tab not drawn (neither asked for by a browser until it comes near), one already complete
+  // lazy image in a tab not drawn (neither asked for by a browser until it comes near), one already complete. The page's
+  // timer is a stand-in: the test fires it, so no real time passes.
   const img = (src, { lazy = false, drawn = true, top = 10, complete = false } = {}) => {
     const ls = {};
     return {
-      src, currentSrc: "", complete, loading: lazy ? "lazy" : "auto",
+      src, currentSrc: "", loading: lazy ? "lazy" : "auto", ls,
+      get complete() { return complete; },
+      fire: (k) => ((complete = true), ls[k]?.()),
       getClientRects: () => (drawn ? [{}] : []),
       getBoundingClientRect: () => ({ top, bottom: top + 20, left: 10, right: 30 }),
-      addEventListener: (k, f) => ((ls[k] = f), k === "load" && src.endsWith("/loads.png") && setTimeout(() => ((complete = true), f()), 20)),
-      get done() { return complete; },
+      addEventListener: (k, f) => (ls[k] = f),
     };
   };
-  const images = [img("https://ct-api.unrealized.trade/v1/logo/solana/never?x=1"), img("https://a.test/loads.png"), img("https://a.test/below.png", { lazy: true, top: 5000 }), img("https://a.test/hidden.png", { lazy: true, drawn: false }), img("https://a.test/done.png", { complete: true })];
-  for (const i of images) Object.defineProperty(i, "complete", { get: () => i.done });
-  const saved = { document: globalThis.document, location: globalThis.location, innerWidth: globalThis.innerWidth, innerHeight: globalThis.innerHeight };
-  Object.assign(globalThis, { document: { images }, location: { href: "https://ct-app.unrealized.trade/discover" }, innerWidth: 1440, innerHeight: 900 });
+  const never = img("https://ct-api.unrealized.trade/v1/logo/solana/never?x=1");
+  const loads = img("https://a.test/loads.png");
+  const below = img("https://a.test/below.png", { lazy: true, top: 5000 });
+  const hidden = img("https://a.test/hidden.png", { lazy: true, drawn: false });
+  const done = img("https://a.test/done.png", { complete: true });
+  const timers = [];
+  const saved = { document: globalThis.document, location: globalThis.location, innerWidth: globalThis.innerWidth, innerHeight: globalThis.innerHeight, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  Object.assign(globalThis, {
+    document: { images: [never, loads, below, hidden, done] },
+    location: { href: "https://ct-app.unrealized.trade/discover" },
+    innerWidth: 1440,
+    innerHeight: 900,
+    setTimeout: (f, ms) => timers.push({ f, ms }) - 1,
+    clearTimeout: (id) => timers[id] && (timers[id].cleared = true),
+  });
   try {
-    const t0 = Date.now();
-    const pending = await SETTLE({ ms: 300 });
-    const took = Date.now() - t0;
+    let pending = null;
+    const p = SETTLE({ ms: SETTLE_MS }).then((x) => (pending = x));
+    // waited on: the two eager images not yet complete, never the lazy ones the browser has not asked for
+    assert.ok(never.ls.load && loads.ls.load && !below.ls.load && !hidden.ls.load && !done.ls.load);
+    assert.deepEqual(timers.map((t) => t.ms), [SETTLE_MS]);
+    loads.fire("load");
+    await Promise.resolve();
+    assert.equal(pending, null, "one image still out: no answer before the bound");
+    timers[0].f();
+    await p;
     assert.deepEqual(pending, ["ct-api.unrealized.trade/v1/logo/solana/never"]);
-    assert.ok(took >= 290 && took < 2_000, `${took} ms`);
-    // nothing to wait on: it answers at once
-    Object.assign(globalThis, { document: { images: [images[2], images[3], images[4]] } });
-    const t1 = Date.now();
-    assert.deepEqual(await SETTLE({ ms: 5_000 }), []);
-    assert.ok(Date.now() - t1 < 100);
+    // nothing to wait on: it answers at once, with no timer set
+    globalThis.document = { images: [below, hidden, done] };
+    assert.deepEqual(await SETTLE({ ms: SETTLE_MS }), []);
+    assert.equal(timers.length, 1);
+    // every image settles: the answer comes then, its timer cleared
+    const a = img("https://a.test/a.png");
+    globalThis.document = { images: [a] };
+    const q = SETTLE({ ms: SETTLE_MS });
+    a.fire("error");
+    assert.deepEqual(await q, []);
+    assert.equal(timers[1].cleared, true);
   } finally {
     Object.assign(globalThis, saved);
   }
