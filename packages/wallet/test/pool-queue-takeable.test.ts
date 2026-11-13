@@ -81,7 +81,7 @@ test("readyAt on the take's clock: an early read of the pool's time stands for i
   }
 });
 
-// review of b57f4eb28 (P3-1, P3-3): the guards no test killed, from the reviewer's probes A, B and D
+// review of b57f4eb28 (P3-1, P3-3): the guards no test killed, from the review's probes A, B and D
 // setup's passes read the pool's time START + 11_000 with the monotonic clock at 0; the fresh note's newest-root proof
 // (epoch START) is late from START + E + 15_000, 64_000 ms of device time later, and out of every list 5 s before
 const LATE_IN = 64_000;
