@@ -67,8 +67,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "kit-frame-version";
 /** The kit version the page reads every app at in full (packages/kit/src/signpage/messages.ts SIGNPAGE_KIT_VERSION), and
  *  its levels below that, newest first, down to kit-v1.4's (packages/signpage/src/kit-version.ts KitLevel). */
-export const KIT = "1.14";
-export const LEVELS = ["1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
+export const KIT = "1.15";
+export const LEVELS = ["1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
 export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
@@ -115,6 +115,12 @@ const NO_CLOSES = /(?:^|[^\w$])([\w$]+)=\(([\w$]+),([\w$]+)\)=>\{if\(!([\w$]+)\.
 /** pool.buy.dry's answer with no out (card solana-buy-preview-complete), as minified: any other kind's result, and one
  *  that is no object, as it is. */
 const NO_OUT = /(?:^|[^\w$])([\w$]+)=\(([\w$]+),([\w$]+)\)=>\{if\(typeof \3!=`object`\|\|!\3\|\|\2!==`pool\.buy\.dry`\)return \3;let\{out:[\w$]+,\.\.\.([\w$]+)\}=\3;return \4\}/;
+/** pool.buy.dry's answer with no with_cash (card one-balance-buys-on-every-chain), as minified: any other kind's result,
+ *  and one that is no object, as it is. */
+const NO_CASH = /(?:^|[^\w$])([\w$]+)=\(([\w$]+),([\w$]+)\)=>\{if\(typeof \3!=`object`\|\|!\3\|\|\2!==`pool\.buy\.dry`\)return \3;let\{with_cash:[\w$]+,\.\.\.([\w$]+)\}=\3;return \4\}/;
+/** A route event as a level reads it (card one-balance-buys-on-every-chain), as minified: the move event to the current
+ *  level only, every other as it is (group: its name). */
+const ROUTE_FOR = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{return \2!==`current`&&Object\.hasOwn\(\3,`move`\)\?null:\3\}/;
 /** The open kinds (packages/kit/src/signpage/messages.ts OPEN_KINDS): each one's ok answer carries closes from kit 1.13. */
 export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"];
 
@@ -164,7 +170,7 @@ function helloPath(js) {
           // card buy-spends-several-pieces: every level below the current one first takes each pool entry's making, kit-v1.11
           // its own level (`making` below holds the strip to NO_MAKING), the asset_held strip built on what it returns and
           // kit-v1.10 its own level on that, every lower level built on the asset_held strip's result
-          new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`(?:(?:\\|\\|\\1===\`1\\.13\`)?\\|\\|\\1===\`1\\.12\`)?\\)return \\2;let ([\\w$]+)=[\\w$]+\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let ([\\w$]+)=[\\w$]+\\(\\3\\);if\\(\\1===\`1\\.10\`\\)return \\4;if\\(\\1===\`1\\.9\`\\)return\\{\\.\\.\\.\\4,ops:\\4\\.ops\\.map\\([\\w$]+\\)\\};let ([\\w$]+)=\\{\\.\\.\\.\\4,ops:\\4\\.ops\\.map\\([\\w$]+\\)\\};if\\(\\1===\`1\\.8\`\\)return \\5;let ([\\w$]+)=${esc(noDec)}\\(\\5\\);if\\(\\1===\`1\\.7\`\\)return \\6;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\6,ops:${esc(filter)}\\(\\6\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\6,ops:${esc(filter)}\\(\\6\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null
+          new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`(?:(?:\\|\\|\\1===\`1\\.14\`)?(?:\\|\\|\\1===\`1\\.13\`)?\\|\\|\\1===\`1\\.12\`)?\\)return \\2;let ([\\w$]+)=[\\w$]+\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let ([\\w$]+)=[\\w$]+\\(\\3\\);if\\(\\1===\`1\\.10\`\\)return \\4;if\\(\\1===\`1\\.9\`\\)return\\{\\.\\.\\.\\4,ops:\\4\\.ops\\.map\\([\\w$]+\\)\\};let ([\\w$]+)=\\{\\.\\.\\.\\4,ops:\\4\\.ops\\.map\\([\\w$]+\\)\\};if\\(\\1===\`1\\.8\`\\)return \\5;let ([\\w$]+)=${esc(noDec)}\\(\\5\\);if\\(\\1===\`1\\.7\`\\)return \\6;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\6,ops:${esc(filter)}\\(\\6\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\6,ops:${esc(filter)}\\(\\6\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null
         : null))
     : null;
   const decimals = noDec && poolOps && poolOps.includes(`=${noDec}(`) ? poolOps : null;
@@ -178,11 +184,11 @@ function helloPath(js) {
   // lower level is built on (`poolOps`' last form reads that every level below builds on the strip's result)
   const noHeld = NO_ASSET_HELD.exec(js)?.[1];
   // (card buy-spends-several-pieces: or on the making strip's result, kit-v1.11's level, which the given state is not)
-  const held = noHeld && poolOps && new RegExp(`\\{if\\(([\\w$]+)===\`current\`(?:(?:\\|\\|\\1===\`1\\.13\`)?\\|\\|\\1===\`1\\.12\`)?\\)return ([\\w$]+);(?:let ([\\w$]+)=[\\w$]+\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let ([\\w$]+)=${esc(noHeld)}\\(\\3\\);if\\(\\1===\`1\\.10\`\\)return \\4;|let ([\\w$]+)=${esc(noHeld)}\\(\\2\\);if\\(\\1===\`1\\.10\`\\)return \\5;)`).test(poolOps) ? poolOps : null;
+  const held = noHeld && poolOps && new RegExp(`\\{if\\(([\\w$]+)===\`current\`(?:(?:\\|\\|\\1===\`1\\.14\`)?(?:\\|\\|\\1===\`1\\.13\`)?\\|\\|\\1===\`1\\.12\`)?\\)return ([\\w$]+);(?:let ([\\w$]+)=[\\w$]+\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let ([\\w$]+)=${esc(noHeld)}\\(\\3\\);if\\(\\1===\`1\\.10\`\\)return \\4;|let ([\\w$]+)=${esc(noHeld)}\\(\\2\\);if\\(\\1===\`1\\.10\`\\)return \\5;)`).test(poolOps) ? poolOps : null;
   // card buy-spends-several-pieces: kit-v1.11's level returns the state with no making, the one the asset_held strip and
   // every lower level is built on (`poolOps`' last form)
   const noMaking = NO_MAKING.exec(js)?.[1];
-  const making = noMaking && poolOps && new RegExp(`\\{if\\(([\\w$]+)===\`current\`(?:(?:\\|\\|\\1===\`1\\.13\`)?\\|\\|\\1===\`1\\.12\`)?\\)return ([\\w$]+);let ([\\w$]+)=${esc(noMaking)}\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let [\\w$]+=[\\w$]+\\(\\3\\);`).test(poolOps) ? poolOps : null;
+  const making = noMaking && poolOps && new RegExp(`\\{if\\(([\\w$]+)===\`current\`(?:(?:\\|\\|\\1===\`1\\.14\`)?(?:\\|\\|\\1===\`1\\.13\`)?\\|\\|\\1===\`1\\.12\`)?\\)return ([\\w$]+);let ([\\w$]+)=${esc(noMaking)}\\(\\2\\);if\\(\\1===\`1\\.11\`\\)return \\3;let [\\w$]+=[\\w$]+\\(\\3\\);`).test(poolOps) ? poolOps : null;
   const result16 = shaper && stateFn
     ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\((?:\\1===\`1\\.(?:[789]|10)\`\\|\\|)*\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ??
       // card buy-spends-several-pieces: every level below the current one reads the result with no dry pieces and cost
@@ -195,7 +201,11 @@ function helloPath(js) {
       // card solana-buy-preview-complete: every level below the current one first reads the result with no dry out (`out`
       // below holds the function to NO_OUT), kit-v1.13 its own level on that, the closes strip and every lower branch
       // built on what it returns
-      new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;let ([\\w$]+)=[\\w$]+\\(\\2,\\3\\);if\\(\\1===\`1\\.13\`\\)return \\4;let ([\\w$]+)=[\\w$]+\\(\\2,\\4\\);if\\(\\1===\`1\\.12\`\\)return \\5;let ([\\w$]+)=[\\w$]+\\(\\2,\\5\\);if\\((?:\\1===\`1\\.(?:[789]|1[01])\`\\|\\|)*\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\6\\):\\6;`).exec(js)?.[0] ?? null)
+      new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;let ([\\w$]+)=[\\w$]+\\(\\2,\\3\\);if\\(\\1===\`1\\.13\`\\)return \\4;let ([\\w$]+)=[\\w$]+\\(\\2,\\4\\);if\\(\\1===\`1\\.12\`\\)return \\5;let ([\\w$]+)=[\\w$]+\\(\\2,\\5\\);if\\((?:\\1===\`1\\.(?:[789]|1[01])\`\\|\\|)*\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\6\\):\\6;`).exec(js)?.[0] ??
+      // card one-balance-buys-on-every-chain: every level below the current one first reads the result with no dry
+      // with_cash (`cash` below holds the function to NO_CASH), kit-v1.14 its own level on that, the out strip and every
+      // lower branch built on what it returns
+      new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;let ([\\w$]+)=[\\w$]+\\(\\2,\\3\\);if\\(\\1===\`1\\.14\`\\)return \\4;let ([\\w$]+)=[\\w$]+\\(\\2,\\4\\);if\\(\\1===\`1\\.13\`\\)return \\5;let ([\\w$]+)=[\\w$]+\\(\\2,\\5\\);if\\(\\1===\`1\\.12\`\\)return \\6;let ([\\w$]+)=[\\w$]+\\(\\2,\\6\\);if\\((?:\\1===\`1\\.(?:[789]|1[01])\`\\|\\|)*\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\7\\):\\7;`).exec(js)?.[0] ?? null)
     : null;
   const noDry = NO_DRY.exec(js)?.[1];
   const dry = noDry && result16 && new RegExp(`\\)return [\\w$]+;let [\\w$]+=${esc(noDry)}\\(`).test(result16) ? result16 : null;
@@ -218,24 +228,39 @@ function helloPath(js) {
   const closeKinds = kindsAt ? kindsAt[1].split(",").map((k) => k.slice(1, -1)) : null;
   const closes = (noCloses && result16 && new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=${esc(noCloses[1])}\\([\\w$]+,\\2\\);if\\(\\1===\`1\\.12\`\\)return \\3;`).test(result16) ||
     // (card solana-buy-preview-complete: or on the out strip's result, kit-v1.13's level, which the given answer is not)
-    (noCloses && result16 && new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=[\\w$]+\\([\\w$]+,\\2\\);if\\(\\1===\`1\\.13\`\\)return \\3;let ([\\w$]+)=${esc(noCloses[1])}\\([\\w$]+,\\3\\);if\\(\\1===\`1\\.12\`\\)return \\4;`).test(result16)))
+    (noCloses && result16 && new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=[\\w$]+\\([\\w$]+,\\2\\);if\\(\\1===\`1\\.13\`\\)return \\3;let ([\\w$]+)=${esc(noCloses[1])}\\([\\w$]+,\\3\\);if\\(\\1===\`1\\.12\`\\)return \\4;`).test(result16)) ||
+    // (card one-balance-buys-on-every-chain: or below kit-v1.14's level and the out strip's)
+    (noCloses && result16 && new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=[\\w$]+\\([\\w$]+,\\2\\);if\\(\\1===\`1\\.14\`\\)return \\3;let ([\\w$]+)=[\\w$]+\\([\\w$]+,\\3\\);if\\(\\1===\`1\\.13\`\\)return \\4;let ([\\w$]+)=${esc(noCloses[1])}\\([\\w$]+,\\4\\);if\\(\\1===\`1\\.12\`\\)return \\5;`).test(result16)))
     ? result16
     : null;
-  const state112 = poolOps && /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`(?:\|\|\1===`1\.13`)?\|\|\1===`1\.12`\)return \2;/.test(poolOps) ? poolOps : null;
+  const state112 = poolOps && /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`(?:\|\|\1===`1\.14`)?(?:\|\|\1===`1\.13`)?\|\|\1===`1\.12`\)return \2;/.test(poolOps) ? poolOps : null;
   // card solana-buy-preview-complete: kit-v1.13 is sent each pool.buy.dry answer with no out (the strip first, kit-v1.13
   // its own level on it), and the state in full, as the current level is (out is in no state)
   const noOut = NO_OUT.exec(js)?.[1];
-  const out = noOut && result16 && new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=${esc(noOut)}\\([\\w$]+,\\2\\);if\\(\\1===\`1\\.13\`\\)return \\3;`).test(result16) ? result16 : null;
-  const state113 = poolOps && /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`\|\|\1===`1\.13`(?:\|\|\1===`1\.12`)?\)return \2;/.test(poolOps) ? poolOps : null;
+  const out = noOut && result16 && (new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=${esc(noOut)}\\([\\w$]+,\\2\\);if\\(\\1===\`1\\.13\`\\)return \\3;`).test(result16) ||
+    // (card one-balance-buys-on-every-chain: or on the with_cash strip's result, kit-v1.14's level)
+    new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=[\\w$]+\\([\\w$]+,\\2\\);if\\(\\1===\`1\\.14\`\\)return \\3;let ([\\w$]+)=${esc(noOut)}\\([\\w$]+,\\3\\);if\\(\\1===\`1\\.13\`\\)return \\4;`).test(result16)) ? result16 : null;
+  // card one-balance-buys-on-every-chain: kit-v1.14 is sent each pool.buy.dry answer with no with_cash (the strip first,
+  // kit-v1.14 its own level on it), and the state in full, as the current level is (with_cash is in no state)
+  const noCash = NO_CASH.exec(js)?.[1];
+  const cash = noCash && result16 && new RegExp(`\\{if\\(([\\w$]+)===\`current\`\\)return ([\\w$]+);let ([\\w$]+)=${esc(noCash)}\\([\\w$]+,\\2\\);if\\(\\1===\`1\\.14\`\\)return \\3;`).test(result16) ? result16 : null;
+  const state114 = poolOps && /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`\|\|\1===`1\.14`(?:\|\|\1===`1\.13`)?(?:\|\|\1===`1\.12`)?\)return \2;/.test(poolOps) ? poolOps : null;
+  const state113 = poolOps && /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`(?:\|\|\1===`1\.14`)?\|\|\1===`1\.13`(?:\|\|\1===`1\.12`)?\)return \2;/.test(poolOps) ? poolOps : null;
   const post = shaper ? new RegExp(`=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=${esc(shaper[1])}\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
   // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent at every
   // level but kit-v1.4 (the current level only, before kit-v1.5 had its own), a stage through the stage function at the level, dropped when it gives null
   let branch = null;
+  // since kit 1.15 a route event goes through the route function (ROUTE_FOR) at levels above kit-v1.4: `route` is that
+  // function when the progress branch calls it
+  const routeAt = ROUTE_FOR.exec(js);
+  let route = null;
   if (shaper) {
     const m = esc(shaper[2]);
-    const re = new RegExp(`if\\(${m}\\.type!==\`progress\`\\)return ${m};if\\(!\\(\`stage\`in ${m}\\)\\)return (?:${v}===\`current\`\\?${m}:null|${v}===\`1\\.4\`\\?null:${m});let ([\\w$]+)=([\\w$]+)\\(${v},${m}\\.stage\\);return \\1===null\\?null:\\1===${m}\\.stage\\?${m}:\\{\\.\\.\\.${m},stage:\\1\\}\\}`, "y");
+    const routeFor = esc(routeAt?.[1] ?? "\u0000");
+    const re = new RegExp(`if\\(${m}\\.type!==\`progress\`\\)return ${m};if\\(!\\(\`stage\`in ${m}\\)\\)return (?:${v}===\`current\`\\?${m}:null|${v}===\`1\\.4\`\\?null:${m}|${v}===\`1\\.4\`\\?null:${routeFor}\\(${v},${m}\\));let ([\\w$]+)=([\\w$]+)\\(${v},${m}\\.stage\\);return \\1===null\\?null:\\1===${m}\\.stage\\?${m}:\\{\\.\\.\\.${m},stage:\\1\\}\\}`, "y");
     re.lastIndex = shaper.index + shaper[0].length;
     branch = re.exec(js);
+    if (branch && routeAt && branch[0].includes(`:${routeAt[1]}(`)) route = routeAt[0];
   }
   // the stage function: the current level and a stage kit-v1.4 has pass as they are, else the map's stage, else null
   const stage = branch ? new RegExp(`function ${esc(branch[2])}\\(([\\w$]+),([\\w$]+)\\)\\{return (?:\\1===\`current\`|\\1!==\`1\\.4\`)\\|\\|[\\w$]+\\.has\\(\\2\\)\\?\\2:[\\w$]+\\(([\\w$]+),\\2\\)\\?\\3\\[\\2\\]:null\\}`).exec(js) : null;
@@ -266,6 +291,9 @@ function helloPath(js) {
     state112,
     out,
     state113,
+    cash,
+    state114,
+    route,
   };
 }
 
@@ -316,7 +344,7 @@ export function judge(a, era = ERA) {
   else if (!sameMap(h.progressMap, MAP)) bad(`the progress stage function reads a map other than kit-v1.4's (${JSON.stringify(h.progressMap)})`);
   // card pool-deposit-stages: the version read in full, the levels below it, the pool deposit's op left out below it
   if (typeof h?.assign === "string" && typeof h?.shaper === "string" && typeof h?.post === "string") {
-    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : era.kit === "1.12" ? "pool making" : era.kit === "1.13" ? "open answer's closes" : "dry buy's out"} has no level of its own`);
+    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : era.kit === "1.12" ? "pool making" : era.kit === "1.13" ? "open answer's closes" : era.kit === "1.14" ? "dry buy's out" : "dry buy's with_cash and move route event"} has no level of its own`);
     if (!same(h.levels, era.levels)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(era.levels)}: an older kit's app is sent what it cannot read`);
     if (era.kit !== "1.7" && typeof h.decimals !== "string") bad("the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for");
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
@@ -341,6 +369,10 @@ export function judge(a, era = ERA) {
     const before113 = before112 || era.kit === "1.13";
     if (!before113 && typeof h.out !== "string") bad("pool.buy.dry's answer sent below the current level keeps its out, which kit-v1.13 refuses the whole answer for");
     if (!before113 && typeof h.state113 !== "string") bad("kit-v1.13 is not sent the state in full: it loses a field it reads");
+    const before114 = before113 || era.kit === "1.14";
+    if (!before114 && typeof h.cash !== "string") bad("pool.buy.dry's answer sent below the current level keeps its with_cash, which kit-v1.14 refuses the whole answer for");
+    if (!before114 && typeof h.state114 !== "string") bad("kit-v1.14 is not sent the state in full: it loses a field it reads");
+    if (!before114 && typeof h.route !== "string") bad("a route event is sent below the current level as it is: kit-v1.14 is sent the move event, which it cannot read");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);
