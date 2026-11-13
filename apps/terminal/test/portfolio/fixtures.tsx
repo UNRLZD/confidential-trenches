@@ -214,6 +214,18 @@ export const FIXTURES: Record<string, Fx> = {
   "cash-vault": { state: { pools: [] } },
   "cash-one": { state: { pools: [{ chain: "solana", asset: "SOL", balance: "2.5", ready: "2", tap_max: "0.5", price: PX(150) }] } },
   "cash-four": { state: { pools: FOUR } },
+  // card pool-balance-counts-the-remainder: the three pools with money still at each one's deposit wallet U_X
+  // (state.deposit_wallets), counted in its pool's one balance and in Cash
+  "pools-remainder": {
+    state: {
+      pools: FOUR,
+      deposit_wallets: [
+        { chain: "solana", address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", asset: "SOL", amount: "0.0125" },
+        { chain: "base", address: "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", asset: "ETH", amount: "0.002" },
+        { chain: "robinhood", address: "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359", asset: "ETH", amount: "0.0003" },
+      ],
+    },
+  },
   "cash-moving": {
     state: {
       pools: [FOUR[0]!, FOUR[1]!, { chain: "robinhood", asset: "ETH", balance: "0", price: PX(3000) }],

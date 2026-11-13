@@ -616,10 +616,11 @@ test("evm-deposit-note-stays-incoming review 4: a sign out during a lag wait of 
     ch.c.nonce = 1n;
     const stop = new AbortController();
     let after = 0;
-    // RPC 1 does not know the newest block by number yet: a lag, waited on
+    // RPC 1 has no newest block yet: a lag, waited on (one tag answer of each RPC is the agreed block's read, card
+    // evm-first-proof-inside-ten-seconds, so the lag is RPC 1's latest, never a read by number)
     const rpcs = ch.rpcs.map((rpc, k) => async (m: string, p: readonly unknown[]) => {
       if (stop.signal.aborted) after++;
-      if (k === 1 && m === "eth_getBlockByNumber" && p[0] === q(ch.c.block)) return null;
+      if (k === 1 && m === "eth_getBlockByNumber" && p[0] === "latest") return null;
       return rpc(m, p);
     }) as unknown as readonly [Rpc, Rpc];
     const h = { ...hostOf(ch, ns, { rpcs }), signal: stop.signal, wait: async () => stop.abort() };
@@ -1352,7 +1353,7 @@ test("pool-deposit-sent-end low 4 (EVM, REV E3): a sign out during a pass's read
   // the same pass with no sign out reads each note on both RPCs (the count above means something)
   calls = 0;
   await followPoolDepositEvm({ ...h, signal: undefined, records: async () => ns.list(), wait: () => Promise.reject(new Error("cut")) }, left).catch(() => null);
-  assert.equal(calls, 18, "3 open notes, each: the newest block both hold (4 reads) and U's nonce at its hash, on both RPCs");
+  assert.equal(calls, 12, "3 open notes, each: the newest block both hold (2 reads: one block, card evm-first-proof-inside-ten-seconds) and U's nonce at its hash, on both RPCs");
 });
 
 test("pool-deposit-sent-end low 4 (EVM): the end's own wait ends at the sign out, its timer cleared: the follow returns at once, not a wait later", async () => {
