@@ -553,6 +553,18 @@ test("W holding less USDC than the buy's amount is not swapped: not_funded, noth
   assert.deepEqual(log.at(-1), ["swap", "not_funded"]);
 });
 
+test("the swap's floor not written (the store failed) stops the buy before the swap is sent: nothing signed for it reaches the helper, the USDC stays on W", async () => {
+  const w = world({ begun: { txs: near(tx(1)) }, start: { exists: true, registered: true, usdc: AMOUNT } });
+  const progress = w.deps.progress;
+  w.deps.progress = async (p) => {
+    if (p.swap !== undefined) throw new Error("store down");
+    return progress(p);
+  };
+  sent(await run(w.deps));
+  assert.equal(w.ev.filter((e) => e[0] === "helper" && methodOf(e[1] as HelperBindTradeRequest) === "ft_transfer_call").length, 0, "no swap sent");
+  assert.deepEqual(w.log.at(-1), ["swap", "record_not_written"]);
+});
+
 test("a read that names another account ends the run read_failed at once, never read again", async () => {
   const { deps, ev, log } = world({ start: { exists: true } });
   deps.readWallet = async (a) => (ev.push(["read", { ...a }]), { account: "cd".repeat(32), height: 1, blockHash: "b", nonce: 1n, held: 0n, registered: false, storageMin: STORAGE_MIN, lostfound: 0n });

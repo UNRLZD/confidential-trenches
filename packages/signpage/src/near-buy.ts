@@ -38,10 +38,16 @@
 // - The rebuild (card near-holdings-restore, nearHoldingsPass): a store with no record of a W (a sign out, a new device,
 //   a restore from the 12 words) gets one back from the chain alone, on every load and after each restore's NEAR walk,
 //   so the coin W holds shows as a position and sells, and USDC left on W comes home by resumeNearSells.
+//   The pass reads W only on the helper's keyed seat (NEAR_NETWORKS seat, with no keyless spare) and its record route.
+//   The way home, the sell run it starts, filledFromRead and confirmOnTwo read W on page.rpcs(): dRPC from the device,
+//   and the seat, which falls back to FastNEAR's keyless URL from the device on a 429, a 5xx, a timeout or no answer
+//   (wallet/src/pace.ts nearSeatRpc, seatDown); the sell's move into the vault reads and sends on bindRpcs()
+//   (FastNEAR's keyless URL and dRPC). Each of those providers can see W's id from this device's address; it is kept
+//   at one rebuilt W a page load.
 import { HELPER_BIND_RECORD_WALLETS_MAX, HELPER_BIND_TRADE_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindRecord, type HelperBindRecordRequest, type HelperBindRecordState, type HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/near/networks.ts";
 import { NEAR_RHEA, rheaQuote } from "../../kit/src/near/rhea.ts";
-import { nearFeeBuyerReceives, nearTokenFeeView } from "../../kit/src/near/token-fee.ts";
+import { nearFeeBuyerReceives, nearTokenFeeView, type NearTokenFee } from "../../kit/src/near/token-fee.ts";
 import { vaultSync, vaultSyncStart, type VaultSpendRow } from "../../kit/src/vault/sync.ts";
 import { readNearHeld, readNearSwapPair, readNearSwapWallet, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
 import type { BuyRoute, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -56,7 +62,7 @@ import { jOf } from "../../wallet/src/pool/queue.ts";
 import type { WalletStore } from "../../wallet/src/store/index.ts";
 import { bindRpc, type BindRpc } from "../../wallet/src/deposit/bind.ts";
 import type { HostRefusal, KindContext, Running } from "./api.ts";
-import { nearReturnMove, nearSellFlow, nearSellNote, type NearSellDeps, type NearSellStep } from "./near-sell.ts";
+import { nearReturnMove, nearSellFlow, nearSellNote, type NearMoveEnd, type NearSellDeps, type NearSellStep } from "./near-sell.ts";
 import type { NearSellAsk } from "./rules/near-trade.ts";
 import { nearBuyFlow, runNearBuy, type NearBuyAsk, type NearBuyBegun, type NearBuyDeps, type NearBuyProgress, type NearHeldState, type NearHelperAnswer, type NearPair, type NearPairAsk, type NearPayoutEnd } from "./near-trade.ts";
 import { nearView } from "./near-pools.ts";
@@ -157,14 +163,16 @@ export type NearBuyPage = {
   rpcs(): readonly [NearRpc, NearRpc];
   /** The same pair with the `tx` read, for W's move into the vault (the wallet's bindDeposit); bindRpc's by default. */
   bindRpcs?(): readonly [BindRpc, BindRpc];
+  /** W's USDC into the vault on a sale's note (near-sell.ts nearReturnMove on bindRpcs() unless given). */
+  move?(w: { id: string; l: bigint; j: number }, noteId: string, amount: bigint): Promise<NearMoveEnd>;
   /** The sign out's signal of the moment (the move's wait ends on it; the money stays on W, its call written). */
   signal?(): AbortSignal;
   /** W read on both providers (the kit's readNearSwapWallet on rpcs() unless given). */
   readWallet?(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState>;
   /** The token's decimals (readNearDecimals on rpcs() unless given). */
   decimals?(token: string): Promise<number>;
-  /** What reaches W of `paid` sent by the exchange, the token's buy fee taken off (a quote's fee read unless given). */
-  buyerReceives?(token: string, paid: bigint): Promise<bigint>;
+  /** The token's own fee as a buy's quote reads it (a quote's fee read unless given). */
+  tokenFee?(token: string): Promise<NearTokenFee>;
   /** The quote's candidate pools (near-pools.ts rheaPoolsKept). */
   pools(token: string): Promise<number[]>;
   locks?: LockManager;
@@ -818,10 +826,10 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
     release?.();
     release = null;
   };
-  // W and the token its buy record names (the signer's bound)
+  // W and the token its buy record names (the signer's bound), with the least of it that is W's coin (coinMinOf)
   const w = () => {
     const r = rec!;
-    return { id: r.w, l: BigInt(r.l), j: r.j, token: r.token };
+    return { id: r.w, l: BigInt(r.l), j: r.j, token: r.token, coinMin: coinMinOf(r) };
   };
   // the seed under its lock, zeroed after; W derived again and held to the record's
   const withSeed = <T>(fn: (seed: Uint8Array) => Promise<T> | T): Promise<T> =>
@@ -903,7 +911,8 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
         const holds = async (x: NearBuyRecord): Promise<"holds" | "empty" | "unread"> => {
           try {
             const [t, u] = await Promise.all([readW(page, { wallet: x.w, side: "sell", token }), readW(page, { wallet: x.w, side: "buy", token })]);
-            return t.account === x.w && u.account === x.w && t.held === 0n && u.held < VAULT_CONSTANTS.MIN_DEPOSIT ? "empty" : "holds";
+            // a coin under the record's floor is a stranger's dust: no token, so a W holding only that is empty here
+            return t.account === x.w && u.account === x.w && !coinCounts(x, t.held) && u.held < VAULT_CONSTANTS.MIN_DEPOSIT ? "empty" : "holds";
           } catch {
             return "unread";
           }
@@ -950,6 +959,11 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
       return withSeed((seed) => nearSellNote(notes, seed, scope, { l: x.l, j: x.j }, k, create));
     },
     move: async (x, noteId, amount) => {
+      if (page.move) {
+        const given = await page.move(x, noteId, amount);
+        if (given.kind === "deposited") await addTxs(given.txs);
+        return given;
+      }
       const notes = await page.notes();
       const net = NEAR_NETWORKS[page.network];
       const rpcs = page.bindRpcs?.() ?? ([bindRpc(net.fastnear[0]!), bindRpc(net.drpc)] as const);
@@ -1088,22 +1102,36 @@ export type NearHoldingsReads = {
 
 /** The least of `token` on W that counts as W's coin: W's own buy swap's min_amount_out as it reaches W (the token's
  *  buy fee taken off, as the quote reads it: a mainnet launchpad token only, every other token has none), and no less
- *  than what W's own sell swap sent in when it signed one. page.buyerReceives replaces the fee read in tests. */
+ *  than what W's own sell swap sent in when it signed one. A fee read as not known (an unread view, code not pinned)
+ *  is no floor: it throws, so W is read again later, never kept with a floor its own coin may be under. page.tokenFee
+ *  replaces the fee read in tests. */
 async function coinFloor(page: NearBuyPage, token: string, buyMin: bigint, sellIn: bigint | null): Promise<bigint> {
   let f = buyMin;
-  if (page.buyerReceives) f = await page.buyerReceives(token, buyMin);
-  else if (page.network === "mainnet" && nearTokenFeeView(token) !== null) {
-    const q = await rheaQuote({ network: page.network, rpcs: page.rpcs(), side: "buy", token, amountIn: VAULT_CONSTANTS.MIN_DEPOSIT, pools: await page.pools(token) });
-    f = nearFeeBuyerReceives(q.fee, NEAR_RHEA[page.network].exchange, buyMin);
+  const fee = page.tokenFee
+    ? await page.tokenFee(token)
+    : page.network === "mainnet" && nearTokenFeeView(token) !== null
+      ? (await rheaQuote({ network: page.network, rpcs: page.rpcs(), side: "buy", token, amountIn: VAULT_CONSTANTS.MIN_DEPOSIT, pools: await page.pools(token) })).fee
+      : null;
+  if (fee !== null) {
+    if (fee.unknown) throw new Error("the token's fee is not known");
+    f = nearFeeBuyerReceives(fee, NEAR_RHEA[page.network].exchange, buyMin);
   }
   if (f < 1n) f = 1n;
   return sellIn !== null && sellIn > f ? sellIn : f;
 }
-/** The coin on W counts as the record's: at least its floor over its baseline. A rebuilt record with no floor (no buy
- *  swap of W's, or only Rhea's wrapped NEAR as a stand-in token) counts none; a live record with none (its swap not
- *  signed yet, or written before the floor was kept) counts any, as before. */
-const coinCounts = (r: NearBuyRecord, held: bigint): boolean =>
-  r.swap !== undefined ? held >= BigInt(r.swap.before) + BigInt(r.swap.floor) && BigInt(r.swap.floor) > 0n : !r.id.startsWith(RESTORED_ID) && held > 0n;
+/** The coin on W counts as the record's: at least its floor over its baseline. A record with no floor counts none: a
+ *  live one never sent a swap (every build writes the floor before its swap leaves, src/near-trade.ts's swap step), a
+ *  rebuilt one has no buy swap of W's (or only Rhea's wrapped NEAR as a stand-in token). */
+const coinCounts = (r: NearBuyRecord, held: bigint): boolean => {
+  const m = coinMinOf(r);
+  return m !== null && held >= m;
+};
+/** The least of the record's token on W that is W's coin: its floor over its baseline; null: no floor, so none is. */
+function coinMinOf(r: NearBuyRecord): bigint | null {
+  if (!isObj(r.swap) || typeof r.swap.floor !== "string" || !/^\d{1,78}$/.test(r.swap.floor) || typeof r.swap.before !== "string" || !/^\d{1,78}$/.test(r.swap.before)) return null;
+  const floor = BigInt(r.swap.floor);
+  return floor > 0n ? BigInt(r.swap.before) + floor : null;
+}
 /** The kept records awaiting their one read on the two providers, from the empty key's value. */
 function confirmsOf(kept: unknown): Map<string, NearBuyRecord> {
   const m = new Map<string, NearBuyRecord>();
@@ -1326,11 +1354,6 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
       const settledW = !inFlight && (lastHeight >= 0n ? at > lastHeight : at > born + NEAR_DELEGATE_LIFE_BLOCKS);
       const base = { v: 1 as const, id: `restored:${a.w}`, network: page.network, amount: (a.row.withdrawn - a.row.fee).toString(), slippage_bps: NEAR_RESTORED_SLIPPAGE_BPS, w: a.w, l: a.l.toString(), j: a.j, note: a.note.id, fee: a.row.fee.toString(), created_ms: now(), resumes: NEAR_BUY_RESUMES, payout: "landed" as const, txs: [] };
       let made: NearBuyRecord | null = null;
-      if (token !== null && lost > 0n) {
-        log("near holdings: a W's coin waits in the exchange's lost-found; read again later");
-        out.unread.push(a.w);
-        continue;
-      }
       // the least of the coin that counts as W's (coinFloor): what W's own buy swap made the exchange send, as it reaches
       // W (less the token's buy fee), and once W signed a sell, no less than what that sell sent in. Under it the coin is
       // ignored for every decision (a stranger's dust, or what a whole-balance sell leaves): not shown, never holding
@@ -1344,6 +1367,13 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
           out.unread.push(a.w);
           continue;
         }
+      }
+      // W's own buy output the exchange could not send it waits in the lost-found: at its floor or more it is W's coin, read
+      // again later; under it (or with no buy swap of W's) it is no coin of W's and holds nothing back
+      if (token !== null && floor !== null && lost >= floor) {
+        log("near holdings: a W's coin waits in the exchange's lost-found; read again later");
+        out.unread.push(a.w);
+        continue;
       }
       const swap = floor === null ? {} : { swap: { floor: floor.toString(), before: "0" } };
       if (token !== null && floor !== null && held >= floor) {
