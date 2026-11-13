@@ -443,7 +443,8 @@ else {
     const pair = solPair();
     return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet, signal) : null;
   };
-  // where money for a pool goes (src/pool-deposit-address.ts), the deposit sheet's and a moving tap's (cashDeps) alike
+  // where money for a pool goes (src/pool-deposit-address.ts), for a moving tap (cashMoverNow): the same host as the
+  // deposit sheet's pool.address below, on the same reads, floor and follow
   const poolAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped });
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
   // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
@@ -548,7 +549,7 @@ else {
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only
-      "pool.address": poolAddress,
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
