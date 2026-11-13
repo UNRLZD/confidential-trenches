@@ -134,11 +134,48 @@ const windowMax = (from, to, zero) => {
   }
   return out;
 };
+// a state read at a block older than its host keeps, refused as that host refuses it (anvil keeps every block's state):
+// a read-only probe of 13 Nov 07:50Z (eth_call by block hash at blocks 0 to 80 s old, on every pool and fee provider of
+// both chains) found one: robinhood-rpc.publicnode.com, HTTP 403 "Archive requests require a personal token" from 12 s
+// back (6 s answered); every other provider answered at 80 s (Base) and 44 s (Robinhood)
+const STATE_KEPT_MS = new Map([["robinhood-rpc.publicnode.com", 10_000]]);
+const STATE_METHODS = new Set(["eth_call", "eth_getBalance", "eth_getTransactionCount", "eth_getCode", "eth_getStorageAt", "eth_estimateGas"]);
+const stateRefused = [];
+/** The oldest block a request's state reads name, its age (ms) behind the head; null for none (a tag, or no block). */
+const stateAgeOf = async (body) => {
+  let calls;
+  try {
+    const b = JSON.parse(String(body));
+    calls = Array.isArray(b) ? b : [b];
+  } catch {
+    return null;
+  }
+  let most = null;
+  for (const c of calls) {
+    if (!STATE_METHODS.has(c?.method)) continue;
+    const at = c.params?.at(-1);
+    const byHash = typeof at === "object" && at !== null && typeof at.blockHash === "string" ? at.blockHash : null;
+    const byNumber = typeof at === "string" && at.startsWith("0x") ? at : typeof at?.blockNumber === "string" ? at.blockNumber : null;
+    if (byHash === null && byNumber === null) continue;
+    const blk = byHash !== null ? await anvil("eth_getBlockByHash", [byHash, false]) : await anvil("eth_getBlockByNumber", [byNumber, false]);
+    const top = await anvil("eth_getBlockByNumber", ["latest", false]);
+    if (!blk || !top) continue;
+    const age = (Number(BigInt(top.timestamp)) - Number(BigInt(blk.timestamp))) * 1000;
+    if (most === null || age > most.age) most = { age, m: c.method === "eth_call" ? `eth_call ${String(c.params?.[0]?.data ?? "").slice(0, 10)}` : c.method, id: c.id };
+  }
+  return most;
+};
 globalThis.fetch = async (input, init) => {
   const u = new URL(String(input instanceof Request ? input.url : input));
   if (u.origin === ANVIL || (route.local !== null && u.origin === route.local)) return realFetch(input, init);
   if (route.fork.has(u.host)) {
     for (const { m, from } of methodsOf(init?.body)) hostSends.push({ host: u.host, at: Date.now(), m, from });
+    const kept = STATE_KEPT_MS.get(u.host);
+    const old = kept === undefined ? null : await stateAgeOf(init?.body);
+    if (old !== null && old.age > kept) {
+      stateRefused.push({ host: u.host, at: Date.now(), m: old.m, ageMs: old.age });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: old.id ?? null, error: { code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" } }), { status: 403, headers: { "content-type": "application/json" } });
+    }
     if (typeof init?.body === "string" && init.body.includes("eth_sendRawTransaction")) {
       if (losing) {
         sent.dropped++;
@@ -558,9 +595,12 @@ const epochOf = (ms) => ms - (ms % EPOCH);
 
 // the deposit as the pool's first leaf, in an epoch's first seconds (the chain's blocks run at the wall clock), so the
 // ready proof and the withdraw below fall inside the deposit's own minute
+// CT_DEPOSIT_INTO_MS (card evm-first-proof-inside-ten-seconds): the carry that many ms into an epoch instead (a landing
+// mid-period, its period's first block then older than a host above keeps)
 const sizeBefore = await poolSize();
+const INTO_MS = Number(process.env.CT_DEPOSIT_INTO_MS ?? 0);
 const into = Date.now() % EPOCH;
-if (into > 1_000) await sleep(EPOCH - into + 250);
+if (into < INTO_MS || into > INTO_MS + 1_000) await sleep(((INTO_MS - into + EPOCH) % EPOCH) + 250);
 const carryAt = Date.now();
 const balanceBefore = await balanceOf(A.w);
 await anvil("anvil_setBalance", [ux.evm, hex(floor)]);
@@ -632,7 +672,8 @@ await guard("first leaf: a ready proof inside its first minute", async () => {
   // at most HOST_WINDOW_BOUND requests (each of a batch counted) in any 10 s window from 10 s before that block to the
   // proof, and no log read from the pool's deploy block among them
   const most = windows === null ? null : Math.max(0, ...Object.values(windows).map((w) => w.n));
-  step("first leaf: ready inside 10 s, each pool host inside its window", { readyMsAfterDeposit: found === null ? null : at - depAtMs, readyBoundMs: READY_MS, hostWindowMost: most, hostWindowBound: HOST_WINDOW_BOUND, deployPages }, found !== null && at - depAtMs <= READY_MS && most !== null && most <= HOST_WINDOW_BOUND && deployPages === 0);
+  const refusedOld = depAtMs === null ? [] : stateRefused.filter((x) => x.at > depAtMs - 10_000 && x.at <= at);
+  step("first leaf: ready inside 10 s, each pool host inside its window", { readyMsAfterDeposit: found === null ? null : at - depAtMs, depositIntoPeriodMs: depAtMs === null ? null : depAtMs - epochOf(depAtMs), stateRefusedInWindow: refusedOld, stateRefusedRun: stateRefused.length, readyBoundMs: READY_MS, hostWindowMost: most, hostWindowBound: HOST_WINDOW_BOUND, deployPages }, found !== null && at - depAtMs <= READY_MS && most !== null && most <= HOST_WINDOW_BOUND && deployPages === 0);
 });
 await guard("withdraw: the first leaf, tapped inside its first minute", async () => {
   const AMOUNT = "0.0001";
