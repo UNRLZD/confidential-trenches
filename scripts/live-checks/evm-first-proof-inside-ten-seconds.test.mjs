@@ -73,3 +73,22 @@ test("planted on this tree's build: each part back to its shape before this card
   // the bound gone
   assert.deepEqual(off(planted(/\.evmWarmWaitMs\?\?2e4/, ".evmWarmWaitMs??1/0")), ["wait"]);
 });
+
+// The mainnet copies this build was measured on (packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs, three per
+// chain, each with its book to replay offline): every step held, the first leaf's proof ready inside 10 s of its block,
+// at most 80 requests per pool host in any 10 s from 10 s before that block to the proof, and no log read from the pool's
+// deploy block among them.
+const RUNS = path.join(path.dirname(new URL(import.meta.url).pathname), "../../packages/signpage/scripts/evm-mainnet-copy-runs");
+const COPIES = ["base-11", "base-12", "base-13", "robinhood-11", "robinhood-12", "robinhood-13"].map((n) => `first-proof-${n}.json`);
+test("the recorded mainnet copies: ready inside 10 s, each pool host at most 80 requests per 10 s, no deploy-block log read", () => {
+  for (const f of COPIES) {
+    const r = JSON.parse(readFileSync(path.join(RUNS, f), "utf8"));
+    assert.deepEqual(r.failures, [], f);
+    assert.equal(r.run.dirty, false, `${f}: a clean tree`);
+    const s = r.steps.find((x) => x.name === "first leaf: ready inside 10 s, each pool host inside its window");
+    assert.ok(s?.ok === true, f);
+    assert.ok(s.readyMsAfterDeposit <= 10_000, `${f}: ready ${s.readyMsAfterDeposit} ms`);
+    assert.ok(s.hostWindowBound === 80 && s.hostWindowMost <= 80, `${f}: ${s.hostWindowMost} per host`);
+    assert.equal(s.deployPages, 0, f);
+  }
+});
