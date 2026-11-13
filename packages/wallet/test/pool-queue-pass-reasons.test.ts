@@ -192,6 +192,19 @@ test("a note under the pool's least rung: never proved, counted as small", async
   }
 });
 
+test("a spent note's change of 0 holds no money: never counted as small (card max-is-what-you-hold-after-a-trade)", async () => {
+  // the account of 13 Nov 18:23Z: five UNSPENT change notes of 0 lamports, each a whole release's, and the pass named
+  // them too_small=5 beside notes that were all proved; only money under the least rung is small
+  const { q } = await open({ values: [usd(100), 0n, 0n] });
+  try {
+    const p = await q.refresh();
+    assert.equal(p.small, undefined);
+    assert.equal(p.made.length, 1);
+  } finally {
+    await q.close();
+  }
+});
+
 test("a PassFail keeps what it tags as its cause", () => {
   const cause = new TypeError("fetch failed");
   const e = new PassFail("network", cause);
