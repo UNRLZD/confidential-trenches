@@ -3,6 +3,8 @@
 // nothing on record said why): the vendor, the allowlisted path, the status, whose refusal it is (ours or the vendor's)
 // and the vendor's own message cut to VENDOR_MESSAGE_MAX characters. Never a field of the caller's request, never a key,
 // never an address, never a line break the vendor sent.
+// What no rule here can know (delta review P3-3, by design): a value the vendor rewrites before echoing it, a prefix of it, an
+// amount with separators ("25,000,000"), a deadline in another format. The line is safer, never value-free.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ANSWER_MAX, createProxy, REQUEST_VALUES_MAX, requestValues, SAID_FOLD_KEYS, SAID_FOLD_MS, safeMessage, VENDOR_MESSAGE_READ } from "./proxy.ts";
@@ -153,8 +155,8 @@ test("a request value is replaced: whole, by its start when long, and where the 
   const m = `refund to ${spaced} refused`;
   assert.ok(m.length > VENDOR_MESSAGE_READ);
   assert.equal(safeMessage(m, [spaced]), "refund to <request field>");
-  // where the cut message ends inside a word, the word's tail is not a value's start
-  assert.ok(!safeMessage(`refund order ${"W".repeat(VENDOR_MESSAGE_READ)}`, ["der WWWW"]).includes("<request field>"));
+  // delta review P2-1: glued to a word before it, the start a cut message ends in is still found
+  assert.equal(safeMessage(`refund to x${spaced} refused`, [spaced]), "refund to x<request field>");
 });
 
 // Review P1: a long message is cut before any pass over it, so no vendor answer (ANSWER_MAX) and no request
@@ -329,7 +331,7 @@ test("1Click's refusals keep their field names and their numbers; no address, am
 });
 
 // Re-review P3: marks a vendor's echo may carry inside an id, and an id spelt percent-encoded, hide nothing.
-test("zero-width and direction marks are stripped and %XX is decoded once before the passes; two dots shorten too", () => {
+test("zero-width and direction marks are stripped and %XX is decoded before the passes; two dots shorten too", () => {
   const evm = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
   const sol = "9ddc51SoLAddr2nGeneratedKeyKk5pQwErTy8uiop1";
   for (const [label, m] of [
@@ -344,6 +346,75 @@ test("zero-width and direction marks are stripped and %XX is decoded once before
   // a direction override never reaches the line, nor any mark of the stripped ranges
   const marks = "​‌‍‎‏‪‫‬‭‮⁠⁦⁧⁨⁩﻿";
   assert.equal(safeMessage(`Failed ‮etouq teg ot‬ ${marks}done`, []), "Failed etouq teg ot done");
-  // a %XX past ASCII is left as written, and %XX is decoded once, not twice
-  assert.equal(safeMessage("50%C3%A9 and 200%252E", []), "50%C3%A9 and 200%2E");
+  // a %XX past ASCII is left as written (two in a row; three or more are an encoded run, below), and %XX is decoded until
+  // unchanged, DECODE_ROUNDS at most
+  assert.equal(safeMessage("50%C3%A9 and 200%252E", []), "50%C3%A9 and 200.");
+});
+
+// Delta review of card helper-says-why-a-vendor-refused at e08eebd2e: the wallet's own request shapes, ids as derived.
+const DU = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // 64 hex, 0s inside, as a real U
+const DSOL = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+const DEVM = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"; // EIP-55's own test vector
+const walletQuote = (recipient: string, refundTo: string) =>
+  JSON.stringify({ dry: false, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: "nep141:eth.omft.near", depositType: "ORIGIN_CHAIN", destinationAsset: "nep141:sol.omft.near", amount: "25000000", refundTo, refundType: "INTENTS", recipient, recipientType: "DESTINATION_CHAIN", deadline: "2026-11-12T20:20:00.000Z" });
+/** The 8-character pieces of `value` a line still holds, case and marks aside. */
+const pieces = (line: string, value: string): string[] => {
+  const l = line.toLowerCase().replace(/[^0-9a-z]/g, "");
+  const v = value.toLowerCase().replace(/^0x/, "");
+  const out: string[] = [];
+  for (let i = 0; i + 8 <= v.length; i += 8) if (l.includes(v.slice(i, i + 8))) out.push(v.slice(i, i + 8));
+  return out;
+};
+
+test("P2-1: a request value glued to other letters or digits is replaced; a number only where no digit touches it", () => {
+  for (const [body, m, v] of [
+    [walletQuote(DU, DU), `recipientx${DU} is not valid`, DU],
+    [walletQuote(DU, DU), `refund ids ${DU}s are not valid`, DU],
+    [walletQuote(DSOL, DU), `walletSol${DSOL} is not valid`, DSOL],
+    [walletQuote(DSOL, DU), `recipient ${DSOL}0 is not valid`, DSOL],
+    [walletQuote(DEVM, DU), `recipienta${DEVM} is not valid`, DEVM],
+    [walletQuote(DEVM, DU), `recipient ${DEVM}is not valid`, DEVM],
+  ] as const) {
+    const line = safeMessage(m, requestValues(body, ""));
+    assert.deepEqual(pieces(line, v), [], line);
+    assert.match(line, /<request field>/, m);
+  }
+  const safe = (m: string) => safeMessage(m, requestValues(walletQuote(DU, DU), ""));
+  assert.equal(safe("amount25000000 is above the limit"), "amount<request field> is above the limit");
+  assert.equal(safe("amount 25000000wei is above the limit"), "amount <request field>wei is above the limit");
+  assert.equal(safe("try at least 1000000, slippage 100"), "try at least 1000000, slippage <request field>");
+});
+
+test("P3-1: every default-ignorable mark is stripped, so none splits U, a Solana address or an EVM address", () => {
+  const every = (x: string, n: number, mark: string) => x.match(new RegExp(`.{1,${n}}`, "g"))!.join(mark);
+  for (const mark of ["\u00ad", "\u034f", "\u061c", "\u180e", "\ufe0f", "\u{e0041}", "\u3164"]) {
+    const name = `U+${mark.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
+    for (const [v, body] of [[DU, walletQuote(DU, DU)], [DSOL, walletQuote(DSOL, DU)], [DEVM, walletQuote(DEVM, DU)]] as const) {
+      const line = safeMessage(`recipient ${every(v, 7, mark)} is not valid`, requestValues(body, ""));
+      assert.equal(line, "recipient <request field> is not valid", `${name} in ${v.slice(0, 6)}`);
+      // with no request to name it, the address rules see it whole
+      assert.equal(safeMessage(`recipient ${every(v, 7, mark)} is not valid`, []), "recipient <address> is not valid", `${name} in ${v.slice(0, 6)}, no request`);
+    }
+  }
+});
+
+test("P3-2: %XX is decoded until unchanged, 3 rounds at most, and an encoded run left after them is replaced", () => {
+  const pct = (x: string, rounds: number) => [...x].map((c) => "%" + "25".repeat(rounds - 1) + c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+  const values = requestValues(walletQuote(DU, DU), "");
+  for (const rounds of [1, 2, 3]) assert.equal(safeMessage(`recipient ${pct(DU, rounds)} is not valid`, values), "recipient <request field> is not valid", `${rounds} rounds`);
+  // four rounds: what is left is an encoded run, and no piece of U is in the line
+  assert.equal(safeMessage(`recipient ${pct(DU, 4)} is not valid`, values), "recipient <encoded> is not valid");
+  assert.equal(safeMessage(`recipient ${pct(DU, 4)} is not valid`, []), "recipient <encoded> is not valid");
+});
+
+test("P3-4: replacements never grow the message a later pass searches past VENDOR_MESSAGE_READ", async () => {
+  // 512 places of a 3-character value, each standing alone: each "<request field>" is 12 characters longer
+  const m = "v00 ".repeat(VENDOR_MESSAGE_READ / 4 - 1) + " " + "z".repeat(10_000);
+  const values = requestValues(JSON.stringify({ a: "v00", b: "zzz" }), "");
+  let out = "";
+  assert.ok((await longestSearched(() => (out = safeMessage(m, values)))) <= VENDOR_MESSAGE_READ);
+  assert.ok(!out.includes("v00"), out.slice(0, 80));
+  // "request field", "request" and "field" as values too: each grows what the one before it wrote
+  const grow = requestValues(JSON.stringify({ a: "request field", b: "request", c: "field" }), "");
+  assert.ok((await longestSearched(() => safeMessage(" request field".repeat(140) + " " + "z".repeat(10_000), grow))) <= VENDOR_MESSAGE_READ);
 });

@@ -266,48 +266,72 @@ function addressWord(w: string): boolean {
   if (/^[a-z0-9_-]+(\.[a-z0-9_-]+)+$/.test(lower) && NEAR_TOP.test(lower.slice(lower.lastIndexOf(".") + 1))) return true;
   return t.split(/[_.\-…]+/).some((p) => /^0x[0-9a-f]{6,}$/i.test(p) || /^[0-9a-f]{32,}$/i.test(p) || /^[1-9A-HJ-NP-Za-km-z]{32,}$/.test(p));
 }
-const ALNUM = /[0-9A-Za-z]/;
-const alnumAt = (s: string, i: number): boolean => ALNUM.test(s.charAt(i)); // "" past either end
-/** `s` with `v` replaced where it stands alone, not inside a longer run of letters or digits (re-review P2: the 100 of
- *  a slippage inside "1000000" is the vendor's number, not the request's). A value longer than VALUE_HEAD is found by its
- *  first VALUE_HEAD characters, and the message ends there. */
+const DIGITS = /^[0-9]+$/;
+const digitAt = (s: string, i: number): boolean => /[0-9]/.test(s.charAt(i)); // "" past either end
+/** `s` with `v` replaced wherever it stands, glued to other letters or not (delta review P2-1: "recipientx<U>" and
+ *  "<U>s" hide nothing). A number is the one exception: replaced only where no digit touches it, so the 100 of a
+ *  slippage inside the vendor's "1000000" stays, and "amount25000000" or "25000000wei" do not. A value longer than
+ *  VALUE_HEAD is found by its first VALUE_HEAD characters, and the message ends there. */
 function valueReplaced(s: string, v: string): string {
-  const head = v.length > VALUE_HEAD ? v.slice(0, VALUE_HEAD) : v;
+  if (v.length > VALUE_HEAD) {
+    const at = s.indexOf(v.slice(0, VALUE_HEAD));
+    return at < 0 ? s : `${s.slice(0, at)}<request field>`;
+  }
+  if (!DIGITS.test(v)) return s.split(v).join("<request field>");
   let out = "";
   let from = 0;
-  for (let at = s.indexOf(head); at >= 0; at = s.indexOf(head, at + 1)) {
-    if (at < from || alnumAt(s, at - 1)) continue;
-    if (head !== v) return `${out}${s.slice(from, at)}<request field>`;
-    if (alnumAt(s, at + v.length)) continue;
+  for (let at = s.indexOf(v); at >= 0; at = s.indexOf(v, at + 1)) {
+    if (at < from || digitAt(s, at - 1) || digitAt(s, at + v.length)) continue;
     out += `${s.slice(from, at)}<request field>`;
     from = at + v.length;
   }
   return out + s.slice(from);
 }
+const FIELD = "<request field>";
+/** `s` cut at its last whole word (a word cut in two is one no pattern knows) at most VENDOR_MESSAGE_READ less one
+ *  FIELD long, so the tail check's FIELD keeps it within VENDOR_MESSAGE_READ. */
+function cutToRead(s: string): string {
+  let i = VENDOR_MESSAGE_READ - FIELD.length;
+  while (i > 0 && !/\s/.test(s[i - 1]!)) i--;
+  return s.slice(0, i);
+}
+/** Percent-encoding decoded up to DECODE_ROUNDS times, ASCII only (a byte past it is left as written). */
+const DECODE_ROUNDS = 3;
+const decodedAscii = (s: string): string => s.replace(/%([0-9A-Fa-f]{2})/g, (x, h: string) => (parseInt(h, 16) < 0x80 ? String.fromCharCode(parseInt(h, 16)) : x));
 /**
- * A vendor's message made safe for one log line, every step linear in VENDOR_MESSAGE_READ: cut to it at its last whole
- * word (a word cut in two is one no pattern knows); zero-width and direction marks stripped and %XX decoded once;
- * every request value replaced where it stands alone, and a value's start where the cut message ends; every control and line-separator character a space; every address word replaced (addressWord); cut to
- * VENDOR_MESSAGE_MAX characters. `values` null (past REQUEST_VALUES_MAX): the message is withheld.
+ * A vendor's message made safe for one log line, no step searching more than VENDOR_MESSAGE_READ characters: cut to
+ * fit it at its last whole word (cutToRead); every default-ignorable mark stripped (zero-width, direction, soft hyphen, variation and tag
+ * characters, fillers: each hides a word from a search); %XX decoded up to DECODE_ROUNDS times until unchanged, and a
+ * run of three %XX or more left after that replaced; every request value replaced (valueReplaced), the message cut to
+ * cut again (cutToRead) whenever a replacement grew it past VENDOR_MESSAGE_READ, and a value's start where a cut message ends; every
+ * control and line-separator character a space; every address word replaced (addressWord); cut to VENDOR_MESSAGE_MAX
+ * characters. `values` null (past REQUEST_VALUES_MAX): the message is withheld. What it cannot know, by design: a
+ * value the vendor rewrites (a prefix of it, an amount with separators, a deadline in another format).
  */
 export function safeMessage(m: string, values: readonly string[] | null): string {
   if (values === null) return "(withheld: the request held too many values)";
   let s = m;
-  const cut = s.length > VENDOR_MESSAGE_READ;
-  if (cut) {
-    let i = VENDOR_MESSAGE_READ;
-    while (i > 0 && !/\s/.test(s[i - 1]!)) i--;
-    s = s.slice(0, i);
+  let cut = s.length > VENDOR_MESSAGE_READ;
+  if (cut) s = cutToRead(s);
+  // marks that hide a word from a search, stripped (never a space, which would split it)
+  s = s.replace(/\p{Default_Ignorable_Code_Point}/gu, "");
+  for (let r = 0; r < DECODE_ROUNDS; r++) {
+    const d = decodedAscii(s);
+    if (d === s) break;
+    s = d;
   }
-  // marks that hide a word from a search, stripped (never a space, which would split it), then one %XX decode
-  s = s.replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, "");
-  s = s.replace(/%([0-9A-Fa-f]{2})/g, (x, h: string) => (parseInt(h, 16) < 0x80 ? String.fromCharCode(parseInt(h, 16)) : x));
-  for (const v of values) s = valueReplaced(s, v);
-  // a value whose start ends the cut message: its first characters, cut from the rest
+  s = s.replace(/(%[0-9A-Fa-f]{2}){3,}/g, "<encoded>");
+  for (const v of values) {
+    s = valueReplaced(s, v);
+    // "<request field>" is longer than a short value: the next search stays within VENDOR_MESSAGE_READ
+    if (s.length > VENDOR_MESSAGE_READ) (s = cutToRead(s)), (cut = true);
+  }
+  // a value whose start ends the cut message: its first characters, cut from the rest (a number's only where no digit
+  // stands before it, as valueReplaced)
   if (cut)
     for (const v of values)
       for (let p = Math.max(0, s.length - VALUE_HEAD); p <= s.length - 3; p++)
-        if (!alnumAt(s, p - 1) && v.startsWith(s.slice(p))) {
+        if (!(DIGITS.test(v) && digitAt(s, p - 1)) && v.startsWith(s.slice(p))) {
           s = `${s.slice(0, p)}<request field>`;
           break;
         }
