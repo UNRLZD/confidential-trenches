@@ -70,7 +70,7 @@ import { poolAddressHost } from "./pool-deposit-address.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
-import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
@@ -104,7 +104,7 @@ import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
 import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
-import { PAGE_CLUSTER, PAGE_SOL_PIN, pageEvmWalletRpc, pageSolanaRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { PAGE_CLUSTER, PAGE_SOL_PIN, pageEvmFloorPool, pageEvmWalletRpc, pageSolanaRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { closeHostLanes, gatedFetch, hostLane, hostLanesClosed } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import { walkWorkerPort } from "./walk-workers.ts";
@@ -321,8 +321,9 @@ else {
     trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
   });
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
-  // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
-  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin);
+  // own Pyth read on its two RPCs (src/pool-price.ts), X's own coin on X (a plain send) at that read; any other origin
+  // has none yet, so it gets no quote
+  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin, chain);
   const solPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null));
   // Base's and Robinhood's pool for a quote into U_X (card evm-deposit-route-mainnet): the pool the page's network pins
   // there (the wallet's EVM_POOLS, src/pool-testnet.ts evmPoolOf: its pin and the deposit's own pair) and the one reader
@@ -435,7 +436,7 @@ else {
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
-      ...depositReadHosts({ stop: quotesStopped }),
+      ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only
@@ -988,6 +989,16 @@ function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
 function pageAddressPools(): { chain: PoolChain; scope: bigint }[] {
   return pagePoolScopes().filter((p) => poolWayOut(p.chain));
 }
+// deposit.assets' minimum for each pool's own coin (card deposit-takes-each-pools-own-coin): the pool's floor read now on
+// its two RPCs, as pool.address reads it (one deposit's worst-case cost from U_X and the rent U_X keeps), on a pool
+// pool.address answers; no U_X named (the Solana fee message is priced at POOL_FLOOR_PLACEHOLDER). The frame and the
+// top-level page alike: a function declaration, held by the kinds made above this line
+async function pagePoolFloor(chain: PoolChain, signal?: AbortSignal): Promise<bigint | null> {
+  if (!pageAddressPools().some((p) => p.chain === chain)) return null;
+  if (chain === "solana") return PAGE_SOL_PIN === undefined ? null : readSolanaPoolFloor(pageSolanaRpcs("pass"), PAGE_SOL_PIN.program, POOL_FLOOR_PLACEHOLDER, signal);
+  const e = pageEvmFloorPool(chain);
+  return e === null ? null : readEvmPoolFloor(e.rpcs, e.pin);
+}
 const namer = depositNamer({
   top: !framed,
   scope: pageScope,
@@ -1259,6 +1270,6 @@ if (framed) {
     state: fs.state,
     watch: fs.watch,
     // deposit.quote only on the top-level page, which follows its address (src/deposit-follow.ts): the frame refuses it
-    kinds: { ...depositReadHosts({ stop: quotesStopped }) },
+    kinds: { ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }) },
   });
 }

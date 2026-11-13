@@ -31,7 +31,13 @@
 //   tells only as a stage, is shown too. A refund move's NEAR tx, as the relayer answered it, is kept on the move and
 //   shown only once its nonce reads used and the tx reads FINAL with success on FastNEAR and dRPC, sent by the release's
 //   relayer (poolRefundMover's settle); the follow ends only once that is read or the move's deadline is past.
-// - Pace: FAST_MS while a status shows a send in flight or a deposit ran; else SLOW_MS doubling to SLOW_MAX_MS.
+// - A plain send (card deposit-takes-each-pools-own-coin: X's own coin sent straight to U_X, pool-deposit-address.ts)
+//   has no 1Click quote: its record's address is U_X itself, and 1Click is asked nothing for it. The chain alone moves
+//   its stage: in_transit once U_X's lower balance covers a deposit (written before the carry, so a reload mid-carry
+//   counts U_X's landed note as this send's), short while U_X holds money under one deposit's floor and nothing of U_X's
+//   is landing (a top-up carries it), expired past its deadline with nothing seen (read on: a late send is carried).
+// - Pace: FAST_MS while a status shows a send in flight or a deposit ran; else SLOW_MS doubling to SLOW_MAX_MS (a plain
+//   send waiting for its money: SLOW_MS, no doubling, until its deadline).
 // Nothing here logs. Every read names one public account (U_X) or the quote's deposit address; no request carries a
 // key, the words, or which note is whose.
 import type { PoolChain, PoolDepositStage, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -220,11 +226,14 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     await deps.stage(s);
   };
   let landed = shown === "in_pool";
+  // a plain send: no 1Click address, U_X itself (card deposit-takes-each-pools-own-coin)
+  const plain = f.address === f.u;
   // this quote's own payment read (card evm-deposit-route-mainnet re-read P2-1): 1Click's SUCCESS for its own address, or
   // its stage already in_pool. Only then does a landed note of U_X's count as this quote's: U_X is per (s, i), not per
   // quote, so a neighbour's note never shows an unpaid or expired quote in the pool, nor ends a paid one before its own
   // delivery is carried
-  let paid = shown === "in_pool";
+  // A plain send has no status: the money this follow (or the one before a reload) saw at U_X is its payment
+  let paid = shown === "in_pool" || (plain && (shown === "in_transit" || shown === "short"));
   let slow = POOL_FOLLOW_SLOW_MS;
   // the device's clock at this follow's first end attempt (re-check P2): a page opened long past the quote's deadline
   // still reads a failing tx read again for the whole margin
@@ -302,6 +311,10 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       // the costs' reads only once U_X holds at least the least rung (review L2): none while it holds nothing
       const c = low >= deps.ladder.min ? gated(await deps.costs(f)) : null;
       if (c !== null && low >= c.floor) {
+        if (plain && !landed) {
+          await show("in_transit");
+          paid = true;
+        }
         if (await carry(low, c)) fast = true;
       } else if (landed) {
         // nothing left under U_X to carry: read on to the quote's deadline, so a late send is carried too; while a note of
@@ -323,7 +336,12 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
           }
         }
       } else {
-        const st = await deps.status(f, deps.signal);
+        // a plain send asks 1Click nothing: money under one deposit's floor at U_X, with nothing of U_X's landing, is short
+        if (plain && low > 0n && !opened) {
+          await show("short");
+          paid = true;
+        }
+        const st = plain ? null : await deps.status(f, deps.signal);
         let refund: RefundRead | null = null;
         if (st !== null && "status" in st) {
           // REFUNDED shows nothing the chain has not read: refunded only once the carry's read finds the money under
@@ -351,7 +369,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     }
     if (fast) slow = POOL_FOLLOW_SLOW_MS;
     await deps.sleep(fast ? POOL_FOLLOW_FAST_MS : slow, deps.signal);
-    if (!fast) slow = Math.min(slow * 2, POOL_FOLLOW_SLOW_MAX_MS);
+    if (!fast && !(plain && shown === "quote_checked")) slow = Math.min(slow * 2, POOL_FOLLOW_SLOW_MAX_MS);
   }
 }
 

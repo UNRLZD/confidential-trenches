@@ -22,12 +22,19 @@
 //   read at quote time on two RPCs (`floor`: readSolanaPoolFloor on Solana, readEvmPoolFloor on Base and Robinhood). No
 //   floor read, or one that answers null:
 //   not_allowed, nothing sent; a read that throws: down.
+// - The pool's own coin on its own chain (`origin_asset` POOL_DEPOSIT_DESTINATION[X]: SOL on Solana, ETH on Base and
+//   Robinhood; card deposit-takes-each-pools-own-coin) is a plain send to U_X: no 1Click quote, no swap, nothing asked
+//   of the helper, on any network the page pins X's pool on. The answer's quote names U_X as its deposit address and
+//   the amount as both its amount in and its min out, under the beta cap at the device's own price read, and at least
+//   the floor read now (the same `floor` as a 1Click quote's: one deposit's worst-case cost from U_X and the rent U_X
+//   keeps), else below_min, nothing named. The follow (`checked`) carries what lands at U_X into X's pool, as it carries
+//   a 1Click delivery, and asks 1Click nothing for it (pool-deposit-follow.ts, the record's address is U_X).
 import { base58, base64, hex } from "@scure/base";
 import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type PoolStatePrice, type SignpageResults } from "../../kit/src/signpage/messages.ts";
-import { POOL_DEPOSIT_NETWORK, askDepositQuoteAgain, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
+import { DEPOSIT_QUOTE_DEADLINE_MS, POOL_DEPOSIT_DESTINATION, POOL_DEPOSIT_NETWORK, askDepositQuoteAgain, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
 import { checkPoolDepositQuote, evmPoolDepositFloor, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
@@ -51,14 +58,35 @@ export interface PoolQuotePricing {
 }
 
 /** A quote's price reads from the page's own price for X's pool (src/pool-price.ts `get`, null once past the kit's
- *  bound): USDC in at 1 USD on both reads, X's coin at that price on both; any other origin, or no price, none (no
- *  quote is asked). */
-export function poolQuotePricing(p: PoolStatePrice | null, origin: string): PoolQuotePricing | null {
-  if (!ONECLICK_USDC_ASSETS.includes(origin) || p === null) return null;
+ *  bound): USDC in at 1 USD on both reads, X's coin at that price on both; X's own coin on X (`chain` given: a plain
+ *  send, isPlainSend) in and out at that price; any other origin, or no price, none (no quote is asked). */
+export function poolQuotePricing(p: PoolStatePrice | null, origin: string, chain?: PoolChain): PoolQuotePricing | null {
+  if (p === null) return null;
+  const plain = chain !== undefined && isPlainSend(chain, origin);
+  if (!plain && !ONECLICK_USDC_ASSETS.includes(origin)) return null;
   const d = -p.expo, digits = p.price.padStart(d + 1, "0");
   const usd = d === 0 ? digits : `${digits.slice(0, digits.length - d)}.${digits.slice(digits.length - d)}`;
-  return { decimalsIn: USDC_DECIMALS, pricing: { in: ["1", "1"], out: [usd, usd] } };
+  return plain
+    ? { decimalsIn: POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]], pricing: { in: [usd, usd], out: [usd, usd] } }
+    : { decimalsIn: USDC_DECIMALS, pricing: { in: ["1", "1"], out: [usd, usd] } };
 }
+
+/** True when `origin` is X's own pool coin on X (1Click's id for it, POOL_DEPOSIT_DESTINATION: SOL on Solana, ETH on
+ *  Base and Robinhood): money sent straight to U_X, with no quote (card deposit-takes-each-pools-own-coin). */
+export const isPlainSend = (chain: PoolChain, origin: unknown): boolean =>
+  Object.hasOwn(POOL_DEPOSIT_DESTINATION, chain) && origin === POOL_DEPOSIT_DESTINATION[chain];
+
+/**
+ * How long a plain send takes to read at U_X, in seconds (the answer's time_estimate_s): the follow's read of U_X every
+ * POOL_FOLLOW_SLOW_MS (15 s) while a plain send waits, plus the chain's own lag to the read: Solana's finalized
+ * commitment (32 slots of 400 ms, about 13 s), one block at the latest block on Base (2 s) and Robinhood.
+ */
+export const POOL_PLAIN_SEND_TIME_S: Readonly<Record<PoolChain, number>> = Object.freeze({ solana: 30, base: 20, robinhood: 20 });
+
+/** The public Solana key a floor read with no U_X prices its deposit message by (deposit.assets, signed out): the
+ *  base58 of sha256("blindfill:pool-floor:placeholder"), a key nobody holds. A message's fee is per signature, so the
+ *  payer does not move it (readSolanaPoolCosts). */
+export const POOL_FLOOR_PLACEHOLDER = "2KesqqvtnrxmqFzTKDWNt2WyP4bA2pJqJbrJDZppE6aT";
 
 export interface PoolAddressDeps {
   /** The pools the page's network pins (src/pools.ts PAGE_POOLS), each under its scope. */
@@ -197,9 +225,11 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
 
       // a quote: only under a request id, with a follow to carry the money on, and the device's own price reads
       if (ctx === undefined || deps.checked === undefined || deps.floor === undefined) return;
-      if (deps.network !== POOL_DEPOSIT_NETWORK) return; // 1Click pays out on mainnet only: never to a devnet pool's U_X
       const origin = params.origin_asset;
       if (typeof origin !== "string") return;
+      const plain = isPlainSend(chain, origin);
+      // 1Click pays out on mainnet only: never a quote to a devnet pool's U_X (a plain send asks 1Click nothing)
+      if (!plain && deps.network !== POOL_DEPOSIT_NETWORK) return;
       const priced = deps.priced?.(chain, origin) ?? null;
       if (priced === null || !Number.isInteger(priced.decimalsIn) || priced.decimalsIn < 0 || priced.decimalsIn > 36) return;
       const amount = units(params.amount, priced.decimalsIn);
@@ -220,6 +250,26 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       if (floor === null) return;
 
       const now = deps.now ?? Date.now;
+      if (plain) {
+        // a plain send: what U_X receives is the amount sent, so the amount itself must pay one deposit from U_X
+        if (amount < floor) return void (out = { error: "below_min" });
+        const d = POOL_ASSET_DECIMALS[asset];
+        const sent = decimal(amount, d);
+        const quote = {
+          deposit_address: before.wallet,
+          origin_asset: origin,
+          amount_in: sent,
+          min_amount_out: sent,
+          deadline: new Date(now() + DEPOSIT_QUOTE_DEADLINE_MS).toISOString(),
+          time_estimate_s: POOL_PLAIN_SEND_TIME_S[chain],
+        };
+        const again = usable(await deps.read(pool.scope), chain, pool.scope);
+        if (stopped()) return void (out = { error: "not_allowed" });
+        if (!again || !same(again, before)) return;
+        await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id });
+        if (stopped()) return void (out = { error: "not_allowed" });
+        return void (out = { result: { chain, address: before.wallet, asset, quote } });
+      }
       let request;
       try {
         request = poolDepositQuoteRequest(chain, before.wallet, before.record.id, origin, amount, now());
