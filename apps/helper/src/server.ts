@@ -172,6 +172,12 @@ export const RECORD_RATE_MAX = 4;
 export const RECORD_TOTAL_MAX = 20;
 /** The reason RECORD_TOTAL_MAX names in the refusal log: every client's requests together past the route's total. */
 const ROUTE_TOTAL = "route total";
+/** The longest a chart's read is held before it is answered `filling` (card chart-candles-never-429). The page's read
+ *  gives up at 10 s and draws its error (apps/terminal/src/screens/token/candles.ts TIMEOUT_MS); a cold Solana chart's
+ *  read waits up to 8 s for GeckoTerminal's next free call and then its answer (data/solana/token.ts GT_CHART_WAIT_MS),
+ *  so a page read held that long was cut at 10 s: the card's local run read one 11.5 s answer (13 Nov 09:17Z).
+ *  [design: half the page's 10 s, room for the answer's way back; a read past it goes on and its next read is served] */
+export const CANDLES_ANSWER_MS = 5_000;
 const METHODS: readonly string[] = HELPER_CORS.allowMethods;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -295,6 +301,30 @@ export function handler(
   const recordRate = clientWindow(RECORD_RATE_MAX, now);
   // the route's total: one window every client draws from, keyed by one name for all
   const recordTotal = clientWindow(RECORD_TOTAL_MAX, now);
+  /** Card chart-candles-never-429: a chart's read the data layer answers 429 (nothing of ours held and GeckoTerminal's
+   *  budget, its own 429 or a full set of open books refused it now; every chain's read is queued or tried again on the
+   *  next read) is answered 200 with no bars and `filling` true, the form a cold Base or Robinhood book past its bound
+   *  already answers (data/evm/swaps.ts candles): the page stays loading and reads again FILL_WAIT_MS on, within its 75 s
+   *  span (apps/terminal/src/screens/token/candles.ts loadCandles), and the browser logs no failed load. Live run
+   *  43396216450 (13 Nov 08:54-08:56Z): three "refused /v1/market/candles geckoterminal budget" while GeckoTerminal's own
+   *  429 count was 0 and 1. The refusal is still counted, as "<why> filling", in the refusal log. */
+  /** A chart's read not settled within CANDLES_ANSWER_MS is answered `filling` (as a 429 is, fillingOf) while it goes on:
+   *  its result is held by the data layer (a cold Solana chart's bars, data/solana/token.ts cached; a book opening), so the
+   *  page's next read FILL_WAIT_MS on is served it. */
+  const withinBound = (read: Promise<DataAnswer>): Promise<DataAnswer> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<DataAnswer>((ok) => {
+      timer = setTimeout(() => ok({ status: 429, body: '{"error":{"code":"rate_limited"}}', why: "candles bound" }), CANDLES_ANSWER_MS);
+      timer.unref?.();
+    });
+    return Promise.race([read, late]).finally(() => clearTimeout(timer));
+  };
+  const fillingOf = (tf: string, route: string) => (a: DataAnswer): DataAnswer => {
+    if (a.status !== 429) return a;
+    refusals.count(route, `${a.why ?? "unnamed"} filling`);
+    const at = now();
+    return { status: 200, body: JSON.stringify({ tf, candles: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at, ...(a.timing === undefined ? {} : { timing: a.timing }) };
+  };
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
       [HELPER_COMMIT_HEADER]: commit,
@@ -673,7 +703,7 @@ export function handler(
             if (tf === null || to === null || limit === null || !/^(|[1-9]\d{0,10})$/.test(to) || !/^(|[1-9]\d{0,2})$/.test(limit) || Number(limit) > CANDLES_MAX) {
               return send(404, { error: { code: "not_found" } }, cors(req));
             }
-            settle(near.trades.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit)), began);
+            settle(withinBound(near.trades.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit))).then(fillingOf(tf, route)), began);
           } else settle(path === MARKET_TOKEN ? near.token.page(mint) : near.token.holders(mint), began);
           return;
         }
@@ -691,7 +721,7 @@ export function handler(
           if (tf === null || to === null || limit === null || !/^(|[1-9]\d{0,10})$/.test(to) || !/^(|[1-9]\d{0,2})$/.test(limit) || Number(limit) > CANDLES_MAX) {
             return send(404, { error: { code: "not_found" } }, cors(req));
           }
-          read = swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req));
+          read = withinBound(swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req))).then(fillingOf(tf, route));
         } else if (evmToken !== undefined) read = path === MARKET_TOKEN ? evmToken.page(mint, clientOf(req)) : evmToken.holders(mint, clientOf(req));
         else read = path === MARKET_TOKEN ? token.page(mint, clientOf(req)) : token.holders(mint, clientOf(req));
         // the 4h change from our own bars where the page's source has none (card token-page-data-complete-and-fast:
