@@ -1332,11 +1332,11 @@ test("each state read and turn pass syncs the chain's pool index, the last one p
   let n = 100;
   const t = testnetPool({ ...page(w), held: async () => w }, {
     prover: { vault: signalsProver(), stop: () => {} },
-    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
     evmRpcs: unread,
     evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
     evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
-    evmHelper: (c) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
     evmTurn: tt.evmTurn,
     evmIndexSync: async (chain: string, prev: { through: number } | null) => {
       calls.push({ chain, prev: prev?.through ?? null });
