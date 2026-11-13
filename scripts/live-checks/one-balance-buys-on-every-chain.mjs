@@ -49,6 +49,16 @@ const TAP = new RegExp(
     `(${N})=await (${N})\\.any\\(\\)\\?await \\10\\.tapMax\\((${N})\\):(${N})\\.amount,(${N})=\\9<\\12\\.amount\\?await \\10\\.need\\(\\12\\.amount-\\9\\):null;if\\(\\13!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\13\\}\\)\\}catch\\{\\}`,
   ].join("|"),
 );
+/** The tap on every pool chain (since Cash moves to Base and Robinhood too): the chain's tap read, the want (Solana's
+ *  gap to one tap, an EVM chain's whole asked rung), the mover asked for it, the move op told, then the wait; and the
+ *  want itself, Solana's the ask less the tap. */
+const TAP_ALL = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.tapMax\\(\\3,${N}\\):(${N})\\.amount,(${N})=\\1<\\4\\.amount\\?(${N})\\(\\1\\):null,(${N})=\\5===null\\?null:await \\2\\.need\\(\\3,\\5\\);if\\(\\7!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\7\\}\\)\\}catch\\{\\}`);
+const tapAll = (js) => {
+  const m = TAP_ALL.exec(js);
+  if (m === null) return false;
+  const want = new RegExp(`(?:^|[^\\w$])${esc(m[6])}=(${N})=>${esc(m[3])}===\`solana\`\\?${esc(m[4])}\\.amount-\\1:`);
+  return want.test(js);
+};
 /** pool.buy.dry's answer with with_cash. */
 const MAX = new RegExp(`\\{\\.\\.\\.(${N}),result:\\{\\.\\.\\.\\1\\.result,with_cash:${N}\\}\\}`);
 /** kit-v1.14's level in the version chain, and its strip of with_cash. */
@@ -66,7 +76,7 @@ export function facts(index, js) {
     index,
     sha384: sha384(js),
     move: rules.some((r) => checkOf(r).test(js)) && MOVE_ID.test(js),
-    tap: TAP.test(js),
+    tap: TAP.test(js) || tapAll(js),
     max: MAX.test(js),
     level: LEVEL.test(js) && STRIP.test(js),
     version: /`1\.15`/.test(js),

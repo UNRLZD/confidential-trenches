@@ -98,3 +98,14 @@ test("the tap as each build spells it: before any() (15b7ae910), with any() (par
   assert.equal(facts("", op.replace("await o.need(n.amount-s)", "null")).tap, false);
   assert.equal(facts("", op.replace("op:c})", "op:s})")).tap, false);
 });
+
+test("the tap on every pool chain (Cash to Base and Robinhood): the build's form PASS; the want not Solana's gap, the mover not asked for it, or the move op not told: FAIL", () => {
+  const all = "let o=e=>a===`solana`?n.amount-e:Nz(a,n.amount)?n.amount:null;let l=await c.any(a)?await c.tapMax(a,i):n.amount,u=l<n.amount?o(l):null,d=u===null?null:await c.need(a,u);if(d!==null){try{r?.route?.({move:`cash`,op:d})}catch{}}";
+  assert.equal(facts("", all).tap, true);
+  for (const bad of [
+    all.replace("?n.amount-e:", "?n.amount:"),
+    all.replace("await c.need(a,u)", "null"),
+    all.replace("op:d})", "op:u})"),
+    all.replace("c.tapMax(a,i)", "c.tapMax(`solana`,i)"),
+  ]) assert.equal(facts("", bad).tap, false, bad.slice(0, 90));
+});

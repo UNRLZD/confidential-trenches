@@ -19,11 +19,12 @@ const ctx = (): KindContext & { routes: unknown[] } => {
 
 const PRICE = { price: "8000000000", expo: -8 }; // SOL at 80 USD
 type Paid = { recipient: string; amount: bigint; fee: bigint };
-function mover(o: { cash?: bigint; quote?: (usdc: bigint) => CashQuote | { error: string }; end?: string; price?: null; landed?: (id: string) => boolean; hold?: Promise<void> }) {
+function mover(o: { floor?: bigint | null; cash?: bigint; quote?: (usdc: bigint) => CashQuote | { error: string }; end?: string; price?: null; landed?: (id: string) => boolean; hold?: Promise<void> }) {
   const paid: Paid[] = [], quoted: { chain: string; usdc: bigint; id: string; rail: CashRail }[] = [];
   let clock = 1_000;
   const d: CashMoverDeps = {
-    price: () => (o.price === null ? null : PRICE),
+    price: (c) => (o.price === null ? null : c === "solana" ? PRICE : { price: "300000000000", expo: -8 }),
+    floor: async () => (o.floor === undefined ? 1_020_000_000_000_000n : o.floor),
     rails: ["1click"],
     quote: async (chain, usdc, id, rail) => (quoted.push({ chain, usdc, id, rail }), o.quote?.(usdc) ?? { address: ADDRESS, amountIn: usdc, minOut: (usdc * 10n ** 9n) / 80_000_000n }),
     fee: async () => 50_000n,
@@ -85,6 +86,24 @@ test("cashMover.need: a quote that is not a NEAR implicit account, not the USDC 
   }
 });
 
+test("cashMover.need on Base and Robinhood: a whole note of the asked rung, never part of one: the quote's least is the rung plus one deposit's gas (the pool's floor less its least rung), the USDC that at the device's ETH price and 3% over", async () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    const t = mover({ quote: (usdc) => ({ address: ADDRESS, amountIn: usdc, minOut: 5_020_000_000_000_000n }) });
+    // 0.005 ETH + 0.00002 ETH gas at 3,000 USD, 3% over = 15.5118 USDC
+    assert.equal(await t.m.need(chain, 5_000_000_000_000_000n), `cash/${chain}/1000`);
+    assert.deepEqual(t.quoted.map((q) => [q.chain, q.usdc]), [[chain, 15_511_800n]]);
+    assert.deepEqual(t.paid, [{ recipient: ADDRESS, amount: 15_511_800n, fee: 50_000n }]);
+    // a quote under the rung plus its gas: nothing withdrawn
+    const short = mover({ quote: (usdc) => ({ address: ADDRESS, amountIn: usdc, minOut: 5_019_999_999_999_999n }) });
+    assert.equal(await short.m.need(chain, 5_000_000_000_000_000n), null);
+    assert.deepEqual(short.paid, []);
+    // no floor read: no move
+    const none = mover({ floor: null });
+    assert.equal(await none.m.need(chain, 5_000_000_000_000_000n), null);
+    assert.deepEqual(none.quoted, []);
+  }
+});
+
 // --- the tap
 
 type Calls = { inner: bigint[] };
@@ -134,7 +153,7 @@ test("cashFirst: with nothing on its way the pool buy answers at once; a move th
   let reads = 0;
   const d = tap({ taps: [100_000_000n], moving: true }, calls);
   const tm = d.tapMax;
-  d.tapMax = async (t) => (reads++, tm(t));
+  d.tapMax = async (c, t) => (reads++, tm(c, t));
   await run(cashFirst(innerOf(calls), () => d)(ask(400_000_000n), ctx()));
   assert.ok(reads <= CASH_MOVE_WAIT_MS / CASH_MOVE_POLL_MS + 2, `${reads} reads`);
 });
@@ -150,10 +169,31 @@ test("cashFirst: with no Cash to move and nothing on its way the pool buy goes s
   assert.deepEqual([calls.inner, reads, needs, c.routes], [[400_000_000n], 0, 0, []]);
 });
 
-test("cashFirst: a sell, an EVM buy or a NEAR buy is the inner kind's alone", async () => {
+test("cashFirst on Base and Robinhood: a rung above every ready note asks the mover for that whole rung, waits for it, then buys it; an ask that is no rung goes straight to the pool buy", async () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    const calls = { inner: [] as bigint[] };
+    const c = ctx();
+    const d = tap({ taps: [2_000_000_000_000_000n, 2_000_000_000_000_000n, 5_000_000_000_000_000n], moving: true }, calls);
+    const asked: [string, bigint][] = [];
+    d.need = async (ch, x) => (asked.push([ch, x]), `cash/${ch}/7`);
+    await run(cashFirst(innerOf(calls), () => d)({ ...ask(5_000_000_000_000_000n), chain }, c));
+    assert.deepEqual(asked, [[chain, 5_000_000_000_000_000n]], "the whole rung, never the gap to the ready note");
+    assert.deepEqual(c.routes, [{ move: "cash", op: `cash/${chain}/7` }]);
+    assert.deepEqual(calls.inner, [5_000_000_000_000_000n]);
+    const odd = { inner: [] as bigint[] };
+    const o = tap({ taps: [0n], moving: true }, odd);
+    let needs = 0;
+    o.need = async () => (needs++, "x");
+    await run(cashFirst(innerOf(odd), () => o)({ ...ask(4_000_000_000_000_000n), chain }, ctx()));
+    assert.deepEqual([odd.inner, needs], [[4_000_000_000_000_000n], 0]);
+  }
+});
+
+test("cashFirst: a sell or a NEAR buy is the inner kind's alone", async () => {
   const calls = { inner: [] as bigint[] };
-  await run(cashFirst(innerOf(calls), () => tap({ taps: [0n], moving: true }, calls))({ ...ask(1n), chain: "base" }, ctx()));
-  assert.deepEqual(calls.inner, [1n]);
+  await run(cashFirst(innerOf(calls), () => tap({ taps: [0n], moving: true }, calls))({ ...ask(1n), chain: "near" as never }, ctx()));
+  await run(cashFirst(innerOf(calls), () => tap({ taps: [0n], moving: true }, calls))({ ...ask(1n), kind: "pool.sell" }, ctx()));
+  assert.deepEqual(calls.inner, [1n, 1n]);
 });
 
 test("cashLamportsFor: Cash counted in SOL at the device's price, less 3% and the least rung, rounded down", () => {

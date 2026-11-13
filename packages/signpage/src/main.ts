@@ -79,6 +79,7 @@ import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
+import { poolBalances } from "../../wallet/src/pool/balances.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -324,6 +325,8 @@ else {
       fee: () => form.fee(),
       cash: () => form.available(),
       handoff,
+      // an EVM pool's quote floor (its least rung plus one deposit's gas), the same read pool.address checks against
+      floor: (chain) => (chain === "solana" ? Promise.resolve(null) : evmRoute.floor(chain)),
       // the quote's follow op ended: its money is in the pool (or refunded), no longer on its way
       landed: async (id) => {
         const op = await (await open()).get("ops", id).catch(() => undefined);
@@ -372,19 +375,26 @@ else {
     };
   };
   const cashDeps = (): CashToPoolDeps => ({
-    // Cash's largest note (the note store, on the device) or a move on its way
-    any: async () => {
-      if (cashMoverNow().coming("solana") > 0n) return true;
+    // Cash's largest note (the note store, on the device) or a move on its way to the chain
+    any: async (chain) => {
+      if (cashMoverNow().coming(chain) > 0n) return true;
       const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
       return (await withdrawFormDeps(vault).available().catch(() => 0n)) > 0n;
     },
-    tapMax: async (token) => {
-      const r = tapDry({ chain: "solana", token });
-      await r.after;
-      const a = r.answer();
-      return a !== null && "result" in a ? (parsePoolUnits(a.result.tap_max, 9) ?? 0n) : 0n;
+    // Solana: the dry's tap_max on the coin's venue; Base and Robinhood: state.pools' tap_max, the largest ready note
+    tapMax: async (chain, token) => {
+      if (chain === "solana") {
+        const r = tapDry({ chain: "solana", token });
+        await r.after;
+        const a = r.answer();
+        return a !== null && "result" in a ? (parsePoolUnits(a.result.tap_max, 9) ?? 0n) : 0n;
+      }
+      if (!testnet) return 0n;
+      const both = await testnet.readyWith(pageNotes);
+      const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
+      return tap === undefined ? 0n : (parsePoolUnits(tap, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) ?? 0n);
     },
-    need: (short) => cashMoverNow().need("solana", short),
+    need: (chain, short) => cashMoverNow().need(chain, short),
     wait: (ms) => new Promise((res) => setTimeout(res, ms)),
     now: () => Date.now(),
     signal: withdrawWait.signal,
