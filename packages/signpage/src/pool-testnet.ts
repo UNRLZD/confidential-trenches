@@ -136,6 +136,10 @@ export const pageEvmHold = (pin: EvmPoolPin, store: () => Promise<WalletStore>):
 };
 /** The deep public sources past each chain's pool list (card evm-pool-sync-holds): the kit's EVM_POOL_HISTORY (its
  *  reads cited there), in SIGN_HOST's connect-src; scripts/live-checks/evm-pool-sync-holds.mjs reads each one's floor. */
+/** A rebuild of the EVM buy records that left a W unrecorded is asked again this long on (the turn pass's period),
+ *  doubling to EVM_HOLDINGS_RETRY_MAX_MS until a pass leaves none. */
+export const EVM_HOLDINGS_RETRY_MS = 60_000;
+export const EVM_HOLDINGS_RETRY_MAX_MS = 600_000;
 export const MAINNET_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly string[]>> = EVM_POOL_HISTORY;
 const HISTORY = new Map<string, readonly EvmRpc[]>();
 /** Where else an EVM pool's logs are read when its seats cannot give them (evm.ts EvmSyncArgs history): on mainnet the
@@ -1158,6 +1162,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // whose records it wrote reads its positions again. None in the testnet build (no helper route there: its restore
   // reads the records, src/pool-restore.ts)
   const evmHoldingsRunning = new Set<"base" | "robinhood">();
+  // a pass that left a W with a Bought unrecorded (the helper down, a read failed) or failed whole is asked again at the
+  // turn pass (evmTurnPass, once a period), EVM_HOLDINGS_RETRY_MS on and doubling to EVM_HOLDINGS_RETRY_MAX_MS, until a
+  // pass leaves none: a W's coin shows without a reload
+  const evmHoldingsRetry = new Map<"base" | "robinhood", { at: number; waitMs: number }>();
+  const holdingsMissed = (chain: "base" | "robinhood"): void => {
+    const waitMs = Math.min(EVM_HOLDINGS_RETRY_MAX_MS, 2 * (evmHoldingsRetry.get(chain)?.waitMs ?? EVM_HOLDINGS_RETRY_MS / 2));
+    evmHoldingsRetry.set(chain, { at: turnNow() + waitMs, waitMs });
+  };
   const evmHoldings = (chain: "base" | "robinhood"): void => {
     if (!wayOut(chain)) return;
     const e = evmPool(chain);
@@ -1168,8 +1180,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     void locks
       .request(`ct-evm-holdings/${chain}`, { ifAvailable: true }, async (free) => {
         if (free === null) return;
+        let left = 1;
         const wrote = await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () =>
           rebuildEvmHoldings({
+            left: (n) => void (left = n),
             chain,
             network: e.pin.network as EvmPoolChain,
             pin: e.pin,
@@ -1184,8 +1198,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           }),
         );
         if (wrote.length > 0 && !signal.aborted) evmPositions(chain)?.refresh();
+        if (left > 0) holdingsMissed(chain);
+        else evmHoldingsRetry.delete(chain);
       })
-      .catch(() => {})
+      .catch(() => holdingsMissed(chain))
       .finally(() => evmHoldingsRunning.delete(chain));
   };
   // pool.sell on an EVM chain (card signpage-evm-pool-sell, src/pool-sell-evm.ts): the Ws the chain's spent notes pay,
@@ -1444,6 +1460,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const signal = evmStop.signal;
     const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null);
     if (chains.length === 0) return;
+    // a rebuild that left a W unrecorded, asked again once its wait is over
+    for (const c of chains) if ((evmHoldingsRetry.get(c)?.at ?? Infinity) <= turnNow()) evmHoldings(c);
     const all = await readNotes(await page.store());
     await Promise.all(
       chains.map(async (chain) => {

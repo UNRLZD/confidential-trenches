@@ -1256,3 +1256,65 @@ test("card sign-out-stops-the-pages-reads: another tab's sign out (signedOut alo
   await new Promise((r) => setTimeout(r, 30));
   assert.deepEqual(calls.slice(atSignOut), [], "no EVM RPC call after another tab's sign out");
 });
+
+test("a rebuild of the buy records that failed is asked again at the turn pass, 60 s on and doubling to 10 min, and no more once one leaves no W unrecorded", async () => {
+  const { EVM_HOLDINGS_RETRY_MS, EVM_HOLDINGS_RETRY_MAX_MS } = await import("../src/pool-testnet.ts");
+  assert.deepEqual([EVM_HOLDINGS_RETRY_MS, EVM_HOLDINGS_RETRY_MAX_MS], [60_000, 600_000]);
+  const { w, ns } = await wallet();
+  // deposit 0 spent (its change landed): a W the device holds no buy record for, so each rebuild reads the round
+  await landed(ns);
+  await ns.add({ ref: C0, scope: SCOPE, precommitment: P(C0), state: "UNSPENT", leaf: { value: RUNG - 10n, label: L0, commitment: noteCommitment(RUNG - 10n, L0, P(C0)), leafIndex: 1n } });
+  // each rebuild's ask, counted by its lock (one a pass, src/pool-testnet.ts evmHoldings)
+  let asks = 0;
+  const real = navigator.locks.request.bind(navigator.locks);
+  (navigator.locks as { request: unknown }).request = (name: string, ...a: unknown[]) => (name === "ct-evm-holdings/base" && asks++, (real as (...x: unknown[]) => unknown)(name, ...a));
+  let down = true;
+  const START = 1_800_000_000_000;
+  const o = { now: START + 20_000 };
+  const tt = turnTimers(o);
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => (down ? Promise.reject(new Error("the round failed")) : { fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  const settle = async () => {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  try {
+    await t.stateRead();
+    await settle();
+    assert.equal(asks, 1, "the state read's rebuild, failed");
+    // each turn a minute apart: asked once 60 s past the failed pass, then 120 s past that one, then 240 s
+    const turns: number[] = [];
+    for (let k = 1; k <= 8; k++) {
+      o.now = START + k * 60_000 + 3_000;
+      const before = asks;
+      await tt.set.at(-1)!.f();
+      await settle();
+      if (asks > before) turns.push(k);
+    }
+    assert.deepEqual(turns, [2, 4, 8], "60 s, then 120 s, then 240 s");
+    // the round answers again: the next ask leaves no W unrecorded, and no turn asks after it
+    down = false;
+    for (let k = 9; k <= 16; k++) {
+      o.now = START + k * 60_000 + 3_000;
+      await tt.set.at(-1)!.f();
+      await settle();
+    }
+    const after = asks;
+    assert.equal(turns.length, 3);
+    for (let k = 17; k <= 30; k++) {
+      o.now = START + k * 60_000 + 3_000;
+      await tt.set.at(-1)!.f();
+      await settle();
+    }
+    assert.equal(asks, after, "no ask once a pass left none");
+  } finally {
+    (navigator.locks as { request: unknown }).request = real;
+    await t.signedOut();
+  }
+});

@@ -74,12 +74,14 @@ export type EvmHoldingsHost = {
   signal?: AbortSignal;
   /** The random source the buys are asked in (positions-evm.ts shuffled; crypto.getRandomValues when not given). */
   random?: (out: Uint32Array<ArrayBuffer>) => void;
+  /** Told, at the pass's end, how many Ws with a Bought it left unrecorded (a read of the helper or the pair failed). */
+  left?: (n: number) => void;
 };
 
 /** One pass (see the header): the Ws whose record it wrote. */
 export async function rebuildEvmHoldings(h: EvmHoldingsHost): Promise<string[]> {
   const spent = (await h.notes()).filter((n) => n.scope === h.scope && (n.state === "SPENT" || n.state === "RESERVED") && n.leaf !== undefined);
-  if (spent.length === 0) return [];
+  if (spent.length === 0) return (h.left?.(0), []);
   const store = await h.held();
   const keysOf = (v: unknown): string[] => Object.keys(typeof v === "object" && v !== null ? v : {}).map(lower);
   // a W with a buy record, or one the carry ended (a Withdrawn release: a refused buy or a withdraw), is never looked
@@ -97,7 +99,7 @@ export async function rebuildEvmHoldings(h: EvmHoldingsHost): Promise<string[]> 
   } finally {
     seed.fill(0);
   }
-  if (lacking.length === 0) return [];
+  if (lacking.length === 0) return (h.left?.(0), []);
   const { events } = await h.round();
   const buys = new Map<bigint, EvmPoolEvent>();
   for (const e of events) if (e.kind === "buy" && e.nullifier !== null) buys.set(e.nullifier, e);
@@ -108,6 +110,7 @@ export async function rebuildEvmHoldings(h: EvmHoldingsHost): Promise<string[]> 
     if (b !== null && b.w === w) owed.push({ ...b, w });
   }
   const out: string[] = [];
+  let missed = 0;
   // asked in a random order, never the notes' (M359 (4)): the order says nothing of which buy came first
   for (const b of shuffled(owed, h.random)) {
     h.signal?.throwIfAborted();
@@ -117,6 +120,7 @@ export async function rebuildEvmHoldings(h: EvmHoldingsHost): Promise<string[]> 
       route = await evmBuyRouteByTx(h.helper, h.network, h.pin.pool, b);
       decimals = await keptTokenDecimals(h.chain, b.token, h.rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 });
     } catch {
+      missed++;
       continue;
     }
     h.signal?.throwIfAborted();
@@ -130,5 +134,6 @@ export async function rebuildEvmHoldings(h: EvmHoldingsHost): Promise<string[]> 
     });
     if (wrote) out.push(b.w);
   }
+  h.left?.(missed);
   return out;
 }
