@@ -101,11 +101,13 @@ const b64 = (w: Uint8Array) => Buffer.from(w).toString("base64");
 
 type Calls = { method: string; params: readonly unknown[] }[];
 /** `fail`: a call this answers with a throw (a provider's 429, say) instead of its answer. */
-/** `stale`: a call this answers from slot 1, as a provider that ignores minContextSlot. */
-function rpcStub(calls: Calls = [], simErr: unknown = null, fail?: (method: string, params: readonly unknown[]) => Error | null, stale?: (method: string, params: readonly unknown[]) => boolean): SolanaRpc {
+/** `stale`: a call this answers from slot 1, as a provider that ignores minContextSlot. `hold`: a call that answers only
+ *  once its promise settles. */
+function rpcStub(calls: Calls = [], simErr: unknown = null, fail?: (method: string, params: readonly unknown[]) => Error | null, stale?: (method: string, params: readonly unknown[]) => boolean, hold?: (method: string, params: readonly unknown[]) => Promise<void> | undefined): SolanaRpc {
   return Object.assign(
     async (method: string, params: readonly unknown[]) => {
       calls.push({ method, params });
+      await hold?.(method, params);
       const e = fail?.(method, params);
       if (e) throw e;
       // a provider that honours minContextSlot answers at that slot at least
@@ -155,7 +157,7 @@ type EngineCall = { url: string; method: string; params: unknown[] };
 /** A sender on `cluster` whose kit sender records each set and, for a set with a block engine path, drives it twice
  *  (the first send, then one rebroadcast) before the set's end `end` gives. */
 /** `clock`: the sender's now, moved by each pause (and by the test); NOW when absent. */
-function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<string>; result?: unknown; simErr?: unknown; fail?: (method: string, params: readonly unknown[]) => Error | null; stale?: (method: string, params: readonly unknown[]) => boolean; clock?: { t: number } } = {}) {
+function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<string>; result?: unknown; simErr?: unknown; fail?: (method: string, params: readonly unknown[]) => Error | null; stale?: (method: string, params: readonly unknown[]) => boolean; hold?: (method: string, params: readonly unknown[]) => Promise<void> | undefined; clock?: { t: number } } = {}) {
   const calls: Calls = [];
   const sets: Set[] = [];
   const pauses: number[] = [];
@@ -176,7 +178,7 @@ function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<st
         })
       : null;
   const deps: SolanaPoolSenderDeps = {
-    providers: [rpcStub(calls, o.simErr, o.fail, o.stale), rpcStub(calls)],
+    providers: [rpcStub(calls, o.simErr, o.fail, o.stale, o.hold), rpcStub(calls)],
     now: () => o.clock?.t ?? NOW,
     readRent: async () => TEST_RENT,
     log: () => {},
@@ -579,5 +581,23 @@ test("the reads after the tag 2s landed stop at the carry's arrival plus a block
     assert.deepEqual([a.status, code(a)], [503, "not_landed"], String(took));
     assert.equal(r.pauses.length, asks, String(took));
     assert.ok(clock.t <= Math.max(NOW + took, NOW + POOL_LANDED_READ_MS), String(took));
+  }
+});
+
+test("RED at ece8c89b: the simulation and the blockhash read start together, on the one-piece route and on a buy's tag 3 after its tag 2s landed", async () => {
+  for (const which of ["one piece", "pieces"] as const) {
+    const ws = two();
+    const sim = deferred<void>();
+    const target = b64(which === "one piece" ? ws[0]! : ws[1]!);
+    // provider a holds that transaction's simulation until the blockhash read has started
+    const r = rig("devnet", { hold: (m, p) => (m === "simulateTransaction" && p[0] === target ? sim.p : undefined) });
+    const run = which === "one piece" ? r.s.carry({ pool: POOL, tx: target }) : r.s.carryPieces(bodyOf(ws));
+    for (let i = 0; i < 50 && !r.calls.some((c, k) => c.method === "getLatestBlockhash" && k > r.calls.findIndex((x) => x.method === "simulateTransaction" && x.params[0] === target)); i++) await tick();
+    const simAt = r.calls.findIndex((c) => c.method === "simulateTransaction" && c.params[0] === target);
+    const hashAt = r.calls.findIndex((c, k) => c.method === "getLatestBlockhash" && k > simAt);
+    assert.ok(simAt >= 0 && hashAt > simAt, `${which}: the blockhash read waited for the simulation (${simAt}, ${hashAt})`);
+    sim.done();
+    const a = await run;
+    assert.equal(a.status, 200, `${which}: ${JSON.stringify(a.body)}`);
   }
 });

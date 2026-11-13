@@ -724,9 +724,10 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       let height: number;
       const at = after === undefined ? {} : { minContextSlot: after.minSlot };
       try {
-        const [s, h] = await landedRead(after, async () =>
+        // both reads start at once (one round trip, not two), the simulation's slot checked as it answers
+        const [s, h] = await landedRead(after, () =>
           Promise.all([
-            atLanded(after, await a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", ...at }])),
+            a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", ...at }]).then((r) => atLanded(after, r)),
             a("getLatestBlockhash", [{ commitment: "processed", ...at }]),
           ]),
         );
