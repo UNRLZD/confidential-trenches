@@ -3243,15 +3243,21 @@ const rhPace = (() => {
   assert.ok(m, "limits.ts paces the Robinhood scan provider by the post");
   return { perS: Number(m[1]), burst: Number(m[2]) };
 })();
-test("card robinhood-quotes-inside-provider-limits: the Robinhood quote list holds no provider whose pace a warm quote's rounds pass (Robinhood's own, 1 post a second, took FRONG's 35 to 38 posts a tap)", () => {
+test("card robinhood-quotes-inside-provider-limits: a Robinhood quote asks a provider whose pace its rounds pass only after every other (Robinhood's own, 1 post a second, took FRONG's 35 to 38 posts a tap)", () => {
   const src = readFileSync(new URL("../../../apps/helper/src/limits/limits.ts", import.meta.url), "utf8");
   const listed = builder.evmPoolVenues().robinhood.providers!;
-  assert.ok(listed.length >= 2 && new Set(listed.map((u) => new URL(u).host)).size === listed.length, "two providers at least, each its own host");
-  for (const u of listed) {
+  // a warm quote's round is about 3 batches of 3 calls on each side, several rounds a second
+  const slow = listed.filter((u) => {
     const m = new RegExp(`"${u.replace(/[./]/g, "\\$&")}": \\{ perS: ([\\d.]+), burst: (\\d+), unit: "(post|call)" \\}`).exec(src);
-    // a warm quote's round is about 3 batches of 3 calls on each side, several rounds a second
-    assert.ok(m === null || (m[3] === "post" ? Number(m[1]) >= 5 : Number(m[1]) >= 15), `${u} is paced at ${m?.[1]} a second by the ${m?.[3]}`);
-  }
+    return m !== null && (m[3] === "post" ? Number(m[1]) < 5 : Number(m[1]) < 15);
+  });
+  assert.deepEqual(slow, ["https://rpc.mainnet.chain.robinhood.com"], "limits.ts paces Robinhood's own by the post");
+  // measured fastest of all, it is still asked last; the rest keep their order
+  quoteMod.evmSpeedReset();
+  const ranked = quoteMod.evmRanked(listed);
+  assert.deepEqual(ranked.slice(-slow.length), slow, ranked.join(" "));
+  assert.deepEqual(ranked.slice(0, -slow.length), listed.filter((u) => !slow.includes(u)));
+  assert.ok(listed.filter((u) => !slow.includes(u)).length >= 2, "two providers at least before it");
 });
 test("card robinhood-quotes-inside-provider-limits: a warm Robinhood quote of a token with 40 other currencies sends the scan provider no more posts than its pace takes in 2 s", async () => {
   const token = "0x0000000000000000000000000000000000ee1401";

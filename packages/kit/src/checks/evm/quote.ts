@@ -2049,6 +2049,10 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
 // A provider with a request out for longer than EVM_HEDGE_MS is ranked with the held until it answers: the next quote
 // does not wait on it either.
 const SPEED = new Map<string, { ms: number | null; held: number; out: number[] }>();
+/** Every venue's `quoteLast`: the providers a quote asks only after every other (evmRanked). */
+let QUOTE_LAST: ReadonlySet<string> | undefined;
+const quoteLastOf = (): ReadonlySet<string> =>
+  (QUOTE_LAST ??= new Set(Object.values(evmPoolVenues()).flatMap((v) => (Object.hasOwn(v, "quoteLast") && Array.isArray(v.quoteLast) ? v.quoteLast : []))));
 export const EVM_HOLD_MS = 30_000;
 /** Forgets every provider's measured time and hold: for the tests, which share this module's state (not in the index). */
 export const evmSpeedReset = (): void => SPEED.clear();
@@ -2083,11 +2087,13 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
 };
 /** `urls` in the order a quote asks them: those neither held nor with a request out past EVM_HEDGE_MS by their
  *  measured time (the unmeasured after them, in the venue list's order), then those with a request out, then the held,
- *  each in the same order. */
+ *  each in the same order; a venue's `quoteLast` after all of them, in the same order (card
+ *  robinhood-quotes-inside-provider-limits). */
 export function evmRanked(urls: readonly string[], now: number = performance.now()): string[] {
+  const last = quoteLastOf();
   const rank = (u: string, k: number) => {
     const s = SPEED.get(u);
-    const slow = s === undefined ? 0 : s.held > now ? 2 : s.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0;
+    const slow = (last.has(u) ? 3 : 0) + (s === undefined ? 0 : s.held > now ? 2 : s.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0);
     return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;
   };
   return urls
