@@ -59,7 +59,7 @@ test("this tree's build gives the recorded good run's bundle facts, its index pi
   const b = localBuild();
   sameFacts(b.index, b.js);
   // planted: the tree's build with one marker gone (the carry's floor), its index pinning it, fails on that fact
-  const js = b.js.replace(/if\(([\w$]+)<([\w$]+)\.floor\)return null;/, "");
+  const js = b.js.replace(/if\(([\w$]+)<([\w$]+)\.floor\)return ([\w$]+)\(\1\);/, "");
   assert.notEqual(js, b.js);
   const index = b.index.replace(bundleFacts(b.index, b.js).pin, bundleFacts("", js).sha384);
   assert.throws(() => sameFacts(index, js), (e) => e instanceof assert.AssertionError && /ux_carry/.test(e.message));
@@ -113,12 +113,16 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/,([\w$]+)!==([\w$]+)\)throw Error\(`its U_X reads/, ",!1)throw Error(`its U_X reads").ux_read, false, "two balances taken");
   assert.equal(mut(/,([\w$]+)!==([\w$]+)\)throw Error\(`its U_X reads/, ",$1!==$1)throw Error(`its U_X reads").ux_read, false, "the two balances compared to themselves");
   assert.equal(mut(/return ([\w$]+)===0n\?([\w$]+):\(([\w$]+)\.set/, "return $1<=1n?$2:($3.set").ux_read, false, "a held balance read as none");
-  assert.equal(mut(/if\(([\w$]+)<([\w$]+)\.floor\)return null;/, "if($1<$2.keep)return null;").ux_carry, false, "another floor");
+  assert.equal(mut(/if\(([\w$]+)<([\w$]+)\.floor\)return ([\w$]+)\(\1\);/, "if($1<$2.keep)return $3($1);").ux_carry, false, "another floor");
   assert.equal(mut(/if\(([\w$]+)!==null&&([\w$]+)>=\1\)return\{why:`holds/, "if(!1)return{why:`holds").ux_carry, false, "a filled deposit that moved nothing carried on");
   assert.equal(mut(/if\(([\w$]+)!==`filled`&&\1!==`part_filled`\)return\{why:`holds/, "if($1===`failed`)return{why:`holds").ux_carry, false, "a carry that did not fill passed");
   // card pool-deposit-op-txs: the follow's deposit answers its run ({ end, txs }); the run read as its end never fills
   assert.equal(mut(/let\{end:([\w$]+)\}=await ([\w$]+)\.deposit\(/, "let $1=await $2.deposit(").ux_carry, false, "the deposit's run read as its end");
-  assert.equal(mut(/(ux:[\w$]+=>[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1zz$2({chain:").ux_wired, false, "other deps than the follow's");
+  // card deposit-takes-each-pools-own-coin, delta review r3 P2-1: what the carry reads U_X holds is its op's left
+  assert.equal(mut(/await ([\w$]+)\.leftAt\?\.\(/, "await $1.leftOff?.(").ux_carry, false, "the carry writes no left");
+  assert.equal(mut(/,await ([\w$]+)\(0n\);let\{end:/, ";let{end:").ux_carry, false, "no left 0 before the carry's deposit (listed and in the pool at once)");
+  assert.equal(mut(/,leftAt:async\(/, ",leftOff:async(").ux_wired, false, "the restore's U_X reads with no leftAt");
+  assert.equal(mut(/(ux:[\w$]+=>\{let [\w$]+=[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1zz$2({chain:").ux_wired, false, "other deps than the follow's");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://ct-api.unrealized.trade`]);function").ux_pair, false, "our helper as the second");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://api.mainnet-beta.solana.com`]);function").ux_pair, false, "the operator that refuses a page as the second");
   assert.equal(mut(/return\[([\w$]+)\(([\w$]+)\(([\w$]+)\[0\]\)\),\1\(\2\(\3\[1\]\)\)\]\}/, "return[$1($2($3[0])),$2($3[1])]}").ux_pair, false, "the second unpaced");
@@ -181,9 +185,9 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(f(`${js};var __c=class{h0=1;m(){};${tok.exec(js)[1]}=0}`).id_held, false, "a field after a method is not in the leading list");
   // review P2: a dead same-shaped copy beside a broken real one, and the U_X reader not handed to the id read
   const read = /,([\w$]+)=async\(([\w$]+),([\w$]+)\)=>\{if\(\3===void 0\)throw Error\(`no deposit index for its U_X`\);[^]*?`money`\)\}/.exec(js)[0];
-  const carry = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+)=null;for\(;;\)\{[^]*?\6=[\w$]+\}\}/.exec(js)[0];
+  const carry = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+)=null,[^]*?for\(;;\)\{[^]*?\6=[\w$]+\}\}/.exec(js)[0];
   const held = /async function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let ([\w$]+);try\{\4=await \2\(\3\)\}[^]*?return [\w$]+\}/.exec(js)[0];
-  const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),ux:[^]*?\),ended:/.exec(js)[0];
+  const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),ux:[^]*?\}\},ended:/.exec(js)[0];
   const broken = (from, to) => {
     const t = js.replace(from, to);
     assert.notEqual(t, js, String(from));
@@ -191,9 +195,9 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   };
   const dead = (text, copy) => f(`${text};var __dead=0${copy};`);
   assert.equal(dead(broken(/,([\w$]+)!==([\w$]+)\)throw Error\(`its U_X reads/, ",!1)throw Error(`its U_X reads"), read).ux_read, false, "dead copy: read (real guard dropped)");
-  assert.equal(dead(broken(/if\(([\w$]+)<([\w$]+)\.floor\)return null;/, ""), `;${carry.replace(/^async function ([\w$]+)/, "async function __dead_c")}`).ux_carry, false, "dead copy: carry (real floor dropped)");
+  assert.equal(dead(broken(/if\(([\w$]+)<([\w$]+)\.floor\)return ([\w$]+)\(\1\);/, ""), `;${carry.replace(/^async function ([\w$]+)/, "async function __dead_c")}`).ux_carry, false, "dead copy: carry (real floor dropped)");
   assert.equal(dead(broken(/:([\w$]+)>1n&&/, ":!1&&"), `;${held.replace(/^async function ([\w$]+)/, "async function __dead_h")}`).id_held, false, "dead copy: held rule (real one names nothing)");
-  assert.equal(dead(broken(/(ux:[\w$]+=>[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1(()=>null)({chain:"), `;var __dead_w={signedIn:0,${wired}0}`).ux_wired, false, "dead copy: wired (real deps swapped)");
+  assert.equal(dead(broken(/(ux:[\w$]+=>\{let [\w$]+=[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1(()=>null)({chain:"), `;var __dead_w={signedIn:0,${wired}0}`).ux_wired, false, "dead copy: wired (real deps swapped)");
   assert.equal(dead(js, read).ux_read, false, "a second copy of the reader beside the real one");
   assert.equal(dead(js, ";var __dead_p=Object.freeze([`https://solana-rpc.publicnode.com`,`https://solana.api.pocket.network`])").ux_pair, false, "a second copy of the pair beside the real one");
   const handed = /(`money`\)\},[\w$]+=await [\w$]+\([\w$]+,([\w$]+)\.scope,\{notes:\[\.\.\.\2\.notes\],\.\.\.[\w$]+\(\2\.notes,\2\.scope\)\},)([\w$]+),await ([\w$]+)\(\2\.scope,\2\.notes\)\)/;
