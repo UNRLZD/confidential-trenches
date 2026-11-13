@@ -1,19 +1,24 @@
 #!/usr/bin/env node
 // Live check of card deposit-quote-no-liquidity on SIGN_HOST (https://confidential.unrealized.trade): the deposit sheet's
-// display read never asks a quote again (review ruling a: the dry lines and the asset list are asked again as the user
-// types and opens the sheet, so a re-ask there only adds wait and load). The committed asks (deposit.quote, pool.address,
-// the refund move) ask again on 1Click's 400 "No liquidity available" (wallet/src/deposit/quote.ts askDepositQuoteAgain);
-// they need a signed-in seed and a live quote, which this run never has, so their re-ask is held by the package tests
-// (packages/wallet/test/deposit-quote.test.ts, packages/signpage/test/rules-deposit-quote.test.ts,
+// display read (deposit.dry) asks 1Click's no-liquidity 400 again as every quote path does, and stays inside the one
+// ask's window. Since a704c14fb (card helper-says-why-a-vendor-refused) every quote path asks a 1Click 400 that is not
+// about the request again through wallet/src/deposit/quote.ts askDepositQuoteAgain, the display reads too
+// (signpage/src/rules/deposit-dry.ts): a sheet that asked its assets once showed Not available for minutes of 1Click
+// 400s. That overrules this check's first ruling (the display read asked once). The rule's numbers are read from
+// quote.ts itself (QUOTE_RULE), never copied here: the first ask and one re-ask per NO_LIQUIDITY_PAUSES_MS entry at
+// most, every one inside DEPOSIT_QUOTE_TIMEOUT_MS from the first send. The committed asks (deposit.quote, pool.address,
+// the refund move) need a signed-in seed and a live quote, which this run never has; their re-ask is held by the package
+// tests (packages/wallet/test/deposit-quote.test.ts, packages/signpage/test/rules-deposit-quote.test.ts,
 // pool-deposit-address.test.ts, refund-move.test.ts). The run, with the served page:
 //   - SIGN_HOST as a top-level page frames APP_HOST, which Playwright answers with a probe page (no request reaches the
 //     real APP_HOST); once the shell's ready arrives the probe posts the kit's hello and asks deposit.dry for 25 USDC
 //     from Solana, the sheet's own read as the amount is typed;
 //   - every quote request the page sends to the helper's 1Click proxy is answered here with 1Click's own no-liquidity
 //     answer (400, the body the deployed helper passed on 2026-11-10T19:06:57Z): no request reaches the helper.
-// PASS when the page sent the one dry 25 USDC request to the public placeholder and answered not_available, within the
-// one ask's window (DEPOSIT_QUOTE_TIMEOUT_MS, 10 s). FAIL when it asks again (this card's first head did: three asks),
-// answers another code or anything but a refusal, or does not answer.
+// PASS when the page sent the dry 25 USDC request to the public placeholder at least once and at most QUOTE_RULE.maxAsks
+// times (the first and its re-asks), each the same request, each sent inside QUOTE_RULE.windowMs from the first send,
+// and answered not_available inside that window. FAIL on one ask more, an ask after the window, a changed request, a
+// request that reached the helper, another code or anything but a refusal, or no answer.
 // The quote is dry and answered here: nothing is signed, nothing of anyone's is named, nothing reaches the helper.
 // After: sign
 //   node scripts/live-checks/deposit-quote-no-liquidity.mjs [--url <SIGN_HOST url>] [--record <file>]
@@ -40,8 +45,23 @@ export const SOL_USDC = ONECLICK_USDC_ASSETS[1];
 /** What the run asks: 25 USDC from Solana, the size 1Click had no liquidity for on 10 Nov 07:04-07:43Z. */
 export const ASKED = Object.freeze({ origin_asset: SOL_USDC, amount: "25" });
 export const ASKED_UNITS = "25000000";
+/** The page's quote rule as wallet/src/deposit/quote.ts writes it: its one ask's window (DEPOSIT_QUOTE_TIMEOUT_MS) and
+ *  the asks at most (the first, and one per NO_LIQUIDITY_PAUSES_MS pause). Throws when a literal is not in its shape, so
+ *  a reshaped rule is an error (exit 2), never a pass on a stale number. */
+export const QUOTE_SOURCE = path.join(REPO, "packages/wallet/src/deposit/quote.ts");
+export function parseQuoteRule(text) {
+  const num = (x) => Number(x.replaceAll("_", ""));
+  const w = /^export const DEPOSIT_QUOTE_TIMEOUT_MS = ([0-9][0-9_]*);$/m.exec(String(text));
+  const p = /^export const NO_LIQUIDITY_PAUSES_MS: readonly number\[\] = Object\.freeze\(\[([0-9_,\s]*)\]\);$/m.exec(String(text));
+  if (!w) throw new Error("DEPOSIT_QUOTE_TIMEOUT_MS not found in its literal shape");
+  if (!p) throw new Error("NO_LIQUIDITY_PAUSES_MS not found in its literal shape");
+  const pauses = p[1].split(",").map((x) => x.trim()).filter(Boolean).map(num);
+  if (!(num(w[1]) > 0) || pauses.length === 0 || !pauses.every((x) => x > 0)) throw new Error("the quote rule's literals are not positive numbers");
+  return Object.freeze({ windowMs: num(w[1]), maxAsks: 1 + pauses.length });
+}
+export const QUOTE_RULE = parseQuoteRule(readFileSync(QUOTE_SOURCE, "utf8"));
 /** The one ask's window (wallet/src/deposit/quote.ts DEPOSIT_QUOTE_TIMEOUT_MS). */
-export const WINDOW_MS = 10_000;
+export const WINDOW_MS = QUOTE_RULE.windowMs;
 /** 1Click's no-liquidity answer as the deployed helper passed it on 2026-11-10T19:06:57Z (a dry quote of NEAR USDC into a
  *  meme no solver quotes; the card's 25 USDC reads gave the same status and message). */
 export const NO_LIQUIDITY_BODY = '{"message":"No liquidity available","correlationId":"2357c43d-9fdf-4c05-9732-edaa447fcb6a","timestamp":"2026-11-10T19:06:57.250Z","path":"/v0/quote"}';
@@ -61,13 +81,19 @@ export function judge(a) {
   const quotes = Array.isArray(a?.quotes) ? a.quotes : [];
   const answer = (Array.isArray(a?.log) ? a.log : []).find((m) => m?.fromParent && m.data?.id === a?.id)?.data;
   if (a?.ready === true && quotes.length === 0) bad("the page sent no quote request for deposit.dry");
-  if (quotes.length > 1) bad(`the page asked the display quote ${quotes.length} times on 1Click's no-liquidity answer, want once`);
+  if (quotes.length > QUOTE_RULE.maxAsks) bad(`the page asked the display quote ${quotes.length} times on 1Click's no-liquidity answer, want ${QUOTE_RULE.maxAsks} at most (the first and its re-asks)`);
   if (quotes.some((q) => q.planted !== true)) bad("a quote request reached the helper: this run answers every one");
   const first = quotes[0]?.body;
   if (first !== undefined) {
     if (first?.dry !== true || first.originAsset !== SOL_USDC || first.amount !== ASKED_UNITS) bad(`the quote request is not the dry 25 USDC from Solana asked: ${show(first)}`);
     if (first?.recipient !== DEPOSIT_DRY_PLACEHOLDER || first?.refundTo !== DEPOSIT_DRY_PLACEHOLDER) bad("the quote request names someone other than the public placeholder");
   }
+  // a re-ask is the same request as it is (askDepositQuoteAgain), sent inside the one ask's window from the first send
+  quotes.slice(1).forEach((q, i) => {
+    if (JSON.stringify(q.body) !== JSON.stringify(first)) bad(`ask ${i + 2} is not the first ask's request: ${show(q.body)}`);
+  });
+  const late = quotes.filter((q) => !(typeof q.t === "number" && q.t - quotes[0].t >= 0 && q.t - quotes[0].t <= WINDOW_MS));
+  if (late.length) bad(`${late.length} ask(s) sent outside the one ask's ${WINDOW_MS} ms from the first send (${late.map((q) => (typeof q.t === "number" ? `${q.t - quotes[0].t} ms` : "no time")).join(", ")})`);
   if (answer === undefined) bad("the page sent no answer to deposit.dry");
   else if (!(answer.ok === false && answer.error?.code === "not_available" && Object.keys(answer).sort().join() === "error,id,ok,v"))
     bad(`deposit.dry answered ${show(answer.ok === false ? answer.error : answer)}, want not_available on 1Click's no-liquidity answer`);
