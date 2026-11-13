@@ -403,6 +403,31 @@ test("the page's walk Workers reach every pool's walk: Solana's and each EVM poo
   for (const x of got) assert.equal(x.walkers, walkers, `${x.chain}: the host's walkers`);
 });
 
+// card restore-shows-the-balance-in-seconds: the live check pool-restore-wired reads when the first pool's balance is
+// the restored one from this line; it names the chain alone, once that pool's floor has written, and never after a
+// failed floor
+test("each pool's floor, once written, logs only 'restore: <chain> walked', in walk order, an empty walk's too; a failed floor logs nothing", async () => {
+  const was = console.info;
+  const said: unknown[][] = [];
+  console.info = (...a: unknown[]) => void said.push(a);
+  try {
+    const w = await world({ solana: (async () => ({ notes: [], spends: [] })) as never });
+    await w.r.auto();
+    assert.deepEqual(w.ends.map((e) => e.stage), ["done"]);
+    assert.deepEqual(said, [["restore: solana walked"], ["restore: base walked"]], "solana first (empty), then base (with notes), each one string");
+    for (const [line] of said) assert.match(String(line), /^restore: (solana|near|base|robinhood) walked$/);
+    said.length = 0;
+    const f = await world();
+    const real = f.store;
+    f.host.store = async () => Object.assign(Object.create(real), { raiseDepositIndex: async () => Promise.reject(new Error("refused")) });
+    await f.r.auto();
+    assert.deepEqual(f.ends.map((e) => e.stage), ["stalled"]);
+    assert.deepEqual(said, [], "a failed floor logs nothing");
+  } finally {
+    console.info = was;
+  }
+});
+
 test("pagePools: the mainnet build pins the NEAR vault on its release pair (card signpage-restores-near-vault-notes), the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair, then Base's and Robinhood's (card evm-pools-on-mainnet), each on its pool list", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
   const { EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");

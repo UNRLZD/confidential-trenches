@@ -9,12 +9,14 @@
 // started, a restore answered while signed out. Card sign-live-checks-read-a-pinned-page: live111 (below), and the
 // pinned hosts' cases planted at the end. Card restore-first-sign-in-under-two-minutes: step 5 after done, planted on
 // live111 at the end. Card sign-live-checks-name-evm-pool-hosts: live119, with the EVM pools' hosts' cases planted on it.
+// Card restore-shows-the-balance-in-seconds: net, --local --net (this card's build with the pinned hosts on the network,
+// 13 Nov 00:00Z, the slowest of three runs): its first balance within BALANCE_MS, with that line's cases planted on it.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { FIRST_PAUSE_MS, idReadOf, judge, WAIT_MS } from "./pool-restore-wired.mjs";
+import { BALANCE_MS, FIRST_PAUSE_MS, idReadOf, judge, WAIT_MS } from "./pool-restore-wired.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "pool-restore-wired.answers.json"), "utf8"));
@@ -185,9 +187,36 @@ test("idReadOf counts a step 5 id read alone", () => {
 test("planted: the run with no tap ended at WAIT_MS: PASS; a ms past it, never, or no number: FAIL", () => {
   const at = mut((rec) => (rec.steps.auto.ms = WAIT_MS));
   assert.equal(at.ok, true, at.lines.join("\n"));
-  assert.ok(at.lines.some((l) => l.startsWith("OK ") && l.includes(`it ended within ${WAIT_MS / 1000} s of Continue (${WAIT_MS} ms)`)), at.lines.join("\n"));
-  fails(mut((rec) => (rec.steps.auto.ms = WAIT_MS + 1)), /it ended within .* s of Continue/);
-  fails(mut((rec) => (rec.steps.auto.ms = null)), /of Continue \(never\)/);
-  fails(mut((rec) => (rec.steps.auto.ms = "fast")), /of Continue/);
-  fails(mut((rec) => (rec.steps.auto.ms = -1)), /of Continue/);
+  assert.ok(at.lines.some((l) => l.startsWith("OK ") && l.includes(`every pool walked ${WAIT_MS} ms after Continue (within ${WAIT_MS / 1000} s)`)), at.lines.join("\n"));
+  fails(mut((rec) => (rec.steps.auto.ms = WAIT_MS + 1)), /^BAD every pool walked \d+ ms after Continue/);
+  fails(mut((rec) => (rec.steps.auto.ms = null)), /^BAD every pool walked never after Continue/);
+  fails(mut((rec) => (rec.steps.auto.ms = "fast")), /^BAD every pool walked .* after Continue/);
+  fails(mut((rec) => (rec.steps.auto.ms = -1)), /^BAD every pool walked .* after Continue/);
+});
+
+test("recorded --local --net run: the balance first showed in seconds, the NEAR pool's notes written, and every pool walked: PASS", () => {
+  const r = judge(ANSWERS.net);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.match(ANSWERS.net.source, /, the pinned hosts on the network$/);
+  assert.ok(r.lines.includes(`OK  the balance first showed ${ANSWERS.net.steps.balance.ms} ms after Continue (the near pool's notes written; within ${BALANCE_MS / 1000} s)`), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => /^OK  every pool walked \d+ ms after Continue \(within 120 s\)$/.test(l)), r.lines.join("\n"));
+});
+
+test("planted on the --net run: no pool's notes written, or the first past BALANCE_MS: FAIL; a record from before the card is not judged on it", () => {
+  const bad = (f, re) => {
+    const rec = structuredClone(ANSWERS.net);
+    f(rec);
+    const r = judge(rec);
+    assert.equal(r.ok, false, r.lines.join("\n"));
+    assert.ok(r.lines.some((l) => re.test(l)), r.lines.join("\n"));
+  };
+  bad((rec) => ((rec.walked = []), (rec.steps.balance = null)), /^BAD the balance first showed never after Continue \(no pool's notes written; within 30 s\)$/);
+  bad((rec) => (rec.steps.balance.ms = BALANCE_MS + 1), /^BAD the balance first showed 30001 ms after Continue \(the near pool's notes written; within 30 s\)$/);
+  bad((rec) => (rec.steps.balance.ms = -1), /^BAD the balance first showed -1 ms after Continue/);
+  const at = structuredClone(ANSWERS.net);
+  at.steps.balance.ms = BALANCE_MS;
+  assert.equal(judge(at).ok, true, judge(at).lines.join("\n"));
+  const old = structuredClone(ANSWERS.net);
+  delete old.walked;
+  assert.ok(!judge(old).lines.some((l) => l.includes("the balance first showed")), judge(old).lines.join("\n"));
 });
