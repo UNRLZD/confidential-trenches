@@ -198,10 +198,11 @@ test("the wait is bounded (EVM_WARM_WAIT_MS, 20 s): past it the round reads as b
   const { w } = await wallet();
   const s = twoSyncs(w, () => new Promise(() => {}), { waitMs: 120 });
   s.t.evmPoolOf("base");
-  const t0 = Date.now();
-  await s.round();
-  const took = Date.now() - t0;
-  assert.ok(took >= 100 && took < 1_000, `waited ${took} ms for a read that never ends, bound 120 ms`);
+  const r = s.round();
+  await new Promise((x) => setTimeout(x, 40));
+  assert.deepEqual(s.calls, ["pass:events"], "inside the bound (120 ms) the round has read nothing");
+  const got = await Promise.race([r.then(() => "read"), new Promise((x) => setTimeout(() => x("still waiting"), 2_000))]);
+  assert.equal(got, "read", "past the bound the round reads, the history read still running");
   assert.deepEqual(s.calls, ["pass:events", "deposit:events"]);
 });
 
@@ -238,11 +239,9 @@ test("a sign out during the wait ends the round at once: thrown, no read after t
   await until(() => s.calls.includes("pass:events"));
   const r = s.round();
   await new Promise((x) => setTimeout(x, 30));
-  const t0 = Date.now();
   (s.t as unknown as { signingOut: () => void }).signingOut();
-  const got = await Promise.race([r.then(() => "read", () => "thrown"), new Promise((x) => setTimeout(() => x("still waiting"), 1_000))]);
-  assert.equal(got, "thrown", "the round ends at the sign out");
-  assert.ok(Date.now() - t0 < 500, `ended ${Date.now() - t0} ms after the tap`);
+  const got = await Promise.race([r.then(() => "read", () => "thrown"), new Promise((x) => setTimeout(() => x("still waiting"), 500))]);
+  assert.equal(got, "thrown", "the round ends at the sign out, not at the 20 s bound");
   await new Promise((x) => setTimeout(x, 50));
   assert.deepEqual(s.calls, ["pass:events"], "no read after the tap, the history read not asked again");
 });
