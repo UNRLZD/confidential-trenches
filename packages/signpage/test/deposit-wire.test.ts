@@ -219,3 +219,27 @@ test("a sign out in deposit.quote's re-ask pause: the host sends no second quote
   assert.deepEqual(d.answer(), { error: "down" });
   assert.equal(asks, 1);
 });
+
+test("a sign out during deposit.quote's records read: no quote leaves, the answer is down", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  const page = quotesStop();
+  let asks = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  let reading = false;
+  const deps: DepositWireDeps = {
+    scope: () => SCOPE,
+    read: async () => ((reading = true), await gate, SAVED),
+    fetch: (async () => (asks++, new Response("{}", { status: 503, headers: { "content-type": "application/json" } }))) as typeof fetch,
+    now: () => NOW,
+    checked: async () => assert.fail("no address goes to the follow"),
+    stop: page.stopped,
+  };
+  const d = depositQuoteHost(deps)({ origin_asset: SOL_USDC, amount: "25" }, { id: "op-1" });
+  while (!reading) await new Promise((ok) => setImmediate(ok));
+  page.signedOut();
+  release();
+  await d.after;
+  assert.deepEqual(d.answer(), { error: "down" });
+  assert.equal(asks, 0);
+});

@@ -28,6 +28,31 @@ test("every quote host gets the page's stop: deposit.quote, pool.address and the
   assert.match(MAIN, /"pool\.address": poolAddressHost\(\{[^\n]*stop: quotesStopped \}\)/);
   assert.equal(MAIN.split("depositReadHosts({ stop: quotesStopped })").length - 1, 2);
   assert.equal(MAIN.split("depositReadHosts(").length - 1, 2);
-  // declared before the API starts, which reads it as the page loads
+  // declared before the API starts, which reads it as the page loads, from the page's one stop (src/quotes-stop.ts)
   assert.ok(MAIN.indexOf("const quotesStopped") < MAIN.indexOf("stop: quotesStopped"));
+  assert.match(MAIN, /const quotes = quotesStop\(\);\nconst quotesStopped = quotes\.stopped;\nconst quotesSignedOut = quotes\.signedOut;/);
+});
+
+// Re-review P3: a sign out readies the next sign in's stop; without the fresh signal, every quote after the first sign out
+// would answer down until a reload.
+test("sign out, sign in, a quote: it goes out on the fresh stop, and the one under way at the sign out did not", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  const { depositQuoteHost } = await import("../src/deposit-wire.ts");
+  const page = quotesStop();
+  const before = page.stopped();
+  page.signedOut();
+  assert.equal(before.aborted, true);
+  assert.equal(page.stopped().aborted, false);
+  let asks = 0;
+  const d = depositQuoteHost({
+    scope: () => 7n,
+    read: async () => ({ status: { source: "code", code_saved: true }, deposit: { v: 1, scope: "7", index: 3, id: "5d".repeat(32) } }),
+    fetch: (async () => (asks++, new Response("{}", { status: 503, headers: { "content-type": "application/json" } }))) as typeof fetch,
+    now: () => Date.parse("2026-11-02T06:00:00.000Z"),
+    checked: async () => {},
+    stop: page.stopped,
+  })({ origin_asset: "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near", amount: "25" }, { id: "op-2" });
+  await d.after;
+  assert.equal(asks, 1, "the quote after the sign in went out");
+  assert.deepEqual(d.answer(), { error: "down" }); // the helper's 503, as data
 });

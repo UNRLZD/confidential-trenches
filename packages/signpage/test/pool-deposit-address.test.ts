@@ -493,3 +493,23 @@ test("a sign out in the quote's re-ask pause: no second quote leaves, no address
   assert.equal(w.sent.length, 1);
   assert.equal(w.took.length, 0);
 });
+
+// Re-review P2 of card helper-says-why-a-vendor-refused: the stop is read once, as the request arrives. A sign out swaps
+// in a fresh signal (src/quotes-stop.ts), so a host that read it only after its awaits would send its quote anyway.
+test("a sign out during pool.address's floor read: no quote leaves, the answer is down", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  const w = world();
+  const page = quotesStop();
+  w.deps.stop = page.stopped;
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  let reading = false;
+  const floor = w.deps.floor!;
+  w.deps.floor = async (chain, wallet) => ((reading = true), await gate, floor(chain, wallet));
+  const asked = ask(w, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
+  while (!reading) await new Promise((ok) => setImmediate(ok));
+  page.signedOut();
+  release();
+  assert.deepEqual(await asked, { error: "down" });
+  assert.equal(w.sent.length, 0);
+});

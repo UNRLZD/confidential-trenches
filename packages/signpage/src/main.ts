@@ -67,6 +67,7 @@ import { startApi, type KindContext } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
+import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
 import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
@@ -210,12 +211,9 @@ const poolFollow = !framed
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 // Sign out (this tab's or another's) stops every quote's asks (card helper-says-why-a-vendor-refused, review P3):
 // deposit.quote, pool.address and the deposit sheet's reads send nothing more, a re-ask's pause included.
-let quotesStop = new AbortController();
-const quotesStopped = (): AbortSignal => quotesStop.signal;
-function quotesSignedOut(): void {
-  quotesStop.abort(new DOMException("signed out", "AbortError"));
-  quotesStop = new AbortController();
-}
+const quotes = quotesStop();
+const quotesStopped = quotes.stopped;
+const quotesSignedOut = quotes.signedOut;
 // declared before the API starts below (its kinds read quotesStopped)
 if (framed) document.body.append(root);
 else {

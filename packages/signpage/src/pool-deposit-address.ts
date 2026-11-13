@@ -173,6 +173,10 @@ export async function readSolanaPoolCosts(rpcs: readonly [SolanaRpc, SolanaRpc],
 export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, unknown>, ctx?: { id: string }) => Deferred<"pool.address"> {
   return (params, ctx) => {
     let out: HostAnswer<"pool.address"> | HostRefusal = { error: "not_allowed" };
+    // the page's stop as the request arrives (re-review P2 of card helper-says-why-a-vendor-refused): a sign out swaps in
+    // a fresh one, so one read after an await would never be aborted. Read again after each await: stopped, nothing goes
+    const stop = deps.stop?.();
+    const stopped = () => stop?.aborted === true;
     const after = (async () => {
       const chain = params.chain as PoolChain;
       const pool = deps.pools().find((p) => p.chain === chain);
@@ -180,7 +184,9 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       const asset = POOL_ADDRESS_ASSET[chain];
       const quoted = params.origin_asset !== undefined || params.amount !== undefined;
       await deps.named?.().catch(() => {});
+      if (stopped()) return void (out = { error: "down" });
       const before = usable(await deps.read(pool.scope), chain, pool.scope);
+      if (stopped()) return void (out = { error: "down" });
       if (!before) return;
       if (!quoted) return void (out = { result: { chain, address: before.wallet, asset } });
 
@@ -205,6 +211,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       } catch {
         return void (out = { error: "down" });
       }
+      if (stopped()) return void (out = { error: "down" });
       if (floor === null) return;
 
       const now = deps.now ?? Date.now;
@@ -217,7 +224,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       let reply;
       try {
         // asked again on 1Click's no-liquidity answer, inside the one ask's window (card deposit-quote-no-liquidity)
-        reply = await askDepositQuoteAgain(request, deps.fetch, undefined, undefined, deps.stop?.());
+        reply = await askDepositQuoteAgain(request, deps.fetch, undefined, undefined, stop);
       } catch {
         return void (out = { error: "down" });
       }
@@ -248,6 +255,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
 
       // the address stands only while the records are the ones it was asked under
       const now2 = usable(await deps.read(pool.scope), chain, pool.scope);
+      if (stopped()) return void (out = { error: "down" });
       if (!now2 || !same(now2, before)) return;
       const quote = {
         deposit_address: checked.depositAddress,
