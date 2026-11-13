@@ -10,6 +10,9 @@
 // Card restore-shows-the-balance-in-seconds: the site's trusted-types names walk-worker beside prover-worker, so the
 // good answer's site CSP is the recorded one with walk-worker added there, as the build's _headers now serves it; re-recorded
 // at the next sign deploy.
+// Card found-wallet-sweep-reads-on-a-pair-that-answers: the site's connect-src names Solana Vibe Station's endpoint after
+// Pocket's, so the good answers' site CSP has it added there, as the build's _headers now serves it; re-recorded at the
+// next sign deploy.
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

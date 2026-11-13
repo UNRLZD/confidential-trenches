@@ -385,6 +385,10 @@ export const pageSolanaSettleRpcs = (kind: ReadKind = "trade"): readonly [Solana
   POOL_TESTNET
     ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0], SOLANA_RPC_RETRY, kind)), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1], SOLANA_RPC_WINDOW_RETRY, kind))]
     : [solanaPacedRpc(seatRpc(SOLANA_PUBLIC_SEAT, kind)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind))];
+/** Marks per getMultipleAccounts on pageSolanaSettleRpcs' two seats (the wallet's solanaMarksListed batches): the public
+ *  provider's 10 (publicnode's cap; api.devnet.solana.com held to the same), the helper's route getMultipleAccounts' own
+ *  100, so a cold read draws a tenth of the calls from the helper's share a user's trade reads also draw on. */
+export const PAGE_SOL_MARK_BATCHES: readonly [number, number] = Object.freeze([SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX] as const);
 /** The public seat of a found W's token-account reads (card found-wallet-sweep-reads-on-a-pair-that-answers): Solana Vibe
  *  Station's keyless endpoint, read device-direct. The page's public seat answers none (SOLANA_PUBLIC_SEAT, read from
  *  SIGN_HOST's origin 2026-11-13 17:47Z: publicnode 403 -32602 "Request blocked" on Token and "Indexed requests require a
@@ -405,10 +409,6 @@ export const SOLANA_TOKEN_SEAT_LIMIT: SolanaRpcLimit = Object.freeze({ windowMs:
  *  SOLANA_TOKEN_SEAT, paced, and the helper's /v1/rpc/solana, pageSolanaRpcs' second; the testnet build's own pair. */
 export const pageSolanaTokenRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] =>
   POOL_TESTNET ? pageSolanaRpcs(kind) : [solanaPacedRpc(pageRpc(SOLANA_TOKEN_SEAT, kind), SOLANA_TOKEN_SEAT_LIMIT), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, kind))];
-/** Marks per getMultipleAccounts on pageSolanaSettleRpcs' two seats (the wallet's solanaMarksListed batches): the public
- *  provider's 10 (publicnode's cap; api.devnet.solana.com held to the same), the helper's route getMultipleAccounts' own
- *  100, so a cold read draws a tenth of the calls from the helper's share a user's trade reads also draw on. */
-export const PAGE_SOL_MARK_BATCHES: readonly [number, number] = Object.freeze([SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX] as const);
 /** The page's marks and pages of PAGE_SOL_PIN's pool on pageSolanaRpcs' pair (the wallet's SolanaPoolCache): every settle
  *  of the page and its restore read only the marks and pages none of them has read yet, so a settle after the first
  *  reads the newest page of each tree and the newest bucket of each mark size, at any pool size (review P2-2 of

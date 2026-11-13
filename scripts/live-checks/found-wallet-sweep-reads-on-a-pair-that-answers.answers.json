@@ -1,9 +1,9 @@
 {
  "good": {
   "at": "2026-11-13T18:04:24.304Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-wnctJo+Lv3njvoOz/ZT1wcAbXF7saagmnS/KZgwMNWSNzPs1Zy+dHFUrmFP1JDG0\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-gIWdxj0tbsDuLNDhflF3hiX7KRjTxGrZvKrx3e0q5D+m9fsn+n3YuiOXTzn7S/lW\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-wnctJo+Lv3njvoOz/ZT1wcAbXF7saagmnS/KZgwMNWSNzPs1Zy+dHFUrmFP1JDG0",
+   "sha384": "sha384-gIWdxj0tbsDuLNDhflF3hiX7KRjTxGrZvKrx3e0q5D+m9fsn+n3YuiOXTzn7S/lW",
    "names": [
     "https://public.rpc.solanavibestation.com"
    ]
