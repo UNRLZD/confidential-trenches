@@ -156,6 +156,7 @@ export const OUT = {
   "signpage-pool-withdraw-form": "devnet RPC reads of the run",
   "signpage-pool-pins": "mainnet RPC reads of the pin's accounts and the helper's mainnet fee answer",
   "signpage-throttled-provider-has-a-spare": "both public Solana seats' CORS answers to the page's origin and their mainnet reads of the stable accounts",
+  "near-quote-under-the-pace": "the helper's NEAR seat (its CORS answer to the page's origin, a mainnet read beside dRPC's, one page's 10 s window of reads); the bundle's naming of the seat is held by packages/kit/test/near-networks.test.ts and the page's wiring by packages/signpage/src/main.ts",
   "pool-deposits": "devnet RPC reads of the run",
   "wallet-passkey-prf": "a browser",
   "signpage-postmessage": "a browser",

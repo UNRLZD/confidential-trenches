@@ -2,12 +2,14 @@
 // its seat at the key's 5 a second (the wallet's nearSeatRpc, its own pace per page: here two copies of the pace
 // module), and their reads interleave on one key that the helper holds at 5 a second, 5 at once, answering 429 with
 // Retry-After 1 past it. Each device reads its swap's pair (the kit's readNearSwapPair: one final height on both seats,
-// then W, the quote and the baseline at that block) on its seat and dRPC, on the real clock; the chain moves a block
+// then W, the quote and the baseline at that block) on its seat and dRPC, on the test clock (onTestClock: every wait set
+// and ended in its turn, the idle time skipped); the chain moves a block
 // every 600 ms. Both pairs complete, each of one block, within the signer's NEAR_SWAP_READ_AGE_MAX, and no read falls
 // to the keyless seat: the 429s are waited out.
 //   node --test test/near-seat-two-devices.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { readNearSwapPair } from "../../kit/src/trade/near/wallet.ts";
 import { NEAR_SWAP_READ_AGE_MAX } from "../../wallet/src/near/swap-delegate.ts";
@@ -18,7 +20,7 @@ const NET = NEAR_NETWORKS.mainnet;
 // one copy of the pace module per device: a page's paces are its own
 const device = async (n: number) => (await import(new URL(`../../wallet/src/pace.ts?device=${n}`, import.meta.url).href)) as typeof Pace;
 
-test("two devices' pairs interleaved on one 5/s key: both complete at one block, within the signer's age, none on the keyless seat", { timeout: 60_000 }, async () => {
+test("two devices' pairs interleaved on one 5/s key: both complete at one block, within the signer's age, none on the keyless seat", { timeout: 60_000 }, () => onTestClock(async () => {
   const k = chain();
   k.c.exists = true;
   const t0 = performance.now();
@@ -66,4 +68,4 @@ test("two devices' pairs interleaved on one 5/s key: both complete at one block,
   assert.ok(asked.refused > 0, `the two devices met the key's pace (${JSON.stringify(asked)})`);
   assert.equal(asked.keyless, 0, JSON.stringify(asked));
   console.log("two devices:", JSON.stringify(asked), `${Math.round(performance.now() - t0)} ms`);
-});
+}));
