@@ -14,6 +14,7 @@
 // no such line (or the line is BAD).
 // After: sign --engine chromium --live --width phone
 //   node scripts/live-checks/sign-out-stops-the-pages-reads.mjs --engine chromium --live --width phone [--record <f>]
+//     the deployed SIGN_HOST (confidential.unrealized.trade), as signpage-shell.mjs reads it
 //   node scripts/live-checks/sign-out-stops-the-pages-reads.mjs --engine chromium [--site <dir>] [--record <f>]
 //     the harness: SIGN_HOST from this checkout's build, or from <dir>
 // PASS exit 0, FAIL exit 1, error exit 2. No money; the words are the published vector's, the passkeys the virtual
