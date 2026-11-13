@@ -186,6 +186,33 @@ test("a fresh device (the notes from the words, no record): W's record is rebuil
   assert.deepEqual(plan.legs.map((l) => [l.w.w, l.w.route, l.w.block, l.units]), [[a.w, routeTo(token), BUY_BLOCK, 10n ** 18n]]);
 });
 
+test("a reorg lands a buy after its note was freed and bought again: the new buy's record is replaced, then removed at its end (the release is not its own), and W's coin is found by the rebuild", async () => {
+  const { evmBuyHost } = await import("../src/pool-buy-evm.ts");
+  const ws = await stores();
+  const token = freshToken();
+  const a = noteOf(0);
+  const pin = { network: "base", pool: POOL, feeRecipient: "0x" + "fe".repeat(20), fromBlock: 1n } as const;
+  const h = evmBuyHost("base", pin as never, [async () => null, async () => null], new Set(), { queue: async () => assert.fail("no queue"), seed64: async () => SEED.slice(), held: async () => ws, settle: () => {}, marks: async () => new Map(), testnet: false } as never);
+  const buy = (deadlineMs: string) => ({ nullifier: a.nullifier.toString(), from: "1", deadlineMs, minOut: "1", value: "1", feeCap: "1", feeRecipient: pin.feeRecipient });
+  const pending = (deadlineMs: string) => ({ mint: "0x" + "77".repeat(20), decimals: 6, chain: "base" as const, state: "pending" as const, route: { venue: "uniswap-v3" as const, adapter: V4, path: { venue: "uniswap-v3", tokens: [], fees: [] } as never }, buy: buy(deadlineMs) });
+  // the first buy of the note: pending; it never landed by its deadline, the pool's round freed the note
+  await h.record(a.w, pending("1000"));
+  // the note's next buy (another token): its pending record replaces the first's
+  await h.record(a.w, pending("2000"));
+  assert.equal(((await recordsOf(ws))[a.w] as { buy: { deadlineMs: string } }).buy.deadlineMs, "2000");
+  // a reorg brings the first buy back: it lands, its Bought in the round; the second's own send is refused by the pool
+  // (the nullifier spent), and its read-back, a release of the nullifier that is not its own (src/evm-send.ts
+  // evmBuyVerdict not_landed with a release), removes its record (src/pool-buy-evm.ts watch)
+  await h.unrecord(a.w, a.nullifier, 2000n);
+  assert.equal((await recordsOf(ws))[a.w], undefined);
+  // W holds the first buy's coin: the rebuild finds it from the chain
+  const tx = buyTx(a.w, token);
+  const x = world({ notes: [a.n], events: [row("buy", a.nullifier, a.w, tx.hash, token, 3n)], txs: [tx], ws });
+  assert.deepEqual(await rebuildEvmHoldings(x.host), [a.w]);
+  assert.equal(((await recordsOf(ws))[a.w] as { mint: string; state: string }).mint, token);
+  assert.equal(((await recordsOf(ws))[a.w] as { state: string }).state, "filled");
+});
+
 test("a reload: a second pass writes nothing and asks the helper nothing (the record is there)", async () => {
   const ws = await stores();
   const token = freshToken();
