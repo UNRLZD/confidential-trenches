@@ -47,7 +47,7 @@
 //   nothing is read: the state read, the queue and the flow all stop at the missing pin. The testnet constants sit
 //   behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them.
 import { base58, base64 } from "@scure/base";
-import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, solanaWrappedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
+import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, solanaWrappedRpc, type SolanaRpc, type SolanaRpcLimit, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts, seatRpc, type ReadKind } from "./page-rpc.ts";
 import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
@@ -389,6 +389,26 @@ export const pageSolanaSettleRpcs = (kind: ReadKind = "trade"): readonly [Solana
  *  provider's 10 (publicnode's cap; api.devnet.solana.com held to the same), the helper's route getMultipleAccounts' own
  *  100, so a cold read draws a tenth of the calls from the helper's share a user's trade reads also draw on. */
 export const PAGE_SOL_MARK_BATCHES: readonly [number, number] = Object.freeze([SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX] as const);
+/** The public seat of a found W's token-account reads (card found-wallet-sweep-reads-on-a-pair-that-answers): Solana Vibe
+ *  Station's keyless endpoint, read device-direct. The page's public seat answers none (SOLANA_PUBLIC_SEAT, read from
+ *  SIGN_HOST's origin 2026-11-13 17:47Z: publicnode 403 -32602 "Request blocked" on Token and "Indexed requests require a
+ *  personal token" on Token-2022; Pocket -32602 "requires a mint filter" and -32010 "excluded from account secondary
+ *  indexes"), so a found W's leftover was held for good. Of 19 keyless mainnet providers read then, this one alone
+ *  answers getTokenAccountsByOwner on both token programs from the page (CORS *, preflight 204): api.mainnet-beta and
+ *  api.mainnet 403, dRPC's free plan 400, Ankr, BlockPI, Shyft, Solana Tracker and Helius a key, OnFinality 429, Lava
+ *  410, Alchemy's demo 429; Helium's answers but is Helius's (its cookie's domain), the company the helper's first
+ *  keyed URL is. Another company than every one the helper's /v1/rpc/solana asks (Helius, QuickNode, dRPC, the
+ *  Solana Foundation's public endpoint), so the pair is two operators' reads. */
+export const SOLANA_TOKEN_SEAT = "https://public.rpc.solanavibestation.com";
+/** SOLANA_TOKEN_SEAT's pace: one call each 1.25 s. Its docs name 5 a second for its free tier
+ *  (docs.solanavibestation.com/getting-started/rate-limits-connection-limits); read 2026-11-13 17:51-17:56Z from this
+ *  Mac at the page's origin, its public endpoint holds less: one a second for 20 s, 20 answered; two a second, 12 of 20
+ *  and 17 of 30 (the rest an HTML 429 with no Retry-After); six at once, three. A found W's pass asks it 6 calls. */
+export const SOLANA_TOKEN_SEAT_LIMIT: SolanaRpcLimit = Object.freeze({ windowMs: 1_250, total: 1, perMethod: 1 });
+/** The pair a found W's token accounts are read on (pool-sell.ts foundTokenAccounts and ownsNoTokens): on mainnet
+ *  SOLANA_TOKEN_SEAT, paced, and the helper's /v1/rpc/solana, pageSolanaRpcs' second; the testnet build's own pair. */
+export const pageSolanaTokenRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] =>
+  POOL_TESTNET ? pageSolanaRpcs(kind) : [solanaPacedRpc(pageRpc(SOLANA_TOKEN_SEAT, kind), SOLANA_TOKEN_SEAT_LIMIT), solanaPacedRpc(pageHelperRpc(TRADE_HELPER, SOLANA_RPC_RETRY, kind))];
 /** The page's marks and pages of PAGE_SOL_PIN's pool on pageSolanaRpcs' pair (the wallet's SolanaPoolCache): every settle
  *  of the page and its restore read only the marks and pages none of them has read yet, so a settle after the first
  *  reads the newest page of each tree and the newest bucket of each mark size, at any pool size (review P2-2 of
@@ -612,6 +632,8 @@ export type TestnetOver = {
   pool?: Pool<unknown>;
   prover?: { vault: VaultProver; stop(): void };
   rpcs?: readonly [SolanaRpc, SolanaRpc];
+  /** A found W's token-account pair (`rpcs` when planted, pageSolanaTokenRpcs otherwise). */
+  tokenRpcs?: readonly [SolanaRpc, SolanaRpc];
   /** The marks' lister (the pair's first RPC when `rpcs` is planted, pageSolanaLister otherwise). */
   lister?: SolanaRpc;
   /** The Solana pool's cache (PAGE_SOL_CACHE on the page's own pin and pair, a new one when `rpcs` or `pin` is planted). */
@@ -894,6 +916,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const rpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaRpcs(kind);
   // every settle's pair: the same two seats, the helper's waiting out its window (pageSolanaSettleRpcs)
   const settleRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaSettleRpcs(kind);
+  // a found W's token-account reads: a pair that answers getTokenAccountsByOwner (pageSolanaTokenRpcs)
+  const tokenRpcs = (kind: ReadKind = "trade"): readonly [SolanaRpc, SolanaRpc] => over.tokenRpcs ?? over.rpcs ?? pageSolanaTokenRpcs(kind);
   // the marks' lister: a test's planted pair lists on its own first RPC unless it plants a lister
   const lister = (kind: ReadKind = "trade"): SolanaRpc | undefined => over.lister ?? (over.rpcs === undefined ? pageSolanaLister(kind) : undefined);
   // a trade's hold on the hosts its reads go to, from its host's making to its run's end (the host's end): every pass
@@ -2570,6 +2594,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // mainnet: W's sell pays a priority fee (pool-sell.ts solanaSellBudget)
       cluster: PAGE_CLUSTER,
       rpcs: r,
+      tokenRpcs: tokenRpcs(),
       notes: store,
       ops: page.store,
       seed64: page.seed64,

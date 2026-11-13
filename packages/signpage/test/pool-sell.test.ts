@@ -2357,6 +2357,47 @@ test("a found W: held with no `found`, with one RPC failing, answering out of sh
   }
 });
 
+// A found W after a restore on mainnet (card found-wallet-sweep-reads-on-a-pair-that-answers): the page's public seat
+// answers no getTokenAccountsByOwner (publicnode HTTP 403 -32602 "Request blocked", Pocket -32010, read from SIGN_HOST's
+// origin 13 Nov 17:47Z), so a found W's leftover SOL was held for good, with no reason given. Its token accounts are read
+// on the host's token pair (pool-testnet.ts pageSolanaTokenRpcs), every other read of the pass on its pair; a token pair
+// that fails holds W and names the read's fault.
+test("a found W whose pair's public seat refuses getTokenAccountsByOwner: its token accounts read on the token pair, its SOL swept back into the pool; a token pair that refuses holds W naming the fault", async () => {
+  const blocked = (w: World): SolanaRpc => {
+    const r = w.host.rpcs[0];
+    return (async (m: string, p: readonly unknown[]) => (m === "getTokenAccountsByOwner" ? Promise.reject(new Error("HTTP 403: RPC error -32602: Request blocked")) : r(m, p))) as SolanaRpc;
+  };
+  const w = await world({ buy: null }, []);
+  w.c.accounts.delete(VF.pump.ata);
+  const answers = w.host.rpcs;
+  w.host.tokenRpcs = [answers[0], answers[1]];
+  w.host.rpcs = [blocked(w), answers[1]];
+  await w.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  const had = BigInt(w.c.accounts.get(W.address)!.lamports);
+  await resumeRentBacks(w.host, fakeLocks());
+  const swept = w.c.deposits.filter((d) => d.sweep);
+  assert.equal(swept.length, 1, JSON.stringify(w.told));
+  assert.ok(swept[0]!.value > 0n && swept[0]!.value < had, `${swept[0]!.value}`);
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0, "W emptied into the pool");
+  // the token pair's both RPCs were asked, W alone
+  const asked = w.c.calls.filter((c) => c.method === "getTokenAccountsByOwner");
+  assert.ok(asked.length >= 6 && asked.every((c) => c.params[0] === W.address), JSON.stringify(asked.map((c) => c.params[0])));
+  assert.deepEqual([...new Set(asked.map((c) => c.p))].sort(), [0, 1]);
+  // a token pair whose seat refuses too: W held, the read's fault named in the sweep's state, nothing sent
+  const v = await world({ buy: null }, []);
+  v.c.accounts.delete(VF.pump.ata);
+  v.host.tokenRpcs = [blocked(v), v.host.rpcs[1]];
+  await v.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  const before = v.c.accounts.get(W.address)?.lamports;
+  await resumeRentBacks(v.host, fakeLocks());
+  assert.equal(v.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.equal(v.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+  assert.equal(v.c.accounts.get(W.address)?.lamports, before, "W's SOL where it was");
+  const last = v.told.filter((t) => t.step === "rent_back").at(-1)!;
+  assert.equal(last.state, "holds");
+  assert.match(last.detail, /a found W: its token accounts not read alike on both RPCs \(Error: HTTP 403: RPC error -32602: Request blocked\)/, last.detail);
+});
+
 // The race the found W's sweep meets (card buy-spends-several-pieces): another device on the same 12 words still sends
 // the buy of several pieces that paid W (its tag 3 spends W's SOL) while this restored device sweeps W. Either order
 // loses nothing: the sweep first, W's SOL is a note of the user's in the pool and the buy, short of it, fails; the buy

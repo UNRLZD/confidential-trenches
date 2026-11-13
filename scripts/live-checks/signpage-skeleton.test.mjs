@@ -14,7 +14,10 @@
 // walk-worker, beside prover-worker, so good is that answer with walk-worker added to trusted-types, as the build's
 // _headers now sets it (no served answer of it until the next sign deploy: SIGN_HOST fails this line until then, as it
 // did each card above until its deploy), and the answer before is kept as beforeWalk: FAIL on trusted-types alone. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
-// card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
+// card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL. Card
+// found-wallet-sweep-reads-on-a-pair-that-answers: connect-src names Solana Vibe Station's endpoint after Pocket's, so good
+// is that answer with it added, as the build's _headers now sets it (no served answer of it until the next sign deploy),
+// and the answer before is kept as beforeTokenSeat: FAIL on connect-src alone.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -33,6 +36,8 @@ const GOOD = ANSWERS.good;
 // every answer recorded before card restore-shows-the-balance-in-seconds names prover-worker alone in trusted-types
 const PRE_TT = 'BAD CSP trusted-types: "prover-worker", want "prover-worker walk-worker"';
 const APP = "https://ct-app.unrealized.trade";
+// every answer recorded before card found-wallet-sweep-reads-on-a-pair-that-answers has no token seat in connect-src
+const PRE_TS = (rec) => `BAD CSP connect-src: "${rec.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src ")).slice("connect-src ".length)}", want "${CSP.find(([k]) => k === "connect-src")[1]}"`;
 
 const withCsp = (from, to) => {
   const csp = GOOD.headers["content-security-policy"];
@@ -56,12 +61,19 @@ test("recorded good answer: every header equals the policy: PASS", async () => {
 
 test("recorded bad answer: the good build before card signing-views-open-over-the-app (picture-in-picture and fullscreen not denied): FAIL on the Permissions-Policy alone", () => {
   const r = judge(ANSWERS.beforePip);
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_TT, PRE_PP(ANSWERS.beforePip)]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_TS(ANSWERS.beforePip), PRE_TT, PRE_PP(ANSWERS.beforePip)]);
+});
+
+test("recorded bad answer: the good build before card found-wallet-sweep-reads-on-a-pair-that-answers (no token seat in connect-src): FAIL on connect-src alone", () => {
+  const r = judge(ANSWERS.beforeTokenSeat);
+  assert.equal(r.ok, false);
+  assert.ok(CSP.find(([k]) => k === "connect-src")[1].includes(" https://public.rpc.solanavibestation.com "), "the policy names the found W's token seat");
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_TS(ANSWERS.beforeTokenSeat)]);
 });
 
 test("recorded bad answer: the good build before card restore-shows-the-balance-in-seconds (no walk-worker policy): FAIL on trusted-types alone", () => {
   const r = judge(ANSWERS.beforeWalk);
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_TT]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_TS(ANSWERS.beforeWalk), PRE_TT]);
 });
 
 test("a trusted-types with a third policy, or 'allow-duplicates', is refused: FAIL", async () => {
