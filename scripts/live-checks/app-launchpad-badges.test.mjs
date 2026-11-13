@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, linkOf, rowFaults, servedMap, servedRow, WIDTHS } from "./app-launchpad-badges.mjs";
+import { judge, linkOf, rowFaults, servedMap, servedRow, SETTLE, SETTLE_MS, WIDTHS } from "./app-launchpad-badges.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-launchpad-badges.answers.json"), "utf8"));
@@ -126,4 +126,43 @@ test("a run that never drew Discover, or read no lists, or lost a width: FAIL", 
   rec = structuredClone(ANSWERS.good);
   rec.loads.pop();
   assert.ok(bad(judge(rec).lines).some((l) => /1 loads of 2/.test(l)));
+});
+
+// card app-faults-seen-on-124: release 125's app live run (43328445607) hung 20 minutes in this check's wait for every
+// image, which had no bound; the wait is now SETTLE_MS and each image still pending is a BAD line naming it
+test("planted: an image that never settles fails the run naming it, and the wait ends at its bound", async () => {
+  assert.equal(SETTLE_MS, 8_000);
+  const rec = structuredClone(ANSWERS.good);
+  rec.loads[1].pending = ["ct-api.unrealized.trade/v1/logo/solana/never"];
+  assert.deepEqual(bad(judge(rec).lines), ["BAD desktop /discover: image never settled in 8 s: ct-api.unrealized.trade/v1/logo/solana/never"]);
+  // SETTLE in a stand-in page: one eager image that never answers, one that loads, one lazy image below the fold and one
+  // lazy image in a tab not drawn (neither asked for by a browser until it comes near), one already complete
+  const img = (src, { lazy = false, drawn = true, top = 10, complete = false } = {}) => {
+    const ls = {};
+    return {
+      src, currentSrc: "", complete, loading: lazy ? "lazy" : "auto",
+      getClientRects: () => (drawn ? [{}] : []),
+      getBoundingClientRect: () => ({ top, bottom: top + 20, left: 10, right: 30 }),
+      addEventListener: (k, f) => ((ls[k] = f), k === "load" && src.endsWith("/loads.png") && setTimeout(() => ((complete = true), f()), 20)),
+      get done() { return complete; },
+    };
+  };
+  const images = [img("https://ct-api.unrealized.trade/v1/logo/solana/never?x=1"), img("https://a.test/loads.png"), img("https://a.test/below.png", { lazy: true, top: 5000 }), img("https://a.test/hidden.png", { lazy: true, drawn: false }), img("https://a.test/done.png", { complete: true })];
+  for (const i of images) Object.defineProperty(i, "complete", { get: () => i.done });
+  const saved = { document: globalThis.document, location: globalThis.location, innerWidth: globalThis.innerWidth, innerHeight: globalThis.innerHeight };
+  Object.assign(globalThis, { document: { images }, location: { href: "https://ct-app.unrealized.trade/discover" }, innerWidth: 1440, innerHeight: 900 });
+  try {
+    const t0 = Date.now();
+    const pending = await SETTLE({ ms: 300 });
+    const took = Date.now() - t0;
+    assert.deepEqual(pending, ["ct-api.unrealized.trade/v1/logo/solana/never"]);
+    assert.ok(took >= 290 && took < 2_000, `${took} ms`);
+    // nothing to wait on: it answers at once
+    Object.assign(globalThis, { document: { images: [images[2], images[3], images[4]] } });
+    const t1 = Date.now();
+    assert.deepEqual(await SETTLE({ ms: 5_000 }), []);
+    assert.ok(Date.now() - t1 < 100);
+  } finally {
+    Object.assign(globalThis, saved);
+  }
 });
