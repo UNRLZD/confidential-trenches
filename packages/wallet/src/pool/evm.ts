@@ -1954,9 +1954,9 @@ export async function evmLatestHigh(rpcs: readonly [EvmRpc, EvmRpc], signal?: Ab
  * block; while no block before the start is known, each next step goes where the chain's pace from the newest block
  * puts the start, and at least 16 blocks below, twice that the step after (a gallop); once one is known, the guess is the
  * height the pace between the two blocks either side puts at the start, and a guess that does not halve the span is
- * followed by a halving. On a uniform chain that is two rounds whatever its pace, where doubling then halving took 13
- * (a Robinhood mainnet copy of 13 Nov 09:58Z, 3.3 s at its 250 ms answers); the check on both RPCs reads its two
- * blocks at once.
+ * followed by a halving. From a whole-minute start 1 s to 10 min back, RPC 0 reads in at most 7 rounds at Base's 5
+ * blocks a second and 9 at Robinhood's 9.4, the check included, where doubling then halving took 13 (a Robinhood
+ * mainnet copy of 13 Nov 09:58Z, 3.3 s at its 250 ms answers); the check on both RPCs reads its two blocks at once.
  */
 export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartMs: bigint, signal?: AbortSignal, sleep: Sleep = wait): Promise<EvmBlock> {
   checkEvmRpcs(rpcs);
@@ -1983,8 +1983,13 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
     if (hi.number === 0n) break;
     let g: bigint;
     if (lo !== null && (halve || ms(hi) === ms(lo))) g = (lo.number + hi.number) / 2n;
-    // the first height the pace between the two blocks either side puts at or after the start
-    else if (lo !== null) g = lo.number + ((epochStartMs - ms(lo)) * (hi.number - lo.number) + ms(hi) - ms(lo) - 1n) / (ms(hi) - ms(lo));
+    // the first height the pace between the two blocks either side puts at or after the start. A period starts on a
+    // whole minute, so it shares its second with a run of blocks; with hi on that second the pace would name hi itself
+    // at every step, so it aims half a second below (each block taken as its second's middle)
+    else if (lo !== null) {
+      const aim = ms(hi) === epochStartMs ? epochStartMs - 500n : epochStartMs;
+      g = lo.number + ((aim - ms(lo)) * (hi.number - lo.number) + ms(hi) - ms(lo) - 1n) / (ms(hi) - ms(lo));
+    }
     else if (steps === 0) g = hi.number > EVM_EPOCH_PROBE_BLOCKS ? hi.number - EVM_EPOCH_PROBE_BLOCKS : 0n;
     else {
       g = hi.number > back ? hi.number - back : 0n;
