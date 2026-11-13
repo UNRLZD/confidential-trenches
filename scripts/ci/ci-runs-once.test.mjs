@@ -85,6 +85,17 @@ test("planted: a heavy job back on pull requests, a new job with no if, or a fas
   assert.ok(has(pullRequestProblems(lost), /ci\.yml has no job deep-import/));
 });
 
+// card e2e-runs-once-in-the-queue: the browser runs moved from live.yml's pull requests to ci.yml's queue group; back on
+// a pull request, every one waits about 27 minutes on them before it can queue
+test("planted: browser-e2e on a pull request again (live.yml's if, or any if a pull request can pass) is refused", () => {
+  const Q = "  browser-e2e:\n    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'\n";
+  assert.ok(CI.includes(Q), "ci.yml's browser-e2e runs on the queue's group and by hand");
+  for (const to of ["    if: github.event_name == 'pull_request'\n", "    if: github.event_name != 'schedule'\n", "    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'\n", ""]) {
+    const back = CI.replace(Q, `  browser-e2e:\n${to}`);
+    assert.ok(has(pullRequestProblems(back), /ci\.yml's browser-e2e runs on pull_request/), to || "no if");
+  }
+});
+
 test("an if is read as running wherever it cannot be ruled out", () => {
   assert.equal(mayRun("github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'", "pull_request"), false);
   assert.equal(mayRun("github.event_name != 'pull_request'", "pull_request"), false);
