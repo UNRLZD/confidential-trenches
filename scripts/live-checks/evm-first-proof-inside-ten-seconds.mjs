@@ -15,7 +15,9 @@
 //   - warm (evmWarm): the first time the page is asked for a chain's pool (evmPoolOf: a quote's floor, its follow, a
 //     restore), the pass sync reads the pool's history once into the page's hold, asked again only after a failure;
 //   - wait (evmWarmWait): the deposit's round waits for that read before its own, at most EVM_WARM_WAIT_MS (20 s), and
-//     asks a failed one again once; after a second failure in a row it reads as before.
+//     asks a failed one again once; after a second failure in a row it reads as before. The wait ends at the round's
+//     signal, else the page's reads' stop taken at the call (a sign out), asks nothing once that fired, and the round
+//     then throws instead of reading; once the read held, a round waits on nothing.
 // What each part does is held by the signing page's tests (test/evm-landing-pass-trade.test.ts,
 // test/pool-deposit-evm.test.ts) and the wallet's (test/pool-evm-reads-once.test.ts).
 // After: sign
@@ -59,20 +61,22 @@ const ROUTED_POOL = (l, on) =>
   new RegExp(`\\{\\.\\.\\.(${N}),now:(${N})=>${esc(on)}\\(\\2\\)\\?${esc(l)}\\.now\\(\\2\\):${N}\\(\\2\\),trees:\\((${N}),(${N}),(${N})\\)=>\\(${esc(on)}\\(\\4\\)\\?${esc(l)}:\\1\\)\\.trees\\(\\3,\\4,\\5\\),bind:\\((${N}),(${N})\\)=>\\(${esc(on)}\\(\\7\\)\\?${esc(l)}:\\1\\)\\.bind\\(\\6,\\7\\)\\}`);
 const LANDING = (set) => new RegExp(`[,;{ ](${N})=\\(\\)=>\\{let (${N})=new AbortController;return ${esc(set)}\\.add\\(\\2\\.signal\\),\\2\\.signal\\}`);
 const HANDED = (l, g) => new RegExp(`\\.\\.\\.${esc(l)}===null\\?\\{\\}:\\{landing:${esc(g)}\\}`);
-/** evmWarm and evmPoolOf: `R=e=>{let t=M(e);if(t===null)return null;let n=I.get(e);if(n===void 0){let r=t.passSync.events(
- *  ve.signal).then(()=>(L.delete(e),!0),()=>(I.get(e)===r&&I.delete(e),L.set(e,(L.get(e)??0)+1),!1));I.set(e,n=r)}return n}`
- *  and `evmPoolOf:e=>(t=>t===null?null:(R(e),{pin:t.pin,rpcs:t.rpcs}))(M(e))`. */
+/** evmWarm and evmPoolOf: `ne=e=>{let t=M(e);if(t===null)return null;let n=R.get(e);if(n===void 0){let r=t.passSync.events(
+ *  xe.signal).then(()=>(R.get(e)===r&&(te.delete(e),ee.add(e)),!0),()=>(R.get(e)===r&&(R.delete(e),te.set(e,(te.get(e)??
+ *  0)+1)),!1));R.set(e,n=r)}return n}` (an answer after a sign out, the maps cleared, kept by neither) and
+ *  `evmPoolOf:e=>(t=>t===null?null:(ne(e),{pin:t.pin,rpcs:t.rpcs}))(M(e))`. */
 const WARM = new RegExp(
-  `[,;{ ](${N})=(${N})=>\\{let (${N})=(${N})\\(\\2\\);if\\(\\3===null\\)return null;let (${N})=(${N})\\.get\\(\\2\\);if\\(\\5===void 0\\)\\{let (${N})=\\3\\.passSync\\.events\\(${N}\\.signal\\)\\.then\\(\\(\\)=>\\((${N})\\.delete\\(\\2\\),!0\\),\\(\\)=>\\(\\6\\.get\\(\\2\\)===\\7&&\\6\\.delete\\(\\2\\),\\8\\.set\\(\\2,\\(\\8\\.get\\(\\2\\)\\?\\?0\\)\\+1\\),!1\\)\\);\\6\\.set\\(\\2,\\5=\\7\\)\\}return \\5\\}`,
+  `[,;{ ](${N})=(${N})=>\\{let (${N})=(${N})\\(\\2\\);if\\(\\3===null\\)return null;let (${N})=(${N})\\.get\\(\\2\\);if\\(\\5===void 0\\)\\{let (${N})=\\3\\.passSync\\.events\\(${N}\\.signal\\)\\.then\\(\\(\\)=>\\(\\6\\.get\\(\\2\\)===\\7&&\\((${N})\\.delete\\(\\2\\),(${N})\\.add\\(\\2\\)\\),!0\\),\\(\\)=>\\(\\6\\.get\\(\\2\\)===\\7&&\\(\\6\\.delete\\(\\2\\),\\8\\.set\\(\\2,\\(\\8\\.get\\(\\2\\)\\?\\?0\\)\\+1\\)\\),!1\\)\\);\\6\\.set\\(\\2,\\5=\\7\\)\\}return \\5\\}`,
 );
-/** evmWarmWait, bound to that read: `te=async(e,t)=>{let n=M(e);if(n===null||n.passSync===n.sync)return;let r=Date.now()+ee;
- *  for(let n=0;n<3;n++){let n=I.get(e)??((L.get(e)??0)<2?R(e):null),i=r-Date.now();if(n===null||i<=0||t?.aborted)return;`,
- *  its bound `ee=t.evmWarmWaitMs??2e4` (EVM_WARM_WAIT_MS), and the deposit's round behind it: `round:t.evmRound?t.evmRound(
- *  n,i,r):(t=>async n=>(await te(e,n),t(n)))(A(a))`. */
-const WAIT = (warm, pool, reads, fails) =>
-  new RegExp(`[,;{ ](${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${esc(pool)}\\(\\2\\);if\\(\\4===null\\|\\|\\4\\.passSync===\\4\\.sync\\)return;let (${N})=Date\\.now\\(\\)\\+(${N});for\\(let (${N})=0;\\7<3;\\7\\+\\+\\)\\{let (${N})=${esc(reads)}\\.get\\(\\2\\)\\?\\?\\(\\(${esc(fails)}\\.get\\(\\2\\)\\?\\?0\\)<2\\?${esc(warm)}\\(\\2\\):null\\),(${N})=\\5-Date\\.now\\(\\);if\\(\\8===null\\|\\|\\9<=0\\|\\|\\3\\?\\.aborted\\)return;`);
+/** evmWarmWait, bound to that read: `ie=async(e,t)=>{let n=M(e);if(n===null||n.passSync===n.sync||ee.has(e))return;let r=
+ *  Date.now()+re;for(let n=0;n<3&&!t.aborted;n++){let n=R.get(e)??((te.get(e)??0)<2?ne(e):null),i=r-Date.now();if(n===null
+ *  ||i<=0)return;`, its bound `re=t.evmWarmWaitMs??2e4` (EVM_WARM_WAIT_MS), and the deposit's round behind it, on its
+ *  signal or the reads' stop taken at the call, thrown once that fired: `round:t.evmRound?t.evmRound(n,i,r):(t=>async n=>{
+ *  let r=n??xe.signal;return await ie(e,r),r.throwIfAborted(),t(n)})(A(a))`. */
+const WAIT = (warm, pool, reads, fails, warmed) =>
+  new RegExp(`[,;{ ](${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${esc(pool)}\\(\\2\\);if\\(\\4===null\\|\\|\\4\\.passSync===\\4\\.sync\\|\\|${esc(warmed)}\\.has\\(\\2\\)\\)return;let (${N})=Date\\.now\\(\\)\\+(${N});for\\(let (${N})=0;\\7<3&&!\\3\\.aborted;\\7\\+\\+\\)\\{let (${N})=${esc(reads)}\\.get\\(\\2\\)\\?\\?\\(\\(${esc(fails)}\\.get\\(\\2\\)\\?\\?0\\)<2\\?${esc(warm)}\\(\\2\\):null\\),(${N})=\\5-Date\\.now\\(\\);if\\(\\8===null\\|\\|\\9<=0\\)return;`);
 const BOUND = (b) => new RegExp(`[,;{ ]${esc(b)}=${N}\\.evmWarmWaitMs\\?\\?2e4[,;]`);
-const BEHIND = (wait) => new RegExp(`round:(${N})\\.evmRound\\?\\1\\.evmRound\\(${N},${N},${N}\\):\\((${N})=>async (${N})=>\\(await ${esc(wait)}\\(${N},\\3\\),\\2\\(\\3\\)\\)\\)\\(${N}\\(${N}\\)\\)`);
+const BEHIND = (wait) => new RegExp(`round:(${N})\\.evmRound\\?\\1\\.evmRound\\(${N},${N},${N}\\):\\((${N})=>async (${N})=>\\{let (${N})=\\3\\?\\?${N}\\.signal;return await ${esc(wait)}\\(${N},\\4\\),\\4\\.throwIfAborted\\(\\),\\2\\(\\3\\)\\}\\)\\(${N}\\(${N}\\)\\)`);
 const POOL_OF = (warm, pool) => new RegExp(`evmPoolOf:(${N})=>\\((${N})=>\\2===null\\?null:\\(${esc(warm)}\\(\\1\\),\\{pin:\\2\\.pin,rpcs:\\2\\.rpcs\\}\\)\\)\\(${esc(pool)}\\(\\1\\)\\)`);
 
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, and each part found exactly once and bound. */
@@ -91,7 +95,7 @@ export function pageFacts(index, js) {
     proofs: proofs && [...js.matchAll(REFRESH_ARG)].length === 1,
     lanes: routed !== null && once(ROUTED_POOL(trade[1], routed[2]), js) && landing !== null && once(HANDED(trade[1], landing[1]), js),
     warm: warm !== null && once(POOL_OF(warm[1], warm[4]), js),
-    wait: ((w) => w !== null && once(BOUND(w[6]), js) && once(BEHIND(w[1]), js))(warm !== null && once(WAIT(warm[1], warm[4], warm[6], warm[8]), js) ? WAIT(warm[1], warm[4], warm[6], warm[8]).exec(js) : null),
+    wait: ((w) => w !== null && once(BOUND(w[6]), js) && once(BEHIND(w[1]), js))(warm !== null && once(WAIT(warm[1], warm[4], warm[6], warm[8], warm[9]), js) ? WAIT(warm[1], warm[4], warm[6], warm[8], warm[9]).exec(js) : null),
   };
 }
 

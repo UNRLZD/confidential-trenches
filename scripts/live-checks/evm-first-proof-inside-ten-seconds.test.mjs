@@ -69,19 +69,31 @@ test("planted on this tree's build: each part back to its shape before this card
   // evmPoolOf that never starts it
   assert.deepEqual(off(planted(/evmPoolOf:([\w$]+)=>\(([\w$]+)=>\2===null\?null:\(([\w$]+)\(\1\),/, (_m, e, t) => `evmPoolOf:${e}=>(${t}=>${t}===null?null:(void 0,`)), ["warm"]);
   // the deposit's round not behind the wait
-  assert.deepEqual(off(planted(/:\(([\w$]+)=>async ([\w$]+)=>\(await ([\w$]+)\(([\w$]+),\2\),\1\(\2\)\)\)\(/, (_m, t, n) => `:(${t}=>async ${n}=>${t}(${n}))(`)), ["wait"]);
+  assert.deepEqual(off(planted(/:\(([\w$]+)=>async ([\w$]+)=>\{let ([\w$]+)=\2\?\?([\w$]+)\.signal;return await ([\w$]+)\(([\w$]+),\3\),\3\.throwIfAborted\(\),\1\(\2\)\}\)\(/, (_m, t, n) => `:(${t}=>async ${n}=>${t}(${n}))(`)), ["wait"]);
+  // a round that reads after its stop fired (as before the review: the wait returned and the round read on)
+  assert.deepEqual(off(planted(/,([\w$]+)\.throwIfAborted\(\),([\w$]+)\(([\w$]+)\)\}\)\(/, (_m, r, t, n) => `,${t}(${n})})(`)), ["wait"]);
+  // the wait not ended at the stop (its loop asks again after it fired)
+  assert.deepEqual(off(planted(/;([\w$]+)<3&&!([\w$]+)\.aborted;/, (_m, k) => `;${k}<3;`)), ["wait"]);
+  // a wait asked again once the read held
+  assert.deepEqual(off(planted(/\|\|([\w$]+)\.passSync===\1\.sync\|\|([\w$]+)\.has\(([\w$]+)\)\)return;/, (_m, n) => `||${n}.passSync===${n}.sync)return;`)), ["wait"]);
+  // an answer after a sign out kept (the warm's read held for the next session)
+  assert.deepEqual(off(planted(/\.then\(\(\)=>\(([\w$]+)\.get\(([\w$]+)\)===([\w$]+)&&\(([\w$]+)\.delete\(\2\),([\w$]+)\.add\(\2\)\),!0\)/, (_m, _m2, e, _r, f, w) => `.then(()=>(${f}.delete(${e}),${w}.add(${e}),!0)`)), ["warm", "wait"]);
   // the bound gone
   assert.deepEqual(off(planted(/\.evmWarmWaitMs\?\?2e4/, ".evmWarmWaitMs??1/0")), ["wait"]);
 });
 
 // The mainnet copies this build was measured on (packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs, three per
-// chain, each with its book to replay offline): every step held, the first leaf's proof ready inside 10 s of its block,
-// at most 80 requests per pool host in any 10 s from 10 s before that block to the proof, and no log read from the pool's
-// deploy block among them.
+// chain landing early in a period and three landing mid-period, CT_DEPOSIT_INTO_MS=20000, each with its book to replay
+// offline): every step held, the first leaf's proof ready inside 10 s of its block, at most 80 requests per pool host in
+// any 10 s from 10 s before that block to the proof, and no log read from the pool's deploy block among them. A
+// mid-period landing's period began over 10 s before it, past the state robinhood-rpc.publicnode.com keeps; the copy
+// refuses such a read there as that host does, and the proof is still ready inside 10 s.
 const RUNS = path.join(path.dirname(new URL(import.meta.url).pathname), "../../packages/signpage/scripts/evm-mainnet-copy-runs");
-const COPIES = ["base-11", "base-12", "base-13", "robinhood-11", "robinhood-12", "robinhood-13"].map((n) => `first-proof-${n}.json`);
-test("the recorded mainnet copies: ready inside 10 s, each pool host at most 80 requests per 10 s, no deploy-block log read", () => {
-  for (const f of COPIES) {
+const EARLY = ["base-31", "base-32", "base-33", "robinhood-31", "robinhood-32", "robinhood-33"];
+const MID = ["base-21", "base-22", "base-23", "robinhood-21", "robinhood-22", "robinhood-23"];
+test("the recorded mainnet copies, early and mid-period: ready inside 10 s, each pool host at most 80 requests per 10 s, no deploy-block log read", () => {
+  for (const n of [...EARLY, ...MID]) {
+    const f = `first-proof-${n}.json`;
     const r = JSON.parse(readFileSync(path.join(RUNS, f), "utf8"));
     assert.deepEqual(r.failures, [], f);
     assert.equal(r.run.dirty, false, `${f}: a clean tree`);
@@ -90,5 +102,6 @@ test("the recorded mainnet copies: ready inside 10 s, each pool host at most 80 
     assert.ok(s.readyMsAfterDeposit <= 10_000, `${f}: ready ${s.readyMsAfterDeposit} ms`);
     assert.ok(s.hostWindowBound === 80 && s.hostWindowMost <= 80, `${f}: ${s.hostWindowMost} per host`);
     assert.equal(s.deployPages, 0, f);
+    if (MID.includes(n)) assert.ok(s.depositIntoPeriodMs > 10_000, `${f}: landed ${s.depositIntoPeriodMs} ms into its period`);
   }
 });

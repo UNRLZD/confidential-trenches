@@ -2,11 +2,11 @@
  "key": "evm-first-proof-inside-ten-seconds",
  "recorded": "2026-11-13T06:47:42.474Z",
  "good": {
-  "readAt": "2026-11-13T06:47:42.474Z",
+  "readAt": "2026-11-13T07:56:43.994Z",
   "from": "local build",
   "page": {
-   "pin": "sha384-mwSzZLy4fp26omFtf7srdKm3iv9or6pq8S5Fo41mGVZozfQEdkbC/MjaXzmsZBZ3",
-   "sha384": "sha384-mwSzZLy4fp26omFtf7srdKm3iv9or6pq8S5Fo41mGVZozfQEdkbC/MjaXzmsZBZ3",
+   "pin": "sha384-PrcYjMfAOKdwKYNoJChxxAZer3yVzIvsSQcbfaQ8fowg8I+b32ltnXB1TtwSpgnu",
+   "sha384": "sha384-PrcYjMfAOKdwKYNoJChxxAZer3yVzIvsSQcbfaQ8fowg8I+b32ltnXB1TtwSpgnu",
    "landed": true,
    "proofs": true,
    "lanes": true,
