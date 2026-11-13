@@ -96,7 +96,7 @@ import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
 import { nearBuyKind, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
 import { rheaPoolsKept } from "./near-pools.ts";
-import { pacedNearRpc } from "../../wallet/src/pace.ts";
+import { nearSeatRpc, pacedNearRpc, seatsUp } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
@@ -702,7 +702,9 @@ function nearBuyPage(): NearBuyPage | null {
   if (!prover) return (nearPageMade = null);
   const vault = () => ({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal });
   const net = NEAR_NETWORKS[PAGE_NETWORK];
-  const pair = [pacedNearRpc(net.fastnear[0]), pacedNearRpc(net.drpc)] as const;
+  // the FastNEAR seat is the helper's (FastNEAR's key at its pace, FastNEAR's keyless URL its spare: nearSeatRpc), dRPC
+  // device-direct (card near-quote-under-the-pace)
+  const pair = [nearSeatRpc(PAGE_NETWORK), pacedNearRpc(net.drpc)] as const;
   return (nearPageMade = {
     network: PAGE_NETWORK,
     store: () => open(),
@@ -889,6 +891,8 @@ function signedOutElsewhere(): void {
   poolFollow?.stop();
   withdrawsSignedOut();
   void testnet?.signedOut();
+  // a NEAR seat taken for down is this session's: the next one asks it again
+  seatsUp();
   reloadSignedOut();
 }
 // the resync in flight, which open kinds wait for (openKind)
@@ -1142,6 +1146,7 @@ async function signOut(): Promise<void> {
     return reloadSignedOut();
   }
   store = null;
+  seatsUp();
   // after the store signed out: a deposit that landed while it waited cannot open the queue again (no seed)
   await testnet?.signedOut();
   // signed out: the page reloads, and with it the app, which then shows signed out

@@ -12,6 +12,7 @@ import type { NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
 import type { HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import type { SignedNearSwapDelegate } from "../../wallet/src/near/swap-delegate.ts";
 import type { KindContext } from "../src/api.ts";
+import { fakePair } from "./near-pair-fake.ts";
 import { checkNearBuyRequest, NearTradeRefused } from "../src/rules/near-trade.ts";
 import { NEAR_BUY_READ_TRIES, NEAR_BUY_SENDS, nearBuyFlow, type NearBuyAnswer, type NearBuyBegun, type NearBuyDeps, type NearBuyProgress } from "../src/near-trade.ts";
 
@@ -147,6 +148,7 @@ function world(o: World = {}) {
     },
     wait: async (ms) => void ev.push(["wait", ms]),
     log: (step, outcome) => void log.push([step, outcome]),
+    pair: fakePair(() => deps),
   };
   return { deps, ev, log, chain, quotes, records };
 }
@@ -231,7 +233,9 @@ test("relayer bcb795f2: token_mismatch and token_untrusted at the swap end the b
 test("the happy path: the record first, the payout, create, the registration alone, a fresh pair, the swap, what W received; each step on the record", async () => {
   const { deps, ev, log, quotes, records } = world();
   const answer = await run(deps);
-  assert.deepEqual(names(ev), ["begin", "payout", "read", "quote", "helper", "read", "read", "quote", "sign", "helper", "read", "read", "read", "quote", "sign", "helper", "read"]);
+  // the swap's pair: W, the quote, and the baseline of the token at the same block (deps.pair; this world's fake reads
+  // them in that order)
+  assert.deepEqual(names(ev), ["begin", "payout", "read", "quote", "helper", "read", "read", "quote", "sign", "helper", "read", "read", "quote", "read", "sign", "helper", "read"]);
   for (const e of ev.filter((x) => x[0] === "quote")) assert.deepEqual(e[1], { side: "buy", token: TOKEN, amountIn: AMOUNT });
   const [create, register, swap] = helperBodies(ev);
   assert.deepEqual(create, { trade: tradeOf(quotes[0]!), signed_delegates: [] });
@@ -439,6 +443,31 @@ test("P3-2 a quote read before W's state, or past the signer's window, is never 
   assert.equal(signs(ev).length, 1);
 });
 
+test("the swap's pair is of one moment at the first try: W's read and its quote 26 blocks apart when each is read on its own (the keyless pace's 12 Nov skew) never cost the buy one more read", async () => {
+  const { deps, ev, log } = world({ start: { registered: true }, pays: 5_100_000n });
+  const read = deps.readWallet;
+  const quote = deps.quote;
+  // read on their own, one after the other: the quote 26 blocks past W's read, past the signer's 10
+  deps.quote = async (x) => {
+    const q = await quote(x);
+    return { ...q, height: q.height + 25 };
+  };
+  // the pair: W, the quote and the baseline at one final height (the kit's readNearSwapPair)
+  let pairs = 0;
+  deps.pair = async (a) => {
+    pairs++;
+    const state = await read({ wallet: a.wallet, side: a.side, token: a.token });
+    const q = await quote({ side: a.side, token: a.token, amountIn: a.amountIn });
+    const pair = { state, quote: { ...q, height: state.height } };
+    return a.baseline === undefined ? pair : { ...pair, baseline: (await read({ wallet: a.wallet, side: "sell", token: a.token })).held };
+  };
+  const a = await run(deps);
+  assert.ok(a !== null && "result" in a && a.result.stage === "filled", JSON.stringify([a, log], (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  assert.equal(pairs, 1, "the swap's round reads one pair");
+  const [s] = signs(ev);
+  assert.equal((s![3] as { height: number }).height, (s![4] as NearSwapWalletState).height, "signed from one block");
+});
+
 test("NT07 NT08 a quote of another amount or token is refused, nothing signed", async () => {
   for (const bad of [{ amountIn: AMOUNT + 1n }, { token: "other.near" }, { side: "sell" as const }, { network: "testnet" as const }]) {
     const { deps, ev } = world({ start: { exists: true, registered: true } });
@@ -579,4 +608,31 @@ test("F6 carry_failed for a round whose swap landed (its claim failed): never si
   const afterSwap = names(ev).slice(names(ev).lastIndexOf("helper") + 1);
   assert.deepEqual(afterSwap.slice(0, 3), ["read", "read", "read"]);
   assert.ok(!afterSwap.slice(0, 2).includes("wait"));
+});
+
+// review P3-5 of e6c66cce3: the swap's own pair is checked as read, never only the reads before it
+test("P3-5 the swap's pair reading less USDC than the buy's amount (the earlier read had it): not_funded, nothing signed for the swap", async () => {
+  const { deps, ev, log } = world({ begun: { txs: near(tx(1)) }, start: { exists: true, registered: true, usdc: AMOUNT } });
+  const pair = deps.pair;
+  deps.pair = async (a) => {
+    const p = await pair(a);
+    return a.baseline === undefined ? p : { ...p, state: { ...p.state, held: AMOUNT - 1n } };
+  };
+  sent(await run(deps));
+  assert.equal(signs(ev).length, 0);
+  assert.deepEqual(log.at(-1), ["swap", "not_funded"]);
+});
+
+test("P3-5 the swap's pair asked for its baseline and answered without one: read_failed, nothing signed for the swap", async () => {
+  const { deps, ev, log } = world({ begun: { txs: near(tx(1)) }, start: { exists: true, registered: true, usdc: AMOUNT } });
+  const pair = deps.pair;
+  deps.pair = async (a) => {
+    const p = await pair(a);
+    if (a.baseline === undefined) return p;
+    const { baseline: _gone, ...rest } = p;
+    return rest;
+  };
+  sent(await run(deps));
+  assert.equal(signs(ev).length, 0);
+  assert.deepEqual(log.at(-1), ["swap", "read_failed"]);
 });
