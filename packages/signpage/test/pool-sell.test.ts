@@ -1680,7 +1680,15 @@ test("a W left under the floor keeps its record through any run of faulted loads
   w.c.accounts.set(W.address, { ...w.c.accounts.get(W.address)!, lamports: onW + 3_000_000 });
   await resumeRentBacks(loaded, fakeLocks());
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, "swept once W can make a note");
-  restAfterSweep(w);
+  const rest = restAfterSweep(w);
+  assert.ok(rest > 0, "the rest past the rung stays on W");
+  // card pool-amounts-are-standard-sizes: that rest is the user's own, under the least rung: the record is kept and W
+  // listed while W holds it, never dropped
+  await resumeRentBacks(loaded, fakeLocks());
+  assert.equal(w.owed.has(W.address), true, "kept while W holds its rest");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, "no second sweep under the floor");
+  // the rest moved off W (W's next move): both RPCs read W empty, the record dropped
+  w.c.accounts.delete(W.address);
   await resumeRentBacks(loaded, fakeLocks());
   assert.equal(w.owed.has(W.address), false, "dropped once both RPCs read W empty");
 });
@@ -2117,8 +2125,17 @@ test("a rent back owed is recorded before the sell's send and run again on the n
   await resumeRentBacks(loaded, fakeLocks());
   assert.deepEqual({ tokenAccount: w.c.accounts.has(ATA), volumeAccount: w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM)), w: w.c.accounts.get(W.address)?.lamports ?? 0 }, { tokenAccount: false, volumeAccount: false, w: restAfterSweep(w) });
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
+  // card pool-amounts-are-standard-sizes: the next load sweeps W's rest in its own largest rung, and the one after finds
+  // the rest under what a rung can take with W left rent-exempt: kept on W, the record kept (never dropped while W
+  // holds lamports)
   await resumeRentBacks(loaded, fakeLocks());
-  assert.equal(w.owed.size, 0, "the pass after finds nothing left");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 2, "the rest swept again");
+  const left = restAfterSweep(w);
+  await resumeRentBacks(loaded, fakeLocks());
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 2, "nothing more under the floor");
+  assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.at(-1)));
+  assert.equal(w.c.accounts.get(W.address)?.lamports, left, "W keeps its rest");
+  assert.ok(w.owed.has(W.address), "the record kept while W holds its rest");
 });
 
 // The review of c1fd2d20, 2c: resumeRentBacks held the sell lock around its whole list, so a sell tapped meanwhile
