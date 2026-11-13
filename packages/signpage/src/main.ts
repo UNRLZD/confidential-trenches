@@ -1085,8 +1085,9 @@ async function landed(l: Landing): Promise<void> {
   void namer.named().then(() => testnet?.settle()).catch(() => {});
   // a NEAR deposit followed on from its stage (src/deposit-follow.ts)
   void follows?.settle().catch(() => {});
-  // a pool quote's money followed on into its pool from its stage (src/pool-deposit-follow.ts)
-  void poolFollow?.settle().catch(() => {});
+  // a pool quote's money followed on into its pool from its stage (src/pool-deposit-follow.ts); a load reads every
+  // ended op's U_X once, paced (a send to an old address is carried from the next load on)
+  void poolFollow?.settle({ load: true }).catch(() => {});
   // a vault withdrawal a reload cut short is followed to settled (src/withdraw/handoff.ts withdrawSettle)
   // then a NEAR buy a reload cut short goes on from its record (src/near-buy.ts), after its payout's note is settled
   void settleWithdraws()

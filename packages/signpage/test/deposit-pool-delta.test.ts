@@ -147,7 +147,7 @@ test("P2-b: settle reads each ended U_X one at a time, after the host's wait, on
   assert.equal(followReads, 0, "never the follow's own burst reads");
 });
 
-test("P2-b: an ended op past POOL_AGAIN_FOR_MS whose end left nothing is not read again; one that left money is", async () => {
+test("P2-b: at a landing, an ended op past POOL_AGAIN_FOR_MS whose end left nothing is not read again, one that left money is; at a page load, every one is", async () => {
   const FOR = m.POOL_AGAIN_FOR_MS as number;
   assert.equal(typeof FOR, "number");
   const { rows, store } = opsStore();
@@ -165,6 +165,11 @@ test("P2-b: an ended op past POOL_AGAIN_FOR_MS whose end left nothing is not rea
   await host.settle();
   await host.idle();
   assert.deepEqual(read, ["U_KEPT"]);
+  // a page load reads every ended U_X, old ones too: a late send to an old address is found at the next load
+  read.length = 0;
+  await (host.settle as (o?: { load?: boolean }) => Promise<void>)({ load: true });
+  await host.idle();
+  assert.deepEqual(read.sort(), ["U_KEPT", "U_OLD"]);
 });
 
 test("P2-c: a plain send's base is read before its address goes out: a send that lands while the page is closed shows short", async () => {

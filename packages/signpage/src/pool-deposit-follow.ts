@@ -732,10 +732,11 @@ export function poolFollows(h: PoolFollowHost) {
      * Each signed-in landing: every pool op no follow has ended is followed again. And each U_X whose ops have all ended
      * is read once (review P2-b of card deposit-takes-each-pools-own-coin): money sent to it after its last op ended (an
      * address used again, a late send) that covers one deposit's floor follows that U_X's newest op again, so it is
-     * carried in. Those reads run one U_X at a time on the host's paced reads after its drawn wait, for
-     * POOL_AGAIN_FOR_MS from the op's quote or while its end left money there (review P2-b of the delta).
+     * carried in. Those reads run one U_X at a time on the host's paced reads after its drawn wait (review P2-b of the
+     * delta): at a landing, for POOL_AGAIN_FOR_MS from the op's quote or while its end left money there; at a page load
+     * (`load`), every one.
      */
-    async settle(): Promise<void> {
+    async settle(o: { load?: boolean } = {}): Promise<void> {
       const ops = await h.store();
       const live = new Set<string>();
       const ended = new Map<string, { k: string; v: PoolDepositOp }>();
@@ -752,7 +753,9 @@ export function poolFollows(h: PoolFollowHost) {
         if (had === undefined || v.created_ms > had.v.created_ms) ended.set(ux, { k, v });
       }
       const t = (h.now ?? Date.now)();
-      const due = [...ended].filter(([ux, { v }]) => !live.has(ux) && (t - v.created_ms <= POOL_AGAIN_FOR_MS || uxHeldOf([v], v.follow.chain, v.follow.u)));
+      // a page load reads every ended U_X (a send to an old address is found at the next load: a load's restore reads
+      // the U_X only while its step 5 is owed, src/pool-restore.ts resume); a landing only the recent and the held ones
+      const due = [...ended].filter(([ux, { v }]) => !live.has(ux) && (o.load === true || t - v.created_ms <= POOL_AGAIN_FOR_MS || uxHeldOf([v], v.follow.chain, v.follow.u)));
       if (due.length === 0) return;
       // one run at a time, one U_X at a time (review P2-b of the delta), after a drawn wait: never a user's U_X read in
       // one burst, nor at the instant a landing is read. A landing during a run reads again once it ends
