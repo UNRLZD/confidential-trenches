@@ -1,0 +1,139 @@
+{
+ "_note": "Recorded 12 Nov by app-faults-seen-on-124.mjs --record on the test machine: good = this card's build (--harness, apps/terminal/dist at 9df7be7ea, the stand-in shell signed out); bad = the deployed SIGN_HOST and APP_HOST of release 124, signed out, before this card.",
+ "good": {
+  "check": "app-faults-seen-on-124",
+  "at": "2026-11-12T22:05:07.132Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed out",
+  "browser": "156.0.8078.79",
+  "loads": [
+   {
+    "route": "/discover",
+    "atMs": 1794521107192,
+    "ready": true,
+    "assets": 1,
+    "oneclick": []
+   },
+   {
+    "route": "/profile",
+    "atMs": 1794521108891,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   },
+   {
+    "route": "/orders",
+    "atMs": 1794521110493,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   },
+   {
+    "route": "/terms",
+    "atMs": 1794521112117,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   },
+   {
+    "route": "/portfolio",
+    "atMs": 1794521113720,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   },
+   {
+    "route": "/discover",
+    "atMs": 1794521115320,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   },
+   {
+    "route": "/profile",
+    "atMs": 1794521116961,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   },
+   {
+    "route": "/orders",
+    "atMs": 1794521118560,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   },
+   {
+    "route": "/terms",
+    "atMs": 1794521120179,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   },
+   {
+    "route": "/portfolio",
+    "atMs": 1794521121783,
+    "ready": true,
+    "assets": 0,
+    "oneclick": []
+   }
+  ],
+  "shot": "app-faults-seen-on-124-1440.png"
+ },
+ "bad": {
+  "check": "app-faults-seen-on-124",
+  "at": "2026-11-12T22:05:23.875Z",
+  "source": "live https://confidential.unrealized.trade and https://ct-app.unrealized.trade, the helper as served, signed out",
+  "browser": "156.0.8078.79",
+  "loads": [
+   {
+    "route": "/discover",
+    "atMs": 1794521123938,
+    "ready": true,
+    "assets": 1,
+    "oneclick": [
+     {
+      "path": "/v1/proxy/oneclick/v0/tokens",
+      "status": 200
+     }
+    ]
+   },
+   {
+    "route": "/profile",
+    "atMs": 1794521127277,
+    "ready": true,
+    "assets": 1,
+    "oneclick": [
+     {
+      "path": "/v1/proxy/oneclick/v0/tokens",
+      "status": 200
+     },
+     {
+      "path": "/v1/proxy/oneclick/v0/quote",
+      "status": 201
+     },
+     {
+      "path": "/v1/proxy/oneclick/v0/quote",
+      "status": 201
+     },
+     {
+      "path": "/v1/proxy/oneclick/v0/quote",
+      "status": 201
+     }
+    ]
+   },
+   {
+    "route": "/orders",
+    "atMs": 1794521129189,
+    "ready": true,
+    "assets": 1,
+    "oneclick": [
+     {
+      "path": "/v1/proxy/oneclick/v0/tokens",
+      "status": 429
+     }
+    ]
+   }
+  ],
+  "shot": "app-faults-seen-on-124-1440.png"
+ }
+}
