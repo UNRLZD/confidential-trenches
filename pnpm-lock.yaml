@@ -88,6 +88,9 @@ importers:
       '@blindfill/kit':
         specifier: workspace:*
         version: link:../kit
+      '@noble/curves':
+        specifier: 2.4.0
+        version: 2.4.0
       snarkjs:
         specifier: 0.7.5
         version: 0.7.5

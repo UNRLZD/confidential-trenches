@@ -13,7 +13,7 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const CORE_FILE = path.join(SRC, "core.ts");
 const WALLET = fileURLToPath(new URL("../../wallet/", import.meta.url));
 
-/** The values core exports, and its types: 74 names in all. */
+/** The values core exports, and its types: 80 names in all. */
 const VALUES = [
   "RESTORE_GAP", "RESTORE_LANES", "entropyToWords", "noteCommitment", "noteSecrets", "refKey", "restoreNotes", "restorePages", "typedSeed", "walkLane", "wordsToSeed64",
   // card exit-ids-out: the ids' keys and their moves out
@@ -29,8 +29,10 @@ const VALUES = [
   // card exit-evm-pools-with-the-words: the Base and Robinhood pools' restore, pins, trees, context and the note's W
   "evmRestoreNotes", "EVM_CHAIN_IDS", "EVM_POOLS", "evmMemoryHold", "evmPoolContextOf", "evmPoolScopeOf", "evmRelayDataBytes", "evmTreeSync", "jOf",
   "evmExitGasAddress", "evmExitSignSend", "evmExitW", "evmExitWithdrawCalldata", "evmExitWithdrawSignature", "EvmExitRefused",
+  // card exit-with-only-the-words: the Solana pool's exit (W, the fee wallet's key, the pool's bind, a release's context)
+  "freshWallet", "slip10Ed25519", "solanaPool", "solanaContextOf",
 ];
-const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend", "EvmRestoredNote", "EvmRestoredSpend", "EvmPoolPin", "EvmRelayData", "EvmRpc", "EvmExitProof", "EvmExitSigner", "EvmExitTx"];
+const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend", "EvmRestoredNote", "EvmRestoredSpend", "EvmPoolPin", "EvmRelayData", "EvmRpc", "EvmExitProof", "EvmExitSigner", "EvmExitTx", "SolanaFeeAnswer", "SolanaReleaseRequest"];
 
 /** Every name core.ts exports, as its export declarations write them (types included). */
 function declaredNames(file: string): string[] {

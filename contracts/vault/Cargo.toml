@@ -83,6 +83,11 @@ path = "tests/smoke.rs"
 required-features = ["sandbox"]
 
 [[test]]
+name = "exit_words"
+path = "tests/exit_words.rs"
+required-features = ["sandbox"]
+
+[[test]]
 name = "relayer_send"
 path = "tests/relayer_send.rs"
 required-features = ["sandbox"]

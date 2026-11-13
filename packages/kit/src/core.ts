@@ -69,3 +69,8 @@ export { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPoolContextOf, evmPoolScope
 export { jOf } from "../../wallet/src/pool/queue.ts";
 // and the exit's EVM signatures, each key derived and zeroed inside the wallet: G's release send, W's Withdraw and W's send
 export { evmExitGasAddress, evmExitSignSend, evmExitW, evmExitWithdrawCalldata, evmExitWithdrawSignature, EvmExitRefused, type EvmExitProof, type EvmExitSigner, type EvmExitTx } from "../../wallet/src/pool/evm-exit.ts";
+// card exit-with-only-the-words: the Solana pool's exit, run by the wallet's own code. Its fresh wallet W_{sol, l, j} and
+// the words' standard Solana key (m/44'/501'/0'/0', the exit's fee wallet), the pool's bind on a pin whose fee payer is
+// that wallet, and the program's context of a release, which the exit checks the bind's answer against
+export { freshWallet, slip10Ed25519 } from "../../wallet/src/derive/keys.ts";
+export { solanaPool, solanaContextOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
