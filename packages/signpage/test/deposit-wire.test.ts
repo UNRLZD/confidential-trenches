@@ -220,7 +220,7 @@ test("a sign out in deposit.quote's re-ask pause: the host sends no second quote
   assert.equal(asks, 1);
 });
 
-test("a sign out during deposit.quote's records read: no quote leaves, the answer is down", async () => {
+test("a sign out during deposit.quote's records read: no quote leaves, the answer is not_allowed", async () => {
   const { quotesStop } = await import("../src/quotes-stop.ts");
   const page = quotesStop();
   let asks = 0;
@@ -240,13 +240,13 @@ test("a sign out during deposit.quote's records read: no quote leaves, the answe
   page.signedOut();
   release();
   await d.after;
-  assert.deepEqual(d.answer(), { error: "down" });
+  assert.deepEqual(d.answer(), { error: "not_allowed" });
   assert.equal(asks, 0);
 });
 
 // Re-review P2: the stop is read once as the request arrives and checked after each wait. Each wait held in turn, a sign
 // out during it, on the page's own stop (src/quotes-stop.ts, which swaps in a fresh signal): nothing after it runs.
-test("a sign out at each of deposit.quote's waits: nothing after it runs (no records read, no quote, no follow), the answer is down", async () => {
+test("a sign out at each of deposit.quote's waits: nothing after it runs (no records read, no quote, no follow), the answer is not_allowed", async () => {
   const { quotesStop } = await import("../src/quotes-stop.ts");
   for (const at of ["named", "read", "read again", "follow"] as const) {
     const page = quotesStop();
@@ -272,7 +272,7 @@ test("a sign out at each of deposit.quote's waits: nothing after it runs (no rec
     page.signedOut();
     release();
     await d.after;
-    assert.deepEqual(d.answer(), { error: "down" }, at);
+    assert.deepEqual(d.answer(), { error: "not_allowed" }, at);
     assert.equal(steps.at(-1), at, `${at}: ${steps.join(", ")}`);
   }
 });

@@ -178,7 +178,8 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
   return (params, ctx) => {
     let out: HostAnswer<"pool.address"> | HostRefusal = { error: "not_allowed" };
     // the page's stop as the request arrives (re-review P2 of card helper-says-why-a-vendor-refused): a sign out swaps in
-    // a fresh one, so one read after an await would never be aborted. Read again after each await: stopped, nothing goes
+    // a fresh one, so one read after an await would never be aborted. Read again after each await: stopped, nothing goes,
+    // and the answer is a signed-out page's, not_allowed (final; a read or an ask the sign out cut mid-flight answers down)
     const stop = deps.stop?.();
     const stopped = () => stop?.aborted === true;
     const after = (async () => {
@@ -188,9 +189,9 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       const asset = POOL_ADDRESS_ASSET[chain];
       const quoted = params.origin_asset !== undefined || params.amount !== undefined;
       await deps.named?.().catch(() => {});
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       const before = usable(await deps.read(pool.scope), chain, pool.scope);
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!before) return;
       if (!quoted) return void (out = { result: { chain, address: before.wallet, asset } });
 
@@ -215,7 +216,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       } catch {
         return void (out = { error: "down" });
       }
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (floor === null) return;
 
       const now = deps.now ?? Date.now;
@@ -259,7 +260,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
 
       // the address stands only while the records are the ones it was asked under
       const now2 = usable(await deps.read(pool.scope), chain, pool.scope);
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!now2 || !same(now2, before)) return;
       const quote = {
         deposit_address: checked.depositAddress,
@@ -270,7 +271,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
         time_estimate_s: timeEstimate,
       };
       await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id });
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: { chain, address: before.wallet, asset, quote } };
     })().catch(() => {
       out = { error: "down" };

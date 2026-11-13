@@ -511,7 +511,7 @@ test("a sign out in the quote's re-ask pause: no second quote leaves, no address
 
 // Re-review P2 of card helper-says-why-a-vendor-refused: the stop is read once, as the request arrives. A sign out swaps
 // in a fresh signal (src/quotes-stop.ts), so a host that read it only after its awaits would send its quote anyway.
-test("a sign out during pool.address's floor read: no quote leaves, the answer is down", async () => {
+test("a sign out during pool.address's floor read: no quote leaves, the answer is not_allowed", async () => {
   const { quotesStop } = await import("../src/quotes-stop.ts");
   const w = world();
   const page = quotesStop();
@@ -525,13 +525,13 @@ test("a sign out during pool.address's floor read: no quote leaves, the answer i
   while (!reading) await new Promise((ok) => setImmediate(ok));
   page.signedOut();
   release();
-  assert.deepEqual(await asked, { error: "down" });
+  assert.deepEqual(await asked, { error: "not_allowed" });
   assert.equal(w.sent.length, 0);
 });
 
 // Each wait held in turn, a sign out during it, on the page's own stop: nothing after it runs (the floor read carries the
 // deposit address to an RPC, the follow reads it on chain).
-test("a sign out at each of pool.address's waits: nothing after it runs (no records read, no floor read, no quote, no follow), the answer is down", async () => {
+test("a sign out at each of pool.address's waits: nothing after it runs (no records read, no floor read, no quote, no follow), the answer is not_allowed", async () => {
   const { quotesStop } = await import("../src/quotes-stop.ts");
   for (const at of ["named", "read", "floor", "read again", "follow"] as const) {
     const w = world();
@@ -556,7 +556,7 @@ test("a sign out at each of pool.address's waits: nothing after it runs (no reco
     while (!held) await new Promise((ok) => setImmediate(ok));
     page.signedOut();
     release();
-    assert.deepEqual(await asked, { error: "down" }, at);
+    assert.deepEqual(await asked, { error: "not_allowed" }, at);
     assert.equal(steps.at(-1), at, `${at}: ${steps.join(", ")}`);
     // the follow's write ran before the sign out was seen: it holds the op, but the answer names no address
     assert.equal(w.took.length, at === "follow" ? 1 : 0, at);

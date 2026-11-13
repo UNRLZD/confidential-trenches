@@ -92,7 +92,8 @@ test("the reviewer's case: a deposit.quote queued behind one in flight at the ta
   assert.deepEqual(a.answer(), { error: "down" });
   const b = h.quote(PARAMS, { id: "b" }); // the API queue runs B now
   await b.after;
-  assert.deepEqual(b.answer(), { error: "down" });
+  // A's ask was cut mid-flight (down); B never asked: a signed-out page's answer
+  assert.deepEqual(b.answer(), { error: "not_allowed" });
   assert.equal(h.sent.length - 1, 0, "asks after the tap");
 });
 

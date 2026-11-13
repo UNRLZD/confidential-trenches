@@ -67,16 +67,17 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
   return (params, ctx) => {
     let out: HostAnswer<"deposit.quote"> | HostRefusal = { error: "not_allowed" };
     // the page's stop as the request arrives (re-review P2 of card helper-says-why-a-vendor-refused): a sign out swaps in
-    // a fresh one, so one read after an await would never be aborted. Read again after each await: stopped, nothing goes
+    // a fresh one, so one read after an await would never be aborted. Read again after each await: stopped, nothing goes,
+    // and the answer is a signed-out page's, not_allowed (final; a read or an ask the sign out cut mid-flight answers down)
     const stop = deps.stop?.();
     const stopped = () => stop?.aborted === true;
     const after = (async () => {
       await deps.named?.().catch(() => {});
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       const scope = deps.scope();
       if (scope === null) return;
       const before = usable(await deps.read(scope), scope);
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!before) return;
       const got = await depositQuoteKind(params, {
         seed: before.status,
@@ -89,12 +90,12 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       if (!got.ok) return void (out = { error: got.code });
       // the address stands only while the records are the ones it was asked under
       const now = usable(await deps.read(scope), deps.scope());
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!now || !same(now.deposit, before.deposit)) return;
       // no request id, no follow: no address goes out
       if (ctx === undefined) return;
       await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id });
-      if (stopped()) return void (out = { error: "down" });
+      if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: got.result };
     })().catch(() => {
       // a read that threw (the records not answering) is no rule's refusal: "not now" (card pool-read-down), which
