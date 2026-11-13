@@ -13,6 +13,7 @@ import { VaultTree } from "../../kit/src/vault/inputs.ts";
 import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { evmPoolVenues, evmReadProvidersOf } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
+import { evmPoolIndexPools, evmPoolIndexReset } from "../../kit/src/checks/evm/quote.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, readReservedMarks, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
@@ -1322,42 +1323,64 @@ test("a rebuild of the buy records that failed is asked again at the turn pass, 
   }
 });
 
-test("each state read and turn pass syncs the chain's pool index, the last one passed to the next sync", async () => {
+test("the pool index syncs once a sign-in, after the state read's proof pass ends, from the kept index; a partial sync is synced again, a turn pass syncs none", async () => {
   const { w, ns } = await wallet();
   await landed(ns);
+  evmPoolIndexReset();
   const START = 1_800_000_000_000;
   const o = { now: START + 20_000 };
   const tt = turnTimers(o);
+  const log: string[] = [];
   const calls: { chain: string; prev: number | null }[] = [];
-  let n = 100;
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const ix = (through: number) => ({ v: 1, chainId: 84532, poolManager: PM, from: 1, through, head: { number: through, hash: "0x" + "0".repeat(64) }, spans: [[1, through]], pools: [] });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  let partial = true;
+  const kept = new Map<string, unknown>([["base-sepolia", ix(50)]]);
+  const pool = fakeEvmPool();
+  const trees = pool.trees;
   const t = testnetPool({ ...page(w), held: async () => w }, {
     prover: { vault: signalsProver(), stop: () => {} },
     evmPin: (c: string) => (c === "base" ? PIN : undefined),
     evmRpcs: unread,
     evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
-    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    // the pass's reads take a while: the index's sync must start after its last
+    evmQueuePool: () => ({ ...pool, trees: async (...a: Parameters<typeof trees>) => (log.push("pass read"), await new Promise((r) => setTimeout(r, 30)), log.push("pass read done"), trees(...a)) }) as Pool<unknown>,
     evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
     evmTurn: tt.evmTurn,
+    evmIndexStore: { get: async (c: string) => (kept.get(c) ?? null) as never, put: async (c: string, i: unknown) => void kept.set(c, i) },
     evmIndexSync: async (chain: string, prev: { through: number } | null) => {
+      log.push("index sync");
       calls.push({ chain, prev: prev?.through ?? null });
-      n += 10;
-      const index = { v: 1, chainId: 84532, poolManager: "0x0000000000000000000000000000000000000001", from: 1, through: n, head: { number: n, hash: "0x" + "0".repeat(64) }, spans: [[1, n]], pools: [] };
-      return { index, coversThrough: n, pools: [], error: null, stats: { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 } };
+      const n = (prev?.through ?? 0) + 10;
+      // the first sync ends partial (a reader that failed a span): it proves nothing past the kept index
+      if (partial) return (partial = false), { index: ix(n), coversThrough: null, pools: null, error: { code: "rpc_failed", message: "x" }, stats };
+      return { index: ix(n), coversThrough: n, pools: [], error: null, stats };
     },
   } as unknown as Parameters<typeof testnetPool>[1]);
   const settle = async () => {
-    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 5));
   };
   try {
     await t.stateRead();
     await settle();
-    assert.deepEqual(calls, [{ chain: "base", prev: null }], "the state read's sync, cold");
+    assert.deepEqual(calls, [{ chain: "base", prev: 50 }], "the sync reads on from the kept index");
+    assert.ok(log.includes("pass read done") && log.indexOf("index sync") > log.lastIndexOf("pass read done"), `the sync starts after the pass's last read: ${log.join(", ")}`);
+    assert.deepEqual(evmPoolIndexPools("base-sepolia", "0x00000000000000000000000000000000000000aa"), [], "the kept index is served before the sync ends");
+    assert.equal((kept.get("base-sepolia") as { through: number }).through, 50, "a partial sync is never kept");
     o.now = START + 60_000 + 3_000;
     await tt.set.at(-1)!.f();
     await settle();
-    assert.deepEqual(calls.at(-1), { chain: "base", prev: 110 }, "the turn pass's sync reads on from the last");
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 1, "a turn pass syncs none");
+    await t.stateRead();
+    await settle();
+    assert.deepEqual(calls.at(-1), { chain: "base", prev: 60 }, "a partial sync is synced again at the next state read, on from what it proved");
+    assert.equal((kept.get("base-sepolia") as { through: number }).through, 70, "a whole sync is kept");
+    await t.stateRead();
+    await settle();
+    assert.equal(calls.length, 2, "a served index is synced no more at a state read");
   } finally {
+    evmPoolIndexReset();
     await t.signedOut();
   }
 });
