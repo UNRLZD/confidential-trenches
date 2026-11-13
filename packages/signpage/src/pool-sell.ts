@@ -2327,6 +2327,14 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
     listed.push({ address, evidence, mints: evidence.rec ? mintsOf(mints, [{ mint: evidence.rec.mint, program: evidence.rec.program }]) : mints });
   }
   const read = await findOn(rpcs[1], listed).catch(() => null);
+  // a W read empty is listed empty for good only once its notes are settled spent (review P3-9 of 024e8a89d): a W is
+  // derived from SPENT and RESERVED notes (spentNotesOf), and a RESERVED note's release may land on W after this read;
+  // with the store unread, none is listed
+  let reserved: Set<string> | null | undefined;
+  const settledSpent = async (address: string): Promise<boolean> => {
+    if (reserved === undefined) reserved = await h.notes().then(async (s) => new Set((await s.list()).filter((n) => n.state === "RESERVED").map((n) => refKey(n.ref)))).catch(() => null);
+    return reserved !== null && (wallets ?? []).every((w) => w.address !== address || !reserved!.has(w.note));
+  };
   const todo: string[] = [];
   for (const { address } of listed) {
     const o = owed.find((r) => r.address === address);
@@ -2337,7 +2345,7 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
     }
     if (r === undefined) continue;
     if (!r.any) {
-      await Promise.resolve(h.owed.markEmpty?.(address)).catch(() => {});
+      if (await settledSpent(address)) await Promise.resolve(h.owed.markEmpty?.(address)).catch(() => {});
       continue;
     }
     todo.push(address);

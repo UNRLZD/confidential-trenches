@@ -32,7 +32,7 @@ import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/sol
 import { pairDown } from "./outage.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
-import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
+import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { buyWallets, HOLDINGS_RPC_LIMIT, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
@@ -7246,3 +7246,34 @@ test("round-trip-costs-less: an owed end under the floor lists the note the swee
   assert.equal(w.owed.get(W.address)?.lamports, note, `W holds ${held}: listed as the note's ${note}`);
 });
 const OWED_LAMPORTS = 3_400_000;
+
+// review P3-9 of 024e8a89d: a W of the account's the helper reads empty was listed empty for good at once, also while
+// its note was RESERVED (spentNotesOf lists SPENT and RESERVED), so a release that landed on W after the read left its
+// SOL on W with no load ever passing it. Listed empty only once its notes are settled spent
+test("round-trip-costs-less P3-9: a W read empty while its note is RESERVED is not listed empty; its release landing after the read is passed at the next load", async () => {
+  const ref = { kind: "change" as const, l: 7n, j: 0 };
+  const w = await world({ buy: null }, [{ ...wallet(0n), note: refKey(ref), holdings: null } as never]);
+  w.c.accounts.delete(VF.pump.ata);
+  const onW = w.c.accounts.get(W.address)!;
+  w.c.accounts.delete(W.address);
+  let state: "RESERVED" | "SPENT" = "RESERVED";
+  w.host.notes = async () => withNote(w.ns, () => ({ ref, state }));
+  forgetPageLoad();
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.deepEqual(await w.host.owed!.empty!(), new Set(), "its note RESERVED: not listed empty");
+  // the release lands after the read; the note is spent
+  w.c.accounts.set(W.address, onW);
+  state = "SPENT";
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.ok(w.told.some((t) => t.address === W.address && t.step === "rent_back"), "W passed at the next load");
+  // a W read empty whose notes are all settled spent: listed empty, as before
+  const e = await world({ buy: null }, [{ ...wallet(0n), note: refKey(ref), holdings: null } as never]);
+  e.c.accounts.delete(VF.pump.ata);
+  e.c.accounts.delete(W.address);
+  e.host.notes = async () => withNote(e.ns, () => ({ ref, state: "SPENT" }));
+  await resumeRentBacks(e.host, fakeLocks());
+  assert.deepEqual(await e.host.owed!.empty!(), new Set([W.address]), "settled spent and empty: listed empty");
+});
+/** `ns` whose list also holds one more record (its ref and state alone), every other method `ns`'s own. */
+const withNote = (ns: NoteStore, extra: () => { ref: unknown; state: string }): NoteStore =>
+  new Proxy(ns as object, { get: (t, k) => (k === "list" ? async () => [...(await ns.list()), extra() as never] : typeof (t as Record<PropertyKey, unknown>)[k] === "function" ? ((t as Record<PropertyKey, (...a: unknown[]) => unknown>)[k]!).bind(t) : (t as Record<PropertyKey, unknown>)[k]) }) as NoteStore;
