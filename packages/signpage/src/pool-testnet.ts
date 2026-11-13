@@ -54,7 +54,7 @@ import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { openNoteStore, readNotes, readReservedMarks, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { chainNow, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
+import { openProofQueue, PassFail, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, type TradeStore } from "./trade.ts";
@@ -214,6 +214,25 @@ export const evmEpochFee = (at: { baseFeePerGas: bigint; depth: number; chainFee
 export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.devnet : SOL_POOLS.mainnet;
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
 export const PAGE_CLUSTER: "mainnet" | "devnet" = POOL_TESTNET ? "devnet" : "mainnet";
+/** The codes a proof pass's console line names, in its order (the queue's PassReason and its notes under the least rung). */
+export const PASS_CODES = ["network", "fee_refused", "prover_failed", "too_small", "held_elsewhere"] as const;
+/**
+ * A proof pass's console line (card buy-spends-several-pieces): `pool pass: <chain> failed <code>=<count> ...`, for a
+ * pass whose notes failed (each by the step the queue names, ../../wallet/src/pool/queue.ts PassFail), that left notes
+ * under the pool's smallest rung unproved, or that failed whole at a pool read (`thrown`); null when none. Codes and
+ * counts only: never a note, an address, an amount, an epoch or an error's text, so DevTools and a walk read why no proof
+ * is ready and nothing of the account.
+ */
+export function passLine(chain: string, pass: QueuePass | undefined, thrown?: unknown): string | null {
+  const n = new Map<string, number>();
+  const add = (code: string, k = 1): void => void n.set(code, (n.get(code) ?? 0) + k);
+  for (const f of pass?.failed ?? []) if (f.reason !== undefined) add(f.reason);
+  if (pass?.small !== undefined && pass.small > 0) add("too_small", pass.small);
+  if (thrown instanceof PassFail) add(thrown.reason);
+  const parts = PASS_CODES.filter((c) => n.has(c)).map((c) => `${c}=${n.get(c)}`);
+  return parts.length === 0 ? null : `pool pass: ${chain} failed ${parts.join(" ")}`;
+}
+
 /** The buys of several pieces owed their end (pool-buy.ts OwedPieces), in the wallet store's meta/owed/pieces-sol (meta/owed/
  *  is never read or listed by the frame), by W's address. */
 export const piecesOwedOf = (store: () => Promise<Pick<TradeStore, "get" | "update">>): PiecesOwed => {
@@ -780,6 +799,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
   };
   const watchers = new Set<() => void>();
+  // each chain's last "pool pass:" line, printed again only when it changes (card buy-spends-several-pieces)
+  const passLines = new Map<string, string>();
+  const logPass = (chain: string, pass: QueuePass | undefined, thrown?: unknown): void => {
+    const line = passLine(chain, pass, thrown) ?? "";
+    if (line === (passLines.get(chain) ?? "")) return;
+    passLines.set(chain, line);
+    if (line !== "") console.log(line);
+  };
   // a release read landed on both RPCs (a Solana or EVM buy's, a withdraw's): what it took out of the pool goes on the
   // note's mark in the store (../../wallet/src/notes/store.ts ReservedMark), so every tab and a reload count only the
   // note's change until the settle writes it (../../wallet/src/pool/balances.ts landed); then the app reads the state
@@ -797,9 +824,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const p = (open ??= openQueue());
     try {
       const pass = await (await p).queue.refresh();
+      logPass("solana", pass);
       if (pass.made.length > 0 || pass.remade.length > 0) for (const f of watchers) f();
       return pass;
-    } catch {
+    } catch (e) {
+      logPass("solana", undefined, e);
       // a queue that could not open (no seed: signed out) is dropped, so the next landing opens it again
       if (open === p) await p.then(() => {}, () => void (open = null));
       return null;
@@ -945,9 +974,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
     try {
       const pass = await (await p).queue.refresh();
+      logPass(chain, pass);
       if (pass.made.length > 0 || pass.remade.length > 0) for (const f of watchers) f();
       return pass;
-    } catch {
+    } catch (e) {
+      logPass(chain, undefined, e);
       // a queue that could not open (no seed: signed out) is dropped, so the next landing opens it again
       const q = p;
       if (evmQueues.get(chain) === q) await q.then(() => {}, () => void (evmQueues.get(chain) === q && evmQueues.delete(chain)));

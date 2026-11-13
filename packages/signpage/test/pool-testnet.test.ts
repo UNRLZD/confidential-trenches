@@ -54,6 +54,7 @@ const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts")
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
+type QueuePassT = import("../../wallet/src/pool/queue.ts").QueuePass;
 
 const RECORD = JSON.parse(readFileSync(new URL("../../../scripts/live-checks/pool-sol-deploy.devnet.json", import.meta.url), "utf8")) as { cluster: string; program_id: string; pool: string };
 // GET https://ct-api.unrealized.trade/v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef,
@@ -324,6 +325,49 @@ test("a state read proves the landed notes whatever its settle steps do: a depos
     await t.signedOut();
   }
   assert.deepEqual(got, cases.map((c) => `${c.name}: 1 proved, 1 ready`));
+});
+
+test("a proof pass's console line: each code with its count, in its order; none for a pass with nothing failed", async () => {
+  const { passLine, PASS_CODES } = await import("../src/pool-testnet.ts");
+  const { PassFail } = await import("../../wallet/src/pool/queue.ts");
+  const f = (reason?: string) => ({ noteId: "n", error: "x", ...(reason ? { reason } : {}) }) as QueuePassT["failed"][number];
+  const pass = (failed: QueuePassT["failed"], small?: number): QueuePassT => ({ made: [], remade: [], failed, ...(small ? { small } : {}) });
+  assert.deepEqual([...PASS_CODES], ["network", "fee_refused", "prover_failed", "too_small", "held_elsewhere"]);
+  assert.equal(passLine("solana", pass([f("held_elsewhere"), f("prover_failed"), f("network"), f("fee_refused"), f("prover_failed")], 3)), "pool pass: solana failed network=1 fee_refused=1 prover_failed=2 too_small=3 held_elsewhere=1");
+  for (const code of ["network", "fee_refused", "prover_failed", "held_elsewhere"]) assert.equal(passLine("base", pass([f(code)])), `pool pass: base failed ${code}=1`);
+  assert.equal(passLine("solana", pass([], 2)), "pool pass: solana failed too_small=2");
+  assert.equal(passLine("solana", undefined, new PassFail("network", new Error("429"))), "pool pass: solana failed network=1", "a pass that failed whole at a pool read");
+  assert.equal(passLine("solana", pass([f()])), null, "a failure the queue names no step for prints nothing");
+  assert.equal(passLine("solana", pass([])), null);
+  assert.equal(passLine("solana", undefined, new Error("no seed is stored")), null, "a queue that could not open is no pass's failure");
+});
+
+test("a proof pass that fails prints one 'pool pass:' line per change, the codes alone: never the error's text, an address or a note", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const ADDRESS = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
+  const ok = signalsProver();
+  let fail = true;
+  const prover = { ...ok, prove: async (c: string, i: unknown) => (fail ? Promise.reject(new Error(`provider 403 for ${ADDRESS}: limit`)) : ok.prove(c as never, i as never)) } as typeof ok;
+  const lines: string[] = [];
+  const log = mock.method(console, "log", (...a: unknown[]) => void lines.push(a.map(String).join(" ")));
+  try {
+    const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, locks: null });
+    const note = await land(ns, await incoming(ns, null, 1));
+    await t.proofs();
+    await t.proofs(); // the same failure again: no second line
+    assert.deepEqual(lines.filter((l) => l.startsWith("pool pass:")), ["pool pass: solana failed prover_failed=1"]);
+    const all = lines.join("\n");
+    for (const secret of [ADDRESS, "403", "limit", note.id]) assert.ok(!all.includes(secret), `no ${secret} in the console`);
+    // the prover works again: the proof is made, nothing printed; a later failure prints again
+    fail = false;
+    await t.proofs();
+    assert.equal((await t.readyWith(async () => null)).ready?.length, 1);
+    assert.equal(lines.filter((l) => l.startsWith("pool pass:")).length, 1);
+    await t.signedOut();
+  } finally {
+    log.mock.restore();
+  }
 });
 
 test("the testnet build's pool RPCs, every chain and both providers, read through a 429 once", async () => {

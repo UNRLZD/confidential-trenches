@@ -93,7 +93,24 @@ export type ProofQueueArgs<R> = {
 };
 
 /** What one pass did: the notes it proved, the notes whose proof was made again, and each failure. */
-export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string }[] };
+/** Which step a proof failed at (a console line names these codes only, never the error's text): a pool read (the
+ *  pool's time or its trees) "network"; the fee binding (the helper's fee answer, or the device's own reads it is checked
+ *  against) "fee_refused"; the note's hold (another tab or pass holds it) "held_elsewhere"; the prover "prover_failed". */
+export type PassReason = "network" | "fee_refused" | "held_elsewhere" | "prover_failed";
+/** An error tagged with the step it came from; its message is the cause's. */
+export class PassFail extends Error {
+  readonly reason: PassReason;
+  constructor(reason: PassReason, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.reason = reason;
+  }
+}
+// an abort (a sign out, a trade's stop) is no failure of a step: it goes on as it was
+const failAs = (reason: PassReason) => (e: unknown): never => {
+  throw e instanceof PassFail || (e as { name?: unknown } | null)?.name === "AbortError" ? e : new PassFail(reason, e);
+};
+/** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
+export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };
 const NOTHING = (): QueuePass => ({ made: [], remade: [], failed: [] });
 
 export interface ProofQueue<R> {
@@ -273,7 +290,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     w.secretKey.fill(0);
     const deadlineMs = epochStartMs + pool.lifeMs;
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
-    const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs }, signal);
+    const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs }, signal).catch(failAs("fee_refused"));
     checkBinding(pool as Pool, binding, chunk);
     live();
     const context = binding.context.toString();
@@ -282,7 +299,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     let attempt: string | undefined;
     if (prev === undefined) {
       const other = (to === null ? alt : ready).get(n.id);
-      attempt = other === undefined ? (await notes.move(n.id, "UNSPENT", "HELD", { deadlineMs, context })).attempt! : (await notes.holdSecond(n.id, other.attempt, { deadlineMs, context })).second!.attempt;
+      attempt = other === undefined ? (await notes.move(n.id, "UNSPENT", "HELD", { deadlineMs, context }).catch(failAs("held_elsewhere"))).attempt! : (await notes.holdSecond(n.id, other.attempt, { deadlineMs, context }).catch(failAs("held_elsewhere"))).second!.attempt;
       flight.attempt = attempt;
     }
     try {
@@ -299,7 +316,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         newSecret: next.secret,
         withdrawn: chunk,
         context: binding.context,
-      });
+      }).catch(failAs("prover_failed"));
       // the kit refused any answer whose 8 signals are not this input's: the chunk, the trees' roots and the context
       live();
       if (flight.dropped) throw new Error("dropped while it was proved");
@@ -351,7 +368,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       if (ready.has(id) || alt.has(id)) await onNote(id, () => letGo(id));
     }
     if (!inFront()) return out;
-    const nowMs = await readNow(signal);
+    const nowMs = await readNow(signal).catch(failAs("network"));
     if (typeof nowMs !== "bigint" || nowMs < 0n) throw new Error(`pool ${pool.id}: now is not a bigint`);
     const start = epochOf(nowMs);
     for (const [attempt, id] of [...unfreed]) await free(id, attempt);
@@ -365,6 +382,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       }
     const byChunk = byChunkThenLeaf(pool.ladder);
     const usable = (n: NoteRecord): boolean => n.scope === pool.scope && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) !== null && !skipped.has(n.id);
+    const small = all.filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) === null).length;
+    if (small > 0) out.small = small;
     // tier 1: a note with no tier 1 proof, UNSPENT or held by its tier 2 proof
     const open = all.filter((n) => usable(n) && !ready.has(n.id) && (n.state === "UNSPENT" || (n.state === "HELD" && alt.has(n.id)))).sort(byChunk);
     const again: NoteRecord[] = [];
@@ -376,7 +395,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     let newest: PoolTrees | Error | undefined;
     const todo: Todo[] = [];
     if (want > 0 && (open.length > 0 || again.length > 0)) {
-      epochTrees = await pool.trees(start, signal);
+      epochTrees = await pool.trees(start, signal).catch(failAs("network"));
       // the ready set's own notes first (each landed before the epoch began), then the open notes; among the remakes a
       // newest-root proof first (take refuses it NEWEST_GRACE_MS past the boundary, an epoch-root one stays takeable
       // all epoch), then by chunk and leaf
@@ -391,7 +410,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         if (n.leaf!.leafIndex < BigInt(epochTrees.stateTree.size)) todo.push({ n, trees: epochTrees, root: "epoch" });
         else {
           newest ??= await pool.trees(nowMs + 1n, signal, { newest: true }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))); // every leaf up to now
-          if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest) });
+          if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest), reason: "network" });
           // a leaf past the pool's time (its landing read before both RPCs' final block reached it) waits for the next pass
           else if (n.leaf!.leafIndex < BigInt(newest.stateTree.size)) todo.push({ n, trees: newest, root: "newest" });
         }
@@ -423,7 +442,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         if (n.leaf!.leafIndex >= BigInt(epochTrees.stateTree.size)) {
           newest ??= await pool.trees(nowMs + 1n, signal, { newest: true }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
           if (newest instanceof Error) {
-            out.failed.push({ noteId: n.id, error: msg(newest) });
+            out.failed.push({ noteId: n.id, error: msg(newest), reason: "network" });
             continue;
           }
           if (n.leaf!.leafIndex >= BigInt(newest.stateTree.size)) continue; // waits for the next pass
@@ -442,7 +461,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
           await prove(t.n, prover, t.trees, t.root, start, t.prev, t.to ?? null, signal);
           (t.prev !== undefined ? out.remade : out.made).push(t.n.id);
         } catch (e) {
-          out.failed.push({ noteId: t.n.id, error: msg(e) });
+          out.failed.push({ noteId: t.n.id, error: msg(e), ...(e instanceof PassFail ? { reason: e.reason } : {}) });
         } finally {
           inFlight.delete(t.n.id);
         }
