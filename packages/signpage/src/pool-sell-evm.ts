@@ -26,7 +26,9 @@
 //   signEvmSellSim, a signature that can never land). Last, the token's decimals() at the quote's block on both RPCs:
 //   equal to the ask's (the number the request's typed amount was turned into units with), else refused, so a token
 //   behind a proxy that changed its decimals since the number was kept never signs a wrong amount; and the kit's
-//   fee-on-transfer probe at that block refuses an amount W does not hold on both.
+//   fee-on-transfer probe at that block refuses an amount W does not hold on both. Right before W signs, a quote whose
+//   block is more than EVM_QUOTE_MAX_AGE_MS behind the device's clock is read again, with its decimals at its own block,
+//   and the new one is built, checked and signed.
 // - Built by the kit (evmPoolBuildSell: the quote's route, target and minOut, the precommitment of the return note, the
 //   chain's pinned FeeCollector as the fee recipient, a deadline EVM_SELL_DEADLINE_S on, W's sell nonce), checked by the
 //   rule (checkEvmSell: the quote's own build, the pinned pool, W, the token and units, the precommitment, the fee cap
@@ -61,7 +63,7 @@
 //   Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
-import { evmPoolSellQuote, evmSellRevertedPools, type EvmPoolSellQuote, type EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolSellQuote, evmSellRevertedPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolSellQuote, type EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { evmBuyRouteOf, evmPoolVenues, venuePins, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSell, type EvmPoolSell, type EvmPoolSellFields } from "../../kit/src/trade/evm/sell.ts";
 import type { EvmSellSim } from "../../kit/src/trade/evm/sell-unpinned.ts";
@@ -323,7 +325,7 @@ export async function planEvmSell(h: Pick<EvmSellHost, "chain" | "scope" | "rpcs
 /** One leg's plan and quote: its return note, its nonces, its `sent` and bans, the kit's quote at the ask's slippage,
  *  the decimals at the quote's block. `sim`, W's sim signer (none: a read-only caller, which then cannot price a route
  *  through a hook the venue does not list: the kit refuses that quote bad_request). */
-export type EvmSellLegQuote = { q: EvmPoolSellQuote; note: { ref: NoteRef; precommitment: bigint; held: NoteRecord | undefined; resume?: EvmOpenSell; orphan?: boolean }; pending: { ref: NoteRef; precommitment: bigint }[]; nonce: bigint; authNonce: bigint; authReads: readonly [bigint, bigint] };
+export type EvmSellLegQuote = { q: EvmPoolSellQuote; req: EvmPoolSellQuoteRequest; note: { ref: NoteRef; precommitment: bigint; held: NoteRecord | undefined; resume?: EvmOpenSell; orphan?: boolean }; pending: { ref: NoteRef; precommitment: bigint }[]; nonce: bigint; authNonce: bigint; authReads: readonly [bigint, bigint] };
 /** `opens`: the open sales; a note held INCOMING whose sale of this W is open, not on chain and not being sent by this
  *  page is that sale's to sign again (`resume`: its Sell nonce and precommitment, card signpage-evm-pool-sell review
  *  P2-4: a helper's refusal or no answer never locks W's sale until its deadline). `own`: this run's own note. */
@@ -352,16 +354,23 @@ export async function evmSellQuoteLeg(h: Omit<EvmSellHost, "send" | "record" | "
   const nonce = await agreed(h.rpcs, async (rpc) => word0(await rpc("eth_call", [{ to: w.w, data: nonceCall() }, "latest"]), "nonce", true));
   const authReads = (await Promise.all(h.rpcs.map(async (rpc) => quantity(await rpc("eth_getTransactionCount", [w.w, "latest"]), "nonce")))) as [bigint, bigint];
   const banned = await h.banned(token);
-  const q = await h.quote({ chain: networkOf(h), token, w: w.w, amountIn: ask.amount, slippageBps: ask.slippageBps, bought: w.route, boughtBlock: w.block, sent, banned, ...(sim ? { signSim: sim } : {}) });
-  // the decimals the ask's units were made with, read again at the quote's block on both RPCs
-  const at = hexQ(q.block.number);
-  const reads = await Promise.all(h.rpcs.map((rpc) => rpc("eth_call", [{ to: token, data: ERC20_DECIMALS }, at])));
-  if (tokenDecimalsOf(ask.chain, reads as [unknown, unknown]) !== ask.decimals) return no("quote_check_failed");
+  const req: EvmPoolSellQuoteRequest = { chain: networkOf(h), token, w: w.w, amountIn: ask.amount, slippageBps: ask.slippageBps, bought: w.route, boughtBlock: w.block, sent, banned, ...(sim ? { signSim: sim } : {}) };
+  const q = await legQuote(h, ask, req);
   // the chain's notes a deposit names in a block not final yet (a sale of W's on chain, its note not in this store: a
   // wiped device's restore writes final ones only): written INCOMING before the next one is planned (sellLeg), so the
   // store's order rule holds and a later round lands them
   const pending = walk.pending.map((ref) => ({ ref, precommitment: noteSecrets(seed64, ref).precommitment }));
-  return { q, note: { ref: walk.next.ref, precommitment: walk.next.precommitment, held, ...(resume && !mine ? { resume } : {}), ...(orphan ? { orphan } : {}) }, pending, nonce, authNonce: authReads[0], authReads };
+  return { q, req, note: { ref: walk.next.ref, precommitment: walk.next.precommitment, held, ...(resume && !mine ? { resume } : {}), ...(orphan ? { orphan } : {}) }, pending, nonce, authNonce: authReads[0], authReads };
+}
+
+/** The kit's quote of one leg, and the decimals the ask's units were made with, read again at the quote's block on both
+ *  RPCs: equal to the ask's, else refused. */
+async function legQuote(h: Pick<EvmSellHost, "quote" | "rpcs">, ask: PoolAsk, req: EvmPoolSellQuoteRequest): Promise<EvmPoolSellQuote> {
+  const q = await h.quote(req);
+  const at = hexQ(q.block.number);
+  const reads = await Promise.all(h.rpcs.map((rpc) => rpc("eth_call", [{ to: req.token, data: ERC20_DECIMALS }, at])));
+  if (tokenDecimalsOf(ask.chain, reads as [unknown, unknown]) !== ask.decimals) return no("quote_check_failed");
+  return q;
 }
 
 /** The return note's chain for W: (return, evm, l, j), then R's second arrivals. */
@@ -411,12 +420,16 @@ async function signPicked(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, same: 
   // precommitment, so at most one of the two lands
   const fix = same ?? (leg.note.resume ? { nonce: BigInt(leg.note.resume.nonce), precommitment: BigInt(leg.note.resume.precommitment) } : null);
   if (fix !== null && (leg.nonce !== fix.nonce || leg.note.precommitment !== fix.precommitment)) return no();
+  // the decimals reads since the quote: its block past EVM_QUOTE_MAX_AGE_MS on the device's clock is never signed; the
+  // quote is read again (its decimals at its own block), and the new one built, checked and signed (a failure signs
+  // nothing)
+  const q = clock() - leg.q.block.timestamp * 1000n > BigInt(EVM_QUOTE_MAX_AGE_MS) ? await legQuote(h, sellAsk, leg.req) : leg.q;
   const deadline = clock() / 1000n + BigInt(EVM_SELL_DEADLINE_S);
   const fields: EvmPoolSellFields = { precommitment: leg.note.precommitment, feeRecipient: pins.feeCollector, deadline, nonce: leg.nonce };
-  const built = h.build ? h.build(leg.q, fields) : evmPoolBuildSell(leg.q, fields);
-  const ctx = { ...ctxOf(leg.q.feeMax), precommitment: leg.note.precommitment };
+  const built = h.build ? h.build(q, fields) : evmPoolBuildSell(q, fields);
+  const ctx = { ...ctxOf(q.feeMax), precommitment: leg.note.precommitment };
   // the floor is the rule's own: the quote's amount out less the ask's slippage (review P3-1)
-  checkEvmSell(built, sellAsk, ctx, { amountOut: leg.q.amountOut }, h.testnet);
+  checkEvmSell(built, sellAsk, ctx, { amountOut: q.amountOut }, h.testnet);
   // an open sale signed again is that sale: its amount, and a floor no lower than its record's (review P2-A); another
   // amount, or a price under that floor, waits for the open sale's end
   const r = leg.note.resume;
@@ -426,7 +439,7 @@ async function signPicked(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, same: 
   const authorization = signEvmAuthorization(key, ctx, auth);
   key.fill(0);
   const data = evmSellCalldata(built, built.feeCap, signature);
-  return { s: { q: leg.q, built, data, authorization, sig: Array.from(signature, (b) => b.toString(16).padStart(2, "0")).join("") }, leg };
+  return { s: { q, built, data, authorization, sig: Array.from(signature, (b) => b.toString(16).padStart(2, "0")).join("") }, leg: { ...leg, q } };
 }
 
 /** The read-back's state: each RPC's `stop`, and the round's want. */

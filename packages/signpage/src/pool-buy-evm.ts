@@ -17,7 +17,9 @@
 //   the quote's agreed output less the ask's own slippage, which the rule derives, the proof's relay data W's and the
 //   pinned fee recipient's), signed by W only through signEvmBuy. W is derived from the seed right before it signs and
 //   must be the proof's W and the relay data's recipient; the seed is zeroed once W is derived and W's key once it has
-//   signed, and both again on every exit. A quote or a check that fails is never signed: the note stays HELD.
+//   signed, and both again on every exit. A quote or a check that fails is never signed: the note stays HELD. Right
+//   before W signs, a quote whose block is more than EVM_QUOTE_MAX_AGE_MS behind the device's clock (the reads and the
+//   seed below take time) is read again, and the new one is built, checked and signed.
 // - Before the bytes leave: the token's decimals (both RPCs), each RPC's newest block (where the read-back starts), and
 //   W's holding written as pending (the token, its decimals, the route W signed): a write that fails sends nothing. So
 //   a buy that lands is never without its record, whatever happens to the page after the send.
@@ -54,7 +56,7 @@
 //   nullifier or a transaction hash.
 // Nothing here logs.
 import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
-import { evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolBuyQuote, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
@@ -273,12 +275,16 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       const binding = { nullifier: signals[1]!, context: signals[7]!, value: signals[2]! };
       if (binding.context !== r.binding.context || binding.value !== r.chunk) return no();
       // the quote and the build: the device's own, for what the pool swaps (the chunk less the fee)
-      const q = await quoteOf(h, network, token, r.chunk - fee, ask.slippageBps);
-      const adapter = q.route.venue === "uniswap-v4" ? pins.v4 : pins.v3;
-      if (adapter === undefined) return no("quote_check_failed");
-      const built = h.build(adapter, q);
-      const ctx = { nowMs: clock(), wallet: r.wallet.address, feeCap: fee, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
-      checkEvmBuy(built, h.pin.pool, binding, relay, ask, ctx, { token: q.token, amountIn: q.amountIn, amountOut: q.amountOut }, h.testnet);
+      const quoted = async () => {
+        const q = await quoteOf(h, network, token, r.chunk - fee, ask.slippageBps);
+        const adapter = q.route.venue === "uniswap-v4" ? pins.v4 : pins.v3;
+        if (adapter === undefined) return no("quote_check_failed");
+        const built = h.build(adapter, q);
+        const ctx = { nowMs: clock(), wallet: r.wallet.address, feeCap: fee, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
+        checkEvmBuy(built, h.pin.pool, binding, relay, ask, ctx, { token: q.token, amountIn: q.amountIn, amountOut: q.amountOut }, h.testnet);
+        return { q, adapter, built, ctx };
+      };
+      let { q, adapter, built, ctx } = await quoted();
       // before W signs, so a read that fails leaves the note HELD: the token's decimals, and where the read-back starts
       const decimals = await h.decimals(token);
       const heads = await Promise.all(h.rpcs.map((rpc) => evmHeadNumber(rpc)));
@@ -291,6 +297,9 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       key = w.secretKey;
       seed.fill(0);
       if (lower(w.address) !== lower(r.wallet.address) || lower(relay.recipient) !== lower(w.address)) return no();
+      // the reads and the seed since the quote: its block past EVM_QUOTE_MAX_AGE_MS on the device's clock is never
+      // signed; the quote is read again, and the new one built, checked and signed (a failure signs nothing)
+      if (clock() - q.block.timestamp * 1000n > BigInt(EVM_QUOTE_MAX_AGE_MS)) ({ q, adapter, built, ctx } = await quoted());
       const signature = signEvmBuy(key, ctx, built, h.pin.pool, binding);
       key.fill(0);
       const data = evmBuyCalldata(h.pin.pool, relay, r.proof, r.publicSignals, fee, built, signature);

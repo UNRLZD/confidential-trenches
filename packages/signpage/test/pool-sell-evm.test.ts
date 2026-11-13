@@ -21,7 +21,7 @@ import { EVM_SECOND_GAP } from "../../wallet/src/notes/store.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { evmPoolVenues, pinnedBuild, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSell } from "../../kit/src/trade/evm/sell.ts";
-import type { EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
+import { EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolSellQuote, type EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { BOUGHT, flat, provider, refreshHead, sellQuoteWith, TOKEN } from "../../kit/test/evm-sell-quote-fx.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
@@ -960,4 +960,57 @@ test("a sign out while the sale's read waits ends the wait at once: failed, noth
   assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "failed" });
   assert.equal(reads, 1);
   assert.equal(x.posts.length, 0);
+});
+
+// card evm-buy-and-sell-on-mainnet: the decimals reads at the quote's block come between the sale's quote and W's
+// signature; a quote whose block is past the kit's bound on the device's clock there is never signed: the quote is read
+// again (with its decimals at the new block), and the new one is built, checked and signed
+const lowerPrice = (p: Parameters<typeof flat>[0]) => flat(p) - flat(p) / 10n;
+/** The sale's quotes in turn: the first at the flat price, the next at a lower one; the first's decimals reads take the
+ *  device's clock 31 s past its block. `fail`: what the second answers instead. */
+const requoting = (x: World, fail?: Error) => {
+  const asked: EvmPoolSellQuote[] = [];
+  x.h.quote = async (req) => {
+    if (asked.length > 0 && fail) throw fail;
+    const m = { price: asked.length === 0 ? flat : lowerPrice };
+    const q = await sellQuoteWith(req, [provider(m), provider(m)], Date.now());
+    asked.push(q);
+    if (asked.length === 1) tick(Number(q.block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS + 1_000 - Date.now());
+    return q;
+  };
+  return asked;
+};
+
+test("a sale quote whose block is 31 s old at W's signature is never signed: the quote is read again and the second quote is signed", async () => {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      x.land(s.minOut - s.fee);
+      return "0x" + "d1".repeat(32);
+    },
+  });
+  const asked = requoting(x);
+  const a = await runEvmPoolSell(x.h, ASK);
+  assert.equal(asked.length, 2, "the quote read again at the signature");
+  assert.ok(asked[1]!.minOut < asked[0]!.minOut, "the second quote's min out is its own");
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: "0x" + "d1".repeat(32) }] });
+  assert.equal(x.posts.length, 1);
+  assert.equal(sellOf(x.posts[0]!.data).minOut, asked[1]!.minOut, "W signed the second quote's min out, never the first's");
+  // the decimals read again at the second quote's block, on both RPCs
+  const at = x.c.calls.filter((c) => c.method === "eth_call" && (c.params[0] as { data: string }).data === "0x313ce567").map((c) => [c.k, c.params[1]]);
+  assert.deepEqual(at, [[0, hx(asked[0]!.block.number)], [1, hx(asked[0]!.block.number)], [0, hx(asked[1]!.block.number)], [1, hx(asked[1]!.block.number)]]);
+});
+
+test("a sale quote read again at W's signature that fails: nothing signed, recorded or sent, the note never INCOMING", async () => {
+  const x = await world();
+  const asked = requoting(x, new EvmQuoteError("stale_quote", "old"));
+  let calls = 0;
+  const quote = x.h.quote;
+  x.h.quote = (req) => (calls++, quote(req));
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual([asked.length, calls], [1, 2], "the quote was read again");
+  assert.equal(x.posts.length, 0);
+  assert.deepEqual(await openOf(x), []);
+  assert.notEqual((await returnNote(x.store))?.state, "INCOMING");
 });

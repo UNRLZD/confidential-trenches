@@ -7,7 +7,7 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { evmPoolBuyQuoteWith, EvmQuoteError, type EvmPoolBuyQuote, type EvmRpc as QuoteRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolBuyQuoteWith, EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmRpc as QuoteRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
 import { evmQuotedBuy } from "../../kit/src/trade/evm/quoted.ts";
 import { evmPoolVenues, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { asRecorded, gasRoundAnswers, withMarker } from "../../kit/test/evm-quote-gas-fx.ts";
@@ -1009,5 +1009,41 @@ test("a release of this buy's own read back, filled or withdrawn, tells the page
     r.h.landed = (...a) => void told.push(a);
     assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { stage: "not_landed", txs: [] });
     assert.deepEqual(told, [], "another's release is not this note's");
+  }
+});
+
+// card evm-buy-and-sell-on-mainnet: the decimals and heads reads and the seed come between the quote and W's signature;
+// a quote whose block is past the kit's bound on the device's clock there is never signed: the quote is read again, and
+// the new one is built, checked and signed (Solana's rule: the price read again after every wait before a signature)
+test("a quote whose block is 31 s old at W's signature is never signed: the quote is read again and the second quote is signed", async () => {
+  const first = await fixtureQuote();
+  const second = await quoteAt(50);
+  assert.ok(second.minOut > first.minOut, "the second quote's min out is its own");
+  const asked: EvmPoolBuyQuote[] = [];
+  const { h, seen } = host({ ...both([release({ out: second.minOut })]), quote: async () => (asked.push(asked.length === 0 ? first : second), asked.at(-1)!) });
+  // the reads between the quote and the signature take the device's clock 31 s past the first quote's block
+  h.decimals = async () => ((seen.clock.t = first.block.timestamp * 1000n + BigInt(EVM_QUOTE_MAX_AGE_MS) + 1_000n), 6);
+  const got = await runEvmPoolBuy(h, ASK);
+  assert.deepEqual(asked, [first, second], "the quote read again at the signature");
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(seen.sends.length, 1);
+  const data = hex(seen.sends[0]!.data);
+  assert.ok(data.includes(w32(second.minOut)), "W signed the second quote's min out");
+  assert.ok(!data.includes(w32(first.minOut)), "never the first's");
+  assert.equal(seen.records[0]![1].buy?.minOut, second.minOut.toString());
+  assert.deepEqual(seen.records[0]![1].route.path, second.route);
+});
+
+test("a quote read again at W's signature that fails: nothing signed, recorded, taken or sent (the note stays HELD)", async () => {
+  const first = await fixtureQuote();
+  for (const fail of [new EvmQuoteError("stale_quote", "old"), new EvmQuoteError("rpc_error", "down")]) {
+    let n = 0;
+    const { h, seen } = host({ quote: async () => (n++ === 0 ? first : Promise.reject(fail)) });
+    h.decimals = async () => ((seen.clock.t = first.block.timestamp * 1000n + BigInt(EVM_QUOTE_MAX_AGE_MS) + 1_000n), 6);
+    assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed" }, fail.code);
+    assert.equal(n, 2, `${fail.code}: the quote was read again`);
+    assert.deepEqual([seen.records.length, seen.takes.length, seen.sends.length, seen.settles], [0, 0, 0, 0], fail.code);
+    assert.ok(zero(seen.seeds[0]!), fail.code);
+    assert.equal(h.claimed!.size, 0, `${fail.code}: the proof is released for the next tap`);
   }
 });
