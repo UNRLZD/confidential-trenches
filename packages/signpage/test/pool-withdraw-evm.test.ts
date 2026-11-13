@@ -498,6 +498,8 @@ type RunPlant = {
   codeGas?: (from: string) => bigint;
   /** the pool's trees refuse a cut that holds no leaf, as the wallet's do (wallet pool/evm.ts trees: "no leaf before") */
   noLeaf?: boolean;
+  /** the epoch cut refuses with this error (any refusal but no leaf: a read the run must never take as a cut of no leaf) */
+  cutThrows?: Error;
 };
 // the wallet's refusal of a cut with no leaf: its typed PoolNoLeafError, a plain Error before
 const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
@@ -549,6 +551,7 @@ async function runWorld(plant: RunPlant = {}) {
     now: async () => clock.ms,
     trees: async (beforeMs: bigint, _s?: unknown, o?: { newest?: boolean }) => {
       chain.trees.push({ beforeMs, newest: o?.newest === true, signal: _s instanceof AbortSignal });
+      if (plant.cutThrows && o?.newest !== true) throw plant.cutThrows;
       // the rested notes in every tree; the run's note out of the epoch's own trees (up to NOW, an epoch's start) when it
       // landed this epoch, and out of the newest while that cut lags it
       const leaves = extras.map((e) => e.leaf), labels = extras.map((e) => e.label);
@@ -1219,4 +1222,16 @@ test("beside it, a pool with older leaves and the note landed this epoch: the ep
     runs.push({ bound: world.chain.bound.filter((x) => x === lower(world.w) || lower(world.extras[0]!.w) === x).length, binds: world.chain.binds });
   }
   assert.deepEqual(runs[1], runs[0], "a pool that refuses an empty cut plans as one that answers it: one bind, the fresh note's W, the same chunk");
+});
+
+test("an epoch cut refused for any other reason (the two RPCs apart: PoolReadError rpc_disagree) is the run's failure, never a cut of no leaf: no newest root is read, nothing is bound or sent, the note stays UNSPENT", async () => {
+  const { PoolReadError } = await import("../../wallet/src/pool/pool.ts");
+  const world = await runWorld({ thisEpoch: true, noLeaf: true, cutThrows: new PoolReadError("rpc_disagree", "the RPCs read the pool's logs apart") });
+  const got = await runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+  assert.notEqual(got.stage, "sent", "the run does not go on past a refused read");
+  assert.match(String(got.cause), /rpc_disagree/, `the refusal is the run's cause: ${got.cause}`);
+  assert.equal(world.chain.trees.some((t) => t.newest), false, "no newest root was read in its place");
+  assert.equal(world.chain.binds.length, 0, "nothing bound");
+  assert.equal(world.chain.sends, 0, "nothing sent");
+  assert.equal((await world.notes.get(world.noteId))?.state, "UNSPENT", "the note stays spendable");
 });
