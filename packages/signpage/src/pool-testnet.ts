@@ -544,6 +544,8 @@ export type TestnetOver = {
   evmSync?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], list: readonly EvmRpc[]) => Pick<EvmTreeSync, "events">;
   /** An EVM chain's pool for its proof queue (the wallet's evmPool over the chain's pool list otherwise). */
   evmQueuePool?: (chain: "base" | "robinhood") => Pool<unknown>;
+  /** A test's two queue pools: the pass's and the one a landing's pass reads (card evm-first-proof-inside-ten-seconds). */
+  evmQueuePools?: (chain: "base" | "robinhood") => { pass: Pool<unknown>; trade: Pool<unknown> };
   /** The EVM turn pass's clock, timers, spread draw and tab visibility (the page's own otherwise; tests). */
   evmTurn?: EvmTurnDeps;
   /** The deposit kinds (poolDepositKind, poolDepositEvmKind otherwise): a test reads the hosts this page wires into them
@@ -721,7 +723,7 @@ export type TestnetPool = {
 
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
 /** An open proof queue, its note store and the id of the pool it proves for. */
-type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string; hold?: (signal?: AbortSignal, seen?: (now: bigint) => void) => Promise<void> };
+type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string; hold?: (signal?: AbortSignal, seen?: (now: bigint) => void) => Promise<void>; landing?: () => AbortSignal };
 
 /** The EVM turn pass (card evm-device-reads-need-no-old-state): this long past each period's turn, plus the page's
  *  spread, the period's first block is in on both seats (Base makes one every 2 s, Robinhood several a second) and still
@@ -981,7 +983,44 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           relayFee: (ep, s) => evmPoolRelayFee(e.pin.pool, ep, s, over.fetch),
           epochFee: evmEpochFee,
         });
-      const pool = over.evmQueuePool ? passPool : { ...passPool, now: (s?: AbortSignal) => evmRetryLag(() => evmNow(e.rpcs, s), undefined, s) };
+      // card evm-first-proof-inside-ten-seconds: the one pass a landing of the device's own deposit starts reads as that
+      // deposit's last step, the trade's (its pool on the deposit's pair and its sync, the round that read the landing),
+      // so it never waits for a window the landing's own reads filled (a Base mainnet copy of 13 Nov 05:38Z: 152 requests
+      // per host in the 10 s before it, its first read waited 9.1 s). That pass is the one whose signal `landing` made;
+      // every other pass, the settle's rounds and the restore's read on the pass pool, on their hosts' budget
+      const planted = over.evmQueuePools?.(chain);
+      const passBase = planted?.pass ?? passPool;
+      const tradePool: Pool<unknown> | null =
+        planted?.trade ??
+        (over.evmQueuePool
+          ? null
+          : walletEvmPool({
+              pin: e.pin,
+              rpcs: e.rpcs,
+              feeRpcs: pageEvmFeeRpcs(chain),
+              held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
+              history: [...e.list, ...pageEvmHistory(e.pin)],
+              ...(typeof (e.sync as Partial<EvmTreeSync>).trees === "function" ? { sync: e.sync as EvmTreeSync } : {}),
+              relayFee: (ep, s) => evmPoolRelayFee(e.pin.pool, ep, s, over.fetch),
+              epochFee: evmEpochFee,
+            }));
+      const landings = new WeakSet<AbortSignal>();
+      const on = (s?: AbortSignal): boolean => s !== undefined && tradePool !== null && landings.has(s);
+      const passNow = planted !== undefined || over.evmQueuePool ? (s?: AbortSignal) => passBase.now(s) : (s?: AbortSignal) => evmRetryLag(() => evmNow(e.rpcs, s), undefined, s);
+      const pool: Pool<unknown> =
+        tradePool === null
+          ? over.evmQueuePool ? passPool : { ...passPool, now: passNow }
+          : {
+              ...passBase,
+              now: (s?: AbortSignal) => (on(s) ? tradePool.now(s) : passNow(s)),
+              trees: (b, s, o) => (on(s) ? tradePool : passBase).trees(b, s, o),
+              bind: (x, s) => (on(s) ? tradePool : passBase).bind(x, s),
+            };
+      const landing = (): AbortSignal => {
+        const c = new AbortController();
+        landings.add(c.signal);
+        return c.signal;
+      };
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
       // the period's fee held at the turn (the wallet's evmPool holdFee), at the pool's own time's period
       const holdFee = (passPool as Partial<Pick<EvmPoolOf, "holdFee">>).holdFee;
@@ -992,7 +1031,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seen?.(now);
         await holdFee.call(passPool, now - (now % passPool.epochMs), s);
       } : undefined;
-      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id, ...(hold ? { hold } : {}) };
+      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id, ...(hold ? { hold } : {}), ...(tradePool !== null ? { landing } : {}) };
     } catch (err) {
       notes.close();
       throw err;
@@ -1000,13 +1039,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64?.fill(0); // the queue keeps its own copy
     }
   };
-  /** The EVM chain's queue pass, the queue opened first when none is; null with no pool or no queue. */
-  const evmProofs = async (chain: "base" | "robinhood"): Promise<QueuePass | null> => {
+  /** The EVM chain's queue pass, the queue opened first when none is; null with no pool or no queue. `landing`: the one
+   *  pass the device's own landed deposit starts (evmKind's landed), read as that deposit's (openEvmQueue). */
+  const evmProofs = async (chain: "base" | "robinhood", landing = false): Promise<QueuePass | null> => {
     if (evmPool(chain) === null) return null;
     let p = evmQueues.get(chain);
     if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
     try {
-      const pass = await (await p).queue.refresh();
+      const q = await p;
+      const pass = await q.queue.refresh(landing ? q.landing?.() : undefined);
       logPass(chain, pass);
       if (pass.made.length > 0 || pass.remade.length > 0) for (const f of watchers) f();
       return pass;
@@ -1018,6 +1059,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return null;
     }
   };
+  // the chains whose landing pass is asked in this tick (evmKind's landed)
+  const evmLandingAsked = new Set<"base" | "robinhood">();
   const evmKind = (chain: "base" | "robinhood", end?: () => void) => {
     const e = evmPool(chain);
     if (e === null) return null;
@@ -1031,8 +1074,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         notes: async () => (notes = await openNoteStore(await page.store())),
         records: async () => readNotes(await page.store()),
         seed64: page.seed64,
-        // each landed note runs the chain's queue pass, as the Solana deposit's does
-        landed: () => void evmProofs(chain),
+        // each landed note runs the chain's queue pass, as the Solana deposit's does: the notes one round claims (one
+        // tick) start one pass, the deposit's own (evmProofs' landing). Only this host's landed starts one: the deposit
+        // kind calls it once the round on the pool's two RPCs holds the note's Deposited (pool-deposit-evm.ts)
+        landed: () => {
+          if (evmLandingAsked.has(chain)) return;
+          evmLandingAsked.add(chain);
+          queueMicrotask(() => {
+            evmLandingAsked.delete(chain);
+            void evmProofs(chain, true);
+          });
+        },
         settle: () => void settleEvm(chain),
         signal: follows.signal,
         // the session's sign out (signingOut, at its tap): it ends a wait between the ask's attempts
