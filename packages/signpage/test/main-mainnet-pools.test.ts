@@ -49,6 +49,8 @@ const { SOL_POOLS, solanaPoolOf, SOL_TIP_CAP, solanaEpochFee } = await import(".
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteCommitment } = await import("../../wallet/src/notes/secrets.ts");
 const { solanaTapSpendOf } = await import("../../wallet/src/pool/balances.ts");
+const { depositId, entropyToWords, wordsToSeed64 } = await import("@blindfill/wallet/derive");
+const { base58, hex } = await import("@scure/base");
 
 const PROGRAM = SOL_POOLS.mainnet!.program;
 const SCOPE = solanaPoolOf(PROGRAM).scope;
@@ -130,7 +132,7 @@ new DataView(rentData.buffer).setFloat64(8, 2, true);
 rentData[16] = 50;
 const rentReads: string[] = [];
 /** Every JSON-RPC call the page makes: its URL and method. */
-const calls: { url: string; method: string }[] = [];
+const calls: { url: string; method: string; account?: string }[] = [];
 const SELL_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const mintData = new Uint8Array(82);
 mintData[44] = 6;
@@ -145,7 +147,7 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
     body = JSON.parse(String(init?.body ?? "{}"));
   } catch {}
   const id = body.id ?? 1;
-  calls.push({ url: String(url), method: String(body.method) });
+  calls.push({ url: String(url), method: String(body.method), ...(typeof body.params?.[0] === "string" ? { account: body.params[0] } : {}) });
   const rentOrMint = body.method === "getAccountInfo" && (body.params?.[0] === "SysvarRent111111111111111111111111111111111" || body.params?.[0] === SELL_MINT);
   if (hold && typeof body.method === "string" && !rentOrMint && !String(url).includes("/oneclick/")) {
     heldReads++;
@@ -402,7 +404,17 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
   // this device has no buy record of its W, so the sell reads that W through the finder, on the helper's keyed route
   // only (review of 55d4c6eb, P2-A: a W from before a sign out); no provider is asked for any W's accounts
   const reads = (c: { method: string }) => c.method === "getBalance" || c.method === "getTokenAccountsByOwner" || c.method === "getMultipleAccounts";
-  const kept = calls.slice(from).filter(reads);
+  // U_X's own balance, read on the pool's pair as its follow reads it, is no W's: the namer reads it to keep a U_X that
+  // still holds a send's remainder named (card deposit-takes-each-pools-own-coin, review P1)
+  const seed64 = wordsToSeed64(entropyToWords(new Uint8Array(16).fill(0x7f)));
+  const indices = (await ns.list()).flatMap((n) => (n.ref.kind === "deposit" && n.ref.s === SCOPE ? [n.ref.i] : []));
+  const uxs = new Set(indices.map((i) => {
+    const u = depositId(seed64, SCOPE, i);
+    u.secretKey.fill(0);
+    return base58.encode(hex.decode(u.id));
+  }));
+  seed64.fill(0);
+  const kept = calls.slice(from).filter(reads).filter((c) => !(c.method === "getBalance" && c.account !== undefined && uxs.has(c.account)));
   assert.ok(kept.some((c) => c.method === "getTokenAccountsByOwner"), "the unrecorded W read through the finder");
   assert.deepEqual([...new Set(kept.map((c) => c.url))], ["https://ct-api.unrealized.trade/v1/rpc/solana"], "a kept pass and an unrecorded W: the W's reads on the helper's route only");
   // with no pass kept (a device whose passes have not run), the sell finds its Ws by their holdings, and only through
