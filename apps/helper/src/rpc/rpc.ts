@@ -374,6 +374,16 @@ export const MARKS_A_ENV = "SOLANA_RPC_URL";
 /** The one operator POST /v1/rpc/near?keyed=only sends to (operatorOf; card near-quote-under-the-pace): the signing
  *  page's other NEAR seat is dRPC, read device-direct, so this one is FastNEAR's key. */
 export const NEAR_SEAT = "fastnear.com";
+/**
+ * The most reads one caller's ?keyed=only NEAR seat takes in a UTC day (review P3-2 of e6c66cce3). Without it one
+ * caller at its share (30 a 10 s window) is 259,200 a day against FastNEAR's key's 322,580 (limits.ts KEYED_DAY), so
+ * two callers end the seat for every page until midnight. Past it the caller's 429 names RETRY_AFTER_MAX_S, which the
+ * page takes for the seat down and reads its keyless spare (packages/wallet/src/pace.ts nearSeatRpc). [design: 15,000:
+ * 300 trades a day of about 50 seat reads each (a buy 47, a session's first 53 with Rhea's pool pages:
+ * packages/signpage/test/near-seat-down.test.ts); 21 callers at it fill the key's day.]
+ */
+export const NEAR_SEAT_DAY = 15_000;
+const SEAT_DAY_MS = 86_400_000;
 /** The company each new keyed name is (card rpc-keyed-lists), whose pace it reads under (limits.ts KEYED_PACE). The
  *  existing names keep the pace they had (the chain's budget, rpc.ts createPacer). */
 export const KEYED_PROVIDER: Readonly<Record<string, KeyedProvider>> = {
@@ -640,6 +650,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
+  // each caller's ?keyed=only NEAR reads this UTC day (NEAR_SEAT_DAY), in memory as the shares are; a new day clears it
+  const seatDay = { day: -1, used: new Map<string, number>() };
+  const seatDayTake = (client: string, n: number): boolean => {
+    const d = Math.floor(now() / SEAT_DAY_MS);
+    if (d !== seatDay.day) (seatDay.day = d), seatDay.used.clear();
+    const u = seatDay.used.get(client) ?? 0;
+    if (u + n > NEAR_SEAT_DAY) return false;
+    seatDay.used.set(client, u + n);
+    return true;
+  };
   const scanPrograms: Partial<Record<RpcChain, readonly string[]>> = Object.fromEntries(Object.entries(RPC_SCAN_PROGRAM_ENV).map(([c, name]) => [c, !env[name] ? [] : c === "solana-devnet" ? env[name]!.split(",") : [env[name]!]]));
   // a keyed Solana provider's slot: its fallback is the public endpoint, on a budget of its own
   const keyed = upstreams.solana.url !== SOLANA_PUBLIC;
@@ -843,6 +863,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // only when this seat and its other, dRPC read device-direct, agree byte for byte, so this seat must be another
     // operator: never dRPC's URL or any other company's, and none of FastNEAR's set is 503
     if (keyedOnly) {
+      if (c === "near" && client !== undefined && !seatDayTake(client, methods.length)) return throttled(RETRY_AFTER_MAX_S, undefined, "near seat day");
       const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT)).map((k) => k.url);
       return own.length === 0 ? UPSTREAM() : callList(c, own, forward, methods, client, reserved, by);
     }

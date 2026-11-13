@@ -33,8 +33,14 @@ import { NEAR_NETWORKS, type NearNetwork, type NearRpc, nearRpc, RPC_TIMEOUT_MS,
  *
  * `seat`: the helper's FastNEAR seat (NEAR_NETWORKS seat, card near-quote-under-the-pace), FastNEAR's key behind the
  * helper's own pace for it (apps/helper/src/limits/limits.ts KEYED_PACE fastnear: 5 a second, 5 at once). The device
- * asks no faster, so its own reads never meet the helper's 429; another device's reads at the same moment can, and a
- * 429 there is waited out (pacedNearRpc), then the keyless seat (nearSeatRpc).
+ * asks no faster than the key, but faster than the helper's share for one caller (apps/helper/src/rpc/rpc.ts
+ * RPC_PAGE_NEED near: 30 a 10 s window), so a session's first buy meets that 429 once: its busiest 10 s asks the seat
+ * 52 times (Rhea's 6 pool pages and the buy's reads; packages/signpage/test/near-seat-down.test.ts, on the test clock),
+ * the share answers the rest 429 with the seconds left, and pacedNearRpc waits it out. Measured there (review P3-3 of
+ * e6c66cce3), the buy fills in 10.0 s with no share, 14.4 s at 5 a second with the share (1 refused), 17.0 s at 3 (1
+ * refused), 19.2 s at 2.5 (none: 5 + 25 fits 30) and 24.0 s at 2: the share's one wait costs less than any slower
+ * pace, and no share fits the 52 inside the key's own 50 a 10 s. Another device's reads at the same moment can meet the
+ * key's 429 too; past NEAR_BUSY_TRIES the keyless seat answers (nearSeatRpc).
  */
 export const PACE: Readonly<Record<"fastnear" | "drpc" | "seat", { perSec: number; burst: number }>> = Object.freeze({
   fastnear: Object.freeze({ perSec: 0.39, burst: 8 }),
@@ -99,6 +105,7 @@ export function paceHold(p: Pace, now: number, ms: number): void {
 /** Forgets every provider's pace (tests: each test's clock starts at its own zero). */
 export function resetPaces(): void {
   PACES.clear();
+  SEATS_DOWN.clear();
 }
 
 const PACED = new WeakSet<object>();
@@ -187,7 +194,8 @@ export function pacedNearRpc(url: string, fetchFn: typeof fetch = (...a) => fetc
       try {
         return await (k === 0 ? first() : paced.query(params, signal));
       } catch (e) {
-        if (!isBusy(e) || k + 1 >= NEAR_BUSY_TRIES || signal?.aborted) throw e;
+        // a provider that names a wait past NEAR_BUSY_WAIT_MAX_MS (the helper's day cap) is not waited out here
+        if (!isBusy(e) || k + 1 >= NEAR_BUSY_TRIES || signal?.aborted || (e.retryAfterMs ?? 0) > NEAR_BUSY_WAIT_MAX_MS) throw e;
         const wait = Math.min(NEAR_BUSY_WAIT_MAX_MS, Math.max(e.retryAfterMs ?? NEAR_BUSY_WAIT_MS * 2 ** k, p.every));
         paceHold(p, performance.now(), wait);
       }
@@ -224,6 +232,23 @@ const seatDown = (e: unknown): boolean => {
   return e.name === "TimeoutError" || e.name === "TypeError";
 };
 /**
+ * How long a seat that fell to its spare stays down: its reads go straight to the spare meanwhile, then the seat is
+ * asked again (review P2-1 of e6c66cce3: with nothing remembered, every read of a trade waited the seat out again, up
+ * to the 10 s deadline or four busy tries, before the spare). [design: 10 s, the helper's window (apps/helper
+ * src/limits/limits.ts LIMIT_WINDOW_MS): its per-caller 429 names at most the seconds to that window's end, so the
+ * seat is asked again once the window that refused it has turned; a trade loses at most one seat wait per 10 s.]
+ */
+export const SEAT_DOWN_MS = 10_000;
+/** The longest a busy seat's named wait keeps it down: the longest wait the helper names (apps/helper/src/limits/limits.ts
+ *  RETRY_AFTER_MAX_S, 75 s; its day cap names it), so a seat that names more is asked again no later than that. */
+export const SEAT_DOWN_MAX_MS = 75_000;
+/** Each seat's down-until time (performance.now), for the whole page as its paces are; seatsUp() clears it. */
+const SEATS_DOWN = new Map<string, number>();
+/** Forget every seat taken for down (the page's sign out, so nothing of a session outlives it; resetPaces too). */
+export function seatsUp(): void {
+  SEATS_DOWN.clear();
+}
+/**
  * The page's FastNEAR seat on `network` (card near-quote-under-the-pace): the helper's POST /v1/rpc/near?keyed=only,
  * FastNEAR's key at PACE.seat, a 429 waited out as pacedNearRpc does; past that, or with the helper down or slow
  * (seatDown), the same read on FastNEAR's keyless URL at its own pace (PACE.fastnear), so a trade never stops for the
@@ -236,21 +261,30 @@ export function nearSeatRpc(network: NearNetwork, fetchFn: typeof fetch = (...a)
   const net = NEAR_NETWORKS[network];
   const spare = pacedNearRpc(net.fastnear[0], fetchFn);
   if (net.seat === null) return spare;
-  const seat = pacedNearRpc(net.seat, fetchFn);
+  const url = net.seat;
+  const seat = pacedNearRpc(url, fetchFn);
+  const down = () => (SEATS_DOWN.get(url) ?? -Infinity) > performance.now();
   const or = async (read: () => Promise<unknown>, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
     try {
       return await read();
     } catch (e) {
       if (signal?.aborted || !seatDown(e)) throw e;
+      // down SEAT_DOWN_MS, or as long as a busy seat names up to SEAT_DOWN_MAX_MS (the helper's day cap)
+      const named = isBusy(e) ? Math.min(SEAT_DOWN_MAX_MS, e.retryAfterMs ?? 0) : 0;
+      SEATS_DOWN.set(url, performance.now() + Math.max(SEAT_DOWN_MS, named));
       return spare.query(params, signal);
     }
   };
   const rpc: NearRpc = {
-    name: net.seat,
-    query: (params, signal) => or(() => seat.query(params, signal), params, signal),
+    name: url,
+    query: (params, signal) => (down() ? spare.query(params, signal) : or(() => seat.query(params, signal), params, signal)),
     async reserve(signal) {
+      if (down()) {
+        const first = await spare.reserve!(signal);
+        return { name: url, query: (params, s) => first.query(params, s) };
+      }
       const first = await seat.reserve!(signal);
-      return { name: net.seat!, query: (params, s) => or(() => first.query(params, s), params, s) };
+      return { name: url, query: (params, s) => or(() => first.query(params, s), params, s) };
     },
   };
   return rpc;

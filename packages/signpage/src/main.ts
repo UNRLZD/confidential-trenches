@@ -96,7 +96,7 @@ import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
 import { nearBuyKind, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
 import { rheaPoolsKept } from "./near-pools.ts";
-import { nearSeatRpc, pacedNearRpc } from "../../wallet/src/pace.ts";
+import { nearSeatRpc, pacedNearRpc, seatsUp } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
@@ -814,6 +814,8 @@ const open = async (): Promise<WalletStore> => {
       void testnet?.signedOut();
       restore?.signedOut();
       follows?.signedOut();
+      // a NEAR seat taken for down is this session's: the next one asks it again
+      seatsUp();
       poolFollow?.stop();
       show("signed-out");
     },
@@ -858,6 +860,7 @@ function storeMoved(e: WalletEvent): void {
   if (e.kind === "signout") {
     void testnet?.signedOut();
     withdrawsSignedOut();
+    seatsUp();
   }
   void resync();
 }
@@ -1092,6 +1095,7 @@ async function signOut(): Promise<void> {
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;
+  seatsUp();
   // after the store signed out: a deposit that landed while it waited cannot open the queue again (no seed)
   await testnet?.signedOut();
   show("signed-out");

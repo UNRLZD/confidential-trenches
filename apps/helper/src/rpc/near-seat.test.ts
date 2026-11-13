@@ -93,3 +93,34 @@ test("T3: one page's busiest 10 s on the near seat: 30 reads from one address an
   assert.ok(asked.every((u) => u === FASTNEAR));
   assert.equal(NEED.near, 30, "RPC_PAGE_NEED names near's share");
 });
+
+test("T4: one caller's ?keyed=only NEAR reads in a UTC day stop at NEAR_SEAT_DAY: past it 429 rate_limited naming RETRY_AFTER_MAX_S with no send; another caller is answered; the next UTC day the first is again (review P3-2)", async () => {
+  const DAY = (rpcModule as unknown as { NEAR_SEAT_DAY?: number }).NEAR_SEAT_DAY ?? 15_000;
+  const { asked, c, keyedOnly } = rig({ NEAR_RPC_URL_FASTNEAR: FASTNEAR }, false);
+  // the day's start, then reads well inside the share (5 every 10 s, 2 s apart) and FastNEAR's pace
+  c.t = Math.ceil(c.t / 86_400_000) * 86_400_000;
+  let ok = 0;
+  let last;
+  for (let i = 0; i < DAY + 1; i++) {
+    last = await keyedOnly({ ...QUERY, id: i + 1 });
+    if (last.status !== 200) break;
+    ok++;
+    c.t += 2_000;
+  }
+  assert.equal(ok, DAY, `answered ${ok} of the day's ${DAY}`);
+  assert.ok(c.t < Math.ceil((c.t + 1) / 86_400_000) * 86_400_000, "all inside one UTC day");
+  assert.equal(last!.status, 429, last!.body);
+  assert.deepEqual(JSON.parse(last!.body), { error: { code: "rate_limited" } });
+  assert.equal(last!.headers?.["Retry-After"], "75");
+  assert.equal(asked.length, DAY, "the refused read reached no provider");
+  assert.equal((await keyedOnly(QUERY, "198.51.100.8")).status, 200, "another caller is answered");
+  c.t = Math.ceil(c.t / 86_400_000) * 86_400_000 + 1;
+  assert.equal((await keyedOnly(QUERY)).status, 200, "a new UTC day");
+});
+
+test("T5: FastNEAR's keyless URL set under the keyed name (no key in it): ?keyed=only answers 503 upstream and sends nothing (review P3-5)", async () => {
+  const { asked, keyedOnly } = rig({ NEAR_RPC_URL_FASTNEAR: "https://rpc.mainnet.fastnear.com", NEAR_RPC_URL_B: DRPC_KEYED }, false);
+  const a = await keyedOnly(QUERY);
+  assert.equal(a.status, 503, a.body);
+  assert.deepEqual(asked, []);
+});
