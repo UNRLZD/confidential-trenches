@@ -441,6 +441,8 @@ export type SolanaPoolSenderDeps = {
  *  blockhash (150 blocks at about 400 ms), at this pace (about two slots). */
 export const POOL_LANDED_READ_MS = 60_000;
 export const LANDED_READ_PACE_MS = 800;
+/** The reads after a buy's tag 2s landed: at `minSlot` or later, asked again until `until` (ms). */
+type Landed = { minSlot: number; until: number };
 
 /** A failed start rent read is logged the first time, then at most once per this long while the reads keep failing. */
 export const POOL_START_LOG_MS = 60_000;
@@ -579,20 +581,26 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   // a buy's pieces (carryPieces): each piece's entry in once names its carry's run and nullifiers, so a repeat of the
   // same set is told from a piece another carry holds
   const bundleOf = new WeakMap<Promise<PoolSendAnswer>, { run: Promise<PoolPiecesAnswer>; key: string }>();
-  // a read after a buy's tag 2s landed (sendPieces): asked again while their blockhash lives and before the release's
-  // deadline, about two slots apart
+  // a read after a buy's tag 2s landed (sendPieces), `after`: asked again about two slots apart until `after.until`
+  // (the carry's arrival plus a blockhash's life, never past a release's deadline); without it, read once
   const pause = deps.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref?.()));
-  async function landedRead<T>(retry: boolean, deadlineMs: number, read: () => Promise<T>): Promise<T> {
-    const until = Math.min(now() + POOL_LANDED_READ_MS, deadlineMs);
+  async function landedRead<T>(after: Landed | undefined, read: () => Promise<T>): Promise<T> {
     for (let n = 1; ; n++) {
       try {
         return await read();
       } catch (e) {
-        if (!retry || n >= POOL_LANDED_READ_MS / LANDED_READ_PACE_MS || now() + LANDED_READ_PACE_MS > until) throw e;
+        if (after === undefined || n >= POOL_LANDED_READ_MS / LANDED_READ_PACE_MS || now() + LANDED_READ_PACE_MS > after.until) throw e;
         await pause(LANDED_READ_PACE_MS);
       }
     }
   }
+  /** `r`, an answer read at `after.minSlot` or later: one from a provider that ignored minContextSlot and answered from
+   *  an older slot throws, so landedRead asks again. */
+  const atLanded = <T>(after: Landed | undefined, r: T): T => {
+    const slot = (r as { context?: { slot?: unknown } } | null)?.context?.slot;
+    if (after !== undefined && !(Number.isSafeInteger(slot) && (slot as number) >= after.minSlot)) throw new Error(`a read at slot ${String(slot)}, before ${after.minSlot}`);
+    return r;
+  };
   const bounded = <V>(m: Map<string, V>, k: string, v: V) => {
     m.delete(k);
     m.set(k, v);
@@ -681,16 +689,19 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   }
   /** A message that loads keys: its tables on both providers, then the pool and inner programs they resolve to; null
    *  when it loads none or they pass. */
-  async function tablesRefusal(tx: SolanaPoolChecked): Promise<PoolSendError | null> {
+  async function tablesRefusal(tx: SolanaPoolChecked, after?: Landed): Promise<PoolSendError | null> {
     if (tx.message.lookups.length === 0) return null;
     const tables: Record<string, readonly [SolanaLookupTable | null, SolanaLookupTable | null]> = {};
+    const at = after === undefined ? {} : { minContextSlot: after.minSlot };
     try {
-      await Promise.all(
-        tx.message.lookups.map(async (l) => {
-          const read = (rpc: SolanaRpc) => rpc("getAccountInfo", [l.table, { encoding: "base64", commitment: "processed" }]);
-          const [x, y] = await Promise.all([read(a), read(b)]);
-          tables[l.table] = [tableOf(x), tableOf(y)];
-        }),
+      await landedRead(after, () =>
+        Promise.all(
+          tx.message.lookups.map(async (l) => {
+            const read = async (rpc: SolanaRpc) => atLanded(after, await rpc("getAccountInfo", [l.table, { encoding: "base64", commitment: "processed", ...at }]));
+            const [x, y] = await Promise.all([read(a), read(b)]);
+            tables[l.table] = [tableOf(x), tableOf(y)];
+          }),
+        ),
       );
     } catch (e) {
       return unread(e);
@@ -699,22 +710,23 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     return k.ok ? null : no(422, k.code, k.detail);
   }
   /** `after`: the tag 3 of a buy of several pieces, sent once its tag 2s landed at `minSlot` at the latest (sendPieces):
-   *  its reads ask a provider at or past that slot, and one that fails (a throttle, a provider down, one behind it) is
-   *  asked again at LANDED_READ_PACE_MS while the blockhash lives, since the tag 2s' money is already in W. */
-  async function simulateSignSend(raw: string, tx: SolanaPoolChecked, queueMaxMs?: number, after?: { minSlot: number }): Promise<PoolSendAnswer> {
+   *  its reads (its tables again, its simulation, the blockhash height) ask a provider at or past that slot, and one
+   *  that fails (a throttle, a provider down, one behind it) is asked again at LANDED_READ_PACE_MS until `until`, since
+   *  the tag 2s' money is already in W. */
+  async function simulateSignSend(raw: string, tx: SolanaPoolChecked, queueMaxMs?: number, after?: Landed): Promise<PoolSendAnswer> {
       const arrived = now();
       // the simulation of W's bytes as received (slot 0 empty, so no signature check), on its own blockhash; and the
       // newest blockhash's last valid height, which bounds how long the sender rebroadcasts (W's is no newer)
       // a message that loads keys: its tables on both providers first, then the pool and inner programs they resolve to
-      const t = await tablesRefusal(tx);
+      const t = await tablesRefusal(tx, after);
       if (t !== null) return t;
       let sim: unknown;
       let height: number;
       const at = after === undefined ? {} : { minContextSlot: after.minSlot };
       try {
-        const [s, h] = await landedRead(after !== undefined, Number(tx.deadlineMs), () =>
+        const [s, h] = await landedRead(after, async () =>
           Promise.all([
-            a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", ...at }]),
+            atLanded(after, await a("simulateTransaction", [raw, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", ...at }])),
             a("getLatestBlockhash", [{ commitment: "processed", ...at }]),
           ]),
         );
@@ -974,6 +986,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   /** The reads, the signatures and the send of checked pieces, one way on every cluster (card owners-solana-buy-lands):
    *  the tag 2s plain, each filled on both providers, then the tag 3 as the one-piece route sends it. */
   async function sendPieces(raws: readonly string[], txs: readonly SolanaPoolChecked[], queueMaxMs: number | undefined): Promise<PoolPiecesAnswer> {
+    const arrived = now();
     for (const tx of txs) {
       const t = await tablesRefusal(tx);
       if (t !== null) return t;
@@ -1022,8 +1035,12 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     const sigs = signed.map((w) => base58(w.subarray(1, 65)));
     /** A tag 2 sent plain and read on both providers: null when it filled, else its answer: 422 only for a failure on
      *  chain while no other piece landed. */
-    // the newest slot a tag 2 landed at, as provider a read it: every read after them asks for that slot at least
+    // the newest slot a tag 2 landed at, as provider a read it: every read after them asks for that slot at least, until
+    // the carry's arrival plus a blockhash's life (W signed every piece on one blockhash just before it asked), never past
+    // a piece's deadline
     let landedSlot = 0;
+    const until = Math.min(arrived + POOL_LANDED_READ_MS, ...txs.map((t) => Number(t.deadlineMs)));
+    const landed = (): Landed => ({ minSlot: landedSlot, until });
     const one = async (i: number): Promise<PoolPiecesAnswer | null> => {
       let state: string | undefined;
       let slot: number | undefined;
@@ -1072,7 +1089,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       // pieces already on chain
       let r: PoolPiecesAnswer | null;
       try {
-        r = refusalOf(await landedRead(true, Number(txs[i]!.deadlineMs), () => a("simulateTransaction", [raws[i]!, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", minContextSlot: landedSlot }])));
+        const at = landed();
+        r = refusalOf(await landedRead(at, async () => atLanded(at, await a("simulateTransaction", [raws[i]!, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "processed", minContextSlot: at.minSlot }]))));
       } catch {
         r = no(503, "upstream");
       }
@@ -1084,7 +1102,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     // left, at their slot or later, the tip it carries, on mainnet the bundle beside the plain copy, its end read),
     // under this carry's entry
     if (entry3 === undefined || once.get(nf3) !== entry3) return afterLanded({ ...no(503, "not_landed"), note: { tag: 3, end: "unknown" } });
-    const r3 = await simulateSignSend(raws[last]!, txs[last]!, queueMaxMs, { minSlot: landedSlot });
+    const r3 = await simulateSignSend(raws[last]!, txs[last]!, queueMaxMs, landed());
     const ix3 = poolIxOf(txs[last]!.wire);
     const note: PoolSendNote = { tag: 3, ...(ix3 === null ? {} : tipNote(ix3)), ...r3.note };
     if ("signature" in r3.body) return { status: r3.status, body: { signatures: [...sigs, r3.body.signature] }, note };

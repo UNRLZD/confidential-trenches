@@ -7,11 +7,13 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
+  SOLANA_ALT_PROGRAM,
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_POOL_BUY_PIECES_MAX,
   SOLANA_POOL_PAGE_ENTRIES,
   solanaCompileV0,
+  solanaDecodeLookupTable,
   solanaEncodePoolRelease,
   solanaEncodePoolTag3,
   solanaPoolAccount,
@@ -39,6 +41,23 @@ const POOL = solanaPoolAccount(PROGRAM);
 const TIP_TO = testKey("TIP_TO").address;
 const TO = testKey("TO").address;
 const BLOCKHASH = testKey("BLOCKHASH").address;
+// a lookup table holding TO, as every pool tag 3 loads keys from the pool's table (kit pool-buy.ts, [chain.table])
+const TABLE = testKey("TABLE").address;
+const tableData = (keys: string[]): Uint8Array => {
+  const meta = new Uint8Array(56);
+  const dv = new DataView(meta.buffer);
+  dv.setUint32(0, 1, true);
+  dv.setBigUint64(4, (1n << 64n) - 1n, true);
+  return Uint8Array.from([...meta, ...keys.flatMap((k) => [...base58Bytes(k)])]);
+};
+const base58Bytes = (s: string): Uint8Array => {
+  const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n = 0n;
+  for (const c of s) n = n * 58n + BigInt(B58.indexOf(c));
+  const out = new Uint8Array(32);
+  for (let i = 31; i >= 0; i--, n >>= 8n) out[i] = Number(n & 0xffn);
+  return out;
+};
 const FEE = 2_000_000n;
 const TEST_RENT: SolanaRent = { lamportsPerByte: 8_400n, factor: 1n };
 const NOW = 1_800_000_000_000;
@@ -82,14 +101,18 @@ const b64 = (w: Uint8Array) => Buffer.from(w).toString("base64");
 
 type Calls = { method: string; params: readonly unknown[] }[];
 /** `fail`: a call this answers with a throw (a provider's 429, say) instead of its answer. */
-function rpcStub(calls: Calls = [], simErr: unknown = null, fail?: (method: string, params: readonly unknown[]) => Error | null): SolanaRpc {
+/** `stale`: a call this answers from slot 1, as a provider that ignores minContextSlot. */
+function rpcStub(calls: Calls = [], simErr: unknown = null, fail?: (method: string, params: readonly unknown[]) => Error | null, stale?: (method: string, params: readonly unknown[]) => boolean): SolanaRpc {
   return Object.assign(
     async (method: string, params: readonly unknown[]) => {
       calls.push({ method, params });
       const e = fail?.(method, params);
       if (e) throw e;
-      if (method === "simulateTransaction") return { context: { slot: 1 }, value: { err: typeof simErr === "function" ? (simErr as (raw: unknown) => unknown)(params[0]) : simErr, logs: [] } };
-      if (method === "getLatestBlockhash") return { context: { slot: 1 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1000 } };
+      // a provider that honours minContextSlot answers at that slot at least
+      const slot = stale?.(method, params) ? 1 : Math.max(1, (params[params.length - 1] as { minContextSlot?: number } | undefined)?.minContextSlot ?? 1);
+      if (method === "simulateTransaction") return { context: { slot }, value: { err: typeof simErr === "function" ? (simErr as (raw: unknown) => unknown)(params[0]) : simErr, logs: [] } };
+      if (method === "getLatestBlockhash") return { context: { slot }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1000 } };
+      if (method === "getAccountInfo" && params[0] === TABLE) return { context: { slot }, value: { owner: SOLANA_ALT_PROGRAM, data: [Buffer.from(tableData([TO])).toString("base64"), "base64"] } };
       throw new Error(`unexpected ${method}`);
     },
     { url: `https://stub.invalid/${Math.random()}` },
@@ -131,7 +154,8 @@ type Set = { wires: Uint8Array[]; paths: string[] };
 type EngineCall = { url: string; method: string; params: unknown[] };
 /** A sender on `cluster` whose kit sender records each set and, for a set with a block engine path, drives it twice
  *  (the first send, then one rebroadcast) before the set's end `end` gives. */
-function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<string>; result?: unknown; simErr?: unknown; fail?: (method: string, params: readonly unknown[]) => Error | null } = {}) {
+/** `clock`: the sender's now, moved by each pause (and by the test); NOW when absent. */
+function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<string>; result?: unknown; simErr?: unknown; fail?: (method: string, params: readonly unknown[]) => Error | null; stale?: (method: string, params: readonly unknown[]) => boolean; clock?: { t: number } } = {}) {
   const calls: Calls = [];
   const sets: Set[] = [];
   const pauses: number[] = [];
@@ -152,12 +176,15 @@ function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<st
         })
       : null;
   const deps: SolanaPoolSenderDeps = {
-    providers: [rpcStub(calls, o.simErr, o.fail), rpcStub(calls)],
-    now: () => NOW,
+    providers: [rpcStub(calls, o.simErr, o.fail, o.stale), rpcStub(calls)],
+    now: () => o.clock?.t ?? NOW,
     readRent: async () => TEST_RENT,
     log: () => {},
     jito,
-    pause: async (ms) => void pauses.push(ms),
+    pause: async (ms) => {
+      pauses.push(ms);
+      if (o.clock) o.clock.t += ms;
+    },
     // the log line's timed reads never come before the send ends
     wait: (_ms, signal) => new Promise<boolean>((r) => (signal.aborted ? r(false) : signal.addEventListener("abort", () => r(false), { once: true }))),
     send: (set, opts) => {
@@ -474,4 +501,83 @@ test("RED at ed9ec97a: a tag 2 whose end the providers did not agree on is held 
   const again = await r.s.carryPieces(bodyOf(ws));
   assert.deepEqual([again.status, code(again)], [503, "not_landed"]);
   assert.equal(r.sets.length, 1);
+});
+
+// ---- delta review FIX of 0b30d8a2 (card owners-solana-buy-lands) ----
+
+/** A tag 3 that loads TO from TABLE, as every pool tag 3 does. */
+function tag3Loaded(nullifier: number): Uint8Array {
+  const r = release(nullifier);
+  const accounts = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, r, 6);
+  accounts.push({ key: SOLANA_JITO_TIP_ACCOUNTS[0]!, signer: false, writable: true }, { key: TO, signer: false, writable: true });
+  const data = solanaEncodePoolTag3(r, false, 10_000n, [{ program: 7, accounts: [1, 9], data: Uint8Array.from([2, 0, 0, 0, ...u64(1_000_000n)]) }]);
+  const tables = [{ address: TABLE, table: solanaDecodeLookupTable(tableData([TO])) }];
+  const { message } = solanaCompileV0(FP.address, [cuLimit(400_000), cuPrice(1_000n), { program: PROGRAM, accounts, data }], BLOCKHASH, tables, [FP.address, W.address]);
+  return Uint8Array.from([2, ...new Uint8Array(64), ...ed25519.sign(message, W.seed), ...message]);
+}
+const tableReadsOf = (calls: Calls) => calls.filter((c) => c.method === "getAccountInfo" && c.params[0] === TABLE);
+
+test("RED at 0b30d8a2: the tag 3's table read again after the tag 2s landed asks at their slot, and a throttle on it is asked again instead of dropping the buy", async () => {
+  for (const cluster of ["mainnet", "devnet"] as const) {
+    const ws = [piece({ tag: 2, nullifier: 2 }), tag3Loaded(3)];
+    let n = 0;
+    // provider a: the read before anything is sent passes, the read after the tag 2 landed is throttled once
+    const r = rig(cluster, { fail: (m, p) => (m === "getAccountInfo" && p[0] === TABLE && n++ === 1 ? throttle() : null) });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.equal(a.status, 200, `${cluster}: ${JSON.stringify(a.body)}`);
+    assert.equal(r.sets.length, 2, cluster);
+    assert.deepEqual(r.pauses, [LANDED_READ_PACE_MS], cluster);
+    const reads = tableReadsOf(r.calls);
+    // before the send: both providers, no slot; after the tag 2 landed at 100: provider a twice, provider b once, at 100
+    assert.equal(reads.filter((c) => (c.params[1] as { minContextSlot?: number }).minContextSlot === undefined).length, 2, cluster);
+    assert.deepEqual(reads.filter((c) => (c.params[1] as { minContextSlot?: number }).minContextSlot !== undefined).map((c) => (c.params[1] as { minContextSlot: number }).minContextSlot), [100, 100, 100, 100], cluster);
+  }
+});
+
+test("RED at 0b30d8a2: a provider that ignores minContextSlot and answers the tag 3's simulation from before the tag 2s landed is asked again; its answer never decides", async () => {
+  for (const cluster of ["mainnet", "devnet"] as const) {
+    const ws = two();
+    let n = 0;
+    // provider a's first simulation of the tag 3 answers from slot 1 (minContextSlot ignored), refusing it as the state
+    // before the tag 2 would; asked again, it answers at the slot asked and passes
+    const first = (m: string, p: readonly unknown[]) => m === "simulateTransaction" && p[0] === b64(ws[1]!) && n++ === 0;
+    const r = rig(cluster, { stale: first, simErr: (raw: unknown) => (raw === b64(ws[1]!) && n === 1 ? { InstructionError: [2, { Custom: 1 }] } : null) });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.equal(a.status, 200, `${cluster}: ${JSON.stringify(a.body)}`);
+    assert.equal(r.sets.length, 2, cluster);
+    assert.deepEqual(r.pauses, [LANDED_READ_PACE_MS], cluster);
+  }
+});
+
+test("the reads after the tag 2s landed stop at the carry's arrival plus a blockhash's life, and never past a piece's deadline, on a moving clock", async () => {
+  // a provider that keeps failing: asked again until arrival + POOL_LANDED_READ_MS
+  {
+    const ws = two();
+    const clock = { t: NOW };
+    const r = rig("mainnet", { clock, fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null) });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.deepEqual([a.status, a.body], [503, { error: { code: "not_landed", detail: "rate_limited" } }]);
+    assert.ok(clock.t <= NOW + POOL_LANDED_READ_MS, `${clock.t - NOW} ms`);
+    // the count cap (POOL_LANDED_READ_MS / LANDED_READ_PACE_MS asks) ends it within one pace of the window's end
+    assert.ok(clock.t + 2 * LANDED_READ_PACE_MS > NOW + POOL_LANDED_READ_MS, `${clock.t - NOW} ms`);
+  }
+  // the window runs from the carry's arrival, not from each read: a tag 2 that took 50 s to land leaves 10 s of asks, and
+  // one that took past the window leaves none (a piece's deadline is at least SOLANA_POOL_SEND_MARGIN_MS, 90 s, past
+  // the arrival, so the window always ends first; the cap on it holds that if the margin ever shrinks)
+  for (const [took, asks] of [[50_000, 12], [250_000, 0]] as const) {
+    const ws = two();
+    const clock = { t: NOW };
+    const r = rig("mainnet", {
+      clock,
+      end: async (n) => {
+        if (n === 0) clock.t = NOW + took;
+        return "filled";
+      },
+      fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null),
+    });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.deepEqual([a.status, code(a)], [503, "not_landed"], String(took));
+    assert.equal(r.pauses.length, asks, String(took));
+    assert.ok(clock.t <= Math.max(NOW + took, NOW + POOL_LANDED_READ_MS), String(took));
+  }
 });

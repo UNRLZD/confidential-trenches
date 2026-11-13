@@ -774,8 +774,9 @@ if (SCENARIO === "tag3-fail") {
   out.front = front;
   const W = b.W;
   if (!W) finish(false, "no owed record names W");
-  // the terminal's one state read after a pool.buy answer (packages/kit/src/signpage/client.ts REASK_STATE), as a
-  // page that stays open gets it; nothing else asks this page again
+  // the state read an open page makes after the buy changed its store: in production the page's watchers push one
+  // (src/api.ts host.watch, a read per batch of changes; the kit's client.ts REASK_STATE asks only on a pool.buy timeout);
+  // this script has no watcher, so it reads once here, as that push does
   if (AFTER === "stay") await A.t.stateRead();
   const t0 = Date.now();
   let p = A;
