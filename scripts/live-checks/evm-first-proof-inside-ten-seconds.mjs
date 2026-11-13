@@ -6,8 +6,9 @@
 // "first leaf" step: readyMsAfterDeposit, hostWindowMax, deployPages); this check holds that SIGN_HOST serves the code
 // those copies ran. It passes only when SIGN_HOST's served /app.js is the one its index.html pins (its sha384), and in
 // it, as minified, each exactly once and bound to one another:
-//   - landed (packages/signpage/src/pool-testnet.ts evmKind's landed): the notes one round claims start one pass in a
-//     tick (queueMicrotask), and that pass is asked as the landing's (evmProofs(chain, true)); nothing else asks one;
+//   - landed (packages/signpage/src/pool-testnet.ts evmLanded, the one landing hook of the deposit host and the carry's):
+//     the notes one round claims start one pass in a tick (queueMicrotask), and that pass is asked as the landing's
+//     (evmProofs(chain, true)); every EVM landed is that hook, and nothing else asks a landing's pass;
 //   - proofs (evmProofs): only a landing's pass hands the queue a signal from `landing`, every other pass none;
 //   - lanes (openEvmQueue): the queue's pool reads its time, trees and binding on the deposit's own pool (the chain's
 //     pair, the trade lane) only for a signal `landing` made (a WeakSet), and on the pass pool (the pass pair and its
@@ -41,8 +42,13 @@ const count = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length;
 const once = (re, js) => count(re, js) === 1;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
-/** evmKind's landed: `landed:()=>{R.has(t)||(R.add(t),queueMicrotask(()=>{R.delete(t),F(t,!0)}))}`. */
-const LANDED = new RegExp(`landed:\\(\\)=>\\{(${N})\\.has\\((${N})\\)\\|\\|\\(\\1\\.add\\(\\2\\),queueMicrotask\\(\\(\\)=>\\{\\1\\.delete\\(\\2\\),(${N})\\(\\2,!0\\)\\}\\)\\)\\}`);
+/** evmLanded, a chain's one landing hook: `L=e=>()=>{R.has(e)||(R.add(e),queueMicrotask(()=>{R.delete(e),F(e,!0)}))}`
+ *  (group 1 L, group 4 F, evmProofs), each EVM host's landed `landed:L(t)`. */
+const LANDED = new RegExp(`[,;{ ](${N})=(${N})=>\\(\\)=>\\{(${N})\\.has\\(\\2\\)\\|\\|\\(\\3\\.add\\(\\2\\),queueMicrotask\\(\\(\\)=>\\{\\3\\.delete\\(\\2\\),(${N})\\(\\2,!0\\)\\}\\)\\)\\}`);
+const LANDED_USE = (l) => new RegExp(`landed:${esc(l)}\\(${N}\\)`);
+/** A landing's pass asked anywhere (evmProofs with `!0`): evmLanded's alone may ask one, so a second hook (an inline copy
+ *  of it, a pass asked as the landing's elsewhere) fails. */
+const LANDING_ASK = (f) => new RegExp(`[^\\w$.]${esc(f)}\\(${N},!0\\)`);
 /** Any landed of an EVM kind that starts a pass some other way (the shape before this card: `landed:()=>void F(t)`). */
 const LANDED_ANY = new RegExp(`landed:\\(\\)=>void ${N}\\(${N}\\)`);
 /** evmProofs: `F=async(e,t=!1)=>{...let r=await n,i=await r.queue.refresh(t?r.landing?.():void 0);`. */
@@ -96,7 +102,7 @@ const POOL_OF = (warm, pool) => new RegExp(`evmPoolOf:(${N})=>\\((${N})=>\\2===n
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, and each part found exactly once and bound. */
 export function pageFacts(index, js) {
   const landed = once(LANDED, js) ? LANDED.exec(js) : null;
-  const proofs = landed !== null && proofsOf(landed[3], js);
+  const proofs = landed !== null && proofsOf(landed[4], js);
   const pass = once(PASS_POOL, js) ? PASS_POOL.exec(js) : null;
   const trade = pass !== null && once(TRADE_POOL(pass[3], pass[4], pass[2], pass[5]), js) ? TRADE_POOL(pass[3], pass[4], pass[2], pass[5]).exec(js) : null;
   const routed = trade !== null && once(ROUTED(trade[1]), js) ? ROUTED(trade[1]).exec(js) : null;
@@ -105,7 +111,7 @@ export function pageFacts(index, js) {
   return {
     pin: /src="\/app\.js" integrity="([^"]+)"/.exec(index)?.[1] ?? null,
     sha384: sha384(js),
-    landed: landed !== null && count(LANDED_ANY, js) === 0,
+    landed: landed !== null && count(LANDED_USE(landed[1]), js) >= 1 && count(LANDED_ANY, js) === 0 && once(LANDING_ASK(landed[4]), js),
     proofs: proofs && [...js.matchAll(REFRESH_ARG)].length === 1,
     lanes: routed !== null && once(ROUTED_POOL(trade[1], routed[2]), js) && landing !== null && once(HANDED(trade[1], landing[1]), js),
     warm: warm !== null && once(POOL_OF(warm[1], warm[4]), js),

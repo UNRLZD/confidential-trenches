@@ -1,0 +1,24 @@
+{
+ "key": "evm-deposit-ready-in-ten-seconds",
+ "note": "Two real runs from the Mac (--record), none edited: good = --local, this card build (500f0eaff) in SIGN_HOST place; bad_live_before = SIGN_HOST as served before this card, its app.js pin as recorded.",
+ "good": {
+  "readAt": "2026-11-13T16:17:30.683Z",
+  "from": "local build",
+  "page": {
+   "pin": "sha384-KeadjFF5/BdYiu146/ufRi984dyn1c599R5xyKlNBQ4rEw/v1u0yUibTqIyId19L",
+   "sha384": "sha384-KeadjFF5/BdYiu146/ufRi984dyn1c599R5xyKlNBQ4rEw/v1u0yUibTqIyId19L",
+   "first": true,
+   "guard": true
+  }
+ },
+ "bad_live_before": {
+  "readAt": "2026-11-13T16:17:33.886Z",
+  "from": "https://confidential.unrealized.trade",
+  "page": {
+   "pin": "sha384-NymveXcBzoY560CH1iafqdHEyou/EhbkawVN/gtvh/pRFYUb3IuX4t27Q4Rrcrdd",
+   "sha384": "sha384-NymveXcBzoY560CH1iafqdHEyou/EhbkawVN/gtvh/pRFYUb3IuX4t27Q4Rrcrdd",
+   "first": false,
+   "guard": true
+  }
+ }
+}

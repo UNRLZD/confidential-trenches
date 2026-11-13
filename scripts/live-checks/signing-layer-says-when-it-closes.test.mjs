@@ -30,6 +30,17 @@ test("recorded good answer: this card's build tells a kit 1.13 app once, after i
   assert.deepEqual([ANSWERS.good.level, ANSWERS.good.fresh, ANSWERS.good.tied, ANSWERS.good.layer], [true, true, true, true]);
 });
 
+test("recorded good answer goodKit114 (card solana-buy-preview-complete's build, kit 1.14): the notice at the current level or kit-v1.13's, the two that read it: PASS", () => {
+  const g = ANSWERS.goodKit114;
+  assert.deepEqual(judge(g).lines, []);
+  assert.match(g.notice, /!==`current`&&[\w$]+!==`1\.13`\|\|/);
+  assert.notEqual(g.sha384, ANSWERS.good.sha384, "another build");
+  // the 1.14 shape with any other second level is no notice a kit-v1.13 app reads
+  const js = (n) => `closed:e=>{!i||r!==\`current\`&&r!==\`${n}\`||o({v:1,type:\`closed\`,id:e})}`;
+  assert.notEqual(facts(g.index, js("1.13")).notice, null);
+  for (const n of ["1.12", "1.14", "current"]) assert.equal(facts(g.index, js(n)).notice, null, n);
+});
+
 for (const [k, lines] of [
   ["bad", [NOTICE, TIMER, OPEN, CLOSE, TOLD, RUN, OPENS(0, 2)]],
   ["badBeforeReview", [NOTICE, TIMER, CLOSE, TOLD, RUN]],

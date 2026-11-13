@@ -1,20 +1,22 @@
 // node --test scripts/live-checks/signpage-evm-pool-buy.test.mjs: the live check replays recorded runs
 // (signpage-evm-pool-buy.answers.json). good: the card's two buys read back on both pool RPCs of their chains, the
-// helper's send route refusing a malformed buy from SIGN_HOST, and SIGN_HOST's mainnet bundle with no EVM buy: PASS.
+// helper's send route refusing a malformed buy from SIGN_HOST, and SIGN_HOST's mainnet bundle with the EVM buy beside its
+// carry and no testnet pool: PASS.
 // bad_deposits: the run's two deposits named as buys: FAIL. bad_testnet_page: the testnet build served on SIGN_HOST:
 // FAIL. Made from the good run: a buy read back on one RPC only, a reverted receipt, a receipt with no Bought, another
 // block, another pool, a helper that sends a malformed buy, a CORS echo of "*", one testnet missing, a bundle that is
 // not the pinned one: each FAIL.
 // Card evm-pools-on-mainnet: the good and bad_testnet_page answers' page parts are re-made from a local mainnet build (and the testnet
 // build for a testnet page) of that card, which pins both EVM pools and keeps the kind closed there; re-recorded from
-// SIGN_HOST at the next sign deploy.
+// SIGN_HOST at the next sign deploy. Change evm-buy-and-sell-on-mainnet re-made both page parts from its builds (the buy
+// opens on mainnet beside its carry), and plants the bundle before it (no buy) and a buy with no carry: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { RETRY } from "./provider-answer.mjs";
-import { BOUGHT, EVM_BUY_MARKS, HELPER, PINS_OF, SIGN, judge, pageFacts, read, txsOf } from "./signpage-evm-pool-buy.mjs";
+import { BOUGHT, EVM_BUY_MARKS, HELPER, PINS_OF, SIGN, TESTNET_POOL_MARKS, judge, pageFacts, read, txsOf } from "./signpage-evm-pool-buy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 RETRY.ms = 0;
@@ -74,7 +76,7 @@ test("recorded bad run: the run's deposits named as buys: FAIL", async () => {
 test("recorded bad run: the testnet build, the EVM buy in it, served on SIGN_HOST: FAIL", async () => {
   const r = await run(A.bad_testnet_page);
   assert.equal(r.ok, false);
-  assert.deepEqual(bad(r), [`BAD [SIGN_HOST] the mainnet build carries no EVM buy (closed on mainnet: refused before any read): ${EVM_BUY_MARKS.join(", ")}`]);
+  assert.deepEqual(bad(r), [`BAD [SIGN_HOST] the mainnet build carries the EVM buy beside its carry and no testnet pool: buy ${EVM_BUY_MARKS.join(", ")}; testnet ${A.bad_testnet_page.page.testnet.join(", ")}`]);
 });
 
 test("made from the good run: each break FAILs", async () => {
@@ -91,6 +93,9 @@ test("made from the good run: each break FAILs", async () => {
     "CORS *": { ...A.good, sends: A.good.sends.map((s) => ({ ...s, headers: { "access-control-allow-origin": "*" } })) },
     "one testnet": { ...A.good, txs: A.good.txs.slice(0, 1) },
     "not the pinned bundle": { ...A.good, page: { ...A.good.page, sha384: "sha384-other" } },
+    "the bundle before the buy opened": { ...A.good, page: { ...A.good.page, marks: [] } },
+    "a buy with no carry": { ...A.good, page: { ...A.good.page, marks: ["uniswap-v4"] } },
+    "a testnet pool": { ...A.good, page: { ...A.good.page, testnet: [TESTNET_POOL_MARKS[0]] } },
     "page not read": { ...A.good, page: undefined },
   };
   for (const [name, rec] of Object.entries(cases)) {

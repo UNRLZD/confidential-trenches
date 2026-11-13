@@ -2,11 +2,11 @@
  "key": "evm-first-proof-inside-ten-seconds",
  "recorded": "2026-11-13T06:47:42.474Z",
  "good": {
-  "readAt": "2026-11-13T10:05:00.142Z",
+  "readAt": "2026-11-13T15:05:52.877Z",
   "from": "local build",
   "page": {
-   "pin": "sha384-xVXyZoWtZ+9Mm/vt48H10GgdsZ8RHSSxLKY706Cz84sdv6cJXDWAvJ9zT2HLYzHJ",
-   "sha384": "sha384-xVXyZoWtZ+9Mm/vt48H10GgdsZ8RHSSxLKY706Cz84sdv6cJXDWAvJ9zT2HLYzHJ",
+   "pin": "sha384-nKGYw4sxUYNgoAREqWkc9uHdjt5U58PeUu/gNAs7nu0HehX+VsbSm0w0pQWm8h83",
+   "sha384": "sha384-nKGYw4sxUYNgoAREqWkc9uHdjt5U58PeUu/gNAs7nu0HehX+VsbSm0w0pQWm8h83",
    "landed": true,
    "proofs": true,
    "lanes": true,
@@ -25,6 +25,19 @@
    "lanes": false,
    "warm": false,
    "wait": false
+  }
+ },
+ "bad_carry_before": {
+  "readAt": "2026-11-13T15:05:53.324Z",
+  "from": "local build",
+  "page": {
+   "pin": "sha384-WUH09PnUiXM3E2Iu3haRq93+V+el9SrUexDkJsbQq8LYB8wcBge4nt8jhbnVeUcV",
+   "sha384": "sha384-WUH09PnUiXM3E2Iu3haRq93+V+el9SrUexDkJsbQq8LYB8wcBge4nt8jhbnVeUcV",
+   "landed": false,
+   "proofs": false,
+   "lanes": true,
+   "warm": true,
+   "wait": true
   }
  }
 }

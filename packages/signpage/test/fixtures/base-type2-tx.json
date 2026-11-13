@@ -1,0 +1,27 @@
+{
+ "read": "2026-11-12T22:36:38.457Z",
+ "note": "eth_getTransactionByHash on Base mainnet, one public read; the sender field dropped",
+ "tx": {
+  "accessList": [],
+  "blockHash": "0x83a0d50af08c5e0f730e1e7b9eafcede2e496106af396c1532a2cb99429e56de",
+  "blockNumber": "0x3609c49",
+  "blockTimestamp": "0x6af63f76",
+  "blockTimestampMs": "0x1a1d1e7e5b8",
+  "chainId": "0x2105",
+  "gas": "0x39990",
+  "gasPrice": "0x533349b",
+  "hash": "0x4e591ce39706a95d97984296f4b931555e1bae55d39a3290a33a852ce44c63b7",
+  "input": "0x7eb644130000010000000000000000002e024ac5000000000005549bcd5f7b94c000000000000000000000000000000000000000000000000002f00c49d620a90387366562635f72627762636632780b0080218021802180218021802180218021",
+  "maxFeePerGas": "0x533349b",
+  "maxPriorityFeePerGas": "0x533349b",
+  "nonce": "0xc89f6",
+  "r": "0x4f24fcdb348b40dbcf6b8a054db72ecf031ca94e20d92d2474d27d4e9b5aa8fc",
+  "s": "0x26f13783b29901464707b2576d7302d5df3b832447cf5aeff56fc6ae9c84ab76",
+  "to": "0x83d55acdc72027ed339d267eebaf9a41e47490d5",
+  "transactionIndex": "0x2",
+  "type": "0x2",
+  "v": "0x1",
+  "value": "0x0",
+  "yParity": "0x1"
+ }
+}

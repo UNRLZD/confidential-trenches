@@ -379,7 +379,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.dry": depositDry,
   "pool.address": poolAddress,
   "pool.sell.dry": poolSellDry,
-  "pool.buy.dry": obj({ tap_max: dec }, { pieces: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SOLANA_POOL_BUY_PIECES_MAX, cost: dec }),
+  "pool.buy.dry": obj({ tap_max: dec }, { pieces: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SOLANA_POOL_BUY_PIECES_MAX, cost: dec, out: dec }),
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 

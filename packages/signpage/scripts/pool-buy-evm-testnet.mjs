@@ -44,7 +44,8 @@ const { evmRestoreNotes } = await import("../../wallet/src/pool/evm-restore.ts")
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
 const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
-const { EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+const { EVM_CARRY_OPEN_KEY } = await import("../src/pool-carry-evm.ts");
 
 const [CHAIN, TOKEN, OUT] = process.argv.slice(2);
 if ((CHAIN !== "base" && CHAIN !== "robinhood") || !/^0x[0-9a-fA-F]{40}$/.test(TOKEN ?? "") || !OUT || !process.env.FLOW_RESUME)
@@ -139,7 +140,7 @@ const end = stages.at(-1) ?? null;
 const endMs = Date.now() - tapAt;
 tapped = false;
 const holdings = await w.get("meta", EVM_POSITION_COSTS_KEY);
-const owed = await w.get("meta", EVM_OWED_BACK_KEY);
+const owed = await w.get("meta", EVM_CARRY_OPEN_KEY);
 const hash = holdings?.[proof.wallet.address]?.route?.tx ?? null;
 // what each request named: W, the proof's nullifier (its word), the transaction
 const said = { w: proof.wallet.address.slice(2).toLowerCase(), nullifier: BigInt(proof.publicSignals[1]).toString(16).padStart(64, "0"), tx: hash?.slice(2) ?? "-" };

@@ -200,7 +200,7 @@ async function headerOf(rpc: EvmRpc, at: string, what: string): Promise<Spent> {
  * Once final, every tx of U up to `nonce` is in a block at or below it and never moves, so any Deposited of the note's
  * sends is in the pool's events up to it. `check` runs before each read and `signal` ends the lag waits (sign out).
  */
-async function spentFinal(rpcs: readonly [EvmRpc, EvmRpc], u: string, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal, check: () => void = () => {}): Promise<{ final: bigint | null; kept: Spent | undefined }> {
+export async function spentFinal(rpcs: readonly [EvmRpc, EvmRpc], u: string, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal, check: () => void = () => {}): Promise<{ final: bigint | null; kept: Spent | undefined }> {
   if (kept === undefined) {
     check();
     const b = await evmRetryLag(() => evmAgreedBlock(rpcs, "latest", signal, sleep), sleep, signal);
@@ -259,7 +259,7 @@ function selectorOf(sig: string): string {
   return hex(keccak_256(new TextEncoder().encode(sig)).slice(0, 4));
 }
 /** The pool's state and label tree depths at `tag`, each as both RPCs read it (they must agree). */
-async function depthsOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, tag: string): Promise<{ state: [bigint, bigint]; label: [bigint, bigint] }> {
+export async function depthsOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, tag: string): Promise<{ state: [bigint, bigint]; label: [bigint, bigint] }> {
   const out: [bigint, bigint][] = [];
   for (const data of DEPTH_CALLS) {
     const d = await both(r.h.rpcs, async (rpc, k) => firstWord(await rpc("eth_call", [{ to: r.h.pin.pool, data }, tag]), `rpc ${k} tree depth`));
@@ -271,7 +271,7 @@ async function depthsOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, tag:
 
 /** The L1 fee bound for `gas` on the pin's network, as each RPC's chain fee reads give it (the kit's reads; they must
  *  agree), 0 on Nitro. */
-async function l1FeesOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, gas: bigint, tag: string): Promise<[bigint, bigint]> {
+export async function l1FeesOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, gas: bigint, tag: string): Promise<[bigint, bigint]> {
   const net = r.h.pin.network;
   if (net === "robinhood" || net === "robinhood-testnet") return [0n, 0n];
   const calls = evmPoolChainFeeReads(net, gas);
@@ -434,30 +434,15 @@ async function tryNote(r: Run, first: Extract<NoteRef, { kind: "deposit" }>, aga
 type Verdict = { kind: "landed"; note: NoteRecord; filled: boolean } | { kind: "pending" } | { kind: "dead" } | { kind: "unsent"; nonce: bigint };
 async function verdictOf(r: Run, n: NoteRecord, kept: (n: NoteRecord) => void = () => {}): Promise<Verdict> {
   const first = firstOf(n.ref, r.scope)!;
-  // U's nonce used past the last send by a block final on both RPCs (spentFinal), read before the round: any send of
-  // the note that landed is then in the round's events, so one that lands between the two reads is read landed, never
-  // dead and built again. No read of old state: a node that keeps none answers it (card evm-deposit-note-stays-incoming).
-  // The kept block is the note's own (its record as the caller holds it), written back when it changes and handed to the
-  // caller (`kept`) for its next read. A read that fails is held while the round is judged: a landed deposit settles whatever a node
-  // refuses for it, and only with no Deposited does the failure stand (review 1)
   const last = n.evmSends?.at(-1);
   const id = depositIdEvm(r.seed, first.s, first.i);
   r.keys.push(id.secretKey);
-  let spent: bigint | null = null;
-  let fault: { e: unknown } | null = null;
-  if (last !== undefined) {
-    try {
-      const was = n.evmSpent !== undefined && n.evmSpent.nonce === last.nonce ? { number: n.evmSpent.number, hash: n.evmSpent.hash } : undefined;
-      const s = await spentFinal(r.h.rpcs, id.address, last.nonce, was, sleepOf(r.h), r.h.signal);
-      spent = s.final;
-      if (s.kept?.number !== was?.number || s.kept?.hash !== was?.hash) kept(await r.store.keepEvmSpent(n.id, s.kept === undefined ? null : { nonce: last.nonce, ...s.kept }));
-    } catch (e) {
-      fault = { e };
-    }
-  }
+  // the round first: landed once the newest block both RPCs agree on holds its Deposited (card
+  // evm-money-shows-and-spends-at-once), final or not: a reorg that drops it backs the note out again (wallet
+  // evm-settle.ts). A landed note needs nothing else, so its verdict is the round's time alone (card
+  // evm-deposit-ready-in-ten-seconds: on the Base copy the reads below, 4 host answers in a row, came first and held a
+  // landing 3.6 s)
   const round = await r.h.round();
-  // landed once the newest block both RPCs agree on holds its Deposited (card evm-money-shows-and-spends-at-once), final
-  // or not: a reorg that drops it backs the note out again (wallet evm-settle.ts)
   const pick = evmTakenNotes(r.seed, r.scope, round.events, first, round.finalBlock);
   if (pick.taken.some((t) => sameRef(t.ref, n.ref))) {
     if (ended(r.h)) return { kind: "pending" }; // a sign out or a stop while the round was read: nothing written
@@ -466,7 +451,17 @@ async function verdictOf(r: Run, n: NoteRecord, kept: (n: NoteRecord) => void = 
     return { kind: "landed", note: now, filled: now.leaf?.value === n.evmSends?.[0]?.value };
   }
   if (last === undefined) return { kind: "dead" }; // INCOMING with no send: nothing left the device for it
-  if (fault !== null) throw fault.e;
+  // no Deposited: U's nonce used past the last send by a block final on both RPCs (spentFinal). Read after the round,
+  // it still tells dead only at a block the round's final events reach (round.finalBlock >= spent below): the round's
+  // events run to its anchor, at or past its finalized block, so a send final by its nonce there has its Deposited in
+  // them, and one that lands after the round is read past that block, pending, read landed at the next round. No read
+  // of old state: a node that keeps none answers it (card evm-deposit-note-stays-incoming). The kept block is the
+  // note's own (its record as the caller holds it), written back when it changes and handed to the caller (`kept`) for
+  // its next read. A read that fails stands only with no Deposited, as here (review 1)
+  const was = n.evmSpent !== undefined && n.evmSpent.nonce === last.nonce ? { number: n.evmSpent.number, hash: n.evmSpent.hash } : undefined;
+  const s = await spentFinal(r.h.rpcs, id.address, last.nonce, was, sleepOf(r.h), r.h.signal);
+  const spent = s.final;
+  if (s.kept?.number !== was?.number || s.kept?.hash !== was?.hash) kept(await r.store.keepEvmSpent(n.id, s.kept === undefined ? null : { nonce: last.nonce, ...s.kept }));
   // dead only when U's nonce passed the send at a block final on BOTH RPCs, that block within the round's final
   // events, and no Deposited names it on either
   if (spent !== null && round.finalBlock >= spent) return { kind: "dead" };

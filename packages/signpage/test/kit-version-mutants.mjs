@@ -141,20 +141,33 @@ export const MUTANTS = [
   // answer for it, kit-v1.12 read at another level, or a key of that name taken from a kind that is no open
   ["kit", '  if (level === "1.12") return shut;\n', '  if (level === "1.12") return given;\n'],
   ["kit", '  if (level === "1.12") return shut;\n', ""],
-  ["kit", "  const shut = openFor(kind, given);\n", "  const shut = given;\n"],
+  ["kit", "  const shut = openFor(kind, plain);\n", "  const shut = plain;\n"],
   ["kit", "  const { closes: _c, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
   ["kit", "  if (!(OPEN_KINDS as readonly SignpageKind[]).includes(kind) || typeof result", "  if (typeof result"],
   ["kit", 'from(1, 12) ? "1.12" : ', ""],
   ["kit", 'from(1, 12) ? "1.12" : ', 'from(1, 12) ? "current" : '],
   ["kit", 'from(1, 12) ? "1.12" : ', 'from(1, 11) ? "1.12" : '],
-  ["kit", 'if (level === "current" || level === "1.12") return all;', 'if (level === "current") return all;'],
-  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 12] as [number, number];"],
+  ["kit", 'if (level === "current" || level === "1.13" || level === "1.12") return all;', 'if (level === "current" || level === "1.13") return all;'],
+  // card solana-buy-preview-complete: a dry buy's out sent to kit-v1.13 or below, whose schema refuses the whole answer
+  // for it, kit-v1.13 read at another level or in part, a key of that name taken from another kind, or kit-v1.13 told no
+  // closed notice
+  ["kit", "  const plain = dryOutFor(kind, given);\n", "  const plain = given;\n"],
+  ["kit", '  if (level === "1.13") return plain;\n', ""],
+  ["kit", '  if (level === "1.13") return plain;\n', '  if (level === "1.13") return given;\n'],
+  ["kit", "  const { out: _o, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
+  ["kit", 'result === null || kind !== "pool.buy.dry") return result;', "result === null) return result;"],
+  ["kit", 'from(1, 13) ? "1.13" : ', ""],
+  ["kit", 'from(1, 13) ? "1.13" : ', 'from(1, 13) ? "current" : '],
+  ["kit", 'from(1, 13) ? "1.13" : ', 'from(1, 12) ? "1.13" : '],
+  ["kit", 'if (level === "current" || level === "1.13" || level === "1.12") return all;', 'if (level === "current" || level === "1.12") return all;'],
+  ["api", '    if (!hello || (level !== "current" && level !== "1.13")) return;', '    if (!hello || level !== "current") return;'],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 13] as [number, number];"],
   // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
   ["api", "if (kit !== null) return void ((level = kitLevel(kit)), (hello = true));", "if (kit !== null) return;"],
   // card signing-layer-says-when-it-closes (review P3-2): the closed notice sent with no hello since the last ready
   ["api", "if (kit !== null) return void ((level = kitLevel(kit)), (hello = true));", "if (kit !== null) return void (level = kitLevel(kit));"],
   ["api", "    hello = false;\n    queue = queue.then", "    queue = queue.then"],
-  ["api", "    if (!hello || level !== \"current\") return;", "    if (level !== \"current\") return;"],
+  ["api", "    if (!hello || (level !== \"current\" && level !== \"1.13\")) return;", "    if (level !== \"current\" && level !== \"1.13\") return;"],
   ["api", "      level = KIT_DEFAULT;\n", ""],
   ["api", "    post(answer, kind);", "    post(answer);"],
   ["api", "first.answer ? post(first.answer, first.kind)", "first.answer ? post(first.answer)"],

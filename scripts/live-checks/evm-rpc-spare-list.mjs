@@ -33,9 +33,15 @@
 //   - every address-less Transfer read answers 200 with a JSON-RPC result list, never an error;
 //   - the deployed helper's read HISTORY_BACK blocks back answers 200 with a result list on each chain;
 //   - each maker list holds MIN_MAKERS on hosts of their own, and each spare past the second answers both reads.
+// A spare that throttles the reader (card evm-spare-check-reads-a-throttle-as-no-answer: HTTP 429, or an error whose code
+// or words are a rate limit, provider-answer.mjs's rule; 4663.rpc.thirdweb.com's "You are using a public RPC with rate
+// limits" to GitHub's runner in helper live run 43464263269, 13 Nov 16:35Z, while it answered this Mac) is read again
+// once, then is no answer: that spare is INCONCLUSIVE, never FAIL, on each chain's maker and scan lists. A wrong chain
+// id, any other error and a list under its floor stay FAIL.
 // After: helper
 //   node scripts/live-checks/evm-rpc-spare-list.mjs [--base <url>] [--record <file>]
-// PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, for the test's replay (evm-rpc-spare-list.answers.json).
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (no FAIL, a spare throttled). --record writes the run, for
+// the test's replay (evm-rpc-spare-list.answers.json).
 // Reads only: no key, no transaction, no money moves.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
@@ -79,14 +85,41 @@ export const CASES = [
 
 const host = (u) => (typeof u === "string" ? new URL(u).hostname : "none");
 
+// provider-answer.mjs's throttle rule (rpcAnswer's classify), copied: scripts/ci/live-checks-provider-answer.mjs refuses
+// a check that imports provider-answer.mjs and builds a JSON-RPC request itself, as this one still does (its NOT_MOVED);
+// evm-rpc-spare-list.test.mjs fails when these and provider-answer.mjs's drift apart.
+export const RATE_LIMIT = /request limit|rate limit|too many requests|exceeded its compute units per second/i;
+export const LIMIT_CODES = new Set([429, -32005]);
+/** The pause before a throttled spare is read again, ms (provider-answer.mjs's RETRY). The tests set it to 0. */
+export const RETRY = { ms: 1000 };
+/** Whether a read's answer is a throttle: its HTTP status 429, or its error line (rpcCall's "<code> <message>", or a
+ *  body that is not JSON) a rate limit by code or words. */
+export const throttled = (status, error) => status === 429 || (typeof error === "string" && (LIMIT_CODES.has(Number(error.split(" ")[0])) || RATE_LIMIT.test(error)));
+
+/** A maker spare's verdict ("PASS", "FAIL" or "INCONCLUSIVE") on its two reads, the chain id and the history read:
+ *  FAIL on a wrong chain id or any read that is neither an answer nor a throttle, else INCONCLUSIVE on a throttle. */
+export function spareVerdict(a, chainId) {
+  if (a === undefined) return "FAIL";
+  const id = a.chainId === chainId ? "PASS" : a.chainId === undefined && throttled(a.idStatus, a.idError) ? "INCONCLUSIVE" : "FAIL";
+  const logs = Number.isInteger(a.results) ? "PASS" : throttled(a.status, a.error) ? "INCONCLUSIVE" : "FAIL";
+  return [id, logs].includes("FAIL") ? "FAIL" : [id, logs].includes("INCONCLUSIVE") ? "INCONCLUSIVE" : "PASS";
+}
+
 /** The verdict on a run ({ scans: { [chain]: [url...] }, preflight: { [url]: {...} }, cases: { [name]: { first, held } },
  *  helper: { [chain]: { list: [url...], held: [{ mode, status, results, answeredBy }] } } }). */
 export function check(run) {
   const lines = [];
   let ok = true;
+  let quiet = false;
   const say = (pass, text) => {
     ok &&= pass;
     lines.push(`${pass ? "PASS" : "FAIL"} ${text}`);
+  };
+  /** A spare's line: PASS, FAIL, or INCONCLUSIVE (it throttled the reader past its one retry: no answer, not judged). */
+  const sayOf = (verdict, text) => {
+    if (verdict !== "INCONCLUSIVE") return say(verdict === "PASS", text);
+    quiet = true;
+    lines.push(`INCONCLUSIVE ${text}: it throttled this reader past its one retry, no answer`);
   };
   const origin = (o) => o === "*" || o === APP_ORIGIN;
   for (const [name, req, want] of CASES) {
@@ -97,7 +130,8 @@ export function check(run) {
     for (const [i, u] of [[2, list[2]], ...list.slice(3).map((x, k) => [k + 3, x])]) {
       const p = typeof u === "string" ? run?.preflight?.[u] : undefined;
       const allowed = p !== undefined && p.status >= 200 && p.status < 300 && origin(p.allow) && (p.headers === "*" || /(^|,)\s*content-type\s*(,|$)/i.test(p.headers ?? "")) && origin(p.post);
-      say(allowed, `${req.chain} ${i === 2 ? "third" : i === 3 ? "fourth" : `#${i + 1}`} scan provider preflight from ${APP_ORIGIN}: ${p === undefined ? "not read" : `${p.status}, allow-origin ${p.allow ?? "none"}, allow-headers ${p.headers ?? "none"}; POST allow-origin ${p.post ?? "none"}`}`);
+      const verdict = allowed ? "PASS" : p !== undefined && (p.status === 429 || p.postStatus === 429) ? "INCONCLUSIVE" : "FAIL";
+      sayOf(verdict, `${req.chain} ${i === 2 ? "third" : i === 3 ? "fourth" : `#${i + 1}`} scan provider preflight from ${APP_ORIGIN}: ${p === undefined ? "not read" : `${p.status}, allow-origin ${p.allow ?? "none"}, allow-headers ${p.headers ?? "none"}; POST ${p.postStatus === undefined ? "" : `${p.postStatus}, `}allow-origin ${p.post ?? "none"}`}`);
     }
     const c = run?.cases?.[name];
     const warm = [];
@@ -140,17 +174,18 @@ export function check(run) {
     say(list.length >= least && new Set(list.map(host)).size === list.length, `helper ${chain} maker list of ${list.length}, each on its own host: ${list.map(host).join(", ") || "none"} (${least} at least)`);
     for (const u of list.slice(2)) {
       const a = m?.spares?.[u];
-      const ok2 = a !== undefined && a.chainId === CHAIN_IDS[chain] && Number.isInteger(a.results);
-      say(ok2, `helper ${chain} maker spare ${host(u)}: ${a === undefined ? "not read" : `chain id ${a.chainId ?? a.idError ?? "none"}, ${Number.isInteger(a.results) ? `${a.results} logs ${HISTORY_BACK} back` : `error ${a.error ?? "none"}`}`} (chain id ${CHAIN_IDS[chain]} and a list wanted)`);
+      const http = (s) => (s === undefined ? "" : `HTTP ${s} `);
+      sayOf(spareVerdict(a, CHAIN_IDS[chain]), `helper ${chain} maker spare ${host(u)}: ${a === undefined ? "not read" : `chain id ${a.chainId ?? `${http(a.idStatus)}${a.idError ?? "none"}`}, ${Number.isInteger(a.results) ? `${a.results} logs ${HISTORY_BACK} back` : `${http(a.status)}error ${a.error ?? "none"}`}`} (chain id ${CHAIN_IDS[chain]} and a list wanted)`);
     }
   }
-  return { ok, lines };
+  const verdict = !ok ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 /** One JSON-RPC call to `url`: its result, or an error line. */
-async function rpcCall(url, method, params, headers = {}) {
+async function rpcCall(url, method, params, headers = {}, fetchFn = fetch) {
   try {
-    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
+    const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
     const text = await r.text();
     try {
       const j = JSON.parse(text);
@@ -170,16 +205,29 @@ async function historyRead(chain, base) {
   const r = await rpcCall(`${base}/v1/rpc/${chain}`, "eth_getLogs", historyParams(chain, head), { Origin: APP_ORIGIN });
   return { status: r.status, results: Array.isArray(r.result) ? r.result.length : null, ...(r.error === undefined ? {} : { error: r.error }), ...(r.commit ? { commit: r.commit } : {}) };
 }
-/** The checkout's maker list, and each spare's chain id and history read. */
-async function makerSpares(chain) {
+/** One read of a spare, read again once after RETRY.ms when it throttled (provider-answer.mjs's rpcAnswer). */
+async function spareCall(url, method, params, fetchFn) {
+  const a = await rpcCall(url, method, params, {}, fetchFn);
+  if (!throttled(a.status, a.error)) return a;
+  await new Promise((r) => setTimeout(r, RETRY.ms));
+  return rpcCall(url, method, params, {}, fetchFn);
+}
+/** The checkout's maker list, and each spare's chain id and history read, each with its HTTP status when it is no
+ *  answer (idStatus, status). */
+export async function makerSpares(chain, fetchFn = fetch) {
   const { MAKER_RPCS } = await import("../../apps/helper/src/data/evm/lists.ts");
   const list = [...MAKER_RPCS[chain]];
   const spares = {};
   for (const u of list.slice(2)) {
-    const id = await rpcCall(u, "eth_chainId", []);
-    const h = await rpcCall(u, "eth_blockNumber", []);
-    const logs = typeof h.result === "string" ? await rpcCall(u, "eth_getLogs", historyParams(chain, BigInt(h.result) - 5n)) : h;
-    spares[u] = { ...(typeof id.result === "string" ? { chainId: Number(id.result) } : { idError: id.error }), results: Array.isArray(logs.result) ? logs.result.length : null, ...(logs.error === undefined ? {} : { error: logs.error }) };
+    const id = await spareCall(u, "eth_chainId", [], fetchFn);
+    const h = await spareCall(u, "eth_blockNumber", [], fetchFn);
+    const logs = typeof h.result === "string" ? await spareCall(u, "eth_getLogs", historyParams(chain, BigInt(h.result) - 5n), fetchFn) : h;
+    spares[u] = {
+      ...(typeof id.result === "string" ? { chainId: Number(id.result) } : { idError: id.error, idStatus: id.status }),
+      results: Array.isArray(logs.result) ? logs.result.length : null,
+      ...(Array.isArray(logs.result) ? {} : { status: logs.status }),
+      ...(logs.error === undefined ? {} : { error: logs.error }),
+    };
   }
   return { list, spares };
 }
@@ -218,17 +266,26 @@ async function addressless(chain, base) {
   return { checkout, deployed };
 }
 
-async function preflight(urls) {
+/** Each scan spare's CORS preflight and POST from the app's origin, read again once after RETRY.ms when either
+ *  answered 429 (the check's throttle rule). */
+export async function preflight(urls, fetchFn = fetch) {
+  const once = async (u) => {
+    try {
+      const r = await fetchFn(u, { method: "OPTIONS", headers: { Origin: APP_ORIGIN, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type" }, signal: AbortSignal.timeout(10_000) });
+      await r.arrayBuffer().catch(() => {});
+      const post = await fetchFn(u, { method: "POST", headers: { Origin: APP_ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), signal: AbortSignal.timeout(10_000) });
+      await post.text();
+      return { status: r.status, allow: r.headers.get("access-control-allow-origin"), headers: r.headers.get("access-control-allow-headers"), post: post.headers.get("access-control-allow-origin"), postStatus: post.status };
+    } catch (e) {
+      return { status: 0, allow: null, headers: null, post: null, error: String(e?.cause?.code ?? e?.message ?? e).slice(0, 120) };
+    }
+  };
   const out = {};
   for (const u of urls) {
-    try {
-      const r = await fetch(u, { method: "OPTIONS", headers: { Origin: APP_ORIGIN, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type" }, signal: AbortSignal.timeout(10_000) });
-      const post = await fetch(u, { method: "POST", headers: { Origin: APP_ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }), signal: AbortSignal.timeout(10_000) });
-      await post.text();
-      out[u] = { status: r.status, allow: r.headers.get("access-control-allow-origin"), headers: r.headers.get("access-control-allow-headers"), post: post.headers.get("access-control-allow-origin") };
-    } catch (e) {
-      out[u] = { status: 0, allow: null, headers: null, post: null, error: String(e?.cause?.code ?? e?.message ?? e).slice(0, 120) };
-    }
+    out[u] = await once(u);
+    if (out[u].status !== 429 && out[u].postStatus !== 429) continue;
+    await new Promise((r) => setTimeout(r, RETRY.ms));
+    out[u] = await once(u);
   }
   return out;
 }
@@ -360,8 +417,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (at > 0) writeFileSync(process.argv[at + 1], JSON.stringify(run, null, 1) + "\n");
     const r = check(run);
     for (const l of r.lines) console.log(l);
-    console.log(r.ok ? "PASS evm-rpc-spare-list" : "FAIL evm-rpc-spare-list");
-    process.exit(r.ok ? 0 : 1);
+    console.log(`${r.verdict} evm-rpc-spare-list`);
+    process.exit({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 }[r.verdict]);
   } catch (e) {
     console.log(`ERROR evm-rpc-spare-list: ${e?.message ?? e}`);
     process.exit(2);

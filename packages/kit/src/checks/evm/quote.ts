@@ -141,7 +141,7 @@ export type EvmQuoteErrorCode =
   | "no_quoter" // the chain has no pinned quoter for the route's venue
   | "rpc_error" // a provider did not answer, or answered something that is not an answer
   | "rpc_disagree" // the two providers gave different answers at the same block
-  | "no_quote" // the route reverts, or quotes nothing
+  | "no_quote" // the route reverts, or quotes nothing; a buy's names the device's own best route where one fits
   | "partial_fill" // the route runs out of a pool's liquidity
   | "below_reference" // the route is quoted below the device's own standard pool, goes through a pool the device banned, or goes through a hook the venue does not list where a route through listed pools is within the slippage of it
   | "native_first" // the route starts from WETH where a native route quotes at least as much
@@ -156,8 +156,9 @@ export type EvmQuoteErrorCode =
   | "over_gas_floor"; // a buy's route needs more gas than the pool guarantees its swap, with the margin (card evm-buy-gas-floor); `reference` names the best route that fits, or none fits
 export class EvmQuoteError extends Error {
   readonly code: EvmQuoteErrorCode;
-  /** On below_reference, native_first and over_gas_floor: the device's own best route, which the caller may quote
-   *  instead (null on over_gas_floor where no route fits). */
+  /** On below_reference, native_first and over_gas_floor, and on a buy's no_quote or partial_fill of the asked route: the
+   *  device's own best route, which the caller may quote instead (null on over_gas_floor and no_quote where no route
+   *  fits). */
   readonly reference: { readonly amountOut: bigint; readonly route: EvmRoute } | null;
   constructor(code: EvmQuoteErrorCode, message: string, reference: EvmQuoteError["reference"] = null) {
     super(`${code}: ${message}`);
@@ -1255,6 +1256,56 @@ function keyOfRoute(r: EvmV4Route): EvmPoolKey {
 const INITIALIZE = "dd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"; // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
 type Spans = [number, number][];
 const SCANS = new Map<string, { spans: Spans; pools: EvmPoolKey[] }>();
+// The device's pool index of a chain (pool-index.ts evmPoolIndexSync: every Initialize log of the PoolManager, each span
+// proven on two readers of two operators), as its last whole sync served it: every pool to `through` (its N). A scan of a
+// currency that has no kept scan starts from it: the index's blocks from its first to N count as read, with the
+// currency's pools in them, so a quote asks the scan provider only the blocks past N (card evm-buy-and-sell-on-mainnet:
+// a cold quote of Base's 1M blocks on one public provider asked 101 to 129 log batches at the tap, ran past 30 s on
+// its 429s and refused). An index proves more than the scan it replaces, which one provider answers alone.
+const INDEXES = new Map<EvmPoolChain, { from: number; through: number; byCurrency: Map<string, EvmPoolKey[]> }>();
+/** Serves `sync`, a whole sync of `chain`'s pool index (evmPoolIndexSync: coversThrough N and every pool to N), to this
+ *  module's scans; one that is not whole, of another chain or PoolManager, or not newer than the one held changes
+ *  nothing. Returns whether it is now the one held. */
+export function evmPoolIndexUse(chain: EvmPoolChain, sync: { readonly index: { readonly chainId: number; readonly poolManager: string; readonly from: number } | null; readonly coversThrough: number | null; readonly pools: readonly { readonly key: EvmPoolKey }[] | null }): boolean {
+  const all = evmPoolVenues();
+  const pinned = typeof chain === "string" && Object.hasOwn(all, chain) ? all[chain] : undefined;
+  const pm = venue(chain).poolManager;
+  const ix = sync?.index;
+  const n = sync?.coversThrough;
+  if (pinned === undefined || pm === undefined || ix === null || ix === undefined || n === null || n === undefined || !Array.isArray(sync.pools)) return false;
+  if (ix.chainId !== pinned.chainId || typeof ix.poolManager !== "string" || lower(ix.poolManager) !== pm || !Number.isSafeInteger(ix.from) || !Number.isSafeInteger(n) || ix.from < 0 || n < ix.from) return false;
+  const held = INDEXES.get(chain);
+  if (held !== undefined && held.through >= n) return held.through === n && held.from === ix.from;
+  const byCurrency = new Map<string, EvmPoolKey[]>();
+  for (const p of sync.pools) {
+    const c0 = (p?.key as { currency0?: unknown } | undefined)?.currency0;
+    const k = typeof c0 === "string" ? keyOf(p.key, c0) : null;
+    if (k === null) continue;
+    for (const c of new Set([k.currency0, k.currency1])) append(byCurrency, c, k);
+  }
+  INDEXES.set(chain, { from: ix.from, through: n, byCurrency });
+  return true;
+}
+/** The pools of `token` the chain's served index holds (every pool of the PoolManager to its N that pairs the token),
+ *  or null where no index is served: what a buy may ask a quote of, never a pool the quote then trusts unread (each is
+ *  read at the agreed block on both providers like any candidate). */
+export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly EvmPoolKey[] | null {
+  const ix = INDEXES.get(chain);
+  return ix === undefined || typeof token !== "string" ? null : [...(ix.byCurrency.get(lower(token)) ?? [])];
+}
+/** For the tests: forgets every chain's index (not in the kit's index). */
+export const evmPoolIndexReset = (): void => INDEXES.clear();
+/** The scan of currency `c` the index holds, from `floor` (the scan's oldest block) to its N, kept as a scan keeps its
+ *  own: none where no index covers past `floor`. */
+const indexScanOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: string, floor: number): { spans: Spans; pools: EvmPoolKey[] } | undefined => {
+  const ix = INDEXES.get(chain);
+  if (ix === undefined || ix.through < floor) return undefined;
+  const pools = (ix.byCurrency.get(c) ?? []).filter((k) => {
+    const other = k.currency0 === c ? k.currency1 : k.currency0;
+    return kind === "all" || other === NATIVE || other === weth;
+  });
+  return { spans: [[Math.max(floor, ix.from), ix.through]], pools };
+};
 /** `spans` with [a, b] added, merged where they touch. */
 const withSpan = (spans: Spans, a: number, b: number): Spans => {
   const out: Spans = [];
@@ -1587,13 +1638,31 @@ async function scanPools(
   const floor = Math.max(0, head - s.depth + 1);
   const each = cs.map((c) => {
     const key = `${chain}:${kind}:${c}`;
-    const cached = SCANS.get(key);
+    // the device's own kept scan and the index's, where both are: their blocks and pools together
+    const own = SCANS.get(key);
+    const ixs = indexScanOf(chain, kind, c, weth, floor);
+    const cached = own === undefined || ixs === undefined ? (own ?? ixs) : { spans: withSpan(own.spans, ...ixs.spans[0]!), pools: [...new Map([...own.pools, ...ixs.pools].map((k) => [poolId(k), k])).values()] };
     const pools = cached === undefined ? [] : [...cached.pools];
     // the blocks read before, those still within the depth
     const spans: Spans = (cached?.spans ?? []).filter(([, b]) => b >= floor).map(([a, b]) => [Math.max(a, floor), b]);
-    return { c, key, spans, gaps: gapsOf(spans, floor, head), pools, ids: new Set(pools.map(poolId)) };
+    return { c, key, spans, gaps: gapsOf(spans, floor, head), pools, ids: new Set(pools.map(poolId)), later: [] as Spans };
   });
   type Each = (typeof each)[number];
+  // a currency whose kept or index scan already holds pools and reads to within maxLag of the scan provider's head is
+  // not scanned for those last blocks before this quote (card evm-buy-and-sell-on-mainnet: the round cost a warm Base
+  // quote 280-520 ms): the kit accepts the same blocks unread where the scan provider's head is behind the agreed block
+  // by as much, so a pool made in the last maxLag blocks before the agreed block is missed, and only its price (each
+  // pool read is read on both providers like any candidate), by every quote that answers before this gap's read lands.
+  // Its gap is read right after, beside the quote's next round, and kept for the next quotes; one that starts more than
+  // maxLag blocks before the agreed block is read before the answer (below). A currency with no pool kept is scanned
+  // whole first: a coin made inside the gap is never "no pool" for this.
+  const lag = Number(maxLag);
+  for (const e of each) {
+    if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {
+      e.later = e.gaps;
+      e.gaps = [];
+    }
+  }
   // the currencies with the same blocks left share each request
   const groups = new Map<string, Each[]>();
   for (const e of each) append(groups, JSON.stringify(e.gaps), e);
@@ -1773,7 +1842,13 @@ async function scanPools(
     for (const e of each) {
       for (const g of got) if (g.part.includes(e)) e.spans = withSpan(e.spans, g.a, g.b);
       if (!SCANS.has(e.key) && SCANS.size >= SCAN_TOKENS) SCANS.delete(SCANS.keys().next().value!);
-      SCANS.set(e.key, { spans: e.spans, pools: e.pools });
+      // with what a quote after this one kept meanwhile (review of 98a87843b, P3: a gap read later committed over a
+      // newer quote's entry, and the next quote asked its blocks again): both read their spans and pools
+      const now = SCANS.get(e.key);
+      SCANS.set(
+        e.key,
+        now === undefined ? { spans: e.spans, pools: e.pools } : { spans: now.spans.reduce((s, [x, y]) => withSpan(s, x, y), e.spans), pools: [...new Map([...now.pools, ...e.pools].map((k) => [poolId(k), k])).values()] },
+      );
     }
   };
   const failing = async (e: unknown, at?: Block): Promise<never> => {
@@ -1789,6 +1864,17 @@ async function scanPools(
   const agreedAt = await agreed();
   const b = agreedAt.number;
   if (scanHead - b > maxLag) return refuse("rpc_disagree", `the scan provider's head ${scanHead} is more than ${maxLag} blocks past the agreed block ${b}`);
+  // the blocks a quote answers without are at most maxLag before the agreed block, deferred ones and those past the scan
+  // head together (review of 98a87843b, P2-1: a gap left for later from 5,000,001 and an agreed block 5,000,099 left 99
+  // blocks unread on Base): a gap left for later that starts further back is read now, before the answer
+  if (b - scanHead <= maxLag) {
+    jobs.length = 0;
+    for (const e of each) if (e.later.length > 0 && b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);
+    if (jobs.length > 0) {
+      shortMax += 2 * jobs.length;
+      await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
+    }
+  }
   if (b - scanHead > maxLag) {
     // the scan outlasted maxLag blocks: on from the block after the head up to the agreed block, which the provider
     // answering each request must hold, by hash, in that request's own batch (`pin`; review of 4830f1f, H1: a backend
@@ -1799,6 +1885,8 @@ async function scanPools(
     const end = Number(b);
     pin = agreedAt;
     jobs.length = 0;
+    // a gap left for later is no longer within maxLag of the agreed block: read now
+    for (const e of each) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);
     jobsOf(each, head + 1, end);
     shortMax += 2 * jobs.length;
     await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
@@ -1825,7 +1913,24 @@ async function scanPools(
     }
   }
   take();
-  return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };
+  // the gaps left for later, read once the quote keeps what it read (commit) and kept for the next quote; a failure
+  // keeps nothing of them
+  const later = each.filter((e) => e.later.length > 0);
+  const rest = async (): Promise<void> => {
+    const js: Job[] = [];
+    for (const e of later) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y, first, js);
+    if (js.length === 0) return;
+    shortMax += 2 * js.length;
+    await settle(js.map(run));
+    commit();
+  };
+  return {
+    pools: new Map(each.map((e) => [e.c, e.pools])),
+    commit: () => {
+      commit();
+      if (later.length > 0) void rest().catch(() => {});
+    },
+  };
 }
 
 /** The device's quote of `req.route` on the chain's two pinned providers, with every check above; throws EvmQuoteError
@@ -2044,6 +2149,11 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const wethStart = !startsNative(route);
   const firstOut = route.venue === "uniswap-v3" ? route.tokens[1]! : route.hops[0]!.currency;
   const firstHop: { at: number; twice: number }[] = [];
+  // the first round's no_quote of the route itself (a revert, 0 or nothing out, its read out of gas): the quote goes on
+  // to find R as for a route below it, and refuses no_quote naming R (card evm-buy-and-sell-on-mainnet)
+  let noMain = null as string | null;
+  let noMainCode: "no_quote" | "partial_fill" = "no_quote";
+  const missed = (code: "no_quote" | "partial_fill", why: string): void => void ((noMain = why), (noMainCode = code));
   const set = await routeSet({
     chain,
     v,
@@ -2078,27 +2188,30 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     // the prune's floor is what the route counts for, the lowest of Q and its reads with unlisted hooks replaced: Q
     // alone is the hook's own answer, and a hook that quotes the quoter high would raise the floor past the token's
     // real market, which the prune then never quotes (review of 72e28658, H1). A read that answers nothing refuses
-    // the quote below (review of a2d82dc6, F2), so it lowers nothing here
+    // the quote below (review of a2d82dc6, F2), so it lowers nothing here. A route that quotes nothing (noMain) counts
+    // for nothing, so every route that fills could be R: the floor is 1 wei, the least a route that fills gives
+    // (fills: an output above 0), and the bounds are ceilings, so it drops only a pool that gives nothing (0n would
+    // also skip the X prune, which then cuts only such pools)
     floor: (out) => lows.reduce((m, i) => {
       const x = out(i);
       return x !== null && x > 0n && x < m ? x : m;
-    }, out(main)!),
+    }, noMain !== null ? 1n : out(main)!),
     // The route: a quote, and one that grows with its input
     firstRound: (out, answer) => {
       const q = out(main);
       const m = answer(main);
-      if (m.kind === "revert" && m.partial) return refuse("partial_fill", "a hookless hop runs out of liquidity (NotEnoughLiquidity)");
-      if (m.kind === "revert" && m.gas === true) return refuse("no_quote", `the route's quote runs out of its gas read alone (${EVM_READ_CALL_GAS} gas a call)`);
-      if (q === null || q === 0n) return refuse("no_quote", "the route reverts or quotes nothing");
+      if (m.kind === "revert" && m.partial) return missed("partial_fill", "a hookless hop runs out of liquidity (NotEnoughLiquidity)");
+      if (m.kind === "revert" && m.gas === true) return missed("no_quote", `the route's quote runs out of its gas read alone (${EVM_READ_CALL_GAS} gas a call)`);
+      if (q === null || q === 0n) return missed("no_quote", "the route reverts or quotes nothing");
       const q2 = out(twice);
-      if (q2 !== null && q2 <= q) return refuse("partial_fill", `twice the amount quotes ${q2}, not more than ${q}: a pool runs out`);
+      if (q2 !== null && q2 <= q) return missed("partial_fill", `twice the amount quotes ${q2}, not more than ${q}: a pool runs out`);
       // a v3 route has no hook: its quote at twice the amount reverts only when a pool cannot fill it. One whose read at
       // twice runs out of its gas alone (`gas`) is no revert (review of fe9f5ec3, finding 1): through one pool the 1x
       // read that answered within its gas filled whole, since a swap stopped at its price limit takes the 1x path at
       // twice and would answer within the same gas; through several, a hop's spam can hide another's partial fill
       const gas2 = (answer(twice) as { gas?: true }).gas === true;
       if (q2 === null && route.venue === "uniswap-v3" && gas2 && route.tokens.length > 2) return refuse("out_of_gas", "twice the amount runs out of a read's gas alone on a v3 route of more than one hop: its quote may be a partial fill");
-      if (q2 === null && route.venue === "uniswap-v3" && !gas2) return refuse("partial_fill", "twice the amount reverts on a v3 route");
+      if (q2 === null && route.venue === "uniswap-v3" && !gas2) return missed("partial_fill", "twice the amount reverts on a v3 route");
     },
   });
   const { block, out, fills, filled } = set;
@@ -2122,7 +2235,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // limit and leave out the very read that shows what the route pays (review of a2d82dc6, F2). The cost is a route
   // through an honest cap behind such a hook refused at quote time: no fee lost, nothing banned
   let value = q;
-  for (const i of lows) {
+  for (const i of noMain === null ? lows : []) {
     const x = out(i);
     if (x === null || x === 0n) return refuse("no_quote", "the route with a hook the venue does not list replaced reverts or quotes nothing");
     if (x < value) value = x;
@@ -2167,6 +2280,13 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const natives = ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : [];
   const exits = ownFits && unlisted.length > 0 ? priced.filter((r) => evmSellExits(chain, token, r.route)) : [];
   const all = () => true;
+  // a route that quotes nothing: R is the best of every route that fits, as for a route that does not fit, held to
+  // the same rule a named R is (ranOut), and named on its no_quote; none is named where none fits
+  if (noMain !== null) {
+    const r = (await bestFits([{ l: priced, band: all }]))[0] ?? null;
+    if (r !== null) ranOut(r, "the best route that fits");
+    return refuse(noMainCode, noMain, r);
+  }
   const fitted = await bestFits([
     { l: [{ route, amountOut: value }], band: all },
     { l: priced, band: ownFits ? (c) => c.amountOut >= value : all },
@@ -4272,6 +4392,8 @@ const limited = (a: unknown) => {
   const m = (a as { error?: { message?: unknown } } | null)?.error?.message;
   return typeof m === "string" && !reverted(a) && /request limit|rate limit|too many requests|exceeded its compute units per second/i.test(m);
 };
+/** `limited` for a call's error object alone (the pool index's reads, pool-index.ts): one copy of the words. */
+export const evmErrorLimited = (e: unknown): boolean => limited({ error: e });
 /** A call that reverted (code 3, or a message "execution reverted…"): its string is the called contract's, never the
  *  provider's state or limit (review LOW-2). */
 const reverted = (a: unknown) => {

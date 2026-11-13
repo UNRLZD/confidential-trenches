@@ -18,16 +18,18 @@ import { evmPoolScopeOf, EVM_POOL_EVENTS, type EvmPoolEvent, type EvmPoolPin, ty
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { evmRestore, SECOND_GAP } from "../../wallet/src/pool/evm-restore.ts";
 import { EVM_SECOND_GAP } from "../../wallet/src/notes/store.ts";
+import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { evmPoolVenues, pinnedBuild, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSell } from "../../kit/src/trade/evm/sell.ts";
-import type { EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
+import { EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolSellQuote, type EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { BOUGHT, flat, provider, refreshHead, sellQuoteWith, TOKEN } from "../../kit/test/evm-sell-quote-fx.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
-import { EVM_OPEN_SELLS_KEY, EVM_SELL_DEADLINE_S, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, planEvmSell, poolSellEvmKind, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
+import { EVM_OPEN_SELLS_KEY, EVM_SELL_DEADLINE_S, evmBuyRouteRead, evmSellPlanQuote, evmSellAnswer, followEvmSells, planEvmSell, poolSellEvmKind, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
 import { POOL_TRADE_LOCK } from "../src/trade.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
@@ -112,7 +114,7 @@ function chain() {
         case "eth_getTransactionByHash":
           return c.txs.get(p[0] as string) ?? null;
         case "eth_getBlockByNumber": {
-          const n = p[0] === "latest" ? c.head : p[0] === "safe" ? c.head - 10n : BigInt(p[0] as string);
+          const n = p[0] === "latest" ? c.head : p[0] === "finalized" ? c.head - 10n : BigInt(p[0] as string);
           return { number: hx(n), timestamp: hx(timeOf(n)), hash: w32(n) };
         }
         case "eth_getTransactionCount":
@@ -328,7 +330,7 @@ test("a W whose buy record holds no route, or no block, is refused not_allowed: 
 test("a token whose decimals() changed since its buy (6 at the quote's block, the ask's units made with 18) is refused before W signs", async () => {
   const x = await world();
   x.c.decimalsAtBlock = 6n;
-  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "quote_check_failed", rule: "decimals" });
   assert.equal(x.posts.length, 0);
   assert.deepEqual(await openOf(x), []);
   assert.notEqual((await returnNote(x.store))?.state, "INCOMING");
@@ -618,6 +620,50 @@ for (const [ref, p] of [
   });
 }
 
+/** A filled half sale whose deposit is on chain but not final (its record kept, its note UNSPENT). */
+async function soldNotFinal(): Promise<{ x: World; id: string }> {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      x.c.balance = x.c.balance.map((b) => b - s.amount);
+      x.land(s.minOut - s.fee, s.precommitment, W, "0x" + "e1".repeat(32), true);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  const a = await runEvmPoolSell(x.h, HALF);
+  assert.equal("stage" in a && a.stage, "filled");
+  const n = (await returnNote(x.store))!;
+  assert.equal(n.state, "UNSPENT");
+  assert.equal((await openOf(x)).length, 1, "record kept");
+  return { x, id: n.id };
+}
+/** One settle round of the pool's (wallet src/pool/evm-settle.ts) at `fin`, on the world's events. */
+const settleRound = (x: World, fin: bigint) =>
+  evmSettleReserved({ seed64: SEED.slice(), notes: x.store, scope: SCOPE, round: async () => ({ fin: { number: fin, timestamp: BigInt(Math.floor(Date.now() / 1000)) - 600n }, anchor: { number: x.c.head + 100n, timestamp: BigInt(Math.floor(Date.now() / 1000)) }, events: [...x.c.events] }) });
+
+for (const reserved of [false, true]) {
+  test(`P2-race${reserved ? " (its note RESERVED by a buy)" : ""}: a reorg drops a sale's deposit for good and a load's follow reads not_landed before the pool's round backs the note out: the record is kept, and the follow after the round puts the note back PLANNED`, async () => {
+    const { x, id } = await soldNotFinal();
+    if (reserved) {
+      const held = await x.store.move(id, "UNSPENT", "HELD", { deadlineMs: BigInt(Date.now()) + 60_000n, context: "1" });
+      await x.store.move(id, "HELD", "RESERVED", { attempt: held.attempt! });
+    }
+    x.c.deposits.pop();
+    x.c.events.pop();
+    x.c.sellNonce = x.c.sellNonce! - 1n;
+    tick((EVM_SELL_DEADLINE_S + 120) * 1000);
+    await followEvmSells(x.h);
+    assert.equal((await openOf(x)).length, 1, "the record kept over a note whose landing is not final yet");
+    // the round backs the note out (its block above the final one), then one with that block final and no deposit of it
+    await settleRound(x, x.c.fin);
+    await settleRound(x, x.c.fin + 100n);
+    await followEvmSells(x.h);
+    assert.equal((await x.store.get(id))!.state, "PLANNED", "back to PLANNED, never INCOMING for good");
+    assert.deepEqual(await openOf(x), []);
+  });
+}
+
 test("P1-1: the store plans an EVM sale's next R note on an INCOMING one only while fewer than the restore's gap of that chain are unlanded; a Solana chain never", async () => {
   assert.equal(EVM_SECOND_GAP, SECOND_GAP, "the store's number is the restore's");
   const store = await notes();
@@ -696,6 +742,26 @@ test("P2-3: one round past the deadline with empty log lists is not not_landed: 
   await y.store.move(m.id, "PLANNED", "INCOMING");
   await y.h.record({ ...o, note: m.id });
   await followEvmSells(y.h);
+  assert.equal((await returnNote(y.store))?.state, "PLANNED");
+  assert.deepEqual(await openOf(y), []);
+});
+
+test("P3-1: a sale read not_landed whose note cannot be put back PLANNED keeps its record, read again until the move is written", async () => {
+  const y = await world();
+  const m = await y.store.add({ ref: RETURN, scope: SCOPE, precommitment: P, state: "PLANNED" });
+  await y.store.move(m.id, "PLANNED", "INCOMING");
+  const o: EvmOpenSell = { note: m.id, chain: "base", w: W, token: TOKEN, amount: "1", precommitment: P.toString(), nonce: "0", deadline: (BigInt(Math.floor(Date.now() / 1000)) - 100n).toString(), from: "900", least: "1" };
+  await y.h.record(o);
+  // the store's first write of the move fails; the record is still there at it
+  const move = y.store.move.bind(y.store);
+  const at: number[] = [];
+  y.store.move = (async (...a: Parameters<typeof move>) => {
+    at.push((await openOf(y)).length);
+    if (at.length === 1) throw new Error("the write failed");
+    return move(...a);
+  }) as typeof move;
+  await followEvmSells(y.h);
+  assert.deepEqual(at, [1, 1], "moved again on a later round, the record kept over the failed one");
   assert.equal((await returnNote(y.store))?.state, "PLANNED");
   assert.deepEqual(await openOf(y), []);
 });
@@ -918,6 +984,36 @@ test("P2-A: a refused sale signed again is that sale: another amount waits (fail
   assert.ok(s2!.minOut - s2!.fee >= BigInt(first.least), "a floor no lower than the first's");
 });
 
+test("a refused sale past its deadline at the quote's agreed block holds nothing: another amount is signed at once on the same Sell nonce and note, with its own floor, while the first's record waits for the final block", async () => {
+  let x!: World;
+  x = await world({
+    send: async (n, body) => {
+      if (n === 1) throw new EvmSendRefused(422, "fee_low");
+      const s = sellOf(body.data);
+      x.land(s.minOut - s.fee);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  x.h.keep = () => {};
+  x.h.following = new Set();
+  x.h.wait = () => new Promise((r) => setTimeout(r, 1));
+  // a sign out at the end stops the two sales' follows (their records wait for the final block, which never comes here)
+  const out = new AbortController();
+  x.h.signal = out.signal;
+  assert.deepEqual(await runEvmPoolSell(x.h, HALF), { stage: "refused", txs: [] });
+  const first = (await openOf(x))[0]!;
+  // the chain's newest agreed block past the first sale's deadline: SellDelegate refuses it from then on
+  tick((EVM_SELL_DEADLINE_S + 30) * 1000);
+  const a = await runEvmPoolSell(x.h, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const [s1, s2] = x.posts.map((p) => sellOf(p.data));
+  assert.notEqual(s2!.amount, s1!.amount, "another amount");
+  assert.equal(s2!.nonce, s1!.nonce, "the same Sell nonce: at most one of the two lands");
+  assert.equal(s2!.precommitment, s1!.precommitment, "the same note");
+  assert.ok(BigInt(first.deadline) < s2!.deadline);
+  out.abort();
+});
+
 test("review F4: a refusal that comes past the tap's bound is told as a late stage", async () => {
   let x!: World;
   let n = 0;
@@ -1003,6 +1099,73 @@ test("a sign out while the sale's read waits ends the wait at once: failed, noth
   assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "failed" });
   assert.equal(reads, 1);
   assert.equal(x.posts.length, 0);
+});
+
+// card evm-buy-and-sell-on-mainnet: the decimals reads at the quote's block come between the sale's quote and W's
+// signature; a quote whose block is past the kit's bound on the device's clock there is never signed: the quote is read
+// again (with its decimals at the new block), and the new one is built, checked and signed
+const lowerPrice = (p: Parameters<typeof flat>[0]) => flat(p) - flat(p) / 10n;
+/** The sale's quotes in turn: the first at the flat price, the next at a lower one; the first's decimals reads take the
+ *  device's clock 31 s past its block. `fail`: what the second answers instead. */
+const requoting = (x: World, fail?: Error) => {
+  const asked: EvmPoolSellQuote[] = [];
+  x.h.quote = async (req) => {
+    if (asked.length > 0 && fail) throw fail;
+    const m = { price: asked.length === 0 ? flat : lowerPrice };
+    const q = await sellQuoteWith(req, [provider(m), provider(m)], Date.now());
+    asked.push(q);
+    if (asked.length === 1) tick(Number(q.block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS + 1_000 - Date.now());
+    return q;
+  };
+  return asked;
+};
+
+test("a sale quote whose block is 31 s old at W's signature is never signed: the quote is read again and the second quote is signed", async () => {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      x.land(s.minOut - s.fee);
+      return "0x" + "d1".repeat(32);
+    },
+  });
+  const asked = requoting(x);
+  const a = await runEvmPoolSell(x.h, ASK);
+  assert.equal(asked.length, 2, "the quote read again at the signature");
+  assert.ok(asked[1]!.minOut < asked[0]!.minOut, "the second quote's min out is its own");
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: "0x" + "d1".repeat(32) }] });
+  assert.equal(x.posts.length, 1);
+  assert.equal(sellOf(x.posts[0]!.data).minOut, asked[1]!.minOut, "W signed the second quote's min out, never the first's");
+  // the decimals read again at the second quote's block, on both RPCs
+  const at = x.c.calls.filter((c) => c.method === "eth_call" && (c.params[0] as { data: string }).data === "0x313ce567").map((c) => [c.k, c.params[1]]);
+  assert.deepEqual(at, [[0, hx(asked[0]!.block.number)], [1, hx(asked[0]!.block.number)], [0, hx(asked[1]!.block.number)], [1, hx(asked[1]!.block.number)]]);
+});
+
+test("a sale quote read again at W's signature that fails: nothing signed, recorded or sent, the note never INCOMING", async () => {
+  const x = await world();
+  const asked = requoting(x, new EvmQuoteError("stale_quote", "old"));
+  let calls = 0;
+  const quote = x.h.quote;
+  x.h.quote = (req) => (calls++, quote(req));
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "quote_check_failed", rule: "stale_quote" });
+  assert.deepEqual([asked.length, calls], [1, 2], "the quote was read again");
+  assert.equal(x.posts.length, 0);
+  assert.deepEqual(await openOf(x), []);
+  assert.notEqual((await returnNote(x.store))?.state, "INCOMING");
+});
+
+test("a two-W sale's answer to the app is its stage and transactions, which the kit's pool.sell schema takes; the legs and their rule words stay on the page (review of 586284afc, P3)", () => {
+  const tx = { chain: "base" as const, hash: "0x" + "ab".repeat(32) };
+  const run = { stage: "part_filled" as const, txs: [tx], legs: [
+    { wallet: W, amount: "1000", tx: tx.hash, stage: "filled" as const },
+    { wallet: "0x" + "e2".repeat(20), amount: "500", tx: null, stage: null, error: "quote_check_failed" as const, rule: "below_reference" },
+  ] };
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS["pool.sell"](run), false, "the run as it is, legs and all, is refused by the kit");
+  const a = evmSellAnswer(run);
+  assert.deepEqual(a, { result: { stage: "part_filled", txs: [tx] } });
+  assert.ok("result" in a && SIGNPAGE_RESULT_SCHEMAS["pool.sell"](a.result), "the kit's client takes the answer");
+  assert.deepEqual(evmSellAnswer({ error: "quote_check_failed", rule: "below_reference" }), { error: "quote_check_failed", rule: "below_reference" });
+  assert.deepEqual(evmSellAnswer({ error: "down" }), { error: "down" });
 });
 
 // review P2-1 of 024e8a89d: the EVM sale's whole run holds POOL_TRADE_LOCK, shared, so no Solana leftover rent back

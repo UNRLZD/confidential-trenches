@@ -22,9 +22,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { check } from "./evm-rpc-spare-list.mjs";
+import { APP_ORIGIN, LIMIT_CODES, RATE_LIMIT, RETRY, check, makerSpares, preflight, spareVerdict, throttled } from "./evm-rpc-spare-list.mjs";
+import { LIMIT_CODES as SHARED_LIMIT_CODES, RATE_LIMIT as SHARED_RATE_LIMIT, RETRY as SHARED_RETRY } from "./provider-answer.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-rpc-spare-list.answers.json", import.meta.url), "utf8"));
+const RETRY_MS = RETRY.ms; // as loaded, before a test sets it to 0
 const has = (lines, re) => assert.ok(lines.some((l) => re.test(l)), `a line matches ${re}:\n${lines.join("\n")}`);
 
 test("the good answer (card base-rpc-list-fix) passes: Base's four scan providers and Robinhood's three, every held quote ok on the third, every helper read past the first two", () => {
@@ -112,4 +114,121 @@ test("card evm-spare-list-green: the good answer on this card's branch passes: e
   for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^PASS robinhood-torch, first two ${m}: ends ok in \\d+ ms`));
   has(r.lines, /^PASS helper base maker list of 6, each on its own host: .*rpc\.sentio\.xyz \(5 at least\)$/);
   assert.ok(!r.lines.some((l) => /blockpi/.test(l)), "no line names BlockPI");
+});
+
+// Card evm-spare-check-reads-a-throttle-as-no-answer: `throttledSpare` is helper live run 43464263269 (job
+// 132019260570, 13 Nov 16:35Z, the deployed helper at 59087d39a), transcribed from its log: 78 of 79 checks green and
+// this one red on 4663.rpc.thirdweb.com's rate-limit answer to GitHub's runner ("You are using a public RPC with rate
+// limits, ..."), which answered this Mac {"result":"0x1237"} three times at 16:4xZ. `thirdweb429` is thirdweb's own 429
+// to this Mac after a burst of 40 reads (16:4xZ). A throttle is no answer: that spare is INCONCLUSIVE, never FAIL; a
+// wrong chain id, any other error and a short list stay FAIL.
+test("card evm-spare-check-reads-a-throttle-as-no-answer: run 43464263269's throttled thirdweb spare is INCONCLUSIVE, and no line of the run FAILs", () => {
+  const r = check(A.throttledSpare);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.equal(r.ok, false);
+  has(r.lines, /^INCONCLUSIVE helper robinhood maker spare 4663\.rpc\.thirdweb\.com: chain id 4663, error You are using a public RPC with rate limits.*: it throttled this reader past its one retry, no answer$/);
+  assert.equal(r.lines.filter((l) => /^FAIL /.test(l)).length, 0, r.lines.join("\n"));
+  assert.equal(r.lines.length, 54);
+});
+
+test("card evm-spare-check-reads-a-throttle-as-no-answer: a planted wrong chain id, a list under its floor, or any other error stays FAIL beside a throttle", () => {
+  const u = "https://4663.rpc.thirdweb.com";
+  const id = structuredClone(A.throttledSpare);
+  id.makers.robinhood.spares[u].chainId = 1;
+  const a = check(id);
+  assert.equal(a.verdict, "FAIL");
+  has(a.lines, /^FAIL helper robinhood maker spare 4663\.rpc\.thirdweb\.com: chain id 1, error You are using a public RPC with rate limits/);
+  const short = structuredClone(A.throttledSpare);
+  short.makers.robinhood.list = short.makers.robinhood.list.filter((x) => x !== u);
+  const b = check(short);
+  assert.equal(b.verdict, "FAIL");
+  has(b.lines, /^FAIL helper robinhood maker list of 4, each on its own host: .* \(5 at least\)$/);
+  const other = structuredClone(A.throttledSpare);
+  other.makers.robinhood.spares[u] = { chainId: 4663, results: null, status: 200, error: "-32002 keyless requests are served for the most recent 5000 blocks only" };
+  assert.equal(check(other).verdict, "FAIL");
+  const page = structuredClone(A.throttledSpare);
+  page.makers.robinhood.spares[u] = { idError: "<!DOCTYPE html>", idStatus: 521, results: null, status: 521, error: "<!DOCTYPE html>" };
+  assert.equal(check(page).verdict, "FAIL");
+  // a throttle on the chain-id read too is no answer; HTTP 429 or code -32005 with no rate-limit words is one
+  const idq = structuredClone(A.throttledSpare);
+  idq.makers.robinhood.spares[u] = { idError: "-32005 slow down", idStatus: 200, results: null, status: 429, error: "busy" };
+  assert.equal(check(idq).verdict, "INCONCLUSIVE");
+});
+
+test("card evm-spare-check-reads-a-throttle-as-no-answer: a scan spare whose preflight or POST answers 429 is INCONCLUSIVE; one that answers no origin stays FAIL", () => {
+  const run = structuredClone(A.goodSpare);
+  const u = run.scans.robinhood[2];
+  run.preflight[u] = { status: 204, allow: "https://ct-app.unrealized.trade", headers: "content-type", post: null, postStatus: 429 };
+  const r = check(run);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  has(r.lines, /^INCONCLUSIVE robinhood third scan provider preflight from \S+: 204, .*POST 429, allow-origin none: it throttled/);
+  run.preflight[u] = { status: 429, allow: null, headers: null, post: null, postStatus: 429 };
+  assert.equal(check(run).verdict, "INCONCLUSIVE");
+  run.preflight[u] = { status: 204, allow: null, headers: "content-type", post: null, postStatus: 200 };
+  assert.equal(check(run).verdict, "FAIL");
+});
+
+test("card evm-spare-check-reads-a-throttle-as-no-answer: a maker spare is read again once on thirdweb's recorded 429, then judged by the second answer", async () => {
+  RETRY.ms = 0;
+  const thirdweb = "https://4663.rpc.thirdweb.com";
+  const t = A.thirdweb429;
+  const answer = (method) => ({ eth_chainId: "0x1237", eth_blockNumber: "0x1000000", eth_getLogs: [] })[method];
+  const fetchOf = (throttles) => {
+    const asked = new Map();
+    const f = async (url, init) => {
+      const { method } = JSON.parse(init.body);
+      const k = `${url} ${method}`;
+      asked.set(k, (asked.get(k) ?? 0) + 1);
+      if (url === thirdweb && asked.get(k) <= throttles) return new Response(t.body, { status: t.status, headers: t.headers });
+      return Response.json({ jsonrpc: "2.0", id: 1, result: answer(method) });
+    };
+    return { f, asked };
+  };
+  const once = fetchOf(1);
+  const ok = await makerSpares("robinhood", once.f);
+  assert.deepEqual(ok.spares[thirdweb], { chainId: 4663, results: 0 });
+  assert.equal(once.asked.get(`${thirdweb} eth_chainId`), 2);
+  const twice = fetchOf(2);
+  const quiet = await makerSpares("robinhood", twice.f);
+  assert.equal(twice.asked.get(`${thirdweb} eth_chainId`), 2, "read again once, never more");
+  assert.equal(quiet.spares[thirdweb].idStatus, 429);
+  assert.equal(spareVerdict(quiet.spares[thirdweb], 4663), "INCONCLUSIVE");
+  const run = structuredClone(A.throttledSpare);
+  run.makers.robinhood = quiet;
+  has(check(run).lines, /^INCONCLUSIVE helper robinhood maker spare 4663\.rpc\.thirdweb\.com: chain id HTTP 429 You are using a public-good RPC/);
+});
+
+test("card evm-spare-check-reads-a-throttle-as-no-answer: a scan spare's preflight is read again once on a 429, then recorded as answered", async () => {
+  RETRY.ms = 0;
+  const u = "https://robinhood.api.pocket.network";
+  const t = A.thirdweb429;
+  const cors = { "access-control-allow-origin": APP_ORIGIN, "access-control-allow-headers": "content-type" };
+  const fetchOf = (throttles) => {
+    let n = 0;
+    const f = async (_url, init) => {
+      if (init.method === "OPTIONS") n++;
+      if (n <= throttles) return new Response(init.method === "OPTIONS" ? null : t.body, { status: init.method === "OPTIONS" ? 204 : 429 });
+      return init.method === "OPTIONS" ? new Response(null, { status: 204, headers: cors }) : Response.json({ jsonrpc: "2.0", id: 1, result: "0x1" }, { headers: cors });
+    };
+    return { f, asked: () => n };
+  };
+  const once = fetchOf(1);
+  const p = (await preflight([u], once.f))[u];
+  assert.equal(once.asked(), 2);
+  assert.deepEqual(p, { status: 204, allow: APP_ORIGIN, headers: "content-type", post: APP_ORIGIN, postStatus: 200 });
+  const twice = fetchOf(2);
+  const q = (await preflight([u], twice.f))[u];
+  assert.equal(twice.asked(), 2, "read again once, never more");
+  assert.equal(q.postStatus, 429);
+  const run = structuredClone(A.goodSpare);
+  run.preflight[u] = q;
+  assert.equal(check(run).verdict, "INCONCLUSIVE");
+});
+
+test("card evm-spare-check-reads-a-throttle-as-no-answer: the check's throttle words and codes are provider-answer.mjs's", () => {
+  assert.equal(RATE_LIMIT.source, SHARED_RATE_LIMIT.source);
+  assert.equal(RATE_LIMIT.flags, SHARED_RATE_LIMIT.flags);
+  assert.deepEqual([...LIMIT_CODES].sort(), [...SHARED_LIMIT_CODES].sort());
+  assert.equal(RETRY_MS, SHARED_RETRY.ms);
+  assert.ok(throttled(undefined, A.throttledSpare.makers.robinhood.spares["https://4663.rpc.thirdweb.com"].error));
 });

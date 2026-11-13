@@ -9,15 +9,17 @@
 //   binding holds, the device's own epoch fee read on two RPCs when the queue bound it, and the relay data's fee cap
 //   (what the proof's context commits to) is held to it by the rule.
 // - The quote: the kit's evmPoolBuyQuote, for the chunk less that fee (what the pool swaps), on the kit's pinned
-//   providers; a read names the token, never W. The request names no route, so the device asks the standard pool
-//   shapes in turn (v4 native, then v3 WETH, each fee tier), and a quote the kit refuses below its own best
-//   (below_reference, native_first, over_gas_floor) is asked again on that best route, once.
+//   providers; a read names the token, never W. The request names no route, so the device asks one shape (quoteOf),
+//   then one v3 WETH tier, and a quote the kit refuses below its own best (below_reference, native_first,
+//   over_gas_floor, and a no_quote that names it) is asked again on that best route, once: three quotes at most.
 // - Built by the kit (evmPoolBuildQuoted, through the chain's pinned adapter for the route's venue), checked by the
 //   rule (checkEvmBuy: the quote's own build, the pinned pool and adapter, the ask's token and amount, a min out at least
 //   the quote's agreed output less the ask's own slippage, which the rule derives, the proof's relay data W's and the
 //   pinned fee recipient's), signed by W only through signEvmBuy. W is derived from the seed right before it signs and
 //   must be the proof's W and the relay data's recipient; the seed is zeroed once W is derived and W's key once it has
-//   signed, and both again on every exit. A quote or a check that fails is never signed: the note stays HELD.
+//   signed, and both again on every exit. A quote or a check that fails is never signed: the note stays HELD. Right
+//   before W signs, a quote whose block is more than EVM_QUOTE_MAX_AGE_MS behind the device's clock (the reads and the
+//   seed below take time) is read again, and the new one is built, checked and signed.
 // - Before the bytes leave: the token's decimals (both RPCs), each RPC's newest block (where the read-back starts), and
 //   W's holding written as pending (the token, its decimals, the route W signed): a write that fails sends nothing. So
 //   a buy that lands is never without its record, whatever happens to the page after the send.
@@ -33,8 +35,9 @@
 //       the min out W signed, of the chunk at a fee up to the proof's (the sender picks the fee, at most the relay
 //       data's cap); W's holding is completed with what W received, and filled names that transaction;
 //     refused, with the release's transaction: both show a Withdrawn (the swap failed in the pool's own call and W got
-//       the chunk less the fee charged, in ETH): that ETH is written owed back to the user (EVM_OWED_BACK_KEY) for the sell and
-//       withdraw cards to return, and the holding marked withdrawn; the buy did not fill;
+//       the chunk less the fee charged, in ETH): the holding is marked withdrawn and the page's carry pass starts
+//       (src/pool-carry-evm.ts: W deposits that ETH back into the pool as a note of the user's, found from the chain
+//       alone, again on every load until it lands); the buy did not fill;
 //     not_landed: both show another release of the nullifier (the note spent elsewhere), or both RPCs' newest block is
 //       past the proof's deadline with no release of it on either (the pool refuses it from then on: PrivacyPool.sol
 //       reverts a release once block.timestamp is past the relay data's deadline). Never on a revert: the pool has no
@@ -53,7 +56,8 @@
 //   nullifier or a transaction hash.
 // Nothing here logs.
 import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
-import { evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolBuyQuote, evmPoolIndexPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
+import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
@@ -65,6 +69,7 @@ import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type PoolAsk } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmReleaseRead } from "./evm-send.ts";
 import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
+import { refusalRule } from "./refusal-rule.ts";
 import { duringTrade, TRADE_HELPER } from "./trade.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -77,7 +82,7 @@ export const EVM_POSITION_COSTS_KEY = "owed/cost-evm";
 /** One W's buy: positions.ts PositionCost's fields (mint, received once known, decimals; no cost_usd, the page reads no
  *  EVM price yet, which positions.ts reads as cost unknown), its state, and the route W signed (with its transaction and
  *  block once read back). pending: written before the send; filled: read back with what W received; withdrawn: the
- *  swap failed, W holds the ETH owed back (EVM_OWED_BACK_KEY). */
+ *  swap failed, W holds the ETH, which the carry puts back into the pool (src/pool-carry-evm.ts). */
 export type EvmHolding = {
   mint: string;
   decimals: number;
@@ -92,10 +97,6 @@ export type EvmHolding = {
   buy?: EvmPendingBuy;
 };
 export type EvmPendingBuy = { nullifier: string; from: string; deadlineMs: string; minOut: string; value: string; feeCap: string; feeRecipient: string };
-/** ETH a release paid W with no swap (a Withdrawn), owed back to the user, by W's address: the chunk less the fee, in
- *  wei, and the release that paid it. The pool sell and withdraw cards read it to return it. */
-export const EVM_OWED_BACK_KEY = "owed/back-evm";
-export type EvmOwedBack = { address: string; chain: Chain; wei: string; tx: string; block: string };
 
 export type EvmPoolBuyHost = {
   chain: Chain;
@@ -116,6 +117,8 @@ export type EvmPoolBuyHost = {
   seed64(): Promise<Uint8Array>;
   /** The kit's evmPoolBuyQuote. */
   quote(req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote>;
+  /** The token's v4 pools in the chain's served pool index (the kit's evmPoolIndexPools), or null where none is served. */
+  indexPools?(network: EvmPoolChain, token: string): readonly EvmPoolKey[] | null;
   /** The kit's evmPoolBuildQuoted. */
   build(adapter: string, q: EvmPoolBuyQuote): EvmPoolBuy;
   /** The token's decimals, the same on both RPCs (rules/pool.ts tokenDecimalsOf, via pool-kinds.ts keptTokenDecimals); throws otherwise. */
@@ -134,8 +137,9 @@ export type EvmPoolBuyHost = {
   holdings(): Promise<Record<string, unknown>>;
   /** The Ws whose buy this page is following now: the load's follow skips them. */
   following?: Set<string>;
-  /** Writes W's ETH owed back (EVM_OWED_BACK_KEY). */
-  owe(o: EvmOwedBack): Promise<void>;
+  /** Starts the chain's carry pass (src/pool-carry-evm.ts carryEvmOwed): a release paid W with no swap. Never awaited;
+   *  the pass reads the chain alone, so a pass that never starts here runs at the next state read. */
+  carry?(): void;
   /** Runs the part up to the send under the seed's lock (the kind's); the read-back runs outside it. */
   hold?<T>(f: () => Promise<T>): Promise<T>;
   /** The bytes have left the device: told once. */
@@ -156,7 +160,9 @@ export type EvmPoolBuyHost = {
   wait?(ms: number): Promise<void>;
 };
 
-export type EvmPoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" };
+/** A refusal's `rule` (refusal-rule.ts): the fixed word naming the device rule or kit code that refused it, for the page's
+ *  own record; never posted to the app. */
+export type EvmPoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed"; rule?: string };
 
 /** The tap's read-back from the send, on the wall clock (the Solana buy's POOL_BUY_SETTLE_MS). */
 export const EVM_BUY_SETTLE_MS = 120_000;
@@ -185,46 +191,34 @@ export const EVM_BUY_LAG_BLOCKS = 400n;
 export const EVM_BUY_HEAD_SPREAD = 5_000n;
 /** A busy wait's slices: it ends within one once this tab starts a sign out (\`stopped\`). */
 const STOP_POLL_MS = 250;
-/** The standard v4 (fee, tick spacing) pairs and v3 fee tiers the first quote asks in turn (the kit's own standard set,
- *  checks/evm/quote.ts V4_KEYS and V3_FEES). */
-const V4_FIRST: readonly (readonly [number, number])[] = [[3000, 60], [10000, 200], [500, 10], [100, 1]];
-const V3_FIRST: readonly number[] = [3000, 500, 10000, 100];
-const ZERO = "0x0000000000000000000000000000000000000000";
-const REQUOTE = new Set(["below_reference", "native_first", "over_gas_floor"]);
-
 type Code = Exclude<EvmPoolBuyAnswer, { stage: TradeStage }>["error"];
 class Refused extends Error {
   readonly code: Code;
-  constructor(code: Code) {
+  readonly rule: string | undefined;
+  constructor(code: Code, rule?: string) {
     super(code);
     this.code = code;
+    this.rule = rule;
   }
 }
-const no = (code: Code = "failed"): never => {
-  throw new Refused(code);
+const no = (code: Code = "failed", rule?: string): never => {
+  throw new Refused(code, rule);
 };
 const lower = (s: string): string => s.toLowerCase();
 
-/** The device's quote of the ask: the standard shapes in turn until one quotes or the kit names its own best route, which
- *  is then asked once. Any other refusal of every shape: quote_check_failed. */
+/** For the tests: forgets every token's last route (the kit's evmBuyTapReset). */
+export const evmLastRouteReset = (): void => evmBuyTapReset();
+
+/** The device's quote of the ask: the kit's buy tap quote (kit trade/evm/buy-tap.ts evmPoolBuyQuoteTap, three kit
+ *  quotes at most, the token's last route, its indexed pools a buy may take, the kit's own best route) on this page's
+ *  host; a tap no route takes answers its name (not_allowed, quote_check_failed). */
 async function quoteOf(h: EvmPoolBuyHost, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
-  const v = h.venues[network];
-  if (v === undefined) return no("not_allowed");
-  const shapes: EvmRoute[] = [
-    ...V4_FIRST.map(([fee, tickSpacing]): EvmRoute => ({ venue: "uniswap-v4", currencyIn: ZERO, hops: [{ currency: token, fee, tickSpacing, hooks: ZERO, hookData: "0x" }] })),
-    ...V3_FIRST.map((fee): EvmRoute => ({ venue: "uniswap-v3", tokens: [v.weth, token], fees: [fee] })),
-  ];
-  const ask = (route: EvmRoute) => h.quote({ chain: network, token, amountIn, slippageBps, route });
-  for (const route of shapes) {
-    try {
-      return await ask(route);
-    } catch (e) {
-      const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
-      if (typeof err?.code === "string" && REQUOTE.has(err.code) && err.reference) return ask(err.reference.route);
-      if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
-    }
+  try {
+    return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
+  } catch (e) {
+    if (e instanceof EvmBuyTapRefused) return no(e.code, refusalRule(e));
+    throw e;
   }
-  return no("quote_check_failed");
 }
 
 /** One pool.buy on an EVM chain: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). */
@@ -275,12 +269,16 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       const binding = { nullifier: signals[1]!, context: signals[7]!, value: signals[2]! };
       if (binding.context !== r.binding.context || binding.value !== r.chunk) return no();
       // the quote and the build: the device's own, for what the pool swaps (the chunk less the fee)
-      const q = await quoteOf(h, network, token, r.chunk - fee, ask.slippageBps);
-      const adapter = q.route.venue === "uniswap-v4" ? pins.v4 : pins.v3;
-      if (adapter === undefined) return no("quote_check_failed");
-      const built = h.build(adapter, q);
-      const ctx = { nowMs: clock(), wallet: r.wallet.address, feeCap: fee, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
-      checkEvmBuy(built, h.pin.pool, binding, relay, ask, ctx, { token: q.token, amountIn: q.amountIn, amountOut: q.amountOut }, h.testnet);
+      const quoted = async () => {
+        const q = await quoteOf(h, network, token, r.chunk - fee, ask.slippageBps);
+        const adapter = q.route.venue === "uniswap-v4" ? pins.v4 : pins.v3;
+        if (adapter === undefined) return no("quote_check_failed", "adapter");
+        const built = h.build(adapter, q);
+        const ctx = { nowMs: clock(), wallet: r.wallet.address, feeCap: fee, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
+        checkEvmBuy(built, h.pin.pool, binding, relay, ask, ctx, { token: q.token, amountIn: q.amountIn, amountOut: q.amountOut }, h.testnet);
+        return { q, adapter, built, ctx };
+      };
+      let { q, adapter, built, ctx } = await quoted();
       // before W signs, so a read that fails leaves the note HELD: the token's decimals, and where the read-back starts
       const decimals = await h.decimals(token);
       const heads = await Promise.all(h.rpcs.map((rpc) => evmHeadNumber(rpc)));
@@ -293,6 +291,9 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       key = w.secretKey;
       seed.fill(0);
       if (lower(w.address) !== lower(r.wallet.address) || lower(relay.recipient) !== lower(w.address)) return no();
+      // the reads and the seed since the quote: its block past EVM_QUOTE_MAX_AGE_MS on the device's clock is never
+      // signed; the quote is read again, and the new one built, checked and signed (a failure signs nothing)
+      if (clock() - q.block.timestamp * 1000n > BigInt(EVM_QUOTE_MAX_AGE_MS)) ({ q, adapter, built, ctx } = await quoted());
       const signature = signEvmBuy(key, ctx, built, h.pin.pool, binding);
       key.fill(0);
       const data = evmBuyCalldata(h.pin.pool, relay, r.proof, r.publicSignals, fee, built, signature);
@@ -327,7 +328,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
           if (e instanceof EvmSendRefused && !busied) {
             // a refusal is the helper's word, and the device never drops what it may own on a server's word: the run
             // answers refused, its pending record stays, and the chain ends it (the follow below: a Bought fills W's
-            // holding, no release by the two-round safe rule removes it, as the note's settle frees the note)
+            // holding, no release by the two-round final-block rule removes it, as the note's settle frees the note)
             return { refused: { want, from, holding, w: w.address, stops: [null, null], none: null, mine } };
           }
           if (e instanceof EvmSendBusy && !stopped() && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
@@ -382,9 +383,9 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
     // pending record is removed (a removal that fails leaves it to the load's follow)
     const mine = written as Written | null;
     if (mine !== null) await h.unrecord(mine.w, mine.nullifier, mine.deadlineMs).catch(() => {});
-    if (e instanceof Refused) return { error: e.code };
-    if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
-    if ((e as { name?: unknown })?.name === "EvmQuoteError" || (e as { name?: unknown })?.name === "EvmPoolBuyError") return { error: "quote_check_failed" };
+    if (e instanceof Refused) return e.rule === undefined ? { error: e.code } : { error: e.code, rule: e.rule };
+    if (e instanceof PoolRuleRefused) return { error: "quote_check_failed", rule: refusalRule(e) };
+    if ((e as { name?: unknown })?.name === "EvmQuoteError" || (e as { name?: unknown })?.name === "EvmPoolBuyError") return { error: "quote_check_failed", rule: refusalRule(e) };
     return { error: "failed" };
   } finally {
     (seed as Uint8Array | null)?.fill(0);
@@ -444,9 +445,14 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
       await h.record(x.w, { ...x.holding, state: "filled", received: poolUnits(v.release.out, x.holding.decimals), route: at }).catch(() => {});
       return { stage: "filled", txs };
     }
-    // withdrawn: W holds the chunk less the fee in ETH, owed back to the user; the buy did not fill
-    await h.owe({ address: x.w, chain: h.chain, wei: (v.release.value - v.release.fee).toString(), tx: v.release.tx, block: v.release.block.toString() }).catch(() => {});
+    // withdrawn: W holds the chunk less the fee in ETH; the buy did not fill. The carry puts it back into the pool, from
+    // the chain's own release (no record of this run is its source: a write that fails here loses nothing)
     await h.record(x.w, { ...x.holding, state: "withdrawn", route: at }).catch(() => {});
+    try {
+      h.carry?.();
+    } catch {
+      /* the next state read runs it */
+    }
     return { stage: "refused", txs };
   }
   return null;
@@ -458,7 +464,7 @@ const big = (v: unknown): bigint | null => (typeof v === "string" && /^[0-9]{1,7
  * The load's follow of pending buys (the tab that sent one may have closed before its end): each W's holding on this
  * chain still pending with its buy written, that no run of this page follows, is read on the chain from the record's
  * own block range until an end, as the run's own follow reads it (watch): filled or withdrawn completes it, not_landed
- * by the two-round safe rule removes it, so a pending never stays for good and the note can buy again. Runs once per W
+ * by the two-round final-block rule removes it, so a pending never stays for good and the note can buy again. Runs once per W
  * at a time (h.following); a sign out (h.signal) ends it with nothing written. Started on each state read
  * (src/pool-testnet.ts); never awaited.
  */
@@ -523,6 +529,17 @@ export type EvmBuyPage = {
   marks(): Promise<ReadonlyMap<string, ReservedMark>>;
   /** EvmPoolBuyHost.landed: the page's balance counts the note's change from here. */
   landed?(noteId: string, attempt: string, withdrawn: bigint, block: bigint): void;
+  /** EvmPoolBuyHost.carry: the chain's carry pass. */
+  carry?(chain: Chain): void;
+};
+
+/** Whether `was`, W's holding, is an earlier buy of the note `now` buys: pending, the same nullifier, an earlier
+ *  deadline. */
+const endedBefore = (was: unknown, now: EvmHolding): boolean => {
+  const b = (was as Partial<EvmHolding> | null)?.buy;
+  const n = (x: unknown) => (typeof x === "string" && /^\d{1,20}$/.test(x) ? BigInt(x) : null);
+  const [then, at] = [n(b?.deadlineMs), n(now.buy?.deadlineMs)];
+  return (was as Partial<EvmHolding>)?.state === "pending" && b?.nullifier === now.buy?.nullifier && b?.nullifier !== undefined && then !== null && at !== null && then < at;
 };
 
 /** A W that already has a holding: the pending write is refused, so nothing is sent (review P3-7). */
@@ -534,7 +551,7 @@ export class EvmHoldingTaken extends Error {
 }
 
 /** The page's host for one EVM buy run: the kit's quote, build and venue list, the helper's send, the pool's pair for
- *  the token's decimals and the read-back, W's holding and owed ETH in the wallet store's meta. */
+ *  the token's decimals and the read-back, W's holding in the wallet store's meta, the page's carry. */
 export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], claimed: Set<string>, page: EvmBuyPage): EvmPoolBuyHost {
   return {
     chain,
@@ -556,6 +573,7 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     },
     seed64: page.seed64,
     quote: evmPoolBuyQuote,
+    indexPools: evmPoolIndexPools,
     build: evmPoolBuildQuoted,
     // the page's kept decimals (pool-kinds.ts keptTokenDecimals: read on both RPCs and kept, so a sell after it reads none);
     // no wait here: this read falls between the buy's quote check and W's signature, and fails fast as the heads read does
@@ -563,12 +581,16 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     send: (body) => evmPoolSend(TRADE_HELPER, body, page.fetch),
     settle: page.settle,
     // the pending write, before anything leaves, refuses a W that already has a holding (another tab's run of the same
-    // note, whose token it would overwrite); an end's write completes this run's own
+    // note, whose token it would overwrite); an end's write completes this run's own. One holding is not in the way: an
+    // earlier buy of this same note (its nullifier) at an earlier deadline, still pending. The note was proved again, so
+    // the pool's round freed it (wallet src/pool/evm-settle.ts: both RPCs agree on a block past that deadline with no
+    // release of it, PrivacyPool.sol:241 refusing it from then on): that buy can never land, and its record, which waits
+    // for the final block to end (src/evm-send.ts evmReleaseRead), never holds the note's money that long
     record: async (w, holding) => {
       const store = await page.held();
       await store.update("meta", EVM_POSITION_COSTS_KEY, (v) => {
         const all = typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
-        if (holding.state === "pending" && all[w] !== undefined) throw new EvmHoldingTaken();
+        if (holding.state === "pending" && all[w] !== undefined && !endedBefore(all[w], holding)) throw new EvmHoldingTaken();
         return { ...all, [w]: holding };
       });
     },
@@ -587,10 +609,7 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
       return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
     },
     following: page.following,
-    owe: async (o) => {
-      const store = await page.held();
-      await store.update("meta", EVM_OWED_BACK_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [o.address]: o }));
-    },
+    ...(page.carry ? { carry: () => page.carry!(chain) } : {}),
     claimed,
     signal: page.signal,
     stopped: page.stopped,
@@ -624,7 +643,7 @@ export function poolBuyEvmKind(host: () => EvmPoolBuyHost & { end?(): void }, lo
           },
           ask,
         );
-        if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
+        if (!answer) answer = "error" in a ? (a.rule === undefined ? { error: a.error } : { error: a.error, rule: a.rule }) : { result: a };
         if ("stage" in a) ctx?.progress(a.stage);
       } finally {
         h.end?.();

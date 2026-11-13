@@ -7,14 +7,14 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { evmPoolBuyQuoteWith, EvmQuoteError, type EvmPoolBuyQuote, type EvmRpc as QuoteRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolBuyQuoteWith, EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmRpc as QuoteRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
 import { evmQuotedBuy } from "../../kit/src/trade/evm/quoted.ts";
 import { evmPoolVenues, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { asRecorded, gasRoundAnswers, withMarker } from "../../kit/test/evm-quote-gas-fx.ts";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, type EvmPoolRequest, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmOwedBack, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
+import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_POSITION_COSTS_KEY, evmLastRouteReset, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused } from "../src/evm-send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import * as R from "../src/rules/pool.ts";
@@ -113,8 +113,8 @@ const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost[
   calls.push({ method, params });
   if (side.down) throw new Error("down");
   if (method === "eth_blockNumber") return "0x" + (side.start ?? START).toString(16);
-  // the safe block is the newest one unless the side sets its time (`safeTime`)
-  const safe = method === "eth_getBlockByNumber" && (params as unknown[])[0] === "safe" && side.safeTime !== undefined;
+  // the final block is the newest one unless the side sets its time (`safeTime`)
+  const safe = method === "eth_getBlockByNumber" && (params as unknown[])[0] === "finalized" && side.safeTime !== undefined;
   // a block asked by number (the read-back's last block of a range cut by EVM_BUY_LOG_SPAN) answers that number
   const at = method === "eth_getBlockByNumber" && /^0x[0-9a-f]+$/.test(String((params as unknown[])[0])) ? BigInt(String((params as unknown[])[0])) : null;
   if (method === "eth_getBlockByNumber") return { number: "0x" + (at ?? side.head?.() ?? START + 0x40n).toString(16), timestamp: "0x" + ((safe ? side.safeTime!() : (side.time?.() ?? clock.t)) / 1000n).toString(16) };
@@ -122,7 +122,7 @@ const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost[
   throw new Error(`no ${method}`);
 };
 
-type Seen = { seeds: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; owed: EvmOwedBack[]; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
+type Seen = { seeds: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; carries: number; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
 type HostOpts = { ready?: ReadyProof<EvmPoolRequest>[]; a?: Side; b?: Side; send?: () => Promise<string>; quote?: () => Promise<EvmPoolBuyQuote>; claimed?: Set<string>; record?: () => Promise<void>; holdings?: Map<string, EvmHolding>; unrecord?: () => Promise<void>; following?: Set<string>; take?: () => Promise<void> };
 /** Every host's sign out, aborted after each test: the reads a test leaves following end with it. */
 const stops: AbortController[] = [];
@@ -130,7 +130,7 @@ afterEach(() => void stops.splice(0).forEach((c) => c.abort()));
 function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
   stops.push(new AbortController());
   const clock = { t: NOW };
-  const seen: Seen = { seeds: [], takes: [], sends: [], settles: 0, records: [], owed: [], sent: 0, late: [], quotes: [], calls: [], order: [], clock };
+  const seen: Seen = { seeds: [], takes: [], sends: [], settles: 0, records: [], carries: 0, sent: 0, late: [], quotes: [], calls: [], order: [], clock };
   const ready = o.ready ?? [readyOf()];
   const kept = o.holdings ?? new Map<string, EvmHolding>();
   const h: EvmPoolBuyHost = {
@@ -187,7 +187,7 @@ function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
     },
     holdings: async () => Object.fromEntries(kept),
     following: o.following ?? new Set(),
-    owe: async (x) => void seen.owed.push(x),
+    carry: () => void seen.carries++,
     sent: () => void seen.sent++,
     late: (x) => void seen.late.push(x),
     claimed: o.claimed ?? new Set(),
@@ -326,13 +326,13 @@ test("(ruling 2) never not_landed before the deadline on both RPCs: a send with 
   assert.deepEqual(await lateOf(stuck.seen), { stage: "not_landed", txs: [] });
 });
 
-test("the fee is the sender's pick up to the proof's cap (PrivacyPool.sol _release: FeeOverCap only): a release charging less is still this buy's, filled or owed back by its own fee", async () => {
+test("the fee is the sender's pick up to the proof's cap (PrivacyPool.sol _release: FeeOverCap only): a release charging less is still this buy's, filled or carried back by its own release", async () => {
   const { h, seen } = host(both([release({ fee: FEE / 2n, out: 41_000_000n })]));
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
   assert.equal(seen.records.at(-1)![1].received, "41");
   const free = host(both([release({ kind: "withdrawn", fee: 0n })]));
   assert.deepEqual(await runEvmPoolBuy(free.h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
-  assert.equal(free.seen.owed[0]!.wei, CHUNK.toString(), "the chunk less the fee charged");
+  assert.equal(free.seen.carries, 1, "the carry pass started at the refusal");
 });
 
 test("a sign out ends the reads past the tap: no late end, no more reads", async () => {
@@ -348,12 +348,11 @@ test("a sign out ends the reads past the tap: no late end, no more reads", async
   assert.deepEqual(seen.late, []);
 });
 
-test("(ruling 4) a Withdrawn for the nullifier: the buy did not fill, W's ETH (the chunk less the fee) is written owed back, and the answer names the release", async () => {
+test("(ruling 4) a Withdrawn for the nullifier: the buy did not fill, the carry pass starts (W's ETH back into the pool, read from the chain), and the answer names the release", async () => {
   const { h, seen } = host(both([release({ kind: "withdrawn" })]));
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
-  assert.deepEqual(seen.owed, [{ address: W, chain: "base", wei: (CHUNK - FEE).toString(), tx: TX, block: "272" }]);
+  assert.equal(seen.carries, 1);
   assert.equal(seen.records.at(-1)![1].state, "withdrawn");
-  assert.equal(EVM_OWED_BACK_KEY, "owed/back-evm");
 });
 
 test("(ruling 3) W's holding is written pending before the take and the send; a write that fails sends nothing and leaves the note HELD", async () => {
@@ -436,7 +435,7 @@ test("(ruling 6) a device quote whose min out is under the ask's own slippage of
   const q = await fixtureQuote();
   assert.ok(loose.minOut < q.minOut && loose.amountOut === q.amountOut, "the same route's output, a looser min out");
   const { h, seen } = host({ quote: async () => loose });
-  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed", rule: "min_out" });
   assert.deepEqual([seen.seeds.length, seen.records.length, seen.takes.length, seen.sends.length], [0, 0, 0, 0]);
 });
 
@@ -444,30 +443,38 @@ test("(ruling 6) the relay data's fee cap is held to the device's binding fee: a
   const relay = relayOf({ feeCap: FEE * 2n });
   const r = readyOf(relay);
   const { h, seen } = host({ ready: [{ ...r, binding: { ...r.binding, feeCap: FEE } }] });
-  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed", rule: "fee_cap_over_device_cap" });
   assert.deepEqual([seen.seeds.length, seen.sends.length], [0, 0]);
+});
+
+// card evm-buy-and-sell-on-mainnet: copy run 4 on a Base copy (13 Nov 07:02Z) answered quote_check_failed and nothing
+// named why: its proof's relay deadline (epoch 06:58:00Z plus EVM_LIFE_MS, 07:01:30Z) had passed at the tap (07:02:23Z)
+test("a refused buy names the rule that refused it: a ready proof whose relay deadline passed before the tap is deadline_past, never signed", async () => {
+  const { h, seen } = host({ ready: [readyOf(relayOf({ deadlineMs: NOW - 1n }))] });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed", rule: "deadline_past" });
+  assert.deepEqual([seen.seeds.length, seen.records.length, seen.takes.length, seen.sends.length], [0, 0, 0, 0]);
 });
 
 test("a quote that fails checkEvmBuy is never signed: no seed read, no record, no take, no send", async () => {
   // the proof binds another fee recipient than the pinned one: the rule refuses fee_recipient
   const { h, seen } = host({ ready: [readyOf(relayOf({ feeRecipient: "0x0000000000000000000000000000000000000bad" }))] });
   const claimed = h.claimed!;
-  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed", rule: "fee_recipient" });
   assert.deepEqual([seen.seeds.length, seen.records.length, seen.takes.length, seen.sends.length, seen.settles], [0, 0, 0, 0, 0]);
   assert.equal(claimed.size, 0, "the proof is released for the next tap");
   // a quote the providers fail: the search stops there, never on to the next shape
   for (const code of ["rpc_error", "rpc_disagree", "stale_quote"] as const) {
     const r = host({ quote: () => Promise.reject(new EvmQuoteError(code, "x")) });
-    assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { error: "quote_check_failed" }, code);
+    assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { error: "quote_check_failed", rule: code }, code);
     assert.equal(r.seen.quotes.length, 1, code);
   }
   // a quote the kit refuses: never signed either
   const r2 = host({ quote: () => Promise.reject(new EvmQuoteError("stale_quote", "old")) });
-  assert.deepEqual(await runEvmPoolBuy(r2.h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolBuy(r2.h, ASK), { error: "quote_check_failed", rule: "stale_quote" });
   assert.deepEqual([r2.seen.seeds.length, r2.seen.takes.length, r2.seen.sends.length], [0, 0, 0]);
   // the relay data names another recipient than the proof's W: refused by the rule before the seed is read
   const r3 = host({ ready: [readyOf(relayOf({ recipient: OTHER }))] });
-  assert.deepEqual(await runEvmPoolBuy(r3.h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolBuy(r3.h, ASK), { error: "quote_check_failed", rule: "recipient" });
   assert.equal(r3.seen.seeds.length, 0);
 });
 
@@ -613,8 +620,8 @@ test("(P2-1 b) the deadline is judged on the safe block: the newest past it whil
   const { h, seen } = host({ a: side(), b: side() });
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
   await turns(200);
-  assert.deepEqual(seen.late, [], "no end while the safe block is before the deadline");
-  assert.ok(seen.calls.some((c) => c.method === "eth_getBlockByNumber" && (c.params as unknown[])[0] === "safe"));
+  assert.deepEqual(seen.late, [], "no end while the final block is before the deadline");
+  assert.ok(seen.calls.some((c) => c.method === "eth_getBlockByNumber" && (c.params as unknown[])[0] === "finalized"));
   safe = DEADLINE + 1_000n;
   assert.deepEqual(await lateOf(seen), { stage: "not_landed", txs: [] });
 });
@@ -747,7 +754,7 @@ test("(m07) the rule checks the quote's own amount in, never the run's sum: a de
   const ready = { ...r0, chunk: c2, publicSignals: r0.publicSignals.map((x, i) => (i === 2 ? c2.toString() : x)) as typeof r0.publicSignals };
   const { h, seen } = host({ ready: [ready] });
   h.quote = async () => fixtureQuote();
-  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: c2 }), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: c2 }), { error: "quote_check_failed", rule: "amount" });
   assert.deepEqual([seen.seeds.length, seen.sends.length], [0, 0]);
 });
 
@@ -915,7 +922,7 @@ test("(pending end, review P3-G) the load's follow: the fee recipient is the pin
   l1.seen.clock.t = NOW + 200_000n;
   await followPending!(l1.h);
   assert.notEqual(edited.get(W)?.state, "filled", "not filled by another fee recipient's release");
-  assert.equal(l1.seen.owed.length, 0);
+  assert.equal(l1.seen.carries, 0);
   for (const [why, bad] of [
     ["decimals -1", { ...rec, decimals: -1 }],
     ["decimals 1.5", { ...rec, decimals: 1.5 }],
@@ -1011,4 +1018,128 @@ test("a release of this buy's own read back, filled or withdrawn, tells the page
     assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { stage: "not_landed", txs: [] });
     assert.deepEqual(told, [], "another's release is not this note's");
   }
+});
+
+// card evm-buy-and-sell-on-mainnet: the decimals and heads reads and the seed come between the quote and W's signature;
+// a quote whose block is past the kit's bound on the device's clock there is never signed: the quote is read again, and
+// the new one is built, checked and signed (Solana's rule: the price read again after every wait before a signature)
+test("a quote whose block is 31 s old at W's signature is never signed: the quote is read again and the second quote is signed", async () => {
+  const first = await fixtureQuote();
+  const second = await quoteAt(50);
+  assert.ok(second.minOut > first.minOut, "the second quote's min out is its own");
+  const asked: EvmPoolBuyQuote[] = [];
+  const { h, seen } = host({ ...both([release({ out: second.minOut })]), quote: async () => (asked.push(asked.length === 0 ? first : second), asked.at(-1)!) });
+  // the reads between the quote and the signature take the device's clock 31 s past the first quote's block
+  h.decimals = async () => ((seen.clock.t = first.block.timestamp * 1000n + BigInt(EVM_QUOTE_MAX_AGE_MS) + 1_000n), 6);
+  const got = await runEvmPoolBuy(h, ASK);
+  assert.deepEqual(asked, [first, second], "the quote read again at the signature");
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(seen.sends.length, 1);
+  const data = hex(seen.sends[0]!.data);
+  assert.ok(data.includes(w32(second.minOut)), "W signed the second quote's min out");
+  assert.ok(!data.includes(w32(first.minOut)), "never the first's");
+  assert.equal(seen.records[0]![1].buy?.minOut, second.minOut.toString());
+  assert.deepEqual(seen.records[0]![1].route.path, second.route);
+});
+
+test("a quote read again at W's signature that fails: nothing signed, recorded, taken or sent (the note stays HELD)", async () => {
+  const first = await fixtureQuote();
+  for (const fail of [new EvmQuoteError("stale_quote", "old"), new EvmQuoteError("rpc_error", "down")]) {
+    let n = 0;
+    const { h, seen } = host({ quote: async () => (n++ === 0 ? first : Promise.reject(fail)) });
+    h.decimals = async () => ((seen.clock.t = first.block.timestamp * 1000n + BigInt(EVM_QUOTE_MAX_AGE_MS) + 1_000n), 6);
+    assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed", rule: fail.code }, fail.code);
+    assert.equal(n, 2, `${fail.code}: the quote was read again`);
+    assert.deepEqual([seen.records.length, seen.takes.length, seen.sends.length, seen.settles], [0, 0, 0, 0], fail.code);
+    assert.ok(zero(seen.seeds[0]!), fail.code);
+    assert.equal(h.claimed!.size, 0, `${fail.code}: the proof is released for the next tap`);
+  }
+});
+
+test("card evm-buy-and-sell-on-mainnet: a tap asks the route that last quoted for the token first, one quote; the index's listed launchpad pool is asked and an unlisted hook never; a token whose pools no buy may take is not_allowed", async () => {
+  evmLastRouteReset();
+  // the first tap: the first standard shape, refused below the kit's own best route, then that route
+  const a = host({ ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(a.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(a.seen.quotes.length, 2);
+  assert.deepEqual(a.seen.quotes[1], FIXTURE_ROUTE);
+  // the next tap of the token asks that route first: one quote
+  const b = host({ ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(b.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(b.seen.quotes, [FIXTURE_ROUTE]);
+  // with the index served: the token's pools a buy may take, a listed launchpad's first (Doppler's hook, fee and tick
+  // spacing on Base, buy-unpinned.ts hookedPools), never one behind a hook the venue does not list
+  evmLastRouteReset();
+  const t = TOKEN.toLowerCase();
+  const weth = (VENUES.base.weth as string).toLowerCase();
+  const pair = BigInt(weth) < BigInt(t) ? { currency0: weth, currency1: t } : { currency0: t, currency1: weth };
+  const doppler = { ...pair, fee: 0x800000, tickSpacing: 10, hooks: "0xbb7784a4d481184283ed89619a3e3ed143e1adc0" };
+  const unlisted = { ...pair, fee: 3000, tickSpacing: 60, hooks: "0x00000000000000000000000000000000000c0c0c" };
+  const c = host({ ...both([release()]) });
+  const asked: unknown[] = [];
+  const q = await fixtureQuote();
+  c.h.indexPools = () => [unlisted, doppler];
+  c.h.quote = async (req) => (asked.push(req.route), q);
+  assert.deepEqual(await runEvmPoolBuy(c.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(asked, [{ venue: "uniswap-v4", currencyIn: weth, hops: [{ currency: t, fee: 0x800000, tickSpacing: 10, hooks: doppler.hooks, hookData: "0x" }] }], "one quote, the listed pool's");
+  // the index holds the token's pools, none a buy may take, and no v3 tier quotes: the page does not trade it
+  evmLastRouteReset();
+  const d = host();
+  const asked2: unknown[] = [];
+  d.h.indexPools = () => [unlisted];
+  d.h.quote = async (req) => (asked2.push(req.route), Promise.reject(new EvmQuoteError("no_quote", "no pool")));
+  assert.deepEqual(await runEvmPoolBuy(d.h, ASK), { error: "not_allowed", rule: "no_quote" });
+  assert.equal(asked2.length, 2, "two v3 tiers only: the first shape and the fallback, three quotes a tap at most");
+  assert.deepEqual(d.seen.sends, []);
+  evmLastRouteReset();
+});
+
+test("card evm-buy-and-sell-on-mainnet: a no_quote that names the kit's own best route is asked once on it, as below_reference is: the tap's second and last quote is that route, and the buy fills", async () => {
+  evmLastRouteReset();
+  const q = await fixtureQuote();
+  const { h, seen } = host({ ...both([release()]) });
+  const asked: unknown[] = [];
+  // the guessed route has no pool; the kit names the token's real route (GOOGLc and xdp on Base: a two-hop through a
+  // listed middle no guessed shape is)
+  h.quote = async (req) => {
+    asked.push(req.route);
+    if (JSON.stringify(req.route) !== JSON.stringify(FIXTURE_ROUTE)) throw new EvmQuoteError("no_quote", "the route reverts or quotes nothing", { amountOut: q.amountOut, route: FIXTURE_ROUTE });
+    return q;
+  };
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(asked.length, 2, "the first guessed shape, then the kit's route once");
+  assert.notDeepEqual(asked[0], FIXTURE_ROUTE);
+  assert.deepEqual(asked[1], FIXTURE_ROUTE);
+  assert.equal(seen.sends.length, 1);
+  evmLastRouteReset();
+});
+
+test("card evm-buy-and-sell-on-mainnet: a tap makes 3 kit quotes at most however many pools the index holds (CASHCAT on Robinhood: 160 spam-fee pools, 62 quotes, 144 s)", async () => {
+  evmLastRouteReset();
+  const t = TOKEN.toLowerCase();
+  const weth = (VENUES.base.weth as string).toLowerCase();
+  const pair = BigInt(weth) < BigInt(t) ? { currency0: weth, currency1: t } : { currency0: t, currency1: weth };
+  // 200 hookless WETH pools the index holds, each one a buy may take, each answering no_quote with no reference
+  const spam = Array.from({ length: 200 }, (_, i) => ({ ...pair, fee: 10760 + i, tickSpacing: 215, hooks: "0x0000000000000000000000000000000000000000" }));
+  const a = host();
+  const asked: unknown[] = [];
+  a.h.indexPools = () => spam;
+  a.h.quote = async (req) => (asked.push(req.route), Promise.reject(new EvmQuoteError("no_quote", "the route reverts or quotes nothing")));
+  assert.deepEqual(await runEvmPoolBuy(a.h, ASK), { error: "quote_check_failed", rule: "no_quote" });
+  assert.ok(asked.length <= 3, `${asked.length} quotes`);
+  assert.deepEqual(a.seen.sends, []);
+  evmLastRouteReset();
+});
+
+test("card evm-buy-and-sell-on-mainnet: a refusal whose reference goes through a hook the venue does not list (FOBO on Robinhood: 374 pools on one) never asks that route", async () => {
+  evmLastRouteReset();
+  const t = TOKEN.toLowerCase();
+  const b = host();
+  const asked2: unknown[] = [];
+  const unlisted: EvmPoolBuyQuote["route"] = { venue: "uniswap-v4", currencyIn: "0x0000000000000000000000000000000000000000", hops: [{ currency: t, fee: 3000, tickSpacing: 60, hooks: "0x0af57f6200000000000000000000000000000c0c", hookData: "0x" }] };
+  b.h.quote = async (req) => (asked2.push(req.route), Promise.reject(new EvmQuoteError(asked2.length === 1 ? "below_reference" : "no_quote", "x", asked2.length === 1 ? { amountOut: 1n, route: unlisted } : null)));
+  assert.deepEqual(await runEvmPoolBuy(b.h, ASK), { error: "quote_check_failed", rule: "no_quote" });
+  assert.ok(asked2.length <= 3, `${asked2.length} quotes`);
+  assert.ok(!asked2.some((r) => JSON.stringify(r) === JSON.stringify(unlisted)), "the unlisted hook's route is never asked");
+  evmLastRouteReset();
 });

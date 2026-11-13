@@ -443,8 +443,18 @@ export function feeAskAmount(amount: Cents | null, price: PoolPrice | null): str
   return u > 0n ? unitsToDecimal(u, price.decimals) : null;
 }
 
-/** The page's last Fee answer for a coin: its `cost`, kept until the next answer replaces it. */
-export type FeeRead = { key: string; cost: string };
+/** The page's last Fee answer for a coin: its `cost`, kept until the next answer replaces it; its `out` (kit 1.14, card
+ *  solana-buy-preview-complete: what the buy gets, whole tokens, at the device's own quote) and the amount it was asked
+ *  for, which You receive draws. */
+export type FeeRead = { key: string; cost: string; out?: string; amount?: Cents };
+
+/** You receive on a pool path (card solana-buy-preview-complete): the last answer's `out` for this coin, `pending` (drawn
+ *  dimmed, as the set preview's last numbers are) while it was asked for another amount than the box holds; null (a
+ *  dash) for another coin's answer, an answer with no out, or no amount typed. */
+export function receiveShown(read: FeeRead | null, coinKey: string | null, amount: Cents | null): { out: string; pending: boolean } | null {
+  if (read === null || coinKey === null || read.key !== coinKey || read.out === undefined || amount === null || amount <= 0n) return null;
+  return { out: read.out, pending: read.amount !== amount };
+}
 
 /** The Fee row's cents now: the last answer for this coin at today's price, kept while a newer amount is asked (it is
  *  replaced, never blanked, so the row does not flicker as the user types or the price ticks); null (a dash) for

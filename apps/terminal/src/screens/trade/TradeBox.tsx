@@ -29,6 +29,7 @@ import {
   poolBuyAsk,
   poolView,
   presetsOf,
+  receiveShown,
   tradeBal,
   presetOn,
   progress,
@@ -237,7 +238,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: "solana", token, amount: feeAmount }).outcome.then(
           (o) => {
             if (!live) return;
-            if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: coinKey, cost: o.result.cost }));
+            if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: coinKey, cost: o.result.cost, ...(o.result.out === undefined ? {} : { out: o.result.out }), ...(amount === null ? {} : { amount }) }));
             const again = coinTapAgainMs(o.error.code);
             if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
           },
@@ -255,6 +256,9 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     };
   }, [coinKey, amount, kit.request !== null]);
   const fee = onPool ? feeShown(feeRead, coinKey, amount, price) : null;
+  // You receive on the pool path: the same answer's out (the live source has no set preview, card
+  // solana-buy-preview-complete)
+  const receive = onPool ? receiveShown(feeRead, coinKey, amount) : null;
   // Bal: the vault path's money (Cash less the SOL and ETH pools, useOffPool) on a chain with no pool, the pool's on a
   // chain with one; one number for the amount gate. Signed out there is none to show: the signing page sends a state
   // with a zero one, which is not "$0" of anyone's
@@ -373,7 +377,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, path, onPool, price, balance, max, coming, fee, feeShown: coinKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, path, onPool, price, balance, max, coming, fee, feeShown: coinKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -411,8 +415,10 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
   if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} />;
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
   const last = preview?.p ?? null;
-  const pending = shown === null && last !== null;
-  const est = (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
+  // the pool path's You receive is the page's own dry answer (t.receive) once it has one; else the set preview's
+  const recv = t.receive;
+  const pending = recv !== null ? recv.pending : shown === null && last !== null;
+  const est = recv !== null ? `≈ ${fmtOut(recv.out)} ${symbol}` : (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
   const now = src.now();
   const state = signedOut ? "S8.1" : (stateId(phase, now, "buy") ?? "S8.3");
   const canBuy = ready && !running && !unavailable(phase) && amountOk(amount, max, balance) && askable(amount);

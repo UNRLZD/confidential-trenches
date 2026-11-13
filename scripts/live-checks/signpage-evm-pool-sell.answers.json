@@ -1,5 +1,5 @@
 {
- "note": "good: the card run record nine sales read live 2026-11-11T05:35:59.037Z (PASS); bad_buys: the sold holdings own buys named as sales, read live 2026-11-11T03:56:43.101Z (FAIL)",
+ "note": "good: the card run record nine sales read live 2026-11-11T05:35:59.037Z (PASS); bad_buys: the sold holdings own buys named as sales, read live 2026-11-11T03:56:43.101Z (FAIL) Change evm-buy-and-sell-on-mainnet (2026-11-12T22:25:45.291Z): good's page facts re-made from this branch's mainnet build (signBuilt), which carries the EVM sell and no testnet pool.",
  "good": {
   "readAt": "2026-11-11T05:35:59.037Z",
   "txs": [
@@ -3277,9 +3277,13 @@
    }
   ],
   "page": {
-   "pin": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
-   "sha384": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
-   "marks": []
+   "pin": "sha384-DJ+etk0TpAzobagn3XIEh9Byldd0n8U0RF7ipFJzFGyJUqUDm1eXjahL0zrCbHs9",
+   "sha384": "sha384-DJ+etk0TpAzobagn3XIEh9Byldd0n8U0RF7ipFJzFGyJUqUDm1eXjahL0zrCbHs9",
+   "marks": [
+    "nonce()",
+    "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"
+   ],
+   "testnet": []
   }
  },
  "bad_buys": {

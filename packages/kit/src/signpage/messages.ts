@@ -251,11 +251,15 @@ export interface SignpageResults {
  *  buy-spends-several-pieces): `pieces`, how many of the ready proofs a pool.buy of it spends now (the pick of
  *  src/pool-buy.ts: one wallet's, its own note's among them, the least released, then the fewest), and `cost`, what
  *  that buy costs for good in the same whole units: each piece's relay fee and the tip; what W's accounts hold comes
- *  back with the sale. Both absent with no amount or an amount over tap_max. */
+ *  back with the sale. Both absent with no amount or an amount over tap_max. `out` (kit 1.14, card
+ *  solana-buy-preview-complete): with them, what that buy gets, in whole units of the token, at the device's own quote
+ *  (the venue's own reads on both providers, its fees taken, before slippage) on the venue the buy takes; absent when
+ *  that quote is not read. Display only: no request takes it. */
 export interface PoolBuyDry {
   tap_max: string;
   pieces?: number;
   cost?: string;
+  out?: string;
 }
 
 /**
@@ -363,7 +367,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.13";
+export const SIGNPAGE_KIT_VERSION = "1.14";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every

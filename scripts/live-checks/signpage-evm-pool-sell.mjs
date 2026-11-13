@@ -9,12 +9,11 @@
 //   2. HELPER_HOST's POST /v1/pool/evm/sell, the route the page sends a sale through, asked from SIGN_HOST's origin
 //      with a sale that is not one (the selector alone, no authorization) for each testnet pool, refuses it bad_shape
 //      before any send and echoes SIGN_HOST in Access-Control-Allow-Origin;
-//   3. SIGN_HOST's served /app.js is the one its index.html pins, and it is the mainnet build with no EVM sell in it
-//      (no "nonce()", its read of W's SellDelegate nonce; no Sell type string, the typed data W signs): the mainnet build pins both EVM pools (card
-//      evm-pools-on-mainnet) but keeps the sale closed there until a restored device has buy records to sell from, so
-//      pool.sell on Base or Robinhood is refused not_allowed before any read (packages/signpage/test/
-//      pool-mainnet-evm.test.ts) and the sell code is left out of it (POOL_TESTNET is a build constant). The open sales'
-//      and the buy records' keys are no marks: the positions pass, open on mainnet, reads both.
+//   3. SIGN_HOST's served /app.js is the one its index.html pins, and it is the mainnet build with the EVM sell in it
+//      ("nonce()", its read of W's SellDelegate nonce; the Sell type string, the typed data W signs) and no testnet
+//      pool: the sale opens on Base and Robinhood where the build carries the chain's withdraw (change
+//      evm-buy-and-sell-on-mainnet, packages/signpage/test/pool-mainnet-evm.test.ts). The open sales' and the buy
+//      records' keys are no marks: the positions pass reads both.
 // RPCS, CHAIN_IDS, DEPOSITED, SELL_SELECTOR and SELL_PINS are this file's own (it reaches no package code:
 // check:imports holds it); packages/signpage/test/pool-sell-evm.test.ts holds each equal to the page's own.
 // After: sign
@@ -60,9 +59,12 @@ const addrOfTopic = (t) => (typeof t === "string" && t.length === 66 ? `0x${t.sl
 /** The sales of a run record: its `Sell: <network> <hash>` lines on the two testnets (each also a Tx line). */
 export const txsOf = (md) => [...md.matchAll(/^Sell: (base-sepolia|robinhood-testnet) (0x[0-9a-f]{64})$/gm)].map((m) => ({ network: m[1], hash: m[2] }));
 
-/** What the check keeps of SIGN_HOST: its index's /app.js pin, the served bundle's sha384 and the EVM sell marks it holds. */
+/** The testnet pools (the kit's evmTestnetVenues): in the testnet build only. */
+export const TESTNET_POOL_MARKS = Object.freeze(["0xeb967dfc1b4ffb22942f833c76866ea85fc42266", "0xed9fac860e6bc5e932455232eedca8b71c44da4d"]);
+/** What the check keeps of SIGN_HOST: its index's /app.js pin, the served bundle's sha384, the EVM sell marks and the
+ *  testnet pools it holds. */
 export function pageFacts(index, js) {
-  return { pin: /src="\/app\.js" integrity="([^"]+)"/.exec(index)?.[1] ?? null, sha384: sha384(js), marks: EVM_SELL_MARKS.filter((m) => js.includes(m)) };
+  return { pin: /src="\/app\.js" integrity="([^"]+)"/.exec(index)?.[1] ?? null, sha384: sha384(js), marks: EVM_SELL_MARKS.filter((m) => js.includes(m)), testnet: TESTNET_POOL_MARKS.filter((m) => js.includes(m)) };
 }
 
 const json = (t) => {
@@ -125,7 +127,7 @@ export function judge(run) {
   }
   const p = run.page;
   say(typeof p?.pin === "string" && p.pin === p.sha384, `[SIGN_HOST] the served /app.js is the one index.html pins: ${p?.pin ?? "no pin"}`);
-  say(Array.isArray(p?.marks) && p.marks.length === 0, `[SIGN_HOST] the mainnet build carries no EVM sell (closed on mainnet: refused before any read): ${Array.isArray(p?.marks) ? p.marks.join(", ") || "none" : "not read"}`);
+  say(Array.isArray(p?.marks) && p.marks.length === EVM_SELL_MARKS.length && Array.isArray(p?.testnet) && p.testnet.length === 0, `[SIGN_HOST] the mainnet build carries the EVM sell and no testnet pool: sell ${Array.isArray(p?.marks) ? p.marks.length : "not read"}/${EVM_SELL_MARKS.length} marks; testnet ${Array.isArray(p?.testnet) ? p.testnet.join(", ") || "none" : "not read"}`);
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
   return { ok: verdict === "PASS", verdict, lines };
 }

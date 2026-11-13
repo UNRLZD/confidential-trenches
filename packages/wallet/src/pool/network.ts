@@ -6,3 +6,6 @@ declare const __SIGN_NETWORK__: string | undefined;
 
 /** Whether this build is the testnet build. */
 export const POOL_TESTNET: boolean = typeof __SIGN_NETWORK__ !== "undefined" && __SIGN_NETWORK__ === "testnet";
+/** Whether this build is SIGN_HOST's (__SIGN_NETWORK__ named "mainnet"): a table folded on it keeps its testnet half
+ *  everywhere else (Node, the tests, the testnet build). */
+export const SIGN_MAINNET: boolean = typeof __SIGN_NETWORK__ !== "undefined" && __SIGN_NETWORK__ === "mainnet";
