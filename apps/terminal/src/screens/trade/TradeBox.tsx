@@ -43,6 +43,7 @@ import {
 import type { Cents, Phase } from "./model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "./States.tsx";
 import { FillToast, RouteStrip } from "./RouteStrip.tsx";
+import type { Logo } from "../market/Avatar.tsx";
 import { fromOutcome, fromProgress, IDLE, routeEvent, routeTap, toastLine, usd2 } from "./route.ts";
 import type { Route } from "./route.ts";
 import { txLink } from "../withdraw/model.ts";
@@ -385,9 +386,9 @@ export type Trade = ReturnType<typeof useTrade>;
 
 /** The box with its own trade state. `footer` draws inside the panel, under the Route & fees line (the token page's
  *  safety grid). */
-export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmount = "", footer }: { chain: Chain; token: string; symbol: string; slippageBps?: number; initialAmount?: string; footer?: ReactNode }) {
+export function TradeBox({ chain, token, symbol, slippageBps = 1000, initialAmount = "", footer, logo }: { chain: Chain; token: string; symbol: string; slippageBps?: number; initialAmount?: string; footer?: ReactNode; logo?: Logo }) {
   const t = useTrade({ chain, token, slippageBps }, initialAmount);
-  return <TradeView t={t} symbol={symbol} footer={footer} />;
+  return <TradeView t={t} symbol={symbol} footer={footer} {...(logo ? { logo } : {})} />;
 }
 
 /** The fill toast (S8.12) of a trade state's filled buy; nothing for any other phase. */
@@ -405,14 +406,15 @@ export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
   );
 }
 
-/** The box drawn from a trade state; any number of views of one state draw the same trade. */
-export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean }) {
+/** The box drawn from a trade state; any number of views of one state draw the same trade. `logo` whose logo the flow's
+ *  coin step draws (the token page's own read); none draws the symbol's letters. */
+export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean; logo?: Logo }) {
   const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, path, onPool, price, balance, max, coming, fee, feeShown, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   const [tab, setTab] = useState<OrderTab>("market");
   // the page's own symbol: Portfolio's Row names a token by its market read, which the live source has none of yet
-  if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} />;
+  if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} {...(logo ? { logo } : {})} />;
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
   const last = preview?.p ?? null;
   // the pool path's You receive is the page's own dry answer (t.receive) once it has one; else the set preview's
@@ -531,7 +533,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
       >
         {label}
       </button>
-      <RouteStrip route={route} symbol={symbol} outText={route.out === null ? null : fmtOut(route.out)} />
+      <RouteStrip route={route} symbol={symbol} outText={route.out === null ? null : fmtOut(route.out)} {...(logo ? { logo } : {})} />
       </>)}
       {toast && phase.k === "filled" && dismissed !== phase.id && <TradeFillToast t={t} symbol={symbol} />}
       {tab === "market" && (<>

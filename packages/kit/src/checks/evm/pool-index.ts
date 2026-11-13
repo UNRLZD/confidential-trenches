@@ -1,6 +1,9 @@
 // The device's index of every Uniswap v4 pool of a chain (card evm-pool-index): the PoolManager's Initialize logs, read
-// in spans of the venue's `index.span` blocks on the venue's two index readers, each of another operator, and never on
-// the helper (the money rule's attacker is a broken-in helper). A quote that reads its pools from the index asks no
+// in spans of the venue's `index.span` blocks on the venue's two index readers, each of another operator, one of them
+// always a provider the device reaches directly and the other at most the helper's keyed route (the money rule's
+// attacker is a broken-in helper: every span counts only when both answer it alike, F4a, and a pool one reader alone
+// reports only on both readers' state of it, F5, so the helper can make a sync refuse, never add or hide a pool; card
+// signpage-evm-reads-draw-no-refusal, Robinhood's). A quote that reads its pools from the index asks no
 // getLogs of its own; until the index covers the quote's agreed block, the quote keeps its bounded scan
 // (checks/evm/quote.ts scanPools, card evm-buy-quote-in-window), so no quote waits on a cold build.
 //
@@ -62,6 +65,9 @@ export type EvmPoolIndexConfig = {
   /** Spans in one JSON-RPC batch, and batches in flight on each reader at once. */
   readonly perBatch: number;
   readonly parallel: number;
+  /** The most calls a reader takes in one batch (the helper's HELPER_RPC_BATCH_MAX where it reads): the state reads
+   *  (F5) are asked in batches of at most this many. None: INDEX_STATE_BATCH. */
+  readonly batchMax?: number;
   /** For the tests: the wait between tries (default: setTimeout). */
   readonly nap?: (ms: number) => Promise<void>;
 };
@@ -372,11 +378,12 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   const held = new Set<string>();
   if (ones.length > 0) {
     const calls = ones.map((p) => ({ method: "eth_call", params: [{ to: pm, data: "0x" + SEL_EXTSLOAD + stateSlot(p.id).slice(2) }, { blockHash: pin }] }));
-    // INDEX_STATE_BATCH reads a batch, one batch at a time on each reader
+    // INDEX_STATE_BATCH reads a batch (fewer where a reader takes fewer, c.batchMax), one batch at a time on each reader
+    const per = Math.max(1, Math.min(INDEX_STATE_BATCH, c.batchMax ?? INDEX_STATE_BATCH));
     const outs = await Promise.all(([0, 1] as const).map(async (r) => {
       const all: unknown[] = [];
-      for (let i = 0; i < calls.length; i += INDEX_STATE_BATCH) {
-        const part = calls.slice(i, i + INDEX_STATE_BATCH);
+      for (let i = 0; i < calls.length; i += per) {
+        const part = calls.slice(i, i + per);
         all.push(...((await ask(r, part)) ?? part.map(() => null)));
       }
       return all;

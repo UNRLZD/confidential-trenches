@@ -1,0 +1,44 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-13T18:43:58.887Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-UFD4OsJY.js",
+    "status": 200,
+    "found": [
+     "`token`,`wallet`,`pool`,`balance`",
+     "One-time wallet",
+     "route-token-glyph"
+    ]
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-lCLc3Ze8.css",
+    "status": 200
+   }
+  ],
+  "note": "this card: apps/terminal built fresh (vite build, 13 Nov 2026) and read from disk (--root); the page's script holds the sell flow's steps in order, its wallet word and the coin step's picture"
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/",
+  "at": "2026-11-13T18:43:59.180Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-DnSHKF_p.js",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-C9zCN1fp.css",
+    "status": 200
+   }
+  ],
+  "note": "APP_HOST as deployed before this card (release 130, read 13 Nov 2026 over https): its script holds none of them"
+ }
+}

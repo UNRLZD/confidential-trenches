@@ -39,6 +39,8 @@ const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteCommitment } = await import("../../wallet/src/notes/secrets.ts");
 const { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
 const { solanaTapSpendOf } = await import("../../wallet/src/pool/balances.ts");
+// the tip the page's buy pays (card max-is-what-you-hold-after-a-trade: Max is priced at it, never at the tip cap)
+const { pageBuyTip } = await import("../src/pools.ts");
 
 const PROGRAM = SOL_POOLS.devnet!.program;
 const SCOPE = solanaPoolOf(PROGRAM).scope;
@@ -182,7 +184,7 @@ test("the testnet build's state: the devnet pool with the queue's ready proof as
   assert.ok(app, "the shell framed APP_HOST");
   app.dispatchEvent(new Event("load"));
 
-  const want = `0.${solanaTapSpendOf(RENT)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]).toString().padStart(9, "0")}`.replace(/0+$/, "");
+  const want = `0.${solanaTapSpendOf(RENT, undefined, pageBuyTip)([{ chunk: CHUNK, feeCap: FEE_CAP, tipCap: SOL_TIP_CAP }]).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;
   // the first state starts the price and Rent reads; each landing is heard, so a later state carries them
   for (let t = 0; t < 300; t++) {

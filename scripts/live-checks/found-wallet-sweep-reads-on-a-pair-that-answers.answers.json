@@ -1,0 +1,201 @@
+{
+ "good": {
+  "at": "2026-11-13T18:04:24.304Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-gIWdxj0tbsDuLNDhflF3hiX7KRjTxGrZvKrx3e0q5D+m9fsn+n3YuiOXTzn7S/lW\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-gIWdxj0tbsDuLNDhflF3hiX7KRjTxGrZvKrx3e0q5D+m9fsn+n3YuiOXTzn7S/lW",
+   "names": [
+    "https://public.rpc.solanavibestation.com"
+   ]
+  },
+  "providers": {
+   "https://public.rpc.solanavibestation.com": {
+    "lists": {
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "status": 200,
+      "acao": "*",
+      "count": 116,
+      "sha256": "d6ac8c59f9716f4ccb612dbe5b53cca9264af440f378bb9cc78fd8a6b153f3e4"
+     },
+     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+      "status": 200,
+      "acao": "*",
+      "count": 18,
+      "sha256": "9f84038910f59e60d2a063ca1421347ff7abb1c6f53342f9e84ada41fa763db4"
+     }
+    },
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+    }
+   },
+   "https://ct-api.unrealized.trade/v1/rpc/solana": {
+    "lists": {
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "count": 116,
+      "sha256": "d6ac8c59f9716f4ccb612dbe5b53cca9264af440f378bb9cc78fd8a6b153f3e4"
+     },
+     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "count": 18,
+      "sha256": "9f84038910f59e60d2a063ca1421347ff7abb1c6f53342f9e84ada41fa763db4"
+     }
+    }
+   }
+  },
+  "built": "packages/signpage/scripts/build-app.mjs --out of this branch, 2026-11-13 18:06Z (no served answer until the next sign deploy); its providers read live from the page origin 2026-11-13T18:04:24.304Z"
+ },
+ "beforeDeploy": {
+  "at": "2026-11-13T18:04:24.304Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+   "names": []
+  },
+  "providers": {
+   "https://public.rpc.solanavibestation.com": {
+    "lists": {
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "status": 200,
+      "acao": "*",
+      "count": 116,
+      "sha256": "d6ac8c59f9716f4ccb612dbe5b53cca9264af440f378bb9cc78fd8a6b153f3e4"
+     },
+     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+      "status": 200,
+      "acao": "*",
+      "count": 18,
+      "sha256": "9f84038910f59e60d2a063ca1421347ff7abb1c6f53342f9e84ada41fa763db4"
+     }
+    },
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+    }
+   },
+   "https://ct-api.unrealized.trade/v1/rpc/solana": {
+    "lists": {
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "count": 116,
+      "sha256": "d6ac8c59f9716f4ccb612dbe5b53cca9264af440f378bb9cc78fd8a6b153f3e4"
+     },
+     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "count": 18,
+      "sha256": "9f84038910f59e60d2a063ca1421347ff7abb1c6f53342f9e84ada41fa763db4"
+     }
+    }
+   }
+  }
+ },
+ "publicnode": {
+  "at": "2026-11-13T18:04:33.560Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+   "names": []
+  },
+  "providers": {
+   "https://solana-rpc.publicnode.com": {
+    "lists": {
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "status": 403,
+      "acao": "*",
+      "error": {
+       "code": -32602,
+       "message": "Request blocked"
+      }
+     },
+     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+      "status": 403,
+      "acao": "*",
+      "error": {
+       "code": -32602,
+       "message": "Indexed requests require a personal token. Get one at: https://www.allnodes.com/publicnode"
+      }
+     }
+    },
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "content-type"
+    }
+   },
+   "https://ct-api.unrealized.trade/v1/rpc/solana": {
+    "lists": {
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "count": 116,
+      "sha256": "d6ac8c59f9716f4ccb612dbe5b53cca9264af440f378bb9cc78fd8a6b153f3e4"
+     },
+     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "count": 18,
+      "sha256": "9f84038910f59e60d2a063ca1421347ff7abb1c6f53342f9e84ada41fa763db4"
+     }
+    }
+   }
+  }
+ },
+ "pocket": {
+  "at": "2026-11-13T18:04:45.143Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+   "names": []
+  },
+  "providers": {
+   "https://solana.api.pocket.network": {
+    "lists": {
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "status": 400,
+      "acao": "https://confidential.unrealized.trade",
+      "error": {
+       "code": -32602,
+       "message": "getTokenAccountsByOwner requires a mint filter on this endpoint"
+      }
+     },
+     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "error": {
+       "code": -32010,
+       "message": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb excluded from account secondary indexes; this RPC method unavailable for key"
+      }
+     }
+    },
+    "preflight": {
+     "status": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "content-type"
+    }
+   },
+   "https://ct-api.unrealized.trade/v1/rpc/solana": {
+    "lists": {
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "count": 116,
+      "sha256": "d6ac8c59f9716f4ccb612dbe5b53cca9264af440f378bb9cc78fd8a6b153f3e4"
+     },
+     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+      "status": 200,
+      "acao": "https://confidential.unrealized.trade",
+      "count": 18,
+      "sha256": "9f84038910f59e60d2a063ca1421347ff7abb1c6f53342f9e84ada41fa763db4"
+     }
+    }
+   }
+  }
+ }
+}

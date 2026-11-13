@@ -78,9 +78,15 @@
 // POST /v1/pool/solana/pieces (card buy-spends-several-pieces; carryPieces below, its body limit in ./solana-pieces.ts):
 // one buy made of several pieces, { "pool": "<pool>", "txs": ["<base64 v0 tx>", ...] }, 2 to the kit's
 // SOLANA_POOL_BUY_PIECES_MAX transactions, every one a tag 2 but the last, a tag 3, all of one W.
+// Or a lone round (card buy-carry-helper-round): 1 to SOLANA_POOL_BUY_PIECES_MAX tag 2s and no tag 3, all of one W: a
+// buy's releases sent ahead of it, so the device can prove a note's change and carry it with the tag 3 in the same tap.
+// It gets every check below and the tag 2s' send, and answers once they all filled. Each tag 2 pays the fee payer its
+// own relay fee out of the note it releases (release.rs:240 and :278, the fee out of withdrawnValue; the checks hold it
+// to the published fee and the priority to the budget, fee_off and fee_below_cost above), so a round with no buy costs
+// the helper nothing it is not paid back.
 // Checks, each a refusal before any read or send: each transaction passes every check above with the one-piece
 // route's cfg (its own fee, deadline, inner programs, lookup tables, tip_low); bad_shape (400) for a count out of
-// bounds, a tag 3 not last or a tag 2 last, or a nullifier twice; wallets_differ (422) for two Ws; failed_this_epoch
+// bounds, a tag 3 not last, or a nullifier twice; wallets_differ (422) for two Ws; failed_this_epoch
 // per nullifier as above; in_flight (429) for a nullifier another carry holds (a repeat of the same set gets its
 // first answer).
 // The send, one way on every cluster (card owners-solana-buy-lands): the tag 2s plain, as the one-piece route sends a
@@ -467,6 +473,13 @@ export type SolanaPoolSender = {
 };
 
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
+/** One transaction of a pieces body as received: its bytes when it is canonical base64 of at most a transaction's
+ *  size, else null. */
+function wireOf(raw: unknown): Uint8Array | null {
+  if (typeof raw !== "string" || raw.length > 1_644 || !B64.test(raw)) return null;
+  const wire = new Uint8Array(Buffer.from(raw, "base64"));
+  return Buffer.from(wire).toString("base64") === raw ? wire : null;
+}
 
 /** The fee payer's key: base58 of 64 bytes (seed then public key, the Solana CLI's keypair), its public half checked. */
 export function feePayerKey(secret: string): { seed: Uint8Array; address: string } {
@@ -638,12 +651,14 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
     async carryPieces(body, client = "") {
       if (typeof body !== "object" || body === null || Array.isArray(body) || Object.keys(body).length !== 2 || (body as { pool?: unknown }).pool !== pool) return no(400, "bad_shape");
       const raws = (body as { txs?: unknown }).txs;
-      if (!Array.isArray(raws) || raws.length < 2 || raws.length > SOLANA_POOL_BUY_PIECES_MAX) return no(400, "bad_shape", `not 2 to ${SOLANA_POOL_BUY_PIECES_MAX} transactions`);
+      // a lone round may be one tag 2 (card buy-carry-helper-round); a buy is two pieces at least
+      const one = Array.isArray(raws) && raws.length === 1 ? wireOf(raws[0]) : null;
+      const loneOne = one !== null && poolIxOf(one)?.tag === 2;
+      if (!Array.isArray(raws) || (raws.length < 2 && !loneOne) || raws.length > SOLANA_POOL_BUY_PIECES_MAX) return no(400, "bad_shape", `not 2 to ${SOLANA_POOL_BUY_PIECES_MAX} transactions`);
       const wires: Uint8Array[] = [];
       for (const raw of raws as unknown[]) {
-        if (typeof raw !== "string" || raw.length > 1_644 || !B64.test(raw)) return no(400, "bad_shape");
-        const wire = new Uint8Array(Buffer.from(raw, "base64"));
-        if (Buffer.from(wire).toString("base64") !== raw) return no(400, "bad_shape");
+        const wire = wireOf(raw);
+        if (wire === null) return no(400, "bad_shape");
         wires.push(wire);
       }
       return carryBundle(raws as string[], wires, client);
@@ -936,8 +951,9 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (!c.ok) return no(c.status, c.code, `tx ${i}${c.detail ? `: ${c.detail}` : ""}`);
       txs.push(c.tx);
     }
+    // a lone round (card buy-carry-helper-round): tag 2s alone, no buy; else a buy: every tag 2 but the last, a tag 3
     const last = txs.length - 1;
-    if (txs.some((t, i) => t.tag !== (i === last ? 3 : 2))) return no(400, "bad_shape", "every transaction a tag 2 but the last, a tag 3");
+    if (!txs.every((t) => t.tag === 2) && txs.some((t, i) => t.tag !== (i === last ? 3 : 2))) return no(400, "bad_shape", "every transaction a tag 2 but the last, a tag 3");
     if (txs.some((t) => t.w !== txs[0]!.w)) return no(422, "wallets_differ");
     const nfs = txs.map((t) => t.nullifier);
     if (new Set(nfs).size !== nfs.length) return no(400, "bad_shape", "a nullifier twice");
@@ -992,9 +1008,11 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       const t = await tablesRefusal(tx);
       if (t !== null) return t;
     }
-    const last = txs.length - 1;
-    const nf3 = txs[last]!.nullifier;
-    const entry3 = once.get(nf3); // set before the first await above
+    // a buy's tag 3 is its last piece; a lone round (card buy-carry-helper-round) has none, and `last` counts its tag 2s
+    const buy = txs[txs.length - 1]!.tag === 3;
+    const last = buy ? txs.length - 1 : txs.length;
+    const nf3 = buy ? txs[last]!.nullifier : undefined;
+    const entry3 = nf3 === undefined ? undefined : once.get(nf3); // set before the first await above
     // the tag 2s whose change note goes on the first piece's state page (the first piece always) run on the chain's
     // state as it is now: simulated here, before anything is sent, and sent at once, side by side (one landing). One on
     // a later page runs only on the state those leave (alone it names a page the pool does not write yet, and fails):
@@ -1099,10 +1117,12 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       const s = await one(i);
       if (s !== null) return afterLanded(s);
     }
+    // a lone round: every tag 2 filled on both providers, W holds their money; the fee payer's signature of each
+    if (!buy) return { status: 200, body: { signatures: sigs }, note: { tag: 2, via: "plain", end: "filled" } };
     // the tag 3, now that every tag 2 brought W its money: the one-piece route's own send (simulated on the state they
     // left, at their slot or later, the tip it carries, on mainnet the bundle beside the plain copy, its end read),
     // under this carry's entry
-    if (entry3 === undefined || once.get(nf3) !== entry3) return afterLanded({ ...no(503, "not_landed"), note: { tag: 3, end: "unknown" } });
+    if (entry3 === undefined || once.get(nf3!) !== entry3) return afterLanded({ ...no(503, "not_landed"), note: { tag: 3, end: "unknown" } });
     const r3 = await simulateSignSend(raws[last]!, txs[last]!, queueMaxMs, landed());
     const ix3 = poolIxOf(txs[last]!.wire);
     const note: PoolSendNote = { tag: 3, ...(ix3 === null ? {} : tipNote(ix3)), ...r3.note };

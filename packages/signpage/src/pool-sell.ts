@@ -114,6 +114,9 @@ export type PoolSellHost = {
   preempt?(): () => void;
   /** Two RPCs of different operators. */
   rpcs: readonly [SolanaRpc, SolanaRpc];
+  /** Two RPCs of different operators that both answer getTokenAccountsByOwner, for a found W's token accounts
+   *  (foundTokenAccounts, ownsNoTokens; pool-testnet.ts pageSolanaTokenRpcs): `rpcs` when absent. */
+  tokenRpcs?: readonly [SolanaRpc, SolanaRpc];
   /** The note store, opened top-level. */
   notes(): Promise<NoteStore>;
   /** The 64-byte seed; each copy is zeroed here. */
@@ -1925,6 +1928,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     }
   };
   const { rpcs, w, rent } = x;
+  // a found W's token accounts: on a pair that answers getTokenAccountsByOwner (card
+  // found-wallet-sweep-reads-on-a-pair-that-answers: the page's public seat answers none on mainnet)
+  const tokens = h.tokenRpcs ?? rpcs;
   // every sleep of the pass: the sell lock let go for it and taken again only if it is free
   const wait = async (ms: number): Promise<void> => {
     if (!hold) return x.wait(ms);
@@ -2073,9 +2079,13 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // a found W: nothing is signed for it, a close included, before the found W's rule's time part holds on both RPCs
       // (foundPast: no buy signed before W's latest transaction can still land); `since` is that transaction, the one
       // the sweep then reads W's history from
-      const since = x.bare === true ? await foundPast(rpcs, w.address).catch(() => null) : undefined;
-      const extra = since === undefined ? [] : since === null ? null : await foundTokenAccounts(rpcs, w.address).catch(() => null);
-      if (since === null || extra === null) return { young: true as const, keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
+      // each way short of the rule names why W holds, a read's fault with its provider (card
+      // found-wallet-sweep-reads-on-a-pair-that-answers: a refused read held W with no reason given)
+      let why = "";
+      const since = x.bare === true ? await foundPast(rpcs, w.address).catch((e: unknown) => ((why = `its latest transaction not read on both RPCs (${faultOf(e)})`), null)) : undefined;
+      if (since === null) return { young: why || "not yet past its last transaction's blockhash on both RPCs, or the two not reading that transaction alike", keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
+      const extra = since === undefined ? [] : await foundTokenAccounts(tokens, w.address).catch((e: unknown) => ((why = `its token accounts not read alike on both RPCs (${faultOf(e)})`), null));
+      if (extra === null) return { young: why, keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
       const read = await readW(undefined, extra);
       // W still holds what it sold: its sell has not filled, so its volume and wrapped-SOL accounts are what that sell
       // (or its next) still uses; nothing is closed
@@ -2101,11 +2111,11 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       checkSolanaTeardownFrames(t.wires, ctx, t.reads);
       const signed = await signAll(t.wires);
       // a found W's latest transaction read again on both RPCs: one landed since the rule's read drops the closes
-      if (since !== undefined && (await latestOf(rpcs, w.address).catch(() => null)) !== since) return { young: true as const, keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
+      if (since !== undefined && (await latestOf(rpcs, w.address).catch(() => null)) !== since) return { young: "a transaction landed on W since the rule's read", keep: [], signed: [], last: 0, unclaimed: undefined, since: undefined };
       return { keep: t.plan.keep, signed, last: bh.lastHeight, unclaimed: t.reads.unclaimed, since };
     });
     if (teardown === null) return end("gave_up", "the teardown");
-    if (teardown.ok.young !== undefined) return end("holds", "a found W: not yet past its last transaction's blockhash on both RPCs, a transaction landed on W since, or its token accounts not read alike", false);
+    if (teardown.ok.young !== undefined) return end("holds", `a found W: ${teardown.ok.young}`, false);
     if (teardown.ok.holds !== undefined) return end("holds", teardown.ok.holds ? "W holds a token it traded: no full sell of it landed" : "W holds a token it traded: its sell not final yet", teardown.ok.holds);
     if (teardown.ok.refused !== undefined) return end("refused", teardown.ok.refused);
     if (teardown.ok.signed.length > 0) await spaced();
@@ -2135,8 +2145,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // account meanwhile, leaves an account open): the sweep only when the plan now closes nothing and keeps nothing,
       // so W keeps the fee for what is still open; a claim the teardown planned around stays planned around (card
       // sol-w-sweep: it is the next pass's to try again, from the claim's cost the sweep leaves on W)
-      const extra = since === undefined ? [] : await foundTokenAccounts(rpcs, w.address).catch(() => null);
-      if (extra === null) return { end: "holds" as const, steady: false, detail: "a found W: its token accounts not read alike on both RPCs" };
+      let why = "";
+      const extra = since === undefined ? [] : await foundTokenAccounts(tokens, w.address).catch((e: unknown) => ((why = faultOf(e)), null));
+      if (extra === null) return { end: "holds" as const, steady: false, detail: `a found W: its token accounts not read alike on both RPCs (${why})` };
       const now = await readW(unclaimed, extra);
       if (now.k === "holds") return { end: "kept" as const, steady: now.steady, detail: "W holds a token it traded" };
       if (now.k === "refused") return { end: "refused" as const, detail: now.why };
@@ -2157,7 +2168,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // a found W (no buy recorded, card buy-spends-several-pieces): swept only on the found W's rule, its time part read
       // before the teardown and the rest here, in the pass that reads the lamports the sweep signs for (foundSince);
       // short of it W holds, not as its own state, so every later pass reads it again
-      if (since !== undefined && !(await foundSince(rpcs, w.address, since, own).catch(() => false))) return { end: "holds" as const, steady: false, detail: "a found W: owning a token account, or a transaction on W since the rule's read, on either RPC" };
+      const rule = since === undefined ? true : await foundSince(tokens, rpcs, w.address, since, own).catch((e: unknown) => faultOf(e));
+      if (rule !== true) return { end: "holds" as const, steady: false, detail: `a found W: ${rule === false ? "owning a token account, or a transaction on W since the rule's read, on either RPC" : `its token accounts or history since the rule's read not read on both RPCs (${rule})`}` };
       // the gate; the sizes the sweep is priced on are read again with its pages (depositHeld, review P2-1 of 77055f4e)
       let sizes = await treeSizes(rpcs, x.program, x.pool, wait);
       const s = await seed();
@@ -2682,8 +2694,8 @@ async function latestAt(rpcs: Rpcs, owner: string): Promise<{ signature: string;
 const latestOf = async (rpcs: Rpcs, owner: string): Promise<string | null> => (await latestAt(rpcs, owner))?.signature ?? null;
 /** The found W's rule's other part, in the sweep's pass: W owns no token account and shows nothing since `since` but
  *  `own`, on both RPCs. */
-async function foundSince(rpcs: Rpcs, owner: string, since: string, own: ReadonlySet<string>): Promise<boolean> {
-  return (await ownsNoTokens(rpcs, owner)) && (await onlyOwnSince(rpcs, owner, since, own));
+async function foundSince(tokens: Rpcs, rpcs: Rpcs, owner: string, since: string, own: ReadonlySet<string>): Promise<boolean> {
+  return (await ownsNoTokens(tokens, owner)) && (await onlyOwnSince(rpcs, owner, since, own));
 }
 /** Every transaction on `owner` after `since` is one of `own`, on both RPCs (getSignaturesForAddress until `since`, W
  *  alone, at most one more than `own` asked for): an RPC that does not know `since` lists what came before it, which is
