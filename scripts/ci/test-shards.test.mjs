@@ -169,7 +169,7 @@ test("ci.yml: test needs every shard and passes only when each one passed", () =
 // each way the wiring can break, planted in a copy of this ci.yml
 const PLANTED = {
   "a shard missing from test's needs": [/needs: \[([^\]]*), test-vault\]/, "needs: [$1]", "test does not need test-vault"],
-  "test without always()": [/if: always\(\) && github\.event_name != 'schedule'\n(\s+runs-on: ubuntu-24\.04\n\s+timeout-minutes: 5)/, "if: github.event_name != 'schedule'\n$1", "test's if has no always()"],
+  "test without always()": [/if: always\(\) && \((github\.event_name == 'merge_group' \|\| github\.event_name == 'workflow_dispatch')\)\n(\s+runs-on: ubuntu-24\.04\n\s+timeout-minutes: 5)/, "if: $1\n$2", "test's if has no always()"],
   "a skipped shard read as passed": ['.value.result == "success" or', '.value.result == "success" or .value.result == "skipped" or', "test passes when a shard is skipped"],
   "a failed shard read as passed": ['.value.result == "success" or', '.value.result != "cancelled" or', "test passes when a shard is failure"],
   // card ci-pr-light: each way the planned skip can widen

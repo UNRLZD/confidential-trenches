@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { cacheProblems, ciProblems, fullRun, runsArgs, triggerProblems } from "./ci-runs-once.mjs";
+import { cacheProblems, ciProblems, fullRun, mayRun, pullRequestProblems, runsArgs, triggerProblems } from "./ci-runs-once.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CI = readFileSync(path.join(HERE, "../../.github/workflows/ci.yml"), "utf8");
@@ -39,6 +39,62 @@ test("planted: a push trigger, a lost merge_group or workflow_dispatch, or trigg
   assert.ok(triggerProblems(flow).length > 0, "a flow-form on: is not read as clean");
   const other = CI.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  workflow_run:\n    workflows: [x]\n");
   assert.ok(has(triggerProblems(other), /runs on workflow_run, which this rule does not know/));
+});
+
+// card ci-runs-once-per-change: a pull request runs the fast gates alone; every heavy job runs on the queue's group
+test("the real ci.yml runs no heavy job on a pull request, and its four fast gates on pull requests and groups", () => {
+  assert.deepEqual(pullRequestProblems(CI), []);
+});
+
+test("planted: a heavy job back on pull requests, a new job with no if, or a fast gate off a pull request or a group is refused", () => {
+  const Q = "    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'\n";
+  // each shard back on its pull-request gate, as on main before this card
+  for (const [job, key] of [["test-wallet", "test_wallet"], ["test-browser", "test_browser"], ["test-scripts", "test_scripts"], ["test-vault", "test_vault"]]) {
+    const back = CI.replace(new RegExp(`(\n  ${job}:\n    needs: changes\n)${Q.replace(/[|()]/g, "\\$&")}`), `$1    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.${key} != 'false')\n`);
+    assert.notEqual(back, CI, job);
+    assert.ok(has(pullRequestProblems(back), new RegExp(`ci\\.yml's ${job} runs on pull_request`)), job);
+  }
+  const pkgs = CI.replace(`  test-packages:\n    needs: changes\n${Q}`, "  test-packages:\n    needs: changes\n    if: github.event_name != 'schedule'\n");
+  assert.notEqual(pkgs, CI);
+  assert.ok(has(pullRequestProblems(pkgs), /test-packages runs on pull_request/));
+  const agg = CI.replace("    if: always() && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch')\n", "    if: always() && github.event_name != 'schedule'\n");
+  assert.notEqual(agg, CI);
+  assert.ok(has(pullRequestProblems(agg), /ci\.yml's test runs on pull_request/), "test with always() runs whatever its shards did");
+  // the sandbox's plan on pull requests again: its build and shards then run too
+  const plan = CI.replace("  vault-sandbox-plan:\n    if: github.event_name != 'pull_request'\n", "  vault-sandbox-plan:\n");
+  assert.notEqual(plan, CI);
+  for (const j of ["vault-sandbox-plan", "vault-sandbox-build", "vault-sandbox-shard"]) assert.ok(has(pullRequestProblems(plan), new RegExp(`ci\\.yml's ${j} runs on pull_request`)), j);
+  const box = CI.replace("    if: always() && github.event_name != 'pull_request'\n", "    if: always()\n");
+  assert.notEqual(box, CI);
+  assert.ok(has(pullRequestProblems(box), /ci\.yml's vault-sandbox runs on pull_request/));
+  // a new job, no if: it runs on every event
+  const fresh = CI.replace("\n  test:\n", "\n  e2e-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 30\n    steps:\n      - run: pnpm -r run test:e2e\n\n  test:\n");
+  assert.notEqual(fresh, CI);
+  assert.ok(has(pullRequestProblems(fresh), /ci\.yml's e2e-extra runs on pull_request: .*\(its if: none\)/));
+  // a new job needing a fast one only: it runs with it
+  const tail = CI.replace("\n  test:\n", "\n  e2e-after:\n    needs: gitleaks\n    runs-on: ubuntu-24.04\n    steps:\n      - run: \"true\"\n\n  test:\n");
+  assert.ok(has(pullRequestProblems(tail), /ci\.yml's e2e-after runs on pull_request/));
+  // a fast gate moved to the queue alone, or off the queue
+  const late = CI.replace("  gitleaks:\n    if: github.event_name != 'schedule'\n", `  gitleaks:\n${Q}`);
+  assert.notEqual(late, CI);
+  assert.ok(has(pullRequestProblems(late), /ci\.yml's gitleaks does not run on pull_request/));
+  const prOnly = CI.replace("  money-gate:\n    if: github.event_name != 'schedule'\n", "  money-gate:\n    if: github.event_name == 'pull_request'\n");
+  assert.notEqual(prOnly, CI);
+  assert.ok(has(pullRequestProblems(prOnly), /ci\.yml's money-gate does not run on merge_group/));
+  const lost = CI.replace("\n  deep-import:\n", "\n  deep-imports:\n");
+  assert.ok(has(pullRequestProblems(lost), /ci\.yml has no job deep-import/));
+});
+
+test("an if is read as running wherever it cannot be ruled out", () => {
+  assert.equal(mayRun("github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'", "pull_request"), false);
+  assert.equal(mayRun("github.event_name != 'pull_request'", "pull_request"), false);
+  assert.equal(mayRun("always() && github.event_name != 'pull_request'", "pull_request"), false);
+  assert.equal(mayRun("github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.test_vault != 'false')", "pull_request"), true);
+  assert.equal(mayRun("needs.vault-sandbox-plan.outputs.run == 'true'", "pull_request"), true);
+  assert.equal(mayRun("${{ github.event_name == 'merge_group' }}", "pull_request"), false);
+  assert.equal(mayRun("strategy.job-index == 0", "pull_request"), true, "a form it cannot read runs");
+  assert.equal(mayRun("", "pull_request"), true);
+  assert.equal(mayRun("github.event_name != 'schedule'", "merge_group"), true);
 });
 
 const SHA = "b04a235225deb8d277ce162326fc6312268ea446";

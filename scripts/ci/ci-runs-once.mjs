@@ -17,9 +17,16 @@
 // holds every cache ci.yml saves outside the nightly's jobs saved there with the same path and key, the test-vault job's
 // steps up to its registry fetch equal (rust-cache keys on the job id, the toolchains and the env), no test run there,
 // and that workflow on push to main and by hand alone.
+// Pull requests (card ci-runs-once-per-change): every pull request ran the full checks (about 25-30 minutes, 31 checks)
+// and its queue group ran them again. A pull request now runs only the jobs PR_JOBS names: the four fast required gates,
+// which must run on pull_request and merge_group alike (the pull request gates run as main has them), the changes job
+// and the path-gated pool-solana and slither. Every other job, a new one included, must not run on pull_request: its
+// if reads false there, or it needs such a job and has no always(). A job skipped by its if reports success to a
+// required check (GitHub's "Troubleshooting required status checks", read 13 Nov 12:5xZ), so test and vault-sandbox
+// pass a pull request and gate the queue's group.
 //   node scripts/ci/ci-runs-once.mjs [<ci.yml> [<ci-cache.yml>]]   exit 0 when ci.yml has no push trigger and keeps
-//                                                 pull_request, merge_group and workflow_dispatch, and ci-cache.yml
-//                                                 saves its caches on main; 1 otherwise
+//                                                 pull_request, merge_group and workflow_dispatch, runs no heavy job on
+//                                                 a pull request, and ci-cache.yml saves its caches on main; 1 otherwise
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +59,59 @@ export function triggerProblems(yml) {
   if (!("pull_request" in t) || !/branches: \[main\]/.test(t.pull_request)) p.push("ci.yml does not run on pull requests into main");
   if (!("workflow_dispatch" in t)) p.push("ci.yml has no workflow_dispatch: a commit with no full run could not be given one");
   for (const k of Object.keys(t)) if (!["pull_request", "merge_group", "schedule", "workflow_dispatch", "push"].includes(k)) p.push(`ci.yml runs on ${k}, which this rule does not know`);
+  return p;
+}
+
+/** The jobs a pull request runs; FAST_GATES also on every queue group. */
+export const FAST_GATES = ["gitleaks", "deep-import", "verify-gate", "money-gate"];
+export const PR_JOBS = [...FAST_GATES, "changes", "pool-solana", "slither"];
+
+/** Whether a job's `if:` can be true on `event`: event_name compares read for it, always() and every other term (a
+ *  needs output, a step's) read as true, so an if this cannot rule out is read as running. */
+export function mayRun(jobIf, event) {
+  if (!jobIf) return true;
+  const js = jobIf
+    .replace(/^\$\{\{\s*|\s*\}\}$/g, "")
+    .replace(/github\.event_name\s*(==|!=)\s*'([^']*)'/g, (_, op, x) => String(op === "==" ? x === event : x !== event))
+    .replace(/always\(\)/g, "true")
+    .replace(/[\w.-]+\s*(==|!=)\s*'[^']*'/g, "true")
+    .replace(/\b(?!true\b|false\b)[a-z][\w.-]*(\(\))?/gi, "true");
+  if (!/^(?:\s|true|false|&&|\|\||!|\(|\))*$/.test(js)) return true;
+  return Function(`return (${js});`)();
+}
+
+/** Each job's { if, needs, always } as ci.yml writes it. */
+function jobHeads(yml) {
+  const out = {};
+  for (const [id, body] of Object.entries(jobs(yml))) {
+    const head = body.split("\n").filter((l) => /^ {4}\S/.test(l));
+    const jobIf = head.map((l) => /^ {4}if: (.*)$/.exec(l)?.[1]).find((x) => x !== undefined) ?? "";
+    const n = head.map((l) => /^ {4}needs: (.*)$/.exec(l)?.[1]).find((x) => x !== undefined) ?? "";
+    const needs = n.replace(/^\[|\]$/g, "").split(",").map((x) => x.trim()).filter(Boolean);
+    out[id] = { jobIf: jobIf.trim(), needs, always: /\balways\(\)/.test(jobIf) };
+  }
+  return out;
+}
+
+/** Why ci.yml runs a heavy job on a pull request, or a fast gate off one (empty = none). */
+export function pullRequestProblems(yml) {
+  const heads = jobHeads(yml);
+  const p = [];
+  const runsOn = (id, event, seen = new Set()) => {
+    const h = heads[id];
+    if (!h || seen.has(id)) return true;
+    seen.add(id);
+    if (!mayRun(h.jobIf, event)) return false;
+    // a job that needs a skipped one is skipped with it, unless its if has always()
+    return h.always || h.needs.every((n) => runsOn(n, event, seen));
+  };
+  for (const id of Object.keys(heads)) {
+    if (!PR_JOBS.includes(id) && runsOn(id, "pull_request")) p.push(`ci.yml's ${id} runs on pull_request: a heavy job runs on the merge queue's group and by hand only, so each change runs it once (its if: ${heads[id].jobIf || "none"})`);
+  }
+  for (const id of FAST_GATES) {
+    if (!heads[id]) p.push(`ci.yml has no job ${id}, a fast gate a pull request runs`);
+    else for (const ev of ["pull_request", "merge_group"]) if (!runsOn(id, ev)) p.push(`ci.yml's ${id} does not run on ${ev}: a fast gate runs on the pull request and on its group (its if: ${heads[id].jobIf})`);
+  }
   return p;
 }
 
@@ -146,8 +206,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const file = process.argv[2] ?? path.join(ROOT, ".github/workflows/ci.yml");
   const cacheFile = process.argv[3] ?? path.join(ROOT, ".github/workflows/ci-cache.yml");
   const ci = readFileSync(file, "utf8");
-  const p = [...triggerProblems(ci), ...cacheProblems(ci, readFileSync(cacheFile, "utf8"))];
+  const p = [...triggerProblems(ci), ...pullRequestProblems(ci), ...cacheProblems(ci, readFileSync(cacheFile, "utf8"))];
   for (const l of p) console.log(`ci-runs-once: ${l}`);
-  console.log(p.length ? `ci-runs-once: FAIL ${p.length} problems` : "ci-runs-once: PASS ci.yml runs once per merged commit (the queue's run), on pull requests, nightly and by hand; ci-cache.yml saves main's caches");
+  console.log(p.length ? `ci-runs-once: FAIL ${p.length} problems` : "ci-runs-once: PASS ci.yml runs once per merged commit (the queue's run), its fast gates alone on pull requests, nightly and by hand; ci-cache.yml saves main's caches");
   process.exit(p.length ? 1 : 0);
 }
