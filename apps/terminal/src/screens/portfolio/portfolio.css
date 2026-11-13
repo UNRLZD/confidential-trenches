@@ -332,5 +332,8 @@
 /* the desktop header panel is a fixed 364px: Where it is scrolls when the pools and Wallets need more, so no row is cut off */
 .pfd .eqbrk { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 
-/* The Orders route (card app-orders-coming-soon): Portfolio's empty state alone, in the middle of the page. */
-.pf.pf-orders { min-height: 60vh; display: flex; align-items: center; justify-content: center; }
+/* The Orders route (card app-orders-coming-soon): Portfolio's empty state alone, in the middle of the page: the route's
+   screen is a column and the box fills it, so the words sit at the screen's centre at every width (card
+   app-faults-seen-on-124: a 60vh box held them in the top third at 1440). */
+.screen:has(> .pf-orders) { display: flex; flex-direction: column; }
+.pf.pf-orders { flex: 1; min-height: 320px; display: flex; align-items: center; justify-content: center; }
