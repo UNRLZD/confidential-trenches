@@ -301,13 +301,6 @@ export function handler(
   const recordRate = clientWindow(RECORD_RATE_MAX, now);
   // the route's total: one window every client draws from, keyed by one name for all
   const recordTotal = clientWindow(RECORD_TOTAL_MAX, now);
-  /** Card chart-candles-never-429: a chart's read the data layer answers 429 (nothing of ours held and GeckoTerminal's
-   *  budget, its own 429 or a full set of open books refused it now; every chain's read is queued or tried again on the
-   *  next read) is answered 200 with no bars and `filling` true, the form a cold Base or Robinhood book past its bound
-   *  already answers (data/evm/swaps.ts candles): the page stays loading and reads again FILL_WAIT_MS on, within its 75 s
-   *  span (apps/terminal/src/screens/token/candles.ts loadCandles), and the browser logs no failed load. Live run
-   *  43396216450 (13 Nov 08:54-08:56Z): three "refused /v1/market/candles geckoterminal budget" while GeckoTerminal's own
-   *  429 count was 0 and 1. The refusal is still counted, as "<why> filling", in the refusal log. */
   /** A chart's read not settled within CANDLES_ANSWER_MS is answered `filling` (as a 429 is, fillingOf) while it goes on:
    *  its result is held by the data layer (a cold Solana chart's bars, data/solana/token.ts cached; a book opening), so the
    *  page's next read FILL_WAIT_MS on is served it. */
@@ -319,6 +312,13 @@ export function handler(
     });
     return Promise.race([read, late]).finally(() => clearTimeout(timer));
   };
+  /** Card chart-candles-never-429: a chart's read the data layer answers 429 (nothing of ours held and GeckoTerminal's
+   *  budget, its own 429 or a full set of open books refused it now; every chain's read is queued or tried again on the
+   *  next read) is answered 200 with no bars and `filling` true, the form a cold Base or Robinhood book past its bound
+   *  already answers (data/evm/swaps.ts candles): the page stays loading and reads again FILL_WAIT_MS on, within its 75 s
+   *  span (apps/terminal/src/screens/token/candles.ts loadCandles), and the browser logs no failed load. Live run
+   *  43396216450 (13 Nov 08:54-08:56Z): three "refused /v1/market/candles geckoterminal budget" while GeckoTerminal's own
+   *  429 count was 0 and 1. The refusal is still counted, as "<why> filling", in the refusal log. */
   const fillingOf = (tf: string, route: string) => (a: DataAnswer): DataAnswer => {
     if (a.status !== 429) return a;
     refusals.count(route, `${a.why ?? "unnamed"} filling`);
