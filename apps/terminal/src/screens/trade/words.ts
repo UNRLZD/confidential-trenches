@@ -75,8 +75,8 @@ export const WORDS = {
   privateBalance: PF.privateBalance,
   newWallet: draft("New one-time wallet", "buy-route-strip-spec.md Words on screen; design-lock-r5 P.pvTrade PV-02"),
   // the sell's flow, the buy's reversed (card sell-box-works-like-the-buy-box): its wallet already holds the coin, so
-  // the buy's label without "New", as the CO's brief names the step (13 Nov 18:11Z); the owner's pick pending
-  sellWallet: draft("One-time wallet", "card sell-box-works-like-the-buy-box brief (CO 13 Nov): the sell flow's wallet step; newWallet without New"),
+  // the buy's label without "New", as the CO's brief names the step (13 Nov 18:11Z); picked by the owner 18:49Z
+  sellWallet: ok("One-time wallet", "owner 13 Nov 18:49Z, picked; card sell-box-works-like-the-buy-box: the sell flow's wallet step, newWallet without New"),
   poolSuffix: ok("pool", "owner 8 Nov 07:55Z, kept; drafted from buy-route-strip-spec.md Words on screen: `<Venue> pool` (PV-03, the venue's name + ` pool`)"),
   final: draft("Final", "buy-route-strip-spec.md Words on screen: the tag beside Filled (S8.12)"),
   // every orders place (the Limit and TP/SL tabs, the exit plan): orders are out of the plan for now
