@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { DEPOSIT_DRY_PLACEHOLDER, ONECLICK_USDC_ASSETS, SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { signBuilt } from "../signpage-built.mjs";
 import { named } from "./record-names.mjs";
@@ -217,7 +218,8 @@ async function main() {
     const local = args.includes("--local");
     const given = local && opt("--local") && !opt("--local").startsWith("--") ? path.resolve(opt("--local")) : null;
     const dir = local ? (given ?? build()) : null;
-    const browser = await launchBrowser("chromium");
+    // --local is a harness run: the harness browser, so a socket or a request this run does not answer fails it
+    const browser = await (local ? launchHarnessBrowser : launchBrowser)("chromium");
     try {
       answer = await collect({ browser, signUrl: local ? SIGN_URL : (opt("--url") ?? SIGN_URL), dir, source: local ? `local, SIGN_HOST answered from ${given ? named(given) : "packages/signpage's build (index.html and public/ copied)"}` : "live" });
     } finally {

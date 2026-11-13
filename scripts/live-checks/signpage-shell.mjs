@@ -74,6 +74,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SIGNPAGE_IFRAME_ATTRIBUTES, SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { kitTakesState } from "../signpage-state.mjs";
 import { named } from "./record-names.mjs";
 
@@ -434,8 +435,8 @@ export function rpcOf(body) {
 
 // ------------------------------------------------------------------------------------------------ the engines
 /** Playwright's Chromium or Firefox behind one driver shape (WebKit's is scripts/webkit-harness's). */
-async function playwrightDriver(engine, serve, live, size) {
-  const browser = await launchBrowser(engine);
+async function playwrightDriver(engine, serve, live, size, launch) {
+  const browser = await launch(engine);
   const ctx = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: size.dpr });
   const reports = [];
   await ctx.exposeBinding("__harnessReport", (src, s) => {
@@ -483,7 +484,7 @@ async function playwrightDriver(engine, serve, live, size) {
   };
 }
 
-async function driverFor(engine, serve, live, size) {
+async function driverFor(engine, serve, live, size, launch) {
   if (engine === "webkit") {
     if (live) throw new Error("--live runs on chromium or firefox; WebKit runs on the harness");
     const { launchWebKit } = await import("../webkit-harness/index.mjs");
@@ -491,7 +492,7 @@ async function driverFor(engine, serve, live, size) {
     // typing: the driver's native keyDown/keyUp per character, 30 ms apart, to whatever holds the page's focus
     return d;
   }
-  return playwrightDriver(engine, serve, live, size);
+  return playwrightDriver(engine, serve, live, size, launch);
 }
 
 // ------------------------------------------------------------------------------------------------ the read
@@ -512,7 +513,10 @@ async function until(f, ms = WAIT_MS) {
   }
 }
 
-export async function collect({ engine, site, live, width = "desktop" }) {
+// `launch`: the browser's start. On the harness it is the harness browser (scripts/harness-sockets.mjs): every socket
+// and every request this run's own route lets through is the harness's to judge, so a page that reaches a host the
+// run does not answer fails the run; live, the plain launcher, whose pinned hosts are the network's.
+export async function collect({ engine, site, live, width = "desktop", launch = live ? launchBrowser : launchHarnessBrowser }) {
   const size = WIDTHS[width];
   if (!size) throw new Error(`--width must be one of ${Object.keys(WIDTHS).join(", ")}`);
   const requests = [];
@@ -523,7 +527,7 @@ export async function collect({ engine, site, live, width = "desktop" }) {
     built = site ? null : buildSignpage();
     sign = await siteServer(realpathSync(site ?? built));
   }
-  const d = await driverFor(engine, serveWith(sign, requests), live, size);
+  const d = await driverFor(engine, serveWith(sign, requests), live, size, launch);
   const rec = { engine, view: { name: width, width: size.width, height: size.height, inner: null }, source: live ? `live ${SIGN}` : `harness, SIGN_HOST from ${site ? named(site) : "packages/signpage's committed build"}`, at: new Date().toISOString(), browser: d.version, topology: null, steps: {}, messages: [], requests, connect: null, errors: [] };
   const reports = () => d.messages().filter((m) => m.frame?.host === APP_HOST);
   const msgs = () => reports().filter((m) => m.data?.kind === "message").map((m) => ({ t: m.data.t, data: m.data.data }));
