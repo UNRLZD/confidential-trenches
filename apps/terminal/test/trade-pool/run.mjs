@@ -69,6 +69,9 @@ const BUYS = [
 const FEE = { "sol-ready": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
 // the amount field marked wrong: over one tap, or not a whole chunk on Base; never while a proof is still making (the
 // amount is not what is wrong) or on an amount the pool can take
+// You receive on a Solana pool buy (card solana-buy-preview-complete): the dry answer's out for the typed amount (the
+// recorded curve coin's 35,294.263662 at 0.001 SOL), over the fixture's set preview, which the live source has none of
+const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH" };
 const BAD = { "sol-ready": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
 // the presets row as data-preset:disabled:text per button: the four on Solana (all over one tap's most on the pool, $100
 // over the vault's max); on Base the chunk's one button, "—" and off while no proof is ready
@@ -223,6 +226,10 @@ try {
         const feeEl = page.locator('[data-testid="trade-cost"]');
         const gotFee = (await feeEl.count()) ? await settle(async () => norm(await feeEl.innerText()), FEE[name]) : null;
         check(gotFee === FEE[name], `${tag}: the Fee row "${gotFee}", want "${FEE[name]}"`);
+        if (RECEIVE[name] !== undefined) {
+          const recv = await settle(async () => norm(await page.locator('[data-testid="trade-receive"]').innerText()), RECEIVE[name]);
+          check(recv === RECEIVE[name], `${tag}: You receive "${recv}", want "${RECEIVE[name]}"`);
+        }
         // the box's own reads (pool.buy.dry): this coin's Max, one a state at most, and the Fee of the typed amount, one an
         // amount; on Solana only, and never a buy
         const reads = await page.evaluate(() => window.__reads);

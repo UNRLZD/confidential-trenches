@@ -9,6 +9,7 @@ import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
 import { SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolFee, type SolanaPoolRelease, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { fx, replay } from "../../kit/test/solana-pool-buy-fx.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { poolBalances, solanaBalancePool, type BalanceProof } from "../../wallet/src/pool/balances.ts";
@@ -49,7 +50,8 @@ test("the coin's own venue: the 0.01 SOL piece's Max on a curve coin and a PumpS
   assert.equal(state[0]!.tap_max, "0.00038488");
   for (const [coin, kind] of [["pump", "pump-curve"], ["pumpswap", "pumpswap"]] as const) {
     const venue = await readCoinVenue(pair(coin), fx[coin].mint);
-    assert.deepEqual(venue, { kind, tokenAccountSize: 170, cashback: false });
+    // the mint's decimals, byte 44 of the recorded mint (pump's coins are made at 6)
+    assert.deepEqual(venue, { kind, tokenAccountSize: 170, cashback: false, decimals: 6 });
     const a = await ask(poolBuyDryKind(deps({ rpcsOf: () => pair(coin) })), { chain: "solana", token: fx[coin].mint });
     // 10,000,000 less the relay fee 1,300,000, the tip cap 1,000,000, W's token account rent(170) 1,513,840, its volume
     // account rent(137) 1,346,200 and the sell's need on PumpSwap with no cashback (5,000 + rent(165) 1,488,440)
@@ -90,7 +92,7 @@ test("a cashback coin, as both providers' venue bytes say it (the curve's byte 8
   // makes W's wrapped-SOL cashback account (1,858,080)
   for (const [coin, kind, tap] of [["pump", "pump-curve", "0.00051188"], ["pumpswap", "pumpswap", "0.00185808"]] as const) {
     const rpcs = [cashback(coin, 0), cashback(coin, 1)] as const;
-    assert.deepEqual(await readCoinVenue(rpcs, fx[coin].mint), { kind, tokenAccountSize: 170, cashback: true });
+    assert.deepEqual(await readCoinVenue(rpcs, fx[coin].mint), { kind, tokenAccountSize: 170, cashback: true, decimals: 6 });
     assert.deepEqual(await ask(poolBuyDryKind(deps({ rpcsOf: () => rpcs })), { chain: "solana", token: fx[coin].mint }), { result: { tap_max: tap } }, coin);
   }
 });
@@ -219,12 +221,14 @@ test("with an amount (kit 1.12, card buy-spends-several-pieces): the pieces a bu
   const tap = plain.result!.tap_max as string;
   assert.deepEqual(Object.keys(plain.result!), ["tap_max"], "no amount: tap_max alone, as kit 1.10 reads it");
   const sol = (l: bigint) => (Number(l) / 1e9).toString();
+  // out (card solana-buy-preview-complete): the quote the buy takes, the kit's readSolanaReference on the same pair
+  const outOf = async (spend: string) => (await quoteOut("pump", spend));
   // a spend the own piece pays alone: one piece, its relay fee and the tip
-  assert.deepEqual((await at("0.001")).result, { tap_max: tap, pieces: 1, cost: sol(FEE + TIP) });
+  assert.deepEqual((await at("0.001")).result, { tap_max: tap, pieces: 1, cost: sol(FEE + TIP), out: await outOf("0.001") });
   // past it: the own piece and one 0.02 (the least released), two relay fees and one tip
-  assert.deepEqual((await at("0.01")).result, { tap_max: tap, pieces: 2, cost: sol(2n * FEE + TIP) });
+  assert.deepEqual((await at("0.01")).result, { tap_max: tap, pieces: 2, cost: sol(2n * FEE + TIP), out: await outOf("0.01") });
   // tap_max itself: all three
-  assert.deepEqual((await at(tap)).result, { tap_max: tap, pieces: 3, cost: sol(3n * FEE + TIP) });
+  assert.deepEqual((await at(tap)).result, { tap_max: tap, pieces: 3, cost: sol(3n * FEE + TIP), out: await outOf(tap) });
   // past tap_max: no pieces, as no buy of it passes
   assert.deepEqual(Object.keys((await at("1")).result!), ["tap_max"]);
   for (const bad of ["0.0000000001", "-1", "1e3", "abc", 5]) assert.deepEqual(await at(bad as string), { error: "not_allowed" }, String(bad));
@@ -240,4 +244,45 @@ test("with an amount, the page's own tip (card buy-spends-several-pieces): every
   const sol = (l: bigint) => (Number(l) / 1e9).toString();
   assert.deepEqual([(await at("0.001")).result?.pieces, (await at("0.001")).result?.cost], [1, sol(FEE + SOLANA_POOL_JITO_TIP)]);
   assert.deepEqual([(await at("0.01")).result?.pieces, (await at("0.01")).result?.cost], [2, sol(2n * FEE + SOLANA_POOL_JITO_TIP)]);
+});
+
+/** The expected out the buy's own quote gives for `spend` SOL on the recorded coin (src/pool-buy.ts: readSolanaReference
+ *  through pageReference, the best of pump's curve and PumpSwap), in whole tokens at the mint's 6 decimals. */
+async function quoteOut(coin: "pump" | "pumpswap", spend: string): Promise<string> {
+  const [w, f = ""] = spend.split(".");
+  const lamports = BigInt(w!) * 1_000_000_000n + BigInt(f.padEnd(9, "0"));
+  const ref = await readSolanaReference(pair(coin), { side: "buy", token: fx[coin].mint, amount: lamports });
+  const best = ref!.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0]!;
+  const s = best.expectedOut.toString().padStart(7, "0");
+  const frac = s.slice(-6).replace(/0+$/, "");
+  return frac ? `${s.slice(0, -6)}.${frac}` : s.slice(0, -6);
+}
+
+/** The page's one 0.01 SOL note with its own proof ready: a buy it pays alone is one piece. */
+const OWN: PoolBuyDryDeps["ready"] = async () => ({ notes: [held], ready: [{ ...ready, own: true as const }], open: new Set([SOL.id]) });
+test("with an amount, You receive (card solana-buy-preview-complete): out is the buy's own quote on the coin's venue, curve and PumpSwap, and a quote that is not read gives no out", async () => {
+  // red before this card: the answer had no out, so the app's You receive drew a dash on every amount
+  for (const coin of ["pump", "pumpswap"] as const) {
+    const kind = poolBuyDryKind(deps({ rpcsOf: () => pair(coin), tip: 100_000n, ready: OWN }));
+    const a = (await ask(kind, { chain: "solana", token: fx[coin].mint, amount: "0.001" })) as { result: Record<string, unknown> };
+    assert.equal(a.result.out, await quoteOut(coin, "0.001"), coin);
+    assert.match(a.result.out as string, /^[1-9][0-9]*(\.[0-9]{1,6})?$/, coin);
+    assert.ok(SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](a.result), coin);
+  }
+  // the curve coin's 0.001 SOL buy as recorded: 35,294.263662 tokens (a curve near its start: ~35.7K a 0.001 SOL less
+  // pump's fee)
+  assert.equal(await quoteOut("pump", "0.001"), "35294.263662");
+  // the quote's read fails on one provider (the venue's kept from an earlier ask): pieces and cost as before, no out
+  let fail = false;
+  const flaky = (p: 0 | 1): SolanaRpc => {
+    const r = replay(fx.pump, p);
+    return (async (m: string, q: readonly unknown[]) => {
+      if (fail && p === 1) throw new SolanaRpcTransportError("timeout", "no answer", 1, "test");
+      return r(m, q);
+    }) as SolanaRpc;
+  };
+  const kind = poolBuyDryKind(deps({ rpcsOf: () => [flaky(0), flaky(1)], tip: 100_000n, ready: OWN }));
+  await ask(kind, { chain: "solana", token: fx.pump.mint });
+  fail = true;
+  assert.deepEqual(await ask(kind, { chain: "solana", token: fx.pump.mint, amount: "0.001" }), { result: { tap_max: "0.00334652", pieces: 1, cost: "0.0014" } });
 });
