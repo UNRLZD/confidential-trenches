@@ -53,11 +53,11 @@ function world(o: { cash?: bigint; floor?: bigint | null } = {}) {
   return { k: poolMoveKinds(() => mover, () => toCash), runs, quoted };
 }
 
-async function dry(k: ReturnType<typeof world>["k"], params: Record<string, string>): Promise<unknown> {
+// not async: an answer's own `then` would make it a thenable; each is copied into a plain object
+function dry(k: ReturnType<typeof world>["k"], params: Record<string, string>): Promise<unknown> {
   const r = k["pool.move.dry"](params, ctx);
-  if (!("running" in r)) return r;
-  await r.after;
-  return r.answer();
+  if (!("running" in r)) return Promise.resolve({ ...r });
+  return r.after.then(() => ({ ...(r.answer() as object) }));
 }
 
 const SENDABLE = poolSendable(FUNDS);

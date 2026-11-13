@@ -165,7 +165,7 @@ export const MUTANTS = [
   // card one-balance-buys-on-every-chain: a dry buy's with_cash or a { move: "cash" } route event sent to kit-v1.14 or
   // below, whose schema refuses the whole answer or the event for it, kit-v1.14 read at another level or in part, a key
   // of that name taken from another kind, kit-v1.14 told no closed notice, or the move event told to no one
-  ["kit", "  const cashless = dryCashFor(kind, given);\n", "  const cashless = given;\n"],
+  ["kit", "  const cashless = dryCashFor(kind, maxless);\n", "  const cashless = maxless;\n"],
   ["kit", '  if (level === "1.14") return cashless;\n', ""],
   ["kit", '  if (level === "1.14") return cashless;\n', '  if (level === "1.14") return given;\n'],
   ["kit", "  const { with_cash: _w, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],

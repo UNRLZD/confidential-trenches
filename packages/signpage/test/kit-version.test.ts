@@ -1182,9 +1182,12 @@ test("pool.move.dry's max: kept for the kit's own version, left out for kit-v1.1
   assert.ok(NOW.SIGNPAGE_RESULT_SCHEMAS["pool.move.dry"](DRY_MOVE_LIMITS));
   for (const kit of [SIGNPAGE_KIT_VERSION, "1.15", "1.14"]) assert.deepEqual(resultFor(kitLevel(kit), "pool.move.dry", DRY_MOVE_LIMITS), DRY_MOVE_LIMITS, kit);
   assert.equal(V115.SIGNPAGE_RESULT_SCHEMAS["pool.move.dry"](DRY_MOVE_LIMITS), false);
-  // another kind keeps a key named max: only the dry move's is taken
-  const buy = { tap_max: "0.04", max: "1" };
+  // another kind keeps a key named max, its out beside it: only the dry move's is taken
+  const buy = { tap_max: "0.04", max: "1", out: "2" };
   assert.deepEqual(resultFor(kitLevel("1.15"), "pool.buy.dry", buy), buy);
+  // kit-v1.15 reads a dry buy's with_cash, out, pieces and cost: its level takes the max alone
+  assert.deepEqual(resultFor(kitLevel("1.15"), "pool.buy.dry", DRY_CASH), DRY_CASH);
+  assert.ok(V115.SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](DRY_CASH));
 });
 
 test("hello kit 1.15 against this page: the state and every state event as they are, the closed notice and the move event told, and kit-v1.15's own schema reads them", async () => {
