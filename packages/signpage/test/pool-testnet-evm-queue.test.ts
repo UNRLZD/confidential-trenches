@@ -1355,7 +1355,8 @@ test("the pool index syncs once a sign-in, after the state read's proof pass end
       const n = (prev?.through ?? 0) + 10;
       // the first sync ends partial (a reader that failed a span): it proves nothing past the kept index
       if (partial) return (partial = false), { index: ix(n), coversThrough: null, pools: null, error: { code: "rpc_failed", message: "x" }, stats };
-      return { index: ix(n), coversThrough: n, pools: [], error: null, stats };
+      // a whole sync, as the kit's answers it (pool-index.ts F4d): proven to its head N, the index kept to N less the margin
+      return { index: ix(n), coversThrough: n + 4, pools: [], error: null, stats };
     },
   } as unknown as Parameters<typeof testnetPool>[1]);
   const settle = async () => {

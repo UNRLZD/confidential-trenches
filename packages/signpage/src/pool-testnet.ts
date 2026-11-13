@@ -1214,7 +1214,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (signal.aborted) return;
       // a partial sync keeps what it proved for the next; only a whole one is served and kept
       if (s.index !== null) evmIndex.set(chain, s.index);
-      if (s.index !== null && s.coversThrough === s.index.through && evmPoolIndexUse(network, s)) {
+      // (a whole sync is proven to its head; the index it keeps ends the margin below, read again by the next gap)
+      if (s.index !== null && s.coversThrough !== null && evmPoolIndexUse(network, s)) {
         evmIndexed.add(chain);
         await indexStore?.put(network, s.index);
       }
