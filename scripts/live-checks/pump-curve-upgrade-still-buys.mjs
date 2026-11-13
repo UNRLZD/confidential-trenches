@@ -3,14 +3,14 @@
 // of 2026-11-13 20:12:28Z (programdata slot 469055660) grew its Global account from 1,088 to 1,096 bytes (one u64
 // appended), and the kit's venue read (packages/kit/src/trade/solana/pool-buy.ts pumpGlobalFeeRecipient) refused any
 // Global but 1,088 bytes, so every pump.fun curve buy and sell the signing page built stopped before it was signed.
+// The fix reads Global at any size from a minimum up (pump appends fields and never moves one).
 // What it proves, and only that: the served /app.js is the one index.html pins (its sha384); the bundle's check on
-// pump Global's size, found by its refusal's text, accepts the sizes it lists; and pump's Global, read now on two
-// public mainnet RPCs, is one size on both and one the served bundle accepts. So it also fails the day pump grows Global
-// again. It does not prove a buy lands: that is the pool's LiteSVM buy and sell on mainnet's code
+// pump Global's size, found by its refusal's text, is a minimum, not an exact size; and pump's Global, read now on two
+// public mainnet RPCs, is one size on both and at or above that minimum. It does not prove a buy lands: that is the pool's LiteSVM buy and sell on mainnet's code
 // (contracts/pool-solana/svm-tests, fixtures/venues/pump.json) and the kit's test at the released commit.
 // An RPC that answers nothing usable is its no-answer (provider-answer.mjs), never a wrong answer: with fewer than two
 // sizes read the check is INCONCLUSIVE. On a pull request's build (scripts/ci/bundle-checks.mjs) `bundle` judges the
-// build alone: its pin, and a size check that takes GLOBAL_SIZE_AT_CARD, the size mainnet held when this card landed.
+// build alone: its pin, and a minimum at or below GLOBAL_SIZE_AT_CARD, the size mainnet held when this card landed.
 // After: sign
 // Bundle: read sign
 //   node scripts/live-checks/pump-curve-upgrade-still-buys.mjs [--record <file>] [--answer <file>]
@@ -30,44 +30,39 @@ export const PUMP_GLOBAL = "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf";
 /** Global's size on both RPCs after pump's upgrade of 2026-11-13 20:12:28Z (slot 469057462). */
 export const GLOBAL_SIZE_AT_CARD = 1096;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
-const esc = (s) => s.replace(/[$]/g, "\\$");
 
-/** The Global sizes the bundle's check accepts, from its one refusal "pump Global is N bytes, not ...": a list
- *  (`!L.includes(e.data.length)`, L defined as an array of numbers) or a single size (`e.data.length!==N`); null when
- *  the refusal is missing, repeated or of another shape. */
-export function acceptedSizes(js) {
+/** The bundle's check on pump Global's size, from its one refusal "pump Global is N bytes, ...": { rule: "min", size }
+ *  for `e.data.length<N` (this card's), { rule: "exact" } for any other shape that refuses by size (`!==N`, or a list of
+ *  sizes as `!L.includes(e.data.length)`); null when the refusal is missing or repeated. */
+export function globalRule(js) {
   const all = js.match(/throw Error\(`pump Global is /g) ?? [];
   if (all.length !== 1) return null;
-  const list = /!([\w$]+)\.includes\(([\w$]+)\.data\.length\)\)throw Error\(`pump Global is \$\{\2\.data\.length\} bytes, not \$\{\1\.join\(` or `\)\}`\)/.exec(js);
-  if (list) {
-    const defs = [...js.matchAll(new RegExp(`(?<![\\w$.])${esc(list[1])}=\\[(\\d+(?:,\\d+)*)\\][,;]`, "g"))];
-    return defs.length === 1 ? defs[0][1].split(",").map(Number) : null;
-  }
-  const one = /([\w$]+)\.data\.length!==(\d+)\)throw Error\(`pump Global is \$\{\1\.data\.length\} bytes, not /.exec(js);
-  return one ? [Number(one[2])] : null;
+  const min = /([\w$]+)\.data\.length<(\d+)\)throw Error\(`pump Global is \$\{\1\.data\.length\} bytes, under /.exec(js);
+  return min ? { rule: "min", size: Number(min[2]) } : { rule: "exact" };
 }
 
-/** What the check keeps of the reads: the index, the served bundle's sha384, the sizes it accepts, and Global's size
+/** What the check keeps of the reads: the index, the served bundle's sha384, its Global size rule, and Global's size
  *  on each RPC (null when it gave no account of pump's). */
 export function facts(index, js, globalSizes) {
-  return { index, sha384: sha384(js), accepts: acceptedSizes(js), globalSizes };
+  return { index, sha384: sha384(js), global: globalRule(js), globalSizes };
 }
 
-/** The build's own lines: SIGN_HOST's pin, and the sizes the bundle's check accepts (or null with a BAD line). */
+/** The build's own lines: SIGN_HOST's pin, and the minimum the bundle's check takes (or null with a BAD line). */
 function bundleLines(a, lines) {
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
   if (!pin) lines.push("BAD SIGN_HOST's index.html pins no /app.js");
   else if (pin !== a.sha384) lines.push("BAD SIGN_HOST's served /app.js is not the one index.html pins");
-  const accepts = Array.isArray(a?.accepts) && a.accepts.length > 0 && a.accepts.every((n) => Number.isSafeInteger(n) && n > 0) ? a.accepts : null;
-  if (!accepts) lines.push("BAD the served bundle has no check of pump Global's size");
-  return accepts;
+  const g = a?.global;
+  if (g?.rule === "exact") { lines.push("BAD the served bundle pins pump Global at an exact size"); return null; }
+  if (g?.rule !== "min" || !Number.isSafeInteger(g.size) || g.size <= 0) { lines.push("BAD the served bundle has no check of pump Global's size"); return null; }
+  return g.size;
 }
 
-/** The verdict on an answer { index, sha384, accepts, globalSizes, noAnswers }: FAIL on a bad build or a mainnet size
+/** The verdict on an answer { index, sha384, global, globalSizes, noAnswers }: FAIL on a bad build or a mainnet size
  *  the build refuses; INCONCLUSIVE when an RPC gave no size (its no-answer named); else PASS. */
 export function judge(a) {
   const lines = [];
-  const accepts = bundleLines(a, lines);
+  const min = bundleLines(a, lines);
   const raw = Array.isArray(a?.globalSizes) && a.globalSizes.length === RPCS.length ? a.globalSizes : [null, null];
   const sizes = raw.filter((n) => Number.isSafeInteger(n) && n > 0);
   const wrong = raw.filter((n) => n !== null && !(Number.isSafeInteger(n) && n > 0)).length;
@@ -76,17 +71,17 @@ export function judge(a) {
   if (wrong) lines.push(`BAD ${wrong} RPC(s) answered with no pump Global`);
   else if (quiet) lines.push(`--  pump Global read on ${sizes.length} of ${RPCS.length} RPCs: INCONCLUSIVE`);
   else if (sizes.some((n) => n !== sizes[0])) lines.push(`BAD the RPCs read pump Global at different sizes: ${sizes.join(", ")}`);
-  else if (accepts && !accepts.includes(sizes[0])) lines.push(`BAD pump Global is ${sizes[0]} bytes on mainnet and the served bundle accepts only ${accepts.join(" or ")}`);
+  else if (min !== null && sizes[0] < min) lines.push(`BAD pump Global is ${sizes[0]} bytes on mainnet, under the served bundle's minimum of ${min}`);
   const bad = lines.some((l) => l.startsWith("BAD"));
   const verdict = verdictOf(bad, quiet);
   return { ok: verdict === "PASS", verdict, lines };
 }
 
-/** The build alone (scripts/ci/bundle-checks.mjs): its pin, and a size check that takes GLOBAL_SIZE_AT_CARD. */
+/** The build alone (scripts/ci/bundle-checks.mjs): its pin, and a minimum at or below GLOBAL_SIZE_AT_CARD. */
 export function judgeBundle(a) {
   const lines = [];
-  const accepts = bundleLines(a, lines);
-  if (accepts && !accepts.includes(GLOBAL_SIZE_AT_CARD)) lines.push(`BAD the bundle accepts only ${accepts.join(" or ")}, not the ${GLOBAL_SIZE_AT_CARD}-byte Global`);
+  const min = bundleLines(a, lines);
+  if (min !== null && min > GLOBAL_SIZE_AT_CARD) lines.push(`BAD the bundle's minimum of ${min} refuses the ${GLOBAL_SIZE_AT_CARD}-byte Global`);
   return { ok: lines.length === 0, lines };
 }
 
