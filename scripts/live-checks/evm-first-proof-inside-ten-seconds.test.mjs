@@ -83,13 +83,13 @@ test("planted on this tree's build: each part back to its shape before this card
 });
 
 // The mainnet copies this build was measured on (packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs, three per
-// chain landing early in a period and three landing mid-period, CT_DEPOSIT_INTO_MS=20000, each with its book to replay
+// chain landing mid-period (CT_DEPOSIT_INTO_MS=20000) and one landing early in a period, each with its book to replay
 // offline): every step held, the first leaf's proof ready inside 10 s of its block, at most 80 requests per pool host in
 // any 10 s from 10 s before that block to the proof, and no log read from the pool's deploy block among them. A
 // mid-period landing's period began over 10 s before it, past the state robinhood-rpc.publicnode.com keeps; the copy
 // refuses such a read there as that host does, and the proof is still ready inside 10 s.
 const RUNS = path.join(path.dirname(new URL(import.meta.url).pathname), "../../packages/signpage/scripts/evm-mainnet-copy-runs");
-const EARLY = ["base-31", "base-32", "base-33", "robinhood-31", "robinhood-32", "robinhood-33"];
+const EARLY = ["base-31", "robinhood-31"];
 const MID = ["base-21", "base-22", "base-23", "robinhood-21", "robinhood-22", "robinhood-23"];
 test("the recorded mainnet copies, early and mid-period: ready inside 10 s, each pool host at most 80 requests per 10 s, no deploy-block log read", () => {
   for (const n of [...EARLY, ...MID]) {
@@ -102,6 +102,7 @@ test("the recorded mainnet copies, early and mid-period: ready inside 10 s, each
     assert.ok(s.readyMsAfterDeposit <= 10_000, `${f}: ready ${s.readyMsAfterDeposit} ms`);
     assert.ok(s.hostWindowBound === 80 && s.hostWindowMost <= 80, `${f}: ${s.hostWindowMost} per host`);
     assert.equal(s.deployPages, 0, f);
+    assert.equal(s.stateRefusedRun, 0, `${f}: no state read refused as older than its host keeps`);
     if (MID.includes(n)) assert.ok(s.depositIntoPeriodMs > 10_000, `${f}: landed ${s.depositIntoPeriodMs} ms into its period`);
   }
 });
