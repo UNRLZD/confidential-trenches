@@ -2,14 +2,13 @@
 // setup files ./setup.ts fetches and checks byte for byte against the kit's pins, with no server of ours. It is a
 // VaultProver, so the kit's vaultProveWithdraw and poolProveWithdraw check its answer as they check the browser
 // worker's: public signals exactly the input's, the proof in the affine form the vault and the pools parse.
-import { createRequire } from "node:module";
 import type { VaultProver } from "@blindfill/kit";
 
 /** The Node prover: snarkjs on the withdraw setup files, each checked against the kit's sha256 pin (./setup.ts), loaded once. */
 export async function exitProver(): Promise<VaultProver> {
   const { exitSetupFiles } = await import("./setup.ts");
-  // snarkjs ships no types: loaded as the kit's own Node proof loads it (packages/kit/test/prove-e2e.test.ts)
-  const snarkjs = createRequire(import.meta.url)("snarkjs") as { groth16: { fullProve(i: unknown, w: Uint8Array, z: Uint8Array, logger: undefined, wtns: undefined, o: { singleThread: boolean }): Promise<{ proof: unknown; publicSignals: string[] }> } };
+  // snarkjs's Node build by a plain import (its types: ./snarkjs.d.ts), loaded when the prover is made
+  const snarkjs = await import("snarkjs");
   let files: Map<string, Uint8Array> | null = null;
   return {
     async load(circuit) {

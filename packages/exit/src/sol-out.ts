@@ -17,8 +17,10 @@
 //   and W, sent to the first RPC and read back on both; then W's own System transfer of all it holds less its fee to
 //   the typed address, W its only signer and fee payer, read back on both (pool-withdraw.ts sendOnward). Every key is
 //   zeroed once it signed.
+// - The signatures: @noble/curves' ed25519, as the wallet's own Solana signer (packages/wallet/src/arming/records.ts),
+//   at the two sites scripts/ci/sign-sites.mjs lists (sendOnward, solExitWith), proven by test/sol-out.test.ts (b).
 // - The resume: a W of ours that still holds lamports (a release that landed before a stop) is sent on first.
-import { createPrivateKey, createPublicKey, sign as edSign, type KeyObject } from "node:crypto";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import {
   poolProveWithdraw,
   readSolanaRent,
@@ -127,28 +129,11 @@ export function b58decode(s: string, len: number): Uint8Array | null {
 const b64 = (b: Uint8Array): string => Buffer.from(b).toString("base64");
 const unb64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64"));
 
-// ---------- ed25519, by node:crypto ----------
-const PKCS8_ED25519 = [0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20];
-/** An ed25519 key object of a 32-byte seed; the DER copy of the seed is zeroed at once. */
-function edKey(seed32: Uint8Array): KeyObject {
-  if (seed32.length !== 32) throw new Error("an ed25519 seed is 32 bytes");
-  const der = Buffer.alloc(48);
-  try {
-    der.set(PKCS8_ED25519);
-    der.set(seed32, 16);
-    return createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-  } finally {
-    der.fill(0);
-  }
-}
-const edPublic = (k: KeyObject): Uint8Array => new Uint8Array(createPublicKey(k).export({ format: "der", type: "spki" }).subarray(-32));
-const edSignWith = (k: KeyObject, message: Uint8Array): Uint8Array => new Uint8Array(edSign(null, message, k));
-
 /** The fee wallet F of seed64: its address, and its 32-byte secret (the caller zeroes it). */
 export function solFeeWallet(seed64: Uint8Array): { address: string; secretKey: Uint8Array } {
   const { key, chainCode } = slip10Ed25519(seed64, [...SOL_FEE_WALLET_PATH]);
   chainCode.fill(0);
-  return { address: b58encode(edPublic(edKey(key))), secretKey: key };
+  return { address: b58encode(ed25519.getPublicKey(key)), secretKey: key };
 }
 
 // ---------- reads on both RPCs ----------
@@ -319,7 +304,7 @@ async function sendOnward(rpcs: Pair, seed64: Uint8Array, l: bigint, j: number, 
   let sig: Uint8Array;
   try {
     if (signer.address !== w.address) stop("W is not the one the bytes were built for");
-    sig = edSignWith(edKey(signer.secretKey), message);
+    sig = ed25519.sign(message, signer.secretKey);
   } finally {
     signer.secretKey.fill(0);
   }
@@ -487,7 +472,7 @@ export function solExitWith(over: SolExitOver = {}): ExitChain {
         let sigs: Uint8Array[];
         try {
           if (fk.address !== F || wk.address !== w.address) stop("a signer is not the one the bytes were built for");
-          sigs = [edSignWith(edKey(fk.secretKey), message), edSignWith(edKey(wk.secretKey), message)];
+          sigs = [ed25519.sign(message, fk.secretKey), ed25519.sign(message, wk.secretKey)];
         } finally {
           fk.secretKey.fill(0);
           wk.secretKey.fill(0);
