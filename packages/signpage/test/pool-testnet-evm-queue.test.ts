@@ -4,7 +4,7 @@
 // notes are settled on the chain's sync, and sign out closes it. Without the pin nothing opens and nothing is read.
 //   node --test test/pool-testnet-evm-queue.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { afterEach, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
@@ -41,7 +41,10 @@ const C0: NoteRef = { kind: "change", l: L0, j: 0 };
 const P = (ref: NoteRef) => noteSecrets(SEED64, ref).precommitment;
 
 const closers: (() => void)[] = [];
-after(() => closers.forEach((f) => f()));
+// each test's stores closed as it ends: in a lone run (--test-name-pattern) the root test ended only once the event
+// loop drained, which a store's open BroadcastChannel (wallet store/index.ts) never let happen, so a top-level after()
+// closing them never ran and the run hung
+afterEach(() => closers.splice(0).forEach((f) => f()));
 async function wallet(): Promise<{ w: WalletStore; ns: NoteStore }> {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => w.close());
