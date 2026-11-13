@@ -99,7 +99,7 @@ import { evmIndexStore, type EvmIndexStore } from "./evm-index-store.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
-import { BUY_NONE_KEY, solBuyRecords, tradesDone, tradesFrom, writeTradeOps, type TradesStore } from "./sol-buy-records.ts";
+import { BUY_NONE_KEY, BUY_NONE_MARK, buyNoneMarked, solBuyRecords, tradesDone, tradesFrom, writeTradeOps, type TradesStore } from "./sol-buy-records.ts";
 import { fillTradeOps, type FillStore } from "./trade-fill.ts";
 import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 
@@ -2429,7 +2429,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (!page.held) throw new Error("no wallet store is open");
       const st = await page.held();
       if (buy === "none") {
-        await st.update("meta", BUY_NONE_KEY, (v) => ({ ...asRecord(v), [address]: true }));
+        await st.update("meta", BUY_NONE_KEY, (v) => ({ ...asRecord(v), [address]: BUY_NONE_MARK }));
         return false;
       }
       let wrote = false;
@@ -2649,7 +2649,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       owed: owedNoted(page.store),
       bought: buyMints(page.store),
       // the restore's rebuild's "read, no buy" mark (sol-buy-records.ts), proven by the rent back before it holds W
-      buyNone: async (address) => Object.hasOwn(asRecord(await (await page.store()).get("meta", BUY_NONE_KEY)), address),
+      buyNone: async (address) => buyNoneMarked(await (await page.store()).get("meta", BUY_NONE_KEY), address),
       // a load's rent backs hold the positions' passes off only while a W of theirs is read (review of 20ba2481b, P3-8)
       preempt: () => {
         const hold = positions.preempt();
