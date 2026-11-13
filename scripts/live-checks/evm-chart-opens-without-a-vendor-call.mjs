@@ -12,8 +12,8 @@
 // passes only when:
 //   - the lists answer 200 with at least N distinct trending tokens;
 //   - every candles answer is 200 JSON with X-Helper-Commit a full sha, its src one the helper names (X-Helper-Source
-//     and the body's src alike): "chain" or "chain,geckoterminal" (our own bars, the vendor only before our first), or
-//     "geckoterminal" for a token our reads find no pool of; tf "15m", bars [t_s, o, h, l, c, vol] on the 15m grid,
+//     and the body's src alike): "chain", "chain,geckoterminal" or "chain,coingecko" (our own bars, the vendor, keyless
+//     or the paid plan, only before our first), or "geckoterminal" or "coingecko" for a token our reads find no pool of; tf "15m", bars [t_s, o, h, l, c, vol] on the 15m grid,
 //     oldest first, at least one (a trending token has a chart), high and low holding open and close; own_from_s, when
 //     present, one of its bars;
 //   - each chart opened within THROTTLE_SPAN_S of its first read.
@@ -34,7 +34,9 @@ export const WINDOW_S = 75;
 export const LISTS_PATH = "/v1/market/lists?chain=base";
 /** The token page's first candles read (apps/terminal/src/screens/token/candles.ts DEFAULT_TF 15m, CANDLES_LIMIT 500). */
 export const CANDLES_PATH = (t) => `/v1/market/candles?chain=base&token=${t}&tf=15m&limit=500`;
-export const SOURCES = ["chain", "chain,geckoterminal", "geckoterminal"];
+export const SOURCES = ["chain", "chain,geckoterminal", "chain,coingecko", "geckoterminal", "coingecko"];
+/** The vendor-only sources: CoinGecko's bars alone, keyless or the paid plan. */
+const VENDOR_ONLY = ["geckoterminal", "coingecko"];
 const STEP = 900;
 const SHA = /^[0-9a-f]{40}$/;
 const DEC = /^\d+(\.\d+)?$/;
@@ -74,7 +76,7 @@ export function candlesFault(r) {
     if (!(h >= o && h >= cl && l <= o && l <= cl)) return `bar ${i} high/low does not hold open and close ${show(b)}`;
   }
   if (c.own_from_s !== undefined && !c.candles.some((b) => b[0] === c.own_from_s)) return `own_from_s ${show(c.own_from_s)} is not a bar`;
-  if (c.own_from_s !== undefined && c.src === "geckoterminal") return "own_from_s on a GeckoTerminal-only chart";
+  if (c.own_from_s !== undefined && VENDOR_ONLY.includes(c.src)) return "own_from_s on a vendor-only chart";
   return null;
 }
 
