@@ -614,3 +614,43 @@ test("every W key the pass derives (the owed list's and the signature's) is zero
   assert.ok(keys.length >= 2, "the owed list's key and the signature's");
   assert.ok(keys.every((k) => k.every((b) => b === 0)), "every key zeroed");
 });
+
+// ---- card buy-any-amount-on-every-chain: a buy's rest W's change goes back as rungs ----
+const REST = (await import("../src/pool-buy-evm-rest.ts")) as Record<string, unknown>;
+const WBUY_KEY = REST.EVM_WBUY_KEY as string;
+const RUNG = 2n * CHUNK; // 0.002 ETH, a rung of the ladder
+
+test("card buy-any-amount-on-every-chain: a rest W (its release a pool withdraw, its own buy ended) has its change carried back as the largest rung it pays, never its whole balance; the helper is never asked; under the least rung it ends", async () => {
+  const ch = chain();
+  ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+  const change = 2_940_000_000_000_000n; // 0.00294 ETH left on W after its own buy
+  ch.c.balance = [change, change];
+  const { ns, ws } = await stores();
+  await refused(ch, ns);
+  await ws.update("meta", WBUY_KEY, () => ({ [W]: { chain: "base", l: LABEL.toString(), j: 0, nullifier: "1", deadlineMs: "1", sendBy: "2", spend: "1", token: "0x" + "11".repeat(20), end: "filled" } }));
+  const h = hostOf(ch, ns, ws);
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "sent" }]);
+  assert.equal(ch.c.helperAsked.length, 0, "a rest W is known from its record: no release transaction asked");
+  const s = sentOf(ch.c.sent[0]!);
+  assert.equal(s.value, RUNG, "the largest rung W pays beside the send's bound");
+  assert.equal(s.data, DEPOSIT + word(RUNG) + word(RETURN_PRE));
+  ch.land(s.pre, s.value);
+  ch.c.nonce = 1n;
+  ch.c.balance = [change - RUNG - 10n ** 12n, change - RUNG - 10n ** 12n];
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "landed" }]);
+  assert.deepEqual(await ws.get("meta", EVM_CARRY_DONE_KEY), { [W]: { chain: "base", end: "carried" } }, "what is under the least rung stays on W, its tail");
+});
+
+test("card buy-any-amount-on-every-chain: a rest W whose own buy has no end is never carried (nor ended a withdraw) until its window is long past", async () => {
+  const ch = chain();
+  ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+  const { ns, ws } = await stores();
+  await refused(ch, ns);
+  const h = hostOf(ch, ns, ws);
+  const sendBy = BigInt(h.clock.t) + 1_000n;
+  await ws.update("meta", WBUY_KEY, () => ({ [W]: { chain: "base", l: LABEL.toString(), j: 0, nullifier: "1", deadlineMs: "1", sendBy: sendBy.toString(), spend: "1", token: "0x" + "11".repeat(20) } }));
+  assert.deepEqual(await carryEvmOwed(h), []);
+  assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined, "never ended a withdraw");
+  h.clock.t = Number(sendBy + (REST.EVM_WBUY_CARRY_AFTER_MS as bigint)) + 1;
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "empty" }], "past the window: carried (here W holds under the least rung: its tail)");
+});

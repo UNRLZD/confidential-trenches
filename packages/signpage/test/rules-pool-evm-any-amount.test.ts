@@ -227,3 +227,20 @@ test("checkEvmChange: W's change goes back as the largest rung its balance pays 
   assert.equal(ruleOf(() => checkEvmChange(depTx(EVM_LADDER.min), ctx(EVM_LADDER.min), depReads(EVM_LADDER.min + DFEE - 1n))), "balance");
   assert.equal(ruleOf(() => checkEvmChange(depTx(milli(5n)), { ...ctx(milli(5n)), chain: "solana" as never }, depReads(held))), "chain");
 });
+
+test("planEvmBuy: when no piece the whole ones leave can carry the rest, one they took carries it instead (spends 5, 2 and 2, bound 0.1, an ask of 6.95: both 2s whole and 2.95 on the 5's W); only an ask within one buy's bound under every spend is refused", () => {
+  const u = 10n ** 14n;
+  const pieces = [
+    { noteId: "five", chunk: 50n * u + u, fee: u },
+    { noteId: "two-a", chunk: 20n * u + u, fee: u },
+    { noteId: "two-b", chunk: 20n * u + u, fee: u },
+  ];
+  const ask = { kind: "pool.buy", chain: "base", token: "0x" + "11".repeat(20), amount: 69n * u + u / 2n, slippageBps: 100, decimals: 18 } as const;
+  const plan = planEvmBuy(ask, pieces, u);
+  assert.deepEqual(plan.whole.map((p) => p.noteId), ["two-a", "two-b"]);
+  assert.equal(plan.rest?.piece.noteId, "five");
+  assert.equal(plan.rest?.spend, 29n * u + u / 2n);
+  // every spend is 9.0: an ask over 8.9 (the bound 0.1 under it) and under 9.0 has no W to pay its own buy
+  assert.throws(() => planEvmBuy({ ...ask, amount: 89n * u + 1n }, pieces, u), /amount/);
+  assert.equal(planEvmBuy({ ...ask, amount: 90n * u }, pieces, u).rest, null, "Max: every piece whole");
+});

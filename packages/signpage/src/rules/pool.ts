@@ -998,19 +998,36 @@ export function planEvmBuy(ask: PoolAsk, pieces: readonly EvmBuyPiece[], bound: 
   // largest spend first, a tie in the caller's order (its preference: a proof on the epoch root first), so one list of
   // proofs always gives one plan
   const order = [...list].sort((a, b) => (spend(a) === spend(b) ? 0 : spend(a) > spend(b) ? -1 : 1));
-  const whole: EvmBuyPiece[] = [];
-  const left: EvmBuyPiece[] = [];
-  let rem = x;
-  for (const p of order) {
-    if (spend(p) <= rem) {
-      whole.push(p);
-      rem -= spend(p);
-    } else left.push(p);
-  }
+  // whole pieces largest first over `from`, and what they leave of the amount
+  const fill = (from: readonly EvmBuyPiece[]) => {
+    const whole: EvmBuyPiece[] = [];
+    const left: EvmBuyPiece[] = [];
+    let rem = x;
+    for (const p of from) {
+      if (spend(p) <= rem) {
+        whole.push(p);
+        rem -= spend(p);
+      } else left.push(p);
+    }
+    return { whole, left, rem };
+  };
+  const bySpend = (a: EvmBuyPiece, b: EvmBuyPiece) => (spend(a) === spend(b) ? 0 : spend(a) < spend(b) ? -1 : 1);
+  let { whole, left, rem } = fill(order);
   let rest: EvmBuyPlan["rest"] = null;
   if (rem > 0n) {
-    // the least change: the smallest spend that pays the rest and W's own buy
-    const carrier = left.filter((p) => spend(p) - bound >= rem).sort((a, b) => (spend(a) === spend(b) ? 0 : spend(a) < spend(b) ? -1 : 1))[0];
+    // the least change: the smallest spend left that pays the rest and W's own buy
+    let carrier = left.filter((p) => spend(p) - bound >= rem).sort(bySpend)[0];
+    // none left pays it: a piece the whole ones took may carry the rest instead (spends 5 and 1, bound 0.1, an ask
+    // of 5.95: 1 whole, 4.95 on the 5's W), the smallest such first
+    for (const c of carrier === undefined ? [...order].sort(bySpend) : []) {
+      const f = fill(order.filter((p) => p !== c));
+      if (f.rem > 0n && spend(c) - bound >= f.rem) {
+        ({ whole, rem } = f);
+        carrier = c;
+        break;
+      }
+    }
+    // over every piece's spend less one buy's bound: no W could pay its own buy beside the rest
     if (carrier === undefined) return refuse("amount");
     rest = Object.freeze({ piece: carrier, spend: rem });
   }
@@ -1067,6 +1084,22 @@ export function checkEvmWithdraw(pool: string, given: EvmPoolProofBinding, relay
   const pins = evmPins(ctx, chain);
   if (lower(pool) !== lower(pins.pool)) return refuse("pool");
   if (proof.value === 0n) return refuse("amount");
+  checkRelay(proof, relay, pins, ctx);
+  passed("evm.withdraw", given, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, proof });
+  return { chain: ask.chain, op: ask.kind, token: null, amount: proof.value, feeCap: relay.feeCap, pool: pins.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+}
+
+/** The release of a buy's rest piece to its W (card buy-any-amount-on-every-chain): Withdraw on the pinned pool, as
+ *  checkEvmWithdraw holds it (the relay data paying W, the context recomputed), for the one piece `plan` (planEvmBuy's,
+ *  for this very ask) names as its rest, at that piece's own fee; signed by signEvmWithdraw. */
+export function checkEvmRestRelease(pool: string, given: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, plan: EvmBuyPlan, testnet = false): PoolDraw {
+  if (ask.kind !== "pool.buy") return refuse("kind");
+  if (!PLANNED.has(plan) || plan.amount !== ask.amount || plan.rest === null) return refuse("plan");
+  const proof = snapProof(given);
+  const chain = evmChainOf(ask, testnet);
+  const pins = evmPins(ctx, chain);
+  if (lower(pool) !== lower(pins.pool)) return refuse("pool");
+  if (proof.value !== plan.rest.piece.chunk || ctx.feeCap !== plan.rest.piece.fee) return refuse("amount");
   checkRelay(proof, relay, pins, ctx);
   passed("evm.withdraw", given, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, proof });
   return { chain: ask.chain, op: ask.kind, token: null, amount: proof.value, feeCap: relay.feeCap, pool: pins.pool, to: ctx.wallet, decimals: ask.decimals, back: null };

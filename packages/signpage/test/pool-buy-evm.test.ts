@@ -15,7 +15,7 @@ import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/der
 import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, type EvmPoolRequest, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { EVM_BUY_LAG_BLOCKS, EVM_BUY_SETTLE_MS, EVM_POSITION_COSTS_KEY, evmLastRouteReset, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
-import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused } from "../src/evm-send.ts";
+import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, EVM_WITHDRAW_SIGNATURE } from "../src/evm-send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import * as R from "../src/rules/pool.ts";
 
@@ -1148,4 +1148,166 @@ test("card buy-any-amount-on-every-chain: a buy asks the ETH that goes into swap
   const { h, seen } = host(both([release()]));
   assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: CHUNK - FEE }), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
   assert.deepEqual(seen.takes, ["n1"]);
+});
+
+// ---- card buy-any-amount-on-every-chain: the plan's legs ----
+const L2 = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
+const W2 = freshWallet(SEED, "evm", L, 1).address;
+const N2 = 0x777n;
+const TX2 = "0x" + "ce".repeat(32);
+/** A second note's ready proof: its own W (j = 1) and nullifier. */
+function readyTwo(): ReadyProof<EvmPoolRequest> {
+  const r = readyOf(relayOf({ recipient: W2 }), "n2", "a2");
+  return { ...r, wallet: { ...r.wallet, j: 1, address: W2 }, publicSignals: r.publicSignals.map((s, i) => (i === 1 ? N2.toString() : s)) as ReadyProof<EvmPoolRequest>["publicSignals"] };
+}
+const TWO: PoolAsk = { ...ASK, amount: 2n * (CHUNK - FEE) };
+
+test("card buy-any-amount-on-every-chain: an ask of two whole notes' spend buys with both in one tap: both taken before either is sent, filled once both read back, with both releases", async () => {
+  const { h, seen } = host({ ready: [readyOf(), readyTwo()], ...both([release(), release({ w: W2, nullifier: N2, tx: TX2 })]) });
+  assert.deepEqual(await runEvmPoolBuy(h, TWO), { stage: "filled", txs: [{ chain: "base", hash: TX }, { chain: "base", hash: TX2 }] });
+  assert.deepEqual(seen.takes, ["n1", "n2"]);
+  assert.equal(seen.sends.length, 2);
+  assert.deepEqual(seen.order.slice(0, 6), ["record pending", "record pending", "take", "take", "send", "send"], "every leg recorded and taken before any send");
+  assert.equal(seen.sent, 1, "told sent once");
+  assert.deepEqual(seen.records.filter(([, r]) => r.state === "filled").map(([w]) => w).sort(), [W, W2].sort());
+});
+
+test("card buy-any-amount-on-every-chain: one leg filled and the other's swap refused in the pool is part_filled, with both transactions", async () => {
+  const { h, seen } = host({ ready: [readyOf(), readyTwo()], ...both([release(), release({ kind: "withdrawn", w: W2, nullifier: N2, tx: TX2 })]) });
+  assert.deepEqual(await runEvmPoolBuy(h, TWO), { stage: "part_filled", txs: [{ chain: "base", hash: TX }, { chain: "base", hash: TX2 }] });
+  assert.equal(seen.carries, 1, "the refused leg's W is carried back");
+});
+
+test("card buy-any-amount-on-every-chain: a leg whose quote fails before the send sends nothing of the tap: no take, no send, every pending record removed", async () => {
+  const held = new Map<string, EvmHolding>();
+  let n = 0;
+  const { h, seen } = host({
+    ready: [readyOf(), readyTwo()],
+    holdings: held,
+    quote: async () => {
+      // the first leg's one quote, then none for the second
+      if (++n > 1) throw new EvmQuoteError("no_quote", "no route");
+      return fixtureQuote();
+    },
+  });
+  const got = await runEvmPoolBuy(h, TWO);
+  assert.ok("error" in got && got.error === "quote_check_failed", JSON.stringify(got));
+  assert.deepEqual(seen.takes, []);
+  assert.equal(seen.sends.length, 0);
+  assert.equal(held.size, 0, "the first leg's pending record removed");
+});
+
+test("card buy-any-amount-on-every-chain: a plan with a rest on a page whose host keeps no rest record is not_funded (plan_legs): nothing quoted, signed or sent", async () => {
+  const { h, seen } = host();
+  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: CHUNK - FEE - 10n ** 14n }), { error: "not_funded", rule: "plan_legs" });
+  assert.equal(seen.quotes.length + seen.seeds.length + seen.sends.length, 0);
+});
+
+test("card buy-any-amount-on-every-chain: the legs' ends as one (legsEnd)", () => {
+  const legsEnd = L2.legsEnd as (e: ({ stage: string; txs: unknown[] } | null)[]) => { stage: string; txs: unknown[] };
+  const e = (stage: string, hash = "0x1") => ({ stage, txs: [{ chain: "base", hash }] });
+  assert.equal(legsEnd([e("filled"), e("filled")]).stage, "filled");
+  assert.equal(legsEnd([e("filled"), e("refused")]).stage, "part_filled");
+  assert.equal(legsEnd([e("filled"), e("not_landed")]).stage, "part_filled");
+  assert.equal(legsEnd([e("filled"), null]).stage, "sent", "a leg still on its way: sent");
+  assert.equal(legsEnd([e("refused"), e("not_landed")]).stage, "refused");
+  assert.equal(legsEnd([e("not_landed"), e("not_landed")]).stage, "not_landed");
+  assert.equal(legsEnd([e("filled", "0xa"), e("filled", "0xb")]).txs.length, 2);
+});
+
+/** The rest leg's chain: both pool RPCs read the rest note's Withdrawn to W2, then W2's own buy and its receipt. */
+function restChain(o: { receipt?: "0x1" | "0x0"; logs?: () => unknown[] } = {}) {
+  const sent: string[] = [];
+  const calls: { method: string; params: unknown[] }[] = [];
+  const word = (v: bigint) => "0x" + v.toString(16).padStart(64, "0");
+  const rpc = async (method: string, params: unknown[]): Promise<unknown> => {
+    calls.push({ method, params });
+    switch (method) {
+      case "eth_blockNumber":
+        return "0x" + START.toString(16);
+      case "eth_getBlockByNumber":
+        return { number: "0x" + (START + 0x40n).toString(16), hash: "0x" + "aa".repeat(32), timestamp: "0x" + (NOW / 1000n).toString(16), baseFeePerGas: "0xf4240" };
+      case "eth_getLogs":
+        return o.logs ? o.logs() : [release({ kind: "withdrawn", w: W2, nullifier: N2, value: 2n * CHUNK, tx: TX2 })];
+      case "eth_getTransactionCount":
+        return "0x0";
+      case "eth_getBalance":
+        return "0x" + (2n * CHUNK - FEE).toString(16);
+      case "eth_estimateGas":
+        return "0x" + (300_000).toString(16);
+      case "eth_call": {
+        const c = params[0] as { from?: string; data: string };
+        if (c.from !== undefined) return "0x";
+        if (c.data.startsWith("0x70a08231")) return word(5_000_000n);
+        return word(1_000n);
+      }
+      case "eth_sendRawTransaction":
+        sent.push(params[0] as string);
+        return "0x" + hex(keccak_256(Buffer.from((params[0] as string).slice(2), "hex")));
+      case "eth_getTransactionReceipt":
+        return { status: o.receipt ?? "0x1", from: W2, to: A_V3, blockHash: "0x" + "bb".repeat(32), blockNumber: "0x" + (START + 0x30n).toString(16) };
+    }
+    throw new Error(`no ${method}`);
+  };
+  return { rpcs: [rpc, rpc] as unknown as EvmPoolBuyHost["rpcs"], sent, calls };
+}
+function readyRest(): ReadyProof<EvmPoolRequest> {
+  const r = readyTwo();
+  return { ...r, chunk: 2n * CHUNK, publicSignals: r.publicSignals.map((s, i) => (i === 2 ? (2n * CHUNK).toString() : s)) as ReadyProof<EvmPoolRequest>["publicSignals"] };
+}
+function restHost(o: { receipt?: "0x1" | "0x0"; logs?: () => unknown[] } = {}) {
+  const { h, seen } = host({ ready: [readyRest()] });
+  const ch = restChain(o);
+  const rests: Record<string, unknown>[] = [];
+  h.rpcs = ch.rpcs;
+  h.quote = async (req) => {
+    seen.quotes.push(req.route);
+    assert.equal(req.amountIn, AMOUNT_IN, "the rest is quoted, never the note");
+    const q = await fixtureQuote();
+    if (JSON.stringify(req.route) !== JSON.stringify(FIXTURE_ROUTE)) throw new EvmQuoteError("below_reference", "the standard pool quotes more", { amountOut: q.amountOut, route: FIXTURE_ROUTE });
+    return q;
+  };
+  h.rest = async (w, rec) => void rests.push({ w, ...rec });
+  return { h, seen, ch, rests };
+}
+
+test("card buy-any-amount-on-every-chain: an amount under a note's spend: the note is released whole to its W, W buys exactly the rest through the pinned adapter itself (checked, signed by W, its hash kept before it leaves), filled with both transactions; its change is the carry's", async () => {
+  const { h, seen, ch, rests } = restHost();
+  const got = await runEvmPoolBuy(h, { ...ASK, amount: AMOUNT_IN });
+  assert.equal(ch.sent.length > 0, true, "W's buy went to the RPCs");
+  const raw = ch.sent[0]!;
+  const wbuy = "0x" + hex(keccak_256(Buffer.from(raw.slice(2), "hex")));
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "base", hash: TX2 }, { chain: "base", hash: wbuy }] });
+  assert.deepEqual(seen.takes, ["n2"]);
+  assert.equal(seen.sends.length, 1, "the release, by the helper's sender");
+  assert.equal(hex(seen.sends[0]!.data.subarray(0, 4)), hex(keccak_256(new TextEncoder().encode(EVM_WITHDRAW_SIGNATURE)).subarray(0, 4)), "a pool withdraw paying W");
+  // W's own buy: to the pinned adapter, exactly the rest, buy(token, W, minOut, path)
+  const est = ch.calls.find((c) => c.method === "eth_estimateGas")!.params[0] as { from: string; to: string; value: string; data: string };
+  assert.equal(est.from, W2);
+  assert.equal(est.to, A_V3);
+  assert.equal(BigInt(est.value), AMOUNT_IN);
+  assert.ok(est.data.startsWith("0x" + hex(keccak_256(new TextEncoder().encode("buy(address,address,uint256,bytes)")).subarray(0, 4))));
+  assert.ok(est.data.slice(10 + 64, 10 + 128).endsWith(W2.slice(2).toLowerCase()), "paying W");
+  // the rest's record: written before the release, its hash before W's buy left, its end once read back
+  assert.equal(rests[0]!.spend, AMOUNT_IN.toString());
+  assert.equal(rests.find((r) => r.hash !== undefined)?.hash, wbuy);
+  assert.equal(rests.at(-1)!.end, "filled");
+  assert.deepEqual(seen.records.map(([w, r]) => [w, r.state, r.received]), [[W2, "pending", undefined], [W2, "filled", "5"]]);
+  assert.equal(seen.carries, 1, "W's change: the carry pass");
+});
+
+test("card buy-any-amount-on-every-chain: W's own buy reverting is refused (the release's and W's transactions), W's holding withdrawn and its ETH the carry's", async () => {
+  const { h, seen, rests } = restHost({ receipt: "0x0" });
+  const got = await runEvmPoolBuy(h, { ...ASK, amount: AMOUNT_IN });
+  assert.ok("stage" in got && got.stage === "refused" && got.txs.length === 2, JSON.stringify(got));
+  assert.equal(rests.at(-1)!.end, "reverted");
+  assert.equal(seen.records.at(-1)![1].state, "withdrawn");
+  assert.equal(seen.carries, 1);
+});
+
+test("card buy-any-amount-on-every-chain: a rest note released to another W (spent elsewhere) is not_landed and W signs nothing", async () => {
+  const { h, ch, rests } = restHost({ logs: () => [release({ kind: "withdrawn", w: OTHER, nullifier: N2, value: 2n * CHUNK, tx: TX2 })] });
+  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: AMOUNT_IN }), { stage: "not_landed", txs: [] });
+  assert.equal(ch.sent.length, 0);
+  assert.equal(rests.at(-1)!.end, "unsent");
 });
