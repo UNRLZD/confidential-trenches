@@ -57,14 +57,16 @@ export type PassReason = "network" | "fee_refused" | "held_elsewhere" | "prover_
 export class PassFail extends Error {
   readonly reason: PassReason;
   constructor(reason: PassReason, cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause));
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "PassFail";
     this.reason = reason;
   }
 }
-/** A catch that tags what it is given with `reason`; a PassFail keeps its own, and an abort (a sign out, a trade's
- *  stop) is no failure of a step: it goes on as it was. */
+/** A catch that tags what it is given with `reason`; a PassFail keeps its own, and an abort or a sign out (a trade's
+ *  stop, ../throttle.ts SignedOut) is no failure of a step: it goes on as it was. */
 export const failAs = (reason: PassReason) => (e: unknown): never => {
-  throw e instanceof PassFail || (e as { name?: unknown } | null)?.name === "AbortError" ? e : new PassFail(reason, e);
+  const name = (e as { name?: unknown } | null)?.name;
+  throw e instanceof PassFail || name === "AbortError" || name === "SignedOut" ? e : new PassFail(reason, e);
 };
 
 export type PoolBindArgs = {

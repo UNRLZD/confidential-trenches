@@ -490,6 +490,15 @@ test("the pool fee read: no connection, no answer in time, or still busy (429, 5
   assert.equal(await reasonOf((async () => Promise.reject(new TypeError("fetch failed"))) as typeof fetch), "network");
   assert.equal(await reasonOf((async () => Promise.reject(new DOMException("no answer", "TimeoutError"))) as typeof fetch), "network");
   assert.match(await reasonOf(fetchOf(404)), /^untagged: .*HTTP 404/);
+  // what a withdraw records of that failure (pool-sell.ts legCause): the cause's class and code, never the tag's frames
+  // and never a message (review P3-2 of b8df326b6: "Error at <the wrap>" where it read "TypeError")
+  const { legCause } = await import("../src/pool-sell.ts");
+  const causeOf = async (f: typeof fetch) => legCause(await poolRelayFee(pool, 1_800_000_000_000n, undefined, f, async () => {}).catch((x: unknown) => x));
+  const typeErr = await causeOf((async () => Promise.reject(new TypeError("fetch failed for 9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb"))) as typeof fetch);
+  assert.match(typeErr, /^TypeError( at [\w$.]+( < [\w$.]+)?)?$/, typeErr);
+  const timeout = await causeOf((async () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))) as typeof fetch);
+  assert.match(timeout, /^TimeoutError 23( at .*)?$/, timeout);
+  for (const c of [typeErr, timeout]) assert.ok(!/fetch failed|9T3R|timed out/.test(c), `a message reached the cause: ${c}`);
   // the caller's own abort is no step's failure
   const stop = new AbortController();
   stop.abort();

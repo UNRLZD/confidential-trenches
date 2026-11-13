@@ -96,7 +96,7 @@ export type ProofQueueArgs<R> = {
 export { PassFail, type PassReason } from "./pool.ts";
 // a bind's read that got no answer keeps its own error (callers read its class: a throttle's wait, an EVM read's
 // EvmUnansweredError), so the pass names it by that class: "network", never the fee_refused of a refusal
-const UNANSWERED = new Set(["SolanaRpcTransportError", "EvmUnansweredError", "EvmOperatorsUnanswered"]);
+const UNANSWERED = new Set(["SolanaRpcTransportError", "EvmUnansweredError", "EvmOperatorsUnanswered", "EvmLagError", "TimeoutError"]);
 const bindFail = (e: unknown): never => failAs(UNANSWERED.has(String((e as { name?: unknown } | null)?.name)) ? "network" : "fee_refused")(e);
 /** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };

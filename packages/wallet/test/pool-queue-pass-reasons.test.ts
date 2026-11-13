@@ -10,6 +10,7 @@ import { vaultLabelOf, type VaultProver } from "@blindfill/kit";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { PassFail } from "../src/pool/pool.ts";
 import { openProofQueue } from "../src/pool/queue.ts";
+import { SignedOut } from "../src/throttle.ts";
 import { closeVaults, SCOPE, SEED, signalsProver, vaultWith } from "./withdraw-fixture.ts";
 import { E, fakePool } from "./queue-late-fixture.ts";
 
@@ -66,8 +67,8 @@ test("a bind whose own read got no answer (tagged by the pool): network, never f
   }
 });
 
-test("a bind whose read got no answer, its own error kept (a Solana transport fault, an EVM read unanswered): network", async () => {
-  for (const name of ["SolanaRpcTransportError", "EvmUnansweredError", "EvmOperatorsUnanswered"]) {
+test("a bind whose read got no answer, its own error kept (a Solana transport fault, an EVM read unanswered or behind, no answer in time): network", async () => {
+  for (const name of ["SolanaRpcTransportError", "EvmUnansweredError", "EvmOperatorsUnanswered", "EvmLagError", "TimeoutError"]) {
     const { pool, q } = await open();
     try {
       pool.bind = async () => {
@@ -185,6 +186,34 @@ test("a note under the pool's least rung: never proved, counted as small", async
     assert.equal(p.made.length, 1);
   } finally {
     await q.close();
+  }
+});
+
+test("a PassFail keeps what it tags as its cause", () => {
+  const cause = new TypeError("fetch failed");
+  const e = new PassFail("network", cause);
+  assert.equal(e.cause, cause);
+  assert.equal(e.name, "PassFail");
+  assert.equal(e.message, "fetch failed");
+});
+
+test("a sign out's stop (the lanes' SignedOut) is no step's failure: at a read or at a bind it passes through untagged", async () => {
+  for (const at of ["now", "bind"] as const) {
+    const { pool, q } = await open();
+    try {
+      const out = new SignedOut();
+      if (at === "now") pool.now = async () => Promise.reject(out);
+      else pool.bind = async () => Promise.reject(out);
+      if (at === "now") {
+        const e = await q.refresh().then(() => assert.fail("the pass did not throw"), (x: unknown) => x);
+        assert.equal(e, out, `${at}: the sign out tagged`);
+      } else {
+        const p = await q.refresh();
+        assert.deepEqual(reasons(p), [undefined], `${at}: the sign out tagged`);
+      }
+    } finally {
+      await q.close();
+    }
   }
 });
 
