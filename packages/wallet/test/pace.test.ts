@@ -263,7 +263,7 @@ const withFetch = async (stub: typeof fetch, run: () => Promise<void>): Promise<
 };
 const busy = (retryAfter?: string) => new Response("busy", { status: 429, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } });
 
-test("a busy answer from dRPC holds its pace and the read is asked again, not failed; past NEAR_BUSY_TRIES it fails", async () => {
+test("a busy answer from dRPC holds its pace and the read is asked again, not failed; past NEAR_BUSY_TRIES it fails", () => onTestClock(async () => {
   let n = 0;
   await withFetch(async () => (++n <= 2 ? busy("0") : answer()), async () => {
     const rpc = P.pacedNearRpc(DRPC);
@@ -279,9 +279,9 @@ test("a busy answer from dRPC holds its pace and the read is asked again, not fa
     await assert.rejects(P.pacedNearRpc(DRPC).query({ request_type: "view_account", finality: "final", account_id: "intents.near" }), /HTTP 429/);
     assert.equal(m, P.NEAR_BUSY_TRIES);
   });
-});
+}));
 
-test("reserve takes the provider's turn once: its first query goes at once with no second turn, the next ones take turns", async () => {
+test("reserve takes the provider's turn once: its first query goes at once with no second turn, the next ones take turns", () => onTestClock(async () => {
   await withFetch(async () => answer(), async () => {
     const rpc = P.pacedNearRpc(FAST);
     const p = P.paceOf(FAST);
@@ -301,7 +301,7 @@ test("reserve takes the provider's turn once: its first query goes at once with 
     await now.query(q);
     assert.ok(performance.now() - t2 >= p.every - 50);
   });
-});
+}));
 
 // card near-quote-under-the-pace: the helper's FastNEAR seat (nearSeatRpc) at the key's pace, its keyless spare
 const SEAT = NEAR_NETWORKS.mainnet.seat;
@@ -312,14 +312,14 @@ const keyPace = (perSec = 5, burst = 5) => {
   return () => {
     const now = performance.now();
     const t = Math.max(tat, now);
-    if (t - now > (burst - 1) * every + 2) return false;
+    if (t > now + (burst - 1) * every + 2) return false;
     tat = t + every;
     return true;
   };
 };
 const VIEW = { request_type: "view_account", finality: "final", account_id: "intents.near" };
 
-test("the seat: 11 reads asked at once go out 5 at once, then one every 200 ms; the key never answers 429 and none goes to the keyless seat", async () => {
+test("the seat: 11 reads asked at once go out 5 at once, then one every 200 ms; the key never answers 429 and none goes to the keyless seat", () => onTestClock(async () => {
   const take = keyPace();
   const sent: number[] = [];
   let keyless = 0;
@@ -343,7 +343,7 @@ test("the seat: 11 reads asked at once go out 5 at once, then one every 200 ms; 
     assert.ok(sent.slice(0, 5).every((x) => x - t < 50), "the first 5 at once");
     for (let k = 5; k < 11; k++) assert.ok(sent[k]! - t >= (k - 4) * 200 - 5, `read ${k} at ${sent[k]! - t} ms`);
   });
-});
+}));
 
 test("the seat falls to FastNEAR's keyless URL when the helper is busy past its tries, down (5xx), slow or unreachable; never on a 4xx or the caller's own abort", async () => {
   const cases: [string, () => Response | Promise<Response>, boolean][] = [

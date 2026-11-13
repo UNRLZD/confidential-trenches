@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { onTestClock } from "./test-clock.ts";
 import { rheaQuote, RheaQuoteRefused, type RheaRefusalCode } from "@blindfill/kit";
 import { NEAR_RHEA, nearFinal, rheaSimpleOut, type RheaPool } from "../src/near/rhea.ts";
 import { readNearHeld, readNearSwapPair, readNearSwapWallet } from "../src/trade/near/wallet.ts";
@@ -373,14 +374,14 @@ function clocked(w: World, behind: readonly [number, number], turnMs: readonly [
   }) as unknown as Parameters<typeof rheaQuote>[0]["rpcs"];
 }
 
-test("Q8 the two final heights are of one moment: a provider's wait for its turn is never read as lag; a real lag still refuses", async () => {
+test("Q8 the two final heights are of one moment: a provider's wait for its turn is never read as lag; a real lag still refuses", () => onTestClock(async () => {
   const w = world();
   // FastNEAR's turn 6 blocks off, dRPC's at once: both turns are taken before either height is asked
   const q = await rheaQuote({ network: "mainnet", rpcs: clocked(w, [0, 0], [6 * BLOCK_MS, 0]), side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9] });
   assert.ok(q.height >= w.height);
   // a provider 6 blocks behind the chain, its turn at once: the chain's lag, refused
   await refused(rheaQuote({ network: "mainnet", rpcs: clocked(w, [0, 6], [0, 0]), side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9] }), "lag");
-});
+}));
 
 // ---------- W and the quote at one block (card near-quote-under-the-pace) ----------
 const WID = "0".repeat(64);
