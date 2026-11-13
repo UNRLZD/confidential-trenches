@@ -1,22 +1,19 @@
 // node --test apps/helper/src/pool/solana-pieces.test.ts: POST /v1/pool/solana/pieces (card buy-spends-several-pieces)
-// carries one buy made of several pieces, every tag 2 then the tag 3, as one Jito bundle with the helper's own tip last,
-// all landing or none; or refuses it before anything is sent. Every key here is a test key: ed25519 of
+// carries one buy made of several pieces: the tag 2s plain, then the tag 3 as the one-piece route sends it (card
+// owners-solana-buy-lands); or refuses it before anything is sent. Every key here is a test key: ed25519 of
 // sha256("helper-pool-senders/test-key/<name>"), as solana.test.ts makes them.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
+  SOLANA_ALT_PROGRAM,
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_JITO_TIP_ACCOUNTS,
-  SOLANA_JITO_TIP_MIN,
   SOLANA_POOL_BUY_PIECES_MAX,
   SOLANA_POOL_PAGE_ENTRIES,
-  SOLANA_POOL_JITO_TIP,
-  SOLANA_SYSTEM_PROGRAM,
   solanaCompileV0,
-  solanaDecodeTransaction,
-  solanaPoolPriorityBudget,
+  solanaDecodeLookupTable,
   solanaEncodePoolRelease,
   solanaEncodePoolTag3,
   solanaPoolAccount,
@@ -27,10 +24,9 @@ import {
   type SolanaRpc,
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
-import { JITO_BUNDLE_MAX, jitoSender } from "./jito.ts";
+import { jitoSender } from "./jito.ts";
 import { poolSendLine } from "./send-log.ts";
-import { solanaPoolSender, type PoolPiecesAnswer, type SolanaPoolSenderDeps } from "./solana.ts";
-import { JITO_TIP_FLOOR_CACHE_MS, jitoTipFloor, piecesTipCap, SOLANA_TIP_TX_FEE, tipFloorOf } from "./solana-pieces.ts";
+import { LANDED_READ_PACE_MS, POOL_LANDED_READ_MS, solanaPoolSender, type PoolPiecesAnswer, type SolanaPoolSenderDeps } from "./solana.ts";
 
 const testKey = (name: string) => {
   const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/test-key/${name}`).digest());
@@ -45,6 +41,23 @@ const POOL = solanaPoolAccount(PROGRAM);
 const TIP_TO = testKey("TIP_TO").address;
 const TO = testKey("TO").address;
 const BLOCKHASH = testKey("BLOCKHASH").address;
+// a lookup table holding TO, as every pool tag 3 loads keys from the pool's table (kit pool-buy.ts, [chain.table])
+const TABLE = testKey("TABLE").address;
+const tableData = (keys: string[]): Uint8Array => {
+  const meta = new Uint8Array(56);
+  const dv = new DataView(meta.buffer);
+  dv.setUint32(0, 1, true);
+  dv.setBigUint64(4, (1n << 64n) - 1n, true);
+  return Uint8Array.from([...meta, ...keys.flatMap((k) => [...base58Bytes(k)])]);
+};
+const base58Bytes = (s: string): Uint8Array => {
+  const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n = 0n;
+  for (const c of s) n = n * 58n + BigInt(B58.indexOf(c));
+  const out = new Uint8Array(32);
+  for (let i = 31; i >= 0; i--, n >>= 8n) out[i] = Number(n & 0xffn);
+  return out;
+};
 const FEE = 2_000_000n;
 const TEST_RENT: SolanaRent = { lamportsPerByte: 8_400n, factor: 1n };
 const NOW = 1_800_000_000_000;
@@ -87,12 +100,21 @@ function piece(o: { tag: 2 | 3; nullifier: number; w?: typeof W; tipTo?: string;
 const b64 = (w: Uint8Array) => Buffer.from(w).toString("base64");
 
 type Calls = { method: string; params: readonly unknown[] }[];
-function rpcStub(calls: Calls = [], simErr: unknown = null): SolanaRpc {
+/** `fail`: a call this answers with a throw (a provider's 429, say) instead of its answer. */
+/** `stale`: a call this answers from slot 1, as a provider that ignores minContextSlot. `hold`: a call that answers only
+ *  once its promise settles. */
+function rpcStub(calls: Calls = [], simErr: unknown = null, fail?: (method: string, params: readonly unknown[]) => Error | null, stale?: (method: string, params: readonly unknown[]) => boolean, hold?: (method: string, params: readonly unknown[]) => Promise<void> | undefined): SolanaRpc {
   return Object.assign(
     async (method: string, params: readonly unknown[]) => {
       calls.push({ method, params });
-      if (method === "simulateTransaction") return { context: { slot: 1 }, value: { err: typeof simErr === "function" ? (simErr as (raw: unknown) => unknown)(params[0]) : simErr, logs: [] } };
-      if (method === "getLatestBlockhash") return { context: { slot: 1 }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1000 } };
+      await hold?.(method, params);
+      const e = fail?.(method, params);
+      if (e) throw e;
+      // a provider that honours minContextSlot answers at that slot at least
+      const slot = stale?.(method, params) ? 1 : Math.max(1, (params[params.length - 1] as { minContextSlot?: number } | undefined)?.minContextSlot ?? 1);
+      if (method === "simulateTransaction") return { context: { slot }, value: { err: typeof simErr === "function" ? (simErr as (raw: unknown) => unknown)(params[0]) : simErr, logs: [] } };
+      if (method === "getLatestBlockhash") return { context: { slot }, value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1000 } };
+      if (method === "getAccountInfo" && params[0] === TABLE) return { context: { slot }, value: { owner: SOLANA_ALT_PROGRAM, data: [Buffer.from(tableData([TO])).toString("base64"), "base64"] } };
       throw new Error(`unexpected ${method}`);
     },
     { url: `https://stub.invalid/${Math.random()}` },
@@ -121,11 +143,8 @@ test("RED first: a body whose pieces two wallets signed is refused wallets_diffe
   assert.deepEqual([calls.length, sent.length], [0, 0]);
 });
 
-// ---- the stand-ins: providers, the kit's sender, the block engines, the tip floor ----
+// ---- the stand-ins: providers, the kit's sender, the block engines ----
 
-const BUDGET = solanaPoolPriorityBudget(TEST_RENT, FEE);
-/** W's priority fee in every piece here: 400,000 CU at 1,000 micro-lamports. */
-const PRIORITY = 400n;
 const code = (a: PoolPiecesAnswer) => ("error" in a.body ? a.body.error.code : "ok");
 const tick = () => new Promise((r) => setImmediate(r));
 const deferred = <T>() => {
@@ -135,13 +154,14 @@ const deferred = <T>() => {
 };
 type Set = { wires: Uint8Array[]; paths: string[] };
 type EngineCall = { url: string; method: string; params: unknown[] };
-/** A sender on `cluster` whose kit sender records each set and, on mainnet, drives its block engine path twice (the
- *  first send, then one rebroadcast) before the set's end `end` gives. */
-function rig(cluster: "devnet" | "mainnet", o: { floor?: bigint | null; end?: (n: number) => Promise<string>; result?: unknown; simErr?: unknown } = {}) {
+/** A sender on `cluster` whose kit sender records each set and, for a set with a block engine path, drives it twice
+ *  (the first send, then one rebroadcast) before the set's end `end` gives. */
+/** `clock`: the sender's now, moved by each pause (and by the test); NOW when absent. */
+function rig(cluster: "devnet" | "mainnet", o: { end?: (n: number) => Promise<string>; result?: unknown; simErr?: unknown; fail?: (method: string, params: readonly unknown[]) => Error | null; stale?: (method: string, params: readonly unknown[]) => boolean; hold?: (method: string, params: readonly unknown[]) => Promise<void> | undefined; clock?: { t: number } } = {}) {
   const calls: Calls = [];
   const sets: Set[] = [];
+  const pauses: number[] = [];
   const engine: EngineCall[] = [];
-  const floorAsks: number[] = [];
   const jito =
     cluster === "mainnet"
       ? jitoSender({
@@ -151,32 +171,40 @@ function rig(cluster: "devnet" | "mainnet", o: { floor?: bigint | null; end?: (n
           fetch: async (url, init) => {
             const j = JSON.parse(String(init.body)) as { method: string; params: unknown[] };
             engine.push({ url, method: j.method, params: j.params });
-            return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: o.result ?? "ab".repeat(32) }), { status: 200 });
+            // a transaction send answers its own signature, as a block engine does
+            const sig = j.method === "sendTransaction" ? base58(new Uint8Array(Buffer.from(String(j.params[0]), "base64")).subarray(1, 65)) : undefined;
+            return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: o.result ?? sig ?? "ab".repeat(32) }), { status: 200 });
           },
         })
       : null;
   const deps: SolanaPoolSenderDeps = {
-    providers: [rpcStub(calls, o.simErr), rpcStub(calls)],
-    now: () => NOW,
+    providers: [rpcStub(calls, o.simErr, o.fail, o.stale, o.hold), rpcStub(calls)],
+    now: () => o.clock?.t ?? NOW,
     readRent: async () => TEST_RENT,
     log: () => {},
     jito,
-    tipFloor: async () => (floorAsks.push(1), o.floor === undefined ? 250_000n : o.floor),
+    pause: async (ms) => {
+      pauses.push(ms);
+      if (o.clock) o.clock.t += ms;
+    },
+    // the log line's timed reads never come before the send ends
+    wait: (_ms, signal) => new Promise<boolean>((r) => (signal.aborted ? r(false) : signal.addEventListener("abort", () => r(false), { once: true }))),
     send: (set, opts) => {
       const n = sets.length;
       sets.push({ wires: set.map((t) => t.wire), paths: opts.paths.map((p) => p.name) });
       const sig = base58(set[0]!.wire.subarray(1, 65));
       const done = (async () => {
         const sends: { path: string; attempt: number; ok: boolean; ms: number }[] = [];
-        if (cluster === "mainnet") for (let i = 0; i < 2; i++) sends.push({ path: "jito", attempt: i, ok: (await opts.paths[0]!.send(b64(set[0]!.wire))) === sig, ms: 0 });
+        if (opts.paths[0]?.name === "jito") for (let i = 0; i < 2; i++) sends.push({ path: "jito", attempt: i, ok: (await opts.paths[0]!.send(b64(set[0]!.wire))) === sig, ms: 0 });
         const state = await (o.end ?? (async () => "filled"))(n);
-        return { txs: [{ signature: sig, state: state as "filled", sends }] };
+        // set n lands at slot 100 + n, as provider a reads it
+        return { txs: [{ signature: sig, state: state as "filled", sends, ...(state === "filled" ? { slot: 100 + n } : {}) }] };
       })();
       return { signatures: [sig], done, stop() {} };
     },
   };
   const s = solanaPoolSender({ cluster, program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) }, deps);
-  return { s, calls, sets, engine, floorAsks };
+  return { s, calls, sets, engine, pauses };
 }
 const two = () => [piece({ tag: 2, nullifier: 2 }), piece({ tag: 3, nullifier: 3 })];
 const bodyOf = (ws: Uint8Array[]) => ({ pool: POOL, txs: ws.map(b64) });
@@ -191,14 +219,6 @@ test("count bounds: one transaction, more than SOLANA_POOL_BUY_PIECES_MAX, or no
     const a = await s.carryPieces(body);
     assert.deepEqual([a.status, code(a)], [400, "bad_shape"], JSON.stringify(body).slice(0, 80));
   }
-  assert.deepEqual([calls.length, sets.length, engine.length], [0, 0, 0]);
-});
-
-test("mainnet: pieces that with the tip would pass Jito's 5 a bundle are bad_shape (400), nothing read or sent", async () => {
-  const { s, calls, sets, engine } = rig("mainnet");
-  const ws = [...Array.from({ length: JITO_BUNDLE_MAX - 1 }, (_, i) => piece({ tag: 2, nullifier: 10 + i })), piece({ tag: 3, nullifier: 3 })];
-  const a = await s.carryPieces(bodyOf(ws));
-  assert.deepEqual([a.status, code(a)], [400, "bad_shape"]);
   assert.deepEqual([calls.length, sets.length, engine.length], [0, 0, 0]);
 });
 
@@ -235,141 +255,68 @@ test("a tag 2 the simulation refuses: blockhash_not_found or simulation_failed (
   }
 });
 
-test("the tip: the helper's own transaction last, one transfer to a static Jito tip account, for the floor's amount, on the tag 3's blockhash", async () => {
-  const { s, engine } = rig("mainnet", { floor: 250_000n });
-  const ws = two();
-  const a = await s.carryPieces(bodyOf(ws));
-  assert.equal(a.status, 200, JSON.stringify(a.body));
-  const bundle = engine[0]!.params[0] as string[];
-  assert.equal(bundle.length, 3, "two pieces and the tip");
-  const tip = new Uint8Array(Buffer.from(bundle[2]!, "base64"));
-  const t = solanaDecodeTransaction(tip);
-  assert.equal(t.signatures, 1, "the fee payer its only signer");
-  assert.ok(ed25519.verify(tip.subarray(1, 65), t.messageBytes, ed25519.getPublicKey(FP.seed)), "signed by the fee payer");
-  assert.equal(t.message.staticKeys[0], FP.address);
-  assert.deepEqual(t.message.lookups, [], "no lookup table");
-  assert.equal(t.message.blockhash, solanaDecodeTransaction(ws[1]!).message.blockhash, "the tag 3's blockhash");
-  assert.equal(t.message.instructions.length, 1, "one instruction");
-  const ix = t.message.instructions[0]!;
-  assert.equal(t.message.staticKeys[ix.programIndex], SOLANA_SYSTEM_PROGRAM);
-  assert.deepEqual(ix.accounts, [0, 1]);
-  assert.ok(SOLANA_JITO_TIP_ACCOUNTS.includes(t.message.staticKeys[1]!), "to a Jito tip account, a static key");
-  assert.deepEqual([...ix.data], [2, 0, 0, 0, ...u64(250_000n)], "a SystemProgram transfer of the floor's lamports");
-  // an unread floor gives the kit's 100,000; a floor under Jito's least, the least
-  for (const [floor, want] of [[null, SOLANA_POOL_JITO_TIP], [10n, SOLANA_JITO_TIP_MIN]] as const) {
-    const r = rig("mainnet", { floor });
-    assert.equal((await r.s.carryPieces(bodyOf(two()))).status, 200);
-    const d = solanaDecodeTransaction(new Uint8Array(Buffer.from((r.engine[0]!.params[0] as string[])[2]!, "base64")));
-    assert.deepEqual([...d.message.instructions[0]!.data], [2, 0, 0, 0, ...u64(want)], `floor ${floor}`);
-  }
-});
-
-test("the tip's cap: the relay fees less each piece's cost and W's priority fee, less the tip's own fee; a floor over it tips the cap, never a refusal; a cap under Jito's least is refused fee_below_cost, nothing sent", async () => {
-  const cap = 2n * (BUDGET - PRIORITY) - SOLANA_TIP_TX_FEE;
-  assert.equal(piecesTipCap([{ budget: BUDGET, priority: PRIORITY }, { budget: BUDGET, priority: PRIORITY }]), cap);
-  const tipOf = (r: ReturnType<typeof rig>): bigint => {
-    const d = solanaDecodeTransaction(new Uint8Array(Buffer.from((r.engine[0]!.params[0] as string[])[2]!, "base64")));
-    return Buffer.from(d.message.instructions[0]!.data.slice(4)).readBigUInt64LE();
-  };
-  const at = rig("mainnet", { floor: cap });
-  assert.equal((await at.s.carryPieces(bodyOf(two()))).status, 200, "a floor at the cap is carried");
-  assert.equal(tipOf(at), cap);
-  const over = rig("mainnet", { floor: cap + 1_000_000n });
-  assert.equal((await over.s.carryPieces(bodyOf(two()))).status, 200, "a floor over the cap is carried");
-  assert.equal(tipOf(over), cap, "at the cap: the fee payer never tips more than the relay fees bring");
-  // a cap under Jito's least (W's priority fees eat the budgets): no bundle could land, refused before anything is sent
-  const near = ((BUDGET - 1_000n) * 1_000_000n) / 400_000n; // a priority fee 1,000 lamports under each budget
-  const poor = rig("mainnet", { floor: 1n });
-  const a = await poor.s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2, cuPrice: near }), piece({ tag: 3, nullifier: 3, cuPrice: near })]));
-  assert.deepEqual([a.status, a.body], [422, { error: { code: "fee_below_cost", detail: "the relay fees pay no tip Jito takes" } }]);
-  assert.deepEqual([poor.calls.length, poor.sets.length, poor.engine.length], [0, 0, 0], "nothing read or sent");
-  // the worked number at mainnet rent (the kit's fee 1,300,000, budget 207,245): four pieces with no priority fee
-  const mainnetBudget = solanaPoolPriorityBudget({ lamportsPerByte: 5_080n, factor: 1n }, 1_300_000n);
-  assert.equal(mainnetBudget, 207_245n);
-  assert.equal(piecesTipCap(Array.from({ length: 4 }, () => ({ budget: mainnetBudget, priority: 0n }))), 823_980n);
-});
-
-test("the tip floor read is hostile: a non-finite, negative, absurd or misshapen value is unread; SOL to lamports rounded up", async () => {
-  assert.equal(tipFloorOf(JSON.stringify([{ landed_tips_95th_percentile: 0.00005999 }])), 59_990n);
-  assert.equal(tipFloorOf(JSON.stringify([{ landed_tips_95th_percentile: 0.0000000001 }])), 1n, "a part of a lamport rounds up");
-  for (const bad of ["[]", "{}", "null", "not json", JSON.stringify([{ landed_tips_95th_percentile: -1e-5 }]), JSON.stringify([{ landed_tips_95th_percentile: "0.00001" }]), JSON.stringify([{ landed_tips_95th_percentile: 2 }]), '[{"landed_tips_95th_percentile":1e400}]', JSON.stringify([{ landed_tips_50th_percentile: 0.00001 }])]) assert.equal(tipFloorOf(bad), null, bad);
-  // cached JITO_TIP_FLOOR_CACHE_MS, unread included; a slow, failing or oversized answer is unread
-  let now = 0;
-  let asks = 0;
-  const answer = { text: JSON.stringify([{ landed_tips_95th_percentile: 0.0002 }]), status: 200 };
-  const read = jitoTipFloor({ now: () => now, fetch: async () => (asks++, new Response(answer.text, { status: answer.status })) });
-  assert.equal(await read(), 200_000n);
-  now = JITO_TIP_FLOOR_CACHE_MS - 1;
-  assert.equal(await read(), 200_000n);
-  assert.equal(asks, 1, "one read serves the cache window");
-  now = JITO_TIP_FLOOR_CACHE_MS;
-  answer.status = 503;
-  assert.equal(await read(), null);
-  now = 2 * JITO_TIP_FLOOR_CACHE_MS;
-  answer.status = 200;
-  answer.text = JSON.stringify([{ landed_tips_95th_percentile: 0.0002, pad: "x".repeat(5_000) }]);
-  assert.equal(await read(), null, "over the bounded body");
-  // a read that never answers is unread at its timeout: the await ends (with no timeout of its own it would hang the test)
-  const slow = jitoTipFloor({ timeoutMs: 30, fetch: () => new Promise<Response>(() => {}) });
-  assert.equal(await slow(), null);
-});
-
-test("mainnet: only sendBundle, every piece in order then the tip, no plain send on any path; the answer only after the fill, the signatures in order", async () => {
-  const fill = deferred<string>();
-  const { s, calls, sets, engine } = rig("mainnet", { end: () => fill.p });
+test("RED at 4c1826a7: mainnet sends the tag 2s plain, side by side, then the tag 3 as the one-piece route does: simulated on the state they left, the bundle beside the plain copy, its tip in the log line; the answer only after the fill", async () => {
+  const ends = [deferred<string>(), deferred<string>(), deferred<string>()];
+  const { s, calls, sets, engine } = rig("mainnet", { end: (n) => ends[n]!.p });
   const ws = [piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 }), piece({ tag: 3, nullifier: 3 })];
   const p = s.carryPieces(bodyOf(ws));
   let settled = false;
   void p.then(() => (settled = true));
   for (let i = 0; i < 20; i++) await tick();
-  assert.equal(settled, false, "no answer before the fill is decided");
-  assert.deepEqual(sets.map((x) => x.paths), [["jito"]], "the kit's sender gets the block engine path only: no plain copy");
-  assert.ok(engine.length >= 2, "the first send and a rebroadcast");
-  for (const e of engine) {
-    assert.equal(e.method, "sendBundle");
-    assert.equal(e.url, `${new URL(e.url).origin}/api/v1/bundles`);
-    assert.deepEqual(e.params[1], { encoding: "base64" });
-    const bundle = e.params[0] as string[];
-    assert.equal(bundle.length, 4);
-    // the pieces as W signed them, the fee payer's signature added in slot 0, in request order
-    bundle.slice(0, 3).forEach((x, i) => {
-      const w = new Uint8Array(Buffer.from(x, "base64"));
-      assert.deepEqual(w.subarray(65), ws[i]!.subarray(65), `piece ${i}: every byte after slot 0 is W's`);
-      assert.equal(base58(w.subarray(1, 65)), fpSig(ws[i]!));
-    });
-  }
-  assert.equal(engine[0]!.url, engine[1]!.url, "rebroadcast to the region that took it");
-  // the tag 2s simulated alone, the tag 3 never; no provider ever got a send
-  const sims = calls.filter((c) => c.method === "simulateTransaction");
-  assert.deepEqual(sims.map((c) => c.params[0]), [b64(ws[0]!), b64(ws[1]!)]);
-  assert.equal(calls.filter((c) => c.method === "sendTransaction").length, 0);
-  fill.done("filled");
+  const sims = () => calls.filter((c) => c.method === "simulateTransaction").map((c) => c.params[0]);
+  assert.deepEqual(sims(), [b64(ws[0]!), b64(ws[1]!)], "the tag 2s simulated before anything is sent");
+  assert.deepEqual(sets.map((x) => x.paths), [["rpc0", "rpc1"], ["rpc0", "rpc1"]], "both tag 2s at once, plain");
+  assert.equal(engine.length, 0, "no block engine for a tag 2");
+  sets.forEach((x, i) => assert.equal(base58(x.wires[0]!.subarray(1, 65)), fpSig(ws[i]!)));
+  ends[0]!.done("filled");
+  for (let i = 0; i < 20; i++) await tick();
+  assert.equal(sets.length, 2, "the tag 3 waits for every tag 2");
+  ends[1]!.done("filled");
+  for (let i = 0; i < 20; i++) await tick();
+  assert.deepEqual(sims(), [b64(ws[0]!), b64(ws[1]!), b64(ws[2]!)], "the tag 3 simulated once the tag 2s landed");
+  assert.deepEqual(sets[2]!.paths, ["jito", "rpc0", "rpc1"], "the tag 3: the bundle beside the plain copy");
+  assert.ok(engine.length >= 2 && engine.every((e) => e.method === "sendTransaction"), "the one-piece route's send and rebroadcast");
+  assert.equal(settled, false, "no answer before the tag 3's fill");
+  ends[2]!.done("filled");
   const a = await p;
   assert.equal(a.status, 200);
   assert.deepEqual(a.body, { signatures: ws.map(fpSig) });
-  assert.equal(new Set((a.body as { signatures: string[] }).signatures).size, 3);
-  // the route's log line holds no signature
   const line = poolSendLine({ chain: "solana", net: "mainnet", route: "pieces", status: a.status, body: a.body, ms: 1, note: a.note });
-  assert.match(line, /^pool send solana mainnet pieces outcome=filled status=200 ms=1 via=jito region=ny bundle=named end=filled/);
+  assert.match(line, /^pool send solana mainnet pieces outcome=filled status=200 ms=1 tag=3 tip=10000 via=jito region=ny bundle=unnamed end=filled rebroadcasts=2 misses=0 plain=0 hash_ms=/);
   for (const sig of ws.map(fpSig)) assert.ok(!line.includes(sig));
-  // a repeat of the same bundle answers the first and sends nothing
-  const n = engine.length;
+  // a repeat of the same set answers the first and sends nothing
+  const n = sets.length;
   assert.deepEqual(await s.carryPieces(bodyOf(ws)), a);
-  assert.equal(engine.length, n);
+  assert.equal(sets.length, n);
 });
 
-test("mainnet: a bundle that expires unlanded is not_landed (503), nothing plain; its nullifiers are free again", async () => {
-  let end = "expired";
-  const { s, sets, engine } = rig("mainnet", { end: async () => end });
-  const a = await s.carryPieces(bodyOf(two()));
-  assert.deepEqual([a.status, a.body], [503, { error: { code: "not_landed" } }]);
-  assert.equal(a.note?.end, "expired");
-  assert.deepEqual(sets.map((x) => x.paths), [["jito"]]);
-  assert.ok(engine.every((e) => e.method === "sendBundle"));
-  end = "filled";
+test("mainnet: a tag 3 that does not land after its tag 2s did is 503 not_landed, its end read (end simulation, tip), and the one-piece route takes the very same tag 3 again", async () => {
+  let end3 = "expired";
+  const { s, sets } = rig("mainnet", { end: async (n) => (n < 1 ? "filled" : end3) });
+  const ws = two();
+  const a = await s.carryPieces(bodyOf(ws));
+  assert.deepEqual([a.status, a.body], [503, { error: { code: "not_landed" } }], "never a 4xx once a piece is on chain");
+  const line = poolSendLine({ chain: "solana", net: "mainnet", route: "pieces", status: a.status, body: a.body, ms: 1, note: a.note });
+  assert.match(line, /^pool send solana mainnet pieces outcome=not_landed status=503 ms=1 tag=3 tip=10000 via=jito region=ny bundle=unnamed end=expired .*end_sim=ok/);
+  assert.deepEqual(sets.map((x) => x.paths), [["rpc0", "rpc1"], ["jito", "rpc0", "rpc1"]]);
+  // the page's resend of the same bytes on the one-piece route is carried (its nullifier free again)
+  end3 = "filled";
   await tick();
-  assert.equal((await s.carryPieces(bodyOf(two()))).status, 200, "sent again");
-  assert.equal(sets.length, 2);
+  const again = await s.carry({ pool: POOL, tx: b64(ws[1]!) });
+  assert.deepEqual([again.status, again.body], [200, { signature: fpSig(ws[1]!) }]);
+  // a tag 3 the simulation refuses once the tag 2s landed: 503 not_landed naming it, nothing sent for it
+  const sim = rig("mainnet", { simErr: (raw: unknown) => (raw === b64(ws[1]!) ? { InstructionError: [2, { Custom: 6001 }] } : null) });
+  const b = await sim.s.carryPieces(bodyOf(ws));
+  assert.deepEqual([b.status, b.body], [503, { error: { code: "not_landed", detail: "simulation_failed" } }]);
+  assert.match(poolSendLine({ chain: "solana", net: "mainnet", route: "pieces", status: b.status, body: b.body, ms: 1, note: b.note }), /outcome=not_landed status=503 ms=1 tag=3 tip=10000 err=\{"InstructionError":\[2,\{"Custom":6001\}\]\}$/);
+  assert.equal(sim.sets.length, 1, "the tag 2 only");
+  // a tag 2 that fails on chain while the other landed: 503 too; both failing alone: 422, as before
+  const half = rig("mainnet", { end: async (n) => (n === 0 ? "filled" : "failed") });
+  const c = await half.s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 12 }), piece({ tag: 2, nullifier: 14 }), piece({ tag: 3, nullifier: 13 })]));
+  assert.deepEqual([c.status, code(c)], [503, "not_landed"]);
+  const none = rig("mainnet", { end: async () => "failed" });
+  const d = await none.s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 22 }), piece({ tag: 3, nullifier: 23 })]));
+  assert.deepEqual([d.status, code(d)], [422, "not_landed"]);
 });
 
 test("a piece another carry holds is refused in_flight (429), so no nullifier goes out twice", async () => {
@@ -384,16 +331,14 @@ test("a piece another carry holds is refused in_flight (429), so no nullifier go
   await one;
 });
 
-test("devnet: plain, in order, each tag 2 filled before the next, then the tag 3; no tip; the signatures in order", async () => {
+test("devnet: the same way, no block engine: the tag 2s plain side by side, then the tag 3 simulated and sent plain, answered at its send; the signatures in order", async () => {
   const ends = [deferred<string>(), deferred<string>(), deferred<string>()];
-  const { s, sets, calls, floorAsks } = rig("devnet", { end: (n) => ends[n]!.p });
+  const { s, sets, calls, engine } = rig("devnet", { end: (n) => ends[n]!.p });
   const ws = [piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 }), piece({ tag: 3, nullifier: 3 })];
   const p = s.carryPieces(bodyOf(ws));
   for (let i = 0; i < 10; i++) await tick();
-  assert.equal(sets.length, 1, "the second piece waits for the first's fill");
+  assert.equal(sets.length, 2, "both tag 2s at once");
   ends[0]!.done("filled");
-  for (let i = 0; i < 10; i++) await tick();
-  assert.equal(sets.length, 2);
   ends[1]!.done("filled");
   const a = await p;
   assert.equal(a.status, 200);
@@ -404,9 +349,8 @@ test("devnet: plain, in order, each tag 2 filled before the next, then the tag 3
     assert.deepEqual(x.paths, ["rpc0", "rpc1"], "plain");
     assert.deepEqual(x.wires[0]!.subarray(65), ws[i]!.subarray(65), `piece ${i} in order`);
   });
-  assert.ok(sets.every((x) => x.wires[0]![0] === 2), "no one-signer tip transaction");
-  assert.equal(floorAsks.length, 0, "no tip floor read");
-  assert.equal(calls.filter((c) => c.method === "simulateTransaction").length, 2, "the tag 3 is not simulated");
+  assert.equal(engine.length, 0);
+  assert.equal(calls.filter((c) => c.method === "simulateTransaction").length, 3, "the tag 3 simulated once the tag 2s landed");
   ends[2]!.done("filled");
   // a tag 2 that does not fill stops the buy: the tag 3 is never sent
   const stop = rig("devnet", { end: async () => "expired" });
@@ -415,7 +359,7 @@ test("devnet: plain, in order, each tag 2 filled before the next, then the tag 3
   assert.equal(stop.sets.length, 1);
 });
 
-test("a page boundary: a tag 2 whose change note goes on the next state page is never simulated alone before the pieces before it run (devnet: right before its own send, once they landed; mainnet: not alone, inside the bundle)", async () => {
+test("a page boundary: a tag 2 whose change note goes on the next state page is simulated and sent only once the pieces before it landed, on every cluster", async () => {
   // the first piece's change note is the page's last entry, the second's the next page's first
   const E = SOLANA_POOL_PAGE_ENTRIES;
   const ws = [piece({ tag: 2, nullifier: 2, stateSize: E - 1 }), piece({ tag: 2, nullifier: 4, stateSize: E }), piece({ tag: 3, nullifier: 3, stateSize: E + 1 })];
@@ -433,14 +377,19 @@ test("a page boundary: a tag 2 whose change note goes on the next state page is 
   ends[1]!.done("filled");
   assert.equal((await p).status, 200);
   ends[2]!.done("filled");
-  // mainnet: the bundle carried with the first piece simulated alone, the second not
-  const fill = deferred<string>();
-  const main = rig("mainnet", { end: () => fill.p });
+  // mainnet: the same order, the tag 3 last through the block engine path
+  const mends = [deferred<string>(), deferred<string>(), deferred<string>()];
+  const main = rig("mainnet", { end: (n) => mends[n]!.p });
   const q = main.s.carryPieces(bodyOf(ws));
   for (let i = 0; i < 20; i++) await tick();
   assert.deepEqual(sims(main.calls), [b64(ws[0]!)]);
-  assert.equal(main.engine[0]?.method, "sendBundle");
-  fill.done("filled");
+  mends[0]!.done("filled");
+  for (let i = 0; i < 20; i++) await tick();
+  assert.deepEqual(sims(main.calls), [b64(ws[0]!), b64(ws[1]!)]);
+  mends[1]!.done("filled");
+  for (let i = 0; i < 20; i++) await tick();
+  assert.deepEqual(main.sets.map((x) => x.paths[0]), ["rpc0", "rpc0", "jito"]);
+  mends[2]!.done("filled");
   assert.equal((await q).status, 200);
   // devnet: the later page's piece refused once the first landed: not_landed (a piece is on chain), the tag 3 never sent
   const later = [piece({ tag: 2, nullifier: 5, stateSize: E - 1 }), piece({ tag: 2, nullifier: 6, stateSize: E }), piece({ tag: 3, nullifier: 7, stateSize: E + 1 })];
@@ -479,5 +428,176 @@ test("POST /v1/pool/solana/pieces: carried through the server, 404 for a pool it
     assert.equal(sets.length, 2, "nothing more carried");
   } finally {
     srv.close();
+  }
+});
+
+// ---- review FIX of ed9ec97a (card owners-solana-buy-lands) ----
+
+const throttle = () => new Error("HTTP 429 Too Many Requests");
+const simsOf = (calls: Calls, w: Uint8Array) => calls.filter((c) => c.method === "simulateTransaction" && c.params[0] === b64(w));
+
+test("RED at ed9ec97a: once the tag 2s landed, the tag 3's simulation is read at their slot or later, and a throttle on it is asked again instead of dropping the buy", async () => {
+  for (const cluster of ["mainnet", "devnet"] as const) {
+    const ws = two();
+    let n = 0;
+    const r = rig(cluster, { fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) && n++ === 0 ? throttle() : null) });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.equal(a.status, 200, `${cluster}: ${JSON.stringify(a.body)}`);
+    assert.equal(r.sets.length, 2, cluster);
+    assert.deepEqual(r.pauses, [LANDED_READ_PACE_MS], cluster);
+    // set 0 (the tag 2) landed at slot 100: both asks of the tag 3's simulation and its blockhash read ask for it
+    const sims = simsOf(r.calls, ws[1]!);
+    assert.equal(sims.length, 2, cluster);
+    for (const c of sims) assert.equal((c.params[1] as { minContextSlot?: number }).minContextSlot, 100, cluster);
+    // the tag 2's own simulation came before anything landed: no slot asked
+    assert.equal((simsOf(r.calls, ws[0]!)[0]!.params[1] as { minContextSlot?: number }).minContextSlot, undefined, cluster);
+  }
+});
+
+test("RED at ed9ec97a: a later page's tag 2 whose simulation meets a node behind the landed slot is asked again at that slot", async () => {
+  const E = SOLANA_POOL_PAGE_ENTRIES;
+  const ws = [piece({ tag: 2, nullifier: 2, stateSize: E - 1 }), piece({ tag: 2, nullifier: 4, stateSize: E }), piece({ tag: 3, nullifier: 3, stateSize: E + 1 })];
+  let n = 0;
+  const r = rig("mainnet", { fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) && n++ === 0 ? new Error("RPC error -32016: Minimum context slot has not been reached") : null) });
+  const a = await r.s.carryPieces(bodyOf(ws));
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(r.sets.length, 3);
+  const sims = simsOf(r.calls, ws[1]!);
+  assert.equal(sims.length, 2);
+  for (const c of sims) assert.equal((c.params[1] as { minContextSlot?: number }).minContextSlot, 100);
+  // the tag 3 after set 1 landed at 101
+  for (const c of simsOf(r.calls, ws[2]!)) assert.equal((c.params[1] as { minContextSlot?: number }).minContextSlot, 101);
+});
+
+test("a provider that keeps failing after the tag 2s landed: asked again a bounded number of times, then 503 not_landed with its code, the tag 3 never sent", async () => {
+  const ws = two();
+  const r = rig("mainnet", { fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null) });
+  const a = await r.s.carryPieces(bodyOf(ws));
+  assert.deepEqual([a.status, a.body], [503, { error: { code: "not_landed", detail: "rate_limited" } }]);
+  assert.equal(r.sets.length, 1);
+  assert.equal(simsOf(r.calls, ws[1]!).length, POOL_LANDED_READ_MS / LANDED_READ_PACE_MS);
+});
+
+test("RED at ed9ec97a: first-page tag 2s, one failed and one with an end the providers did not agree on: 503 not_landed in either order, never a 4xx", async () => {
+  for (const ends of [["failed", "unknown"], ["unknown", "failed"]]) {
+    const r = rig("mainnet", { end: async (n) => ends[n] ?? "filled" });
+    const a = await r.s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 }), piece({ tag: 3, nullifier: 3 })]));
+    assert.equal(a.status, 503, `${ends}: ${JSON.stringify(a.body)}`);
+    assert.equal(code(a), "not_landed", String(ends));
+    assert.equal(r.sets.length, 2, String(ends));
+  }
+  // both failed: nothing landed, the 422 the device reads as nothing sent
+  const r = rig("mainnet", { end: async (n) => (n < 2 ? "failed" : "filled") });
+  const a = await r.s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 }), piece({ tag: 3, nullifier: 3 })]));
+  assert.deepEqual([a.status, code(a)], [422, "not_landed"]);
+});
+
+test("RED at ed9ec97a: a tag 2 whose end the providers did not agree on is held as the one-piece route holds one: its nullifier answers 503 not_landed until the release's deadline, unsent", async () => {
+  const ws = two();
+  const r = rig("mainnet", { end: async (n) => (n === 0 ? "unknown" : "filled") });
+  const a = await r.s.carryPieces(bodyOf(ws));
+  assert.deepEqual([a.status, code(a)], [503, "not_landed"]);
+  assert.equal(r.sets.length, 1);
+  const alone = await r.s.carry({ pool: POOL, tx: b64(ws[0]!) });
+  assert.deepEqual([alone.status, "error" in alone.body ? alone.body.error.code : "ok"], [503, "not_landed"]);
+  const again = await r.s.carryPieces(bodyOf(ws));
+  assert.deepEqual([again.status, code(again)], [503, "not_landed"]);
+  assert.equal(r.sets.length, 1);
+});
+
+// ---- delta review FIX of 0b30d8a2 (card owners-solana-buy-lands) ----
+
+/** A tag 3 that loads TO from TABLE, as every pool tag 3 does. */
+function tag3Loaded(nullifier: number): Uint8Array {
+  const r = release(nullifier);
+  const accounts = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, r, 6);
+  accounts.push({ key: SOLANA_JITO_TIP_ACCOUNTS[0]!, signer: false, writable: true }, { key: TO, signer: false, writable: true });
+  const data = solanaEncodePoolTag3(r, false, 10_000n, [{ program: 7, accounts: [1, 9], data: Uint8Array.from([2, 0, 0, 0, ...u64(1_000_000n)]) }]);
+  const tables = [{ address: TABLE, table: solanaDecodeLookupTable(tableData([TO])) }];
+  const { message } = solanaCompileV0(FP.address, [cuLimit(400_000), cuPrice(1_000n), { program: PROGRAM, accounts, data }], BLOCKHASH, tables, [FP.address, W.address]);
+  return Uint8Array.from([2, ...new Uint8Array(64), ...ed25519.sign(message, W.seed), ...message]);
+}
+const tableReadsOf = (calls: Calls) => calls.filter((c) => c.method === "getAccountInfo" && c.params[0] === TABLE);
+
+test("RED at 0b30d8a2: the tag 3's table read again after the tag 2s landed asks at their slot, and a throttle on it is asked again instead of dropping the buy", async () => {
+  for (const cluster of ["mainnet", "devnet"] as const) {
+    const ws = [piece({ tag: 2, nullifier: 2 }), tag3Loaded(3)];
+    let n = 0;
+    // provider a: the read before anything is sent passes, the read after the tag 2 landed is throttled once
+    const r = rig(cluster, { fail: (m, p) => (m === "getAccountInfo" && p[0] === TABLE && n++ === 1 ? throttle() : null) });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.equal(a.status, 200, `${cluster}: ${JSON.stringify(a.body)}`);
+    assert.equal(r.sets.length, 2, cluster);
+    assert.deepEqual(r.pauses, [LANDED_READ_PACE_MS], cluster);
+    const reads = tableReadsOf(r.calls);
+    // before the send: both providers, no slot; after the tag 2 landed at 100: provider a twice, provider b once, at 100
+    assert.equal(reads.filter((c) => (c.params[1] as { minContextSlot?: number }).minContextSlot === undefined).length, 2, cluster);
+    assert.deepEqual(reads.filter((c) => (c.params[1] as { minContextSlot?: number }).minContextSlot !== undefined).map((c) => (c.params[1] as { minContextSlot: number }).minContextSlot), [100, 100, 100, 100], cluster);
+  }
+});
+
+test("RED at 0b30d8a2: a provider that ignores minContextSlot and answers the tag 3's simulation from before the tag 2s landed is asked again; its answer never decides", async () => {
+  for (const cluster of ["mainnet", "devnet"] as const) {
+    const ws = two();
+    let n = 0;
+    // provider a's first simulation of the tag 3 answers from slot 1 (minContextSlot ignored), refusing it as the state
+    // before the tag 2 would; asked again, it answers at the slot asked and passes
+    const first = (m: string, p: readonly unknown[]) => m === "simulateTransaction" && p[0] === b64(ws[1]!) && n++ === 0;
+    const r = rig(cluster, { stale: first, simErr: (raw: unknown) => (raw === b64(ws[1]!) && n === 1 ? { InstructionError: [2, { Custom: 1 }] } : null) });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.equal(a.status, 200, `${cluster}: ${JSON.stringify(a.body)}`);
+    assert.equal(r.sets.length, 2, cluster);
+    assert.deepEqual(r.pauses, [LANDED_READ_PACE_MS], cluster);
+  }
+});
+
+test("the reads after the tag 2s landed stop at the carry's arrival plus a blockhash's life, and never past a piece's deadline, on a moving clock", async () => {
+  // a provider that keeps failing: asked again until arrival + POOL_LANDED_READ_MS
+  {
+    const ws = two();
+    const clock = { t: NOW };
+    const r = rig("mainnet", { clock, fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null) });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.deepEqual([a.status, a.body], [503, { error: { code: "not_landed", detail: "rate_limited" } }]);
+    assert.ok(clock.t <= NOW + POOL_LANDED_READ_MS, `${clock.t - NOW} ms`);
+    // the count cap (POOL_LANDED_READ_MS / LANDED_READ_PACE_MS asks) ends it within one pace of the window's end
+    assert.ok(clock.t + 2 * LANDED_READ_PACE_MS > NOW + POOL_LANDED_READ_MS, `${clock.t - NOW} ms`);
+  }
+  // the window runs from the carry's arrival, not from each read: a tag 2 that took 50 s to land leaves 10 s of asks, and
+  // one that took past the window leaves none (a piece's deadline is at least SOLANA_POOL_SEND_MARGIN_MS, 90 s, past
+  // the arrival, so the window always ends first; the cap on it holds that if the margin ever shrinks)
+  for (const [took, asks] of [[50_000, 12], [250_000, 0]] as const) {
+    const ws = two();
+    const clock = { t: NOW };
+    const r = rig("mainnet", {
+      clock,
+      end: async (n) => {
+        if (n === 0) clock.t = NOW + took;
+        return "filled";
+      },
+      fail: (m, p) => (m === "simulateTransaction" && p[0] === b64(ws[1]!) ? throttle() : null),
+    });
+    const a = await r.s.carryPieces(bodyOf(ws));
+    assert.deepEqual([a.status, code(a)], [503, "not_landed"], String(took));
+    assert.equal(r.pauses.length, asks, String(took));
+    assert.ok(clock.t <= Math.max(NOW + took, NOW + POOL_LANDED_READ_MS), String(took));
+  }
+});
+
+test("RED at ece8c89b: the simulation and the blockhash read start together, on the one-piece route and on a buy's tag 3 after its tag 2s landed", async () => {
+  for (const which of ["one piece", "pieces"] as const) {
+    const ws = two();
+    const sim = deferred<void>();
+    const target = b64(which === "one piece" ? ws[0]! : ws[1]!);
+    // provider a holds that transaction's simulation until the blockhash read has started
+    const r = rig("devnet", { hold: (m, p) => (m === "simulateTransaction" && p[0] === target ? sim.p : undefined) });
+    const run = which === "one piece" ? r.s.carry({ pool: POOL, tx: target }) : r.s.carryPieces(bodyOf(ws));
+    for (let i = 0; i < 50 && !r.calls.some((c, k) => c.method === "getLatestBlockhash" && k > r.calls.findIndex((x) => x.method === "simulateTransaction" && x.params[0] === target)); i++) await tick();
+    const simAt = r.calls.findIndex((c) => c.method === "simulateTransaction" && c.params[0] === target);
+    const hashAt = r.calls.findIndex((c, k) => c.method === "getLatestBlockhash" && k > simAt);
+    assert.ok(simAt >= 0 && hashAt > simAt, `${which}: the blockhash read waited for the simulation (${simAt}, ${hashAt})`);
+    sim.done();
+    const a = await run;
+    assert.equal(a.status, 200, `${which}: ${JSON.stringify(a.body)}`);
   }
 });

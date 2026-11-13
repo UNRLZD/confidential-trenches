@@ -8,7 +8,8 @@
 //   proofs of one W that hold that W's own note, never two of one note, that pay the spend and W's new accounts (the
 //   kit's solanaPoolBuyFunds over every piece): the fewest pieces, then the least released (pickPieces), at most four:
 //   the other pieces' releases (tag 2) to W, each its own transaction, then the own note's tag 3 that buys, sent
-//   as one bundle that lands whole or not at all. Every note is taken (RESERVED) before anything leaves, each read back,
+//   in order by the helper: the tag 2s first, then the tag 3 once they landed (a tag 2 may land without the buy, its
+//   money then waiting in W until the rent back sweeps it). Every note is taken (RESERVED) before anything leaves, each read back,
 //   settled and owned on its own (sendAndSettle). One piece is the plain buy below.
 // - The proof: one the wallet's proof queue made ahead (../../wallet/src/pool/queue.ts). Its release is read off the proof itself:
 //   the 256 bytes of A, B (imaginary part first) and C, the hashes, the chunk and the depths from its public signals,
@@ -186,8 +187,8 @@ export type PoolBuyHost = {
   seed64(): Promise<Uint8Array>;
   /** POST /v1/pool/solana/send: the helper's answer as it came (hostile). */
   send(pool: string, tx: Uint8Array): Promise<unknown>;
-  /** A buy's pieces (card buy-spends-several-pieces): the helper's send of these transactions as one bundle, in order,
-   *  all landing or none; its answer as it came (hostile), each one's signature in order. Absent: a buy spends one
+  /** A buy's pieces (card buy-spends-several-pieces): the helper's send of these transactions in order, the tag 2s
+   *  before the tag 3 (a tag 2 may land without the buy); its answer as it came (hostile), each one's signature in order. Absent: a buy spends one
    *  piece. */
   sendPieces?(pool: string, txs: readonly Uint8Array[]): Promise<unknown>;
   /** The wallet's solanaSettleSpent for this note: "spent" once its change is written and the note is SPENT. minSlots:
@@ -770,10 +771,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     // not awaited here: the buy waits on its own venue's reads only (below, once the reference names the venue), so a
     // slow or hung read of another venue's table never holds it; a rejection no buy awaits is marked handled
     for (const r of tableReads.values()) r.catch(() => {});
-    // the tag 3's tip for a set of k pieces (the kit's solanaPoolBuyTip): on mainnet the helper sends one piece's tag 3
-    // to Jito bundle-only, so it tips enough to win the auction (SOLANA_POOL_JITO_TIP); a bundle of several pieces ends
-    // with the helper's own tip out of the pieces' relay fees, so its tag 3 carries the least (SOLANA_JITO_TIP_MIN);
-    // devnet has no block engine, so no tip
+    // the tag 3's tip for a set of k pieces (the kit's solanaPoolBuyTip): on mainnet the helper sends every tag 3 to
+    // Jito as its own bundle (several pieces' once the tag 2s landed), so it tips enough to win the auction
+    // (SOLANA_POOL_JITO_TIP); devnet has no block engine, so no tip
     const tipOf = (k: number): bigint => solanaPoolBuyTip(h.cluster, k);
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();

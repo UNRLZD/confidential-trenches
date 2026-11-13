@@ -19,10 +19,6 @@
 // every second booked past the queue limit), which the route answers as 429 with a wait; a 5xx alone is not one. A
 // nullifier whose last send expired goes again with a queue limit of 0 (M374 (4)): only into a second free now, so
 // re-sends of unlanded notes never queue ahead of fresh sends.
-// A bundle (card buy-spends-several-pieces): sendBundle carries a buy's pieces and the helper's tip transaction as one
-// bundle, "Maximum of 5 transactions" (docs.jito.wtf/lowlatencytxnsend, sendBundle, read 2026-11-12), to the region's
-// /api/v1/bundles. It is one request in the region's second, booked and paced by the same pacer as a transaction send,
-// so bundles and single sends share each region's 1 request a second.
 
 import { SOLANA_KEYLESS_PATH_INTERVAL_MS } from "@blindfill/kit";
 
@@ -63,9 +59,6 @@ export const JITO_TIMEOUT_MS = 2_000;
  * 24 answered 8 busy)]. */
 export const JITO_QUEUE_MAX_MS = 2 * JITO_REGION_INTERVAL_MS;
 const ANSWER_MAX = 16_384;
-/** The most transactions one bundle holds: "Maximum of 5 transactions" (docs.jito.wtf/lowlatencytxnsend, sendBundle,
- *  read 2026-11-12). */
-export const JITO_BUNDLE_MAX = 5;
 
 /** One whole first send: accepted by a region, every region busy or refusing, or every region failing on transport. */
 export type JitoSend = { kind: "ok"; region: string; bundleId?: string } | { kind: "busy"; detail: string; throttled: boolean } | { kind: "refused"; detail: string } | { kind: "transport"; detail: string };
@@ -92,14 +85,6 @@ export type JitoSender = {
    *  waits in, and gives the second up to a rebroadcast waiting for it; past that, or past its request's timeout, it is
    *  unread, so it answers within one interval plus the timeout. */
   status(region: string, bundleId: string, signal?: AbortSignal): Promise<JitoBundleStatus>;
-};
-/** The bundle sends (card buy-spends-several-pieces): the same regions, pacers, queue and answers as JitoSender's. */
-export type JitoBundleSender = {
-  readonly intervalMs: number;
-  /** A carry's first bundle send: 1 to JITO_BUNDLE_MAX signed transactions in order, base64; the region that took it. */
-  sendBundle(base64Txs: readonly string[], queueMaxMs?: number): Promise<JitoSend>;
-  /** The same bundle again to `region` only, in a second nobody booked, as rebroadcast goes. */
-  rebroadcastBundle(region: string, base64Txs: readonly string[], signal?: AbortSignal): Promise<JitoTry>;
 };
 /** Resolves true after `ms`, or false at once when `signal` aborts (the timer cleared). */
 export type JitoSleep = (ms: number, signal?: AbortSignal) => Promise<boolean>;
@@ -142,11 +127,8 @@ async function bounded(r: Response): Promise<string> {
 type JitoCall = { url: (region: string) => string; method: string; params: readonly unknown[]; accept: (result: unknown) => boolean; wrong: string };
 const BUNDLE_ID = /^[0-9a-f]{64}$/;
 const txCall = (b64: string, signature: string): JitoCall => ({ url: (r) => r, method: "sendTransaction", params: [b64, { encoding: "base64" }], accept: (x) => x === signature, wrong: "the answer is not this transaction's signature" });
-// the bundle's id is its answer ("A bundle ID, used to identify the bundle", the same page); taken when it is a short
-// word of letters and digits, kept as the bundle id only in the hex form status reads
-const bundleCall = (b64s: readonly string[]): JitoCall => ({ url: (r) => `${new URL(r).origin}/api/v1/bundles`, method: "sendBundle", params: [[...b64s], { encoding: "base64" }], accept: (x) => typeof x === "string" && /^[0-9A-Za-z]{1,128}$/.test(x), wrong: "the answer is not a bundle id" });
 
-export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetch; timeoutMs?: number; intervalMs?: number; queueMaxMs?: number; clock?: () => number; sleep?: JitoSleep } = {}): JitoSender & JitoBundleSender {
+export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetch; timeoutMs?: number; intervalMs?: number; queueMaxMs?: number; clock?: () => number; sleep?: JitoSleep } = {}): JitoSender {
   const regions = opts.regions ?? SOLANA_JITO_BLOCK_ENGINES;
   if (regions.length === 0) throw new Error("no block engine");
   const doFetch = opts.fetch ?? ((u: string, i: RequestInit) => fetch(u, i));
@@ -210,9 +192,8 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     }
     if (!r.ok) return { kind: "refused", detail: `HTTP ${r.status}` };
     if (!call.accept(o.result)) return { kind: "refused", detail: call.wrong };
-    // the bundle the engine made of it ("you can get the bundle_id from the x-bundle-id HTTP header", the same page), or
-    // a bundle send's own answer
-    const id = call.method === "sendBundle" ? (o.result as string) : r.headers.get("x-bundle-id");
+    // the bundle the engine made of it ("you can get the bundle_id from the x-bundle-id HTTP header", the same page)
+    const id = r.headers.get("x-bundle-id");
     return { kind: "ok", detail: "", ...(id !== null && BUNDLE_ID.test(id) ? { bundleId: id } : {}) };
   }
 
@@ -259,13 +240,10 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
     return no ?? one(i, call);
   }
 
-  const bundleOk = (b64s: readonly string[]) => b64s.length >= 1 && b64s.length <= JITO_BUNDLE_MAX && b64s.every((b) => typeof b === "string" && b.length > 0);
   return {
     intervalMs: interval,
     send: (b64, signature, queueMaxMs = queueMax) => first(txCall(b64, signature), queueMaxMs),
     rebroadcast: (region, b64, signature, signal) => again(region, txCall(b64, signature), signal),
-    sendBundle: async (b64s, queueMaxMs = queueMax) => (bundleOk(b64s) ? first(bundleCall(b64s), queueMaxMs) : { kind: "refused", detail: `not 1 to ${JITO_BUNDLE_MAX} transactions` }),
-    rebroadcastBundle: async (region, b64s, signal) => (bundleOk(b64s) ? again(region, bundleCall(b64s), signal) : { kind: "refused", detail: `not 1 to ${JITO_BUNDLE_MAX} transactions` }),
     async status(region, bundleId, signal) {
       const i = regions.indexOf(region);
       if (i < 0 || !/^[0-9a-f]{64}$/.test(bundleId)) return "unread";

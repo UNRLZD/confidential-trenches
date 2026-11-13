@@ -9,7 +9,7 @@
 //   - the page's own candle read: GET /v1/market/candles for that mint at 15m (the default), 200, and its bar count;
 //   - the chart: data-chart="ready", a canvas drawn, and the bar count the chart holds (data-bars, read from the
 //     library's own data list) equal to the bars the page's read answered;
-//   - CoinGecko's label: shown exactly when the read's X-Helper-Source names geckoterminal.
+//   - CoinGecko's label: shown exactly when the read's X-Helper-Source names geckoterminal or coingecko (candles.ts isGecko).
 // A screenshot of every load is kept.
 // After: app
 // Bundle: out a browser and the helper

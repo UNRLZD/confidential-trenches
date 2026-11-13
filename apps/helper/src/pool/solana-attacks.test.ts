@@ -935,12 +935,12 @@ test("a bundle that did not fill: the note names the region, the end, the rebroa
   const a = await s.carry(body(tipped()));
   assert.equal(code(a), "not_landed");
   assert.equal(a.status, 503);
-  assert.deepEqual(a.note, { tag: 3, via: "jito", region: "amsterdam", bundle: true, end: "expired", rebroadcasts: 2, misses: 1, plain: 0, hashMs: ">0", status: "failed", endSim: "ok" });
+  assert.deepEqual(a.note, { tag: 3, tip: "1000", via: "jito", region: "amsterdam", bundle: true, end: "expired", rebroadcasts: 2, misses: 1, plain: 0, hashMs: ">0", status: "failed", endSim: "ok" });
   assert.deepEqual(seen.map((x) => [new URL(x.url).host.split(".")[0], new URL(x.url).pathname, x.method]), [["amsterdam", "/api/v1/transactions", "sendTransaction"], ["amsterdam", "/api/v1/getInflightBundleStatuses", "getInflightBundleStatuses"]]);
   assert.deepEqual(seen[1]!.params, [[id]]);
   // a fill reads nothing more; an engine that names no bundle is not asked
   const f = await mainnet({ engine: { fetchFn }, done: (x) => Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }) }).carry(body(tipped({ r: { existingNullifierHash: f32(91) } })));
-  assert.deepEqual(f.note, { tag: 3, via: "jito", region: "amsterdam", bundle: true, end: "filled", rebroadcasts: 0, misses: 0, plain: 0, hashMs: ">0" });
+  assert.deepEqual(f.note, { tag: 3, tip: "1000", via: "jito", region: "amsterdam", bundle: true, end: "filled", rebroadcasts: 0, misses: 0, plain: 0, hashMs: ">0" });
   const bare = blockEngine(() => "ok");
   const u = await mainnet({ engine: bare }).carry(body(tipped({ r: { existingNullifierHash: f32(92) } })));
   assert.equal(u.note?.bundle, false);

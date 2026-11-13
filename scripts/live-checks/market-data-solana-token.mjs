@@ -16,8 +16,9 @@
 //     each a Field {v, src, as_of_ms}, the authorities and the tax read from the chain;
 //   - holders: Holders {holders, total, top_bps, src, as_of_ms}, at most 20 rows {addr, amt, bps[, kind]};
 //   - candles: Candles {tf, candles, src, as_of_ms}, at least one bar, each [t_s, o, h, l, c, vol_usd] on the hour
-//     grid, oldest first, USD values decimal strings. src is "geckoterminal" for a mint the lists do not hold, else
-//     "chain" or "chain,geckoterminal" (the helper's own bars, the vendor's only before them,
+//     grid, oldest first, USD values decimal strings. src is "geckoterminal" or "coingecko" (the paid plan) for a
+//     mint the lists do not hold, else "chain", "chain,geckoterminal" or "chain,coingecko" (the helper's own bars, the
+//     vendor's only before them,
 //     apps/helper/src/data/solana/trades.ts); when the bars include ours, own_from_s (before as_of_ms) is our first bar.
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span; a 429 still standing after it, or a 200 with no bars, is BAD as any other answer.
@@ -45,7 +46,7 @@ export const PAGE = ["row", "decimals", "pool", "risk", "route"];
 export const RISK = ["mint_auth", "freeze_auth", "lp", "top10_bps", "dev_bps", "snipers_bps", "holders", "liq_usd", "age_s", "tax", "honeypot", "insiders_bps", "bundlers_bps", "fresh_bps"];
 export const HOLDERS = ["holders", "total", "top_bps", "src", "as_of_ms"];
 export const CANDLES = ["tf", "candles", "src", "as_of_ms"];
-export const CANDLE_SOURCES = ["geckoterminal", "chain", "chain,geckoterminal"];
+export const CANDLE_SOURCES = ["geckoterminal", "coingecko", "chain", "chain,geckoterminal", "chain,coingecko"];
 const SOURCE = { token: ["jupiter"], holders: ["chain", "jupiter"], candles: CANDLE_SOURCES };
 const SHA = /^[0-9a-f]{40}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;

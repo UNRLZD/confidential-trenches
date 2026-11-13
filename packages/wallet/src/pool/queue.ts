@@ -136,7 +136,7 @@ export interface ProofQueue<R> {
    * `nullifier`: the proof's (an EVM buy's). Each written on the note's mark with HELD -> RESERVED, never in the note
    * (notes/store.ts ReservedMark). */
   take(noteId: string, attempt?: string, early?: Promise<ChainNow>, lastHeight?: bigint, nullifier?: bigint): Promise<ReadyProof<R>>;
-  /** take() of several notes at once, for one bundle of transactions that lands whole or not at all (card
+  /** take() of several notes at once, for the transactions of one buy made of several pieces (card
    *  buy-spends-several-pieces): every note's turn held together, every refusal decided before any write, so a set
    *  refused leaves none RESERVED (a late proof's attempt let go and made again, as take() does; the others HELD, their
    *  proofs ready). Then each HELD -> RESERVED in order, with `lastHeight` on each one's mark. A write that fails there
