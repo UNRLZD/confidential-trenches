@@ -369,6 +369,20 @@ test("rule 6: USDC on W goes home only once nothing of W is in flight and no cal
   assert.deepEqual((await usdcOnly(() => [], { tx_hash: "c", state: "pending", height: "1" })).p.written, []);
 });
 
+test("a creation the helper calls pending holds W's USDC only until the seat's final is NEAR_PENDING_SETTLED_BLOCKS past the block this device first read it so; a Sync never restarts the wait", async () => {
+  const v = await world([5_000_000n], [true]);
+  const { w: W, nh } = v.ws[0]!;
+  const creating = recordsFrom({ [W]: { wallet: W, token: null, calls: [], created: { tx_hash: "c", state: "pending", height: "1" } } });
+  const at = (h: number, fresh = false) => nearHoldingsPass(pageOf(v), { spends: spendsOf([row(nh, W)], h), records: creating, seat: seatOf({ [USDC]: { [W]: 2_500_000n } }, { height: h }), fresh });
+  // no first read yet: this read is it, not yet
+  assert.deepEqual(await at(H), { written: [], empty: [], unread: [W] });
+  // inside the wait, a Sync too: not yet
+  assert.deepEqual((await at(H + Number(NEAR_PENDING_SETTLED_BLOCKS), true)).written, []);
+  // past it: home
+  assert.deepEqual((await at(H + Number(NEAR_PENDING_SETTLED_BLOCKS) + 1)).written, [W]);
+  assert.equal((await records(v.w))[0]!.stage, "sent");
+});
+
 test("finding 7: the coin in the exchange's lost-found leaves W unread, never kept empty", async () => {
   const { v, W, reads } = await bought({});
   reads.seat = seatOf({}, { lost: 4n });

@@ -957,7 +957,8 @@ export const NEAR_SEAT_LAG_MAX = 30;
  *  runs at its max_block_height at the latest, but what it starts runs on in later receipts (the token's
  *  ft_transfer_call into Rhea, the swap, the output's ft_transfer back, ft_resolve_transfer): a block or two each, and
  *  the protocol delays receipts under congestion. 100 blocks, about a minute and a half, holds that chain with room;
- *  a longer wait only keeps USDC on W longer. */
+ *  a longer wait only keeps USDC on W longer. A creation the helper calls pending (a plain Transfer, no last block of
+ *  its own) is settled the same many blocks past the block this device first read W so. */
 export const NEAR_PENDING_SETTLED_BLOCKS = 100n;
 
 /** The helper's record of one W (POST /v1/bind/record): the token its first carried call named, each call's relayer
@@ -1057,7 +1058,8 @@ const delivered = (r: VaultSpendRow): boolean => r.status === "paid" || (r.statu
  *   of W is in flight and no call W signed can still land: the seat's final past every delegate's max_block_height, a
  *   pending call's by NEAR_PENDING_SETTLED_BLOCKS more; with no call, past the creation's height by
  *   NEAR_DELEGATE_LIFE_BLOCKS, or with no creation either, past the block this device first read W so (the helper's
- *   word moving only when, never where, the money goes). The coin in the lost-found, or USDC held back by a call still
+ *   word moving only when, never where, the money goes); a creation the helper calls pending, once the seat's final is
+ *   NEAR_PENDING_SETTLED_BLOCKS past the block this device first read W so. The coin in the lost-found, or USDC held back by a call still
  *   able to land: nothing yet, read again later. A proven token and USDC both empty with nothing in flight: closed by
  *   that seat answer only until the next restore or Sync (reads.fresh), which reads it again. Closed for good: a note's
  *   W whose spends row is final and paid someone else or was refunded (a plain withdrawal).
@@ -1213,14 +1215,17 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
         break;
       }
       const at = BigInt(block.height);
-      // in flight: W's creation pending, or a call pending that can still run (no last block known, or the seat's final
-      // not yet NEAR_PENDING_SETTLED_BLOCKS past it)
-      const inFlight = rec.created?.state === "pending" || pendingTill.some((m) => m === null || at <= m + NEAR_PENDING_SETTLED_BLOCKS);
-      // no call W signed can land any more: past every delegate's last block; with no call, past the creation's life,
-      // and with no creation either, that life past the block this device first read W so (another device's buy asks
-      // W's creation right after its payout)
+      // the block this device first read W with no call and no creation, or with its creation pending (another device's
+      // buy asks W's creation right after its payout): kept across loads, never reset by a Sync
       const firstSeen = seen.get(a.w);
-      if (lastHeight < 0n && rec.created === null && firstSeen === undefined) (seen.set(a.w, block.height), (changed = true));
+      if (((lastHeight < 0n && rec.created === null) || rec.created?.state === "pending") && firstSeen === undefined) (seen.set(a.w, block.height), (changed = true));
+      // in flight: W's creation pending until the seat's final is NEAR_PENDING_SETTLED_BLOCKS past that first read, or a
+      // call pending that can still run (no last block known, or the seat's final not yet NEAR_PENDING_SETTLED_BLOCKS
+      // past it)
+      const creating = rec.created?.state === "pending" && (firstSeen === undefined || at <= BigInt(firstSeen) + NEAR_PENDING_SETTLED_BLOCKS);
+      const inFlight = creating || pendingTill.some((m) => m === null || at <= m + NEAR_PENDING_SETTLED_BLOCKS);
+      // no call W signed can land any more: past every delegate's last block; with no call, past the creation's life,
+      // and with no creation either, that life past the block this device first read W so
       const settledW = !inFlight && (lastHeight >= 0n ? at > lastHeight : at > BigInt(rec.created === null ? (firstSeen ?? block.height) : rec.created.height) + NEAR_DELEGATE_LIFE_BLOCKS);
       const base = { v: 1 as const, id: `restored:${a.w}`, network: page.network, amount: (a.row.withdrawn - a.row.fee).toString(), slippage_bps: NEAR_RESTORED_SLIPPAGE_BPS, w: a.w, l: a.l.toString(), j: a.j, note: a.note.id, fee: a.row.fee.toString(), created_ms: now(), resumes: NEAR_BUY_RESUMES, payout: "landed" as const, txs: [] };
       let made: NearBuyRecord | null = null;
