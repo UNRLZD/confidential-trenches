@@ -1,0 +1,192 @@
+{
+ "_note": "good: the branch helper (card/helper-candles-keyed-gt, this card's working tree) on the Mac at http://127.0.0.1:8797 with planted vendor keys and a planted CoinGecko key (none real), CoinGecko's on-chain paths answered by GeckoTerminal's keyless v2 (the same data; a preload rewrote https://pro-api.coingecko.com/api/v3/onchain to https://api.geckoterminal.com/api/v2 and dropped the key header, since the planted key cannot read CoinGecko), read by helper-candles-keyed-gt.mjs --base http://127.0.0.1:8797 --record at 2026-11-13T10:52:42.991Z: BONK src coingecko, Base 0xb200..108c src chain,coingecko, 500 bars each; the helper log held no trace of the key. bad: the deployed helper (main b1b679c42, no key) at https://ct-api.unrealized.trade, same read at 2026-11-13T10:50:57.056Z: both charts src chain,geckoterminal after 9 reads. A run on the deployed helper with the owner's real key is recorded after the owner's key step and the deploy.",
+ "good": {
+  "base": "http://127.0.0.1:8797",
+  "at": "2026-11-13T10:52:42.991Z",
+  "lists": {
+   "base": 200
+  },
+  "charts": [
+   {
+    "chain": "solana",
+    "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "status": 200,
+      "ms": 5004,
+      "bars": 0,
+      "src": "chain",
+      "filling": true
+     },
+     {
+      "status": 200,
+      "ms": 461,
+      "bars": 500,
+      "src": "coingecko",
+      "filling": false
+     }
+    ]
+   },
+   {
+    "chain": "base",
+    "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+    "reads": [
+     {
+      "status": 200,
+      "ms": 1326,
+      "bars": 500,
+      "src": "chain,coingecko",
+      "filling": false
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-13T10:50:57.056Z",
+  "lists": {
+   "base": 200
+  },
+  "charts": [
+   {
+    "chain": "solana",
+    "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "status": 200,
+      "ms": 1666,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 839,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 816,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 878,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 877,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 818,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 817,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 866,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 1031,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     }
+    ]
+   },
+   {
+    "chain": "base",
+    "address": "0xb20000000000000000000078ee7ce2fe4908108c",
+    "reads": [
+     {
+      "status": 200,
+      "ms": 1310,
+      "bars": 4,
+      "src": "chain",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 874,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 876,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 816,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 810,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 866,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 1039,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 794,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 2241,
+      "bars": 500,
+      "src": "chain,geckoterminal",
+      "filling": false
+     }
+    ]
+   }
+  ]
+ }
+}

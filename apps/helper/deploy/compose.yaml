@@ -19,6 +19,10 @@ services:
       RELAY_API_KEY: ${RELAY_API_KEY:-}
       LIFI_API_KEY: ${LIFI_API_KEY:-}
       ONECLICK_JWT: ${ONECLICK_JWT:-}
+      # the paid CoinGecko key every chart reads first (src/data/coingecko.ts) and its calls a minute, as CoinGecko's
+      # /key answers them (the owner's coingecko-key.sh writes both); empty: every chart reads GeckoTerminal keyless
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      COINGECKO_CALLS_PER_MIN: ${COINGECKO_CALLS_PER_MIN:-}
       # Every other name src/ reads (deploy/env-names.test.mjs holds the list to src): the RPC providers (src/rpc/rpc.ts,
       # src/token-status/, src/withdraw/fee.ts; empty: the public endpoint) and the release's withdrawal relayer per
       # network (src/withdraw/fee.ts; empty: that network is not quoted).

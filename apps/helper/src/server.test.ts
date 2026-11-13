@@ -380,11 +380,13 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const \{ ready, warmed \} = readyGate\(warmUntilReady\(\{ lists, evmLists, token \}\), checked\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
-  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
+  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds, keyed\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
   // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
   // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health; each account's
   // daily spend in the store, shared with the helper this one replaces (review H1 of 424dce1e)
-  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
+  // card helper-candles-keyed-gt: and CoinGecko's keyed account, whose reads every chart asks first (none with no key)
+  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\), \.\.\.coingeckoPace\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
+  assert.match(main, /const keyed = createKeyed\(process\.env, holds\);/);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held, near\);/);
@@ -412,7 +414,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /^ {1,}setDefaultAutoSelectFamilyAttemptTimeout\(CONNECT_ATTEMPT_MS\);/m);
   assert.ok(CONNECT_ATTEMPT_MS > 1_000, "past the 1 s SYN resend");
   assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko, \{ holds \}\)\]\)\);/);
-  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko, slots\);/);
+  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko, slots, keyed\);/);
   assert.match(main, /for \(const l of Object\.values\(evmLists\)\) l\.warm\(\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
