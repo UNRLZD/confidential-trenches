@@ -1613,9 +1613,10 @@ test("evm-money-shows-and-spends-at-once: a sign out or a stop during the run's 
       }
       return { events: [...ch.c.events], finalBlock: ch.c.fin };
     } });
-    const t0 = Date.now();
-    const a = await runPoolDepositEvm(h, ASK);
-    assert.ok(Date.now() - t0 < POOL_DEPOSIT_EVM_WAIT_MS / 2, `${k}: the wait ended at the sign out (${Date.now() - t0} ms)`);
+    // a run that sits out its wait ends after POOL_DEPOSIT_EVM_WAIT_MS; one that ends at the sign out (100 ms in) wins
+    // this race by over a second
+    const a = await Promise.race([runPoolDepositEvm(h, ASK), settleMs((POOL_DEPOSIT_EVM_WAIT_MS * 3) / 4).then(() => "sat out the wait" as const)]);
+    assert.notEqual(a, "sat out the wait", `${k}: the wait ended at the sign out`);
     assert.equal((a as { stage?: string }).stage, "sent", k);
     assert.equal(after, 0, `${k}: no read after the sign out`);
     assert.equal((await ns.get(planned.id))!.state, "INCOMING", `${k}: nothing written after the sign out`);
