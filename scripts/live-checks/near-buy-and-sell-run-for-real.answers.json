@@ -1,0 +1,118 @@
+{
+ "good": {
+  "note": "mainnet read by this check, 2026-11-12T23:04:49.507Z",
+  "at": "2026-11-12T23:04:49.507Z",
+  "reads": {
+   "https://rpc.mainnet.fastnear.com": {
+    "code": {
+     "vault.confidential.unrlzd.near": "C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u",
+     "v2.ref-finance.near": "GZmkbfVLcN7ErxU9RDxP24YTaKmoVixhM6XyycP15Qvi",
+     "wrap.near": "DL2f5xmZ44cQRP6vBMt94rvseH5d5KKnAGis2WkTAsh1",
+     "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+     "touched.tkn.near": "4AVV1KUVgi17XoXkqxUPzyMhERXu15mGawriPQvWmBKD"
+    },
+    "vaultKeys": [],
+    "pools": {
+     "4512": {
+      "token_account_ids": [
+       "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+       "wrap.near"
+      ],
+      "total_fee": 30
+     },
+     "4771": {
+      "token_account_ids": [
+       "touched.tkn.near",
+       "wrap.near"
+      ],
+      "total_fee": 30
+     }
+    }
+   },
+   "https://near.drpc.org": {
+    "code": {
+     "vault.confidential.unrlzd.near": "C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u",
+     "v2.ref-finance.near": "GZmkbfVLcN7ErxU9RDxP24YTaKmoVixhM6XyycP15Qvi",
+     "wrap.near": "DL2f5xmZ44cQRP6vBMt94rvseH5d5KKnAGis2WkTAsh1",
+     "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+     "touched.tkn.near": "4AVV1KUVgi17XoXkqxUPzyMhERXu15mGawriPQvWmBKD"
+    },
+    "vaultKeys": [],
+    "pools": {
+     "4512": {
+      "token_account_ids": [
+       "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+       "wrap.near"
+      ],
+      "total_fee": 30
+     },
+     "4771": {
+      "token_account_ids": [
+       "touched.tkn.near",
+       "wrap.near"
+      ],
+      "total_fee": 30
+     }
+    }
+   }
+  }
+ },
+ "bad": {
+  "at": "2026-11-12T23:04:49.507Z",
+  "reads": {
+   "https://rpc.mainnet.fastnear.com": {
+    "code": {
+     "vault.confidential.unrlzd.near": "C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u",
+     "v2.ref-finance.near": "DL2f5xmZ44cQRP6vBMt94rvseH5d5KKnAGis2WkTAsh1",
+     "wrap.near": "DL2f5xmZ44cQRP6vBMt94rvseH5d5KKnAGis2WkTAsh1",
+     "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+     "touched.tkn.near": "4AVV1KUVgi17XoXkqxUPzyMhERXu15mGawriPQvWmBKD"
+    },
+    "vaultKeys": [],
+    "pools": {
+     "4512": {
+      "token_account_ids": [
+       "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+       "wrap.near"
+      ],
+      "total_fee": 30
+     },
+     "4771": {
+      "token_account_ids": [
+       "touched.tkn.near",
+       "wrap.near"
+      ],
+      "total_fee": 30
+     }
+    }
+   },
+   "https://near.drpc.org": {
+    "code": {
+     "vault.confidential.unrlzd.near": "C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u",
+     "v2.ref-finance.near": "DL2f5xmZ44cQRP6vBMt94rvseH5d5KKnAGis2WkTAsh1",
+     "wrap.near": "DL2f5xmZ44cQRP6vBMt94rvseH5d5KKnAGis2WkTAsh1",
+     "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q",
+     "touched.tkn.near": "4AVV1KUVgi17XoXkqxUPzyMhERXu15mGawriPQvWmBKD"
+    },
+    "vaultKeys": [],
+    "pools": {
+     "4512": {
+      "token_account_ids": [
+       "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+       "wrap.near"
+      ],
+      "total_fee": 30
+     },
+     "4771": {
+      "token_account_ids": [
+       "touched.tkn.near",
+       "wrap.near"
+      ],
+      "total_fee": 25
+     }
+    }
+   }
+  },
+  "note": "the good answer as an upgrade would leave it: Rhea at another code (planted: the hash is wrap.near's) on both operators, and pool 4771 at fee 25 on dRPC"
+ }
+}

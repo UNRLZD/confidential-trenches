@@ -241,6 +241,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sell-share-across-wallets.mjs",
   "scripts/live-checks/near-private-trading.mjs",
   "scripts/live-checks/near-holdings-restore.mjs",
+  "scripts/live-checks/near-buy-and-sell-run-for-real.mjs",
   "scripts/live-checks/solana-mint-supply-moves.mjs",
   "scripts/live-checks/solana-release-reads-paced.mjs",
   "scripts/live-checks/portfolio-one-balance.mjs",
