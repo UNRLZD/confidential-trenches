@@ -8,6 +8,8 @@ import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount } from "./model.ts";
 import { useSellKit } from "./source.tsx";
 import type { Sell, SellPreview } from "./source.tsx";
 import { OrderTabs, OrdersSoon } from "../trade/OrderTabs.tsx";
+import { RouteStrip } from "../trade/RouteStrip.tsx";
+import type { Logo } from "../market/Avatar.tsx";
 import type { OrderTab } from "../trade/OrderTabs.tsx";
 import { W } from "./W.tsx";
 import { WORDS } from "./words.ts";
@@ -18,7 +20,9 @@ import "./positions.css";
 // S8.29, S8.30), drawn after R5's ticket at S8.29 (design/proto at design-lock-r5: assets/token.js U.ticket with
 // side "sell", trenches-1440.html's ticket: `1.2M SYM held`, the percent in the amount box with the share's value under
 // it, `25%` `50%` `75%` `100%`, `You receive`, `Sell 50%`), in the buy side's own classes (src/screens/trade/trade.css)
-// with the sell's coral. A preset sells on one click; the box's percent sells on the main button. The button's states
+// with the sell's coral. A preset only picks the share (card sell-box-works-like-the-buy-box, owner 13 Nov 18:11Z: "these
+// button are to choose"); the main button sells it, once. A running sell draws the buy's flow reversed (RouteStrip.tsx):
+// the coin, its one-time wallet, the pool, Private balance. The button's states
 // are the buy side's (src/screens/trade/States.tsx: S8.30 Sending and Landing, S8.11 Slow, Filled, and for a sell
 // the kit ended S8.32 Failed or S8.36 Not landed with Retry, S8.35 part sold with the ready label), run by `useSell`,
 // one request for a double tap. The side switch's Buy goes to the mount (the buy side is TradeBox). No route (S8.33)
@@ -63,7 +67,8 @@ const Coins = () => (
 /** `footer` draws inside the panel under the Route & fees line, as the buy side's does (the token page's safety grid). */
 /** A percent is a share of the row's own units at the row's decimals, the signing page's (positions/model.ts sellAmount),
  *  never the helper's token read: a sell's amount is never sized on a server's word (card app-sell-mount re-check 2). */
-export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy, footer }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void; footer?: ReactNode }) {
+/** `logo` whose logo the flow's coin step draws (the token page's own read); none draws the symbol's letters. */
+export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy, footer, logo }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void; footer?: ReactNode; logo?: Logo }) {
   const decimals = row.decimals;
   const kit = useSellKit();
   // NEAR sells the whole holding only (s.takes): its box opens at 100%, and its amount box holds it there
@@ -127,10 +132,6 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
     if (s.phase.k === "sending" && s.bps !== null) setText(pctLabel(s.bps).slice(0, -1));
   }, [s.phase.k, s.bps]);
 
-  function sellAt(b: number) {
-    if (!canSellAt(b)) return;
-    s.sell(sellAmount(row.units, b, decimals), b, decimals);
-  }
   const canSellAt = (b: number) => s.ready && !running && !off && !noRoute && s.takes(b) && sellAmount(row.units, b, decimals) !== null;
 
   const shown = preview && preview.amount === amount ? preview.p : null;
@@ -192,10 +193,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
             data-pct={b}
             data-on={bps === b || undefined}
             disabled={!canSellAt(b)}
-            onClick={() => {
-              setText(String(b / 100));
-              sellAt(b);
-            }}
+            onClick={() => setText(String(b / 100))}
           >
             {pctLabel(b)}
           </button>
@@ -224,10 +222,11 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
         disabled={!canSell && !running}
         aria-disabled={running || undefined}
         data-testid="sell-cta"
-        onClick={() => bps !== null && canSell && s.sell(amount, bps, decimals)}
+        onClick={() => bps !== null && canSell && s.sell(amount, bps, decimals, shown ? cents(shown.out_usd) : null)}
       >
         {label}
       </button>
+      <RouteStrip route={s.route} symbol={row.symbol} outText={s.route.sold === null ? null : units(s.route.sold)} {...(logo ? { logo } : {})} />
       <div className="trb-line">
         <button type="button" className="trb-row" aria-expanded="false" disabled>
           <Swap />

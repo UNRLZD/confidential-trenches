@@ -23,6 +23,7 @@ function page() {
   const paid: string[] = [];
   let pool = 100_000_000n; // one tap spends 0.1 SOL until the move lands
   const cash: CashToPoolDeps = {
+    any: async () => true,
     tapMax: async () => pool,
     // the mover's need: a move on its way, which lands at once here
     need: async () => (paid.push("c".repeat(64)), (pool = 410_000_000n), "cash/solana/0"),

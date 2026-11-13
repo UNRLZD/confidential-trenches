@@ -74,6 +74,12 @@ export const WORDS = {
   // label is the venue's name and "pool"; `poolBare` is the label while no event has named the venue.
   privateBalance: PF.privateBalance,
   newWallet: draft("New one-time wallet", "buy-route-strip-spec.md Words on screen; design-lock-r5 P.pvTrade PV-02"),
+  // card one-balance-buys-on-every-chain: the step a Solana buy above one tap's spend shows while its shortfall moves from
+  // Cash into the pool (the page's route { move: "cash" }); the lead's words, until the owner picks
+  moveFromCash: draft("Moving from Cash", "card one-balance-buys-on-every-chain (lead's brief, 14 Nov): the route strip's move step before the one-time wallet"),
+  // the sell's flow, the buy's reversed (card sell-box-works-like-the-buy-box): its wallet already holds the coin, so
+  // the buy's label without "New", as the card's brief names the step (13 Nov 18:11Z); picked by the owner 18:49Z
+  sellWallet: ok("One-time wallet", "owner 13 Nov 18:49Z, picked; card sell-box-works-like-the-buy-box: the sell flow's wallet step, newWallet without New"),
   poolSuffix: ok("pool", "owner 8 Nov 07:55Z, kept; drafted from buy-route-strip-spec.md Words on screen: `<Venue> pool` (PV-03, the venue's name + ` pool`)"),
   final: draft("Final", "buy-route-strip-spec.md Words on screen: the tag beside Filled (S8.12)"),
   // every orders place (the Limit and TP/SL tabs, the exit plan): orders are out of the plan for now

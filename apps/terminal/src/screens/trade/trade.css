@@ -123,7 +123,8 @@
 .rs-n[data-state="active"] .rs-v { color: var(--text-1); }
 .rs-n[data-state="done"] .rs-v { color: var(--text-2); }
 .rs-n[data-step="balance"] .rs-v, .rs-n[data-step="token"] .rs-v { min-width: 0; }
-.rs-tk { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--bg-raised); color: var(--text-2); font: 600 13px var(--font-ui); text-transform: uppercase; }
+/* the token step's picture: the coin's own logo, or its letters, as the rail draws them (market/Avatar.tsx) */
+.rs-tk { display: flex; flex: none; }
 /* a link: dots that brighten toward the arrow; the green layer fills left to right */
 .rs-l { flex: 1 1 0; min-width: 12px; height: 38px; display: flex; align-items: center; gap: 1px; padding: 0 4px; overflow: hidden; color: rgba(244, 244, 242, 0.7); transition: color 0.15s ease-out; }
 .rs-l[data-full] { color: var(--acc); }

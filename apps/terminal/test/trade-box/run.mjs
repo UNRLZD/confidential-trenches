@@ -276,7 +276,9 @@ try {
       await page.clock.runFor(2_000);
       check(await settle(async () => !(await side.isDisabled()), true), `@${w.name}: Sell off after the pool buy's Filled`);
       await side.click();
+      // a percent only picks the share (card sell-box-works-like-the-buy-box); Sell sells it
       await page.locator('[data-testid="sell-box"] [data-pct="10000"]').click();
+      await page.locator('[data-testid="sell-cta"]').click();
       await page.clock.runFor(10_500); // the sale's stage filled at 10.4 s, its Final 9.3 s after the route's out
       const box = page.locator('[data-testid="sell-box"]');
       const shown = await settle(() => box.count(), 1);

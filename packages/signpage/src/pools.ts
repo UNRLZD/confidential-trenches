@@ -71,10 +71,15 @@ export function pagePoolsOf(network: "mainnet" | "testnet", solPins = SOL_POOLS,
  */
 export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");
 
+/** The tip a pool.buy on this page pays for a set of k pieces (src/pool-buy.ts tipOf, the kit's solanaPoolBuyTip):
+ *  SOLANA_POOL_JITO_TIP on mainnet for any count of pieces, none on devnet. */
+export const pageBuyTip = (k: number): bigint => solanaPoolBuyTip(POOL_TESTNET ? "devnet" : "mainnet", k);
+
 /** `pools` with each Solana entry's tap spend at `rent` (the kit's Rent sysvar, read on two RPCs): its tap_max, on
- *  `venue` (a coin's own, pool.buy.dry) or, with none, on the costliest venue of any coin (state.pools). */
-export function withSolanaRent(pools: readonly BalancePool[], rent: SolanaRent, venue?: CoinVenue): readonly BalancePool[] {
-  return Object.freeze(pools.map((p) => (p.chain === "solana" ? solanaBalancePool(p.id, p.scope, solanaTapSpendOf(rent, venue)) : p)));
+ *  `venue` (a coin's own, pool.buy.dry) or, with none, on the costliest venue of any coin (state.pools), at the tip the
+ *  buy pays (`tipOf`, pageBuyTip; card max-is-what-you-hold-after-a-trade), so Max is all the buy's pick funds. */
+export function withSolanaRent(pools: readonly BalancePool[], rent: SolanaRent, venue?: CoinVenue, tipOf: (k: number) => bigint = pageBuyTip): readonly BalancePool[] {
+  return Object.freeze(pools.map((p) => (p.chain === "solana" ? solanaBalancePool(p.id, p.scope, solanaTapSpendOf(rent, venue, tipOf)) : p)));
 }
 
 /** What a coin's tap spend reads of its venue (the kit's solanaPoolBuyMaxSpend): pump's curve or PumpSwap, its token
@@ -154,7 +159,7 @@ const solOf = (l: bigint): string => {
 type BuyDryAnswer = { result: PoolBuyDry } | { error: ErrorCode };
 export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unknown>) => Running<"pool.buy.dry"> {
   const now = d.now ?? (() => performance.now());
-  const tipOf = (k: number): bigint => d.tip ?? solanaPoolBuyTip(POOL_TESTNET ? "devnet" : "mainnet", k);
+  const tipOf = (k: number): bigint => d.tip ?? pageBuyTip(k);
   const venues = new Map<string, { v: CoinVenue; at: number }>();
   const venueOf = async (rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> => {
     const kept = venues.get(token);
@@ -185,7 +190,7 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
     } catch (e) {
       return { error: e instanceof SolanaRpcTransportError ? "down" : "quote_check_failed" };
     }
-    const tap = poolBalances(got.notes, withSolanaRent(sol, rent, venue), got.ready, got.open, got.landed)[0]?.tap_max;
+    const tap = poolBalances(got.notes, withSolanaRent(sol, rent, venue, tipOf), got.ready, got.open, got.landed)[0]?.tap_max;
     if (tap === undefined) return { error: "not_funded" };
     if (amount === null || amount === 0n || amount > lamportsOf(tap)!) return { result: { tap_max: tap } };
     const ids = new Set(sol.map((p) => p.id));

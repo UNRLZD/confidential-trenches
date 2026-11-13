@@ -88,9 +88,10 @@ test("cashMover.need: a quote that is not a NEAR implicit account, not the USDC 
 // --- the tap
 
 type Calls = { inner: bigint[] };
-function tap(o: { taps: bigint[]; moving: boolean }, _calls: Calls): CashToPoolDeps {
+function tap(o: { taps: bigint[]; moving: boolean; any?: boolean }, _calls: Calls): CashToPoolDeps {
   let t = 0, clock = 0;
   return {
+    any: async () => o.any ?? true,
     tapMax: async () => o.taps[Math.min(t++, o.taps.length - 1)]!,
     need: async () => (o.moving ? "cash/solana/7" : null),
     wait: async (ms) => void (clock += ms),
@@ -136,6 +137,17 @@ test("cashFirst: with nothing on its way the pool buy answers at once; a move th
   d.tapMax = async (t) => (reads++, tm(t));
   await run(cashFirst(innerOf(calls), () => d)(ask(400_000_000n), ctx()));
   assert.ok(reads <= CASH_MOVE_WAIT_MS / CASH_MOVE_POLL_MS + 2, `${reads} reads`);
+});
+
+test("cashFirst: with no Cash to move and nothing on its way the pool buy goes straight to the flow, with no tap read and no move asked", async () => {
+  const calls = { inner: [] as bigint[] };
+  const c = ctx();
+  const d = tap({ taps: [0n], moving: true, any: false }, calls);
+  let reads = 0, needs = 0;
+  d.tapMax = async () => (reads++, 0n);
+  d.need = async () => (needs++, "cash/solana/0");
+  await run(cashFirst(innerOf(calls), () => d)(ask(400_000_000n), c));
+  assert.deepEqual([calls.inner, reads, needs, c.routes], [[400_000_000n], 0, 0, []]);
 });
 
 test("cashFirst: a sell, an EVM buy or a NEAR buy is the inner kind's alone", async () => {
