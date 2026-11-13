@@ -10,7 +10,8 @@
 //   - wired: on a pool path the box's trade state carries that rule's value as its receive;
 //   - drawn: You receive (`trade-receive`) draws `≈ <out> <symbol>` from it, and dims it while pending, before any set
 //     preview (which the live source has none of);
-//   - hello: the app's kit names itself 1.14, the version the signing page sends out to.
+//   - hello: the app's kit names itself as the kit at this commit does (packages/kit/src/signpage/messages.ts, from the kit's entry
+//     SIGNPAGE_KIT_VERSION, read, never a literal), which is 1.14 or later, the version the signing page sends out to.
 // The rule's cases are apps/terminal/test/trade-pool-buy.test.ts and the box's drawing apps/terminal/test/trade-pool/
 // run.mjs at the released commit. The recorded answers are facts() over apps/terminal/dist as the deploy builds it.
 // After: app
@@ -21,12 +22,20 @@ import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 
 const KEY = "solana-buy-preview-complete-screens";
 export const APP = "https://ct-app.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const N = "[\\w$]+";
 const esc = (v) => v.replace(/\$/g, "\\$");
+
+/** The kit's own version, and the least the signing page sends out to (kit 1.14): a kit below it is this check's fault. */
+export const KIT = SIGNPAGE_KIT_VERSION;
+const OUT_FROM = [1, 14];
+const parts = (v) => (/^(\d+)\.(\d+)$/.exec(v) ?? []).slice(1).map(Number);
+const [kMaj, kMin] = parts(KIT);
+if (kMaj === undefined || kMaj < OUT_FROM[0] || (kMaj === OUT_FROM[0] && kMin < OUT_FROM[1])) throw new Error(`${KEY}: the kit's version ${KIT} is below 1.14`);
 
 const ASK = new RegExp(`\\{key:${N},cost:(${N})\\.result\\.cost,\\.\\.\\.\\1\\.result\\.out===void 0\\?\\{\\}:\\{out:\\1\\.result\\.out\\},\\.\\.\\.(${N})===null\\?\\{\\}:\\{amount:\\2\\}\\}`);
 /** receiveShown (group: its name). */
@@ -57,7 +66,7 @@ export function facts(index, js) {
     shown: shown !== null,
     wired,
     drawn,
-    hello: hello !== null && new RegExp(`(?:^|[^\\w$.])${esc(hello[1])}=\`1\\.14\``).test(js),
+    hello: hello !== null && new RegExp(`(?:^|[^\\w$.])${esc(hello[1])}=\`${KIT.replace(".", "\\.")}\``).test(js),
   };
 }
 
@@ -66,7 +75,7 @@ export const SAYS = Object.freeze({
   shown: "the trade box has no You receive rule for a pool buy (this coin's out, dimmed while another amount is typed, a dash with none)",
   wired: "the trade box's state on a pool path does not carry that rule's value as its receive",
   drawn: "You receive does not draw the dry answer's out (≈ out symbol, dimmed while pending)",
-  hello: "the app's kit does not name itself 1.14: the signing page sends it no out",
+  hello: `the app's kit does not name itself ${KIT}, the kit's own version: the signing page sends it no out, or reads it at an older level`,
 });
 
 /** The verdict on an answer { index, sha384, ask, shown, wired, drawn, hello }. */

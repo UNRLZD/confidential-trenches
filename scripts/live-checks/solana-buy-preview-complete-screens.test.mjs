@@ -6,7 +6,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { facts, judge, SAYS } from "./solana-buy-preview-complete-screens.mjs";
+import { facts, judge, KIT, SAYS } from "./solana-buy-preview-complete-screens.mjs";
+import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./solana-buy-preview-complete-screens.answers.json", import.meta.url), "utf8"));
 const ALL = Object.values(SAYS).map((s) => `BAD ${s}`);
@@ -39,7 +40,7 @@ const JS = [
   ";let he=de?Ah(F,ae,M,fe):null,ge=de?kh(F,ae,M):null,_e=qv(l);return{preview:C,receive:ge,sell:k}",
   ",N=j?.p??null,ae=e.receive,oe=ae===null?M===null&&N!==null:ae.pending,se=ae===null?M??N?`≈ ${oS((M??N).out)} ${t}`:`—`:`≈ ${oS(ae.out)} ${t}`,ce=s.now();",
   "(0,U.jsx)(`span`,{\"data-pending\":oe||void 0,\"data-testid\":`trade-receive`,children:se})",
-  ";m=`1.14`;post({v:1,type:`hello`,kit:m})",
+  `;m=\`${KIT}\`;post({v:1,type:\`hello\`,kit:m})`,
 ].join("");
 const INDEX = (js) => `<script type="module" crossorigin src="/assets/index.js" integrity="${facts("", js).sha384}"></script>`;
 
@@ -57,7 +58,11 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     // You receive drawn from the set preview alone, or the pending mark from it alone
     ["drawn", JS.replace(":`≈ ${oS(ae.out)} ${t}`", ":`—`")],
     ["drawn", JS.replace("\"data-pending\":oe||void 0", "\"data-pending\":void 0")],
-    ["hello", JS.replace("m=`1.14`", "m=`1.13`")],
+    ["hello", JS.replace(`m=\`${KIT}\``, "m=`1.13`")],
+    // an app built on a kit one level older than this commit's (747's kit 1.15 bump: a 1.14 app is read at 1.14)
+    ["hello", JS.replace(`m=\`${KIT}\``, `m=\`${KIT.replace(/\d+$/, (n) => String(Number(n) - 1))}\``)],
+    // another version's dot read as any character
+    ["hello", JS.replace(`m=\`${KIT}\``, `m=\`${KIT.replace(".", "x")}\``)],
   ];
   for (const [mark, js] of cuts) {
     assert.notEqual(js, JS, `${mark}: the cut changed nothing`);
@@ -65,4 +70,9 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     const want = mark === "shown" ? [mark, "wired"] : [mark];
     assert.deepEqual(judge(facts(INDEX(js), js)).lines, want.map((m) => `BAD ${SAYS[m]}`), `${mark}: ${js.slice(0, 80)}`);
   }
+});
+
+test("the version the app's kit must name is the kit's own at this commit, never a literal", () => {
+  assert.equal(KIT, SIGNPAGE_KIT_VERSION);
+  assert.ok(SAYS.hello.includes(SIGNPAGE_KIT_VERSION));
 });
