@@ -53,6 +53,8 @@ test("a remainder at U_X shows in its pool's one balance, exact, for SOL on Sola
   });
   // a pool whose notes hold nothing but whose U_X holds money is not empty
   assert.equal(portfolio(snap(BEFORE), data, NOW).pools.view, "rows");
+  // what each row's Withdraw can take out is the pool's own: Robinhood's U_X money alone leaves its Withdraw off
+  assert.deepEqual(Object.fromEntries(portfolio(snap(BEFORE), data, NOW).pools.rows.map((r) => [r.chain, r.pooled])), { near: 10_000_000n, solana: 1_500_000_000n, base: 10_000_000_000_000_000n, robinhood: 0n });
   // the deposit sheet's balance reads the same number as Portfolio's row
   assert.deepEqual(poolBalance(BEFORE.pools, "solana", BEFORE.deposit_wallets), { asset: "SOL", balance: "1.512500001" });
   assert.deepEqual(poolBalance(BEFORE.pools, "base", BEFORE.deposit_wallets), { asset: "ETH", balance: "0.012" });

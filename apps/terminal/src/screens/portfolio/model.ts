@@ -726,6 +726,8 @@ export interface PoolRow {
   asset: PoolAsset;
   decimals: number;
   balance: bigint;
+  /** What the pool itself holds (its notes alone, no deposit wallet's money): what its Withdraw can take out. */
+  pooled: bigint;
 }
 
 /** loading: no state yet. offline: the signing page is down. unread: the page sent no pools (it cannot read the
@@ -741,10 +743,12 @@ export interface Pools {
  *  never holds the vault, as cashParts reads it), then the pools in the page's order. */
 export function pools(s: SignpageState, offline = false): Pools {
   if (s.pools === undefined) return { view: offline ? "offline" : "unread", rows: [] };
-  const vault: PoolRow = { chain: "near", asset: "USDC", decimals: POOL_ASSET_DECIMALS.USDC, balance: baseUnits(s.vault_balance, POOL_ASSET_DECIMALS.USDC) ?? 0n };
+  const v = baseUnits(s.vault_balance, POOL_ASSET_DECIMALS.USDC) ?? 0n;
+  const vault: PoolRow = { chain: "near", asset: "USDC", decimals: POOL_ASSET_DECIMALS.USDC, balance: v, pooled: v };
   const rows = [vault, ...s.pools.map((p): PoolRow => {
     const decimals = POOL_ASSET_DECIMALS[p.asset];
-    return { chain: p.chain, asset: p.asset, decimals, balance: (baseUnits(p.balance, decimals) ?? 0n) + waitingAt(s.deposit_wallets, p.chain, p.asset) };
+    const pooled = baseUnits(p.balance, decimals) ?? 0n;
+    return { chain: p.chain, asset: p.asset, decimals, balance: pooled + waitingAt(s.deposit_wallets, p.chain, p.asset), pooled };
   })];
   return { view: rows.some((r) => r.balance > 0n) ? "rows" : "empty", rows };
 }
