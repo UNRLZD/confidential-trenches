@@ -207,6 +207,7 @@ export const OUT = {
   "discover-matches-the-main-app": "a browser and the helper",
   "app-pool-withdraw": "a browser",
   "app-hop-sync-lock": "a browser",
+  "app-lock-holds-until-the-layer-closes": "a browser (its --harness run is in test-browser)",
   "balances-per-chain": "a browser and chain RPCs",
   "app-export-every-wallet": "a browser",
   "evm-quote-warm-round": "EVM RPC quotes",
