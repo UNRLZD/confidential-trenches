@@ -5,38 +5,38 @@
     "the real fee payer and relay fees on the deployed helper: the copy's helper sender runs in this process with a fresh fee payer, the fee the kit's for the copy's rent",
     "the 151-block clock on real slot times on the real RPC pair: the copy's slots run on this machine's clock"
   ],
-  "at": "2026-11-13T11:42:08.739Z",
+  "at": "2026-11-13T11:49:13.550Z",
   "what": "a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): 2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool",
   "validator": {
     "feature-set": 3383571666,
     "solana-core": "4.3.2"
   },
-  "mainnetSlot": 468913193,
+  "mainnetSlot": 468915139,
   "rent": {
     "mainnet": "d813000000000000000000000000f03f32",
     "copy": "d813000000000000000000000000f03f32"
   },
   "clock": [
     {
-      "wallMs": 1794570055308,
+      "wallMs": 1794570473464,
       "confirmed": {
         "slot": 34,
-        "time": 1794570055
+        "time": 1794570473
       },
       "finalized": {
         "slot": 34,
-        "time": 1794570055
+        "time": 1794570473
       }
     },
     {
-      "wallMs": 1794570055816,
+      "wallMs": 1794570473971,
       "confirmed": {
         "slot": 37,
-        "time": 1794570055
+        "time": 1794570473
       },
       "finalized": {
         "slot": 37,
-        "time": 1794570055
+        "time": 1794570473
       }
     }
   ],
@@ -139,10 +139,10 @@
     {
       "coin": "curve",
       "step": "deposit-0",
-      "signature": "228m7FPv7qzcT8H6YiPFsRJN59AiKv13KLW6SR1avu3uGVYLjEj913bGNmcdhe8qPtvdiaE8AAYMFbrYp66Sfg63",
+      "signature": "5i4frFMkGvkwz5FW784aXJ4opsEm2m8F684G6Zmwe5MjL8uiFy7ftNx5qyYU9UFnoo1vQ5zf4PYmZeWQvEBUs8Gj",
       "found": true,
       "slot": 46,
-      "blockTime": 1794570057,
+      "blockTime": 1794570475,
       "ok": true,
       "err": null,
       "cu": 20924,
@@ -157,13 +157,13 @@
     {
       "coin": "curve",
       "step": "deposit-1",
-      "signature": "65gP4CZXfdxHnggTWWHPwLkbfHSJe6gMArNHb1WCdmxMgrMvEjtDmUHkyDzLaDgcLbztcDcqWL5u5QxiGgAS7xki",
+      "signature": "mfA35jXcLgA8HDYZjx1xbn3xTnxTg5acDUBPEDvcPLJ7SVeBBjx16yTz5aARndFJjrFmr35xRWDRaz9tUC7QTFW",
       "found": true,
-      "slot": 54,
-      "blockTime": 1794570058,
+      "slot": 55,
+      "blockTime": 1794570477,
       "ok": true,
       "err": null,
-      "cu": 24213,
+      "cu": 28713,
       "cuLimit": null,
       "fee": 5000,
       "accounts": 9,
@@ -175,10 +175,10 @@
     {
       "coin": "curve",
       "step": "tag3-fail",
-      "signature": "4PSc3eCxSWk2Cz7vRMTty83EiMn1SGo153z8Z1Pki1wVr8mnUkxHM2ohz911aJuKdzVThwaSaa77SKo5MZRLZdfn",
+      "signature": "64SqPKsHKt7mf4dHexru3GxnhSavRoGc56ok6KSHmD15Y6211pKR2qSgg712KdRQnAgXW1EeEcqUCBJWToXhPPSU",
       "found": true,
-      "slot": 164,
-      "blockTime": 1794570079,
+      "slot": 161,
+      "blockTime": 1794570497,
       "ok": true,
       "err": null,
       "cu": 92787,
@@ -194,13 +194,13 @@
     {
       "coin": "curve",
       "step": "tag3-fail",
-      "signature": "LanYj3eZFnwj3EzxPZN7fjuRSDYzj4U4fbZaPnfLAeapbPXFagwGTPq5uGWEkN77cQQu1rJgfPdz24azVXbdBow",
+      "signature": "2vsU4muruxYG59yh6HY56GUw8guiTuJAwULQG6UML6HUp86dUJBvzek4U2WsPCSFs6my2hxrvoNWWJT43NgEzGGh",
       "found": true,
-      "slot": 169,
-      "blockTime": 1794570080,
+      "slot": 167,
+      "blockTime": 1794570498,
       "ok": true,
       "err": null,
-      "cu": 124834,
+      "cu": 123335,
       "cuLimit": 400000,
       "fee": 10000,
       "accounts": 10,
@@ -213,13 +213,13 @@
     {
       "coin": "curve",
       "step": "tag3-fail",
-      "signature": "2uvnU7PwbyPDrwMv54V8b4kFA6VDoDFdMZK7Xfohs4wdjAQUdGJqndKeVh5wtM8yE2aDAdkbasYBf4z9v41AsExc",
+      "signature": "4f9SBqLfHfyoQhzGHtLmypWkDatNE1rZ21TtUHNzgXWyc1yFV3HCzjaxPNYrYXvobN6GP9hDhEXScGSDpjpd4vBq",
       "found": true,
-      "slot": 350,
-      "blockTime": 1794570114,
+      "slot": 341,
+      "blockTime": 1794570530,
       "ok": true,
       "err": null,
-      "cu": 21045,
+      "cu": 24045,
       "cuLimit": null,
       "fee": 5000,
       "accounts": 9,
@@ -242,18 +242,18 @@
             }
           ]
         },
-        "cu": 223803,
+        "cu": 223932,
         "logsTail": [
-          "Program pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ consumed 3360 of 85749 compute units",
+          "Program pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ consumed 3360 of 85620 compute units",
           "Program return: pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA",
           "Program pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ success",
           "Program log: AnchorError thrown in programs/pump/src/buy.rs:143. Error Code: BuySlippageBelowMinTokensOut. Error Number: 6042. Error Message: Slippage: Would buy less tokens than expected min_tokens_out.",
           "Program log: Left: 184693172381",
           "Program log: Right: 185283133233",
-          "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 50863 of 127060 compute units",
+          "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 49493 of 125561 compute units",
           "Program return: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA",
           "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x179a",
-          "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 223503 of 299700 compute units",
+          "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 223632 of 299700 compute units",
           "Program return: EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA",
           "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF failed: custom program error: 0x179a"
         ]
@@ -264,14 +264,14 @@
       "step": "pieces",
       "ok": true,
       "exit": 0,
-      "why": "the tag 3 null null, the buy not_landed; W swept to 0 in 20 s (stay); the notes [{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\"},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\"},{\"ref\":\"deposit\",\"state\":\"HELD\",\"value\":\"10000000\"},{\"ref\":\"second\",\"state\":\"PLANNED\",\"value\":null},{\"ref\":\"return\",\"state\":\"INCOMING\",\"value\":null}]"
+      "why": "the tag 3 null null, the buy not_landed; W swept to 0 in 28 s (stay); the notes [{\"ref\":\"deposit\",\"state\":\"HELD\",\"value\":\"10000000\"},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\"},{\"ref\":\"return\",\"state\":\"INCOMING\",\"value\":null},{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\"},{\"ref\":\"second\",\"state\":\"PLANNED\",\"value\":null}]"
     }
   ],
   "runs": {
     "curve": {
       "exit": 0,
       "pieces": {
-        "at": "2026-11-13T11:40:56.330Z",
+        "at": "2026-11-13T11:47:54.537Z",
         "scenario": "tag3-fail",
         "after": "stay",
         "plant": "none",
@@ -280,49 +280,49 @@
         "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
         "table": "pinned",
         "mint": "XJC1f2dGemPpp4jCeLPpUUCdFLqPrD9fd4jXBRYpump",
-        "seed": "/tmp/sol-copy-SqE8Ru/curve/run-2026-11-13T11-40-56-298Z.seed",
-        "F": "8bJVxZqRX6pVbmVMhMaGAxypJY8d17hbmGEY8neegJEF",
+        "seed": "/tmp/sol-copy-DqgCEf/curve/run-2026-11-13T11-47-54-505Z.seed",
+        "F": "3cgCWfU7d5CpeGJAGLAzZLp8z5jQkJrbnW38bUyN23KP",
         "helper": {
           "base": "the copy's sender, in process",
           "commit": null
         },
         "deposits": [
           {
-            "U": "GCksFoMP6sHDK2si9DDMSfsCD9xRQFRRY3VBrDybEaTs",
+            "U": "AS7iLt7Q22BxXm34TLH2cSreStmhSHCHRe9NHUUZoH5L",
             "answer": {
               "result": {
                 "stage": "sent",
                 "txs": [
                   {
                     "chain": "solana",
-                    "hash": "228m7FPv7qzcT8H6YiPFsRJN59AiKv13KLW6SR1avu3uGVYLjEj913bGNmcdhe8qPtvdiaE8AAYMFbrYp66Sfg63"
+                    "hash": "5i4frFMkGvkwz5FW784aXJ4opsEm2m8F684G6Zmwe5MjL8uiFy7ftNx5qyYU9UFnoo1vQ5zf4PYmZeWQvEBUs8Gj"
                   }
                 ]
               }
             },
             "times": {
-              "answer": 25,
-              "\"filled\"": 1042,
-              "ended": 1042
+              "answer": 24,
+              "\"filled\"": 1037,
+              "ended": 1037
             }
           },
           {
-            "U": "G1oQ5CnV3W3UaQiTN6Fp7Rq22coiPLZHECSws6kEjJaF",
+            "U": "8pMUw5AuC5REwE9ovXTYmx1ns8SDmzarqW7EFex9hwM5",
             "answer": {
               "result": {
                 "stage": "sent",
                 "txs": [
                   {
                     "chain": "solana",
-                    "hash": "65gP4CZXfdxHnggTWWHPwLkbfHSJe6gMArNHb1WCdmxMgrMvEjtDmUHkyDzLaDgcLbztcDcqWL5u5QxiGgAS7xki"
+                    "hash": "mfA35jXcLgA8HDYZjx1xbn3xTnxTg5acDUBPEDvcPLJ7SVeBBjx16yTz5aARndFJjrFmr35xRWDRaz9tUC7QTFW"
                   }
                 ]
               }
             },
             "times": {
-              "answer": 30,
-              "\"filled\"": 5279,
-              "ended": 5279
+              "answer": 29,
+              "\"filled\"": 5193,
+              "ended": 5193
             }
           }
         ],
@@ -333,7 +333,7 @@
         "buy": {
           "k": 2,
           "amount": "0.005246520",
-          "readyMs": 15043,
+          "readyMs": 14622,
           "answer": {
             "result": {
               "stage": "not_landed",
@@ -341,16 +341,16 @@
             }
           },
           "times": {
-            "\"not_landed\"": 29062,
-            "answer": 29063,
-            "ended": 29143
+            "\"not_landed\"": 28579,
+            "answer": 28579,
+            "ended": 28630
           },
           "end": "not_landed",
           "spent": 1,
-          "W": "GoPwbhbFHtqG4VjAR9hBUGnr54MVzLsHzP4R5mFba6r",
+          "W": "GR7WUrqHQy4QEdAjN3tTjtkwbHKig8DYBd6yp1QBo3pt",
           "txs": []
         },
-        "front": "4PSc3eCxSWk2Cz7vRMTty83EiMn1SGo153z8Z1Pki1wVr8mnUkxHM2ohz911aJuKdzVThwaSaa77SKo5MZRLZdfn",
+        "front": "64SqPKsHKt7mf4dHexru3GxnhSavRoGc56ok6KSHmD15Y6211pKR2qSgg712KdRQnAgXW1EeEcqUCBJWToXhPPSU",
         "holds": {
           "lamports": [
             "0",
@@ -362,15 +362,15 @@
           ]
         },
         "readBack": {
-          "228m7FPv7qzcT8H6YiPFsRJN59AiKv13KLW6SR1avu3uGVYLjEj913bGNmcdhe8qPtvdiaE8AAYMFbrYp66Sfg63": [
+          "5i4frFMkGvkwz5FW784aXJ4opsEm2m8F684G6Zmwe5MjL8uiFy7ftNx5qyYU9UFnoo1vQ5zf4PYmZeWQvEBUs8Gj": [
             "finalized",
             "finalized"
           ],
-          "65gP4CZXfdxHnggTWWHPwLkbfHSJe6gMArNHb1WCdmxMgrMvEjtDmUHkyDzLaDgcLbztcDcqWL5u5QxiGgAS7xki": [
+          "mfA35jXcLgA8HDYZjx1xbn3xTnxTg5acDUBPEDvcPLJ7SVeBBjx16yTz5aARndFJjrFmr35xRWDRaz9tUC7QTFW": [
             "finalized",
             "finalized"
           ],
-          "2uvnU7PwbyPDrwMv54V8b4kFA6VDoDFdMZK7Xfohs4wdjAQUdGJqndKeVh5wtM8yE2aDAdkbasYBf4z9v41AsExc": [
+          "4f9SBqLfHfyoQhzGHtLmypWkDatNE1rZ21TtUHNzgXWyc1yFV3HCzjaxPNYrYXvobN6GP9hDhEXScGSDpjpd4vBq": [
             "finalized",
             "finalized"
           ]
@@ -378,7 +378,7 @@
         "notes": [
           {
             "ref": "deposit",
-            "state": "SPENT",
+            "state": "HELD",
             "value": "10000000"
           },
           {
@@ -387,127 +387,127 @@
             "value": "0"
           },
           {
+            "ref": "return",
+            "state": "INCOMING",
+            "value": null
+          },
+          {
             "ref": "deposit",
-            "state": "HELD",
+            "state": "SPENT",
             "value": "10000000"
           },
           {
             "ref": "second",
             "state": "PLANNED",
             "value": null
-          },
-          {
-            "ref": "return",
-            "state": "INCOMING",
-            "value": null
           }
         ],
         "ok": true,
-        "why": "the tag 3 null null, the buy not_landed; W swept to 0 in 20 s (stay); the notes [{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\"},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\"},{\"ref\":\"deposit\",\"state\":\"HELD\",\"value\":\"10000000\"},{\"ref\":\"second\",\"state\":\"PLANNED\",\"value\":null},{\"ref\":\"return\",\"state\":\"INCOMING\",\"value\":null}]",
+        "why": "the tag 3 null null, the buy not_landed; W swept to 0 in 28 s (stay); the notes [{\"ref\":\"deposit\",\"state\":\"HELD\",\"value\":\"10000000\"},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\"},{\"ref\":\"return\",\"state\":\"INCOMING\",\"value\":null},{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\"},{\"ref\":\"second\",\"state\":\"PLANNED\",\"value\":null}]",
         "stages": [
           {
             "page": "A",
             "kind": "pool.deposit",
             "stage": "filled",
-            "ms": 1042
+            "ms": 1037
           },
           {
             "page": "A",
             "kind": "pool.deposit",
             "stage": "filled",
-            "ms": 5279
+            "ms": 5193
           },
           {
             "page": "A",
             "kind": "pool.buy",
             "stage": "not_landed",
-            "ms": 29062
+            "ms": 28579
           }
         ],
         "proofs": [
           {
-            "at": 1794570064174,
-            "ms": 4937
+            "at": 1794570482284,
+            "ms": 4847
           },
           {
-            "at": 1794570069112,
-            "ms": 4887
+            "at": 1794570487162,
+            "ms": 4830
           },
           {
-            "at": 1794570074081,
-            "ms": 4948
+            "at": 1794570492017,
+            "ms": 4833
           },
           {
-            "at": 1794570079208,
-            "ms": 5091
+            "at": 1794570496910,
+            "ms": 4862
           },
           {
-            "at": 1794570114161,
-            "ms": 5731
+            "at": 1794570530456,
+            "ms": 4867
           }
         ],
         "sent": [
-          "228m7FPv7qzcT8H6YiPFsRJN59AiKv13KLW6SR1avu3uGVYLjEj913bGNmcdhe8qPtvdiaE8AAYMFbrYp66Sfg63",
-          "65gP4CZXfdxHnggTWWHPwLkbfHSJe6gMArNHb1WCdmxMgrMvEjtDmUHkyDzLaDgcLbztcDcqWL5u5QxiGgAS7xki",
-          "2uvnU7PwbyPDrwMv54V8b4kFA6VDoDFdMZK7Xfohs4wdjAQUdGJqndKeVh5wtM8yE2aDAdkbasYBf4z9v41AsExc"
+          "5i4frFMkGvkwz5FW784aXJ4opsEm2m8F684G6Zmwe5MjL8uiFy7ftNx5qyYU9UFnoo1vQ5zf4PYmZeWQvEBUs8Gj",
+          "mfA35jXcLgA8HDYZjx1xbn3xTnxTg5acDUBPEDvcPLJ7SVeBBjx16yTz5aARndFJjrFmr35xRWDRaz9tUC7QTFW",
+          "4f9SBqLfHfyoQhzGHtLmypWkDatNE1rZ21TtUHNzgXWyc1yFV3HCzjaxPNYrYXvobN6GP9hDhEXScGSDpjpd4vBq"
         ],
         "told": [
           {
-            "at": "2026-11-13T11:41:54.242Z",
-            "line": "rent back GoPwbhbFHtqG4VjAR9hBUGnr54MVzLsHzP4R5mFba6r rent_back sent: 2uvnU7PwbyPDrwMv54V8b4kFA6VDoDFdMZK7Xfohs4wdjAQUdGJqndKeVh5wtM8yE2aDAdkbasYBf4z9v41AsExc"
+            "at": "2026-11-13T11:48:50.511Z",
+            "line": "rent back GR7WUrqHQy4QEdAjN3tTjtkwbHKig8DYBd6yp1QBo3pt rent_back sent: 4f9SBqLfHfyoQhzGHtLmypWkDatNE1rZ21TtUHNzgXWyc1yFV3HCzjaxPNYrYXvobN6GP9hDhEXScGSDpjpd4vBq"
           }
         ],
         "steps": [
           {
             "step": "deposit-0",
-            "signature": "228m7FPv7qzcT8H6YiPFsRJN59AiKv13KLW6SR1avu3uGVYLjEj913bGNmcdhe8qPtvdiaE8AAYMFbrYp66Sfg63"
+            "signature": "5i4frFMkGvkwz5FW784aXJ4opsEm2m8F684G6Zmwe5MjL8uiFy7ftNx5qyYU9UFnoo1vQ5zf4PYmZeWQvEBUs8Gj"
           },
           {
             "step": "deposit-0",
-            "signature": "228m7FPv7qzcT8H6YiPFsRJN59AiKv13KLW6SR1avu3uGVYLjEj913bGNmcdhe8qPtvdiaE8AAYMFbrYp66Sfg63"
+            "signature": "5i4frFMkGvkwz5FW784aXJ4opsEm2m8F684G6Zmwe5MjL8uiFy7ftNx5qyYU9UFnoo1vQ5zf4PYmZeWQvEBUs8Gj"
           },
           {
             "step": "deposit-1",
-            "signature": "65gP4CZXfdxHnggTWWHPwLkbfHSJe6gMArNHb1WCdmxMgrMvEjtDmUHkyDzLaDgcLbztcDcqWL5u5QxiGgAS7xki"
+            "signature": "mfA35jXcLgA8HDYZjx1xbn3xTnxTg5acDUBPEDvcPLJ7SVeBBjx16yTz5aARndFJjrFmr35xRWDRaz9tUC7QTFW"
           },
           {
             "step": "deposit-1",
-            "signature": "65gP4CZXfdxHnggTWWHPwLkbfHSJe6gMArNHb1WCdmxMgrMvEjtDmUHkyDzLaDgcLbztcDcqWL5u5QxiGgAS7xki"
+            "signature": "mfA35jXcLgA8HDYZjx1xbn3xTnxTg5acDUBPEDvcPLJ7SVeBBjx16yTz5aARndFJjrFmr35xRWDRaz9tUC7QTFW"
           },
           {
             "step": "tag3-fail",
-            "signature": "4PSc3eCxSWk2Cz7vRMTty83EiMn1SGo153z8Z1Pki1wVr8mnUkxHM2ohz911aJuKdzVThwaSaa77SKo5MZRLZdfn"
+            "signature": "64SqPKsHKt7mf4dHexru3GxnhSavRoGc56ok6KSHmD15Y6211pKR2qSgg712KdRQnAgXW1EeEcqUCBJWToXhPPSU"
           },
           {
             "step": "tag3-fail",
-            "signature": "4PSc3eCxSWk2Cz7vRMTty83EiMn1SGo153z8Z1Pki1wVr8mnUkxHM2ohz911aJuKdzVThwaSaa77SKo5MZRLZdfn"
+            "signature": "64SqPKsHKt7mf4dHexru3GxnhSavRoGc56ok6KSHmD15Y6211pKR2qSgg712KdRQnAgXW1EeEcqUCBJWToXhPPSU"
           },
           {
             "step": "tag3-fail",
-            "signature": "LanYj3eZFnwj3EzxPZN7fjuRSDYzj4U4fbZaPnfLAeapbPXFagwGTPq5uGWEkN77cQQu1rJgfPdz24azVXbdBow"
+            "signature": "2vsU4muruxYG59yh6HY56GUw8guiTuJAwULQG6UML6HUp86dUJBvzek4U2WsPCSFs6my2hxrvoNWWJT43NgEzGGh"
           },
           {
             "step": "tag3-fail",
-            "signature": "LanYj3eZFnwj3EzxPZN7fjuRSDYzj4U4fbZaPnfLAeapbPXFagwGTPq5uGWEkN77cQQu1rJgfPdz24azVXbdBow"
+            "signature": "2vsU4muruxYG59yh6HY56GUw8guiTuJAwULQG6UML6HUp86dUJBvzek4U2WsPCSFs6my2hxrvoNWWJT43NgEzGGh"
           },
           {
             "step": "tag3-fail",
-            "signature": "2uvnU7PwbyPDrwMv54V8b4kFA6VDoDFdMZK7Xfohs4wdjAQUdGJqndKeVh5wtM8yE2aDAdkbasYBf4z9v41AsExc"
+            "signature": "4f9SBqLfHfyoQhzGHtLmypWkDatNE1rZ21TtUHNzgXWyc1yFV3HCzjaxPNYrYXvobN6GP9hDhEXScGSDpjpd4vBq"
           },
           {
             "step": "tag3-fail",
-            "signature": "2uvnU7PwbyPDrwMv54V8b4kFA6VDoDFdMZK7Xfohs4wdjAQUdGJqndKeVh5wtM8yE2aDAdkbasYBf4z9v41AsExc"
+            "signature": "4f9SBqLfHfyoQhzGHtLmypWkDatNE1rZ21TtUHNzgXWyc1yFV3HCzjaxPNYrYXvobN6GP9hDhEXScGSDpjpd4vBq"
           }
         ],
         "sendLines": [
           {
             "phase": "tag3-fail",
-            "line": "pool send solana mainnet pieces outcome=not_landed status=503 ms=444 tag=3 tip=100000 err={\"InstructionError\":[2,{\"Custom\":6042}]}"
+            "line": "pool send solana mainnet pieces outcome=not_landed status=503 ms=431 tag=3 tip=100000 err={\"InstructionError\":[2,{\"Custom\":6042}]}"
           }
         ],
         "engineCalls": [
           {
-            "at": 1794570080804,
+            "at": 1794570498438,
             "call": "pieces",
             "status": 503,
             "txs": 2,
@@ -525,18 +525,18 @@
                 }
               ]
             },
-            "cu": 223803,
+            "cu": 223932,
             "logsTail": [
-              "Program pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ consumed 3360 of 85749 compute units",
+              "Program pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ consumed 3360 of 85620 compute units",
               "Program return: pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA",
               "Program pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ success",
               "Program log: AnchorError thrown in programs/pump/src/buy.rs:143. Error Code: BuySlippageBelowMinTokensOut. Error Number: 6042. Error Message: Slippage: Would buy less tokens than expected min_tokens_out.",
               "Program log: Left: 184693172381",
               "Program log: Right: 185283133233",
-              "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 50863 of 127060 compute units",
+              "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 49493 of 125561 compute units",
               "Program return: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA",
               "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x179a",
-              "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 223503 of 299700 compute units",
+              "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 223632 of 299700 compute units",
               "Program return: EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA",
               "Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF failed: custom program error: 0x179a"
             ]
@@ -545,35 +545,35 @@
         "fee": "1300000"
       },
       "tail": [
-        "2026-11-13T11:40:56.247Z copy: the mainnet build on http://127.0.0.1:34644 and http://localhost:34644; pool 7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8; fee payer 5qmuPMBVBMUh6XfHtaqe26pWfD2yjMPCs3ZdCxeKJnq5; fee 1300000; engine stand-in swallow",
-        "2026-11-13T11:40:56.298Z the run's seed is kept at /tmp/sol-copy-SqE8Ru/curve/run-2026-11-13T11-40-56-298Z.seed (FLOW_RESUME=/tmp/sol-copy-SqE8Ru/curve/run-2026-11-13T11-40-56-298Z.seed signs its words in again)",
-        "2026-11-13T11:40:56.330Z copy helper: GET /v1/health is not served on the copy (404)",
-        "2026-11-13T11:40:56.330Z the helper at the copy's sender, in process: commit null",
-        "2026-11-13T11:40:56.835Z F 8bJVxZqRX6pVbmVMhMaGAxypJY8d17hbmGEY8neegJEF funded by the copy's airdrop: 3CWgBfowroyiiBN3tM1uCDh3V9Su1SXXj41a9dGMuVrEN4eoAkieARbhgxc1QAwpc8uHZqPwNgRe2KkVdkGLs6Pv",
-        "2026-11-13T11:40:57.372Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"228m7FPv7qzcT8H6YiPFsRJN59AiKv13KLW6SR1avu3uGVYLjEj913bGNmcdhe8qPtvdiaE8AAYMFbrYp66Sfg63\"}]}}",
-        "2026-11-13T11:40:58.389Z A pool.deposit progress \"filled\"",
-        "2026-11-13T11:40:58.943Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"65gP4CZXfdxHnggTWWHPwLkbfHSJe6gMArNHb1WCdmxMgrMvEjtDmUHkyDzLaDgcLbztcDcqWL5u5QxiGgAS7xki\"}]}}",
-        "2026-11-13T11:40:59.229Z A helper GET /v1/pool/fee: HTTP 200",
-        "2026-11-13T11:41:04.191Z A pool.deposit progress \"filled\"",
-        "2026-11-13T11:41:04.216Z A helper GET /v1/pool/fee: HTTP 200",
-        "2026-11-13T11:41:09.126Z A helper GET /v1/pool/fee: HTTP 200",
-        "2026-11-13T11:41:14.111Z A helper GET /v1/pool/fee: HTTP 200",
-        "2026-11-13T11:41:19.239Z pool.buy.dry 0.005246520: {\"result\":{\"tap_max\":\"0.01204652\",\"pieces\":2,\"cost\":\"0.0027\"}}",
-        "2026-11-13T11:41:19.310Z F buys 50000000 lamports of XJC1f2dGemPpp4jCeLPpUUCdFLqPrD9fd4jXBRYpump on its curve: 4PSc3eCxSWk2Cz7vRMTty83EiMn1SGo153z8Z1Pki1wVr8mnUkxHM2ohz911aJuKdzVThwaSaa77SKo5MZRLZdfn",
-        "2026-11-13T11:41:20.802Z copy: simulation failed in tag3-fail: {\"InstructionError\":[2,{\"Custom\":6042}]}; Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 50863 of 127060 compute units | Program return: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA | Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x179a | Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 223503 of 299700 compute units | Program return: EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA | Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF failed: custom program error: 0x179a",
-        "2026-11-13T11:41:20.804Z helper: pool send solana mainnet pieces outcome=not_landed status=503 ms=444 tag=3 tip=100000 err={\"InstructionError\":[2,{\"Custom\":6042}]}",
-        "2026-11-13T11:41:20.804Z A helper POST /v1/pool/solana/pieces: HTTP 503",
-        "2026-11-13T11:41:48.305Z A pool.buy progress \"not_landed\"",
-        "2026-11-13T11:41:48.306Z A pool.buy answered {\"result\":{\"stage\":\"not_landed\",\"txs\":[]}}",
-        "2026-11-13T11:41:48.421Z A helper GET /v1/pool/fee: HTTP 200",
-        "2026-11-13T11:41:48.669Z W GoPwbhbFHtqG4VjAR9hBUGnr54MVzLsHzP4R5mFba6r: {\"lamports\":[\"8700000\",\"8700000\"],\"units\":[\"0\",\"0\"]}",
+        "2026-11-13T11:47:54.424Z copy: the mainnet build on http://127.0.0.1:20254 and http://localhost:20254; pool 7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8; fee payer 2KczzSZWCqiBT15h31y2zfpaGnCoGc9JfU8DFxDDmDKM; fee 1300000; engine stand-in swallow",
+        "2026-11-13T11:47:54.505Z the run's seed is kept at /tmp/sol-copy-DqgCEf/curve/run-2026-11-13T11-47-54-505Z.seed (FLOW_RESUME=/tmp/sol-copy-DqgCEf/curve/run-2026-11-13T11-47-54-505Z.seed signs its words in again)",
+        "2026-11-13T11:47:54.537Z copy helper: GET /v1/health is not served on the copy (404)",
+        "2026-11-13T11:47:54.537Z the helper at the copy's sender, in process: commit null",
+        "2026-11-13T11:47:55.042Z F 3cgCWfU7d5CpeGJAGLAzZLp8z5jQkJrbnW38bUyN23KP funded by the copy's airdrop: MAQ6vodMNh1v4rhNBtc5isHFE7sPGK9ksv4sAxVgyAftYPtVmy6ownrh5i4GSsHLZVnD5ZSsrrYJViJPNwYaM1Z",
+        "2026-11-13T11:47:55.576Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"5i4frFMkGvkwz5FW784aXJ4opsEm2m8F684G6Zmwe5MjL8uiFy7ftNx5qyYU9UFnoo1vQ5zf4PYmZeWQvEBUs8Gj\"}]}}",
+        "2026-11-13T11:47:56.590Z A pool.deposit progress \"filled\"",
+        "2026-11-13T11:47:57.136Z A pool.deposit answered {\"result\":{\"stage\":\"sent\",\"txs\":[{\"chain\":\"solana\",\"hash\":\"mfA35jXcLgA8HDYZjx1xbn3xTnxTg5acDUBPEDvcPLJ7SVeBBjx16yTz5aARndFJjrFmr35xRWDRaz9tUC7QTFW\"}]}}",
+        "2026-11-13T11:47:57.429Z A helper GET /v1/pool/fee: HTTP 200",
+        "2026-11-13T11:48:02.300Z A pool.deposit progress \"filled\"",
+        "2026-11-13T11:48:02.324Z A helper GET /v1/pool/fee: HTTP 200",
+        "2026-11-13T11:48:07.177Z A helper GET /v1/pool/fee: HTTP 200",
+        "2026-11-13T11:48:12.042Z A helper GET /v1/pool/fee: HTTP 200",
+        "2026-11-13T11:48:16.927Z pool.buy.dry 0.005246520: {\"result\":{\"tap_max\":\"0.01204652\",\"pieces\":2,\"cost\":\"0.0027\"}}",
+        "2026-11-13T11:48:16.977Z F buys 50000000 lamports of XJC1f2dGemPpp4jCeLPpUUCdFLqPrD9fd4jXBRYpump on its curve: 64SqPKsHKt7mf4dHexru3GxnhSavRoGc56ok6KSHmD15Y6211pKR2qSgg712KdRQnAgXW1EeEcqUCBJWToXhPPSU",
+        "2026-11-13T11:48:18.438Z copy: simulation failed in tag3-fail: {\"InstructionError\":[2,{\"Custom\":6042}]}; Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 49493 of 125561 compute units | Program return: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA | Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x179a | Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF consumed 223632 of 299700 compute units | Program return: EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF AAAAAAAAAABfAAAAAAAAAB4AAAAAAAAA | Program EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF failed: custom program error: 0x179a",
+        "2026-11-13T11:48:18.439Z helper: pool send solana mainnet pieces outcome=not_landed status=503 ms=431 tag=3 tip=100000 err={\"InstructionError\":[2,{\"Custom\":6042}]}",
+        "2026-11-13T11:48:18.439Z A helper POST /v1/pool/solana/pieces: HTTP 503",
+        "2026-11-13T11:48:45.508Z A pool.buy progress \"not_landed\"",
+        "2026-11-13T11:48:45.508Z A pool.buy answered {\"result\":{\"stage\":\"not_landed\",\"txs\":[]}}",
+        "2026-11-13T11:48:45.580Z A helper GET /v1/pool/fee: HTTP 200",
         "pool pass: solana failed too_small=1",
-        "rent back GoPwbhbFHtqG4VjAR9hBUGnr54MVzLsHzP4R5mFba6r rent_back sent: 2uvnU7PwbyPDrwMv54V8b4kFA6VDoDFdMZK7Xfohs4wdjAQUdGJqndKeVh5wtM8yE2aDAdkbasYBf4z9v41AsExc",
-        "2026-11-13T11:42:08.709Z W GoPwbhbFHtqG4VjAR9hBUGnr54MVzLsHzP4R5mFba6r: {\"lamports\":[\"0\",\"0\"],\"units\":[\"0\",\"0\"]}",
-        "2026-11-13T11:42:08.710Z read-back 228m7FPv7qzcT8H6YiPFsRJN59AiKv13KLW6SR1avu3uGVYLjEj913bGNmcdhe8qPtvdiaE8AAYMFbrYp66Sfg63: finalized, finalized, held by both RPCs 0.001 s after the read-back began",
-        "2026-11-13T11:42:08.711Z read-back 65gP4CZXfdxHnggTWWHPwLkbfHSJe6gMArNHb1WCdmxMgrMvEjtDmUHkyDzLaDgcLbztcDcqWL5u5QxiGgAS7xki: finalized, finalized, held by both RPCs 0.002 s after the read-back began",
-        "2026-11-13T11:42:08.712Z read-back 2uvnU7PwbyPDrwMv54V8b4kFA6VDoDFdMZK7Xfohs4wdjAQUdGJqndKeVh5wtM8yE2aDAdkbasYBf4z9v41AsExc: finalized, finalized, held by both RPCs 0.003 s after the read-back began",
-        "2026-11-13T11:42:08.715Z PASS tag3-fail (stay): the tag 3 null null, the buy not_landed; W swept to 0 in 20 s (stay); the notes [{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\"},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\"},{\"ref\":\"deposit\",\"state\":\"HELD\",\"value\":\"10000000\"},{\"ref\":\"second\",\"state\":\"PLANNED\",\"value\":null},{\"ref\":\"return\",\"state\":\"INCOMING\",\"value\":null}]",
+        "rent back GR7WUrqHQy4QEdAjN3tTjtkwbHKig8DYBd6yp1QBo3pt rent_back sent: 4f9SBqLfHfyoQhzGHtLmypWkDatNE1rZ21TtUHNzgXWyc1yFV3HCzjaxPNYrYXvobN6GP9hDhEXScGSDpjpd4vBq",
+        "2026-11-13T11:48:53.480Z W GR7WUrqHQy4QEdAjN3tTjtkwbHKig8DYBd6yp1QBo3pt: {\"lamports\":[\"8700000\",\"8700000\"],\"units\":[\"0\",\"0\"]}",
+        "2026-11-13T11:49:13.528Z W GR7WUrqHQy4QEdAjN3tTjtkwbHKig8DYBd6yp1QBo3pt: {\"lamports\":[\"0\",\"0\"],\"units\":[\"0\",\"0\"]}",
+        "2026-11-13T11:49:13.529Z read-back 5i4frFMkGvkwz5FW784aXJ4opsEm2m8F684G6Zmwe5MjL8uiFy7ftNx5qyYU9UFnoo1vQ5zf4PYmZeWQvEBUs8Gj: finalized, finalized, held by both RPCs 0.001 s after the read-back began",
+        "2026-11-13T11:49:13.530Z read-back mfA35jXcLgA8HDYZjx1xbn3xTnxTg5acDUBPEDvcPLJ7SVeBBjx16yTz5aARndFJjrFmr35xRWDRaz9tUC7QTFW: finalized, finalized, held by both RPCs 0.002 s after the read-back began",
+        "2026-11-13T11:49:13.531Z read-back 4f9SBqLfHfyoQhzGHtLmypWkDatNE1rZ21TtUHNzgXWyc1yFV3HCzjaxPNYrYXvobN6GP9hDhEXScGSDpjpd4vBq: finalized, finalized, held by both RPCs 0.003 s after the read-back began",
+        "2026-11-13T11:49:13.535Z PASS tag3-fail (stay): the tag 3 null null, the buy not_landed; W swept to 0 in 28 s (stay); the notes [{\"ref\":\"deposit\",\"state\":\"HELD\",\"value\":\"10000000\"},{\"ref\":\"change\",\"state\":\"UNSPENT\",\"value\":\"0\"},{\"ref\":\"return\",\"state\":\"INCOMING\",\"value\":null},{\"ref\":\"deposit\",\"state\":\"SPENT\",\"value\":\"10000000\"},{\"ref\":\"second\",\"state\":\"PLANNED\",\"value\":null}]",
         ""
       ]
     }
