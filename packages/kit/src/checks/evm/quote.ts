@@ -1717,6 +1717,19 @@ async function scanPools(
     }
   };
   for (const g of groups.values()) for (const [a, b] of g[0]!.gaps) jobsOf(g, a, b);
+  // the gaps left for later of `es`, taken from them as jobs: the currencies with the same blocks left share each request
+  // as their gaps above do (card robinhood-quotes-inside-provider-limits: one request a currency sent a warm Robinhood
+  // tap of FOBO, 298 other currencies, 12 to 252 posts to rpc.mainnet.chain.robinhood.com, paced at 1 a second, and
+  // drew hundreds of 429s)
+  const laterJobs = (es: readonly Each[], into = jobs): void => {
+    const gs = new Map<string, Each[]>();
+    for (const e of es) if (e.later.length > 0) append(gs, JSON.stringify(e.later), e);
+    for (const g of gs.values()) {
+      const spans = g[0]!.later;
+      for (const e of g) e.later = [];
+      for (const [x, y] of spans) jobsOf(g, x, y, first, into);
+    }
+  };
   shortMax += 2 * jobs.length;
   // a scan the second carries whole, in one round of its requests (a warm one): each provider with another behind it
   // has EVM_SCAN_HOLD_MS a request before the next takes it (scanGateOf)
@@ -1934,7 +1947,7 @@ async function scanPools(
   // blocks unread on Base): a gap left for later that starts further back is read now, before the answer
   if (b - scanHead <= maxLag) {
     jobs.length = 0;
-    for (const e of each) if (e.later.length > 0 && b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);
+    laterJobs(each.filter((e) => e.later.length > 0 && b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag));
     if (jobs.length > 0) {
       shortMax += 2 * jobs.length;
       await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
@@ -1951,7 +1964,7 @@ async function scanPools(
     pin = agreedAt;
     jobs.length = 0;
     // a gap left for later is no longer within maxLag of the agreed block: read now
-    for (const e of each) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);
+    laterJobs(each);
     jobsOf(each, head + 1, end);
     shortMax += 2 * jobs.length;
     await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
@@ -1983,7 +1996,7 @@ async function scanPools(
   const later = each.filter((e) => e.later.length > 0);
   const rest = async (): Promise<void> => {
     const js: Job[] = [];
-    for (const e of later) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y, first, js);
+    laterJobs(later, js);
     if (js.length === 0) return;
     shortMax += 2 * js.length;
     await settle(js.map(run));
