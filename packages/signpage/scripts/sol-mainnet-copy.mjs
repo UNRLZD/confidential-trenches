@@ -23,7 +23,9 @@
 // - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, on SOL_COPY_ENGINE (swallow by default),
 //   through pool-buy-pieces-devnet.mjs's copy-part1 in place of the flow: 6 notes of 0.01 SOL, a buy only 5 pay (refused,
 //   nothing sent), a buy of 2 pieces and Max of the 4 left, each carried as the helper's pieces route sends them (the tag 2s
-//   plain, then the tag 3, card owners-solana-buy-lands).
+//   plain, then the tag 3, card owners-solana-buy-lands). SOL_COPY_SCENARIO=copy-takeable runs that scenario instead;
+//   SOL_COPY_SCENARIO=tag3-fail runs the driver's tag3-fail (FLOW_AFTER=stay): a buy of 2 pieces at 1 bp whose tag 3 pump
+//   refuses (F buys the coin first), its tag 2s landed; it passes when the page's rent back sweeps W's SOL into the pool.
 // - FLOW_RUNG=<lamports> (card round-trip-costs-less, pool-flow-devnet.mjs): the run's one note, 0.01 SOL by default; a
 //   larger rung leaves W enough after its full sell for the sweep, so the record times the sale, teardown and sweep.
 // - Keys are made fresh for the copy and live only in the run's temp folder, removed at the end.
@@ -46,9 +48,10 @@ const STEPS = process.env.SOL_COPY_STEPS ?? "all"; // "buy": deposit and buy onl
 const FLOW = process.env.SOL_COPY_FLOW ?? "pool";
 if (!["pool", "pieces"].includes(FLOW)) throw new Error(`SOL_COPY_FLOW: pool or pieces, not ${FLOW}`);
 const PIECES = FLOW === "pieces";
-// the pieces driver's scenario: copy-part1 (the default), or copy-takeable (the Max past an epoch boundary, the load)
+// the pieces driver's scenario: copy-part1 (the default), copy-takeable (the Max past an epoch boundary, the load), or
+// tag3-fail (the tag 3 refused by pump once its tag 2s landed: W swept back into the pool)
 const SCENARIO = process.env.SOL_COPY_SCENARIO ?? "copy-part1";
-if (!["copy-part1", "copy-takeable"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1 or copy-takeable, not ${SCENARIO}`);
+if (!["copy-part1", "copy-takeable", "tag3-fail"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1, copy-takeable or tag3-fail, not ${SCENARIO}`);
 if (PIECES && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=pieces runs the curve coin alone, with no plant and every step");
 // since card owners-solana-buy-lands a buy of several pieces needs no engine to land (its tag 2s go plain, its tag 3 with
 // a plain copy), so the pieces flow runs on the default stand-in too, the one that never lands a bundle
@@ -343,7 +346,13 @@ for (const kind of KINDS) {
     for (const s of f?.steps ?? []) {
       if (seen.has(s.signature)) continue;
       seen.add(s.signature);
-      const tx = await local("getTransaction", [s.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+      // a send of the run's last moments (a rent back the sale started) may land after the driver ends: read it again
+      // for up to 30 s before it counts as not found
+      let tx = null;
+      for (let i = 0; i < 60 && !tx; i++) {
+        if (i > 0) await sleep(500);
+        tx = await local("getTransaction", [s.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+      }
       records.push(txRecord(kind, s.step, s.signature, tx, Ws[s.step] ? { W: Ws[s.step] } : {}, (x) => base58.decode(x)));
     }
     for (const s of f?.simFails ?? []) records.push({ coin: kind, step: s.phase, ok: false, simulation: s });
@@ -404,7 +413,9 @@ const record = {
     "the 151-block clock on real slot times on the real RPC pair: the copy's slots run on this machine's clock",
   ] } : {}),
   at: new Date().toISOString(),
-  what: PIECES ? "a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): 6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max" : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
+  what: PIECES
+    ? `a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): ${SCENARIO === "tag3-fail" ? "2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool" : SCENARIO === "copy-takeable" ? "5 notes of 0.01 SOL, Max ready after a load and past an epoch boundary" : "6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max"}`
+    : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
   validator: version,
   mainnetSlot: read.slot,
   rent: { mainnet: mainRent, copy: copyRent },
@@ -431,8 +442,12 @@ const record = {
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, JSON.stringify(record, null, 2) + "\n");
 log(`record ${OUT}: ${records.map((r) => `${r.coin}/${r.step} ${r.ok ? "ok" : "FAIL"}`).join(", ")}`);
-// the plant fails only with pump's own refusal of the buy, in the program's log
-const pumpRefused = (r) => r.coin === "mayhem" && r.step === "buy" && !r.ok && (r.simulation?.logsTail ?? r.logsTail ?? []).some((l) => l.includes(`Program ${SOLANA_PUMP_PROGRAM} failed`));
-const plantOk = PLANT ? records.some(pumpRefused) : true;
+// the plant fails only with pump's own refusal of the buy, in the program's log; so does tag3-fail's tag 3 (F bought
+// first, so its 1 bp min out fails), every other record ok
+const pumpRefused = (coin, step) => (r) => r.coin === coin && r.step === step && !r.ok && (r.simulation?.logsTail ?? r.logsTail ?? []).some((l) => l.includes(`Program ${SOLANA_PUMP_PROGRAM} failed`));
+const plantOk = PLANT ? records.some(pumpRefused("mayhem", "buy")) : true;
 if (PLANT) log(`plant ${PLANT}: ${plantOk ? "the buy failed with pump's own error" : "NOT refused by pump"}`);
-process.exit(records.length > 0 && (PLANT ? plantOk : records.every((r) => r.ok)) ? 0 : 1);
+const tag3Refused = pumpRefused("curve", "tag3-fail");
+const tag3Ok = PIECES && SCENARIO === "tag3-fail" ? records.some(tag3Refused) && records.every((r) => r.ok || tag3Refused(r)) : null;
+if (tag3Ok !== null) log(`tag3-fail: ${tag3Ok ? "the tag 3 refused by pump's own error, every other record ok" : "NOT as planted"}`);
+process.exit(records.length > 0 && (PLANT ? plantOk : tag3Ok ?? records.every((r) => r.ok)) ? 0 : 1);

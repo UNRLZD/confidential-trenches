@@ -243,6 +243,9 @@ const NEED = RUNG + solanaRentMin(rent, 17) + 2n * 72n * rent.lamportsPerByte * 
 const F_NEEDS = BigInt(N) * (NEED + FEE) + (SCENARIO === "tag3-fail" ? FRONT + solanaRentMin(rent, 165) + 10n * FEE : 0n) + solanaRentMin(rent, 0);
 
 const idb = new IDBFactory();
+// the device's own database beside the wallet's (src/device-spacing.ts, the rent back's spacing reads globalThis's), as
+// a browser has it and pool-flow-devnet.mjs sets it: with none, every leftover pass is held and W is never swept
+globalThis.indexedDB ??= idb;
 const store = await openWalletStore({ indexedDB: idb });
 // every W an owed record of a buy of several pieces names, in the order written (a landed buy's record goes at its end)
 const owedWs = [];
@@ -763,11 +766,17 @@ if (SCENARIO === "landed-reload") {
 }
 
 if (SCENARIO === "tag3-fail") {
-  const b = await buyOf(2, 1, AFTER !== "stay");
+  // the copy prices the tag 3's tip at mainnet's, so the tap's Max sits under maxOf(2) there: a buy one piece cannot pay,
+  // as copy-part1's buy of 2 pieces
+  phase = "tag3-fail";
+  const b = await buyOf(2, 1, AFTER !== "stay", COPY ? maxOf(1) + 1_000_000n : maxOf(2));
   out.buy = b;
   out.front = front;
   const W = b.W;
   if (!W) finish(false, "no owed record names W");
+  // the terminal's one state read after a pool.buy answer (packages/kit/src/signpage/client.ts REASK_STATE), as a
+  // page that stays open gets it; nothing else asks this page again
+  if (AFTER === "stay") await A.t.stateRead();
   const t0 = Date.now();
   let p = A;
   for (let i = 0; Date.now() - t0 < SWEEP_WAIT_MS; i++) {
