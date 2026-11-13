@@ -11,12 +11,12 @@
 // the good run. fees_bad_deployed: the same read sent to the deployed helper at a74c37a6, which refuses it 400
 // method_not_allowed: FAIL. The deploy of the helper with the method is what the check then reads live.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { HELPER_RPC_METHODS } from "../../packages/kit/src/index.ts";
-import { PARAMS, SIGN, judge, read } from "./helper-rpc-sell-methods.mjs";
+import { OWN_CHECK, PARAMS, SIGN, judge, read } from "./helper-rpc-sell-methods.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-rpc-sell-methods.answers.json"), "utf8"));
@@ -43,8 +43,10 @@ const edit = (method, f) => ({ ...GOOD, reads: GOOD.reads.map((x) => (x.method =
 test("recorded good run: the deployed helper answers every method on the kit's Solana list: PASS", async () => {
   const r = await run(GOOD);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.deepEqual(A.good.methods, [...HELPER_RPC_METHODS.solana].filter((m) => m !== "getRecentPrioritizationFees"));
-  assert.equal(r.lines.length, 1 + 19 * 3 + 1);
+  // the list less the fee read (listed after this run) and what a check of its own reads (getBlock, added after this
+  // run: buy-spends-several-pieces-helper)
+  assert.deepEqual(A.good.methods, HELPER_RPC_METHODS.solana.filter((m) => m !== "getRecentPrioritizationFees" && OWN_CHECK[m] === undefined));
+  assert.equal(r.lines.length, 1 + 19 * 3 + 1 + 1, "19 methods read, getBlock its own check");
   assert.ok(r.lines.some((l) => l.startsWith('ok  [getFeeForMessage] answered: 200 {"jsonrpc":"2.0","id":16,"result":"object"}')));
   assert.ok(r.lines.includes('ok  [getRecentPrioritizationFees] answered: 200 {"jsonrpc":"2.0","id":19,"result":"array"}'));
   // the recorded good run alone, before the fee read was listed, now fails on it: no read
@@ -100,12 +102,21 @@ test("a 429 is waited out once for its Retry-After and sent again; a second 429 
 });
 
 test("every method on the kit's Solana list has its request, and getProgramAccounts is the restore's shape on the record's program", async () => {
-  for (const m of HELPER_RPC_METHODS.solana) assert.ok(PARAMS[m] !== undefined, `no params for ${m}`);
+  for (const m of HELPER_RPC_METHODS.solana) assert.ok(PARAMS[m] !== undefined || OWN_CHECK[m] !== undefined, `no params for ${m}`);
   const sent = [];
   const rec = { ...GOOD, program: "11111111111111111111111111111111", reads: [...GOOD.reads, { method: "getProgramAccounts", id: 20, status: 200, headers: A.good.reads[0].headers, body: '{"jsonrpc":"2.0","id":20,"result":"object"}' }] };
   const r = judge(await read(BASE, replay(rec, sent), { methods: rec.methods, program: rec.program, wait: async () => {} }));
   assert.equal(r.ok, true, r.lines.join("\n"));
   // apps/helper/src/rpc/rpc.test.ts SPENT less minContextSlot, which the helper forwards with or without it
   assert.deepEqual(sent.find((b) => b.method === "getRecentPrioritizationFees").params, [["SysvarC1ock11111111111111111111111111111111"]]);
+  // a method with a check of its own is never sent here and reads n/a with that check's name, a check that exists
+  const listed = [];
+  const own = judge(await read(BASE, replay(GOOD, listed), { methods: HELPER_RPC_METHODS.solana, program: null, wait: async () => {} }));
+  assert.equal(own.ok, true, own.lines.join("\n"));
+  for (const [m, key] of Object.entries(OWN_CHECK)) {
+    assert.ok(HELPER_RPC_METHODS.solana.includes(m) && !listed.some((b) => b.method === m), m);
+    assert.ok(own.lines.includes(`ok  [${m}] n/a: its own check, ${key}`));
+    assert.ok(existsSync(path.join(HERE, `${key}.mjs`)), key);
+  }
   assert.deepEqual(sent.find((b) => b.method === "getProgramAccounts").params, [rec.program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }]);
 });

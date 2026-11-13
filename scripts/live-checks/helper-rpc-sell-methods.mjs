@@ -11,7 +11,9 @@
 // getProgramAccounts is forwarded only in the note restore's shape on the helper's pinned mainnet pool program
 // (apps/helper/src/rpc/rpc.ts scanAllowed); it is sent in that shape on the program the mainnet pool's deploy record
 // names (scripts/live-checks/pool-sol-deploy.mainnet.json), and while no record exists there is no pool to restore
-// from: that line reads n/a with the reason.
+// from: that line reads n/a with the reason. getBlock is forwarded only as the found W's header read of one slot
+// (rpc.ts blockHeaderAllowed), which needs a slot read first: its own check, buy-spends-several-pieces-helper, sends it
+// and the full read the helper must refuse, and its line here reads n/a with that name.
 // A caller draws 16 requests per 10 s on the route on the public endpoint (rpc.ts RPC_CLIENT_MAX; 42 on our keyed
 // providers, RPC_PAGE_NEED) and the list may be longer, so a 429 is waited
 // out once for its Retry-After (at most 10 s) and the request sent again.
@@ -65,6 +67,9 @@ export const PARAMS = {
   getProgramAccounts: (program) => [program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }],
 };
 
+/** A method on the list read by a check of its own, never here. */
+export const OWN_CHECK = { getBlock: "buy-spends-several-pieces-helper" };
+
 /** The program the mainnet pool's deploy record names under `root`, or null where there is no record. */
 export function mainnetPoolProgram(root = ROOT) {
   const file = path.join(root, MAINNET_POOL_RECORD);
@@ -105,6 +110,10 @@ export function judge({ methods, program, reads }) {
       say(true, `${tag} n/a: no ${MAINNET_POOL_RECORD}, no mainnet pool to restore from`);
       continue;
     }
+    if (OWN_CHECK[method] !== undefined) {
+      say(true, `${tag} n/a: its own check, ${OWN_CHECK[method]}`);
+      continue;
+    }
     const r = reads.find((x) => x.method === method);
     if (!r) {
       say(false, `${tag} no read`);
@@ -126,7 +135,7 @@ export async function read(base = BASE, fetchFn = fetch, { methods = HELPER_RPC_
   const reads = [];
   let id = 1;
   for (const method of methods) {
-    if (method === "getProgramAccounts" && program === null) continue;
+    if ((method === "getProgramAccounts" && program === null) || OWN_CHECK[method] !== undefined) continue;
     const p = PARAMS[method];
     if (p === undefined) throw new Error(`no params for ${method}: add it to PARAMS`);
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params: typeof p === "function" ? p(program) : p });

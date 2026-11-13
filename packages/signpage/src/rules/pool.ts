@@ -75,6 +75,7 @@ import {
   solanaPoolPage,
   solanaPoolNextPage,
   solanaPoolTag2Accounts,
+  SOLANA_POOL_BUY_PIECES_MAX,
   solanaPoolSellMinOut,
   solanaPoolSellSteps,
   solanaRentMin,
@@ -459,6 +460,16 @@ export function checkSolanaDeposit(wire: Uint8Array, ask: PoolAsk, ctx: PoolCont
 export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolContext, release: SolanaPoolRelease, reads: SolanaPoolReads): PoolDraw {
   if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") return refuse("kind");
   const pin = pinOf(ctx);
+  const got = releaseTx(wire, ctx, release, reads);
+  passedWire(wire);
+  return { chain: "solana", op: ask.kind, token: null, amount: got.withdrawnValue - got.relayFee, feeCap: got.relayFeeCap, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+}
+
+/** One tag 2 to W (a withdraw's release, a buy's piece): the fee payer and W sign, the compute budget, then the
+ *  device's own release byte for byte, its accounts the kit's tag 2 to W with the change note at `reads.stateSize`,
+ *  nothing after it. Its fee within the device's cap and its deadline ahead. */
+function releaseTx(wire: Uint8Array, ctx: PoolContext, release: SolanaPoolRelease, reads: SolanaPoolReads): SolanaPoolRelease {
+  const pin = pinOf(ctx);
   const d = decode(wire, reads);
   if (d.signers.length !== 2 || d.signers[0] !== pin.feePayer || d.signers[1] !== ctx.wallet) return refuse("signers");
   const n = head(d.ixs);
@@ -480,8 +491,7 @@ export function checkSolanaWithdraw(wire: Uint8Array, ask: PoolAsk, ctx: PoolCon
   if (!sameList(rel.accounts, accounts)) return refuse("release_accounts");
   // the release alone: nothing after it
   if (d.ixs.length > n + 1) return refuse("instructions");
-  passedWire(wire);
-  return { chain: "solana", op: ask.kind, token: null, amount: got.withdrawnValue - got.relayFee, feeCap: got.relayFeeCap, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+  return got;
 }
 
 /** The keys the Solana runtime keeps read-only in every transaction: its reserved account keys (agave
@@ -562,7 +572,19 @@ export function checkSolanaOnwardSend(wire: Uint8Array, ask: PoolAsk, ctx: PoolC
   return { chain: "solana", op: ask.kind, token: null, amount, feeCap: fee, pool: pin.pool, to, decimals: ask.decimals, back: null };
 }
 
-/** A Solana pool buy (tag 3): the kit's checks on every byte against the pinned pool, the request bound to them here. */
+/** A buy's piece (card buy-spends-several-pieces): one tag 2 of the bundle that pays W before its tag 3, its own
+ *  transaction, and the device's release in it. */
+export type SolanaBuyPiece = { readonly wire: Uint8Array; readonly release: SolanaPoolRelease };
+
+/**
+ * A Solana pool buy (tag 3): the kit's checks on every byte against the pinned pool, the request bound to them here.
+ * `pieces` (card buy-spends-several-pieces): the bundle's tag 2s sent before it, each its own transaction: each must
+ * release the device's own proof to this W (ctx.wallet) and nothing else, its change note at the state index it lands
+ * at (the pool's size read, then one more for each release before it; the tag 3's is the next), no two the same note;
+ * the request's `before` must be exactly their withdrawn values and fees, so the tag 3 spends no more than these
+ * releases and its own pay W. A bundle that pays any other wallet is refused (wallet, signers); the draw's fee cap is
+ * every release's.
+ */
 export function checkSolanaBuy(
   wire: Uint8Array,
   ask: PoolAsk,
@@ -571,6 +593,7 @@ export function checkSolanaBuy(
   venue: SolanaPoolBuyVenue,
   req: SolanaPoolBuyRequest,
   reads: SolanaPoolBuyReads,
+  pieces: readonly SolanaBuyPiece[] = [],
 ): PoolDraw {
   if (ask.kind !== "pool.buy" || ask.chain !== "solana") return refuse("kind");
   const pin = pinOf(ctx);
@@ -580,11 +603,25 @@ export function checkSolanaBuy(
   if (req.spend !== ask.amount) return refuse("amount");
   if (reads.reference.slippageBps !== ask.slippageBps) return refuse("slippage");
   checkFeeAndDeadline(release.relayFee, release.relayFeeCap, release.deadlineMs, ctx);
+  if (!Array.isArray(pieces) || pieces.length >= SOLANA_POOL_BUY_PIECES_MAX) return refuse("pieces");
+  const before = req.before ?? [];
+  if (before.length !== pieces.length) return refuse("pieces");
+  const spent = new Set([hexOf(release.existingNullifierHash)]);
+  let feeCap = release.relayFeeCap;
+  pieces.forEach((p, i) => {
+    const got = releaseTx(p.wire, ctx, p.release, { blockhash: reads.blockhash, tables: {}, stateSize: reads.stateSize - pieces.length + i, labelSize: 0 });
+    if (spent.has(hexOf(got.existingNullifierHash))) refuse("pieces");
+    spent.add(hexOf(got.existingNullifierHash));
+    if (before[i]!.withdrawnValue !== got.withdrawnValue || before[i]!.relayFee !== got.relayFee) refuse("pieces");
+    feeCap += got.relayFeeCap;
+  });
   const verdict = checkSolanaPoolBuy(wire, { program: pin.program, pool: pin.pool }, release, venue, req, reads);
   if (!verdict.ok) return refuse(`buy_${verdict.results.find((r) => !r.ok)?.id ?? "checks"}`);
+  for (const p of pieces) passedWire(p.wire);
   passedWire(wire);
-  return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: release.relayFeeCap, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+  return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
 }
+const hexOf = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 /** The device's own reads a sell's reserve under 0 is priced from (solanaSellReserve in src/pool-sell.ts): whether the
  *  sell empties W's holding, W's lamports (the lower of both RPCs), the fee both RPCs price the message at, what the

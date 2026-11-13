@@ -1,14 +1,14 @@
 {
   "_note": {
-    "good": "card/round-trip-costs-less build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch, the rent back's batched read and its proven buy: PASS",
-    "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them",
-    "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them",
-    "beforeFold8": "5697d7a1's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 8's fold (no buy record: the page's holdings, the helper's word on mainnet, decided the pass and were part of what W read as): FAIL on the seen and own-coin rules; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them",
-    "beforeFloor": "main 383b1ffe's build (mainnet; release-102, kit-sol-pool-deposit-floor merged), the committed packages/signpage/index.html and public/app.js there: the sell's rule refuses only a note under the pool's least deposit, so it signs a deposit back under the kit's release floor: FAIL on the sell's rule alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them"
+    "good": "card/round-trip-costs-less build (mainnet; main c32f749c6 merged): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch, the rent back's batched read and its proven buy, and card buy-spends-several-pieces's found W's rule: PASS",
+    "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
+    "beforeFold": "08290868's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 7's fold (no buy record: an airdrop's full sell swept W with its own coin held): FAIL on the seen and the own-coin rules alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
+    "beforeFold8": "5697d7a1's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before delta review 8's fold (no buy record: the page's holdings, the helper's word on mainnet, decided the pass and were part of what W read as): FAIL on the seen and own-coin rules; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them",
+    "beforeFloor": "main 383b1ffe's build (mainnet; release-102, kit-sol-pool-deposit-floor merged), the committed packages/signpage/index.html and public/app.js there: the sell's rule refuses only a note under the pool's least deposit, so it signs a deposit back under the kit's release floor: FAIL on the sell's rule alone; its facts read again from that commit's committed bundle under the marks as card round-trip-costs-less has them; the found W's rule (card buy-spends-several-pieces) is in none of them"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5nqwyZYXvkmrSRzwB6bfGrV2Wt8n5Jx6ds4vbG6QUKzaQ4hgkKxp5xo2Rz4qEclo\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-5nqwyZYXvkmrSRzwB6bfGrV2Wt8n5Jx6ds4vbG6QUKzaQ4hgkKxp5xo2Rz4qEclo",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Xha5HyYf2jFgHc+lyLGFdA+RUyPu02WmYXAO5yhNXGKjwGqvyguv0aDGAugORSW9\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Xha5HyYf2jFgHc+lyLGFdA+RUyPu02WmYXAO5yhNXGKjwGqvyguv0aDGAugORSW9",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
@@ -35,7 +35,8 @@
       "a full sell's record keeps the mints W's record already names": true,
       "the sweep's plan refusal ends the pass refused, not given up": true,
       "every sleep of the pass, its tries' and its read-backs', lets the sell lock go": true,
-      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": true
+      "W's own coin holds the pass: the buy writes its mint before its send, the rent back reads it into the mints it holds on, and with no buy record it holds; the page's buy and sell hosts write and read that record in its store": true,
+      "a found W is swept only once both RPCs read it owning no token account and past its latest transaction's blockhash life, the same latest transaction on both, nothing signed for it before that, a close included, every token account both list it owning closed to it when it holds none, and its history since holding only its teardown's frames when the sweep is built and again before its send": true
     }
   },
   "bad": {
