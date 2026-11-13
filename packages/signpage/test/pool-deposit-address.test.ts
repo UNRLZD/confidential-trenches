@@ -513,3 +513,35 @@ test("a sign out during pool.address's floor read: no quote leaves, the answer i
   assert.deepEqual(await asked, { error: "down" });
   assert.equal(w.sent.length, 0);
 });
+
+// Each wait held in turn, a sign out during it, on the page's own stop: nothing after it runs (the floor read carries the
+// deposit address to an RPC, the follow reads it on chain).
+test("a sign out at each of pool.address's waits: nothing after it runs (no records read, no floor read, no quote, no follow), the answer is down", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  for (const at of ["named", "read", "floor", "read again"] as const) {
+    const w = world();
+    const page = quotesStop();
+    w.deps.stop = page.stopped;
+    const steps: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => (release = ok));
+    let held = false;
+    const hold = async (step: string) => {
+      steps.push(step);
+      if (step === at) (held = true), await gate;
+    };
+    const { read, floor, fetch: send, checked } = w.deps;
+    w.deps.named = () => hold("named");
+    w.deps.read = async (scope) => (await hold(steps.includes("read") ? "read again" : "read"), read(scope));
+    w.deps.floor = async (chain, wallet) => (await hold("floor"), floor!(chain, wallet));
+    w.deps.fetch = ((url: string | URL | Request, init?: RequestInit) => (steps.push("ask"), send!(url, init))) as typeof fetch;
+    w.deps.checked = async (...a) => (steps.push("follow"), checked!(...a));
+    const asked = ask(w, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
+    while (!held) await new Promise((ok) => setImmediate(ok));
+    page.signedOut();
+    release();
+    assert.deepEqual(await asked, { error: "down" }, at);
+    assert.equal(steps.at(-1), at, `${at}: ${steps.join(", ")}`);
+    assert.equal(w.took.length, 0, at);
+  }
+});

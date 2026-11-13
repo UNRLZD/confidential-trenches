@@ -243,3 +243,36 @@ test("a sign out during deposit.quote's records read: no quote leaves, the answe
   assert.deepEqual(d.answer(), { error: "down" });
   assert.equal(asks, 0);
 });
+
+// Re-review P2: the stop is read once as the request arrives and checked after each wait. Each wait held in turn, a sign
+// out during it, on the page's own stop (src/quotes-stop.ts, which swaps in a fresh signal): nothing after it runs.
+test("a sign out at each of deposit.quote's waits: nothing after it runs (no records read, no quote, no follow), the answer is down", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  for (const at of ["named", "read", "read again"] as const) {
+    const page = quotesStop();
+    const steps: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => (release = ok));
+    let held = false;
+    const hold = async (step: string) => {
+      steps.push(step);
+      if (step === at) (held = true), await gate;
+    };
+    const mock = h1c({});
+    const d = depositQuoteHost({
+      scope: () => SCOPE,
+      named: () => hold("named"),
+      read: async () => (await hold(steps.includes("read") ? "read again" : "read"), SAVED),
+      fetch: ((url: string | URL | Request, init?: RequestInit) => (steps.push("ask"), mock.fetch(url, init))) as typeof fetch,
+      now: () => NOW,
+      checked: async () => void steps.push("follow"),
+      stop: page.stopped,
+    })({ origin_asset: SOL_USDC, amount: "25" }, { id: "op-1" });
+    while (!held) await new Promise((ok) => setImmediate(ok));
+    page.signedOut();
+    release();
+    await d.after;
+    assert.deepEqual(d.answer(), { error: "down" }, at);
+    assert.equal(steps.at(-1), at, `${at}: ${steps.join(", ")}`);
+  }
+});
