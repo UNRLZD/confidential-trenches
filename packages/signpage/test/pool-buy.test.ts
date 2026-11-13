@@ -2452,6 +2452,32 @@ test("pieces: a piece only the take's own clock lists has its roots looked up: t
   assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
 });
 
+// review P3-3 of b8df326b6: the roots of a proof only the last-seen list names (the pick on the take's own clock never
+// takes it) are read in the same round, and that read's fault (a 429) never costs the buy a wait: it is kept, and thrown
+// only by a pick that needs that root. A pick that needs it still answers by the fault
+test("a root read that fails for a proof the pick does not take costs no wait; the buy fills", async () => {
+  const own = readyProof();
+  const piece = pieceProof("note-2", 777n, 5_000_000n);
+  const older = [...piece.publicSignals] as VaultWithdrawSignals;
+  older[3] = "1003";
+  older[5] = "1003";
+  const other = { ...piece, publicSignals: older };
+  const statePage = solanaPoolPage(PROGRAM, 0, 0);
+  // the n-th read of the state tree's first page on RPC 0 answers 429: the 2nd is the other proof's root (the pick never
+  // needs it: no wait), the 1st the bought proof's own (the pick needs it: the fault is thrown, waited out, then bought)
+  for (const [n, waits] of [[2, []], [1, [1_000]]] as const) {
+    const w = await world();
+    let pageReads = 0;
+    const f = faultAt(w.host.rpcs, 0, (m, q) => m === "getAccountInfo" && q[0] === statePage && ++pageReads === n, 1);
+    const read = Promise.resolve({ ms: 1n, at: 0, wall: 0 });
+    // the last-seen list names both; the take's own clock lists the bought proof only
+    const a = await runPoolBuy({ ...w.host, rpcs: f.rpcs, chainNow: () => read, ready: async (early) => (early === read ? [own] : [own, other]) }, ASK);
+    assert.ok(f.fired(), `read ${n}: answered 429`);
+    assert.equal("stage" in a && a.stage, "filled", `read ${n}: ${JSON.stringify(a)}`);
+    assert.deepEqual(beforeSend(w), waits, `read ${n}: the waits before the send`);
+  }
+});
+
 // review P2-1 of 92ae9ded1: the round of the root lookups, the venue and the blockhash runs beside the early read of the
 // pool's time, never after it, so a buy pays the slower of the two, not their sum. The early read here answers only once
 // the round's blockhash read has started; a round that waits for it first never starts that read, and the early read is
