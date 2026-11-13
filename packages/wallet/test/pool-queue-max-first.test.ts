@@ -277,3 +277,60 @@ test("perEpoch: the newest 4 epochs are kept; an older one is asked again", asyn
   calls.at(-1)!.ok("fee-1");
   assert.equal(await p1, "fee-1");
 });
+
+// ---- the pass's guards (src/pool/queue.ts refresh) ----
+
+test("a primary whose own proof fails gets no tier 2 proof to its W that pass; the other notes' own proofs are still made", async () => {
+  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
+  const pool = piecesPool(v);
+  const P = await noteOf(v, usd(20));
+  const bind = pool.bind.bind(pool);
+  pool.bind = async (b) => {
+    if (b.wallet.address === W(P) && b.chunk === usd(20)) throw new Error("planted: the primary's bind refused");
+    return bind(b);
+  };
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 16 });
+  open.push(q);
+  const out = await q.refresh();
+  assert.ok(out.failed.some((f) => f.noteId === P.id), "the primary's own proof failed");
+  assert.equal(pool.binds.filter((b) => b.wallet.address === W(P)).length, 0, "no bind to the primary's W but its own (refused before the push)");
+  assert.equal(q.ready().filter((r) => r.wallet.address === W(P)).length, 0, "no proof to the primary's W");
+  assert.ok(q.ready().some((r) => r.own === true), "the other notes' own proofs made");
+});
+
+test("at an epoch turn the remakes of Max's set come before the other notes' own remakes", async () => {
+  const v = await vaultWith([usd(2), usd(5.5), usd(10), usd(20)]);
+  const pool = piecesPool(v, 2);
+  let now = START + 1_000n;
+  pool.now = async () => now;
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 16 });
+  open.push(q);
+  await q.refresh();
+  const P = await noteOf(v, usd(20));
+  const ten = await noteOf(v, usd(10));
+  assert.ok(q.ready().some((r) => r.noteId === ten.id && r.wallet.address === W(P)), "the 10's piece pays the primary's W");
+  now = START + E + 1_000n;
+  pool.binds.length = 0;
+  const out = await q.refresh();
+  assert.ok(out.remade.length >= 4, `the turn remakes the set and the own proofs: ${out.remade.length}`);
+  const order = pool.binds.map((b) => (b.wallet.address === W(P) ? `P ${b.chunk}` : `own ${b.chunk}`));
+  assert.deepEqual(order.slice(0, 2), [`P ${usd(20)}`, `P ${usd(10)}`], `Max's set first: ${order.join(", ")}`);
+});
+
+test("a bind's older read of the pool's time never moves the queue's read back: the next bind is handed the newer one", async () => {
+  const v = await vaultWith([usd(5.5), usd(20)]);
+  const pool = piecesPool(v);
+  const bind = pool.bind.bind(pool);
+  const seen: (bigint | undefined)[] = [];
+  pool.bind = async (b) => {
+    seen.push(b.now?.ms);
+    if (seen.length === 1) b.readNow?.({ ms: START, at: performance.now(), wall: Date.now() });
+    return bind(b);
+  };
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool: pool as Pool<unknown>, provers: [signalsProver()], hardwareConcurrency: 16 });
+  open.push(q);
+  await q.refresh();
+  assert.ok(seen.length >= 2);
+  assert.equal(seen[0], START + 1_000n, "the pass's read");
+  assert.ok(seen[1] !== undefined && seen[1] >= START + 1_000n, `the second bind keeps the newer read: ${seen[1]}`);
+});
