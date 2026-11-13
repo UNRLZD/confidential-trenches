@@ -28,6 +28,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import os from "node:os";
 import { IDBFactory } from "fake-indexeddb";
 
 const USAGE = "usage: pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token 0x...40 hex>";
@@ -147,7 +148,15 @@ route.local = `http://127.0.0.1:${server.address().port}`;
 route.helper = new URL(TRADE_HELPER).origin;
 log("helper", { local: route.local, sender: sender.sender, pool: sender.pool, feeRecipient: PIN.feeRecipient });
 
-// the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files
+// the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files, on the page's threads (card
+// evm-deposit-ready-in-ten-seconds, as pool-fork-evm-carry-withdraw.mjs): SIGN_HOST's prover worker proves on
+// min(hardwareConcurrency - 1, 4) threads (packages/kit/src/prover/worker.js THREADS); snarkjs in Node takes
+// os.cpus().length threads (ffjavascript's thread manager), so this process reports the page's count there first
+const PROVER_THREADS = Math.max(1, Math.min(os.cpus().length - 1, 4));
+{
+  const cpus = os.cpus;
+  os.cpus = () => cpus().slice(0, PROVER_THREADS);
+}
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
 const file = (name) => {
   const b = readFileSync(new URL(name, KIT_ZK));
@@ -163,10 +172,10 @@ const vault = {
   prove: async (circuit, input) => {
     if (circuit !== "withdraw") throw new Error(`no ${circuit} prover here`);
     const s = performance.now();
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY, undefined, undefined, { singleThread: true });
+    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY, undefined, undefined, { singleThread: PROVER_THREADS < 2 });
     const ms = Math.round(performance.now() - s);
     proves.push(ms);
-    log("proved", { ms });
+    log("proved", { ms, threads: PROVER_THREADS });
     return { proof, publicSignals, proveMs: ms };
   },
 };

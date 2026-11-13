@@ -83,6 +83,8 @@ const sentOf = (raw: string) => {
 };
 
 /** Two RPCs over one chain: per-RPC balance, nonce and simulation; the pool's events and its finalized block. */
+/** A block's hash in the mock: its number in the low 8 bytes. */
+const BLOCK_HASH = (n: bigint) => `0x${"11".repeat(24)}${n.toString(16).padStart(16, "0")}`;
 function chain() {
   const c = {
     block: 100n,
@@ -113,6 +115,9 @@ function chain() {
     /** each RPC's latest head when it is past `block` (the agreed block is the lower of the two) */
     head: [null, null] as (bigint | null)[],
     pending: [null, null] as (bigint | null)[],
+    /** the block a landing made (`land`) and U's nonce below it: U's nonce read at an older block's hash is that one */
+    landedAt: -1n,
+    nonceBefore: 0n,
     /** the pool's state and label tree depths (currentTreeDepth, currentLabelTreeDepth) */
     depth: [0n, 0n] as bigint[],
     /** a balance of one address's own, by lowercase address (else `balance`) */
@@ -122,12 +127,25 @@ function chain() {
     const label = vaultLabelOf(keccak_256, SCOPE, BigInt(c.events.length + 1));
     c.events.push({ block: c.fin, blockHash: `0x${"ab".repeat(32)}`, logIndex: BigInt(c.events.length), bytes: "", kind: "deposit", state: noteCommitment(value, label, pre), label, value, precommitment: pre, nullifier: null, recipient: null, token: null } as EvmPoolEvent);
   };
-  /** U's tx lands: its Deposited at a final block, U's nonce on, its value and fee spent. */
+  /** U's tx lands: its Deposited in a new block, final at once, U's nonce on, its value and fee spent. A new block, as
+   *  on a chain: a block a round read never gains a log after (the round's logs are held to the pool's root and size
+   *  at its anchor, wallet src/pool/evm.ts), so a landing after a round is past that round's final block (card
+   *  evm-deposit-ready-in-ten-seconds). */
   const land = (raw: string) => {
     const s = sentOf(raw);
+    if (c.block === c.fin) c.block++;
+    c.fin = c.block;
+    c.landedAt = c.block;
+    c.nonceBefore = c.nonce;
     deposit(s.pre, s.value);
     c.nonce = s.nonce + 1n;
     c.balance = c.balance.map((b) => b - s.value - 10n ** 12n);
+  };
+  // each block its own hash (an RPC's own in `hashes`, else BLOCK_HASH), so a read at a hash is at that block
+  const hashAt = (k: number, n: bigint) => c.hashes[k]!.get(n) ?? BLOCK_HASH(n);
+  const numberOf = (k: number, h: string): bigint | null => {
+    for (const [n, x] of c.hashes[k]!) if (x === h) return n;
+    return h.startsWith(BLOCK_HASH(0n).slice(0, 50)) ? BigInt(`0x${h.slice(50)}`) : null;
   };
   const rpc =
     (k: number) =>
@@ -138,11 +156,14 @@ function chain() {
       switch (method) {
         case "eth_getBlockByNumber": {
           const n = p[0] === "latest" ? (c.head[k] ?? c.block) : p[0] === "finalized" ? (c.finHead[k] ?? c.fin) : BigInt(p[0] as string);
-          return { number: q(n), hash: c.hashes[k]!.get(n) ?? `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: q(off(c.baseFee, c.off.baseFee)) };
+          return { number: q(n), hash: hashAt(k, n), timestamp: "0x1", baseFeePerGas: q(off(c.baseFee, c.off.baseFee)) };
         }
         case "eth_getTransactionCount":
           if (p[1] === "finalized" && c.pruned) throw new Error("RPC error -32000: historical state a5a7fa45d53925ebc8c068cfff3eb8a4b45ff56fc39078b86d614df23a905b8a is not available");
-          if (typeof p[1] === "object" && p[1] !== null) return q(c.nonceAt[k] ?? c.nonce);
+          if (typeof p[1] === "object" && p[1] !== null) {
+            const n = numberOf(k, (p[1] as { blockHash: string }).blockHash);
+            return q(c.nonceAt[k] ?? (n !== null && n < c.landedAt ? c.nonceBefore : c.nonce));
+          }
           return q(p[1] === "pending" ? (c.pending[k] ?? c.nonce) : off(c.nonce, c.off.nonce));
         case "eth_getTransactionByHash":
           return c.known[k]!.has(p[0] as string) ? { hash: p[0] } : null;
@@ -220,6 +241,51 @@ test("a funded U deposits its rung: INCOMING with { hash, nonce, value } before 
   assert.equal(n!.state, "UNSPENT");
   assert.equal(n!.leaf!.value, RUNG);
   assert.ok(h.seeds.every((x) => x.every((b) => b === 0)), "the seed zeroed at run end");
+});
+
+test("card evm-deposit-ready-in-ten-seconds: a send its first verdict read finds landed reads only the round between the send and UNSPENT, no read of U's nonce or a final block before it", async () => {
+  // the Base copy (ep2-final, 15:45Z): U's nonce at the newest block's hash and that block's finality, 4 host answers in
+  // a row (3.6 s), were read before the round that held the Deposited; they tell only a dead send, never a landed one
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  ch.c.onSend = (raw) => ch.land(raw);
+  const log: string[] = [];
+  const at = (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>, k: number) => async (m: string, p: readonly unknown[]) => {
+    log.push(`rpc ${k} ${m} ${typeof p[1] === "object" && p[1] !== null ? "at hash" : JSON.stringify(p[0] ?? null).slice(0, 12)}`);
+    return rpc(m, p);
+  };
+  const rpcs = [at(ch.rpcs[0], 0), at(ch.rpcs[1], 1)] as const;
+  const round = async () => (log.push("round"), { events: [...ch.c.events], finalBlock: ch.c.fin });
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs, round }), ASK);
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
+  const sent = log.findIndex((x) => x.includes("eth_sendRawTransaction"));
+  const landing = log.slice(sent + 1);
+  const first = landing.indexOf("round");
+  assert.ok(first >= 0, "a round after the send");
+  assert.deepEqual(landing.slice(0, first).filter((x) => !x.includes("eth_sendRawTransaction")), [], `read before the landing's round:\n${landing.join("\n")}`);
+  assert.equal(landing.filter((x) => x === "round").length, 1, "one round: the first verdict read lands it");
+});
+
+test("card evm-deposit-ready-in-ten-seconds: a send that lands and is final between the round (no Deposited) and U's nonce read is pending, never dead: U's nonce passed it at a block past the round's final one; the next read lands it", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  let armed = false;
+  let planted = false;
+  const at = (rpc: (m: string, p: readonly unknown[]) => Promise<unknown>) => async (m: string, p: readonly unknown[]) => {
+    if (armed && !planted && m === "eth_getBlockByNumber" && p[0] === "latest") (planted = true), ch.land(ch.c.sent[0]!);
+    return rpc(m, p);
+  };
+  const rpcs = [at(ch.rpcs[0]), at(ch.rpcs[1])] as const;
+  // the first round after the send holds no Deposited; the send lands, final, before the nonce read's newest block
+  const round = async () => {
+    const r = { events: [...ch.c.events], finalBlock: ch.c.fin };
+    if (ch.c.sent.length === 1 && !planted) armed = true;
+    return r;
+  };
+  const a = await runPoolDepositEvm(hostOf(ch, ns, { rpcs, round }), ASK);
+  assert.equal(planted, true, "the planted landing happened");
+  assert.equal(ch.c.sent.length, 1, "never built again");
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: CHAIN, hash: sentOf(ch.c.sent[0]!).hash }] });
+  assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
 });
 
 test("a simulation that fails on one RPC signs nothing; read and simulated once more, then not_funded with nothing written", async () => {
@@ -301,7 +367,7 @@ test("evm-deposit-note-stays-incoming: on RPCs that refuse state at \"finalized\
   assert.equal(ch.c.sent.length, 1, "never sent again");
 });
 
-test("evm-deposit-note-stays-incoming: a send that lands just after the device read U's nonce unmoved is read landed by the round read after it, never dead, never sent again", async () => {
+test("evm-deposit-note-stays-incoming: a send that lands just after the device read U's nonce unmoved is read landed by the next round, never dead, never sent again", async () => {
   const { ch, ns, planned } = await funded(RUNG + FEE);
   ch.c.pruned = true;
   await runPoolDepositEvm(hostOf(ch, ns, { reads: 1 }), ASK);
@@ -312,11 +378,14 @@ test("evm-deposit-note-stays-incoming: a send that lands just after the device r
     return got;
   };
   const rpcs = [at(ch.rpcs[0]), at(ch.rpcs[1])] as const;
-  // the nonce read answered unmoved on both, then the send landed: no block kept, and the round read after it holds
-  // the Deposited
+  // the nonce read answered unmoved on both, then the send landed: no block kept, so nothing dead. The verdict reads
+  // the round first (card evm-deposit-ready-in-ten-seconds), so this pass's round was read before the landing: pending
+  // (one read a pass for an open note), and the next round holds the Deposited
   const p = await runPoolDepositEvm(hostOf(ch, ns, { rpcs }), null);
   assert.equal(plant, false, "the planted landing happened");
-  assert.deepEqual(p, { stage: "filled", txs: [] });
+  assert.deepEqual(p, { stage: "not_landed", txs: [] });
+  assert.equal(ch.c.sent.length, 1, "never built again");
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { rpcs }), null), { stage: "filled", txs: [] });
   assert.equal(ch.c.sent.length, 1, "never built again");
   assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
 });
@@ -385,7 +454,7 @@ test("evm-deposit-note-stays-incoming: no step of the deposit asks a block's sta
   await runPoolDepositEvm(hostOf(ch, ns, { rpcs }), null);
   const s = new Set(asked.map((x) => JSON.stringify(x)));
   assert.ok(asked.length > 0);
-  const newest = [JSON.stringify(q(ch.c.block)), '"latest"', '"pending"', JSON.stringify({ blockHash: `0x${"11".repeat(32)}` })];
+  const newest = [JSON.stringify(q(ch.c.block)), '"latest"', '"pending"', JSON.stringify({ blockHash: BLOCK_HASH(ch.c.block) })];
   for (const x of s) assert.ok(newest.includes(x), `a state read at ${x}`);
 });
 
@@ -1615,10 +1684,11 @@ test("evm-money-shows-and-spends-at-once: a sign out or a stop during the run's 
     const h = hostOf(ch, ns, { reads: undefined, wait: undefined, [k]: ac.signal, round: async () => {
       if (ac.signal.aborted) after++;
       if (ch.c.sent.length === 1 && rounds++ === 0) {
-        const events = [...ch.c.events];
+        // the round as read before the landing: its events and its final block
+        const round = { events: [...ch.c.events], finalBlock: ch.c.fin };
         ch.land(ch.c.sent[0]!);
         setTimeout(() => ac.abort(), 100);
-        return { events, finalBlock: ch.c.fin };
+        return round;
       }
       return { events: [...ch.c.events], finalBlock: ch.c.fin };
     } });
