@@ -38,6 +38,7 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
+import { POOL_BUY_POLL_MS } from "../src/pool-buy.ts";
 import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_UNPROVEN_PASSES, restAdds, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, FOUND_CLOSE_MAX, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type OwedRentBacks, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
@@ -1171,8 +1172,9 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
     assert.deepEqual({ tokenAccount: w.c.accounts.get(ata)?.lamports ?? 0, volumeAccount: w.c.accounts.get(vol)?.lamports ?? 0, w: BigInt(w.c.accounts.get(W.address)?.lamports ?? 0) }, { tokenAccount: 0, volumeAccount: 0, w: under });
     assert.equal(w.c.deposits.length, 1);
     assert.deepEqual(w.c.deposits[0], { pre: preOf(RETURN), value: swept, sweep: true });
-    // the sweep sent, the sell lock free: its note INCOMING until the next state read's settle (review L6)
-    assert.equal((await ours(w.ns)).find((n) => n.ref.kind === RETURN.kind)?.state, "INCOMING");
+    // the sweep sent, the sell lock free for each wait: its note followed to its end in the run (card
+    // trades-and-balance-fast; before it, INCOMING until the next state read's settle, review L6)
+    assert.equal((await ours(w.ns)).find((n) => n.ref.kind === RETURN.kind)?.state, "UNSPENT");
     assert.equal(w.owed.get(W.address)?.passes, 1, "owed until a pass finds nothing left");
     await settle(w);
     assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: swept, leafIndex: BigInt(N) }]);
@@ -1568,6 +1570,142 @@ test("a full sell kept on W, a stranger's unit sent to W's token account after i
   assert.equal(w.c.accounts.has(ATA), false, "W's token account closed");
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
   restAfterSweep(w);
+});
+
+// Card trades-and-balance-fast: the owner's sale of 13 Nov 18:05:39Z closed W's accounts 6 s after it landed and swept
+// W 4 s after the closes, each read back a second apart (POOL_SELL_WAIT_MS). Every transaction here reads back one read
+// after its send, as a landing does: each wait between those reads is a slot's (the buy's POOL_BUY_POLL_MS), never more.
+test("a full sale, its teardown and its sweep are each read back at a slot's pace, never a second apart", async () => {
+  const lamports = 1_493_440n;
+  const { amount } = await amountFor(SWEPT_SALE);
+  // the blockhashes never past on either RPC (finalized height 0): only a read that finds a frame ends its read-back
+  const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT, finalHeight: 0 }, [wallet(amount)]);
+  const asked = new Map<string, number>();
+  const late = (k: number, rpc: SolanaRpc): SolanaRpc => async (method, params) => {
+    if (method === "getTransaction" && (params?.[1] as { commitment?: string } | undefined)?.commitment !== "finalized") {
+      const key = `${k} ${String(params?.[0])}`;
+      asked.set(key, (asked.get(key) ?? 0) + 1);
+      if (asked.get(key) === 1) return null;
+    }
+    return rpc(method, params);
+  };
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, rpcs: [late(0, w.c.rpcs[0]), late(1, w.c.rpcs[1])] as const, wait: async (ms: number) => void waits.push(ms) }, { ...ASK, amount });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(w.told));
+  assert.ok(waits.length >= 2, `the sale and the teardown each read back late: ${JSON.stringify(waits)}`);
+  assert.deepEqual(waits.filter((ms) => ms > POOL_BUY_POLL_MS), [], `waits ${JSON.stringify(waits)}`);
+});
+
+// Card trades-and-balance-fast: the owner's sale of 13 Nov 18:05:39Z swept W into the pool at 18:05:49Z, and the sweep's
+// note stayed INCOMING until some later state read settled it: the balance showed the sale's SOL only when something
+// else asked the state. The tap's run now follows the sweep's note to its end, so its move to UNSPENT is the store
+// change the page's state follows; its settle (the mark at finalized) is asked only once both RPCs' finalized slot
+// reaches the sweep's, the wait between those reads the gap at a slot's time each.
+/** RPCs whose finalized slot trails the last transaction each read back by `lag` slots, one fewer at each finalized slot
+ *  read (card trades-and-balance-fast); `early` counts the marks read at finalized (a settle's) while it still trails;
+ *  `hide`: an account read at finalized answers none while it trails (a mark not final yet). */
+const finalityTrails = (w: World, lag: number, hide = false) => {
+  const behind = [lag, lag];
+  const read = [0, 0];
+  const t = { early: 0, gating: false, behind };
+  const gated = (k: number, rpc: SolanaRpc): SolanaRpc => async (method, params) => {
+    if (method === "getSlot") {
+      assert.deepEqual(params, [{ commitment: "finalized" }]);
+      t.gating = true;
+      const at = read[k]! - behind[k]!;
+      behind[k] = Math.max(0, behind[k]! - 1);
+      return at;
+    }
+    const final = method === "getAccountInfo" && (params?.[1] as { commitment?: string } | undefined)?.commitment === "finalized";
+    if (final && t.gating && behind[k]! > 0) t.early++;
+    if (final && hide && behind[k]! > 0 && read[k]! > 0) return { context: { slot: read[k]! - behind[k]! }, value: null };
+    const r = await rpc(method, params);
+    if (method === "getTransaction" && r !== null) read[k] = (r as { slot: number }).slot;
+    return r;
+  };
+  return { t, rpcs: [gated(0, w.c.rpcs[0]), gated(1, w.c.rpcs[1])] as const };
+};
+
+test("a full sale's sweep is followed to its note's end in the tap's run, its settle asked only once both finalized slots reach the sweep's", async () => {
+  const lamports = 1_493_440n;
+  const { amount } = await amountFor(SWEPT_SALE);
+  const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT }, [wallet(amount)]);
+  const f = finalityTrails(w, 3);
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, reads: 10, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, { ...ASK, amount });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const rec = w.owed.get(W.address)!;
+  assert.ok(rec.sweep !== undefined, JSON.stringify(w.told));
+  const note = (await w.ns.list()).find((n) => n.sends?.some((d) => d.signature === rec.sweep));
+  assert.equal(note?.state, "UNSPENT", `the sweep's note counted when the tap's run ends: ${JSON.stringify(w.told)}`);
+  assert.equal(f.t.early, 0, "no mark read before the finalized slot reached the sweep's");
+  // the gate's waits: the gap at a slot's time each (3 slots, then 2, then 1), never a fixed sleep
+  assert.deepEqual(waits, [3 * POOL_BUY_POLL_MS, 2 * POOL_BUY_POLL_MS, POOL_BUY_POLL_MS]);
+});
+
+// the same gate on a sale's own deposit back: read back at a slot's pace, its note's mark asked only once final, the sale
+// filled then (a mark read every slot before it is final costs four reads a slot for nothing)
+test("a sale with a deposit back reads its note's mark only once both finalized slots reach the sale's, then fills", async () => {
+  const w = await world({ ...HALF, ataLamports: TOKEN_RENT }, halfW());
+  const f = finalityTrails(w, 4);
+  const waits: number[] = [];
+  const a = await runPoolSell({ ...w.host, reads: 10, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(w.c.deposits.filter((d) => !d.sweep).length, 1, "the sale's own deposit");
+  assert.equal(f.t.early, 0, "no mark read before the finalized slot reached the sale's");
+  assert.deepEqual(waits.slice(0, 4), [4 * POOL_BUY_POLL_MS, 3 * POOL_BUY_POLL_MS, 2 * POOL_BUY_POLL_MS, POOL_BUY_POLL_MS], `waits ${JSON.stringify(waits)}`);
+});
+
+// a sale with a deposit back is filled once it reads back on both RPCs as its very transaction, succeeded: the sale and
+// the deposit are one transaction. Told then, as the buy tells its fill at confirmed; its note's settle (the mark at
+// finalized) follows in the run, and the end is never told twice. At f7f20cdaf the sale was told filled only at the
+// settle: with the mark not final, never within the run's reads
+test("a sale with a deposit back is told filled once it reads back on both RPCs, before its note's mark is final, and once", async () => {
+  const w = await world({ ...HALF, ataLamports: TOKEN_RENT }, halfW());
+  const f = finalityTrails(w, 4, true);
+  const stages: string[] = [];
+  const at: number[][] = [];
+  const ctx = { id: "f1", sha: "00", progress: (s: string) => void (stages.push(s), at.push([...f.t.behind])) } as never;
+  const ended = { n: 0 };
+  const r = poolSellKind(() => ({ ...w.host, reads: 10, rpcs: f.rpcs, wait: async () => {}, ops: async () => w.store, end: () => void ended.n++ }), fakeLocks())(ASK, ctx) as KindAnswer;
+  await r.after;
+  await until(async () => ended.n > 0);
+  assert.equal(stages[0], "filled", JSON.stringify(stages));
+  assert.ok(at[0]!.some((x) => x > 0), `told while the finalized slot still trailed the sale's: ${JSON.stringify(at)}`);
+  assert.deepEqual(stages, ["filled"], "told once");
+  assert.equal(((await w.store.get("ops", "f1")) as { stage?: string }).stage, "filled", "the record's stage, at its note's settle");
+});
+
+// the sweep's follow holds the sell lock only between its waits, as the pass's other steps: a sell tapped while it waits
+// for finality takes the lock at once, and the follow ends, its note left INCOMING for the next state read, never
+// settled by two runs at once
+test("a sell tapped while a sale's sweep is followed takes the sell lock at once, and the follow ends, its note left for the next state read", async () => {
+  const lamports = 1_493_440n;
+  const { amount } = await amountFor(SWEPT_SALE);
+  const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT }, [wallet(amount)]);
+  const f = finalityTrails(w, 3);
+  const locks = fakeLocks();
+  let other: Promise<unknown> | undefined;
+  let leave!: () => void;
+  let tookAt = -1;
+  const waits: number[] = [];
+  const ended = { n: 0 };
+  const host = (): PoolSellKindHost => ({ ...w.host, reads: 10, rpcs: f.rpcs, ops: async () => w.store, end: () => void ended.n++, wait: async (ms: number) => {
+    waits.push(ms);
+    // the follow's first wait (the gate's gap): another sell takes the lock, and holds it
+    if (f.t.gating && other === undefined) other = locks.request(POOL_SELL_LOCK, { mode: "exclusive" }, () => ((tookAt = waits.length), new Promise<void>((r) => (leave = r))));
+  } });
+  const r = poolSellKind(host, locks)({ ...ASK, amount }, ctxOf("t1")) as KindAnswer;
+  await r.after;
+  await until(async () => ended.n > 0);
+  assert.equal(ended.n, 1, "the run ended with the other sell holding the lock");
+  assert.equal(tookAt, 1, "the other sell took the lock at the follow's first wait");
+  const rec = w.owed.get(W.address)!;
+  const note = (await w.ns.list()).find((n) => n.sends?.some((d) => d.signature === rec.sweep));
+  assert.equal(note?.state, "INCOMING", "left for the next state read");
+  leave();
+  await other;
 });
 
 // Review of T1+T2 (card every-lamport-can-move) P3-4: a full sale writes W's owed record before it leaves the device; a
@@ -4135,7 +4273,9 @@ for (const kept of [false, true]) {
     const afterRun = { stage: opOf("p2", await w.store.get("ops", "p2"))?.stage, held: await held() };
     await loadSettle(w, w.store);
     assert.deepEqual({ stage: opOf("p2", await w.store.get("ops", "p2"))?.stage, held: await held() }, { stage: "filled", held: kept ? [] : ["UNSPENT"] }, `after the run: ${JSON.stringify(afterRun)}`);
-    assert.deepEqual({ ...afterRun, stages }, { stage: "sent", held: kept ? [sig] : ["INCOMING"], stages: ["sent"] });
+    // card trades-and-balance-fast: a sale with its deposit back, landed on both RPCs, is told filled then, and never told
+    // sent after it; its record stays sent until the next load writes filled
+    assert.deepEqual({ ...afterRun, stages }, { stage: "sent", held: kept ? [sig] : ["INCOMING"], stages: [kept ? "sent" : "filled"] });
   });
 }
 
@@ -6337,7 +6477,8 @@ test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass 
   const rec = swept.w.owed.get(W.address)!;
   assert.ok(rec.lamports !== undefined && BigInt(rec.lamports) > 0n, "its sweep sent: the read kept");
   const note = (await swept.w.ns.list()).find((n) => n.sends?.some((d) => d.signature === rec.sweep));
-  assert.equal(note?.state, "INCOMING", "the sweep's signature names its note, not counted yet");
+  // card trades-and-balance-fast: the pass follows its sweep's note to its end, so it is counted when the pass ends
+  assert.equal(note?.state, "UNSPENT", "the sweep's signature names its note, counted once its mark is final");
   assert.equal(floor.w.owed.get(W.address)?.sweep, undefined, "no sweep: none");
   const unproven = await soldElsewhere(ENOUGH, null);
   await resumeRentBacks(unproven.w.host, fakeLocks());
@@ -6360,7 +6501,8 @@ test("round-trip-costs-less P3-e: a W that ended at the floor draws a RETURNING 
   assert.deepEqual(rows.map((r) => [r.address, r.state]), [[W.address, "RETURNING"]], "a W at the floor: its row");
   const swept = await soldElsewhere(ENOUGH);
   await resumeRentBacks(swept.w.host, fakeLocks());
-  assert.equal(returningWallets([...swept.w.owed.values()], price, await swept.w.ns.list()).length, 1, "a W whose sweep is on its way: listed");
+  // card trades-and-balance-fast: the pass follows its sweep's note to UNSPENT, so the balance counts it and no row does
+  assert.equal(returningWallets([...swept.w.owed.values()], price, await swept.w.ns.list()).length, 0, "a W whose sweep's note is counted: no row, never counted twice");
 });
 
 // Card every-lamport-can-move T3: a tap's pass over the leftover Ws carries `ride`: a W whose last pass ended at the
