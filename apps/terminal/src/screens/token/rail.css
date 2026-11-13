@@ -76,15 +76,11 @@ a.tkr-row:hover { background: var(--bg-row-hover); }
 .tkr-board { flex: none; margin: 0 12px 12px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; background: var(--bg-raised); color: var(--text-2); font: 500 13px var(--font-ui); transition: color 150ms ease, background-color 150ms ease; }
 .tkr-board:hover { color: var(--text-1); background: #1e1e1e; }
 
-/* slim: the expand button and the rings (under 1500, or folded by «); opened under 1500, the full rail is drawn over
-   the chart, its column still 78, so the page under it never moves */
+/* slim: the expand button and the rings (under 1500, or folded by «); opened under 1500, the full rail takes its own
+   340 column from the main column (token.css .tkp-desk; card rail-open-pushes-the-middle) */
 .tkr-exp { position: relative; display: flex; height: 52px; flex: none; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
 .tkr-exp:hover { color: var(--text-1); }
 .tkr[data-slim="true"] .tkr-a, .tkr[data-slim="true"] .tkr-b { display: none; }
 .tkr[data-slim="true"] .tkr-rows { padding: 0 4px 6px; }
 .tkr[data-slim="true"] .tkr-row { justify-content: center; padding: 10px 0; }
 .tkr[data-slim="true"] .tkr-msg { font-size: 11px; text-align: center; }
-@media (max-width: 1499.98px) {
-  .tkr[data-open="true"] { z-index: 8; width: 340px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); animation: tkrIn 220ms var(--ease-out) both; }
-  @keyframes tkrIn { from { opacity: 0.6; transform: translateX(-12px); } }
-}

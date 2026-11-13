@@ -369,6 +369,22 @@ export function pickAsset(assets: readonly Asset[] | null, picked: { symbol: str
   return assets.find((a) => a.symbol === picked.symbol && a.chain === picked.chain) ?? assets.find((a) => a.symbol === picked.symbol) ?? assets[0]!;
 }
 
+/** Each place's own coin (card deposit-pool-picks-its-own-coin): what the vault holds and what each chain's pool
+ *  holds (POOL_ASSET_DECIMALS; the kit's chain pool asset). */
+export const DEST_COIN: Readonly<Record<Dest, PoolAsset>> = Object.freeze({ near: "USDC", solana: "SOL", base: "ETH", robinhood: "ETH" });
+
+/**
+ * The asset a place starts on when it is picked (card deposit-pool-picks-its-own-coin; the UNRLZD terminal's deposit
+ * starts on its home's own coin): the place's own coin on its own chain, else the first asset on that chain, else the
+ * list's first; null with no list. The pickers still offer every asset.
+ */
+export function destAsset(assets: readonly Asset[] | null, dest: Dest): { symbol: string; chain: string } | null {
+  if (!assets?.length) return null;
+  const chain = CHAIN_NAME[dest];
+  const a = assets.find((x) => x.chain === chain && x.symbol === DEST_COIN[dest]) ?? assets.find((x) => x.chain === chain) ?? assets[0]!;
+  return { symbol: a.symbol, chain: a.chain };
+}
+
 /** A row of the sheet's Recent block: a deposit of this account, its stage's word, and what it credited once done. */
 export interface RecentRow {
   id: string;

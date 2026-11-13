@@ -63,3 +63,23 @@ test("planted on the good answer: another engine, no reload, a pinned read after
   r.requests.push({ ...named, t: st.words.t + 1 }, { ...named, t: st.created2.t + 1 });
   badLine(r, "after the words' account signs out and a second account lands, no request names the words' account (1 of its addresses and ids");
 });
+
+// release 128 (card signing-layer-says-when-it-closes, kit 1.13): the signout open answers { pending: true, closes: true }.
+// closes: this tree's build on the harness, release128: the live page (13 Nov, Chrome 156, phone), each by its own
+// --record: PASS. Planted on closes: the signout answered closes false, or with another key: FAIL.
+test("recorded runs on release 128's answers (the harness at this tree, the live page): PASS, the signout answered pending with closes", () => {
+  for (const k of ["closes", "release128"]) {
+    const r = judge(ANSWERS[k]);
+    assert.equal(r.ok, true, `${k}\n${r.lines.join("\n")}`);
+    const so = ANSWERS[k].messages.find((m) => m.data?.id === ANSWERS[k].steps.passkeyOut.openId)?.data;
+    assert.deepEqual(so?.result, { pending: true, closes: true }, k);
+  }
+  assert.match(ANSWERS.release128.source, /^live https:\/\/confidential\.unrealized\.trade$/);
+  for (const result of [{ pending: true, closes: false }, { pending: true, closes: true, extra: 1 }]) {
+    for (const step of ["passkeyOut", "passkeyOut2"]) {
+      const r = clone(ANSWERS.closes);
+      r.messages.find((m) => m.data?.id === r.steps[step].openId).data.result = result;
+      badLine(r, step === "passkeyOut" ? "Sign out in this tab, by its own Sign out button" : "the second passkey account's Sign out in this tab");
+    }
+  }
+});

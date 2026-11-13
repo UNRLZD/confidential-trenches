@@ -1,6 +1,7 @@
 // SIGN_HOST's one prover (src/prover-host.ts), card signpage-prover-host.
 //   node --test test/prover-host.test.ts      (from packages/signpage)
-// The worker starts at the first proof that passes the kit's input checks, never before; one worker serves every proof
+// The worker starts at the first proof that passes the kit's input checks or at the proof queue's load (vault.load),
+// never before; one worker serves every proof
 // and loads the withdraw setup files once; a worker that died is replaced at the next proof, which loads them again; a
 // refused worker answer keeps the worker; stop() ends it; proofs run one at a time. The worker here is a stand-in that
 // answers the fixture's signals, behind a fake startProver or behind the kit's real one (client.ts) on a fake Worker
@@ -174,12 +175,15 @@ test("proofs run one at a time: a second proof asked while one runs waits for it
   assert.deepEqual(s.log, ["start 1", "load 1 withdraw", "prove 1 withdraw", "prove 1 withdraw"]);
 });
 
-test("vault (card signpage-pool-notes-2): the proof queue's prover is the same worker, in the same line: its load starts nothing, a worker loads once, a dead one is replaced and loaded again, stop() refuses", async () => {
+test("vault (card signpage-pool-notes-2): the proof queue's prover is the same worker, in the same line: its load starts the worker and loads the circuit ahead of the first proof (card max-ready-seconds-after-a-load), a worker loads once, a dead one is replaced and loaded again, stop() refuses", async () => {
   let proves = 0;
   const s = starter((n) => (n === 1 ? { prove: async () => (++proves === 3 ? Promise.reject(new Error("prover worker: terminated")) : { proof: PROOF, publicSignals: [...SIGNALS], proveMs: 1 }) } : {}));
   const host = proverHost(s.start);
+  assert.deepEqual(s.log, [], "no worker before the queue's load");
   await host.vault.load("withdraw");
-  assert.deepEqual(s.log, [], "no worker at load");
+  assert.deepEqual(s.log, ["start 1", "load 1 withdraw"], "the load starts the one worker and loads the circuit");
+  await host.vault.load("withdraw");
+  assert.deepEqual(s.log, ["start 1", "load 1 withdraw"], "a second load is the first one's");
   await host.vault.prove("withdraw", {});
   await host.proveWithdraw(fixtureArgs(CV));
   assert.deepEqual(s.log, ["start 1", "load 1 withdraw", "prove 1 withdraw", "prove 1 withdraw"], "one worker, loaded once for both paths");
@@ -190,6 +194,28 @@ test("vault (card signpage-pool-notes-2): the proof queue's prover is the same w
   host.stop();
   await assert.rejects(late, (e) => isProverDead(e));
   assert.deepEqual(s.log.slice(9), ["stop 2"], "a prove asked before stop() never reaches a worker");
+});
+
+test("vault.load (card max-ready-seconds-after-a-load): runs in the one line, so a load asked behind a proof waits for it; one asked before stop() is refused and starts nothing; a failed load is asked again by the next prove", async () => {
+  let loads = 0;
+  const s = starter(() => ({ load: async () => (++loads === 2 ? Promise.reject(new Error("setup file: fetch failed")) : undefined) }));
+  const host = proverHost(s.start);
+  const first = host.proveWithdraw(fixtureArgs(CV));
+  const warm = host.vault.load("withdraw");
+  await Promise.all([first, warm]);
+  assert.deepEqual(s.log, ["start 1", "load 1 withdraw", "prove 1 withdraw"], "the queue's load is the worker's own, loaded once");
+  host.stop();
+  const s2 = starter(() => ({ load: async () => (++loads === 2 ? Promise.reject(new Error("setup file: fetch failed")) : undefined) }));
+  const host2 = proverHost(s2.start);
+  const late = host2.vault.load("withdraw");
+  host2.stop();
+  await assert.rejects(late, (e) => isProverDead(e));
+  assert.deepEqual(s2.log, [], "a load asked before stop() starts nothing");
+  await assert.rejects(host2.vault.load("withdraw"), /fetch failed/);
+  assert.deepEqual(s2.log, ["start 1", "load 1 withdraw"], "a failed load keeps the worker");
+  await host2.vault.prove("withdraw", {});
+  assert.deepEqual(s2.log, ["start 1", "load 1 withdraw", "load 1 withdraw", "prove 1 withdraw"], "the prove after a failed load loads again");
+  host2.stop();
 });
 
 // ---- the kit's real startProver (client.ts) on a fake Worker and fetch ----
