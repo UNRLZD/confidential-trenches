@@ -3,14 +3,18 @@
 // puts that ETH back into the pinned pool as a note of the user's, with no tap, by a deposit W signs and pays the gas of.
 //
 // - Which Ws, from chain data alone: every RESERVED or SPENT note of the pool's scope in the note store (a restore from
-//   the 12 words writes them from the chain), its release found in the pool's round (evmTreeSync events(), both RPCs
-//   byte for byte) by its nullifier hash: a Withdrawn paying the note's own W (W_{evm, l, j}, l its label, j = jOf(its
-//   ref), the only W a proof of the note pays). A Bought is a buy that filled: never a carry. A Withdrawn is a refused
-//   buy only when the transaction that emitted it, read on both RPCs (its log at its block hash and index, then that
-//   block's transaction at its index), is a direct call to the pool whose input is a Buy (evm-send.ts
+//   the 12 words writes them from the chain), its release found in the pool's round (evmTreeSync events(): two
+//   operators, out of the seats, the helper's keyed route and the public history sources, answering each row byte for
+//   byte) by its nullifier hash: a Withdrawn paying the note's own W (W_{evm, l, j}, l its label, j = jOf(its ref), the
+//   only W a proof of the note pays). A Bought is a buy that filled: never a carry. A Withdrawn is a refused buy only
+//   when its transaction (the hash in the row), asked of the helper's keyed route and taken only when its fields hash to
+//   that hash (evm-tx-hash.ts evmAgreedTx), is a direct call to the pool whose input is a Buy (evm-send.ts
 //   evmBuyCalldataRead): a pool.withdraw's W, whose ETH goes on to its destination, is never carried, and a release the
-//   two RPCs name apart, or that came through another contract, is left alone (`unread`, `other`). No local record is
-//   the source: a tab that closed before its buy's end and a fresh device are the same path.
+//   helper withholds, or that came through another contract, is left alone (`unread`, `other`). No local record is the
+//   source: a tab that closed before its buy's end and a fresh device are the same path.
+// - One W a pass: of the owed Ws (not ended, not waiting), one drawn at random; only it is named to the pool's RPCs in
+//   that pass (its nonce, balance, estimate, simulation and send: the reads that gate its signature, on two operators).
+//   A restored device owed three carries takes three passes.
 // - The note: W's return chain (return, evm, l, j), then its R second arrivals, picked through the wallet's evmNextNote
 //   over the round, the chain a sell signs on: a W whose buy was refused holds no token, so no sell of it ever signs
 //   there, and a restore's walk of every spent note's return chain finds the carried note (../../wallet/src/pool/
@@ -30,26 +34,32 @@
 //   nonces still the send's: built again at that same nonce, so at most one of the two can land). A send built again is
 //   added to the record before it leaves, at its own value (W's balance and the fee may have moved).
 // - Ends per W (EVM_CARRY_DONE_KEY), never read again: `withdraw` and `other`; `carried` once its carry landed (W keeps
-//   only the gas its send did not use: at most the send's bound less its cost); `empty` when W reads at or under the
-//   pool's least deposit with nothing carried (no deposit can take it at any fee). A W whose balance covers the least
-//   deposit but not the fee at the base fee read (`high_fee`) is read again on the next pass.
+//   only the gas its send did not use: at most the send's bound less its cost, and the bound, the L1 fee in it, is at
+//   most 1/EVM_CARRY_FEE_PARTS of the value carried); `empty` when W reads at or under the pool's least deposit at a
+//   final block with nothing carried (no deposit can take it at any fee). `withdraw` and `other` only from a release at
+//   a final block. A W still holding the least deposit or more after its carry landed never ends: it is carried again.
+//   A W whose fee is over that part or its balance (`high_fee`), or whose simulation fails (`sim_failed`), waits
+//   (EVM_CARRY_WAIT_KEY): 30 s, doubling to 10 min, before it is drawn again.
 // - When: the buy's own read-back starts a pass at a refusal (pool-buy-evm.ts), and every signed-in state read starts
 //   one (src/pool-testnet.ts), under the seed's shared lock and one pass per chain at a time. A sign out (`signal`) ends
 //   it between steps: nothing is signed or written after it.
-// - Who learns what: the pool RPCs, W (its nonce, balance, estimate and its deposit), the pool's logs at one block and
-//   that block's transactions. No server is asked anything. Nothing here logs.
+// - Who learns what: the helper's keyed route, the drawn W's release transaction by its hash (decision M359); the pool
+//   RPCs, that one W (its nonce, balance, estimate and its deposit), never a release's block or another W in the same
+//   pass. Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
-import { evmAgreedBlock, evmRetryLag, EVM_CHAIN_IDS, EVM_POOL_EVENTS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { evmAgreedBlock, evmRetryLag, EVM_CHAIN_IDS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import type { WalletStore } from "@blindfill/wallet/store";
 import { checkEvmCarry, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, signEvmDeposit, type EvmOnwardSend } from "./rules/pool.ts";
 import { depthsOf, EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS, l1FeesOf, spentFinal } from "./pool-deposit-evm.ts";
 import { evmBuyCalldataRead } from "./evm-send.ts";
+import { evmAgreedTx, evmRowTx } from "./evm-tx-hash.ts";
+import { shuffled } from "./positions-evm.ts";
 
 type Chain = "base" | "robinhood";
 
@@ -63,6 +73,16 @@ export type EvmCarryOpen = { chain: Chain; note: string; l: string; j: number; s
 /** The refused buys' hint of an earlier release (W's address -> its owed ETH): no longer written; an entry is dropped once
  *  its W ends here. */
 export const EVM_OWED_BACK_KEY = "owed/back-evm";
+/** Each W whose carry waits for a lower fee (high_fee) or a simulation that passes (sim_failed), by W's address: when it
+ *  is read again and the wait that set it, doubling from EVM_CARRY_WAIT_MS to EVM_CARRY_WAIT_MAX_MS (the rent back's
+ *  numbers, pool-sell.ts); dropped at any other end. */
+export const EVM_CARRY_WAIT_KEY = "owed/carry-evm-wait";
+export type EvmCarryWait = { at: string; waitMs: number };
+export const EVM_CARRY_WAIT_MS = 30_000;
+export const EVM_CARRY_WAIT_MAX_MS = 600_000;
+/** The most the carry's send may cost, as a part of the value it carries: 1/20 (5%). Over it the carry waits for a lower
+ *  fee (high_fee), so what W keeps after it (at most the bound less what the send cost) stays under 5% of the value. */
+export const EVM_CARRY_FEE_PARTS = 20n;
 
 /** What a carry pass needs from the page. */
 export type EvmCarryHost = {
@@ -71,8 +91,10 @@ export type EvmCarryHost = {
   pin: EvmPoolPin;
   /** The pool's scope (evmPoolScopeOf of the pin). */
   scope: bigint;
-  /** The pool's two RPCs, of two operators. */
+  /** The pool's two RPCs, of two operators: the reads that gate W's signature, for the one W of the pass. */
   rpcs: readonly [EvmRpc, EvmRpc];
+  /** The helper's keyed route (/v1/rpc/{chain}): each release's transaction by its agreed hash. */
+  helper: EvmRpc;
   /** One round of the pool's sync (evmTreeSync events()): its events up to the newest agreed block, its final block. */
   round(): Promise<{ events: readonly EvmPoolEvent[]; fin: { number: bigint } }>;
   notes(): Promise<NoteStore>;
@@ -85,6 +107,10 @@ export type EvmCarryHost = {
   now?(): number;
   wait?(ms: number): Promise<void>;
   signal?: AbortSignal;
+  /** The random source the pass's one W is drawn from (positions-evm.ts shuffled; crypto.getRandomValues when not given). */
+  random?: (out: Uint32Array<ArrayBuffer>) => void;
+  /** W's key from the seed (freshWallet when not given): a test's own, to see every key zeroed. */
+  derive?: typeof freshWallet;
 };
 
 /** One W's outcome in a pass. */
@@ -94,7 +120,6 @@ const lower = (s: string): string => s.toLowerCase();
 const hex = (b: Uint8Array): string => "0x" + Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const qty = (v: bigint): string => "0x" + v.toString(16);
 const word = (v: bigint): string => v.toString(16).padStart(64, "0");
-const TOPIC_WITHDRAWN = hex(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Withdrawn)));
 function quantity(x: unknown, what: string): bigint {
   if (typeof x !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(x)) throw new Error(`${what}: not a quantity`);
   return BigInt(x);
@@ -111,29 +136,19 @@ const recordsOf = (v: unknown): Record<string, unknown> => (typeof v === "object
 type Owed = { l: bigint; j: number; w: string; release: EvmPoolEvent };
 
 /**
- * What a Withdrawn paying W came from, on both RPCs: its log at its block hash and index, then that block's transaction
- * at the log's index. "buy": a direct call to the pool with a Buy's input (a refused buy); "withdraw": a direct call to
- * the pool that is no Buy; "other": a call to another contract. Two RPCs that name another transaction, or input,
- * throw: the W is left for a later pass.
+ * What a Withdrawn paying W came from: its transaction, by the hash in the round's own row (two operators agreed it byte
+ * for byte), asked of the helper's keyed route alone (decision M359: never a public provider, which would learn one
+ * device's releases together) and taken only when its fields hash to that hash (evm-tx-hash.ts evmAgreedTx). "buy": a
+ * direct call to the pool with a Buy's input (a refused buy); "withdraw": a direct call to the pool that is no Buy;
+ * "other": a call to another contract. A helper that withholds, fails or answers another transaction throws: the W is
+ * left for a later pass.
  */
-export async function evmReleaseKind(rpcs: readonly [EvmRpc, EvmRpc], pool: string, w: string, e: Pick<EvmPoolEvent, "block" | "blockHash" | "logIndex">): Promise<"buy" | "withdraw" | "other"> {
-  const one = async (rpc: EvmRpc) => {
-    const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [TOPIC_WITHDRAWN], fromBlock: qty(e.block), toBlock: qty(e.block) }])) as unknown;
-    if (!Array.isArray(logs)) throw new Error("carry: not a log list");
-    const log = (logs as Record<string, unknown>[]).find((x) => typeof x === "object" && x !== null && x.removed !== true && typeof x.logIndex === "string" && BigInt(x.logIndex) === e.logIndex && typeof x.blockHash === "string" && lower(x.blockHash) === lower(e.blockHash));
-    const topics = Array.isArray(log?.topics) ? (log!.topics as unknown[]) : [];
-    if (log === undefined || typeof topics[1] !== "string" || BigInt(topics[1]) !== BigInt(w) || typeof log.transactionIndex !== "string" || typeof log.transactionHash !== "string") throw new Error("carry: no Withdrawn for W at its place");
-    const tx = lower(log.transactionHash);
-    const block = (await rpc("eth_getBlockByNumber", [qty(e.block), true])) as { hash?: unknown; transactions?: unknown } | null;
-    if (typeof block?.hash !== "string" || lower(block.hash) !== lower(e.blockHash) || !Array.isArray(block.transactions)) throw new Error("carry: not the Withdrawn's block");
-    const t = block.transactions[Number(BigInt(log.transactionIndex))] as { hash?: unknown; to?: unknown; input?: unknown } | undefined;
-    if (typeof t?.hash !== "string" || lower(t.hash) !== tx || typeof t.input !== "string" || (t.to !== null && typeof t.to !== "string")) throw new Error("carry: the Withdrawn's transaction is not read");
-    return { tx, to: typeof t.to === "string" ? lower(t.to) : "", input: lower(t.input) };
-  };
-  const [a, b] = await both(rpcs, one);
-  if (a.tx !== b.tx || a.to !== b.to || a.input !== b.input) throw new Error("carry: the two RPCs name another release");
-  if (a.to !== lower(pool)) return "other";
-  return evmBuyCalldataRead(a.input) !== null ? "buy" : "withdraw";
+export async function evmReleaseKind(helper: EvmRpc, pool: string, e: Pick<EvmPoolEvent, "bytes">): Promise<"buy" | "withdraw" | "other"> {
+  const tx = evmRowTx(e);
+  if (tx === null) throw new Error("carry: the release's row names no transaction");
+  const t = await evmAgreedTx(helper, tx);
+  if (t.to !== lower(pool)) return "other";
+  return evmBuyCalldataRead(t.input) !== null ? "buy" : "withdraw";
 }
 
 /** W's reads at one block both RPCs hold: the block, the base fee and W's nonce (each the same on both, each RPC's kept
@@ -150,6 +165,12 @@ async function wReads(rpcs: readonly [EvmRpc, EvmRpc], w: string, sleep: (ms: nu
 }
 
 type Pass = { h: EvmCarryHost; store: NoteStore; seed: Uint8Array; sleep: (ms: number) => Promise<void>; now: () => bigint };
+
+/** W's lower balance at block `fin` (final) on both RPCs. */
+async function finalLow(p: Pass, w: string, fin: bigint): Promise<bigint> {
+  const b = await both(p.h.rpcs, async (rpc, k) => quantity(await rpc("eth_getBalance", [w, qty(fin)]), `rpc ${k} final balance`));
+  return b[0] < b[1] ? b[0] : b[1];
+}
 
 /**
  * One carry of W's balance into the pool: the note picked through evmNextNote over a fresh round (a taken note of the
@@ -173,7 +194,8 @@ async function carryOnce(p: Pass, o: Owed, again?: NoteRecord): Promise<EvmCarry
   // W's balance read at or past the release that paid it
   if (acct.block < o.release.block) return "pending";
   const low = acct.balance[0] < acct.balance[1] ? acct.balance[0] : acct.balance[1];
-  if (low <= EVM_POOL_MIN_DEPOSIT) return "empty";
+  // empty ends W for good, so it is read at a final block: W's balance there, on both RPCs, at or under the least deposit
+  if (low <= EVM_POOL_MIN_DEPOSIT) return (await finalLow(p, o.w, round.fin.number)) <= EVM_POOL_MIN_DEPOSIT ? "empty" : "pending";
   const tip = h.priorityCap ?? EVM_DEPOSIT_PRIORITY_CAP;
   const maxFee = 2n * acct.baseFee + tip;
   const r = { h: { rpcs: h.rpcs, pin: h.pin } };
@@ -191,6 +213,9 @@ async function carryOnce(p: Pass, o: Owed, again?: NoteRecord): Promise<EvmCarry
   const l1 = await l1FeesOf(r, gasLimit, acct.tag);
   const value = low - gasLimit * maxFee - l1[0];
   if (value < EVM_POOL_MIN_DEPOSIT) return "high_fee";
+  // the send's bound (the L1 fee in it) at most 1/EVM_CARRY_FEE_PARTS of the value carried: over it, a lower fee is
+  // waited for, so W never keeps more than that part (the bound less what the send cost)
+  if ((gasLimit * maxFee + l1[0]) * EVM_CARRY_FEE_PARTS > value) return "high_fee";
   const call = callOf(value);
   const tx: EvmOnwardSend = { type: 2, chainId: EVM_CHAIN_IDS[h.pin.network], nonce: acct.nonce, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gasLimit, to: call.to, value: call.value, data: call.data, accessList: [] };
   checkEvmCarry(tx, { wallet: o.w, precommitment: next.precommitment, call, pin: h.pin, chain: h.chain }, { nonce: acct.nonces, balance: acct.balance, estimate: est, baseFee: acct.baseFees, l1Fee: l1, stateDepth: depths.state, labelDepth: depths.label, priorityCap: tip }, h.testnet);
@@ -199,7 +224,7 @@ async function carryOnce(p: Pass, o: Owed, again?: NoteRecord): Promise<EvmCarry
   if (sim.some((s) => s.status === "rejected")) return "sim_failed";
   // a sign out since the reads: nothing signed or written after it
   if (h.signal?.aborted) return "pending";
-  const wk = freshWallet(seed, "evm", o.l, o.j);
+  const wk = (h.derive ?? freshWallet)(seed, "evm", o.l, o.j);
   let raw: Uint8Array;
   try {
     if (lower(wk.address) !== o.w) throw new Error("carry: W is not the release's");
@@ -286,8 +311,9 @@ async function follow(p: Pass, o: Owed, n: NoteRecord, rec: EvmCarryOpen | undef
 }
 
 /**
- * One carry pass over the pool's scope (see the header). Returns each owed W's outcome; a W whose reads fail is
- * `unread` and read again on the next pass.
+ * One carry pass over the pool's scope (see the header): at most one owed W, drawn at random from those not ended and
+ * not waiting, so no pass names two of the user's Ws to a provider. Returns that W's outcome (none when no W is owed);
+ * a W whose reads fail is `unread` and drawn again on a later pass.
  */
 export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> {
   const sleep = h.wait ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
@@ -298,10 +324,10 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
   if (spent.length === 0) return [];
   const meta = await h.held();
   const done = recordsOf(await meta.get("meta", EVM_CARRY_DONE_KEY));
+  const waits = recordsOf(await meta.get("meta", EVM_CARRY_WAIT_KEY));
   const round = await h.round();
   const releases = new Map<bigint, EvmPoolEvent>();
   for (const e of round.events) if (e.kind === "withdraw" && e.nullifier !== null) releases.set(e.nullifier, e);
-  const out: EvmCarryOutcome[] = [];
   const seed = await h.seed64();
   try {
     const owed: Owed[] = [];
@@ -310,46 +336,75 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
       if (e === undefined || e.recipient === null) continue;
       const l = n.leaf!.label;
       const j = jOf(n.ref);
-      const wk = freshWallet(seed, "evm", l, j);
+      const wk = (h.derive ?? freshWallet)(seed, "evm", l, j);
       wk.secretKey.fill(0);
       const w = lower(wk.address);
-      // a release of the note to another W is not the user's W's money
+      // a release of the note to another W is not the user's W's money; a W ended, or waiting for its time, is not drawn
       if (lower(e.recipient) !== w || done[w] !== undefined) continue;
+      const wait = waits[w] as EvmCarryWait | undefined;
+      if (wait !== undefined && now() < BigInt(wait.at)) continue;
       owed.push({ l, j, w, release: e });
     }
+    const o = shuffled(owed, h.random)[0];
+    if (o === undefined || h.signal?.aborted) return [];
     const p: Pass = { h, store, seed, sleep, now };
-    for (const o of owed) {
-      if (h.signal?.aborted) break;
-      let end: EvmCarryOutcome["end"];
-      try {
-        const open = (await store.list()).find((n) => n.scope === h.scope && n.state === "INCOMING" && onChain(n.ref, o.l, o.j));
-        if (open !== undefined) end = await follow(p, o, open, recordsOf(await meta.get("meta", EVM_CARRY_OPEN_KEY))[o.w] as EvmCarryOpen | undefined);
-        else {
-          const kind = await evmReleaseKind(h.rpcs, h.pin.pool, o.w, o.release);
-          end = kind === "buy" ? await carryOnce(p, o) : kind;
-        }
-      } catch (e) {
-        end = e instanceof EvmNotFinalError ? "pending" : "unread";
+    let end: EvmCarryOutcome["end"];
+    let landed = false;
+    try {
+      const open = (await store.list()).find((n) => n.scope === h.scope && n.state === "INCOMING" && onChain(n.ref, o.l, o.j));
+      if (open !== undefined) end = await follow(p, o, open, recordsOf(await meta.get("meta", EVM_CARRY_OPEN_KEY))[o.w] as EvmCarryOpen | undefined);
+      else {
+        const kind = await evmReleaseKind(h.helper, h.pin.pool, o.release);
+        // withdraw and other end W for good, so only from a release at a final block
+        end = kind === "buy" ? await carryOnce(p, o) : o.release.block <= round.fin.number ? kind : "pending";
       }
-      if (end === "withdraw" || end === "other" || end === "empty" || end === "landed") {
-        if (h.signal?.aborted) break;
-        const rec: EvmCarryDone = { chain: h.chain, end: end === "landed" ? "carried" : end };
-        await meta.update("meta", EVM_CARRY_DONE_KEY, (v) => ({ ...recordsOf(v), [o.w]: rec }));
-        await meta.update("meta", EVM_CARRY_OPEN_KEY, (v) => {
-          const all = recordsOf(v);
-          delete all[o.w];
-          return all;
-        });
-        await meta.update("meta", EVM_OWED_BACK_KEY, (v) => {
-          const all = recordsOf(v);
-          for (const k of Object.keys(all)) if (lower(k) === o.w) delete all[k];
-          return all;
-        });
+      if (end === "landed") {
+        landed = true;
+        // a W still holding the least deposit or more is carried again (the next note of its chain), never ended
+        const acct = await wReads(h.rpcs, o.w, sleep, h.signal);
+        const low = acct.balance[0] < acct.balance[1] ? acct.balance[0] : acct.balance[1];
+        if (low >= EVM_POOL_MIN_DEPOSIT) end = "pending";
       }
-      out.push({ w: o.w, end });
+    } catch (e) {
+      end = e instanceof EvmNotFinalError ? "pending" : "unread";
     }
+    if (h.signal?.aborted) return [{ w: o.w, end }];
+    if (end === "high_fee" || end === "sim_failed") {
+      const was = waits[o.w] as EvmCarryWait | undefined;
+      const waitMs = Math.min(EVM_CARRY_WAIT_MAX_MS, was === undefined ? EVM_CARRY_WAIT_MS : was.waitMs * 2);
+      const rec: EvmCarryWait = { at: (now() + BigInt(waitMs)).toString(), waitMs };
+      await meta.update("meta", EVM_CARRY_WAIT_KEY, (v) => ({ ...recordsOf(v), [o.w]: rec }));
+    } else if (end !== "unread" && waits[o.w] !== undefined) {
+      await meta.update("meta", EVM_CARRY_WAIT_KEY, (v) => {
+        const all = recordsOf(v);
+        delete all[o.w];
+        return all;
+      });
+    }
+    // a carry that landed closes its record whether or not W ends (a W carried again opens a new one)
+    if (landed) {
+      await meta.update("meta", EVM_CARRY_OPEN_KEY, (v) => {
+        const all = recordsOf(v);
+        delete all[o.w];
+        return all;
+      });
+    }
+    if (end === "withdraw" || end === "other" || end === "empty" || end === "landed") {
+      const rec: EvmCarryDone = { chain: h.chain, end: end === "landed" ? "carried" : end };
+      await meta.update("meta", EVM_CARRY_DONE_KEY, (v) => ({ ...recordsOf(v), [o.w]: rec }));
+      await meta.update("meta", EVM_CARRY_OPEN_KEY, (v) => {
+        const all = recordsOf(v);
+        delete all[o.w];
+        return all;
+      });
+      await meta.update("meta", EVM_OWED_BACK_KEY, (v) => {
+        const all = recordsOf(v);
+        for (const k of Object.keys(all)) if (lower(k) === o.w) delete all[k];
+        return all;
+      });
+    }
+    return [{ w: o.w, end }];
   } finally {
     seed.fill(0);
   }
-  return out;
 }

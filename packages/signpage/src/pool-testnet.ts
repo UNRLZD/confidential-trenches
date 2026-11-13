@@ -1099,16 +1099,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     void followPendingEvmBuys(evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain))).catch(() => {});
   };
   // a refused buy's ETH on W put back into the pool as a note of the user's (src/pool-carry-evm.ts carryEvmOwed: the Ws
-  // from the chain alone, so a closed tab and a restored device are the same pass), with no tap: at a refusal (the
-  // buy's carry) and at each state read; one pass per chain in this tab and across tabs (a Web Lock taken if free),
-  // under the seed's shared lock; a sign out ends it (evmStop) with nothing signed or written after it
-  const evmCarrying = new Set<"base" | "robinhood">();
+  // from the chain alone, so a closed tab and a restored device are the same pass; one W a pass, its release asked of
+  // the helper's route), with no tap: at a refusal (the buy's carry) and at each state read; one pass per chain in this
+  // tab and across tabs (one Web Lock a chain, taken if free: a second request in this tab finds it held as another
+  // tab's does), under the seed's shared lock; a sign out ends it (evmStop) with nothing signed or written after it
   const evmCarry = (chain: "base" | "robinhood"): void => {
     // only where the build carries the chain's withdraw (poolWayOut), as the buy
     if (!wayOut(chain)) return;
     const e = evmPool(chain);
-    if (e === null || !locks || evmCarrying.has(chain)) return;
-    evmCarrying.add(chain);
+    // each release's transaction from the helper's keyed route alone (decision M359): none, no pass
+    const helper = over.evmHelper ? over.evmHelper(chain) : pageEvmWalletRpc(chain);
+    if (e === null || helper === undefined || !locks) return;
     const signal = evmStop.signal;
     void locks
       .request(`ct-evm-carry/${chain}`, { ifAvailable: true }, async (held) => {
@@ -1122,6 +1123,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               pin: e.pin,
               scope: e.scope,
               rpcs: e.rpcs,
+              helper,
               round: () => e.sync.events(signal),
               notes: async () => notes,
               seed64: page.seed64,
@@ -1134,8 +1136,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           }
         });
       })
-      .catch(() => {})
-      .finally(() => evmCarrying.delete(chain));
+      .catch(() => {});
   };
   // a W's buy record rebuilt from the chain on a device that never made the buy (src/pool-holdings-evm.ts: the round's
   // Bought, the buy's transaction from the helper alone, bound to the hash both RPCs agree on), at each state read until

@@ -1131,10 +1131,15 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
   const sel = (s: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(s))).toString("hex").slice(0, 8);
   const BUY = sel(EVM_BUY_SIGNATURE) + Array.from({ length: 20 }, (_, k) => word(k === 18 ? 640n : 0n)).join("") + word(0xa0n) + word(0x80n) + word(1n) + word(0xbbn) + word(0n);
   const HASH20 = `0x${"20".repeat(32)}`;
-  const release = { ...ev(20n, { kind: "withdraw", state: 9n, value: CHUNK, nullifier: noteSecrets(SEED64, D0).nullifierHash, recipient: W }), blockHash: HASH20, logIndex: 2n };
+  // the release's transaction as the helper's route answers it, its fields hashing to the hash in the round's row
+  const { evmType2Hash } = await import("../src/evm-tx-hash.ts");
+  const relTx: Record<string, unknown> = { type: "0x2", chainId: "0x2105", nonce: "0x0", maxPriorityFeePerGas: "0x1", maxFeePerGas: "0x2", gas: "0x5208", to: PIN.pool.toLowerCase(), value: "0x0", input: BUY, accessList: [], yParity: "0x0", r: "0x" + "5a".repeat(32), s: "0x" + "3c".repeat(32) };
+  relTx.hash = evmType2Hash(relTx);
+  const helperAsked: string[] = [];
+  const helper: EvmRpc = async (method, params) => (helperAsked.push(method), method === "eth_getTransactionByHash" && params[0] === relTx.hash ? relTx : null);
+  const release = { ...ev(20n, { kind: "withdraw", state: 9n, value: CHUNK, nullifier: noteSecrets(SEED64, D0).nullifierHash, recipient: W }), blockHash: HASH20, logIndex: 2n, bytes: ["0x14", HASH20, "0x2", relTx.hash as string, "0x0", PIN.pool.toLowerCase(), "t0", "t1", "0x"].join(" ") };
   const round = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, events: [DEPOSIT, release] };
   const sent: string[] = [];
-  const topic = "0x" + Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Withdrawn))).toString("hex");
   const rpcs = (): readonly EvmRpc[] =>
     ["https://a.example", "https://b.example"].map((url, k) =>
       Object.assign(
@@ -1142,10 +1147,8 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
           const p = params as unknown[];
           switch (method) {
             case "eth_getBlockByNumber":
-              if (p[0] === "0x14" && p[1] === true) return { number: "0x14", hash: HASH20, transactions: [{ hash: `0x${"77".repeat(32)}`, to: PIN.pool.toLowerCase(), input: BUY }] };
+              if (p[0] === "0x14" || p[1] === true) throw new Error("the release's block asked of a public RPC");
               return { number: "0x28", hash: `0x${"28".repeat(32)}`, timestamp: "0x" + (BigInt(Date.now()) / 1000n).toString(16), baseFeePerGas: "0xf4240" };
-            case "eth_getLogs":
-              return [{ logIndex: "0x2", blockHash: HASH20, topics: [topic, "0x" + word(BigInt(W))], transactionIndex: "0x0", transactionHash: `0x${"77".repeat(32)}` }];
             case "eth_getTransactionCount":
               return "0x0";
             case "eth_getBalance":
@@ -1171,9 +1174,19 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
     evmRpcs: (c) => (c === "base" ? rpcs() : null),
     evmSync: () => ({ events: async () => round }),
     evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c) => (c === "base" ? helper : undefined),
   });
+  // another tab holds the chain's carry lock: this tab's state read runs no pass of it
+  let free!: () => void;
+  await new Promise<void>((held) => void navigator.locks.request("ct-evm-carry/base", () => new Promise<void>((r) => ((free = r), held()))));
   await t.stateRead();
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(helperAsked.length, 0, "no pass while another tab holds the lock");
+  free();
+  // two state reads at once in this tab: one pass
+  await Promise.all([t.stateRead(), t.stateRead()]);
   await until(() => sent.length > 0);
+  assert.deepEqual(helperAsked, ["eth_getTransactionByHash"], "one pass, its release from the helper's route");
   const raw = Buffer.from(sent[0]!.slice(4), "hex");
   const ret: NoteRef = { kind: "return", c: "evm", l: L0, j: 0 };
   const hexRaw = raw.toString("hex");

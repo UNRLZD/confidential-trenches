@@ -3,10 +3,11 @@
 // pool-sell-evm.ts planEvmSell). Run at each state read beside the carry (src/pool-testnet.ts), so a pass that could
 // not finish runs again on the next one.
 // - The Ws: each SPENT or RESERVED note of the pool's scope whose release in the pool sync's round (evmTreeSync: every
-//   log of the pool, read on both pool RPCs, which agree on each row's bytes) is a Bought with the note's nullifier and
+//   log of the pool, two operators out of the seats, the helper's keyed route and the public history sources answering
+//   each row byte for byte) is a Bought with the note's nullifier and
 //   W (freshWallet(seed, "evm", l, jOf(ref))) as its recipient. A Withdrawn (a refused buy, a withdraw) writes nothing:
 //   the carry owns a refused buy's ETH (pool-carry-evm.ts). The token, the block and the buy's transaction hash are
-//   that row's own (its bytes hold the hash both RPCs gave).
+//   that row's own (its bytes hold the hash those two operators gave).
 // - The route: the buy's transaction by that hash, asked of the helper's /v1/rpc/{chain} alone (pageEvmWalletRpc,
 //   decision M359), never of a public provider: a public provider asked for one device's buys together learns which
 //   buys are one device's. The answer is taken only when its fields hash to the agreed hash (keccak256 of the signed
@@ -19,7 +20,6 @@
 //   filled record is written once, under the store's update. Any read that fails or disagrees writes nothing. A sold
 //   W's record stays filled on every device: its amount is balanceOf, so a W sold in full shows no row
 //   (positions-evm.ts) and gives the sale nothing (pool-sell-evm.ts planEvmSell).
-import { keccak_256 } from "@noble/hashes/sha3.js";
 import { evmBuyRouteOf, type EvmPoolChain } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
@@ -28,89 +28,29 @@ import type { EvmPoolEvent, EvmPoolPin, EvmRpc } from "../../wallet/src/pool/evm
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import type { WalletStore } from "@blindfill/wallet/store";
 import { evmBuyCalldataRead } from "./evm-send.ts";
+import { evmAgreedTx, evmRowTx } from "./evm-tx-hash.ts";
+import { shuffled } from "./positions-evm.ts";
+export { evmType2Hash } from "./evm-tx-hash.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "./pool-buy-evm.ts";
 import { EVM_CARRY_DONE_KEY } from "./pool-carry-evm.ts";
 import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 
 const lower = (s: string): string => s.toLowerCase();
-const HASH = /^0x[0-9a-f]{64}$/;
-const ADDRESS = /^0x[0-9a-f]{40}$/;
 
-// RLP (the Ethereum yellow paper, appendix B)
-const cat = (...p: Uint8Array[]): Uint8Array => {
-  const out = new Uint8Array(p.reduce((n, x) => n + x.length, 0));
-  let o = 0;
-  for (const x of p) (out.set(x, o), (o += x.length));
-  return out;
-};
-const beBytes = (v: bigint): Uint8Array => {
-  if (v < 0n) throw new Error("a negative integer");
-  const out: number[] = [];
-  for (let x = v; x > 0n; x >>= 8n) out.unshift(Number(x & 0xffn));
-  return Uint8Array.from(out);
-};
-const head = (n: number, short: number): Uint8Array => {
-  if (n < 56) return Uint8Array.of(short + n);
-  const len = beBytes(BigInt(n));
-  return cat(Uint8Array.of(short + 55 + len.length), len);
-};
-const rlpBytes = (b: Uint8Array): Uint8Array => (b.length === 1 && b[0]! < 0x80 ? b : cat(head(b.length, 0x80), b));
-const rlpList = (items: Uint8Array[]): Uint8Array => {
-  const body = cat(...items);
-  return cat(head(body.length, 0xc0), body);
-};
-const hexBytes = (h: string): Uint8Array => {
-  if (!/^0x([0-9a-f]{2})*$/.test(h)) throw new Error("not hex bytes");
-  return Uint8Array.from(h.slice(2).match(/../g) ?? [], (x) => parseInt(x, 16));
-};
-const qty = (v: unknown, what: string): bigint => {
-  if (typeof v !== "string" || !/^0x(0|[1-9a-f][0-9a-f]{0,63})$/.test(v)) throw new Error(`${what}: not a quantity`);
-  return BigInt(v);
-};
-const hex = (b: Uint8Array): string => `0x${Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("")}`;
-
-/** The hash of a signed type 2 transaction as an RPC gives it (eth_getTransactionByHash): keccak256(0x02 ‖ rlp([chainId,
- *  nonce, maxPriorityFeePerGas, maxFeePerGas, gas, to, value, input, accessList, yParity, r, s])). Throws on any
- *  other type or a field out of its shape. */
-export function evmType2Hash(t: Record<string, unknown>): string {
-  if (t?.type !== "0x2") throw new Error("not a type 2 transaction");
-  const u = (k: string) => rlpBytes(beBytes(qty(t[k], k)));
-  if (typeof t.to !== "string" || !ADDRESS.test(lower(t.to))) throw new Error("to: not an address");
-  if (typeof t.input !== "string") throw new Error("input: not hex");
-  const list = t.accessList;
-  if (!Array.isArray(list)) throw new Error("accessList: not a list");
-  const access = rlpList(
-    list.map((e: { address?: unknown; storageKeys?: unknown }) => {
-      if (typeof e?.address !== "string" || !ADDRESS.test(lower(e.address)) || !Array.isArray(e.storageKeys)) throw new Error("accessList: not an entry");
-      return rlpList([rlpBytes(hexBytes(lower(e.address))), rlpList(e.storageKeys.map((k: unknown) => {
-        if (typeof k !== "string" || !HASH.test(lower(k))) throw new Error("accessList: not a storage key");
-        return rlpBytes(hexBytes(lower(k)));
-      }))]);
-    }),
-  );
-  const parity = t.yParity ?? t.v;
-  const y = qty(parity, "yParity");
-  if (y !== 0n && y !== 1n) throw new Error("yParity: not 0 or 1");
-  const fields = [u("chainId"), u("nonce"), u("maxPriorityFeePerGas"), u("maxFeePerGas"), u("gas"), rlpBytes(hexBytes(lower(t.to))), u("value"), rlpBytes(hexBytes(lower(t.input))), access, rlpBytes(beBytes(y)), u("r"), u("s")];
-  return hex(keccak_256(cat(Uint8Array.of(2), rlpList(fields))));
-}
-
-/** A buy's place in the round: W, the token, its block and the transaction hash both pool RPCs gave (the row's bytes:
+/** A buy's place in the round: W, the token, its block and the transaction hash the round agreed (the row's bytes:
  *  block, block hash, log index, transaction hash, ...). Null for any other row. */
 export function evmBoughtOf(e: EvmPoolEvent): { w: string; token: string; block: bigint; tx: string } | null {
   if (e.kind !== "buy" || e.recipient === null || e.token === null) return null;
-  const tx = e.bytes.split(" ")[3];
-  return typeof tx === "string" && HASH.test(tx) ? { w: e.recipient, token: e.token, block: e.block, tx } : null;
+  const tx = evmRowTx(e);
+  return tx !== null ? { w: e.recipient, token: e.token, block: e.block, tx } : null;
 }
 
 /** The route of the buy at `tx`, from the helper's answer (see the header): throws unless that answer hashes to `tx`,
  *  calls `pool` and buys `token`. */
 export async function evmBuyRouteByTx(helper: EvmRpc, network: EvmPoolChain, pool: string, b: { token: string; block: bigint; tx: string }): Promise<EvmHolding["route"]> {
-  const t = (await helper("eth_getTransactionByHash", [b.tx])) as Record<string, unknown> | null;
-  if (t === null || typeof t !== "object") throw new Error("the helper has no such transaction");
-  if (evmType2Hash(t) !== lower(b.tx)) throw new Error("the helper's transaction is not the agreed one");
-  if (lower(String(t.to)) !== lower(pool)) throw new Error("the transaction does not call the pool");
-  const buy = evmBuyCalldataRead(lower(String(t.input)));
+  const t = await evmAgreedTx(helper, b.tx);
+  if (t.to !== lower(pool)) throw new Error("the transaction does not call the pool");
+  const buy = evmBuyCalldataRead(t.input);
   if (buy === null || lower(buy.token) !== lower(b.token)) throw new Error("the transaction is not a Buy of the token");
   const path = evmBuyRouteOf(network, buy);
   return { venue: path.venue, adapter: lower(buy.adapter), path, tx: lower(b.tx), block: b.block.toString() };
@@ -126,12 +66,14 @@ export type EvmHoldingsHost = {
   rpcs: readonly [EvmRpc, EvmRpc];
   /** The helper's /v1/rpc/{chain}: the buys' transactions. */
   helper: EvmRpc;
-  /** The pool sync's round (every row agreed on both RPCs). */
+  /** The pool sync's round (every row agreed byte for byte by two operators). */
   round(): Promise<{ events: readonly EvmPoolEvent[] }>;
   notes(): Promise<readonly NoteRecord[]>;
   seed64(): Promise<Uint8Array>;
   held(): Promise<Pick<WalletStore, "get" | "update">>;
   signal?: AbortSignal;
+  /** The random source the buys are asked in (positions-evm.ts shuffled; crypto.getRandomValues when not given). */
+  random?: (out: Uint32Array<ArrayBuffer>) => void;
 };
 
 /** One pass (see the header): the Ws whose record it wrote. */
@@ -166,7 +108,8 @@ export async function rebuildEvmHoldings(h: EvmHoldingsHost): Promise<string[]> 
     if (b !== null && b.w === w) owed.push({ ...b, w });
   }
   const out: string[] = [];
-  for (const b of owed) {
+  // asked in a random order, never the notes' (M359 (4)): the order says nothing of which buy came first
+  for (const b of shuffled(owed, h.random)) {
     h.signal?.throwIfAborted();
     let route: EvmHolding["route"];
     let decimals: number;

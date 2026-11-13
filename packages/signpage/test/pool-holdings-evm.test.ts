@@ -388,3 +388,29 @@ test("SIGN_HOST's page: a state read on a restored device rebuilds W's record th
     globalThis.fetch = realFetch;
   }
 });
+
+test("a transaction whose fields hash to the round's own hash but call another contract: nothing written (the pool check, not the hash, refuses it)", async () => {
+  const ws = await stores();
+  const token = freshToken();
+  const a = noteOf(0);
+  const real = buyTx(a.w, token);
+  // the same Buy sent to another contract, hashed on its own fields: the round names this very hash
+  const to = { ...real, to: "0x" + "e1".repeat(20) } as Record<string, unknown> & { hash: string };
+  to.hash = evmType2Hash(to);
+  const x = world({ notes: [a.n], events: [row("buy", a.nullifier, a.w, to.hash, token, 3n)], txs: [to], ws });
+  assert.deepEqual(await rebuildEvmHoldings(x.host), []);
+  assert.equal(x.helperAsked.length, 1, "the helper answered; its answer hashed right");
+  assert.equal(await ws.get("meta", EVM_POSITION_COSTS_KEY), undefined);
+});
+
+test("the buys' transactions are asked of the helper in a random order, never the notes' order", async () => {
+  const ws = await stores();
+  const token = freshToken();
+  const ns = [noteOf(0), noteOf(1), noteOf(2)];
+  const txs = ns.map((x) => buyTx(x.w, token));
+  const x = world({ notes: ns.map((y) => y.n), events: ns.map((y, i) => row("buy", y.nullifier, y.w, txs[i]!.hash, token, BigInt(3 + i))), txs, ws });
+  // a source of all zeros: Fisher-Yates over [0, 1, 2] then gives [1, 2, 0]
+  x.host.random = (out) => void out.fill(0);
+  assert.equal((await rebuildEvmHoldings(x.host)).length, 3);
+  assert.deepEqual(x.helperAsked.map((l) => JSON.parse(l.slice(l.indexOf(" ") + 1))[0]), [txs[1]!.hash, txs[2]!.hash, txs[0]!.hash]);
+});

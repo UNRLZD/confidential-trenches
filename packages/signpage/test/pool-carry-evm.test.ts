@@ -15,13 +15,14 @@ import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
-import { EVM_POOL_EVENTS, evmPoolScopeOf, type EvmPoolEvent, type EvmPoolPin } from "../../wallet/src/pool/evm.ts";
+import { evmPoolScopeOf, type EvmPoolEvent, type EvmPoolPin } from "../../wallet/src/pool/evm.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { checkEvmCarry, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmDepositReads, type EvmOnwardSend } from "../src/rules/pool.ts";
 import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS } from "../src/pool-deposit-evm.ts";
 import { EVM_BUY_SIGNATURE, EVM_WITHDRAW_SIGNATURE } from "../src/evm-send.ts";
-import { carryEvmOwed, EVM_CARRY_DONE_KEY, EVM_CARRY_OPEN_KEY, EVM_OWED_BACK_KEY, type EvmCarryHost, type EvmCarryOpen } from "../src/pool-carry-evm.ts";
+import { carryEvmOwed, EVM_CARRY_DONE_KEY, EVM_CARRY_OPEN_KEY, EVM_CARRY_WAIT_KEY, EVM_OWED_BACK_KEY, type EvmCarryHost, type EvmCarryOpen } from "../src/pool-carry-evm.ts";
+import { evmType2Hash } from "../src/evm-tx-hash.ts";
 
 const SEED = wordsToSeed64(entropyToWords(new Uint8Array(16)));
 const POOL = "0x00000000000000000000000000000000000f0011";
@@ -37,12 +38,15 @@ const OWED = CHUNK - FEE;
 const q = (v: bigint) => "0x" + v.toString(16);
 const word = (v: bigint) => v.toString(16).padStart(64, "0");
 const sel = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex").slice(0, 8);
-const TOPIC_WITHDRAWN = "0x" + Buffer.from(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Withdrawn))).toString("hex");
 const SEL_STATE_DEPTH = sel("currentTreeDepth()");
 const SEL_LABEL_DEPTH = sel("currentLabelTreeDepth()");
 const DEPOSIT = sel("deposit(uint256,uint256)");
 const W = freshWallet(SEED, "evm", LABEL, 0).address.toLowerCase();
-const RELEASE_TX = "0x" + "77".repeat(32);
+/** A release's transaction as the helper's route answers it: its fields hash to the hash the round's row carries. */
+const releaseTxOf = (to: string, input: string) => {
+  const t: Record<string, unknown> = { type: "0x2", chainId: "0x2105", nonce: "0x0", maxPriorityFeePerGas: "0x1", maxFeePerGas: "0x2", gas: "0x5208", to, value: "0x0", input, accessList: [], yParity: "0x0", r: "0x" + "5a".repeat(32), s: "0x" + "3c".repeat(32) };
+  return { ...t, hash: evmType2Hash(t) } as Record<string, unknown> & { hash: string };
+};
 const RELEASE_BLOCK = 90n;
 const RELEASE_HASH = "0x" + "90".repeat(32);
 /** A Buy's input as evmBuyCalldata lays it out (evm-send.ts evmBuyCalldataRead reads it): the Buy at word 18. */
@@ -94,29 +98,47 @@ function chain(name: "base" | "robinhood" = "base") {
     sent: [] as string[],
     known: [new Set<string>(), new Set<string>()],
     simFail: [false, false],
-    /** the release's transaction as each RPC names it */
-    release: [{ to: POOL, input: BUY_INPUT }, { to: POOL, input: BUY_INPUT }] as { to: string; input: string }[],
+    /** the release's transaction (its hash in the round's row) and how the helper's route answers for it */
+    release: releaseTxOf(POOL, BUY_INPUT),
+    helper: "ok" as "ok" | "withhold" | "fail" | "forge",
+    helperAsked: [] as string[],
+    /** every request each public RPC was sent */
+    asked: [[], []] as string[][],
     estimate: 250_000n,
+    /** the pool's tree depths, the L1 fee each chain-fee read answers, and W's balance at the final block (null: as latest) */
+    depth: 0n,
+    l1: 7_000n,
+    finBalance: null as bigint[] | null,
+  };
+  const helper = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+    c.helperAsked.push(`${method} ${JSON.stringify(params)}`);
+    if (method !== "eth_getTransactionByHash") throw new Error(`no ${method} on the helper`);
+    if (c.helper === "fail") throw new Error("HTTP 503");
+    if (c.helper === "withhold" || params[0] !== c.release.hash) return null;
+    // another transaction under the agreed hash: its fields hash to another
+    if (c.helper === "forge") return { ...c.release, input: c.release.input === BUY_INPUT ? WITHDRAW_INPUT : BUY_INPUT };
+    return c.release;
   };
   const rpc =
     (k: number) =>
     async (method: string, params: readonly unknown[]): Promise<unknown> => {
       const p = params as unknown[];
+      c.asked[k]!.push(`${method} ${JSON.stringify(params)}`);
       switch (method) {
         case "eth_getBlockByNumber": {
           const n = p[0] === "latest" ? c.block : p[0] === "finalized" ? c.fin : BigInt(p[0] as string);
-          if (p[1] === true && n === RELEASE_BLOCK) return { number: q(n), hash: RELEASE_HASH, transactions: [{ hash: RELEASE_TX, ...c.release[k]! }] };
+          // a release's block, its transactions or its logs are never asked of a public RPC
+          if (p[1] === true || n === RELEASE_BLOCK) throw new Error("a release's block asked of a public RPC");
           return { number: q(n), hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: q(c.baseFee) };
         }
-        case "eth_getLogs":
-          return [{ logIndex: "0x3", blockHash: RELEASE_HASH, topics: [TOPIC_WITHDRAWN, "0x" + word(BigInt(W))], transactionIndex: "0x0", transactionHash: RELEASE_TX }];
         case "eth_getTransactionCount":
           if (typeof p[1] === "object" && p[1] !== null) return q(c.nonceAt[k] ?? c.nonce);
           return q(p[1] === "pending" ? (c.pending[k] ?? c.nonce) : c.nonce);
         case "eth_getTransactionByHash":
           return c.known[k]!.has(p[0] as string) ? { hash: p[0] } : null;
         case "eth_getBalance":
-          return q(String(p[0]).toLowerCase() === W ? c.balance[k]! : 0n);
+          if (String(p[0]).toLowerCase() !== W) return q(0n);
+          return q(c.finBalance !== null && p[1] === q(c.fin) ? c.finBalance[k]! : c.balance[k]!);
         case "eth_estimateGas":
           return q(c.estimate);
         case "eth_call": {
@@ -125,9 +147,9 @@ function chain(name: "base" | "robinhood" = "base") {
             if (c.simFail[k]) throw new Error("RPC error 3: execution reverted");
             return "0x";
           }
-          if (call.data === SEL_STATE_DEPTH) return "0x" + word(0n);
-          if (call.data === SEL_LABEL_DEPTH) return "0x" + word(0n);
-          return "0x" + word(call.data.startsWith("0xf1c7a58b") ? 7_000n : 0n);
+          if (call.data === SEL_STATE_DEPTH) return "0x" + word(c.depth);
+          if (call.data === SEL_LABEL_DEPTH) return "0x" + word(c.depth);
+          return "0x" + word(call.data.startsWith("0xf1c7a58b") ? c.l1 : 0n);
         }
         case "eth_sendRawTransaction": {
           const raw = p[0] as string;
@@ -142,7 +164,7 @@ function chain(name: "base" | "robinhood" = "base") {
     const label = vaultLabelOf(keccak_256, scope, BigInt(c.events.filter((e) => e.kind === "deposit").length + 1));
     c.events.push({ block: c.fin, blockHash: `0x${"ab".repeat(32)}`, logIndex: BigInt(c.events.length), bytes: "", kind: "deposit", state: noteCommitment(value, label, pre), label, value, precommitment: pre, nullifier: null, recipient: null, token: null } as EvmPoolEvent);
   };
-  return { c, scope, land, rpcs: [rpc(0), rpc(1)] as const };
+  return { c, scope, land, rpcs: [rpc(0), rpc(1)] as const, helper };
 }
 
 async function stores(idb = new IDBFactory()): Promise<{ ns: NoteStore; ws: WalletStore; idb: IDBFactory }> {
@@ -163,7 +185,7 @@ async function refused(ch: ReturnType<typeof chain>, ns: NoteStore): Promise<Not
   const change: NoteRef = { kind: "change", l: LABEL, j: 0 };
   const cpre = noteSecrets(SEED, change).precommitment;
   await ns.add({ ref: change, scope: ch.scope, precommitment: cpre, state: "UNSPENT", leaf: { value: value - CHUNK, label: LABEL, commitment: noteCommitment(value - CHUNK, LABEL, cpre), leafIndex: 1n } });
-  ch.c.events.push({ block: RELEASE_BLOCK, blockHash: RELEASE_HASH, logIndex: 3n, bytes: "", kind: "withdraw", state: 1n, label: null, value: CHUNK, precommitment: null, nullifier: noteSecrets(SEED, planned.ref).nullifierHash, recipient: W, token: null } as EvmPoolEvent);
+  ch.c.events.push({ block: RELEASE_BLOCK, blockHash: RELEASE_HASH, logIndex: 3n, bytes: [q(RELEASE_BLOCK), RELEASE_HASH, "0x3", ch.c.release.hash, "0x0", POOL, "t0", "t1", "0x"].join(" "), kind: "withdraw", state: 1n, label: null, value: CHUNK, precommitment: null, nullifier: noteSecrets(SEED, planned.ref).nullifierHash, recipient: W, token: null } as EvmPoolEvent);
   return planned;
 }
 
@@ -178,6 +200,7 @@ function hostOf(ch: ReturnType<typeof chain>, ns: NoteStore, ws: WalletStore, na
     pin: PINS[name],
     scope: ch.scope,
     rpcs: ch.rpcs,
+    helper: ch.helper,
     round: async () => ({ events: [...ch.c.events], fin: { number: ch.c.fin } }),
     notes: async () => ns,
     seed64: async () => (seeds.push(SEED.slice()), seeds.at(-1)!),
@@ -196,7 +219,7 @@ for (const name of ["base", "robinhood"] as const) {
     const ch = chain(name);
     const { ns, ws } = await stores();
     await refused(ch, ns);
-    await ws.update("meta", EVM_OWED_BACK_KEY, () => ({ [W]: { address: W, chain: name, wei: OWED.toString(), tx: RELEASE_TX, block: "90" } }));
+    await ws.update("meta", EVM_OWED_BACK_KEY, () => ({ [W]: { address: W, chain: name, wei: OWED.toString(), tx: ch.c.release.hash, block: "90" } }));
     const h = hostOf(ch, ns, ws, name);
     assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "sent" }]);
     assert.equal(ch.c.sent.length, 1);
@@ -258,6 +281,7 @@ test("a reload mid-carry (the page closed after the send) follows the open note 
   assert.equal(ch.c.sent.length, 1);
   const s = sentOf(ch.c.sent[0]!);
   ch.land(s.pre, s.value);
+  ch.c.balance = [10n ** 12n, 10n ** 12n];
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "landed" }]);
   assert.equal(ch.c.sent.length, 1);
 });
@@ -305,7 +329,7 @@ test("a dead send (W's nonce past it at a block final on both RPCs, no Deposited
 
 test("a withdraw's W (its release not a Buy) is never carried, and ended so; nothing signed", async () => {
   const ch = chain();
-  ch.c.release = [{ to: POOL, input: WITHDRAW_INPUT }, { to: POOL, input: WITHDRAW_INPUT }];
+  ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
   const { ns, ws } = await stores();
   await refused(ch, ns);
   const h = hostOf(ch, ns, ws);
@@ -315,19 +339,25 @@ test("a withdraw's W (its release not a Buy) is never carried, and ended so; not
   assert.deepEqual(await carryEvmOwed(h), []);
 });
 
-test("a release through another contract is never carried (other); one the two RPCs name apart is left unread for a later pass", async () => {
+test("a release through another contract is never carried (other); one the helper withholds, fails or answers with another transaction under the hash is left unread for a later pass", async () => {
   const other = chain();
-  other.c.release = [{ to: "0x00000000000000000000000000000000000000cc", input: BUY_INPUT }, { to: "0x00000000000000000000000000000000000000cc", input: BUY_INPUT }];
+  other.c.release = releaseTxOf("0x00000000000000000000000000000000000000cc", BUY_INPUT);
   const a = await stores();
   await refused(other, a.ns);
   assert.deepEqual(await carryEvmOwed(hostOf(other, a.ns, a.ws)), [{ w: W, end: "other" }]);
-  const apart = chain();
-  apart.c.release = [{ to: POOL, input: BUY_INPUT }, { to: POOL, input: WITHDRAW_INPUT }];
-  const b = await stores();
-  await refused(apart, b.ns);
-  assert.deepEqual(await carryEvmOwed(hostOf(apart, b.ns, b.ws)), [{ w: W, end: "unread" }]);
-  assert.equal(apart.c.sent.length + other.c.sent.length, 0);
-  assert.equal(await b.ws.get("meta", EVM_CARRY_DONE_KEY), undefined, "read again on the next pass");
+  for (const mode of ["withhold", "fail", "forge"] as const) {
+    const apart = chain();
+    apart.c.helper = mode;
+    const b = await stores();
+    await refused(apart, b.ns);
+    assert.deepEqual(await carryEvmOwed(hostOf(apart, b.ns, b.ws)), [{ w: W, end: "unread" }], mode);
+    assert.equal(apart.c.sent.length, 0);
+    assert.equal(await b.ws.get("meta", EVM_CARRY_DONE_KEY), undefined, "read again on the next pass");
+    // and read again: the helper answers now
+    apart.c.helper = "ok";
+    assert.deepEqual(await carryEvmOwed(hostOf(apart, b.ns, b.ws)), [{ w: W, end: "sent" }], `${mode}, then answered`);
+  }
+  assert.equal(other.c.sent.length, 0);
 });
 
 test("dust: W at or under the pool's least deposit is ended empty; over it but under the fee at this base fee is read again (high_fee); a failed simulation signs nothing", async () => {
@@ -412,4 +442,175 @@ test("checkEvmCarry: W's whole lower balance less the bound, to the pinned pool'
   assert.equal(rule(() => checkEvmCarry(txOf(), { ...ctxOf(), chain: "solana" as never }, READS)), "chain");
   assert.equal(rule(() => checkEvmCarry(txOf(), { ...ctxOf(), pin: PINS.robinhood }, READS)), "evm_not_pinned");
   assert.equal(rule(() => checkEvmCarry(txOf({ gasLimit: GAS + 1n }), ctxOf(), READS)), "gas_estimate");
+});
+
+/** A device restored from the words with several releases, each paying its own W: `kind` of each release, W's balance.
+ *  Every request each public RPC gets is kept, per pass. */
+async function several(releases: { label: bigint; block: bigint; input: string; balance: bigint }[]) {
+  const ch = chain();
+  const { ns, ws } = await stores();
+  const wOf = (label: bigint) => freshWallet(SEED, "evm", label, 0).address.toLowerCase();
+  const txs = releases.map((r) => releaseTxOf(POOL, r.input));
+  for (const [i, r] of releases.entries()) {
+    const planned = await ns.planDeposit(ch.scope, (ref) => noteSecrets(SEED, ref).precommitment);
+    const value = 3n * CHUNK;
+    await ns.move(planned.id, "PLANNED", "INCOMING", { evmSend: { hash: "0x" + (i + 1).toString(16).padStart(64, "0"), nonce: 0n, value, sentMs: 1n } });
+    await ns.move(planned.id, "INCOMING", "UNSPENT", { leaf: { value, label: r.label, commitment: noteCommitment(value, r.label, planned.precommitment), leafIndex: BigInt(2 * i) } });
+    await ns.move(planned.id, "UNSPENT", "SPENT").catch(async () => {});
+    const hash = "0x" + r.block.toString(16).padStart(64, "9");
+    ch.c.events.push({ block: r.block, blockHash: hash, logIndex: 3n, bytes: [q(r.block), hash, "0x3", txs[i]!.hash, "0x0", POOL, "t0", "t1", "0x"].join(" "), kind: "withdraw", state: BigInt(1_000 + i), label: null, value: CHUNK, precommitment: null, nullifier: noteSecrets(SEED, planned.ref).nullifierHash, recipient: wOf(r.label), token: null } as EvmPoolEvent);
+  }
+  const asked: string[][] = [[], []];
+  const balanceOf = (w: string) => releases.find((r) => wOf(r.label) === w)?.balance ?? 0n;
+  const rpc = (k: 0 | 1) => async (method: string, params: readonly unknown[]) => {
+    asked[k]!.push(`${method} ${JSON.stringify(params)}`);
+    if (method === "eth_getBalance") return q(balanceOf(String(params[0]).toLowerCase()));
+    return ch.rpcs[k](method, params);
+  };
+  const helperAsked: string[] = [];
+  const helper = async (method: string, params: readonly unknown[]) => {
+    helperAsked.push(`${method} ${JSON.stringify(params)}`);
+    return txs.find((t) => t.hash === params[0]) ?? null;
+  };
+  const h = hostOf(ch, ns, ws, "base", { rpcs: [rpc(0), rpc(1)], helper });
+  return { ch, ns, ws, h, asked, helperAsked, ws_: releases.map((r) => wOf(r.label)), txs };
+}
+
+test("a restored device owed three releases: each pass names one W at most to the pool's RPCs and no release block to any; the releases' transactions go to the helper's route alone; three passes take the three", async () => {
+  const x = await several([
+    { label: 701n, block: 90n, input: WITHDRAW_INPUT, balance: 0n },
+    { label: 702n, block: 92n, input: BUY_INPUT, balance: OWED },
+    { label: 703n, block: 94n, input: BUY_INPUT, balance: OWED },
+  ]);
+  // the restore writes these SPENT: the store's own path is RESERVED or SPENT, either is read
+  const seen = new Map<string, string[]>();
+  let passes = 0;
+  for (; passes < 30 && seen.size < 3; passes++) {
+    const before = [x.asked[0]!.length, x.asked[1]!.length];
+    const out = await carryEvmOwed(x.h);
+    assert.ok(out.length <= 1, "one W a pass");
+    for (const k of [0, 1] as const) {
+      const now = x.asked[k]!.slice(before[k]).join("\n").toLowerCase();
+      const named = x.ws_.filter((w) => now.includes(w.slice(2)));
+      assert.ok(named.length <= 1, `pass ${passes}: rpc ${k} was named ${named.length} Ws`);
+      if (out[0] !== undefined) assert.ok(named.every((w) => w === out[0]!.w), "only the pass's own W");
+      assert.ok(!/"0x5a",|"0x5c",|"0x5e",|"fromblock"/.test(now), "no release block asked");
+    }
+    for (const o of out) seen.set(o.w, [...(seen.get(o.w) ?? []), o.end]);
+  }
+  assert.ok(passes >= 3, "three passes at least");
+  assert.deepEqual(seen.get(x.ws_[0]!)?.[0], "withdraw");
+  assert.ok(seen.get(x.ws_[1]!)!.includes("sent") && seen.get(x.ws_[2]!)!.includes("sent"));
+  // the helper was asked each release's transaction by its hash, and nothing else
+  assert.ok(x.helperAsked.every((l) => l.startsWith("eth_getTransactionByHash ")));
+  assert.deepEqual(new Set(x.helperAsked.map((l) => JSON.parse(l.slice(l.indexOf(" ") + 1))[0])), new Set(x.txs.map((t) => t.hash)));
+  // and the withdraw's W was never named to a public RPC at all
+  assert.ok(!x.asked.flat().join("\n").toLowerCase().includes(x.ws_[0]!.slice(2)));
+});
+
+test("a fee spike (0.3 gwei on Base, the deposit's real estimate): the bound is over 5% of the value, so nothing is signed; it waits 30 s, then 60 s, doubling to 10 min, read again only past each wait", async () => {
+  const ch = chain();
+  ch.c.baseFee = 300_000_000n;
+  ch.c.estimate = 330_785n;
+  const { ns, ws } = await stores();
+  await refused(ch, ns);
+  const h = hostOf(ch, ns, ws);
+  const waits: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "high_fee" }]);
+    const rec = ((await ws.get("meta", EVM_CARRY_WAIT_KEY)) as Record<string, { at: string; waitMs: number }>)[W]!;
+    waits.push(rec.waitMs);
+    assert.equal(BigInt(rec.at), BigInt(h.clock.t + rec.waitMs));
+    // before the wait is over the W is not drawn
+    h.clock.t += rec.waitMs - 1;
+    assert.deepEqual(await carryEvmOwed(h), []);
+    h.clock.t += 1;
+  }
+  assert.deepEqual(waits, [30_000, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000]);
+  assert.equal(ch.c.sent.length, 0);
+  assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined, "never ended");
+  // the fee falls: carried, the wait dropped
+  ch.c.baseFee = 1_000_000n;
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "sent" }]);
+  assert.deepEqual(await ws.get("meta", EVM_CARRY_WAIT_KEY), {});
+  const s = sentOf(ch.c.sent[0]!);
+  assert.ok((s.gas * s.maxFee + 7_000n) * 20n <= s.value, "the bound at most 5% of what it carries");
+});
+
+test("the 5% bound counts the tree's depth and Base's L1 fee: a carry at depth 0 signs where depth 20 waits; a large L1 fee waits on Base, not on Robinhood (none)", async () => {
+  const at = async (name: "base" | "robinhood", baseFee: bigint, depth: bigint, l1: bigint) => {
+    const ch = chain(name);
+    Object.assign(ch.c, { baseFee, depth, l1 });
+    const { ns, ws } = await stores();
+    await refused(ch, ns);
+    return (await carryEvmOwed(hostOf(ch, ns, ws, name)))[0]!.end;
+  };
+  assert.equal(await at("base", 15_000_000n, 0n, 7_000n), "sent");
+  assert.equal(await at("base", 15_000_000n, 20n, 7_000n), "high_fee");
+  assert.equal(await at("base", 10_000_000n, 0n, 7_000n), "sent");
+  assert.equal(await at("base", 10_000_000n, 0n, 40_000_000_000_000n), "high_fee");
+  assert.equal(await at("robinhood", 10_000_000n, 0n, 40_000_000_000_000n), "sent");
+});
+
+test("a W still holding the least deposit or more after its carry landed is carried again on its chain's next note, never ended; ended carried once what is left is under it", async () => {
+  const ch = chain();
+  const { ns, ws } = await stores();
+  await refused(ch, ns);
+  const h = hostOf(ch, ns, ws);
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "sent" }]);
+  const a = sentOf(ch.c.sent[0]!);
+  ch.land(a.pre, a.value);
+  ch.c.nonce = 1n;
+  // more ETH reached W since (a second send to W): W holds more than the least deposit
+  ch.c.balance = [3n * EVM_POOL_MIN_DEPOSIT, 3n * EVM_POOL_MIN_DEPOSIT];
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "pending" }], "landed, W not ended");
+  assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined);
+  assert.deepEqual(await ws.get("meta", EVM_CARRY_OPEN_KEY), {}, "the landed carry's record closed");
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "sent" }]);
+  const b = sentOf(ch.c.sent[1]!);
+  assert.notEqual(b.pre, a.pre, "the chain's next note");
+  ch.land(b.pre, b.value);
+  ch.c.nonce = 2n;
+  ch.c.balance = [10n ** 12n, 10n ** 12n];
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "landed" }]);
+  assert.deepEqual(await ws.get("meta", EVM_CARRY_DONE_KEY), { [W]: { chain: "base", end: "carried" } });
+});
+
+test("the ends that stop a W for good come from final reads: a withdraw above the final block waits; empty at latest but more at the final block waits", async () => {
+  const ch = chain();
+  ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+  ch.c.fin = RELEASE_BLOCK - 1n;
+  const { ns, ws } = await stores();
+  await refused(ch, ns);
+  const h = hostOf(ch, ns, ws);
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "pending" }]);
+  assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined);
+  ch.c.fin = RELEASE_BLOCK;
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "withdraw" }]);
+  const e = chain();
+  e.c.balance = [EVM_POOL_MIN_DEPOSIT, EVM_POOL_MIN_DEPOSIT];
+  e.c.finBalance = [OWED, OWED];
+  e.c.fin = 99n; // the latest block 100, the final 99
+  const b = await stores();
+  await refused(e, b.ns);
+  const he = hostOf(e, b.ns, b.ws);
+  assert.deepEqual(await carryEvmOwed(he), [{ w: W, end: "pending" }]);
+  assert.equal(await b.ws.get("meta", EVM_CARRY_DONE_KEY), undefined);
+  e.c.finBalance = null;
+  assert.deepEqual(await carryEvmOwed(he), [{ w: W, end: "empty" }]);
+});
+
+test("every W key the pass derives (the owed list's and the signature's) is zeroed", async () => {
+  const ch = chain();
+  const { ns, ws } = await stores();
+  await refused(ch, ns);
+  const keys: Uint8Array[] = [];
+  const derive: typeof freshWallet = (...a) => {
+    const k = freshWallet(...a);
+    keys.push(k.secretKey);
+    return k;
+  };
+  assert.deepEqual(await carryEvmOwed(hostOf(ch, ns, ws, "base", { derive })), [{ w: W, end: "sent" }]);
+  assert.ok(keys.length >= 2, "the owed list's key and the signature's");
+  assert.ok(keys.every((k) => k.every((b) => b === 0)), "every key zeroed");
 });
