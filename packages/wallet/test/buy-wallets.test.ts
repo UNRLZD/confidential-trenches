@@ -559,6 +559,31 @@ test("card wallets-found-in-one-read: the finder's rounds are held by the host's
   }
 }));
 
+// A sale's own finder read at its tap holds what a trade waits for (the sale's seed and sell locks), so it reads as a
+// trade (../src/throttle.ts header): main-mainnet-pools.test.ts's pool.sell waited 10 to 17 s for the helper host's pass
+// room while the Robinhood index sync and the restore's retries filled that host's window (31 to 42 requests in 10 s, the
+// sale's own hold capping the passes at 20), past the test's 15 s bound on main 902b5efa1
+test("a sale's finder read at its tap takes the host's trade turn: with the window full and the sale holding the host, it goes at once; the passes' finder still waits", () => onTestClock(async () => {
+  const sol = stubFetch("https://lane-sale.example", (m, id) => solOk(m, id));
+  const lane = hostLane("https://lane-sale.example");
+  const give = lane.trade();
+  try {
+    // a pass went just now, and the page has sent the host its passes' budget in this window
+    await lane.turn("pass");
+    for (let i = 0; i < PASS_BUDGET; i++) lane.count();
+    const t0 = Date.now();
+    await solanaHelperHoldings("https://lane-sale.example", "trade").read(solW(0));
+    assert.ok(sol.starts[0]![0] - t0 < 1_000, `the sale's read waited ${sol.starts[0]![0] - t0} ms for the passes' room`);
+    const t1 = Date.now();
+    const n = sol.starts.length;
+    await solanaHelperHoldings("https://lane-sale.example").read(solW(1));
+    assert.ok(sol.starts[n]![0] - t1 >= 4_000, `the passes' finder went at ${sol.starts[n]![0] - t1} ms, inside the floor`);
+  } finally {
+    give();
+    sol.restore();
+  }
+}));
+
 test("card wallets-found-in-one-read: on a provider that takes about 10 getTokenAccountsByOwner in 10 s (mainnet-beta, the helper's fallback), 20 Ws at the pace all read: each 429 is waited out on the one throttle rule, never a failed list", () => onTestClock(async () => {
   // a sliding window of 10 getTokenAccountsByOwner in any 10 s, as measured; past it a 429 with no Retry-After
   const taken: number[] = [];

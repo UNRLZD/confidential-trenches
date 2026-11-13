@@ -222,9 +222,9 @@ test("count bounds: one transaction, more than SOLANA_POOL_BUY_PIECES_MAX, or no
   assert.deepEqual([calls.length, sets.length, engine.length], [0, 0, 0]);
 });
 
-test("order: a tag 3 not last, or a tag 2 last, is bad_shape (400), nothing read or sent", async () => {
+test("order: a tag 3 not last is bad_shape (400), nothing read or sent (a set of tag 2s alone is a lone round, card buy-carry-helper-round)", async () => {
   const { s, calls, sets, engine } = rig("mainnet");
-  for (const ws of [[piece({ tag: 3, nullifier: 3 }), piece({ tag: 2, nullifier: 2 })], [piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 })], [piece({ tag: 2, nullifier: 2 }), piece({ tag: 3, nullifier: 3 }), piece({ tag: 3, nullifier: 4 })]]) {
+  for (const ws of [[piece({ tag: 3, nullifier: 3 }), piece({ tag: 2, nullifier: 2 })], [piece({ tag: 2, nullifier: 2 }), piece({ tag: 3, nullifier: 3 }), piece({ tag: 3, nullifier: 4 })]]) {
     const a = await s.carryPieces(bodyOf(ws));
     assert.deepEqual([a.status, code(a)], [400, "bad_shape"]);
   }
@@ -600,4 +600,172 @@ test("RED at ece8c89b: the simulation and the blockhash read start together, on 
     const a = await run;
     assert.equal(a.status, 200, `${which}: ${JSON.stringify(a.body)}`);
   }
+});
+
+// ---- card buy-carry-helper-round: a lone round of tag 2s to one W, no tag 3 ----
+// A buy that carries a note's change in the same tap sends it in two rounds: the releases to W alone, read filled, then
+// (once the device proved the change) the change's tag 2 with the tag 3. The first round has no buy, so the pieces route
+// carries a set of tag 2s to one W with every check a tag 2 gets inside a buy, and keeps the buy's rule as it was.
+
+/** A piece W signed with relay_fee `fee` instead of the published one. */
+const pieceAtFee = (nullifier: number, fee: bigint): Uint8Array => {
+  const r = { ...release(nullifier), relayFee: fee };
+  const accounts = solanaPoolReleaseAccounts({ program: PROGRAM, pool: POOL }, W.address, FP.address, r, 6);
+  const { message } = solanaCompileV0(FP.address, [cuLimit(400_000), cuPrice(1_000n), { program: PROGRAM, accounts, data: solanaEncodePoolRelease(r) }], BLOCKHASH, [], [FP.address, W.address]);
+  return Uint8Array.from([2, ...new Uint8Array(64), ...ed25519.sign(message, W.seed), ...message]);
+};
+const detail = (a: PoolPiecesAnswer) => ("error" in a.body ? a.body.error.detail : undefined);
+
+test("RED at 87b6244ef: a lone round of tag 2s to one W is carried on every cluster: each simulated, sent plain side by side, read filled; 200 with the fee payer's signature of each, in order; no block engine, no tag 3", async () => {
+  for (const cluster of ["devnet", "mainnet"] as const) {
+    for (const ws of [[piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 })], [piece({ tag: 2, nullifier: 6 })], Array.from({ length: SOLANA_POOL_BUY_PIECES_MAX }, (_, i) => piece({ tag: 2, nullifier: 30 + i }))]) {
+      const ends = ws.map(() => deferred<string>());
+      const { s, calls, sets, engine } = rig(cluster, { end: (n) => ends[n]!.p });
+      const p = s.carryPieces(bodyOf(ws));
+      let settled = false;
+      void p.then(() => (settled = true));
+      for (let i = 0; i < 20; i++) await tick();
+      const sims = calls.filter((c) => c.method === "simulateTransaction").map((c) => c.params[0]);
+      assert.deepEqual(sims, ws.map(b64), `${cluster} ${ws.length}: every tag 2 simulated before anything is sent`);
+      assert.deepEqual(sets.map((x) => x.paths), ws.map(() => ["rpc0", "rpc1"]), `${cluster} ${ws.length}: every tag 2 at once, plain`);
+      sets.forEach((x, i) => assert.deepEqual(x.wires[0]!.subarray(65), ws[i]!.subarray(65), "W's bytes as signed"));
+      assert.equal(settled, false, "no answer before the fills");
+      ends.forEach((e) => e.done("filled"));
+      const a = await p;
+      assert.deepEqual([a.status, a.body], [200, { signatures: ws.map(fpSig) }], `${cluster} ${ws.length}`);
+      assert.equal(sets.length, ws.length, "nothing else sent");
+      assert.equal(engine.length, 0, "no block engine for a tag 2");
+      assert.match(poolSendLine({ chain: "solana", net: cluster, route: "pieces", status: a.status, body: a.body, ms: 1, note: a.note }), new RegExp(`^pool send solana ${cluster} pieces outcome=filled status=200 ms=1 tag=2 via=plain end=filled$`));
+      // a repeat of the same round answers the first and sends nothing
+      assert.deepEqual(await s.carryPieces(bodyOf(ws)), a);
+      assert.equal(sets.length, ws.length);
+    }
+  }
+});
+
+test("RED at 87b6244ef: a lone round naming two Ws is refused wallets_differ (422), nothing read or sent", async () => {
+  for (const cluster of ["devnet", "mainnet"] as const) {
+    const { s, calls, sets } = rig(cluster);
+    const a = await s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4, w: W2 })]));
+    assert.deepEqual([a.status, a.body], [422, { error: { code: "wallets_differ" } }], cluster);
+    assert.deepEqual([calls.length, sets.length], [0, 0]);
+  }
+});
+
+test("RED at 87b6244ef: a lone round with a nullifier twice is bad_shape (400) naming it, nothing read or sent", async () => {
+  const { s, calls, sets } = rig("mainnet");
+  const a = await s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 }), piece({ tag: 2, nullifier: 2 })]));
+  assert.deepEqual([a.status, a.body], [400, { error: { code: "bad_shape", detail: "a nullifier twice" } }]);
+  assert.deepEqual([calls.length, sets.length], [0, 0]);
+});
+
+test("RED at 87b6244ef: a lone round whose nullifier is spent: on chain the simulation's NullifierAlreadySpent (Custom 16) refuses it, 422 simulation_failed, nothing sent; one this helper carried already is never sent again", async () => {
+  for (const cluster of ["devnet", "mainnet"] as const) {
+    const ws = [piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 })];
+    const { s, sets, engine } = rig(cluster, { simErr: (raw: unknown) => (raw === b64(ws[1]!) ? { InstructionError: [2, { Custom: 16 }] } : null) });
+    const a = await s.carryPieces(bodyOf(ws));
+    assert.deepEqual([a.status, a.body], [422, { error: { code: "simulation_failed", detail: '{"InstructionError":[2,{"Custom":16}]}' } }], cluster);
+    assert.deepEqual([sets.length, engine.length], [0, 0], `${cluster}: nothing sent`);
+  }
+  // spent through this helper: the one-piece route carried nullifier 2, so a round naming it is refused in_flight
+  const { s, sets } = rig("devnet");
+  const one = await s.carry({ pool: POOL, tx: b64(piece({ tag: 2, nullifier: 2 })) });
+  assert.equal(one.status, 200);
+  const a = await s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 })]));
+  assert.deepEqual([a.status, code(a), a.retryAfterS], [429, "in_flight", 2]);
+  assert.equal(sets.length, 1, "the one-piece send only");
+});
+
+test("RED at 87b6244ef: each tag 2 of a lone round pays its own relay fee: one whose relay_fee is not the published fee is fee_off, one whose priority is over the budget fee_below_cost, naming its index; nothing read or sent", async () => {
+  const { s, calls, sets } = rig("mainnet");
+  const a = await s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2 }), pieceAtFee(4, FEE - 1n)]));
+  assert.deepEqual([a.status, code(a), detail(a)], [422, "fee_off", `tx 1: relay_fee ${FEE - 1n}, published ${FEE}`]);
+  const zero = await s.carryPieces(bodyOf([pieceAtFee(4, 0n)]));
+  assert.deepEqual([zero.status, code(zero)], [422, "fee_off"], "a release that pays the helper nothing");
+  const b = await s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 2, cuPrice: 10n ** 12n }), piece({ tag: 2, nullifier: 4 })]));
+  assert.deepEqual([b.status, code(b)], [422, "fee_below_cost"]);
+  assert.match(detail(b) ?? "", /^tx 0: priority /);
+  assert.deepEqual([calls.length, sets.length], [0, 0]);
+});
+
+test("RED at 87b6244ef: a lone round in which one tag 2 lands and one fails is 503 not_landed (the device reads both back); none landing is 422, as in a buy", async () => {
+  const half = rig("mainnet", { end: async (n) => (n === 0 ? "filled" : "failed") });
+  const a = await half.s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 12 }), piece({ tag: 2, nullifier: 14 })]));
+  assert.deepEqual([a.status, code(a)], [503, "not_landed"]);
+  const none = rig("devnet", { end: async () => "failed" });
+  const b = await none.s.carryPieces(bodyOf([piece({ tag: 2, nullifier: 22 }), piece({ tag: 2, nullifier: 24 })]));
+  assert.deepEqual([b.status, code(b), detail(b)], [422, "not_landed", "failed"]);
+  // the failed nullifier waits for the next epoch, on either route
+  const again = await none.s.carry({ pool: POOL, tx: b64(piece({ tag: 2, nullifier: 22 })) });
+  assert.deepEqual(again.body, { error: { code: "failed_this_epoch" } });
+});
+
+test("RED at 87b6244ef: a lone round across a page boundary: the tag 2 on the next state page is simulated and sent only once the one before it landed", async () => {
+  const E = SOLANA_POOL_PAGE_ENTRIES;
+  const ws = [piece({ tag: 2, nullifier: 2, stateSize: E - 1 }), piece({ tag: 2, nullifier: 4, stateSize: E })];
+  const ends = [deferred<string>(), deferred<string>()];
+  const { s, calls, sets } = rig("mainnet", { end: (n) => ends[n]!.p });
+  const p = s.carryPieces(bodyOf(ws));
+  for (let i = 0; i < 20; i++) await tick();
+  const sims = () => calls.filter((c) => c.method === "simulateTransaction").map((c) => c.params[0]);
+  assert.deepEqual(sims(), [b64(ws[0]!)]);
+  assert.equal(sets.length, 1);
+  ends[0]!.done("filled");
+  for (let i = 0; i < 20; i++) await tick();
+  assert.deepEqual(sims(), [b64(ws[0]!), b64(ws[1]!)]);
+  ends[1]!.done("filled");
+  assert.deepEqual((await p).body, { signatures: ws.map(fpSig) });
+});
+
+test("count and order for a lone round: one tag 3 alone, a tag 3 before a tag 2, two tag 3s, or more than SOLANA_POOL_BUY_PIECES_MAX tag 2s stay bad_shape (400) as before, nothing read or sent", async () => {
+  const { s, calls, sets } = rig("mainnet");
+  const many = Array.from({ length: SOLANA_POOL_BUY_PIECES_MAX + 1 }, (_, i) => piece({ tag: 2, nullifier: 10 + i }));
+  const cases: [Uint8Array[], string][] = [
+    [[piece({ tag: 3, nullifier: 3 })], `not 2 to ${SOLANA_POOL_BUY_PIECES_MAX} transactions`],
+    [many, `not 2 to ${SOLANA_POOL_BUY_PIECES_MAX} transactions`],
+    [[piece({ tag: 3, nullifier: 3 }), piece({ tag: 2, nullifier: 2 })], "every transaction a tag 2 but the last, a tag 3"],
+    [[piece({ tag: 3, nullifier: 3 }), piece({ tag: 3, nullifier: 5 })], "every transaction a tag 2 but the last, a tag 3"],
+  ];
+  for (const [ws, d] of cases) assert.deepEqual((await s.carryPieces(bodyOf(ws))).body, { error: { code: "bad_shape", detail: d } });
+  for (const txs of [["AA=="], ["not base64!"], []]) assert.deepEqual((await s.carryPieces({ pool: POOL, txs })).body, { error: { code: "bad_shape", detail: `not 2 to ${SOLANA_POOL_BUY_PIECES_MAX} transactions` } }, JSON.stringify(txs));
+  assert.deepEqual([calls.length, sets.length], [0, 0]);
+});
+
+/** Every answer, read, send and engine call of a fixed list of bodies that end in a tag 3 (or are no lone round), as
+ *  one sha256: the pin that the buy's rule answers byte for byte as at 87b6244ef. */
+async function buyTranscript(): Promise<string> {
+  const E = SOLANA_POOL_PAGE_ENTRIES;
+  const out: unknown[] = [];
+  const scenarios: [string, "devnet" | "mainnet", unknown, Parameters<typeof rig>[1]][] = [
+    ["devnet 2,3", "devnet", bodyOf(two()), {}],
+    ["mainnet 2,2,3", "mainnet", bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 2, nullifier: 4 }), piece({ tag: 3, nullifier: 3 })]), {}],
+    ["mainnet tag 3 expired", "mainnet", bodyOf(two()), { end: async (n) => (n < 1 ? "filled" : "expired") }],
+    ["devnet tag 2 failed", "devnet", bodyOf(two()), { end: async () => "failed" }],
+    ["mainnet tag 2 spent", "mainnet", bodyOf(two()), { simErr: (raw: unknown) => (raw === b64(two()[0]!) ? { InstructionError: [2, { Custom: 16 }] } : null) }],
+    ["mainnet half", "mainnet", bodyOf([piece({ tag: 2, nullifier: 12 }), piece({ tag: 2, nullifier: 14 }), piece({ tag: 3, nullifier: 13 })]), { end: async (n) => (n === 0 ? "filled" : "failed") }],
+    ["page boundary", "devnet", bodyOf([piece({ tag: 2, nullifier: 2, stateSize: E - 1 }), piece({ tag: 2, nullifier: 4, stateSize: E }), piece({ tag: 3, nullifier: 3, stateSize: E + 1 })]), {}],
+    ["3 alone", "mainnet", bodyOf([piece({ tag: 3, nullifier: 3 })]), {}],
+    ["3,2", "mainnet", bodyOf([piece({ tag: 3, nullifier: 3 }), piece({ tag: 2, nullifier: 2 })]), {}],
+    ["2,3,3", "mainnet", bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 3, nullifier: 3 }), piece({ tag: 3, nullifier: 4 })]), {}],
+    ["two Ws", "mainnet", bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 3, nullifier: 3, w: W2 })]), {}],
+    ["nullifier twice", "mainnet", bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 3, nullifier: 2 })]), {}],
+    ["tip_low", "mainnet", bodyOf([piece({ tag: 2, nullifier: 2 }), piece({ tag: 3, nullifier: 3, tipTo: TIP_TO })]), {}],
+    ["fee off", "mainnet", bodyOf([pieceAtFee(2, FEE - 1n), piece({ tag: 3, nullifier: 3 })]), {}],
+    ["one garbage", "mainnet", { pool: POOL, txs: ["AA=="] }, {}],
+    ["empty", "mainnet", { pool: POOL, txs: [] }, {}],
+    ["no list", "devnet", { pool: POOL }, {}],
+    ["another pool", "devnet", { pool: TO, txs: two().map(b64) }, {}],
+  ];
+  for (const [name, cluster, body, o] of scenarios) {
+    const r = rig(cluster, o);
+    const a = await r.s.carryPieces(body);
+    out.push({ name, a, calls: r.calls, sets: r.sets.map((x) => ({ wires: x.wires.map(b64), paths: x.paths })), engine: r.engine, pauses: r.pauses });
+  }
+  return createHash("sha256").update(JSON.stringify(out, (_k, v) => (typeof v === "bigint" ? `${v}n` : v))).digest("hex");
+}
+
+test("PIN: every body that ends in a tag 3 (or is no lone round) answers, reads and sends byte for byte as at 87b6244ef", async () => {
+  const h = await buyTranscript();
+  assert.equal(await buyTranscript(), h, "the transcript is the same on a second run");
+  assert.equal(h, "3533748bb0c15d9b5a0ce90ce061e5abaaed7c8da7a274b23b9a201303747756");
 });
