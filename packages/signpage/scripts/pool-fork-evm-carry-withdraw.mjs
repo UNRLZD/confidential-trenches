@@ -101,10 +101,12 @@ Error.prepareStackTrace = (err, frames) => {
 // every request the page sends a pool host, by host and time (the windows around the landing, the ready step)
 const hostSends = [];
 // card evm-first-proof-inside-ten-seconds: the first leaf's proof ready inside READY_MS of its block, and each pool host
-// sent at most HOST_WINDOW_BOUND requests in any 10 s window around the landing (the helper's per-device window on Base
-// and Robinhood: 30 per 10 s)
+// sent at most HOST_WINDOW_BOUND requests (each of a batch counted) in any 10 s window from 10 s before that block to the
+// proof. The reads go from the page to the pool's public providers on the deposit's lane, which has no budget: the
+// copies of 13 Nov measured 58 to 73, and that pattern sent again to the real providers met no refusal for rate
+// (scripts/evm-landing-replay.mjs)
 const READY_MS = 10_000;
-const HOST_WINDOW_BOUND = 30;
+const HOST_WINDOW_BOUND = 80;
 /** A request body's method (an eth_call's selector beside it), each of a batch. */
 const methodsOf = (body) => {
   try {
@@ -114,12 +116,13 @@ const methodsOf = (body) => {
     return [{ m: "?" }];
   }
 };
-/** Per host, the most requests in any HOST_WINDOW_MS (10 s) window that overlaps [from, to], with its start (ms after
- *  `zero`) and its requests by method. */
+/** Per host, the most requests sent from `from` to `to` (the landing's: never one sent after the ready proof, such as
+ *  the withdraw tapped next) in any HOST_WINDOW_MS (10 s) window, with its start (ms after `zero`) and its requests by
+ *  method. */
 const windowMax = (from, to, zero) => {
   const out = {};
   for (const h of new Set(hostSends.map((x) => x.host))) {
-    const xs = hostSends.filter((x) => x.host === h && x.at > from - 10_000 && x.at < to + 10_000).sort((a, b) => a.at - b.at);
+    const xs = hostSends.filter((x) => x.host === h && x.at >= from && x.at <= to).sort((a, b) => a.at - b.at);
     let best = { n: 0, i: 0, j: -1 };
     for (let i = 0, j = 0; j < xs.length; j++) {
       while (xs[j].at - xs[i].at >= 10_000) i++;
