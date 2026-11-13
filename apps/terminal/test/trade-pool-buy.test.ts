@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountOk, amountText, amountWrong, cashMax, cashMovesTo, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetOn, presetsOf, PRESETS, receiveShown, tradeBal, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountOk, amountText, amountWrong, cashMax, waitingCents, cashMovesTo, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetOn, presetsOf, PRESETS, receiveShown, tradeBal, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -269,4 +269,17 @@ test("card one-balance-buys-on-every-chain: a pool that holds nothing yet buys f
   }
   // Solana's presets stay the four
   assert.deepEqual(presetsOf("solana", poolView(empty, "solana", SOL), 4_650n), PRESETS);
+});
+
+test("card one-balance-buys-on-every-chain: Bal on a pool counts what its deposit wallets still hold (a U_X leftover, a W's tail), beside the pool and Cash", () => {
+  // the owner's Robinhood deposit: one 0.002 ETH note in the pool and 0.0009941 ETH left at U_X, Cash $0
+  const pools = [{ ...base("0.002", "0.002", "0.002"), chain: "robinhood" as const }];
+  const pv = poolView(pools, "robinhood", ETH)!;
+  const left = unitsToCents(decimalToUnits("0.0009941", 18)!, ETH);
+  assert.deepEqual(tradeBal(true, pv, 0n, 0n, left), { from: "pool", cents: pv.balance + left });
+  assert.deepEqual(tradeBal(true, pv, 0n, 0n), { from: "pool", cents: pv.balance }, "none waiting: the pool's");
+  assert.deepEqual(tradeBal(true, pv, 0n, 0n, null), { from: "pool", cents: null }, "not priced: no number");
+  assert.equal(waitingCents([{ chain: "robinhood", address: "0xU", asset: "ETH", amount: "0.0009941" }, { chain: "base", address: "0xB", asset: "ETH", amount: "1" }], "robinhood", "ETH", ETH), left);
+  assert.equal(waitingCents(undefined, "robinhood", "ETH", ETH), 0n);
+  assert.equal(waitingCents([{ chain: "robinhood", address: "0xU", asset: "ETH", amount: "0.0009941" }], "robinhood", "ETH", null), null);
 });
