@@ -437,7 +437,10 @@ test("pagePools: the mainnet build pins the NEAR vault on its release pair (card
   const [vault, sol, ...evm] = pagePools();
   assert.ok(vault?.chain === "near");
   assert.deepEqual([vault.network, vault.scope, vault.rpcs?.().map((r) => r.name)], ["mainnet", vaultScope("mainnet"), [NEAR_NETWORKS.mainnet.fastnear[0], NEAR_NETWORKS.mainnet.drpc]]);
-  assert.deepEqual(sol, { chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
+  // the page's Solana pair and lister, each built for the read's kind (a load's resume reads as a pass)
+  const { rpcs: solRpcs, lister: solLister, ...solRest } = sol as { rpcs: () => readonly unknown[]; lister: () => unknown };
+  assert.deepEqual(solRest, { chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
+  assert.deepEqual([solRpcs().length, typeof solLister(), pageSolanaSettleRpcs().length, typeof pageSolanaLister()], [2, typeof pageSolanaLister(), 2, typeof solLister()]);
   assert.deepEqual(evm.map((p) => [p.chain, (p as { pin?: unknown }).pin, (p as { scope?: unknown }).scope]), [
     ["evm", EVM_POOLS.base, evmPoolScopeOf(EVM_POOLS.base!.pool, 8453n)],
     ["evm", EVM_POOLS.robinhood, evmPoolScopeOf(EVM_POOLS.robinhood!.pool, 4663n)],
@@ -1857,8 +1860,16 @@ test("delta P2-A zd6: a kept lane whose notes changed since is read whole again 
   await r1.idle();
   const kept = ((await markerOf(probe.store))!.read![SOL_SCOPE.toString()] as number[][]).find(([l]) => l === B);
   assert.deepEqual(kept?.slice(0, 2), [B, B + 8 * 27]);
-  // a deposit lands on lane B below that id, and money rests further up the lane
+  // a deposit lands on lane B below that id, and money rests further up the lane. A load's resume walks no pool its
+  // marker owes no walk (card a-load-proves-first-and-walks-the-restore-once): it reads the notes the store holds, so
+  // the deposit is this device's own, stored as its deposit wrote it
   notes = [depositNote(B + 8 * 2, 0n)];
+  const ns = await openNoteStore(probe.store);
+  try {
+    await writeRestored(ns, { notes });
+  } finally {
+    ns.close();
+  }
   const up = idOf(SOL_SCOPE, B + 8 * 10);
   planted.set(solUx(up), "held");
   const t2 = tracked();
