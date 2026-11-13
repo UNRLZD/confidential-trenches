@@ -10,8 +10,9 @@
 //     rounded down once (69 cents, on Solana), and the two add up to the tile; on the desktop Allocation draws a
 //     Reserve tile at the same cents (owner pick 12 Nov 16:17:50Z, option B);
 //   - the phone's Positions pane has one Open and one Closed control, and Closed turns on when tapped (row 6);
-//   - deposit.assets is asked once the page is ready, before any deposit sheet opens, and the sheet's first read
-//     after it opens draws the asset (any state but S4.1, the assets' loading skeleton) (row 7).
+//   - the page load asks no deposit.assets (card app-faults-seen-on-124 fault 9: the list is asked at a Deposit control's
+//     intent, a pointer over it, its focus or press, or as the sheet opens); once Deposit is pressed it is asked, and the
+//     sheet's first read after it opens draws the asset (any state but S4.1, the assets' loading skeleton) (row 7).
 // Discover's stamp (row 5), the PumpSwap chart (row 4) and Discover's logos (live check discover-matches-the-main-app)
 // are held by their own tests and that check. A screenshot of each width is kept.
 // After: app
@@ -91,7 +92,8 @@ export function judge(rec) {
       say(c.open === 1 && c.closed === 1, `${n}: the Positions pane draws ${c.open ?? 0} Open and ${c.closed ?? 0} Closed control(s), want one each`);
       say(c.tapped === true, `${n}: tapping Closed ${c.tapped ? "turns it on and Open off" : "changes nothing"}`);
     }
-    say(r.warm === true, `${n}: deposit.assets ${r.warm ? "is asked before any deposit sheet opens" : "is not asked until a sheet opens"}`);
+    say(r.loadAsks === 0, `${n}: deposit.assets ${r.loadAsks === 0 ? "is not asked by the page load" : `is asked ${r.loadAsks ?? "?"} time(s) by the page load, before any Deposit control is touched`}`);
+    say(r.asks >= 1, `${n}: deposit.assets is asked ${r.asks ?? 0} time(s) once Deposit is pressed, want at least one`);
     say(typeof r.firstState === "string" && r.firstState !== "S4.1", `${n}: the deposit sheet's first read after it opens is ${r.firstState ?? "no sheet"}${r.firstState === "S4.1" ? ", the assets' loading skeleton" : ""}, want the asset drawn (any state but S4.1)`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
@@ -148,9 +150,9 @@ async function runOne(browser, w, shots, route) {
     await f.waitForSelector(`${sel}:not([data-pools='loading'])`, { timeout: READY_MS }).catch(() => {});
     await f.waitForSelector("[data-tile='positions']", { timeout: 5_000 }).catch(() => {});
     run.pools = await f.evaluate(POOLS, w.isMobile);
-    // the deposit list is asked at the shell's READY, before any sheet opens (a page that asks only on open has not)
+    // the page load asks no deposit list: nothing is asked before a Deposit control is touched (a page that asks at READY has)
     await page.waitForTimeout(1_500);
-    run.warm = (await asked(page)).includes("deposit.assets") && (await f.locator("[data-sheet='deposit']").count()) === 0;
+    run.loadAsks = (await asked(page)).filter((t) => t === "deposit.assets").length;
     // the Positions tile's parts
     const tile = f.locator("[data-tile='positions']").filter({ visible: true }).first();
     await tile.scrollIntoViewIfNeeded({ timeout: 2_000 }).catch(() => {});
@@ -172,6 +174,7 @@ async function runOne(browser, w, shots, route) {
     await f.locator("[data-action='deposit']").filter({ visible: true }).first().click({ timeout: 5_000 }).catch(() => {});
     await f.waitForSelector("[data-sheet='deposit']", { timeout: 3_000 }).catch(() => {});
     run.firstState = await f.locator("[data-sheet='deposit']").first().getAttribute("data-state", { timeout: 1_000 }).catch(() => null);
+    run.asks = (await asked(page)).filter((t) => t === "deposit.assets").length;
     await page.screenshot({ path: path.join(shots, `${KEY}-${w.name}-deposit.png`) });
   } finally {
     await ctx.close();
