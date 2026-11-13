@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { NoteRecord, NoteState } from "../src/notes/store.ts";
 import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_VOLUME_ACCOUNT_SIZE, SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed, solanaPoolFee, solanaRentMin, type SolanaPoolRelease, type SolanaRent } from "@blindfill/kit";
-import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type TapSpendOf } from "../src/pool/balances.ts";
+import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapLegs, solanaTapSpendOf, type BalancePool, type BalanceProof, type TapSpendOf } from "../src/pool/balances.ts";
 import { EVM_LADDER } from "../src/pool/evm.ts";
 import { SOL_LADDER, SOL_PIECES, SOL_TIP_CAP } from "../src/pool/solana.ts";
 
@@ -389,8 +389,9 @@ test("tiers (card buy-spends-several-pieces): tap_max is the most of the largest
   // each note once: 35; Max: the primary and its two pieces, 35 less the 1,000, over the 20 alone
   assert.equal(read().ready, "35");
   assert.equal(read().tap_max, "34.999999");
-  // a piece that adds less than nothing (its fee over its chunk): the primary alone is more
-  assert.equal(read([own(P, 20n * L), own(X, 10n * L), to(X, P, "x2", L, 3n * L)]).tap_max, "19.999999");
+  // a piece that adds less than nothing (its fee over its chunk): the primary alone is more, and X, left out of P's W,
+  // is its own leg by its tier 1 proof (card buy-any-amount-on-every-chain): 19.999999 + 9.999999
+  assert.equal(read([own(P, 20n * L), own(X, 10n * L), to(X, P, "x2", L, 3n * L)]).tap_max, "29.999998");
   // making: Q's first proof and R's own proof are being made (R's one ready proof pays a W whose note is gone, so it is
   // not ready); X's piece is being made again, but X is ready already
   const Q = note(S.scope, "HELD", 7n * L);
@@ -399,10 +400,53 @@ test("tiers (card buy-spends-several-pieces): tap_max is the most of the largest
   const m = read([...ready, to(R, gone, R.attempt!, 3n * L)], [P, X, Y, Q, R], new Set([X.id, Q.id, R.id]));
   assert.equal(m.ready, "35", "R's piece to a W whose note is gone is not ready");
   assert.equal(m.making, "10", "Q's and R's values only: making is what is not ready yet");
-  // right after a buy took P: X and Y are ready by their own proofs; their pieces to P's W are not, and Max is X's
+  // right after a buy took P: X and Y are ready by their own proofs; their pieces to P's W are not, and Max is X's leg
+  // and Y's leg, each on its own W (card buy-any-amount-on-every-chain)
   const after = read(ready, [{ ...P, state: "RESERVED" }, X, Y]);
   assert.equal(after.ready, "15");
-  assert.equal(after.tap_max, "9.999999");
+  assert.equal(after.tap_max, "14.999998");
+});
+
+// Card buy-any-amount-on-every-chain: Max on Solana is everything the ready proofs spend, one tap split across disjoint
+// W sets (the page's legs, signpage src/pool-buy.ts), each note in one set only: the primary's W with its tier 2
+// pieces, then every other note on its own W by its tier 1 proof. Never a note twice: a note spent as a tier 2 piece
+// is not also its own leg.
+test("tap_max on Solana (card buy-any-amount-on-every-chain): the sum over a disjoint partition of the ready notes into W sets, each note once", () => {
+  const L = LAMPORTS;
+  // each set pays its pieces less their fees, less 1,000 once (its own tip and accounts)
+  const S: BalancePool = { ...SOL, spendOf: (ps) => ps.reduce((a, p) => a + p.chunk - p.feeCap, 0n) - 1_000n };
+  const twice = (x: NoteRecord, a2: string): NoteRecord => ({ ...x, second: { attempt: a2, deadlineMs: 2n, context: "2" } });
+  const own = (x: NoteRecord, chunk: bigint): BalanceProof => proof(S, x, chunk, x.attempt!);
+  const to = (x: NoteRecord, by: NoteRecord, attempt: string, chunk: bigint): BalanceProof => ({ ...proof(S, x, chunk, attempt), wallet: { l: by.leaf!.label, j: 0, address: `w-${by.id}` } });
+  const P = note(S.scope, "HELD", 20n * L);
+  const X = twice(note(S.scope, "HELD", 10n * L), "x2");
+  const Y = twice(note(S.scope, "HELD", 5n * L), "y2");
+  const Z = note(S.scope, "HELD", 3n * L); // past the primary's room: its tier 1 proof only
+  const ready = [own(P, 20n * L), own(X, 10n * L), own(Y, 5n * L), own(Z, 3n * L), to(X, P, "x2", 10n * L), to(Y, P, "y2", 5n * L)];
+  const e = poolBalances([P, X, Y, Z], [S], ready)[0]!;
+  assert.equal(e.ready, "38");
+  // P's W with X and Y (34.999999), and Z's own W (2.999999); X and Y never again by their own proofs
+  assert.equal(e.tap_max, "37.999998");
+  // the legs themselves: P's W first, then Z's, disjoint
+  const legs = solanaTapLegs([
+    { address: "w-P", ownId: "P", own: { chunk: 20n * L, feeCap: 0n, tipCap: undefined }, others: [{ id: "X", piece: { chunk: 10n * L, feeCap: 0n, tipCap: undefined } }, { id: "Y", piece: { chunk: 5n * L, feeCap: 0n, tipCap: undefined } }] },
+    { address: "w-X", ownId: "X", own: { chunk: 10n * L, feeCap: 0n, tipCap: undefined }, others: [] },
+    { address: "w-Y", ownId: "Y", own: { chunk: 5n * L, feeCap: 0n, tipCap: undefined }, others: [] },
+    { address: "w-Z", ownId: "Z", own: { chunk: 3n * L, feeCap: 0n, tipCap: undefined }, others: [] },
+  ], S.spendOf!);
+  assert.deepEqual(legs, [
+    { address: "w-P", ids: ["P", "X", "Y"], spend: 35n * L - 1_000n },
+    { address: "w-Z", ids: ["Z"], spend: 3n * L - 1_000n },
+  ]);
+  // a set that spends nothing is no leg, and its note stays free; never a note in two legs
+  const zero = solanaTapLegs([{ address: "w-T", ownId: "T", own: { chunk: 500n, feeCap: 0n, tipCap: undefined }, others: [] }], S.spendOf!);
+  assert.deepEqual(zero, []);
+  // with no tier 2 at all, each ready note is its own leg and Max their sum: 19.999999 + 9.999999 + 4.999999 + 2.999999
+  assert.equal(poolBalances([P, X, Y, Z], [S], [own(P, 20n * L), own(X, 10n * L), own(Y, 5n * L), own(Z, 3n * L)])[0]!.tap_max, "37.999996");
+  // two Solana pools on one chain: a tap runs on one pool, so the chain's Max is the larger pool's sum, never both
+  const S2: BalancePool = { ...S, id: "sol-pool-2", scope: 44n };
+  const Q = note(S2.scope, "HELD", 2n * L);
+  assert.equal(poolBalances([P, X, Y, Z, Q], [S, S2], [...ready, proof(S2, Q, 2n * L)])[0]!.tap_max, "37.999998");
 });
 
 test("solanaTapSpendOf at the tap's own tip (card max-is-what-you-hold-after-a-trade): the most the buy funds at that tip, 0 when it is over a piece's tip cap, the cap's bound without one", () => {
