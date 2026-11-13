@@ -546,18 +546,10 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
   const { pool, scope } = solanaPoolOf(program);
   if (feePayer === pool) throw new Error("feePayer: the pool");
   const sync = solanaTreeSync(a.rpcs, program, a.lagWait);
-  // the epoch's fee, computed once per epoch from the device's own reads
-  const fees = new Map<bigint, Promise<{ rent: SolanaRent; cost: bigint; fee: bigint }>>();
-  const feeOf = (epochStartMs: bigint, signal?: AbortSignal) => {
-    let f = fees.get(epochStartMs);
-    if (f === undefined) {
-      f = solanaCostReads(a.rpcs, a.pin, signal).then(({ rent }) => ({ rent, ...solanaEpochFee(rent) }));
-      f.catch(() => fees.delete(epochStartMs));
-      for (const k of fees.keys()) if (k < epochStartMs - SOL_LIFE_MS) fees.delete(k);
-      fees.set(epochStartMs, f);
-    }
-    return f;
-  };
+  // the epoch's fee, computed once per epoch from the device's own reads, on the read's own stop (perEpoch): a bind that
+  // stops never stops another bind's wait on it (card max-ready-seconds-after-a-load)
+  const fees = perEpoch((e: bigint, s?: AbortSignal): Promise<{ rent: SolanaRent; cost: bigint; fee: bigint }> => solanaCostReads(a.rpcs, a.pin, s).then(({ rent }) => ({ rent, ...solanaEpochFee(rent) })));
+  const feeOf = (epochStartMs: bigint, signal?: AbortSignal) => fees.get(epochStartMs, signal);
   // the helper's fee answer, asked once an epoch (each bind still checks it whole); one a bind refuses is asked again
   const relayFees = perEpoch((e, s) => a.relayFee(e, s));
   return {

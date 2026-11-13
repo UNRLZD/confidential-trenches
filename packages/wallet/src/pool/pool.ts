@@ -236,25 +236,63 @@ export function bindNow(now: ChainNow | undefined, epochStartMs: bigint, epochMs
 
 /** One answer per epoch (card max-ready-seconds-after-a-load: the relayer's fee is the same for every proof of an epoch):
  *  `get` asks once per epoch and hands the same answer to every bind of it; an ask that fails, or an answer a bind
- *  refuses (`drop`), is asked again by the next bind. Only the newest few epochs are kept. */
+ *  refuses (`drop`), is asked again by the next bind. Only the newest `keep` epochs are kept. The ask runs on its own
+ *  stop, as evm.ts joinFee's read does: a caller's signal ends that caller's wait only, the ask is stopped (and asked
+ *  again by the next caller) when every caller waiting on it has stopped, and an answer in hand is handed to any caller. */
 export function perEpoch<T>(ask: (epochStartMs: bigint, signal?: AbortSignal) => Promise<T>, keep = 4): { get(epochStartMs: bigint, signal?: AbortSignal): Promise<T>; drop(epochStartMs: bigint, got: Promise<T>): void } {
-  const m = new Map<bigint, Promise<T>>();
-  const drop = (e: bigint, got: Promise<T>): void => {
-    if (m.get(e) === got) m.delete(e);
+  type Held = { read: Promise<T>; done: boolean; waiting: number; stop: AbortController };
+  const m = new Map<bigint, Held>();
+  const of = new WeakMap<Promise<T>, Held>(); // each promise handed out, to the ask it waits on
+  const forget = (e: bigint, h: Held): void => {
+    if (m.get(e) === h) m.delete(e);
+  };
+  const join = (e: bigint, h: Held, signal?: AbortSignal): Promise<T> => {
+    if (h.done) return h.read;
+    h.waiting++;
+    return new Promise<T>((res, rej) => {
+      let out = false;
+      const end = (): boolean => {
+        if (out) return false;
+        out = true;
+        h.waiting--;
+        signal?.removeEventListener("abort", leave);
+        return true;
+      };
+      const leave = (): void => {
+        if (!end()) return;
+        if (h.waiting === 0 && !h.done) {
+          h.stop.abort(signal!.reason);
+          forget(e, h);
+        }
+        rej(signal!.reason);
+      };
+      if (signal?.aborted) return leave();
+      signal?.addEventListener("abort", leave, { once: true });
+      h.read.then((v) => void (end() && res(v)), (x: unknown) => void (end() && rej(x)));
+    });
   };
   return {
     get(e, signal) {
-      let f = m.get(e);
-      if (f === undefined) {
-        f = ask(e, signal);
-        m.set(e, f);
-        const mine = f;
-        f.catch(() => drop(e, mine));
+      let h = m.get(e);
+      if (h === undefined) {
+        if (signal?.aborted) return Promise.reject(signal.reason);
+        const stop = new AbortController();
+        const mine: Held = { read: ask(e, stop.signal), done: false, waiting: 0, stop };
+        mine.read.then(
+          () => void (mine.done = true),
+          () => forget(e, mine),
+        );
+        m.set(e, (h = mine));
         for (const k of [...m.keys()].sort((x, y) => (x < y ? 1 : -1)).slice(keep)) m.delete(k);
       }
-      return f;
+      const p = join(e, h, signal);
+      of.set(p, h);
+      return p;
     },
-    drop,
+    drop(e, got) {
+      const h = of.get(got);
+      if (h !== undefined) forget(e, h);
+    },
   };
 }
 

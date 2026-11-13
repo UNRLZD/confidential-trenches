@@ -11,7 +11,7 @@ import * as d from "../src/derive/index.ts";
 import type { NoteRef } from "../src/notes/secrets.ts";
 import type { NoteRecord } from "../src/notes/store.ts";
 import { USDC_LADDER } from "../src/pool/near.ts";
-import { bindNow, type Pool, type PoolBindArgs, type PoolTrees } from "../src/pool/pool.ts";
+import { bindNow, perEpoch, type Pool, type PoolBindArgs, type PoolTrees } from "../src/pool/pool.ts";
 import { openProofQueue, type ProofQueue } from "../src/pool/queue.ts";
 import { poolBalances, type BalancePool, type TapSpendOf } from "../src/pool/balances.ts";
 import { BLOCK_MS, closeVaults, SCOPE, SEED, signalsProver, vaultWith, type Vault } from "./withdraw-fixture.ts";
@@ -193,4 +193,87 @@ test("a pass's read gone stale (the device's clock on past NOW_REUSE_MS): the fi
   assert.equal(r.made.length, 6);
   assert.equal(pool.reads.now, 1);
   assert.equal(pool.reads.own, 1, "one read of its own, then the next binds take it");
+});
+
+// ---- pool.ts perEpoch: one answer per epoch (the relayer's fee, the Solana epoch fee) ----
+
+/** An ask whose answers the test settles: each call logged with its epoch and its own stop. */
+function asker() {
+  const calls: { e: bigint; signal: AbortSignal | undefined; ok: (v: string) => void; fail: (x: unknown) => void }[] = [];
+  const ask = (e: bigint, signal?: AbortSignal): Promise<string> =>
+    new Promise((ok, fail) => {
+      calls.push({ e, signal, ok, fail });
+    });
+  return { calls, ask };
+}
+
+test("perEpoch: a caller's stop ends its own wait only; another caller of the epoch still gets the one answer, asked once", async () => {
+  const { calls, ask } = asker();
+  const fees = perEpoch(ask);
+  const a = new AbortController(), b = new AbortController();
+  const first = fees.get(1n, a.signal);
+  const second = fees.get(1n, b.signal);
+  assert.equal(calls.length, 1, "one ask for the epoch");
+  a.abort(new Error("first caller's stop"));
+  await assert.rejects(first, /first caller's stop/);
+  assert.equal(calls[0]!.signal?.aborted, false, "the ask runs on while another caller waits");
+  calls[0]!.ok("fee-1");
+  assert.equal(await second, "fee-1");
+  assert.equal(await fees.get(1n, AbortSignal.abort(new Error("late"))), "fee-1", "an answer in hand is handed even to a stopped caller, as joinFee does");
+  assert.equal(calls.length, 1);
+});
+
+test("perEpoch: when every waiting caller has stopped, the ask is stopped and the next caller asks again", async () => {
+  const { calls, ask } = asker();
+  const fees = perEpoch(ask);
+  const a = new AbortController(), b = new AbortController();
+  const both = [fees.get(1n, a.signal), fees.get(1n, b.signal)];
+  a.abort(new Error("a"));
+  assert.equal(calls[0]!.signal?.aborted, false);
+  b.abort(new Error("b"));
+  await Promise.allSettled(both);
+  assert.equal(calls[0]!.signal?.aborted, true, "the last caller's stop ends the ask");
+  const again = fees.get(1n);
+  assert.equal(calls.length, 2, "asked again");
+  calls[1]!.ok("fee-1b");
+  assert.equal(await again, "fee-1b");
+  calls[0]!.ok("late answer"); // the stopped ask's answer, if it comes, is no one's
+  assert.equal(await fees.get(1n), "fee-1b");
+});
+
+test("perEpoch: a failed ask and an answer a bind drops are asked again; a drop of an older answer leaves the newer one", async () => {
+  const { calls, ask } = asker();
+  const fees = perEpoch(ask);
+  const f1 = fees.get(1n);
+  calls[0]!.fail(new Error("helper down"));
+  await assert.rejects(f1, /helper down/);
+  const f2 = fees.get(1n);
+  assert.equal(calls.length, 2, "a failed ask is asked again");
+  calls[1]!.ok("refused");
+  assert.equal(await f2, "refused");
+  fees.drop(1n, f2);
+  const f3 = fees.get(1n);
+  assert.equal(calls.length, 3, "a dropped answer is asked again");
+  calls[2]!.ok("good");
+  assert.equal(await f3, "good");
+  fees.drop(1n, f2); // the older answer's drop, late
+  assert.equal(await fees.get(1n), "good");
+  assert.equal(calls.length, 3, "the newer answer stays");
+});
+
+test("perEpoch: the newest 4 epochs are kept; an older one is asked again", async () => {
+  const { calls, ask } = asker();
+  const fees = perEpoch(ask);
+  for (let e = 1n; e <= 5n; e++) {
+    const p = fees.get(e);
+    calls.at(-1)!.ok(`fee-${e}`);
+    await p;
+  }
+  assert.equal(calls.length, 5);
+  for (let e = 2n; e <= 5n; e++) assert.equal(await fees.get(e), `fee-${e}`);
+  assert.equal(calls.length, 5, "epochs 2 to 5 kept");
+  const p1 = fees.get(1n);
+  assert.equal(calls.length, 6, "epoch 1, the oldest, was let go");
+  calls.at(-1)!.ok("fee-1");
+  assert.equal(await p1, "fee-1");
 });
