@@ -662,6 +662,9 @@ const INTO_MS = Number(process.env.CT_DEPOSIT_INTO_MS ?? 0);
 const into = Date.now() % EPOCH;
 if (into < INTO_MS || into > INTO_MS + 1_000) await sleep(((INTO_MS - into + EPOCH) % EPOCH) + 250);
 const carryAt = Date.now();
+// CT_TRACE=1: every failed chain read and every error read from the carry to the ready proof, kept in the ready step
+// (landingTrace), so a slow landing names what it waited on
+if (process.env.CT_TRACE === "1") tracing = [];
 const balanceBefore = await balanceOf(A.w);
 await anvil("anvil_setBalance", [ux.evm, hex(floor)]);
 let shownMs = null;
@@ -736,8 +739,10 @@ await guard("first leaf: a ready proof inside its first minute", async () => {
   // review of 584af1495, P3-2: every request each host was sent from 10 s before the deposit's block to the proof, as
   // sent (ms after that block, its batch), so scripts/evm-landing-replay.mjs sends the real providers the same times and
   // batches
+  const landingTrace = process.env.CT_TRACE === "1" ? tracing.map((x) => ({ ...x, msAfterDeposit: depAtMs === null ? null : x.at + t0 - depAtMs })) : undefined;
+  if (process.env.CT_TRACE === "1") tracing = null;
   const sentInWindow = depAtMs === null ? [] : hostSends.filter((x) => x.at >= depAtMs - 10_000 && x.at <= at).map((x) => ({ host: x.host, ms: x.at - depAtMs, batch: x.batch, m: x.m }));
-  step("first leaf: ready inside 10 s, each pool host inside its window", { readyMsAfterDeposit: found === null ? null : at - depAtMs, depositIntoPeriodMs: depAtMs === null ? null : depAtMs - epochOf(depAtMs), stateRefusedInWindow: refusedOld, stateRefusedRun: stateRefused.length, sentInWindow, readyBoundMs: READY_MS, hostWindowMost: most, hostWindowBound: HOST_WINDOW_BOUND, deployPages }, found !== null && at - depAtMs <= READY_MS && most !== null && most <= HOST_WINDOW_BOUND && deployPages === 0);
+  step("first leaf: ready inside 10 s, each pool host inside its window", { readyMsAfterDeposit: found === null ? null : at - depAtMs, depositIntoPeriodMs: depAtMs === null ? null : depAtMs - epochOf(depAtMs), stateRefusedInWindow: refusedOld, stateRefusedRun: stateRefused.length, sentInWindow, ...(landingTrace ? { landingTrace } : {}), readyBoundMs: READY_MS, hostWindowMost: most, hostWindowBound: HOST_WINDOW_BOUND, deployPages }, found !== null && at - depAtMs <= READY_MS && most !== null && most <= HOST_WINDOW_BOUND && deployPages === 0);
 });
 // the held-note copy measures the landing beside a held note; the withdraw steps below are the first leaf's
 if (HELD) {
