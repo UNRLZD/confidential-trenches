@@ -41,7 +41,7 @@
 //   8. device C, a fresh profile: the restore from the seed alone shows the spent notes SPENT and the same balance as A.
 // It writes every step, each transaction's receipt (gas used, price, its signed bytes' length for Base's L1 fee) and the
 // helper calls to <out.json>, and exits 0 only when every step held. Nothing here logs a key or the words.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -122,13 +122,14 @@ const { evmAddress } = await import("../../wallet/src/derive/keys.ts");
 const { depositKey, depositRecordOf, openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore, readNotes } = await import("../../wallet/src/notes/store.ts");
 const { writeRestored } = await import("../../wallet/src/notes/restore.ts");
-const { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+const { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_POOLS, evmPoolScopeOf, evmTreeSync } = await import("../../wallet/src/pool/evm.ts");
+const { PoolNoLeafError } = await import("../../wallet/src/pool/pool.ts");
 const { evmRestoreNotes } = await import("../../wallet/src/pool/evm-restore.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { evmPoolVenues } = await import("../../kit/src/trade/evm/buy-unpinned.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { MAINNET_EVM_FEE_RPCS, MAINNET_POOL_HISTORY, MAINNET_POOL_RPCS, pageEvmPoolRpcs, pageEvmWalletRpc, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
+const { MAINNET_EVM_FEE_RPCS, MAINNET_POOL_HISTORY, MAINNET_POOL_RPCS, pageEvmHold, pageEvmPoolRpcs, pageEvmWalletRpc, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
 const { depositToEnd, evmQuoteRoute, followPoolQuote, uxNoteLanded, uxNoteOpen } = await import("../src/pool-deposit-follow.ts");
 const { readEvmPoolFloor } = await import("../src/pool-deposit-address.ts");
 const { depositNamer } = await import("../src/deposit-name.ts");
@@ -323,7 +324,11 @@ const restoreInto = async (ns) => {
   return r;
 };
 
-const record = { by: "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs", chain: CHAIN, pool: PIN.pool, anvil: ANVIL, slots: SLOTS, helperSender: sender.sender, steps: [], txs: [], helperCalls, helperLines, refusedHosts: {} };
+// what the record was made by: the commit the run ran on and this script's own bytes, so a record names the code it holds
+// for; the fork block and the book its answers were recorded into (fork-rpc.mjs FORK_RPC_BOOK_FILE), to replay it offline
+const SCRIPT = new URL(import.meta.url);
+const run = { commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), dirty: execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim() !== "", scriptSha256: createHash("sha256").update(readFileSync(SCRIPT)).digest("hex"), forkBlock: POOLS_FORK_BLOCKS[CHAIN], book: process.env.FORK_RPC_BOOK_FILE ?? null };
+const record = { by: "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs", run, chain: CHAIN, pool: PIN.pool, anvil: ANVIL, slots: SLOTS, helperSender: sender.sender, steps: [], txs: [], helperCalls, helperLines, refusedHosts: {} };
 const failures = [];
 const step = (name, o, ok) => {
   record.steps.push({ name, atMs: Date.now() - t0, ok, ...o });
@@ -340,9 +345,13 @@ const finish = async (code) => {
   record.sent = { ...sent };
   ticking = false;
   await ticker;
+  // every transaction the run sent succeeded on the fork
+  const bad = record.txs.filter((x) => x.status !== "0x1");
+  if (bad.length > 0) failures.push(`transactions not 0x1: ${bad.map((x) => `${x.what} ${x.hash} ${x.status}`).join(", ")}`);
   record.failures = failures;
   record.senderThrows = senderThrows;
   record.tapWaitMs = tapWaitMs;
+  record.plannedAs = plannedAs;
   writeFileSync(OUT, JSON.stringify(record, big, 2) + "\n");
   log("wrote", { out: OUT, failures, txs: record.txs.map((t) => [t.what, t.status, t.gasUsed]) });
   seed64.fill(0);
@@ -395,6 +404,8 @@ await guard("under the least rung", async () => {
 });
 
 // 3 and 4. the follow of U_X: one wei under the floor carries nothing; topped up to the floor it carries the rung
+// the quote's deadline already past: the carry step reads the follow's end (in_pool read on past the deadline, as the
+// page ends a follow), which a future deadline would hold open past the run; no other step reads the deadline
 const f = { chain: CHAIN, s: scope.toString(), i: ux.index, u: ux.evm, refund_id: ux.id, address: "0x" + "00".repeat(20), deadline_ms: Date.now() - 1_000, origin: "nep141:base.omft.near", min_out: floor.toString() };
 const evmRoute = evmQuoteRoute({ network: "mainnet", pool: (c) => t.evmPoolOf(c), wallet: (c) => pageEvmWalletRpc(c), notes: () => readNotes(A.w) });
 const depositFromUx = (g, amount, signal) => depositToEnd((p, ctx) => t.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx), g.chain, 18, amount, signal);
@@ -414,7 +425,11 @@ const deps = {
   stage: async (s) => void (stages.push(s), (stageAt[s] ??= Date.now()), log("follow stage", { stage: s })),
   txs: async (x) => void carried.push(...x),
   signal: follows.signal,
-  sleep: (ms, sg) => (rounds++, new Promise((r) => { const k = setTimeout(r, Math.min(ms, 1_000)); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
+  // the page's own pace once the follow shows in_pool (15 s doubling to 60 s, pool-deposit-follow.ts): the 1 s cap only before,
+  // to read the under-floor rounds and the carry fast. Kept to 1 s after in_pool it repeated the end's receipt reads (each
+  // waits for the deposit's block to be final) every second on the pool's two hosts, ahead of the proof queue's reads
+  // there, which the page itself never does (the 03:16Z run: the queue's first round waited 25 s for its turn)
+  sleep: (ms, sg) => (rounds++, new Promise((r) => { const k = setTimeout(r, stages.includes("in_pool") ? ms : Math.min(ms, 1_000)); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
 };
 await anvil("anvil_setBalance", [ux.evm, hex(floor - 1n)]);
 const beforeUnder = sends();
@@ -430,6 +445,9 @@ const toBalance = async () => BigInt(await anvil("eth_getBalance", [TO, "latest"
 // a tap after a withdraw waits, as the user would, for the change note the screen can spend (its leaf's block final):
 // the safe block mined and the page's state read, at most 30 rounds; the wait is kept per op
 const tapWaitMs = {};
+// the taps whose fixed amount was asked as the screen's nearest lower one (op -> the amount, below and above)
+const plannedAs = {};
+const fmt18 = (w) => { const x = w.toString().padStart(19, "0"); return `${x.slice(0, -18)}.${x.slice(-18)}`.replace(/\.?0+$/, ""); };
 const tap = async (pool, op, amount) => {
   const w0 = Date.now();
   const want = parseUnits(amount, 18);
@@ -443,7 +461,13 @@ const tap = async (pool, op, amount) => {
   const to = checkPoolTo(CHAIN, TO, wd.keys);
   if (!to.ok) throw new Error("To refused by the screen");
   const funds = await wd.funds(to.to);
-  const m = checkPoolAmount(CHAIN, amount, funds);
+  let m = checkPoolAmount(CHAIN, amount, funds);
+  // a fixed amount the notes cannot make whole (the fees at the fork block set the notes' values: Robinhood run 7's one
+  // note of 2.887e14 made 7.8e13 or 2.18e14, not 1e14) is asked as the nearest lower amount the screen offers for it
+  if (!m.ok && m.code === "unplannable" && typeof m.below === "bigint" && m.below > 0n) {
+    plannedAs[op] = { asked: amount, below: m.below, above: m.above ?? null };
+    m = checkPoolAmount(CHAIN, fmt18(m.below), funds);
+  }
   if (!m.ok) throw new Error(`the amount is refused: ${JSON.stringify(m, big)}`);
   if (typeof wd.handoff !== "function") throw new Error("the screen has no run for this chain");
   const ready = { chain: CHAIN, to: to.to, amount: m.amount, maxFee: m.maxFee };
@@ -507,6 +531,26 @@ const depRc = depHash === undefined ? null : await anvil("eth_getTransactionRece
 const depAtMs = depRc === null ? null : Number(BigInt((await anvil("eth_getBlockByNumber", [depRc.blockNumber, false])).timestamp)) * 1000;
 const sizeAtDep = depRc === null ? null : await poolSize(depRc.blockNumber);
 const first = { sizeBefore, depositBlock: depRc ? BigInt(depRc.blockNumber) : null, depositAtMs: depAtMs, depositEpochStartMs: depAtMs === null ? null : epochOf(depAtMs), sizeAtDeposit: sizeAtDep };
+// the part's tree reads, as pool-withdraw-evm.ts makes them, on the wallet's own sync over the pool's two RPCs (the fork,
+// each URL kept, read directly), after the send so the tap is not held: the epoch cut at the tap's epoch start, refused
+// as no leaf (PoolNoLeafError code no_leaf), then the newest root; and the state root the release bound (its proof's
+// public signal 3, read from its calldata: withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),
+// uint256,bytes), the signals words 9 to 16), which must be that newest root and the pool's own root at the deposit block
+const ROOT_SEL = "0x" + Buffer.from(keccak_256(new TextEncoder().encode("currentRoot()"))).toString("hex").slice(0, 8);
+const noLeafRead = async (op, cutMs) => {
+  const direct = (url) => Object.assign((m, p) => anvil(m, p), { url });
+  const sync = evmTreeSync({ rpcs: MAINNET_POOL_RPCS[CHAIN].map(direct), pin: PIN, held: pageEvmHold(PIN, async () => A.w) });
+  const cut = await sync.trees(BigInt(cutMs)).then(() => "a leaf", (e) => (e instanceof PoolNoLeafError ? e.code : `${e?.name}: ${String(e?.message).slice(0, 160)}`));
+  const newest = await sync.trees(BigInt(await chainMs()) + 1n, undefined, { newest: true }).catch(() => null);
+  let boundStateRoot = null;
+  for (const x of op?.txs ?? []) {
+    const tx = await anvil("eth_getTransactionByHash", [x.hash]);
+    if (tx?.to?.toLowerCase() !== PIN.pool.toLowerCase() || typeof tx.input !== "string") continue;
+    boundStateRoot = BigInt("0x" + tx.input.slice(10 + 64 * 12, 10 + 64 * 13));
+  }
+  const poolRootAtDeposit = depRc === null ? null : BigInt(await anvil("eth_call", [{ to: PIN.pool, data: ROOT_SEL }, depRc.blockNumber]));
+  return { cut, cutMs, newestStateRoot: newest?.stateRoot ?? null, newestSize: newest?.stateTree.size ?? null, boundStateRoot, poolRootAtDeposit };
+};
 await guard("first leaf: a ready proof inside its first minute", async () => {
   let found = null;
   let reads = 0;
@@ -532,7 +576,8 @@ await guard("withdraw: the first leaf, tapped inside its first minute", async ()
   const o = await opOf("wfirst");
   txsOf(o.op, "withdraw first leaf");
   const got = (await toBalance()) - toWas;
-  step("withdraw: the first leaf, tapped inside its first minute", { ...first, sizeAtTap: size, depthAtTap: depthOfSize(size), tapChainMs, tapEpochStartMs: epochOf(tapChainMs), tapMsAfterDeposit: tapChainMs - depAtMs, runMs, sentMs: seenAt.wfirst.wallMs - s, end, ...o, arrived: got, asked: ready.amount }, end === "sent" && got === ready.amount && sizeAtDep === 1 && epochOf(tapChainMs) === epochOf(depAtMs));
+  const noLeaf = await noLeafRead(o.op, epochOf(tapChainMs));
+  step("withdraw: the first leaf, tapped inside its first minute", { ...first, sizeAtTap: size, depthAtTap: depthOfSize(size), tapChainMs, tapEpochStartMs: epochOf(tapChainMs), tapMsAfterDeposit: tapChainMs - depAtMs, runMs, sentMs: seenAt.wfirst.wallMs - s, end, ...o, arrived: got, asked: ready.amount, noLeaf }, end === "sent" && got === ready.amount && sizeAtDep === 1 && epochOf(tapChainMs) === epochOf(depAtMs) && noLeaf.cut === "no_leaf" && noLeaf.boundStateRoot !== null && noLeaf.boundStateRoot === noLeaf.newestStateRoot && noLeaf.boundStateRoot === noLeaf.poolRootAtDeposit);
 });
 await guard("withdraw: the second, at depth 1", async () => {
   const AMOUNT = "0.0001";

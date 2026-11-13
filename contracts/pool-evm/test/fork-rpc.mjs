@@ -44,7 +44,8 @@ let upstreamN = 0;
 const bookArg = process.argv.indexOf("--book");
 const BOOK = BOOKS[bookArg > 0 && process.argv.indexOf("--") > bookArg ? process.argv[bookArg + 1] : "forge"];
 if (!BOOK) throw new Error("fork-rpc: --book is forge or pools");
-const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), BOOK.file);
+// FORK_RPC_BOOK_FILE: another file for the book (a copy run's own, kept beside its record so the run replays offline)
+const FILE = process.env.FORK_RPC_BOOK_FILE ? path.resolve(process.env.FORK_RPC_BOOK_FILE) : path.join(path.dirname(fileURLToPath(import.meta.url)), BOOK.file);
 const PORT = Number(process.env.FORK_RPC_PORT ?? 47545);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`fork-rpc: FORK_RPC_PORT ${process.env.FORK_RPC_PORT} is no port`);
 const UPSTREAM = BOOK.upstream;
