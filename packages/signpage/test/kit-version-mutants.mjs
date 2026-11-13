@@ -3,7 +3,8 @@
 // mutant. Each later deposit stage's mapping is mutated to every other kit-v1.4 stage, so a mapping that tells an older
 // app another place for its money (a refund move read as done, a failed deposit read as held) is caught. A mutant is
 // written to a copy of src/api.ts and src/kit-version.ts in packages/.kit-version-mutant-<pid>/src/ (the same depth, so
-// their ../../kit/src imports resolve), run by a copy of the test and its kit-v1.4, kit-v1.7, kit-v1.8, kit-v1.10 and kit-v1.11 fixtures beside it, all removed after,
+// their ../../kit/src imports resolve), run by a copy of the test and its kit-v1.4, kit-v1.7, kit-v1.8, kit-v1.10 and kit-v1.11 fixtures beside it (kit-v1.12's is
+// the kit's own, packages/kit/test/fixtures/kit-v1.12, read at the same relative path), all removed after,
 // so the sources are never changed and a test run beside the sweep never reads a mutant. Exits 1 when the test fails on
 // the code as it is, passes on a mutant, or a mutant's text is not in its file exactly once.
 // test/kit-version-mutants.test.mjs runs it in the package's test:mutants.
@@ -131,11 +132,23 @@ export const MUTANTS = [
   ["kit", 'from(1, 11) ? "1.11" : ', ""],
   ["kit", 'from(1, 11) ? "1.11" : ', 'from(1, 11) ? "current" : '],
   ["kit", 'from(1, 11) ? "1.11" : ', 'from(1, 10) ? "1.11" : '],
-  ["kit", "  const result = dryFor(kind, given);\n", "  const result = given;\n"],
+  ["kit", "  const result = dryFor(kind, shut);\n", "  const result = shut;\n"],
   ["kit", "  const { pieces: _p, cost: _c, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
   ["kit", 'if (kind !== "pool.buy.dry" ||', 'if (kind !== "pool.buy" ||'],
   ["kit", '  if (level === "1.11") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', '  if (level === "1.11") return result;\n'],
   ["kit", '  if (level === "1.11") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', ""],
+  // card signing-layer-says-when-it-closes: an open's closes sent to kit-v1.12 or below, whose schema refuses the whole
+  // answer for it, kit-v1.12 read at another level, or a key of that name taken from a kind that is no open
+  ["kit", '  if (level === "1.12") return shut;\n', '  if (level === "1.12") return given;\n'],
+  ["kit", '  if (level === "1.12") return shut;\n', ""],
+  ["kit", "  const shut = openFor(kind, given);\n", "  const shut = given;\n"],
+  ["kit", "  const { closes: _c, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
+  ["kit", "  if (!(OPEN_KINDS as readonly SignpageKind[]).includes(kind) || typeof result", "  if (typeof result"],
+  ["kit", 'from(1, 12) ? "1.12" : ', ""],
+  ["kit", 'from(1, 12) ? "1.12" : ', 'from(1, 12) ? "current" : '],
+  ["kit", 'from(1, 12) ? "1.12" : ', 'from(1, 11) ? "1.12" : '],
+  ["kit", 'if (level === "current" || level === "1.12") return all;', 'if (level === "current") return all;'],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 12] as [number, number];"],
   // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
   ["api", "if (kit !== null) return void (level = kitLevel(kit));", "if (kit !== null) return;"],
   ["api", "      level = KIT_DEFAULT;\n", ""],

@@ -28,6 +28,10 @@
 // Kit version (card kit-frame-version): before each handshake `state` request the client posts a hello naming
 // SIGNPAGE_KIT_VERSION (messages.ts HelloMessage), so the page sends it only what this version reads; a page of an
 // earlier release drops the hello unanswered. A state's op this client cannot read is left out, never the whole state.
+//
+// Closed notices (card signing-layer-says-when-it-closes, kit 1.13): an open kind's ok answer with `closes` says the
+// page will post a closed notice for that id once the layer the open showed has closed (messages.ts ClosedEvent);
+// onClosed(id) hears it. A notice counts only for an id whose ok answer said so, and once.
 
 import { OPEN_KINDS, SIGNPAGE_KIT_VERSION } from "./messages.ts";
 import type { BuyRoute, HelloMessage, PaintedMessage, ErrorCode, SignpageKind, SignpageParams, SignpageRequest, SignpageResults, SignpageState, Stage } from "./messages.ts";
@@ -40,6 +44,7 @@ import {
   signpageIsKind,
   signpageIsPlainMessage,
   signpageProgressRouteSchema,
+  signpageClosedSchema,
   signpageProgressSchema,
   signpageReadableOps,
   signpageReadySchema,
@@ -176,6 +181,14 @@ export interface SignpageClient {
   /** Called on every route event of a running buy (messages.ts BuyRoute), by the request's id; returns the unsubscribe.
    *  A page of an earlier release sends none. */
   onRoute(fn: (id: string, route: BuyRoute) => void): () => void;
+  /**
+   * Calls `fn` once, when the signing page's layer for the open `id` has closed (messages.ts ClosedEvent), or in a
+   * microtask when that notice came before this call; returns the unsubscribe. Null when that id's ok answer carried no
+   * `closes`: a page of an earlier release, which sends no notice, an open not answered ok, or an id this client did
+   * not send. The notice is not guaranteed even then (a page that crashes, reloads or navigates sends none), so a
+   * caller that waits on it keeps its own bound.
+   */
+  onClosed(id: string, fn: () => void): (() => void) | null;
   /** Sends one request once READY. Throws at once when its params are not exactly its kind's. */
   request<K extends SignpageKind>(kind: K, params: SignpageParams[K]): SignpageRequestHandle<K>;
   /** A fresh iframe (parent mode: none) and a new handshake now. */
@@ -218,6 +231,10 @@ export function signpageOrigin(url: string): string {
 
 type Timer = ReturnType<typeof setTimeout>;
 
+/** The most open ids whose ok answer carried `closes` the client keeps, the oldest let go first: an open is one per tap
+ *  of the user's, and a notice that never comes leaves its id here. */
+const CLOSING_MAX = 64;
+
 interface Pending {
   kind: SignpageKind;
   resolve: (o: SignpageOutcome) => void;
@@ -245,6 +262,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   const listeners = new Set<(s: SignpageClientSnapshot) => void>();
   const progressListeners = new Set<(id: string, stage: Stage) => void>();
   const routeListeners = new Set<(id: string, route: BuyRoute) => void>();
+  /** The open kinds answered ok with `closes`, by id: who waits for the closed notice, and whether it came. */
+  const closing = new Map<string, { fns: Set<() => void>; closed: boolean }>();
   /** Posted requests, by id. */
   const pending = new Map<string, Pending>();
   const drops: Record<SignpageDropReason, number> = { origin: 0, source: 0, shape: 0, id: 0 };
@@ -494,12 +513,26 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
           set({ state: result as SignpageState, stale: false });
           return settle(m.id as string, { ok: true, result: view.state as SignpageResults[SignpageKind] });
         }
+        // an open the page will say the close of (its layer's), heard by onClosed
+        if ((OPEN_KINDS as readonly SignpageKind[]).includes(p.kind) && (result as { closes?: unknown }).closes === true && !closing.has(m.id as string)) {
+          closing.set(m.id as string, { fns: new Set(), closed: false });
+          if (closing.size > CLOSING_MAX) closing.delete(closing.keys().next().value as string);
+        }
         return settle(m.id as string, { ok: true, result: result as SignpageResults[SignpageKind] });
       }
       if (signpageAnswerErrorSchema(m)) return settle(m.id as string, { ok: false, error: m.error as { code: ErrorCode } });
       return void drops.shape++;
     }
     if (signpageReadySchema(m)) return onReady(m as { release: string; api: number });
+    // a closed notice: only for an open whose ok answer said one comes, and once
+    if (signpageClosedSchema(m)) {
+      const c = closing.get(m.id as string);
+      if (!c || c.closed) return void drops.id++;
+      c.closed = true;
+      const fns = new Set(c.fns);
+      c.fns.clear();
+      return tell(fns);
+    }
     if (snap.status !== "ready") return void drops.shape++;
     if (m.type === "state" && Object.hasOwn(m, "state")) {
       const ev = { ...m, state: signpageReadableOps(m.state) };
@@ -538,6 +571,23 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       routeListeners.add(fn);
       return () => void routeListeners.delete(fn);
     },
+    onClosed(id, fn) {
+      const c = closing.get(id);
+      if (!c || destroyed) return null;
+      let on = true;
+      const once = () => {
+        if (!on) return;
+        on = false;
+        c.fns.delete(once);
+        fn();
+      };
+      if (c.closed) queueMicrotask(() => tell(new Set([once])));
+      else c.fns.add(once);
+      return () => {
+        on = false;
+        c.fns.delete(once);
+      };
+    },
     request(kind, params) {
       const id = crypto.randomUUID();
       const msg = signpageBuildRequest(kind, params, id);
@@ -570,6 +620,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       listeners.clear();
       progressListeners.clear();
       routeListeners.clear();
+      closing.clear();
     },
   };
 

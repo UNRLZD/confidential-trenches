@@ -19,10 +19,14 @@
 // Every message it posts is shaped for the app's kit version (card kit-frame-version, src/kit-version.ts): a hello
 // {v: 1, type: "hello", kit} names it, read in the queue like a request and answered with nothing; until one comes, and
 // again from each `ready`, the app is read as kit-v1.4.
+// closed(id) posts the closed notice {v: 1, type: "closed", id} (card signing-layer-says-when-it-closes; the shell's,
+// src/shell.ts, once an open's layer has closed): only to an app whose hello named the kit's own version or above, the
+// one level that reads it, through the same one post as every other message, at once (never behind the queue, whose
+// head may wait seconds on a helper).
 //
 // src/main.ts starts it when the page runs inside APP_HOST's frame; scripts/build-app.mjs bundles both into public/app.js.
 
-import type { BuyRoute, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
+import type { BuyRoute, ClosedEvent, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema } from "../../kit/src/signpage/schema.ts";
 import { KIT_DEFAULT, helloKit, kitLevel, resultFor, stageFor, stateFor, type KitLevel } from "./kit-version.ts";
 
@@ -243,14 +247,14 @@ function hostAnswer(host: ApiHost, m: Record<string, unknown>, ctx: KindContext)
  * last state sent (answer or event), so an event never overtakes a newer answer. A kind that moves money writes its id
  * to the wallet store before it signs (wallet.md §7 item 4), with that card.
  */
-export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void } {
+export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void; closed(id: string): void } {
   // answer null: a Running kind's id whose answer is not posted yet; `held` keeps its progress events until it is
   const answered = new Map<string, { sha: string; kind: SignpageKind; answer: SignpageAnswer | null }>();
   const held = new Map<string, Stage[]>();
   // the app's kit version, as a hello named it (src/kit-version.ts)
   let level: KitLevel = KIT_DEFAULT;
   // the message as the app's kit reads it, or null when it reads none of it; `kind`: an answer's request kind
-  const shaped = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent, kind?: SignpageKind): unknown => {
+  const shaped = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent | ClosedEvent, kind?: SignpageKind): unknown => {
     if ("ok" in msg) return msg.ok && kind !== undefined ? { ...msg, result: resultFor(level, kind, msg.result) } : msg;
     if (msg.type === "state") return { ...msg, state: stateFor(level, msg.state) };
     if (msg.type !== "progress") return msg;
@@ -258,7 +262,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     const stage = stageFor(level, msg.stage);
     return stage === null ? null : stage === msg.stage ? msg : { ...msg, stage };
   };
-  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent, kind?: SignpageKind) => {
+  const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent | ClosedEvent, kind?: SignpageKind) => {
     const out = shaped(msg, kind);
     if (out !== null) host.parent.postMessage(out, APP_ORIGIN);
   };
@@ -371,5 +375,11 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
   };
   if (!host.readyOnLoad) ready();
   // the shell posts `ready` on each load of its frame instead: each APP_HOST document needs its own, once
-  return { idle: () => queue, ready };
+  // the notice that an open's layer has closed: the type and the id alone, to an app at the current level only
+  const closed = (id: string): void => {
+    if (level !== "current") return;
+    const msg: ClosedEvent = { v: 1, type: "closed", id };
+    post(msg);
+  };
+  return { idle: () => queue, ready, closed };
 }
