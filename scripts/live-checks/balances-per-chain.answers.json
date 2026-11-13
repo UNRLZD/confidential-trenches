@@ -1,7 +1,8 @@
 {
   "good": {
-    "at": "2026-11-03T08:55:59.364Z",
-    "source": "harness, this branch's terminal build with Portfolio mounted on /portfolio (the one route line of card app-portfolio-mount)",
+    "at": "2026-11-13T08:33:36.175Z",
+    "browser": "157.0.8103.51",
+    "source": "harness, terminal build apps/terminal/dist",
     "answer": {
       "release": "check-shell",
       "api": 1,
@@ -41,47 +42,61 @@
         "view": "rows",
         "rows": [
           {
+            "chain": "near",
+            "asset": "USDC",
+            "balance": "0",
+            "marks": [],
+            "text": [
+              "NEAR",
+              "0 USDC",
+              ""
+            ]
+          },
+          {
             "chain": "solana",
             "asset": "SOL",
             "balance": "12500000000",
-            "ready": "10000000000",
-            "pending": "2500000000",
+            "marks": [],
             "text": [
               "Solana",
               "12.5 SOL",
-              "10",
-              "2.5"
+              ""
             ]
           },
           {
             "chain": "base",
             "asset": "ETH",
             "balance": "250000000000000000",
-            "ready": "none",
-            "pending": "none",
+            "marks": [],
             "text": [
               "Base",
               "0.25 ETH",
-              "—",
-              "—"
+              ""
             ]
           },
           {
             "chain": "robinhood",
             "asset": "ETH",
             "balance": "0",
-            "ready": "0",
-            "pending": "0",
+            "marks": [],
             "text": [
               "Robinhood",
               "0 ETH",
-              "0",
-              "0"
+              ""
             ]
           }
         ],
         "violations": [],
-        "errors": []
+        "errors": [],
+        "headers": [
+          "Balance"
+        ],
+        "blockText": "Private balanceBalanceNEAR0 USDCSolana12.5 SOLBase0.25 ETHRobinhood0 ETH",
+        "footer": {
+          "conn": "wait",
+          "block": "",
+          "ms": 182
+        }
       },
       {
         "width": "desktop",
@@ -89,47 +104,61 @@
         "view": "rows",
         "rows": [
           {
+            "chain": "near",
+            "asset": "USDC",
+            "balance": "0",
+            "marks": [],
+            "text": [
+              "NEAR",
+              "0 USDC",
+              ""
+            ]
+          },
+          {
             "chain": "solana",
             "asset": "SOL",
             "balance": "12500000000",
-            "ready": "10000000000",
-            "pending": "2500000000",
+            "marks": [],
             "text": [
               "Solana",
               "12.5 SOL",
-              "10",
-              "2.5"
+              ""
             ]
           },
           {
             "chain": "base",
             "asset": "ETH",
             "balance": "250000000000000000",
-            "ready": "none",
-            "pending": "none",
+            "marks": [],
             "text": [
               "Base",
               "0.25 ETH",
-              "—",
-              "—"
+              ""
             ]
           },
           {
             "chain": "robinhood",
             "asset": "ETH",
             "balance": "0",
-            "ready": "0",
-            "pending": "0",
+            "marks": [],
             "text": [
               "Robinhood",
               "0 ETH",
-              "0",
-              "0"
+              ""
             ]
           }
         ],
         "violations": [],
-        "errors": []
+        "errors": [],
+        "headers": [
+          "Balance"
+        ],
+        "blockText": "Private balanceBalanceNEAR0 USDCSolana12.5 SOLBase0.25 ETHRobinhood0 ETH",
+        "footer": {
+          "conn": "on",
+          "block": "223500001",
+          "ms": 177
+        }
       }
     ]
   },
@@ -184,6 +213,213 @@
         "rows": [],
         "violations": [],
         "errors": []
+      }
+    ]
+  },
+  "main": {
+    "at": "2026-11-13T08:33:37.785Z",
+    "browser": "157.0.8103.51",
+    "source": "harness, terminal build of main 4c1826a75",
+    "answer": {
+      "release": "check-shell",
+      "api": 1,
+      "signed_in": true,
+      "way": "passkey",
+      "code_saved": true,
+      "vault_balance": "0",
+      "wallets": [],
+      "positions": [],
+      "orders": [],
+      "held": [],
+      "ops": [],
+      "pools": [
+        {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "12.5",
+          "ready": "10"
+        },
+        {
+          "chain": "base",
+          "asset": "ETH",
+          "balance": "0.25"
+        },
+        {
+          "chain": "robinhood",
+          "asset": "ETH",
+          "balance": "0",
+          "ready": "0"
+        }
+      ]
+    },
+    "runs": [
+      {
+        "width": "phone",
+        "frame": "https://ct-app.unrealized.trade/portfolio",
+        "view": "rows",
+        "rows": [
+          {
+            "chain": "near",
+            "asset": "USDC",
+            "balance": "0",
+            "marks": [
+              "data-ready",
+              "data-pending"
+            ],
+            "text": [
+              "NEAR",
+              "0 USDC",
+              "\u2014",
+              "\u2014",
+              ""
+            ]
+          },
+          {
+            "chain": "solana",
+            "asset": "SOL",
+            "balance": "12500000000",
+            "marks": [
+              "data-ready",
+              "data-pending"
+            ],
+            "text": [
+              "Solana",
+              "12.5 SOL",
+              "10",
+              "2.5",
+              ""
+            ]
+          },
+          {
+            "chain": "base",
+            "asset": "ETH",
+            "balance": "250000000000000000",
+            "marks": [
+              "data-ready",
+              "data-pending"
+            ],
+            "text": [
+              "Base",
+              "0.25 ETH",
+              "\u2014",
+              "\u2014",
+              ""
+            ]
+          },
+          {
+            "chain": "robinhood",
+            "asset": "ETH",
+            "balance": "0",
+            "marks": [
+              "data-ready",
+              "data-pending"
+            ],
+            "text": [
+              "Robinhood",
+              "0 ETH",
+              "0",
+              "0",
+              ""
+            ]
+          }
+        ],
+        "violations": [],
+        "errors": [],
+        "headers": [
+          "Balance",
+          "Ready",
+          "Pending"
+        ],
+        "blockText": "Private balanceBalanceReadyPendingNEAR0 USDC\u2014\u2014Solana12.5 SOL102.5Base0.25 ETH\u2014\u2014Robinhood0 ETH00",
+        "footer": {
+          "conn": "wait",
+          "block": "",
+          "ms": 173
+        }
+      },
+      {
+        "width": "desktop",
+        "frame": "https://ct-app.unrealized.trade/portfolio",
+        "view": "rows",
+        "rows": [
+          {
+            "chain": "near",
+            "asset": "USDC",
+            "balance": "0",
+            "marks": [
+              "data-ready",
+              "data-pending"
+            ],
+            "text": [
+              "NEAR",
+              "0 USDC",
+              "\u2014",
+              "\u2014",
+              ""
+            ]
+          },
+          {
+            "chain": "solana",
+            "asset": "SOL",
+            "balance": "12500000000",
+            "marks": [
+              "data-ready",
+              "data-pending"
+            ],
+            "text": [
+              "Solana",
+              "12.5 SOL",
+              "10",
+              "2.5",
+              ""
+            ]
+          },
+          {
+            "chain": "base",
+            "asset": "ETH",
+            "balance": "250000000000000000",
+            "marks": [
+              "data-ready",
+              "data-pending"
+            ],
+            "text": [
+              "Base",
+              "0.25 ETH",
+              "\u2014",
+              "\u2014",
+              ""
+            ]
+          },
+          {
+            "chain": "robinhood",
+            "asset": "ETH",
+            "balance": "0",
+            "marks": [
+              "data-ready",
+              "data-pending"
+            ],
+            "text": [
+              "Robinhood",
+              "0 ETH",
+              "0",
+              "0",
+              ""
+            ]
+          }
+        ],
+        "violations": [],
+        "errors": [],
+        "headers": [
+          "Balance",
+          "Ready",
+          "Pending"
+        ],
+        "blockText": "Private balanceBalanceReadyPendingNEAR0 USDC\u2014\u2014Solana12.5 SOL102.5Base0.25 ETH\u2014\u2014Robinhood0 ETH00",
+        "footer": {
+          "conn": "on",
+          "block": "223500001",
+          "ms": 170
+        }
       }
     ]
   }

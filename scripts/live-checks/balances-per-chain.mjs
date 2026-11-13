@@ -5,13 +5,14 @@
 // Headless Chromium opens APP_HOST/portfolio at 390 x 844 (phone, dpr 2, touch) and 1440 x 900 (desktop, dpr 1) inside a
 // stand-in SIGN_HOST shell (Playwright's route answers SIGN_HOST's name; the shell frames APP_HOST, posts `ready` and
 // answers `state` with ANSWER below: three pools in SOL and ETH, one with a ready, one with none sent, one with nothing in
-// it) and reads, in the form on screen:
+// it) and reads, in the form on screen. 13 Nov 07:53Z: removed, the app names no proof: a pool row is chain, Balance,
+// Withdraw, and the block has no Ready or Pending column, whatever the state sends:
 //   - the pool block's view is "rows", with one row per pool in the answer's order, its chain and asset, and its
-//     balance, ready and pending in the asset's base units (pending = balance - ready), the answer's decimals read at the
-//     kit's table (POOL_ASSET_DECIMALS), rounded down;
+//     balance in the asset's base units, the answer's decimals read at the kit's table (POOL_ASSET_DECIMALS), rounded down;
+//   - the block has one column header, Balance, and no text reading Ready or Pending anywhere in it, and no row carries a
+//     data-ready or data-pending mark;
 //   - each pool is drawn in its own asset: the balance names it ("12.5 SOL") and no amount in a pool row is a dollar
 //     figure (a SOL or ETH pool has none until a price read exists);
-//   - a pool the answer sends with no ready draws Ready and Pending as a dash, never 0; one with a ready draws a number;
 //   - no CSP violation, no console error and no page error in the terminal's frame (one with no address counts).
 // It passes on the deployed host once Portfolio is mounted on /portfolio (card app-portfolio-mount) and this card is
 // deployed. A screenshot of each width is kept.
@@ -43,7 +44,8 @@ export const WIDTHS = [
 ];
 const READY_MS = 20_000;
 
-/** The pools the stand-in shell sends: a ready, no ready (no proof queue running), and an empty pool. */
+/** The pools the stand-in shell sends: one with a ready, one with none, and an empty pool (the screen draws a Balance for
+ *  each and names no ready or pending). */
 export const POOLS = [
   { chain: "solana", asset: "SOL", balance: "12.5", ready: "10" },
   { chain: "base", asset: "ETH", balance: "0.25" },
@@ -71,13 +73,17 @@ export function judge(rec) {
   const say = (ok, s) => lines.push(`${ok ? "ok " : "BAD"} ${s}`);
   const pools = rec.answer?.pools ?? [];
   const runs = rec.runs ?? [];
-  say(pools.length > 0 && pools.some((p) => p.ready === undefined) && pools.some((p) => p.ready !== undefined), `the answer sends ${pools.length} pool(s), with and without a ready`);
+  say(pools.length > 0 && pools.some((p) => p.ready === undefined) && pools.some((p) => p.ready !== undefined), `the answer sends ${pools.length} pool(s), with and without a ready (the screen names neither)`);
   say(WIDTHS.every((w) => runs.some((r) => r.width === w.name)), `${runs.length} run(s) of ${WIDTHS.length} (every width)`);
   for (const r of runs) {
     const n = `${r.width} ${PATH}`;
     say(r.view === "rows", `${n}: the pool block ${r.view ? `is ${r.view}` : "is not drawn"}, want rows`);
     // NEAR's vault row (card app-faults-seen-on-122) is the vault's USDC, not a pool the answer sends: its own live check
     // (app-faults-seen-on-122.mjs) reads it; this check reads the pools' rows
+    const heads = r.headers ?? null;
+    say(Array.isArray(heads) && heads.length === 1 && heads[0] === "Balance", `${n}: the column headers are ${JSON.stringify(heads)}, want one, Balance`);
+    const words = /(ready|pending)/i.exec(r.blockText ?? "");
+    say(typeof r.blockText === "string" && words === null, `${n}: ${typeof r.blockText !== "string" ? "the block's text was not read" : words ? `the block says ${JSON.stringify(words[0])}` : "the block says neither Ready nor Pending"}`);
     const rows = (r.rows ?? []).filter((x) => x.chain !== "near" || pools.some((p) => p.chain === "near"));
     say(rows.length === pools.length && rows.every((x, i) => x.chain === pools[i].chain), `${n}: rows ${rows.map((x) => x.chain).join(", ") || "none"}, want ${pools.map((p) => p.chain).join(", ")}`);
     for (const p of pools) {
@@ -89,13 +95,7 @@ export function judge(rec) {
       const bal = base(p.balance, p.asset);
       say(x.asset === p.asset && x.balance === bal, `${n}: ${p.chain} balance ${x.balance} base units of ${x.asset}, want ${bal} of ${p.asset}`);
       say(new RegExp(`^<?[0-9][0-9.,]*[KMB]? ${p.asset}$`).test(x.text[1] ?? "") && !x.text.some((t) => t.includes("$")), `${n}: ${p.chain} drawn ${JSON.stringify(x.text.slice(1))}: the balance in ${p.asset}, no dollar figure`);
-      if (p.ready === undefined) {
-        say(x.ready === "none" && x.pending === "none" && x.text[2] === "—" && x.text[3] === "—", `${n}: ${p.chain} sends no ready: Ready ${JSON.stringify(x.text[2])} and Pending ${JSON.stringify(x.text[3])} (${x.ready}, ${x.pending}), want dashes, never 0`);
-      } else {
-        const rd = base(p.ready, p.asset);
-        const pd = (BigInt(bal) - BigInt(rd)).toString();
-        say(x.ready === rd && x.pending === pd && /^<?[0-9]/.test(x.text[2] ?? "") && /^<?[0-9]/.test(x.text[3] ?? ""), `${n}: ${p.chain} ready ${x.ready} and pending ${x.pending} drawn ${JSON.stringify(x.text[2])} and ${JSON.stringify(x.text[3])}, want ${rd} and ${pd} as numbers`);
-      }
+      say((x.marks ?? ["unread"]).length === 0, `${n}: ${p.chain} row marks ${JSON.stringify(x.marks ?? null)}, want none of data-ready, data-pending`);
     }
     // a footer read of a release NEAR RPC that failed (its preflight line is the page's own), the footer showing the pair
     // answered, is no error; any other failed load of a release RPC needs a Verify panel, and /portfolio draws none
@@ -161,8 +161,8 @@ const INIT = ({ app }) => {
 const READ = (phone) => {
   const b = document.querySelector(phone ? ".pfm .pools" : ".pfd .pools");
   if (!b) return { view: null, rows: [] };
-  const rows = [...b.querySelectorAll("[data-pool]")].filter((x) => x.dataset.pool !== "unread").map((x) => ({ chain: x.dataset.pool, asset: x.dataset.asset, balance: x.dataset.balance, ready: x.dataset.ready, pending: x.dataset.pending, text: [...x.children].map((c) => c.textContent) }));
-  return { view: b.dataset.pools ?? null, rows };
+  const rows = [...b.querySelectorAll("[data-pool]")].filter((x) => x.dataset.pool !== "unread").map((x) => ({ chain: x.dataset.pool, asset: x.dataset.asset, balance: x.dataset.balance, marks: ["data-ready", "data-pending"].filter((a) => x.hasAttribute(a)), text: [...x.children].map((c) => c.textContent) }));
+  return { view: b.dataset.pools ?? null, headers: [...b.querySelectorAll(".plc")].map((c) => c.textContent.trim()), blockText: b.textContent.replace(/\s+/g, " ").trim(), rows };
 };
 
 async function runOne(browser, w, shots, handler) {

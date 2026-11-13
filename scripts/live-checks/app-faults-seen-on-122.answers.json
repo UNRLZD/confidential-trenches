@@ -1,7 +1,7 @@
 {
  "good": {
   "check": "app-faults-seen-on-122",
-  "at": "2026-11-13T02:10:17.357Z",
+  "at": "2026-11-13T08:36:07.429Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
   "browser": "157.0.8103.51",
   "runs": [
@@ -13,15 +13,13 @@
       "chain": "near",
       "asset": "USDC",
       "balance": "73180000",
-      "ready": "none",
-      "pending": "none"
+      "marks": []
      },
      {
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": []
      }
     ],
     "loadAsks": 0,
@@ -61,15 +59,13 @@
       "chain": "near",
       "asset": "USDC",
       "balance": "73180000",
-      "ready": "none",
-      "pending": "none"
+      "marks": []
      },
      {
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": []
      }
     ],
     "loadAsks": 0,
@@ -113,8 +109,10 @@
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
      }
     ],
     "loadAsks": 0,
@@ -140,8 +138,10 @@
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
      }
     ],
     "loadAsks": 0,
@@ -171,15 +171,19 @@
       "chain": "near",
       "asset": "USDC",
       "balance": "73180000",
-      "ready": "none",
-      "pending": "none"
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
      },
      {
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
      }
     ],
     "loadAsks": 1,
@@ -219,15 +223,19 @@
       "chain": "near",
       "asset": "USDC",
       "balance": "73180000",
-      "ready": "none",
-      "pending": "none"
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
      },
      {
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
      }
     ],
     "loadAsks": 1,
@@ -254,6 +262,114 @@
     "alloc": "69",
     "firstState": "S4.3",
     "asks": 2
+   }
+  ]
+ },
+ "main": {
+  "check": "app-faults-seen-on-122",
+  "at": "2026-11-13T08:36:18.677Z",
+  "source": "harness, terminal build of main 4c1826a75, the stand-in shell signed in",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "near",
+      "asset": "USDC",
+      "balance": "73180000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     },
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     }
+    ],
+    "loadAsks": 0,
+    "parts": {
+     "open": true,
+     "tile": "$0.69",
+     "parts": [
+      {
+       "part": "coins",
+       "cents": "0",
+       "chains": null
+      },
+      {
+       "part": "reserve",
+       "cents": "69",
+       "chains": "solana"
+      }
+     ],
+     "words": [
+      "Coins",
+      "Reserve"
+     ]
+    },
+    "control": {
+     "open": 1,
+     "closed": 1,
+     "tapped": true
+    },
+    "firstState": "S4.3",
+    "asks": 1
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "near",
+      "asset": "USDC",
+      "balance": "73180000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     },
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     }
+    ],
+    "loadAsks": 0,
+    "parts": {
+     "open": true,
+     "tile": "$0.69",
+     "parts": [
+      {
+       "part": "coins",
+       "cents": "0",
+       "chains": null
+      },
+      {
+       "part": "reserve",
+       "cents": "69",
+       "chains": "solana"
+      }
+     ],
+     "words": [
+      "Coins",
+      "Reserve"
+     ]
+    },
+    "alloc": "69",
+    "firstState": "S4.3",
+    "asks": 1
    }
   ]
  }
