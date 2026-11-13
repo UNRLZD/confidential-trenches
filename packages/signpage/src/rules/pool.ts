@@ -91,7 +91,7 @@ import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor } from "../../../kit/
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
-import { isReleaseSize, noteOf, SOL_GRID, SOL_NOTE_FLOOR, type PieceRule } from "../../../wallet/src/pool/pieces.ts";
+import { isReleaseSize, noteOf, releaseSizesUpTo, SOL_GRID, SOL_NOTE_FLOOR, type PieceRule } from "../../../wallet/src/pool/pieces.ts";
 import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
@@ -643,13 +643,17 @@ export function solanaNoteOf(amount: bigint): bigint {
 }
 
 /** The least note a sale's deposit back makes (card every-lamport-can-move): the pool's piece floor (SOL_NOTE_FLOOR), or
- *  the kit's release floor at the rent read (solanaPoolNoteFloor) rounded up to the grid (SOL_GRID) when that is more,
- *  so a rent rise never makes a note no release can take whole. On the grid, so a value at or over it makes the note
- *  noteOf gives it, and one under it makes none. */
+ *  the kit's release floor at the rent read (solanaPoolNoteFloor) rounded up to a rung when that is more, so a rent rise
+ *  never makes a note no release can take whole. A rung (card pool-amounts-are-standard-sizes), so the rule's raw
+ *  `minOut - reserve` and the device's solanaNoteOf of it fall on the same side of it: a value at or over it makes a
+ *  note of at least it, one under it makes none (at 60,000 a byte the grid's 26,000,000 let the device send a bare sell
+ *  the rule refused). */
 export function solanaSellNoteFloor(rent: SolanaRent): bigint {
   const f = solanaPoolNoteFloor(rent);
-  const up = ((f + SOL_GRID - 1n) / SOL_GRID) * SOL_GRID;
-  return up > SOL_NOTE_FLOOR ? up : SOL_NOTE_FLOOR;
+  if (f <= SOL_NOTE_FLOOR) return SOL_NOTE_FLOOR;
+  let r = SOL_NOTE_FLOOR;
+  while (r < f) r = releaseSizesUpTo(SOL_RULE, r * 3n)[0]!;
+  return r;
 }
 
 /** A Solana pool sell: the kit's venue sell of the request's amount from W at a min out no lower than the device's

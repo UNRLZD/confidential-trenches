@@ -1746,11 +1746,11 @@ const wireOf = (message: Uint8Array): Uint8Array => {
 };
 
 /** What W's rest (its lamports less the sweep's fee, the deposit's rents and the keep) is listed at (its RETURNING row,
- *  the balance; card pool-amounts-are-standard-sizes, the CO's pick (c)): its own sweep's rung when that is at the floor
- *  or over; else the rest itself, the user's own on W (under the least rung no sweep moves it into the pool; it goes on
- *  with W's next move), never hidden; at 0 or less not listed. */
-export function restAdds(rest: bigint, floor: bigint): bigint {
-  const own = solanaSweepOf(rest).value;
+ *  the balance; card pool-amounts-are-standard-sizes, the CO's pick (c)): its own sweep's rung (what W must keep, `stay`,
+ *  left past it) when that is at the floor or over; else the rest itself, the user's own on W (no sweep moves it into the
+ *  pool; it goes on with W's next move, its tail), never hidden; at 0 or less not listed. */
+export function restAdds(rest: bigint, floor: bigint, stay = 0n): bigint {
+  const own = solanaSweepOf(rest, stay).value;
   if (own >= floor) return own;
   return rest > 0n ? rest : 0n;
 }
@@ -2196,7 +2196,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       const cheapest = solanaSweepOf(cheapRest, stay).value;
       // under the floor W is listed at its rest (restAdds), a claim owed or not (the fee, the deposit's rents and the
       // keep are not on their way); a rest of 0 or less is not listed (no RETURNING row, nothing in the balance)
-      const adds = restAdds(rest, floor);
+      const adds = restAdds(rest, floor, stay);
       if (value < floor && adds === 0n) x.unlisted?.();
       if (value < floor && adds > 0n && (x.buy || since !== undefined)) x.read?.(adds);
       if (value < floor) return { end: owed > 0 ? ("owed" as const) : ("floor" as const), steady: cheapest < floor, detail: `W's ${lamports} would leave ${rest} for a note, under ${floor}: kept on W${owed > 0 ? `, owed ${owed} cashback claim${owed > 1 ? "s" : ""}` : ""}` };
