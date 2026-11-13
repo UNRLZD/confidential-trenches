@@ -45,8 +45,8 @@
 // the fork, the floor evmQuoteRoute's, checked by poolFollows' quoted into the store's op) with origin_asset
 // POOL_DEPOSIT_DESTINATION[chain] at the floor, which must answer U_X as its address and its quote's deposit address
 // with no request for 1Click or the helper's 1Click routes, and one wei under the floor, which must answer below_min;
-// steps 3 and 4 put money at U_X by two real sends on the fork from an outside wallet (an unlocked anvil dev account with
-// no code: floor - 1 wei, then the 1 wei that tops it up to the floor), and the follow runs on the op's own record with
+// steps 3 and 4 put money at U_X by two real sends on the fork from an outside wallet (a fresh address with no code,
+// funded and impersonated on the fork only: floor - 1 wei, then the 1 wei that tops it up to the floor), and the follow runs on the op's own record with
 // a status read that throws if ever called (counted: 0). The follow reads on to the quote's real deadline (30 min, the
 // page's own), so the run ends it by its signal once the carry and the withdraws are done, at in_pool.
 // It writes every step, each transaction's receipt (gas used, price, its signed bytes' length for Base's L1 fee) and the
@@ -84,6 +84,12 @@ const hex = (n) => `0x${BigInt(n).toString(16)}`;
 const sent = { page: 0, helper: 0, dropped: 0 };
 // --plain: the follow's 1Click status reads (each one throws; the run needs none)
 let statusCalls = 0;
+// a tap after a withdraw waits, as the user would, for the change note the screen can spend (its leaf's block final):
+// the safe block mined and the page's state read, at most 30 rounds; the wait is kept per op (declared before any step,
+// so a step that ends the run early writes its record)
+const tapWaitMs = {};
+// the taps whose fixed amount was asked as the screen's nearest lower one (op -> the amount, below and above)
+const plannedAs = {};
 const sends = () => sent.page + sent.helper;
 let losing = false;
 const realFetch = globalThis.fetch;
@@ -472,10 +478,17 @@ const plainF = !PLAIN ? null : await guard("plain: pool.address", async () => {
   step("plain: pool.address", { origin, floor, price, under, at, asked, refusedHosts: [...refused.keys()].slice(refused0), op, underOp }, under?.error === "below_min" && underOp === null && at?.result?.address === ux.evm && q?.deposit_address === ux.evm && q?.origin_asset === origin && q?.amount_in === fmt18(floor) && q?.min_amount_out === fmt18(floor) && deadlineAheadMs > 29 * 60_000 && asked.every((a) => !/oneclick|quote|status/.test(a)) && refused.size === refused0 && op?.kind === "pool_deposit" && op?.stage === "quote_checked" && f?.address === ux.evm && f?.u === ux.evm && f?.min_out === floor.toString() && f?.origin === origin);
   return f;
 });
-// --plain, steps 3 and 4: the outside wallet, an unlocked anvil dev account with no code on the fork
+// --plain, steps 3 and 4: the outside wallet. anvil's dev accounts all hold code on Base mainnet (EIP-7702 delegations:
+// the 13 Nov 09:35Z run found none without), so it is a fresh address, keccak("plain-send/outside")'s last 20 bytes,
+// which no one holds a key to: funded on the fork only (1 ETH, anvil_setBalance) and sent from by anvil's impersonation,
+// with no code at the fork block
 const outside = !PLAIN ? null : await guard("plain: the outside wallet", async () => {
-  for (const a of await anvil("eth_accounts", [])) if ((await anvil("eth_getCode", [a, "latest"])) === "0x") return a;
-  throw new Error("no dev account without code on the fork");
+  const a = "0x" + Buffer.from(keccak_256(new TextEncoder().encode("plain-send/outside"))).toString("hex").slice(24);
+  if ((await anvil("eth_getCode", [a, "latest"])) !== "0x") throw new Error("the outside address holds code");
+  await anvil("anvil_setBalance", [a, "0xde0b6b3a7640000"]);
+  await anvil("anvil_impersonateAccount", [a]);
+  step("plain: the outside wallet", { address: a, balance: BigInt(await anvil("eth_getBalance", [a, "latest"])) }, true);
+  return a;
 });
 const plainSends = [];
 // one plain send from the outside wallet to U_X, at the held base fee, mined at once (anvil automines); its receipt read
@@ -542,11 +555,6 @@ const toKey = keccak_256(Uint8Array.from([...seed64, ...new TextEncoder().encode
 const TO = evmAddress(secp256k1.getPublicKey(toKey, false));
 toKey.fill(0);
 const toBalance = async () => BigInt(await anvil("eth_getBalance", [TO, "latest"]));
-// a tap after a withdraw waits, as the user would, for the change note the screen can spend (its leaf's block final):
-// the safe block mined and the page's state read, at most 30 rounds; the wait is kept per op
-const tapWaitMs = {};
-// the taps whose fixed amount was asked as the screen's nearest lower one (op -> the amount, below and above)
-const plannedAs = {};
 const tap = async (pool, op, amount) => {
   const w0 = Date.now();
   const want = parseUnits(amount, 18);
