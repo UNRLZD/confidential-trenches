@@ -4,8 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider } from "../../kit/src/trade/solana/send.ts";
-import { lanedRpc, optionalRead, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts, seatRpc } from "../src/page-rpc.ts";
-import { solanaSellPrice } from "../src/pool-sell.ts";
+import { pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
 import { pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { hostLane, PROBE_HELD_MAX_MS, resetHostLanes, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
@@ -104,7 +103,7 @@ test("card helper-rpc-sell-methods: every Solana method the page's files name is
 
 test("card helper-rpc-sell-methods: a planted call the hand list and its filter passed over goes red (a file it did not name, a method it did not know)", () => {
   const files = pageFiles();
-  for (const [f, m] of [["signpage/src/trade.ts", "getTokenAccountBalance"], ["kit/src/trade/solana/flow.ts", "getVoteAccounts"], ["signpage/src/pool-sell.ts", "getTokenSupply"]] as const) {
+  for (const [f, m] of [["signpage/src/trade.ts", "getTokenAccountBalance"], ["kit/src/trade/solana/flow.ts", "getRecentPrioritizationFees"], ["signpage/src/pool-sell.ts", "getTokenSupply"]] as const) {
     const href = new URL(f, PACKAGES).href;
     const planted = new Map(files).set(href, `${files.get(href)}\nawait rpc("${m}", []);\n`);
     assert.deepEqual(scan(planted).off, [`${m} (${f})`]);
@@ -442,113 +441,4 @@ test("the mainnet build's Solana reads: the lister is the helper's marks route; 
     [`${TRADE_HELPER}/v1/rpc/solana`, "getProgramAccounts"],
     [`${TRADE_HELPER}/v1/rpc/solana`, "getMultipleAccounts"],
   ]);
-});
-
-// card round-trip-costs-less, review P2-1 of 4f9217972: the sale's fee read is an optional read (OptionalRead): asked
-// once, its throttle reported to no lane, so a 429 on it (Retry-After 3, or the helper's longest, 10) never holds the
-// sale's next helper call; a host not open now is not asked at all. On the review's head the send after a 429'd fee read
-// waited 6.0 s (Retry-After 3) and 10.0 s (Retry-After 10). The read and the send run with setTimeout frozen (mock
-// timers): a send that waits on the lane's pause, or a read that waits to ask again, never ends, and the test's own
-// timeout fails it.
-test("round-trip-costs-less P2-1: a 429 on the sale's optional fee read leaves the helper's lane open, so the send goes at once, the read asked once", { timeout: 20_000 }, async (t) => {
-  for (const after of ["3", "10"]) {
-    resetHostLanes();
-    const sent: string[] = [];
-    const fakeFetch = async (_url: string, init?: RequestInit): Promise<Response> => {
-      const body = JSON.parse(String(init?.body)) as { id: string; method: string };
-      sent.push(body.method);
-      if (body.method === "getRecentPrioritizationFees") return new Response(JSON.stringify({ error: { code: "rate_limited" } }), { status: 429, headers: { "retry-after": after, "content-type": "application/json" } });
-      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: "sig" }), { status: 200, headers: { "content-type": "application/json" } });
-    };
-    const helper = solanaPacedRpc(lanedRpc(`https://helper-optional-${after}.example/v1/rpc/solana`, { fetch: fakeFetch }));
-    const pub = (async () => [{ slot: 1, prioritizationFee: 0 }]) as unknown as Parameters<typeof solanaSellPrice>[0][0];
-    t.mock.timers.enable({ apis: ["setTimeout"] });
-    try {
-      assert.equal(await solanaSellPrice([pub, helper], ["x"]), null, "the read refused: the cap");
-      assert.equal(await helper("sendTransaction", ["AQ=="]), "sig");
-    } finally {
-      t.mock.timers.reset();
-    }
-    resetHostLanes();
-    assert.deepEqual(sent, ["getRecentPrioritizationFees", "sendTransaction"], `Retry-After ${after}: the read asked once, the send once`);
-  }
-});
-
-test("round-trip-costs-less P2-1: an optional read is not sent to a host another reader's 429 paused, and on a seat goes to one member only; a paced or wrapped provider keeps it", { timeout: 20_000 }, async (t) => {
-  resetHostLanes();
-  const asked: string[] = [];
-  const fetchOf = (host: string, status: number) => async (_url: string, init?: RequestInit): Promise<Response> => {
-    const body = JSON.parse(String(init?.body)) as { id: string; method: string };
-    asked.push(`${host} ${body.method}`);
-    return status === 429 ? new Response("{}", { status: 429, headers: { "retry-after": "5" } }) : new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: [] }), { status: 200 });
-  };
-  // a trade read's 429 pauses the host (Retry-After 5): the optional read after it is refused at once, nothing sent
-  const paused = lanedRpc("https://paused-optional.example/rpc", { fetch: fetchOf("paused", 429), retry: { deadlineMs: 50, backoffMs: 50 } });
-  await assert.rejects(paused("getSlot", []));
-  asked.length = 0;
-  // refused at once: with setTimeout frozen, a read that waited out the pause would never end
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  try {
-    await assert.rejects(optionalRead(solanaPacedRpc(paused))!("getRecentPrioritizationFees", [["x"]], new AbortController().signal), (e: unknown) => e instanceof SolanaRpcTransportError);
-  } finally {
-    t.mock.timers.reset();
-  }
-  assert.deepEqual(asked, []);
-  // an aborted signal: nothing sent
-  const open = lanedRpc("https://open-optional.example/rpc", { fetch: fetchOf("open", 200) });
-  const stop = new AbortController();
-  stop.abort();
-  await assert.rejects(optionalRead(open)!("getRecentPrioritizationFees", [["x"]], stop.signal));
-  assert.deepEqual(asked, []);
-  assert.deepEqual(await optionalRead(open)!("getRecentPrioritizationFees", [["x"]], new AbortController().signal), []);
-  assert.deepEqual(asked, ["open getRecentPrioritizationFees"]);
-  // no optional read for a URL no page RPC made: none (the sale pays its cap)
-  assert.equal(optionalRead(Object.assign(async () => null, { url: "https://unknown-optional.example/rpc" })), undefined);
-  // a seat: one member only, the first open one; a member's 429 is not failed over to the next
-  const real = globalThis.fetch;
-  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => fetchOf(new URL(String(u)).host, new URL(String(u)).host.startsWith("seat-a") ? 429 : 200)(String(u), init)) as typeof fetch;
-  try {
-    asked.length = 0;
-    const seat = solanaPacedRpc(seatRpc(["https://seat-a-optional.example/", "https://seat-b-optional.example/"]));
-    await assert.rejects(optionalRead(seat)!("getRecentPrioritizationFees", [["x"]], new AbortController().signal));
-    assert.deepEqual(asked, ["seat-a-optional.example getRecentPrioritizationFees"]);
-    // A's lane open still (the optional read's 429 paused nothing); a trade read then meets A's 429, which pauses A, and
-    // reads on B: the next optional read goes to B alone
-    await seat("getSlot", []);
-    assert.deepEqual(asked.slice(-2), ["seat-a-optional.example getSlot", "seat-b-optional.example getSlot"]);
-    asked.length = 0;
-    assert.deepEqual(await optionalRead(seat)!("getRecentPrioritizationFees", [["x"]], new AbortController().signal), []);
-    assert.deepEqual(asked, ["seat-b-optional.example getRecentPrioritizationFees"]);
-  } finally {
-    globalThis.fetch = real;
-    resetHostLanes();
-  }
-});
-
-// review 2 P3-d of c0dd55d02: an optional read is counted in its host's budget (HostLane count), as every request
-test("round-trip-costs-less P3-d: an optional read counts once in its host's window", async () => {
-  resetHostLanes();
-  const ok = async (_u: string, init?: RequestInit): Promise<Response> => new Response(JSON.stringify({ jsonrpc: "2.0", id: (JSON.parse(String(init?.body)) as { id: string }).id, result: [] }), { status: 200 });
-  const rpc = lanedRpc("https://counted-optional.example/rpc", { fetch: ok });
-  const lane = hostLane(rpc.url!);
-  const before = lane.inWindow();
-  assert.deepEqual(await optionalRead(rpc)!("getRecentPrioritizationFees", [["x"]], new AbortController().signal), []);
-  assert.equal(lane.inWindow(), before + 1);
-  resetHostLanes();
-});
-
-// round-trip-costs-less: only a trade's page RPC gives its url an optional read; a pass's RPC and a pass's seat give none
-// (the sale's fee read never goes out on a pass's lane), while a trade's seat does
-test("round-trip-costs-less P2-1: only a trade's RPC or seat registers an optional read: a pass's RPC and a pass's seat register none", () => {
-  resetHostLanes();
-  const none = async (): Promise<Response> => new Response("{}", { status: 500 });
-  const pass = lanedRpc("https://pass-optional.example/rpc", { kind: "pass", fetch: none });
-  assert.equal(optionalRead(pass), undefined, "a pass's RPC");
-  const passSeat = seatRpc(["https://pass-seat-a-optional.example/", "https://pass-seat-b-optional.example/"], "pass");
-  assert.equal(optionalRead(passSeat), undefined, "a pass's seat");
-  const trade = lanedRpc("https://trade-optional.example/rpc", { fetch: none });
-  assert.equal(typeof optionalRead(trade), "function", "a trade's RPC");
-  const tradeSeat = seatRpc(["https://trade-seat-a-optional.example/", "https://trade-seat-b-optional.example/"]);
-  assert.equal(typeof optionalRead(tradeSeat), "function", "a trade's seat");
-  resetHostLanes();
 });

@@ -9,6 +9,6 @@ rpcs:tR(eR(e.rpcs,iR(t.token)),rR(t.token),nU,()=>Number(e.now?.()??BigInt(Date.
 .signal?.aborted)return{error:`failed`};nR(o.rpcs);continue}
 ,m=async t=>{if(!i.hold(t))return $(`failed`,`tap_bound`);if(f&&(p=!0),await ZL(e.wait,t,e.signal),e.stopped?.()||e.signal?.aborted)return $(`failed`,`stopped`)};
 ,u=async e=>{if(!i.hold(e))return $(`failed`,`tap_bound`);if(l=!0,await ZL(o.wait,e,o.signal),o.stopped?.()||o.signal?.aborted)return $(`failed`,`stopped`)},
-{if(a=void 0,`stage`in c&&c.stage===`not_landed`?Bq.add(r.address):`stage`in c&&(c.stage===`filled`||c.stage===`refused`)&&Bq.delete(r.address),n.reprice&&!e.stopped?.())nR(e.rpcs);
+{if(a=void 0,n.reprice&&!e.stopped?.())nR(e.rpcs);
 if(p||a?.waited?.())return n.reprice=!0,{error:`failed`};let pe=ce,me={amount:
 return o?.inFlight?.()&&(n.simWaited??0)<rU?(n.simWaited=(n.simWaited??0)+500,await m(500),n.reprice=!0,{error:`failed`}):$(`failed`,`sim`,a.flatMap((e,t)=>e!=null&&e.err===null?[]:[`RPC ${
