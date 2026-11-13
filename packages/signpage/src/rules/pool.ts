@@ -93,6 +93,7 @@ import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSi
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
 import { SOL_GRID, SOL_NOTE_FLOOR, type PieceRule } from "../../../wallet/src/pool/pieces.ts";
 import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
+import { chunkOf, isRung } from "../../../wallet/src/pool/ladder.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
 export const POOL_KINDS = ["pool.deposit", "pool.buy", "pool.sell", "pool.withdraw"] as const;
@@ -929,12 +930,80 @@ function checkRelay(proof: EvmPoolProofBinding, relay: EvmRelayData, pins: Retur
   if (proof.context !== context) refuse("context");
 }
 
-/** An EVM pool buy: the kit's pinned Buy, the request's token and amount, the proof's relay data the device's, and a
- *  min out the check derives itself: the device's quote (`agreed`: the route's output both of its providers gave, for
- *  the token the ask names and exactly the ask's amount less the relay fee the device caps, ctx.feeCap) less the ask's
- *  own slippage, never a floor or slippage the caller hands in. */
-export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, agreed: { token: string; amountIn: bigint; amountOut: bigint }, testnet = false): PoolDraw {
+// ---------- EVM: a buy of any amount (card buy-any-amount-on-every-chain) ----------
+// The pool's buy (PrivacyPoolSimple.buy) swaps a whole release in its own call, and every release is a whole note, a
+// rung (./ladder.ts). So a buy of X, the ETH that goes into swaps in all (as Solana's spend), is planned here from the
+// proofs ready: the notes whose whole spend (chunk less its relay fee) fits, largest first, each its own pool.buy; and
+// for what is left, the one other note whose spend covers it with W's own buy's fee bound beside it, the least such.
+// That note is released whole to its W (checkEvmWithdraw), W buys exactly the rest through the pinned adapter itself
+// (checkEvmWBuy), and W's change goes back into the pool as rungs (checkEvmChange), what is under the least rung
+// staying on W as its tail. Every amount that touches the pool stays a rung.
+
+/** One ready proof a buy may spend: its note, its chunk (the whole note) and the relay fee its binding caps (paid from it). */
+export type EvmBuyPiece = { readonly noteId: string; readonly chunk: bigint; readonly fee: bigint };
+/** A buy's plan: `whole`, the pieces each spent whole by a pool.buy (spend chunk less fee); `rest`, the piece released
+ *  to its W, which buys exactly `spend` itself (null when the whole pieces make the amount); `bound`, the most W's own
+ *  buy may cost (its gas and L1 fee bound) that the plan kept beside `spend`. */
+export type EvmBuyPlan = { readonly amount: bigint; readonly whole: readonly EvmBuyPiece[]; readonly rest: { readonly piece: EvmBuyPiece; readonly spend: bigint } | null; readonly bound: bigint };
+const PLANNED = new WeakSet<EvmBuyPlan>();
+
+/** The plan of an EVM pool.buy of ask.amount over `pieces` (the ready proofs of the ask's chain), with `bound` the most
+ *  W's own buy may cost. Refused "amount" when no plan makes the amount exactly: over every piece's spend, or within
+ *  one buy's bound under it (the rest's W could not pay its own buy). */
+export function planEvmBuy(ask: PoolAsk, pieces: readonly EvmBuyPiece[], bound: bigint): EvmBuyPlan {
+  if (ask.kind !== "pool.buy" || ask.chain === "solana") return refuse("kind");
+  const x = ask.amount;
+  if (typeof x !== "bigint" || x <= 0n || x >= U256) return refuse("amount");
+  if (typeof bound !== "bigint" || bound < 0n || bound >= U256) return refuse("bound");
+  if (!Array.isArray(pieces)) return refuse("pieces");
+  const seen = new Set<string>();
+  const list = pieces.map((p) => {
+    const q = Object.freeze({ noteId: p?.noteId, chunk: p?.chunk, fee: p?.fee });
+    // a piece is a whole note, its fee under it; one piece a note. A note is a rung once the ladder made it; one made
+    // before stays spendable, released whole as it was deposited, so no new size reaches the chain
+    if (typeof q.noteId !== "string" || seen.has(q.noteId) || typeof q.chunk !== "bigint" || q.chunk >= U256 || typeof q.fee !== "bigint" || q.fee < 0n || q.fee >= q.chunk) return refuse("pieces");
+    seen.add(q.noteId);
+    return q;
+  });
+  const spend = (p: EvmBuyPiece): bigint => p.chunk - p.fee;
+  // largest spend first, a tie in the caller's order (its preference: a proof on the epoch root first), so one list of
+  // proofs always gives one plan
+  const order = [...list].sort((a, b) => (spend(a) === spend(b) ? 0 : spend(a) > spend(b) ? -1 : 1));
+  const whole: EvmBuyPiece[] = [];
+  const left: EvmBuyPiece[] = [];
+  let rem = x;
+  for (const p of order) {
+    if (spend(p) <= rem) {
+      whole.push(p);
+      rem -= spend(p);
+    } else left.push(p);
+  }
+  let rest: EvmBuyPlan["rest"] = null;
+  if (rem > 0n) {
+    // the least change: the smallest spend that pays the rest and W's own buy
+    const carrier = left.filter((p) => spend(p) - bound >= rem).sort((a, b) => (spend(a) === spend(b) ? 0 : spend(a) < spend(b) ? -1 : 1))[0];
+    if (carrier === undefined) return refuse("amount");
+    rest = Object.freeze({ piece: carrier, spend: rem });
+  }
+  const plan: EvmBuyPlan = Object.freeze({ amount: x, whole: Object.freeze(whole), rest, bound });
+  PLANNED.add(plan);
+  return plan;
+}
+
+/** The most an EVM buy over `pieces` can spend: every piece's spend (chunk less its fee), each a whole pool.buy. */
+export function evmBuyMax(pieces: readonly EvmBuyPiece[]): bigint {
+  return pieces.reduce((s, p) => s + (p.chunk - p.fee), 0n);
+}
+
+/** An EVM pool buy, one whole piece of `plan` (planEvmBuy's, for this very ask): the kit's pinned Buy, the request's
+ *  token, the proof a whole piece the plan spends whole and its relay data the device's, and a min out the check
+ *  derives itself: the device's quote (`agreed`: the route's output both of its providers gave, for the token the ask
+ *  names and exactly the piece's chunk less the relay fee the device caps, ctx.feeCap, the piece's own fee) less the
+ *  ask's own slippage, never a floor or slippage the caller hands in. */
+export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, agreed: { token: string; amountIn: bigint; amountOut: bigint }, plan: EvmBuyPlan, testnet = false): PoolDraw {
   if (ask.kind !== "pool.buy") return refuse("kind");
+  // only the device's own plan of this very amount
+  if (!PLANNED.has(plan) || plan.amount !== ask.amount) return refuse("plan");
   // only a buy built from the device's own quote: never a server's route, hook data or min out
   if (!evmIsQuotedBuy(built)) return refuse("not_quoted");
   const proof = snapProof(given);
@@ -944,10 +1013,12 @@ export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProof
   if (lower(pool) !== lower(pins.pool)) return refuse("pool");
   if (![pins.v3, pins.v4].some((a) => a !== undefined && lower(a) === lower(built.adapter))) return refuse("adapter");
   if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");
-  if (proof.value !== ask.amount) return refuse("amount");
-  // the quote: the ask's token, for the ask's amount less the device's fee cap (what the pool swaps), above 0
+  // the proof's value a piece the plan spends whole, at that piece's own fee
+  const piece = plan.whole.find((p) => p.chunk === proof.value && p.fee === ctx.feeCap);
+  if (piece === undefined) return refuse("amount");
+  // the quote: the ask's token, for the piece's chunk less the device's fee cap (what the pool swaps), above 0
   if (lower(agreed.token) !== lower(ask.token ?? "")) return refuse("token");
-  if (typeof ctx.feeCap !== "bigint" || ctx.feeCap < 0n || ctx.feeCap >= ask.amount || agreed.amountIn !== ask.amount - ctx.feeCap) return refuse("amount");
+  if (typeof ctx.feeCap !== "bigint" || ctx.feeCap < 0n || ctx.feeCap >= piece.chunk || agreed.amountIn !== piece.chunk - ctx.feeCap) return refuse("amount");
   if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");
   if (typeof agreed.amountOut !== "bigint" || agreed.amountOut <= 0n) return refuse("min_out");
   const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
@@ -956,7 +1027,7 @@ export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProof
   const read = { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, proof };
   passed("evm.buy", built, read);
   passed("evm.buy", given, read);
-  return { chain: ask.chain, op: ask.kind, token: built.token, amount: ask.amount, feeCap: relay.feeCap, pool: pins.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+  return { chain: ask.chain, op: ask.kind, token: built.token, amount: piece.chunk - ctx.feeCap, feeCap: relay.feeCap, pool: pins.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
 }
 
 /** An EVM pool withdraw: Withdraw(nullifier, context, value) on the pinned pool, the relay data paying W. */
@@ -1456,6 +1527,125 @@ export function signEvmDeposit(secretKey: Uint8Array, tx: EvmOnwardSend): Uint8A
   const rec = secp256k1.sign(evmOnwardSendDigest(passed), secretKey, { prehash: false, lowS: true, format: "recovered" });
   const vrs = [rlpUint(BigInt(rec[0]!)), rlpUint(be32(rec.subarray(1, 33))), rlpUint(be32(rec.subarray(33, 65)))];
   return cat(Uint8Array.of(2), rlpList([...onwardFields(passed), ...vrs]));
+}
+// ---------- EVM: the rest of a buy, W's own (card buy-any-amount-on-every-chain) ----------
+// The plan's rest piece is released whole to its W (checkEvmWithdraw); W then buys exactly the plan's rest itself, one
+// EIP-1559 call of the pinned adapter's buy(token, W, minOut, path) with that value, the same adapter and path the
+// kit builds for the pool's own buy (IBuyAdapter: anyone may call it; the router takes all the value or the call
+// reverts), and puts its change back into the pool as rungs.
+
+/** The device's reads for W's own buy, each as its two RPCs answered (they must agree, but W's balance, each RPC's own
+ *  reading): W's nonce and balance once its release landed, eth_estimateGas of the very call from W, whether eth_call of
+ *  it succeeded, the base fee, the L1 fee bound (Base; 0 on Robinhood); the device's cap on the priority fee. */
+export type EvmWBuyReads = {
+  readonly nonce: readonly [bigint, bigint];
+  readonly balance: readonly [bigint, bigint];
+  readonly estimate: readonly [bigint, bigint];
+  readonly simulated: readonly [boolean, boolean];
+  readonly baseFee: readonly [bigint, bigint];
+  readonly l1Fee: readonly [bigint, bigint];
+  readonly priorityCap: bigint;
+};
+/** The most gas W's own buy may take: a v4 swap of four hops estimates under 600,000 (the pool's own buy reserves
+ *  BUY_SWAP_GAS, 500,000, for the same adapter call), so their word never spends W's money as gas past this. */
+export const EVM_WBUY_GAS_MAX = 1_000_000n;
+/** IBuyAdapter.buy(address,address,uint256,bytes)'s selector. */
+const evmAdapterBuySelector = (): string => hex(keccak_256(new TextEncoder().encode("buy(address,address,uint256,bytes)")).subarray(0, 4)).slice(2);
+/** The adapter call's bytes: buy(token, recipient, minOut, path), ABI-encoded. */
+export function evmAdapterBuyData(token: string, recipient: string, minOut: bigint, path: string): string {
+  if (!EVM_ADDRESS.test(token) || !EVM_ADDRESS.test(recipient) || typeof minOut !== "bigint" || minOut <= 0n || minOut >= U256 || !/^0x([0-9a-fA-F]{2})+$/.test(path)) return refuse("data");
+  const body = path.slice(2).toLowerCase();
+  const len = BigInt(body.length / 2);
+  const padded = body.padEnd(Math.ceil(body.length / 64) * 64, "0");
+  return "0x" + evmAdapterBuySelector() + evmWord(BigInt(token)) + evmWord(BigInt(recipient)) + evmWord(minOut) + evmWord(128n) + evmWord(len) + padded;
+}
+const WBUY_CHECKED = new WeakMap<object, OnwardRead>();
+
+/** W's own buy of the plan's rest: on the pinned chain, to a pinned adapter, the kit's quoted build of the ask's token
+ *  for exactly plan.rest.spend (`quote`, the device's quote of that amount; the floor its output less the ask's
+ *  slippage), paying W, W's agreed nonce, the two-RPC estimate and a fifth (at most EVM_WBUY_GAS_MAX), the run on both
+ *  RPCs, the fee caps, and the value with its fee bound within plan.bound and W's balance on each RPC's reading. */
+export function checkEvmWBuy(tx: EvmOnwardSend, built: EvmPoolBuy, ask: PoolAsk, ctx: PoolContext, reads: EvmWBuyReads, quote: { token: string; amountIn: bigint; amountOut: bigint }, plan: EvmBuyPlan, testnet = false): PoolDraw {
+  if (ask.kind !== "pool.buy") return refuse("kind");
+  if (!PLANNED.has(plan) || plan.amount !== ask.amount || plan.rest === null) return refuse("plan");
+  const part = plan.rest.spend;
+  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");
+  const chain = evmChainOf(ask, testnet);
+  const pins = evmPins(ctx, chain);
+  if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");
+  if (built.chain !== chain) return refuse("chain");
+  if (![pins.v3, pins.v4].some((a) => a !== undefined && lower(a) === lower(built.adapter))) return refuse("adapter");
+  if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");
+  if (lower(quote.token) !== lower(ask.token ?? "") || quote.amountIn !== part) return refuse("amount");
+  if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");
+  if (typeof quote.amountOut !== "bigint" || quote.amountOut <= 0n) return refuse("min_out");
+  const floor = (quote.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
+  if (floor <= 0n || built.minOut < floor) return refuse("min_out");
+  const t = onwardCopy(tx);
+  const uint = (x: unknown) => typeof x === "bigint" && x >= 0n && x < U256;
+  const nonce = agreed(reads.nonce, uint);
+  const estimate = agreed(reads.estimate, uint);
+  const baseFee = agreed(reads.baseFee, uint);
+  const l1Fee = agreed(reads.l1Fee, uint);
+  if (agreed(reads.simulated, (x) => typeof x === "boolean") !== true) return refuse("simulation");
+  if (!Array.isArray(reads.balance) || reads.balance.length !== 2 || !reads.balance.every(uint) || !uint(reads.priorityCap)) return refuse("reads");
+  if (ask.chain === "robinhood" && l1Fee !== 0n) return refuse("l1_fee");
+  if (t.chainId !== pins.chainId) return refuse("chain_id");
+  // the adapter the build names, the rest exactly, the build's own path and min out paying W: nothing else
+  if (lower(t.to) !== lower(built.adapter)) return refuse("to");
+  if (t.value !== part) return refuse("value");
+  if (lower(t.data) !== evmAdapterBuyData(built.token, ctx.wallet, built.minOut, built.data)) return refuse("data");
+  if (t.nonce !== nonce) return refuse("nonce");
+  if (t.accessList.length !== 0) return refuse("access_list");
+  if (estimate === 0n || estimate > EVM_WBUY_GAS_MAX) return refuse("gas_over_cap");
+  if (t.gasLimit !== evmOnwardCodeGas(estimate) || t.gasLimit > EVM_WBUY_GAS_MAX) return refuse("gas_estimate");
+  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");
+  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");
+  // the fee bound within what the plan kept for it, and the value with it within W's balance on each RPC's reading
+  const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;
+  if (feeBound > plan.bound) return refuse("fee_cap");
+  if (reads.balance.some((b) => part + feeBound > b)) return refuse("balance");
+  WBUY_CHECKED.set(tx, Object.freeze({ ...t, wallet: lower(ctx.wallet) }));
+  return { chain: ask.chain, op: "pool.buy", token: built.token, amount: part, feeCap: feeBound, pool: pins.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+}
+
+/** W's signed own buy, the raw transaction: only the very send checkEvmWBuy passed, as it read it, with W's key alone. */
+export function signEvmWBuy(secretKey: Uint8Array, tx: EvmOnwardSend): Uint8Array {
+  const passed = typeof tx === "object" && tx !== null ? WBUY_CHECKED.get(tx) : undefined;
+  if (passed === undefined) return refuse("unchecked");
+  let again: EvmOnwardSend;
+  try {
+    again = onwardCopy(tx);
+  } catch {
+    return refuse("unchecked");
+  }
+  // the send as the check read it, field for field, and W's own key
+  const keys = ["type", "chainId", "nonce", "maxPriorityFeePerGas", "maxFeePerGas", "gasLimit", "to", "value", "data"] as const;
+  if (keys.some((k) => again[k] !== passed[k]) || again.accessList.length > 0) return refuse("unchecked");
+  if (lower(hex(keccak_256(secp256k1.getPublicKey(secretKey, false).subarray(1)).subarray(12))) !== passed.wallet) return refuse("wallet");
+  const rec = secp256k1.sign(evmOnwardSendDigest(passed), secretKey, { prehash: false, lowS: true, format: "recovered" });
+  const vrs = [rlpUint(BigInt(rec[0]!)), rlpUint(be32(rec.subarray(1, 33))), rlpUint(be32(rec.subarray(33, 65)))];
+  return cat(Uint8Array.of(2), rlpList([...onwardFields(passed), ...vrs]));
+}
+
+/** W's change after its own buy, back into the pinned pool: one rung of the pool's ladder, never W's whole balance, as
+ *  U's deposit is held (checkEvmDeposit: the pin, deposit(value, precommitment) and nothing else, W's agreed nonce, the
+ *  estimate with the tree's headroom, the fee caps), the rung the largest at or under W's lower balance reading less
+ *  the send's fee bound: what is under the least rung stays on W, its tail. Signed by signEvmDeposit with W's key. */
+export function checkEvmChange(tx: EvmOnwardSend, ctx: EvmCarryContext, reads: EvmDepositReads, testnet = false): PoolDraw {
+  if (ctx?.chain !== "base" && ctx?.chain !== "robinhood") return refuse("chain");
+  const value = ctx.call?.value;
+  if (typeof value !== "bigint" || !isRung(EVM_LADDER, value)) return refuse("rung");
+  const ask: PoolAsk = { kind: "pool.deposit", chain: ctx.chain, token: null, amount: value, slippageBps: 0, decimals: 18 };
+  const draw = checkEvmDeposit(tx, ask, ctx, reads, testnet);
+  const low = reads.balance[0]! < reads.balance[1]! ? reads.balance[0]! : reads.balance[1]!;
+  // the largest rung W's balance pays beside the fee bound: no smaller one that leaves a rung on W
+  const top = low - draw.feeCap;
+  if (top < value || chunkOf(EVM_LADDER, top) !== value) {
+    DEPOSIT_CHECKED.delete(tx);
+    return refuse("change_rung");
+  }
+  return draw;
 }
 // ---------- the draw ----------
 

@@ -66,7 +66,7 @@ import { EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, ty
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type PoolAsk } from "./rules/pool.ts";
+import { checkEvmBuy, planEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type EvmBuyPlan, type PoolAsk } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmReleaseRead } from "./evm-send.ts";
 import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { refusalRule } from "./refusal-rule.ts";
@@ -254,10 +254,24 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       if (h.pin.network !== network) return no("not_allowed");
       const pins = venuePins(h.venues, network);
       if (pins.pool === undefined || lower(pins.pool) !== lower(h.pin.pool)) return no("not_allowed");
-      // the proof: its chunk the ask's amount, its W an EVM one, no other tap's; claimed at once
-      // a proof on the epoch root first; one on the newest root (a note that landed this epoch) only when none is the
-      // amount (card fresh-money-spendable-at-once)
-      const r = (await h.ready()).filter((p) => p.wallet.chain === "evm" && p.chunk === ask.amount && !h.claimed?.has(p.noteId)).sort((x, y) => (x.root === y.root ? 0 : x.root === "epoch" ? -1 : 1))[0];
+      // the plan (card buy-any-amount-on-every-chain): the ask is the ETH that goes into swaps, made of whole notes
+      // (rules/pool.ts planEvmBuy) over the proofs with an EVM W no other tap holds, one a note: a proof on the epoch
+      // root first, one on the newest root (a note that landed this epoch) only beside none (card
+      // fresh-money-spendable-at-once). W's own buy of a rest is bounded by one release's fee, the dearest piece's.
+      const live = (await h.ready()).filter((p) => p.wallet.chain === "evm" && !h.claimed?.has(p.noteId)).sort((x, y) => (x.root === y.root ? 0 : x.root === "epoch" ? -1 : 1));
+      const byNote = new Map<string, Ready>();
+      for (const p of live) if (!byNote.has(p.noteId)) byNote.set(p.noteId, p);
+      const pieces = [...byNote.values()].filter((p) => p.binding.feeCap < p.chunk).map((p) => ({ noteId: p.noteId, chunk: p.chunk, fee: p.binding.feeCap }));
+      let plan: EvmBuyPlan;
+      try {
+        plan = planEvmBuy(ask, pieces, pieces.reduce((m, p) => (p.fee > m ? p.fee : m), 0n));
+      } catch (e) {
+        if (e instanceof PoolRuleRefused) return no("not_funded", refusalRule(e));
+        throw e;
+      }
+      // this run spends one whole note; a plan of several notes or with a rest is run by the legs' run, not yet here
+      if (plan.rest !== null || plan.whole.length !== 1) return no("not_funded", "plan_legs");
+      const r = byNote.get(plan.whole[0]!.noteId);
       if (r === undefined) return no("not_funded");
       claim = r.noteId;
       h.claimed?.add(claim);
@@ -275,7 +289,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
         if (adapter === undefined) return no("quote_check_failed", "adapter");
         const built = h.build(adapter, q);
         const ctx = { nowMs: clock(), wallet: r.wallet.address, feeCap: fee, evm: { venues: h.venues, feeRecipient: h.pin.feeRecipient } };
-        checkEvmBuy(built, h.pin.pool, binding, relay, ask, ctx, { token: q.token, amountIn: q.amountIn, amountOut: q.amountOut }, h.testnet);
+        checkEvmBuy(built, h.pin.pool, binding, relay, ask, ctx, { token: q.token, amountIn: q.amountIn, amountOut: q.amountOut }, plan, h.testnet);
         return { q, adapter, built, ctx };
       };
       let { q, adapter, built, ctx } = await quoted();

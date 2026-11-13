@@ -78,7 +78,7 @@ function readyOf(relay = relayOf(), id = "n1", attempt = "a1"): ReadyProof<EvmPo
     publicSignals: ["11", NULLIFIER.toString(), CHUNK.toString(), "13", "14", "15", "16", context.toString()],
   };
 }
-const ASK: PoolAsk = { kind: "pool.buy", chain: "base", token: TOKEN, amount: CHUNK, slippageBps: 100, decimals: 18 };
+const ASK: PoolAsk = { kind: "pool.buy", chain: "base", token: TOKEN, amount: CHUNK - FEE, slippageBps: 100, decimals: 18 };
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const topic = (s: string) => "0x" + hex(keccak_256(new TextEncoder().encode(s)));
@@ -479,17 +479,17 @@ test("a quote that fails checkEvmBuy is never signed: no seed read, no record, n
 });
 
 test("(ruling 7) the pin, the venue list and the proof's own signals: each off is refused before the seed", async () => {
-  const cases: [string, (h: EvmPoolBuyHost) => void, ReadyProof<EvmPoolRequest>[] | undefined, string][] = [
+  const cases: [string, (h: EvmPoolBuyHost) => void, ReadyProof<EvmPoolRequest>[] | undefined, string, string?][] = [
     ["the pin is another network's", (h) => void (h.pin = { ...h.pin, network: "robinhood" }), undefined, "not_allowed"],
     ["the venue list's pool is not the pin's", (h) => void (h.venues = Object.freeze({ base: { ...VENUES.base, pool: OTHER } }) as never), undefined, "not_allowed"],
-    ["a fee of the whole chunk", () => {}, [{ ...readyOf(), binding: { ...readyOf().binding, feeCap: CHUNK } }], "not_funded"],
+    ["a fee of the whole chunk", () => {}, [{ ...readyOf(), binding: { ...readyOf().binding, feeCap: CHUNK } }], "not_funded", "amount"],
     ["the proof's context is not its binding's", () => {}, [{ ...readyOf(), publicSignals: readyOf().publicSignals.map((x, i) => (i === 7 ? "1" : x)) as never }], "failed"],
     ["the proof's value is not its chunk", () => {}, [{ ...readyOf(), publicSignals: readyOf().publicSignals.map((x, i) => (i === 2 ? "1" : x)) as never }], "failed"],
   ];
-  for (const [name, edit, ready, code] of cases) {
+  for (const [name, edit, ready, code, rule] of cases) {
     const { h, seen } = host({ ready });
     edit(h);
-    assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: code }, name);
+    assert.deepEqual(await runEvmPoolBuy(h, ASK), rule === undefined ? { error: code } : { error: code, rule }, name);
     assert.deepEqual([seen.seeds.length, seen.takes.length, seen.sends.length], [0, 0, 0], name);
   }
 });
@@ -567,16 +567,16 @@ test("a second tap while one is in flight takes another proof, or none", async (
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual([...claimed], ["n1"], "the first tap holds its proof");
   const second = host({ ...both([release()]), claimed });
-  assert.deepEqual(await runEvmPoolBuy(second.h, ASK), { error: "not_funded" }, "the only ready proof is the first tap's");
+  assert.deepEqual(await runEvmPoolBuy(second.h, ASK), { error: "not_funded", rule: "amount" }, "the only ready proof is the first tap's");
   assert.equal(second.seen.seeds.length, 0);
   release_();
   assert.equal(((await run1) as { stage: string }).stage, "filled");
   assert.equal(claimed.size, 0);
 });
 
-test("a proof whose chunk is not the ask's amount, or an ask on another chain, is not this buy's", async () => {
+test("an amount over what the ready proofs spend (card buy-any-amount-on-every-chain: no plan makes it), or an ask on another chain, is not this buy's", async () => {
   const { h } = host();
-  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: CHUNK + 1n }), { error: "not_funded" });
+  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: CHUNK - FEE + 1n }), { error: "not_funded", rule: "amount" });
   assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, chain: "robinhood" }), { error: "not_allowed" });
   assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, kind: "pool.sell" }), { error: "not_allowed" });
 });
@@ -754,7 +754,7 @@ test("(m07) the rule checks the quote's own amount in, never the run's sum: a de
   const ready = { ...r0, chunk: c2, publicSignals: r0.publicSignals.map((x, i) => (i === 2 ? c2.toString() : x)) as typeof r0.publicSignals };
   const { h, seen } = host({ ready: [ready] });
   h.quote = async () => fixtureQuote();
-  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: c2 }), { error: "quote_check_failed", rule: "amount" });
+  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: c2 - FEE }), { error: "quote_check_failed", rule: "amount" });
   assert.deepEqual([seen.seeds.length, seen.sends.length], [0, 0]);
 });
 
@@ -1142,4 +1142,10 @@ test("card evm-buy-and-sell-on-mainnet: a refusal whose reference goes through a
   assert.ok(asked2.length <= 3, `${asked2.length} quotes`);
   assert.ok(!asked2.some((r) => JSON.stringify(r) === JSON.stringify(unlisted)), "the unlisted hook's route is never asked");
   evmLastRouteReset();
+});
+
+test("card buy-any-amount-on-every-chain: a buy asks the ETH that goes into swaps (the chunk less its fee, not a chunk): the run plans it and spends that note whole", async () => {
+  const { h, seen } = host(both([release()]));
+  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: CHUNK - FEE }), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(seen.takes, ["n1"]);
 });
