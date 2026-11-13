@@ -153,3 +153,76 @@ test("the pool's history is read once a deposit is in sight (evmPoolOf: a quote'
   assert.equal(rounds, 2, "one read after the failed one, then none");
   assert.equal(t.evmPoolOf("robinhood"), null, "no pin: no pool, nothing read");
 });
+
+// the deposit's round and the history read (evmWarmWait): the round waits for the read the page started, at most the
+// bound, then reads its own; a read that fails is asked again once, and after a second failure the round reads as before.
+// The two syncs are told apart by when the page makes them: the deposit's first (its own pair), then the pass sync.
+type Round = { round?: (signal?: AbortSignal) => Promise<unknown> };
+function twoSyncs(w: WalletStore, pass: () => Promise<unknown>, o: { waitMs?: number } = {}) {
+  const calls: string[] = [];
+  const hosts: (() => Round)[] = [];
+  let made = 0;
+  const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmSync: () => {
+      const name = made++ === 0 ? "deposit" : "pass";
+      return { events: async () => (calls.push(`${name}:events`), name === "pass" ? pass() : { fin: { number: 1n }, anchor: {}, events: [] }) };
+    },
+    ...(o.waitMs === undefined ? {} : { evmWarmWaitMs: o.waitMs }),
+    depositKinds: { solana: () => () => ({ error: "not_allowed" }), evm: (host: () => Round) => () => (hosts.push(host), { error: "not_allowed" }) },
+  } as never);
+  t.flow(ASK as never, CTX);
+  return { t, calls, round: () => hosts[0]!().round!() };
+}
+test("the deposit's round waits for the pool's history read the page started, then reads on its own sync (its hold): it never reads beside it", async () => {
+  const { w } = await wallet();
+  let done: (v: unknown) => void = () => {};
+  const s = twoSyncs(w, () => new Promise((r) => (done = r)));
+  assert.notEqual(s.t.evmPoolOf("base"), null);
+  await until(() => s.calls.includes("pass:events"));
+  const r = s.round();
+  await new Promise((x) => setTimeout(x, 80));
+  assert.deepEqual(s.calls, ["pass:events"], "the round has read nothing while the history read runs");
+  done({ fin: {}, anchor: {}, events: [] });
+  await r;
+  assert.deepEqual(s.calls, ["pass:events", "deposit:events"]);
+  // read once: the next round waits on nothing
+  await s.round();
+  assert.deepEqual(s.calls, ["pass:events", "deposit:events", "deposit:events"]);
+});
+
+test("the wait is bounded (EVM_WARM_WAIT_MS, 20 s): past it the round reads as before, on its own sync", async () => {
+  const { EVM_WARM_WAIT_MS } = await import("../src/pool-testnet.ts");
+  assert.equal(EVM_WARM_WAIT_MS, 20_000);
+  const { w } = await wallet();
+  const s = twoSyncs(w, () => new Promise(() => {}), { waitMs: 120 });
+  s.t.evmPoolOf("base");
+  const t0 = Date.now();
+  await s.round();
+  const took = Date.now() - t0;
+  assert.ok(took >= 100 && took < 1_000, `waited ${took} ms for a read that never ends, bound 120 ms`);
+  assert.deepEqual(s.calls, ["pass:events", "deposit:events"]);
+});
+
+test("a history read that fails is asked again once; after a second failure the round reads as before, and one asked again that reads is waited for", async () => {
+  const { w } = await wallet();
+  const s = twoSyncs(w, () => Promise.reject(new Error("down")));
+  s.t.evmPoolOf("base");
+  await until(() => s.calls.includes("pass:events"));
+  await new Promise((x) => setTimeout(x, 20));
+  await s.round();
+  assert.deepEqual(s.calls, ["pass:events", "pass:events", "deposit:events"], "the failed read asked again once, then the round's own");
+
+  const { w: w2 } = await wallet();
+  let k = 0;
+  let done: (v: unknown) => void = () => {};
+  const s2 = twoSyncs(w2, () => (k++ === 0 ? Promise.reject(new Error("down")) : new Promise((r) => (done = r))));
+  const r = s2.round();
+  await until(() => s2.calls.filter((c) => c === "pass:events").length === 2);
+  await new Promise((x) => setTimeout(x, 50));
+  assert.deepEqual(s2.calls, ["pass:events", "pass:events"], "the round waits for the read asked again");
+  done({ fin: {}, anchor: {}, events: [] });
+  await r;
+  assert.deepEqual(s2.calls, ["pass:events", "pass:events", "deposit:events"]);
+});
