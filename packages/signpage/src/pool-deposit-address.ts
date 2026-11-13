@@ -24,7 +24,7 @@
 //   not_allowed, nothing sent; a read that throws: down.
 // - The pool's own coin on its own chain (`origin_asset` POOL_DEPOSIT_DESTINATION[X]: SOL on Solana, ETH on Base and
 //   Robinhood; card deposit-takes-each-pools-own-coin) is a plain send to U_X: no 1Click quote, no swap, nothing asked
-//   of the helper, on any network the page pins X's pool on. The answer's quote names U_X as its deposit address and
+//   of the helper, on mainnet only, as a 1Click quote (review P3-c). The answer's quote names U_X as its deposit address and
 //   the amount as both its amount in and its min out, under the beta cap at the device's own price read, and at least
 //   the floor read now (the same `floor` as a 1Click quote's: one deposit's worst-case cost from U_X and the rent U_X
 //   keeps), else below_min, nothing named. The follow (`checked`) carries what lands at U_X into X's pool, as it carries
@@ -114,7 +114,7 @@ export interface PoolAddressDeps {
 type Named = { record: DepositRecord; wallet: string; status: NonNullable<DepositPublic["status"]> };
 
 /** U_X from the scope's record: the id's own key in base58 on Solana, the record's EIP-55 address on an EVM chain. */
-function walletOf(chain: PoolChain, rec: DepositRecord): string | null {
+export function walletOf(chain: PoolChain, rec: Pick<DepositRecord, "id" | "evm">): string | null {
   if (chain === "solana") return rec.evm === undefined ? base58.encode(hex.decode(rec.id)) : null;
   return rec.evm ?? null;
 }
@@ -224,12 +224,12 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       if (!quoted) return void (out = { result: { chain, address: before.wallet, asset } });
 
       // a quote: only under a request id, with a follow to carry the money on, and the device's own price reads
-      if (ctx === undefined || deps.checked === undefined || deps.floor === undefined) return;
+      // on mainnet only, a plain send too (review P3-c of card deposit-takes-each-pools-own-coin): no quote to a devnet
+      // pool's U_X is ever answered, 1Click's or an outside wallet's
+      if (ctx === undefined || deps.checked === undefined || deps.floor === undefined || deps.network !== POOL_DEPOSIT_NETWORK) return;
       const origin = params.origin_asset;
       if (typeof origin !== "string") return;
       const plain = isPlainSend(chain, origin);
-      // 1Click pays out on mainnet only: never a quote to a devnet pool's U_X (a plain send asks 1Click nothing)
-      if (!plain && deps.network !== POOL_DEPOSIT_NETWORK) return;
       const priced = deps.priced?.(chain, origin) ?? null;
       if (priced === null || !Number.isInteger(priced.decimalsIn) || priced.decimalsIn < 0 || priced.decimalsIn > 36) return;
       const amount = units(params.amount, priced.decimalsIn);

@@ -43,12 +43,13 @@ test("recorded bad answer beforeStop: FAIL on unfollowed and stopped", () => {
   assert.deepEqual(v.lines, bad("unfollowed", "stopped"));
 });
 
-// card deposit-takes-each-pools-own-coin: main 6de76338d's build, whose pool.address gates every origin on mainnet and
-// has one record read and one follow write after the quote, fails on those two marks alone
-test("recorded bad answer beforePlain: FAIL on unfollowed and stopped", () => {
+// card deposit-takes-each-pools-own-coin: main 6de76338d's build, whose namer names no pool's chain and keeps no held
+// U_X, and whose pool.address has no plain-send test and one record read and one follow write after the quote, fails on
+// those four marks alone
+test("recorded bad answer beforePlain: FAIL on namesEach, namesRecord, unfollowed and stopped", () => {
   const v = judge(ANSWERS.beforePlain);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, bad("unfollowed", "stopped"));
+  assert.deepEqual(v.lines, bad("namesEach", "namesRecord", "unfollowed", "stopped"));
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
@@ -66,7 +67,12 @@ test("the excerpt of this build: every mark holds", () => {
 const PLANTED = [
   ["the namer handed no pools", new RegExp(`(\\{top:!${N},scope:${N},)pools:${N},`), "$1", ["namerPools"]],
   ["the pools' list keeps NEAR", new RegExp(`(flatMap\\(${N}=>)${N}\\.chain===\`near\`\\?\\[\\]:(\\[\\{chain:)`), "$1$2", ["namerPools"]],
-  ["one scope that fails stops the rest", new RegExp(`(for\\(let\\{scope:${N},evm:${N}\\}of ${N}\\))try\\{(await ${N}\\([^)]*\\))\\}catch\\{\\}`), "$1$2", ["namesEach"]],
+  ["one scope that fails stops the rest", new RegExp(`(for\\(let\\{scope:${N},evm:${N},chain:${N}\\}of ${N}\\))try\\{(await ${N}\\([^)]*\\))\\}catch\\{\\}`), "$1$2", ["namesEach"]],
+  // card deposit-takes-each-pools-own-coin review P1: a pool's U_X still holding money stays named, nothing wider
+  ["no pool's chain handed to the naming", new RegExp(`,chain:(${N})\\.chain\\}\\)\\)\\]`), "})]", ["namesEach"]],
+  ["a held U_X on any index, not only a lower one", new RegExp(`&&(${N})\\.index<(${N})&&await`), "&&await", ["namesRecord"]],
+  ["a failed held read moves the naming on", new RegExp(`\\.held\\((${N}),(${N})\\)\\.catch\\(\\(\\)=>!0\\)`), ".held($1,$2).catch(()=>!1)", ["namesRecord"]],
+  ["the vault's record held too (no chain asked)", new RegExp(`(\\|\\|)(${N})!==void 0&&(${N})\\.held!==void 0&&`), "$1$3.held!==void 0&&", ["namesRecord"]],
   ["every pool named as Solana", new RegExp(`evm:(${N})\\.chain!==\`solana\``), "evm:!1", ["namesEach"]],
   ["the EVM key not zeroed", new RegExp(`(\\{let (${N})=${N}\\(${N},${N},${N}\\);)\\2\\.secretKey\\.fill\\(0\\),`), "$1", ["namesRecord"]],
   ["the EVM record with no address", new RegExp(`,\\.\\.\\.${N}===void 0\\?\\{\\}:\\{evm:${N}\\}\\}\\)`), "})", ["namesRecord"]],
@@ -101,10 +107,10 @@ const PLANTED = [
   ["the quote's ask not handed the stop", new RegExp(`(,${N}\\.fetch,void 0,void 0),${N}\\)\\}`), "$1)}", ["stopped"]],
   // with no floor read wired, none is handed the stop either
   ["pool.address wired with no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["unfollowed", "stopped"]],
-  ["no floor-read gate", new RegExp(`\\|\\|${N}\\.floor===void 0\\)return;`), ")return;", ["unfollowed"]],
-  ["no network gate (review F2)", new RegExp(`if\\(!${N}&&${N}\\.network!==\`mainnet\`\\)return;`), "", ["unfollowed"]],
-  // card deposit-takes-each-pools-own-coin: the network gate held for every origin but the plain send's
-  ["the network gate skipped for every origin", new RegExp(`if\\(!(${N})&&${N}\\.network!==\`mainnet\`\\)return;`), "if(!$1&&!1)return;", ["unfollowed"]],
+  ["no floor-read gate", new RegExp(`\\|\\|${N}\\.floor===void 0\\|\\|`), "||", ["unfollowed"]],
+  ["no network gate (review F2)", new RegExp(`\\|\\|${N}\\.network!==\`mainnet\`\\)return;`), ")return;", ["unfollowed"]],
+  // card deposit-takes-each-pools-own-coin review P3-c: a plain send is held to mainnet as every quote is
+  ["the network gate skipped for a plain send", new RegExp(`\\|\\|(${N})\\.network!==\`mainnet\`\\)return;`), "||$1.network!==`mainnet`&&!Object.hasOwn(BE,t.chain))return;", ["unfollowed"]],
   ["the page's network not passed (review F2)", new RegExp(`(\\{pools:${N},)network:${N},(read:)`), "$1$2", ["unfollowed"]],
   ["no pool floor (review F3)", new RegExp(`return (${N})\\.minAmountOut<${N}\\.floor&&${N}\\(\`floor\`\\)`), "return $1", ["floored"]],
   ["a context floor under the rung let through (review F3)", new RegExp(`\\|\\|(${N})\\.floor<${N}\\[\\1\\.chain\\]\\)&&`), ")&&", ["floored"]],

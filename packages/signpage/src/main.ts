@@ -69,8 +69,8 @@ import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
-import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
-import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeld, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
+import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
@@ -1006,6 +1006,15 @@ const namer = depositNamer({
   open,
   startup: () => startup,
   resyncing: () => resyncing,
+  // a pool's U_X that still holds what its follow left stays named (review P1 of card deposit-takes-each-pools-own-coin):
+  // read on the follow's own reads (U_X's balance, one deposit's costs), as the follow reads it
+  held: async (chain, rec) => {
+    const u = walletOf(chain, rec);
+    if (u === null) return false;
+    const ux = { chain, s: rec.scope, i: rec.index, u, refund_id: rec.id, address: u, deadline_ms: 0, origin: "", min_out: "" };
+    const d = poolFollowDeps(ux, UX_ONLY);
+    return d === null ? false : uxHeld(d, ux);
+  },
 });
 // state.pools' notes (src/pools.ts): read only, with the wallet's readNotes on this page's own wallet store: no Web Lock,
 // no write, so a state read never frees a note or finishes a parent (the note store's own paths do). Top-level only, as

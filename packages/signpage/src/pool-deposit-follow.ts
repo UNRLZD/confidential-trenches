@@ -77,6 +77,10 @@ export interface PoolFollowRecord {
   min_out: string;
   /** The refund carry's last move (poolRefundMover), written before it is sent. */
   move?: PoolMove;
+  /** A plain send's: U_X's lower balance as its follow began (card deposit-takes-each-pools-own-coin, review P3-a), in
+   *  base units. Only money over it is this send's: a remainder a follow before left, or a neighbour's delivery to the
+   *  same U_X, is carried but never shows this send as sent. */
+  base?: string;
 }
 
 /** A refund move's NEAR tx as the relayer answered it (card pool-deposit-op-txs), kept with the move it carried (its
@@ -215,6 +219,21 @@ export function askOf(ladder: Ladder, have: bigint, perRung: bigint, keep: bigin
   }
 }
 
+/**
+ * Whether U_X still holds money a follow left there (card deposit-takes-each-pools-own-coin, review P1): a send that is
+ * not a sum of rungs leaves its remainder, since only whole rungs go into the pool. True while U_X's lower balance is
+ * over the rent it keeps and one deposit's worst-case cost (dust under that cannot pay its own deposit); the namer then
+ * keeps naming U_X (src/deposit-name.ts), so the next send tops it up and its follow carries both. Throws when a read
+ * fails.
+ */
+export async function uxHeld(r: Pick<PoolUxReads, "balances" | "costs">, ux: PoolUx): Promise<boolean> {
+  const [a, b] = await r.balances(ux);
+  const low = a < b ? a : b;
+  if (low === 0n) return false;
+  const c = await r.costs(ux);
+  return low > c.keep + c.perRung;
+}
+
 /** Follows one pool quote to its end (in_pool past the deadline), or until the signal stops it; returns the last stage. */
 export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps, from: PoolFollowStage = "quote_checked"): Promise<PoolFollowStage> {
   let shown: PoolFollowStage = from;
@@ -234,6 +253,18 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
   // delivery is carried
   // A plain send has no status: the money this follow (or the one before a reload) saw at U_X is its payment
   let paid = shown === "in_pool" || (plain && (shown === "in_transit" || shown === "short"));
+  // a plain send's own money is what U_X holds over `base` (review P3-a): its lower balance as the follow began, lowered
+  // to what U_X reads after money left it (a remainder carried with a neighbour's), never raised
+  let base = ((): bigint => {
+    try {
+      return plain && f.base !== undefined ? BigInt(f.base) : 0n;
+    } catch {
+      return 0n;
+    }
+  })();
+  // the pool's own two RPCs read before a plain send shows expired (review P3-b), until they read nothing over its base:
+  // one reader's word (the helper's on EVM mainnet) never shows a send expired that landed
+  let chainSeen = false;
   let slow = POOL_FOLLOW_SLOW_MS;
   // the device's clock at this follow's first end attempt (re-check P2): a page opened long past the quote's deadline
   // still reads a failing tx read again for the whole margin
@@ -273,7 +304,8 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     const { end, txs } = await deps.deposit(f, amount, deps.signal);
     // landed only with nothing of U_X's still landing: a rung sent after the one that landed is followed first
     const went = (end === "filled" || end === "part_filled") && !(await isOpen());
-    if (went) {
+    // a plain send's carry of money that is not its own (nothing over its base seen yet) never shows it in the pool
+    if (went && (!plain || paid)) {
       landed = true;
       await show("in_pool");
     }
@@ -308,10 +340,11 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       // (with one reader, its one reading: it only starts a deposit, which reads U_X on the pool's two RPCs itself)
       const [a, b] = await deps.balances(f);
       const low = a < b ? a : b;
+      if (plain && low < base) base = low;
       // the costs' reads only once U_X holds at least the least rung (review L2): none while it holds nothing
       const c = low >= deps.ladder.min ? gated(await deps.costs(f)) : null;
       if (c !== null && low >= c.floor) {
-        if (plain && !landed) {
+        if (plain && !landed && low > base) {
           await show("in_transit");
           paid = true;
         }
@@ -337,7 +370,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         }
       } else {
         // a plain send asks 1Click nothing: money under one deposit's floor at U_X, with nothing of U_X's landing, is short
-        if (plain && low > 0n && !opened) {
+        if (plain && low > base && !opened) {
           await show("short");
           paid = true;
         }
@@ -362,7 +395,15 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         // refunded by 1Click, and that refund is carried as any other). A REFUNDED whose read found nothing under U_{s,i}
         // is no send seen; one whose read did not count ("wait") is read again first
         const unseen = st === null || ("status" in st && (st.status === "PENDING_DEPOSIT" || (st.status === "REFUNDED" && (refund === null || refund === "none"))));
-        if (shown === "quote_checked" && unseen && (await deps.past(f))) await show("expired");
+        if (shown === "quote_checked" && unseen && (await deps.past(f))) {
+          if (plain && deps.chainBalances !== undefined && !chainSeen) {
+            const [x, y] = await deps.chainBalances(f);
+            // money there on either: not expired, read again next round (the helper's reading catches up)
+            if ((x > y ? x : y) > base) throw new Error("U_X holds money on the pool's RPCs: read again");
+            chainSeen = true;
+          }
+          await show("expired");
+        }
       }
     } catch {
       if (deps.signal.aborted) return shown;
@@ -492,6 +533,17 @@ export function poolFollows(h: PoolFollowHost) {
       });
       if (d === null) return;
       if (ended) return void (await d.refund?.settle?.(f).catch(() => {}));
+      // a plain send's base (review P3-a): U_X's lower balance as its follow first began, kept with the op; a read that
+      // fails writes none (read again at the next start)
+      let g: PoolFollowRecord = read.follow.base === undefined ? f : { ...f, base: read.follow.base };
+      if (g.address === g.u && g.base === undefined && now.stage === "quote_checked") {
+        const low = await d.balances(g).then(([a, b]) => (a < b ? a : b), () => null);
+        if (low !== null) {
+          await ops.update("ops", id, (v) => (isPoolOp(v) && v.follow.base === undefined ? { ...v, follow: { ...v.follow, base: low.toString() } } : undefined));
+          const v = await ops.get("ops", id);
+          if (isPoolOp(v) && v.follow.base !== undefined) g = { ...g, base: v.follow.base };
+        }
+      }
       const stage = async (s: PoolFollowStage) => {
         await ops.update("ops", id, (v) => (isPoolOp(v) ? withStage(v, s, (h.now ?? Date.now)()) : undefined));
       };
@@ -502,7 +554,7 @@ export function poolFollows(h: PoolFollowHost) {
           return next === v ? undefined : next;
         });
       };
-      const end = await followPoolQuote(f, { ...d, stage, txs, signal }, now.stage);
+      const end = await followPoolQuote(g, { ...d, stage, txs, signal }, now.stage);
       // the follow returns past its deadline only at in_pool; a signal's return leaves the op to the next landing
       if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...withStage(v, "in_pool", (h.now ?? Date.now)()), final: true } : undefined));
     };
@@ -516,6 +568,28 @@ export function poolFollows(h: PoolFollowHost) {
       });
     running.set(id, { p, signal });
     return p;
+  };
+
+  // an ended op's U_X read once: covering one deposit's floor, the op is followed again from in_pool (its money read as
+  // landed before, so what arrives is carried and the op ends again past its deadline once U_X is under the floor)
+  const followAgain = async (id: string, v: PoolDepositOp): Promise<void> => {
+    if (running.get(id)?.signal.aborted === false) return;
+    const d = h.deps(v.follow, { move: async () => v.follow.move, record: async () => Promise.reject(new Error("a read records no refund move")) });
+    if (d === null) return;
+    try {
+      const [a, b] = await d.balances(v.follow);
+      const low = a < b ? a : b;
+      if (low < d.ladder.min || low < (await d.costs(v.follow)).floor) return;
+    } catch {
+      return;
+    }
+    const ops = await h.store();
+    await ops.update("ops", id, (x) => {
+      if (!isPoolOp(x) || !poolFollowEnded(x)) return undefined;
+      const { final: _final, ...open } = x;
+      return open;
+    });
+    void follow(id, v.follow);
   };
 
   return {
@@ -536,13 +610,29 @@ export function poolFollows(h: PoolFollowHost) {
       if (!isPoolOp(op) || FOLLOW_KEYS.some((k) => op.follow[k] !== f[k])) throw new Error("the request's op names another deposit");
       void follow(id, f);
     },
-    /** Each signed-in landing: every pool op no follow has ended is followed again. */
+    /**
+     * Each signed-in landing: every pool op no follow has ended is followed again. And each U_X whose ops have all ended
+     * is read once (review P2-b of card deposit-takes-each-pools-own-coin): money sent to it after its last op ended (an
+     * address used again, a late send) that covers one deposit's floor follows that U_X's newest op again, so it is
+     * carried in; nothing under U_X is left unfollowed.
+     */
     async settle(): Promise<void> {
       const ops = await h.store();
+      const live = new Set<string>();
+      const ended = new Map<string, { k: string; v: PoolDepositOp }>();
       for (const k of await ops.keys("ops")) {
         const v = await ops.get("ops", k).catch(() => undefined);
-        if (isPoolOp(v) && (!poolFollowEnded(v) || openHeard(v))) void follow(k, v.follow);
+        if (!isPoolOp(v)) continue;
+        const ux = `${v.follow.chain}/${v.follow.u}`;
+        if (!poolFollowEnded(v) || openHeard(v)) {
+          live.add(ux);
+          void follow(k, v.follow);
+          continue;
+        }
+        const had = ended.get(ux);
+        if (had === undefined || v.created_ms > had.v.created_ms) ended.set(ux, { k, v });
       }
+      await Promise.all([...ended].filter(([ux]) => !live.has(ux)).map(([, { k, v }]) => followAgain(k, v)));
     },
     /** This tab's sign out, or the store closing: every follow stops; settle() starts them again. */
     stop(): void {

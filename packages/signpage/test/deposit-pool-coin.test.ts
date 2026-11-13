@@ -212,6 +212,16 @@ for (const [chain, origin, u, amount, units, asset] of [
   });
 }
 
+test("pool.address plain send on a page not pinned on mainnet (review P3-c): not_allowed, no floor read, nothing handed to the follow", async () => {
+  const p = page({ network: "testnet" });
+  for (const [chain, origin] of [["solana", SOL], ["base", BASE_ETH], ["robinhood", HOOD_ETH]] as const) {
+    assert.deepEqual(await p.ask({ chain, origin_asset: origin, amount: "1" }), { error: "not_allowed" });
+  }
+  assert.deepEqual(p.floorsAsked, []);
+  assert.deepEqual(p.took, []);
+  assert.deepEqual(p.fetched, []);
+});
+
 test("pool.address plain send: one base unit under the floor is below_min, nothing handed to the follow, nothing asked", async () => {
   const p = page();
   assert.deepEqual(await p.ask({ chain: "solana", origin_asset: SOL, amount: "0.013586399" }), { error: "below_min" });

@@ -1,53 +1,59 @@
 {
- "_note": "[object Object] Card deposit-takes-each-pools-own-coin: good re-recorded at that card's build (pool.address answers the pool's own coin on its own chain as a plain send, its network gate skipped for that origin alone, three record reads and two follow writes each checked against the stop), the excerpt's host line re-cut from it (its usable read named as the excerpt names it) with its plain-send test and table added; beforePlain: main 6de76338d's build under the same rules: FAIL on unfollowed and stopped.",
- "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-6pf9mPiGh0Lsx7rAUdEI3HbsXvtRfWZAq6kZrQ8DEydFDXFgyjGFGRTa3rtplsCQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-6pf9mPiGh0Lsx7rAUdEI3HbsXvtRfWZAq6kZrQ8DEydFDXFgyjGFGRTa3rtplsCQ",
-  "namerPools": true,
-  "namesEach": true,
-  "namesRecord": true,
-  "sameChain": true,
-  "unfollowed": true,
-  "stopped": true,
-  "floored": true
- },
- "bad": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI",
-  "namerPools": false,
-  "namesEach": false,
-  "namesRecord": false,
-  "sameChain": false,
-  "unfollowed": false
- },
- "liveBefore": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI",
-  "namerPools": false,
-  "namesEach": false,
-  "namesRecord": false,
-  "sameChain": false,
-  "unfollowed": false
- },
- "beforeStop": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-xhGWqj+mSNnlpkeN0Pg91FQK+TxnUDTHnC0QkCDmOH2oHLgei9kQNFAYFLqwMC7s\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-xhGWqj+mSNnlpkeN0Pg91FQK+TxnUDTHnC0QkCDmOH2oHLgei9kQNFAYFLqwMC7s",
-  "namerPools": true,
-  "namesEach": true,
-  "namesRecord": true,
-  "sameChain": true,
-  "unfollowed": false,
-  "floored": true
- },
- "beforePlain": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-O9RDtuS7IvPd+o8N13T+YPTfBg3BUL+4TbRyld4KKP/T0E4Jrx20KMFcXRJDIqj+\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-O9RDtuS7IvPd+o8N13T+YPTfBg3BUL+4TbRyld4KKP/T0E4Jrx20KMFcXRJDIqj+",
-  "namerPools": true,
-  "namesEach": true,
-  "namesRecord": true,
-  "sameChain": true,
-  "unfollowed": false,
-  "stopped": false,
-  "floored": true
- }
+  "_note": {
+    "good": "facts() over the build of card pool-deposit-follow on main 3a351685 (the follow wired, the floor read passed): PASS; re-recorded by card helper-says-why-a-vendor-refused on its build at c735c9486 (main 697ba9b91 merged; a stopped quote answers not_allowed; pool.address handed the page stop, read once, checked after each wait and the follow, handed to the floor read and on to its RPC reads) Re-recorded by card deposit-takes-each-pools-own-coin on its build (b420b177b plus its review fixes): pool.address answers the pool own coin on its own chain as a plain send, on mainnet only as every quote (review P3-c), three record reads and two follow writes each checked against the stop; the namer names each pool with its chain and keeps a pool record on a lower index while its U_X still holds money (review P1). The excerpt re-cut whole from that build, the plain-send test and its table added.",
+    "bad": "facts() over main 7d70c9fd's build, before this card: FAIL, each mark named",
+    "liveBefore": "SIGN_HOST read at 2026-11-08 before this card's deploy: FAIL, each mark named",
+    "beforeStop": "SIGN_HOST read at 2026-11-13T00:08:02.513Z (release 125, pool.address with no stop): FAIL on unfollowed and stopped",
+    "beforePlain": "card deposit-takes-each-pools-own-coin: main 6de76338d build (index.html and public/app.js) under the same rules: FAIL on namesEach, namesRecord, unfollowed and stopped."
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-I8P4IjqA+Z/T2SAsIkbCwsB65C7i2Q9YGXuvWTaTV7LwqlR7JZMXU2BNh/nZoyVn\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-I8P4IjqA+Z/T2SAsIkbCwsB65C7i2Q9YGXuvWTaTV7LwqlR7JZMXU2BNh/nZoyVn",
+    "namerPools": true,
+    "namesEach": true,
+    "namesRecord": true,
+    "sameChain": true,
+    "unfollowed": true,
+    "stopped": true,
+    "floored": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI",
+    "namerPools": false,
+    "namesEach": false,
+    "namesRecord": false,
+    "sameChain": false,
+    "unfollowed": false
+  },
+  "liveBefore": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI",
+    "namerPools": false,
+    "namesEach": false,
+    "namesRecord": false,
+    "sameChain": false,
+    "unfollowed": false
+  },
+  "beforeStop": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-xhGWqj+mSNnlpkeN0Pg91FQK+TxnUDTHnC0QkCDmOH2oHLgei9kQNFAYFLqwMC7s\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-xhGWqj+mSNnlpkeN0Pg91FQK+TxnUDTHnC0QkCDmOH2oHLgei9kQNFAYFLqwMC7s",
+    "namerPools": true,
+    "namesEach": true,
+    "namesRecord": true,
+    "sameChain": true,
+    "unfollowed": false,
+    "floored": true
+  },
+  "beforePlain": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-O9RDtuS7IvPd+o8N13T+YPTfBg3BUL+4TbRyld4KKP/T0E4Jrx20KMFcXRJDIqj+\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-O9RDtuS7IvPd+o8N13T+YPTfBg3BUL+4TbRyld4KKP/T0E4Jrx20KMFcXRJDIqj+",
+    "namerPools": true,
+    "namesEach": false,
+    "namesRecord": false,
+    "sameChain": true,
+    "unfollowed": false,
+    "stopped": false,
+    "floored": true
+  }
 }
