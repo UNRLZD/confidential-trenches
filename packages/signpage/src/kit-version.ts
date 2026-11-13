@@ -25,20 +25,25 @@
 // it: it is sent each open's answer with closes left out (every level below it too), and no notice (src/api.ts closed).
 // A client that names kit-v1.13 reads everything but a pool.buy.dry answer's out (card solana-buy-preview-complete), a
 // key its schema refuses the whole answer for: it is sent each with out left out (every level below it too), and every
-// closed notice. A client at SIGNPAGE_KIT_VERSION or above gets every message as it is. A change
+// closed notice. A client that names kit-v1.14 reads everything but a pool.buy.dry answer's with_cash and the route event
+// { move: "cash" } (card one-balance-buys-on-every-chain), which its schema refuses the whole answer, or the event, for:
+// it is sent each answer with with_cash left out and no move event (every level below it too). A move op (kind "move",
+// pool.move's), a kind no kit before 1.15 has, is sent as it is: kit-v1.5 and later drop an op they cannot read and keep
+// the rest of the state (kit schema.ts signpageReadableOps), and kit-v1.4's path leaves it out (opV1_4). A client at
+// SIGNPAGE_KIT_VERSION or above gets every message as it is. A change
 // to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import { OPEN_KINDS } from "../../kit/src/signpage/messages.ts";
-import type { DepositStage, Operation, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
+import type { DepositStage, Operation, ProgressRouteEvent, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
 
 /** The levels this page sends at: kit-v1.4's shape, kit-v1.5's (no moved_out, no pool_deposit op), kit-v1.6's (no
  *  pool_deposit op), kit-v1.7's (no position decimals), kit-v1.8's (no op detail; none at the levels below either),
  *  kit-v1.9's (no op pool_amount), kit-v1.10's (no position asset_held; none at the levels below either), kit-v1.11's
  *  (no pool making, no dry buy pieces and cost; none at the levels below either), kit-v1.12's (no open closes; none at
- *  the levels below either), kit-v1.13's (no dry buy out; none at the levels below either), or everything (kit-v1.14
- *  and above). */
-export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "1.9" | "1.10" | "1.11" | "1.12" | "1.13" | "current";
+ *  the levels below either), kit-v1.13's (no dry buy out; none at the levels below either), kit-v1.14's (no dry buy
+ *  with_cash, no move route event; none at the levels below either), or everything (kit-v1.15 and above). */
+export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "1.9" | "1.10" | "1.11" | "1.12" | "1.13" | "1.14" | "current";
 /** A client that posts no hello. */
 export const KIT_DEFAULT: KitLevel = "1.4";
 /** The first kit version that names itself and reads everything this page sends: the kit's own, as [major, minor]. */
@@ -60,7 +65,7 @@ export function kitLevel(kit: string): KitLevel {
   if (!v) return KIT_DEFAULT;
   const [major, minor] = [Number(v[1]), Number(v[2])];
   const from = (m: number, n: number) => major > m || (major === m && minor >= n);
-  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 13) ? "1.13" : from(1, 12) ? "1.12" : from(1, 11) ? "1.11" : from(1, 10) ? "1.10" : from(1, 9) ? "1.9" : from(1, 8) ? "1.8" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
+  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 14) ? "1.14" : from(1, 13) ? "1.13" : from(1, 12) ? "1.12" : from(1, 11) ? "1.11" : from(1, 10) ? "1.10" : from(1, 9) ? "1.9" : from(1, 8) ? "1.8" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
 }
 
 /** kit-v1.4's deposit stages (kit-v1.4:packages/kit/src/signpage/schema.ts DEPOSIT). */
@@ -100,7 +105,7 @@ export const V1_4_DEPOSIT_STAGE: Readonly<Record<DepositStage, V1_4Deposit>> = O
 
 /** kit-v1.4's op stages by kind (kit-v1.4 schema.ts WITHDRAW, TRADE, HOP, RETURN, RESTORE): a stage not listed is an
  *  op that client cannot read. */
-const V1_4_OP_STAGES: Readonly<Record<Exclude<Operation["kind"], "deposit" | "pool_deposit">, readonly string[]>> = Object.freeze({
+const V1_4_OP_STAGES: Readonly<Record<Exclude<Operation["kind"], "deposit" | "pool_deposit" | "move">, readonly string[]>> = Object.freeze({
   withdraw: ["proving", "submitted", "in_transit", "sent", "refunded", "stopped"],
   buy: ["signed", "sent", "filled", "part_filled", "refused", "not_landed"],
   sell: ["signed", "sent", "filled", "part_filled", "refused", "not_landed"],
@@ -127,7 +132,7 @@ function opV1_4(op: Operation): Operation | null {
     const stage = depositV1_4(op);
     return stage === null ? null : { id: op.id, kind: "deposit", stage, txs: op.txs };
   }
-  if (op.kind === "pool_deposit" || !own(V1_4_OP_STAGES, op.kind) || !V1_4_OP_STAGES[op.kind].includes(op.stage)) return null;
+  if (op.kind === "pool_deposit" || op.kind === "move" || !own(V1_4_OP_STAGES, op.kind) || !V1_4_OP_STAGES[op.kind].includes(op.stage)) return null;
   if (op.kind === "buy" || op.kind === "sell") return op.code === undefined ? { id: op.id, kind: op.kind, stage: op.stage, txs: op.txs } : { id: op.id, kind: op.kind, stage: op.stage, txs: op.txs, code: op.code };
   return { id: op.id, kind: op.kind, stage: op.stage, txs: op.txs } as Operation;
 }
@@ -155,6 +160,12 @@ const noDecimals = (s: SignpageState): SignpageState => ({ ...s, positions: s.po
 
 /** The pools with no making (card buy-spends-several-pieces): kit-v1.11 and before refuse a pool entry that has one. */
 const noMaking = (s: SignpageState): SignpageState => (s.pools === undefined ? s : { ...s, pools: s.pools.map(({ making: _m, ...p }) => p) });
+/** pool.buy.dry's answer with no with_cash (card one-balance-buys-on-every-chain): kit-v1.14 and before refuse one. */
+const dryCashFor = (kind: SignpageKind, result: unknown): unknown => {
+  if (result === null || typeof result !== "object" || kind !== "pool.buy.dry") return result;
+  const { with_cash: _w, ...rest } = result as Record<string, unknown>;
+  return rest;
+};
 /** pool.buy.dry's answer with no out (card solana-buy-preview-complete): kit-v1.13 and before refuse one. */
 const dryOutFor = (kind: SignpageKind, result: unknown): unknown => {
   if (typeof result !== "object" || result === null || kind !== "pool.buy.dry") return result;
@@ -200,7 +211,7 @@ function noDetail(o: Operation): Operation {
  *  kit-v1.5's, that and each deposit op with no moved_out; kit-v1.4's fields only, in the state's own order, each op
  *  mapped or left out. */
 export function stateFor(level: KitLevel, all: SignpageState): SignpageState {
-  if (level === "current" || level === "1.13" || level === "1.12") return all;
+  if (level === "current" || level === "1.14" || level === "1.13" || level === "1.12") return all;
   const given = noMaking(all);
   if (level === "1.11") return given;
   const held = noAssetHeld(given);
@@ -217,6 +228,12 @@ export function stateFor(level: KitLevel, all: SignpageState): SignpageState {
   return out as unknown as SignpageState;
 }
 
+/** A route event (messages.ts BuyRoute) as a client above kit-v1.4 at `level` reads it, or null when it reads none of it:
+ *  kit-v1.14 and before have no { move: "cash" } shape (card one-balance-buys-on-every-chain) and refuse that event. */
+export function routeFor(level: KitLevel, e: ProgressRouteEvent): ProgressRouteEvent | null {
+  return level !== "current" && Object.hasOwn(e, "move") ? null : e;
+}
+
 /** A progress stage as a client at `level` reads it, or null when that client has no stage for it (the event is not sent). */
 export function stageFor(level: KitLevel, stage: Stage): Stage | null {
   if (level !== "1.4" || V1_4_STAGES.has(stage)) return stage;
@@ -224,8 +241,9 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
 }
 
 /**
- * An answer's result of `kind` as a client at `level` reads it: below the current level, pool.buy.dry's with no out
- * (kit-v1.13's level is that alone); below kit-v1.13, an open kind's with no closes too (kit-v1.12's level is that);
+ * An answer's result of `kind` as a client at `level` reads it: below the current level, pool.buy.dry's with no with_cash
+ * (kit-v1.14's level is that alone); below kit-v1.14, with no out either (kit-v1.13's level is that); below kit-v1.13,
+ * an open kind's with no closes too (kit-v1.12's level is that);
  * below kit-v1.12, the state with no pool making
  * and pool.buy.dry's with no pieces and cost; for kit-v1.10 the state with no position asset_held either; for kit-v1.9
  * the state with no op pool_amount either; for kit-v1.8 the
@@ -238,7 +256,9 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
  */
 export function resultFor(level: KitLevel, kind: SignpageKind, given: unknown): unknown {
   if (level === "current") return given;
-  const plain = dryOutFor(kind, given);
+  const cashless = dryCashFor(kind, given);
+  if (level === "1.14") return cashless;
+  const plain = dryOutFor(kind, cashless);
   if (level === "1.13") return plain;
   const shut = openFor(kind, plain);
   if (level === "1.12") return shut;

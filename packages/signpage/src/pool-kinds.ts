@@ -43,6 +43,7 @@
 //   (rules/near-trade.ts), never to the pool rule or a pool pin; with no NEAR flow it is refused not_allowed, no read
 //   made. tradeRoute is the one switch over a trade's chain, exhaustive: a chain added to TRADE_CHAINS fails the
 //   typecheck here until it is routed.
+import { cashFirst, type CashToPoolDeps } from "./cash-to-pool.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
 import { afterOf, readWaits, ReadStopped, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
@@ -156,6 +157,9 @@ export type PoolKindsDeps = {
   stop?: () => AbortSignal;
   /** The device's clock, ms (tests replace it): a request's one bound counts on it from its arrival. */
   now?: () => number;
+  /** A Solana buy above one tap's spend moves its shortfall from Cash first (src/cash-to-pool.ts cashFirst, card
+   *  one-balance-buys-on-every-chain); none: the pool's flow alone. */
+  cash?: () => CashToPoolDeps;
   /** The NEAR buy's flow (src/near-trade.ts nearBuyFlow), given a request its rule passed; none: refused not_allowed. */
   near?: { buy?: (ask: NearBuyAsk, ctx: KindContext) => HostRefusal | Running<"pool.buy">; sell?: (ask: NearSellAsk, ctx: KindContext) => HostRefusal | Running<"pool.sell"> };
 };
@@ -250,7 +254,9 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         const ask = checked(p);
         if (!ask) return NO;
         if (!deps.pinned(ask.chain) || !deps.flow) return NO;
-        return runFlow(deps.flow, ask, ctx) as Answer<K>;
+        const flow = deps.flow;
+        if (kind === "pool.buy" && deps.cash) return cashFirst((a, c) => runFlow(flow, a, c ?? ctx) as HostRefusal | Running<"pool.buy">, deps.cash)(ask, ctx) as Answer<K>;
+        return runFlow(flow, ask, ctx) as Answer<K>;
       }
       // a sell: on a pinned pool's chain only, for a token that is an address of that chain, the token's decimals (kept,
       // or read on two providers), then the whole request checked with them; no read is made for any other string
