@@ -1,7 +1,8 @@
 {
   "good": {
+    "note": "card verify-check-plants-on-a-live-operator: this card tree (base 52df9055b plus this change, uncommitted at record time) with the terminal built from it, in the harness on a Mac (--harness --build), 13 Nov: the probe found all three Solana hosts answering, publicnode refused on the phone and Pocket on the desktop: the Solana row ok on the two others, PASS",
     "check": "verify-row-survives-one-provider",
-    "at": "2026-11-12T23:43:45.937Z",
+    "at": "2026-11-13T15:57:07.557Z",
     "source": "harness, terminal build, the release's mainnet RPCs live but the planted one",
     "network": "mainnet",
     "release": {
@@ -166,13 +167,13 @@
             "phase": "open"
           },
           {
-            "url": "https://ct-app.unrealized.trade/assets/index-CjzHRUnq.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-C-1N5SUp.js",
             "method": "GET",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://ct-app.unrealized.trade/assets/style-DdQ4MFGO.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-DkwIrJxc.css",
             "method": "GET",
             "status": 200,
             "phase": "open"
@@ -294,7 +295,7 @@
             "rpcMethod": "eth_blockNumber"
           },
           {
-            "url": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
             "method": "GET",
             "status": 200,
             "phase": "open"
@@ -305,25 +306,6 @@
             "status": 200,
             "phase": "open",
             "rpcMethod": "getMultipleAccounts"
-          },
-          {
-            "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
-            "method": "GET",
-            "status": 200,
-            "phase": "open"
-          },
-          {
-            "url": "https://ct-api.unrealized.trade/v1/market/trades?chain=solana&token=<mint>&limit=50",
-            "method": "GET",
-            "status": 200,
-            "phase": "open"
-          },
-          {
-            "url": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
-            "method": "GET",
-            "status": null,
-            "phase": "open",
-            "failure": "net::ERR_NAME_NOT_RESOLVED"
           },
           {
             "url": "https://rpc.mainnet.fastnear.com/",
@@ -923,7 +905,7 @@
           "footer": {
             "conn": "wait",
             "block": "",
-            "ms": 3093
+            "ms": 2590
           }
         }
       },
@@ -1032,13 +1014,13 @@
             "phase": "open"
           },
           {
-            "url": "https://ct-app.unrealized.trade/assets/index-CjzHRUnq.js",
+            "url": "https://ct-app.unrealized.trade/assets/index-C-1N5SUp.js",
             "method": "GET",
             "status": 200,
             "phase": "open"
           },
           {
-            "url": "https://ct-app.unrealized.trade/assets/style-DdQ4MFGO.css",
+            "url": "https://ct-app.unrealized.trade/assets/style-DkwIrJxc.css",
             "method": "GET",
             "status": 200,
             "phase": "open"
@@ -1167,6 +1149,13 @@
             "rpcMethod": "block"
           },
           {
+            "url": "https://public.rpc.solanavibestation.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "getMultipleAccounts"
+          },
+          {
             "url": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
             "method": "GET",
             "status": 200,
@@ -1177,13 +1166,6 @@
             "method": "GET",
             "status": 200,
             "phase": "open"
-          },
-          {
-            "url": "https://public.rpc.solanavibestation.com/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "getMultipleAccounts"
           },
           {
             "url": "https://ct-api.unrealized.trade/v1/market/trades?chain=solana&token=<mint>&limit=50",
@@ -1297,6 +1279,90 @@
             "rpcMethod": "query"
           },
           {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
             "url": "https://mainnet.base.org/",
             "method": "POST",
             "status": 200,
@@ -1381,88 +1447,11 @@
             "rpcMethod": "eth_getStorageAt"
           },
           {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "url": "https://rpc.mainnet.fastnear.com/?ct=footer",
             "method": "POST",
             "status": 200,
             "phase": "open",
-            "rpcMethod": "eth_getBlockByNumber"
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getCode"
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_call"
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getStorageAt"
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getStorageAt"
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getStorageAt"
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getBlockByNumber"
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getCode"
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_call"
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getStorageAt"
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getStorageAt"
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "method": "POST",
-            "status": 200,
-            "phase": "open",
-            "rpcMethod": "eth_getStorageAt"
+            "rpcMethod": "block"
           }
         ],
         "violations": [],
@@ -1616,6 +1605,78 @@
             "cors": false
           },
           {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
             "url": "https://mainnet.base.org/",
             "status": 204,
             "failure": null,
@@ -1688,73 +1749,7 @@
             "cors": false
           },
           {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://rpc.mainnet.chain.robinhood.com/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
-            "status": 204,
-            "failure": null,
-            "cors": false
-          },
-          {
-            "url": "https://robinhood.drpc.org/",
+            "url": "https://rpc.mainnet.fastnear.com/?ct=footer",
             "status": 204,
             "failure": null,
             "cors": false
@@ -1801,12 +1796,29 @@
           },
           "footer": {
             "conn": "on",
-            "block": "223500007",
-            "ms": 1510
+            "block": "223500011",
+            "ms": 4061
           }
         }
       }
     ],
+    "probe": {
+      "at": "2026-11-13T15:56:59.699Z",
+      "hosts": [
+        {
+          "host": "solana-rpc.publicnode.com",
+          "answered": true
+        },
+        {
+          "host": "solana.api.pocket.network",
+          "answered": true
+        },
+        {
+          "host": "public.rpc.solanavibestation.com",
+          "answered": true
+        }
+      ]
+    },
     "plants": {
       "phone": "solana-rpc.publicnode.com",
       "desktop": "solana.api.pocket.network"
@@ -3766,6 +3778,1823 @@
         }
       }
     ],
+    "plants": {
+      "phone": "solana-rpc.publicnode.com",
+      "desktop": "solana.api.pocket.network"
+    }
+  },
+  "runner_lost_second": {
+    "note": "the same tree and build in the harness, 13 Nov, the check's probe, plants and collect() with one more refusal: Pocket also answered the phone's page HTTP 400, as GitHub's runner did in live run 43449871228 (job 131969564589), publicnode planted: two of three down on the phone, the row warns: INCONCLUSIVE naming Pocket, never PASS",
+    "check": "verify-row-survives-one-provider",
+    "at": "2026-11-13T15:57:13.486Z",
+    "source": "harness, terminal build, the release's mainnet RPCs live but the planted one and, on the phone, Pocket refused as the runner lost it",
+    "network": "mainnet",
+    "release": {
+      "solana": {
+        "rpcs": [
+          "https://solana-rpc.publicnode.com",
+          "https://solana.api.pocket.network",
+          "https://public.rpc.solanavibestation.com"
+        ],
+        "pin": {
+          "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+          "programdata": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+          "codeLen": 79088,
+          "codeSha256": "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162"
+        }
+      },
+      "base": {
+        "rpcs": [
+          "https://mainnet.base.org",
+          "https://base-rpc.publicnode.com",
+          "https://base.api.pocket.network",
+          "https://base.gateway.tenderly.co"
+        ],
+        "pin": {
+          "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+          "codeHash": "0xcac5a62a0ac95b9dd1323c57a2561fe3eb56292c82c5d3a5390c95e522ff786d"
+        }
+      },
+      "robinhood": {
+        "rpcs": [
+          "https://rpc.mainnet.chain.robinhood.com",
+          "https://robinhood.drpc.org",
+          "https://robinhood.api.pocket.network",
+          "https://robinhood-rpc.publicnode.com"
+        ],
+        "pin": {
+          "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+          "codeHash": "0x4052383ebda1543cc4e9d8f51a03cdc631f4562d763c60508ef870189f8747c7"
+        }
+      }
+    },
+    "records": {
+      "solana": {
+        "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+        "programdata": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+        "codeLen": 79088,
+        "codeSha256": "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162"
+      },
+      "base": {
+        "address": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+        "codeHash": "0xcac5a62a0ac95b9dd1323c57a2561fe3eb56292c82c5d3a5390c95e522ff786d"
+      },
+      "robinhood": {
+        "address": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+        "codeHash": "0x4052383ebda1543cc4e9d8f51a03cdc631f4562d763c60508ef870189f8747c7"
+      }
+    },
+    "browser": "157.0.8103.51",
+    "runs": [
+      {
+        "width": "phone",
+        "frame": "https://ct-app.unrealized.trade/verify",
+        "pools": {
+          "state": "read",
+          "rows": {
+            "solana": {
+              "status": "warn",
+              "checks": {
+                "authority": {
+                  "status": "warn",
+                  "word": "Unverified"
+                },
+                "poolCode": {
+                  "status": "warn",
+                  "word": "Unverified"
+                }
+              },
+              "rpcs": [
+                "solana.api.pocket.network",
+                "public.rpc.solanavibestation.com"
+              ],
+              "links": [
+                "https://solscan.io/account/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+                "https://explorer.solana.com/address/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+              ]
+            },
+            "base": {
+              "status": "ok",
+              "checks": {
+                "owner": {
+                  "status": "ok",
+                  "word": null
+                },
+                "proxy": {
+                  "status": "ok",
+                  "word": null
+                },
+                "poolCode": {
+                  "status": "ok",
+                  "word": null
+                }
+              },
+              "rpcs": [
+                "mainnet.base.org",
+                "base-rpc.publicnode.com"
+              ],
+              "links": [
+                "https://basescan.org/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+                "https://base.blockscout.com/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf"
+              ]
+            },
+            "robinhood": {
+              "status": "ok",
+              "checks": {
+                "owner": {
+                  "status": "ok",
+                  "word": null
+                },
+                "proxy": {
+                  "status": "ok",
+                  "word": null
+                },
+                "poolCode": {
+                  "status": "ok",
+                  "word": null
+                }
+              },
+              "rpcs": [
+                "rpc.mainnet.chain.robinhood.com",
+                "robinhood.drpc.org"
+              ],
+              "links": [
+                "https://robinhoodchain.blockscout.com/address/0x9306359433127c4f3be426f6faeb00a3c41f66db",
+                "https://hoodscan.co/address/0x9306359433127c4f3be426f6faeb00a3c41f66db"
+              ]
+            }
+          }
+        },
+        "requests": [
+          {
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/index-C-1N5SUp.js",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/style-DkwIrJxc.css",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-2x-cool-CyRdqxKi.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-2x-DCJZ3gWM.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=base",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=robinhood",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=near",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://solana-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 400,
+            "phase": "open",
+            "rpcMethod": "getMultipleAccounts",
+            "failure": "net::ERR_ABORTED"
+          },
+          {
+            "url": "https://solana.api.pocket.network/",
+            "method": "POST",
+            "status": 400,
+            "phase": "open",
+            "rpcMethod": "getMultipleAccounts",
+            "failure": "net::ERR_ABORTED"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_blockNumber"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_blockNumber"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_blockNumber"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_blockNumber"
+          },
+          {
+            "url": "https://public.rpc.solanavibestation.com/",
+            "method": "POST",
+            "status": null,
+            "phase": "open",
+            "rpcMethod": "getMultipleAccounts",
+            "failure": "net::ERR_ABORTED"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          }
+        ],
+        "violations": [],
+        "errors": [
+          "Failed to load resource: the server responded with a status of 400 (Bad Request) (https://solana-rpc.publicnode.com/)",
+          "Failed to load resource: the server responded with a status of 400 (Bad Request) (https://solana.api.pocket.network/)",
+          "Verify read the pool on no two of solana-rpc.publicnode.com, solana.api.pocket.network, public.rpc.solanavibestation.com (https://ct-app.unrealized.trade/assets/index-C-1N5SUp.js)"
+        ],
+        "otherReads": [],
+        "preflights": [
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://solana-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://solana.api.pocket.network/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://public.rpc.solanavibestation.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          }
+        ],
+        "docs": [
+          {
+            "url": "https://ct-app.unrealized.trade/verify",
+            "status": 200
+          },
+          {
+            "url": "https://confidential.unrealized.trade/verify",
+            "status": 200
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/verify",
+            "status": 200
+          }
+        ],
+        "dom": {
+          "verify": {
+            "state": "read",
+            "code": "ok",
+            "funds": "ok",
+            "pools": {
+              "solana": "warn",
+              "base": "ok",
+              "robinhood": "ok"
+            },
+            "poolRpcs": {
+              "solana": [
+                "solana.api.pocket.network",
+                "public.rpc.solanavibestation.com"
+              ],
+              "base": [
+                "mainnet.base.org",
+                "base-rpc.publicnode.com"
+              ],
+              "robinhood": [
+                "rpc.mainnet.chain.robinhood.com",
+                "robinhood.drpc.org"
+              ]
+            }
+          },
+          "footer": {
+            "conn": "wait",
+            "block": "",
+            "ms": 1552
+          }
+        }
+      },
+      {
+        "width": "desktop",
+        "frame": "https://ct-app.unrealized.trade/verify",
+        "pools": {
+          "state": "read",
+          "rows": {
+            "solana": {
+              "status": "ok",
+              "checks": {
+                "authority": {
+                  "status": "ok",
+                  "word": null
+                },
+                "poolCode": {
+                  "status": "ok",
+                  "word": null
+                }
+              },
+              "rpcs": [
+                "solana-rpc.publicnode.com",
+                "public.rpc.solanavibestation.com"
+              ],
+              "links": [
+                "https://solscan.io/account/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+                "https://explorer.solana.com/address/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"
+              ]
+            },
+            "base": {
+              "status": "ok",
+              "checks": {
+                "owner": {
+                  "status": "ok",
+                  "word": null
+                },
+                "proxy": {
+                  "status": "ok",
+                  "word": null
+                },
+                "poolCode": {
+                  "status": "ok",
+                  "word": null
+                }
+              },
+              "rpcs": [
+                "mainnet.base.org",
+                "base-rpc.publicnode.com"
+              ],
+              "links": [
+                "https://basescan.org/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+                "https://base.blockscout.com/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf"
+              ]
+            },
+            "robinhood": {
+              "status": "ok",
+              "checks": {
+                "owner": {
+                  "status": "ok",
+                  "word": null
+                },
+                "proxy": {
+                  "status": "ok",
+                  "word": null
+                },
+                "poolCode": {
+                  "status": "ok",
+                  "word": null
+                }
+              },
+              "rpcs": [
+                "rpc.mainnet.chain.robinhood.com",
+                "robinhood.drpc.org"
+              ],
+              "links": [
+                "https://robinhoodchain.blockscout.com/address/0x9306359433127c4f3be426f6faeb00a3c41f66db",
+                "https://hoodscan.co/address/0x9306359433127c4f3be426f6faeb00a3c41f66db"
+              ]
+            }
+          }
+        },
+        "requests": [
+          {
+            "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/index-C-1N5SUp.js",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/style-DkwIrJxc.css",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=base",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=robinhood",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=near",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://solana-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "getMultipleAccounts"
+          },
+          {
+            "url": "https://solana.api.pocket.network/",
+            "method": "POST",
+            "status": 400,
+            "phase": "open",
+            "rpcMethod": "getMultipleAccounts"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_blockNumber"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_blockNumber"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_blockNumber"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_blockNumber"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/?ct=footer",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "block"
+          },
+          {
+            "url": "https://public.rpc.solanavibestation.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "getMultipleAccounts"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=<mint>",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/trades?chain=solana&token=<mint>&limit=50",
+            "method": "GET",
+            "status": 200,
+            "phase": "open"
+          },
+          {
+            "url": "https://ct-api.unrealized.trade/v1/market/candles?chain=solana&token=<mint>&tf=15m&limit=500",
+            "method": "GET",
+            "status": null,
+            "phase": "open",
+            "failure": "net::ERR_NAME_NOT_RESOLVED"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "query"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getBlockByNumber"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getCode"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_call"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "method": "POST",
+            "status": 200,
+            "phase": "open",
+            "rpcMethod": "eth_getStorageAt"
+          }
+        ],
+        "violations": [],
+        "errors": [
+          "Failed to load resource: the server responded with a status of 400 (Bad Request) (https://solana.api.pocket.network/)"
+        ],
+        "otherReads": [],
+        "preflights": [
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://solana-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://solana.api.pocket.network/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/?ct=footer",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://public.rpc.solanavibestation.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.chain.robinhood.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://robinhood.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://rpc.mainnet.fastnear.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://near.drpc.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://mainnet.base.org/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          },
+          {
+            "url": "https://base-rpc.publicnode.com/",
+            "status": 204,
+            "failure": null,
+            "cors": false
+          }
+        ],
+        "docs": [
+          {
+            "url": "https://ct-app.unrealized.trade/verify",
+            "status": 200
+          },
+          {
+            "url": "https://confidential.unrealized.trade/verify",
+            "status": 200
+          },
+          {
+            "url": "https://ct-app.unrealized.trade/verify",
+            "status": 200
+          }
+        ],
+        "dom": {
+          "verify": {
+            "state": "read",
+            "code": "ok",
+            "funds": "ok",
+            "pools": {
+              "solana": "ok",
+              "base": "ok",
+              "robinhood": "ok"
+            },
+            "poolRpcs": {
+              "solana": [
+                "solana-rpc.publicnode.com",
+                "public.rpc.solanavibestation.com"
+              ],
+              "base": [
+                "mainnet.base.org",
+                "base-rpc.publicnode.com"
+              ],
+              "robinhood": [
+                "rpc.mainnet.chain.robinhood.com",
+                "robinhood.drpc.org"
+              ]
+            }
+          },
+          "footer": {
+            "conn": "on",
+            "block": "223500004",
+            "ms": 1558
+          }
+        }
+      }
+    ],
+    "probe": {
+      "at": "2026-11-13T15:57:09.385Z",
+      "hosts": [
+        {
+          "host": "solana-rpc.publicnode.com",
+          "answered": true
+        },
+        {
+          "host": "solana.api.pocket.network",
+          "answered": true
+        },
+        {
+          "host": "public.rpc.solanavibestation.com",
+          "answered": true
+        }
+      ]
+    },
     "plants": {
       "phone": "solana-rpc.publicnode.com",
       "desktop": "solana.api.pocket.network"
