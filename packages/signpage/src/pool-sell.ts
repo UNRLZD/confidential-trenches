@@ -83,7 +83,7 @@ import { solanaBuyReader, type ListedBuyWallet, type SolanaBuy } from "../../wal
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { SOL_GRID } from "../../wallet/src/pool/pieces.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
-import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
+import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, POOL_BUY_BACKOFF_MAX_MS, POOL_BUY_POLL_MS, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { duringTrade, fromRecord, timedStore, TRADE_STORE_MS, tradeLock, tradeRunning, within, type TradeStore } from "./trade.ts";
@@ -174,9 +174,15 @@ type PoolSellError = "not_allowed" | "not_funded" | "quote_check_failed" | "venu
  *  never posted to the app. */
 export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[]; legs?: readonly PoolSellLeg[] } | { error: PoolSellError; rule?: string };
 
-/** Verdict reads a sell gets, a second apart: past a blockhash's life (~60 to 90 s) and a finalization. */
+/** A sell's read-back budget: POOL_SELL_READS x POOL_SELL_WAIT_MS on the wall clock, past a blockhash's life (~60 to
+ *  90 s) and a finalization. */
 export const POOL_SELL_READS = 120;
 export const POOL_SELL_WAIT_MS = 1_000;
+/** The pace of a sale's, a teardown frame's and a partial sale's sweep's read-back: a slot, as the buy's
+ *  (pool-buy.ts POOL_BUY_POLL_MS; card trades-and-balance-fast: a second apart, the owner's sale of 13 Nov 18:05:39Z
+ *  closed W's accounts 6 s after it landed). The reads within POOL_SELL_READS x POOL_SELL_WAIT_MS stay that budget. */
+export const POOL_SELL_POLL_MS = POOL_BUY_POLL_MS;
+const POOL_SELL_POLL_READS = (POOL_SELL_READS * POOL_SELL_WAIT_MS) / POOL_SELL_POLL_MS;
 /** How long a sale's market and blockhash reads (solanaSaleReads) serve its later legs (card pool-sell-legs-side-by-side:
  *  each leg asking them again drew the helper's 429). [design: 4 s, 10 slots at 400 ms: a leg's reference stays under
  *  SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) from its read to the leg's send; past it the leg reads its own.] A shared read
@@ -497,6 +503,48 @@ async function pastAt(rpcs: Rpcs, last: number): Promise<[number, number] | null
 
 /** The stage a settled sell answers: its transaction failed on both (`dead`), or the chain's word on its note. */
 const stageOf = (end: Exclude<SellEnd, "pending">, dead: boolean): TradeStage => (end === "filled" ? "filled" : dead ? "refused" : "not_landed");
+
+/** The longest wait between two reads of the finalized slot a landed send's settle waits for (the buy's own). */
+export const POOL_SELL_GATE_WAIT_MAX_MS = POOL_BUY_BACKOFF_MAX_MS;
+/**
+ * When a sent note's settle is worth asking (card trades-and-balance-fast). The settle reads its mark at finalized
+ * (settleSellNote), which a landed send reaches some 32 slots after it lands: asked at every read, it cost four reads a
+ * slot for nothing. Once both RPCs read the send back as this very transaction, succeeded, each RPC's slot of it is kept
+ * and the settle is asked once both RPCs' finalized slot reaches it (an RPC that names none is held to the other's), the
+ * wait between those reads the gap at a slot's time each, at most POOL_SELL_GATE_WAIT_MAX_MS, as the buy's settle
+ * (pool-buy.ts). Until it reads back, the settle is asked at every read, as before: it drops a send that never lands
+ * once both RPCs are past its blockhash. `ms`: how long to wait before the next read, 0 when the settle is due now.
+ */
+export function settleGate(rpcs: Rpcs, signature: string, signed: Uint8Array): (got?: readonly { got: string; slot?: number }[]) => Promise<number> {
+  let slots: [number, number] | null = null;
+  return async (got) => {
+    if (slots === null) {
+      const read = got ?? (await both(rpcs, (r) => readBackMeta(r, signature, signed)).catch(() => null));
+      const [a, b] = read ?? [];
+      if (a?.got !== "ok" || b?.got !== "ok" || (a.slot === undefined && b.slot === undefined)) return 0;
+      slots = [a.slot ?? b.slot!, b.slot ?? a.slot!];
+    }
+    const at = slots;
+    const fin = await Promise.all(rpcs.map((r) => r("getSlot", [{ commitment: "finalized" }]))).then((v) => v.map((x) => int(x)), () => null);
+    // a finalized slot not read: the settle asked (its own reads decide), as before this gate
+    if (fin === null) return 0;
+    const gap = Math.max(at[0] - fin[0]!, at[1] - fin[1]!);
+    return gap > 0 ? Math.min(gap * POOL_SELL_POLL_MS, POOL_SELL_GATE_WAIT_MAX_MS) : 0;
+  };
+}
+
+/** A sent note followed to its end: read at a slot's pace, its settle asked when settleGate says (card
+ *  trades-and-balance-fast), while `more()`. The settle's end, or "pending" when `more()` ran out. */
+async function followNote(gate: ReturnType<typeof settleGate>, settle: () => Promise<SellEnd>, wait: (ms: number) => Promise<void>, more: () => boolean): Promise<SellEnd> {
+  for (let i = 0, ms = 0; i === 0 || more(); i++) {
+    if (i > 0) await wait(ms || POOL_SELL_POLL_MS);
+    ms = await gate();
+    if (ms > 0) continue;
+    const end = await settle();
+    if (end !== "pending") return end;
+  }
+  return "pending";
+}
 
 /**
  * The note the sale's deposit makes: W's return note, then its R second arrivals in order; the first that has not
@@ -1514,13 +1562,16 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     const swept: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait, async () => keepSweep(h, { rpcs, program, pool, scope, rent, store, sync, w, keep, wait: (ms) => waitUnless(h.wait, ms, h.signal) }));
     const back: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait, async (hold) => void (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: owedRec.mints, wait, sale: true, ride: true, ...(owedRec.sell ? { sell: owedRec.sell } : {}) }, owedRec, hold, await seenOf(h, w.address, owedRec.mints))));
     // the verdict: the chain's word on the note's mark, never an RPC's tx history alone
-    const reads = h.reads ?? POOL_SELL_READS;
-    // the reads are a time budget too (POOL_SELL_READS a second apart): one RPC down, each read's retry its own 3.5 s,
+    const reads = h.reads ?? POOL_SELL_POLL_READS;
+    // the reads are a time budget too (POOL_SELL_READS x POOL_SELL_WAIT_MS, read a slot apart): one RPC down, each read's retry its own 3.5 s,
     // never holds the seed's lock past it; the note, INCOMING, settles at the next load or sell
     const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
     const sentAt = clock();
-    for (let i = 0; i < reads && (i === 0 || clock() - sentAt < POOL_SELL_READS * POOL_SELL_WAIT_MS); i++) {
-      if (i > 0) await wait(POOL_SELL_WAIT_MS);
+    // the note's settle asked once its mark can be final (settleGate), the wait to the next read the gate's
+    const gate = settleGate(rpcs, signature, signed);
+    for (let i = 0, next = 0; i < reads && (i === 0 || clock() - sentAt < POOL_SELL_READS * POOL_SELL_WAIT_MS); i++) {
+      if (i > 0) await wait(next || POOL_SELL_POLL_MS);
+      next = 0;
       // no deposit back: no mark to read, so the verdict is this very transaction's on both RPCs (keptVerdict); its
       // record dropped once it ends, so a load leaves it be
       if (note === null) {
@@ -1533,9 +1584,15 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
         if (v === "filled") later.back = keeps ? swept : back;
         return { stage: v, txs };
       }
-      const got = await both(rpcs, (r) => readBackFailure(r, signature, signed)).catch((): { got: "none"; err?: unknown }[] => [{ got: "none" }, { got: "none" }]);
+      const read = await both(rpcs, (r) => readBackMeta(r, signature, signed)).catch(() => null);
+      const got = read === null ? [{ got: "none" as const }, { got: "none" as const }] : read.map((g) => (g.got === "failed" ? { got: g.got, err: g.meta?.err } : { got: g.got }));
       // this very transaction failed on chain, on both RPCs: the sale and the deposit are one, nothing moved
-      const dead = got[0].got === "failed" && got[1].got === "failed";
+      const dead = got[0]!.got === "failed" && got[1]!.got === "failed";
+      // landed on both: its note's settle waits for its mark to be final (card trades-and-balance-fast)
+      if (!dead && read !== null) {
+        next = await gate(read);
+        if (next > 0) continue;
+      }
       // the request's stage before the note leaves INCOMING (a write that fails throws, answered "sent" below, the
       // note settled at the next load), but for a sell built again: the next attempt's record names its own signature
       // the deposit's index, read from the message W signed: the last instruction, when it is the pool's deposit
@@ -1829,14 +1886,12 @@ async function keepSweep(h: PoolSellHost, x: KeepSweep): Promise<void> {
     const note = await x.store.move(id, "PLANNED", "INCOMING", { send: { signature, value, last_valid_block_height: BigInt(bh.lastHeight) } });
     await Promise.allSettled(rpcs.map((r) => r("sendTransaction", [base64.encode(signed), { encoding: "base64", preflightCommitment: "confirmed" }])));
     h.back?.(signature);
-    const reads = h.reads ?? POOL_SELL_READS;
+    const reads = h.reads ?? POOL_SELL_POLL_READS;
     const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
     const sentAt = clock();
-    for (let i = 0; i < reads && (i === 0 || clock() - sentAt < POOL_SELL_READS * POOL_SELL_WAIT_MS); i++) {
-      if (i > 0) await x.wait(POOL_SELL_WAIT_MS);
-      const { end } = await settleSellNote(rpcs, x.program, x.scope, x.sync, x.store, note);
-      if (end !== "pending") return tell(end === "filled" ? "sent" : "gave_up", `${signature} ${end}`);
-    }
+    let n = 0;
+    const end = await followNote(settleGate(rpcs, signature, signed), async () => (await settleSellNote(rpcs, x.program, x.scope, x.sync, x.store, note)).end, x.wait, () => ++n < reads && clock() - sentAt < POOL_SELL_READS * POOL_SELL_WAIT_MS);
+    if (end !== "pending") return tell(end === "filled" ? "sent" : "gave_up", `${signature} ${end}`);
     tell("sent", `${signature} still landing: settled at the next state read`);
   } catch (e) {
     tell("gave_up", faultOf(e));
@@ -1936,7 +1991,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     if (!hold) return x.wait(ms);
     if (!(await hold.nap(ms))) throw BUSY;
   };
-  const reads = h.reads ?? POOL_SELL_READS;
+  const reads = h.reads ?? POOL_SELL_POLL_READS;
   const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
   const deadline = clock() + POOL_RENT_BACK_MS;
   const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: w.address, feeCap: 0n, solana: h.pin };
@@ -2123,7 +2178,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     // each frame on both RPCs, failed on both, or past its blockhash on both, within the rent back's one bound
     const open = new Set(teardown.ok.signed);
     for (let i = 0; i < reads && open.size > 0 && (i === 0 || clock() < deadline); i++) {
-      if (i > 0) await wait(POOL_SELL_WAIT_MS);
+      if (i > 0) await wait(POOL_SELL_POLL_MS);
       for (const f of [...open]) {
         const got = await both(rpcs, (r) => readBack(r, f.signature, f.wire)).catch(() => ["none", "none"] as const);
         if ((got[0] === "ok" && got[1] === "ok") || (got[0] === "failed" && got[1] === "failed")) open.delete(f);
@@ -2246,11 +2301,18 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     // held (resumeRentBacks' spacing): before the note is written or anything sent
     await spaced();
     const id = sw.planned ?? (await x.store.add({ ref: sw.ref, scope: x.scope, precommitment: sw.precommitment, state: "PLANNED" })).id;
-    await x.store.move(id, "PLANNED", "INCOMING", { send: { signature: sw.one.signature, value: sw.value, last_valid_block_height: BigInt(sw.last) } });
+    const note = await x.store.move(id, "PLANNED", "INCOMING", { send: { signature: sw.one.signature, value: sw.value, last_valid_block_height: BigInt(sw.last) } });
     // W's record names the sweep before its send, as the note does (review P3-10 of 024e8a89d): a page closed during the
     // send leaves both, so the next load counts W's SOL once, as the note; a record not written sends nothing
     await x.swept?.(sw.one.signature, sw.value);
     await send(sw.one.signed, sw.one.signature);
+    // the sweep's note followed to its end here (card trades-and-balance-fast): its move to UNSPENT is the store change the
+    // page's state follows, so the balance counts the sale's SOL once its mark is final, never at the next state read
+    // something else asks. The sell lock let go first, so a sell tapped meanwhile never waits on it; what it leaves
+    // INCOMING settles at the next state read, as before
+    hold?.release();
+    let n = 0;
+    await followNote(settleGate(rpcs, sw.one.signature, sw.one.signed), async () => (await settleSellNote(rpcs, x.program, x.scope, x.sync, x.store, note)).end, x.wait, () => ++n < reads && clock() < deadline).catch(() => "pending");
     return end("sent", sw.one.signature);
   } catch (e) {
     // the sell has landed; what is not closed or swept stays on W, owed, and its note, if sent, settles at the next read
