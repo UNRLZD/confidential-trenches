@@ -56,6 +56,20 @@ export class PoolNoLeafError extends Error {
   }
 }
 
+/** A tree read refused for what its RPCs answered, its cause in `code` (pool-sell.ts legCause), never the message:
+ *  rpc_disagree (the two RPCs, or the sources, differ), root_mismatch (a root built from the leaves is not the pool's),
+ *  page_changed (a page read before holds other bytes now), time_back (a leaf's time below the one before it),
+ *  no_agreed_logs (no two sources of two operators gave the same logs making the pool's trees). */
+export type PoolReadCode = "rpc_disagree" | "root_mismatch" | "page_changed" | "time_back" | "no_agreed_logs";
+export class PoolReadError extends Error {
+  readonly code: PoolReadCode;
+  constructor(code: PoolReadCode, message: string) {
+    super(message);
+    this.name = "PoolReadError";
+    this.code = code;
+  }
+}
+
 /** An epoch cut's trees with a cut that holds no leaf read as trees of no leaf (the proof queue's epoch read): every
  *  note is then past the cut and waits on the newest root, so an empty pool's first leaf is proved in its first epoch. */
 export function cutOrEmpty(read: Promise<PoolTrees>): Promise<PoolTrees> {

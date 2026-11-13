@@ -81,7 +81,7 @@ import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChai
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { POOL_TESTNET } from "./network.ts";
-import { PoolNoLeafError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
 export type EvmRpc = SolanaRpc;
@@ -380,6 +380,8 @@ export type EvmBlock = { number: bigint; hash: string; timestamp: bigint; baseFe
 
 /** An RPC behind the other: a retry, never an answer. */
 export class EvmLagError extends Error {
+  /** The cause a stop names (pool-sell.ts legCause), never the message. */
+  readonly code = "lag";
   constructor(m: string) {
     super(m);
     this.name = "EvmLagError";
@@ -670,6 +672,8 @@ const throttleWaitMs = (tries: number, afterMs: number | null): number => Math.m
 /** A read a throttle or no answer in time left unanswered through its every try: named by the read, and never a
  * throttle to a read around it, so one bound is never tried again inside another. */
 export class EvmUnansweredError extends Error {
+  /** The cause a stop names (pool-sell.ts legCause), never the message. */
+  readonly code = "unanswered";
   constructor(m: string, cause: unknown) {
     super(m, { cause });
     this.name = "EvmUnansweredError";
@@ -1330,7 +1334,7 @@ export async function evmAgreedBlock(rpcs: readonly [EvmRpc, EvmRpc], at: string
   if (x === null || y === null) return lag(`rpc ${x === null ? 0 : 1} does not know block ${n} yet`);
   if (x.hash !== y.hash || x.timestamp !== y.timestamp || x.number !== n || y.number !== n) {
     if (at === EVM_NEWEST_TAG) return lag(`the two RPCs hold different blocks at ${n}`);
-    throw new Error(`the two RPCs hold different blocks at ${n}`);
+    throw new PoolReadError("rpc_disagree", `the two RPCs hold different blocks at ${n}`);
   }
   return x;
 }
@@ -1436,7 +1440,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   /** One view on both RPCs at the anchor; the two answers must be one. */
   async function agreed(data: string, h: string, what: string, signal?: AbortSignal): Promise<bigint> {
     const [x, y] = await both(rpcs, (rpc, k, sig) => view(rpc, pool, data, h, `rpc ${k} ${what}`, sig, sleep), signal);
-    if (x !== y) throw new Error(`the two RPCs differ on ${what} at ${h}`);
+    if (x !== y) throw new PoolReadError("rpc_disagree", `the two RPCs differ on ${what} at ${h}`);
     return x;
   }
 
@@ -1462,7 +1466,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     if (known !== undefined) return known;
     const t = await agreed(VIEWS.stateRootTimes + hex(word(root)), h, "stateRootTimes(root)", signal);
     if (t !== 0n) rootTimes.set(root, t);
-    if (t === 0n) throw new Error(`the state root of the pool's first ${k} leaves (to block ${events[k - 1]!.block}) is not one the pool made`);
+    if (t === 0n) throw new PoolReadError("root_mismatch", `the state root of the pool's first ${k} leaves (to block ${events[k - 1]!.block}) is not one the pool made`);
     return t;
   }
 
@@ -1650,7 +1654,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: heldTo, events: held, kept: ks, ...(writtenAt === null ? {} : { at: writtenAt }) }).catch(() => {});
       }
       if (lagged || moved || reads.some(behindOf)) lag(`a source's logs past block ${fin.number} are behind (${whys.join("; ")})`);
-      throw new Error(`${why}; no two sources of two operators gave the same logs making the pool's trees at ${anchor.hash}${whys.length > 0 ? ` (${whys.join("; ")})` : ""}`);
+      throw new PoolReadError("no_agreed_logs", `${why}; no two sources of two operators gave the same logs making the pool's trees at ${anchor.hash}${whys.length > 0 ? ` (${whys.join("; ")})` : ""}`);
     };
     let why = "";
     let got: ReturnType<typeof build> | null = null;
@@ -1747,7 +1751,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const st = await leafTime(r.events, prefix, n, h, signal);
         const lt = await agreed(VIEWS.labelRootTimes + hex(word(labelTree.root!)), h, "labelRootTimes(root)", signal);
         const labelAt = cut.lastIndexOf(lastLabel) + 1;
-        if (lt === 0n || lt !== (labelAt === n ? st : await leafTime(r.events, prefix, labelAt, h, signal))) throw new Error(`the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
+        if (lt === 0n || lt !== (labelAt === n ? st : await leafTime(r.events, prefix, labelAt, h, signal))) throw new PoolReadError("root_mismatch", `the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
         // the times were the anchor's chain's only if the block they were read at and the anchor both still hold their
         // heights on both RPCs once they are read (review of 7fbf2af3, P2-1: a newest block named on a fork that lacks
         // the anchor gives that fork's times, so another cut); a change is a retry

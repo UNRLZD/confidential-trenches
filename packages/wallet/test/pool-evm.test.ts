@@ -2053,7 +2053,7 @@ test("the tree sync's reorg check (a mismatch: is the newest anchor's block stil
   // both RPCs say one more leaf than the logs make: a mismatch, refused once the anchor's block 100 reads unmoved
   const lie = { view: (name: string, v: bigint) => (name === "currentTreeSize" ? v + 1n : v) };
   // rpc 1's first read of block 100 is the agreed block's own; every later one is the check's
-  for (const [faults, want, reads] of [[[HTTP_429], /^Error: the state tree from the logs \(4 leaves\) is not the pool's/, 3], [Array(100).fill(HTTP_429), /^EvmUnansweredError: rpc 1 block 100: no answer in 4 tries/, 1 + EVM_POOL_READ_TRIES]] as const) {
+  for (const [faults, want, reads] of [[[HTTP_429], /^PoolReadError: the state tree from the logs \(4 leaves\) is not the pool's/, 3], [Array(100).fill(HTTP_429), /^EvmUnansweredError: rpc 1 block 100: no answer in 4 tries/, 1 + EVM_POOL_READ_TRIES]] as const) {
     const rpcs = pair(c3, c3, lie, lie);
     let seen = 0;
     rpcs[1] = flaky(rpcs[1], (m, p) => byNumber(q(100))(m, p, 0) && seen++ >= 1, [...faults]);
@@ -3165,4 +3165,35 @@ test("review of 39a4c67a, P3-4: Tenderly's cap, named in its error's data, pages
   assert.equal(r.events.length, 3);
   assert.ok(pages.length > 0 && pages.length <= Math.ceil(60_000 / 1_000) + 1, `${pages.length} pages`);
   assert.ok(pages.slice(0, -1).every((n) => n === 1_000), `pages: ${[...new Set(pages)].join(", ")}`);
+});
+
+// card evm-deposit-on-mainnet: a stop names its cause by code (pool-sell.ts legCause), never by message, so each refusal
+// of a tree read carries one, its words kept (before: a plain Error, or a named one with no code)
+test("each refusal of the EVM tree read carries its code: rpc_disagree, root_mismatch, no_agreed_logs, no_leaf, lag, unanswered", async () => {
+  const coded = (code: string, words: RegExp) => (e: unknown) => {
+    assert.match(String((e as Error).message), words);
+    assert.equal((e as { code?: unknown }).code, code, String((e as Error).message));
+    return true;
+  };
+  const c = C3();
+  const off = (name: string) => ({ view: (n: string, v: bigint) => (n === name ? v + 1n : v) });
+  await assert.rejects(sync(pair(c, c, {}, off("currentRoot"))).trees(after(25)), coded("rpc_disagree", /the two RPCs differ on currentRoot\(\)/));
+  await assert.rejects(sync(pair(c, c, {}, { hashOf: (n) => (n === 90 ? h32("other 90") : c.hashOf(n)) })).trees(after(25)), coded("rpc_disagree", /hold different blocks at 90/));
+  const unmade = { view: (n: string, v: bigint) => (n === "stateRootTimes" ? 0n : v) };
+  await assert.rejects(sync(pair(c, c, unmade, unmade)).trees(after(25)), coded("root_mismatch", /is not one the pool made/));
+  await assert.rejects(sync(pair(c, c, off("labelRootTimes"), off("labelRootTimes"))).trees(after(25)), coded("root_mismatch", /the label root built from the cut is not the pool's root/));
+  const drop = (l: Record<string, unknown>[]) => l.filter((_, i) => i !== 3);
+  await assert.rejects(sync(pair(c, c, { logs: drop }, { logs: drop })).trees(after(25)), coded("no_agreed_logs", /the state tree from the logs \(3 leaves\) is not the pool's/));
+  await assert.rejects(sync(pair(c, c)).trees(after(5)), coded("no_leaf", /no leaf before/));
+  const any = anyChain();
+  const forged = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : x));
+  await assert.rejects(evmTreeSync({ rpcs: anySeats(any), pin: PIN, history: [helperSrc(any, forged)], ...noWait }).events(), coded("no_agreed_logs", /no two sources of two operators gave the same logs/));
+  const moved = C3();
+  const old = moved.hashOf;
+  let seen = 0;
+  moved.hashOf = (n) => (n === 41 && seen++ > 0 ? h32("fork 41") : old(n));
+  await assert.rejects(evmEpochBlock(pair(moved, moved), (T0 + 2n * 41n) * 1000n - 1000n), (e) => e instanceof EvmLagError && coded("lag", /moved under the search/)(e));
+  const rpcs = pair(c, c);
+  rpcs[1] = flaky(rpcs[1], byNumber("latest"), Array(100).fill(() => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "b.example", 9_000)));
+  await assert.rejects(evmNow(rpcs, undefined, async () => {}), (e) => e instanceof EvmUnansweredError && coded("unanswered", /latest block: no answer/)(e));
 });
