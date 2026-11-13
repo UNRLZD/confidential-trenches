@@ -52,6 +52,7 @@ import type { BuyRoute, SignpageResults, TradeStage, TxRef } from "../../kit/src
 import { NEAR_SWAP_READ_AGE_MAX, type SignedNearSwapDelegate } from "../../wallet/src/near/swap-delegate.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { SIGNPAGE_ROUTE_OUT } from "../../kit/src/signpage/schema.ts";
+import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { unitsOf } from "./pool-buy.ts";
 import { legCause } from "./pool-sell.ts";
 
@@ -493,7 +494,11 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
       held = (await readUntil("sell", (x) => ((last = x), x.held - got.before >= got.floor), "received_below_floor")).held;
     } catch (e) {
       const lastRead = last as NearHeldState | null;
-      if (lastRead !== null && lastRead.held > got.before) {
+      // the USDC decision apart from the coin's: W holding USDC of the least deposit is on its way home whatever it
+      // holds of the token (a swap that failed, a stranger's dust after it), so no fill is written that would make it a
+      // position the load never sends home; a USDC read that fails writes none either (the way home decides)
+      const usdcLow = lastRead !== null && lastRead.held > got.before ? await light("buy").then((u) => u.held < VAULT_CONSTANTS.MIN_DEPOSIT, () => false) : false;
+      if (lastRead !== null && lastRead.held > got.before && usdcLow) {
         const { fill } = await fillOf(lastRead.held - got.before);
         if (fill) await progress({ stage: "sent", fill });
       }

@@ -749,12 +749,11 @@ test("a W no call of names a token keeps Rhea's wrapped NEAR as a stand-in that 
   assert.deepEqual(home.st.moved, [2_500_000n], "W's USDC in the vault");
 });
 
-test("a live buy's record (not rebuilt) whose swap was sent: dust under its own floor never holds its USDC back; the coin at its floor does", async () => {
+test("a live buy's record (not rebuilt) whose swap was sent: W's USDC goes home whatever W holds; dust under the floor is nothing, the coin at its floor is kept a position", async () => {
   const v = await world([5_000_000n], [true]);
   const { w: W, note } = v.ws[0]!;
   const live = { v: 1, id: "req-7", network: NETWORK, token: TOKEN, amount: "2980000", slippage_bps: 100, w: W, l: note.leaf!.label.toString(), j: jOf(note.ref), note: note.id, fee: "20000", created_ms: 1, resumes: NEAR_BUY_RESUMES, stage: "sent", step: "swap", code: "carry_failed", txs: [], payout: "landed", swap: { floor: "1000", before: "0" } };
   await v.w.put("quotes", `${NEAR_BUY_KEY}req-7`, live);
-  const bind = () => [{ name: "x", query: async () => Promise.reject(new Error("no")) }, { name: "y", query: async () => Promise.reject(new Error("no")) }] as never;
   const log: string[] = [];
   const home = homeOf(1n, 2_500_000n);
   await resumeNearSells(pageOf(v, log, { readWallet: home.readWallet, move: home.move }));
@@ -763,9 +762,10 @@ test("a live buy's record (not rebuilt) whose swap was sent: dust under its own 
   const v2 = await world([5_000_000n], [true]);
   const n2 = v2.ws[0]!.note;
   await v2.w.put("quotes", `${NEAR_BUY_KEY}req-7`, { ...live, w: v2.ws[0]!.w, note: n2.id, l: n2.leaf!.label.toString(), j: jOf(n2.ref) });
-  const log2: string[] = [];
-  await resumeNearSells(pageOf(v2, log2, { readWallet: twoProviders(1000n, 2_500_000n), bindRpcs: bind })).catch(() => {});
-  assert.ok(!log2.includes("near sell recorded"), "the coin at its floor: a position, never sent home");
+  const home2 = homeOf(1000n, 2_500_000n);
+  await resumeNearSells(pageOf(v2, [], { readWallet: home2.readWallet, move: home2.move }));
+  assert.deepEqual(home2.st.moved, [2_500_000n], "the coin at its floor: W's USDC still home, nothing sold");
+  assert.deepEqual((await records(v2.w))[0]!.fill?.out, "1000", "the coin kept, a position");
 });
 
 test("one rebuilt W a load reaches the two providers whatever it waits for: two rebuilt Ws with a sell open each, one taken up this load", async () => {
@@ -826,59 +826,6 @@ test("a token that takes a fee on what the exchange sends: the floor is what rea
   assert.deepEqual((await records(v.w))[0]!.swap, { floor: "950", before: "0" });
 });
 
-// a fee not known: while W holds USDC of the least deposit (1,000,000), the signed minimum is the floor
-const unknownFee = async () => ({ buyBps: 0, sellBps: 0, senderPays: false, scope: [] as string[], exempt: [] as string[], unknown: true });
-const failedAt = (min: string) => ({ ...buySwap(TOKEN, BigInt(H - 1)), args: { ...buySwap().args, msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: USDC, token_out: TOKEN, min_amount_out: min }], skip_degen_price_sync: true, skip_unwrap_near: true }) } });
-/** A rebuilt W whose buy swap (min 1,000,000) failed, fee not known, the seat reading `dust` of the coin and `usdc`. */
-async function unknownFeeW(dust: bigint, usdc: bigint) {
-  const v = await world([5_000_000n], [true]);
-  const { w: W, note, nh } = v.ws[0]!;
-  const recs = recordsFrom({ [W]: recordOf(W, TOKEN, [{ tx: relayed(note, register()) }, { tx: relayed(note, failedAt("1000000")), state: "failed" }]) });
-  const p = await nearHoldingsPass(pageOf(v, [], { tokenFee: unknownFee }), { spends: spendsOf([row(nh, W)]), records: recs, seat: seatOf({ [TOKEN]: { [W]: dust }, [USDC]: { [W]: usdc } }) });
-  return { v, W, p, r: (await records(v.w))[0] };
-}
-
-test("P2-H a fee not known with W's USDC unspent: dust of 99 or 100 (the widest floor is 100) is no coin, W is on its way home and the way home takes the 2.5 USDC", async () => {
-  for (const dust of [99n, 100n, 10_000n]) {
-    const { v, W, p, r } = await unknownFeeW(dust, 2_500_000n);
-    assert.deepEqual(p.written, [W], `dust ${dust}`);
-    assert.deepEqual([r!.stage, r!.fill, r!.swap], ["sent", undefined, { floor: "100", before: "0", funded: "1000000" }], `dust ${dust}`);
-    const home = homeOf(dust, 2_500_000n);
-    await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
-    assert.deepEqual(home.st.moved, [2_500_000n], `dust ${dust}: W's USDC in the vault`);
-  }
-});
-
-test("P2-H the seat read no coin, the two providers see 100 of dust on the way home: still no coin while the USDC is unspent, the USDC comes home", async () => {
-  const { v, r } = await unknownFeeW(0n, 2_500_000n);
-  assert.equal(r!.stage, "sent");
-  const home = homeOf(100n, 2_500_000n);
-  await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
-  assert.equal((await records(v.w))[0]!.fill, undefined, "never a position of dust");
-  assert.deepEqual(home.st.moved, [2_500_000n]);
-});
-
-test("P2-H the USDC threshold is the least deposit itself: at exactly 1,000,000 the signed minimum holds; one unit under, the widest floor (W's USDC spent)", async () => {
-  const at = await unknownFeeW(100n, 1_000_000n);
-  assert.deepEqual([at.r!.stage, at.r!.fill], ["sent", undefined], "1,000,000: dust is no coin");
-  const under = await unknownFeeW(100n, 999_999n);
-  assert.deepEqual([under.r!.stage, under.r!.fill?.out], ["filled", "100"], "999,999: W's USDC spent, the widest floor counts it");
-});
-
-test("P2-H a fee not known with W's USDC spent: a real coin under its signed minimum shows and sells", async () => {
-  const { v, W, r } = await unknownFeeW(950_000n, 0n);
-  assert.deepEqual([r!.stage, r!.fill?.out], ["filled", "950000"]);
-  assert.equal((await nearPositions(pageOf(v))).length, 1);
-  const lines: string[] = [];
-  const home = homeOf(950_000n, 0n);
-  const page = pageOf(v, lines, { readWallet: home.readWallet, move: home.move });
-  const run = nearSellKind(page)({ token: TOKEN, slippageBps: 100 }, { id: "s1" } as never);
-  if ("running" in run) await run.after.catch(() => {});
-  assert.ok(lines.includes("near sell read: token held"), lines.join(" | "));
-  assert.ok(!lines.some((l) => l.includes("not_funded") || l.includes("no wallet holds")), lines.join(" | "));
-  void W;
-});
-
 test("a token fee read as not known (code not pinned) is taken at the widest fee the device reads: W is never left unread for good; its USDC comes home and its coin shows", async () => {
   const unknown = async () => ({ buyBps: 0, sellBps: 0, senderPays: false, scope: [] as string[], exempt: [] as string[], unknown: true });
   // W's buy swap failed: 2.5 USDC on W and none of the coin, three passes
@@ -890,7 +837,7 @@ test("a token fee read as not known (code not pinned) is taken at the widest fee
   const pass = () => nearHoldingsPass(page, { spends: spendsOf([row(nh, W)]), records: recs, seat: seatOf({ [USDC]: { [W]: 2_500_000n } }) });
   assert.deepEqual(await pass(), { written: [W], empty: [], unread: [] });
   const r = (await records(v.w))[0]!;
-  assert.deepEqual([r.stage, r.swap], ["sent", { floor: "1", before: "0", funded: "1000" }], "1000 at 9,999 bps is under 1: the floor is 1; while W holds its USDC, 1000");
+  assert.deepEqual([r.stage, r.swap], ["sent", { floor: "1", before: "0" }], "1000 at 9,999 bps is under 1: the floor is 1");
   const home = homeOf(0n, 2_500_000n);
   await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
   assert.deepEqual(home.st.moved, [2_500_000n], "W's USDC in the vault");
@@ -899,4 +846,209 @@ test("a token fee read as not known (code not pinned) is taken at the widest fee
   const b = await bought({}, (n) => [{ tx: relayed(n, register()) }, { tx: relayed(n, at) }]);
   assert.deepEqual(await nearHoldingsPass(pageOf(b.v, [], { tokenFee: unknown }), { ...b.reads, seat: seatOf({ [TOKEN]: { [b.W]: 5000n } }) }), { written: [b.W], empty: [], unread: [] });
   assert.deepEqual((await records(b.v.w))[0]!.fill?.out, "5000");
+});
+
+// ---- round 7's grid: the USDC decision and the coin decision apart, at every site ----
+
+/** W's buy swap signed at min_amount_out 1,000,000 of the coin. Restored: the token's fee not known, so the plain floor is
+ *  1,000,000 at the widest fee (9,999 bps) = 100. Live: the device's own record, its floor 1,000,000 (no fee). */
+const SIGNED_MIN = "1000000";
+const signedSwap = { ...buySwap(), args: { ...buySwap().args, msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: USDC, token_out: TOKEN, min_amount_out: SIGNED_MIN }], skip_degen_price_sync: true, skip_unwrap_near: true }) } };
+const feeUnknown = async () => ({ buyBps: 0, sellBps: 0, senderPays: false, scope: [] as string[], exempt: [] as string[], unknown: true });
+type When = "before" | "after" | "mid";
+/** What a cell ends with: the position shown (whole units of 18 decimals as nearPositions gives them, or null), the USDC
+ *  moved into the vault, and the record (stage, fill, the sell's stage; "none" for no record). */
+type End = { pos: string | null; home: bigint; rec: string };
+
+/**
+ * One cell: W holds `coin` of the token throughout and `usdc` of USDC that arrives `when` (before the rebuild, after it,
+ * or mid way home: after the way home's first USDC read). The run: the restore's pass (restored) or the live record, then
+ * a load, a load, a Sync (the pass fresh, then a load), a load; its end; then a load and a Sync again, which change nothing.
+ */
+async function cell(device: "restored" | "live" | "live-filled", coin: bigint, usdc: bigint, when: When): Promise<{ end: End; again: End; tap: string[]; tapHome: bigint }> {
+  const v = await world([5_000_000n], [true]);
+  const { w: W, note, nh } = v.ws[0]!;
+  const st = { coin, usdc: when === "before" ? usdc : 0n, moved: 0n, armed: when === "mid" };
+  const readWallet = async (x: { wallet: string; side: string }) => {
+    const held = x.side === "sell" ? st.coin : st.usdc;
+    // mid way home: the USDC lands just after the way home's first read of it (that read saw none)
+    if (x.side === "buy" && st.armed) (st.armed = false, (st.usdc = usdc));
+    return { account: x.wallet, height: 1, blockHash: "h", nonce: 1n, held, registered: true, storageMin: 0n, lostfound: 0n, exists: true } as never;
+  };
+  const move = async (_w: unknown, _n: string, amount: bigint) => ((st.moved += amount), (st.usdc -= amount), { kind: "deposited" as const, txs: ["11111111111111111111111111111111"], height: 1 });
+  const seat: NearRpc = {
+    name: NEAR_NETWORKS.mainnet.seat!,
+    async query(p) {
+      const args = JSON.parse(atob(String(p.args_base64)));
+      const at = "block_id" in p ? Number(p.block_id) : H;
+      const of = String(p.account_id) === TOKEN ? st.coin : String(p.account_id) === USDC ? st.usdc : 0n;
+      const val = p.method_name === "ft_balance_of" ? String(args.account_id === W ? of : 0n) : p.method_name === "get_lostfound_token" ? "0" : null;
+      return { result: { block_height: at, block_hash: `H${at}`, result: [...new TextEncoder().encode(JSON.stringify(val))] } };
+    },
+  };
+  const reads: NearHoldingsReads = { spends: spendsOf([row(nh, W)]), records: recordsFrom({ [W]: recordOf(W, TOKEN, [{ tx: relayed(note, register()) }, { tx: relayed(note, signedSwap) }]) }), seat };
+  const log: string[] = [];
+  const page = () => pageOf(v, log, { readWallet, move, tokenFee: feeUnknown });
+  const load = () => resumeNearSells(page()).catch(() => {});
+  const sync = async () => (await nearHoldingsPass(page(), { ...reads, fresh: true }), await load());
+  if (device === "restored") await nearHoldingsPass(page(), reads);
+  else {
+    const live = { v: 1, id: "req-7", network: NETWORK, token: TOKEN, amount: "2980000", slippage_bps: 100, w: W, l: note.leaf!.label.toString(), j: jOf(note.ref), note: note.id, fee: "20000", created_ms: 1, resumes: NEAR_BUY_RESUMES, stage: "sent", step: "swap", code: "carry_failed", txs: [], payout: "landed", swap: { floor: SIGNED_MIN, before: "0" } };
+    // live-filled: the live buy read its fill, 950,000 of a token whose fee took 5% under the signed 1,000,000
+    await v.w.put("quotes", `${NEAR_BUY_KEY}req-7`, device === "live" ? live : { ...Object.fromEntries(Object.entries(live).filter(([k]) => k !== "code")), stage: "filled", step: "receive", fill: { out: "950000", decimals: 18 } });
+  }
+  // after the rebuild (restored) or after the first load (live)
+  if (when === "after" && device === "restored") st.usdc = usdc;
+  const endOf = async (): Promise<End> => {
+    const rs = await records(v.w);
+    const r = rs[0];
+    const pos = (await nearPositions(page()))[0]?.amount ?? null;
+    return { pos, home: st.moved, rec: r === undefined ? "none" : `${r.stage}${r.fill ? ` ${r.fill.out}` : ""}${r.sell ? ` sell ${r.sell.stage}` : ""}` };
+  };
+  await load();
+  if (when === "after" && device !== "restored") st.usdc = usdc;
+  await load();
+  await sync();
+  await load();
+  const end = await endOf();
+  await load();
+  await sync();
+  const again = await endOf();
+  // the tap: a sale the user asks reads W's coin as held wherever a position is shown
+  const tap: string[] = [];
+  if (end.pos !== null) {
+    const r = nearSellKind(pageOf(v, tap, { readWallet, move, tokenFee: feeUnknown }))({ token: TOKEN, slippageBps: 100 }, { id: "tap-1", sha: "00", progress: () => {} });
+    if ("running" in r) await r.after.catch(() => {});
+  }
+  return { end, again, tap, tapHome: st.moved - again.home };
+}
+
+
+/**
+ * Each cell's end, as literal data: [device, the coin on W, the USDC on W, its end ("position home record", one for all
+ * three arrivals, or [before, after, mid])]. The position is whole units at 18 decimals; home is the USDC moved into the
+ * vault; the record is its stage, its fill and its sell's stage. Read against round 7's rule:
+ * - W's USDC of the least deposit (1,000,000) goes home whatever W holds; under it nothing moves (the vault takes no less).
+ * - The coin counts at its floor alone: restored 100 (the plain floor, the fee not known), live 1,000,000. Under it the
+ *   coin is a stranger's dust: never shown, never holding the USDC back.
+ * - The read budget: a position's W (its record "filled") is not read on a load, so USDC that lands on it after the
+ *   record is filled (after the rebuild, or mid way home after a read that saw none) stays on W until the user's own
+ *   sale moves it (near-sell's move takes W's whole USDC). A load and a Sync later change nothing.
+ * - A live record stopped at its swap whose W holds nothing over the least deposit and none of its coin stays "sent"
+ *   (read again each load), as before round 7.
+ * - live-filled: the live buy's fill (950,000, under the signed 1,000,000 by the token's fee) stands; W is never read on
+ *   a load, so no USDC moves whatever lands there.
+ */
+const GRID: readonly (readonly [device: "restored" | "live" | "live-filled", coin: bigint, usdc: bigint, end: string | readonly [string, string, string]])[] = [
+  ["restored", 0n, 0n, "null 0 none"],
+  ["restored", 0n, 999_999n, "null 0 none"],
+  ["restored", 0n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["restored", 0n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["restored", 1n, 0n, "null 0 none"],
+  ["restored", 1n, 999_999n, "null 0 none"],
+  ["restored", 1n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["restored", 1n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["restored", 99n, 0n, "null 0 none"],
+  ["restored", 99n, 999_999n, "null 0 none"],
+  ["restored", 99n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["restored", 99n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["restored", 100n, 0n, "0.0000000000000001 0 filled 100"],
+  ["restored", 100n, 999_999n, "0.0000000000000001 0 filled 100"],
+  ["restored", 100n, 1_000_000n, ["0.0000000000000001 1000000 filled 100 sell refused", "0.0000000000000001 0 filled 100", "0.0000000000000001 0 filled 100"]],
+  ["restored", 100n, 2_500_000n, ["0.0000000000000001 2500000 filled 100 sell refused", "0.0000000000000001 0 filled 100", "0.0000000000000001 0 filled 100"]],
+  ["restored", 10_000n, 0n, "0.00000000000001 0 filled 10000"],
+  ["restored", 10_000n, 999_999n, "0.00000000000001 0 filled 10000"],
+  ["restored", 10_000n, 1_000_000n, ["0.00000000000001 1000000 filled 10000 sell refused", "0.00000000000001 0 filled 10000", "0.00000000000001 0 filled 10000"]],
+  ["restored", 10_000n, 2_500_000n, ["0.00000000000001 2500000 filled 10000 sell refused", "0.00000000000001 0 filled 10000", "0.00000000000001 0 filled 10000"]],
+  ["restored", 950_000n, 0n, "0.00000000000095 0 filled 950000"],
+  ["restored", 950_000n, 999_999n, "0.00000000000095 0 filled 950000"],
+  ["restored", 950_000n, 1_000_000n, ["0.00000000000095 1000000 filled 950000 sell refused", "0.00000000000095 0 filled 950000", "0.00000000000095 0 filled 950000"]],
+  ["restored", 950_000n, 2_500_000n, ["0.00000000000095 2500000 filled 950000 sell refused", "0.00000000000095 0 filled 950000", "0.00000000000095 0 filled 950000"]],
+  ["restored", 1_000_000n, 0n, "0.000000000001 0 filled 1000000"],
+  ["restored", 1_000_000n, 999_999n, "0.000000000001 0 filled 1000000"],
+  ["restored", 1_000_000n, 1_000_000n, ["0.000000000001 1000000 filled 1000000 sell refused", "0.000000000001 0 filled 1000000", "0.000000000001 0 filled 1000000"]],
+  ["restored", 1_000_000n, 2_500_000n, ["0.000000000001 2500000 filled 1000000 sell refused", "0.000000000001 0 filled 1000000", "0.000000000001 0 filled 1000000"]],
+  ["live", 0n, 0n, "null 0 sent"],
+  ["live", 0n, 999_999n, "null 0 sent"],
+  ["live", 0n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["live", 0n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["live", 1n, 0n, "null 0 sent"],
+  ["live", 1n, 999_999n, "null 0 sent"],
+  ["live", 1n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["live", 1n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["live", 99n, 0n, "null 0 sent"],
+  ["live", 99n, 999_999n, "null 0 sent"],
+  ["live", 99n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["live", 99n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["live", 100n, 0n, "null 0 sent"],
+  ["live", 100n, 999_999n, "null 0 sent"],
+  ["live", 100n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["live", 100n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["live", 10_000n, 0n, "null 0 sent"],
+  ["live", 10_000n, 999_999n, "null 0 sent"],
+  ["live", 10_000n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["live", 10_000n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["live", 950_000n, 0n, "null 0 sent"],
+  ["live", 950_000n, 999_999n, "null 0 sent"],
+  ["live", 950_000n, 1_000_000n, "null 1000000 sent sell filled"],
+  ["live", 950_000n, 2_500_000n, "null 2500000 sent sell filled"],
+  ["live", 1_000_000n, 0n, "0.000000000001 0 filled 1000000"],
+  ["live", 1_000_000n, 999_999n, "0.000000000001 0 filled 1000000"],
+  ["live", 1_000_000n, 1_000_000n, ["0.000000000001 1000000 filled 1000000 sell refused", "0.000000000001 0 filled 1000000", "0.000000000001 0 filled 1000000"]],
+  ["live", 1_000_000n, 2_500_000n, ["0.000000000001 2500000 filled 1000000 sell refused", "0.000000000001 0 filled 1000000", "0.000000000001 0 filled 1000000"]],
+  ["live-filled", 950_000n, 0n, "0.00000000000095 0 filled 950000"],
+  ["live-filled", 950_000n, 999_999n, "0.00000000000095 0 filled 950000"],
+  ["live-filled", 950_000n, 1_000_000n, "0.00000000000095 0 filled 950000"],
+  ["live-filled", 950_000n, 2_500_000n, "0.00000000000095 0 filled 950000"],
+];
+
+test("round 7's grid: every cell of the coin on W, the USDC on W, the device and when the USDC lands ends as its row says, a later load and Sync change nothing, and a tap reads the coin wherever a position shows", async () => {
+  assert.equal(GRID.length, 60);
+  const failed: string[] = [];
+  for (const [device, coin, usdc, end] of GRID)
+    for (const [k, when] of (["before", "after", "mid"] as const).entries()) {
+      const want = typeof end === "string" ? end : end[k]!;
+      const c = await cell(device, coin, usdc, when);
+      const got = `${c.end.pos} ${c.end.home} ${c.end.rec}`;
+      const again = `${c.again.pos} ${c.again.home} ${c.again.rec}`;
+      const tapped = c.tap.includes("near sell read: token held");
+      if (got !== want || again !== got || tapped !== (c.end.pos !== null)) failed.push(`${device} coin ${coin} usdc ${usdc} ${when}: ${got} (again ${again}, tap ${tapped}), want ${want}`);
+    }
+  assert.deepEqual(failed, []);
+});
+
+test("a stored record whose swap carries a funded floor (7059859c3 wrote one) still reads, and the funded floor is never used: dust at it is no coin and the USDC goes home", async () => {
+  const v = await world([5_000_000n], [true]);
+  const { w: W, note } = v.ws[0]!;
+  const live = { v: 1, id: "req-7", network: NETWORK, token: TOKEN, amount: "2980000", slippage_bps: 100, w: W, l: note.leaf!.label.toString(), j: jOf(note.ref), note: note.id, fee: "20000", created_ms: 1, resumes: NEAR_BUY_RESUMES, stage: "sent", step: "swap", code: "carry_failed", txs: [], payout: "landed", swap: { floor: "1000000", before: "0", funded: "100" } };
+  await v.w.put("quotes", `${NEAR_BUY_KEY}req-7`, live);
+  assert.ok(nearBuyRecordOf(await v.w.get("quotes", `${NEAR_BUY_KEY}req-7`)), "the record reads");
+  const log: string[] = [];
+  const home = homeOf(100n, 2_500_000n);
+  await resumeNearSells(pageOf(v, log, { readWallet: home.readWallet, move: home.move }));
+  assert.deepEqual(home.st.moved, [2_500_000n], "W's USDC in the vault");
+  assert.deepEqual(await nearPositions(pageOf(v)), [], "100 under the floor of 1,000,000: no position, whatever funded says");
+});
+
+test("a W one seat answer closed that the two providers read holding its coin and 2.5 USDC: a record on its way home, never a position that holds the USDC; the next load moves the USDC and keeps the coin", async () => {
+  const { v, W, reads } = await bought({});
+  assert.deepEqual((await nearHoldingsPass(pageOf(v), { ...reads, seat: seatOf({}) })).empty, [W]);
+  const home = homeOf(HELD, 2_500_000n);
+  await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
+  const r = (await records(v.w))[0]!;
+  assert.deepEqual([r.stage, r.fill], ["sent", undefined], "the USDC decides first: on its way home");
+  await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
+  assert.deepEqual(home.st.moved, [2_500_000n], "W's USDC in the vault");
+  assert.equal((await nearPositions(pageOf(v)))[0]?.amount, "5", "the coin kept, a position");
+});
+
+test("a record whose W held 500 of the coin before its swap (its baseline) and holds 1700 after: the position is what the swap brought, 1200", async () => {
+  const v = await world([5_000_000n], [true]);
+  const { w: W, note } = v.ws[0]!;
+  const live = { v: 1, id: "req-7", network: NETWORK, token: TOKEN, amount: "2980000", slippage_bps: 100, w: W, l: note.leaf!.label.toString(), j: jOf(note.ref), note: note.id, fee: "20000", created_ms: 1, resumes: NEAR_BUY_RESUMES, stage: "sent", step: "swap", code: "carry_failed", txs: [], payout: "landed", swap: { floor: "1000", before: "500" } };
+  await v.w.put("quotes", `${NEAR_BUY_KEY}req-7`, live);
+  const home = homeOf(1700n, 0n);
+  await resumeNearSells(pageOf(v, [], { readWallet: home.readWallet, move: home.move }));
+  assert.deepEqual((await records(v.w))[0]!.fill?.out, "1200");
+  assert.deepEqual(home.st.moved, []);
 });

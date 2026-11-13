@@ -115,9 +115,7 @@ export type NearBuyRecord = {
   /** The vault's payout to W from the note: "none" until it is asked (written before the hand-off, so before the note
    *  can go HELD), "asked", then "landed" on proof that it paid W. Absent on a record written before it: read as asked. */
   payout?: NearPayoutMark;
-  /** `funded`: the floor while W holds USDC of the least deposit or more, when it differs (a fee read as not known: the
-   *  signed minimum, since a bought coin never sits beside the swap's unspent input). */
-  swap?: { floor: string; before: string; funded?: string };
+  swap?: { floor: string; before: string };
   /** What W received of the token (base units) and its decimals, read at the buy's end. */
   fill?: { out: string; decimals: number };
   /** The sell of W, once one was asked (it owns W from then). */
@@ -695,13 +693,11 @@ export async function resumeNearSells(page: NearBuyPage): Promise<void> {
       const holds = async () => {
         const [t, u] = await Promise.all([readW(page, { wallet: r.w, side: "sell", token: r.token }), readW(page, { wallet: r.w, side: "buy", token: r.token })]);
         // a coin under the record's floor is no coin (a stranger's dust): never shown, never holding the USDC back
-        const counts = coinCounts(r, t.held, u.held);
-        // a rebuilt W the two providers find holding its proven coin: a position, from their read, never sent home
-        if (restored && r.sell === undefined && counts) {
-          await filledFromRead(page, k, r, t.held);
-          return false;
-        }
-        return !counts && u.held >= VAULT_CONSTANTS.MIN_DEPOSIT;
+        // two questions, apart: W's USDC of the least deposit goes home whatever W holds of the token (the way home moves
+        // it and sells nothing); W's token at its coinMin is its coin, a position, never sold unasked
+        if (u.held >= VAULT_CONSTANTS.MIN_DEPOSIT) return true;
+        if (coinCounts(r, t.held) && (r.sell === undefined || r.sell.stage === "refused")) await filledFromRead(page, k, r, t.held);
+        return false;
       };
       try {
         go = await holds();
@@ -723,7 +719,9 @@ export async function resumeNearSells(page: NearBuyPage): Promise<void> {
     if (!go) continue;
     const id = sellOpen(r.sell) ? r.sell.id : `${r.id}:sell:${now()}`;
     const slippage = r.sell?.slippage_bps ?? r.slippage_bps;
-    const deps = sellDepsOf(page, r.id, id, slippage);
+    // a sale the user asked (its sell open) goes on as one; anything else a load takes up is the way home: W's USDC moved,
+    // nothing sold, a coin still on W after it a position
+    const deps = sellDepsOf(page, r.id, id, slippage, !sellOpen(r.sell));
     const run = nearSellFlow(deps)({ token: r.token, slippageBps: slippage }, { id } as KindContext);
     if (!("running" in run)) {
       deps.release();
@@ -748,7 +746,7 @@ async function confirmOnTwo(page: NearBuyPage, c: NearBuyRecord): Promise<void> 
   let decimals: number | null = null;
   try {
     [t, u] = await Promise.all([readW(page, { wallet: c.w, side: "sell", token: c.token }), readW(page, { wallet: c.w, side: "buy", token: c.token })]);
-    if (coinCounts(c, t.held, u.held)) decimals = page.decimals ? await page.decimals(c.token) : await readNearDecimals(page.network, page.rpcs(), c.token);
+    if (u.held < VAULT_CONSTANTS.MIN_DEPOSIT && coinCounts(c, t.held)) decimals = page.decimals ? await page.decimals(c.token) : await readNearDecimals(page.network, page.rpcs(), c.token);
   } catch (e) {
     page.log?.(`near sell resume: a closed W not read (${legCause(e)})`);
     return;
@@ -788,8 +786,10 @@ async function filledFromRead(page: NearBuyPage, key: string, r: NearBuyRecord, 
   const store = await page.store();
   const write = async () => {
     const now = nearBuyRecordOf(await store.get(RECORDS, key).catch(() => undefined));
-    if (!now || now.stage !== "sent" || now.fill !== undefined || now.sell !== undefined) return;
-    await store.put(RECORDS, key, { ...now, stage: "filled", fill: { out: held.toString(), decimals } } satisfies NearBuyRecord);
+    if (!now || now.stage !== "sent" || now.fill !== undefined || !(now.sell === undefined || now.sell.stage === "refused")) return;
+    const before = baselineOf(now);
+    if (held <= before) return;
+    await store.put(RECORDS, key, { ...now, stage: "filled", fill: { out: (held - before).toString(), decimals } } satisfies NearBuyRecord);
     page.log?.("near sell resume: a rebuilt W holds its coin, shown");
   };
   const locks = page.locks ?? (globalThis.navigator as { locks?: LockManager } | undefined)?.locks;
@@ -800,7 +800,7 @@ async function filledFromRead(page: NearBuyPage, key: string, r: NearBuyRecord, 
  * The sell flow's deps over one buy record. `only`: the record a resume takes (none: the oldest of the ask's token as the
  * header says). `id`: the op of a new sell. `end` writes the run's answer to the record and its op.
  */
-export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, slippageBps: number): NearSellDeps & { release(): void; end(a: unknown): Promise<unknown> } {
+export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, slippageBps: number, home = false): NearSellDeps & { release(): void; end(a: unknown): Promise<unknown> } {
   const log = page.log ?? ((line: string) => console.info(line));
   const now = page.now ?? (() => Date.now());
   const locks = page.locks ?? (globalThis.navigator as { locks?: LockManager } | undefined)?.locks;
@@ -831,8 +831,7 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
   // W and the token its buy record names (the signer's bound), with the least of it that is W's coin (coinMinOf)
   const w = () => {
     const r = rec!;
-    const funded = isObj(r.swap) && r.swap.funded !== undefined ? coinMinOf(r, VAULT_CONSTANTS.MIN_DEPOSIT) : null;
-    return { id: r.w, l: BigInt(r.l), j: r.j, token: r.token, coinMin: coinMinOf(r, null), ...(funded === null ? {} : { coinMinFunded: funded }) };
+    return { id: r.w, l: BigInt(r.l), j: r.j, token: r.token, coinMin: coinMinOf(r) };
   };
   // the seed under its lock, zeroed after; W derived again and held to the record's
   const withSeed = <T>(fn: (seed: Uint8Array) => Promise<T> | T): Promise<T> =>
@@ -849,6 +848,19 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
 
   return {
     release: unlock,
+    home,
+    // W's coin kept once its USDC moved: the record a position of what W holds over its baseline (a fill); a decimals
+    // read that fails leaves it to the way home's next read (filledFromRead)
+    async kept(held) {
+      const r = rec;
+      if (r === null) return;
+      const before = baselineOf(r);
+      if (held <= before) return;
+      const decimals = page.decimals ? await page.decimals(r.token) : await readNearDecimals(page.network, page.rpcs(), r.token);
+      rec = { ...r, stage: "filled", fill: { out: (held - before).toString(), decimals } };
+      await write((m) => m);
+      log("near sell: W's coin kept as a position");
+    },
     async end(a) {
       if (rec === null) return a;
       const result = isObj(a) && isObj(a.result) ? a.result : null;
@@ -915,7 +927,7 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
           try {
             const [t, u] = await Promise.all([readW(page, { wallet: x.w, side: "sell", token }), readW(page, { wallet: x.w, side: "buy", token })]);
             // a coin under the record's floor is a stranger's dust: no token, so a W holding only that is empty here
-            return t.account === x.w && u.account === x.w && !coinCounts(x, t.held, u.held) && u.held < VAULT_CONSTANTS.MIN_DEPOSIT ? "empty" : "holds";
+            return t.account === x.w && u.account === x.w && !coinCounts(x, t.held) && u.held < VAULT_CONSTANTS.MIN_DEPOSIT ? "empty" : "holds";
           } catch {
             return "unread";
           }
@@ -1111,7 +1123,7 @@ export type NearHoldingsReads = {
  *  again on a later pass). page.tokenFee replaces the fee read in tests. */
 /** The widest token fee the device reads, in bps (kit/src/near/token-fee.ts takes a rate under 10,000 bps). */
 export const NEAR_FEE_WIDEST_BPS = 9_999;
-async function coinFloor(page: NearBuyPage, token: string, buyMin: bigint, sellIn: bigint | null): Promise<{ floor: bigint; funded: bigint | null }> {
+async function coinFloor(page: NearBuyPage, token: string, buyMin: bigint, sellIn: bigint | null): Promise<bigint> {
   let f = buyMin;
   const fee = page.tokenFee
     ? await page.tokenFee(token)
@@ -1122,24 +1134,24 @@ async function coinFloor(page: NearBuyPage, token: string, buyMin: bigint, sellI
     f = fee.unknown ? (buyMin * BigInt(10_000 - NEAR_FEE_WIDEST_BPS)) / 10_000n : nearFeeBuyerReceives(fee, NEAR_RHEA[page.network].exchange, buyMin);
   }
   if (f < 1n) f = 1n;
-  const atLeastSold = (x: bigint) => (sellIn !== null && sellIn > x ? sellIn : x);
-  // a fee not known: while W still holds its USDC (the swap's input unspent), the signed minimum itself
-  return { floor: atLeastSold(f), funded: fee !== null && fee.unknown ? atLeastSold(buyMin) : null };
+  return sellIn !== null && sellIn > f ? sellIn : f;
 }
 /** The coin on W counts as the record's: at least coinMinOf(r). A record with no floor and no fill counts none: a
  *  live one never sent a swap (every build writes the floor before its swap leaves, src/near-trade.ts's swap step), a
  *  rebuilt one has no buy swap of W's (or only Rhea's wrapped NEAR as a stand-in token). */
-const coinCounts = (r: NearBuyRecord, held: bigint, usdc: bigint | null): boolean => {
-  const m = coinMinOf(r, usdc);
+const coinCounts = (r: NearBuyRecord, held: bigint): boolean => {
+  const m = coinMinOf(r);
   return m !== null && held >= m;
 };
-/** The least of the record's token on W that is W's coin (coinMin of its floors, its baseline and its fill), with W
- *  holding `usdc` (null: not read, the floor alone). */
-function coinMinOf(r: NearBuyRecord, usdc: bigint | null): bigint | null {
+/** What W held of the token before its buy's swap (the record's baseline), 0 when it keeps none. */
+const baselineOf = (r: NearBuyRecord): bigint => (isObj(r.swap) && typeof r.swap.before === "string" && /^\d{1,78}$/.test(r.swap.before) ? BigInt(r.swap.before) : 0n);
+/** The least of the record's token on W that is W's coin (coinMin of its floor, its baseline and its fill). Any other
+ *  field a record's swap carries (a `funded` floor an unshipped build wrote) is not read. */
+function coinMinOf(r: NearBuyRecord): bigint | null {
   const digits = (x: unknown): x is string => typeof x === "string" && /^\d{1,78}$/.test(x);
-  const swap = isObj(r.swap) && digits(r.swap.floor) && digits(r.swap.before) && (r.swap.funded === undefined || digits(r.swap.funded)) ? r.swap : undefined;
+  const swap = isObj(r.swap) && digits(r.swap.floor) && digits(r.swap.before) ? r.swap : undefined;
   const fill = isObj(r.fill) && typeof r.fill.out === "string" && /^[1-9]\d{0,77}$/.test(r.fill.out) ? BigInt(r.fill.out) : null;
-  return coinMin(swap ? BigInt(swap.floor) : null, swap ? BigInt(swap.before) : 0n, fill, swap?.funded === undefined ? null : BigInt(swap.funded), usdc);
+  return coinMin(swap ? BigInt(swap.floor) : null, swap ? BigInt(swap.before) : 0n, fill);
 }
 /**
  * The one rule for what of W's token is W's coin, for every site that decides on it (the way home, confirmOnTwo, the
@@ -1147,10 +1159,8 @@ function coinMinOf(r: NearBuyRecord, usdc: bigint | null): bigint | null {
  * signed, or plus what that buy received (`fill`) when it landed under its floor, the lesser; no floor and no fill: none
  * is. A coin a buy received is a position and sells, whatever its floor; dust on top of it only joins the sale.
  */
-function coinMin(floor: bigint | null, before: bigint, fill: bigint | null, funded: bigint | null, usdc: bigint | null): bigint | null {
-  // W still holding USDC of the least deposit: its `funded` floor where it has one (a fee not known)
-  const chosen = funded !== null && usdc !== null && usdc >= VAULT_CONSTANTS.MIN_DEPOSIT ? funded : floor;
-  const f = chosen !== null && chosen > 0n ? chosen : null;
+function coinMin(floor: bigint | null, before: bigint, fill: bigint | null): bigint | null {
+  const f = floor !== null && floor > 0n ? floor : null;
   const least = f === null ? fill : fill !== null && fill < f ? fill : f;
   return least === null ? null : before + least;
 }
@@ -1381,10 +1391,9 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
       // ignored for every decision (a stranger's dust, or what a whole-balance sell leaves): not shown, never holding
       // the USDC back. No buy swap of W's: no floor, no coin counts.
       let floor: bigint | null = null;
-      let funded: bigint | null = null;
       if (token !== null && buyMin !== null) {
         try {
-          ({ floor, funded } = await coinFloor(page, token, buyMin, sellIn));
+          floor = await coinFloor(page, token, buyMin, sellIn);
         } catch (e) {
           log(`near holdings: the token's fee not read (${legCause(e)})`);
           out.unread.push(a.w);
@@ -1393,14 +1402,24 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
       }
       // W's own buy output the exchange could not send it waits in the lost-found: at its floor or more it is W's coin, read
       // again later; under it (or with no buy swap of W's) it is no coin of W's and holds nothing back
-      const least = coinMin(floor, 0n, null, funded, usdc);
+      const least = coinMin(floor, 0n, null);
       if (token !== null && least !== null && lost >= least) {
         log("near holdings: a W's coin waits in the exchange's lost-found; read again later");
         out.unread.push(a.w);
         continue;
       }
-      const swap = floor === null ? {} : { swap: { floor: floor.toString(), before: "0", ...(funded === null ? {} : { funded: funded.toString() }) } };
-      if (token !== null && least !== null && held >= least) {
+      const swap = floor === null ? {} : { swap: { floor: floor.toString(), before: "0" } };
+      // two questions, apart: USDC of the least deposit goes home whatever W holds of the token (a "sent" record, whose
+      // way home moves it, sells nothing and makes a coin still on W a position); with less, W's token at its floor is
+      // its coin, a position
+      if (usdc >= VAULT_CONSTANTS.MIN_DEPOSIT) {
+        if (!settledW) {
+          out.unread.push(a.w);
+          continue;
+        }
+        // its proven token (a W no call of names a token keeps Rhea's wrapped NEAR, which it never bought)
+        made = { ...base, token: token ?? NEAR_RHEA[page.network].wrap, stage: "sent", step: "receive", ...swap };
+      } else if (token !== null && least !== null && held >= least) {
         let decimals: number;
         try {
           decimals = page.decimals ? await page.decimals(token) : await readNearDecimals(page.network, page.rpcs(), token);
@@ -1410,15 +1429,6 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
           continue;
         }
         made = { ...base, token, stage: "filled", step: "receive", ...swap, fill: { out: held.toString(), decimals } };
-      } else if (usdc >= VAULT_CONSTANTS.MIN_DEPOSIT) {
-        if (!settledW) {
-          out.unread.push(a.w);
-          continue;
-        }
-        // its proven token: a coin the two providers find on W on the way home makes it a position (resumeNearSells);
-        // a W no call of names a token (never created, or created and never used) keeps Rhea's wrapped NEAR, which it
-        // never bought, so the way home reads 0 of it
-        made = { ...base, token: token ?? NEAR_RHEA[page.network].wrap, stage: "sent", step: "receive", ...swap };
       } else if (token !== null && settledW) {
         // its proven token and USDC empty, nothing in flight: closed by this seat answer, read again on a restore or Sync,
         // and once on the two providers on the way home (resumeNearSells), so no seat answer hides a coin for good

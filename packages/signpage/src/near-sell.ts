@@ -83,9 +83,8 @@ type Awaitable<T> = T | Promise<T>;
 type DropSeed<T> = T extends (seed64: Uint8Array, ...rest: infer R) => infer O ? (...rest: R) => O : never;
 /** W_{near,l,j} and the token its buy record binds it to (A11): the bound the signer holds a sell to. `coinMin`: the
  *  least of the token on W that is W's coin (its buy's floor over its baseline), less is a stranger's dust and no token
- *  to sell; null: no buy swap of W's, so none is; absent: any of it is. `coinMinFunded`: the least while W holds USDC of
- *  the least deposit (a fee not known: the signed minimum), read once at the run's first read and kept for the run. */
-type W = { id: string; l: bigint; j: number; token: string; coinMin?: bigint | null; coinMinFunded?: bigint };
+ *  to sell; null: no buy swap of W's, so none is; absent: any of it is. */
+type W = { id: string; l: bigint; j: number; token: string; coinMin?: bigint | null };
 
 export type NearSellDeps = {
   network: NearNetwork;
@@ -116,6 +115,12 @@ export type NearSellDeps = {
   lastTrade(): Awaitable<NearTradeSigned | null>;
   /** Keeps the last trade delegate signed on the sell's record, before it is sent: a later run gates W's moves on it. */
   traded(t: NearTradeSigned): Awaitable<void>;
+  /** The way home: W's USDC of the least deposit or more moved into the vault and nothing sold (a load never sells
+   *  unasked); W's coin is judged after the move. */
+  home?: boolean;
+  /** W still holds its coin (`held`, at its coinMin or more) once its USDC moved, with nothing sold (the way home, or a
+   *  sale the vault would refuse): the record is made a position of it before the run ends. */
+  kept?(held: bigint): Awaitable<void>;
 };
 /** A trade delegate W signed: its nonce and max_block_height. */
 export type NearTradeSigned = { nonce: bigint; mbh: bigint };
@@ -188,10 +193,8 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
     }
     if (w === null || typeof w !== "object" || !IMPLICIT.test(w.id) || typeof w.l !== "bigint" || !Number.isSafeInteger(w.j) || typeof w.token !== "string" || w.token === "") return { error: "not_allowed" };
     if (!(w.coinMin === undefined || w.coinMin === null || (typeof w.coinMin === "bigint" && w.coinMin > 0n))) return { error: "not_allowed" };
-    if (!(w.coinMinFunded === undefined || (typeof w.coinMinFunded === "bigint" && w.coinMinFunded > 0n))) return { error: "not_allowed" };
     const wallet: W = { id: w.id, l: w.l, j: w.j, token: w.token, ...(w.coinMin === undefined ? {} : { coinMin: w.coinMin }) };
-    // the run's one least: coinMinFunded when W holds USDC of the least deposit at the first read, else coinMin
-    let least = wallet.coinMin;
+    const least = wallet.coinMin;
     // W's coin: the token at its coinMin or more; under it, a stranger's dust, never sold for and never holding W's
     // USDC back (the vault would refuse what dust sells for, so a sale of it would stop every run before the move)
     const coin = (held: bigint): boolean => (least === null ? false : held >= (least ?? 1n));
@@ -236,7 +239,6 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
     };
 
     // 1. what W holds of the token (side sell: the token sent, USDC received)
-    if (w.coinMinFunded !== undefined && (await lightUntil("read", "buy", () => true, "read_failed")).held >= MIN) least = w.coinMinFunded;
     const first = await lightUntil("read", "sell", () => true, "read_failed");
     say("read", coin(first.held) ? "token held" : "no token");
 
@@ -252,7 +254,9 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
     // 2-5, again on a fresh quote after a swap that failed on chain with its input back in W (the helper's carry_failed:
     // the swap's side is freed for W, at most NEAR_SELL_SWAPS_MAX swaps per side per W), never more often than that
     let s: NearHeldState = first;
-    for (let swaps = 1; coin(s.held); swaps++) {
+    // a sale the vault would refuse (its proceeds under the least deposit): nothing sold, and W's USDC still goes home
+    let refusedSale = false;
+    for (let swaps = 1; !deps.home && coin(s.held); swaps++) {
       const held = s.held;
       // 2. the quote of the amount W sells (all it holds, less a fee the seller pays on top), with W read at the same block
       // (deps.pair): what a round signs from is never older than what it signs against. Asked again, bounded, as the
@@ -278,7 +282,14 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
         }
         return fail("quote", "quote_check_failed");
       };
-      let { s: seen, q } = await fresh("quote", held);
+      let seen: NearSwapWalletState, q: RheaQuote;
+      try {
+        ({ s: seen, q } = await fresh("quote", held));
+      } catch (e) {
+        if (!(e instanceof Stop) || e.code !== "amount_too_low") throw e;
+        refusedSale = true;
+        break;
+      }
       let amount: bigint;
       try {
         amount = nearSellAmount(q.fee, q.exchange, held);
@@ -447,6 +458,24 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
     // a read that fails, or W not empty (USDC still on its way, a token sent in): "sent", and the next run goes on
     const t = await readUntil("done", "sell", (x) => x.height >= height, "read_failed");
     const u = await readUntil("done", "buy", (x) => x.height >= height, "read_failed");
+    // W's coin kept with nothing sold (the way home, or a sale the vault would refuse) once its USDC is home: a position
+    if (coin(t.held) && (deps.home || refusedSale) && u.held < MIN) {
+      try {
+        await deps.kept?.(t.held);
+      } catch {
+        return fail("done", "not_known");
+      }
+      // ended, never sold: the sell refused with its code (a sale the vault would refuse, or a way home that sold
+      // nothing), so the coin stays a position and a tap sells it afresh; the USDC moved stays in the sell's txs
+      const code = refusedSale ? "amount_too_low" : "coin_kept";
+      say("done", code);
+      try {
+        deps.stop?.("done", code);
+      } catch {
+        // the record's write is the page's; the answer stands
+      }
+      return { error: code };
+    }
     if (coin(t.held) || u.held >= MIN) return fail("done", "not_empty");
     say("done", "wallet empty");
     // nothing sold and nothing in the vault: W held nothing to sell

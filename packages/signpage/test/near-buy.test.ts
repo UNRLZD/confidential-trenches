@@ -393,12 +393,16 @@ test("P2-3 load: a sell is taken up for a paid W whose money is on its way home 
     ["1 USDC, no token", null, { token: 0n, usdc: 1_000_000n }, true],
     ["just under 1 USDC", null, { token: 0n, usdc: 999_999n }, false],
     // every build writes the floor before its swap leaves (src/near-trade.ts, swap step): a W holding its coin has one
-    ["the token held, no sell asked", "floor", { token: 5n, usdc: 2_000_000n }, false],
+    // W's USDC of the least deposit goes home whatever W holds; the coin stays, a position (round 7's rule)
+    ["the token held and 2 USDC: the USDC home, nothing sold", "floor", { token: 5n, usdc: 2_000_000n }, true],
+    ["the token held, under 1 USDC: a position, nothing taken up", "floor", { token: 5n, usdc: 999_999n }, false],
     // a buy stopped before its swap (no floor: no swap ever left W) past its resumes: a stranger's dust on W never holds
     // its USDC back
     ["dust on a W whose buy stopped before its swap", "register", { token: 1n, usdc: 2_000_000n } as { token: bigint; usdc: bigint }, true],
-    // a buy stopped at its swap, its floor written and the swap landed, no fill read yet: its coin is its own
-    ["a buy at its swap, the floor written, the swap landed", "swap", { token: 5n, usdc: 2_000_000n }, false],
+    // a buy stopped at its swap, its floor written and the swap landed, no fill read yet: its coin is its own, and W's USDC
+    // of the least deposit still goes home (round 7)
+    ["a buy at its swap, the floor written, the swap landed, 2 USDC: the USDC home", "swap", { token: 5n, usdc: 2_000_000n }, true],
+    ["a buy at its swap, the floor written, the swap landed, under 1 USDC: nothing taken up", "swap", { token: 5n, usdc: 999_999n }, false],
     // W held 500 of the token before its swap (the baseline): 1200 is under 500 + its floor of 1000, so no coin of its
     ["a coin under its floor over its baseline", "before", { token: 1200n, usdc: 2_000_000n }, true],
     ["W not read", null, {}, false],
