@@ -72,6 +72,8 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor", "solanaSweepKeep", "SOLANA_SWEEP_OWED_MAX",
     // card every-lamport-can-move: the grid note, the sale's note floor and the sweep's split, pure
     "solanaNoteOf", "solanaSellNoteFloor", "solanaSweepOf",
+    // card pool-amounts-are-standard-sizes: what a sweep's rung leaves W at least, a number, pure
+    "solanaSweepStay",
     "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "EVM_PRECOMPILE_TOP", "evmOnwardCodeGas", "checkEvmDeposit", "checkEvmCarry", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P", "EVM_DEPOSIT_GAS_PER_LEVEL", "evmDepositHeadroom",
     "TOKEN_DECIMALS_MAX", // a number: the decimals bound the rule and the EVM buy's load follow read (card signpage-evm-pool-buy)
     "SOLANA_POOL_SELL_PRIORITY", // a number: the most priority a Solana sell pays (card round-trip-costs-less)
