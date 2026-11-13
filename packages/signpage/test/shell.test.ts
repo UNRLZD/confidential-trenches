@@ -838,3 +838,96 @@ test("closed notice: a layer opened again before the frame is live keeps the fir
     resetTimers(mock.timers);
   }
 });
+
+test("closed notice: an open told with no layer (told) is told as a close tells it: the frame inert from then, the notice PROTECT_MS later with it live again, once", async () => {
+  // review P2-1: an open answered closes: true that showed no layer (signed in already, no held op, a read that failed)
+  // was never told. Red before the fix: the shell had no told().
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const id = crypto.randomUUID();
+    c.sh.told(id);
+    assert.equal(c.f.inert, true, "the frame inert from the told, as from a close");
+    mock.timers.tick(PROTECT_MS - 1);
+    assert.deepEqual(c.notices(), [], "never before PROTECT_MS");
+    mock.timers.tick(1);
+    assert.deepEqual(c.notices().map((p) => p.msg), [CLOSED(id)]);
+    assert.equal(c.f.inert, false);
+    assert.equal(c.inertAt.at(-1), false, "the frame live again when the notice went");
+    c.sh.told(id);
+    c.sh.open(false, id);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    assert.equal(c.notices().length, 1, "once per id");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: told while another open's layer shows waits for that layer's close; told twice, or for an id shown, still once", async () => {
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const [a, b] = [crypto.randomUUID(), crypto.randomUUID()];
+    c.sh.open(false, a);
+    c.sh.told(b);
+    c.sh.told(b);
+    c.sh.told(a);
+    mock.timers.tick(PROTECT_MS * 3);
+    assert.deepEqual(c.notices(), [], "none while a layer shows");
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS);
+    assert.deepEqual(c.notices().map((p) => p.msg), [CLOSED(a), CLOSED(b)]);
+    // told under a frame taken out (a typed screen): the app's document went with it, nothing is told
+    const t = crypto.randomUUID();
+    c.sh.open(true, crypto.randomUUID());
+    c.sh.told(t);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    assert.equal(c.notices().length, 2, "none for an id told under a frame taken out");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: open(id) twice, before its close or after it and before the frame is live, tells it once", async () => {
+  // review P3-3: open()'s dedupe of an id still to tell. A shell opened twice for one id (the layer redrawn) without it
+  // tells that id twice.
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const [a, b] = [crypto.randomUUID(), crypto.randomUUID()];
+    c.sh.open(false, a);
+    c.sh.open(false, a);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS - 1);
+    c.sh.open(false, a);
+    c.sh.open(false, b);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS);
+    assert.deepEqual(c.notices().map((p) => p.msg), [CLOSED(a), CLOSED(b)]);
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: the shell keeps the last 1024 ids told (CLOSED_KEPT) and lets the oldest go first", async () => {
+  // review P3-3: an id told is never told again while kept; past 1024 the oldest is forgotten, so the set stays bounded
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const ids = Array.from({ length: 1025 }, () => crypto.randomUUID());
+    for (const id of ids) c.sh.told(id);
+    mock.timers.tick(PROTECT_MS);
+    assert.equal(c.notices().length, 1025);
+    // the first is the one let go: told again, it is told again; the second is still kept
+    c.sh.told(ids[1]!);
+    mock.timers.tick(PROTECT_MS);
+    assert.equal(c.notices().length, 1025, "the 1024 newest are kept");
+    c.sh.told(ids[0]!);
+    mock.timers.tick(PROTECT_MS);
+    assert.equal(c.notices().length, 1026, "the oldest past 1024 is let go");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});

@@ -281,6 +281,12 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   // the hello read and dropped; the level set but not the one the shaper reads; the post not through the shaper
   assert.equal(facts("", js.replace("return void(r=Bc(c))", "return")).hello.assign, null);
   assert.equal(facts("", js.replace("return void(r=Bc(c))", "return void(q=Bc(c))")).hello.shaper, null);
+  // kit 1.13 sets the closed notice's hello flag beside the level (card signing-layer-says-when-it-closes): read the same;
+  // anything else beside it is not
+  const flagged = facts("", js.replace("return void(r=Bc(c))", "return void(r=Bc(c),h=!0)")).hello;
+  assert.equal(flagged.assign, "let c=zc(i);if(c!==null)return void(r=Bc(c),h=!0)");
+  assert.deepEqual({ ...flagged, assign: null }, { ...facts("", js).hello, assign: null });
+  assert.equal(facts("", js.replace("return void(r=Bc(c))", "return void(r=Bc(c),r=`current`)")).hello.assign, null);
   assert.equal(facts("", js.replace("let r=i(t,n);", "let r=t;")).hello.post, null);
   assert.equal(facts("", js.replace("result:Xc(r,t,e.result)", "result:e.result")).hello.shaper, null);
 });

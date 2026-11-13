@@ -157,6 +157,12 @@ export interface Shell {
   /** Hides the sheet: a kept frame is live again as it was; a frame taken out comes back new at the top window's address. */
   close(): void;
   /**
+   * An open kind of request `id` that ends with no layer shown for it (no page to show, a read that failed, a run that
+   * never started; card signing-layer-says-when-it-closes, review P2-1): told as a close would tell it, the kept frame
+   * inert for PROTECT_MS from now and then the one closed notice; with a layer shown, at that layer's close. Once per id.
+   */
+  told(id: string): void;
+  /**
    * Called on the user's own Esc ("key"), close tap or scrim tap ("tap"), trusted events only; set by the screens. A key
    * gives no user activation on some engines, so a step that needs one (a clipboard write) acts only on a tap.
    */
@@ -322,24 +328,14 @@ export function mountShell(
         veiled = f;
         veilCap = setTimeout(() => lift(f), VEIL_CAP_MS);
       }
-      const f = frame as unknown as HTMLIFrameElement;
-      f.inert = true;
-      if (waking !== null) clearTimeout(waking);
-      waking = setTimeout(() => {
-        waking = null;
-        if (frame !== f || !layer.hidden) return;
-        f.inert = false;
-        f.focus?.();
-        // the frame takes taps again: each open shown over it is told its layer closed; one shown over a frame taken out
-        // is told nothing
-        const told = toTell;
-        toTell = [];
-        for (const o of told) {
-          done.add(o.id);
-          if (done.size > CLOSED_KEPT) done.delete(done.values().next().value as string);
-          if (o.over === f) api.closed(o.id);
-        }
-      }, PROTECT_MS);
+      wake(frame as unknown as HTMLIFrameElement);
+    },
+    told(id) {
+      if (done.has(id) || showing.some((o) => o.id === id) || toTell.some((o) => o.id === id)) return;
+      // a layer shown now (another open's) tells it at its own close, as one shown over this frame
+      if (!layer.hidden || !frame) return void showing.push({ id, over: frame });
+      toTell.push({ id, over: frame });
+      wake(frame);
     },
     dismissible(may) {
       sheet.close.hidden = !may;
@@ -347,6 +343,26 @@ export function mountShell(
       dismissOk = may;
     },
   };
+  // the kept frame inert for PROTECT_MS from now, then live again, and each open still to tell told then, in that task
+  function wake(f: HTMLIFrameElement): void {
+    f.inert = true;
+    if (waking !== null) clearTimeout(waking);
+    waking = setTimeout(() => {
+      waking = null;
+      if (frame !== f || !layer.hidden) return;
+      f.inert = false;
+      f.focus?.();
+      // the frame takes taps again: each open shown over it is told its layer closed; one shown over a frame taken out
+      // is told nothing
+      const told = toTell;
+      toTell = [];
+      for (const o of told) {
+        done.add(o.id);
+        if (done.size > CLOSED_KEPT) done.delete(done.values().next().value as string);
+        if (o.over === f) api.closed(o.id);
+      }
+    }, PROTECT_MS);
+  }
   let dismissOk = false;
   const dismiss = (e: Event): void => {
     if (!e.isTrusted || layer.hidden || !dismissOk) return;

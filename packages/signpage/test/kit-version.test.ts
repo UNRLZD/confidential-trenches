@@ -796,6 +796,15 @@ test("the kit-v1.12 files here are main's at kit 1.12: each file's SHA-256 pinne
     return t.skip(`no ${V112_COMMIT} in this clone (a shallow checkout): the pins above hold the files`);
   }
   for (const f of Object.keys(V112_FILES)) assert.ok(execFileSync("git", ["show", `${V112_COMMIT}:packages/kit/src/${f}`], { maxBuffer: 1 << 24 }).equals(file(f)), `${f} is kit-v1.12's`);
+  assert.match(execFileSync("git", ["show", `${V112_COMMIT}:packages/kit/src/trade/solana/pool-buy.ts`], { maxBuffer: 1 << 24 }).toString(), new RegExp(`^${PIECES_MAX}$`, "m"), "main's value at kit 1.12");
+});
+// the one name kit-v1.12's schema.ts takes from the kit's trade code, pinned as a literal at main's value then, never
+// read from the live kit (review P3-4: a re-export moved with the kit, and the fixture with it)
+const PIECES_MAX = "export const SOLANA_POOL_BUY_PIECES_MAX = 4;";
+test("the kit-v1.12 fixture's SOLANA_POOL_BUY_PIECES_MAX is the literal 4, imported from nowhere", () => {
+  const shim = readFileSync(new URL("../../kit/test/fixtures/kit-v1.12/trade/solana/pool-buy.ts", import.meta.url), "utf8");
+  const code = shim.split("\n").filter((l) => !l.startsWith("//") && l.trim() !== "");
+  assert.deepEqual(code, [PIECES_MAX]);
 });
 
 /** A page whose host answers every kind but state with the kit's fixture result for it, each open kind's with `closes`
@@ -868,4 +877,48 @@ test("hello kit 1.12: the state answer and every state event as they are (each p
   const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
   assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "77" } }]);
   assert.ok(reads(V112, ev[0], "state"));
+});
+
+test("closed(id) after a ready whose reset still waits in the queue posts nothing; the next document's own hello decides (1.13: the notice, 1.12: none)", async () => {
+  // review P3-2: closed() read `level` at once while ready()'s reset waited behind a quote at the queue's head, so a
+  // notice went to the new APP_HOST document read at the old one's level. Red before the fix: one notice right after the
+  // ready. The page's API, its quote held on `gate` as a helper that answers late holds it.
+  const posted: { type?: string; id?: string }[] = [];
+  const parent = { postMessage: (msg: unknown, to: string) => void (to === APP_ORIGIN && posted.push(structuredClone(msg) as { type?: string })) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const api = startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    readyOnLoad: true,
+    state: () => FULL,
+    kinds: { "signin.open": () => ({ result: { pending: true, closes: true } }), "deposit.quote": () => ({ after: gate, answer: () => ({ error: "busy" }) }) } as unknown as ApiHost["kinds"],
+  });
+  const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
+  const notices = () => posted.filter((m) => m.type === "closed");
+  api.ready();
+  send(hello(SIGNPAGE_KIT_VERSION));
+  const open = crypto.randomUUID();
+  send({ v: 1, id: open, type: "signin.open", ...FIXTURES["signin.open"].params });
+  await api.idle();
+  send({ v: 1, id: crypto.randomUUID(), type: "deposit.quote", ...FIXTURES["deposit.quote"].params });
+  await new Promise((ok) => setImmediate(ok));
+  // the frame loads a new document: its ready, then (its hello queued behind the quote) the layer's close tells the open
+  api.ready();
+  send(hello("1.12"));
+  api.closed(open);
+  assert.deepEqual(notices(), [], "no notice while the ready's reset waits in the queue");
+  release();
+  await api.idle();
+  api.closed(open);
+  assert.deepEqual(notices(), [], "the new document's hello named 1.12: still none");
+  // a document at the kit's own version, after its own ready and hello: the notice goes
+  api.ready();
+  api.closed(open);
+  assert.deepEqual(notices(), [], "none between a ready and its hello");
+  send(hello(SIGNPAGE_KIT_VERSION));
+  await api.idle();
+  api.closed(open);
+  assert.deepEqual(notices(), [{ v: 1, type: "closed", id: open }]);
 });

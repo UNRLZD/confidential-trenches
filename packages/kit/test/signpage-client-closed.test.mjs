@@ -185,3 +185,23 @@ test("closes is read only on an open kind's ok answer, and only as true", () => 
   assert.ok(SCHEMA.signpageClosedSchema({ v: 1, type: "closed", id: "x" }));
   for (const m of [{ v: 1, type: "closed" }, { v: 2, type: "closed", id: "x" }, { v: 1, type: "closed", id: "" }, { v: 1, type: "closed", id: "x", ok: true }]) assert.equal(SCHEMA.signpageClosedSchema(m), false, JSON.stringify(m));
 });
+
+test("the client keeps the last 64 open ids whose answer said closes (CLOSING_MAX), the oldest let go first", async () => {
+  // review P3-3: the map stays bounded whatever the page sends or leaves unsent
+  const { w, page, client, h } = await pair(NEW, newPage);
+  const ids = [h.id];
+  for (let i = 0; i < 64; i++) {
+    const r = client.request("signin.open", FIXTURES["signin.open"].params);
+    await r.outcome;
+    ids.push(r.id);
+  }
+  assert.equal(client.onClosed(ids[0], () => assert.fail("heard")), null, "the oldest of 65 is let go");
+  let heard = 0;
+  assert.equal(typeof client.onClosed(ids[1], () => void heard++), "function", "the 64 newest are kept");
+  page.closed(ids[0]);
+  page.closed(ids[1]);
+  await until(() => closedTo(w).length === 2, "both notices delivered");
+  await until(() => heard === 1, "the kept id heard");
+  assert.equal(client.dropped().id, 1, "the let-go id's notice is dropped by its id");
+  client.destroy();
+});

@@ -1,7 +1,8 @@
 // src/main.ts's closed notice (card signing-layer-says-when-it-closes), booted top-level on test/main-dom.ts (the
 // minimal DOM of test/main-sheet.test.ts): every open kind that shows a layer over the kept frame is told, once, when
-// that layer has closed, the frame live again, by every way it ends there (Cancel, Esc, the x, the scrim). None for an
-// open the page refused once its sheet showed, one that showed no layer, one whose frame went under a typed screen (the
+// that layer has closed, the frame live again, by every way it ends there (Cancel, Esc, the x, the scrim), and one that
+// showed no layer as a close would tell it (the rest of those endings: test/main-closed-notice-ends.test.ts). None for an
+// open the page refused once its sheet showed, one whose frame went under a typed screen (the
 // 12 words' field, the backup that ends signed in: the app's document went with the frame), an app below kit 1.13 (its
 // answer carries no closes either), and none before a sign out's reload, whose app document goes with the page.
 // Red before this card: no open's answer carried closes and the page posted no notice.
@@ -12,7 +13,7 @@ import { test } from "node:test";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import { PROTECT_MS } from "../src/guard.ts";
 
-test("main.ts: each open whose layer showed over the kept frame is told once when it closed, by every way it ends; none for a refusal, no layer, a typed screen, an older kit or a reload", async () => {
+test("main.ts: each open whose layer showed over the kept frame is told once when it closed, by every way it ends, and one with no layer once; none for a refusal, a typed screen, an older kit or a reload", async () => {
   await import("../src/main.ts");
   doc.body.children.find((c) => c.tagName === "iframe")!.dispatchEvent(new Event("load"));
   sendRaw({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION });
@@ -74,13 +75,14 @@ test("main.ts: each open whose layer showed over the kept frame is told once whe
   await until("a new frame", frameIn);
   await told(made, 0, "Saved on the backup");
 
-  // no layer: a held deposit's way out for an id this page holds no op under goes back to the app with no screen
+  // no layer: a held deposit's way out for an id this page holds no op under goes back to the app with no screen, and is
+  // told as a close would tell it (review P2-1: it was told nothing, so the app's lock waited on its own timer)
   const none = send({ type: "withdraw.open", from_id: "ab".repeat(32), return_key: "portfolio" });
   const noneA = await answer(none);
   assert.deepEqual(noneA?.result, { pending: true, closes: true }, `${JSON.stringify(noneA)} on ${root().dataset.signin}`);
   await settle();
   assert.equal(shown(), false, "no layer shown");
-  await told(none, 0, "an open that showed no layer");
+  await told(none, 1, "an open that showed no layer");
 
   // the reload ending of a sign out here, on the sign-out sheet (the frame kept): the page reloads, and nothing is told
   // before it (the app's document goes with the reload); another tab's sign out is test/main-closed-notice-elsewhere.test.ts
@@ -89,5 +91,5 @@ test("main.ts: each open whose layer showed over the kept frame is told once whe
   press("signout");
   await until("a reload on this tab's sign out", () => reloadCount() > before, 5000);
   await told(out, 0, "a sign out here");
-  assert.equal(notices().length, 4, "four notices in all: Cancel, Esc, the x, the scrim");
+  assert.equal(notices().length, 5, "five notices in all: Cancel, Esc, the x, the scrim, the open that showed no layer");
 });

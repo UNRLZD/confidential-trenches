@@ -253,6 +253,9 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   const held = new Map<string, Stage[]>();
   // the app's kit version, as a hello named it (src/kit-version.ts)
   let level: KitLevel = KIT_DEFAULT;
+  // a hello read since the last ready: `level` names the frame's own document, never the one a ready said went (its reset
+  // waits in the queue; review P3-2 of card signing-layer-says-when-it-closes)
+  let hello = false;
   // the message as the app's kit reads it, or null when it reads none of it; `kind`: an answer's request kind
   const shaped = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent | ClosedEvent, kind?: SignpageKind): unknown => {
     if ("ok" in msg) return msg.ok && kind !== undefined ? { ...msg, result: resultFor(level, kind, msg.result) } : msg;
@@ -278,7 +281,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     const bytes = plainRequestBytes(data);
     if (!bytes) return;
     const kit = helloKit(data);
-    if (kit !== null) return void (level = kitLevel(kit));
+    if (kit !== null) return void ((level = kitLevel(kit)), (hello = true));
     const m = envelope(data);
     if (!m) return;
     const id = m.id as string;
@@ -367,17 +370,20 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   // `state` answer (its client asks one at once, after its hello); in the queue, so a hello its document posted before
   // is read first and the new one's after
   const ready = (): void => {
+    hello = false;
     queue = queue.then(() => {
       level = KIT_DEFAULT;
+      hello = false;
       sent = null;
     });
     post({ v: 1, type: "ready", release: RELEASE, api: API });
   };
   if (!host.readyOnLoad) ready();
   // the shell posts `ready` on each load of its frame instead: each APP_HOST document needs its own, once
-  // the notice that an open's layer has closed: the type and the id alone, to an app at the current level only
+  // the notice that an open's layer has closed: the type and the id alone, to an app at the current level only, as the
+  // hello of the frame's document since its ready named it (a ready's reset still in the queue: none)
   const closed = (id: string): void => {
-    if (level !== "current") return;
+    if (!hello || level !== "current") return;
     const msg: ClosedEvent = { v: 1, type: "closed", id };
     post(msg);
   };

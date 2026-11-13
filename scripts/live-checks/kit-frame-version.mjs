@@ -4,9 +4,10 @@
 // older kit only what that kit reads (packages/signpage/src/kit-version.ts):
 //   - it reads the kit's hello ({ v: 1, type: "hello", kit }, packages/kit/src/signpage/messages.ts HelloMessage), the
 //     version an app names, and reads an app that names none as kit-v1.4 (kit-v1 to kit-v1.4 are public tags): the
-//     request handler sets the page's level from the hello's version (`let c=zc(i);if(c!==null)return void(r=Bc(c))`),
-//     the one shaper reads that level for every answer's result and every state event, and the one post sends what the
-//     shaper returns (`a=(t,n)=>{let r=i(t,n);r!==null&&e.parent.postMessage(r,...)`);
+//     request handler sets the page's level from the hello's version (`let c=zc(i);if(c!==null)return void(r=Bc(c))`;
+//     since kit 1.13 with the closed notice's hello flag set beside it, `void(r=Bc(c),i=!0)`), the one shaper reads
+//     that level for every answer's result and every state event, and the one post sends what the shaper returns
+//     (`a=(t,n)=>{let r=i(t,n);r!==null&&e.parent.postMessage(r,...)`);
 //   - that post is the bundle's only `parent.postMessage(`, so nothing reaches the app past the shaper, and the shaper
 //     sends a progress event through the stage map at that level (stageFor: kit-v1.4 is sent a later stage as MAP has it,
 //     a stage it has no reading for and a route event not at all, `if(e.type!==`progress`)return e;...`), its stage
@@ -131,7 +132,8 @@ function helloPath(js) {
   const named = split?.[2] ? [...js.matchAll(new RegExp(`(?:^|[^\\w$.])${esc(split[2])}=\`(\\d{1,4}\\.\\d{1,4})\`[,;]`, "g"))] : [];
   const kit = split?.[1] ?? (named.length === 1 ? named[0][1] : null);
 
-  const assign = reader && level ? new RegExp(`let ([\\w$]+)=${esc(reader)}\\([\\w$]+\\);if\\(\\1!==null\\)return void\\(([\\w$]+)=${esc(level)}\\(\\1\\)\\)`).exec(js) : null;
+  // (card signing-layer-says-when-it-closes: with the closed notice's hello flag set in the same expression, `,i=!0`)
+  const assign = reader && level ? new RegExp(`let ([\\w$]+)=${esc(reader)}\\([\\w$]+\\);if\\(\\1!==null\\)return void\\(([\\w$]+)=${esc(level)}\\(\\1\\)(?:,[\\w$]+=!0)?\\)`).exec(js) : null;
   const v = assign ? esc(assign[2]) : null;
   const shaper = v ? new RegExp(`([\\w$]+)=\\(([\\w$]+),([\\w$]+)\\)=>\\{if\\(\`ok\`in \\2\\)return \\2\\.ok&&\\3!==void 0\\?\\{\\.\\.\\.\\2,result:([\\w$]+)\\(${v},\\3,\\2\\.result\\)\\}:\\2;if\\(\\2\\.type===\`state\`\\)return\\{\\.\\.\\.\\2,state:([\\w$]+)\\(${v},\\2\\.state\\)\\};`).exec(js) : null;
   // card pool-deposit-stages (review P3 2): the functions the shaper itself calls, the state shaper (for every state

@@ -472,7 +472,7 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string): O
   return {
     result: { pending: true, closes: true },
     then: () =>
-      void run(async () => {
+      runOpen(id, async (layer) => {
         const seed = await readSeedSettled();
         const page = pageFor(kind, way, seed, typeof PublicKeyCredential !== "undefined", fromId);
         openedBy = kind;
@@ -492,7 +492,7 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string): O
           if (heldOp === null) return show("signed-in", shown(seed!));
           show("held");
         } else show(page === "passkey" ? "signed-out" : page);
-        openLayer(id);
+        layer();
       }),
   };
 }
@@ -504,12 +504,28 @@ function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: 
   return {
     result: { pending: true, closes: true },
     then: () =>
-      void run(async () => {
+      runOpen(opId, async (layer) => {
         poolWithdraw = { chain, opId };
         show("pool-withdraw");
-        openLayer(opId);
+        layer();
       }),
   };
+}
+// An open answered closes: true (card signing-layer-says-when-it-closes, review P2-1) is told exactly once on every
+// ending: by its layer's close when `layer()` opened one for it, else, once its run has ended (a page it does not show:
+// signed in or out already, no held op; a read that failed; a run that never started, the page busy), by the shell as a
+// close would tell it, PROTECT_MS after, never sooner. The app's document going (a reload) is the one ending that tells
+// nothing.
+function runOpen(id: string, step: (layer: () => void) => Promise<void>): void {
+  let layered = false;
+  void run(() =>
+    step(() => {
+      openLayer(id);
+      layered = true;
+    }),
+  ).finally(() => {
+    if (!layered) shell?.told(id);
+  });
 }
 const sheetShown = (): boolean => shell !== null && !shell.layer.hidden;
 // The layer opens for the open kind of request `id`, and the activation guard restarts its 500 ms: a click lined up
