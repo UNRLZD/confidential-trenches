@@ -1,7 +1,7 @@
 // node --test packages/signpage/scripts/load-count-browser.test.mjs: the per-route count of one signed-in load
 // (load-count-browser.mjs) against the helper's window for one device. The windows are the helper's own numbers, read
 // from its source here, so a change to them changes the check. A planted load that draws 43 calls of /v1/rpc/solana in
-// 10 s FAILs on that window, one that draws 42 passes it, and a load with a "restore: <chain> walked" line is named.
+// 10 s FAILs on that window, one that draws 42 passes it, and a load that walks a pool twice is named.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -39,4 +39,7 @@ test("a plain load at the share passes; one call past it in 10 s FAILs; a re-wal
   assert.deepEqual(summarize(load(31, "/v1/rpc/base")).over, ["/v1/rpc/base"]);
   const walked = summarize(load(1, "/v1/rpc/solana", [{ s: 3.7, text: "restore: solana walked" }]));
   assert.deepEqual(walked.walked, ["restore: solana walked @3.7s"]);
+  // each load walks each pool once by design; a pool walked twice in one load is named
+  assert.deepEqual(walked.twice, []);
+  assert.deepEqual(summarize(load(1, "/v1/rpc/solana", [{ s: 3.7, text: "restore: solana walked" }, { s: 9, text: "restore: near walked" }, { s: 12, text: "restore: solana walked" }])).twice, ["restore: solana walked"]);
 });

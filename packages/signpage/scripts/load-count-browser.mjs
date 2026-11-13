@@ -16,7 +16,8 @@
 //   node packages/signpage/scripts/load-count-browser.mjs [--loads 3] [--window 30] [--settle 15] [--refuse <host>]
 //     [--record <file>] [--timeout <s>]
 // Records hold counts, routes, methods and seconds only: never the words, a key, an id or a one-time wallet.
-// PASS exit 0 (no helper route over its window in any load, and no load re-walked a pool), FAIL exit 1, error exit 2.
+// PASS exit 0 (no helper route over its window in any load, and no load walked a pool more than once: each load walks
+// each pool once by design), FAIL exit 1, error exit 2.
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { REAL, startHarness } from "../../../apps/terminal/test/harness/harness.mjs";
@@ -67,7 +68,7 @@ export function summarize(load) {
   }
   const windows = Object.fromEntries(Object.entries(helper).map(([w, ts]) => [w, { busiest10: busiest10(ts), limit: HELPER_WINDOW[w] ?? HELPER_WINDOW.other }]));
   const walked = load.lines.filter((l) => /^restore: \S+ walked$/.test(l.text));
-  return { routes, windows, over: Object.entries(windows).filter(([, x]) => x.busiest10 > x.limit).map(([w]) => w), walked: walked.map((l) => `${l.text} @${l.s}s`), passes: load.lines.filter((l) => l.text.startsWith("pool pass:")).map((l) => `${l.text} @${l.s}s`), prover: load.prover };
+  return { routes, windows, over: Object.entries(windows).filter(([, x]) => x.busiest10 > x.limit).map(([w]) => w), walked: walked.map((l) => `${l.text} @${l.s}s`), twice: [...new Set(walked.map((l) => l.text).filter((t, k, all) => all.indexOf(t) !== k))], passes: load.lines.filter((l) => l.text.startsWith("pool pass:")).map((l) => `${l.text} @${l.s}s`), prover: load.prover };
 }
 
 async function main() {
@@ -159,7 +160,7 @@ async function main() {
     for (const [w, x] of Object.entries(s.windows)) console.log(`  window ${w}: busiest 10 s ${x.busiest10} of ${x.limit}${x.busiest10 > x.limit ? " OVER" : ""}`);
     console.log(`  restore lines: ${s.walked.join("; ") || "none"}`);
     console.log(`  pass lines: ${s.passes.join("; ") || "none"}; first prover Worker @${s.prover ?? "-"}s`);
-    if (k > 0) ok &&= s.over.length === 0 && s.walked.length === 0;
+    if (k > 0) ok &&= s.over.length === 0 && s.twice.length === 0;
   });
   const file = opt("--record", null);
   if (file) writeFileSync(file, `${JSON.stringify({ refuse, unanswered: rec.unanswered, sums, loads: rec.loads.map((l) => ({ requests: l.requests, lines: l.lines.filter((x) => /^(restore|pool pass)/.test(x.text)), prover: l.prover })) }, null, 1)}\n`);
