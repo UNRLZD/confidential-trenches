@@ -2,7 +2,7 @@
 //! Card exit-with-only-the-words (Blindfill v2 lite paper §5; vault paper 2.12): the exit command brings a note home
 //! with only the 12 words, in near-sandbox 2.13.4 with the mainnet build of the vault at the release's own id
 //! (vault.confidential.unrlzd.near, put there by a state patch with its code and no key: the sandbox's registrar cannot
-//! create a .near name) on the mock token at TOKEN. Runs only with `--features sandbox`, through tests/harness/run.sh
+//! create a .near name) on the mock token at TOKEN, with intents.near on its pinned wasm. Runs only with `--features sandbox`, through tests/harness/run.sh
 //! (`contracts/vault/tests/harness/run.sh --test exit_words`); a plain `cargo test` builds this file empty.
 //!
 //! A depositor deposits one note of the published all-zero vector's words (packages/wallet/test/vectors/a8.json) by
@@ -70,6 +70,8 @@ async fn the_words_alone_bring_the_note_home() -> R<()> {
     h.patch_landed("the vault at the release's id", send, landed).await?;
     assert!(h.access_keys(&h.vault, "final").await?.is_empty(), "the vault has no key");
     h.deploy_mock_token().await?;
+    // intents.near (the pinned wasm), as on mainnet: A's close reads that nothing of any kind sits under A there
+    let _ = h.deploy_intents().await?;
     let _ = h.storage_deposit(&h.root, &h.vault).await?;
     let ids = helper(&["--ids"])?;
     assert_eq!((ids["vault"].as_str(), ids["token"].as_str()), (Some(RELEASE_VAULT), Some(h.token.as_str())), "the release's vault and token");
