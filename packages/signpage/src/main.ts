@@ -192,6 +192,8 @@ const restore = !framed
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
       written: () => void testnet?.proofs().catch(() => {}),
+      // a load's first proof passes go ahead of the resume's reads (card a-load-proves-first-and-walks-the-restore-once)
+      firstPass: (startMs) => testnet?.firstPass(startMs) ?? Promise.resolve(),
       // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
       // follow's own reader on the restore's two public operators (never our helper relay: on Base and Robinhood the
       // pool's own pair, card evm-deposit-on-mainnet), and the follow's own deposit (poolFollowDeps below), so a restore
@@ -1106,8 +1108,9 @@ async function landed(l: Landing): Promise<void> {
     .catch(() => {});
   // a held deposit's move out a reload cut short (src/withdraw/held.ts)
   void settleHeld().catch(() => {});
-  // a restore a closed or reloaded page left running reads stalled, so the app offers Retry; then step 5, when a page
-  // closed before it read every id, is read again with no tap and no sheet (src/pool-restore.ts RESTORE_IDS_KEY)
+  // a restore a closed or reloaded page left running reads stalled, so the app offers Retry; then the load walks every
+  // pool once as a pass, after its first proof pass, and reads step 5 again when a page closed before it read every id,
+  // with no tap and no sheet (src/pool-restore.ts resume, RESTORE_IDS_KEY)
   void restore?.settle().then(() => restore?.resume()).catch(() => {});
   // a buy or sell a closed or reloaded page left open is settled from its wallets' marks, or refused when it sent
   // nothing (src/trade.ts settleTradeOps): the app's Sell never waits on an op no page will end

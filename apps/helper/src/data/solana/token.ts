@@ -28,6 +28,7 @@ import { readFirstBuys, readHeld, shares, type FirstBuys, type Shares } from "./
 import { createOrigins, hintsOf, onCurve, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
+import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { BURST_MS, QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
 
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -599,7 +600,7 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
  *  429 on it would be the device's own reads' and sends' 429 too. */
 /** `sleep`: the GeckoTerminal budget's wait (setTimeout unless a test passes its clock's beside `now`, card
  *  helper-pace-test-clock). */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget; metaLogos?: Pick<Logos, "fromMeta"> } = {}) {
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget; metaLogos?: Pick<Logos, "fromMeta">; keyed?: Keyed | null } = {}) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   const doFetch = deps.fetch ?? fetch;
@@ -1044,6 +1045,15 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     if (text.length > ANSWER_MAX) throw new Upstream();
     return JSON.parse(text);
   }
+  /** A chart's read (its top pool, its bars): CoinGecko's keyed API first when a key is set (../coingecko.ts), else, or
+   *  when it cannot serve the read, GeckoTerminal's keyless one in `lane`, as before (card helper-candles-keyed-gt).
+   *  `ok`: the keyed answer is the shape the caller reads. The read ahead is the keyed pace's background. */
+  async function chartRead(path: string, lane: "pages" | "stale" | "refresh" | "ahead", what: string, ok: (j: unknown) => boolean, untilMs?: number, client?: string): Promise<{ a: unknown; src: ChartSrc }> {
+    const k = deps.keyed == null ? undefined : await deps.keyed.read(path, ok, lane === "ahead");
+    if (k !== undefined) return { a: k, src: CG_SRC };
+    return { a: await gecko(path, lane, what, untilMs, client), src: "geckoterminal" };
+  }
+  const poolOk = (j: unknown) => topPool(j) !== null;
 
   // a held pool's re-read is a refresh: refused, the pool held is served (a token's top pool rarely moves; a launchpad
   // coin's moves once, off its curve: chartPool)
@@ -1051,7 +1061,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     POOL_FRESH_MS,
     now,
     async (mint, client, held) => {
-      const a = await gecko(`/networks/solana/tokens/${mint}`, held === true ? "refresh" : "pages", "sol pool", undefined, client);
+      const { a } = await chartRead(`/networks/solana/tokens/${mint}`, held === true ? "refresh" : "pages", "sol pool", poolOk, undefined, client);
       const pool = a === null ? null : topPool(a);
       return pool === null ? NOT_FOUND : { status: 200, body: pool, asOfMs: now() };
     },
@@ -1073,7 +1083,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails, while under GT_SERVE_MS
    *  or for history before their read (an empty chart is never the answer for a token with known history, and an old one
    *  never a 200: the read's 429 or 503, card helper-restart-fresh). */
-  const kept = bounded<{ bars: Candle[]; at: number }>(CACHE_MAX);
+  const kept = bounded<{ bars: Candle[]; at: number; src?: typeof CG_SRC }>(CACHE_MAX);
   // the newest range (no `to`) moves with every trade: CANDLES_FRESH_MS; a range before a time is history: an hour
   // a re-read of bars held is a refresh: refused, candles() serves the kept bars, dated by their read. The newest range
   // is a refresh while its kept bars (a swap's handover included) are under REFRESH_URGENT_MS old, a page read past it,
@@ -1091,11 +1101,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
     const { period, aggregate } = TF[tf];
     const before = to === "" ? "" : `&before_timestamp=${to}`;
-    const a = await gecko(`/networks/solana/pools/${chartPool(mint, p.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane, "sol bars", until, client);
+    const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane, "sol bars", (j) => toCandles(j, tf, 1_000, now()) !== null, until, client);
     const candles = a === null ? [] : toCandles(a, tf, 1_000, now());
     if (candles === null) throw new Upstream();
     const at = now();
-    return { status: 200, body: JSON.stringify(candles), src: "geckoterminal", asOfMs: at };
+    return { status: 200, body: JSON.stringify(candles), src, asOfMs: at };
   });
 
   const mintKey = (k: string) => address(k) !== null;
@@ -1104,9 +1114,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   /** The newest charts callers read (`mint:tf` to the read's time), the most recent last (card helper-restart-fresh). */
   const hot = bounded<number>(HOT_MAX);
   /** Keeps `k`'s newest bars in `kept`, unless what is held is newer. */
-  const keep = (k: string, got: Candle[], at: number) => {
+  const keep = (k: string, got: Candle[], at: number, src?: string) => {
     const had = kept.get(k);
-    if (got.length > 0 && (had === undefined || got.at(-1)![0] >= had.bars.at(-1)![0])) kept.set(k, { bars: got, at });
+    if (got.length > 0 && (had === undefined || got.at(-1)![0] >= had.bars.at(-1)![0])) kept.set(k, { bars: got, at, ...(src === CG_SRC ? { src: CG_SRC } : {}) });
   };
   /** The Trending tokens kept fresh (TOP_MAX): the list's first row, then Discover's column order's first TOP_MAX. */
   async function topTrending(): Promise<string[]> {
@@ -1155,16 +1165,16 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         const pool = pools.peek(mint);
         try {
           if (pool === undefined) {
-            const a = await gecko(`/networks/solana/tokens/${mint}`, "ahead", "sol pool");
+            const { a } = await chartRead(`/networks/solana/tokens/${mint}`, "ahead", "sol pool", poolOk);
             const p = a === null ? null : topPool(a);
             pools.put(mint, p === null ? NOT_FOUND : { status: 200, body: p, asOfMs: now() });
             return k;
           }
           const { period, aggregate } = TF[tf];
-          const a = await gecko(`/networks/solana/pools/${chartPool(mint, pool.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`, "ahead", "sol bars");
+          const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, pool.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`, "ahead", "sol bars", (j) => toCandles(j, tf, 1_000, now()) !== null);
           tried.set(k, now());
           const got = a === null ? [] : toCandles(a, tf, 1_000, now());
-          if (got !== null) keep(k, got, now());
+          if (got !== null) keep(k, got, now(), src);
           return k;
         } catch (e) {
           // refused by the budget: no call made, the next tick asks again; a failed call waits its AHEAD_MS
@@ -1181,7 +1191,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
      * swap are answered as the old helper would have answered them, under the same freshness rules, instead of all
      * going upstream at once into a GeckoTerminal budget the old helper spent. Newest first within HANDOVER_MAX bytes.
      */
-    state(): { page: [string, Kept][]; holders: [string, Kept][]; pools: [string, Kept][]; kept: [string, { bars: Candle[]; at: number }][]; hot: [string, number][] } {
+    state(): { page: [string, Kept][]; holders: [string, Kept][]; pools: [string, Kept][]; kept: [string, { bars: Candle[]; at: number; src?: typeof CG_SRC }][]; hot: [string, number][] } {
       let room = HANDOVER_MAX;
       const fit = <T>(list: [string, T][]): [string, T][] => {
         const out: [string, T][] = [];
@@ -1222,11 +1232,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       for (const e of o.kept.slice(-CACHE_MAX)) {
         if (!Array.isArray(e) || e.length !== 2 || typeof e[0] !== "string") continue;
         const [mint, tf, more] = e[0].split(":");
-        const v = e[1] as { bars?: unknown; at?: unknown } | null;
+        const v = e[1] as { bars?: unknown; at?: unknown; src?: unknown } | null;
         if (more !== undefined || !mintKey(mint!) || !Object.hasOwn(TF, tf ?? "") || typeof v !== "object" || v === null) continue;
         if (typeof v.at !== "number" || !Number.isFinite(v.at) || v.at > t || t - v.at > KEPT_HANDOVER_MS || !isBars(v.bars) || v.bars.length === 0) continue;
         const had = kept.get(e[0]);
-        if (had === undefined || had.at < v.at) kept.set(e[0], { bars: v.bars, at: v.at });
+        if (had === undefined || had.at < v.at) kept.set(e[0], { bars: v.bars, at: v.at, ...(v.src === CG_SRC ? { src: CG_SRC } : {}) });
       }
     },
     /** 06b TokenPage for a Solana mint: 404 when it is no mint or Jupiter does not list it, 503 on an upstream failure. */
@@ -1260,13 +1270,14 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const have = to === null ? undefined : kept.get(k);
       const held = have === undefined || to! * 1000 > have.at ? [] : have.bars.filter((c) => c[0] < to!);
       if (held.length >= limit || (held.length > 0 && have!.bars.length < 1_000)) {
-        const body: Candles = { tf: tf as Tf, candles: held.slice(-limit), src: "geckoterminal", as_of_ms: have!.at };
-        return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: have!.at };
+        const src = have!.src ?? "geckoterminal";
+        const body: Candles = { tf: tf as Tf, candles: held.slice(-limit), src, as_of_ms: have!.at };
+        return { status: 200, body: JSON.stringify(body), src, asOfMs: have!.at };
       }
       let a = await bars.get(`${mint}:${tf}:${to ?? ""}`, client);
       if (a.status === 200) {
         // the last good bars of this mint and tf (the newest range read), whatever range was asked
-        keep(k, JSON.parse(a.body) as Candle[], a.asOfMs!);
+        keep(k, JSON.parse(a.body) as Candle[], a.asOfMs!, a.src);
       } else if (a.status === 429 || a.status === 503) {
         // GeckoTerminal throttled or down: its last good bars, cut at `to`, read time theirs, while they are within
         // GT_SERVE_MS or the range is history before their read; past it the 429 or 503, never a 200 with old bars (card
@@ -1274,11 +1285,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         const had = kept.get(k);
         const servable = had !== undefined && ((to !== null && to * 1000 <= had.at) || now() - had.at <= GT_SERVE_MS);
         const cut = !servable ? [] : had.bars.filter((c) => to === null || c[0] < to);
-        if (cut.length > 0) a = { status: 200, body: JSON.stringify(cut), src: "geckoterminal", asOfMs: had!.at };
+        if (cut.length > 0) a = { status: 200, body: JSON.stringify(cut), src: had!.src ?? "geckoterminal", asOfMs: had!.at };
       }
       if (a.status !== 200) return a;
-      const body: Candles = { tf: tf as Tf, candles: (JSON.parse(a.body) as Candle[]).slice(-limit), src: "geckoterminal", as_of_ms: a.asOfMs! };
-      return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: a.asOfMs };
+      // the source that served the bars: CoinGecko's keyed API or GeckoTerminal's keyless one (card helper-candles-keyed-gt)
+      const src = a.src ?? "geckoterminal";
+      const body: Candles = { tf: tf as Tf, candles: (JSON.parse(a.body) as Candle[]).slice(-limit), src, as_of_ms: a.asOfMs! };
+      return { status: 200, body: JSON.stringify(body), src, asOfMs: a.asOfMs };
     },
   };
 }

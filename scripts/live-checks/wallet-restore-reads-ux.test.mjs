@@ -125,7 +125,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/(ux:[\w$]+=>\{let [\w$]+=[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1zz$2({chain:").ux_wired, false, "other deps than the follow's");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://ct-api.unrealized.trade`]);function").ux_pair, false, "our helper as the second");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://api.mainnet-beta.solana.com`]);function").ux_pair, false, "the operator that refuses a page as the second");
-  assert.equal(mut(/return\[([\w$]+)\(([\w$]+)\(([\w$]+)\[0\]\)\),\1\(\2\(\3\[1\]\)\)\]\}/, "return[$1($2($3[0])),$2($3[1])]}").ux_pair, false, "the second unpaced");
+  assert.equal(mut(/return\[([\w$]+)\(([\w$]+)\(([\w$]+)\[0\],`pass`\)\),\1\(\2\(\3\[1\],`pass`\)\)\]\}/, "return[$1($2($3[0],`pass`)),$2($3[1],`pass`)]}").ux_pair, false, "the second unpaced");
   // review P2-3: the Base and Robinhood pair each on its queue by the same pacer, never handed bare
   const evmPair = /rpcs:\[([\w$]+)\(([\w$]+)\.rpcs\[0\]\),\1\(\2\.rpcs\[1\]\)\],pin:\2\.pin,deposit:/;
   assert.equal(mut(evmPair, "rpcs:$2.rpcs,pin:$2.pin,deposit:").ux_pair, false, "the EVM pair handed unpaced");
@@ -187,7 +187,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   const read = /,([\w$]+)=async\(([\w$]+),([\w$]+)\)=>\{if\(\3===void 0\)throw Error\(`no deposit index for its U_X`\);[^]*?`money`\)\}/.exec(js)[0];
   const carry = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+)=null,[^]*?for\(;;\)\{[^]*?\6=[\w$]+\}\}/.exec(js)[0];
   const held = /async function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let ([\w$]+);try\{\4=await \2\(\3\)\}[^]*?return [\w$]+\}/.exec(js)[0];
-  const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),ux:[^]*?\}\},ended:/.exec(js)[0];
+  const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),(?:firstPass:[\w$]+=>[\w$]+\?\.firstPass\([\w$]+\)\?\?Promise\.resolve\(\),)?ux:[^]*?\}\},ended:/.exec(js)[0];
   const broken = (from, to) => {
     const t = js.replace(from, to);
     assert.notEqual(t, js, String(from));

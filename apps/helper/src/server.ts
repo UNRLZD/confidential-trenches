@@ -35,6 +35,7 @@ import { createNearToken, type NearMarket } from "./data/near/token.ts";
 import { createNearTrades } from "./data/near/trades.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
+import { coingeckoPace, createKeyed, type Keyed } from "./data/coingecko.ts";
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
@@ -840,7 +841,7 @@ export function heldFrom(token: Pick<Token, "named">, evmLists: EvmLists): Held 
   return createHeld({ solana: { page: (mint) => token.named(mint) }, lists: evmLists });
 }
 
-export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc, gecko?: GeckoBudget, slots?: Map<SlotName, Slot>): Token {
+export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc, gecko?: GeckoBudget, slots?: Map<SlotName, Slot>, keyed?: Keyed | null): Token {
   const holders = env.SOLANA_HOLDERS_RPC_URL;
   // card helper-solana-failover: the holders key's slot has no public fallback (the public endpoint refuses
   // getTokenLargestAccounts, rpc/rpc.ts Deps): fallen back, its reads answer 503 at once and the page serves Jupiter's
@@ -848,14 +849,14 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   const holdersRpc =
     holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false, ...(holders === env.SOLANA_RPC_URL ? { pacer: rpc.pacer } : {}) });
   if (holdersRpc !== undefined) slots?.set("holders", holdersRpc.slot);
-  return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc, metaLogos: LOGOS });
+  return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc, metaLogos: LOGOS, keyed });
 }
 
 /**
  * The EVM chains' own swap reads (src/data/evm/swaps.ts): Base's and Robinhood's candles and trade tape. A token is
  * served only when its chain's Discover lists hold it. The providers: evmSwapRpcs.
  */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds): Swaps {
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
@@ -880,6 +881,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
     const swaps = createSwaps(chain, {
       gecko,
       holds,
+      keyed,
       rpcs: evmSwapRpcs(env, chain),
       index: INDEX_RPCS[chain],
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
@@ -1204,7 +1206,11 @@ if (import.meta.main) {
     // and /v1/rpc/robinhood all read rpc.mainnet.chain.robinhood.com)
     // card rpc-keyed-lists: with every keyed URL's company pace (limits.ts KEYED_PACE), each account's daily spend kept
     // in the store and shared with the helper this one replaces (limits/day-spend.ts, review H1)
-    const holds = providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(process.env) }, dayFiles(storeDir, id));
+    // card helper-candles-keyed-gt: CoinGecko's keyed on-chain API (data/coingecko.ts) is one more paced account, its day
+    // kept in the same day files
+    const holds = providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(process.env), ...coingeckoPace(process.env) }, dayFiles(storeDir, id));
+    // every chart's read asks CoinGecko's keyed API first when COINGECKO_API_KEY is set; none set, null: every read keyless
+    const keyed = createKeyed(process.env, holds);
     // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room
     // (rpc.ts callEvm): a user's call never pays for the helper's background load
     const rpc = createRpc(process.env, { holds, pinned: SWAP_RPCS });
@@ -1237,7 +1243,7 @@ if (import.meta.main) {
     saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState(), evmMarket: evmMarketOf(SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] })) }));
     // card helper-solana-failover: every Solana slot's state, for /v1/health
     const slots = new Map<SlotName, Slot>([["rpc", rpc.slot]]);
-    const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko, slots);
+    const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko, slots, keyed);
     // card app-console-429: the token page's answers the previous helper held, at the start and again at the handover
     // (the file it wrote at its stop), so a swap's first loads are answered as the old helper would have answered them
     solanaState = () => token.state();
@@ -1264,7 +1270,7 @@ if (import.meta.main) {
     // card helper-evm-fee-at-epoch-start: each pool's fee read at its period's start, while every provider still holds
     // the period's first block's state; a request answers it from memory
     stopWarm = evmFeeWarm(evmPools.values());
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
     // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
     const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept })]));
@@ -1282,6 +1288,9 @@ if (import.meta.main) {
     setInterval(() => void token.ahead().catch(() => undefined), AHEAD_TICK_MS).unref();
     // card helper-crowd-429: GeckoTerminal's calls a minute by lane and read, so a refused chart is named from the log
     setInterval(() => void ((l) => l !== null && console.log(`helper: ${l}`))(gecko.minute()), 60_000).unref();
+    // card helper-candles-keyed-gt: CoinGecko's keyed reads a minute by outcome (served, refused by its minute or day, its
+    // own answers), counts only: the key is never in a log line
+    if (keyed !== null) setInterval(() => void ((l) => l !== null && console.log(`helper: ${l}`))(keyed.minute()), 60_000).unref();
     // ready (health.ts): once the lists, a token page and its holders answer 200. A helper that replaces a running one
     // (peer) listens only then, so the proxy, which tries each helper of the service in turn, never reaches it cold
     // (deploy/redeploy.sh waits for it, bounded, before it stops the old one); one that starts alone listens at once.
