@@ -21,6 +21,9 @@
 //   U_X itself; everywhere the ed25519 id a 1Click refund lands under, the key the refund move signs with), and on Base
 //   and Robinhood U^evm_{s,i}'s EIP-55 address as `evm`, where 1Click sends the coin. One scope at a time, in order;
 //   one that fails leaves its record as it was and the others are still named. Pools are named with no vault named.
+//   One exception to "never a funded one again", pools only (card deposit-takes-each-pools-own-coin, review P1): a U_X
+//   that still holds what its follow left (`held`: a send not a sum of rungs) stays named until a send tops it up and
+//   its follow carries both, so no remainder is left at a U_X nothing names.
 // - A naming that would change nothing takes no lock (card signpage-passes-yield-to-a-trade, devnet run 10 of 11 Nov: a
 //   sell tapped 3 s after a buy sent nothing for 12.7 s). A trade holds the seed lock shared for its run; its own note
 //   writes post "changed", and every naming asked the seed lock exclusive: Web Locks grant in request order, so the
@@ -52,6 +55,13 @@ export interface DepositNamerDeps {
   startup(): Promise<unknown>;
   /** The resync in flight, or null (main.ts resync()). */
   resyncing(): Promise<unknown> | null;
+  /**
+   * Whether a pool's named U_{s,i} still holds money its follow left (pool-deposit-follow.ts uxHeld; card
+   * deposit-takes-each-pools-own-coin, review P1): while it does, that pool's record stays on it, though money reached
+   * its index, so the next send tops it up. A read that throws keeps it too (named again at the next landing). None
+   * given: a funded index is never named again (W:355-358), as for the vault.
+   */
+  held?(chain: PoolChain, record: { scope: string; index: number; id: string; evm?: string }): Promise<boolean>;
   /** Tests only: the note store, seed64 and U's derivation. */
   openNotes?: (st: WalletStore) => Promise<Pick<NoteStore, "planDeposit" | "close">>;
   seed64Of?: (entropy: Uint8Array) => Uint8Array;
@@ -82,9 +92,9 @@ export function depositNamer(deps: DepositNamerDeps): DepositNamer {
 
   async function nameNow(entropy: Uint8Array): Promise<void> {
     const vault = deps.scope();
-    const scopes: { scope: bigint; evm: boolean }[] = [
+    const scopes: { scope: bigint; evm: boolean; chain?: PoolChain }[] = [
       ...(vault === null ? [] : [{ scope: vault, evm: false }]),
-      ...(deps.pools?.() ?? []).map((p) => ({ scope: p.scope, evm: p.chain !== "solana" })),
+      ...(deps.pools?.() ?? []).map((p) => ({ scope: p.scope, evm: p.chain !== "solana", chain: p.chain })),
     ];
     if (scopes.length === 0) return;
     const st = await deps.open();
@@ -95,9 +105,9 @@ export function depositNamer(deps: DepositNamerDeps): DepositNamer {
     if (!same) return;
     const seed64 = seed64Of(entropy);
     try {
-      for (const { scope, evm } of scopes) {
+      for (const { scope, evm, chain } of scopes) {
         try {
-          await nameScope(st, entropy, seed64, scope, evm);
+          await nameScope(st, entropy, seed64, scope, evm, chain);
         } catch {
           // this scope's record stays as it was; the next landing or notes change names it again
         }
@@ -107,7 +117,7 @@ export function depositNamer(deps: DepositNamerDeps): DepositNamer {
     }
   }
 
-  async function nameScope(st: WalletStore, entropy: Uint8Array, seed64: Uint8Array, scope: bigint, evm: boolean): Promise<void> {
+  async function nameScope(st: WalletStore, entropy: Uint8Array, seed64: Uint8Array, scope: bigint, evm: boolean, chain?: PoolChain): Promise<void> {
     const notes = await openNotes(st);
     let index: number;
     try {
@@ -128,6 +138,9 @@ export function depositNamer(deps: DepositNamerDeps): DepositNamer {
     // the record as stored, read with no lock: a naming that would write nothing asks no exclusive lock (see the top)
     const had = depositRecordOf(await st.get("meta", depositKey(scope)).catch(() => undefined));
     if (had !== undefined && had.scope === scope.toString() && (had.index > index || (had.index === index && had.id === u.id && had.evm === address))) return;
+    // a pool's U_{s,i} that money reached but that still holds what its follow left (a send not a sum of rungs): it stays
+    // named, so the next send tops it up and that follow carries both (review P1). The vault's never: 1Click pays it exact
+    if (chain !== undefined && deps.held !== undefined && had !== undefined && had.scope === scope.toString() && had.index < index && (await deps.held(chain, had).catch(() => true))) return;
     await st.nameDeposit({ entropy }, { scope, index, id: u.id, ...(address === undefined ? {} : { evm: address }) });
   }
 

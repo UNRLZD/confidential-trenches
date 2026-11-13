@@ -69,7 +69,16 @@ test("recorded good answer: the card's build (recorded with --local): PASS", { s
 test("planted: a fourth asset in deposit.assets", () => {
   const other = "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near";
   const a = plant((a) => assetsOf(a).push({ origin_asset: other, chain: "near", symbol: "USDC", decimals: 6, min: "1.02", max_usd: "1000" }));
-  assert.deepEqual(lines(a), [`BAD deposit.assets lists "${other}", not one of the kit's three USDC assets`]);
+  assert.deepEqual(lines(a), [`BAD deposit.assets lists "${other}", not one of the kit's three USDC assets or a pool's own coin`]);
+});
+
+test("each pool's own coin after the USDC rows (card deposit-takes-each-pools-own-coin) is not this check's to refuse: PASS", () => {
+  const a = plant((a) => assetsOf(a).push(
+    { origin_asset: "nep141:sol.omft.near", chain: "solana", symbol: "SOL", decimals: 9, min: "0.0135864", max_usd: "1000" },
+    { origin_asset: "nep141:base.omft.near", chain: "base", symbol: "ETH", decimals: 18, min: "0.0010012", max_usd: "1000" },
+    { origin_asset: "nep141:hood.omft.near", chain: "robinhood", symbol: "ETH", decimals: 18, min: "0.0010009", max_usd: "1000" },
+  ));
+  assert.deepEqual(lines(a), []);
 });
 
 test("planted: one of the three missing from deposit.assets, and one listed twice", () => {
