@@ -389,7 +389,9 @@ for (const kind of KINDS) {
     const tx = await local("getTransaction", [s.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
     // W: the buy's second key (the release pays W, which signs the buy)
     if (s.step === "buy" && tx) W = tx.transaction.message.accountKeys[1];
-    records.push(txRecord(kind, s.step, s.signature, tx, { ...(s.watch ?? {}), W }, (x) => base58.decode(x)));
+    // the relayer's fee payer and the pool's account too (review P1-1 of 1d3b96d9c): the sweep's rest under the grid
+    // shows as the fee payer's change, and the pool's change is the deposit's value alone
+    records.push(txRecord(kind, s.step, s.signature, tx, { ...(s.watch ?? {}), W, feePayer: FP, pool: DEPLOY.pool }, (x) => base58.decode(x)));
   }
   for (const s of [...(f?.simFails ?? []), ...(withdraw?.simFails ?? [])]) records.push({ coin: kind, step: s.phase, ok: false, simulation: s });
   if (f && !f.filled) records.push({ coin: kind, step: "flow", ok: false, exit: flow.code, buyAnswer: f.buy?.answer ?? null, sellAnswer: f.sell?.answer ?? null });

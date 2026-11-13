@@ -31,6 +31,9 @@ const NEXT = "Solana deposit: each tree's next page";
 const P22 = "round-trip-costs-less P2-2: a Solana sale paying more priority";
 const P3B = "round-trip-costs-less P3-b: a partial Solana sale's fee is held";
 const SWEEP = "the sweep's rule: W the only signer";
+const SWG = "Solana sweep, P3-1: the grid note and its rest as one transfer";
+const NOTE = "solanaNoteOf is noteOf at SOL_PIECES";
+const FLOORT = "Solana sell: a deposit back under the sale's note floor";
 const WD = "Solana withdraw: another pool program";
 const BUY = "Solana buy: the kit's tag 3";
 const SELL = "Solana sell:";
@@ -108,6 +111,24 @@ export const MUTANTS = [
   ['if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads) !== ask.amount)', "if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads, true) !== ask.amount)", NEXT],
   ["const back = depositOf(last, pin, ctx.wallet, ctx.precommitment, reads, true);", "const back = depositOf(last, pin, ctx.wallet, ctx.precommitment, reads);", SELL],
   ["const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);", "const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads, true);", SWEEP, SELLT],
+  // card every-lamport-can-move, review P3-1: the deposit, then at most one System transfer of the rest under the grid
+  // from W to the pinned pool's account; no compute budget; the equation exact with the transfer in it
+  ['if (d.ixs.length !== 1 && d.ixs.length !== 2) return refuse("instructions");', "", SWG],
+  ['if (d.ixs.length !== 1 && d.ixs.length !== 2) return refuse("instructions");', 'if (d.ixs.length > 3) return refuse("instructions");', SWG],
+  ["if (t.program !== SOLANA_SYSTEM_PROGRAM || t.data.length !== 12 || new DataView(", "if (t.data.length !== 12 || new DataView(", SWG],
+  ["!== 2) return refuse(\"transfer\");", "!== 2 && false) return refuse(\"transfer\");", SWG],
+  ["|| !same(t.accounts[1], pin.pool, false, true)) return refuse(\"transfer_to\");", ") return refuse(\"transfer_to\");", SWG],
+  ["!same(t.accounts[0], ctx.wallet, true, true) || !same(t.accounts[1], pin.pool, false, true)", "!same(t.accounts[1], pin.pool, false, true)", SWG],
+  ['if (under === 0n || under >= SOL_GRID) return refuse("transfer_amount");', 'if (under === 0n) return refuse("transfer_amount");', SWG],
+  ['if (under === 0n || under >= SOL_GRID) return refuse("transfer_amount");', 'if (under === 0n || under > SOL_GRID) return refuse("transfer_amount");', SWG],
+  ['if (under === 0n || under >= SOL_GRID) return refuse("transfer_amount");', 'if (under >= SOL_GRID) return refuse("transfer_amount");', SWG],
+  ["value + SOLANA_LAMPORTS_PER_SIGNATURE + under + solanaDepositRents", "value + SOLANA_LAMPORTS_PER_SIGNATURE + solanaDepositRents", SWG],
+  ["if (value % SOL_GRID !== 0n || value < SOL_NOTE_FLOOR || ", "if (", SWG],
+  ["if (value % SOL_GRID !== 0n || ", "if (", SWG],
+  [" || value < SOL_NOTE_FLOOR || value < SOLANA_POOL_MIN_DEPOSIT", " || value < SOLANA_POOL_MIN_DEPOSIT", SWG],
+  // the note a step makes: down to the grid, none under the floor
+  ["  const note = amount - (amount % SOL_GRID);\n  return note < SOL_NOTE_FLOOR ? 0n : note;", "  const note = amount - (amount % SOL_GRID);\n  return note;", NOTE],
+  ["  const note = amount - (amount % SOL_GRID);\n  return note < SOL_NOTE_FLOOR ? 0n : note;", "  const note = amount;\n  return note < SOL_NOTE_FLOOR ? 0n : note;", NOTE],
   ['if (x.accounts.length === 8 && !same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)) return refuse("state_page");', "", NEXT],
   ['if (x.accounts.length === 8 && !same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");', "", NEXT],
   ["same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)", "same(nextState, solanaPoolNextPage(pin.program, 0, reads.labelSize), false, true)", NEXT],
@@ -158,15 +179,22 @@ export const MUTANTS = [
   ["const want = solanaPoolSellSteps(venue, ctx.wallet, ask.amount, minOut);", 'const want = solanaPoolSellSteps(venue.kind === "pump-curve" ? { ...venue, feeRecipient: venueIx.accounts[1]!.key } : venue, ctx.wallet, ask.amount, minOut);', SELL],
   // the review of 6eb64bdb: one account the wire names, the curve's creator vault (its sell's account 8), taken as the rule's own
   ['if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts.map((a, j) => (j === 8 && g.accounts[8] ? { ...a, key: g.accounts[8].key } : a)))) return refuse("sell_accounts");', SELL],
-  ['if (back !== minOut - reserve) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
-  // card sol-w-sweep: the reserve's bound on every path (the cap, less what the sweep carries on), the line that
-  // replaced the one these two planted
-  ['if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX) return refuse("reserve");', "", SELL],
-  // card sol-sell-deposit-back-floor: the deposit back's floor, the kit's at the rent read, refused by name; under it the
-  // venue's sell alone, drawn with no deposit, to W
-  ["const kept = minOut - reserve < solanaPoolNoteFloor(rent);", "const kept = minOut - reserve < SOLANA_POOL_MIN_DEPOSIT;", SELL],
+  ['if (back !== solanaNoteOf(minOut - reserve)) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
+  // card every-lamport-can-move: the deposit back on the grid, never the exact lamport amount
+  ["if (back !== solanaNoteOf(minOut - reserve))", "if (back !== minOut - reserve)", SELL],
+  // the reserve's bound on every path: the cap on a partial sell, 0 on a full one (card every-lamport-can-move)
+  ['if (reserve > (p.full ? 0n : SOLANA_POOL_SELL_RESERVE_MAX)) return refuse("reserve");', "", SELL],
+  ["if (reserve > (p.full ? 0n : SOLANA_POOL_SELL_RESERVE_MAX))", "if (reserve > SOLANA_POOL_SELL_RESERVE_MAX)", SELL],
+  ['if (p === undefined || typeof p.full !== "boolean") return refuse("reserve");', "", SELL],
+  // a full sell carries no deposit (card every-lamport-can-move)
+  ['if (p.full && last.program === pin.program) return refuse("deposit_full");', "", SELL],
+  // card sol-sell-deposit-back-floor: the deposit back's floor, at the rent read, refused by name; under it the venue's
+  // sell alone, drawn with no deposit, to W (card every-lamport-can-move: the piece floor, the kit's up to the grid)
+  ["const kept = minOut - reserve < solanaSellNoteFloor(rent);", "const kept = minOut - reserve < SOLANA_POOL_MIN_DEPOSIT;", SELL],
+  ["  return up > SOL_NOTE_FLOOR ? up : SOL_NOTE_FLOOR;", "  return f;", FLOORT],
+  ["  return up > SOL_NOTE_FLOOR ? up : SOL_NOTE_FLOOR;", "  return up;", FLOORT],
   ['if (kept && last.program === pin.program) return refuse("deposit_floor");', "", SELL],
-  ["const sell = kept ? body : body.slice(0, -1);", "const sell = body.slice(0, -1);", SELL],
+  ["const sell = bare ? body : body.slice(0, -1);", "const sell = body.slice(0, -1);", SELL],
   ['  if (rent === undefined || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");\n', "", SELL],
   ["rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor", "(rent.factor", SELL],
   ['(rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");\n  const kept', 'false) return refuse("reserve");\n  const kept', SELL],
@@ -223,8 +251,8 @@ export const MUTANTS = [
   ['if (u64le(ixs[n]!.data, 1) > SOLANA_CU_PRICE_MAX) refuse("cu_price");', "", DEP],
   // card round-trip-costs-less, review P2-2 of 4f9217972: a sale's priority and a full sell's fee, bounded by the rule
   ['  if (priority > SOLANA_POOL_SELL_PRIORITY) return refuse("priority");\n', "", P22],
-  [" || p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY)) return refuse(\"reserve\");", ")) return refuse(\"reserve\");", P22],
-  ["  if (p !== undefined && (typeof p.fee !== \"bigint\"", "  if (p !== undefined && p.full === true && (typeof p.fee !== \"bigint\"", P3B],
+  [" || p.fee > SOLANA_LAMPORTS_PER_SIGNATURE + SOLANA_POOL_SELL_PRIORITY) return refuse(\"reserve\");", ") return refuse(\"reserve\");", P22],
+  ["  if (typeof p.fee !== \"bigint\"", "  if (!p.full) {} else if (typeof p.fee !== \"bigint\"", P3B],
   ["  let limit = BigInt(SOLANA_POOL_CU_LIMIT_MAX);\n", "  let limit = 0n;\n", P22],
   // only a build from the device's own quote (card evm-buy-hookdata-fee, review fold 1 M1)
   ['  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");\n', "", EBUY],

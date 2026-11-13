@@ -553,6 +553,176 @@ test("the epoch's first block is the first at or after its start, the same on bo
   await assert.rejects(evmEpochBlock(pair(c, c, {}, { hashOf: (n) => (n === 40 ? h32("other 40") : c.hashOf(n)) }), start), /hold different blocks at 40/);
 });
 
+// card evm-landing-reads-batched: the search reads by rounds, a step's guess and the block below it at once
+/** rpc's block reads by number, by round: a read started while none is in flight opens a round (each answered a
+ *  macrotask later, so reads asked together overlap and reads asked in turn do not). */
+const blockRounds = (r: EvmRpc) => {
+  const out = { rounds: 0, most: 0, reads: [] as string[], rpc: r };
+  let live = 0;
+  out.rpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    // a search needs each block's time only: headers, never the block's transactions (a fork's upstream log of 13 Nov
+    // showed full blocks, anvil's own fetches below its fork block), the newest and finalized tags' reads too
+    if (m === "eth_getBlockByNumber") assert.equal(p[1], false, `block ${String(p[0])} asked with its transactions`);
+    if (m !== "eth_getBlockByNumber" || !/^0x/.test(String(p[0]))) return r(m, p);
+    if (live++ === 0) out.rounds++;
+    out.most = Math.max(out.most, live);
+    out.reads.push(String(p[0]));
+    try {
+      await new Promise((x) => setImmediate(x));
+      return await r(m, p);
+    } finally {
+      live--;
+    }
+  }, { url: r.url });
+  return out;
+};
+/** A small seeded generator (mulberry32), so a failing case can be replayed. */
+const seeded = (seed: number) => () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
+/** The seconds that put `t - back` on a whole minute, as a period's start always is (holdFee and bind refuse any other). */
+// rounds on RPC 0, the check included, on whole-minute starts (review of 71ed06f71, P2): at 71ed06f71 Base took 8,
+// Robinhood 15 and the dense chains 16, a guess at hi itself each step while hi shared the start's second
+// with the newest block at each place in its second (review of 22a42d62f, P3-1): Base 8, Robinhood 9 at 9.4 a second
+// and 11 on its runs of 9 to 16
+const MOST_BASE = 8, MOST_RH = 9, MOST_RH_RUNS = 11, MOST_DENSE = 13;
+/** A Robinhood-like chain whose seconds hold 9 to 16 blocks (seeded), from 30,000 blocks below `top` up; below, 12.5 a second. */
+const robinhoodRuns = (top: number) => {
+  const rand = seeded(0x9a16);
+  const from = top - 30_000;
+  const times: bigint[] = [];
+  for (let t = T0 + 1_000_000n, left = 0; times.length <= top - from; left--) {
+    if (left === 0) (t++, (left = 9 + Math.floor(rand() * 8)));
+    times.push(t);
+  }
+  return (n: number) => (n >= from ? times[n - from]! : times[0]! - BigInt(Math.ceil((from - n) / 12.5)));
+};
+const toMinute = (t: bigint, back: bigint) => (((back - t) % 60n) + 60n) % 60n;
+
+test("card evm-landing-reads-batched: on a chain at its real pace the search is a few rounds, a guess and the block below it at once, then both checks in one round", async () => {
+  // Base at 5 blocks a second (mainnet.base.org, 13 Nov 11:32Z: 100 blocks in 20 s) and Robinhood Chain at 9.4 with up
+  // to 16 on one second; a block every 2 s; the newest block 2,000,000 to 2,000,009, so it is at each place in its second
+  // (the first, the last or between: review of 22a42d62f, P3-1); the start, a whole minute, 1 s to 10 min back
+  const paces: [string, (n: number) => bigint, number][] = [
+    ["Base 5/s", (n) => T0 + BigInt(Math.floor(n / 5)), MOST_BASE],
+    ["Robinhood 9.4/s", (n) => T0 + BigInt(Math.floor(n / 9.4)), MOST_RH],
+    ["2 s blocks", (n) => T0 + 2n * BigInt(n), 3],
+    ["Robinhood 9 to 16 a second", robinhoodRuns(2_000_010), MOST_RH_RUNS],
+  ];
+  for (const [name, at, most] of paces)
+    for (let HEAD = 2_000_000; HEAD < 2_000_010; HEAD++)
+    for (const back of [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 10n, 15n, 30n, 55n, 600n]) {
+      const off = toMinute(at(HEAD), back);
+      const ts = (n: number) => at(n) + off;
+      const c = { ...C3(), head: HEAD, finalized: HEAD - 10, ts };
+      const start = (ts(HEAD) - back) * 1000n;
+      let want = HEAD;
+      while (want > 0 && ts(want - 1) * 1000n >= start) want--;
+      const [a, b] = pair(c, c);
+      const r0 = blockRounds(a), r1 = blockRounds(b);
+      assert.equal((await evmEpochBlock([r0.rpc, r1.rpc], start)).number, BigInt(want), `${name}, ${back} s back`);
+      assert.ok(r0.rounds <= most, `${name}, head ${HEAD}, ${back} s back: rpc 0 read in ${r0.rounds} rounds (${JSON.stringify(r0.reads)})`);
+      assert.equal(r0.most, 2, "a round's two blocks asked at once");
+      assert.equal(r1.rounds, 1, "rpc 1 reads only the check, its two blocks at once");
+    }
+});
+
+test("card evm-landing-reads-batched: on any chain's times, equal times and long gaps included, the search finds the first block at or after the start", async () => {
+  const rand = seeded(0x5eed);
+  for (let k = 0; k < 400; k++) {
+    const head = 2 + Math.floor(rand() * 400);
+    const times: bigint[] = [T0];
+    for (let n = 1; n <= head; n++) {
+      const x = rand();
+      // a Robinhood-like chain: blocks only when there is work, several in one second, or a minute apart
+      times.push(times[n - 1]! + BigInt(x < 0.3 ? 0 : x < 0.9 ? 1 + Math.floor(rand() * 4) : 30 + Math.floor(rand() * 60)));
+    }
+    const lo = times[0]! * 1000n + 1n, hiMs = times[head]! * 1000n;
+    const start = lo + BigInt(Math.floor(rand() * Number(hiMs - lo + 1n)));
+    const want = times.findIndex((t) => t * 1000n >= start);
+    const c = { ...C3(), head, finalized: Math.max(0, head - 10), ts: (n: number) => times[n]! };
+    const r0 = blockRounds(pair(c, c)[0]);
+    const got = await evmEpochBlock([r0.rpc, pair(c, c)[1]], start);
+    assert.equal(got.number, BigInt(want), `case ${k}: head ${head}, start ${start}`);
+    // the halving taken whenever a guess does not halve the span: about two steps per halving at worst, and the check
+    assert.ok(r0.rounds <= 2 * Math.ceil(Math.log2(head + 1)) + 3, `case ${k}: ${r0.rounds} rounds for ${head} blocks`);
+  }
+});
+
+test("card evm-landing-reads-batched: a dense chain's runs of 16 to 40 blocks on one second, the start a whole minute 1 to 8 s back: the first block in at most MOST_DENSE rounds", async () => {
+  // review of 62112b9b4, P2: a pace from the newest block and the block below it, both on one second, stepped back as
+  // slowly as at the period's start and threw past 64 steps at 25 and 40 blocks a second
+  const rand = seeded(0xd15e);
+  for (let k = 0; k < 120; k++) {
+    const head = 2_000 + Math.floor(rand() * 200_000);
+    const times: bigint[] = [T0];
+    for (let n = 1; n <= head; n++) times.push(times[n - 1]! + (rand() < 1 / (16 + Math.floor(rand() * 25)) ? 1n : 0n));
+    // the newest blocks one run of 16 to 40 on one second
+    const run = 16 + Math.floor(rand() * 25);
+    for (let n = head - run + 1; n <= head; n++) times[n] = times[head - run]! + 1n;
+    const back = BigInt(1 + Math.floor(rand() * 8));
+    const off = toMinute(times[head]!, back);
+    for (let n = 0; n <= head; n++) times[n] = times[n]! + off;
+    const start = (times[head]! - back) * 1000n;
+    if (start <= times[0]! * 1000n) continue;
+    const want = times.findIndex((t) => t * 1000n >= start);
+    const c = { ...C3(), head, finalized: Math.max(0, head - 10), ts: (n: number) => times[n]! };
+    const r0 = blockRounds(pair(c, c)[0]);
+    const got = await evmEpochBlock([r0.rpc, pair(c, c)[1]], start);
+    assert.equal(got.number, BigInt(want), `case ${k}: head ${head}, start ${start}`);
+    assert.ok(r0.rounds <= MOST_DENSE, `case ${k}: ${r0.rounds} rounds for ${head} blocks, a run of ${run}, ${back} s back`);
+  }
+});
+
+test("card evm-landing-reads-batched: a held period's first block is read again by number on both RPCs, never searched again", async () => {
+  const c = { ...CB(), head: 31 };
+  const log: string[] = [];
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c, { log }, { log }), feeRpcs: freshOnly(c, 2, []), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+  await p.holdFee(EPOCH);
+  c.head = 45;
+  log.length = 0;
+  await p.holdFee(EPOCH);
+  // block 30 on each RPC (the held block's check, then the depth's own), never the newest block, never a search
+  const blocks = log.filter((x) => x.startsWith("eth_getBlockByNumber"));
+  assert.ok(blocks.length > 0 && blocks.every((x) => x === `eth_getBlockByNumber ["${q(30)}",false]`), JSON.stringify(blocks));
+  // a reorg of the held block, at the turn again: the search runs again and holds the new block
+  const old = c.hashOf;
+  c.hashOf = (n) => (n === 30 ? h32("reorged 30") : old(n));
+  c.head = 31;
+  log.length = 0;
+  await p.holdFee(EPOCH);
+  assert.ok(log.some((x) => x.includes('"latest"')), "the search read the newest block again");
+  log.length = 0;
+  await p.holdFee(EPOCH);
+  assert.ok(!log.some((x) => x.includes('"latest"')), "and the new block is held");
+});
+
+test("card evm-landing-reads-batched: a round asks the finalized anchor and the pool's five views together, on each RPC", async () => {
+  const c = C3();
+  const [a, b] = pair(c, c);
+  const seen = [0, 1].map(() => ({ live: 0, most: 0, asked: [] as string[] }));
+  const held = (r: EvmRpc, s: (typeof seen)[number]): EvmRpc =>
+    Object.assign(async (m: string, p: readonly unknown[]) => {
+      const one = m === "eth_call" || (m === "eth_getBlockByNumber" && p[0] === "finalized");
+      if (!one) return r(m, p);
+      s.live++;
+      s.most = Math.max(s.most, s.live);
+      s.asked.push(m === "eth_call" ? String((p[0] as { data: string }).data).slice(0, 10) : "finalized");
+      try {
+        await new Promise((x) => setImmediate(x));
+        return await r(m, p);
+      } finally {
+        s.live--;
+      }
+    }, { url: r.url });
+  await syncOn([held(a, seen[0]!), held(b, seen[1]!)], async () => {}).trees(after(25));
+  for (const [k, s] of seen.entries()) assert.ok(s.most >= 6, `rpc ${k}: at most ${s.most} of the round's reads at once (${JSON.stringify(s.asked)})`);
+});
+
 // ---- bind ----
 
 const EPOCH = 1_800_000_060_000n; // block 30's time is T0 + 60 s: the epoch's first block
@@ -2027,7 +2197,8 @@ const READS: Read[] = [
   { name: "the tree sync's view (currentRoot)", side: 1, hit: viewCall("currentRoot()"), what: /^rpc 1 currentRoot\(\): /, run: (r, s) => syncOn(r, s).trees(after(25)) },
   { name: "the tree sync's root time view (stateRootTimes)", side: 1, hit: viewCall("stateRootTimes(uint256)"), what: /^rpc 1 stateRootTimes\(root\): /, run: (r, s) => syncOn(r, s).trees(after(25)) },
   { name: "the tree sync's depthAt block on its own chain", side: 1, hit: byNumber(q(30)), what: /^rpc 1 block 30: /, run: (r, s) => syncOn(r, s).depthAt(30n, undefined, c3.hashOf(30)) },
-  { name: "evmEpochBlock's search on rpc 0", side: 0, hit: byNumber(q(99)), what: /^rpc 0 block 99: /, run: (r, s) => evmEpochBlock(r, START, undefined, s) },
+  // the paced search's first guess on C3 (2 s blocks) is block 41 with 40 beside it: block 40 is the one before the start
+  { name: "evmEpochBlock's search on rpc 0", side: 0, hit: byNumber(q(40)), what: /^rpc 0 block 40: /, run: (r, s) => evmEpochBlock(r, START, undefined, s) },
   { name: "evmEpochBlock's read of the first block on both", side: 1, hit: byNumber(q(41)), what: /^rpc 1 block 41: /, run: (r, s) => evmEpochBlock(r, START, undefined, s) },
   { name: "bind's evmLatestHigh", side: 1, hit: byNumber("latest"), what: /^rpc 1 latest block: /, run: (r, s) => bindOn(r, r, s) },
 ];

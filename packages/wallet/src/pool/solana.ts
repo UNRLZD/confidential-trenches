@@ -46,6 +46,7 @@ import { base58, base64 } from "@scure/base";
 import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import { POOL_TESTNET } from "./network.ts";
 import type { Ladder } from "./ladder.ts";
+import { SOL_FINISH_LEAST, SOL_GRID, SOL_NOTE_FLOOR, type PieceRule } from "./pieces.ts";
 import { bindNow, perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** SOL's ladder: one = 0.001 SOL (the program's MIN_DEPOSIT), from 0.01 SOL [design: the owner's $2 floor, OD:268, in kind]. */
@@ -58,6 +59,9 @@ export const SOL_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 10_000_0
  * SOL_LADDER: the least note a move into the pool makes is still 0.01 SOL.
  */
 export const SOL_PIECE_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 5_000_000n });
+/** The Solana pool's piece rule (./pieces.ts, card every-lamport-can-move): the 0.001 SOL grid, the 5,000,000 floor and
+ *  the piece ladder, whose rungs and the four finishing sizes are every size a release may take. */
+export const SOL_PIECES: PieceRule = Object.freeze({ grid: SOL_GRID, floor: SOL_NOTE_FLOOR, ladder: SOL_PIECE_LADDER, least: SOL_FINISH_LEAST });
 export const SOL_EPOCH_MS = 60_000n;
 /** The kit's send margin (M356 (1)): 90 s. */
 export const SOL_SEND_MARGIN_MS = SOLANA_POOL_SEND_MARGIN_MS;
@@ -557,6 +561,7 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
     chain: "sol",
     scope,
     ladder: SOL_PIECE_LADDER,
+    pieces: SOL_PIECES,
     piecesMax: SOLANA_POOL_BUY_PIECES_MAX,
     epochMs: SOL_EPOCH_MS,
     lifeMs: SOL_LIFE_MS,
