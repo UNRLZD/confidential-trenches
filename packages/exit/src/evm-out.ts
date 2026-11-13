@@ -175,12 +175,19 @@ async function sweep(rpcs: readonly [EvmRpc, EvmRpc], chain: Chain, chainId: big
 
 // ---------- the exit ----------
 
+/** The command's read of one RPC: 15 s an answer, a transport fault (no connection, a dropped one, a timeout, a 429, a
+ *  5xx) read again within 60 s, and no credentials or referrer sent. The fork run (scripts/evm-fork.ts) reads the same
+ *  way. `fetchFn`: a test's fetch. */
+export function exitEvmRpc(url: string, fetchFn?: (u: string, i: RequestInit) => Promise<Response>): EvmRpc {
+  return solanaJsonRpc(url, { timeoutMs: 15_000, retry: { deadlineMs: 60_000, backoffMs: 1_000 }, init: { credentials: "omit", referrerPolicy: "no-referrer" }, ...(fetchFn === undefined ? {} : { fetch: fetchFn }) }) as EvmRpc;
+}
+
 /** The chain's pin, its pair checked to be two providers on the chain. */
 async function pairOf(chain: Chain, ctx: ExitCtx, opts: ExitEvmOpts): Promise<{ pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc]; chainId: bigint }> {
   const pin = EVM_POOLS[chain];
   if (pin === undefined) return refuse(`${chain}: no pinned pool`);
   const chainId = EVM_CHAIN_IDS[chain];
-  const rpcs = opts.rpcs ?? ([0, 1].map((k) => solanaJsonRpc(ctx.rpcs[k]!, { timeoutMs: 15_000, retry: { deadlineMs: 60_000, backoffMs: 1_000 }, init: { credentials: "omit", referrerPolicy: "no-referrer" } })) as [EvmRpc, EvmRpc]);
+  const rpcs = opts.rpcs ?? ([0, 1].map((k) => exitEvmRpc(ctx.rpcs[k]!)) as [EvmRpc, EvmRpc]);
   if (solanaSameProvider(rpcs[0], rpcs[1])) refuse(`${chain}: one RPC twice is one read`);
   const ids = await both(rpcs, async (r) => quantity(await r("eth_chainId", []), "eth_chainId"));
   if (ids[0] !== chainId || ids[1] !== chainId) refuse(`${chain}: the RPCs are on chains ${ids[0]} and ${ids[1]}, not ${chainId}`);
