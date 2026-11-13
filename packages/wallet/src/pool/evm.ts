@@ -1948,6 +1948,10 @@ export type EvmPoolArgs = {
   held?: EvmSyncHold;
   /** Where else the pool's logs may be read (EvmSyncArgs history), before the providers of `rpcs`. */
   history?: readonly EvmRpc[];
+  /** The caller's own sync of this pin on `rpcs` (card evm-deposit-on-mainnet): the pool's trees and depths read on it,
+   *  so the page's background readers of the pool (its settle and this queue) keep one history and a round one of them
+   *  made is never read again by the other; with none, a sync of its own on `rpcs`, `held` and `history`. */
+  sync?: Pick<EvmTreeSync, "trees" | "depthAt">;
   /** GET /v1/pool/fee?pool=&epoch= on the helper: its answer, refused unless every field is this pool's and its fee
    * the device's own. */
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
@@ -1982,7 +1986,8 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   addr20(feeRecipient, "feeRecipient");
   if (feeRecipient === pool || BigInt(feeRecipient) === 0n) throw new Error("feeRecipient: the pool or the zero address");
   // the sources: the caller's, then the list's providers (the pair's seats are none)
-  const sync = evmTreeSync({ rpcs, pin: a.pin, history: [...(a.history ?? []), ...a.rpcs], ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
+  if (a.sync !== undefined && (typeof a.sync?.trees !== "function" || typeof a.sync?.depthAt !== "function")) throw new Error("sync: an EVM tree sync");
+  const sync = a.sync ?? evmTreeSync({ rpcs, pin: a.pin, history: [...(a.history ?? []), ...a.rpcs], ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
   const scope = evmPoolScopeOf(pool, EVM_CHAIN_IDS[a.pin.network]);
   const sleep = a.sleep ?? wait;
   // the fee hold (card evm-device-reads-need-no-old-state): the chain fee read at a period's first block, by period,

@@ -942,6 +942,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           feeRpcs: pageEvmFeeRpcs(chain, "pass"),
           held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
           history: [...e.passList, ...pageEvmHistory(e.pin)],
+          // card evm-deposit-on-mainnet: the trees and depths on the pool's pass sync, the settle's, so the two keep one
+          // history and the queue's first pass reads only past the rounds the settle made (a test's planted sync of
+          // `events` alone leaves the pool its own)
+          ...(typeof (e.passSync as Partial<EvmTreeSync>).trees === "function" ? { sync: e.passSync as EvmTreeSync } : {}),
           relayFee: (ep, s) => evmPoolRelayFee(e.pin.pool, ep, s, over.fetch),
           epochFee: evmEpochFee,
         });

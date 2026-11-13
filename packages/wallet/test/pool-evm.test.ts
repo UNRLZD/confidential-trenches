@@ -3236,3 +3236,26 @@ test("card evm-deposit-on-mainnet: a pass's fresh sync after the pool's first de
     assert.equal((g as EvmSyncHeld).events.length, 1, `${network}: the hold rewritten with the pool's leaf below the finalized anchor`);
   }
 });
+
+test("card evm-deposit-on-mainnet: a pool given the page's sync reads its trees on it: after the settle's round on that sync, the queue's first pass reads only the pages past the sync's cursor, on Base and Robinhood", async () => {
+  const getLogsFrom = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    const c = longChain([...deps(PP, [10, 400_000])], 800_000);
+    const log: string[] = [];
+    const rpcs = pair(c, c, { chainId, log }, { chainId });
+    // the settle's round on the page's pass sync: the pool's history up to the finalized anchor, no hold
+    const passSync = evmTreeSync({ rpcs, pin, ...noWait });
+    assert.equal((await passSync.events()).events.length, 2);
+    assert.ok(getLogsFrom(log).includes(1));
+    // a deposit lands past it; the queue's pool on that same sync reads only past its cursor (block 799,990)
+    c.events.push({ block: 800_080, kind: "dep", leaf: BigInt(PP.commitments[2]!), label: BigInt(PP.labels[2]!) });
+    c.head = 800_100;
+    c.finalized = 800_050;
+    log.length = 0;
+    const queue = evmPool({ pin, ...pairs(rpcs), sync: passSync, relayFee: async () => answer(), epochFee: feeRule([]), ...noWait });
+    assert.equal((await queue.trees(after(800_080))).stateTree.size, 3);
+    assert.deepEqual(getLogsFrom(log), [799_991], `${network}: ${getLogsFrom(log)}`);
+  }
+  assert.throws(() => evmPool({ pin: PIN, ...pairs(pair(chain([]), chain([]))), sync: {} as never, relayFee: async () => answer(), epochFee: feeRule([]) }), /sync: an EVM tree sync/);
+});
