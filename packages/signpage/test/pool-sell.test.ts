@@ -45,6 +45,7 @@ import { checkSolanaKeepSweep, checkSolanaSweep, PoolRuleRefused, solanaNoteOf, 
 import { POOL_TRADE_LOCK, tradeLock, type TradeStore } from "../src/trade.ts";
 import { SOL_GRID, SOL_NOTE_FLOOR, changeMoves, isReleaseSize } from "../../wallet/src/pool/pieces.ts";
 import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
+import { isRung } from "../../wallet/src/pool/ladder.ts";
 import { ridePiece } from "../src/pool-withdraw.ts";
 import { poolSellPays } from "../src/pool-sell-dry.ts";
 
@@ -1123,7 +1124,7 @@ const TOKEN_RENT = Number(rentMin(165));
 const VOLUME_RENT = rentMin(137);
 const GROWTH = 2n * 72n * rent.lamportsPerByte * rent.factor;
 for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLANA_PUMP_AMM_PROGRAM]] as const) {
-  test(`a full sell on ${venue}: W's token account and its ${venue} volume account are closed to W after the fill, then all W holds is swept into the pool as W's next return note, W at 0`, async () => {
+  test(`a full sell on ${venue}: W's token account and its ${venue} volume account are closed to W after the fill, then the largest rung of all W holds is swept into the pool as W's next return note, the rest on W`, async () => {
     const ask = { ...ASK, token: VF[venue].mint };
     const back: string[] = [];
     const w = await world({ venue, ataLamports: TOKEN_RENT, volumes: [{ program: volume }] });
@@ -1132,18 +1133,17 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
     const vol = solanaVolumeAccumulator(W.address, volume);
     const a = await runPoolSell(w.host, ask);
     assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-    // the accounts: closed, their rent in W, then W swept to 0
-    // each one open is rent locked: W's token account, its volume account, and W's own lamports outside the pool
-    assert.deepEqual({ tokenAccount: w.c.accounts.get(ata)?.lamports ?? 0, volumeAccount: w.c.accounts.get(vol)?.lamports ?? 0, w: w.c.accounts.get(W.address)?.lamports ?? 0 }, { tokenAccount: 0, volumeAccount: 0, w: 0 });
     // the sweep (card every-lamport-can-move: the sell carries no deposit): W's lamports after the sell (its own, less
     // the sell's fee, the sale in), plus both rents back, less the two teardown frames' fees (S-4 the token close, S-5
-    // the volume close), less the sweep's own fee, mark and page growth: its rest, the note down to the grid, the rest
-    // under the grid one System transfer to the pinned relayer's account in the same transaction (review P3-1 of T1+T2;
-    // never the pool's account, which would hold it past its books for good: review P1-1 of 1d3b96d9c)
+    // the volume close), less the sweep's own fee, mark and page growth: its rest; card pool-amounts-are-standard-sizes:
+    // the note the largest rung of it that leaves W 0 or rent-exempt, the rest staying on W (never paid away)
     const afterSell = BigInt(ENOUGH) + VF[venue].minOut - BigInt(FEE);
     const rest = afterSell + BigInt(TOKEN_RENT) + VOLUME_RENT - 2n * BigInt(FEE) - (BigInt(FEE) + rentMin(17) + GROWTH);
-    const { value: swept, under } = solanaSweepOf(rest);
+    const { value: swept, under } = solanaSweepOf(rest, rentMin(0));
     assert.equal(swept + under, rest);
+    assert.ok(isReleaseSize(SOL_PIECES, swept), String(swept));
+    // the accounts: closed, their rent in W; W holds exactly the rest past the rung
+    assert.deepEqual({ tokenAccount: w.c.accounts.get(ata)?.lamports ?? 0, volumeAccount: w.c.accounts.get(vol)?.lamports ?? 0, w: BigInt(w.c.accounts.get(W.address)?.lamports ?? 0) }, { tokenAccount: 0, volumeAccount: 0, w: under });
     assert.equal(w.c.deposits.length, 1);
     assert.deepEqual(w.c.deposits[0], { pre: preOf(RETURN), value: swept, sweep: true });
     // the sweep sent, the sell lock free: its note INCOMING until the next state read's settle (review L6)
@@ -1160,15 +1160,12 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
       assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction" && base58.encode(base64.decode(c.params[0] as string).subarray(1, 65)) === sig).length, 2);
     }
     const sweep = solanaDecodeMessage(w.c.txs.get(back[2]!)!.tx.subarray(65));
-    // the deposit, then the rest under the grid to the pinned relayer's account; no compute budget, so a sweep that fails on chain
-    // costs W 5,000, its one signature (before P3-1 it paid its whole rest as the priority, landed or not)
+    // the deposit alone; no compute budget, so a sweep that fails on chain costs W 5,000, its one signature
     assert.ok(!sweep.staticKeys.includes(SOLANA_COMPUTE_BUDGET_PROGRAM), "no compute budget");
-    // this world's rest is off the grid, so the sweep is exactly [deposit, System transfer W -> the pinned relayer of
-    // `under`] (mutants L1 and L1b: the transfer left out, or paid to W, fail here at once; paid to the pool, too)
-    assert.ok(under > 0n && under < SOL_GRID, `the rest off the grid: ${under}`);
-    assert.deepEqual(sweep.instructions.map((x) => sweep.staticKeys[x.programIndex]), [PROGRAM, SOLANA_SYSTEM_PROGRAM]);
-    const t = sweep.instructions[1]!;
-    assert.deepEqual([t.accounts.map((i) => sweep.staticKeys[i]), new DataView(t.data.buffer, t.data.byteOffset + 4, 8).getBigUint64(0, true)], [[W.address, FEE_PAYER], under]);
+    // this world's rest is no rung, so the sweep leaves some on W, and still no transfer: the rest is never paid away
+    assert.ok(under > 0n, `the rest past the rung: ${under}`);
+    assert.deepEqual(sweep.instructions.map((x) => sweep.staticKeys[x.programIndex]), [PROGRAM]);
+    assert.ok(!sweep.staticKeys.includes(FEE_PAYER), "nothing to the relayer");
     assert.equal(feeOf(sweep), BigInt(FEE), "a failed landing costs 5,000");
     assert.ok(w.seeds.every((x) => x.every((b) => b === 0)), "every seed copy zeroed");
     assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
@@ -1183,18 +1180,24 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
     for (const p of [0, 1] as const) assert.equal(rentBackCalls.filter((c) => c.p === p && c.method === "getMultipleAccounts" && JSON.stringify(c.params[0]) === list).length, 2, `RPC ${p}`);
     assert.equal(rentBackCalls.filter((c) => c.p === 0 && c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(SOLANA_RENT_SYSVAR)).length, 0, "never on the public seat");
     assert.deepEqual(rentBackCalls.filter((c) => c.method === "getAccountInfo" && (list.includes(c.params[0] as string))).map((c) => c.params[0]), []);
-    // the next load's pass finds W at 0 and every account closed: owed no more
+    // the next load's pass: every account closed, W's rest swept in its own largest rung when that is at the floor or
+    // over, else kept on W, listed at its rest
     await resumeRentBacks(w.host, fakeLocks());
-    assert.equal(w.owed.size, 0);
-    assert.equal(back.length, 3, "nothing more sent");
+    const next = solanaSweepOf(under - (BigInt(FEE) + rentMin(17) + GROWTH), rentMin(0));
+    assert.ok(next.value >= FLOOR && isReleaseSize(SOL_PIECES, next.value), String(next.value));
+    assert.equal(back.length, 4, "one more sweep, of W's rest");
+    assert.deepEqual(w.c.deposits.map((d) => [d.value, d.sweep]), [[swept, true], [next.value, true]]);
+    assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), next.under, "W holds the rest past the second rung");
+    const again = solanaDecodeMessage(w.c.txs.get(back[3]!)!.tx.subarray(65));
+    assert.deepEqual(again.instructions.map((x) => again.staticKeys[x.programIndex]), [PROGRAM], "the deposit alone again");
   });
 }
 
-// Card every-lamport-can-move T2: a full sell returns in ONE deposit, W's sweep after its teardown, on the pool's grid and
-// at least its floor; the rest under the grid is one System transfer to the pinned relayer's account (review P3-1, P1-1), so W ends at
-// exactly 0. The sell itself carries no deposit.
+// Card every-lamport-can-move T2: a full sell returns in ONE deposit, W's sweep after its teardown, at least its floor;
+// card pool-amounts-are-standard-sizes: that deposit is the largest rung of W's rest that leaves W 0 or rent-exempt, and
+// the rest stays on W (never paid away: no transfer). The sell itself carries no deposit.
 for (const venue of ["pump", "pumpswap"] as const) {
-  test(`every lamport can move: a full sell on ${venue} makes exactly one deposit, the sweep, a whole multiple of the grid and at least the floor, its rest one transfer to the pinned relayer's account, W at 0`, async () => {
+  test(`every lamport can move: a full sell on ${venue} makes exactly one deposit, the sweep, the largest rung of W's rest and at least the floor, the rest left on W, no transfer`, async () => {
     const volume = venue === "pump" ? SOLANA_PUMP_PROGRAM : SOLANA_PUMP_AMM_PROGRAM;
     const back: string[] = [];
     const w = await world({ venue, ataLamports: TOKEN_RENT, volumes: [{ program: volume }] });
@@ -1209,23 +1212,19 @@ for (const venue of ["pump", "pumpswap"] as const) {
     assert.equal(w.c.deposits.length, 1, JSON.stringify(w.c.deposits, (_, v) => (typeof v === "bigint" ? String(v) : v)));
     const d = w.c.deposits[0]!;
     assert.equal(d.sweep, true);
-    assert.equal(d.value % SOL_GRID, 0n, `on the grid: ${d.value}`);
+    assert.ok(isRung({ one: SOL_GRID, min: SOL_NOTE_FLOOR }, d.value), `a rung: ${d.value}`);
     assert.ok(d.value >= SOL_NOTE_FLOOR, `at least the floor: ${d.value}`);
-    // W at exactly 0: the runtime charged the sweep's fee and priority, the rents, and the note
-    assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
-    // the sweep (review P3-1 of T1+T2, P1-1 of 1d3b96d9c): the deposit, then the rest under the grid as one System
-    // transfer to the pinned relayer's account (none with a rest of 0); no compute budget, its fee its one signature
+    // W holds the rest past the rung: the runtime charged the sweep's fee, the rents and the note, and nothing else, so
+    // W's rest was what W holds and the note; the note is the largest rung of it that leaves W 0 or rent-exempt
+    const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
+    assert.ok(left > 0n, "this world's rest is no rung: some stays on W");
+    assert.deepEqual(solanaSweepOf(left + d.value, rentMin(0)), { value: d.value, under: left });
+    // the sweep: the deposit alone (no transfer: the rest is never paid away); no compute budget, its fee its one signature
     const sweep = solanaDecodeMessage(w.c.txs.get(back.at(-1)!)!.tx.subarray(65));
     assert.ok(!sweep.staticKeys.includes(SOLANA_COMPUTE_BUDGET_PROGRAM), "no compute budget");
     assert.equal(feeOf(sweep), BigInt(FEE));
-    const pay = sweep.instructions.slice(1);
-    // this world's rest is off the grid: exactly one transfer
-    assert.equal(pay.length, 1);
-    for (const t of pay) {
-      assert.deepEqual([sweep.staticKeys[t.programIndex], ...t.accounts.map((i) => sweep.staticKeys[i])], [SOLANA_SYSTEM_PROGRAM, W.address, FEE_PAYER]);
-      const under = new DataView(t.data.buffer, t.data.byteOffset + 4, 8).getBigUint64(0, true);
-      assert.ok(under > 0n && under < SOL_GRID, String(under));
-    }
+    assert.deepEqual(sweep.instructions.map((x) => sweep.staticKeys[x.programIndex]), [PROGRAM]);
+    assert.ok(!sweep.staticKeys.includes(FEE_PAYER), "nothing to the relayer");
   });
 }
 
