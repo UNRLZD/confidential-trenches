@@ -33,7 +33,7 @@ export const KEY = "evm-buy-and-sell-on-mainnet";
 export const SIGN = "https://confidential.unrealized.trade";
 /** Each part's marks in the bundle, as the sources write them. */
 export const MARKS = Object.freeze({
-  buy: Object.freeze(["buy((address,bytes),", "uniswap-v4"]),
+  buy: Object.freeze(["buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)", "uniswap-v4"]),
   carry: Object.freeze(["owed/carry-evm-open", "owed/carry-evm"]),
   sell: Object.freeze([
     "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",

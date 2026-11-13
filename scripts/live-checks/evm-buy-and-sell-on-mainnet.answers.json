@@ -1,16 +1,16 @@
 {
  "key": "evm-buy-and-sell-on-mainnet",
- "recorded": "good 2026-11-12T22:51:10.956Z (the Mac, --local: this change's SIGN_HOST build, the sources of the commit that carries this file: the EVM buy, the carry and the sale open on mainnet); bad_live_before 2026-11-12T22:51:11.724Z (the Mac, the live SIGN_HOST as served then: no EVM buy, no carry, no Sell typed data)",
+ "recorded": "good 2026-11-13T02:56:31.219Z (the Mac, --local: this change's SIGN_HOST build, the sources of the commit that carries this file: the EVM buy, the carry and the sale open on mainnet); bad_live_before 2026-11-12T22:51:11.724Z (the Mac, the live SIGN_HOST as served then: no EVM buy, no carry, no Sell typed data)",
  "good": {
-  "readAt": "2026-11-12T22:51:10.956Z",
+  "readAt": "2026-11-13T02:56:31.219Z",
   "from": "local build",
   "page": {
-   "pin": "sha384-DJ+etk0TpAzobagn3XIEh9Byldd0n8U0RF7ipFJzFGyJUqUDm1eXjahL0zrCbHs9",
-   "sha384": "sha384-DJ+etk0TpAzobagn3XIEh9Byldd0n8U0RF7ipFJzFGyJUqUDm1eXjahL0zrCbHs9",
+   "pin": "sha384-UfrtXUSdgxhpEzDJqQR/squ6Hi1pz00notZO9tngcwb7OIOo1ug1tCJ5Ww2YMtq/",
+   "sha384": "sha384-UfrtXUSdgxhpEzDJqQR/squ6Hi1pz00notZO9tngcwb7OIOo1ug1tCJ5Ww2YMtq/",
    "rule": true,
    "withdraw": 2,
    "buy": [
-    "buy((address,bytes),",
+    "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)",
     "uniswap-v4"
    ],
    "carry": [

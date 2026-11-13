@@ -224,7 +224,7 @@ async function carryOnce(p: Pass, o: Owed, again?: NoteRecord): Promise<EvmCarry
   if (sim.some((s) => s.status === "rejected")) return "sim_failed";
   // a sign out since the reads: nothing signed or written after it
   if (h.signal?.aborted) return "pending";
-  const wk = (h.derive ?? freshWallet)(seed, "evm", o.l, o.j);
+  const wk = h.derive ? h.derive(seed, "evm", o.l, o.j) : freshWallet(seed, "evm", o.l, o.j);
   let raw: Uint8Array;
   try {
     if (lower(wk.address) !== o.w) throw new Error("carry: W is not the release's");
@@ -336,7 +336,7 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
       if (e === undefined || e.recipient === null) continue;
       const l = n.leaf!.label;
       const j = jOf(n.ref);
-      const wk = (h.derive ?? freshWallet)(seed, "evm", l, j);
+      const wk = h.derive ? h.derive(seed, "evm", l, j) : freshWallet(seed, "evm", l, j);
       wk.secretKey.fill(0);
       const w = lower(wk.address);
       // a release of the note to another W is not the user's W's money; a W ended, or waiting for its time, is not drawn
