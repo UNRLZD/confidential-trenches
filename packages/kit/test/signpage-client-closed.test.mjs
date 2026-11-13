@@ -24,8 +24,10 @@ import { FIXTURES, STATE } from "./signpage-fixtures.ts";
 const URL_ = "https://confidential.unrealized.trade/";
 const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 const tick = () => new Promise((ok) => setImmediate(ok));
+// bounded by time, not by a count of ticks: 400 ticks can pass in under 4 ms on a busy runner, before the handshake
+// has answered (CI run 43372272145, "never: READY" 3.7 ms into the test)
 const until = async (ok, what) => {
-  for (let i = 0; i < 400; i++) {
+  for (const end = Date.now() + 5_000; Date.now() < end; ) {
     if (ok()) return;
     await tick();
   }
