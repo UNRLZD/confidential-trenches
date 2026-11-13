@@ -1954,9 +1954,10 @@ export async function evmLatestHigh(rpcs: readonly [EvmRpc, EvmRpc], signal?: Ab
  * block; while no block before the start is known, each next step goes where the chain's pace from the newest block
  * puts the start, and at least 16 blocks below, twice that the step after (a gallop); once one is known, the guess is the
  * height the pace between the two blocks either side puts at the start, and a guess that does not halve the span is
- * followed by a halving. From a whole-minute start 1 s to 10 min back, RPC 0 reads in at most 7 rounds at Base's 5
- * blocks a second and 9 at Robinhood's 9.4, the check included, where doubling then halving took 13 (a Robinhood
- * mainnet copy of 13 Nov 09:58Z, 3.3 s at its 250 ms answers); the check on both RPCs reads its two blocks at once.
+ * followed by a halving. From a whole-minute start 1 s to 10 min back, with the newest block at any place in its second,
+ * RPC 0 reads in at most 8 rounds at Base's 5 blocks a second and 11 on Robinhood's runs of 9 to 16, the check
+ * included, where doubling then halving took 13 (a Robinhood mainnet copy of 13 Nov 09:58Z, 3.3 s at its 250 ms
+ * answers); the check on both RPCs reads its two blocks at once.
  */
 export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartMs: bigint, signal?: AbortSignal, sleep: Sleep = wait): Promise<EvmBlock> {
   checkEvmRpcs(rpcs);

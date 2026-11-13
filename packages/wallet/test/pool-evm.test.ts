@@ -560,10 +560,10 @@ const blockRounds = (r: EvmRpc) => {
   const out = { rounds: 0, most: 0, reads: [] as string[], rpc: r };
   let live = 0;
   out.rpc = Object.assign(async (m: string, p: readonly unknown[]) => {
-    if (m !== "eth_getBlockByNumber" || !/^0x/.test(String(p[0]))) return r(m, p);
     // a search needs each block's time only: headers, never the block's transactions (a fork's upstream log of 13 Nov
-    // showed full blocks, anvil's own fetches below its fork block)
-    assert.equal(p[1], false, `block ${String(p[0])} asked with its transactions`);
+    // showed full blocks, anvil's own fetches below its fork block), the newest and finalized tags' reads too
+    if (m === "eth_getBlockByNumber") assert.equal(p[1], false, `block ${String(p[0])} asked with its transactions`);
+    if (m !== "eth_getBlockByNumber" || !/^0x/.test(String(p[0]))) return r(m, p);
     if (live++ === 0) out.rounds++;
     out.most = Math.max(out.most, live);
     out.reads.push(String(p[0]));
@@ -587,19 +587,34 @@ const seeded = (seed: number) => () => {
 /** The seconds that put `t - back` on a whole minute, as a period's start always is (holdFee and bind refuse any other). */
 // rounds on RPC 0, the check included, on whole-minute starts (review of 71ed06f71, P2): at 71ed06f71 Base took 8,
 // Robinhood 15 and the dense chains 16, a guess at hi itself each step while hi shared the start's second
-const MOST_BASE = 7, MOST_RH = 9, MOST_DENSE = 13;
+// with the newest block at each place in its second (review of 22a42d62f, P3-1): Base 8, Robinhood 9 at 9.4 a second
+// and 11 on its runs of 9 to 16
+const MOST_BASE = 8, MOST_RH = 9, MOST_RH_RUNS = 11, MOST_DENSE = 13;
+/** A Robinhood-like chain whose seconds hold 9 to 16 blocks (seeded), from 30,000 blocks below `top` up; below, 12.5 a second. */
+const robinhoodRuns = (top: number) => {
+  const rand = seeded(0x9a16);
+  const from = top - 30_000;
+  const times: bigint[] = [];
+  for (let t = T0 + 1_000_000n, left = 0; times.length <= top - from; left--) {
+    if (left === 0) (t++, (left = 9 + Math.floor(rand() * 8)));
+    times.push(t);
+  }
+  return (n: number) => (n >= from ? times[n - from]! : times[0]! - BigInt(Math.ceil((from - n) / 12.5)));
+};
 const toMinute = (t: bigint, back: bigint) => (((back - t) % 60n) + 60n) % 60n;
 
 test("card evm-landing-reads-batched: on a chain at its real pace the search is a few rounds, a guess and the block below it at once, then both checks in one round", async () => {
   // Base at 5 blocks a second (mainnet.base.org, 13 Nov 11:32Z: 100 blocks in 20 s) and Robinhood Chain at 9.4 with up
-  // to 16 on one second; a block every 2 s; the newest block 2,000,000; the start, a whole minute, 1 s to 10 min back
-  const HEAD = 2_000_000;
+  // to 16 on one second; a block every 2 s; the newest block 2,000,000 to 2,000,009, so it is at each place in its second
+  // (the first, the last or between: review of 22a42d62f, P3-1); the start, a whole minute, 1 s to 10 min back
   const paces: [string, (n: number) => bigint, number][] = [
     ["Base 5/s", (n) => T0 + BigInt(Math.floor(n / 5)), MOST_BASE],
     ["Robinhood 9.4/s", (n) => T0 + BigInt(Math.floor(n / 9.4)), MOST_RH],
     ["2 s blocks", (n) => T0 + 2n * BigInt(n), 3],
+    ["Robinhood 9 to 16 a second", robinhoodRuns(2_000_010), MOST_RH_RUNS],
   ];
   for (const [name, at, most] of paces)
+    for (let HEAD = 2_000_000; HEAD < 2_000_010; HEAD++)
     for (const back of [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 10n, 15n, 30n, 55n, 600n]) {
       const off = toMinute(at(HEAD), back);
       const ts = (n: number) => at(n) + off;
@@ -610,7 +625,7 @@ test("card evm-landing-reads-batched: on a chain at its real pace the search is 
       const [a, b] = pair(c, c);
       const r0 = blockRounds(a), r1 = blockRounds(b);
       assert.equal((await evmEpochBlock([r0.rpc, r1.rpc], start)).number, BigInt(want), `${name}, ${back} s back`);
-      assert.ok(r0.rounds <= most, `${name}, ${back} s back: rpc 0 read in ${r0.rounds} rounds (${JSON.stringify(r0.reads)})`);
+      assert.ok(r0.rounds <= most, `${name}, head ${HEAD}, ${back} s back: rpc 0 read in ${r0.rounds} rounds (${JSON.stringify(r0.reads)})`);
       assert.equal(r0.most, 2, "a round's two blocks asked at once");
       assert.equal(r1.rounds, 1, "rpc 1 reads only the check, its two blocks at once");
     }
