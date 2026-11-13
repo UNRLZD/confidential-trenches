@@ -1409,9 +1409,24 @@ test("an owed claim is tried again on every load though W reads the same, and cl
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   await settle(w);
   const loaded: PoolSellHost = { ...w.host, wallets: async () => [{ ...wallet(AMOUNT, false, VF.pumpswap.mint), holdings: { native: 1n, tokens: new Map([[VF.pumpswap.mint, { amount: 0n, frozen: false }]]), unreadable: [] } }] };
-  for (let i = 0; i < 2; i++) {
+  // card pool-amounts-are-standard-sizes: the loads first sweep W's rest past the sale's rung, one rung a load (the claim
+  // still owed), until the rest is under the floor
+  let sent = 0;
+  for (;;) {
     w.told.length = 0;
     await resumeRentBacks(loaded, fakeLocks());
+    if (w.told.at(-1)?.state !== "sent") break;
+    sent++;
+    assert.ok(sent < 12, "the rest goes in rungs, then stops");
+    assert.ok(isRung({ one: SOL_GRID, min: SOL_NOTE_FLOOR }, w.c.deposits.at(-1)!.value));
+  }
+  assert.ok(sent > 0, "the rest past the sale's rung swept");
+  // then, W read the same, the claim is tried again on every load
+  for (let i = 0; i < 2; i++) {
+    if (i > 0) {
+      w.told.length = 0;
+      await resumeRentBacks(loaded, fakeLocks());
+    }
     assert.equal(w.told.at(-1)?.state, "owed", JSON.stringify(w.told));
   }
   plant.claimFails = false;
