@@ -1,8 +1,8 @@
 // node --test scripts/live-checks/pool-deposit-follow.test.mjs: the live check replays its recorded answers
 // (pool-deposit-follow.answers.json). good: this card's build, re-recorded by card pool-deposit-op-txs (the run's end read
 // from its {end, txs}, the follow function re-cut into the excerpt from that build), and by card evm-deposit-route-mainnet
-// (the wiring, the follow's deps with its deposit and refund functions and depositFrom re-cut from that build), and by card evm-first-proof-inside-ten-seconds (the follow function re-cut from its build: the
-// costs a round under the floor holds): PASS. bad: origin/main 6616059d's build (release-91), and
+// (the wiring, the follow's deps with its deposit and refund functions and depositFrom re-cut from that build), and by card evm-first-proof-inside-ten-seconds (the follow function re-cut from its build, twice: the
+// costs a round under the floor holds, then only under it and never across a clock set back): PASS. bad: origin/main 6616059d's build (release-91), and
 // liveBefore: SIGN_HOST before this card's deploy: each FAIL, each mark named. Planted on the good one: another /app.js,
 // no pin, each mark taken away: each FAIL. Planted in the bundle's own excerpt (pool-deposit-follow.excerpt.txt, cut from
 // this build's public/app.js: the floor and its read, the quote check, the wiring, the follow's page deps, its reads and
@@ -76,6 +76,9 @@ const PLANTED = [
   // card evm-first-proof-inside-ten-seconds: a carry on costs held from an earlier round, not read in its own
   ["a carry on held costs", new RegExp(`\\?(${N}):null,(${N})=(${N})>=(${N})\\.ladder\\.min\\?`), "?$1:null,$2=$3>=$4.ladder.min?$1?.c??0n:", ["chainFirst"]],
   ["the costs held past a balance that moved", new RegExp(`&&(${N})\\.low===(${N})&&`), "&&", ["chainFirst"]],
+  // review of evm-first-proof-inside-ten-seconds: held across a clock set back, and held over the floor
+  ["the costs held across a clock set back", new RegExp(`&&(${N})>=(${N})\\.at&&`), "&&", ["chainFirst"]],
+  ["the costs held over the floor", new RegExp(`=(${N})!==null&&(${N})<\\1\\.floor\\?`), "=$1!==null?", ["chainFirst"]],
   ["a fixed source of another pool's scope let through (H1)", new RegExp(`if\\((${N})\\.s!==(${N})\\|\\|`), "if(", ["fromUX"]],
   ["a fixed source whose U is not the op's U_X let through (review 2 L2)", new RegExp(`\\|\\|(${N})\\((${N})\\)\\.address!==\\2\\.u\\)return\\{error:\`not_allowed\`\\};`), ")return{error:`not_allowed`};", ["fromUX"]],
   ["the kind drops the fixed source (review 2 L1)", new RegExp(`=await (${N})\\((${N}),(${N}),(${N})\\)\\}finally`), "=await $1($2,$3)}finally", ["fromUX"]],
