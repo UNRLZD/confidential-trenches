@@ -57,7 +57,7 @@
 // Nothing here logs.
 import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { evmPoolBuyQuote, evmPoolIndexPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
-import { evmHookListed } from "../../kit/src/trade/evm/sell-unpinned.ts";
+import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
@@ -188,13 +188,6 @@ export const EVM_BUY_LAG_BLOCKS = 400n;
 export const EVM_BUY_HEAD_SPREAD = 5_000n;
 /** A busy wait's slices: it ends within one once this tab starts a sign out (\`stopped\`). */
 const STOP_POLL_MS = 250;
-/** The standard v4 (fee, tick spacing) pairs and v3 fee tiers the first quote asks in turn (the kit's own standard set,
- *  checks/evm/quote.ts V4_KEYS and V3_FEES). */
-const V4_FIRST: readonly (readonly [number, number])[] = [[3000, 60], [10000, 200], [500, 10], [100, 1]];
-const V3_FIRST: readonly number[] = [3000, 500, 10000, 100];
-const ZERO = "0x0000000000000000000000000000000000000000";
-const REQUOTE = new Set(["below_reference", "native_first", "over_gas_floor", "no_quote"]);
-
 type Code = Exclude<EvmPoolBuyAnswer, { stage: TradeStage }>["error"];
 class Refused extends Error {
   readonly code: Code;
@@ -208,81 +201,20 @@ const no = (code: Code = "failed"): never => {
 };
 const lower = (s: string): string => s.toLowerCase();
 
-/** The route that last quoted per chain and token, this page's session: a tap asks it first (one quote a tap). */
-const LAST_ROUTE = new Map<string, EvmRoute>();
-/** For the tests: forgets every token's last route. */
-export const evmLastRouteReset = (): void => LAST_ROUTE.clear();
+/** For the tests: forgets every token's last route (the kit's evmBuyTapReset). */
+export const evmLastRouteReset = (): void => evmBuyTapReset();
 
-/** The device's quote of the ask, one quote where it can (card evm-buy-and-sell-on-mainnet: 8 standard shapes asked in
- *  turn were 8 quotes a tap, and a token whose pools are a launchpad's answered no_quote on all 8):
- *  - first, the route that last quoted for the token this session;
- *  - else, with the chain's pool index served, the first of the token's own v4 pools in it that a buy may take: paired
- *    with the native asset or WETH, and hookless or a launchpad hook the venue lists with that launchpad's fee and tick
- *    spacing (the kit's one rule, sell-unpinned.ts evmHookListed, the sell builder's: a coin bought through another hook
- *    could have no route out). With no index: the first standard hookless shape;
- *  - then the first standard v3 fee tier (the index holds v4 pools only).
- *  A refusal that names the kit's own best route (REQUOTE) asks that route once where the same hook rule takes it: the
- *  kit's best route holds every other shape, so three quotes a tap at most. No route the rules take at all (the
- *  index holds pools of the token, none a buy may take, and no v3 pool quotes): not_allowed, the page does not trade
- *  the coin; any other refusal of every route: quote_check_failed. */
+/** The device's quote of the ask: the kit's buy tap quote (kit trade/evm/buy-tap.ts evmPoolBuyQuoteTap, three kit
+ *  quotes at most, the token's last route, its indexed pools a buy may take, the kit's own best route) on this page's
+ *  host; a tap no route takes answers its name (not_allowed, quote_check_failed). */
 async function quoteOf(h: EvmPoolBuyHost, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
-  const v = h.venues[network];
-  if (v === undefined) return no("not_allowed");
-  const t = lower(token);
-  const weth = lower(v.weth);
-  const known = `${network}:${t}`;
-  const v4Of = (k: EvmPoolKey): EvmRoute | null => {
-    const other = k.currency0 === t ? k.currency1 : k.currency1 === t ? k.currency0 : null;
-    if (other === null || (other !== ZERO && other !== weth)) return null;
-    if (k.hooks !== ZERO && !evmHookListed(network, k.hooks, k.fee, k.tickSpacing)) return null;
-    return { venue: "uniswap-v4", currencyIn: other, hops: [{ currency: t, fee: k.fee, tickSpacing: k.tickSpacing, hooks: k.hooks, hookData: "0x" }] };
-  };
-  const indexed = h.indexPools?.(network, t) ?? null;
-  const v4: EvmRoute[] =
-    indexed !== null ? indexed.flatMap((k) => v4Of(k) ?? [])
-    : [
-        ...V4_FIRST.map(([fee, tickSpacing]): EvmRoute => ({ venue: "uniswap-v4", currencyIn: ZERO, hops: [{ currency: t, fee, tickSpacing, hooks: ZERO, hookData: "0x" }] })),
-        ...(v.hookedPools ?? []).map((p): EvmRoute => ({ venue: "uniswap-v4", currencyIn: p.from === "native" ? ZERO : weth, hops: [{ currency: t, fee: p.fee, tickSpacing: p.tickSpacing, hooks: lower(p.hooks), hookData: "0x" }] })),
-      ];
-  const v3 = V3_FIRST.map((fee): EvmRoute => ({ venue: "uniswap-v3", tokens: [v.weth, t], fees: [fee] }));
-  const last = LAST_ROUTE.get(known);
-  const seen = new Set<string>();
-  const shapes = [...(last === undefined ? [] : [last]), ...v4, ...v3].filter((r) => {
-    const k = JSON.stringify(r);
-    return !seen.has(k) && (seen.add(k), true);
-  });
-  const ask = async (route: EvmRoute) => {
-    const q = await h.quote({ chain: network, token, amountIn, slippageBps, route });
-    LAST_ROUTE.set(known, q.route);
-    return q;
-  };
-  // three kit quotes a tap at most, however many pools the index holds (anyone can make pools: CASHCAT's 160 hookless
-  // spam-fee pools on Robinhood took 62 quotes and 144 s, 2026-11-13): the first shape, then the first v3 tier, and
-  // after a refusal that names the kit's own best route, that route once where the page's hook rule takes it (v4Of's:
-  // from the native asset or WETH, every hop hookless or a listed launchpad's)
-  const takes = (r: EvmRoute) =>
-    r.venue === "uniswap-v3" || ((r.currencyIn === ZERO || lower(r.currencyIn) === weth) && r.hops.every((p) => p.hooks === ZERO || evmHookListed(network, p.hooks, p.fee, p.tickSpacing)));
-  const tries = [shapes[0]!, ...shapes.slice(1).filter((r) => r.venue === "uniswap-v3").slice(0, 1)];
-  let refused = false;
-  for (const route of tries) {
-    try {
-      return await ask(route);
-    } catch (e) {
-      const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
-      if (typeof err?.code === "string" && REQUOTE.has(err.code) && err.reference && takes(err.reference.route)) return ask(err.reference.route);
-      if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
-      if (err?.code !== "no_quote") refused = true;
-    }
+  try {
+    return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
+  } catch (e) {
+    if (e instanceof EvmBuyTapRefused) return no(e.code);
+    throw e;
   }
-  // a kept route that quotes no more is asked last no more
-  LAST_ROUTE.delete(known);
-  // pools of the token, none a buy may take, and nothing else quotes: a coin the page does not trade
-  return no(!refused && indexed !== null && indexed.length > 0 && v4.length === 0 ? "not_allowed" : "quote_check_failed");
 }
-/** The tap's own quote (quoteOf) with only what it reads: the venue list, the kit's quote and the index's pools; for
- *  the read-only live check (scripts/live-checks/evm-buy-and-sell-on-mainnet.mjs), which signs nothing. */
-export const evmBuyQuoteOf = (h: Pick<EvmPoolBuyHost, "venues" | "quote" | "indexPools">, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> =>
-  quoteOf(h as EvmPoolBuyHost, network, token, amountIn, slippageBps);
 
 /** One pool.buy on an EVM chain: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). */
 export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<EvmPoolBuyAnswer> {

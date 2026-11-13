@@ -92,8 +92,9 @@ import { WITHDRAW_BOUNDARY_LAG_MS, finishPoolOnward, runPoolWithdraw, solanaOnwa
 import { EVM_WITHDRAW_BOUNDARY_LAG_MS, evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
 import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { evmPoolIndexSync, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../kit/src/checks/evm/pool-index.ts";
-import { evmJsonRpc, evmPoolIndexUse } from "../../kit/src/checks/evm/quote.ts";
+import type { EvmPoolIndexData, EvmPoolIndexSync } from "../../kit/src/checks/evm/pool-index.ts";
+import { evmPoolIndexUse } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmIndexStore, type EvmIndexStore } from "./evm-index-store.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -1210,7 +1211,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const prev = evmIndex.get(chain) ?? null;
       const s = over.evmIndexSync
         ? await over.evmIndexSync(chain, prev)
-        : await evmPoolIndexSync(prev, { chainId: v!.chainId, poolManager: v!.poolManager!, readers: [evmJsonRpc(ix!.readers[0], passFetch, 64 << 20), evmJsonRpc(ix!.readers[1], passFetch, 64 << 20)], depth: v!.scan!.depth, span: ix!.span, margin: ix!.margin, cap: ix!.cap, perBatch: ix!.perBatch, parallel: ix!.parallel });
+        : (await evmPoolIndexRefresh(network, prev, passFetch)).sync;
+      if (s === null) return;
       if (signal.aborted) return;
       // a partial sync keeps what it proved for the next; only a whole one is served and kept
       if (s.index !== null) evmIndex.set(chain, s.index);
