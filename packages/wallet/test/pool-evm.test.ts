@@ -581,18 +581,28 @@ const seeded = (seed: number) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 
-test("card evm-landing-reads-batched: on a 2 s chain the first guess is the period's first block, one round, then both checks in one round", async () => {
-  for (const [back, first] of [[30, 85], [120, 40]] as const) {
-    const c = C3();
-    const start = (T0 + 200n - BigInt(back)) * 1000n - 1000n; // the head (100) is at T0 + 200 s; between first-1 and first
-    const [a, b] = pair(c, c);
-    const r0 = blockRounds(a), r1 = blockRounds(b);
-    assert.equal((await evmEpochBlock([r0.rpc, r1.rpc], start)).number, BigInt(first));
-    assert.equal(r0.rounds, 2, `${back} s back: rpc 0 read ${JSON.stringify(r0.reads)}`);
-    assert.equal(r0.most, 2, "a round's two blocks asked at once");
-    assert.deepEqual(r0.reads.slice(0, 2).sort(), [q(first - 1), q(first)].sort());
-    assert.equal(r1.rounds, 1, "rpc 1 reads only the check, its two blocks at once");
-  }
+test("card evm-landing-reads-batched: on a chain at its real pace the search is a few rounds, a guess and the block below it at once, then both checks in one round", async () => {
+  // Base at 5 blocks a second (mainnet.base.org, 13 Nov 11:32Z: 100 blocks in 20 s) and Robinhood Chain at 9.4 with up
+  // to 16 on one second; a block every 2 s; the newest block 2,000,000; the start 1 s to 10 min back
+  const HEAD = 2_000_000;
+  const paces: [string, (n: number) => bigint, number][] = [
+    ["Base 5/s", (n) => T0 + BigInt(Math.floor(n / 5)), 6],
+    ["Robinhood 9.4/s", (n) => T0 + BigInt(Math.floor(n / 9.4)), 9],
+    ["2 s blocks", (n) => T0 + 2n * BigInt(n), 3],
+  ];
+  for (const [name, ts, most] of paces)
+    for (const back of [1n, 5n, 30n, 55n, 600n]) {
+      const c = { ...C3(), head: HEAD, finalized: HEAD - 10, ts };
+      const start = (ts(HEAD) - back) * 1000n + 300n;
+      let want = HEAD;
+      while (want > 0 && ts(want - 1) * 1000n >= start) want--;
+      const [a, b] = pair(c, c);
+      const r0 = blockRounds(a), r1 = blockRounds(b);
+      assert.equal((await evmEpochBlock([r0.rpc, r1.rpc], start)).number, BigInt(want), `${name}, ${back} s back`);
+      assert.ok(r0.rounds <= most, `${name}, ${back} s back: rpc 0 read in ${r0.rounds} rounds (${JSON.stringify(r0.reads)})`);
+      assert.equal(r0.most, 2, "a round's two blocks asked at once");
+      assert.equal(r1.rounds, 1, "rpc 1 reads only the check, its two blocks at once");
+    }
 });
 
 test("card evm-landing-reads-batched: on any chain's times, equal times and long gaps included, the search finds the first block at or after the start", async () => {
@@ -613,6 +623,28 @@ test("card evm-landing-reads-batched: on any chain's times, equal times and long
     const got = await evmEpochBlock([r0.rpc, pair(c, c)[1]], start);
     assert.equal(got.number, BigInt(want), `case ${k}: head ${head}, start ${start}`);
     // the halving taken whenever a guess does not halve the span: about two steps per halving at worst, and the check
+    assert.ok(r0.rounds <= 2 * Math.ceil(Math.log2(head + 1)) + 3, `case ${k}: ${r0.rounds} rounds for ${head} blocks`);
+  }
+});
+
+test("card evm-landing-reads-batched: a dense chain's runs of 16 to 40 blocks on one second, the start 1 to 8 s back: the first block in at most 2 log2(head + 1) + 3 rounds", async () => {
+  // review of 62112b9b4, P2: a pace from the newest block and the block below it, both on one second, stepped back as
+  // slowly as at the period's start and threw past 64 steps at 25 and 40 blocks a second
+  const rand = seeded(0xd15e);
+  for (let k = 0; k < 120; k++) {
+    const head = 2_000 + Math.floor(rand() * 200_000);
+    const times: bigint[] = [T0];
+    for (let n = 1; n <= head; n++) times.push(times[n - 1]! + (rand() < 1 / (16 + Math.floor(rand() * 25)) ? 1n : 0n));
+    // the newest blocks one run of 16 to 40 on one second
+    const run = 16 + Math.floor(rand() * 25);
+    for (let n = head - run + 1; n <= head; n++) times[n] = times[head - run]! + 1n;
+    const start = (times[head]! - BigInt(1 + Math.floor(rand() * 8))) * 1000n + BigInt(Math.floor(rand() * 1000));
+    if (start <= times[0]! * 1000n) continue;
+    const want = times.findIndex((t) => t * 1000n >= start);
+    const c = { ...C3(), head, finalized: Math.max(0, head - 10), ts: (n: number) => times[n]! };
+    const r0 = blockRounds(pair(c, c)[0]);
+    const got = await evmEpochBlock([r0.rpc, pair(c, c)[1]], start);
+    assert.equal(got.number, BigInt(want), `case ${k}: head ${head}, start ${start}`);
     assert.ok(r0.rounds <= 2 * Math.ceil(Math.log2(head + 1)) + 3, `case ${k}: ${r0.rounds} rounds for ${head} blocks`);
   }
 });

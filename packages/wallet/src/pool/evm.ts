@@ -191,8 +191,10 @@ export const EVM_POOL_READ_TRIES = 4;
 export const EVM_POOL_READ_WAIT_MS = EVM_POOL_READ_BOUND_MS - BigInt(EVM_POOL_READ_TRIES) * EVM_READ_TRY_MS;
 export const EVM_LAG_TRIES = 5;
 export const EVM_LAG_WAIT_MS = 2_000;
-/** The pace a period's first-block search guesses before it has read two blocks (evmEpochBlock): Base's block time. */
-export const EVM_EPOCH_PACE_MS = 2_000n;
+/** How far below the newest block a period's first-block search reads first (evmEpochBlock): the chain's own pace
+ *  over this many blocks guesses the next step, a baseline a run of equal block times does not upset (Robinhood
+ *  Chain about 9.4 blocks a second with up to 16 on one second; Base 5 a second, mainnet.base.org 13 Nov 11:32Z). */
+export const EVM_EPOCH_PROBE_BLOCKS = 256n;
 
 const enc = new TextEncoder();
 const U64 = (1n << 64n) - 1n;
@@ -1948,11 +1950,13 @@ export async function evmLatestHigh(rpcs: readonly [EvmRpc, EvmRpc], signal?: Ab
  * block at a height it searched holding another hash now is a reorg under the search, and the two RPCs holding two
  * blocks there a moment's fork: both a retry. One hash with two times or two base fees is refused.
  * The search (card evm-landing-reads-batched): each step reads a guessed height and the block below it at once, so the
- * step that guesses the first block ends the search; the guess is the height the chain's own pace puts at the start,
- * the pace taken from the two nearest blocks read on either side (EVM_EPOCH_PACE_MS before any), then halving where
- * that guess does not narrow the span. On Base (a block every 2 s) the first guess is the block, one round trip where
- * doubling then halving took 13 (a Robinhood mainnet copy of 13 Nov 09:58Z, 3.3 s at its 250 ms answers); the check
- * on both RPCs reads its two blocks at once.
+ * step that guesses the first block ends the search. The first step reads EVM_EPOCH_PROBE_BLOCKS below the newest
+ * block; while no block before the start is known, each next step goes where the chain's pace from the newest block
+ * puts the start, and at least 16 blocks below, twice that the step after (a gallop); once one is known, the guess is the
+ * height the pace between the two blocks either side puts at the start, and a guess that does not halve the span is
+ * followed by a halving. On a uniform chain that is two rounds whatever its pace, where doubling then halving took 13
+ * (a Robinhood mainnet copy of 13 Nov 09:58Z, 3.3 s at its 250 ms answers); the check on both RPCs reads its two
+ * blocks at once.
  */
 export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartMs: bigint, signal?: AbortSignal, sleep: Sleep = wait): Promise<EvmBlock> {
   checkEvmRpcs(rpcs);
@@ -1965,23 +1969,32 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
   let hi = await evmAgreedBlock(rpcs, EVM_NEWEST_TAG, signal, sleep);
   if (!after(hi)) return lag(`the ${EVM_NEWEST_TAG} block ${hi.number} is before ${epochStartMs}`);
   let lo: EvmBlock | null = null;
-  // the nearest block read above hi: the pace's second point while no block before the start is known
-  let above: EvmBlock | null = null;
+  // the newest block: the pace's far point while no block before the start is known
+  const head = hi;
   const ms = (b: EvmBlock) => b.timestamp * 1000n;
   // the span a step left, so a guess that did not halve it is followed by a halving (the search always ends)
   let halve = false;
   let span: bigint | null = null;
+  // how far below hi a step past the first reaches at least, doubled each step that finds no block before the start
+  let back = 16n;
   for (let steps = 0; lo === null || hi.number - lo.number > 1n; steps++) {
     signal?.throwIfAborted();
     if (steps >= 64) throw new Error(`no first block of ${epochStartMs} in 64 steps`);
     if (hi.number === 0n) break;
     let g: bigint;
     if (lo !== null && (halve || ms(hi) === ms(lo))) g = (lo.number + hi.number) / 2n;
-    // the first height the chain's pace puts at or after the start: from the two blocks either side, else from hi and
-    // the block above it, else at EVM_EPOCH_PACE_MS a block
+    // the first height the pace between the two blocks either side puts at or after the start
     else if (lo !== null) g = lo.number + ((epochStartMs - ms(lo)) * (hi.number - lo.number) + ms(hi) - ms(lo) - 1n) / (ms(hi) - ms(lo));
-    else if (above !== null && ms(above) > ms(hi)) g = hi.number - ((ms(hi) - epochStartMs) * (above.number - hi.number)) / (ms(above) - ms(hi));
-    else g = hi.number - (ms(hi) - epochStartMs) / EVM_EPOCH_PACE_MS;
+    else if (steps === 0) g = hi.number > EVM_EPOCH_PROBE_BLOCKS ? hi.number - EVM_EPOCH_PROBE_BLOCKS : 0n;
+    else {
+      g = hi.number > back ? hi.number - back : 0n;
+      // the head's pace down to hi, where it reaches further below than the gallop
+      if (ms(head) > ms(hi)) {
+        const paced = hi.number - ((ms(hi) - epochStartMs) * (head.number - hi.number)) / (ms(head) - ms(hi));
+        if (paced < g) g = paced;
+      }
+      back *= 2n;
+    }
     const least = lo === null ? 0n : lo.number + 1n;
     if (g < least) g = least;
     if (g > hi.number) g = hi.number;
@@ -1992,7 +2005,6 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
       break;
     }
     if (after(b)) {
-      above = hi;
       hi = under !== null && after(under) ? under : b;
       if (under === null) break;
     } else lo = b;
