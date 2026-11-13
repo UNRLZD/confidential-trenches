@@ -4,8 +4,8 @@
     "bad": "SIGN_HOST as served 2026-11-13T20:21Z (main before this card): no Chain picker, no exit request, no run pays a quote's deposit address: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-TyfkyJcgrbc2OgF/TiaWrfqRx+Ge7dkDtbN7jHgiMwHuslCn+RF9+ZlHz7jdxWQA\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-TyfkyJcgrbc2OgF/TiaWrfqRx+Ge7dkDtbN7jHgiMwHuslCn+RF9+ZlHz7jdxWQA",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-CJIchjc0FkHPXhHE8cyJoM4ryPIwL8YEePkCRb/zIN0LaqmCnqqsi8hoiCtCvSUG\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-CJIchjc0FkHPXhHE8cyJoM4ryPIwL8YEePkCRb/zIN0LaqmCnqqsi8hoiCtCvSUG",
     "picker": true,
     "request": true,
     "runs": 2
