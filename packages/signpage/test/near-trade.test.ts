@@ -609,3 +609,30 @@ test("F6 carry_failed for a round whose swap landed (its claim failed): never si
   assert.deepEqual(afterSwap.slice(0, 3), ["read", "read", "read"]);
   assert.ok(!afterSwap.slice(0, 2).includes("wait"));
 });
+
+// review P3-5 of e6c66cce3: the swap's own pair is checked as read, never only the reads before it
+test("P3-5 the swap's pair reading less USDC than the buy's amount (the earlier read had it): not_funded, nothing signed for the swap", async () => {
+  const { deps, ev, log } = world({ begun: { txs: near(tx(1)) }, start: { exists: true, registered: true, usdc: AMOUNT } });
+  const pair = deps.pair;
+  deps.pair = async (a) => {
+    const p = await pair(a);
+    return a.baseline === undefined ? p : { ...p, state: { ...p.state, held: AMOUNT - 1n } };
+  };
+  sent(await run(deps));
+  assert.equal(signs(ev).length, 0);
+  assert.deepEqual(log.at(-1), ["swap", "not_funded"]);
+});
+
+test("P3-5 the swap's pair asked for its baseline and answered without one: read_failed, nothing signed for the swap", async () => {
+  const { deps, ev, log } = world({ begun: { txs: near(tx(1)) }, start: { exists: true, registered: true, usdc: AMOUNT } });
+  const pair = deps.pair;
+  deps.pair = async (a) => {
+    const p = await pair(a);
+    if (a.baseline === undefined) return p;
+    const { baseline: _gone, ...rest } = p;
+    return rest;
+  };
+  sent(await run(deps));
+  assert.equal(signs(ev).length, 0);
+  assert.deepEqual(log.at(-1), ["swap", "read_failed"]);
+});

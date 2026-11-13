@@ -248,17 +248,24 @@ const FINALS = new WeakMap<object, readonly [NearRpc, NearRpc]>();
 
 /**
  * Each provider's final height, both asked at one moment: a paced provider's turn (NearRpc.reserve) is taken on both
- * first, then both heights are asked at once, so a wait for one provider's turn is never read as a lead of that
- * provider over the other (card near-quote-under-the-pace: FastNEAR's turn 2.5 s off made it 4 to 5 blocks "ahead" and
- * refused half the quotes). Over RHEA_QUOTE_LAG_MAX apart: refused "lag", one provider is behind the chain.
+ * first, then both heights are asked at once, so a wait for one provider's turn is never read as that
+ * provider being ahead of the other (card near-quote-under-the-pace: FastNEAR's turn 2.5 s off made it 4 to 5 blocks "ahead" and
+ * refused half the quotes). Over RHEA_QUOTE_LAG_MAX apart, the lower one's final is asked once more at once and the two
+ * compared again: an answer that came late (a provider's busy retry, or the page's FastNEAR seat falling to its spare
+ * seconds after the other answered) reads ahead by the time it took, never behind, and the re-ask closes that gap; a
+ * provider truly behind the chain is behind again, and the pair is refused "lag" (review P2-1 of e6c66cce3).
  */
 export async function nearFinal(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], signal?: AbortSignal): Promise<NearFinal> {
   if (!(network in NEAR_RHEA)) throw new RheaQuoteRefused("input", `unknown network ${String(network)}`);
   if (nearPairNetwork(rpcs) !== network) throw new RheaQuoteRefused("input", nearPairRule(network));
   signal?.throwIfAborted();
   const go = await Promise.all(rpcs.map((r) => (typeof r.reserve === "function" ? r.reserve(signal) : r)));
-  const finals = await Promise.all(go.map((r) => answer(r, view(NEAR_RHEA[network].exchange, "metadata", {}, { finality: "final" }), signal)));
-  const [fa, fb] = finals as [Answer, Answer];
+  const ask = (r: NearRpc) => answer(r, view(NEAR_RHEA[network].exchange, "metadata", {}, { finality: "final" }), signal);
+  let [fa, fb] = (await Promise.all(go.map(ask))) as [Answer, Answer];
+  if (Math.abs(fa.height - fb.height) > RHEA_QUOTE_LAG_MAX) {
+    if (fa.height < fb.height) fa = await ask(go[0]!);
+    else fb = await ask(go[1]!);
+  }
   if (Math.abs(fa.height - fb.height) > RHEA_QUOTE_LAG_MAX) throw new RheaQuoteRefused("lag", `the providers' final heights ${fa.height} and ${fb.height} are over ${RHEA_QUOTE_LAG_MAX} blocks apart`);
   const f: NearFinal = Object.freeze({ network, height: Math.min(fa.height, fb.height) });
   FINALS.set(f, [rpcs[0], rpcs[1]]);

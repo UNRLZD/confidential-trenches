@@ -457,3 +457,24 @@ test("P3 what W holds and its registration, read alone: one final and one or two
   assert.deepEqual([only.held, "registered" in only], [7n, false]);
   await refused(readNearHeld({ network: "mainnet", rpcs: pair(w, (name, p, a) => (name === DRPC && p.method_name === "ft_balance_of" ? { ...a, result: { ...(a.result as { result: number[] }), result: bytes("8") } } : a)), wallet: WID, token: RHEA }), "disagree");
 });
+
+// review P3-5 of e6c66cce3: the pair's and the light read's block rules, each planted with both providers agreeing, so
+// only that rule can refuse it
+const QUOTE_VIEWS = new Set(["metadata", "get_frozenlist_tokens", "get_pool_by_ids"]);
+const atHash = (hash: string, when: (p: Record<string, unknown>) => boolean): Tweak => (_name, p, a) => (when(p) ? { ...a, result: { ...(a.result as object), block_hash: hash } } : a);
+test("P4 W's read and the quote at one height but two block hashes (both providers agreeing on each): refused disagree, never a pair", async () => {
+  const w = walletWorld();
+  const quoteElsewhere = withKeys(w, atHash("QuoteHash111111111111111111111111111111111111", (p) => p.request_type === "view_account" || (p.account_id === EX && QUOTE_VIEWS.has(String(p.method_name)))));
+  await refused(readNearSwapPair({ network: "mainnet", rpcs: quoteElsewhere, wallet: WID, side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9] }), "disagree", /not of one block/);
+  // the baseline's balance at another hash of the same height
+  const baseElsewhere = withKeys(w, atHash("BaseHash1111111111111111111111111111111111111", (p) => p.method_name === "ft_balance_of" && p.account_id === RHEA));
+  await refused(readNearSwapPair({ network: "mainnet", rpcs: baseElsewhere, wallet: WID, side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9], baseline: RHEA }), "disagree", /not of one block/);
+});
+
+test("P5 readNearHeld: an answer at another height (both providers), one provider at another block hash, or the second view at another hash (both): each refused", async () => {
+  const w = walletWorld();
+  const read = (tweak: Tweak) => readNearHeld({ network: "mainnet", rpcs: pair(w, tweak), wallet: WID, token: USDC, on: RHEA });
+  await refused(read((_n, p, a) => (p.method_name === "ft_balance_of" ? { ...a, result: { ...(a.result as object), block_height: w.height - 1 } } : a)), "rpc", /not at block/);
+  await refused(read((n, p, a) => (n === DRPC && p.method_name === "ft_balance_of" ? { ...a, result: { ...(a.result as object), block_hash: "Fork" } } : a)), "disagree", /two blocks/);
+  await refused(read(atHash("Other1111111111111111111111111111111111111111", (p) => p.method_name === "storage_balance_of")), "disagree", /two blocks/);
+});

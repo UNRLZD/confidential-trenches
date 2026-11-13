@@ -54,6 +54,7 @@ const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts")
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
+type QueuePassT = import("../../wallet/src/pool/queue.ts").QueuePass;
 
 const RECORD = JSON.parse(readFileSync(new URL("../../../scripts/live-checks/pool-sol-deploy.devnet.json", import.meta.url), "utf8")) as { cluster: string; program_id: string; pool: string };
 // GET https://ct-api.unrealized.trade/v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef,
@@ -273,6 +274,144 @@ test("card signpage-pool-pins: a page that loads with the pool's notes landed op
   assert.equal((await t.readyWith(async () => null)).ready, undefined, "signed out: no queue, no ready list");
 });
 
+test("a state read proves the landed notes whatever its settle steps do: a deposit settle that throws or never ends, an owed pieces' read that throws, a kept sell's read that throws", async () => {
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const never = new Promise<never>(() => {});
+  // the wallet store with one meta record that reads `ok` times (the state read's checks) and then throws, or with
+  // `hang` never answers (the settle's own read)
+  const flaky = (w: WalletStore, key: string, rec: unknown, ok: number, hang = false): WalletStore => {
+    let reads = 0;
+    return new Proxy(w, {
+      get(target, prop) {
+        if (prop === "get")
+          return async (s: string, k: string) => {
+            if (s === "meta" && k === key) {
+              if (reads++ < ok) return rec;
+              if (hang) return never;
+              throw new Error(`planted: the store read of ${key} fails`);
+            }
+            return (target.get as (s: string, k: string) => Promise<unknown>)(s, k);
+          };
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+  };
+  // Web Locks whose request fails (the sell settle's seed lock): the sell settle throws
+  const locks = { request: async () => assert.fail("planted: the lock request fails"), query: async () => ({ held: [], pending: [] }) } as unknown as Pick<LockManager, "request" | "query">;
+  const cases: { name: string; incoming: boolean; store?: (w: WalletStore) => WalletStore; over: Record<string, unknown> }[] = [
+    { name: "the deposit settle throws", incoming: true, over: { depositKinds: { solana: () => () => assert.fail("planted: the deposit settle throws") } } },
+    { name: "the deposit settle never ends", incoming: true, over: { depositKinds: { solana: () => () => ({ running: true, after: never, answer: () => null }) } } },
+    // resumeOwedPieces catches what resumePieces throws (src/pool-testnet.ts resumeOwedPieces); its list read that never
+    // answers (the third: the state read's check, its own, resumePieces') holds the read
+    { name: "the owed pieces' settle never ends", incoming: false, store: (w) => flaky(w, "owed/pieces-sol", { W1: { address: "W1", primary: "p", pieces: ["q"] } }, 2, true), over: {} },
+    { name: "the sell settle's lock throws", incoming: false, store: (w) => flaky(w, "owed/kept-sell-sol", { s1: { signature: "s1", tx: "", last: 0 } }, 99), over: { locks } },
+  ];
+  const got: string[] = [];
+  for (const c of cases) {
+    const { w, ns } = await wallet();
+    const { pool, land } = fakePool();
+    const prover = signalsProver();
+    await land(ns, await incoming(ns, null, 1));
+    if (c.incoming) await incoming(ns, null, 2);
+    const store = c.store ? c.store(w) : w;
+    const t = testnetPool({ store: async () => store, seed64: async () => SEED64.slice() }, { pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], locks: null, ...c.over });
+    const proves = () => prover.log.filter((x) => x.startsWith("prove")).length;
+    void t.stateRead(); // it may wait on its settle for good: the pass is not behind it
+    for (let i = 0; i < 100 && proves() === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    got.push(`${c.name}: ${proves()} proved, ${(await t.readyWith(async () => null)).ready?.length ?? "no"} ready`);
+    await t.signedOut();
+  }
+  assert.deepEqual(got, cases.map((c) => `${c.name}: 1 proved, 1 ready`));
+});
+
+// review P3-3 of 92ae9ded1 (the line 71556b56b added): a state read's settle step that lands an INCOMING note (here a
+// sell's return note, landed by the sell's verdict under the seed lock) runs one more proof pass, so that note is proved
+// in the same read; the read's first pass, started before the settle, listed the notes before it landed
+test("a state read whose sell settle lands the sell's return note proves that note in the same read", async () => {
+  const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const prover = signalsProver();
+  const proves = () => prover.log.filter((x) => x.startsWith("prove")).length;
+  await land(ns, await incoming(ns, null, 1));
+  const back = await incoming(ns, { kind: "return", c: "sol", l: 7n, j: 1 }, 2);
+  let landed = false;
+  // the sell's verdict, under the seed lock settleSells takes: the return note lands once the read's first pass is
+  // proving (it listed the notes before); every other lock runs as asked
+  const locks = {
+    request: async (name: string, opts: unknown, cb?: (l: unknown) => Promise<unknown>) => {
+      const run = typeof opts === "function" ? (opts as (l: unknown) => Promise<unknown>) : cb!;
+      if (name === WALLET_SEED_LOCK && !landed) {
+        for (let k = 0; k < 2_000 && proves() === 0; k++) await new Promise((ok) => setImmediate(ok));
+        landed = true;
+        await land(ns, back);
+        return;
+      }
+      return run({ name, mode: "shared" });
+    },
+    query: async () => ({ held: [], pending: [] }),
+  } as unknown as Pick<LockManager, "request" | "query">;
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], locks, depositKinds: { solana: () => () => ({ error: "not_allowed" }) } } as never);
+  try {
+    await t.stateRead();
+    assert.ok(landed, "the sell settle landed the return note");
+    for (let i = 0; i < 100 && proves() < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(proves(), 2, "the return note the settle landed was not proved in that read");
+    assert.ok((await t.readyWith(async () => null)).ready?.some((r) => r.noteId === back.id), "the return note is ready");
+  } finally {
+    await t.signedOut();
+  }
+});
+
+test("a proof pass's console line: each code with its count, in its order; none for a pass with nothing failed", async () => {
+  const { passLine, PASS_CODES } = await import("../src/pool-testnet.ts");
+  const { PassFail } = await import("../../wallet/src/pool/queue.ts");
+  const f = (reason?: string) => ({ noteId: "n", error: "x", ...(reason ? { reason } : {}) }) as QueuePassT["failed"][number];
+  const pass = (failed: QueuePassT["failed"], small?: number): QueuePassT => ({ made: [], remade: [], failed, ...(small ? { small } : {}) });
+  assert.deepEqual([...PASS_CODES], ["network", "fee_refused", "prover_failed", "too_small", "held_elsewhere"]);
+  assert.equal(passLine("solana", pass([f("held_elsewhere"), f("prover_failed"), f("network"), f("fee_refused"), f("prover_failed")], 3)), "pool pass: solana failed network=1 fee_refused=1 prover_failed=2 too_small=3 held_elsewhere=1");
+  for (const code of ["network", "fee_refused", "prover_failed", "held_elsewhere"]) assert.equal(passLine("base", pass([f(code)])), `pool pass: base failed ${code}=1`);
+  assert.equal(passLine("solana", pass([], 2)), "pool pass: solana failed too_small=2");
+  assert.equal(passLine("solana", undefined, new PassFail("network", new Error("429"))), "pool pass: solana failed network=1", "a pass that failed whole at a pool read");
+  assert.equal(passLine("solana", pass([f()])), null, "a failure the queue names no step for prints nothing");
+  assert.equal(passLine("solana", pass([])), null);
+  assert.equal(passLine("solana", undefined, new Error("no seed is stored")), null, "a queue that could not open is no pass's failure");
+});
+
+test("a proof pass that fails prints one 'pool pass:' line per change, the codes alone: never the error's text, an address or a note", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const ADDRESS = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
+  const ok = signalsProver();
+  let fail = true;
+  const prover = { ...ok, prove: async (c: string, i: unknown) => (fail ? Promise.reject(new Error(`provider 403 for ${ADDRESS}: limit`)) : ok.prove(c as never, i as never)) } as typeof ok;
+  const lines: string[] = [];
+  const log = mock.method(console, "log", (...a: unknown[]) => void lines.push(a.map(String).join(" ")));
+  try {
+    const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, locks: null });
+    const note = await land(ns, await incoming(ns, null, 1));
+    await t.proofs();
+    await t.proofs(); // the same failure again: no second line
+    assert.deepEqual(lines.filter((l) => l.startsWith("pool pass:")), ["pool pass: solana failed prover_failed=1"]);
+    const all = lines.join("\n");
+    for (const secret of [ADDRESS, "403", "limit", note.id]) assert.ok(!all.includes(secret), `no ${secret} in the console`);
+    // the prover works again: the proof is made, nothing printed; a later failure prints again
+    fail = false;
+    await t.proofs();
+    assert.equal((await t.readyWith(async () => null)).ready?.length, 1);
+    assert.equal(lines.filter((l) => l.startsWith("pool pass:")).length, 1);
+    await t.signedOut();
+  } finally {
+    log.mock.restore();
+  }
+});
+
 test("the testnet build's pool RPCs, every chain and both providers, read through a 429 once", async () => {
   const real = globalThis.fetch;
   const seen = new Map<string, number>();
@@ -334,6 +473,37 @@ test("the devnet pool's relay fee: GET /v1/pool/fee on the helper for the pool a
   assert.equal(asked[0]!.init?.redirect, "error");
   await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(404, `{"error":{"code":"not_found"}}`)), /HTTP 404/);
   await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(200, JSON.stringify({ ...answer, pad: "x".repeat(1024) }))), /over 1024 B/);
+});
+
+// card buy-spends-several-pieces: the pass's console line names a fee read that got no answer "network", never the
+// fee_refused a refusal reads as, so a walk tells a throttle from a refusal
+test("the pool fee read: no connection, no answer in time, or still busy (429, 5xx) is network; another status untagged", async () => {
+  const { PassFail } = await import("../../wallet/src/pool/pool.ts");
+  const pool = solanaPoolOf(SOL_POOLS.devnet!.program).pool;
+  const fetchOf = (status: number) => (async () => new Response(status === 429 ? `{"error":{"code":"rate_limited"}}` : "{}", { status })) as typeof fetch;
+  const reasonOf = async (f: typeof fetch) => {
+    const e = await poolRelayFee(pool, 1_800_000_000_000n, undefined, f, async () => {}).then(() => assert.fail("answered"), (x: unknown) => x);
+    return e instanceof PassFail ? e.reason : `untagged: ${String(e)}`;
+  };
+  assert.equal(await reasonOf(fetchOf(429)), "network");
+  assert.equal(await reasonOf(fetchOf(502)), "network");
+  assert.equal(await reasonOf((async () => Promise.reject(new TypeError("fetch failed"))) as typeof fetch), "network");
+  assert.equal(await reasonOf((async () => Promise.reject(new DOMException("no answer", "TimeoutError"))) as typeof fetch), "network");
+  assert.match(await reasonOf(fetchOf(404)), /^untagged: .*HTTP 404/);
+  // what a withdraw records of that failure (pool-sell.ts legCause): the cause's class and code, never the tag's frames
+  // and never a message (review P3-2 of b8df326b6: "Error at <the wrap>" where it read "TypeError")
+  const { legCause } = await import("../src/pool-sell.ts");
+  const causeOf = async (f: typeof fetch) => legCause(await poolRelayFee(pool, 1_800_000_000_000n, undefined, f, async () => {}).catch((x: unknown) => x));
+  const typeErr = await causeOf((async () => Promise.reject(new TypeError("fetch failed for 9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb"))) as typeof fetch);
+  assert.match(typeErr, /^TypeError( at [\w$.]+( < [\w$.]+)?)?$/, typeErr);
+  const timeout = await causeOf((async () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))) as typeof fetch);
+  assert.match(timeout, /^TimeoutError 23( at .*)?$/, timeout);
+  for (const c of [typeErr, timeout]) assert.ok(!/fetch failed|9T3R|timed out/.test(c), `a message reached the cause: ${c}`);
+  // the caller's own abort is no step's failure
+  const stop = new AbortController();
+  stop.abort();
+  const e = await poolRelayFee(pool, 1_800_000_000_000n, stop.signal, (async (_u: unknown, init?: RequestInit) => Promise.reject(init?.signal?.reason)) as typeof fetch).catch((x: unknown) => x);
+  assert.ok(!(e instanceof PassFail), "an abort tagged");
 });
 
 test("the pool fee, busy (card withdraw-fee-busy-waits): 429 rate_limited or 503 upstream waits its Retry-After, capped, and asks again, BUSY_ASKS asks at most; any other status refuses at once", async () => {
@@ -1612,6 +1782,33 @@ test("card sol-buy-reads-side-by-side: the page's buy host hands the early read 
     const before = nows;
     assert.equal((await b.take(r.noteId, r.attempt, early)).noteId, r.noteId);
     assert.equal(nows, before, "the take used the early read");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
+});
+
+// review P3-3 of b57f4eb28: the page's buy host lists on the take's own clock when the pick hands it the early read
+// (queue.readyAt), and on the last-seen time without one (queue.ready): one the early read finds late is never offered
+test("card buy-spends-several-pieces: the page's buy host lists the ready proofs on the early read it is given", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const b = buyHost!();
+  try {
+    const [r] = await b.ready();
+    assert.ok(r, "a ready proof on the last-seen time");
+    // two epochs on, on the early read's own clock: the proof is from before the previous epoch, so not takeable
+    const later = Promise.resolve({ ms: r.epochStartMs + 2n * SOL_EPOCH_MS, at: performance.now(), wall: Date.now() });
+    assert.deepEqual(await b.ready(later), [], "the host offered a proof the early read finds late");
+    assert.ok((await b.ready()).some((p) => p.noteId === r.noteId), "still listed on the last-seen time");
   } finally {
     (b as { end?: () => void }).end?.();
   }

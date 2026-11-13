@@ -1,14 +1,16 @@
 #!/usr/bin/env node
-// Live check of card app-faults-seen-on-124: the deposit sheet's asset list (deposit.assets) is asked at most once a
-// minute per device. Each ask is the token list and a probe quote per asset on SIGN_HOST (four of a device's five 1Click
+// Live check of card app-faults-seen-on-124: no page load asks the deposit sheet's asset list (deposit.assets), so a
+// visitor's pages send nothing to the helper's 1Click paths (fault 9: release 126's app live run 43335415608 met 429 there
+// from /terms, /discover and /profile, as the helper counts its 1Click share per caller address, so every fresh tab on one
+// address shares it). Before fault 9 the rule was at most one ask a minute per device. Each ask is the token list and a probe quote per asset on SIGN_HOST (four of a device's five 1Click
 // calls a minute on the helper, apps/helper/src/proxy/proxy.ts DEPOSIT_SHEET_CALLS); release 124 asked it on every page
 // load, so the second load inside a minute met 429 on /v1/proxy/oneclick/v0/tokens (live runs 43309898493 and
 // 43309913191). Headless Chromium, 1440 x 900, one tab: ten page loads of SIGN_HOST, each on one of the app's routes,
 // inside a minute. On each load it waits for the terminal's frame to read READY (<html data-signpage="ready">) and then
 // for the page's asks to settle, and records the deposit.assets requests the frame sent the shell (heard at SIGN_HOST's
-// top window) and the status of every answer on the helper's 1Click paths. Want: deposit.assets asked once in all
-// (the first load's warm read, so a sheet still opens on a list), no 429 on any 1Click path, every load READY, all
-// inside 60 s. A run stops at the first 429: that is the verdict, and no more of the helper's share is spent.
+// top window), every request to the helper's 1Click paths and the status of each answer there. Want: deposit.assets
+// never asked, no request to a 1Click path (so no 429), every load READY, all inside 60 s. A run stops at the first
+// 429: that is the verdict, and no more of the helper's share is spent.
 // After: app
 //   node scripts/live-checks/app-faults-seen-on-124.mjs [--shots <dir>] [--record <file>]
 //     the deployed SIGN_HOST and APP_HOST and the helper as served, as a signed-out visitor
@@ -35,7 +37,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const ONECLICK = "/v1/proxy/oneclick/";
 export const LOADS = 10;
 /** The routes the loads walk, in turn: the pages the 429s were printed on, and Discover. */
-export const ROUTES = ["/discover", "/profile", "/orders", "/terms", "/portfolio"];
+export const ROUTES = ["/discover", "/profile", "/orders", "/terms", "/portfolio", "/token/solana/6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN"];
 export const WINDOW_MS = 60_000;
 const READY_MS = 20_000;
 /** After READY, the time a warm read has to be sent: the shell's mount asks in its first effect, well inside it. */
@@ -57,7 +59,9 @@ export function judge(rec) {
   say(span !== null && span < WINDOW_MS, `the loads span ${span === null ? "nothing" : `${Math.round(span / 1000)} s`}, want under ${WINDOW_MS / 1000} s`);
   const asks = loads.map((l) => l.assets ?? 0);
   const total = asks.reduce((a, b) => a + b, 0);
-  say(total === 1 && asks[0] === 1, `deposit.assets asked ${total} time(s) over the loads (${asks.join(", ")}), want once, by the first load`);
+  say(total === 0, `deposit.assets asked ${total} time(s) over the loads (${asks.join(", ")}), want none: no page load asks it`);
+  const sent = loads.flatMap((l, i) => (l.oneclickSent ?? [null]).map((p) => (p === null ? `load ${i + 1} not recorded` : `load ${i + 1} ${p}`)));
+  say(sent.length === 0, sent.length ? `requests to the helper's 1Click paths: ${sent.join("; ")}` : "no request to the helper's 1Click paths");
   say(typeof rec.shot === "string", `screenshot ${rec.shot ?? "none"}`);
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -97,12 +101,16 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
     await ctx.addInitScript(LISTEN, SIGN_HOST);
     const page = await ctx.newPage();
     let load = null;
+    page.on("request", (q) => {
+      const u = new URL(q.url());
+      if (load && u.origin === HELPER_HOST && u.pathname.startsWith(ONECLICK)) load.oneclickSent.push(u.pathname);
+    });
     page.on("response", (r) => {
       const u = new URL(r.url());
       if (load && u.origin === HELPER_HOST && u.pathname.startsWith(ONECLICK)) load.oneclick.push({ path: u.pathname, status: r.status() });
     });
     for (let i = 0; i < LOADS; i++) {
-      load = { route: ROUTES[i % ROUTES.length], atMs: Date.now(), ready: false, assets: 0, oneclick: [] };
+      load = { route: ROUTES[i % ROUTES.length], atMs: Date.now(), ready: false, assets: 0, oneclick: [], oneclickSent: [] };
       rec.loads.push(load);
       await page.goto(`${SIGN_HOST}${load.route}`, { waitUntil: "load" });
       const f = await terminal(page);
