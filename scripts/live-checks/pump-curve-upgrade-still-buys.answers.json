@@ -1,0 +1,25 @@
+{
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7LIOiTzOL+gLB7uPXH7VoqyOFzekEZHjqeXX/rTFwXx3IeOsJ5CxV0A6MZ2OKyiM\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-7LIOiTzOL+gLB7uPXH7VoqyOFzekEZHjqeXX/rTFwXx3IeOsJ5CxV0A6MZ2OKyiM",
+  "global": {
+   "rule": "min",
+   "size": 1088
+  },
+  "globalSizes": [
+   1096,
+   1096
+  ]
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+  "global": {
+   "rule": "exact"
+  },
+  "globalSizes": [
+   1096,
+   1096
+  ]
+ }
+}
