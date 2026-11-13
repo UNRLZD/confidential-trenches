@@ -61,14 +61,19 @@ function replay(run, needs, event = "pull_request") {
 // queue group or a push, and the required check test never waits on them
 const NIGHTLY = "test-mutants";
 const NIGHTLY_IF = "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
+// card e2e-runs-once-in-the-queue: the signing page's browser runs, once in the merge queue's group (live.yml ran them on
+// every pull request, about 27 minutes with the terminal's chain, which test-browser already runs). A shard of test like
+// any test-*, so a failed or skipped one keeps the group off main; it is no required check itself
+const E2E_JOB = "browser-e2e";
 
 export function shardProblems(ci) {
   const all = jobs(ci);
-  const shards = Object.keys(all).filter((j) => j.startsWith("test-") && j !== NIGHTLY);
+  const shards = Object.keys(all).filter((j) => (j.startsWith("test-") && j !== NIGHTLY) || j === E2E_JOB);
   const job = all.test;
   if (!job) return ["ci.yml has no job named test"];
   if (!shards.length) return ["ci.yml has no shard job (test-*)"];
   const p = [];
+  if (!all[E2E_JOB]) p.push(`ci.yml has no ${E2E_JOB} job: the signing page's screens would reach main with no browser run`);
   const needs = /^ {4}needs:\s*\[([^\]]*)\]\s*$/m.exec(job)?.[1].split(",").map((s) => s.trim()).filter(Boolean);
   if (!needs) p.push("test has no one-line needs: [...] list");
   for (const s of shards) if (needs && !needs.includes(s)) p.push(`test does not need ${s}`);
@@ -108,6 +113,11 @@ export function shardProblems(ci) {
     const one = ended("success");
     one[s] = { result: "failure", outputs: {} };
     if (replay(run, one) === 0) p.push(`test passes when ${s} is failure`);
+    // card e2e-runs-once-in-the-queue: the group runs every shard, so a skipped one fails it whatever the plan says
+    const skipped = ended("success");
+    skipped[s] = { result: "skipped", outputs: {} };
+    skipped.changes.outputs[flag(s)] = "false";
+    if (replay(run, skipped, "merge_group") === 0) p.push(`test passes when ${s} is skipped on merge_group`);
   }
   if (replay(run, {}) === 0) p.push("test passes with no shard at all");
   if (replay(run, { changes: ended("success").changes }) === 0) p.push("test passes with no shard at all");
@@ -168,7 +178,7 @@ test("ci.yml: test needs every shard and passes only when each one passed", () =
 
 // each way the wiring can break, planted in a copy of this ci.yml
 const PLANTED = {
-  "a shard missing from test's needs": [/needs: \[([^\]]*), test-vault\]/, "needs: [$1]", "test does not need test-vault"],
+  "a shard missing from test's needs": [/needs: \[([^\]]*), test-vault, browser-e2e\]/, "needs: [$1, browser-e2e]", "test does not need test-vault"],
   "test without always()": [/if: always\(\) && \((github\.event_name == 'merge_group' \|\| github\.event_name == 'workflow_dispatch')\)\n(\s+runs-on: ubuntu-24\.04\n\s+timeout-minutes: 5)/, "if: $1\n$2", "test's if has no always()"],
   "a skipped shard read as passed": ['.value.result == "success" or', '.value.result == "success" or .value.result == "skipped" or', "test passes when a shard is skipped"],
   "a failed shard read as passed": ['.value.result == "success" or', '.value.result != "cancelled" or', "test passes when a shard is failure"],
@@ -216,6 +226,13 @@ const PLANTED = {
   "no run by hand": ["\n  workflow_dispatch:\n", "\n", "ci.yml has no workflow_dispatch"],
   "test passing while test-packages failed": ['select(.key != "changes")', 'select(.key != "changes" and .key != "test-packages")', "test passes when test-packages is failure"],
   "test-packages left out of test's needs": ["test-wallet, test-packages, test-browser", "test-wallet, test-browser", "test does not need test-packages"],
+  // card e2e-runs-once-in-the-queue: the browser runs' only check before main is test's read of them
+  "browser-e2e left out of test's needs, so test passes while it fails": [", test-vault, browser-e2e]", ", test-vault]", "test does not need browser-e2e"],
+  "no browser-e2e job": ["\n  browser-e2e:\n", "\n  browser-e2z:\n", "ci.yml has no browser-e2e job"],
+  "test passing while browser-e2e failed": ['select(.key != "changes")', 'select(.key != "changes" and .key != "browser-e2e")', "test passes when browser-e2e is failure"],
+  "test passing a skipped browser-e2e in the group": ['.value.result == "success" or', '.value.result == "success" or (.key == "browser-e2e" and .value.result == "skipped") or', "test passes when browser-e2e is skipped on merge_group"],
+  "a browser-e2e that may fail": ["\n  browser-e2e:\n", "\n  browser-e2e:\n    continue-on-error: true\n", "browser-e2e has continue-on-error"],
+  "a browser-e2e with no timeout": [/(\n  browser-e2e:\n(?:.*\n){2}) {4}timeout-minutes: \d+\n/, "$1", "browser-e2e has no timeout of its own"],
 };
 for (const [name, [from, to, want]] of Object.entries(PLANTED)) {
   test(`planted: ${name} fails`, () => {

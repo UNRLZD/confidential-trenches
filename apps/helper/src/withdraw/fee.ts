@@ -419,7 +419,8 @@ export const RELAYER_ENV = {
 } as const;
 
 /**
- * The quoter from the host's environment: mainnet's pair as USDC's watch reads it (NEAR_RPC_URL, NEAR_RPC_URL_B), each
+ * The quoter from the host's environment: mainnet's pair as USDC's watch reads it (token-status/status.ts readUrls:
+ * NEAR_RPC_URL_FASTNEAR else NEAR_RPC_URL, and NEAR_RPC_URL_B; card near-pair-on-keyed-providers), each
  * read bounded by the relayers' RPC_TIMEOUT_MS (bind/send.ts): a full block from rpc.mainnet.near.org took 3.3 s from
  * a Mac (curl, 2026-11-02 09:27Z), so token-status's 2 s would refuse an honest provider. `lockWaitMs`: the store's
  * lock wait (store/durable.ts openDurableDir; 0 for a retry that must not block, server.ts sendersFromEnv).

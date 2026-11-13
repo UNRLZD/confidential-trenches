@@ -31,7 +31,10 @@
 # The workflow reads no secret and holds the read-only token alone. A check that needs one (helper-proxy reads the vendor
 # keys the host holds) is not run: the plan lists it as skipped-needs-secret in the run's summary, which is no pass.
 #
-# On a pull request one job runs the terminal's browser chain and the signing page's browser runs.
+# The workflow runs on a dispatch alone (card e2e-runs-once-in-the-queue): its pull request job, browser-e2e, ran the
+# terminal's browser chain and the signing page's browser runs on every pull request (about 27 minutes, runs 43440753733
+# and 43440138300), no required check read it, and the merge queue never ran it. Those runs are ci.yml's now, once, in the
+# queue's group: the terminal's chain in test-browser, the signing page's in browser-e2e, both read by the required test.
 # Every action is pinned by commit sha, each read from its own repo: actions/checkout v7.0.1, actions/setup-node v7.1.0 and
 # pnpm/action-setup v6.1.0 as ci.yml has them, actions/upload-artifact v7.0.2 read from its repo on 2026-11-03 at 14:55Z,
 # actions/cache/restore and actions/cache/save v6.1.0 as ci.yml has them.
@@ -55,8 +58,6 @@ on:
         default: mainnet
         type: choice
         options: [mainnet, testnet]
-  pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -64,11 +65,10 @@ permissions:
 # One queue per host (card live-runs-one-per-host): a second dispatched run on a host waits until the first ends, so no
 # check is judged against another run's load on the host's shared budgets (6 Nov 10:55Z: two helper runs at once, 42206377652
 # and 42206382978, read helper-token-page-cold 29 and 28 of 32 cold, floor 30; alone, 42207995804, 31). GitHub keeps one
-# run waiting per group: a newer dispatch on the host replaces a waiting one, never the one running. A pull request's run
-# is its own group (its ref) and a newer push cancels it.
+# run waiting per group: a newer dispatch on the host replaces a waiting one, never the one running.
 concurrency:
   group: live-${{ inputs.host || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   plan:
@@ -314,29 +314,3 @@ jobs:
           node .live-verdicts/scripts/ci/live-verdicts.mjs --dir "$RUNNER_TEMP/verdicts" --matrix "$MATRIX" --summary "$GITHUB_STEP_SUMMARY"
           if [ "$CHECKS" != success ]; then echo "a check job ended $CHECKS"; exit 1; fi
           echo "all $COUNT live runs ended with no check judging the build bad"
-
-  # The terminal's browser chain and the signing page's browser runs, on every pull request, in parallel with ci.yml's jobs.
-  browser-e2e:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-      - run: pnpm install --frozen-lockfile
-      - name: Google Chrome stable, and its sandbox comes up
-        uses: ./.github/actions/chrome
-      - name: the terminal's browser chain (in-shell, BAR-10 and every screen)
-        run: pnpm --filter terminal run test:e2e
-      - name: the signing page in headless Chrome (its headers, its frame)
-        run: pnpm --filter signpage run test:e2e
-      - name: the signing page's withdraw form at 390 and 1440 wide
-        run: node packages/signpage/test/withdraw-screens/run.mjs
-      - name: the signing page's pool withdraw screen at 390 and 1440 wide, on Solana and Base
-        run: node packages/signpage/test/pool-withdraw-screens/run.mjs

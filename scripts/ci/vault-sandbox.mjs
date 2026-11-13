@@ -34,6 +34,8 @@ export const PATHS = [
   "apps/helper/src/near/",
   "apps/helper/src/store/",
   "apps/helper/src/token-status/",
+  // the token watch's provider companies (card near-pair-on-keyed-providers: its pair is two companies)
+  "apps/helper/src/rpc/operator.ts",
   "apps/helper/test/bind-send/",
   // the relayer's withdraw send, which sandbox tests will drive as bind-send is driven
   "apps/helper/src/withdraw/",
