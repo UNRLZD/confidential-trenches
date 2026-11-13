@@ -18,6 +18,7 @@ import { evmPoolScopeOf, EVM_POOL_EVENTS, type EvmPoolEvent, type EvmPoolPin, ty
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { evmRestore, SECOND_GAP } from "../../wallet/src/pool/evm-restore.ts";
 import { EVM_SECOND_GAP } from "../../wallet/src/notes/store.ts";
+import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { evmPoolVenues, pinnedBuild, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSell } from "../../kit/src/trade/evm/sell.ts";
@@ -614,6 +615,50 @@ for (const [ref, p] of [
     await followEvmSells(x.h);
     assert.equal((await x.store.get(n.id))!.state, "PLANNED", `${refKey(ref)}: back to PLANNED, not an arriving line for good`);
     assert.deepEqual(await openOf(x), [], `${refKey(ref)}: the record dropped at its end`);
+  });
+}
+
+/** A filled half sale whose deposit is on chain but not final (its record kept, its note UNSPENT). */
+async function soldNotFinal(): Promise<{ x: World; id: string }> {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      x.c.balance = x.c.balance.map((b) => b - s.amount);
+      x.land(s.minOut - s.fee, s.precommitment, W, "0x" + "e1".repeat(32), true);
+      return "0x" + "aa".repeat(32);
+    },
+  });
+  const a = await runEvmPoolSell(x.h, HALF);
+  assert.equal("stage" in a && a.stage, "filled");
+  const n = (await returnNote(x.store))!;
+  assert.equal(n.state, "UNSPENT");
+  assert.equal((await openOf(x)).length, 1, "record kept");
+  return { x, id: n.id };
+}
+/** One settle round of the pool's (wallet src/pool/evm-settle.ts) at `fin`, on the world's events. */
+const settleRound = (x: World, fin: bigint) =>
+  evmSettleReserved({ seed64: SEED.slice(), notes: x.store, scope: SCOPE, round: async () => ({ fin: { number: fin, timestamp: BigInt(Math.floor(Date.now() / 1000)) - 600n }, anchor: { number: x.c.head + 100n, timestamp: BigInt(Math.floor(Date.now() / 1000)) }, events: [...x.c.events] }) });
+
+for (const reserved of [false, true]) {
+  test(`P2-race${reserved ? " (its note RESERVED by a buy)" : ""}: a reorg drops a sale's deposit for good and a load's follow reads not_landed before the pool's round backs the note out: the record is kept, and the follow after the round puts the note back PLANNED`, async () => {
+    const { x, id } = await soldNotFinal();
+    if (reserved) {
+      const held = await x.store.move(id, "UNSPENT", "HELD", { deadlineMs: BigInt(Date.now()) + 60_000n, context: "1" });
+      await x.store.move(id, "HELD", "RESERVED", { attempt: held.attempt! });
+    }
+    x.c.deposits.pop();
+    x.c.events.pop();
+    x.c.sellNonce = x.c.sellNonce! - 1n;
+    tick((EVM_SELL_DEADLINE_S + 120) * 1000);
+    await followEvmSells(x.h);
+    assert.equal((await openOf(x)).length, 1, "the record kept over a note whose landing is not final yet");
+    // the round backs the note out (its block above the final one), then one with that block final and no deposit of it
+    await settleRound(x, x.c.fin);
+    await settleRound(x, x.c.fin + 100n);
+    await followEvmSells(x.h);
+    assert.equal((await x.store.get(id))!.state, "PLANNED", "back to PLANNED, never INCOMING for good");
+    assert.deepEqual(await openOf(x), []);
   });
 }
 

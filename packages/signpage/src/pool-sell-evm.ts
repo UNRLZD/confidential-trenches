@@ -689,6 +689,9 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       // (review P3-1: a record dropped over a note left INCOMING has nothing that ends it)
       const store = await h.notes();
       const n = await store.get(x.open.note);
+      // a note landed from a deposit a reorg then dropped (its landing not final, so the pool's round backs it out):
+      // the record is kept for the follow after that round, which puts it back PLANNED (review P2-race)
+      if (n !== undefined && n.state !== "INCOMING" && n.state !== "PLANNED" && (await store.landings()).has(n.id)) return null;
       if (n?.state === "INCOMING" && !(await store.move(n.id, "INCOMING", "PLANNED").then(() => true, () => false))) continue;
       await h.unrecord(x.open.note, x.open.deadline).catch(() => {});
       return { stage: "not_landed", txs: [] };
