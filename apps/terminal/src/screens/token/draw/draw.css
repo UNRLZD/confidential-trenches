@@ -1,0 +1,217 @@
+/* The chart's drawing toolbar (DrawToolbar.tsx): the live UNRLZD terminal's values (chart/draw/DrawToolbar.module.css
+   there). Button 28px + 2px gap, rules 1px + 3px margins, 4px column padding: tools.ts foldedGroups counts with these.
+   Phones: buttons 32 px with a 44 px hit area (BAR-10), the column behind one toggle over the plot's top-left. */
+.ctd-bar {
+  --bg-floating: #151515; --bg-row-hover: #141414; --blue: #5b8cff;
+  position: relative;
+  flex: none;
+  width: 36px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-panel);
+  z-index: 4;
+}
+.ctd-col {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+.ctd-btn {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.ctd-btn:hover {
+  color: var(--text-2);
+}
+.ctd-btn[data-on="true"] {
+  background: var(--border-strong);
+  color: var(--text-1);
+}
+.ctd-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ctd-btn:focus-visible,
+.ctd-flyitem:focus-visible,
+.ctd-note:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+/* a group button opens a flyout: TV's corner tick */
+.ctd-corner {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 3px solid currentColor;
+}
+/* strong magnet */
+.ctd-dot {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ctd-sep {
+  flex: none;
+  width: 20px;
+  height: 1px;
+  margin: 1px 0;
+  background: var(--border-panel);
+}
+.ctd-toggle {
+  display: none;
+}
+.ctd-fly {
+  position: absolute;
+  left: calc(100% + 4px);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  min-width: 168px;
+  background: var(--bg-floating);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.ctd-flyitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+.ctd-flyitem:hover {
+  background: var(--bg-row-hover);
+  color: var(--text-1);
+}
+.ctd-flyitem[data-on="true"] {
+  background: var(--border-strong);
+  color: var(--text-1);
+}
+.ctd-note {
+  position: absolute;
+  z-index: 6;
+  width: 180px;
+  height: 26px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-1);
+  background: var(--bg-floating);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+}
+
+/* phones / touch: collapsed behind one toggle floating over the chart's top-left corner */
+@media (max-width: 767.98px), (pointer: coarse) {
+  .ctd-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    background: transparent;
+    border-right: 0;
+    pointer-events: none;
+  }
+  .ctd-bar > * {
+    pointer-events: auto;
+  }
+  .ctd-toggle {
+    display: flex;
+    margin: 4px;
+    background: var(--bg-floating);
+    border: 1px solid var(--border-strong);
+  }
+  .ctd-btn {
+    width: 32px;
+    height: 32px;
+  }
+  .ctd-btn::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+  .ctd-flyitem {
+    height: 44px;
+  }
+  .ctd-col {
+    display: none;
+  }
+  .ctd-bar[data-open="true"] {
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border-panel);
+  }
+  .ctd-bar[data-open="true"] .ctd-col {
+    display: flex;
+  }
+}
+.ctd-bar[data-compact="true"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  background: transparent;
+  border-right: 0;
+  pointer-events: none;
+}
+.ctd-bar[data-compact="true"] > * {
+  pointer-events: auto;
+}
+.ctd-bar[data-compact="true"] .ctd-toggle {
+  display: flex;
+  margin: 4px;
+  background: var(--bg-floating);
+  border: 1px solid var(--border-strong);
+}
+.ctd-bar[data-compact="true"] .ctd-col {
+  display: none;
+}
+.ctd-bar[data-compact="true"][data-open="true"] {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-panel);
+}
+.ctd-bar[data-compact="true"][data-open="true"] .ctd-col {
+  display: flex;
+}

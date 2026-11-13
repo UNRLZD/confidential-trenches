@@ -6,7 +6,7 @@ import { test } from "node:test";
 import type { SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
 import { balanceOf, NO_DATA } from "../src/screens/portfolio/model.ts";
 import { DOTS, glow, TICK, tickDist } from "../src/screens/signin/dots.ts";
-import { headerModel, restoreModel, restoreView, showRestore, signinWays, toCents, usd } from "../src/screens/signin/model.ts";
+import { failLine, headerModel, restoreModel, restoreView, showRestore, signinWays, toCents, usd } from "../src/screens/signin/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/signin/words.ts";
 
 const base: SignpageState = {
@@ -84,6 +84,17 @@ test("S2.1 after a failed way (APU-05): no PRF drops the passkey; no passkey kee
   assert.deepEqual(signinWays(st({ signed_in: false, signin_failed: { way: "passkey", reason: "no_prf" } })), ["wallet", "words"]);
   assert.deepEqual(signinWays(st({ signed_in: false, signin_failed: { way: "passkey", reason: "no_passkey" } })), ["passkey", "wallet", "words"]);
   assert.deepEqual(signinWays(st({ signed_in: false, signin_failed: { way: "wallet", reason: "no_prf" } })), ["passkey", "wallet", "words"]);
+});
+
+test("a way that failed shows its line under it only once tapped here, and not once signed in (UNRLZD's rejected and no-passkey screens)", () => {
+  const failed = (way: "passkey" | "wallet" | "words", reason: string) => st({ signed_in: false, signin_failed: { way, reason } });
+  assert.equal(failLine(failed("wallet", "rejected"), null), null);
+  assert.deepEqual(failLine(failed("wallet", "rejected"), "wallet"), { way: "wallet", kind: "cancelled" });
+  assert.equal(failLine(failed("wallet", "rejected"), "passkey"), null);
+  assert.deepEqual(failLine(failed("passkey", "no_passkey"), "passkey"), { way: "passkey", kind: "cancelled" });
+  assert.deepEqual(failLine(failed("passkey", "no_prf"), "passkey"), { way: "passkey", kind: "nopasskey" });
+  assert.equal(failLine(st({ signed_in: true, signin_failed: { way: "wallet", reason: "rejected" } }), "wallet"), null);
+  assert.equal(failLine(st({ signed_in: false }), "wallet"), null);
 });
 
 const op = (id: string, stage: "started" | "reading" | "done" | "stalled") => ({ id, kind: "restore" as const, stage, txs: [] });

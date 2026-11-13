@@ -11,6 +11,7 @@
 import { dispose, init } from "klinecharts";
 import type { Chart, Crosshair, DeepPartial, KLineData, PeriodType, Point, Styles } from "klinecharts";
 import { sameBar } from "./candles.ts";
+import { drawStyles, registerDrawOverlays } from "./draw/overlays.ts";
 import type { Bar, ChartTf } from "./candles.ts";
 import { valueText, volumeIn } from "./units.ts";
 import type { ChartUnit } from "./units.ts";
@@ -59,6 +60,8 @@ function styles(el: HTMLElement): DeepPartial<Styles> {
     yAxis: { axisLine: { show: false }, tickLine: { show: false }, tickText: tick },
     separator: { size: 1, color: line },
     crosshair: { horizontal: { line: crossLine, text: crossText }, vertical: { line: crossLine, text: crossText } },
+    // the drawing toolbar's overlays in the page's palette (draw/overlays.ts, UNRLZD's drawStyles)
+    overlay: drawStyles(),
   };
 }
 
@@ -76,6 +79,8 @@ function addVolume(chart: Chart, phone: boolean): void {
 export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData) => void): Drawn | null {
   // the axis and the volume pane draw in the chart's unit (units.ts), read at each draw from `drawn.unit`
   let unit: ChartUnit = { mc: false, quote: false };
+  // the drawing toolbar's own overlays (rectangle, measure, note, arrows, fib) are known to the library before a chart
+  registerDrawOverlays();
   const chart = init(el, {
     timezone: "UTC",
     styles: styles(el),

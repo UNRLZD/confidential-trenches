@@ -127,7 +127,9 @@ export interface WalletStore {
   // (nothing written). The store's copy of the entropy and the seed it decrypts are zeroed.
   nameDeposit(shown: { entropy: Uint8Array }, rec: { scope: bigint; index: number; id: string; evm?: string }): Promise<DepositRecord>;
   // Deletes the database. Refuses while the stored seed's 12 words are its only copy and not saved (backupFirst).
-  signOut(): Promise<void>;
+  // `locked` runs once, holding the seed lock exclusive, after every refusal and before the sign out is posted and the
+  // database deleted: no seed operation of any tab runs beside it (the page's gate closes there: src/main.ts).
+  signOut(o?: { locked?: () => void }): Promise<void>;
   close(): void;
 }
 
@@ -591,7 +593,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
       await moveCounter(scope, (n) => (next = Math.max(n, up)));
       return next;
     },
-    async signOut() {
+    async signOut(o = {}) {
       await seedLocked(async () => {
         // the backup comes first while the 12 words are the only copy (wallet.md:922)
         const seed = await unwrap("meta", "seed", await getRaw("meta", "seed"));
@@ -601,6 +603,7 @@ export async function openWalletStore(opts: WalletStoreOptions = {}): Promise<Wa
         // a closed store never deletes the database: it may be a newer account's. Checked here, after the last await and
         // with none between it and deleteDatabase, so a store closed while the backup check ran refuses too.
         live();
+        o.locked?.();
         channel.postMessage({ kind: "signout" });
         shut();
         channel.close();

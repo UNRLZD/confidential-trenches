@@ -19,7 +19,7 @@ const draft = (text: string, source: string): Word => ({ text, source, draft: tr
 export const WORDS = {
   buy: ok("Buy", "R5 token.js U.ticket tk-side; src/screens/token/words.ts buy (the side switch and the main button's `Buy SYM`)"),
   sell: ok("Sell", "R5 token.js U.ticket tk-side; src/screens/token/words.ts sell"),
-  bal: ok("Bal", "09-design-brief S8 Balance: `Bal` (CN-14, signed; v2.0.9, M165 (16))"),
+  available: ok("available", "UNRLZD ticket balance line `— N available` (owner 12 Nov parity)"),
   usd: ok("USD", "R5 token.js U.ticket tk-unit"),
   amountLabel: ok("Amount", "09-design-brief S8 Size: `Amount` (CN-13, signed; v2.0.10, M166 (14)); the field's accessible name only"),
   market: draft("Market", "09-design-brief S8 Order tabs [draft copy: Market]"),
@@ -38,9 +38,9 @@ export const WORDS = {
   exitPlan: ok("Exit plan", "R5 token.js U.exitBlock tk-blockHead; the toggle's accessible name too"),
   exitPlanSub: ok("Sells automatically once this buy fills", "R5 token.js U.exitBlock tk-blockHead"),
   // the safety grid under the box (R5 token.js U.riskGrid and app.js P.riskCells at design-lock-r5: UNRLZD's RiskGrid labels)
-  top10: ok("Top 10 %", "R5 app.js P.riskCells"),
-  dev: ok("Dev %", "R5 app.js P.riskCells"),
-  snipers: ok("Snipers %", "R5 app.js P.riskCells"),
+  top10: ok("Top 10", "UNRLZD risk grid label (owner 12 Nov parity; was R5 app.js P.riskCells `Top 10 %`)"),
+  dev: ok("Dev", "UNRLZD risk grid label (owner 12 Nov parity; was R5 app.js P.riskCells `Dev %`)"),
+  snipers: ok("Snipers", "UNRLZD risk grid label (owner 12 Nov parity; was R5 app.js P.riskCells `Snipers %`)"),
   holders: ok("Holders", "R5 app.js P.riskCells"),
   liq: ok("Liq", "R5 app.js P.riskCells"),
   age: ok("Age", "R5 app.js P.riskCells"),

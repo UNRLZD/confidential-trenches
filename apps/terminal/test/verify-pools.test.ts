@@ -125,7 +125,8 @@ test("readPool: an EVM pool is read at the lower head on both RPCs, every read a
   for (const c of base.filter((x) => x.method !== "eth_blockNumber")) assert.equal(c.method === "eth_getBlockByNumber" ? c.params[0] : c.params.at(-1), "0x64", `${c.method} at the lower head`);
   assert.deepEqual(base.filter((c) => c.method === "eth_getStorageAt").map((c) => c.params[1]).sort(), [EIP1967.admin, EIP1967.beacon, EIP1967.implementation, EIP1967.admin, EIP1967.beacon, EIP1967.implementation].sort());
   const sol = calls.filter((c) => c.method === "getMultipleAccounts");
-  assert.deepEqual(sol.map((c) => c.url), [...PINS.solana!.rpcs]);
+  // two operators of Solana's list too, the first two, both answering: the spare not asked
+  assert.deepEqual(new Set(sol.map((c) => c.url)), new Set(PINS.solana!.rpcs.slice(0, 2)));
   assert.deepEqual(sol[0]!.params, [[(PINS.solana!.pin as any).program, (PINS.solana!.pin as any).programdata], { encoding: "base64", commitment: "finalized" }]);
   // no pool is read through anything but its pair: no helper, no other host
   const hosts = new Set(calls.map((c) => new URL(c.url).host));
@@ -153,14 +154,15 @@ test("one RPC of each pair down: every row amber, nothing logged; both of an EVM
   const was = console.error;
   console.error = (...a: unknown[]) => void logged.push(a.map(String).join(" "));
   try {
-    // card device-evm-fee-read-walks-operators: Solana's pair has no spare, so its row is amber; an EVM row walks its
-    // list to two other operators and stays ok, naming them
+    // card device-evm-fee-read-walks-operators: an EVM row walks its list to two other operators and stays ok, naming
+    // them; since card verify-row-survives-one-provider Solana's list has a spare and does the same
     for (const side of [0, 1]) {
+      forgetPoolWalks();
       const firsts = new Set(Object.values(PINS).map((p) => p!.rpcs[side]));
       const v = await livePools(PINS, replay((u) => firsts.has(u)));
       assert.ok(v.state === "read");
-      assert.deepEqual(v.rows.map((r) => r.status), ["warn", "ok", "ok"], `side ${side} down`);
-      for (const r of v.rows.slice(1)) assert.ok(r.rpcs.length === 2 && !r.rpcs.some((x) => firsts.has(x)) && r.rpcs[0] !== r.rpcs[1], `side ${side} down: ${r.rpcs}`);
+      assert.deepEqual(v.rows.map((r) => r.status), ["ok", "ok", "ok"], `side ${side} down`);
+      for (const r of v.rows) assert.ok(r.rpcs.length === 2 && !r.rpcs.some((x) => firsts.has(x)) && r.rpcs[0] !== r.rpcs[1], `side ${side} down: ${r.rpcs}`);
       assert.deepEqual(logged, [], `side ${side} down: nothing logged`);
     }
     const base = new Set(PINS.base!.rpcs);
@@ -267,4 +269,79 @@ test("the testnet build names no pool: every row Unverified, nothing asked", asy
   const v = await livePools(VERIFY_RELEASES.testnet.pools, (async () => (asked++, new Response("{}"))) as unknown as typeof fetch);
   assert.equal(asked, 0);
   assert.ok(v.state === "read" && v.rows.every((r) => r.status === "warn" && r.rpcs.length === 0 && r.checks.every((c) => c.word === "unverified")));
+});
+
+// card verify-row-survives-one-provider: solana.api.pocket.network answered the page's getMultipleAccounts HTTP 400 in
+// two app live runs in a row (12 Nov, run 43314363472, from GitHub's runners; the same request answered 200 from the
+// Mac), and the Solana row read Unverified, a fixed pair with no spare. Solana's list now walks as the EVM lists do: a
+// refusing operator is walked past to the spare, and the row is still read on two operators' agreeing answers.
+test("Solana: one provider answers HTTP 400 to the accounts read: the row is ok on the two others, nothing logged", async () => {
+  forgetPoolWalks();
+  const sol = PINS.solana!.rpcs;
+  assert.ok(sol.length >= 3, `Solana's list names a spare: ${sol}`);
+  for (const refused of sol.slice(0, 2)) {
+    forgetPoolWalks();
+    const asked: string[] = [];
+    const fetchFn = (async (url: string, init: RequestInit) => {
+      const { method } = JSON.parse(String(init.body));
+      if (method !== "getMultipleAccounts") return new Response("{}", { status: 503 });
+      asked.push(url);
+      if (url === refused) return new Response("", { status: 400 });
+      return new Response(JSON.stringify(REC.solana.rpcs[0]!.answers.accounts), { status: 200 });
+    }) as typeof fetch;
+    const logged: string[] = [];
+    const was = console.error;
+    console.error = (...a: unknown[]) => void logged.push(a.map(String).join(" "));
+    let r: PoolRow;
+    try {
+      r = (await livePools({ solana: PINS.solana, base: null, robinhood: null }, fetchFn)).rows[0]!;
+    } finally {
+      console.error = was;
+    }
+    assert.deepEqual(status(r), ["ok", { authority: "ok", poolCode: "ok" }], `${refused} refused`);
+    assert.ok(r.rpcs.length === 2 && !r.rpcs.includes(refused) && r.rpcs[0] !== r.rpcs[1], `${refused} refused: read on ${r.rpcs}`);
+    assert.ok(asked.includes(sol[2]!), `${refused} refused: the spare was asked`);
+    assert.deepEqual(logged, []);
+  }
+});
+
+test("Solana: two providers that disagree are never turned into agreement by the spare", async () => {
+  forgetPoolWalks();
+  const sol = PINS.solana!.rpcs;
+  const asked: string[] = [];
+  const fetchFn = (async (url: string) => {
+    asked.push(url);
+    const a = JSON.parse(JSON.stringify(REC.solana.rpcs[0]!.answers.accounts));
+    if (url === sol[1]) {
+      const v = a.result.value[1];
+      const b = Buffer.from(v.data[0], "base64");
+      b[12] = 1;
+      v.data[0] = b.toString("base64");
+    }
+    return new Response(JSON.stringify(a), { status: 200 });
+  }) as typeof fetch;
+  const r = (await livePools({ solana: PINS.solana, base: null, robinhood: null }, fetchFn)).rows[0]!;
+  assert.equal(r.status, "warn");
+  assert.equal(r.checks.find((c) => c.id === "authority")!.word, "disagree");
+  assert.ok(!asked.includes(sol[2]!), "no third operator asked once two answered");
+});
+
+test("Solana: one provider left: Unverified, never ok on one answer", async () => {
+  forgetPoolWalks();
+  const sol = PINS.solana!.rpcs;
+  const fetchFn = (async (url: string) => (url === sol[0] ? new Response(JSON.stringify(REC.solana.rpcs[0]!.answers.accounts), { status: 200 }) : new Response("", { status: 400 }))) as typeof fetch;
+  const was = console.error;
+  console.error = () => {};
+  try {
+    const r = (await livePools({ solana: PINS.solana, base: null, robinhood: null }, fetchFn)).rows[0]!;
+    assert.equal(r.status, "warn");
+    assert.ok(r.checks.every((c) => c.status === "warn"));
+  } finally {
+    console.error = was;
+  }
+});
+
+test("the deploy check allows exactly Solana's list in connect-src", async () => {
+  const { SOLANA_RPCS } = await import("../scripts/check-deploy.ts");
+  assert.deepEqual(SOLANA_RPCS, [...PINS.solana!.rpcs]);
 });
