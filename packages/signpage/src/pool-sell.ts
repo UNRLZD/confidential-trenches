@@ -1592,13 +1592,9 @@ export async function solanaSellPrice(rpcs: Rpcs, accounts: readonly string[], s
 /** The Ws whose last sale did not land (review P3-1 of 4f9217972): the next sale of each pays its cap, with no fee read,
  *  until one lands. Kept for the page's session. */
 const capNext = new Set<string>();
-/** The W whose leftover pass of this load sent a transaction (resumeRentBacks): no other leftover W's pass sends in this
- *  load (review 2 P3-e of c0dd55d02). Kept for the page's session, as capNext. */
-let leftoverSent: string | null = null;
-/** A fresh page load: capNext and the load's leftover pass forgotten (a test's reload). */
+/** A fresh page load: capNext forgotten (a test's reload). */
 export const forgetPageLoad = (): void => {
   capNext.clear();
-  leftoverSent = null;
 };
 /** The rent-back transactions this page sent from a W (rentBack's send), so a pass knows whether it sent one. */
 let rentBackSends = 0;
@@ -2344,7 +2340,11 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
   } catch {
     spaceRead = false;
   }
-  // per W: another W's send this load, a store that could not be read, or an open gap that is not W's own
+  // the W whose leftover pass of this run sent a transaction: no other W's pass sends in this run (review 2 P3-e of
+  // c0dd55d02). The run's own (review P3-7 of 024e8a89d: kept for the page's session, a page left open never swept a
+  // second leftover W): a later run reads the device's spacing again, and the claim holds the gap the send opened
+  let leftoverSent: string | null = null;
+  // per W: another W's send this run, a store that could not be read, or an open gap that is not W's own
   const quiet = (o: OwedRentBack): boolean => (leftoverSent !== null && leftoverSent !== o.address) || !spaceRead || spaceOpen(space, Number(h.now?.() ?? BigInt(Date.now())), o.spaced);
   // the order drawn at random each load (review of 20ba2481b, P1-2), so a W whose pass never progresses never holds the
   // rest behind it (review 5 of 38e59182, L2) and no fixed order ties the account's Ws together
@@ -2389,7 +2389,7 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
         if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, quiet: quiet(o), leftover: true, ...(o.sell ? { sell: o.sell } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
       });
       if (!go) return true;
-      // this pass sent from its W: the load's one; the rest send nothing in this load
+      // this pass sent from its W: the run's one; the rest send nothing in this run
       if (rentBackSends > sends) leftoverSent = address;
     }
   } finally {
