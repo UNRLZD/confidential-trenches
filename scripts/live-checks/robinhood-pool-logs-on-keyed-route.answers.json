@@ -1,0 +1,75 @@
+{
+ "_note": "Each side as provider-answer.mjs rpcAnswer read it ({result}, {error} or {noAnswer}; the route with its Server-Timing kept). good: this card's helper in-process (scratch rh-record-good.mts), ROBINHOOD_RPC_URL a made-up Alchemy Robinhood URL whose sends were forwarded to Robinhood's own RPC, 13 Nov 16:26Z: both spans a log list on the keyed route, the same as Robinhood's own, answered by ROBINHOOD_RPC_URL: PASS. bad_live: the deployed helper (f7921e8f) read live 13 Nov 16:26Z with --record: both spans {\"code\":\"upstream\"} (its keyed URLs are free plans: dRPC free answers 400 code 35 past 101 blocks, QuickNode's trial caps at 5): FAIL.",
+ "good": {
+  "base": "in-process",
+  "head": 113493858,
+  "spans": [
+   {
+    "name": "newest 100000",
+    "from": 113393859,
+    "to": 113493858,
+    "route": {
+     "result": [],
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=323;desc=\"ROBINHOOD_RPC_URL\""
+     }
+    },
+    "own": {
+     "result": []
+    }
+   },
+   {
+    "name": "whole history",
+    "from": 108420674,
+    "to": 113493858,
+    "route": {
+     "result": [],
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=316;desc=\"ROBINHOOD_RPC_URL\""
+     }
+    },
+    "own": {
+     "result": []
+    }
+   }
+  ]
+ },
+ "bad_live": {
+  "base": "https://ct-api.unrealized.trade",
+  "head": 113493833,
+  "spans": [
+   {
+    "name": "newest 100000",
+    "from": 113393834,
+    "to": 113493833,
+    "route": {
+     "error": {
+      "code": "upstream"
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=8;desc=\"ROBINHOOD_RPC_URL_DRPC_3\""
+     }
+    },
+    "own": {
+     "result": []
+    }
+   },
+   {
+    "name": "whole history",
+    "from": 108420674,
+    "to": 113493833,
+    "route": {
+     "error": {
+      "code": "upstream"
+     },
+     "kept": {
+      "server-timing": "rpc-wait;dur=0, rpc;dur=10;desc=\"ROBINHOOD_RPC_URL_DRPC_3\""
+     }
+    },
+    "own": {
+     "result": []
+    }
+   }
+  ]
+ }
+}
