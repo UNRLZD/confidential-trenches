@@ -8,7 +8,7 @@ import type { VaultProver } from "@blindfill/kit";
 export async function exitProver(): Promise<VaultProver> {
   const { exitSetupFiles } = await import("./setup.ts");
   // snarkjs ships no types
-  const snarkjs = (await import("snarkjs" as string)) as { groth16: { fullProve(i: unknown, w: unknown, z: unknown): Promise<{ proof: unknown; publicSignals: string[] }> } };
+  const snarkjs = (await import("snarkjs" as string)) as { groth16: { fullProve(i: unknown, w: Uint8Array, z: Uint8Array, logger: undefined, wtns: undefined, o: { singleThread: boolean }): Promise<{ proof: unknown; publicSignals: string[] }> } };
   let files: Map<string, Uint8Array> | null = null;
   return {
     async load(circuit) {
@@ -18,7 +18,8 @@ export async function exitProver(): Promise<VaultProver> {
     async prove(circuit, input) {
       if (circuit !== "withdraw" || files === null) throw new Error("load the withdraw files first");
       const t = performance.now();
-      const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, { type: "mem", data: files.get("withdraw.wasm") }, { type: "mem", data: files.get("withdraw.zkey") });
+      // the browser worker's call (packages/kit/src/prover/worker.js), single thread as the kit's own Node proof runs it
+      const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, files.get("withdraw.wasm")!, files.get("withdraw.zkey")!, undefined, undefined, { singleThread: true });
       return { proof: proof as never, publicSignals, proveMs: Math.round(performance.now() - t) };
     },
   };

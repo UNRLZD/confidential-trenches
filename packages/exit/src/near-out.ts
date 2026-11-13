@@ -144,12 +144,16 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
       return k.id;
     };
     let stopped: string | null = null;
-    // the resume: a spend of ours paid or refund_pending is settled, and its A closed, before any new withdrawal
+    // the resume (a run stopped before, here or in the app): before any new withdrawal, a spend of ours paid or
+    // refund_pending is settled by its A, funded first when short, and every A whose spend is settled and that still
+    // exists is closed to the typed account (exitCloseOne reads A: one already deleted is closed with no tx); in_flight
+    // waits for its callback, said as a stop
     for (const s of scan.spends) {
-      if (s.spend.status !== "paid" && s.spend.status !== "refund_pending") continue;
       const aId = aOf(s.l, s.j);
-      const fee = settleNeed({ gasPrice: await gasPrice(mrpcs) }, s.spend.status);
-      await fundedOrWait({ address: aId, need: fee, unit: { symbol: "NEAR", decimals: 24 }, balance: () => nearBalance(mrpcs, aId), say: ctx.say, sleep });
+      if (s.spend.status === "paid" || s.spend.status === "refund_pending") {
+        const fee = settleNeed({ gasPrice: await gasPrice(mrpcs) }, s.spend.status);
+        await fundedOrWait({ address: aId, need: fee, unit: { symbol: "NEAR", decimals: 24 }, balance: () => nearBalance(mrpcs, aId), say: ctx.say, sleep });
+      }
       const out = await exitCloseOne({ seed64: ctx.seed, network, to, l: s.l, j: s.j, nullifierHash: s.spend.nullifierHash, steps: steps(aId) });
       txs.push(...out.txs);
       if (out.stage !== "closed") stopped ??= `${out.stage}: ${out.why}`;
