@@ -1,5 +1,5 @@
 // Card exit-with-only-the-words: the Solana pool's exit on a local copy of mainnet, with no real money and no test network.
-//   node packages/exit/scripts/sol-exit-copy.mjs        (a heavy job: solana-test-validator, through scripts/heavy.sh)
+//   node packages/exit/scripts/sol-exit-copy.mjs        (run on a machine with solana-test-validator)
 // 1. solana-test-validator clones, from mainnet (read only, nothing is signed or sent there), the release's pool
 //    program (contracts/pool-solana/deployments/mainnet.json, as EXIT_SOL_CLUSTERS.mainnet names it), its pool account and
 //    every account the program owns, with mainnet's feature set.
