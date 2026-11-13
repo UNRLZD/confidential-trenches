@@ -23,7 +23,7 @@ const W = "0".repeat(64);
 let copies = 0;
 const fresh = async () => (await import(new URL(`../../wallet/src/pace.ts?seat-down=${++copies}`, import.meta.url).href)) as typeof Pace;
 
-type Seat = "ok" | "deadline" | "busy-once-3s" | "busy" | "503" | "day";
+type Seat = "ok" | "deadline" | "busy-once-3s" | "busy" | "503" | "day" | "huge";
 /** The seat's answer by mode: hangs to its deadline, 429 once with Retry-After 3, 429 Retry-After 1 always, or 503. */
 function seatAnswer(mode: Seat, nth: number, signal: AbortSignal | null | undefined): Response | Promise<Response> | null {
   if (mode === "deadline") return new Promise<Response>((_, no) => signal!.addEventListener("abort", () => no(signal!.reason), { once: true }));
@@ -32,11 +32,14 @@ function seatAnswer(mode: Seat, nth: number, signal: AbortSignal | null | undefi
   if (mode === "503") return new Response(JSON.stringify({ error: { code: "upstream" } }), { status: 503 });
   // the helper's day cap for this caller (apps/helper/src/rpc/rpc.ts NEAR_SEAT_DAY): its 429 names RETRY_AFTER_MAX_S
   if (mode === "day") return new Response(JSON.stringify({ error: { code: "rate_limited" } }), { status: 429, headers: { "retry-after": "75" } });
+  // a seat naming a wait far past any cap: the page holds it down SEAT_DOWN_MAX_MS at most (review P3-4 of 997ce7a7f)
+  if (mode === "huge") return new Response("{}", { status: 429, headers: { "retry-after": "999999" } });
   return null;
 }
 
-/** A fake chain and the page's pair on it: the seat by `mode`, dRPC and the keyless spare answering; every ask counted. */
-async function pairOn(mode: Seat) {
+/** A fake chain and the page's pair on it: the seat by `mode`, dRPC and the keyless spare answering; every ask counted.
+ *  `drpcLateMs`: dRPC's first answer comes that long after it is asked, at the chain's height then. */
+async function pairOn(mode: Seat, drpcLateMs = 0) {
   const k = chain();
   k.c.exists = true;
   const t0 = performance.now();
@@ -51,8 +54,9 @@ async function pairOn(mode: Seat) {
     if (url === NET.seat) {
       const busy = seatAnswer(mode, ++asked.seat, init?.signal);
       if (busy !== null) return busy;
-    } else if (url === NET.drpc) asked.drpc++;
-    else asked.keyless++;
+    } else if (url === NET.drpc) {
+      if (++asked.drpc === 1 && drpcLateMs > 0) await new Promise((r) => setTimeout(r, drpcLateMs)), at();
+    } else asked.keyless++;
     return new Response(JSON.stringify(k.answer(params)), { status: 200 });
   }) as typeof fetch;
   const P = await fresh();
@@ -69,6 +73,13 @@ for (const mode of ["deadline", "busy-once-3s", "busy", "503"] as const) {
     assert.ok(asked.drpc <= 2, JSON.stringify(asked));
   }));
 }
+
+test("nearFinal with the seat 503 and dRPC's first final 3 s late: the seat side's final is asked once more on the spare, the seat asked once (its reserved turn is its first query's alone; review P3-5 of 997ce7a7f)", { timeout: 120_000 }, () => onTestClock(async () => {
+  const { pair, asked } = await pairOn("503", 3_000);
+  const f = await nearFinal("mainnet", pair).catch((e: unknown) => String(e));
+  assert.equal(typeof f, "object", `${String(f)} ${JSON.stringify(asked)}`);
+  assert.deepEqual([asked.seat, asked.keyless, asked.drpc], [1, 2, 1], "the seat once, the spare twice (the lower final re-asked there), dRPC once");
+}));
 
 test("a seat that fell to its spare stays down SEAT_DOWN_MS: the next reads go to the spare at once; then the seat is asked again; a sign out (seatsUp) forgets it", { timeout: 120_000 }, () => onTestClock(async () => {
   const { pair, asked, P } = await pairOn("503");
@@ -104,8 +115,22 @@ test("the helper's day cap (429 naming 75 s): the seat is asked once, the spare 
   assert.equal(asked.seat, 2, "asked again once the 75 s named are over");
 }));
 
+test("a seat naming Retry-After 999999 stays down SEAT_DOWN_MAX_MS (75 s) at most: asked again once they are over (review P3-4 of 997ce7a7f)", { timeout: 300_000 }, () => onTestClock(async () => {
+  const { pair, asked, P } = await pairOn("huge");
+  const view = { request_type: "view_account", finality: "final", account_id: W };
+  await pair[0].query(view);
+  assert.deepEqual([asked.seat, asked.keyless], [1, 1], "the spare at once");
+  assert.equal(P.SEAT_DOWN_MAX_MS, 75_000);
+  await new Promise((r) => setTimeout(r, P.SEAT_DOWN_MAX_MS - 1_000));
+  await pair[0].query(view);
+  assert.equal(asked.seat, 1, "still down inside the 75 s");
+  await new Promise((r) => setTimeout(r, 1_001));
+  await pair[0].query(view);
+  assert.equal(asked.seat, 2, "asked again once the 75 s are over");
+}));
+
 /** One NEAR buy after its payout on the page's reads (nearReads) and pair, the helper landing what it is sent. */
-async function buy(mode: Seat | "share", poolPages = 0) {
+async function buy(mode: Seat | "share", poolPages = 0, drpcBusy?: readonly [number, number]) {
   let win = -1, used = 0, refused = 0;
   const sent: number[] = [];
   const k = chain();
@@ -117,13 +142,13 @@ async function buy(mode: Seat | "share", poolPages = 0) {
   const asked = { seat: 0, keyless: 0 };
   const fetchFn = (async (url: string, init?: RequestInit) => {
     at();
+    const t = performance.now() - t0;
     const params = JSON.parse(String(init!.body)).params as Record<string, unknown>;
     if (url === NET.seat) {
       asked.seat++;
-      sent.push(performance.now() - t0);
+      sent.push(t);
       if (mode === "share") {
         // the helper's per-caller share: RPC_PAGE_NEED near per fixed 10 s window, past it 429 with the seconds left
-        const t = performance.now() - t0;
         const w = Math.floor(t / 10_000);
         if (w !== win) (win = w), (used = 0);
         if (++used > 30) return refused++, new Response("{}", { status: 429, headers: { "retry-after": String(Math.max(1, Math.ceil(((w + 1) * 10_000 - t) / 1000))) } });
@@ -132,6 +157,10 @@ async function buy(mode: Seat | "share", poolPages = 0) {
         if (busy !== null) return busy;
       }
     } else if (url !== NET.drpc) asked.keyless++;
+    else if (drpcBusy !== undefined && t >= drpcBusy[0] && t < drpcBusy[1]) {
+      // dRPC's own 429 naming 30 s, past NEAR_BUSY_WAIT_MAX_MS (review P3-1 of 997ce7a7f)
+      return new Response("{}", { status: 429, headers: { "retry-after": "30" } });
+    }
     return new Response(JSON.stringify(k.answer(params)), { status: 200 });
   }) as typeof fetch;
   const P = await fresh();
@@ -187,4 +216,11 @@ test("a session's first NEAR buy with the seat up at the helper's per-caller sha
   assert.ok("result" in r.a && r.a.result.stage === "filled", JSON.stringify(r.a));
   assert.ok(r.refused <= 1, `the helper refused ${r.refused} of ${r.asked.seat}`);
   assert.equal(r.asked.keyless, 0, "a share's 429 waited out, the seat never taken for down");
+}));
+
+test("a NEAR buy after its payout with dRPC at 429 naming 30 s from 3 s to 33 s fills: a long wait is the seat's alone to skip, any other provider's is waited out in its tries (review P3-1 of 997ce7a7f)", { timeout: 300_000 }, () => onTestClock(async () => {
+  const r = await buy("ok", 0, [3_000, 33_000]);
+  console.log("dRPC 30 s busy:", r.ms, "ms", JSON.stringify(r.asked), JSON.stringify(r.log));
+  assert.ok("result" in r.a && r.a.result.stage === "filled", JSON.stringify(r.a) + JSON.stringify(r.log));
+  assert.equal(r.usdcOnW, 0n, "no USDC left on W");
 }));

@@ -124,3 +124,62 @@ test("T5: FastNEAR's keyless URL set under the keyed name (no key in it): ?keyed
   assert.equal(a.status, 503, a.body);
   assert.deepEqual(asked, []);
 });
+
+/** A rig whose FastNEAR answers as `mode.now` says: 200, its 503, or its 429 naming 60 s. */
+function modeRig(deps: Record<string, unknown> = {}) {
+  const asked: string[] = [];
+  const mode = { now: "ok" as "ok" | "down" | "busy" };
+  const fetch = async (url: string): Promise<Response> => {
+    asked.push(url);
+    if (mode.now === "down") return new Response("down", { status: 503 });
+    if (mode.now === "busy") return new Response("busy", { status: 429, headers: { "retry-after": "60" } });
+    return new Response(FAST_BODY, { status: 200, headers: { "content-type": JSON_T } });
+  };
+  const c = { t: Math.ceil(1_800_000_000_000 / 86_400_000) * 86_400_000 };
+  const r = createRpc({ NEAR_RPC_URL_FASTNEAR: FASTNEAR }, { ...deps, fetch: fetch as never, now: () => c.t, sleep: async (ms: number) => void (c.t += ms), log: () => undefined });
+  const keyedOnly = (body: unknown, client = "198.51.100.7") => r.handle("near", JSON_T, JSON.stringify(body), client, false, true);
+  /** reads 2 s apart (inside the share and FastNEAR's pace) until one is refused; how many were answered */
+  const drain = async (): Promise<number> => {
+    for (let ok = 0; ; ok++) {
+      const a = await keyedOnly(QUERY);
+      if (a.status !== 200) return ok;
+      c.t += 2_000;
+    }
+  };
+  return { asked, mode, c, keyedOnly, drain };
+}
+const DAY_OF = () => (rpcModule as unknown as { NEAR_SEAT_DAY?: number }).NEAR_SEAT_DAY ?? 15_000;
+
+test("T6: the seat's day map holds at most its caller count (LIMIT_CLIENTS): a new caller past it is refused 429 naming RETRY_AFTER_MAX_S with no send, so its page reads its spare; a caller already in it is answered (review P3-2 of 997ce7a7f)", async () => {
+  const { asked, keyedOnly } = modeRig({ seatClients: 2 });
+  assert.equal((await keyedOnly(QUERY, "198.51.100.1")).status, 200);
+  assert.equal((await keyedOnly(QUERY, "198.51.100.2")).status, 200);
+  const third = await keyedOnly(QUERY, "198.51.100.3");
+  assert.equal(third.status, 429, third.body);
+  assert.equal(third.headers?.["Retry-After"], "75");
+  assert.equal(asked.length, 2, "the third caller's read reached no provider");
+  assert.equal((await keyedOnly(QUERY, "198.51.100.1")).status, 200, "a caller in the map is still answered");
+});
+
+test("T7: a read the caller's share refuses spends none of its day: 5 share refusals in one 10 s, then the day still answers NEAR_SEAT_DAY reads (review P3-3 of 997ce7a7f)", async () => {
+  const { c, keyedOnly, drain } = modeRig();
+  const statuses: number[] = [];
+  for (let i = 0; i < 35; i++) statuses.push((await keyedOnly({ ...QUERY, id: i + 1 })).status), (c.t += 200);
+  assert.deepEqual(statuses, [...Array(30).fill(200), ...Array(5).fill(429)], statuses.join(","));
+  c.t += 10_000;
+  assert.equal(30 + (await drain()), DAY_OF(), "the day counts the 30 answered, never the 5 refused");
+});
+
+test("T8: a read no provider answered (FastNEAR's 503, or its 429 held past the wait) gives its day back (review P3-3 of 997ce7a7f)", async () => {
+  const { asked, mode, c, keyedOnly, drain } = modeRig();
+  mode.now = "down";
+  for (let i = 0; i < 3; i++) assert.equal((await keyedOnly(QUERY)).status, 503), (c.t += 2_000);
+  mode.now = "busy";
+  const held = await keyedOnly(QUERY);
+  assert.equal(held.status, 429, held.body);
+  c.t += 61_000;
+  mode.now = "ok";
+  const sent = asked.length;
+  assert.equal(await drain(), DAY_OF(), "the 4 unanswered reads spent none of the day");
+  assert.equal(asked.length - sent, DAY_OF());
+});

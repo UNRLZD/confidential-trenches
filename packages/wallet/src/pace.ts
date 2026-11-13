@@ -189,13 +189,15 @@ export function pacedNearRpc(url: string, fetchFn: typeof fetch = (...a) => fetc
   const p = paceOf(url);
   const f = pacedFetch(url, fetchFn);
   const paced = nearRpc(url, f, null);
+  // the helper's seat alone names a wait past NEAR_BUSY_WAIT_MAX_MS on purpose (its day cap): it is not waited out, the
+  // seat falls to its spare (nearSeatRpc); any other provider's long wait is waited out in its tries as before
+  const seat = Object.values(NEAR_NETWORKS).some((n) => n.seat === url);
   const again = async (first: () => Promise<unknown>, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
     for (let k = 0; ; k++) {
       try {
         return await (k === 0 ? first() : paced.query(params, signal));
       } catch (e) {
-        // a provider that names a wait past NEAR_BUSY_WAIT_MAX_MS (the helper's day cap) is not waited out here
-        if (!isBusy(e) || k + 1 >= NEAR_BUSY_TRIES || signal?.aborted || (e.retryAfterMs ?? 0) > NEAR_BUSY_WAIT_MAX_MS) throw e;
+        if (!isBusy(e) || k + 1 >= NEAR_BUSY_TRIES || signal?.aborted || (seat && (e.retryAfterMs ?? 0) > NEAR_BUSY_WAIT_MAX_MS)) throw e;
         const wait = Math.min(NEAR_BUSY_WAIT_MAX_MS, Math.max(e.retryAfterMs ?? NEAR_BUSY_WAIT_MS * 2 ** k, p.every));
         paceHold(p, performance.now(), wait);
       }
@@ -279,12 +281,16 @@ export function nearSeatRpc(network: NearNetwork, fetchFn: typeof fetch = (...a)
     name: url,
     query: (params, signal) => (down() ? spare.query(params, signal) : or(() => seat.query(params, signal), params, signal)),
     async reserve(signal) {
+      // the reserved turn is the first query's alone; every later one goes through rpc.query, so a seat that fell to
+      // its spare meanwhile is not asked again (review P3-5 of 997ce7a7f)
+      let used = false;
+      const later = (params: Record<string, unknown>, s?: AbortSignal) => rpc.query(params, s);
       if (down()) {
         const first = await spare.reserve!(signal);
-        return { name: url, query: (params, s) => first.query(params, s) };
+        return { name: url, query: (params, s) => (used ? later(params, s) : ((used = true), first.query(params, s))) };
       }
       const first = await seat.reserve!(signal);
-      return { name: url, query: (params, s) => or(() => first.query(params, s), params, s) };
+      return { name: url, query: (params, s) => (used ? later(params, s) : ((used = true), or(() => first.query(params, s), params, s))) };
     },
   };
   return rpc;
