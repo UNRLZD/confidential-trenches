@@ -16,20 +16,24 @@
 //   kit's one rule (../../../kit/src/near/networks.ts nearPairNetwork), so one operator never counts as two.
 // - An implicit id (64 hex, or 0x and 40 hex) passes with no read, existing or not: no stranger can create it, so a
 //   typo never pays a name someone else can (W:928; WU-05: "to an absent 64-hex implicit id (signed)").
-// - The amount is USDC typed as a decimal with at most the token's 6 places, in base units. One withdrawal spends one
-//   note and the relay fee comes out of it on top of the amount (../../../wallet/src/withdraw/request.ts: the smallest
-//   UNSPENT note covering amount + fee), so the amount is refused when amount + fee is above the largest UNSPENT note
-//   of the vault's scope (withdrawable), and at or below the fee (the §2.8 arming row, W:915: a fee at or above the
-//   amount is refused). The fee is the device's own bound on the relay fee; until it is read, an amount the notes
-//   could hold is unread, never passed.
+// - The amount is USDC typed as a decimal with at most the token's 6 places, in base units. It is sent from every UNSPENT
+//   note of the vault's scope (card cash-withdraws-everything-to-any-chain: Cash goes out whole), one withdrawal per
+//   note, each paying the relay fee on top of its part (../../../wallet/src/withdraw/request.ts: a part above its fee,
+//   part + fee within its note). planCashWithdraw plans the parts on the pool form's planner (../pool-withdraw.ts
+//   planPoolWithdraw: the fewest parts, no change between 0 and the note floor, here two fees and one unit, the least a
+//   later withdrawal can send), so no withdrawal leaves a change no withdrawal could move. What can be sent (Max,
+//   cashSendable) is every note that gives more than its fee, each whole, less its fee: the whole of Cash. The amount
+//   is refused at or below the fee (min: the §2.8 arming row, W:915), above Max (insufficient, naming Max), and when no
+//   plan sends it (unplannable, naming the nearest amounts that can be sent). The fee is the device's own bound on the
+//   relay fee; until it and the notes are read, an amount is unread, never passed.
 //
 // Not here: the proof, the relay call and the move from the arming account to the typed account (the wallet's withdraw
-// path), storage_balance_of on the typed account (the plain move out row, W:929), a withdrawal across several notes
-// (WM-06) and withdraw.open from a one-time id.
+// path), storage_balance_of on the typed account (the plain move out row, W:929) and withdraw.open from a one-time id.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultScopeOf } from "../../../kit/src/vault/shapes.ts";
 import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc } from "../../../kit/src/near/networks.ts";
 import type { NoteRecord } from "../../../wallet/src/notes/store.ts";
+import { nearestPlannable, planPoolWithdraw, WITHDRAW_PLAN_NOTES, type WithdrawCosts, type WithdrawPart, type WithdrawSource } from "../pool-withdraw.ts";
 
 /** intents.near: an ft_withdraw out of it may never name it (W:930), and nothing sent to it is the user's. */
 export const INTENTS = "intents.near";
@@ -37,9 +41,14 @@ export const INTENTS = "intents.near";
 export const TOKEN_DECIMALS = 6;
 
 export type AddressCode = "not-account" | "vault" | "intents" | "token" | "no-account" | "unread";
-export type AmountCode = "amount" | "min" | "insufficient" | "unread";
+export type AmountCode = "amount" | "min" | "insufficient" | "unplannable" | "unread";
 export type RecipientCheck = { ok: true; recipient: string } | { ok: false; code: AddressCode };
-export type AmountCheck = { ok: true; amount: bigint } | { ok: false; code: "min"; min: bigint } | { ok: false; code: "insufficient"; below?: bigint } | { ok: false; code: Exclude<AmountCode, "min" | "insufficient"> };
+export type AmountCheck =
+  | { ok: true; amount: bigint; parts: readonly WithdrawPart[] }
+  | { ok: false; code: "min"; min: bigint }
+  | { ok: false; code: "insufficient"; below?: bigint }
+  | { ok: false; code: "unplannable"; below?: bigint; above?: bigint }
+  | { ok: false; code: Exclude<AmountCode, "min" | "insufficient" | "unplannable"> };
 
 const ACCOUNT = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const IMPLICIT = /^([0-9a-f]{64}|0x[0-9a-f]{40})$/;
@@ -98,22 +107,63 @@ export function parseAmount(typed: unknown): bigint | null {
   return BigInt(m[1] || "0") * 10n ** BigInt(TOKEN_DECIMALS) + BigInt((m[2] ?? "").padEnd(TOKEN_DECIMALS, "0") || "0");
 }
 
+/** A Cash withdrawal's costs in the pool planner's terms: each part pays the relay fee and no W's fee, a part is above
+ *  the fee (the request refuses a fee at or above the amount), so a change is 0 or above two fees (withdrawNoteFloor):
+ *  one a later withdrawal can still send. */
+export const cashCosts = (fee: bigint): WithdrawCosts => ({ fee, wFee: 0n, minPart: fee + 1n });
+
+/** The notes that can give a part: each sends more than its fee. Largest first, then by id. */
+const giving = (notes: readonly WithdrawSource[], fee: bigint): WithdrawSource[] =>
+  notes.filter((n) => n.value - fee > fee).sort((x, y) => (x.value !== y.value ? (x.value > y.value ? -1 : 1) : x.id < y.id ? -1 : 1));
+const whole = (n: WithdrawSource, fee: bigint): WithdrawPart => ({ noteId: n.id, part: n.value - fee, chunk: n.value });
+
+/** What Cash can send now (Max): every note that gives more than its fee, each whole, less its fee. 0n when none. */
+export function cashSendable(notes: readonly WithdrawSource[], fee: bigint): bigint {
+  return giving(notes, fee).reduce((t, n) => t + n.value - fee, 0n);
+}
+
 /**
- * The typed amount against `available` (withdrawable: the largest UNSPENT note) and `fee` (the device's bound on the
- * relay fee), both in base units and each null until read (an amount that needs it is then unread, never passed): amount + fee must fit in the note, and the amount must be above
- * the fee (`min` is the smallest amount that is).
+ * The withdrawals that send `amount` from `notes` at `fee` each, largest note first; null when no plan does. Max
+ * (cashSendable) is every giving note whole, at any count of notes. Any other amount is the pool planner's plan
+ * (planPoolWithdraw: the fewest parts, every change 0 or above the note floor), which reads the WITHDRAW_PLAN_NOTES
+ * largest notes; past that many, the largest note goes whole and the rest is planned the same way, so a Cash of many
+ * small notes still sends what its notes hold. The one planner for every Cash spend (the form and cashMover).
  */
-export function checkAmount(typed: unknown, { available, fee }: { available: bigint | null; fee: bigint | null }): AmountCheck {
+export function planCashWithdraw(notes: readonly WithdrawSource[], amount: bigint, fee: bigint): WithdrawPart[] | null {
+  if (typeof amount !== "bigint" || typeof fee !== "bigint" || fee < 0n || amount <= fee) return null;
+  const all = giving(notes, fee);
+  if (amount === cashSendable(all, fee)) return all.map((n) => whole(n, fee));
+  if (all.length <= WITHDRAW_PLAN_NOTES) return planPoolWithdraw(all, amount, cashCosts(fee));
+  const [first, ...rest] = all as [WithdrawSource, ...WithdrawSource[]];
+  const tail = amount > first.value - fee ? planCashWithdraw(rest, amount - (first.value - fee), fee) : null;
+  return tail !== null ? [whole(first, fee), ...tail] : planPoolWithdraw(all, amount, cashCosts(fee));
+}
+
+/**
+ * The typed amount against `notes` (the vault scope's UNSPENT notes, cashNotes) and `fee` (the device's bound on the
+ * relay fee per withdrawal), each null until read (an amount that needs it is then unread, never passed): above the fee
+ * (`min` is the smallest amount that is), at most Max (`below` names it), and sent by a plan (`parts`), else the nearest
+ * amounts that are.
+ */
+export function checkAmount(typed: unknown, { notes, fee }: { notes: readonly WithdrawSource[] | null; fee: bigint | null }): AmountCheck {
   const amount = parseAmount(typed);
   if (amount === null) return { ok: false, code: "amount" };
   if (fee !== null && amount <= fee) return { ok: false, code: "min", min: fee + 1n };
-  if (available === null) return { ok: false, code: "unread" };
-  // above what the note can send: `below` is what can be (the note less the fee), when the fee is read and some can
-  // the fee unread while the note can send some: what can be sent is not known yet, so the amount waits (unread)
-  if (fee === null && available > 0n && amount > available) return { ok: false, code: "unread" };
-  if (amount > available || (fee !== null && amount + fee > available)) return fee !== null && available - fee > fee ? { ok: false, code: "insufficient", below: available - fee } : { ok: false, code: "insufficient" };
+  if (notes === null) return { ok: false, code: "unread" };
+  // no note at all: nothing can be sent at any fee
+  if (!notes.some((n) => n.value > 0n)) return { ok: false, code: "insufficient" };
+  // the fee unread: what can be sent is not known yet, so the amount waits (unread)
   if (fee === null) return { ok: false, code: "unread" };
-  return { ok: true, amount };
+  const can = cashSendable(notes, fee);
+  if (amount > can) return can > 0n ? { ok: false, code: "insufficient", below: can } : { ok: false, code: "insufficient" };
+  const parts = planCashWithdraw(notes, amount, fee);
+  if (parts === null) return { ok: false, code: "unplannable", ...nearestPlannable(giving(notes, fee), amount, cashCosts(fee)) };
+  return { ok: true, amount, parts };
+}
+
+/** The vault scope's UNSPENT notes, each as a source a Cash plan may spend. */
+export function cashNotes(notes: readonly NoteRecord[], scope: bigint): WithdrawSource[] {
+  return notes.filter((n) => n.state === "UNSPENT" && n.scope === scope && n.leaf !== undefined).map((n) => ({ id: n.id, value: n.leaf!.value }));
 }
 
 /** The largest UNSPENT note's value in `scope`: what one withdrawal can pay, its fee included. */

@@ -38,7 +38,8 @@ root.append(
     {
       network: "testnet",
       rpcs: [rpc(T.fastnear[0]), rpc(T.drpc)],
-      available: async () => 10_000_000n, // the largest unspent note: 10 USDC
+      cash: async () => [{ id: "a", value: 10_000_000n }], // one unspent note: 10 USDC
+      available: async () => 10_000_000n,
       fee: async () => 120_000n, // the fee bound: 0.12 USDC
       handoff: (c) => void w.__handed.push(c),
     },
