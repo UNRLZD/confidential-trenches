@@ -7,6 +7,9 @@ const PATHS = {
   search: ["M8 8l2.8 2.8"],
   share: ["M6 7.5V1.5M3.5 4L6 1.5 8.5 4", "M2 7v2.5c0 .6.4 1 1 1h6c.6 0 1-.4 1-1V7"],
   key: ["M5.7 6.3L10.5 1.5", "M8.5 3.5l1.5 1.5"],
+  // card portfolio-moves-money-between-chains: Move, two arrows each way; the move sheet's close
+  move: ["M2 4h8", "M8 2l2 2-2 2", "M10 8H2", "M4 6L2 8l2 2"],
+  x: ["M3 3l6 6", "M9 3L3 9"],
   target: [],
   more: [],
 } as const;

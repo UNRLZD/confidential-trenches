@@ -9,10 +9,11 @@
 // Withdraw, and the block has no Ready or Pending column, whatever the state sends:
 //   - the pool block's view is "rows", with one row per pool in the answer's order, its chain and asset, and its
 //     balance in the asset's base units, the answer's decimals read at the kit's table (POOL_ASSET_DECIMALS), rounded down;
-//   - the block has one column header, Balance, and no text reading Ready or Pending anywhere in it, and no row carries a
+//   - the block has no column header (card portfolio-moves-money-between-chains: Private balance's total heads the rows,
+//     each amount carries its own unit and $), no text reading Ready or Pending anywhere in it, and no row carries a
 //     data-ready or data-pending mark;
-//   - each pool is drawn in its own asset: the balance names it ("12.5 SOL") and no amount in a pool row is a dollar
-//     figure (a SOL or ETH pool has none until a price read exists);
+//   - each pool is drawn in its own asset: the balance names it ("12.5 SOL") and is no dollar figure; the row's value
+//     beside it is dollars at the page's own fresh price, or a dash where the page sent none (never made up);
 //   - no CSP violation, no console error and no page error in the terminal's frame (one with no address counts).
 // It passes on the deployed host once Portfolio is mounted on /portfolio (card app-portfolio-mount) and this card is
 // deployed. A screenshot of each width is kept.
@@ -82,7 +83,7 @@ export function judge(rec) {
     // NEAR's vault row (card app-faults-seen-on-122) is the vault's USDC, not a pool the answer sends: its own live check
     // (app-faults-seen-on-122.mjs) reads it; this check reads the pools' rows
     const heads = r.headers ?? null;
-    say(Array.isArray(heads) && heads.length === 1 && heads[0] === "Balance", `${n}: the column headers are ${JSON.stringify(heads)}, want one, Balance`);
+    say(Array.isArray(heads) && heads.length === 0, `${n}: the column headers are ${JSON.stringify(heads)}, want none (Private balance's total heads the rows)`);
     const words = /(ready|pending)/i.exec(r.blockText ?? "");
     say(typeof r.blockText === "string" && words === null, `${n}: ${typeof r.blockText !== "string" ? "the block's text was not read" : words ? `the block says ${JSON.stringify(words[0])}` : "the block says neither Ready nor Pending"}`);
     const rows = (r.rows ?? []).filter((x) => x.chain !== "near" || pools.some((p) => p.chain === "near"));
@@ -95,7 +96,7 @@ export function judge(rec) {
       }
       const bal = base(p.balance, p.asset);
       say(x.asset === p.asset && x.balance === bal, `${n}: ${p.chain} balance ${x.balance} base units of ${x.asset}, want ${bal} of ${p.asset}`);
-      say(new RegExp(`^<?[0-9][0-9.,]*[KMB]? ${p.asset}$`).test(x.text[1] ?? "") && !x.text.some((t) => t.includes("$")), `${n}: ${p.chain} drawn ${JSON.stringify(x.text.slice(1))}: the balance in ${p.asset}, no dollar figure`);
+      say(new RegExp(`^<?[0-9][0-9.,]*[KMB]? ${p.asset}$`).test(x.text[1] ?? "") && /^(\$[0-9,]+\.[0-9]{2}|—)$/.test(x.text[2] ?? ""), `${n}: ${p.chain} drawn ${JSON.stringify(x.text.slice(1))}: want the balance in ${p.asset}, no dollar figure, then its value in dollars or a dash`);
       say((x.marks ?? ["unread"]).length === 0, `${n}: ${p.chain} row marks ${JSON.stringify(x.marks ?? null)}, want none of data-ready, data-pending`);
     }
     // a footer read of a release NEAR RPC that failed (its preflight line is the page's own), the footer showing the pair

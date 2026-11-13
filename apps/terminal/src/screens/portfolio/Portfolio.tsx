@@ -17,6 +17,12 @@ import { usePortfolioSource } from "./source.tsx";
 import type { PortfolioAction, PortfolioSource } from "./source.tsx";
 import { W } from "./W.tsx";
 import { WORDS } from "./words.ts";
+import { poolTotal, rowCents } from "./move.ts";
+import type { MoveChain } from "./move.ts";
+import { useMoveSource } from "./move-source.tsx";
+import type { MoveSource } from "./move-source.tsx";
+import { MoveSheet } from "./MoveSheet.tsx";
+import type { MoveUi } from "./MoveSheet.tsx";
 import "./portfolio.css";
 
 // Portfolio (S10, A3.1 app.md:1459) and Activity (S14). The layout and look are R5's (design/proto/portfolio-1440.html
@@ -44,9 +50,11 @@ export interface Ui {
   act: ActUi;
   sheet: string | null;
   menu: string | null;
+  /** The move sheet, open from a Private balance row's Move (card portfolio-moves-money-between-chains). */
+  move?: MoveUi | null;
 }
 
-export const START: Ui = { range: "1W", closed: false, q: "", hideSmall: false, pane: "positions", act: { filter: NO_FILTER, open: null }, sheet: null, menu: null };
+export const START: Ui = { range: "1W", closed: false, q: "", hideSmall: false, pane: "positions", act: { filter: NO_FILTER, open: null }, sheet: null, menu: null, move: null };
 
 /** A tone from an exact figure's sign (signOf), never the rounded one: only an exact zero is neutral. */
 const sgn = (c: bigint | null) => (c === null ? "" : c > 0n ? "gain" : c < 0n ? "loss" : "");
@@ -58,6 +66,8 @@ const DASH = <span className="t3">{"—"}</span>;
 
 export function Portfolio({ onAction = () => {}, initial = START }: { onAction?: (a: PortfolioAction) => void; initial?: Ui }) {
   const src = usePortfolioSource(onAction);
+  const mv = useMoveSource();
+  const { locked } = useReturnHop();
   const [ui, set] = useState<Ui>(initial);
   const setUi = (p: Partial<Ui>) => set((u) => ({ ...u, ...p }));
   const now = src.now();
@@ -99,7 +109,7 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
     <div className="pf" data-screen="portfolio" data-state={pf.view} data-states={stateList} data-offline={pf.offline || undefined}>
       <div className="pfd">
         <div className="pfh">
-          <Equity src={src} t={pf.totals} pools={pf.pools} loading={loading} offline={pf.offline} rows={pf.rows} ui={ui} setUi={setUi} now={now} />
+          <Equity src={src} t={pf.totals} pools={pf.pools} loading={loading} offline={pf.offline} rows={pf.rows} ui={ui} setUi={setUi} now={now} mv={mv} />
           <Calendar closed={closed} now={now} loading={loading} />
           <HowYouTrade st={st} fees={src.data.fees} loading={loading} />
         </div>
@@ -162,7 +172,7 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
       </div>
 
       <div className="pfm">
-        <PhoneTop src={src} t={pf.totals} pools={pf.pools} loading={loading} offline={pf.offline} rows={pf.rows} ui={ui} setUi={setUi} now={now} />
+        <PhoneTop src={src} t={pf.totals} pools={pf.pools} loading={loading} offline={pf.offline} rows={pf.rows} ui={ui} setUi={setUi} now={now} mv={mv} />
         <div className="sticky">
           <div className="msegs" role="tablist">
             <button type="button" role="tab" className={`t ${ui.pane === "positions" ? "on" : ""}`} data-control="seg-positions" onClick={() => setUi({ pane: "positions" })}><W id="positions" />{pf.rows.length > 0 && <span className="n">{pf.rows.length}</span>}</button>
@@ -192,6 +202,19 @@ export function Portfolio({ onAction = () => {}, initial = START }: { onAction?:
         )}
         {sheetRow && <Sheet r={sheetRow} close={() => setUi({ sheet: null })} act={src.act} />}
       </div>
+      {ui.move && mv.ships && pf.pools.view === "rows" && (
+        <MoveSheet
+          ui={ui.move}
+          set={(p) => set((u) => (u.move ? { ...u, move: { ...u.move, ...p } } : u))}
+          rows={pf.pools.rows}
+          state={src.snapshot.state}
+          src={mv}
+          on={src.snapshot.status === "ready" && locked === null}
+          now={now}
+          withdraw={(c) => (setUi({ move: null }), c === "near" ? src.act({ kind: "withdraw" }) : src.act({ kind: "pool-withdraw", chain: c }))}
+          close={() => setUi({ move: null })}
+        />
+      )}
     </div>
   );
 }
@@ -208,9 +231,10 @@ interface HeadProps {
   ui: Ui;
   setUi(p: Partial<Ui>): void;
   now: number;
+  mv: MoveSource;
 }
 
-function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadProps) {
+function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now, mv }: HeadProps) {
   const pts = line(src.data.series, ui.range, now);
   const change = t && pts.length ? t.total - pts[0]![1] : null;
   const v = (c: bigint | null, sign: bigint | null, plus = true): ReactNode => (loading ? <Sk w={80} h={16} /> : c === null || !t ? DASH : <span className={sgn(sign)}>{usd(c, plus)}</span>);
@@ -234,7 +258,7 @@ function Equity({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadP
         <div className="eqbrk">
           <div className="eqh"><W id="whereItIs" /></div>
           <Where t={t} loading={loading} rows={rows} />
-          <PoolRows p={pools} src={src} />
+          <PoolRows p={pools} src={src} mv={mv} now={now} open={(from) => setUi({ move: openMove(from) })} />
           <WalletRows src={src} />
         </div>
         <div className="eqch">
@@ -357,52 +381,76 @@ function PositionsTile({ t, top, col, children }: { t: Totals; top: Row | null; 
 // Chain names are names, drawn as data.
 const CHAIN_NAME = { solana: "Solana", base: "Base", robinhood: "Robinhood", near: "NEAR" } as const;
 
-/** Each chain's pool (card balances-per-chain, v2 A1), in its own asset: one Balance, the private balance from the
- *  device's own notes ("12.5 SOL"). No dollar figure: a SOL or ETH pool has none until a price read exists. data-pools
- *  names the view, each row its chain, asset and base units, for the checks.
- *  Each row with a balance ends in Withdraw (card app-pool-withdraw): an icon that opens SIGN_HOST's pool withdraw for
- *  that chain, where the amount and the address are typed; an open that did not happen draws its HopLine on the
- *  heading's row (portfolio.css), so the block never grows inside the desktop panel. */
-function PoolRows({ p, src, phone }: { p: Pools; src: PortfolioSource; phone?: boolean }) {
+/** The move sheet opened from `from`'s row: To the vault (Cash) from a pool, Solana from the vault; nothing typed. */
+const openMove = (from: MoveChain): MoveUi => ({ from, to: from === "near" ? "solana" : "near", amount: "", id: null, refused: null });
+
+/** Private balance (card balances-per-chain, v2 A1; card portfolio-moves-money-between-chains): the heading with the
+ *  total in dollars over the rows' dollar column, then one row per chain, NEAR's vault USDC first: the chain's mark and name, its balance in its own asset (the
+ *  device's own notes and the money still at its deposit wallets), its value at the signing page's own price (a dash for
+ *  a pool with no fresh price: none is made up), and two actions, Move and Withdraw. Move opens the move sheet with the
+ *  row's chain as From; it is drawn only once the signing page has the move (move-source.tsx ships) and is off on a row
+ *  with nothing to move, never hidden. Withdraw opens SIGN_HOST's withdraw for that chain (NEAR's is the vault's,
+ *  withdraw.open; card app-pool-withdraw), off with nothing in the pool; an open that did not happen draws its HopLine
+ *  on the heading's row (portfolio.css), so the block never grows inside the desktop panel. data-pools names the view,
+ *  each row its chain, asset, base units and cents, for the checks. */
+function PoolRows({ p, src, mv, now, open, phone }: { p: Pools; src: PortfolioSource; mv: MoveSource; now: number; open(from: MoveChain): void; phone?: boolean }) {
   const { locked } = useReturnHop();
   const on = src.snapshot.status === "ready" && locked === null;
   const cols = p.view === "rows" || p.view === "unread" || p.view === "loading";
+  const s = src.snapshot.state;
+  const total = s && p.view !== "loading" && p.view !== "offline" && p.view !== "unread" ? poolTotal(s, p.rows, now) : null;
   return (
-    <div className={`pools${phone ? " ph" : ""}`} data-pools={p.view}>
+    <div className={`pools pv2${phone ? " ph" : ""}`} data-pools={p.view} data-move={mv.ships || undefined}>
       <span className="plk"><W id="privateBalance" /></span>
-      {cols ? (
-        <><span /><span className="plc"><W id="balance" /></span><span /></>
-      ) : (
-        <span className="plst" data-pools-state={p.view}>{p.view === "offline" ? <W id="offline" /> : <W id="noBalance" />}</span>
-      )}
+      <span className="pltot num" data-pools-total={total?.cents.toString()} data-partial={total?.partial || undefined}>{total ? usd(total.cents) : p.view === "loading" ? <Sk w={60} h={12} /> : DASH}</span>
+      {!cols && <span className="plst" data-pools-state={p.view}>{p.view === "offline" ? <W id="offline" /> : <W id="noBalance" />}</span>}
       {p.view === "loading" &&
         [0, 1].map((i) => (
-          <div className="plr" key={i}><Sk w={64} h={12} /><Sk w={56} h={12} /><span /></div>
+          <div className="plr" key={i}><Sk w={64} h={12} /><Sk w={56} h={12} /><Sk w={40} h={12} /><span /></div>
         ))}
       {p.view === "unread" && (
-        <div className="plr" data-pool="unread"><span className="t3">{"—"}</span><span className="num">{DASH}</span><span /></div>
+        <div className="plr" data-pool="unread"><span className="t3">{"—"}</span><span className="num">{DASH}</span><span className="num">{DASH}</span><span /></div>
       )}
       {p.view === "rows" &&
-        p.rows.map((r) => (
-          <div className="plr" key={r.chain} data-pool={r.chain} data-asset={r.asset} data-balance={r.balance.toString()}>
-            <span className="ell">{CHAIN_NAME[r.chain]}</span>
-            <span className="num">{amount(r.balance, r.decimals)} <span className="t3">{r.asset}</span></span>
-            <PoolWithdraw r={r} on={on} act={src.act} />
-            <HopLine control={`pool-withdraw-${r.chain}`} />
-          </div>
-        ))}
+        s &&
+        p.rows.map((r) => {
+          const m = chainOf(r.chain);
+          const c = rowCents(s, r, now);
+          return (
+            <div className="plr" key={r.chain} data-pool={r.chain} data-asset={r.asset} data-balance={r.balance.toString()} data-cents={c === null ? "none" : c.toString()}>
+              <span className="pln">{m && <img className="plm" src={m.logo} alt="" style={{ padding: Math.round((phone ? 28 : 18) * m.inset) }} />}<span className="ell">{CHAIN_NAME[r.chain]}</span></span>
+              <span className="num plb">{amount(r.balance, r.decimals)} <span className="t3">{r.asset}</span></span>
+              <span className="num plv">{c === null ? DASH : usd(c)}</span>
+              <span className="pla">
+                {mv.ships && <PoolMove r={r} on={on} open={open} />}
+                <PoolWithdraw r={r} on={on} act={src.act} />
+              </span>
+              <HopLine control={`pool-withdraw-${r.chain}`} />
+            </div>
+          );
+        })}
     </div>
   );
 }
 
-/** A pool row's Withdraw: the chain only goes to the mount (PortfolioAction pool-withdraw); off with nothing in the pool
- *  (money still at its deposit wallet is not the pool's to withdraw: its own export is under Wallets). */
+/** A row's Move: opens the move sheet with the row's chain as From; off with nothing the row can move (money still at a
+ *  deposit wallet is not yet the pool's), never hidden. */
+function PoolMove({ r, on, open }: { r: PoolRow; on: boolean; open(from: MoveChain): void }) {
+  return (
+    <button type="button" className="plw plmv" data-control={`pool-move-${r.chain}`} aria-label={WORDS.move.text} title={WORDS.move.text} disabled={!on || r.pooled === 0n} onClick={() => open(r.chain)}>
+      <Ic name="move" size={12} />
+    </button>
+  );
+}
+
+/** A row's Withdraw: the chain only goes to the mount (PortfolioAction pool-withdraw; NEAR's is the vault's withdraw);
+ *  off with nothing in the pool (money still at its deposit wallet is not the pool's to withdraw: its own export is
+ *  under Wallets). */
 function PoolWithdraw({ r, on, act }: { r: PoolRow; on: boolean; act: PortfolioSource["act"] }) {
-  if (r.chain === "near") return <span />;
   const chain = r.chain;
   const control = `pool-withdraw-${chain}`;
   return (
-    <button type="button" className="plw" data-control={control} aria-label={WORDS.withdraw.text} title={WORDS.withdraw.text} disabled={!on || r.pooled === 0n} onClick={() => act({ kind: "pool-withdraw", chain })}>
+    <button type="button" className="plw" data-control={control} aria-label={WORDS.withdraw.text} title={WORDS.withdraw.text} disabled={!on || r.pooled === 0n} onClick={() => (chain === "near" ? act({ kind: "withdraw" }) : act({ kind: "pool-withdraw", chain }))}>
       <Ic name="arrowUp" size={12} />
     </button>
   );
@@ -750,7 +798,7 @@ export function Plate() {
 
 // ------------------------------------------------------------------------------------------------------------ phone
 
-function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadProps) {
+function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now, mv }: HeadProps) {
   const intent = useDepositIntent();
   const pts = line(src.data.series, ui.range, now);
   const v = (c: bigint | null, sign: bigint | null): ReactNode => (loading ? <Sk w={70} h={18} /> : c === null || !t ? "—" : <span className={sgn(sign)}>{usd(c, true)}</span>);
@@ -777,7 +825,7 @@ function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: Hea
       <div className="mwhere">
         <div className="lbl2"><W id="whereItIs" /></div>
         <Where t={t} loading={loading} rows={rows} phone />
-        <PoolRows p={pools} src={src} phone />
+        <PoolRows p={pools} src={src} mv={mv} now={now} open={(from) => setUi({ move: openMove(from) })} phone />
         <WalletRows src={src} phone />
       </div>
     </div>
