@@ -1,5 +1,5 @@
 // node --test packages/signpage/test/pool-w-tail.test.ts: a W's leftover under the pool's least standard size is the
-// user's money kept on W (card pool-amounts-are-standard-sizes; the CO's pick (c), 13 Nov 20:4xZ), recorded where
+// user's money kept on W (card pool-amounts-are-standard-sizes; pick (c), 13 Nov 20:4xZ), recorded where
 // wallet's pool-to-Cash reads it: meta w-tail/sol/<address> = { chain: "sol", address, l, j, amount }. The rent back's
 // floor end writes it, an empty read or a sent sweep deletes it; the wallet store takes the key, the write moves no seed
 // and the frame's reader never lists it. IndexedDB here is fake-indexeddb; no key, no seed.

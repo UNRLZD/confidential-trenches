@@ -656,7 +656,7 @@ type SoldBy = { tx: string; last: number };
  *  account, or no buy at all), each with the rules it was read under (POOL_RENT_BACK_RULES), so a load lists them and
  *  reads none of them again. */
 export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void>; claim?(v: RentBackSpacing, own?: number): Promise<boolean>; rideAt?(): Promise<number | undefined>; bookRide?(at: number): Promise<void>; rode?(at: number): Promise<void>; tail?(t: WTail): Promise<void>; untail?(address: string): Promise<void> };
-/** A W's leftover under the pool's least standard size (card pool-amounts-are-standard-sizes; the CO's pick (c), 13 Nov
+/** A W's leftover under the pool's least standard size (card pool-amounts-are-standard-sizes; pick (c), 13 Nov
  *  20:4xZ): meta w-tail/sol/<address>, the record wallet's pool-to-Cash carries to Cash and the balance counts. Written
  *  by a rent back that ends at the floor (`amount`: what W adds once moved, lamports, a decimal string), deleted by one
  *  that reads W empty or sends its sweep; never deposited off the ladder, never paid away. */
@@ -1746,7 +1746,7 @@ const wireOf = (message: Uint8Array): Uint8Array => {
 };
 
 /** What W's rest (its lamports less the sweep's fee, the deposit's rents and the keep) is listed at (its RETURNING row,
- *  the balance; card pool-amounts-are-standard-sizes, the CO's pick (c)): its own sweep's rung (what W must keep, `stay`,
+ *  the balance; card pool-amounts-are-standard-sizes, pick (c)): its own sweep's rung (what W must keep, `stay`,
  *  left past it) when that is at the floor or over; else the rest itself, the user's own on W (no sweep moves it into the
  *  pool; it goes on with W's next move, its tail), never hidden; at 0 or less not listed. */
 export function restAdds(rest: bigint, floor: bigint, stay = 0n): bigint {

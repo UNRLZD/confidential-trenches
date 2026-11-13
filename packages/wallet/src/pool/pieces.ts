@@ -11,7 +11,7 @@
 //   a step makes is one rung (noteOf: the largest rung at or under what the step holds), so every note made from here on
 //   is released whole or in rungs, to 0. What a step holds under the next rung never enters the pool off the ladder and
 //   is never paid away: it stays on its W, the user's own, listed in the balance, and goes on with W's next move (the
-//   CO's pick (c), 13 Nov 20:4xZ). The one release off the ladder is the last remainder of a note made before this rule
+//   pick (c), 13 Nov 20:4xZ). The one release off the ladder is the last remainder of a note made before this rule
 //   (off the grid, or on it but no rung: main made 12,000,000 and 3,000,000 notes), once, whole: the circuit has one
 //   input and withdrawnValue is public, so no other way out exists without a contract change.
 // - The floor: the least piece, and the least note: 0.005 SOL, the smallest rung at or above what one release can move
