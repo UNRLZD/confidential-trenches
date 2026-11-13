@@ -323,7 +323,7 @@ test("pools: loading, offline, unread (none sent), empty, and rows in the pool's
   assert.deepEqual(portfolio(snap(STATE, "down"), data(), NOW).pools, { view: "offline", rows: [] });
   // nothing in the vault or a pool: empty (the vault's row is there, at 0, as every configured chain's)
   const none = { ...STATE, vault_balance: "0" };
-  const NEAR0 = { chain: "near", asset: "USDC", decimals: 6, balance: 0n };
+  const NEAR0 = { chain: "near", asset: "USDC", decimals: 6, balance: 0n, pooled: 0n };
   assert.deepEqual(portfolio(snap({ ...none, pools: [] }), data(), NOW).pools, { view: "empty", rows: [NEAR0] });
   // a configured chain with none: still empty while no pool holds anything
   assert.equal(portfolio(snap({ ...none, pools: [{ chain: "solana", asset: "SOL", balance: "0", ready: "0" }] }), data(), NOW).pools.view, "empty");
@@ -333,10 +333,10 @@ test("pools: loading, offline, unread (none sent), empty, and rows in the pool's
     NEAR0,
     // 12.5 SOL in lamports (9 decimals, the kit's table): one balance, however much of it is ready (13 Nov 07:53Z: the
     // app names no proof)
-    { chain: "solana", asset: "SOL", decimals: 9, balance: 12_500_000_000n },
+    { chain: "solana", asset: "SOL", decimals: 9, balance: 12_500_000_000n, pooled: 12_500_000_000n },
     // 0.25 ETH in wei (18 decimals), no ready sent: the same one balance
-    { chain: "base", asset: "ETH", decimals: 18, balance: 250_000_000_000_000_000n },
-    { chain: "robinhood", asset: "ETH", decimals: 18, balance: 0n },
+    { chain: "base", asset: "ETH", decimals: 18, balance: 250_000_000_000_000_000n, pooled: 250_000_000_000_000_000n },
+    { chain: "robinhood", asset: "ETH", decimals: 18, balance: 0n, pooled: 0n },
   ]);
 });
 
@@ -344,7 +344,7 @@ test("pools: loading, offline, unread (none sent), empty, and rows in the pool's
 // which the page's pool table never holds (packages/signpage/src/pools.ts PAGE_POOLS: Solana, Base, Robinhood). It is a
 // row of the same list, first as in Cash's parts, in USDC; one balance, as every pool's.
 test("pools: NEAR's vault USDC is the list's first row, one balance", () => {
-  const NEAR = (balance: bigint) => ({ chain: "near", asset: "USDC", decimals: 6, balance });
+  const NEAR = (balance: bigint) => ({ chain: "near", asset: "USDC", decimals: 6, balance, pooled: balance });
   const sol = { chain: "solana" as const, asset: "SOL" as const, balance: "0.033928", ready: "0" };
   // the walk's account: SOL in the pool, USDC in the vault
   const p = portfolio(snap({ ...STATE, vault_balance: "2.75", pools: [sol, { chain: "base", asset: "ETH", balance: "0" }, { chain: "robinhood", asset: "ETH", balance: "0" }] }), data(), NOW).pools;
@@ -386,8 +386,8 @@ test("pools: amounts in the asset's own units, short and rounded down, never a d
 test("pools: the balance alone, whatever ready says; a garbled amount reads as 0", () => {
   const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "10", ready: "12" }, { chain: "base", asset: "ETH", balance: "x", ready: "1" }] }), data(), NOW).pools;
   assert.deepEqual(p.rows.slice(1), [
-    { chain: "solana", asset: "SOL", decimals: 9, balance: 10_000_000_000n },
-    { chain: "base", asset: "ETH", decimals: 18, balance: 0n },
+    { chain: "solana", asset: "SOL", decimals: 9, balance: 10_000_000_000n, pooled: 10_000_000_000n },
+    { chain: "base", asset: "ETH", decimals: 18, balance: 0n, pooled: 0n },
   ]);
 });
 

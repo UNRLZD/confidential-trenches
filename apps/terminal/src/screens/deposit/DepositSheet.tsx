@@ -8,7 +8,7 @@ import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { CHAINS } from "../market/pads.ts";
 import { usd as usdCents } from "../signin/model.ts";
-import { addressHeading, ADDRESS_STATES, chainsOf, countdown, destAsset, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, formHeld, pickAsset, poolAskAgainIn, poolQuote, poolBalance, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, destAsset, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, ownCoin, parseAmount, formHeld, pickAsset, poolAskAgainIn, poolQuote, poolBalance, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
 import type { Answer, Asset, Dest, DryQuote, PoolOpen, QuoteRefusal, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
@@ -33,6 +33,9 @@ import "./deposit.css";
 // the pool holds ready to buy from state.pools.
 
 export const SHEET_ID = "deposit";
+
+/** Each pool's one-line send rule, drawn under an address for its own coin (model.ts ownCoin). */
+const SEND_ONLY: Readonly<Record<PoolChain, WordId>> = { solana: "sendOnlySolana", base: "sendOnlyBase", robinhood: "sendOnlyRobinhood" };
 
 function W({ id }: { id: WordId }) {
   const w = WORDS[id];
@@ -172,7 +175,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   if (s === "pool-in" && req && req.dest !== "near") {
     // the notes read on the pool's two RPCs (the kit's in_pool): the chain's balance in its own asset, as Portfolio's
     // row for the chain
-    const p = poolBalance(state?.pools, req.dest);
+    const p = poolBalance(state?.pools, req.dest, state?.deposit_wallets);
     body = (
       <>
         <div className="ddone" data-pool={req.dest}>
@@ -258,6 +261,11 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
           <div className="hex num" data-address={q.deposit_address}>
             {(q.deposit_address.match(/.{1,4}/g) ?? []).join(" ")}
           </div>
+          {req && ownCoin(req.dest, req.asset) && (
+            <div className="dsend" data-send-rule={req.dest}>
+              <W id={SEND_ONLY[req.dest]} />
+            </div>
+          )}
           <div className="kv">
             <div><div className="k"><W id="amount" /></div><div className="v num">{q.amount_in} {req?.asset.symbol}</div></div>
             <div><div className="k"><W id="expiresIn" /></div><div className="v num">{countdown(q.deadline, now)}</div></div>

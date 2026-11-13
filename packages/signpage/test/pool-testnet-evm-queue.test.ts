@@ -598,7 +598,7 @@ test("the EVM buy's live check reads what the testnet page reads: its pairs, cha
 // A keyless operator keeps a block's state seconds to minutes, so the page reads each chain's period fee a few seconds
 // past the turn, while the period's first block is fresh, and runs the queue's pass then, only for a chain with its
 // queue open or its notes landed.
-const { EVM_TURN_PASS_MS, EVM_TURN_SPREAD_MS } = await import("../src/pool-testnet.ts");
+const { EVM_SIGHT_MS, EVM_TURN_PASS_MS, EVM_TURN_SPREAD_MS } = await import("../src/pool-testnet.ts");
 const { evmPool: walletEvmPool } = await import("../../wallet/src/pool/evm.ts");
 const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
 /** The page's turn timers, by hand: each set timer's wait and its callback (which returns the pass). */
@@ -692,6 +692,37 @@ test("the turn pass: armed at a state read for turn + 3 s + this page's spread (
   assert.ok(tt.set[armed - 1]!.cleared, "cleared at signingOut");
   await t.signedOut();
   assert.equal(tt.set.length, armed);
+});
+
+test("card evm-landing-reads-batched: a deposit in sight holds its period's fee at once and at each turn for EVM_SIGHT_MS, with no pass and no notes", async () => {
+  const { w } = await wallet();
+  const START = 1_800_000_000_000;
+  const o = { now: START + 45_000 };
+  const tt = turnTimers(o);
+  const holds: bigint[] = [];
+  let binds = 0;
+  const pool = () => Object.assign(fakeEvmPool(), { now: async () => BigInt(o.now), holdFee: async (e: bigint) => void holds.push(e), bind: async () => (binds++, assert.fail("no pass for a deposit in sight")) }) as Pool<unknown>;
+  const t = testnetPool(page(w), { prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => ({ events: async () => new Promise(() => {}) }), evmQueuePool: pool, evmTurn: tt.evmTurn } as Parameters<typeof testnetPool>[1]);
+  const until = async (f: () => boolean) => { for (let i = 0; i < 100 && !f(); i++) await new Promise((r) => setTimeout(r, 5)); };
+  // the quote's floor asks for the pool 45 s into a period: that period's fee is held now, once however many asks
+  assert.equal(EVM_SIGHT_MS, 600_000);
+  t.evmPoolOf("base");
+  t.evmPoolOf("base");
+  await until(() => holds.length > 0);
+  assert.deepEqual(holds, [BigInt(START)]);
+  // the turn after it, no note landed: the next period's fee held, no pass
+  await t.stateRead();
+  o.now = START + 63_000;
+  await tt.set.at(-1)!.f();
+  assert.deepEqual(holds, [BigInt(START), BigInt(START + 60_000)]);
+  // ten minutes past the last sight: the turn holds nothing
+  o.now = START + 45_000 + 600_000 + 3_000;
+  await tt.set.at(-1)!.f();
+  assert.equal(holds.length, 2);
+  assert.equal(binds, 0);
+  // a sign out forgets the sight
+  t.signingOut();
+  await t.signedOut();
 });
 
 test("the turn pass: a device clock minutes off holds the pool's period and arms the next turn on the pool's time", async () => {

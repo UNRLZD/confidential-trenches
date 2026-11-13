@@ -313,6 +313,39 @@ try {
       }
       await ctx.close();
     }
+    {
+      // card pool-balance-counts-the-remainder: each pool's address for its own coin draws that pool's one send rule,
+      // a draft, under the address; an address for any other coin (USDC on Solana to the Solana pool) or the vault's (NEAR)
+      // draws none. Then the done screen's Balance counts the remainder still at U_X (state.deposit_wallets)
+      const RULES = { solana: "Send only SOL on Solana.", base: "Send only ETH on Base.", robinhood: "Send only ETH on Robinhood." };
+      for (const [dest, coin, rule] of [["solana", "SOL", RULES.solana], ["base", "ETH", RULES.base], ["robinhood", "ETH", RULES.robinhood], ["solana", "USDC", null], ["near", "NEAR", null]]) {
+        const tag = `@${w.name} send rule ${coin} to ${dest}`;
+        const { ctx, page } = await open(browser, w, "own-coin-address", { dest: dest === "near" ? null : dest });
+        if (coin !== (dest === "near" ? "USDC" : dest === "solana" ? "SOL" : "ETH")) {
+          await page.locator('[data-control="deposit-asset"]').selectOption(coin);
+          if (dest !== "near") await page.locator('[data-control="deposit-chain"]').selectOption("Solana");
+        }
+        await page.waitForSelector('.dep[data-state="S4.3"]', { timeout: 5_000 }).catch(() => {});
+        await page.locator('[data-control="deposit-get"]').click({ timeout: 3_000 }).catch(() => {});
+        const shown = await page.waitForSelector('.dep[data-state="S4.13"]', { timeout: 5_000 }).then(() => true, () => false);
+        check(shown, `${tag}: no address state`);
+        const lines = await page.$$eval("[data-send-rule]", (els) => els.map((e) => ({ at: e.getAttribute("data-send-rule"), text: e.textContent?.trim(), draft: e.querySelector("[data-draft-copy]")?.getAttribute("data-draft-copy") ?? null, under: !!e.previousElementSibling?.matches("[data-address]") })));
+        if (rule === null) check(lines.length === 0, `${tag}: a send rule drawn ${JSON.stringify(lines)}`);
+        else check(lines.length === 1 && lines[0].at === dest && lines[0].text === rule && lines[0].draft !== null && lines[0].under, `${tag}: send rule ${JSON.stringify(lines)}, want ${JSON.stringify(rule)} as a draft under the address`);
+        const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
+        check(!m.hscroll && m.smallText.length === 0, `${tag}: hscroll ${m.hscroll}, small text ${m.smallText.join(", ")}`);
+        if (rule !== null) for (const d of await page.$$eval("[data-draft-copy]", (els) => els.map((e) => e.getAttribute("data-draft-copy")))) (drafts.get(d) ?? drafts.set(d, new Set()).get(d)).add("S4.13");
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `send-rule-${coin}-${dest}-${w.name}.png`) });
+        await ctx.close();
+      }
+      const { ctx, page } = await open(browser, w, "pool-in-remainder", { tap: true, dest: "solana" });
+      await page.waitForSelector('.dep[data-state="pool-in"]', { timeout: 5_000 }).catch(() => {});
+      const bal = await page.locator(".ddone [data-balance]").first().getAttribute("data-balance").catch(() => null);
+      const done = norm(await page.locator(".ddone").innerText().catch(() => ""));
+      check(bal === "0.4225" && done.includes("Balance 0.4225 SOL") && !/remainder|proo?f|\bready\b|pending|notes/i.test(done), `@${w.name} pool-in-remainder: Balance ${bal}, ${JSON.stringify(done)}, want 0.41 SOL in the pool and 0.0125 at U_X as one Balance 0.4225 SOL`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `pool-in-remainder-solana-${w.name}.png`) });
+      await ctx.close();
+    }
     // card deposit-to-pool-pools (review P1): while a checked quote is pending the asset, chain and amount are held still,
     // and the address block draws the asset and amount asked, never a pick made after; the vault's and the pool's alike
     // (the vault asked in NEAR, the Solana pool in its own SOL: card deposit-pool-picks-its-own-coin)

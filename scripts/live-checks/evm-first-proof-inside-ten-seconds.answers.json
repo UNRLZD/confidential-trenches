@@ -1,0 +1,30 @@
+{
+ "key": "evm-first-proof-inside-ten-seconds",
+ "recorded": "2026-11-13T06:47:42.474Z",
+ "good": {
+  "readAt": "2026-11-13T10:05:00.142Z",
+  "from": "local build",
+  "page": {
+   "pin": "sha384-xVXyZoWtZ+9Mm/vt48H10GgdsZ8RHSSxLKY706Cz84sdv6cJXDWAvJ9zT2HLYzHJ",
+   "sha384": "sha384-xVXyZoWtZ+9Mm/vt48H10GgdsZ8RHSSxLKY706Cz84sdv6cJXDWAvJ9zT2HLYzHJ",
+   "landed": true,
+   "proofs": true,
+   "lanes": true,
+   "warm": true,
+   "wait": true
+  }
+ },
+ "bad_live_before": {
+  "readAt": "2026-11-13T06:47:43.118Z",
+  "from": "https://confidential.unrealized.trade",
+  "page": {
+   "pin": "sha384-jrG/dxTGoWVCWo1X8cpwncA9wIcApjAd+0yba5NuniLradg8sCfmSuDKR4Wb5qzg",
+   "sha384": "sha384-jrG/dxTGoWVCWo1X8cpwncA9wIcApjAd+0yba5NuniLradg8sCfmSuDKR4Wb5qzg",
+   "landed": false,
+   "proofs": false,
+   "lanes": false,
+   "warm": false,
+   "wait": false
+  }
+ }
+}

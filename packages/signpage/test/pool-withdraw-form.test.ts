@@ -5,6 +5,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CHECK_IDLE_MS } from "../src/withdraw/form.ts";
 import { SOLANA_RESERVED_KEYS } from "../src/rules/pool.ts";
+import { planPoolWithdraw } from "../src/pool-withdraw.ts";
+import { SOL_GRID } from "../../wallet/src/pool/pieces.ts";
+import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
 import { checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady, type PoolWithdrawFormDeps } from "../src/withdraw/pool-form.ts";
 
 const POOL = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
@@ -137,12 +140,32 @@ test("the drawn screen: To and Max fee shown before the press, the press hands o
   assert.equal(f.form.dataset.state, "ready");
   assert.equal(f.lines.hidden, false);
   const shown = Object.fromEntries(f.lines.children.filter((e) => e.tag === "dd").map((e) => [e.dataset.line, e.textContent]));
-  assert.deepEqual(shown, { to: TO, "max-fee": "0.001305 SOL" });
-  assert.deepEqual(f.lines.children.filter((e) => e.tag === "dt").map((e) => e.dataset.draftCopy), ["to", undefined], "To is still a draft; Max fee was kept (owner 8 Nov 07:55Z)");
+  assert.deepEqual(shown, { amount: "0.002 SOL", to: TO, "max-fee": "0.001305 SOL" });
+  assert.deepEqual(f.lines.children.filter((e) => e.tag === "dt").map((e) => e.dataset.draftCopy), ["amount", "to", undefined], "Amount and To are still drafts; Max fee was kept (owner 8 Nov 07:55Z)");
   assert.equal(f.go.dataset.draftCopy, undefined, "Withdraw was kept (owner 8 Nov 07:55Z): no draft mark");
   assert.equal(f.go.disabled, false);
   await f.tap();
   assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: 2_000_000n, maxFee: FEE + W_FEE }]);
+});
+
+// card every-lamport-can-move, review P3-3 of 00d6bef00: with a piece rule a typed amount may plan up to a grid step
+// over it; the screen shows and the press sends that one number, the plan's sum, never the typed one
+test("Amount on a piece rule: the plan's sum is the one number shown and handed over, and it plans exactly itself", async () => {
+  const pieces: PoolFunds = { ...FUNDS, pieces: SOL_PIECES };
+  const typed = 7_123_456n;
+  const sum = planPoolWithdraw(pieces.notes, typed, pieces)!.reduce((t, p) => t + p.part, 0n);
+  assert.ok(sum > typed && sum - typed < SOL_GRID, `${sum}: a test whose typed amount the plan rounds up`);
+  assert.deepEqual(checkPoolAmount("solana", formatUnits(typed, 9), pieces), { ok: true, amount: sum, parts: 1, maxFee: FEE + W_FEE });
+  assert.deepEqual(checkPoolAmount("solana", formatUnits(sum, 9), pieces), { ok: true, amount: sum, parts: 1, maxFee: FEE + W_FEE });
+  const f = drawn(async () => pieces);
+  f.type("to", TO);
+  f.type("amount", formatUnits(typed, 9));
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  const shown = Object.fromEntries(f.lines.children.filter((e) => e.tag === "dd").map((e) => [e.dataset.line, e.textContent]));
+  assert.equal(shown.amount, `${formatUnits(sum, 9)} SOL`);
+  await f.tap();
+  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: sum, maxFee: FEE + W_FEE }]);
 });
 
 // review #232 HIGH 2: an amount no plan sends without a change no withdraw could ever send is refused, naming the

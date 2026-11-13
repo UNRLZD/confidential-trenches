@@ -378,10 +378,13 @@ test("review of 7eb8cfb9, P2-2: a round still running at a sign out stops with t
   assert.deepEqual((await idb.databases()).map((d) => d.name), [], "no wallet database made again after the sign out");
 });
 
-test("review of 39a4c67a, P3-1: a round that reads on past a sign out (no signal) reaches its hold's write, which never makes the wallet database again", async () => {
+// review of 584af1495, P3-1: a round asked with no signal now ends at the sign out too (its stop is the session's), so it
+// never reads on to its hold's write; the write itself, as a read still in flight at the sign out would make it, goes
+// through held() alone and never makes the wallet database again
+test("review of 39a4c67a, P3-1: a round with no signal ends at a sign out during its read, and its hold's write after the sign out never makes the wallet database again", async () => {
   const { keccak_256 } = await import("@noble/hashes/sha3.js");
   const { evmPoolScopeOf, EVM_CHAIN_IDS } = await import("../../wallet/src/pool/evm.ts");
-  const { resetPageEvmHolds } = await import("../src/pool-testnet.ts");
+  const { pageEvmHold, resetPageEvmHolds } = await import("../src/pool-testnet.ts");
   type EvmHost = import("../src/pool-deposit-evm.ts").PoolDepositEvmHost;
   resetPageEvmHolds();
   const idb = new IDBFactory();
@@ -419,10 +422,11 @@ test("review of 39a4c67a, P3-1: a round that reads on past a sign out (no signal
     cur = null;
     await t.signedOut();
   };
-  // no signal: the round reads on past the sign out to its write, which goes through held() alone
-  let ended = false;
-  await he.round().then(() => void (ended = true), () => {});
-  assert.ok(ended, "the round read on past the sign out to its end, its hold's write included");
+  // no signal: the round's stop is the session's, so the sign out during its log read ends it
+  const got = await he.round().then(() => "read on", (e: unknown) => `thrown ${(e as Error)?.name}`);
+  assert.equal(got, "thrown AbortError", "the round ends at the sign out");
+  // the hold's write a read still in flight would make: through held() alone
+  await pageEvmHold(PIN, store).write({ network: PIN.network, pool: PIN.pool.toLowerCase(), fromBlock: PIN.fromBlock, to: 100n, events: [], kept: [] }).catch(() => {});
   await new Promise((r) => setTimeout(r, 50));
   const again = cur as WalletStore | null;
   again?.close();

@@ -784,7 +784,8 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   // the buy's set settle (card buy-spends-several-pieces: every piece's note on one read of the marks) one more site
   const calls = [...src.matchAll(/solanaSettle(?:SpentSet|Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
-  assert.equal(calls.length, 5);
+  // and the sale's ride (card every-lamport-can-move T3), inside the sell host: on the host's own stop, taken when it is made
+  assert.equal(calls.length, 6);
   // the reserved pass's on the pair's pass reads (card signpage-passes-yield-to-a-trade), the rest on its trade reads, and
   // the buy's on its own kind: a trade's to its release, a pass's after it (card sell-right-after-a-buy), its one call so
   for (const c of calls) assert.match(c, /, rpcs: settleRpcs\((?:"pass"|kind)?\), lister: lister\((?:"pass"|kind)?\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
@@ -1026,7 +1027,9 @@ test("card buy-spends-several-pieces: helperPoolSendPieces posts {pool, txs} in 
   assert.match(src, /owner: async \(r\) => \{\s*const rs = settleRpcs\("pass"\);[\s\S]{0,400}?spendOwner\(rs, \{ program: r\.spend\.program, feePayer: r\.spend\.feePayer \}, r\.address, BigInt\(r\.spend\.nullifier\), r\.spend\.context, /);
   // a restore's scan: the batch on the helper's seat on mainnet, never a public provider; the testnet build one W a request
   assert.match(src, /const batch = POOL_TESTNET \? null : over\.rpcs \? over\.rpcs\[1\] : solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER,/);
-  assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*return await resumeRentBacks\(h, locks\);/);
+  // the run's pass with the ride once its drawn time is due, its held passes kept booked (card every-lamport-can-move,
+  // review P2-1 and P3 1 of 1d3b96d9c)
+  assert.match(src, /if \(scan\) await findHeldWs\(mine\)\.catch\(\(\) => \{\}\);\s*const more = await resumeRentBacks\(h, locks, ride !== undefined \? \{ ride: true, held: \(\) => void \(held = true\) \} : \{\}\);/);
 });
 
 test("card buy-spends-several-pieces: piecesOwedOf keeps one record a W in the store's meta/owed/pieces-sol, put over and dropped by W", async () => {

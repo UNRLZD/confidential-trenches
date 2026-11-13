@@ -286,12 +286,13 @@ const { BUY_MINTS_KEY, poolSellKind } = await import("../src/pool-sell.ts");
 const { solanaDecodeMessage } = await import("../../kit/src/checks/solana/message.ts");
 const { PROGRAM } = await import("../../kit/test/solana-pool-buy-fx.ts");
 
-/** What a Solana transaction is: the sale (the venue's sell and the deposit back), the sweep (the deposit alone) or a
- *  teardown frame (the rest). */
+/** What a Solana transaction is: the sale (the venue's 24-byte sell, with a partial sale's deposit back; since card
+ *  every-lamport-can-move a full sale carries none), the sweep (the deposit alone) or a teardown frame (the rest). */
 const kindOf = (tx: Uint8Array): "sale" | "sweep" | "teardown" => {
   const m = solanaDecodeMessage(tx.subarray(1 + 64 * tx[0]!));
   const pool = m.instructions.some((x) => m.staticKeys[x.programIndex] === PROGRAM);
-  return pool && m.instructions.some((x) => x.data.length === 24) ? "sale" : pool ? "sweep" : "teardown";
+  const sell = m.instructions.some((x) => x.data.length === 24 && m.staticKeys[x.programIndex] !== PROGRAM);
+  return sell ? "sale" : pool ? "sweep" : "teardown";
 };
 /** The sell world's chain (test/pool-sell-world.ts) over two RPC hosts, a wallet store holding W's note (RESERVED: its
  *  buy's release left the device) and W's buy record, and every transaction's first send logged by its kind. */

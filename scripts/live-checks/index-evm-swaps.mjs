@@ -9,7 +9,8 @@
 // and passes only when:
 //   - each answers 200 JSON with X-Helper-Commit a full sha, X-Fetched-At an ISO time within 15 s of that answer's own
 //     read (freshAt) and Access-Control-Allow-Origin echoing APP_HOST; X-Helper-Source is "chain" (our own reads) for the tape, and for the
-//     candles "chain" or "chain,geckoterminal" (the vendor only before our first bar);
+//     candles "chain", "chain,geckoterminal" or "chain,coingecko" (the vendor, keyless or the paid plan, only before our
+//     first bar);
 //   - candles hold exactly the frozen fields tf, candles, src, own_from_s, as_of_ms; bars [t_s, o, h, l, c, vol_usd] on
 //     the 1m grid, oldest first, USD decimal strings, high >= open, close >= low, bars from our own reads start at
 //     own_from_s; the trades hold exactly trades, src, as_of_ms, each {t_ms, side, usd, amt, trader, tx}, newest first;
@@ -121,10 +122,13 @@ const blockTime = (n) => {
 const blockOf = (s) => blockAt("base", s);
 const hex = (n) => `0x${n.toString(16)}`;
 
+/** The candles' sources: our own bars, the vendor's (GeckoTerminal keyless, or CoinGecko's paid plan, apps/helper/src/
+ *  data/coingecko.ts CG_SRC) only before our first. */
+export const CANDLE_SOURCES = ["chain", "chain,geckoterminal", "chain,coingecko"];
 /** The first thing wrong with a Candles answer, or null. */
 export function candlesFault(c) {
   if (!isObj(c) || !same(Object.keys(c), ["tf", "candles", "src", "own_from_s", "as_of_ms"])) return `keys ${show(isObj(c) ? Object.keys(c) : c)}`;
-  if (c.tf !== "1m" || !["chain", "chain,geckoterminal"].includes(c.src) || !Number.isSafeInteger(c.as_of_ms)) return `tf ${show(c.tf)}, src ${show(c.src)}`;
+  if (c.tf !== "1m" || !CANDLE_SOURCES.includes(c.src) || !Number.isSafeInteger(c.as_of_ms)) return `tf ${show(c.tf)}, src ${show(c.src)}`;
   if (!Array.isArray(c.candles) || c.candles.length === 0 || c.candles.length > 60) return `candles ${Array.isArray(c.candles) ? c.candles.length : "not a list"}`;
   for (const [i, b] of c.candles.entries()) {
     if (!Array.isArray(b) || b.length !== 6 || !Number.isSafeInteger(b[0]) || b[0] % 60 !== 0 || !b.slice(1).every((v) => typeof v === "string" && DEC.test(v))) return `bar ${i} ${show(b)}`;
@@ -238,7 +242,7 @@ export function judge(run) {
   const readAt = Date.parse(run.readAt);
   const parsed = {};
   for (const [k, fault, path, source] of [
-    ["candles", candlesFault, CANDLES_PATH(run.coin, net), ["chain", "chain,geckoterminal"]],
+    ["candles", candlesFault, CANDLES_PATH(run.coin, net), CANDLE_SOURCES],
     ["trades", tradesFault, TRADES_PATH(run.coin, net), ["chain"]],
   ]) {
     const r = run.reads?.[k] ?? { status: 0, headers: {}, body: "" };

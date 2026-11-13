@@ -120,5 +120,82 @@
     "body": "{\"error\":\"not_found\"}"
    }
   }
+ },
+ "good_coingecko": {
+  "note": "the deployed helper at 6856d0c92eb6d26c9094616d34348ed887ec218a read from a Mac at 2026-11-13T12:05:52.003Z (card charts-say-coingecko): the candles from CoinGecko paid plan before our first bar, X-Helper-Source chain,coingecko",
+  "base": "https://ct-api.unrealized.trade",
+  "mint": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+  "readAt": "2026-11-13T12:05:52.003Z",
+  "reads": {
+   "token": {
+    "at": "2026-11-13T12:05:52.003Z",
+    "ms": 1150,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-encoding": "gzip",
+     "content-length": "712",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Fri, 13 Nov 2026 12:05:53 GMT",
+     "server-timing": "lists;dur=2, rpc-wait;dur=0, rpc;dur=24;desc=\"SOLANA_RPC_URL\", launch;dur=301, read;dur=328, total;dur=328",
+     "vary": "Origin, Accept-Encoding",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-fetched-at": "2026-11-13T12:05:42.725Z",
+     "x-helper-commit": "6856d0c92eb6d26c9094616d34348ed887ec218a",
+     "x-helper-source": "jupiter"
+    },
+    "body": "{\"row\":{\"chain\":\"solana\",\"token\":\"pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn\",\"symbol\":\"PUMP\",\"name\":\"Pump\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1752333086,\"price_usd\":\"0.00348262579234\",\"mc_usd\":\"1595521609.21\",\"vol_24h_usd\":\"27231369.1177\",\"chg_5m_bps\":98,\"chg_1h_bps\":144,\"chg_24h_bps\":322,\"liq_usd\":\"34635959.0082\",\"holders\":441864,\"top10_bps\":5947,\"src\":\"jupiter\",\"as_of_ms\":1794571550725,\"creator\":\"ETFtBU2MYFqN3QW4ktKZfR6XH4mJ7yTawK5QqyzrqoGh\",\"creator_sold_bps\":null,\"dev_bps\":0,\"snipers_bps\":null,\"mint_auth\":false,\"freeze_auth\":false,\"vol_5m_usd\":\"308648.232031\",\"buys_5m\":740,\"sells_5m\":598,\"net_5m_usd\":\"186901.316624\",\"risk_src\":\"jupiter\",\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"1017071.86108\",\"chg_4h_bps\":null,\"buys_24h\":185618,\"sells_24h\":182435,\"buys_1h\":4975,\"sells_1h\":4726},\"decimals\":6,\"pool\":null,\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"chain\",\"as_of_ms\":1794571552706},\"freeze_auth\":{\"v\":false,\"src\":\"chain\",\"as_of_ms\":1794571552706},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794571552706},\"top10_bps\":{\"v\":5947,\"src\":\"jupiter\",\"as_of_ms\":1794571542725},\"dev_bps\":{\"v\":0,\"src\":\"chain\",\"as_of_ms\":1794571552741},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794571552706},\"holders\":{\"v\":441864,\"src\":\"jupiter\",\"as_of_ms\":1794571542725},\"liq_usd\":{\"v\":\"34635959.0082\",\"src\":\"jupiter\",\"as_of_ms\":1794571542725},\"age_s\":{\"v\":42238456,\"src\":\"jupiter\",\"as_of_ms\":1794571542725},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"chain\",\"as_of_ms\":1794571552706},\"honeypot\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794571552706},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794571552706},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794571552706},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794571552706}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+   },
+   "holders": {
+    "at": "2026-11-13T12:05:53.154Z",
+    "ms": 2944,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-encoding": "gzip",
+     "content-length": "1110",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Fri, 13 Nov 2026 12:05:55 GMT",
+     "server-timing": "total;dur=2677",
+     "vary": "Origin, Accept-Encoding",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-fetched-at": "2026-11-13T12:05:55.954Z",
+     "x-helper-commit": "6856d0c92eb6d26c9094616d34348ed887ec218a",
+     "x-helper-source": "chain"
+    },
+    "body": "{\"holders\":[{\"addr\":\"Cfq1ts1iFr1eUWWBm8eFxUzm5R3YA3UvMZznwiShbgZt\",\"amt\":\"229261858182103957\",\"bps\":2785},{\"addr\":\"8UhbNoBXmGoxJr2TeWW8wmSMoWmjS2rTT2tVJxzuTogC\",\"amt\":\"80000000010000236\",\"bps\":972},{\"addr\":\"9pkFKCR1mdS31JxjKdtmWg2awZUg6vJUYVY722DAcXzv\",\"amt\":\"35000000010000254\",\"bps\":425},{\"addr\":\"BBvQteuawKB2UtExfevL8HYLjWWsgmWXsp922vFbvCfT\",\"amt\":\"25000000010023050\",\"bps\":303},{\"addr\":\"GTeSSwovPiVirpvWJpThUWiLDSLsuApmJw621Yom3MhB\",\"amt\":\"25000000010000234\",\"bps\":303},{\"addr\":\"AvqFxKNrYZNvxsj2oWhLW8det68HzCXBqswshoD2TdT6\",\"amt\":\"24000000010000267\",\"bps\":291},{\"addr\":\"85WTujfJ9meJq5hfjAeb5gftj7n8Q7QTsZJbRqMD5ERS\",\"amt\":\"20624964326866386\",\"bps\":250},{\"addr\":\"8UHpWBnhYNeAQURWjAABp8vSrzfYa69o7sfi65vYLC42\",\"amt\":\"19131083343250258\",\"bps\":232},{\"addr\":\"96HiV4cGWTJNCjGVff3RTHgPXmpYz7MSrGTAmxNKVWM9\",\"amt\":\"15812472650505895\",\"bps\":192},{\"addr\":\"GhFaBi8sy3M5mgG97YguQ6J3f7XH4JwV5CoW8MbzRgAU\",\"amt\":\"15625000010000265\",\"bps\":189},{\"addr\":\"ESRc4ce6jpyRyvGJ9Gjgtmwc7wEtR1ZPaQPnh9kWZM67\",\"amt\":\"13861818809645991\",\"bps\":168},{\"addr\":\"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\"amt\":\"13000000000000001\",\"bps\":157},{\"addr\":\"ERRGqu3dh6zYBg7MNAHKL33TyVb7efMmaKxnmdukdNYa\",\"amt\":\"11687479786232617\",\"bps\":142},{\"addr\":\"3gd3dqgtJ4jWfBfLYTX67DALFetjc5iS72sCgRhCkW2u\",\"amt\":\"9124408349174000\",\"bps\":110},{\"addr\":\"9UcygiamY92yGntGkUkBKi4SdApxkBMZd9QSo6wMC2dN\",\"amt\":\"8800000010000236\",\"bps\":106},{\"addr\":\"9SLPTL41SPsYkgdsMzdfJsxymEANKr5bYoBsQzJyKpKS\",\"amt\":\"8493172241056472\",\"bps\":103},{\"addr\":\"FCgSWpNqaTvYydABHVCBxs7MRpgPBemhVDEYUcudj3Zv\",\"amt\":\"8304400405525407\",\"bps\":100},{\"addr\":\"4GZwzZgqSwwTTRVgBoxTDeH3EwDye84dCPb9fALAZFjF\",\"amt\":\"7238875450977589\",\"bps\":87},{\"addr\":\"GsM3emTijQshDHrWRRhSQhqG1zYC9BNnAuah7ZPEu6ya\",\"amt\":\"5480748240277456\",\"bps\":66},{\"addr\":\"2APnhZKqfBUmCAqnZnfGomQLz1stWDq9UotjFPD6ZXsP\",\"amt\":\"5157822952838941\",\"bps\":62}],\"total\":441864,\"top_bps\":1203,\"src\":\"chain\",\"as_of_ms\":1794571555954}"
+   },
+   "candles": {
+    "at": "2026-11-13T12:05:56.098Z",
+    "ms": 804,
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-encoding": "gzip",
+     "content-length": "921",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Fri, 13 Nov 2026 12:05:56 GMT",
+     "server-timing": "total;dur=505",
+     "vary": "Origin, Accept-Encoding",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-fetched-at": "2026-11-13T12:05:56.391Z",
+     "x-helper-commit": "6856d0c92eb6d26c9094616d34348ed887ec218a",
+     "x-helper-source": "chain,coingecko"
+    },
+    "body": "{\"tf\":\"1h\",\"candles\":[[1794488400,\"0.0033596659042\",\"0.00339071045094\",\"0.00328643970464\",\"0.0033618518049\",\"266910.335594\"],[1794492000,\"0.0033618518049\",\"0.00339765984788\",\"0.00332032807372\",\"0.00335666465906\",\"200273.875411\"],[1794495600,\"0.00335666465906\",\"0.00339009969655\",\"0.00333573520593\",\"0.00339000935693\",\"96480.346375\"],[1794499200,\"0.00339000935693\",\"0.00342827060972\",\"0.00336098565321\",\"0.00336939629294\",\"157188.245774\"],[1794502800,\"0.00336939629294\",\"0.00339722049169\",\"0.00335235557379\",\"0.003377913548\",\"61809.083608\"],[1794506400,\"0.003377913548\",\"0.00340246570163\",\"0.00336557721315\",\"0.0033871316413\",\"51419.1846666\"],[1794510000,\"0.0033871316413\",\"0.00341757178492\",\"0.00336634492843\",\"0.00339513133331\",\"78693.7254944\"],[1794513600,\"0.00339513133331\",\"0.00342261656932\",\"0.00338925889787\",\"0.00339859060171\",\"31811.405109\"],[1794517200,\"0.00339859060171\",\"0.0034515592611\",\"0.00339371281859\",\"0.00342854380768\",\"55623.1634835\"],[1794520800,\"0.00342854380768\",\"0.00344476729157\",\"0.00341341942351\",\"0.00342382997284\",\"76580.3051662\"],[1794524400,\"0.00342382997284\",\"0.00348396659505\",\"0.00342354952666\",\"0.00348396659505\",\"101525.68075\"],[1794528000,\"0.00348396659505\",\"0.00351258236877\",\"0.00343675645776\",\"0.00346353542393\",\"174339.474607\"],[1794531600,\"0.00346353542393\",\"0.00348440038866\",\"0.00343931343939\",\"0.00346989570842\",\"77636.7566425\"],[1794535200,\"0.00346989570842\",\"0.00347042465363\",\"0.0033814363935\",\"0.0033956209164\",\"174668.010029\"],[1794538800,\"0.0033956209164\",\"0.0034107063483\",\"0.00325636686837\",\"0.00328678634333\",\"396144.032787\"],[1794542400,\"0.00328678634333\",\"0.00332252961792\",\"0.00325230046964\",\"0.00328548991058\",\"177226.122022\"],[1794546000,\"0.00328548991058\",\"0.00332913527357\",\"0.00325765380632\",\"0.00332659424209\",\"219756.222207\"],[1794549600,\"0.00332659424209\",\"0.00342590484647\",\"0.00329922751338\",\"0.00340773792361\",\"210546.14186\"],[1794553200,\"0.00340773792361\",\"0.00344083339559\",\"0.00339885847766\",\"0.00339885847766\",\"127237.026081\"],[1794556800,\"0.00339885847766\",\"0.00341838421136\",\"0.00336668633413\",\"0.00340371315869\",\"96225.0998476\"],[1794560400,\"0.00340371315869\",\"0.00341089013035\",\"0.00338033339338\",\"0.00340003198924\",\"27520.4101005\"],[1794564000,\"0.00340003198924\",\"0.00343294452622\",\"0.00338806042686\",\"0.00343115736249\",\"81435.9549321\"],[1794567600,\"0.00343115736249\",\"0.00347469131194\",\"0.00341267159356\",\"0.0034368176371\",\"120532.640635\"],[1794571200,\"0.0034368176371\",\"0.00349285159772\",\"0.0034368176371\",\"0.00349285159772\",\"57358.7083202\"]],\"src\":\"chain,coingecko\",\"as_of_ms\":1794571556391}"
+   }
+  }
  }
 }

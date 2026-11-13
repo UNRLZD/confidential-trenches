@@ -100,11 +100,13 @@ export const IN_PROCESS = [
   // two providers is past the build
   { key: "pool-tree-read-waits-for-its-second", host: "sign", load: () => import("../live-checks/pool-tree-read-waits-for-its-second.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   viaRead("fresh-money-spendable-at-once", () => import("../live-checks/fresh-money-spendable-at-once.mjs")),
+  viaRead("every-lamport-can-move", () => import("../live-checks/every-lamport-can-move.mjs")),
   // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
   { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the bundle part only (the one rule, the deposit address, the follow's reader, the withdraw): the pools on two RPCs
   // and the helper's fee against the device's are past the build
   { key: "evm-deposit-on-mainnet", host: "sign", load: () => import("../live-checks/evm-deposit-on-mainnet.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  viaRead("evm-first-proof-inside-ten-seconds", () => import("../live-checks/evm-first-proof-inside-ten-seconds.mjs")),
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
   // serves that file; the helper part reads the helper, past the build
   { key: "withdraw-fee-busy-waits", host: "sign", load: () => import("../live-checks/withdraw-fee-busy-waits.mjs"), run: async (m, f, dirs) => m.judgeSign(await m.readSign(SIGN, f, m.pinOf(readFileSync(path.join(dirs.sign, "index.html"), "utf8")))) },
@@ -139,6 +141,7 @@ export const CHILD_RUNS = [
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
+  "owners-solana-buy-lands": "the helper's pieces route (a planted 2-piece buy) and mainnet's rent on two public RPCs; its bundle part, the kit's one tip for every set, is held on the sources by packages/kit/test/solana-pool-buy-pieces.test.ts and on a build by its own replay (owners-solana-buy-lands.test.mjs)",
   "hosts-main-on-top": "DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names",
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
@@ -236,6 +239,7 @@ export const OUT = {
   "app-faults-seen-on-124": "a browser and SIGN_HOST's 1Click reads through the helper (its --harness run is in test-browser)",
   "app-faults-seen-on-126": "a browser and the helper's chart bars (its --harness run is in test-browser)",
   "screens-never-say-proof": "a browser (its --harness run is in test-browser)",
+  "pool-balance-counts-the-remainder": "a browser, and SIGN_HOST's deployed scripts beside the app's build",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
   "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };

@@ -104,3 +104,18 @@ test("planted: a candle read after a 429 that cleared inside the span passes; a 
   assert.equal(empty.ok, false);
   assert.ok(empty.lines.some((l) => /candles for the mint: .*no bars/.test(l)), empty.lines.join("\n"));
 });
+
+// card charts-say-coingecko: good_coingecko, read 13 Nov 12:23Z by app-token-chart.mjs collect() with --build (this card's
+// build at APP_HOST's name in the stand-in shell), HELPER_HOST live at 6856d0c92: its candles X-Helper-Source chain,coingecko
+test("card charts-say-coingecko: the chart over CoinGecko's paid bars (X-Helper-Source chain,coingecko) shows CoinGecko's label at 1440 and 390: PASS; the label missing over them FAILs", () => {
+  const r = judge(ANSWERS.good_coingecko);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const l of ANSWERS.good_coingecko.loads) {
+    assert.equal(l.read.src, "chain,coingecko");
+    assert.equal(l.vendor, true);
+  }
+  const missing = structuredClone(ANSWERS.good_coingecko);
+  missing.loads[0].vendor = false;
+  assert.ok(bad(judge(missing).lines).some((l) => /CoinGecko's label missing for X-Helper-Source chain,coingecko/.test(l)), judge(missing).lines.join("\n"));
+  assert.equal(judge(ANSWERS.bad).ok, false);
+});

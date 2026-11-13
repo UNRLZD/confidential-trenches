@@ -34,6 +34,8 @@ export type PoolSendNote = {
   hashMs?: string;
   /** For a send that did not fill: the same bytes simulated at the end on a fresh blockhash, ok or simErrText's. */
   endSim?: string;
+  /** A tag 3's Jito tip as W signed it, lamports (card owners-solana-buy-lands). */
+  tip?: string;
 };
 
 /** The error's code word and, for not_landed, its end; "sent" for a 200 whose end the answer did not wait for. */
@@ -51,6 +53,7 @@ export function poolSendLine(l: { chain: "solana" | "evm" | "unknown"; net: stri
   const n = l.note ?? {};
   const out = [`pool send ${l.chain} ${word.test(l.net) ? l.net : "?"} ${l.route}`, `outcome=${outcomeOf(l.status, l.body, l.note)}`, `status=${l.status}`, `ms=${Math.max(0, Math.round(l.ms))}`];
   if (n.tag !== undefined) out.push(`tag=${n.tag}`);
+  if (n.tip !== undefined && /^\d{1,20}$/.test(n.tip)) out.push(`tip=${n.tip}`);
   if (n.via !== undefined) out.push(`via=${n.via}`);
   if (n.first !== undefined) out.push(`first=${n.first}`);
   if (n.region !== undefined && word.test(n.region)) out.push(`region=${n.region}`);

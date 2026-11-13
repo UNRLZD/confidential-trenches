@@ -30,17 +30,19 @@ const valueOf = (js, name) => {
 /** What the check keeps of the reads: the index, the bundle's sha384, the buy's mainnet tip and the sell's priority. */
 export function facts(index, js) {
   // the buy's tip, one piece's on mainnet: picked in the buy (`c===mainnet?TIP:0n`), or, since card
-  // buy-spends-several-pieces, the kit's solanaPoolBuyTip for the set's size (`tipOf=k=>F(c,k)`, F: `devnet?0n:k===1?TIP:MIN`;
-  // a bundle of several pieces ends with the helper's own tip, so its tag 3 tips the least)
+  // buy-spends-several-pieces, the kit's solanaPoolBuyTip for the set's size (`tipOf=k=>F(c,k)`, F: `devnet?0n:k===1?TIP:MIN`,
+  // or since card owners-solana-buy-lands `devnet?0n:TIP`, every set's tag 3 its own bundle)
   const picked = new RegExp(`let ${ID}=${ID}\\.cluster===\`mainnet\`\\?(${ID}):0n,${ID}=new Map`).exec(js);
   const by = !picked && new RegExp(`let ${ID}=(${ID})=>(${ID})\\(${ID}\\.cluster,\\1\\),${ID}=new Map`).exec(js);
-  const rule = by && new RegExp(`function ${by[2].replace(/\$/g, "\\$")}\\((${ID}),(${ID})\\)\\{if\\(!Number\\.isSafeInteger\\(\\2\\)\\|\\|\\2<1\\|\\|\\2>\\d+\\)throw Error\\(\`pieces: 1 to \\d+\`\\);return \\1===\`devnet\`\\?0n:\\2===1\\?(${ID}):${ID}\\}`).exec(js);
-  const buy = picked ?? (rule ? [null, rule[3]] : null);
+  const rule = by && new RegExp(`function ${by[2].replace(/\$/g, "\\$")}\\((${ID}),(${ID})\\)\\{if\\(!Number\\.isSafeInteger\\(\\2\\)\\|\\|\\2<1\\|\\|\\2>\\d+\\)throw Error\\(\`pieces: 1 to \\d+\`\\);return \\1===\`devnet\`\\?0n:(?:\\2===1\\?(${ID}):${ID}|(${ID}))\\}`).exec(js);
+  const buy = picked ?? (rule ? [null, rule[3] ?? rule[4]] : null);
   // the sale: on mainnet, on a form with room, the budget for what W holds beyond the need (`c===mainnet&&fits(kind,
   // cashback)?lamports-need:0n,budget=solanaSellBudget(null,solanaSellPriority(room))`); the preview priced on mainnet
   // (`poolSellPays(..., sizes, c===mainnet)`) with network the fee plus its priority
   const sellBuilds = new RegExp(`${ID}\\.cluster===\`mainnet\`&&${ID}\\(${ID}\\.kind,${ID}\\.cashback\\)\\?${ID}-${ID}:0n,${ID}=${ID}\\(null,${ID}\\(${ID}\\)\\)`).test(js);
-  const previewPriced = new RegExp(`${ID}\\.sizes,${ID}\\.cluster===\`mainnet\`\\)`).test(js) && new RegExp(`network:${ID}\\(${ID}\\+${ID}\\.priority,`).test(js);
+  // since card every-lamport-can-move the preview shows poolSellPays' own network (`network: poolUnits(pays.network,
+  // sol)`), a partial sell's the fee plus its priority (`priority: p, network: FEE + p`)
+  const previewPriced = new RegExp(`${ID}\\.sizes,${ID}\\.cluster===\`mainnet\`\\)`).test(js) && (new RegExp(`network:${ID}\\(${ID}\\+${ID}\\.priority,`).test(js) || (new RegExp(`network:${ID}\\(${ID}\\.network,`).test(js) && new RegExp(`priority:(${ID}),network:${ID}\\+\\1\\}`).test(js)));
   // a partial sell's keep: the next sell's need plus the priority on mainnet (`kept=keeps&&c===mainnet?PRIORITY:0n`)
   const kept = new RegExp(`${ID}=${ID}&&${ID}\\.cluster===\`mainnet\`\\?(${ID}):0n[,;]`).exec(js);
   return { index, sha384: sha384(js), buyTip: buy ? valueOf(js, buy[1]) : null, sellBudget: sellBuilds && previewPriced, sellPriority: kept ? valueOf(js, kept[1]) : null };

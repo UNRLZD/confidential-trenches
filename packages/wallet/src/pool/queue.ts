@@ -3,7 +3,8 @@
 // l.385-391 at research 6d3a34c; the proof pool, wallet.md W:732-746 and WU-11).
 //
 // - The ready set: up to readySetSize UNSPENT notes of the pool's scope, landed, each covering a rung, largest chunk
-//   first. A note's chunk is the largest rung at or below its value (./ladder.ts chunkOf); the proof withdraws exactly
+//   first. A note's chunk is the pool's (./pool.ts poolChunkOf: its piece rule's, ./pieces.ts, else the largest rung at
+//   or below its value, ./ladder.ts chunkOf); the proof withdraws exactly
 //   that. One proof per note, so taps in a row draw on several notes (the ladder's job).
 // - Epochs (./pool.ts): each pass works in the pool's current epoch. Every proof proves against the epoch root
 //   (trees(epoch start)), binds the deadline epoch start + lifeMs and the relayer's fee for the epoch, so every proof
@@ -64,8 +65,8 @@ import { poolProveWithdraw, type VaultProver } from "@blindfill/kit";
 import { changeIndex, freshWallet } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { heldBy, type NoteRecord, type NoteStore } from "../notes/store.ts";
-import { checkLadder, chunkOf } from "./ladder.ts";
-import { checkBinding, checkPool, cutOrEmpty, failAs, NEWEST_GRACE_MS, PassFail, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type PassReason, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
+import { checkLadder } from "./ladder.ts";
+import { checkBinding, checkPool, cutOrEmpty, poolChunkOf, failAs, NEWEST_GRACE_MS, PassFail, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type PassReason, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
 /** Proofs kept ready: min(hardwareConcurrency - 1, 3), at least 1, all made by the one prover in turn. */
 export function readySetSize(hardwareConcurrency: number | undefined): number {
@@ -100,6 +101,11 @@ export { PassFail, type PassReason } from "./pool.ts";
 // a bind's read that got no answer keeps its own error (callers read its class: a throttle's wait, an EVM read's
 // EvmUnansweredError), so the pass names it by that class: "network", never the fee_refused of a refusal
 const UNANSWERED = new Set(["SolanaRpcTransportError", "EvmUnansweredError", "EvmOperatorsUnanswered", "EvmLagError", "TimeoutError"]);
+/** A newest-root proof whose epoch ended before it was made: made, it would be late
+ *  NEWEST_GRACE_MS past the boundary and never listed (Base mainnet copies of 13 Nov: a landing 46 s and 50 s into its
+ *  period, its pass's bind past the boundary, its proof done 18.8 s and 17.3 s after it). The pass makes none, and the
+ *  queue runs the next pass at once, in the new epoch, where the note is under the epoch's cut. */
+class EpochTurned extends Error {}
 const bindFail = (e: unknown): never => failAs(UNANSWERED.has(String((e as { name?: unknown } | null)?.name)) ? "network" : "fee_refused")(e);
 /** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };
@@ -136,7 +142,7 @@ export interface ProofQueue<R> {
    * `nullifier`: the proof's (an EVM buy's). Each written on the note's mark with HELD -> RESERVED, never in the note
    * (notes/store.ts ReservedMark). */
   take(noteId: string, attempt?: string, early?: Promise<ChainNow>, lastHeight?: bigint, nullifier?: bigint): Promise<ReadyProof<R>>;
-  /** take() of several notes at once, for one bundle of transactions that lands whole or not at all (card
+  /** take() of several notes at once, for the transactions of one buy made of several pieces (card
    *  buy-spends-several-pieces): every note's turn held together, every refusal decided before any write, so a set
    *  refused leaves none RESERVED (a late proof's attempt let go and made again, as take() does; the others HELD, their
    *  proofs ready). Then each HELD -> RESERVED in order, with `lastHeight` on each one's mark. A write that fails there
@@ -158,8 +164,8 @@ export function jOf(ref: NoteRef): number {
 }
 
 const notHidden = (): boolean => (globalThis as { document?: { visibilityState?: string } }).document?.visibilityState !== "hidden";
-const byChunkThenLeaf = (l: Pool["ladder"]) => (x: NoteRecord, y: NoteRecord): number => {
-  const cx = chunkOf(l, x.leaf!.value)!, cy = chunkOf(l, y.leaf!.value)!;
+const byChunkThenLeaf = (l: Pick<Pool, "ladder" | "pieces">) => (x: NoteRecord, y: NoteRecord): number => {
+  const cx = poolChunkOf(l, x.leaf!.value)!, cy = poolChunkOf(l, y.leaf!.value)!;
   if (cx !== cy) return cx > cy ? -1 : 1;
   return x.leaf!.leafIndex < y.leaf!.leafIndex ? -1 : 1;
 };
@@ -275,7 +281,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     const flight = inFlight.get(n.id)!;
     const tier = to === null ? ready : alt;
     const leaf = n.leaf!;
-    const chunk = chunkOf(pool.ladder, leaf.value)!;
+    const chunk = poolChunkOf(pool, leaf.value)!;
     const j = jOf(n.ref);
     const wl = to === null ? leaf.label : to.l;
     const wj = to === null ? j : to.j;
@@ -290,7 +296,14 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     const readNowOf = (c: ChainNow): void => {
       if (seen === undefined || c.ms >= seen.ms) seen = { ms: c.ms, at: mono() - (performance.now() - c.at), wall: c.wall };
     };
+    // a newest-root proof is made only while its epoch is the pool's current one, before and after its bind
+    const turned = (): void => {
+      const t = nowSeen();
+      if (root === "newest" && t !== undefined && t >= epochStartMs + pool.epochMs) throw new EpochTurned(`epoch ${epochStartMs} ended at ${t}: made in the next`);
+    };
+    turned();
     const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs, ...(now === undefined ? {} : { now }), readNow: readNowOf }, signal).catch(bindFail);
+    turned();
     try {
       checkBinding(pool as Pool, binding, chunk);
     } catch (e) {
@@ -361,6 +374,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
 
   type Todo = { n: NoteRecord; trees: PoolTrees; root: "epoch" | "newest"; prev?: ReadyProof<R>; to?: To };
 
+  // set by a pass that met its epoch's end before a newest-root proof (EpochTurned): refresh runs the next pass at once
+  let turnedIn = false;
   async function pass(signal?: AbortSignal): Promise<QueuePass> {
     live();
     const out = NOTHING();
@@ -386,9 +401,9 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         const n = byId.get(r.noteId);
         if (n === undefined || !heldBy(n, r.attempt)) m.delete(r.noteId);
       }
-    const byChunk = byChunkThenLeaf(pool.ladder);
-    const usable = (n: NoteRecord): boolean => n.scope === pool.scope && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) !== null && !skipped.has(n.id);
-    const small = all.filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && chunkOf(pool.ladder, n.leaf.value) === null).length;
+    const byChunk = byChunkThenLeaf(pool);
+    const usable = (n: NoteRecord): boolean => n.scope === pool.scope && n.leaf !== undefined && poolChunkOf(pool, n.leaf.value) !== null && !skipped.has(n.id);
+    const small = all.filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && poolChunkOf(pool, n.leaf.value) === null).length;
     if (small > 0) out.small = small;
     // tier 1: a note with no tier 1 proof, UNSPENT or held by its tier 2 proof
     const open = all.filter((n) => usable(n) && !ready.has(n.id) && (n.state === "UNSPENT" || (n.state === "HELD" && alt.has(n.id)))).sort(byChunk);
@@ -487,7 +502,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
           await prove(t.n, prover, t.trees, t.root, start, t.prev, t.to ?? null, signal);
           (t.prev !== undefined ? out.remade : out.made).push(t.n.id);
         } catch (e) {
-          out.failed.push({ noteId: t.n.id, error: msg(e), ...(e instanceof PassFail ? { reason: e.reason } : {}) });
+          if (e instanceof EpochTurned) turnedIn = true;
+          else out.failed.push({ noteId: t.n.id, error: msg(e), ...(e instanceof PassFail ? { reason: e.reason } : {}) });
         } finally {
           inFlight.delete(t.n.id);
         }
@@ -546,7 +562,15 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
   };
   return {
     refresh(signal) {
-      const run = passes.then(() => pass(signal));
+      const run = passes.then(async () => {
+        turnedIn = false;
+        const one = await pass(signal);
+        if (!turnedIn || closed || signal?.aborted) return one;
+        // the epoch turned under a newest-root proof: the next pass now, in the new epoch, its work told with this one's
+        turnedIn = false;
+        const two = await pass(signal);
+        return { ...two, made: [...one.made, ...two.made], remade: [...one.remade, ...two.remade], failed: [...one.failed, ...two.failed] };
+      });
       passes = run.catch(() => undefined);
       return run;
     },

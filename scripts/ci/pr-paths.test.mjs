@@ -199,6 +199,9 @@ export function wiringProblems(ci) {
     // card ci-fast-checks-on-the-pr: the mutant sweeps run nightly and by hand only, on no pull request, so no plan gates
     // them; scripts/ci/test-shards.test.mjs holds their if
     if (job === "test-mutants") continue;
+    // card ci-runs-once-per-change: the test shards run on no pull request at all, so no plan gates them;
+    // scripts/ci/ci-runs-once.mjs holds them off pull requests
+    if (job.startsWith("test-")) continue;
     const body = all[job];
     if (!body) {
       p.push(`ci.yml has no job ${job}`);
@@ -221,10 +224,10 @@ test("ci.yml: the changes job runs main's rule, and each gated job reads its out
 });
 
 const PLANTED = {
-  "a gate on every event": ["(github.event_name != 'pull_request' || needs.changes.outputs.test_vault != 'false')", "(needs.changes.outputs.test_vault != 'false')", "test-vault's if is not the pull-request-only gate"],
-  "a job gated on another job's output": ["needs.changes.outputs.slither != 'false')", "needs.changes.outputs.test_vault != 'false')", "slither's if is not the pull-request-only gate"],
+  "a gate on every event": ["(github.event_name != 'pull_request' || needs.changes.outputs.pool_solana != 'false')", "(needs.changes.outputs.pool_solana != 'false')", "pool-solana's if is not the pull-request-only gate"],
+  "a job gated on another job's output": ["needs.changes.outputs.slither != 'false')", "needs.changes.outputs.pool_solana != 'false')", "slither's if is not the pull-request-only gate"],
   // PR #549's first run: a gate that runs only on an explicit true skipped every job on an empty plan
-  "a gate that runs only on an explicit true": ["needs.changes.outputs.test_browser != 'false')", "needs.changes.outputs.test_browser == 'true')", "test-browser's if is not the pull-request-only gate"],
+  "a gate that runs only on an explicit true": ["needs.changes.outputs.slither != 'false')", "needs.changes.outputs.slither == 'true')", "slither's if is not the pull-request-only gate"],
   "the head's own rule": [' node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD"; ', ' node scripts/ci/pr-paths.mjs decide "$EVENT" "$BASE" "$HEAD"; ', "the changes job does not run main's copy"],
   "an output left out": ["      pool_solana: ${{ steps.decide.outputs.pool_solana }}\n", "", "the changes job does not output pool_solana"],
   "a package selector on the queue": ["SELECT: ${{ github.event_name == 'pull_request' && needs.changes.outputs.tests || '' }}", "SELECT: ${{ needs.changes.outputs.tests }}", "test-packages reads its tests selector"],
