@@ -11,6 +11,7 @@
 //   - risk.bundlers_bps is our chain read too, or none (src "none", v null): never a value with no source;
 //   - the row's chg_4h_bps is an integer or null (the tape's own bars, never a guess).
 // After: helper
+// Serial: jupiter-budget 60 a page check (the newest pump.fun token's page, read until its chain fields land): a listed token, so its page draws no search of its own once listed; with the pages, before the builds
 //   node scripts/live-checks/token-page-chain-risk.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

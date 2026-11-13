@@ -33,6 +33,7 @@
 // After every app deploy (as the kit's other EVM quote checks): a pinned provider can stop applying code overrides or
 // change its gas cap at any time, and the deploy's run reads it again
 // After: app
+// Bundle: out EVM RPC quotes
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE, evmPoolVenues } from "../../packages/kit/src/index.ts";

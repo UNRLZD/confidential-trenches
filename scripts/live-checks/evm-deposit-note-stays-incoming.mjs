@@ -33,6 +33,7 @@
 // passes it, and the provider reads below and the page's own tests (pool-deposit-evm.test.ts, "no step of the deposit
 // asks a block's state by a tag other than the newest") hold that case.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/evm-deposit-note-stays-incoming.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes every answer read as the good run, and as the bad run a real run of the read the path made before
@@ -266,3 +267,9 @@ async function main(argv) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
   main(process.argv.slice(2)).then((c) => process.exit(c), (e) => (console.error(`error: ${e?.stack ?? e}`), process.exit(2)));
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  return judgeBundleOnly(await readBundle(f));
+}

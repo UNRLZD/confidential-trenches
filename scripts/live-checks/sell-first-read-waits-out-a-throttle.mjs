@@ -15,6 +15,7 @@
 // public/app.js (this file reaches no package code: the import check holds it). The card's proof on what is deployed is
 // the app's devnet sell run (card app-sell-e2e-in-the-app); this check holds the code that run depends on.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/sell-first-read-waits-out-a-throttle.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

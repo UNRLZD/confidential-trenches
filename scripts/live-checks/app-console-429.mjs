@@ -12,6 +12,8 @@
 // it): its 429 is read again at its Retry-After within one 75 s span for the crowd, and its answer must then be a 200
 // with bars; a 429 still standing after the span is named with its waits.
 // After: app helper
+// Bundle: out the helper under load
+// Budget-exempt: opens the top Trending token's page: a listed token takes its row from Discover's lists with no Jupiter call (apps/helper/src/data/solana/token.ts listedRow)
 //   node scripts/live-checks/app-console-429.mjs [--base <url>] [--crowd <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

@@ -21,6 +21,7 @@
 //   - at 1024 the four columns sit in one row.
 // While the helper serves no logo (icon false on every row) the logo part is named and passes on the initials.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/discover-matches-the-main-app.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute,

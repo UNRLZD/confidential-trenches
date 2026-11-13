@@ -15,6 +15,8 @@
 // mainnet build answers pool.buy only once pinned pools land there, so no live buy runs here.
 // After: app --host app
 // After: sign --host sign
+// Bundle: child sign --local --host sign
+// Bundle: child app --local --host app
 //   node scripts/live-checks/signpage-buy-route-events.mjs [--host sign|app] [--record <file>]
 //     the deployed hosts (both unless --host names one): SIGN_HOST https://confidential.unrealized.trade/ and
 //     APP_HOST https://ct-app.unrealized.trade/

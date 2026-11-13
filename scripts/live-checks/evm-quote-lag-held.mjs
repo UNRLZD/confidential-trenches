@@ -10,6 +10,7 @@
 // The cold quote's outcome is shown, not judged: a cold Robinhood quote's later rounds can outlast the state some
 // providers keep (an rpc_error naming "historical state", seen with no lag too, 2026-11-05 10:00Z), a matter apart.
 // After: app
+// Bundle: out EVM RPC quotes
 //   node scripts/live-checks/evm-quote-lag-held.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (each quote's time, outcome and the lagger's head
 // asks) to <file>, for the test's replay (evm-quote-lag-held.answers.json).

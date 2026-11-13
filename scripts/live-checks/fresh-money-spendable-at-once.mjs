@@ -14,6 +14,7 @@
 // pool-withdraw.test.ts and pool-buy.test.ts at the released commit, and the mainnet copy's run. The check runs on a
 // pull request's own build too (scripts/ci/bundle-checks.mjs).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/fresh-money-spendable-at-once.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

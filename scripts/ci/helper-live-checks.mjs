@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { poolRecordName } from "../live-checks/pool-redeploys.mjs";
-import { hostList } from "./live-after.mjs";
+import { headerLines, hostList, readChecks } from "./live-after.mjs";
 
 // The checks are each check's `// After: helper` lines (scripts/ci/live-after.mjs), one run for each; `{commit}` in a
 // line's arguments is the deployed commit. helper-pool-senders and helper-bind-relayer-mainnet take their runs from the
@@ -16,6 +16,9 @@ import { hostList } from "./live-after.mjs";
 const AFTER = hostList("helper", path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."));
 export const LIVE_CHECKS = AFTER.checks;
 export const LIVE_ARGS = AFTER.args;
+// [key, value] for each `// <word>:` line in the checks' own headers (scripts/ci/live-after.mjs headerLines), by key
+const CHECK_TEXTS = readChecks(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."));
+const headerOf = (word) => Object.entries(CHECK_TEXTS).flatMap(([k, t]) => headerLines(t, word).map((v) => [k, v]));
 
 // helper-pool-senders takes one --pool: it runs once for each Solana cluster the helper may serve (the keys of
 // POOL_SOLANA_ENV in apps/helper/src/pool/solana.ts, a test holds them), with the pool its deploy record names, read from
@@ -104,9 +107,8 @@ export const bindMainnetPlan = (root = ROOT, commit = "{commit}") =>
 // A check the runner cannot run, with why. live.yml lists each one in the run's summary as skipped-<reason> and runs
 // nothing for it; a skip is never a pass. A test holds each reason to what the check reads.
 //   needs-secret: reads the vendor keys the host holds (helper-proxy's ENV_KEYS); a public-repo run has no secret.
-export const SKIPPED = {
-  "helper-proxy": { reason: "needs-secret", detail: "JUPITER_API_KEY, RELAY_API_KEY, LIFI_API_KEY and ONECLICK_JWT" },
-};
+// Each from the check's own `// Skipped: <reason> <detail>` line (card ci-stops-costing-reruns: no shared list).
+export const SKIPPED = Object.fromEntries(headerOf("Skipped").map(([k, v]) => [k, { reason: v.split(/\s+/)[0], detail: v.slice(v.split(/\s+/)[0].length).trim() }]));
 
 // Card helper-live-jup-serial: the checks that spend the helper's Jupiter budget run one after another in ONE job, never in
 // parallel jobs. The helper counts every send to Jupiter in one window for all its callers (apps/helper/src/proxy/proxy.ts:
@@ -120,30 +122,28 @@ export const SKIPPED = {
 // fewer than 6 of the window's 10 sends spent, or no page in it), so an idle read for it holds for a device's build, which
 // needs fewer than 9, and a build check leaves no sends in a minute that a page check after it would read (proxy.ts freeAt).
 // Every member is one run with no arguments.
-export const SERIAL_GROUPS = {
-  // solana-mint-supply-moves first: once its two dry builds are made it lets the next check start and reads public RPCs for
-  // a burn beside them, to its deadline (live-serial.mjs RELEASES; card live-run-red-means-the-build)
-  "jupiter-budget": [
-    "solana-mint-supply-moves",
-    "helper-token-page-cold",
-    "market-data-solana-token",
-    "helper-page-jup-429",
-    // a page check (the lists, one listed pump.fun token's page and three tapes): last of the pages, before the builds
-    "token-page-data-complete-and-fast",
-    // a page check (the newest pump.fun token's page, read until its chain fields land, READ_MS at most): a listed token,
-    // so its page draws no search of its own once listed; with the pages, before the builds
-    "token-page-chain-risk",
-    "solana-legs-share-wait",
-    "solana-jupiter-build",
-    "app-a2-e2e",
-  ],
-};
+// Each member says so in its own header (card ci-stops-costing-reruns: a list every card appended to made ready branches
+// conflict): `// Serial: <group> <position> [why there]`, the group's order by position (10, 20, ...: a check that joins
+// takes a free number between two, and no other check's line changes). A position held twice, or a line with no
+// position, throws: the plan is never read past a bad header.
+export const SERIAL_GROUPS = (() => {
+  const groups = {};
+  for (const [k, v] of headerOf("Serial")) {
+    const [group, pos] = v.split(/\s+/);
+    if (!/^[a-z0-9-]+$/.test(group ?? "") || !/^\d+$/.test(pos ?? "")) throw new Error(`${k}: "Serial: ${v}": want <group> <position>`);
+    (groups[group] ??= []).push([Number(pos), k]);
+  }
+  return Object.fromEntries(Object.entries(groups).map(([g, m]) => {
+    const at = m.map(([p]) => p);
+    if (new Set(at).size !== at.length) throw new Error(`serial group ${g}: a position held twice (${m.map(([p, k]) => `${k} ${p}`).join(", ")})`);
+    return [g, m.sort((x, y) => x[0] - y[0]).map(([, k]) => k)];
+  }));
+})();
 
 // A check live-workflow.mjs finds reading the helper's Jupiter budget (BUDGET_READS) that is in no group, with why it needs
 // none. A check is never exempt for being slow or for passing alone.
-export const BUDGET_EXEMPT = {
-  "app-console-429": "opens the top Trending token's page: a listed token takes its row from Discover's lists with no Jupiter call (apps/helper/src/data/solana/token.ts listedRow)",
-};
+// From the check's own `// Budget-exempt: <reason>` line.
+export const BUDGET_EXEMPT = Object.fromEntries(headerOf("Budget-exempt"));
 
 export const liveRuns = (k, { commit = "{commit}", root = ROOT } = {}) =>
   k === "helper-pool-senders" ? poolSenderPlan(root).runs : k === "helper-bind-relayer-mainnet" ? bindMainnetPlan(root, commit).runs : (LIVE_ARGS[k] ?? []).map((x) => `scripts/live-checks/${k}.mjs${x ? ` ${x.replaceAll("{commit}", commit)}` : ""}`);

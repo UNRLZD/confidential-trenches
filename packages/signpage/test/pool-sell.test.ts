@@ -6522,9 +6522,19 @@ function countedLocks(): Pick<LockManager, "request" | "query"> & { held: Map<st
 }
 const stillHeld = (l: { held: Map<string, number> }) => [...l.held.entries()].filter(([, n]) => n > 0).map(([k]) => k);
 
+/** The kind host's `end`, counted, and a promise that settles at its first call: a run's end awaited, never polled. */
+const endOf = () => {
+  let done!: () => void;
+  const ended = { n: 0, at: new Promise<void>((ok) => (done = ok)) };
+  return { ended, end: () => void (ended.n++, done()) };
+};
+
 // probe P-J of the review of 3e288da51: the sale's stamp is started before its send and not awaited there, so a spacing
-// store that never answers holds no sale: its send goes in the same turn of the event loop as with no store at all
-test("round-trip-costs-less P-J: a spacing store that never answers never holds a sale's send", async () => {
+// store that never answers holds no sale: its send goes in the same turn of the event loop as with no store at all.
+// Card ci-stops-costing-reruns: no time here but the never-answering store's own bound (neverOpens, a wait that only
+// has to end). The run's store keeps the kind's own bound (TRADE_STORE_MS): a 30 ms one on every read and write of the
+// test's IndexedDB lost to a loaded runner (no answer, run's end never seen). A hang is the test's own timeout.
+test("round-trip-costs-less P-J: a spacing store that never answers never holds a sale's send", { timeout: 60_000 }, async () => {
   for (const store of ["none", "never"] as const) {
     const w = await world();
     const d = neverOpens();
@@ -6533,31 +6543,35 @@ test("round-trip-costs-less P-J: a spacing store that never answers never holds 
     let first: { calls: number; turned: boolean } | undefined;
     const rpcs = w.host.rpcs.map((r) => ((m: string, p: unknown) => (m === "sendTransaction" && first === undefined && (first = { calls, turned }), (r as (m: string, p: unknown) => unknown)(m, p))) as never) as unknown as typeof w.host.rpcs;
     const owed = store === "none" ? w.host.owed! : { ...w.host.owed!, ...d, space: (v: RentBackSpacing) => (calls++, setImmediate(() => (turned = true)), d.space(v)) };
-    const ended = { n: 0 };
-    const r = poolSellKind(() => ({ ...w.host, rpcs, owed, now: () => 5_000_000n, storeMs: 30, ops: async () => w.store, end: () => void ended.n++ }), fakeLocks())(ASK, ctxOf(`pj-${store}`)) as KindAnswer;
-    await Promise.race([r.after, new Promise((_, no) => setTimeout(() => no(new Error(`${store}: the sale never sent`)), 2_000))]);
-    assert.equal(r.answer().result?.stage, "sent", store);
+    const { ended, end } = endOf();
+    const r = poolSellKind(() => ({ ...w.host, rpcs, owed, now: () => 5_000_000n, ops: async () => w.store, end }), fakeLocks())(ASK, ctxOf(`pj-${store}`)) as KindAnswer;
+    await r.after;
+    assert.equal(r.answer().result?.stage, "sent", `${store}: ${JSON.stringify(r.answer())}`);
     // the stamp's write started before the send, and no turn of the event loop between them
     assert.deepEqual(first, { calls: store === "none" ? 0 : 1, turned: false }, store);
-    await until(async () => ended.n > 0);
+    await ended.at;
     assert.equal(ended.n, 1, store);
   }
 });
 
 // probe P-K: a claim that never answers holds a leftover pass at the store's bound, and the pass ends; a sale's run with
-// that store makes no claim (its own rent back is never held) and ends with every lock it took free
-test("round-trip-costs-less P-K: a spacing store that never answers holds a leftover pass at its bound; a sale's run still ends with its locks free", async () => {
+// that store makes no claim (its own rent back is never held) and ends with every lock it took free. Card
+// ci-stops-costing-reruns: timed as P-J is, the pass and the run awaited to their ends.
+test("round-trip-costs-less P-K: a spacing store that never answers holds a leftover pass at its bound; a sale's run still ends with its locks free", { timeout: 60_000 }, async () => {
   const { w, sends } = await leftovers(false);
   forgetPageLoad();
-  await Promise.race([resumeRentBacks({ ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, ...neverOpens() } }, fakeLocks()), new Promise((_, no) => setTimeout(() => no(new Error("the pass never ended")), 3_000))]);
+  await resumeRentBacks({ ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, ...neverOpens() } }, fakeLocks());
   assert.equal(sends().length, 0, "held");
   assert.equal(w.owed.size, 3, "every record kept");
   const s = await world();
   const locks = countedLocks();
-  const ended = { n: 0 };
-  const r = poolSellKind(() => ({ ...s.host, now: () => 5_000_000n, storeMs: 30, owed: { ...s.host.owed!, ...neverOpens() }, ops: async () => s.store, end: () => void ended.n++ }), locks)(ASK, ctxOf("pk")) as KindAnswer;
+  const { ended, end } = endOf();
+  const r = poolSellKind(() => ({ ...s.host, now: () => 5_000_000n, owed: { ...s.host.owed!, ...neverOpens() }, ops: async () => s.store, end }), locks)(ASK, ctxOf("pk")) as KindAnswer;
   await r.after;
-  await until(async () => ended.n > 0);
+  await ended.at;
+  // `end` runs inside the run's locks, and they go in the promise steps after it (no timer, no I/O): one turn of the event
+  // loop lets every one go
+  await new Promise((ok) => setImmediate(ok));
   assert.equal(ended.n, 1, "the run ended");
   assert.deepEqual(stillHeld(locks), [], "no lock held");
   for (const name of [POOL_TRADE_LOCK, "ct-wallet/seed", `ct-pool/back/${W.address}`, POOL_SELL_LOCK]) assert.ok(locks.held.has(name), `${name} taken and let go`);

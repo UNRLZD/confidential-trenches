@@ -35,6 +35,7 @@
 // pools-testnet.test.ts, pool-testnet.test.ts and main-testnet-pools.test.ts, and by the devnet run of
 // packages/signpage/scripts/pool-pins-devnet.mjs (signpage-pool-pins.md).
 // After: sign
+// Bundle: out mainnet RPC reads of the pin's accounts and the helper's mainnet fee answer
 //   node scripts/live-checks/signpage-pool-pins.mjs [--harness [--bundle <file>]] [--record <file>]
 //     --harness: this checkout's bundle and public/_headers stand for SIGN_HOST's /app.js and CSP (the pair read is live);
 //     --bundle <file> stands a copy for SIGN_HOST's /app.js in that run (a planted mutant; its sha384 is not the tree's)

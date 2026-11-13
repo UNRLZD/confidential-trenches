@@ -14,6 +14,7 @@
 // (mainnet, as SIGN_HOST serves) and over SIGN_HOST as served before this card's deploy; this file reaches no package
 // code (the import check holds it).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/evm-pool-sync-wide-pages.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

@@ -12,6 +12,7 @@
 // The behaviour (each place's words at 390 and 1440, nothing in it focusable, a fake fetch that sees no orders request)
 // is the terminal's own browser run: apps/terminal/test/orders-soon/run.mjs.
 // After: app
+// Bundle: child app --root apps/terminal/dist
 //   node scripts/live-checks/app-orders-coming-soon.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-orders-coming-soon.mjs --root <dir> [--record <file>]   the same read on a local build
 //     (apps/terminal/dist, built first) read from disk

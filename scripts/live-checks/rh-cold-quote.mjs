@@ -17,6 +17,7 @@
 //     quote of a token with 99 seeded currencies ..." (card app-live-run-green-after-119).
 // The cold quote's requests per host are printed (traced, as evm-quote-warm-round has them).
 // After: app
+// Bundle: out EVM RPC quotes
 //   node scripts/live-checks/rh-cold-quote.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run to <file>, for the test's replay
 // (rh-cold-quote.answers.json). Reads only: no key, no transaction, no money moves.

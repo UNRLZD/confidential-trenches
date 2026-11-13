@@ -11,6 +11,8 @@
 // The hop itself is judged in a browser by apps/terminal/test/e2e/signin/run.mjs (BAR-03 at both widths).
 // After: app --host app
 // After: sign --host sign
+// Bundle: read sign
+// Bundle: read app
 //   node scripts/live-checks/app-harness-signin-e2e.mjs [--host app|sign] [--sign <origin>] [--app <origin>] [--record <file>]
 //   --host reads that host alone: each host's deploy runs the check on its own host (apps/terminal/scripts/deploy.mjs,
 //   packages/signpage/scripts/deploy.mjs), so a host that lags does not fail the other's deploy; with no --host, both.
@@ -122,4 +124,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`${KEY}: error: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f, { host, SIGN, APP }) {
+  return judge(await probe(SIGN, APP, [host], f));
 }

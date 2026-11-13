@@ -45,6 +45,7 @@
 //     holds.
 // The tree holds no child either: scripts/ci/host-children.mjs, in test:gates.
 // After: sign
+// Bundle: out DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names
 //   node scripts/live-checks/hosts-main-on-top.mjs [--record <file>]     PASS exit 0, FAIL exit 1, INCONCLUSIVE or error
 //   exit 2
 // --record writes every answer the run read to <file>, so the check's test can replay it.

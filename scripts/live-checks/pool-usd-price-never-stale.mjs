@@ -26,6 +26,7 @@
 // sends a price up to about 58 s old, which an app still on 60 s would drop before its next write (review P2-5;
 // signpage-pool-price.mjs's aged run proves the deployed app holds 75 s).
 // After: sign
+// Bundle: out three minutes of mainnet Pyth reads on the page's own pair (its test holds its bundle marks on this tree's own build, planted)
 //   node scripts/live-checks/pool-usd-price-never-stale.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

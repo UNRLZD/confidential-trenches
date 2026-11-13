@@ -16,6 +16,7 @@
 // busiest 10 s); a 5xx or no answer is a provider down, INCONCLUSIVE, never a pass. Every read goes through
 // provider-answer.mjs with the page's Origin. About 34 reads of the seat and one of dRPC, nothing signed, no money.
 // After: sign helper
+// Bundle: out the helper's NEAR seat (its CORS answer to the page's origin, a mainnet read beside dRPC's, one page's 10 s window of reads); the bundle's naming of the seat is held by packages/kit/test/near-networks.test.ts and the page's wiring by packages/signpage/src/main.ts
 //   node scripts/live-checks/near-quote-under-the-pace.mjs [--record <file>]
 //   node scripts/live-checks/near-quote-under-the-pace.mjs --answer <file>     judge a recorded run, no network
 // PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3; the last line is "<verdict> near-quote-under-the-pace".

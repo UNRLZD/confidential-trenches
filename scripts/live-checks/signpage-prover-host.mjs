@@ -17,6 +17,7 @@
 // The page script here speaks the worker's protocol itself (load, prove) rather than run the kit's client, so the check
 // does not trust the code it checks; the kit's own call in Chromium is packages/kit/test/prove-e2e.test.ts's.
 // After: sign
+// Bundle: out a browser
 //   node scripts/live-checks/signpage-prover-host.mjs [--record <file>]                       the live SIGN_HOST
 //   node scripts/live-checks/signpage-prover-host.mjs --harness [--site <dir>] [--record <file>]
 //     the harness: SIGN_HOST answered from a build folder under its own _headers, every rule that matches joined as

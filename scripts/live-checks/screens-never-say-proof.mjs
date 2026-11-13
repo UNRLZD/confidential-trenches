@@ -16,6 +16,7 @@
 //   - the app's scripts (every script the frame loaded, and every script those name, fetched as served): none holds a
 //     removed word as a string ("Proof ready", "Making proof", "Ready", "Pending").
 // After: app
+// Bundle: out a browser (its --harness run is in test-browser)
 //   node scripts/live-checks/screens-never-say-proof.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/screens-never-say-proof.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

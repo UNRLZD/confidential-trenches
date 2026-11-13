@@ -36,6 +36,7 @@
 // never a read (delta review P3-C: a deploy whose step 5 fails before any id read, or reads on one operator only, fails). A local build serves no pinned host, so there that line is not judged. The page's
 // lines are printed with it.
 // After: sign
+// Bundle: out a browser
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/pool-restore-wired.mjs --local [--record <file>]   SIGN_HOST from this checkout's
 //     committed build under its own _headers, nothing on the network
