@@ -28,6 +28,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { HELPER_INTENTS_CODES, checkOneClickQuote } from "../../packages/kit/src/index.ts";
+import { saidOf, saidPart } from "./vendor-said.mjs";
 
 const KEY = "wallet-refund-move";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -70,7 +71,9 @@ export function ruleVerdict(request, answer) {
  *  answer's signature is not kept: an ed25519 signature has a NEAR secret key's shape, which gitleaks refuses here). */
 export function quoteFacts(status, request, answer) {
   const qr = answer?.quoteRequest ?? {};
-  return { status, verdict: status === 200 || status === 201 ? ruleVerdict(request, answer) : null, depositType: qr.depositType ?? null, toU: qr.recipient === request.recipient && qr.refundTo === request.recipient, depositAddress: answer?.quote?.depositAddress ?? null };
+  // card helper-says-why-a-vendor-refused: a refusal keeps the vendor's message (vendor-said.mjs), for the BAD line
+  const said = status === 200 || status === 201 ? {} : { message: saidOf(answer) };
+  return { ...said, status, verdict: status === 200 || status === 201 ? ruleVerdict(request, answer) : null, depositType: qr.depositType ?? null, toU: qr.recipient === request.recipient && qr.refundTo === request.recipient, depositAddress: answer?.quote?.depositAddress ?? null };
 }
 
 /** The verdict on an answer { index, sha384, intents_url, quote: quoteFacts, near: [{ height, salt, used }, ...], relay: { status, code, cors } }. */
@@ -82,7 +85,7 @@ export function judge(a) {
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
   if (a?.intents_url !== true) bad(`SIGN_HOST's bundle carries no refund move (${INTENTS_URL})`);
   const q = a?.quote ?? {};
-  if (q.status !== 201 && q.status !== 200) bad(`the helper's 1Click proxy answers the refund move's quote ${q.status}`);
+  if (q.status !== 201 && q.status !== 200) bad(`the helper's 1Click proxy answers the refund move's quote ${q.status}${saidPart(q.message)}`);
   else if (q.verdict !== "pass") bad(`SIGN_HOST's rule refuses the live refund move quote: ${q.verdict}`);
   else if (q.depositType !== "INTENTS" || q.toU !== true) bad("the live quote is not a refund move's (depositType INTENTS, to U and refunded to U)");
   const n = Array.isArray(a?.near) ? a.near : [];

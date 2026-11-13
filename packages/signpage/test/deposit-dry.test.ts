@@ -62,7 +62,7 @@ interface Net {
   tokens?: { status?: number; body?: unknown; throws?: boolean; response?: () => Response };
   /** Every request waits until its signal aborts (`deaf`: forever, its signal unheard). */
   hang?: "heard" | "deaf";
-  quote?: { noLiquidity?: number; status?: number; throws?: boolean; w?: bigint; spread?: number; fee?: number; before?: (a: Answer) => void; after?: (a: Answer) => void };
+  quote?: { noLiquidity?: number; failed?: number; tooLow?: boolean; status?: number; throws?: boolean; w?: bigint; spread?: number; fee?: number; before?: (a: Answer) => void; after?: (a: Answer) => void };
   /** Per-origin overrides of `quote`. */
   by?: Record<string, Net["quote"]>;
 }
@@ -96,6 +96,10 @@ function helper(net: Net = {}) {
     const k = asked.get(body.originAsset) ?? 0;
     asked.set(body.originAsset, k + 1);
     if (k < (q.noLiquidity ?? 0)) return new Response(JSON.stringify({ message: "No liquidity available" }), { status: 400, headers: { "content-type": "application/json" } });
+    // card helper-says-why-a-vendor-refused: 1Click's 400 "Failed to get quote" for the first `failed` asks of an origin,
+    // and its 400 about the request's amount on every ask
+    if (k < (q.failed ?? 0)) return new Response(JSON.stringify({ message: "Failed to get quote" }), { status: 400, headers: { "content-type": "application/json" } });
+    if (q.tooLow) return new Response(JSON.stringify({ message: "Amount is too low for bridge, try at least 30000000" }), { status: 400, headers: { "content-type": "application/json" } });
     if (q.status !== undefined && q.status !== 200) return new Response("{}", { status: q.status, headers: { "content-type": "application/json" } });
     const a = dryAnswer(body, q.w, q.spread, q.fee);
     q.before?.(a);
@@ -119,7 +123,7 @@ function frame(net: Net = {}, deadlineMs?: number) {
   const posted: unknown[] = [];
   const parent = { postMessage: (msg: unknown, to: string) => void (to === APP_ORIGIN && posted.push(msg)) };
   let listener: ((e: IncomingMessage) => void) | null = null;
-  const api = startApi({ parent, listen: (fn) => (listener = fn), state: fs.state, watch: fs.watch, kinds: { ...depositReadHosts({ fetch: h.fetch, now: () => NOW, deadlineMs }) } });
+  const api = startApi({ parent, listen: (fn) => (listener = fn), state: fs.state, watch: fs.watch, kinds: { ...depositReadHosts({ fetch: h.fetch, now: () => NOW, deadlineMs, sleep: async () => {} }) } });
   const send = (data: unknown) => listener!({ origin: APP_ORIGIN, source: parent, data });
   send({ v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION });
   // the reads are Running kinds (src/deposit-wire.ts): the queue does not wait for them, so wait for the answer itself
@@ -328,18 +332,33 @@ test("deposit.dry: the helper's codes, busy and down not kept", async () => {
     assert.deepEqual((await frame({ quote: q }).ask(dry("25"))).error, { code }, code);
 });
 
-// Card deposit-quote-no-liquidity (review ruling a): the display reads are asked again as the user types and opens the
-// sheet, so on 1Click's 400 "No liquidity available" they make one ask: the dry lines answer not_available, and an asset
-// whose probe had no liquidity is left out of the list while the others are listed.
-test("deposit.dry and deposit.assets: a no-liquidity answer is one ask: not_available, and only that asset left out", async () => {
-  const f = frame({ quote: { noLiquidity: 1 } });
+// Card helper-says-why-a-vendor-refused (in place of card deposit-quote-no-liquidity's rule that the display reads ask
+// once since the sheet asks again as the user types): the sheet asks deposit.assets once while it is open, and a
+// refused list shows Not available with no Retry (apps/terminal/src/screens/deposit/DepositSheet.tsx S4.6), so a few
+// minutes of 1Click 400s (live run 43289730843) left the sheet Not available. A 1Click 400 that is not about the request is
+// asked again, twice inside the one ask's window, as the committed asks do; one about the request is shown at once.
+test("deposit.dry and deposit.assets: a 400 not about the request is asked again and the quote that follows is shown", async () => {
+  for (const q of [{ noLiquidity: 1 }, { failed: 2 }]) {
+    const f = frame({ quote: q });
+    const d = await f.ask(dry("25"));
+    assert.equal(d.ok, true, `${JSON.stringify(q)}: ${JSON.stringify(d)}`);
+    assert.equal(f.sent.filter((x) => x.body !== undefined).length, 1 + (q.noLiquidity ?? q.failed ?? 0));
+    const a = frame({ quote: q });
+    const list = await a.ask(ASSETS);
+    assert.equal(list.ok, true, JSON.stringify(list));
+    assert.deepEqual((list.result as { assets: { origin_asset: string }[] }).assets.map((x) => x.origin_asset), [...ONECLICK_USDC_ASSETS]);
+  }
+  // three refusals in a row: the third stands, Not available, and only that asset is left out
+  const still = frame({ by: { [SOL_USDC]: { failed: 3 } } });
+  const list = await still.ask(ASSETS);
+  assert.deepEqual((list.result as { assets: { origin_asset: string }[] }).assets.map((x) => x.origin_asset), ONECLICK_USDC_ASSETS.filter((x) => x !== SOL_USDC));
+  assert.equal(still.sent.filter((x) => x.body?.originAsset === SOL_USDC).length, 3);
+});
+
+test("deposit.dry: a 400 about the request is shown at once, one ask", async () => {
+  const f = frame({ quote: { tooLow: true } });
   assert.deepEqual((await f.ask(dry("25"))).error, { code: "not_available" });
   assert.equal(f.sent.filter((x) => x.body !== undefined).length, 1);
-  const a = frame({ by: { [SOL_USDC]: { noLiquidity: 1 } } });
-  const list = await a.ask(ASSETS);
-  assert.equal(list.ok, true, JSON.stringify(list));
-  assert.deepEqual((list.result as { assets: { origin_asset: string }[] }).assets.map((x) => x.origin_asset), ONECLICK_USDC_ASSETS.filter((x) => x !== SOL_USDC));
-  assert.equal(a.sent.filter((x) => x.body !== undefined).length, ONECLICK_USDC_ASSETS.length);
 });
 
 test("the committed asks end inside the one ask's window, well inside the kit client's for each committed kind", async () => {
@@ -523,4 +542,72 @@ test("every object export of the deposit rules and the quote request is frozen a
   // planted: a row left writable, or a Set, is named by the walk
   assert.deepEqual(walk(Object.freeze([{ id: "x" }]), "ROWS", []), ["ROWS.0"]);
   assert.deepEqual(walk(new Set([200]), "ANSWERED", []), ["ANSWERED: a Set stays writable when frozen"]);
+});
+
+// Review P3 of card helper-says-why-a-vendor-refused: a read's asks end on its stop. A newer deposit.dry ends the one
+// before it, and the page's sign out (src/main.ts quotesSignedOut) ends every read: no ask leaves after, the pause included.
+/** A pause that ends only when the test says, and says when it began. */
+function heldPause() {
+  const ends: (() => void)[] = [];
+  let began = 0;
+  return { sleep: () => new Promise<void>((ok) => (began++, ends.push(ok))), began: () => began, end: () => ends.splice(0).forEach((ok) => ok()) };
+}
+const turn = () => new Promise((ok) => setImmediate(ok));
+
+test("a newer deposit.dry ends the one before it in its pause: the older asks no more and answers down", async () => {
+  const h = helper({ by: { [SOL_USDC]: { failed: 9 } } });
+  const p = heldPause();
+  const hosts = depositReadHosts({ fetch: h.fetch, now: () => NOW, sleep: p.sleep, deadlineMs: 60_000 });
+  const older = hosts["deposit.dry"]({ origin_asset: SOL_USDC, amount: "25" });
+  while (p.began() < 1) await turn();
+  const newer = hosts["deposit.dry"]({ origin_asset: NEAR_USDC, amount: "25" });
+  // at once, never at its deadline
+  assert.equal(await Promise.race([older.after.then(() => "ended"), new Promise((ok) => setTimeout(() => ok("still paused"), 1_000))]), "ended");
+  assert.deepEqual(older.answer(), { error: "down" });
+  assert.equal(h.sent.filter((s) => s.body?.originAsset === SOL_USDC).length, 1);
+  await newer.after;
+  const got = newer.answer();
+  assert.ok(got !== null && "result" in got, JSON.stringify(got));
+});
+
+test("the page's stop ends every read in its pause: no re-ask leaves after it", async () => {
+  const h = helper({ quote: { failed: 9 } });
+  const p = heldPause();
+  let stop = new AbortController();
+  const hosts = depositReadHosts({ fetch: h.fetch, now: () => NOW, sleep: p.sleep, stop: () => stop.signal, deadlineMs: 60_000 });
+  const assets = hosts["deposit.assets"]();
+  while (p.began() < ONECLICK_USDC_ASSETS.length) await turn();
+  const asked = h.sent.length;
+  stop.abort(new DOMException("signed out", "AbortError"));
+  stop = new AbortController();
+  p.end();
+  await assets.after;
+  // a pause the stop did not end would ask again now: give it the turns to
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.deepEqual(assets.answer(), { error: "down" });
+  assert.equal(h.sent.length, asked, "no ask after the stop");
+  assert.equal(asked, 1 + ONECLICK_USDC_ASSETS.length);
+});
+
+test("deposit.quote's asks end on the page's stop: no re-ask after a sign out in its pause", async () => {
+  const h = helper({ quote: { failed: 9 } });
+  const stop = new AbortController();
+  const kind = depositQuoteKind({ origin_asset: SOL_USDC, amount: "25" }, { seed: { source: "code", code_saved: true }, depositId: U, fetch: h.fetch, now: () => NOW, signal: stop.signal });
+  // the committed ask pauses on the wallet's own timer: the stop ends it at once
+  await new Promise((ok) => setTimeout(ok, 50));
+  stop.abort(new DOMException("signed out", "AbortError"));
+  assert.deepEqual(await kind, { ok: false, code: "down" });
+  assert.equal(h.sent.length, 1);
+});
+
+test("a read past its deadline in its pause asks no more: the deadline ends the pause too", async () => {
+  const h = helper({ by: { [SOL_USDC]: { failed: 9 } } });
+  const p = heldPause();
+  const hosts = depositReadHosts({ fetch: h.fetch, now: () => NOW, sleep: p.sleep, deadlineMs: 100 });
+  const dry = hosts["deposit.dry"]({ origin_asset: SOL_USDC, amount: "25" });
+  await dry.after;
+  assert.deepEqual(dry.answer(), { error: "down" });
+  p.end();
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(h.sent.length, 1, "no ask after the deadline");
 });

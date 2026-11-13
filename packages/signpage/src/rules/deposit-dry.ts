@@ -22,7 +22,7 @@ import { DEPOSIT_DRY_PLACEHOLDER, type DepositAsset, type DepositDry, type Depos
 import type { Chain } from "../../../kit/src/orders/record.ts";
 import {
   DEPOSIT_QUOTE_DEADLINE_MS, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, DEPOSIT_QUOTE_TIMEOUT_MS, DepositAnswerTooLarge,
-  askDepositQuote, readCapped,
+  askDepositQuoteAgain, readCapped,
 } from "../../../wallet/src/deposit/quote.ts";
 
 /** USDC's decimals on every chain the release lists it. */
@@ -48,6 +48,11 @@ export const DEPOSIT_ASSET_CHAINS: readonly { id: string; chain: Chain; blockcha
 export interface DepositReadContext {
   fetch?: typeof fetch;
   now?: () => number;
+  /** The pause before a re-ask (askDepositQuoteAgain); a test's ends at once. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Ends the read (src/deposit-wire.ts running: its deadline, a newer deposit.dry, the page's sign out): no ask leaves
+   *  once it aborts, the re-ask's pause included. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -173,7 +178,9 @@ async function dryQuote(origin: string, amount: bigint, ctx: DepositReadContext)
   const request = depositDryRequest(origin, amount, now());
   let reply;
   try {
-    reply = await askDepositQuote(request, ctx.fetch);
+    // card helper-says-why-a-vendor-refused: a 1Click 400 not about the request is asked again inside the one ask's
+    // window, as the committed asks do (the sheet asks its assets once while open, and showed Not available for minutes)
+    reply = await askDepositQuoteAgain(request, ctx.fetch, ctx.sleep, undefined, ctx.signal);
   } catch {
     return no("down");
   }
@@ -219,10 +226,10 @@ export async function depositDryKind(params: Record<string, unknown>, ctx: Depos
 
 /** Asks the token list through the helper: the parsed JSON, or the refusal (one over DEPOSIT_TOKENS_MAX, declared or
  *  streamed, is not_available, read no further; one that is not JSON not_available too). */
-async function readTokens(fetchFn: typeof fetch = fetch): Promise<DepositReadAnswer<unknown>> {
+async function readTokens(fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<DepositReadAnswer<unknown>> {
   let bytes: Uint8Array;
   try {
-    const res = await fetchFn(DEPOSIT_TOKENS_URL, { ...HELPER_FETCH_INIT, redirect: "error", method: "POST", signal: AbortSignal.timeout(DEPOSIT_QUOTE_TIMEOUT_MS) });
+    const res = await fetchFn(DEPOSIT_TOKENS_URL, { ...HELPER_FETCH_INIT, redirect: "error", method: "POST", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(DEPOSIT_QUOTE_TIMEOUT_MS)]) : AbortSignal.timeout(DEPOSIT_QUOTE_TIMEOUT_MS) });
     const code = statusCode(res.status);
     if (code) return no(code);
     bytes = await readCapped(res, DEPOSIT_TOKENS_MAX);
@@ -250,7 +257,7 @@ function listed(list: unknown, a: (typeof DEPOSIT_ASSET_CHAINS)[number]): boolea
  * down answers that code (not kept, so the same request again runs again); none left is not_available.
  */
 export async function depositAssetsKind(ctx: DepositReadContext = {}): Promise<DepositReadAnswer<{ assets: DepositAsset[] }>> {
-  const tokens = await readTokens(ctx.fetch);
+  const tokens = await readTokens(ctx.fetch, ctx.signal);
   if (!tokens.ok) return tokens;
   const kept = DEPOSIT_ASSET_CHAINS.filter((a) => listed(tokens.result, a));
   const probes = await Promise.all(kept.map((a) => dryQuote(a.id, DEPOSIT_PROBE_AMOUNT, ctx)));

@@ -192,6 +192,36 @@ test("an answer that holds one of our keys in any form is refused, never passed 
   assert.equal(b.status, 503);
 });
 
+// Card helper-says-why-a-vendor-refused, review P3: a key holding ", \ or / leaves a JSON body escaped ("\/", "\"",
+// "\\", "\u0066"), a form keyForms does not spell; the decoded strings of the body are read for it too.
+test("an answer that holds one of our keys JSON-escaped is refused too, never passed on", async () => {
+  const key = 'fake/oneclick"jwt\\-' + "o".repeat(16);
+  const env = { ...ENV, ONECLICK_JWT: key };
+  const esc = JSON.stringify(key).slice(1, -1);
+  const bodies = [
+    `{"echo":"${esc}"}`,
+    `{"echo":"${esc.replaceAll("/", "\\/")}"}`,
+    `{"echo":"\\u0066${esc.slice(1)}"}`,
+    `{"${esc}":1}`,
+  ];
+  for (const body of bodies) {
+    assert.equal(JSON.parse(body).echo ?? Object.keys(JSON.parse(body))[0], key, body);
+    for (const status of [200, 400]) {
+      const a = await createProxy(env, { fetch: vendor(() => new Response(body, { status, headers: { "content-type": "application/json" } })).fetch }).handle("oneclick", "/v0/tokens", "", "");
+      assert.deepEqual([a.status, JSON.parse(a.body)], [503, { error: { code: "upstream" } }], `${status} ${body}`);
+    }
+  }
+});
+
+test("the decoded read is never recursive: an answer of a million-element list passes as it is", async () => {
+  // one escaped string, so the decoded read runs (it runs only on a text that holds an escape)
+  const body = JSON.stringify(Array.from({ length: 1_000_000 }, (_, i) => (i === 0 ? "a\\b" : i % 2 ? "x" : 1)));
+  assert.ok(body.includes("\\"));
+  const a = await createProxy(ENV, { fetch: vendor(() => new Response(body, { status: 200, headers: { "content-type": "application/json" } })).fetch }).handle("oneclick", "/v0/tokens", "", "");
+  assert.equal(a.status, 200);
+  assert.equal(a.body, body);
+});
+
 // card helper-abuse-limits (review finding 3): the helper is the vendor's one client, so a vendor's 429 holds the
 // vendor until its reset (at 06a656f the next caller still reached the vendor). Card helper-crowd-429 fold 6: the hold
 // is never the caller's 429 (a 429 of ours says the caller is past its own limit, live run 41943005189): a reset inside
@@ -785,9 +815,14 @@ test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, 
   assert.equal((await page).status, 200);
   assert.ok(j.sent.filter((s) => s.at > sentAt - 10_000 && s.at <= sentAt).length <= 10, "the window held");
   // one line a send: the lane, the wait, the window, the answer; never a path, query or client
-  assert.equal(lines.length, j.sent.length);
-  assert.ok(lines.every((l) => /^jupiter turn: (caller|background), waited \d+ ms, \d+ of 10 sent in 10 s, answered 200 in \d+ ms$/.test(l)), lines.join("\n"));
-  assert.ok(lines.every((l) => !/198\.51|query|leg=|\/swap|\/tokens/.test(l)));
+  const turns = lines.filter((l) => l.startsWith("jupiter turn: "));
+  assert.equal(turns.length, j.sent.length);
+  assert.ok(turns.every((l) => /^jupiter turn: (caller|background), waited \d+ ms, \d+ of 10 sent in 10 s, answered 200 in \d+ ms$/.test(l)), turns.join("\n"));
+  assert.ok(turns.every((l) => !/198\.51|query|leg=|\/swap|\/tokens/.test(l)));
+  // card helper-says-why-a-vendor-refused: every other line is a refusal of ours (a page's turn past its wait), with the
+  // allowlisted path alone, never a query or client
+  const rest = lines.filter((l) => !l.startsWith("jupiter turn: "));
+  assert.ok(rest.every((l) => /^proxy jupiter \/tokens\/v2\/search answered 503, ours: jupiter (turn|budget|held)/.test(l) && !/198\.51|query|leg=/.test(l)), rest.join("\n"));
   void t0;
 });
 test("card helper-page-jup-429: a turn's log line keeps only whole numbers of the vendor's own count (hostile headers)", async () => {

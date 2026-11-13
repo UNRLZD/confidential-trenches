@@ -51,6 +51,9 @@ export interface DepositQuoteKindContext {
   /** The device's own price reads for an origin asset that is not USDC; none, and only USDC is quoted. */
   priced?: (originAsset: string) => PricedAsset | null;
   fetch?: typeof fetch;
+  /** Stops the quote's asks (card helper-says-why-a-vendor-refused, review P3): the page's sign out. Once it aborts no ask
+   *  leaves (packages/wallet/src/deposit/quote.ts askDepositQuoteAgain). */
+  signal?: AbortSignal;
   now?: () => number;
 }
 
@@ -129,7 +132,7 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   let reply;
   try {
     // on 1Click's no-liquidity answer the same request is asked again inside the one ask's window (card deposit-quote-no-liquidity)
-    reply = await askDepositQuoteAgain(request, ctx.fetch);
+    reply = await askDepositQuoteAgain(request, ctx.fetch, undefined, undefined, ctx.signal);
   } catch {
     return no("down");
   }

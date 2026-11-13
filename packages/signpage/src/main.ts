@@ -67,6 +67,7 @@ import { startApi, type KindContext } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
+import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
 import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
@@ -221,6 +222,13 @@ const poolFollow = !framed
   : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
+// Sign out (this tab's or another's) stops every quote's asks (card helper-says-why-a-vendor-refused, review P3):
+// deposit.quote, pool.address and the deposit sheet's reads send nothing more, a re-ask's pause included.
+const quotes = quotesStop();
+const quotesStopped = quotes.stopped;
+const quotesSignedOut = quotes.signedOut;
+const quotesSignedIn = quotes.signedIn;
+// declared before the API starts below (its kinds read quotesStopped)
 if (framed) document.body.append(root);
 else {
   // the shell's own channel: it hears this document's store and other tabs' (a sign-in, Saved, a sign out)
@@ -319,10 +327,11 @@ else {
   const evmRoute = evmQuoteRoute({ network: PAGE_NETWORK, pool: (chain) => testnet?.evmPoolOf(chain) ?? null, wallet: evmWalletRpc, notes: () => pageNotes() });
   // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor on Solana,
   // readEvmPoolFloor on Base and Robinhood); none on a chain the page pins no pool on
-  const floorFor = async (chain: PoolChain, wallet: string): Promise<bigint | null> => {
+  // A sign out ends the Solana read before its fee read, which names U_X (the EVM floor names no account)
+  const floorFor = async (chain: PoolChain, wallet: string, signal?: AbortSignal): Promise<bigint | null> => {
     if (chain !== "solana") return evmRoute.floor(chain);
     const pair = solPair();
-    return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet) : null;
+    return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet, signal) : null;
   };
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
   // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
@@ -411,13 +420,13 @@ else {
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
       "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u) }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
-      ...depositReadHosts(),
+      ...depositReadHosts({ stop: quotesStopped }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only
-      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u) }),
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with
@@ -886,6 +895,7 @@ function signedOutElsewhere(): void {
   // the gate first: nothing past the page's origin leaves from here on, whatever is still running; then the page
   // reloads signed out
   closeHostLanes();
+  quotesSignedOut();
   restore?.signedOut();
   follows?.signedOut();
   poolFollow?.stop();
@@ -985,6 +995,8 @@ function settleTrades(ifDue = false): Promise<void> {
 async function landed(l: Landing): Promise<void> {
   // a page whose gate a sign out closed lands nowhere: it reloads, and the load lands on the store as it stands
   if (hostLanesClosed()) return void (l.seed.entropy.fill(0), location.reload());
+  // signed in again: the page's quotes ask from now (src/quotes-stop.ts)
+  quotesSignedIn();
   namer.name(l.seed.entropy);
   // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask; once the landing's naming
   // is written (card sol-pools-mainnet-pin, review P3-3): the run holds the seed lock shared across its RPC reads, which
@@ -1119,6 +1131,8 @@ async function signOut(): Promise<void> {
   const s = await open();
   // from the tap: no new run starts here (whileSignedIn)
   leaving = true;
+  // no quote asks again once Sign out is tapped, until the page is signed in again (src/quotes-stop.ts)
+  quotesSignedOut();
   // a restore holds the seed lock shared, which the sign out waits for: it stops first
   restore?.signedOut();
   // a deposit's follow stops too: its op stays at its stage (src/deposit-follow.ts)
@@ -1141,6 +1155,8 @@ async function signOut(): Promise<void> {
     if (still !== undefined) {
       still.entropy.fill(0);
       leaving = false;
+      // still signed in: its quotes ask again
+      quotesSignedIn();
       throw refused.e;
     }
     return reloadSignedOut();
@@ -1198,6 +1214,6 @@ if (framed) {
     state: fs.state,
     watch: fs.watch,
     // deposit.quote only on the top-level page, which follows its address (src/deposit-follow.ts): the frame refuses it
-    kinds: { ...depositReadHosts() },
+    kinds: { ...depositReadHosts({ stop: quotesStopped }) },
   });
 }

@@ -216,10 +216,10 @@ test("a clock set back mid-ask never gives a re-ask more than the one ask's own 
   }
 });
 
-test("any other answer is the one ask's: a 400 of another message, 429, 503, a quote", async () => {
-  for (const a of [{ status: 400, body: { message: "amount is too low" } }, { status: 400, body: { error: { code: "upstream" } } },
+test("any other answer is the one ask's: a 400 about the request, the helper's own 400, 429, 503, a quote", async () => {
+  for (const a of [...ABOUT_THE_REQUEST, { status: 400, body: { error: { code: "upstream" } } },
     { status: 400, body: "No liquidity available" }, { status: 200, body: { message: "No liquidity available" } },
-    { status: 503, body: { message: "No liquidity available" } }, { status: 400, body: { message: "Not: No liquidity available" } },
+    { status: 503, body: { message: "No liquidity available" } },
     { status: 429, body: {} }, { status: 503, body: {} }, QUOTED]) {
     const r = replay([a, QUOTED]);
     assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), a, JSON.stringify(a));
@@ -227,4 +227,91 @@ test("any other answer is the one ask's: a 400 of another message, 429, 503, a q
     assert.deepEqual(r.waits, []);
   }
   assert.equal(noLiquidity(NO_LIQ), true);
+});
+
+// Card helper-says-why-a-vendor-refused: live runs 43276439006 and 43289730843 (12 Nov 18:07Z and 19:25Z) had every 1Click
+// quote answered 400 for a few minutes, a message other than no liquidity, and green again within the half hour. A 400 that
+// is not about the request (1Click's "Failed to get quote", a message the page does not know, none at all) is asked again
+// as no liquidity is, twice inside the one ask's window; one about the request (its amount, its pair, a field 1Click
+// refuses, a list of what is wrong with it: 1Click's own words, research proofs/p3-coverage and the deposit runs) is the
+// one ask's, shown at once.
+const ABOUT_THE_REQUEST = [
+  "Amount is too low for bridge, try at least 1000000", "Amount is too low for the destination chain",
+  "Temporary swap limits: minimum swap amount is $1,000", "Quoting for this pair is not available", "recipient is not valid",
+  "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near is not supported as origin asset",
+  "1cs_v1:hypercore:hip1:0x6d1e supports only ORIGIN_CHAIN refundType", "deadline must be in the future",
+].map((message) => ({ status: 400, body: { message } })).concat([{ status: 400, body: { message: ["amount must be a string"] } } as never]);
+const NOT_ABOUT_IT = [{ message: "Failed to get quote" }, { message: "Something else went wrong" }, { statusCode: 400 }, { message: "Not: No liquidity available" },
+  { message: "Invalid token" }]
+  .map((body) => ({ status: 400, body }));
+
+test("a 400 that is not about the request is asked again, the same request, twice at most, and the quote that follows comes back", async () => {
+  for (const refusal of NOT_ABOUT_IT) {
+    const r = replay([refusal, refusal, QUOTED]);
+    assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), QUOTED, JSON.stringify(refusal));
+    assert.deepEqual(r.bodies, Array(3).fill(JSON.stringify(req())));
+    assert.deepEqual(r.waits, [...NO_LIQUIDITY_PAUSES_MS]);
+    const still = replay([refusal]);
+    assert.deepEqual(await askDepositQuoteAgain(req(), still.fetchFn, still.sleep, still.clock), refusal);
+    assert.equal(still.bodies.length, 3, "three asks in all, then the refusal stands");
+  }
+});
+
+test("a 400 about the request is shown at once: one ask, no wait", async () => {
+  for (const a of ABOUT_THE_REQUEST) {
+    const r = replay([a, QUOTED]);
+    assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), a, JSON.stringify(a));
+    assert.equal(r.bodies.length, 1, JSON.stringify(a));
+    assert.deepEqual(r.waits, []);
+  }
+});
+
+test("a re-ask answered about the request leaves that answer, the request's own, and asks no more", async () => {
+  const fails = NOT_ABOUT_IT[0]!;
+  const low = ABOUT_THE_REQUEST[0]!;
+  const r = replay([fails, low, QUOTED]);
+  assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), low);
+  assert.equal(r.bodies.length, 2);
+});
+
+// Review P3 of card helper-says-why-a-vendor-refused: the caller's stop ends the asks. A sign out, a superseded read or a
+// refund move's stop during the 500 ms pause sends no second ask; an ask under way is cut; a stop before the first sends none.
+test("a stop during the pause ends it: no second ask leaves, and the asks throw the stop's reason", async () => {
+  const r = replay([NO_LIQ, QUOTED]);
+  const stop = new AbortController();
+  let paused = false;
+  let pauseEnded = false;
+  const sleep = (t: number) => new Promise<void>((ok) => (r.waits.push(t), (paused = true), setTimeout(() => ((pauseEnded = true), ok()), 2_000).unref()));
+  const signals: (AbortSignal | null | undefined)[] = [];
+  const fetchFn = ((u: string | URL | Request, init?: RequestInit) => (signals.push(init?.signal), r.fetchFn(u, init))) as typeof fetch;
+  const asked = askDepositQuoteAgain(req(), fetchFn, sleep, r.clock, stop.signal);
+  while (!paused) await new Promise((ok) => setImmediate(ok));
+  stop.abort(new Error("signed out"));
+  await assert.rejects(asked, /signed out/);
+  assert.equal(pauseEnded, false, "the stop ends the pause, not its timer");
+  assert.equal(r.bodies.length, 1);
+  // every ask carries the stop beside its own timeout
+  assert.equal(signals[0]?.aborted, true);
+});
+
+test("a stop before the first ask sends none; a stop while an ask is under way cuts it and asks no more", async () => {
+  const r = replay([QUOTED]);
+  const stop = new AbortController();
+  stop.abort(new Error("signed out"));
+  await assert.rejects(askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock, stop.signal), /signed out/);
+  assert.equal(r.bodies.length, 0);
+  const late = new AbortController();
+  let sent = 0;
+  const hang = (async (_u: string | URL | Request, init?: RequestInit) => {
+    sent++;
+    if (sent === 1) return new Response(JSON.stringify(NO_LIQ.body), { status: 400, headers: { "content-type": "application/json" } });
+    return await new Promise<Response>((_ok, no) => init!.signal!.addEventListener("abort", () => no(init!.signal!.reason)));
+  }) as typeof fetch;
+  const asked = askDepositQuoteAgain(req(), hang, async () => {}, () => 0, late.signal);
+  while (sent < 2) await new Promise((ok) => setImmediate(ok));
+  // the callers' stops are AbortErrors (src/main.ts quotesSignedOut, deposit-wire.ts), which a failed ask is too: the
+  // stop is thrown, never read as a failed re-ask that leaves the standing answer
+  late.abort(new DOMException("superseded", "AbortError"));
+  await assert.rejects(asked, /superseded/);
+  assert.equal(sent, 2);
 });
