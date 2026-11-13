@@ -50,7 +50,7 @@ import {
 import { heldBy, type NoteRecord } from "../notes/store.ts";
 import type { ReadyProof } from "./pool.ts";
 import { jOf } from "./queue.ts";
-import { pieceChunk, type PieceRule } from "./pieces.ts";
+import { isReleaseSize, pieceChunk, type PieceRule } from "./pieces.ts";
 import { SOL_PIECES } from "./solana.ts";
 
 /** One ready proof as a piece of a tap: its chunk, its fee cap and its tip cap (its binding's request.tipCap; undefined
@@ -76,10 +76,13 @@ export function solanaBalancePool(id: string, scope: bigint, spendOf?: TapSpendO
 }
 
 /** The piece a tap carries for a note it releases a piece of (card buy-spends-its-change-in-the-same-tap): the change's
- *  own piece by the pool's rule (pieces.ts pieceChunk), or null when the piece is the whole note or the change has none. */
+ *  own piece by the pool's rule (pieces.ts pieceChunk) when it is a rung (pieces.ts isReleaseSize, card
+ *  pool-amounts-are-standard-sizes); null when the piece is the whole note, the change has none, or its piece is the last
+ *  remainder of a note made before the rule, which a later tap releases alone, once and whole. */
 export function carriedChunk(rule: PieceRule | undefined, value: bigint, chunk: bigint): bigint | null {
   if (rule === undefined || chunk >= value) return null;
-  return pieceChunk(rule, value - chunk);
+  const k = pieceChunk(rule, value - chunk);
+  return k !== null && isReleaseSize(rule, k) ? k : null;
 }
 
 /** The most one tap spends from the set of one W (card buy-spends-its-change-in-the-same-tap): the own piece always,

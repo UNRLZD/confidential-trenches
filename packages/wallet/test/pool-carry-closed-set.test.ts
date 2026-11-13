@@ -38,8 +38,12 @@ test("every piece a tap carries is a listed release size", () => {
     return k !== null && !isReleaseSize(SOL_PIECES, k);
   });
   assert.deepEqual(off, []);
-  // the owner's 0.012 return: its 0.005 piece leaves 0.007, carried whole
-  assert.equal(carriedChunk(SOL_PIECES, 12_000_000n, 5_000_000n), 7_000_000n);
+  // the owner's 0.012 return (made before the rule): its 0.005 piece leaves 0.007, no rung, so the tap carries none; a
+  // later tap releases the 0.007 alone, once and whole (pieceChunk), so it still moves
+  assert.equal(carriedChunk(SOL_PIECES, 12_000_000n, 5_000_000n), null);
+  assert.equal(pieceChunk(SOL_PIECES, 7_000_000n), 7_000_000n);
+  // a change that holds a rung is carried as that rung: 0.03 less its 0.02 piece leaves 0.01, carried
+  assert.equal(carriedChunk(SOL_PIECES, 30_000_000n, 20_000_000n), 10_000_000n);
 });
 
 test("the gate refuses a planted maker of a new note off the grid or under the floor", () => {
