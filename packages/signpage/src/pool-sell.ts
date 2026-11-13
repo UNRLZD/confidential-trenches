@@ -655,7 +655,13 @@ type SoldBy = { tx: string; last: number };
 /** `empty`/`markEmpty` (card round-trip-costs-less): the account's Ws a pass read empty for good (nothing on W, no
  *  account, or no buy at all), each with the rules it was read under (POOL_RENT_BACK_RULES), so a load lists them and
  *  reads none of them again. */
-export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void>; claim?(v: RentBackSpacing, own?: number): Promise<boolean>; rideAt?(): Promise<number | undefined>; bookRide?(at: number): Promise<void>; rode?(at: number): Promise<void> };
+export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void>; empty?(): Promise<ReadonlySet<string>>; markEmpty?(address: string): Promise<void>; spacing?(): Promise<RentBackSpacing | undefined>; space?(v: RentBackSpacing): Promise<void>; claim?(v: RentBackSpacing, own?: number): Promise<boolean>; rideAt?(): Promise<number | undefined>; bookRide?(at: number): Promise<void>; rode?(at: number): Promise<void>; tail?(t: WTail): Promise<void>; untail?(address: string): Promise<void> };
+/** A W's leftover under the pool's least standard size (card pool-amounts-are-standard-sizes; the CO's pick (c), 13 Nov
+ *  20:4xZ): meta w-tail/sol/<address>, the record wallet's pool-to-Cash carries to Cash and the balance counts. Written
+ *  by a rent back that ends at the floor (`amount`: what W adds once moved, lamports, a decimal string), deleted by one
+ *  that reads W empty or sends its sweep; never deposited off the ladder, never paid away. */
+export type WTail = { chain: "sol"; address: string; l: string; j: number; amount: string };
+export const wTailKey = (address: string): string => `w-tail/sol/${address}`;
 export { POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing } from "./device-spacing.ts";
 /** How a rent back ended: its sweep sent; nothing left on W; W under the smallest note (solanaSweepFloor), its lamports
  *  kept on W; an account the plan keeps (so W keeps the fee to close it later); W holding a token; or it gave up. */
@@ -669,7 +675,7 @@ export type RentBackTold = { address: string; step: "teardown" | "sweep" | "rent
 
 /** The rent backs owed, in the wallet store's meta/owed/rentback-sol (meta/owed/ is never read or listed by the frame);
  *  the spacing in the device's own database (src/device-spacing.ts), which sign out leaves. */
-export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "update">>, device: DeviceSpacing = deviceSpacing()): OwedRentBacks => {
+export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "update"> & { delete?(s: "meta", k: string): Promise<void> }>, device: DeviceSpacing = deviceSpacing()): OwedRentBacks => {
   const KEY = "owed/rentback-sol";
   type All = Record<string, OwedRentBack>;
   return {
@@ -702,6 +708,12 @@ export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "upd
     },
     bookRide: async (at) => void (await (await store()).update("meta", RIDE, (v) => (Number.isSafeInteger(v) && (v as number) >= at ? undefined : at))),
     rode: async (at) => void (await (await store()).update("meta", RIDE, (v) => (v === at ? 0 : undefined))),
+    tail: async (t) => void (await (await store()).update("meta", wTailKey(t.address), () => ({ chain: t.chain, address: t.address, l: t.l, j: t.j, amount: t.amount }))),
+    // a tail gone: its record deleted (the page's wallet store deletes; the store's update writes a value or nothing)
+    untail: async (address) => {
+      const s = await store();
+      if ((await s.get("meta", wTailKey(address))) !== undefined) await s.delete?.("meta", wTailKey(address));
+    },
   };
 };
 const EMPTY = "owed/rentback-sol-empty";
@@ -2396,8 +2408,11 @@ async function seenOf(h: PoolSellHost, address: string, mints: readonly { mint: 
  *  one pass more (a pass bound dropped Ws whose passes faulted, both RPCs down, and one reader's word that W holds a
  *  token dropped it too), with what the helper read W as when the pass ended on W's own state (under the floor, holding,
  *  an account kept), so a load whose read of W is the same skips it, and W's proven buy. */
-async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, seen?: string, kept: { buy?: SolanaBuy | null; lamports?: bigint; spaced?: number; sweep?: string; differs?: number; unlisted?: true } = {}): Promise<void> {
+export async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, seen?: string, kept: { buy?: SolanaBuy | null; lamports?: bigint; spaced?: number; sweep?: string; differs?: number; unlisted?: true } = {}): Promise<void> {
   try {
+    // W's tail (WTail): written at the floor with what W adds once moved; gone once W reads empty or its sweep is sent
+    if (e === "floor" && kept.unlisted !== true && kept.lamports !== undefined && kept.lamports > 0n) await Promise.resolve(h.owed?.tail?.({ chain: "sol", address: o.address, l: o.l, j: o.j, amount: kept.lamports.toString() })).catch(() => {});
+    else if (e === "nothing" || e === "sent" || (e === "floor" && kept.unlisted === true)) await Promise.resolve(h.owed?.untail?.(o.address)).catch(() => {});
     if (e === "nothing") {
       await Promise.resolve(h.owed?.markEmpty?.(o.address)).catch(() => {});
       return await h.owed?.drop(o.address);
