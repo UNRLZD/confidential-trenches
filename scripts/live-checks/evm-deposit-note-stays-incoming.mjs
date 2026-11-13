@@ -271,6 +271,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 /** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
  *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
 export async function bundle(f) {
-  const m = await import(import.meta.url);
-  return m.judgeBundleOnly(await m.readBundle(f));
+  return judgeBundleOnly(await readBundle(f));
 }

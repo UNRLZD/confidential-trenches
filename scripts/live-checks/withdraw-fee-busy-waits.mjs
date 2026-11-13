@@ -171,6 +171,5 @@ if (import.meta.main) {
 /** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
  *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
 export async function bundle(f, { dirs, SIGN, readFileSync, path }) {
-  const m = await import(import.meta.url);
-  return m.judgeSign(await m.readSign(SIGN, f, m.pinOf(readFileSync(path.join(dirs.sign, "index.html"), "utf8"))));
+  return judgeSign(await readSign(SIGN, f, pinOf(readFileSync(path.join(dirs.sign, "index.html"), "utf8"))));
 }

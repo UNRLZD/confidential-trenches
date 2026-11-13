@@ -131,6 +131,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
 /** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
  *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
 export async function bundle(f, { host }) {
-  const m = await import(import.meta.url);
-  return m.judge(await m.collect({ hosts: [host], fetchFn: f }));
+  return judge(await collect({ hosts: [host], fetchFn: f }));
 }

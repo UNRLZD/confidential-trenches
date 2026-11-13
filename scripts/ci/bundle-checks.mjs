@@ -19,8 +19,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { CHECKS_DIR, headerLines, readChecks } from "./live-after.mjs";
+import { fileURLToPath } from "node:url";
+import { headerLines, readChecks } from "./live-after.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -46,7 +46,6 @@ export function bundlePlan(root = ROOT) {
   const out = {};
   const problems = [];
   for (const [key, text] of Object.entries(readChecks(root))) {
-    const file = path.join(root, CHECKS_DIR, `${key}.mjs`);
     const seen = new Set();
     for (const value of headerLines(text, "Bundle")) {
       const [mode, ...rest] = value.split(/\s+/);
@@ -71,7 +70,7 @@ export function bundlePlan(root = ROOT) {
       const id = `${mode} ${host} ${args.join(" ")}`;
       if (seen.has(id)) problems.push(`${where}: twice`);
       seen.add(id);
-      if (mode === "read") inProcess.push({ key, host, load: () => import(pathToFileURL(file).href), run: async (m, f, dirs) => (typeof m.bundle === "function" ? m.bundle(f, { host, dirs, SIGN, APP, readFileSync, path }) : m.judge(await m.read(f))) });
+      if (mode === "read") inProcess.push({ key, host, load: () => import(`../live-checks/${key}.mjs`), run: async (m, f, dirs) => (typeof m.bundle === "function" ? m.bundle(f, { host, dirs, SIGN, APP, readFileSync, path }) : m.judge(await m.read(f))) });
       else childRuns.push({ key, host, args });
     }
     if (Object.hasOwn(out, key) && seen.size) problems.push(`${key}: run here and left out`);
