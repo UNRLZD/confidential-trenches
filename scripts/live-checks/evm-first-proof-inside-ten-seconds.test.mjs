@@ -78,6 +78,11 @@ test("planted on this tree's build: each part back to its shape before this card
   assert.deepEqual(off(planted(/queueMicrotask\(\(\)=>\{([\w$]+)\.delete\(([\w$]+)\),([\w$]+)\(\2,!0\)\}\)/, (_m, r, e, f) => `queueMicrotask(()=>{${r}.delete(${e}),${f}(${e})})`)), ["landed", "proofs"]);
   // a second hook beside evmLanded: a host's landed its inline copy, a landing's pass asked another way
   assert.deepEqual(off(planted(use, (_m, t) => `landed:()=>{${R}.has(${t})||(${R}.add(${t}),queueMicrotask(()=>{${R}.delete(${t}),${F}(${t},!0)}))}`)), ["landed"]);
+  // a function of another scope that shares evmProofs' minified name, called with !0 (a hash's `oe(Ye,!0)` in card
+  // robinhood-note-spendable's build): not a landing ask, so every part is still found
+  assert.deepEqual(off(pageFacts(index, `function ${F}(e,t){return e}var planted=${F}(1,!0);${js}`)), []);
+  // a landing pass asked after evmProofs' definition outside the hook (no binding of its name between): FAILs
+  assert.deepEqual(off(planted(use, (_m, t) => `landed:()=>void ${F}(${t},!0)`)), ["landed"]);
   // no host's landed is evmLanded
   assert.deepEqual(off(pageFacts(index, js.replaceAll(new RegExp(use.source, "g"), "landed:void 0"))), ["landed"]);
   // the queue handed no landing signal

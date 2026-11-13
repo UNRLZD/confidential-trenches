@@ -57,6 +57,18 @@ const PROOFS = (f) => new RegExp(`[,;{ ]${esc(f)}=async\\((${N}),(${N})=!1\\)=>\
  *  only notes the chain's first pass, around evmQueuePass), the landing flag passed through unchanged; G is then PROOFS. */
 const WRAPPED = (f) => new RegExp(`[,;{ ]${esc(f)}=\\((${N}),(${N})=!1\\)=>${N}\\(\\1,(${N})\\(\\1,\\2\\)\\)`);
 const proofsOf = (f, js) => once(PROOFS(f), js) || (once(WRAPPED(f), js) && once(PROOFS(WRAPPED(f).exec(js)[3]), js));
+/** A binding of the name `f`: a let/const/var or assignment `f=`, a lone arrow parameter `f=>`, or `function f(`. */
+const DEF = (f) => new RegExp(`(?:[,;{( ]${esc(f)}=(?!=)|function ${esc(f)}\\()`, "g");
+/** The landing asks that call evmProofs itself: each call of `f` with `!0` whose nearest binding of `f` before it is
+ *  evmProofs' own definition (at `at`). The minifier gives evmProofs a short name that a dependency's top-level function
+ *  may share (card robinhood-note-spendable's build: a hash's `oe(Ye,!0)` in front of evmProofs' `oe`), a call in that
+ *  other scope; a binding of `f` between evmProofs' and a call shadows it there. */
+const landingAsks = (f, at, js) => {
+  const defs = [...js.matchAll(DEF(f))].map((m) => m.index);
+  return [...js.matchAll(new RegExp(LANDING_ASK(f).source, "g"))].filter((m) => defs.filter((d) => d < m.index).at(-1) === at).length;
+};
+/** Where evmProofs is defined: its wrapped form's or its own. */
+const proofsAt = (f, js) => (WRAPPED(f).exec(js) ?? PROOFS(f).exec(js))?.index;
 /** Every call of a passed queue's refresh with an argument (the landing's alone may pass one). */
 const REFRESH_ARG = new RegExp(`\\.queue\\.refresh\\([^)]`, "g");
 /** openEvmQueue's two pools, the landing set and the routed pool:
@@ -111,7 +123,7 @@ export function pageFacts(index, js) {
   return {
     pin: /src="\/app\.js" integrity="([^"]+)"/.exec(index)?.[1] ?? null,
     sha384: sha384(js),
-    landed: landed !== null && count(LANDED_USE(landed[1]), js) >= 1 && count(LANDED_ANY, js) === 0 && once(LANDING_ASK(landed[4]), js),
+    landed: landed !== null && count(LANDED_USE(landed[1]), js) >= 1 && count(LANDED_ANY, js) === 0 && landingAsks(landed[4], proofsAt(landed[4], js), js) === 1,
     proofs: proofs && [...js.matchAll(REFRESH_ARG)].length === 1,
     lanes: routed !== null && once(ROUTED_POOL(trade[1], routed[2]), js) && landing !== null && once(HANDED(trade[1], landing[1]), js),
     warm: warm !== null && once(POOL_OF(warm[1], warm[4]), js),
