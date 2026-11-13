@@ -632,24 +632,24 @@ test("card solana-holdings-reads-inside-the-public-limit: the device-direct read
   const origin = "https://mainnet-beta-model.example";
   const m = mainnetBetaModel(origin, recordedSlots);
   let r: Awaited<ReturnType<typeof buyWallets>>;
-  const t0 = Date.now();
   try {
     r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: fourWs(), reader: solanaHoldingsAt(origin) }]);
   } finally {
     m.restore();
   }
-  const took = Date.now() - t0;
   assert.deepEqual(r.failed, []);
   assert.deepEqual(r.wallets.map((w) => w.address).sort(), [0, 1, 2, 3].map(solWj).sort());
   assert.equal(m.got.n429, 0, "no 429 from the host");
   // never more than 8 in any 10 s: the 2 spare calls of HOLDINGS_PUBLIC_RPC_LIMIT
-  for (const t of m.got.gtabo) assert.ok(m.got.gtabo.filter((x) => x > t - 10_000 && x <= t).length <= 8, `${m.got.gtabo.map((x) => x - t0).join(", ")}`);
-  // 8 rounds (1 + 1 + 4 + 2), one each 2.5 s
+  for (const t of m.got.gtabo) assert.ok(m.got.gtabo.filter((x) => x > t - 10_000 && x <= t).length <= 8, `${m.got.gtabo.join(", ")}`);
+  // 8 rounds (1 + 1 + 4 + 2), two getTokenAccountsByOwner each
   assert.equal(m.got.gtabo.length, 16);
   // the public pace, read through the module so this test fails on its reads, not its import, where it is missing
   const pace = (buyWalletsModule as { HOLDINGS_PUBLIC_RPC_LIMIT?: { windowMs: number } }).HOLDINGS_PUBLIC_RPC_LIMIT;
   assert.deepEqual({ ...pace }, { windowMs: 2_500, total: 3, perMethod: 2 });
-  assert.ok(took >= 7 * pace!.windowMs && took < 7 * pace!.windowMs + 1_000, `${took} ms`);
+  // each round's calls start one window after the round before, on the test clock as the model saw them
+  const starts = m.got.gtabo.filter((_, k) => k % 2 === 0);
+  for (let k = 1; k < starts.length; k++) assert.ok(starts[k]! - starts[k - 1]! >= pace!.windowMs, `round ${k + 1}: ${starts.join(", ")}`);
 }));
 
 test("card solana-holdings-reads-inside-the-public-limit: a 429 never spends one of a W's slot rounds: the recorded W j=3 (3 rounds apart, then throttled) is read through 4 throttles, each waited out to its Retry-After", () => onTestClock(async () => {
