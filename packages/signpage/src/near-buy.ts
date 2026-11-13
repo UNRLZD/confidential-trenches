@@ -41,6 +41,7 @@
 import { HELPER_BIND_RECORD_WALLETS_MAX, HELPER_BIND_TRADE_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindRecord, type HelperBindRecordRequest, type HelperBindRecordState, type HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/near/networks.ts";
 import { NEAR_RHEA, rheaQuote } from "../../kit/src/near/rhea.ts";
+import { nearFeeBuyerReceives, nearTokenFeeView } from "../../kit/src/near/token-fee.ts";
 import { vaultSync, vaultSyncStart, type VaultSpendRow } from "../../kit/src/vault/sync.ts";
 import { readNearHeld, readNearSwapPair, readNearSwapWallet, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
 import type { BuyRoute, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -162,6 +163,8 @@ export type NearBuyPage = {
   readWallet?(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState>;
   /** The token's decimals (readNearDecimals on rpcs() unless given). */
   decimals?(token: string): Promise<number>;
+  /** What reaches W of `paid` sent by the exchange, the token's buy fee taken off (a quote's fee read unless given). */
+  buyerReceives?(token: string, paid: bigint): Promise<bigint>;
   /** The quote's candidate pools (near-pools.ts rheaPoolsKept). */
   pools(token: string): Promise<number[]>;
   locks?: LockManager;
@@ -644,15 +647,28 @@ export async function resumeNearSells(page: NearBuyPage): Promise<void> {
   const homeKey = `${NEAR_HOLDINGS_HOME_KEY}${page.network}`;
   const lastRead = await store.get(RECORDS, homeKey).catch(() => undefined);
   const readAt = (w: string): number => (isObj(lastRead) && Number.isSafeInteger(lastRead[w]) ? (lastRead[w] as number) : -1);
+  // every rebuilt W this load would name to the two providers (its home check, its sell taken up, its way home), and
+  // every W one seat answer closed (nearHoldingsPass's confirm list): one of them a load, the least recently read
+  const emptyKey = `${NEAR_HOLDINGS_EMPTY_KEY}${page.network}`;
+  const confirms = confirmsOf(await store.get(RECORDS, emptyKey).catch(() => undefined));
+  const named = new Set<string>();
   let turn: string | null = null;
-  if (!restoredReadThisLoad.has(page)) {
-    for (const k of keys) {
-      const r = nearBuyRecordOf(await store.get(RECORDS, k).catch(() => undefined));
-      if (!r || !r.id.startsWith(RESTORED_ID) || r.network !== page.network || r.stage !== "sent" || r.fill !== undefined || sellOpen(r.sell) || sold(r.sell)) continue;
-      if (homing.has(`${r.l}:${r.j}`)) continue;
-      if (turn === null || readAt(r.w) < readAt(turn)) turn = r.w;
-    }
+  const pick = (w: string) => void (turn === null || readAt(w) < readAt(turn) ? (turn = w) : undefined);
+  for (const k of keys) {
+    const r = nearBuyRecordOf(await store.get(RECORDS, k).catch(() => undefined));
+    if (!r || r.network !== page.network) continue;
+    named.add(r.w);
+    if (!r.id.startsWith(RESTORED_ID) || sold(r.sell) || (r.stage !== "sent" && r.stage !== "filled") || !(await paidW(r, notes))) continue;
+    if (sellOpen(r.sell) || homing.has(`${r.l}:${r.j}`) || r.fill === undefined) pick(r.w);
   }
+  for (const w of confirms.keys()) if (!named.has(w)) pick(w);
+  if (restoredReadThisLoad.has(page)) turn = null;
+  const take = async (w: string): Promise<boolean> => {
+    if (w !== turn || restoredReadThisLoad.has(page)) return false;
+    restoredReadThisLoad.add(page);
+    await store.put(RECORDS, homeKey, { ...(isObj(lastRead) ? lastRead : {}), [w]: now() });
+    return true;
+  };
   for (const k of keys) {
     const r = nearBuyRecordOf(await store.get(RECORDS, k).catch(() => undefined));
     if (!r || r.network !== page.network || sold(r.sell) || (r.stage !== "sent" && r.stage !== "filled")) continue;
@@ -660,24 +676,22 @@ export async function resumeNearSells(page: NearBuyPage): Promise<void> {
     let go = sellOpen(r.sell) || homing.has(`${r.l}:${r.j}`);
     // a buy with a fill holds the token: a position, sold only on a tap, never sent home on a load
     if (!go && r.fill !== undefined) continue;
+    // a W rebuilt from the chain (nearHoldingsPass) is read on the two providers by anything below, which see W's id
+    // from this device: one such W a page load, so no provider sees several of one user's Ws from one address in one
+    // load; the rest wait for the next load
+    const restored = r.id.startsWith(RESTORED_ID);
+    if (restored && !(await take(r.w))) continue;
     if (!go) {
-      // a W rebuilt from the chain (nearHoldingsPass) is read here on the two providers, which see W's id from this
-      // device: one such W a page load, so no provider sees several of one user's Ws from one address in one load; the
-      // rest wait for the next load
-      const restored = r.id.startsWith(RESTORED_ID);
-      if (restored) {
-        if (restoredReadThisLoad.has(page) || r.w !== turn) continue;
-        restoredReadThisLoad.add(page);
-        await store.put(RECORDS, homeKey, { ...(isObj(lastRead) ? lastRead : {}), [r.w]: now() });
-      }
       const holds = async () => {
         const [t, u] = await Promise.all([readW(page, { wallet: r.w, side: "sell", token: r.token }), readW(page, { wallet: r.w, side: "buy", token: r.token })]);
+        // a coin under the record's floor is no coin (a stranger's dust): never shown, never holding the USDC back
+        const counts = coinCounts(r, t.held);
         // a rebuilt W the two providers find holding its proven coin: a position, from their read, never sent home
-        if (restored && r.sell === undefined && t.held > 0n) {
+        if (restored && r.sell === undefined && counts) {
           await filledFromRead(page, k, r, t.held);
           return false;
         }
-        return t.held === 0n && u.held >= VAULT_CONSTANTS.MIN_DEPOSIT;
+        return !counts && u.held >= VAULT_CONSTANTS.MIN_DEPOSIT;
       };
       try {
         go = await holds();
@@ -710,6 +724,45 @@ export async function resumeNearSells(page: NearBuyPage): Promise<void> {
       .catch((e: unknown) => page.log?.(`near sell resume: ${legCause(e)}`))
       .finally(deps.release);
   }
+  // this load's turn on a W one seat answer closed: read once on the two providers; its coin over the floor makes it a
+  // position, its USDC of the least deposit a record on its way home, else it stays closed
+  const c = turn === null ? undefined : confirms.get(turn);
+  if (c !== undefined && (await take(c.w))) await confirmOnTwo(page, c);
+}
+
+/** One W a seat answer closed, read on the two providers: a record written ("filled" from the coin over its floor, or
+ *  "sent" for USDC of the least deposit) when the store has none of W, under the pick lock; its confirm entry dropped
+ *  once read. A read or decimals read that fails leaves the entry for a later load. */
+async function confirmOnTwo(page: NearBuyPage, c: NearBuyRecord): Promise<void> {
+  let t: NearHeldState, u: NearHeldState;
+  let decimals: number | null = null;
+  try {
+    [t, u] = await Promise.all([readW(page, { wallet: c.w, side: "sell", token: c.token }), readW(page, { wallet: c.w, side: "buy", token: c.token })]);
+    if (coinCounts(c, t.held)) decimals = page.decimals ? await page.decimals(c.token) : await readNearDecimals(page.network, page.rpcs(), c.token);
+  } catch (e) {
+    page.log?.(`near sell resume: a closed W not read (${legCause(e)})`);
+    return;
+  }
+  const store = await page.store();
+  const emptyKey = `${NEAR_HOLDINGS_EMPTY_KEY}${page.network}`;
+  const write = async () => {
+    const all = await store.keys(RECORDS);
+    let mine = false;
+    for (const k of all.filter((x) => x.startsWith(NEAR_BUY_KEY))) if (nearBuyRecordOf(await store.get(RECORDS, k).catch(() => undefined))?.w === c.w) mine = true;
+    const key = `${NEAR_BUY_KEY}${c.id}`;
+    if (!mine && (await store.get(RECORDS, key).catch(() => undefined)) === undefined) {
+      if (decimals !== null) await store.put(RECORDS, key, { ...c, stage: "filled", fill: { out: t.held.toString(), decimals } } satisfies NearBuyRecord);
+      else if (u.held >= VAULT_CONSTANTS.MIN_DEPOSIT) await store.put(RECORDS, key, c);
+      if (decimals !== null || u.held >= VAULT_CONSTANTS.MIN_DEPOSIT) page.log?.("near sell resume: a closed W read again on the two providers holds money: rebuilt");
+    }
+    const kept = await store.get(RECORDS, emptyKey).catch(() => undefined);
+    if (isObj(kept) && isObj(kept.confirm)) {
+      const { [c.w]: _, ...rest } = kept.confirm;
+      await store.put(RECORDS, emptyKey, { ...kept, confirm: rest });
+    }
+  };
+  const locks = page.locks ?? (globalThis.navigator as { locks?: LockManager } | undefined)?.locks;
+  await (locks ? locks.request(`${PICK_LOCK}${page.network}`, { mode: "exclusive" }, write) : write());
 }
 
 /** A rebuilt "sent" record whose W the two providers read holding its token: "filled" with that read as its fill, under
@@ -1033,6 +1086,33 @@ export type NearHoldingsReads = {
   fresh?: boolean;
 };
 
+/** The least of `token` on W that counts as W's coin: W's own buy swap's min_amount_out as it reaches W (the token's
+ *  buy fee taken off, as the quote reads it: a mainnet launchpad token only, every other token has none), and no less
+ *  than what W's own sell swap sent in when it signed one. page.buyerReceives replaces the fee read in tests. */
+async function coinFloor(page: NearBuyPage, token: string, buyMin: bigint, sellIn: bigint | null): Promise<bigint> {
+  let f = buyMin;
+  if (page.buyerReceives) f = await page.buyerReceives(token, buyMin);
+  else if (page.network === "mainnet" && nearTokenFeeView(token) !== null) {
+    const q = await rheaQuote({ network: page.network, rpcs: page.rpcs(), side: "buy", token, amountIn: VAULT_CONSTANTS.MIN_DEPOSIT, pools: await page.pools(token) });
+    f = nearFeeBuyerReceives(q.fee, NEAR_RHEA[page.network].exchange, buyMin);
+  }
+  if (f < 1n) f = 1n;
+  return sellIn !== null && sellIn > f ? sellIn : f;
+}
+/** The coin on W counts as the record's: at least its floor over its baseline. A record with no floor (no swap of W's,
+ *  or only Rhea's wrapped NEAR as a stand-in token) counts none. */
+const coinCounts = (r: NearBuyRecord, held: bigint): boolean => r.swap !== undefined && held >= BigInt(r.swap.before) + BigInt(r.swap.floor) && BigInt(r.swap.floor) > 0n;
+/** The kept records awaiting their one read on the two providers, from the empty key's value. */
+function confirmsOf(kept: unknown): Map<string, NearBuyRecord> {
+  const m = new Map<string, NearBuyRecord>();
+  if (isObj(kept) && isObj(kept.confirm))
+    for (const [w, v] of Object.entries(kept.confirm)) {
+      const r = nearBuyRecordOf(v);
+      if (IMPLICIT_W.test(w) && r !== undefined && r.w === w && r.swap !== undefined) m.set(w, r);
+    }
+  return m;
+}
+
 /** A spends row that paid its recipient: paid, or settled with nothing refunded (the helper's own `delivered` rule). */
 const delivered = (r: VaultSpendRow): boolean => r.status === "paid" || (r.status === "settled" && r.refundValue === 0n);
 
@@ -1051,18 +1131,24 @@ const delivered = (r: VaultSpendRow): boolean => r.status === "paid" || (r.statu
  *   block and hash; the seat's final no more than NEAR_SEAT_LAG_MAX behind the spends read, else stale. No request of
  *   the pass names W to anyone but the helper; a seat or helper failure stops the pass, read again on a later load.
  *   Tokens W holds beyond its proven token and USDC are never read, shown or signed on.
- * - The record: W holding its proven token: "filled", its fill what W holds, its cost the payout W received (the row's
- *   withdrawn less its fee), whatever the helper says of a sell. W holding USDC of at least the least deposit: "sent",
- *   its proven token as its token (Rhea's wrapped NEAR only for a W no call of names one), past its resumes
- *   (resumeNearSells takes it home, or makes it "filled" when the two providers find the coin on W), only once nothing
- *   of W is in flight and no call W signed can still land: the seat's final past every delegate's max_block_height, a
- *   pending call's by NEAR_PENDING_SETTLED_BLOCKS more; with no call, past the creation's height by
- *   NEAR_DELEGATE_LIFE_BLOCKS, or with no creation either, past the block this device first read W so (the helper's
- *   word moving only when, never where, the money goes); a creation the helper calls pending, once the seat's final is
- *   NEAR_PENDING_SETTLED_BLOCKS past the block this device first read W so. The coin in the lost-found, or USDC held back by a call still
- *   able to land: nothing yet, read again later. A proven token and USDC both empty with nothing in flight: closed by
- *   that seat answer only until the next restore or Sync (reads.fresh), which reads it again. Closed for good: a note's
- *   W whose spends row is final and paid someone else or was refunded (a plain withdrawal).
+ * - The coin that counts (coinFloor): W's proven token at no less than the floor W itself signed, its buy swap's
+ *   min_amount_out as it reaches W (the token's buy fee taken off), and no less than what W's own sell swap sent in once
+ *   it signed one. Under it the coin is ignored for every decision (a stranger's dust, or what a whole-balance sell
+ *   leaves): never shown, never holding the USDC back. A W with no buy swap of its own has no floor and no coin counts.
+ * - The record: W holding the coin that counts: "filled", its fill what W holds, its cost the payout W received (the
+ *   row's withdrawn less its fee), its floor kept (swap.floor) for the way home, whatever the helper says of a sell.
+ *   W holding USDC of at least the least deposit: "sent", its proven token as its token (Rhea's wrapped NEAR, with no
+ *   floor, only for a W no call of names one), past its resumes (resumeNearSells takes it home, or makes it "filled"
+ *   when the two providers find the coin that counts on W), only once nothing of W is in flight and no call W signed
+ *   can still land: the seat's final past every delegate's max_block_height, a pending call's by
+ *   NEAR_PENDING_SETTLED_BLOCKS more (with no last block known, past W's life and that margin); with no call, past W's
+ *   life, NEAR_DELEGATE_LIFE_BLOCKS from the creation's height or this device's first read of W, the later; a creation
+ *   the helper calls pending, NEAR_PENDING_SETTLED_BLOCKS past that first read (the helper's word moving only when,
+ *   never where, the money goes). The coin in the lost-found, or USDC held back by a call still able to land: nothing
+ *   yet, read again later. A proven token under its floor and USDC empty with nothing in flight: closed by that seat
+ *   answer until the next restore or Sync (reads.fresh), and read once on the two providers on the way home (the
+ *   confirm list), so no seat answer hides a coin for good. Closed for good: a note's W whose spends row is final and
+ *   paid someone else or was refunded (a plain withdrawal).
  * - Idempotent: under the network's pick lock, a record is written only when no record of the store names W, under
  *   NEAR_BUY_KEY + "restored:" + W, so a record the store has always wins and two passes write one. Nothing is signed.
  * - The sign out's signal (reads.signal, else page.signal()) stops it between any two reads: nothing is asked after.
@@ -1103,6 +1189,8 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
   // a restore or Sync drops the soft marks; the first-seen marks only time the wait, so they stay
   const soft = reads.fresh === true ? new Map<string, number>() : marks("soft");
   const seen = marks("seen");
+  // the Ws one seat answer closed, each with the record it would have: read once on the two providers on the way home
+  const confirm = confirmsOf(kept);
   let changed = reads.fresh === true && marks("soft").size > 0;
   // each spent note's W and nullifier: kept by note id, so the seed is opened only for notes not derived before
   const wKey = `${NEAR_HOLDINGS_W_KEY}${page.network}`;
@@ -1176,6 +1264,9 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
       const named = new Set<string>();
       let lastHeight = -1n;
       const pendingTill: (bigint | null)[] = [];
+      // the least W's own buy swaps let the exchange send (min_amount_out), and the most its sell swaps sent in
+      let buyMin: bigint | null = null;
+      let sellIn: bigint | null = null;
       for (const c of rec.calls) {
         const mbh = c.max_block_height === undefined ? null : BigInt(c.max_block_height);
         if (c.state === "pending") pendingTill.push(mbh);
@@ -1187,7 +1278,10 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
         if (call === null) continue;
         if (call.maxBlockHeight > lastHeight) lastHeight = call.maxBlockHeight;
         const t = nearWCallToken(call, net.usdc, exchange);
-        if (t !== null) named.add(t.token);
+        if (t === null) continue;
+        named.add(t.token);
+        if (t.minOut !== undefined && (buyMin === null || t.minOut < buyMin)) buyMin = t.minOut;
+        if (t.amountIn !== undefined && (sellIn === null || t.amountIn > sellIn)) sellIn = t.amountIn;
       }
       if (named.size > 1 || (rec.token !== null && named.size === 1 && !named.has(rec.token))) {
         log("near holdings: a W's calls name more than one token, or not the helper's: nothing rebuilt");
@@ -1215,18 +1309,19 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
         break;
       }
       const at = BigInt(block.height);
-      // the block this device first read W with no call and no creation, or with its creation pending (another device's
-      // buy asks W's creation right after its payout): kept across loads, never reset by a Sync
-      const firstSeen = seen.get(a.w);
-      if (((lastHeight < 0n && rec.created === null) || rec.created?.state === "pending") && firstSeen === undefined) (seen.set(a.w, block.height), (changed = true));
-      // in flight: W's creation pending until the seat's final is NEAR_PENDING_SETTLED_BLOCKS past that first read, or a
-      // call pending that can still run (no last block known, or the seat's final not yet NEAR_PENDING_SETTLED_BLOCKS
-      // past it)
-      const creating = rec.created?.state === "pending" && (firstSeen === undefined || at <= BigInt(firstSeen) + NEAR_PENDING_SETTLED_BLOCKS);
-      const inFlight = creating || pendingTill.some((m) => m === null || at <= m + NEAR_PENDING_SETTLED_BLOCKS);
-      // no call W signed can land any more: past every delegate's last block; with no call, past the creation's life,
-      // and with no creation either, that life past the block this device first read W so
-      const settledW = !inFlight && (lastHeight >= 0n ? at > lastHeight : at > BigInt(rec.created === null ? (firstSeen ?? block.height) : rec.created.height) + NEAR_DELEGATE_LIFE_BLOCKS);
+      // the block this device first read W: kept across loads, never reset by a Sync. W's life is timed from it or from
+      // the creation's height, the later, so a helper that names an old creation cannot cut a wait short (another
+      // device's buy asks W's creation right after its payout)
+      if (!seen.has(a.w)) (seen.set(a.w, block.height), (changed = true));
+      const first = BigInt(seen.get(a.w)!);
+      const born = rec.created !== null && BigInt(rec.created.height) > first ? BigInt(rec.created.height) : first;
+      // in flight: W's creation pending until the seat's final is NEAR_PENDING_SETTLED_BLOCKS past the first read; a call
+      // pending until NEAR_PENDING_SETTLED_BLOCKS past its last block, or with no last block known, past W's life and that
+      // margin
+      const creating = rec.created?.state === "pending" && at <= first + NEAR_PENDING_SETTLED_BLOCKS;
+      const inFlight = creating || pendingTill.some((m) => at <= (m ?? born + NEAR_DELEGATE_LIFE_BLOCKS) + NEAR_PENDING_SETTLED_BLOCKS);
+      // no call W signed can land any more: past every delegate's last block; with no call, past W's life
+      const settledW = !inFlight && (lastHeight >= 0n ? at > lastHeight : at > born + NEAR_DELEGATE_LIFE_BLOCKS);
       const base = { v: 1 as const, id: `restored:${a.w}`, network: page.network, amount: (a.row.withdrawn - a.row.fee).toString(), slippage_bps: NEAR_RESTORED_SLIPPAGE_BPS, w: a.w, l: a.l.toString(), j: a.j, note: a.note.id, fee: a.row.fee.toString(), created_ms: now(), resumes: NEAR_BUY_RESUMES, payout: "landed" as const, txs: [] };
       let made: NearBuyRecord | null = null;
       if (token !== null && lost > 0n) {
@@ -1234,9 +1329,22 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
         out.unread.push(a.w);
         continue;
       }
-      // W holding its proven coin is a position, whatever the helper says of a sell (a sell's swap the helper read
-      // "landed" with the coin still on W sold nothing)
-      if (token !== null && held > 0n) {
+      // the least of the coin that counts as W's (coinFloor): what W's own buy swap made the exchange send, as it reaches
+      // W (less the token's buy fee), and once W signed a sell, no less than what that sell sent in. Under it the coin is
+      // ignored for every decision (a stranger's dust, or what a whole-balance sell leaves): not shown, never holding
+      // the USDC back. No buy swap of W's: no floor, no coin counts.
+      let floor: bigint | null = null;
+      if (token !== null && buyMin !== null) {
+        try {
+          floor = await coinFloor(page, token, buyMin, sellIn);
+        } catch (e) {
+          log(`near holdings: the token's fee not read (${legCause(e)})`);
+          out.unread.push(a.w);
+          continue;
+        }
+      }
+      const swap = floor === null ? {} : { swap: { floor: floor.toString(), before: "0" } };
+      if (token !== null && floor !== null && held >= floor) {
         let decimals: number;
         try {
           decimals = page.decimals ? await page.decimals(token) : await readNearDecimals(page.network, page.rpcs(), token);
@@ -1245,7 +1353,7 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
           out.unread.push(a.w);
           continue;
         }
-        made = { ...base, token, stage: "filled", step: "receive", swap: { floor: "0", before: "0" }, fill: { out: held.toString(), decimals } };
+        made = { ...base, token, stage: "filled", step: "receive", ...swap, fill: { out: held.toString(), decimals } };
       } else if (usdc >= VAULT_CONSTANTS.MIN_DEPOSIT) {
         if (!settledW) {
           out.unread.push(a.w);
@@ -1254,10 +1362,12 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
         // its proven token: a coin the two providers find on W on the way home makes it a position (resumeNearSells);
         // a W no call of names a token (never created, or created and never used) keeps Rhea's wrapped NEAR, which it
         // never bought, so the way home reads 0 of it
-        made = { ...base, token: token ?? NEAR_RHEA[page.network].wrap, stage: "sent", step: "receive" };
+        made = { ...base, token: token ?? NEAR_RHEA[page.network].wrap, stage: "sent", step: "receive", ...swap };
       } else if (token !== null && settledW) {
-        // its proven token and USDC empty, nothing in flight: closed by this seat answer, read again on a restore or Sync
+        // its proven token and USDC empty, nothing in flight: closed by this seat answer, read again on a restore or Sync,
+        // and once on the two providers on the way home (resumeNearSells), so no seat answer hides a coin for good
         soft.set(a.w, block.height);
+        if (floor !== null) confirm.set(a.w, { ...base, token, stage: "sent", step: "receive", ...swap });
         out.empty.push(a.w);
         changed = true;
         continue;
@@ -1269,6 +1379,7 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
       const wrote = await (locks ? (locks.request(`${PICK_LOCK}${page.network}`, { mode: "exclusive" }, async () => put(r)) as Promise<boolean>) : put(r));
       if (wrote) out.written.push(a.w);
       if (seen.delete(a.w)) changed = true;
+      if (confirm.delete(a.w)) changed = true;
     }
     if (stop) break;
   }
@@ -1279,7 +1390,7 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
     await store.put(RECORDS, key, rec);
     return true;
   }
-  if (changed) await store.put(RECORDS, emptyKey, { final: [...empty], soft: Object.fromEntries(soft), seen: Object.fromEntries(seen) });
+  if (changed) await store.put(RECORDS, emptyKey, { final: [...empty], soft: Object.fromEntries(soft), seen: Object.fromEntries(seen), confirm: Object.fromEntries(confirm) });
   if (out.written.length > 0) log(`near holdings: ${out.written.length} record(s) rebuilt`);
   return out;
 }

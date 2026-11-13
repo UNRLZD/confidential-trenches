@@ -101,9 +101,10 @@ function decode(w: string, b: Uint8Array): NearWCall | null {
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const json = (a: Uint8Array): unknown => JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(a));
 
-/** What one checked call says of W's trade: the token it names and whether it is a sell's swap; null when it names
- *  none (a call of no trade shape: it proves nothing). */
-export function nearWCallToken(c: NearWCall, usdc: string, exchange: string): { token: string; sellSwap: boolean } | null {
+/** What one checked call says of W's trade: the token it names, whether it is a sell's swap, and the amount W signed in
+ *  it: a buy swap's floor (its msg's last action's min_amount_out, what the exchange must send at least) and a sell
+ *  swap's amount (what W sends in). null when it names none (a call of no trade shape: it proves nothing). */
+export function nearWCallToken(c: NearWCall, usdc: string, exchange: string): { token: string; sellSwap: boolean; minOut?: bigint; amountIn?: bigint } | null {
   try {
     if (c.method === "storage_deposit") return c.receiver === usdc ? null : { token: c.receiver, sellSwap: false };
     if (c.method === "claim_lostfound") {
@@ -114,12 +115,14 @@ export function nearWCallToken(c: NearWCall, usdc: string, exchange: string): { 
     if (c.method !== "ft_transfer_call") return null;
     const a = json(c.args);
     if (!isObj(a) || a.receiver_id !== exchange || typeof a.msg !== "string") return null;
-    if (c.receiver !== usdc) return { token: c.receiver, sellSwap: true }; // the token's own transfer: a sell
+    if (c.receiver !== usdc) return { token: c.receiver, sellSwap: true, ...(typeof a.amount === "string" && U128.test(a.amount) ? { amountIn: BigInt(a.amount) } : {}) }; // the token's own transfer: a sell
     const m = JSON.parse(a.msg) as unknown;
     const acts = isObj(m) && Array.isArray(m.actions) ? m.actions : [];
     const last = acts.at(-1);
-    return isObj(last) && typeof last.token_out === "string" && last.token_out !== usdc ? { token: last.token_out, sellSwap: false } : null;
+    if (!isObj(last) || typeof last.token_out !== "string" || last.token_out === usdc) return null;
+    return { token: last.token_out, sellSwap: false, ...(typeof last.min_amount_out === "string" && U128.test(last.min_amount_out) ? { minOut: BigInt(last.min_amount_out) } : {}) };
   } catch {
     return null;
   }
 }
+const U128 = /^(0|[1-9]\d{0,38})$/;
