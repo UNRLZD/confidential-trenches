@@ -65,7 +65,7 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_RENT_SYSVAR, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolFee, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_RENT_SYSVAR, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
@@ -81,14 +81,13 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/note
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { solanaBuyReader, type ListedBuyWallet, type SolanaBuy } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
-import { SOL_GRID } from "../../wallet/src/pool/pieces.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { duringTrade, fromRecord, timedStore, TRADE_STORE_MS, tradeLock, tradeRunning, within, type TradeStore } from "./trade.ts";
 import { deviceSpacing, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type DeviceSpacing, type RentBackSpacing } from "./device-spacing.ts";
-import { checkSolanaKeepSweep, checkSolanaSell, checkSolanaSweep, SOLANA_POOL_SELL_PRIORITY, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaNoteOf, solanaSellNoteFloor, solanaSweepFloor, solanaSweepKeep, solanaSweepOf, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaKeepSweep, checkSolanaSell, checkSolanaSweep, SOLANA_POOL_SELL_PRIORITY, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaNoteOf, solanaSellNoteFloor, solanaSweepFloor, solanaSweepKeep, solanaSweepOf, solanaSweepStay, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** What a sell run needs from the page. */
@@ -1623,15 +1622,6 @@ export function solanaSellBudgetFits(kind: "pump-curve" | "pumpswap", cashback: 
 }
 /** The compute budget instruction `tag` with `n` in `width` little-endian bytes. */
 const le = (tag: number, n: number | bigint, width: number): Uint8Array => Uint8Array.from([tag, ...Array.from({ length: width }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn))]);
-/** One System transfer of `v` lamports from W to the pinned relayer's account (the sweep's rest under the grid, review
- *  P3-1; never the pool's account, which holds no lamport past its books: review P1-1 of 1d3b96d9c). */
-const tailTransferIx = (from: string, to: string, v: bigint) => {
-  const data = new Uint8Array(12);
-  const view = new DataView(data.buffer);
-  view.setUint32(0, 2, true);
-  view.setBigUint64(4, v, true);
-  return { program: SOLANA_SYSTEM_PROGRAM, accounts: [{ key: from, signer: true, writable: true }, { key: to, signer: false, writable: true }], data };
-};
 const budgetIxs = (b: { limit: number; price: bigint } | null) =>
   b === null
     ? []
@@ -1743,17 +1733,14 @@ const wireOf = (message: Uint8Array): Uint8Array => {
   return wire;
 };
 
-/** What W's rest (its lamports less the sweep's fee, the deposit's rents and the keep) adds to the user's notes once
- *  moved (card every-lamport-can-move T3; pick (a), 13 Nov): its own sweep's note when that is at the floor or
- *  over; else what a ride adds, floorG(rest - fee): a ride's piece Q (every size of the closed list on the grid, at the
- *  floor or over) reaches W less the relay fee `fee`, so the sweep makes a note of Q + floorG(rest - fee), the same gain
- *  whatever Q the pick takes; else 0 (a stranger's dust, a found W holding little: no tap ever burns more than it brings
- *  back). What W is listed at (its RETURNING row, the balance), never W's lamports or its raw rest; at 0 not listed. */
-export function restAdds(rest: bigint, fee: bigint, floor: bigint): bigint {
+/** What W's rest (its lamports less the sweep's fee, the deposit's rents and the keep) is listed at (its RETURNING row,
+ *  the balance; card pool-amounts-are-standard-sizes, the CO's pick (c)): its own sweep's rung when that is at the floor
+ *  or over; else the rest itself, the user's own on W (under the least rung no sweep moves it into the pool; it goes on
+ *  with W's next move), never hidden; at 0 or less not listed. */
+export function restAdds(rest: bigint, floor: bigint): bigint {
   const own = solanaSweepOf(rest).value;
   if (own >= floor) return own;
-  const lift = rest - fee;
-  return lift >= SOL_GRID ? lift - (lift % SOL_GRID) : 0n;
+  return rest > 0n ? rest : 0n;
 }
 
 /**
@@ -1879,16 +1866,16 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  *    the deposit takes as the program prices them (solanaDepositRents: its mark and both pages, from their lamports on
  *    both RPCs) and, per volume account still owed cashback, what its later claim costs (solanaSweepKeep, card
  *    sol-w-sweep: that claim's frame fee and the claim account's rent, and rent(0) so W stays an account), deposited
- *    (tag 1) as the note that makes on the pool's grid (solanaSweepOf, card every-lamport-can-move: the rest under the
- *    grid one System transfer from W to the pinned relayer's account in the same transaction, review P3-1) on the next of W's
+ *    (tag 1) as the largest rung of it (solanaSweepOf, card pool-amounts-are-standard-sizes: what it leaves stays on
+ *    W, rent-exempt, for W's next pass) on the next of W's
  *    return notes (returnNote's walk: the sell's return note, or after a partial sell's deposit its R second
- *    arrivals), checked by the rule (checkSolanaSweep: W ends at exactly that keep, 0 when nothing is owed), simulated
+ *    arrivals), checked by the rule (checkSolanaSweep: that rung and nothing else), simulated
  *    unsigned on both, then signed; a sweep that leaves an owed claim ends "sent", so W stays owed and the next pass
  *    claims it; its note INCOMING with the send before it leaves, then the sell
  *    lock is free (review L6): the settle at the next state read (settlePoolSells) gives its verdict. A rest that makes
- *    no note (under SOL_NOTE_FLOOR on the grid, solanaSweepOf): a pass flagged `ride` (the sale's own, a tap's pass over
- *    the leftover Ws) first releases one spare piece of the pool's notes to W (h.ride, card every-lamport-can-move T3)
- *    and sweeps again; with none, or on a load's own pass, nothing is sent: W keeps its lamports, listed on its record.
+ *    no note (under SOL_NOTE_FLOOR, solanaSweepOf): nothing is sent: W keeps its lamports, the user's own, listed on its
+ *    record and in the balance (card pool-amounts-are-standard-sizes: never paid away, never deposited off the ladder;
+ *    a ride would release a rung only to deposit the same rung back).
  * W's own coin is its one buy's mint, which the buy writes before its send (h.bought): it joins the record's mints, so W
  * holding any unit of it holds the pass and keeps every lamport its sell needs (delta review 7 of 08290868). Any other
  * mint (an airdrop, a stranger's token) never holds the pass back: its account is not among the addresses the plan
@@ -2139,8 +2126,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     const since = teardown.ok.since;
     const own = new Set(teardown.ok.signed.map((f) => f.signature));
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
-    // `rode`: the sale's ride came first (card every-lamport-can-move T3), so a rest still under the floor ends there
-    const sweepTry = (rode: boolean) => again("sweep", async () => {
+    const sweepTry = () => again("sweep", async () => {
       // W and its accounts read again, after the frames (review M-A: a frame that failed on chain, a token sent to W's
       // account meanwhile, leaves an account open): the sweep only when the plan now closes nothing and keeps nothing,
       // so W keeps the fee for what is still open; a claim the teardown planned around stays planned around (card
@@ -2190,29 +2176,21 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       // under the floor: steady (its `seen` kept) only when W stays under it at the cheapest deposit, both pages already
       // open, so a page another deposit opens meanwhile runs the pass again (review 5 of 38e59182, L3)
       const cheapRest = lamports - SOLANA_POOL_SELL_FEE - solanaDepositRents(rent, sizes, { ...held, state: [OPEN, OPEN], label: [OPEN, OPEN] }) - solanaSweepKeep(rent, owed, kept);
-      // the note on the pool's grid (card every-lamport-can-move: never an exact lamport amount, whose rest would
-      // reappear in a later release and tie it to this sale), and the rest under the grid paid to the pinned relayer's
-      // account in the same transaction (review P3-1 of T1+T2), so W still ends at the keep (0 when nothing is kept); 0 under
-      // the floor
-      const { value, under } = solanaSweepOf(rest);
-      const cheapest = solanaSweepOf(cheapRest).value;
-      // a pass that carries the ride (`ride`: a full sale's own rent back, or a tap's pass over the leftover Ws, never a
-      // load's own pass) with no claim owed: one spare piece of the pool's notes released to W first (h.ride), so W's
-      // rest reaches a note and W ends at 0 (card every-lamport-can-move T3)
-      // under the floor W is listed at what it adds once moved (restAdds, pick (a)), never its lamports or its raw
-      // rest, a claim owed or not (the fee, the deposit's rents and the keep are not on their way); a rest that adds
-      // nothing is not listed (no RETURNING row, nothing in the balance) and never rides
-      const adds = restAdds(rest, solanaPoolFee(rent), floor);
+      // the note a rung (card pool-amounts-are-standard-sizes: never an exact lamport amount, whose rest would reappear
+      // in a later release and tie it to this sale); what it leaves stays on W, rent-exempt, for W's next sweep, the last
+      // of it under the least rung W's own and listed (never paid away); 0 under the floor
+      const stay = solanaSweepStay(rent, solanaSweepKeep(rent, owed, kept));
+      const { value } = solanaSweepOf(rest, stay);
+      const cheapest = solanaSweepOf(cheapRest, stay).value;
+      // under the floor W is listed at its rest (restAdds), a claim owed or not (the fee, the deposit's rents and the
+      // keep are not on their way); a rest of 0 or less is not listed (no RETURNING row, nothing in the balance)
+      const adds = restAdds(rest, floor);
       if (value < floor && adds === 0n) x.unlisted?.();
       if (value < floor && adds > 0n && (x.buy || since !== undefined)) x.read?.(adds);
-      if (value < floor && owed === 0 && adds > 0n && x.ride === true && !rode && h.ride !== undefined) return { end: "ride" as const, rest, lamports, steady: cheapest < floor };
       if (value < floor) return { end: owed > 0 ? ("owed" as const) : ("floor" as const), steady: cheapest < floor, detail: `W's ${lamports} would leave ${rest} for a note, under ${floor}: kept on W${owed > 0 ? `, owed ${owed} cashback claim${owed > 1 ? "s" : ""}` : ""}` };
       const bh = await blockhashOf(rpcs);
-      // the deposit, then the rest under the grid as one System transfer to the pinned relayer's account, the relay fee's
-      // own payee every release names (none at a rest of 0; review P1-1 of 1d3b96d9c: the pool's account would hold it
-      // past its books for good); no compute budget, so a sweep that fails on chain costs W its one signature
-      const pay = under === 0n ? [] : [tailTransferIx(w.address, ctx.solana.feePayer, under)];
-      const { message } = solanaCompileV0(w.address, [depositIx(x.program, x.pool, w.address, sizes, pre, value), ...pay], bh.blockhash, []);
+      // the deposit alone; no compute budget, so a sweep that fails on chain costs W its one signature
+      const { message } = solanaCompileV0(w.address, [depositIx(x.program, x.pool, w.address, sizes, pre, value)], bh.blockhash, []);
       const wire = wireOf(message);
       // the one signature's fee, as both RPCs price this very message: anything else would leave W short or holding some
       const fees = await both(rpcs, async (r) => BigInt(int(((await r("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown })?.value)));
@@ -2226,22 +2204,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       if (since !== undefined && !(await onlyOwnSince(rpcs, w.address, since, own).catch(() => false))) return { end: "holds" as const, steady: false, detail: "a found W: a transaction landed on W after the rule's read" };
       return { end: "sent" as const, ref, precommitment, planned, value, one: one!, last: bh.lastHeight };
     });
-    let sweep = await sweepTry(false);
-    if (sweep !== null && sweep.ok.end === "ride") {
-      const { rest, lamports, steady } = sweep.ok;
-      // what W gets lifts the rest, priced as this try priced the sweep, to a note on the grid at the floor or over (the
-      // gain itself is restAdds', which let this ride run)
-      const fits = (got: bigint): boolean => solanaSweepOf(rest + got).value >= floor;
-      // a leftover pass's spacing claimed before the release, so a pass the gap holds moves nothing to W
-      await spaced();
-      const rode = await h.ride!({ address: w.address, l: w.l, j: w.j }, fits).catch((e: unknown) => ({ state: "fault" as const, why: faultOf(e) }));
-      if (rode.state === "none") return end("floor", `W's ${lamports} would leave ${rest} for a note, under ${floor}: kept on W; no spare piece in the pool lifts it`, steady);
-      if (rode.state !== "landed") return end("gave_up", rode.state === "fault" ? `the ride: ${rode.why}` : rode.state === "unsure" ? "the ride's release may still land: W waits for the next load" : "the ride's release did not land: W keeps its lamports");
-      sweep = await sweepTry(true);
-    }
+    const sweep = await sweepTry();
     if (sweep === null) return end("gave_up", "the sweep");
     const sw = sweep.ok;
-    if (sw.end === "ride") return end("gave_up", "the sweep");
     if (sw.end !== "sent") return "steady" in sw && sw.steady !== undefined ? end(sw.end, sw.detail, (sw.end === "floor" || sw.end === "kept") && sw.steady) : end(sw.end, sw.detail);
     // held (resumeRentBacks' spacing): before the note is written or anything sent
     await spaced();
