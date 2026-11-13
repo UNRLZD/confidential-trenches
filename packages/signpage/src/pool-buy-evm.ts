@@ -334,7 +334,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
           if (e instanceof EvmSendRefused && !busied) {
             // a refusal is the helper's word, and the device never drops what it may own on a server's word: the run
             // answers refused, its pending record stays, and the chain ends it (the follow below: a Bought fills W's
-            // holding, no release by the two-round safe rule removes it, as the note's settle frees the note)
+            // holding, no release by the two-round final-block rule removes it, as the note's settle frees the note)
             return { refused: { want, from, holding, w: w.address, stops: [null, null], none: null, mine } };
           }
           if (e instanceof EvmSendBusy && !stopped() && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
@@ -470,7 +470,7 @@ const big = (v: unknown): bigint | null => (typeof v === "string" && /^[0-9]{1,7
  * The load's follow of pending buys (the tab that sent one may have closed before its end): each W's holding on this
  * chain still pending with its buy written, that no run of this page follows, is read on the chain from the record's
  * own block range until an end, as the run's own follow reads it (watch): filled or withdrawn completes it, not_landed
- * by the two-round safe rule removes it, so a pending never stays for good and the note can buy again. Runs once per W
+ * by the two-round final-block rule removes it, so a pending never stays for good and the note can buy again. Runs once per W
  * at a time (h.following); a sign out (h.signal) ends it with nothing written. Started on each state read
  * (src/pool-testnet.ts); never awaited.
  */

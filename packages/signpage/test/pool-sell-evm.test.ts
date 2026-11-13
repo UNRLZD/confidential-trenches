@@ -111,7 +111,7 @@ function chain() {
         case "eth_getTransactionByHash":
           return c.txs.get(p[0] as string) ?? null;
         case "eth_getBlockByNumber": {
-          const n = p[0] === "latest" ? c.head : p[0] === "safe" ? c.head - 10n : BigInt(p[0] as string);
+          const n = p[0] === "latest" ? c.head : p[0] === "finalized" ? c.head - 10n : BigInt(p[0] as string);
           return { number: hx(n), timestamp: hx(timeOf(n)), hash: w32(n) };
         }
         case "eth_getTransactionCount":
@@ -653,6 +653,26 @@ test("P2-3: one round past the deadline with empty log lists is not not_landed: 
   await y.store.move(m.id, "PLANNED", "INCOMING");
   await y.h.record({ ...o, note: m.id });
   await followEvmSells(y.h);
+  assert.equal((await returnNote(y.store))?.state, "PLANNED");
+  assert.deepEqual(await openOf(y), []);
+});
+
+test("P3-1: a sale read not_landed whose note cannot be put back PLANNED keeps its record, read again until the move is written", async () => {
+  const y = await world();
+  const m = await y.store.add({ ref: RETURN, scope: SCOPE, precommitment: P, state: "PLANNED" });
+  await y.store.move(m.id, "PLANNED", "INCOMING");
+  const o: EvmOpenSell = { note: m.id, chain: "base", w: W, token: TOKEN, amount: "1", precommitment: P.toString(), nonce: "0", deadline: (BigInt(Math.floor(Date.now() / 1000)) - 100n).toString(), from: "900", least: "1" };
+  await y.h.record(o);
+  // the store's first write of the move fails; the record is still there at it
+  const move = y.store.move.bind(y.store);
+  const at: number[] = [];
+  y.store.move = (async (...a: Parameters<typeof move>) => {
+    at.push((await openOf(y)).length);
+    if (at.length === 1) throw new Error("the write failed");
+    return move(...a);
+  }) as typeof move;
+  await followEvmSells(y.h);
+  assert.deepEqual(at, [1, 1], "moved again on a later round, the record kept over the failed one");
   assert.equal((await returnNote(y.store))?.state, "PLANNED");
   assert.deepEqual(await openOf(y), []);
 });

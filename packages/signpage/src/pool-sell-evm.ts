@@ -48,7 +48,7 @@
 // - The read-back (evm-send.ts evmDepositedRead, evmSellVerdict): the pool's Deposited logs since the block read before
 //   the send, on both pool RPCs, by the pool's address and topic only. filled: the deposit naming the precommitment, from W,
 //   at least min out less the fee cap; taken: another deposit took the precommitment first (the sale reverts and W keeps
-//   its token; the note is the user's own all the same); not_landed: none, and both RPCs' safe block past the latest
+//   its token; the note is the user's own all the same); not_landed: none, and both RPCs' final block past the latest
 //   deadline. A hint the helper's hash gives: its receipt failed on both RPCs, so the tap answers refused and, where the
 //   quote picked a pool behind a hook the venue does not list, the kit's evmSellRevertedPools names the pools to ban; the
 //   reads go on to the deadline, since a signed Sell can still be sent to W by anyone until it.
@@ -115,7 +115,7 @@ export const EVM_SELL_LAG_BLOCKS = EVM_BUY_LAG_BLOCKS;
 /** A busy wait's slices: it ends within one once a sign out starts. */
 const STOP_POLL_MS = 250;
 /** SellDelegate.nonce() (contracts/pool-evm/src/SellDelegate.sol:127), called on W. */
-// made at the call, so a bundle with no sale (the mainnet build) keeps none of it
+// made at the call, as evmSellSelector (src/evm-send.ts)
 const nonceCall = (): string => `0x${Array.from(keccak_256(new TextEncoder().encode("nonce()")).subarray(0, 4), (b) => b.toString(16).padStart(2, "0")).join("")}`;
 const BALANCE_OF = "0x70a08231";
 const lower = (s: string): string => s.toLowerCase();
@@ -672,7 +672,7 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       continue;
     }
     if (v.end === "not_landed") {
-      // past the deadline on both RPCs' safe blocks with no deposit of it, on two rounds EVM_BUY_LAG_MS apart (the buy's
+      // past the deadline on both RPCs' final blocks with no deposit of it, on two rounds EVM_BUY_LAG_MS apart (the buy's
       // rule, review P2-3: one round of log answers trailing their headers never answers it)
       const at = clock();
       if (x.none === null) x.none = at;
@@ -685,10 +685,11 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       // a sale signed again since (its record's deadline raised): the newer signature's run follows it, not this one
       const now = (await h.open())[x.open.note];
       if (now !== undefined && now.deadline !== x.open.deadline) return null;
-      // the note back PLANNED, the record dropped
+      // the note back PLANNED, then the record dropped: a move that fails keeps the record, read again next round
+      // (review P3-1: a record dropped over a note left INCOMING has nothing that ends it)
       const store = await h.notes();
       const n = await store.get(x.open.note);
-      if (n?.state === "INCOMING") await store.move(n.id, "INCOMING", "PLANNED").catch(() => {});
+      if (n?.state === "INCOMING" && !(await store.move(n.id, "INCOMING", "PLANNED").then(() => true, () => false))) continue;
       await h.unrecord(x.open.note, x.open.deadline).catch(() => {});
       return { stage: "not_landed", txs: [] };
     }

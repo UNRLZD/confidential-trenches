@@ -113,8 +113,8 @@ const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost[
   calls.push({ method, params });
   if (side.down) throw new Error("down");
   if (method === "eth_blockNumber") return "0x" + (side.start ?? START).toString(16);
-  // the safe block is the newest one unless the side sets its time (`safeTime`)
-  const safe = method === "eth_getBlockByNumber" && (params as unknown[])[0] === "safe" && side.safeTime !== undefined;
+  // the final block is the newest one unless the side sets its time (`safeTime`)
+  const safe = method === "eth_getBlockByNumber" && (params as unknown[])[0] === "finalized" && side.safeTime !== undefined;
   // a block asked by number (the read-back's last block of a range cut by EVM_BUY_LOG_SPAN) answers that number
   const at = method === "eth_getBlockByNumber" && /^0x[0-9a-f]+$/.test(String((params as unknown[])[0])) ? BigInt(String((params as unknown[])[0])) : null;
   if (method === "eth_getBlockByNumber") return { number: "0x" + (at ?? side.head?.() ?? START + 0x40n).toString(16), timestamp: "0x" + ((safe ? side.safeTime!() : (side.time?.() ?? clock.t)) / 1000n).toString(16) };
@@ -612,8 +612,8 @@ test("(P2-1 b) the deadline is judged on the safe block: the newest past it whil
   const { h, seen } = host({ a: side(), b: side() });
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
   await turns(200);
-  assert.deepEqual(seen.late, [], "no end while the safe block is before the deadline");
-  assert.ok(seen.calls.some((c) => c.method === "eth_getBlockByNumber" && (c.params as unknown[])[0] === "safe"));
+  assert.deepEqual(seen.late, [], "no end while the final block is before the deadline");
+  assert.ok(seen.calls.some((c) => c.method === "eth_getBlockByNumber" && (c.params as unknown[])[0] === "finalized"));
   safe = DEADLINE + 1_000n;
   assert.deepEqual(await lateOf(seen), { stage: "not_landed", txs: [] });
 });
