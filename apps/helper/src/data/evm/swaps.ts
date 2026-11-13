@@ -71,6 +71,7 @@ import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX
 import { operatorOf } from "../../rpc/rpc.ts";
 import { isBars, KEPT_HANDOVER_MS, toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
+import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -881,7 +882,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null }) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
@@ -2155,7 +2156,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // History before our first bar: GeckoTerminal's OHLCV for our pool, through the one budget
   // -------------------------------------------------------------------------------------------------------------
 
-  const history = new Map<string, { at: number; bars: Candle[] }>();
+  const history = new Map<string, { at: number; bars: Candle[]; src?: typeof CG_SRC }>();
+  /** The source each held list of bars came from (card helper-candles-keyed-gt): CoinGecko's keyed API, else
+   *  GeckoTerminal's keyless one; a cut of held bars keeps its source. */
+  const sources = new WeakMap<Candle[], ChartSrc>();
+  const srcOf = (bars: Candle[]): ChartSrc => sources.get(bars) ?? "geckoterminal";
+  const tagged = (bars: Candle[], src: ChartSrc | undefined): Candle[] => (src === CG_SRC && sources.set(bars, CG_SRC), bars);
   /** A listed token our reads find no pool of: GeckoTerminal's top pool for it, kept POOL_FRESH_MS (null: it names none). */
   const gtPools = new Map<string, { id: string | null; at: number }>();
   const GT_POOL_FRESH_MS = 600_000;
@@ -2173,7 +2179,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // 0xb2000000...8c01, which GeckoTerminal charts); a read that fails is the 503
       const cold = p === undefined;
       const waitOf = (why: string) => limited(Math.min(Math.max(Math.ceil((deps.gecko!.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
-      if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
+      const keyedPool = await keyedPoolOf(token);
+      if (keyedPool !== undefined) p = keyedPool;
+      else if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
         const got = await readPool(token);
         // GeckoTerminal names no such token (null): nothing to chart, the empty answer
         if (got === null) return none;
@@ -2191,8 +2199,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const bars = got.filter((c) => to === null || c[0] < to).slice(-limit);
     if (bars.length === 0) return none;
     const at = history.get(`${p.id}:${tf}:${to ?? ""}`)?.at ?? kept.get(`${p.id}:${tf}`)?.at ?? now();
-    const body = { tf, candles: bars, src: "geckoterminal", as_of_ms: at };
-    return { status: 200, body: JSON.stringify(body), src: "geckoterminal", asOfMs: at };
+    const src = srcOf(got);
+    const body = { tf, candles: bars, src, as_of_ms: at };
+    return { status: 200, body: JSON.stringify(body), src, asOfMs: at };
   }
 
   /** GeckoTerminal's top pool of a token, its call already taken, held in gtPools: the pool, null when GeckoTerminal
@@ -2214,18 +2223,33 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         return "failed";
       }
       const text = await r.text();
-      const id = text.length > ANSWER_MAX ? undefined : (JSON.parse(text) as { data?: { attributes?: { address?: unknown } }[] })?.data?.[0]?.attributes?.address;
-      const p = { id: typeof id === "string" && /^0x[0-9a-f]{40}([0-9a-f]{24})?$/.test(id.toLowerCase()) ? id.toLowerCase() : null, at: now() };
-      if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
-      gtPools.set(token, p);
-      return p;
+      return holdPool(token, text.length > ANSWER_MAX ? null : poolIdOf(JSON.parse(text)));
     } catch {
       return "failed";
     }
   }
+  /** The top pool's id of a token pools answer (GeckoTerminal's, or CoinGecko's on-chain one: data[0].attributes.address),
+   *  lower case, or null. */
+  function poolIdOf(json: unknown): string | null {
+    const id = (json as { data?: { attributes?: { address?: unknown } }[] } | null)?.data?.[0]?.attributes?.address;
+    return typeof id === "string" && /^0x[0-9a-f]{40}([0-9a-f]{24})?$/.test(id.toLowerCase()) ? id.toLowerCase() : null;
+  }
+  function holdPool(token: string, id: string | null): { id: string | null; at: number } {
+    const p = { id, at: now() };
+    if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
+    gtPools.set(token, p);
+    return p;
+  }
+  /** A token's top pool from CoinGecko's keyed API (card helper-candles-keyed-gt), held as GeckoTerminal's is; undefined
+   *  when no key is set or it cannot serve the read (the keyless read then goes as before). */
+  async function keyedPoolOf(token: string): Promise<{ id: string | null; at: number } | undefined> {
+    if (deps.keyed == null) return undefined;
+    const j = await deps.keyed.read(`/networks/${chain}/tokens/${token}/pools?page=1`, (x) => poolIdOf(x) !== null);
+    return j === undefined ? undefined : holdPool(token, poolIdOf(j));
+  }
 
   /** The last good bars per pool and tf (the newest range read): served when a read is throttled or fails. */
-  const kept = new Map<string, { at: number; bars: Candle[] }>();
+  const kept = new Map<string, { at: number; bars: Candle[]; src?: typeof CG_SRC }>();
   /** GeckoTerminal's bars before `before` (unix seconds; null: its newest range, one cache key however often asked),
    *  or, when the read is refused, throttled or fails, the last good bars of the pool and tf cut there; with none of
    *  those, the 429 (with the wait to the next call) or 503 to answer. `alone`: the bars are the chart, with no book of
@@ -2244,7 +2268,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (fresh !== undefined && fresh.bars.length > 0 && servable(fresh.at)) return fresh.bars;
       const held = kept.get(`${e.pool.id}:${tf}`);
       const cut = (servable(held?.at) ? held!.bars : []).filter((c) => before === null || c[0] < before);
-      return cut.length > 0 ? cut : fail;
+      return cut.length > 0 ? tagged(cut, held?.src) : fail;
     };
     const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
     // a re-read of bars held is a refresh (../gecko.ts): it leaves a cold page its calls, and refused, the bars held are
@@ -2258,6 +2282,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // (card evm-chart-opens-without-a-vendor-call: live run 42995547054, a cold read behind a queue that was not empty
     // was never tried and its page answered an empty 200)
     const nothing = fresh === undefined && fallback(UPSTREAM) === UPSTREAM;
+    // card helper-candles-keyed-gt: CoinGecko's keyed API first; it cannot serve the read, the keyless path as before
+    const keyedBars = await keyedBarsOf(e.pool.id, e.pool.token, tf, before, k);
+    if (keyedBars !== undefined) return keyedBars;
     if (!(await gtTake(lane, `${chain} bars`, client))) {
       if (nothing) wantBars(e.pool.id, e.pool.token, tf, before, k);
       return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
@@ -2267,12 +2294,39 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return Array.isArray(got) ? got : fallback(got === "throttled" ? wait("geckoterminal 429") : UPSTREAM);
   }
 
+  /** A pool's OHLCV path, GeckoTerminal's v2 and CoinGecko's on-chain alike (../coingecko.ts). */
+  const barsPath = (pool: string, token: string, tf: Tf, before: number | null): string => {
+    const g = GT_TF[tf as keyof typeof GT_TF];
+    return `/networks/${chain}/pools/${pool}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${token}${before === null ? "" : `&before_timestamp=${before}`}`;
+  };
+  /** A pool's bars from CoinGecko's keyed API (card helper-candles-keyed-gt), held as GeckoTerminal's are; undefined when
+   *  no key is set or it cannot serve the read. */
+  async function keyedBarsOf(pool: string, token: string, tf: Tf, before: number | null, k: string): Promise<Candle[] | undefined> {
+    if (deps.keyed == null) return undefined;
+    const j = await deps.keyed.read(barsPath(pool, token, tf, before), (x) => toCandles(x, tf as keyof typeof GT_TF, 1_000, now()) !== null);
+    if (j === undefined) return undefined;
+    return holdBars(pool, tf, k, toCandles(j, tf as keyof typeof GT_TF, 1_000, now())!, CG_SRC);
+  }
+  /** Bars read (under `k`, and as the pool's newest when they are), from `src`. */
+  function holdBars(pool: string, tf: Tf, k: string, bars: Candle[], src: ChartSrc): Candle[] {
+    const cg: { src?: typeof CG_SRC } = src === CG_SRC ? { src: CG_SRC } : {};
+    tagged(bars, src);
+    if (history.size >= 500) history.delete(history.keys().next().value!);
+    history.set(k, { at: now(), bars, ...cg });
+    const kk = `${pool}:${tf}`;
+    const had = kept.get(kk);
+    if (bars.length > 0 && (had === undefined || bars.at(-1)![0] >= had.bars.at(-1)![0])) {
+      kept.delete(kk);
+      if (kept.size >= 500) kept.delete(kept.keys().next().value!);
+      kept.set(kk, { at: now(), bars, ...cg });
+    }
+    return bars;
+  }
   /** One GeckoTerminal OHLCV read of a pool, its call already taken: the bars (held under `k`, and as the pool's newest
    *  when they are), "throttled" on its 429 (every lane paused for its Retry-After), else "failed". */
   async function readBars(pool: string, token: string, tf: Tf, before: number | null, k: string): Promise<Candle[] | "throttled" | "failed"> {
     try {
-      const g = GT_TF[tf as keyof typeof GT_TF];
-      const url = `${GT_BASE}/networks/${chain}/pools/${pool}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${token}${before === null ? "" : `&before_timestamp=${before}`}`;
+      const url = `${GT_BASE}${barsPath(pool, token, tf, before)}`;
       const r = await doFetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
         await r.body?.cancel();
@@ -2287,16 +2341,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (text.length > ANSWER_MAX) return "failed";
       const bars = toCandles(JSON.parse(text), tf as keyof typeof GT_TF, 1_000, now());
       if (bars === null) return "failed";
-      if (history.size >= 500) history.delete(history.keys().next().value!);
-      history.set(k, { at: now(), bars });
-      const kk = `${pool}:${tf}`;
-      const had = kept.get(kk);
-      if (bars.length > 0 && (had === undefined || bars.at(-1)![0] >= had.bars.at(-1)![0])) {
-        kept.delete(kk);
-        if (kept.size >= 500) kept.delete(kept.keys().next().value!);
-        kept.set(kk, { at: now(), bars });
-      }
-      return bars;
+      return holdBars(pool, tf, k, bars, "geckoterminal");
     } catch {
       return "failed";
     }
@@ -2451,7 +2496,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
      * bars read per range and the top pool of each token our reads find none of, each with its own read time. Newest
      * first within EVM_HANDOVER_MAX bytes; nothing past the bound its reader serves it within.
      */
-    state(): { kept: [string, { at: number; bars: Candle[] }][]; history: [string, { at: number; bars: Candle[] }][]; pools: [string, { id: string | null; at: number }][] } {
+    state(): { kept: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; history: [string, { at: number; bars: Candle[]; src?: typeof CG_SRC }][]; pools: [string, { id: string | null; at: number }][] } {
       const t = now();
       let room = EVM_HANDOVER_MAX;
       const fit = <T>(list: [string, T][]): [string, T][] => {
@@ -2487,8 +2532,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const pairs = (l: unknown[]) => l.every((e) => Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "object" && e[1] !== null);
       if (!pairs(p) || !pairs(k) || !pairs(h)) return false;
       const P = p as [string, { id?: unknown; at?: unknown }][];
-      const K = k as [string, { bars?: unknown; at?: unknown }][];
-      const H = h as [string, { bars?: unknown; at?: unknown }][];
+      const K = k as [string, { bars?: unknown; at?: unknown; src?: unknown }][];
+      const H = h as [string, { bars?: unknown; at?: unknown; src?: unknown }][];
       if (!P.every(([tk, v]) => evmAddress(tk) === tk && (v.id === null || (typeof v.id === "string" && POOL_ID.test(v.id))) && timed(v.at, t, KEPT_HANDOVER_MS))) return false;
       if (!K.every(([key, v]) => barsKey(key, false) && timed(v.at, t, KEPT_HANDOVER_MS) && isBars(v.bars) && v.bars.length > 0)) return false;
       if (!H.every(([key, v]) => barsKey(key, true) && timed(v.at, t, GT_FRESH_MS) && isBars(v.bars))) return false;
@@ -2503,7 +2548,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           const had = map.get(key);
           if (had !== undefined && had.at >= (v.at as number)) continue;
           if (map.size >= 500) map.delete(map.keys().next().value!);
-          map.set(key, { at: v.at as number, bars: v.bars as Candle[] });
+          map.set(key, { at: v.at as number, bars: tagged(v.bars as Candle[], v.src === CG_SRC ? CG_SRC : undefined), ...(v.src === CG_SRC ? { src: CG_SRC } : {}) });
         }
       return true;
     },
@@ -2575,7 +2620,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
-          src = "chain,geckoterminal";
+          src = `chain,${Array.isArray(got) ? srcOf(got) : "geckoterminal"}`;
         }
       }
       const at = e.readAt ?? now();
