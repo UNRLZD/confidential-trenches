@@ -45,6 +45,13 @@ test("a signed-in page renews the stop: on every landing, and when its sign out 
   assert.equal(MAIN.split("quotesSignedIn()").length - 1, 2);
 });
 
+// Delta review P3-5: pool.address hands its stop to the floor read, and the page's floor hands it to the Solana reads,
+// whose fee read names U_X (the read itself: test/pool-deposit-address.test.ts)
+test("the page's floor read passes the stop on to the Solana floor's reads", () => {
+  assert.match(block("const floorFor = async (", "\n  };\n"), /^const floorFor = async \(chain: PoolChain, wallet: string, signal\?: AbortSignal\)[^\n]*\n[^\n]*\n[^\n]*\n {4}return [^\n]*readSolanaPoolFloor\(pair, PAGE_SOL_PIN\.program, wallet, signal\) : null;$/);
+  assert.match(MAIN, /"pool\.address": poolAddressHost\(\{[^\n]*floor: floorFor,/);
+});
+
 const RECORD = { status: { source: "code", code_saved: true }, deposit: { v: 1, scope: "7", index: 3, id: "5d".repeat(32) } } as const;
 const PARAMS = { origin_asset: "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near", amount: "25" };
 /** deposit.quote on `page`'s stop, the records `records()` says, each ask counted; `hang` keeps an ask in flight until
