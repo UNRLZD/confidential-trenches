@@ -4,8 +4,8 @@
     "bad": "SIGN_HOST as served 13 Nov 21:53Z, before this card: read-backs a second apart, every settle asked at every read, the sweep left INCOMING, a sale with a deposit back told filled only at its settle: FAIL, all four marks named"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oSesPbbareAeD/U4feLSUuOC89501dn5ek+QYpa15jI90H6QI/JffqM/pGdZ05qR\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-oSesPbbareAeD/U4feLSUuOC89501dn5ek+QYpa15jI90H6QI/JffqM/pGdZ05qR",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ecBBt91t8JyYEfBoY5v/YxRCNbuWHpqSYTuG/W+QN2WaYWge5gcjFyQtu2rYznob\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-ecBBt91t8JyYEfBoY5v/YxRCNbuWHpqSYTuG/W+QN2WaYWge5gcjFyQtu2rYznob",
     "pace": true,
     "gate": true,
     "follow": true,

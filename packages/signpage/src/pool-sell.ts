@@ -3113,7 +3113,9 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
                 // after its timeout it asks for state, client.ts REASK_STATE); answer() from here on, like the record
                 // state.ops reads, names the end and every signature sent
                 if (result !== null && sentAnswer(answer)) answer = { result };
-                if (result !== null && result.stage !== told) ctx.progress(result.stage);
+                // a sale told filled is never told sent after it (its record's end write failed: the next load writes
+                // filled); any other end is told
+                if (result !== null && result.stage !== told && !(told === "filled" && result.stage === "sent")) ctx.progress(result.stage);
               }
             });
           }).finally(() => stamped(laters, ran?.storeMs ?? TRADE_STORE_MS));

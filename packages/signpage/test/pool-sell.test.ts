@@ -1147,8 +1147,9 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
     assert.equal(swept + under, rest);
     assert.equal(w.c.deposits.length, 1);
     assert.deepEqual(w.c.deposits[0], { pre: preOf(RETURN), value: swept, sweep: true });
-    // the sweep sent, the sell lock free: its note INCOMING until the next state read's settle (review L6)
-    assert.equal((await ours(w.ns)).find((n) => n.ref.kind === RETURN.kind)?.state, "INCOMING");
+    // the sweep sent, the sell lock free for each wait: its note followed to its end in the run (card
+    // trades-and-balance-fast; before it, INCOMING until the next state read's settle, review L6)
+    assert.equal((await ours(w.ns)).find((n) => n.ref.kind === RETURN.kind)?.state, "UNSPENT");
     assert.equal(w.owed.get(W.address)?.passes, 1, "owed until a pass finds nothing left");
     await settle(w);
     assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: swept, leafIndex: BigInt(N) }]);
@@ -4156,7 +4157,9 @@ for (const kept of [false, true]) {
     const afterRun = { stage: opOf("p2", await w.store.get("ops", "p2"))?.stage, held: await held() };
     await loadSettle(w, w.store);
     assert.deepEqual({ stage: opOf("p2", await w.store.get("ops", "p2"))?.stage, held: await held() }, { stage: "filled", held: kept ? [] : ["UNSPENT"] }, `after the run: ${JSON.stringify(afterRun)}`);
-    assert.deepEqual({ ...afterRun, stages }, { stage: "sent", held: kept ? [sig] : ["INCOMING"], stages: ["sent"] });
+    // card trades-and-balance-fast: a sale with its deposit back, landed on both RPCs, is told filled then, and never told
+    // sent after it; its record stays sent until the next load writes filled
+    assert.deepEqual({ ...afterRun, stages }, { stage: "sent", held: kept ? [sig] : ["INCOMING"], stages: [kept ? "sent" : "filled"] });
   });
 }
 
@@ -6364,7 +6367,8 @@ test("round-trip-costs-less P3-e: a W that ended at the floor draws a RETURNING 
   assert.deepEqual(rows.map((r) => [r.address, r.state]), [[W.address, "RETURNING"]], "a W at the floor: its row");
   const swept = await soldElsewhere(ENOUGH);
   await resumeRentBacks(swept.w.host, fakeLocks());
-  assert.equal(returningWallets([...swept.w.owed.values()], price, await swept.w.ns.list()).length, 1, "a W whose sweep is on its way: listed");
+  // card trades-and-balance-fast: the pass follows its sweep's note to UNSPENT, so the balance counts it and no row does
+  assert.equal(returningWallets([...swept.w.owed.values()], price, await swept.w.ns.list()).length, 0, "a W whose sweep's note is counted: no row, never counted twice");
 });
 
 // Card every-lamport-can-move T3: a tap's pass over the leftover Ws carries the ride (resumeRentBacks' `ride`): a W
