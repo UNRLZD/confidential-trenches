@@ -538,7 +538,7 @@ test("the EVM buy's host on the testnet page: a sign out reaches its run (the fo
   assert.equal(a.signal?.aborted, true, "signed out: the run's reads end");
 });
 
-test("a state read follows a buy whose tab ended before its end, from its pending record: past its deadline with no release on either RPC's safe block, removed (the pending end's dead-tab rule)", { timeout: 60_000 }, async () => {
+test("a state read follows a buy whose tab ended before its end, from its pending record: past its deadline with no release on either RPC's final block, removed (the pending end's dead-tab rule)", { timeout: 60_000 }, async () => {
   const { w } = await wallet();
   const W = "0x" + "4b".repeat(20);
   const deadlineMs = BigInt(Date.now()) - 60_000n;
@@ -546,7 +546,7 @@ test("a state read follows a buy whose tab ended before its end, from its pendin
   const pending = { mint: SEPOLIA_USDC, decimals: 6, chain: "base", state: "pending", route: { venue: "uniswap-v3", adapter: "0x" + "22".repeat(20), path: { venue: "uniswap-v3", tokens: [], fees: [] } }, buy };
   await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: pending }));
   const asked: string[] = [];
-  // two pool RPCs whose newest and safe blocks are past the deadline, with no release of the nullifier
+  // two pool RPCs whose newest and final blocks are past the deadline, with no release of the nullifier
   const rpcs = (): readonly EvmRpc[] =>
     ["https://a.example", "https://b.example"].map((url) =>
       Object.assign(
@@ -570,7 +570,7 @@ test("a state read follows a buy whose tab ended before its end, from its pendin
   await t.stateRead();
   for (let i = 0; i < 400 && ((await w.get("meta", EVM_POSITION_COSTS_KEY)) as Record<string, unknown>)[W] !== undefined; i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(await w.get("meta", EVM_POSITION_COSTS_KEY), {}, "never landed: removed, so the note can buy again");
-  assert.ok(asked.includes("eth_getBlockByNumber safe"), "judged on the safe block");
+  assert.ok(asked.includes("eth_getBlockByNumber finalized") && !asked.includes("eth_getBlockByNumber safe"), "judged on the final block");
   await t.signedOut();
 });
 
