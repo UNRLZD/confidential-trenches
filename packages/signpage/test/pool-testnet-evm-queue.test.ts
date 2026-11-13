@@ -1416,3 +1416,68 @@ test("the pool index syncs once a sign-in, after the state read's proof pass end
     await t.signedOut();
   }
 });
+
+// Card signpage-evm-reads-draw-no-refusal: two tabs signed in at once each synced the whole cold index (release 130,
+// Chrome CDP capture 13 Nov: two pages' Robinhood index reads at 29.1 s each, one answered 429). One sync a chain on the
+// device at once (the Web Lock ct-evm-index/{chain}): the tab that finds it held syncs none, and at its next state
+// read after the other ends syncs on from the index the other kept.
+test("the pool index syncs in one tab at a time: a second tab syncs none while the first does, then on from its kept index", async () => {
+  const { w, ns } = await wallet();
+  await landed(ns);
+  evmPoolIndexReset();
+  const PM = evmPoolVenues()["base-sepolia"].poolManager!;
+  const ix = (through: number) => ({ v: 1, chainId: 84532, poolManager: PM, from: 1, through, head: { number: through, hash: "0x" + "0".repeat(64) }, spans: [[1, through]], pools: [] });
+  const stats = { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 };
+  // the device's one index store, both tabs'
+  const kept = new Map<string, unknown>();
+  const calls: { tab: string; prev: number | null }[] = [];
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const tab = (name: string) => {
+    const o = { now: 1_800_000_000_000 + 20_000 };
+    const tt = turnTimers(o);
+    return testnetPool({ ...page(w), held: async () => w }, {
+      prover: { vault: signalsProver(), stop: () => {} },
+      evmPin: (c: string) => (c === "base" ? PIN : undefined),
+      evmRpcs: unread,
+      evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+      evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+      evmHelper: (c: string) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+      evmTurn: tt.evmTurn,
+      locks: navigator.locks,
+      evmIndexStore: { get: async (c: string) => (kept.get(c) ?? null) as never, put: async (c: string, i: unknown) => void kept.set(c, i) },
+      evmIndexSync: async (_chain: string, prev: { through: number } | null) => {
+        calls.push({ tab: name, prev: prev?.through ?? null });
+        // tab A's cold sync runs until the test lets it end
+        if (name === "a") await held;
+        const n = (prev?.through ?? 0) + 10;
+        return { index: ix(n), coversThrough: n + 4, pools: [], error: null, stats };
+      },
+    } as unknown as Parameters<typeof testnetPool>[1]);
+  };
+  const settle = async () => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  const a = tab("a");
+  const b = tab("b");
+  try {
+    await a.stateRead();
+    await settle();
+    await b.stateRead();
+    await settle();
+    assert.deepEqual(calls, [{ tab: "a", prev: null }], "the second tab syncs none while the first holds the chain's sync");
+    release();
+    await settle();
+    assert.equal((kept.get("base-sepolia") as { through: number } | undefined)?.through, 10, "the first tab's whole sync is kept");
+    // the kit's served index is each tab's own (one module in this process stands for both)
+    evmPoolIndexReset();
+    await b.stateRead();
+    await settle();
+    assert.deepEqual(calls.at(-1), { tab: "b", prev: 10 }, "the second tab then syncs on from the index the first kept");
+  } finally {
+    release();
+    evmPoolIndexReset();
+    await a.signedOut();
+    await b.signedOut();
+  }
+});

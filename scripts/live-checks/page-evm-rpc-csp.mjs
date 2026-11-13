@@ -31,12 +31,16 @@ function urlsIn(v, out = []) {
   return out;
 }
 
-/** The origins of every provider in the kit's EVM venues, in the list's order, each once. */
+/** Our helper's origin: every page's connect-src names it as the page's own server, apart from the providers. */
+export const HELPER_ORIGIN = "https://ct-api.unrealized.trade";
+
+/** The origins of every provider in the kit's EVM venues, in the list's order, each once; the helper's keyed route, which
+ *  Robinhood's index reads second (card signpage-evm-reads-draw-no-refusal), is HELPER_ORIGIN, named apart. */
 export function evmOrigins(venues = evmPoolVenues()) {
   const seen = [];
   for (const chain of Object.keys(venues)) for (const u of urlsIn(venues[chain])) {
     const o = new URL(u).origin;
-    if (!seen.includes(o)) seen.push(o);
+    if (o !== HELPER_ORIGIN && !seen.includes(o)) seen.push(o);
   }
   return seen;
 }

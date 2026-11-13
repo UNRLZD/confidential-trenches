@@ -403,3 +403,23 @@ test("tiers (card buy-spends-several-pieces): tap_max is the most of the largest
   assert.equal(after.ready, "15");
   assert.equal(after.tap_max, "9.999999");
 });
+
+test("solanaTapSpendOf at the tap's own tip (card max-is-what-you-hold-after-a-trade): the most the buy funds at that tip, 0 when it is over a piece's tip cap, the cap's bound without one", () => {
+  const rent: SolanaRent = { lamportsPerByte: 5_080n, factor: 1n };
+  const fee = solanaPoolFee(rent);
+  // the owner's three pieces on one W of 13 Nov 18:23Z
+  const pieces = [5_547_107n, 3_502_518n, 5_000_000n].map((chunk) => ({ chunk, feeCap: fee, tipCap: SOL_TIP_CAP }));
+  const asks: number[] = [];
+  const tipOf = (k: number): bigint => (asks.push(k), 100_000n);
+  const at = solanaTapSpendOf(rent, SOLANA_POOL_WORST_BUY_VENUE, tipOf)(pieces);
+  assert.deepEqual(asks, [3], "the tip of a set of three pieces");
+  assert.equal(at, 2_734_505n);
+  const release = pieces.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.feeCap }) as SolanaPoolRelease);
+  const funds = (spend: bigint) => solanaPoolBuyFunds(release, SOLANA_POOL_WORST_BUY_VENUE, { spend, tip: 100_000n }, rent).problem;
+  assert.equal(funds(at), null);
+  assert.notEqual(funds(at + 1n), null);
+  // without a tap's tip: the tip cap's bound, 900,000 less
+  assert.equal(solanaTapSpendOf(rent)(pieces), at - 900_000n);
+  // a tip over a piece's cap: the tag 3 refuses it, so no spend
+  assert.equal(solanaTapSpendOf(rent, SOLANA_POOL_WORST_BUY_VENUE, () => SOL_TIP_CAP + 1n)(pieces), 0n);
+});

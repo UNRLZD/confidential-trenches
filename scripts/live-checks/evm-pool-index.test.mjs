@@ -1,7 +1,9 @@
-// Replays evm-pool-index.answers.json through the live check: `good`, a real run on this card's kit (2026-11-08 from
-// this Mac), passes; `bad`, the same script run in a checkout of the kit before this card (fb2c25cf, no index in the
-// venue list), fails; and the good run with one thing changed fails: the readers' block N differs (no pin), one reader
-// misses a pool, a span answered without its last block, two readers of one operator, a reader of ours, another margin.
+// Replays evm-pool-index.answers.json through the live check: `good`, a real run on the kit of card
+// signpage-evm-reads-draw-no-refusal (Robinhood's own and the helper's keyed route, 500,000-block spans; 2026-11-13
+// from this Mac), passes; `bad`, the run on the kit before it (2026-11-08, Robinhood's own and Pocket in 10,000-block
+// spans, the reads release 130's page drew 429s on), fails; and the good run with one thing changed fails: no index,
+// the readers' block N differs (no pin), one reader misses a pool, a span answered without its last block, two readers
+// of one operator, a reader of ours that is not the helper's keyed route second, another span, another margin.
 // The read itself, replayed from the good run: a reader one block behind on a span, then caught up, PASSES (asked
 // again, as the index asks it); one that stays behind past TRIES FAILS; a receipt answered null or with a rate limit
 // once, then present, PASSES (reviews 3 and 4), one null past TRIES FAILS, and any other answer is final and FAILS; the
@@ -29,9 +31,8 @@ test("the recorded good run passes", () => {
   assert.equal(v.pass, true, v.lines.filter((l) => l.startsWith("BAD")).join("\n"));
 });
 
-test("the recorded bad run, the kit before this card, fails: no index", () => {
-  bad(A.bad, /base: the kit's venue lists no index/);
-  bad(A.bad, /robinhood: the kit's venue lists no index/);
+test("the recorded bad run, the kit before this card, fails: Robinhood's 10,000-block spans on Pocket", () => {
+  bad(A.bad, /robinhood: span 10000 \(the card's 500000\)/);
 });
 
 test("the good run with one thing changed fails", () => {
@@ -40,7 +41,11 @@ test("the good run with one thing changed fails", () => {
     bad(changed((r) => r.chains[chain].spans[1].on[1].ids.pop()), new RegExp(`${chain} .*pools on both`));
     bad(changed((r) => (r.chains[chain].spans[2].on[0].last = null)), new RegExp(`${chain} .*with its last block in the same batch`));
     bad(changed((r) => (r.chains[chain].index.readers[1] = r.chains[chain].index.readers[0].replace("://", "://other."))), new RegExp(`${chain}: two index readers on two operators`));
+    bad(changed((r) => (r.chains[chain].index = null)), new RegExp(`${chain}: the kit's venue lists no index`));
     bad(changed((r) => (r.chains[chain].index.readers[1] = "https://ct-api.unrealized.trade")), new RegExp(`${chain}: no reader is ours`));
+    bad(changed((r) => (r.chains[chain].index.readers[1] = `https://ct-api.unrealized.trade/v1/rpc/${chain}`)), new RegExp(`${chain}: no reader is ours`));
+    bad(changed((r) => (r.chains[chain].index.readers = [`https://ct-api.unrealized.trade/v1/rpc/${chain}?keyed=only`, "https://rpc.example.org"])), new RegExp(`${chain}: no reader is ours`));
+    bad(changed((r) => (r.chains[chain].index.span = 20_000)), new RegExp(`${chain}: span 20000`));
     bad(changed((r) => (r.chains[chain].index.margin = 0)), new RegExp(`${chain}: span .*margin 0`));
     bad(changed((r) => (r.chains[chain].heads[1] = r.chains[chain].heads[0] + 50_000)), new RegExp(`${chain}: the two heads 50000 blocks apart`));
     const s = A.good.chains[chain].spans.findIndex((x) => x.on[0].ids.length > 0);
@@ -69,8 +74,10 @@ function replayFetch(run, behind = () => false, odd = () => undefined) {
       batches.push(body.length);
       return res(body.map((q) => {
         const tx = q.params[0];
-        const s = c.spans.find((x) => x.txs?.includes(tx));
-        const k = s.txs.indexOf(tx);
+        // the request's id is the receipt's place among the span's firsts (readReceipts), so one transaction that made
+        // several pools (the 13 Nov run's Robinhood span) answers each of them
+        const s = c.spans.find((x) => x.txs?.[q.id] === tx);
+        const k = q.id;
         const rc = s.receipts[r][k];
         const o = odd(url, tx);
         if (o !== undefined) return { jsonrpc: "2.0", id: q.id, ...o };
