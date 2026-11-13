@@ -3816,7 +3816,13 @@ test("L4 B4: a kept account's data changes on both RPCs, its lamports the same: 
   assert.equal(w.told.at(-1)?.state, "sent", JSON.stringify(w.told.slice(-2)));
   await settle(w);
   const loaded = loadedOf(w);
-  await resumeRentBacks(loaded, fakeLocks());
+  // card pool-amounts-are-standard-sizes: W's rest past each sweep's rung goes in rungs, a load at a time, until what is
+  // left is under the floor with the kept account's keep: that pass ends floor, its seen kept
+  for (let i = 0; i < 6 && typeof w.owed.get(W.address)?.seen !== "string"; i++) {
+    await resumeRentBacks(loaded, fakeLocks());
+    await settle(w);
+  }
+  assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.slice(-2)));
   assert.equal(typeof w.owed.get(W.address)?.seen, "string");
   const told = w.told.length;
   await resumeRentBacks(loaded, fakeLocks());
@@ -3900,9 +3906,10 @@ test("L3: a floor end keeps what W read as only when W stays under the floor at 
   // card every-lamport-can-move: the sweep's least note is SOL_NOTE_FLOOR (over solanaSweepFloor at this rent)
   const floor = SOL_NOTE_FLOOR;
   assert.ok(floor >= solanaSweepFloor(rent));
-  // over the floor by 1,000 at the mark's rent alone, under it once the pages' growth is paid
+  // over the floor by 1,000 at the mark's rent alone, under it once the pages' growth is paid; past the rung W keeps
+  // the sweep's stay (card pool-amounts-are-standard-sizes: a rung leaves W 0 or rent-exempt)
   const acc = w.c.accounts.get(W.address)!;
-  w.c.accounts.set(W.address, { ...acc, lamports: Number(floor + BigInt(FEE) + rentMin(17) + solanaSweepKeep(rent, 0) + 1_000n) });
+  w.c.accounts.set(W.address, { ...acc, lamports: Number(floor + solanaSweepStay(rent, 0n) + BigInt(FEE) + rentMin(17) + solanaSweepKeep(rent, 0) + 1_000n) });
   await resumeRentBacks(loaded, fakeLocks());
   assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.slice(-2)));
   assert.equal(w.owed.get(W.address)?.seen, undefined);
