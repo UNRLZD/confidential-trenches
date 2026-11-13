@@ -15,8 +15,10 @@
 //   node scripts/live-checks/app-list-age.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
 //     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name, every helper read recorded; with
 //     --helper-live the served run's helper reads are the live helper's
-// Discover reads Solana's, Base's and Robinhood's lists (card app-chains-evm) and dates them by the oldest read it drew,
-// so a run's lists date is the oldest as_of_ms of the last answer of each chain that was that chain's own snapshot.
+// Discover reads every chain's lists (card app-chains-evm) and, under All, dates them by the newest read it drew
+// (apps/terminal/src/screens/discover/data.ts mergeLists, card app-faults-seen-on-122: one slow chain aged the whole
+// page's stamp), so a run's lists date is the newest as_of_ms of the last answer of each chain that was that chain's
+// own snapshot. Each chain's date is recorded (lists.dates) and the verdict takes the newest of them.
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
@@ -61,7 +63,8 @@ export function judge(rec) {
     const bad = [];
     if (r.framed !== true) bad.push("not inside SIGN_HOST's shell");
     if (r.state !== "ready") bad.push(`Discover is ${r.state ?? "not drawn"}, not ready`);
-    const asOf = r.lists?.asOfMs;
+    const dates = Object.values(r.lists?.dates ?? {}).filter((d) => typeof d === "number");
+    const asOf = dates.length ? Math.max(...dates) : r.lists?.asOfMs;
     let ok = [];
     if (!(typeof asOf === "number")) bad.push("the page read no dated lists answer");
     else {
@@ -124,14 +127,15 @@ async function runOne(browser, w, kind, shots, route) {
     run.readAtMs = Date.now();
     if (last.size) {
       // Discover draws a chain's lists only from a 200 that is that chain's snapshot (data.ts readChainLists); the
-      // status kept is Solana's, the date the oldest drawn chain's
-      const dates = [];
+      // status kept is Solana's, the date the newest drawn chain's (data.ts mergeLists)
+      const dates = {};
       for (const [chain, r] of last) {
         const body = r.status() === 200 ? await r.json().catch(() => null) : null;
-        if (body?.chain === chain && typeof body.as_of_ms === "number") dates.push(body.as_of_ms);
+        if (body?.chain === chain && typeof body.as_of_ms === "number") dates[chain] = body.as_of_ms;
       }
       const sol = last.get("solana") ?? [...last.values()][0];
-      run.lists = { status: sol.status(), asOfMs: dates.length ? Math.min(...dates) : null };
+      const all = Object.values(dates);
+      run.lists = { status: sol.status(), asOfMs: all.length ? Math.max(...all) : null, dates };
     }
     run.shot = `${w.name}-${kind}.png`;
     await page.screenshot({ path: path.join(shots, run.shot) });

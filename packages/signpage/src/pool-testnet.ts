@@ -70,7 +70,7 @@ import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHolding
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
-import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
+import { evmSettleOpen, evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import type { LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { spendOwner } from "./pool-spend.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
@@ -860,17 +860,32 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   // the deposit ends' reads after a run (pool-deposit-sent-end): stopped when the page leaves the deposit (sign out)
   let follows = new AbortController();
-  const signedOut = async (): Promise<void> => {
-    stopTurn();
+  // A sign out's stops, this tab's (signingOut, at its tap) and another tab's (signedOut alone, as main.ts hears it) alike
+  // (card sign-out-stops-the-pages-reads: another tab's sign out left the EVM reads bound to evmStop and signOuts running):
+  // the buy records' rebuild, the late buys, the turn pass, every read waiting for its turn on a host (card
+  // signpage-passes-yield-to-a-trade), every Solana settle, and every EVM read on evmStop or the sign-out count. The
+  // page's gate (nothing more sent past the page's origin) is main.ts's: it closes it once the store's sign out holds the
+  // seed lock, or at another tab's, and the page then reloads
+  function stopReads(): void {
     buyRecords.stop();
-    clears++;
-    // every read waiting for its turn on a host ends (card signpage-passes-yield-to-a-trade)
+    lateBuys.clear();
+    stopTurn();
     stopHostLaneWaits();
+    signOuts++;
+    stopSolana();
+    evmStop.abort();
+    evmStop = new AbortController();
+  }
+  const signedOut = async (): Promise<void> => {
+    stopReads();
+    clears++;
     positions.clear();
     for (const c of evmPositionsCaches.values()) c?.clear();
     evmHolds.clear();
     evmShownGen.clear();
     evmRearmed.clear();
+    // the decimals this account's buys read: never the next account's
+    boughtDecimals.clear();
     awaited.clear();
     follows.abort();
     follows = new AbortController();
@@ -878,7 +893,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     fillStop.abort();
     fillStop = new AbortController();
     fillAgain = false;
-    stopSolana();
     // every queue, Solana's and each EVM pool's: its notes freed, its seed copy zeroed, its note store closed
     const all = [open, ...evmQueues.values()];
     open = null;
@@ -1262,9 +1276,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const settleEvmOpen = async (): Promise<void> => {
     await Promise.all((await evmOpen()).map(settleEvm));
   };
-  // an EVM pool's RESERVED notes settled (../../wallet/src/pool/evm-settle.ts evmSettleReserved: spent with its change
-  // once both RPCs show the release final, freed once both RPCs' final block time is past the deadline with none, else
-  // held), on the chain's sync, under the seed's shared lock as the Solana pass; a freed note or a change written is
+  // an EVM pool's RESERVED and unfinal notes settled (../../wallet/src/pool/evm-settle.ts evmSettleReserved: spent with
+  // its change once the newest block both RPCs agree on shows the release, freed once that block's time is past the
+  // deadline with none, backed out when a reorg drops a leaf, else held), on the chain's sync, under the seed's shared lock as the Solana pass; a freed note or a change written is
   // proved by the queue's next pass. One pass per chain at a time: a state read during one joins it. A sign out stops
   // it (signingOut): its lock wait and its round end at once, and it writes nothing after. No Web Locks: no pass.
   let evmStop = new AbortController();
@@ -1281,6 +1295,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const notes = await openNoteStore(await page.store());
       let seed64: Uint8Array | null = null;
       try {
+        // the wallet's own rule for when a pass reads (a RESERVED note, a note in the store's tail, or one a reorg backed
+        // out): nothing open, no seed read and no round (card evm-money-shows-and-spends-at-once)
+        if (!evmSettleOpen(await notes.list(), await notes.landings(), e.scope)) return;
         seed64 = await page.seed64();
         // a pass: each round of the deposit's sync starts once no trade holds the list's hosts
         const pass = await evmSettleReserved({ seed64, notes, scope: e.scope, round: async (s) => (await passTurn(e.list, s), e.sync.events(s)), signal });
@@ -1305,7 +1322,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return p;
   };
   // a state read's EVM part: its INCOMING notes, then per pinned chain, each beside the other, its queue's pass (one at
-  // a time per chain) while the queue is open or the chain's notes are landed, and its RESERVED notes' settle
+  // a time per chain) while the queue is open or the chain's notes are landed, and its settle (RESERVED and unfinal notes)
   const evmPassing = new Map<"base" | "robinhood", Promise<unknown>>();
   // a read that finds the chain's pass running asks for one more after it (one, never a queue): that pass began before
   // what woke the read (a withdraw's kept-out record, any tab's) and read the queue's skip before it, so only a pass
@@ -1336,7 +1353,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
         // a sign out since the read began: no pass, and the settle stops on its signal
         if (!stop.aborted && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD"))) evmPass(chain, stop);
-        if (mine.some((n) => n.state === "RESERVED")) await reserveEvm(chain, stop).catch(() => {});
+        // the settle on every chain holding a note of the scope: it reads a round only while the wallet's rule finds one
+        // open (evmSettleOpen), so a reorg that drops a fresh deposit or a release after its change was written is
+        // healed with nothing RESERVED (card evm-money-shows-and-spends-at-once, review G)
+        if (mine.length > 0) await reserveEvm(chain, stop).catch(() => {});
       }),
     );
   };
@@ -2825,16 +2845,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return { ready, value, open: ids, landed: await landed(), making };
     },
     watch: (fn) => void watchers.add(fn),
-    signingOut: () => {
-      buyRecords.stop();
-      lateBuys.clear();
-      stopTurn();
-      stopHostLaneWaits();
-      signOuts++;
-      stopSolana();
-      evmStop.abort();
-      evmStop = new AbortController();
-    },
+    signingOut: stopReads,
     signedOut,
     // the session's sign out: aborted at the next one (this tab's or another's), as every Solana settle's stop
     outSignal: () => solanaStop.signal,

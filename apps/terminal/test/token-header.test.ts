@@ -2,7 +2,7 @@
 //   node --test apps/terminal/test/token-header.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { copyText, readWatch, shareHref, toggleWatch, tokenLinks, WATCH_KEY } from "../src/screens/token/model.ts";
+import { copyText, LINK_MARK, readWatch, shareHref, toggleWatch, tokenLinks, WATCH_KEY } from "../src/screens/token/model.ts";
 
 test("link icons only where data exists: Search on X by the address and the chain's explorer, never a website, X account or Telegram the row does not carry", () => {
   const mint = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
@@ -83,4 +83,13 @@ test("the token's own links are drawn when the helper's read carries them, each 
   assert.deepEqual(socialLinks({ site: "javascript:alert(1)", x: "https://evil.example/x.com", telegram: "https://t.me.evil.example/a" }), {});
   for (const bad of ["data:text/html,<b>", "https://127.0.0.1/", "https://u:p@a.b/", `https://a.b/${"x".repeat(300)}`, 5, null]) assert.deepEqual(socialLinks({ site: bad }), {});
   assert.deepEqual(socialLinks("not an object"), {});
+});
+
+test("each link kind draws its own mark (owner 13 Nov: the site, X and the explorer drew one chain-link icon, three alike in a row)", () => {
+  const marks = Object.values(LINK_MARK);
+  assert.equal(new Set(marks).size, marks.length);
+  const mint = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
+  const social = { site: "https://jup.ag", x: "https://x.com/JupiterExchange", telegram: "https://t.me/jup" };
+  assert.deepEqual(tokenLinks("solana", mint, social, "pump.fun").map((l) => LINK_MARK[l.id]), ["web", "x", "telegram", "pad", "explorer"]);
+  assert.deepEqual(tokenLinks("solana", mint).map((l) => LINK_MARK[l.id]), ["search", "explorer"]);
 });

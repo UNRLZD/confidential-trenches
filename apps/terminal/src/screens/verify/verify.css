@@ -83,3 +83,11 @@
   .vfy-x { width: 44px; height: 44px; border-radius: 14px; background: #181818; }
   .vfy .vrow { height: 54px; }
 }
+
+/* Motion, UNRLZD's (the drawer as AccountPanel.module.css's, the phone page as mobile/PushPage.module.css's): the scrim
+   fades in 150 ms, the panel slides in from the right 260 ms on --ease-drawer. Transform and opacity only. */
+.vfy-scrim { animation: vfy-fade 150ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.vfy-box { animation: vfy-in 260ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+@keyframes vfy-fade { from { opacity: 0; } }
+@keyframes vfy-in { from { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .vfy-scrim, .vfy-box { animation: none; } }

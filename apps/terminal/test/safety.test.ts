@@ -43,7 +43,7 @@ test("every label is a word of the owner's lists; only Honeypot is a draft, and 
     if (c.word) assert.ok(WORDS[c.word].text.length > 0);
   }
   assert.deepEqual(DRAFTS.filter((id) => ["top10", "dev", "snipers", "holders", "liq", "age", "insiders", "tax", "mintAuth", "freezeAuth", "lp", "lpCurve", "honeypot"].includes(id)), ["honeypot"]);
-  assert.deepEqual(["top10", "dev", "snipers", "holders", "liq", "age", "insiders", "tax", "mintAuth", "freezeAuth", "lp", "lpCurve", "honeypot"].map((id) => WORDS[id as keyof typeof WORDS].text), ["Top 10 %", "Dev %", "Snipers %", "Holders", "Liq", "Age", "Insiders", "Tax", "Mint auth", "Freeze auth", "LP", "Curve", "Honeypot"]);
+  assert.deepEqual(["top10", "dev", "snipers", "holders", "liq", "age", "insiders", "tax", "mintAuth", "freezeAuth", "lp", "lpCurve", "honeypot"].map((id) => WORDS[id as keyof typeof WORDS].text), ["Top 10", "Dev", "Snipers", "Holders", "Liq", "Age", "Insiders", "Tax", "Mint auth", "Freeze auth", "LP", "Curve", "Honeypot"]);
 });
 
 test("shares as R5's pctS draws them: one place under 10%, whole above, a trace, all of it", () => {
@@ -79,8 +79,10 @@ test("verdicts: amber at the line, coral at one and a half times it (VN-10), for
 test("the authorities and honeypot: present is a coral cross, gone a check, unread the dash", () => {
   assert.deepEqual([cell("mintAuth", { mint_auth: false }).icon, cell("mintAuth", { mint_auth: false }).tone], ["check", "plain"]);
   assert.deepEqual([cell("freezeAuth", { freeze_auth: true }).icon, cell("freezeAuth", { freeze_auth: true }).tone], ["x", "bad"]);
+  // unread in the row and in the token read: the dash
+  const noAuth = { ...risk, mint_auth: undefined, freeze_auth: undefined };
   for (const v of [null, undefined, "yes", 0]) {
-    const c = cell("mintAuth", { mint_auth: v as never });
+    const c = cell("mintAuth", { mint_auth: v as never }, noAuth);
     assert.deepEqual([c.text, c.icon, c.tone], ["—", null, "unknown"], String(v));
   }
   assert.deepEqual([cell("honeypot", {}, { honeypot: f(true) }).icon, cell("honeypot", {}, { honeypot: f(true) }).tone], ["x", "bad"]);
@@ -123,4 +125,21 @@ test("the token read's risk part reaches the page: loadToken keeps it beside the
   const e = await source.loadToken("solana", row.token, ask(bare));
   assert.equal(e.status, "ready");
   assert.equal(e.status === "ready" && "risk" in e, false);
+});
+
+test("a field the row leaves unread is the token read's own risk value for it (UNRLZD parity, owner 12 Nov)", () => {
+  // the row has no authority read; the token read has it from chain: the cell draws the token read's
+  assert.deepEqual([cell("mintAuth", { mint_auth: null }).icon, cell("mintAuth", { mint_auth: null }).tone], ["x", "bad"]);
+  assert.deepEqual([cell("freezeAuth", { freeze_auth: null }, { ...risk, freeze_auth: f(false) }).icon], ["check"]);
+  // the row's own value wins over the token read's
+  assert.equal(cell("mintAuth", { mint_auth: false }).icon, "check");
+  // a share the row leaves null: the token read's, else the dash
+  assert.equal(cell("dev", { dev_bps: null }, { ...risk, dev_bps: f(0) }).text, pct(0));
+  assert.equal(cell("dev", { dev_bps: null }, { ...risk, dev_bps: f(null) }).text, "—");
+  assert.equal(cell("top10", { top10_bps: null }).text, "23%");
+  // holders, liquidity and age the same way; age from the read's age_s against now
+  assert.equal(cell("holders", { holders: null }).text, cell("holders").text);
+  assert.equal(cell("liq", { liq_usd: null }).text, cell("liq", { liq_usd: "561882.088225" }).text);
+  assert.equal(cell("age", { created_s: null }, { ...risk, age_s: f(3600) }).text, cell("age", { created_s: Math.floor(NOW / 1000) - 3600 }).text);
+  assert.equal(cell("age", { created_s: null }, { ...risk, age_s: undefined }).text, "—");
 });

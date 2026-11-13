@@ -53,6 +53,14 @@ export function WithdrawProgress({ onDeposit }: { onDeposit(): void }) {
   const first = current(watch, ops, clock());
   const now = useNow(clock, first?.view === "S12.12");
   const shown = current(watch, ops, now);
+  // Escape closes the one drawn, as its close does (UNRLZD's sheets close on Escape)
+  const shownId = shown?.op.id ?? null;
+  useEffect(() => {
+    if (shownId === null) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setWatch((w) => close(w, shownId));
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [shownId]);
   if (!shown) return null;
 
   const { op, view, counter } = shown;

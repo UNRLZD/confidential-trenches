@@ -1,0 +1,273 @@
+{
+ "note": "recorded 2026-11-12T21:19:31.249Z: bad is SIGN_HOST as deployed then (before this card: no head rule) with the two mainnet pool pairs read live; good is the same chain reads with this branch's signing page build (build-app.mjs --out)",
+ "good": {
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-O0o6CUSYnqls1dbPBxLnBK7a/cdKWgKIJ2NuizReH1enqQMdAE1QMxR9zowjBPUa\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-O0o6CUSYnqls1dbPBxLnBK7a/cdKWgKIJ2NuizReH1enqQMdAE1QMxR9zowjBPUa",
+   "finalKey": true,
+   "guard": true
+  },
+  "at": 1794518371249,
+  "chains": {
+   "base": {
+    "chainId": [
+     {
+      "result": "0x2105"
+     },
+     {
+      "result": "0x2105"
+     }
+    ],
+    "tries": [
+     {
+      "newest": [
+       {
+        "result": {
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
+        }
+       },
+       {
+        "result": {
+         "number": "0x36041db",
+         "hash": "0x0d46b978ecda87a9e40fc8a65940ac40ae046fa5210a390bd2b2e011f174e072",
+         "timestamp": "0x6af62d60"
+        }
+       }
+      ],
+      "byNumber": [
+       {
+        "result": {
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
+        }
+       },
+       {
+        "result": {
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
+        }
+       }
+      ]
+     }
+    ],
+    "finalized": [
+     {
+      "result": {
+       "number": "0x36027ee",
+       "hash": "0x71a5f4a0885329f47896d79367c94382ebefe546f5354818cac8fcac7fd95438",
+       "timestamp": "0x6af62830"
+      }
+     },
+     {
+      "result": {
+       "number": "0x3602f11",
+       "hash": "0xe8ddc5496382063f0f4b9c2c46555f070dcf9dd849dd69adfbd4af73f1c235ac",
+       "timestamp": "0x6af6299e"
+      }
+     }
+    ]
+   },
+   "robinhood": {
+    "chainId": [
+     {
+      "result": "0x1237"
+     },
+     {
+      "result": "0x1237"
+     }
+    ],
+    "tries": [
+     {
+      "newest": [
+       {
+        "result": {
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
+        }
+       },
+       {
+        "result": {
+         "number": "0x6b9c1a3",
+         "hash": "0xe16ffeaa398dcaa54d15e95160a4f7d17460bcbad6618250dfdcfba51a04bc8a",
+         "timestamp": "0x6af62d62"
+        }
+       }
+      ],
+      "byNumber": [
+       {
+        "result": {
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
+        }
+       },
+       {
+        "result": {
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
+        }
+       }
+      ]
+     }
+    ],
+    "finalized": [
+     {
+      "result": {
+       "number": "0x6b99ee9",
+       "hash": "0x04ffb6b109e294cdb2162d1dbce032afebe59935e654844760cea3160a287d6d",
+       "timestamp": "0x6af629c5"
+      }
+     },
+     {
+      "result": {
+       "number": "0x6b99ee9",
+       "hash": "0x04ffb6b109e294cdb2162d1dbce032afebe59935e654844760cea3160a287d6d",
+       "timestamp": "0x6af629c5"
+      }
+     }
+    ]
+   }
+  }
+ },
+ "bad": {
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MXtxRQ69yMzIwXstvbHh6uFRsGMpLRvRwGrrOBZL/HOsGOUCrvjyD/72JuWZKdU7\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-MXtxRQ69yMzIwXstvbHh6uFRsGMpLRvRwGrrOBZL/HOsGOUCrvjyD/72JuWZKdU7",
+   "finalKey": false,
+   "guard": false
+  },
+  "at": 1794518371249,
+  "chains": {
+   "base": {
+    "chainId": [
+     {
+      "result": "0x2105"
+     },
+     {
+      "result": "0x2105"
+     }
+    ],
+    "tries": [
+     {
+      "newest": [
+       {
+        "result": {
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
+        }
+       },
+       {
+        "result": {
+         "number": "0x36041db",
+         "hash": "0x0d46b978ecda87a9e40fc8a65940ac40ae046fa5210a390bd2b2e011f174e072",
+         "timestamp": "0x6af62d60"
+        }
+       }
+      ],
+      "byNumber": [
+       {
+        "result": {
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
+        }
+       },
+       {
+        "result": {
+         "number": "0x36041d8",
+         "hash": "0x9a24522c915450cef5da33b1f0206f800c71f291314532288af166a6e84f1477",
+         "timestamp": "0x6af62d5f"
+        }
+       }
+      ]
+     }
+    ],
+    "finalized": [
+     {
+      "result": {
+       "number": "0x36027ee",
+       "hash": "0x71a5f4a0885329f47896d79367c94382ebefe546f5354818cac8fcac7fd95438",
+       "timestamp": "0x6af62830"
+      }
+     },
+     {
+      "result": {
+       "number": "0x3602f11",
+       "hash": "0xe8ddc5496382063f0f4b9c2c46555f070dcf9dd849dd69adfbd4af73f1c235ac",
+       "timestamp": "0x6af6299e"
+      }
+     }
+    ]
+   },
+   "robinhood": {
+    "chainId": [
+     {
+      "result": "0x1237"
+     },
+     {
+      "result": "0x1237"
+     }
+    ],
+    "tries": [
+     {
+      "newest": [
+       {
+        "result": {
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
+        }
+       },
+       {
+        "result": {
+         "number": "0x6b9c1a3",
+         "hash": "0xe16ffeaa398dcaa54d15e95160a4f7d17460bcbad6618250dfdcfba51a04bc8a",
+         "timestamp": "0x6af62d62"
+        }
+       }
+      ],
+      "byNumber": [
+       {
+        "result": {
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
+        }
+       },
+       {
+        "result": {
+         "number": "0x6b9c19d",
+         "hash": "0xc80e170918427f74524798127239933f5976b04cb4a923b1c9ca4f180ea8e27b",
+         "timestamp": "0x6af62d61"
+        }
+       }
+      ]
+     }
+    ],
+    "finalized": [
+     {
+      "result": {
+       "number": "0x6b99ee9",
+       "hash": "0x04ffb6b109e294cdb2162d1dbce032afebe59935e654844760cea3160a287d6d",
+       "timestamp": "0x6af629c5"
+      }
+     },
+     {
+      "result": {
+       "number": "0x6b99ee9",
+       "hash": "0x04ffb6b109e294cdb2162d1dbce032afebe59935e654844760cea3160a287d6d",
+       "timestamp": "0x6af629c5"
+      }
+     }
+    ]
+   }
+  }
+ }
+}

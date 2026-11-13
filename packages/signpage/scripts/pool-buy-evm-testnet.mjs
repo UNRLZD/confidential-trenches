@@ -90,8 +90,10 @@ const rpcs = RPCS.map((u) => testnetRpc(u));
 
 // the note from the seed alone, as the page's restore reads it (notes only: no W is named to any provider)
 const restored = await evmRestoreNotes({ seed64: seed64.slice(), pin: PIN, rpcs, wallets: false });
-for (const n of restored.notes) await ns.add({ ref: n.ref, scope: n.scope, precommitment: n.precommitment, state: n.state, leaf: n.leaf });
-log(`restored ${restored.notes.length} note(s) at block ${restored.block}: ${restored.notes.map((n) => `${n.ref.kind} ${n.state} ${n.leaf.value}`).join(", ")}`);
+// a note above the round's finalized block carries its landing, as the page's restore writes it (card
+// evm-money-shows-and-spends-at-once)
+for (const n of restored.notes) await ns.add({ ref: n.ref, scope: n.scope, precommitment: n.precommitment, state: n.state, leaf: n.leaf, ...(n.landed === undefined || n.state !== "UNSPENT" ? {} : { landed: n.landed }) });
+log(`restored ${restored.notes.length} note(s) at block ${restored.block}: ${restored.notes.map((n) => `${n.ref.kind} ${n.state} ${n.leaf.value}${n.landed === undefined ? "" : ` (landed in block ${n.landed.block}, above the finalized ${n.landed.fin})`}`).join(", ")}`);
 if (!restored.notes.some((n) => n.state === "UNSPENT")) throw new Error("no UNSPENT note to buy with");
 
 const helperLog = [];

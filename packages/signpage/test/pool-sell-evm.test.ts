@@ -25,7 +25,7 @@ import type { EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts"
 import { BOUGHT, flat, provider, refreshHead, sellQuoteWith, TOKEN } from "../../kit/test/evm-sell-quote-fx.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
-import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, planEvmSell, poolSellEvmKind, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
+import { EVM_OPEN_SELLS_KEY, EVM_SELL_DEADLINE_S, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, planEvmSell, poolSellEvmKind, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
 import { POOL_TRADE_LOCK } from "../src/trade.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
@@ -540,7 +540,7 @@ const R0: NoteRef = { kind: "second", id: { id: "R", c: "evm", l: L, j: J }, n: 
 const P_R0 = noteSecrets(SEED, R0).precommitment;
 const saleNotes = async (store: NoteStore) => (await store.list()).filter((n) => n.ref.kind === "return" || n.ref.kind === "second").map((n) => `${refKey(n.ref)} ${n.state}`).sort();
 
-test("P1-1: half, then the other half at once while the first sale's deposit is on chain but not final: its own note and the next Sell nonce; once final both land; a restore from the words finds both in order", async () => {
+test("P1-1: half, then the other half at once while the first sale's deposit is on chain but not final: its own note and the next Sell nonce; both land at the newest agreed block and stay landed once final; a restore from the words finds both in order", async () => {
   let x!: World;
   x = await world({
     send: async (_n, body) => {
@@ -552,20 +552,21 @@ test("P1-1: half, then the other half at once while the first sale's deposit is 
   });
   const a1 = await runEvmPoolSell(x.h, HALF);
   assert.equal("stage" in a1 && a1.stage, "filled");
-  assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} INCOMING`], "the first sale's deposit is not final: its note stays INCOMING");
+  assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} UNSPENT`], "the first sale's deposit is at the newest agreed block, not final: its note shows at once");
   const a2 = await runEvmPoolSell(x.h, HALF);
   assert.equal("stage" in a2 && a2.stage, "filled", JSON.stringify(a2));
   assert.equal(x.posts.length, 2);
   const [s1, s2] = x.posts.map((p) => sellOf(p.data));
   assert.deepEqual([s1!.precommitment, s2!.precommitment], [P, P_R0], "the second sale on R's first second arrival");
   assert.deepEqual([s1!.nonce, s2!.nonce], [0n, 1n], "the next Sell nonce");
-  assert.equal((await openOf(x)).length, 2, "both open until final");
-  // the round's final block passes both deposits: a load's follow lands both notes
+  assert.deepEqual((await openOf(x)).map((o) => o.nonce), ["0", "1"], "both records kept: their deposits are in the round, not final");
+  assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} UNSPENT`, `${refKey(R0)} UNSPENT`], "both shown before final");
+  // the round's final block passes both deposits: a load's follow keeps both notes and drops both records
   x.c.fin += 100n;
   x.c.head += 200n;
   await followEvmSells(x.h);
   assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} UNSPENT`, `${refKey(R0)} UNSPENT`]);
-  assert.deepEqual(await openOf(x), []);
+  assert.deepEqual(await openOf(x), [], "both closed once final");
   // a wiped device: the words and the pool's events alone give both notes back (the walk's gap the test's own: the
   // pool's one deposit is lane 0's first index, and RESTORE_GAP's 8 x 10,000 misses are 28 s of pure hashing; the
   // return note's chain walks SECOND_GAP as on the device)
@@ -575,6 +576,47 @@ test("P1-1: half, then the other half at once while the first sale's deposit is 
     [refKey(R0), s2!.minOut - s2!.fee],
   ]);
 });
+
+for (const [ref, p] of [
+  [RETURN, P],
+  [R0, P_R0],
+] as const) {
+  test(`evm-money-shows-and-spends-at-once (review P2): a sale's ${ref.kind === "return" ? "return note" : "R note"}, landed at the newest agreed block, that a reorg backs out and no block includes again: the record stays until final, so a load's follow ends it not_landed and puts the note back PLANNED, never INCOMING for good`, async () => {
+    let x!: World;
+    const r = ref === R0;
+    x = await world({
+      send: async (_n, body) => {
+        const s = sellOf(body.data);
+        x.c.balance = x.c.balance.map((b) => b - s.amount);
+        // the R case: the first sale lands final, the second (on R's first) at the newest agreed block only
+        x.land(s.minOut - s.fee, s.precommitment, W, "0x" + (x.posts.length === 1 ? "e1" : "e2").repeat(32), !r || x.posts.length === 2);
+        return "0x" + "aa".repeat(32);
+      },
+    });
+    if (r) {
+      const first = await runEvmPoolSell(x.h, HALF);
+      assert.equal("stage" in first && first.stage, "filled", "the first sale, final");
+    }
+    const a = await runEvmPoolSell(x.h, HALF);
+    assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+    const n = (await x.store.list()).find((m) => refKey(m.ref) === refKey(ref))!;
+    assert.equal(n.precommitment, p);
+    assert.equal(n.state, "UNSPENT", `${refKey(ref)}: shown at once`);
+    assert.deepEqual((await openOf(x)).map((o) => o.note), [n.id], `${refKey(ref)}: its record kept while its block is above the final one`);
+    // a reorg takes the deposit out and no block includes it again: the heal backs the note out (INCOMING), W's Sell
+    // nonce back where it was
+    x.c.deposits.pop();
+    x.c.events.pop();
+    x.c.sellNonce = x.c.sellNonce! - 1n;
+    await x.store.backOut(n.id, x.c.fin);
+    assert.equal((await x.store.get(n.id))!.state, "INCOMING");
+    // past the sale's deadline, a later load: the follow reads no deposit of it and ends it
+    tick((EVM_SELL_DEADLINE_S + 120) * 1000);
+    await followEvmSells(x.h);
+    assert.equal((await x.store.get(n.id))!.state, "PLANNED", `${refKey(ref)}: back to PLANNED, not an arriving line for good`);
+    assert.deepEqual(await openOf(x), [], `${refKey(ref)}: the record dropped at its end`);
+  });
+}
 
 test("P1-1: the store plans an EVM sale's next R note on an INCOMING one only while fewer than the restore's gap of that chain are unlanded; a Solana chain never", async () => {
   assert.equal(EVM_SECOND_GAP, SECOND_GAP, "the store's number is the restore's");
@@ -748,7 +790,7 @@ test("P3-3: a busy helper never holds the tap past its bound: answered sent, the
   assert.equal((await returnNote(x.store))?.state, "UNSPENT");
 });
 
-test("a wiped device sells the rest while its last sale's deposit is not final: that note written INCOMING from the round, the next on R's first; once final both land; an INCOMING note no sale holds and no deposit names is signed on", async () => {
+test("a wiped device sells the rest while its last sale's deposit is not final: that note written from the round and shown at once, the next on R's first; both stay landed once final; an INCOMING note no sale holds and no deposit names is signed on", async () => {
   let x!: World;
   x = await world({
     send: async (_n, body) => {
@@ -764,7 +806,7 @@ test("a wiped device sells the rest while its last sale's deposit is not final: 
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   const s = sellOf(x.posts[0]!.data);
   assert.deepEqual([s.precommitment, s.nonce], [P_R0, 1n], "R's first, on the next Sell nonce");
-  assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} INCOMING`, `${refKey(R0)} INCOMING`]);
+  assert.deepEqual(await saleNotes(x.store), [`${refKey(RETURN)} UNSPENT`, `${refKey(R0)} UNSPENT`], "both at the newest agreed block, shown before final");
   x.c.fin += 100n;
   x.c.head += 200n;
   await followEvmSells(x.h);
