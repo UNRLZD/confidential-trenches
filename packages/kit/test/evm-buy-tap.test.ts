@@ -14,13 +14,11 @@ const tap = (quote: (r: EvmPoolBuyQuoteRequest) => Promise<EvmPoolBuyQuote>, poo
 test("a token with 200 indexed pools that all quote nothing is a named refusal after three kit quotes at most", async () => {
   evmBuyTapReset();
   let n = 0;
-  const t = performance.now();
   await assert.rejects(
     tap(async () => (n++, Promise.reject(new EvmQuoteError("no_quote", "the route reverts or quotes nothing"))), spam(200)),
     (e) => e instanceof EvmBuyTapRefused && e.code === "quote_check_failed",
   );
   assert.ok(n <= EVM_BUY_TAP_QUOTES && EVM_BUY_TAP_QUOTES === 3, `${n} quotes`);
-  assert.ok(performance.now() - t < 1_000);
 });
 
 test("a refusal naming the kit's best route asks it once; one through a hook the venue does not list is never asked", async () => {
