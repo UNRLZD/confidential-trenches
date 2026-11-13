@@ -1644,6 +1644,7 @@ async function scanPools(
   maxLag: bigint,
   from: Promise<ScanFrom>,
   picked: () => Promise<Block> = agreed,
+  defer?: (cs: readonly string[]) => void,
 ): Promise<{ pools: Map<string, EvmPoolKey[]>; commit: () => void }> {
   const { head: scanHead, first } = await from;
   const second = first.next;
@@ -1670,10 +1671,13 @@ async function scanPools(
   // pool read is read on both providers like any candidate), by every quote that answers before this gap's read lands.
   // Its gap is read right after, beside the quote's next round, and kept for the next quotes; one that starts more than
   // maxLag blocks before the agreed block is read before the answer (below). A currency with no pool kept is scanned
-  // whole first: a coin made inside the gap is never "no pool" for this.
+  // whole first: a coin made inside the gap is never "no pool" for this. A currency's markets are the exception (card
+  // robinhood-quotes-inside-provider-limits): they only price routes into the token, so a market made in those blocks is
+  // missed as a pool made in them is, its price and nothing more, while X with no market read again before every warm
+  // quote cost one post of Robinhood's scan provider's 1 a second.
   const lag = Number(maxLag);
   for (const e of each) {
-    if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {
+    if ((e.pools.length > 0 || kind === "markets") && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {
       e.later = e.gaps;
       e.gaps = [];
     }
@@ -2002,11 +2006,18 @@ async function scanPools(
     await settle(js.map(run));
     commit();
   };
+  // `defer`: the quote reads these gaps once it has answered, with every other scan's of the same kind (routeSet)
+  let deferred = false;
   return {
     pools: new Map(each.map((e) => [e.c, e.pools])),
     commit: () => {
       commit();
-      if (later.length > 0) void rest().catch(() => {});
+      if (later.length === 0) return;
+      if (defer === undefined) void rest().catch(() => {});
+      else if (!deferred) {
+        deferred = true;
+        defer(later.map((e) => e.c));
+      }
     },
   };
 }
@@ -2587,7 +2598,21 @@ async function simmedSells(chain: EvmPoolChain, pins: Pick<Venue, "sellDelegate"
  * Returns the agreed block, the answers, and every route of the set that fills, with its output (through a hook that
  * is not pinned, the lower of its quote with the hook replaced and as it is).
  */
-async function routeSet(a: {
+// A quote's set, and once it has answered or refused, the gaps its scans left for later (scanPools `later`), read in one
+// scan of each kind over every currency whose gaps were left (card robinhood-quotes-inside-provider-limits: read by each
+// scan of the quote on its own, a warm Robinhood quote still sent rpc.mainnet.chain.robinhood.com about 6 posts, its
+// pace 1 a second): that scan finds the same gaps, leaves them for later again and reads them at its commit, the
+// currencies with the same blocks in one request. A failure of that read keeps nothing, as before.
+async function routeSet(a: RouteSetArgs): ReturnType<typeof routeSetOf> {
+  const end: (() => void)[] = [];
+  try {
+    return await routeSetOf(a, end);
+  } finally {
+    for (const f of end) f();
+  }
+}
+type RouteSetArgs = Parameters<typeof routeSetOf>[0];
+async function routeSetOf(a: {
   chain: EvmPoolChain;
   v: Venue;
   token: string;
@@ -2628,7 +2653,7 @@ async function routeSet(a: {
   /** what a route must give to matter, read once the first round is in (the buy's own route's Q): a pool that cannot
    *  give it is never quoted (see "The prune"); none for the sell */
   floor?: (out: (i: number) => bigint | null) => bigint;
-}): Promise<{ block: Block; out: (i: number) => bigint | null; fills: (c: { at: number; twice: number; route?: EvmRoute }, v3?: boolean) => boolean; filled: Filled[]; outOfGas: Filled[] }> {
+}, end: (() => void)[]): Promise<{ block: Block; out: (i: number) => bigint | null; fills: (c: { at: number; twice: number; route?: EvmRoute }, v3?: boolean) => boolean; filled: Filled[]; outOfGas: Filled[] }> {
   const { chain, v, token, amountIn, rpcs, scan, reads } = a;
   // a banned pool is no pool at all to this set (review of 919742f5, F1)
   const isBanned = (k: EvmPoolKey) => a.banned !== undefined && a.banned.has("0x" + poolId(k));
@@ -2758,10 +2783,25 @@ async function routeSet(a: {
   // a scan the quote waits for that fails refuses the quote, so it may pick the agreed block to keep its spans; a kept
   // scan started early waits for the quote to pick it, whether it ends or fails (review of bc189de, L-3: one that ended
   // before the token's scan picked the block itself, before the token's logs were in)
+  // the currencies of each kind whose gaps a scan of this quote left for later, read once the quote ends (routeSet)
+  const later = new Map<ScanKind, Set<string>>();
+  const deferTo = (kind: ScanKind) => (cs: readonly string[]) => {
+    const set = later.get(kind) ?? new Set<string>();
+    later.set(kind, set);
+    for (const c of cs) set.add(c);
+  };
+  end.push(() => {
+    for (const [kind, cs] of later) {
+      if (firstOn === undefined || v.poolManager === undefined || v.scan === undefined) break;
+      void scanPools(chain, [...cs], kind, lower(v.weth), v.poolManager, v.scan, agreedHead, v.maxLag, scanFromOf(firstOn))
+        .then((sc) => sc.commit())
+        .catch(() => {});
+    }
+  });
   const scanAt = (cs: readonly string[], kind: ScanKind, early = false) => {
     if (firstOn === undefined || v.poolManager === undefined || v.scan === undefined || cs.length === 0) return null;
     const at = early ? () => picked : agreedHead;
-    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at);
+    return scanPools(chain, cs, kind, lower(v.weth), v.poolManager, v.scan, at, v.maxLag, scanFromOf(firstOn), at, deferTo(kind));
   };
   // the warm round: the token's kept reads and scans; a scan asked again in this quote is the one started here
   const planKey = `${chain}:${a.sell ? "sell" : "buy"}:${lower(token)}`;

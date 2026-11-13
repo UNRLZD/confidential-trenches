@@ -383,7 +383,11 @@ export const evmMainnetVenues = () =>
       // 823/1,180, 766/2,801 and 2,349/4,972 ms. Passed over: daybreak (413 on a batch this size), blockvectra (outside
       // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
       // nodeflare (no head)
-      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
+      // Robinhood's own (rpc.mainnet.chain.robinhood.com) left this list (card robinhood-quotes-inside-provider-limits):
+      // it answers 429 past about 1 post a second (apps/helper/src/limits/limits.ts PROVIDER_PACE) and is the scan's and
+      // the pool sync's seat, yet ranked in by its speed whenever publicnode was held it took a warm tap's rounds of
+      // reads, FRONG's 35 to 38 posts in one tap (mainnet from the Mac, 2026-11-14 23:1xZ). Four operators stay.
+      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
       // 64 reads a call (card evm-buy-quote-in-window): a cold WETH-USDG quote's 2,303 reads at 6 a call were 128 batches,
       // which ran past the 10-13 s that three of these five keep a block's state. Its exact-out reads cost about 100,000
       // gas each, about 6.4M a call against the 50M caps; all five answered 3 calls of 64 alike (review of 2c02f7df) and
