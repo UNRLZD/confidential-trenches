@@ -49,7 +49,7 @@
 import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, solanaWrappedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts, seatRpc, type ReadKind } from "./page-rpc.ts";
-import { holdHosts, hostLane, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
+import { holdHosts, laneFetch, stopHostLaneWaits } from "../../wallet/src/throttle.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -740,10 +740,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a trade's hold on the hosts its reads go to, from its host's making to its run's end (the host's end): every pass
   // read on those hosts waits for it
   const holdTrade = (): (() => void) => holdHosts([...rpcs(), ...settleRpcs(), lister()].flatMap((r) => seatHosts(r)));
-  // a pass's turn on every host of `list`, once no trade holds any of them
-  const passTurn = async (list: readonly { url?: string }[], signal?: AbortSignal): Promise<void> => {
-    for (const r of list) if (r.url !== undefined) await hostLane(r.url).turn("pass", signal);
-  };
   // one cache for every Solana settle on this page (and its restore, src/pool-restore.ts pagePools), on one pair
   const cache: SolanaPoolCache = over.cache ?? (over.rpcs === undefined && over.pin === undefined ? PAGE_SOL_CACHE : {});
   // every Solana settle's stop: a sign out (this tab's, signingOut, or another's, signedOut) aborts it, so a settle on a
@@ -907,8 +903,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // each EVM chain's pool on this page: its pin, its pool list and two RPCs, its sync (the deposit's round and the
   // RESERVED settle read it) and its scope, made once
   // `passList` and `passRpcs`: the same list as a background pass reads it (the proof queue's pool), which waits on its
-  // hosts while a trade holds them (card signpage-passes-yield-to-a-trade); a test's planted list is both
-  const evmPools = new Map<"base" | "robinhood", { pin: EvmPoolPin; list: readonly EvmRpc[]; rpcs: readonly [EvmRpc, EvmRpc]; passList: readonly EvmRpc[]; passRpcs: readonly [EvmRpc, EvmRpc]; sync: Pick<EvmTreeSync, "events">; round: () => Promise<EvmDepositRound>; scope: bigint } | null>();
+  // hosts while a trade holds them (card signpage-passes-yield-to-a-trade); a test's planted list is both. `passSync`: the
+  // pool's sync on that pass pair, the background's (the RESERVED and unfinal settle's rounds), each read on its host's
+  // budget (card evm-deposit-on-mainnet: on the trade pair, a fresh landing's settle took 18 of every 30 requests per
+  // 10 s on each host and the proof queue's first pass waited 75 s for room); `sync` itself when the lists are one
+  const evmPools = new Map<"base" | "robinhood", { pin: EvmPoolPin; list: readonly EvmRpc[]; rpcs: readonly [EvmRpc, EvmRpc]; passList: readonly EvmRpc[]; passRpcs: readonly [EvmRpc, EvmRpc]; sync: Pick<EvmTreeSync, "events">; passSync: Pick<EvmTreeSync, "events">; round: () => Promise<EvmDepositRound>; scope: bigint } | null>();
   const evmPool = (chain: "base" | "robinhood") => {
     if (!evmPools.has(chain)) {
       const p = evmPin(chain);
@@ -917,7 +916,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const pair = r === null || r.length < 2 ? null : evmPair(r);
       const sync = p === undefined || r === null || pair === null ? null : evmSyncOf(p, pair, r);
       const passList = over.evmRpcs || r === null ? r : (pageEvmPoolRpcs(chain, "pass") ?? r);
-      evmPools.set(chain, p === undefined || r === null || pair === null || sync === null || passList === null ? null : { pin: p, list: r, rpcs: pair, passList, passRpcs: passList === r ? pair : evmPair(passList), sync, round: over.evmRound ? over.evmRound(p, pair, r) : roundOf(sync), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
+      const passRpcs = passList === null || passList === r ? pair : evmPair(passList);
+      evmPools.set(chain, p === undefined || r === null || pair === null || sync === null || passList === null || passRpcs === null ? null : { pin: p, list: r, rpcs: pair, passList, passRpcs, sync, passSync: passList === r ? sync : evmSyncOf(p, passRpcs, passList), round: over.evmRound ? over.evmRound(p, pair, r) : roundOf(sync), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
     }
     return evmPools.get(chain)!;
   };
@@ -1268,8 +1268,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // out): nothing open, no seed read and no round (card evm-money-shows-and-spends-at-once)
         if (!evmSettleOpen(await notes.list(), await notes.landings(), e.scope)) return;
         seed64 = await page.seed64();
-        // a pass: each round of the deposit's sync starts once no trade holds the list's hosts
-        const pass = await evmSettleReserved({ seed64, notes, scope: e.scope, round: async (s) => (await passTurn(e.list, s), e.sync.events(s)), signal });
+        // a pass: its rounds on the pool's pass sync, every read on its host's budget, a trade's first. No trade waits on
+        // it: reserveEvm's callers never await it but a state read's, and the seed lock it holds is shared
+        const pass = await evmSettleReserved({ seed64, notes, scope: e.scope, round: (s) => e.passSync.events(s), signal });
         // a freed note's release never landed: a withdraw op owing its send is settled stopped, nothing sent
         if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
         if (pass.freed.length > 0 || pass.spent.length > 0) void evmProofs(chain);
