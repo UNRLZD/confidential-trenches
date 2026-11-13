@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/pool-deposit-follow.test.mjs: the live check replays its recorded answers
 // (pool-deposit-follow.answers.json). good: this card's build, re-recorded by card pool-deposit-op-txs (the run's end read
 // from its {end, txs}, the follow function re-cut into the excerpt from that build), and by card evm-deposit-route-mainnet
-// (the wiring, the follow's deps with its deposit and refund functions and depositFrom re-cut from that build): PASS. bad: origin/main 6616059d's build (release-91), and
+// (the wiring, the follow's deps with its deposit and refund functions and depositFrom re-cut from that build), and by card evm-first-proof-inside-ten-seconds (the follow function re-cut from its build: the
+// costs a round under the floor holds): PASS. bad: origin/main 6616059d's build (release-91), and
 // liveBefore: SIGN_HOST before this card's deploy: each FAIL, each mark named. Planted on the good one: another /app.js,
 // no pin, each mark taken away: each FAIL. Planted in the bundle's own excerpt (pool-deposit-follow.excerpt.txt, cut from
 // this build's public/app.js: the floor and its read, the quote check, the wiring, the follow's page deps, its reads and
@@ -71,7 +72,10 @@ const PLANTED = [
   ["U_X's balance read at confirmed (G2)", /getBalance`,\[([\w$]+)\.u,\{commitment:`finalized`\}/, "getBalance`,[$1.u,{commitment:`confirmed`}", ["chainFirst"]],
   ["the higher balance counted", new RegExp(`=(${N})<(${N})\\?\\1:\\2,`), "=$1<$2?$2:$1,", ["chainFirst"]],
   ["a deposit under the floor", new RegExp(`&&(${N})>=(${N})\\.floor\\)await`), "&&!0)await", ["chainFirst"]],
-  ["the costs read while U_X holds nothing (review L2)", new RegExp(`=(${N})>=(${N})\\.ladder\\.min\\?(${N})\\(await`), "=!0?$3(await", ["chainFirst"]],
+  ["the costs read while U_X holds nothing (review L2)", new RegExp(`=(${N})>=(${N})\\.ladder\\.min\\?(${N})\\?\\.c\\?\\?(${N})\\(await`), "=!0?$3?.c??$4(await", ["chainFirst"]],
+  // card evm-first-proof-inside-ten-seconds: a carry on costs held from an earlier round, not read in its own
+  ["a carry on held costs", new RegExp(`\\?(${N}):null,(${N})=(${N})>=(${N})\\.ladder\\.min\\?`), "?$1:null,$2=$3>=$4.ladder.min?$1?.c??0n:", ["chainFirst"]],
+  ["the costs held past a balance that moved", new RegExp(`&&(${N})\\.low===(${N})&&`), "&&", ["chainFirst"]],
   ["a fixed source of another pool's scope let through (H1)", new RegExp(`if\\((${N})\\.s!==(${N})\\|\\|`), "if(", ["fromUX"]],
   ["a fixed source whose U is not the op's U_X let through (review 2 L2)", new RegExp(`\\|\\|(${N})\\((${N})\\)\\.address!==\\2\\.u\\)return\\{error:\`not_allowed\`\\};`), ")return{error:`not_allowed`};", ["fromUX"]],
   ["the kind drops the fixed source (review 2 L1)", new RegExp(`=await (${N})\\((${N}),(${N}),(${N})\\)\\}finally`), "=await $1($2,$3)}finally", ["fromUX"]],
@@ -84,7 +88,7 @@ const PLANTED = [
   ["any end counted as landed", new RegExp(`\\|\\|(${N})===\`part_filled\`\\)&&`), "||!0)&&", ["chainFirst"]],
   // card evm-deposit-route-mainnet review and re-read: a note of U_X's still landing holds in_pool and the end; a
   // landed note counts only after this quote's own SUCCESS; a carry U_X cannot pay with its fee shows short
-  ["a carry counted landed with a later rung of U_X's still landing", /&&!await p\(\);return l&&/, ";return l&&", ["chainFirst"]],
+  ["a carry counted landed with a later rung of U_X's still landing", /&&!await ([\w$]+)\(\);return ([\w$]+)&&/, ";return $2&&", ["chainFirst"]],
   ["in_pool shown while a note of U_X's is landing", /if\(!s&&r!==`in_pool`&&/, "if(r!==`in_pool`&&", ["chainFirst"]],
   ["a neighbour's landed note counted before this quote's own SUCCESS (re-read P2-1)", /!a&&!s&&o&&t\.noted!==void 0/, "!a&&!s&&t.noted!==void 0", ["chainFirst"]],
   ["SUCCESS never read as this quote's payment (re-read P2-1)", /a\.status===`SUCCESS`&&\(o=!0\),/, "", ["chainFirst"]],

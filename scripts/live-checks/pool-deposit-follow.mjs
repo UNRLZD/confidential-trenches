@@ -97,7 +97,11 @@ const LOOP = new RegExp(
     // P2-1); the lower balance; the costs only once it holds a rung; at or over the floor, the carry; else, landed, no
     // in_pool and no end while a note of U_X's is landing
     `[^]{0,700}?let (${N})=await \\9\\(\\);!\\10&&!\\12&&(${N})&&\\5\\.noted!==void 0&&await \\5\\.noted\\(\\7\\)&&\\(\\10=!0\\);` +
-    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\14<\\15\\?\\14:\\15,(${N})=\\16>=\\5\\.ladder\\.min\\?${N}\\(await \\5\\.costs\\(\\7\\)\\):null;if\\(\\17!==null&&\\16>=\\17\\.floor\\)await \\1\\(\\16,\\17\\)&&\\((${N})=!0\\);` +
+    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\14<\\15\\?\\14:\\15,` +
+    // a cost read held while the balance stays under its floor, at most 15 s (card evm-first-proof-inside-ten-seconds); a
+    // carry only on costs read in its round
+    `(${N})=\\(\\5\\.now\\?\\?Date\\.now\\)\\(\\),(${N})=(${N}),(${N})=\\18!==null&&\\18\\.low===\\16&&\\17-\\18\\.at<15e3\\?\\18:null,` +
+    `(${N})=\\16>=\\5\\.ladder\\.min\\?\\20\\?\\.c\\?\\?${N}\\(await \\5\\.costs\\(\\7\\)\\):null;if\\(\\19=\\21!==null&&\\16<\\21\\.floor\\?\\20\\?\\?\\{low:\\16,at:\\17,c:\\21\\}:null,\\21!==null&&\\16>=\\21\\.floor\\)await \\1\\(\\16,\\21\\)&&\\((${N})=!0\\);` +
     `else if\\(\\10\\)\\{if\\(!\\12&&(${N})!==${Q}in_pool${Q}&&await \\11\\(${Q}in_pool${Q}\\),!\\12&&await \\5\\.past\\(\\7\\)\\)` +
     `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\13=!0\\),`,
 );
