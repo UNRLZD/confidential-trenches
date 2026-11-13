@@ -1645,9 +1645,22 @@ async function scanPools(
     const pools = cached === undefined ? [] : [...cached.pools];
     // the blocks read before, those still within the depth
     const spans: Spans = (cached?.spans ?? []).filter(([, b]) => b >= floor).map(([a, b]) => [Math.max(a, floor), b]);
-    return { c, key, spans, gaps: gapsOf(spans, floor, head), pools, ids: new Set(pools.map(poolId)) };
+    return { c, key, spans, gaps: gapsOf(spans, floor, head), pools, ids: new Set(pools.map(poolId)), later: [] as Spans };
   });
   type Each = (typeof each)[number];
+  // a currency whose kept or index scan already holds pools and reads to within maxLag of the scan provider's head is
+  // not scanned for those last blocks before this quote (card evm-buy-and-sell-on-mainnet: the round cost a warm Base
+  // quote 280-520 ms): the kit accepts the same blocks unread where the scan provider's head is behind the agreed block
+  // by as much, so a pool made in them is missed for this quote only, and only its price (each pool read is read on both
+  // providers like any candidate). Its gap is read right after, beside the quote's next round, and kept for the next
+  // quote. A currency with no pool kept is scanned whole first: a coin made inside the gap is never "no pool" for this.
+  const lag = Number(maxLag);
+  for (const e of each) {
+    if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {
+      e.later = e.gaps;
+      e.gaps = [];
+    }
+  }
   // the currencies with the same blocks left share each request
   const groups = new Map<string, Each[]>();
   for (const e of each) append(groups, JSON.stringify(e.gaps), e);
@@ -1853,6 +1866,8 @@ async function scanPools(
     const end = Number(b);
     pin = agreedAt;
     jobs.length = 0;
+    // a gap left for later is no longer within maxLag of the agreed block: read now
+    for (const e of each) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);
     jobsOf(each, head + 1, end);
     shortMax += 2 * jobs.length;
     await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
@@ -1879,7 +1894,25 @@ async function scanPools(
     }
   }
   take();
-  return { pools: new Map(each.map((e) => [e.c, e.pools])), commit };
+  // the gaps left for later, read once the quote keeps what it read (commit) and kept for the next quote; a failure
+  // keeps nothing of them
+  const later = each.filter((e) => e.later.length > 0);
+  const rest = async (): Promise<void> => {
+    const js: Job[] = [];
+    for (const e of later) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y, first, js);
+    if (js.length === 0) return;
+    shortMax += 2 * js.length;
+    await settle(js.map(run));
+    commit();
+  };
+  return {
+    // a copy: the later read adds its pools to the next quote's, never to this one's candidates
+    pools: new Map(each.map((e) => [e.c, [...e.pools]])),
+    commit: () => {
+      commit();
+      if (later.length > 0) void rest().catch(() => {});
+    },
+  };
 }
 
 /** The device's quote of `req.route` on the chain's two pinned providers, with every check above; throws EvmQuoteError
