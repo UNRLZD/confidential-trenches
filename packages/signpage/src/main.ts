@@ -68,6 +68,7 @@ import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
+import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
 import { cashMover, poolMoveKinds, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
@@ -342,6 +343,44 @@ else {
     cashMoverOf = { signal, m };
     return m;
   };
+  // a pool's money back to Cash (src/pool-to-cash.ts, card one-balance-buys-on-every-chain): Cash's own deposit quote of
+  // the pool's coin to U (a host of its own that prices the pool coins at the device's price: the app's deposit.quote
+  // stays as it is), its follow op written before the address is used; then the pool withdraw run pays that address
+  const poolCoinQuote = depositQuoteHost({
+    scope: pageScope,
+    read: fs.depositRead,
+    named: () => namer.named(),
+    priced: (origin) => pricedPoolCoin(origin, (c) => prices.get(c)),
+    checked: (id, r, u) => follows!.quoted(id, r, u),
+    stop: quotesStopped,
+  });
+  let toCashOf: { signal: AbortSignal; m: ReturnType<typeof poolToCash> } | null = null;
+  const toCashNow = (): ReturnType<typeof poolToCash> => {
+    const signal = withdrawWait.signal;
+    if (toCashOf?.signal === signal) return toCashOf.m;
+    const m = poolToCash({
+      price: (chain) => prices.get(chain),
+      funds: (chain) => (testnet ? testnet.withdrawDeps(chain, "").funds() : Promise.reject(new Error("no pool"))),
+      quote: async (chain, amount, id) => {
+        const r = poolCoinQuote({ origin_asset: POOL_COIN_ASSET[chain], amount: formatPoolUnits(amount, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) }, { id });
+        await r.after;
+        const a = r.answer();
+        return a === null || "error" in a ? { error: a === null ? "failed" : a.error } : { address: a.result.deposit_address };
+      },
+      onChain: onPoolChain,
+      withdraw: (chain) => {
+        if (!testnet) return null;
+        const run = testnet.withdrawDeps(chain, "").handoff;
+        return run ? (ready, id) => void testnet.withdrawDeps(chain, id).handoff?.(ready) : null;
+      },
+      op: async (id) => (await (await open()).get("ops", id).catch(() => undefined)) as Awaited<ReturnType<PoolToCashDeps["op"]>>,
+      put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
+      now: () => Date.now(),
+      signal,
+    });
+    toCashOf = { signal, m };
+    return m;
+  };
   if (prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null)
     resumeMoves = async () => {
       const st = await open();
@@ -351,6 +390,7 @@ else {
         if (rec?.kind === "move") moves.push({ id, rec });
       }
       cashMoverNow().resume(moves);
+      toCashNow().resume(moves);
     };
   // pool.buy.dry with with_cash on Solana (src/cash-to-pool.ts withCash): the dry answer as it is, plus Cash's largest
   // note less the relayer's fee at the device's price and what moves on their way bring; a read that fails leaves it out
@@ -613,7 +653,7 @@ else {
       // with_cash (card one-balance-buys-on-every-chain): a tap's most with Cash moved first, on Solana
       "pool.buy.dry": (params) => dryWithCash(params),
       // a move between Cash and a pool (card one-balance-buys-on-every-chain): the same mover a buy's shortfall takes
-      ...(prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null ? poolMoveKinds(cashMoverNow) : {}),
+      ...(prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null ? poolMoveKinds(cashMoverNow, toCashNow) : {}),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
     })),

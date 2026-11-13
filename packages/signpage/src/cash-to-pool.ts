@@ -41,6 +41,7 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import type { PoolAsk } from "./rules/pool.ts";
 import type { CheckedWithdraw } from "./withdraw/form.ts";
 import type { HandoffEnd } from "./withdraw/handoff.ts";
+import type { PoolToCash } from "./pool-to-cash.ts";
 
 /** How often a moved tap reads whether one tap now spends the ask. */
 export const CASH_MOVE_POLL_MS = 2_000;
@@ -336,26 +337,29 @@ export function cashMover(d: CashMoverDeps): CashMover {
 /** The steps of a move from Cash to pool X (kit messages.ts MoveStep; lite paper v2 §3-4): out of the vault, NEAR
  *  Intents to X, into X's pool. */
 const CASH_TO_POOL_STEPS = (x: PoolChain): PoolMoveDry["steps"] => [{ step: "vault_out", chain: "near" }, { step: "intents", chain: x }, { step: "pool_in", chain: x }];
-const MOVE_AMOUNT = /^(0|[1-9]\d{0,29})(?:\.(\d{1,6}))?$/;
+/** Pool X to Cash: out of X's pool, NEAR Intents to NEAR, into the vault. */
+const POOL_TO_CASH_STEPS = (x: PoolChain): PoolMoveDry["steps"] => [{ step: "pool_out", chain: x }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }];
 const isTrade = (c: unknown): c is TradeChain => (TRADE_CHAINS as readonly unknown[]).includes(c);
 
-/** The pair and the USDC of a pool.move or pool.move.dry the page runs, or its refusal: Cash (near) to a pool for now
- *  (pool to Cash and pool to pool build next), an amount in USDC above 0 at no more than its 6 decimals. */
-function moveAsk(params: Record<string, unknown>): Refusal | { to: PoolChain; usdc: bigint } {
+/** The pair and the amount of a pool.move or pool.move.dry the page runs, or its refusal: Cash (near) to a pool, the
+ *  amount in USDC; a pool to Cash (src/pool-to-cash.ts), the amount in the pool's coin; each above 0 at no more than
+ *  its asset's decimals. Pool to pool builds next. */
+function moveAsk(params: Record<string, unknown>): Refusal | { from: "near"; to: PoolChain; usdc: bigint } | { from: PoolChain; to: "near"; units: bigint } {
   const { from, to, amount } = params;
   if (!isTrade(from) || !isTrade(to) || from === to || typeof amount !== "string") return { error: "not_allowed" };
-  // Cash to any pool (to is a pool chain once from is near); pool to Cash and pool to pool build next
-  if (from !== "near" || to === "near") return { error: "not_allowed" };
-  const m = MOVE_AMOUNT.exec(amount);
+  if (from !== "near" && to !== "near") return { error: "not_allowed" };
+  const d = from === "near" ? USDC_DECIMALS : POOL_DECIMALS[from];
+  const m = new RegExp(`^(0|[1-9]\\d{0,29})(?:\\.(\\d{1,${d}}))?$`).exec(amount);
   if (m === null) return { error: "not_allowed" };
-  const usdc = BigInt(m[1]!) * 10n ** 6n + BigInt((m[2] ?? "").padEnd(6, "0"));
-  return usdc > 0n ? { to, usdc } : { error: "not_allowed" };
+  const x = BigInt(m[1]!) * 10n ** BigInt(d) + BigInt((m[2] ?? "").padEnd(d, "0"));
+  if (x <= 0n) return { error: "not_allowed" };
+  return from === "near" ? { from, to: to as PoolChain, usdc: x } : { from, to: "near", units: x };
 }
 
 /** pool.move and pool.move.dry (card one-balance-buys-on-every-chain): each checked here, then the mover's one move
  *  path. pool.move is answered once the move has left (leaving), its later stages in its op; its dry is refused as it
  *  is, so a dry never promises a move the page cannot run. */
-export function poolMoveKinds(mover: () => CashMover): {
+export function poolMoveKinds(mover: () => CashMover, toCash?: () => PoolToCash): {
   "pool.move": (params: Record<string, unknown>, ctx: KindContext) => HostRefusal | Running<"pool.move">;
   "pool.move.dry": (params: Record<string, unknown>, ctx: KindContext) => HostRefusal | Running<"pool.move.dry">;
 } {
@@ -363,16 +367,27 @@ export function poolMoveKinds(mover: () => CashMover): {
     "pool.move": (params, ctx) => {
       const ask = moveAsk(params);
       if ("error" in ask) return ask;
+      if (ask.from !== "near" && toCash === undefined) return { error: "not_allowed" };
       let answer: HostAnswer<"pool.move"> | HostRefusal = { error: "failed" };
-      const after = mover()
-        .move(ask.to, ask.usdc, ctx.id)
+      const after = (ask.from === "near" ? mover().move(ask.to, ask.usdc, ctx.id) : toCash!().move(ask.from, ask.units, ctx.id))
         .then((r) => void (answer = "error" in r ? { error: r.error } : { result: { stage: "leaving", txs: [] } }), () => void (answer = { error: "failed" }));
       return { running: true, after, answer: () => answer };
     },
     "pool.move.dry": (params) => {
       const ask = moveAsk(params);
       if ("error" in ask) return ask;
+      if (ask.from !== "near" && toCash === undefined) return { error: "not_allowed" };
       let answer: HostAnswer<"pool.move.dry"> | HostRefusal = { error: "failed" };
+      if (ask.from !== "near") {
+        const from = ask.from;
+        const after = toCash!()
+          .dry(from, ask.units)
+          .then(
+            (r) => void (answer = "error" in r ? { error: r.error } : { result: { out: unitsText(r.out, USDC_DECIMALS), fee: unitsText(r.fee, POOL_DECIMALS[from]), steps: POOL_TO_CASH_STEPS(from) } }),
+            () => void (answer = { error: "failed" }),
+          );
+        return { running: true, after, answer: () => answer };
+      }
       const after = mover()
         .dry(ask.to, ask.usdc)
         .then(
