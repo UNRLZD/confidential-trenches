@@ -213,6 +213,7 @@ export const OUT = {
   "app-pool-withdraw": "a browser",
   "app-hop-sync-lock": "a browser",
   "app-lock-holds-until-the-layer-closes": "a browser (its --harness run is in test-browser)",
+  "signed-out-portfolio-and-account-say-what-appears": "a browser (its --harness run is in test-browser)",
   "balances-per-chain": "a browser and chain RPCs",
   "app-export-every-wallet": "a browser",
   "evm-quote-warm-round": "EVM RPC quotes",
