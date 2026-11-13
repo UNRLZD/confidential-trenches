@@ -5,12 +5,15 @@
 //   testnetRpc, as the testnet build reads its devnet pair;
 // - the pool's pin: the mainnet program, with the copy's fee payer (a fresh key the run made; the proof binds the fee
 //   payer through its context only, so the program takes any signer there);
-// - the helper: its own Solana pool sender (apps/helper/src/pool/solana.ts) on the copy, answering GET /v1/pool/fee and
-//   POST /v1/pool/solana/send as server.ts does, with server.ts's send line (pool/send-log.ts poolSendLine). The copy has
-//   no block engine, so the sender's engine is a local stand-in (COPY.engine) that never reaches a real one: "busy" and
-//   "refused" answer so; "swallow" takes the bundle and never lands it (what mainnet's engines did with five buys);
-//   "lands" sends it to the copy as a plain transaction. Every other helper path answers 404 and is logged; any other
-//   host is refused;
+// - the helper: its own Solana pool sender (apps/helper/src/pool/solana.ts) on the copy, answering GET /v1/pool/fee,
+//   POST /v1/pool/solana/send and POST /v1/pool/solana/pieces (a buy's pieces as one bundle, card
+//   buy-spends-several-pieces) as server.ts does, with server.ts's send line (pool/send-log.ts poolSendLine). The copy
+//   has no block engine, so the sender's engine is a local stand-in (COPY.engine) that never reaches a real one: "busy"
+//   and "refused" answer so; "swallow" takes the bundle and never lands it (what mainnet's engines did with five buys);
+//   "lands" sends it to the copy as plain transactions, a bundle's in its order, each read confirmed before the next (a
+//   real engine lands a bundle all or none; the copy lands each on its own). Jito's tip floor is not read: the sender
+//   tips its default (solana-pieces.ts bundleTip). Every other helper path answers 404 and is logged; any other host is
+//   refused;
 // - FLOW_COPY's plant "mayhem-drop": every account read of a curve answers it with its Mayhem byte cleared, so the page
 //   builds a Mayhem coin's buy with the plain fee recipient in place of the Mayhem one (the chain's own state is
 //   unchanged and refuses it);
@@ -44,6 +47,8 @@ export async function copyNet({ log, phase = () => "" }) {
   const simFails = [];
   const sendLines = [];
   const sent = [];
+  // a bundle's transactions keep the step it was sent in, though the stand-in lands its last ones after the page moved on
+  const bundlePhase = new Map();
   const plantCurve = COPY.plant === "mayhem-drop" && COPY.mint ? solanaPoolAddresses(COPY.mint).curve : null;
   const planted = { reads: 0 };
   const clearMayhem = (acc) => {
@@ -66,7 +71,8 @@ export async function copyNet({ log, phase = () => "" }) {
     } catch {}
     if (body?.method === "sendTransaction") {
       try {
-        sent.push({ phase: phase(), signature: base58.encode(Buffer.from(String(body.params?.[0]), "base64").subarray(1, 65)) });
+        const signature = base58.encode(Buffer.from(String(body.params?.[0]), "base64").subarray(1, 65));
+        sent.push({ phase: bundlePhase.get(signature) ?? phase(), signature });
       } catch {}
     }
     const r = await native(u, init);
@@ -112,8 +118,27 @@ export async function copyNet({ log, phase = () => "" }) {
       return { kind: "ok", detail: "the stand-in" };
     },
     status: async () => (engineCalls.push({ at: Date.now(), call: "status", mode: engine }), engine === "lands" ? "landed" : "pending"),
+    // a buy's pieces and the helper's tip, one bundle (card buy-spends-several-pieces): kept whole in engineCalls
+    sendBundle: async (b64s) => {
+      for (const b of b64s) bundlePhase.set(base58.encode(Buffer.from(b, "base64").subarray(1, 65)), phase());
+      engineCalls.push({ at: Date.now(), call: "sendBundle", mode: engine, txs: b64s.length, signatures: b64s.map((b) => base58.encode(Buffer.from(b, "base64").subarray(1, 65))) });
+      if (engine === "busy") return { kind: "busy", detail: "the stand-in is busy", throttled: false };
+      if (engine === "refused") return { kind: "refused", detail: "the stand-in refused it" };
+      if (engine === "lands") for (const b of b64s) await landed(await plain(b));
+      return { kind: "ok", region: ENGINE, bundleId: "stand-in" };
+    },
+    rebroadcastBundle: async () => (engineCalls.push({ at: Date.now(), call: "rebroadcastBundle", mode: engine }), { kind: "ok", detail: "the stand-in" }),
   };
-  const sender = solanaPoolSender({ cluster: "mainnet", program: PIN.program, feePayerSecret: secret, fee: String(fee) }, { providers, jito, log: (l) => log(`helper: ${l}`) });
+  /** A plain copy read confirmed on the copy (the next of a bundle needs it), or failed: up to 30 s. */
+  const landed = async (sig) => {
+    for (let i = 0; i < 60; i++) {
+      const st = (await providers[0]("getSignatureStatuses", [[sig]])).value[0];
+      if (st?.err) return;
+      if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") return;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  };
+  const sender = solanaPoolSender({ cluster: "mainnet", program: PIN.program, feePayerSecret: secret, fee: String(fee) }, { providers, jito, tipFloor: async () => null, log: (l) => log(`helper: ${l}`) });
   await sender.ready;
   const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
   helper = async (url, init) => {
@@ -122,12 +147,13 @@ export async function copyNet({ log, phase = () => "" }) {
     if (url.pathname === "/v1/pool/fee") {
       const epoch = url.searchParams.get("epoch");
       r = url.searchParams.get("pool") !== sender.pool ? json(404, { error: { code: "not_found" } }) : json(200, await sender.fee(epoch ? Number(epoch) : Date.now()));
-    } else if (url.pathname === "/v1/pool/solana/send" && method === "POST") {
+    } else if ((url.pathname === "/v1/pool/solana/send" || url.pathname === "/v1/pool/solana/pieces") && method === "POST") {
+      const pieces = url.pathname === "/v1/pool/solana/pieces";
       const began = performance.now();
       const body = JSON.parse(String(init.body));
-      const a = body?.pool === sender.pool ? await sender.carry(body, "copy") : { status: 404, body: { error: { code: "not_found" } } };
+      const a = body?.pool === sender.pool ? await (pieces ? sender.carryPieces(body, "copy") : sender.carry(body, "copy")) : { status: 404, body: { error: { code: "not_found" } } };
       r = json(a.status, a.body, a.retryAfterS === undefined ? {} : { "retry-after": String(a.retryAfterS) });
-      const line = poolSendLine({ chain: "solana", net: sender.cluster, route: "send", status: a.status, body: a.body, ms: performance.now() - began, note: a.note });
+      const line = poolSendLine({ chain: "solana", net: sender.cluster, route: pieces ? "pieces" : "send", status: a.status, body: a.body, ms: performance.now() - began, note: a.note });
       sendLines.push({ phase: phase(), line });
       log(`helper: ${line}`);
     } else {

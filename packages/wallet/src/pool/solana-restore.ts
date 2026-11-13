@@ -633,11 +633,29 @@ export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigi
  * page's marks and pages from its earlier reads on these two RPCs (SolanaPoolCache), so a settle reads only the marks
  * and pages it has not read yet; kept up to date here.
  */
-export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister?: SolanaRpc; signal?: AbortSignal; minSlots?: readonly [number, number]; cache?: SolanaPoolCache; markBatches?: readonly [number, number]; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaSettled> {
+type SettleArgs = { seed64: Uint8Array; notes: NoteStore; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister?: SolanaRpc; signal?: AbortSignal; minSlots?: readonly [number, number]; cache?: SolanaPoolCache; markBatches?: readonly [number, number]; /** tests only */ lagWait?: SolanaLagWait };
+export async function solanaSettleSpent(a: SettleArgs & { noteId: string }): Promise<SolanaSettled> {
+  const [x] = await solanaSettleSpentSet({ ...a, noteIds: [a.noteId] });
+  if ("error" in x!) throw x.error;
+  return x!;
+}
+
+/** Several notes of one pool settled on one read of the marks and the pages (card buy-spends-several-pieces: a buy of
+ *  several pieces settles every piece's note each round, and the marks are every mark of the pool), each decided as
+ *  solanaSettleSpent decides one: in `noteIds`' order, a note's own refusal (not a landed note of this pool, a change
+ *  not in the state tree, a write that failed) its own entry, `{ error }`. A read of the marks or the pages that fails,
+ *  or a count that does not close, throws for all; with no landed note of this pool among them nothing is read. */
+export async function solanaSettleSpentSet(a: SettleArgs & { noteIds: readonly string[] }): Promise<(SolanaSettled | { error: unknown })[]> {
   if (!(a.seed64 instanceof Uint8Array) || a.seed64.length !== 64) throw new Error("seed64: not 64 bytes");
   const scope = solanaPoolOf(a.program).scope;
-  const note = await a.notes.get(a.noteId);
-  if (note === undefined || note.leaf === undefined || note.scope !== scope) throw new Error(`note ${a.noteId}: not a landed note of this pool`);
+  const found = await Promise.all(
+    a.noteIds.map(async (noteId) => {
+      const note = await a.notes.get(noteId);
+      const f: { error: unknown } | { note: NoteRecord & { leaf: Leaf } } = note === undefined || note.leaf === undefined || note.scope !== scope ? { error: new Error(`note ${noteId}: not a landed note of this pool`) } : { note: note as NoteRecord & { leaf: Leaf } };
+      return f;
+    }),
+  );
+  if (found.every((f) => "error" in f)) return found.map((f) => ({ error: (f as { error: unknown }).error }));
   const cache = a.cache ?? {};
   const sync = (cache.pages ??= solanaTreeSync(a.rpcs, a.program, a.lagWait));
   const marksAt = cachedMarks(cache, a);
@@ -659,21 +677,41 @@ export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStor
     forgetSlots(cache, sync);
     throw e;
   }
-  const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash))?.withdrawn;
-  if (withdrawn === undefined) return { kind: "unspent" };
-  const leafAt = new Map<bigint, number>();
-  leaves.state.forEach((c, k) => {
-    if (leafAt.has(c)) throw new Error(`state leaf ${k} repeats`);
-    leafAt.set(c, k);
-  });
-  const c = spentChange(a.seed64, note.ref, note.leaf, withdrawn, leafAt);
-  try {
-    return { kind: "spent", change: await a.notes.add({ ref: c.ref, scope, precommitment: c.precommitment, state: "UNSPENT", parent: note.id, leaf: c.leaf }), withdrawn };
-  } catch (e) {
-    const there = (await a.notes.list()).find((n) => n.scope === scope && refKey(n.ref) === refKey(c.ref));
-    if (there !== undefined && there.precommitment === c.precommitment && there.leaf?.commitment === c.leaf.commitment && there.leaf.leafIndex === c.leaf.leafIndex) return { kind: "spent", change: there, withdrawn };
-    throw e;
+  let leafAt: Map<bigint, number> | undefined;
+  const out: (SolanaSettled | { error: unknown })[] = [];
+  for (const f of found) {
+    if ("error" in f) {
+      out.push(f);
+      continue;
+    }
+    const note = f.note;
+    try {
+      const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash))?.withdrawn;
+      if (withdrawn === undefined) {
+        out.push({ kind: "unspent" });
+        continue;
+      }
+      if (leafAt === undefined) {
+        const at = new Map<bigint, number>();
+        leaves.state.forEach((c, k) => {
+          if (at.has(c)) throw new Error(`state leaf ${k} repeats`);
+          at.set(c, k);
+        });
+        leafAt = at;
+      }
+      const c = spentChange(a.seed64, note.ref, note.leaf, withdrawn, leafAt);
+      try {
+        out.push({ kind: "spent", change: await a.notes.add({ ref: c.ref, scope, precommitment: c.precommitment, state: "UNSPENT", parent: note.id, leaf: c.leaf }), withdrawn });
+      } catch (e) {
+        const there = (await a.notes.list()).find((n) => n.scope === scope && refKey(n.ref) === refKey(c.ref));
+        if (there !== undefined && there.precommitment === c.precommitment && there.leaf?.commitment === c.leaf.commitment && there.leaf.leafIndex === c.leaf.leafIndex) out.push({ kind: "spent", change: there, withdrawn });
+        else throw e;
+      }
+    } catch (error) {
+      out.push({ error });
+    }
   }
+  return out;
 }
 
 /** Each RPC's finalized block height and that block's slot, from one getEpochInfo each. */

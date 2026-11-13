@@ -83,6 +83,7 @@ const solanaMethodsIn = (src: string): string[] => [...src.matchAll(/["'`]((?:ge
 /** The quoted names of that shape in the page's files that are not RPC methods, each with where it is. */
 const NOT_RPC: ReadonlySet<string> = new Set([
   "sendMarginMs", // wallet pool/pool.ts: a field of the pool's timing
+  "sendPieces", // signpage pool-buy.ts: the buy host's helper call for a buy of several pieces
 ]);
 
 /** The methods the files name, each with a file naming it, and those of them off the helper's list. */

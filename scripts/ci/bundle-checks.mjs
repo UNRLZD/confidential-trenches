@@ -83,6 +83,7 @@ export const IN_PROCESS = [
   { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "app-holding-follows-a-fill", host: "app", load: () => import("../live-checks/app-holding-follows-a-fill.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "app-sell-shows-what-you-receive", host: "app", load: () => import("../live-checks/app-sell-shows-what-you-receive.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
+  { key: "buy-spends-several-pieces-screens", host: "app", load: () => import("../live-checks/buy-spends-several-pieces-screens.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "sol-pool-buys-mayhem-coins", host: "app", load: () => import("../live-checks/sol-pool-buys-mayhem-coins.mjs"), run: async (m, f) => m.judge(await m.read(f)) },
   { key: "pool-sell-share-across-wallets", host: "sign", load: () => import("../live-checks/pool-sell-share-across-wallets.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
@@ -217,6 +218,7 @@ export const OUT = {
   "app-deposit-mount": "a browser (its --harness run is in test-browser)",
   "deposit-to-pool": "a browser (its --harness run is in test-browser)",
   "app-faults-seen-on-122": "a browser (its --harness run is in test-browser)",
+  "app-faults-seen-on-124": "a browser and SIGN_HOST's 1Click reads through the helper (its --harness run is in test-browser)",
   "terminal-harness-sign-spa": "Pages' answer to a path with no file (the index), which no build file holds",
   "near-view-rhea": "mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build",
 };
