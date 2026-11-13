@@ -71,10 +71,11 @@ const GATE = (b, f) => new RegExp(String.raw`(?<g>${I})=class\{#(${I})=0;#(${I})
 // fault, so a sale counts it as the provider's (card pool-sell-legs-side-by-side)
 const HELD = new RegExp(String.raw`async function (?<h>${I})\((${I}),(${I}),(${I}),(${I})\)\{for\(let (${I})=\2\.left\(\);\6>0;\6=\2\.left\(\)\)\{if\(Date\.now\(\)\+\6>\3\|\|\2\.doubtMs\(\)\+\6>3e4\)throw new ${I}\(\`http_429\`,\`its reads drew the provider's 429 past \$\{(?<m>${I})\/1e3\} s\`,1,\`the holdings route\`,\6\);await \4\(\6,\5\),\5\?\.throwIfAborted\(\)\}\}`);
 const BOUND = (m) => new RegExp(String.raw`[,\s;]${esc(m)}=3e4[,;]`);
-// a round in the gate's turn: `async function t(gate, by, sleep, signal, round, lane) { let give = await gate.turn(signal);
-// try { return await h(gate, by, sleep, signal), lane && await lane.turn(`pass`, signal, !1, ...), await
-// round(gate.epoch()) } finally { give() } }`: the host's pass turn after the gate's wait, inside the turn
-const INTURN = (h) => new RegExp(String.raw`async function (?<t>${I})\((${I}),(${I}),(${I}),(${I}),(${I}),(${I})\)\{let (${I})=await \2\.turn\(\5\);try\{return await ${esc(h)}\(\2,\3,\4,\5\),\7&&await \7\.turn\(\`pass\`,\5,!1,[^]{0,120}?\),await \6\(\2\.epoch\(\)\)\}finally\{\8\(\)\}\}`);
+// a round in the gate's turn: `async function t(gate, by, sleep, signal, round, lane, kind = `pass`) { let give = await
+// gate.turn(signal); try { return await h(gate, by, sleep, signal), lane && await lane.turn(kind, signal, !1, ...), await
+// round(gate.epoch()) } finally { give() } }`: the host's turn after the gate's wait, inside the turn, a pass's unless
+// its reader names a trade's (card evm-quote-rides-out-a-one-block-answer: a sale's finder read at its tap)
+const INTURN = (h) => new RegExp(String.raw`async function (?<t>${I})\((${I}),(${I}),(${I}),(${I}),(${I}),(${I}),(${I})=\`pass\`\)\{let (${I})=await \2\.turn\(\5\);try\{return await ${esc(h)}\(\2,\3,\4,\5\),\7&&await \7\.turn\(\8,\5,!1,[^]{0,120}?\),await \6\(\2\.epoch\(\)\)\}finally\{\9\(\)\}\}`);
 // the reader: `async read(address, signal, by = 1/0) {` ... `await t(x.gate, by, sleep, signal, async (e) => {
 // try { r = await once(min), x.gate.answered(e)`: its round in the turn with its read's bound (none of its own unless a
 // caller gives one: the route's 30 s in doubt in held bounds it), a whole round answered

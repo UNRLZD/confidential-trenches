@@ -67,7 +67,14 @@ export const MUTANTS = [
   [QUOTE, "if (next === undefined || e instanceof ScanStop) throw e;", "if (next === undefined) throw e;", R, "card rh-cold-quote: a cold scan's first throttled past"],
   [QUOTE, "throw fast ? new EvmQuoteError(\"rpc_error\", m) : new ScanStop(\"rpc_error\", m);", "throw new EvmQuoteError(\"rpc_error\", m);", R, "card rh-cold-quote: a cold scan's first throttled past"],
   [QUOTE, "    if (alone) return halves(splits);\n", "", R, "card rh-cold-quote: a first that answers HTTP 503 to every request over 100,000"],
-  [QUOTE, "    if (answered || rs !== null) return short();\n", "", R, "card rh-cold-quote: 12,000 made-up pools past the first's cap, answered in rpc.mainnet"],
+  [QUOTE, "    if (answered || behind || rs !== null) return short();\n", "", R, "card rh-cold-quote: 12,000 made-up pools past the first's cap, answered in rpc.mainnet"],
+  // card evm-quote-rides-out-a-one-block-answer: one block answered short is asked again of the same provider, never
+  // the next, rpc_error where the last ask was not answered; logs behind a block the provider holds are asked again
+  // whole, never as halves
+  [QUOTE, "      for (let t = 1; t < SCAN_TRIES; t++) {", "      for (let t = 1; t < 1; t++) {", R, "OB1 "],
+  [QUOTE, "            if (e instanceof ScanStop) throw e;\n            said = e instanceof ScanAnswered;", "            throw e;\n            said = e instanceof ScanAnswered;", R, "OB3 "],
+  [QUOTE, "      if (!shortLast) throw new ScanStop(", "      if (false) throw new ScanStop(", R, "OB5 "],
+  [QUOTE, "    if (behind && behindLeft > 0) {", "    if (false) {", R, "OB4 "],
   [QUOTE, "jobsOf(g, a, b);\n  shortMax += 2 * jobs.length;\n", "jobsOf(g, a, b);\n", R, "card rh-cold-quote: a cold Base scan whose first answers each of its starting requests once"],
   [QUOTE, "        if (shorts > shortMax) throw new ScanStop(", "        if (false) throw new ScanStop(", R, "card rh-cold-quote: a first that answers -32602 to every getLogs"],
   [QUOTE, "if (e instanceof BadAnswer) throw new ScanAnswered(", "if (false) throw new ScanAnswered(", R, "card rh-cold-quote: a first that answers HTTP 413"],
