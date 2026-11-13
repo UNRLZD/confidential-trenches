@@ -185,7 +185,9 @@ export interface SignpageParams {
    * coin's own venue and mint kind (pump's curve or PumpSwap, Token or Token-2022, cashback or not), which the page reads
    * on two providers, where tap_max is priced on the costliest venue of any coin. Signs nothing, writes nothing and
    * sends nothing. Display only: a pool.buy at this amount or under passes the page's own funds rule on the same reads.
-   * Solana only (an EVM tap spends a whole chunk); not_allowed elsewhere. Its refusals: not_allowed, not_funded (signed
+   * Solana; on Base and Robinhood (kit 1.15, card one-balance-buys-on-every-chain) state.pools' tap_max, the largest
+   * ready note (an EVM tap spends a whole one), with with_cash the larger of it and the largest rung Cash makes;
+   * not_allowed elsewhere, and on an EVM chain from a page with no Cash to move. Its refusals: not_allowed, not_funded (signed
    * out or no proof ready), quote_check_failed (no venue the two providers agree on) and busy (a trade runs).
    * `amount` (kit 1.12, card buy-spends-several-pieces): a spend in whole SOL; the answer then also says how many pieces
    * a pool.buy of it spends now and what it costs for good (PoolBuyDry pieces and cost).

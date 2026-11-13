@@ -15,7 +15,9 @@
 //     refuses the whole answer for it);
 //   - version: the page reads every kit at 1.15 and above in full (SIGNPAGE_KIT_VERSION `1.15`);
 //   - poolMove: the page answers pool.move and pool.move.dry itself, each checked first (the pair, the amount), and a
-//     dry from Cash names the route the v2 lite paper names: out of the vault, NEAR Intents, into the pool.
+//     dry from Cash names the route the v2 lite paper names: out of the vault, NEAR Intents, into the pool;
+//   - toCash: a pool's money moves back to Cash (src/pool-to-cash.ts): its dry names pool_out, NEAR Intents to NEAR,
+//     into the vault, and the page quotes each pool coin (SOL, Base's and Robinhood's ETH on 1Click) into Cash.
 // The numbers (sizes, the wait's bound, each refusal) are packages/signpage/test/cash-to-pool.test.ts,
 // pool-kinds-cash.test.ts and kit-version.test.ts at the released commit. The recorded answers are facts() over
 // packages/signpage/scripts/build-app.mjs's build (mainnet, as SIGN_HOST serves) and SIGN_HOST as served before.
@@ -49,6 +51,16 @@ const TAP = new RegExp(
     `(${N})=await (${N})\\.any\\(\\)\\?await \\10\\.tapMax\\((${N})\\):(${N})\\.amount,(${N})=\\9<\\12\\.amount\\?await \\10\\.need\\(\\12\\.amount-\\9\\):null;if\\(\\13!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\13\\}\\)\\}catch\\{\\}`,
   ].join("|"),
 );
+/** The tap on every pool chain (since Cash moves to Base and Robinhood too): the chain's tap read, the want (Solana's
+ *  gap to one tap, an EVM chain's whole asked rung), the mover asked for it, the move op told, then the wait; and the
+ *  want itself, Solana's the ask less the tap. */
+const TAP_ALL = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.tapMax\\(\\3,${N}\\):(${N})\\.amount,(${N})=\\1<\\4\\.amount\\?(${N})\\(\\1\\):null,(${N})=\\5===null\\?null:await \\2\\.need\\(\\3,\\5\\);if\\(\\7!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\7\\}\\)\\}catch\\{\\}`);
+const tapAll = (js) => {
+  const m = TAP_ALL.exec(js);
+  if (m === null) return false;
+  const want = new RegExp(`(?:^|[^\\w$])${esc(m[6])}=(${N})=>${esc(m[3])}===\`solana\`\\?${esc(m[4])}\\.amount-\\1:`);
+  return want.test(js);
+};
 /** pool.buy.dry's answer with with_cash. */
 const MAX = new RegExp(`\\{\\.\\.\\.(${N}),result:\\{\\.\\.\\.\\1\\.result,with_cash:${N}\\}\\}`);
 /** kit-v1.14's level in the version chain, and its strip of with_cash. */
@@ -57,6 +69,7 @@ const STRIP = new RegExp(`${N}!==\`pool\\.buy\\.dry\`\\)return ${N};let\\{with_c
 
 /** pool.move's kind, its ask checked before the mover is asked; and a move from Cash's steps (group 1: the chain). */
 const MOVE_KIND = new RegExp(`\\{"pool\\.move":\\((${N}),${N}\\)=>\\{let (${N})=${N}\\(\\1\\);if\\(\`error\`in \\2\\)return \\2;`);
+const TO_CASH_STEPS = new RegExp(`\\[\\{step:\`pool_out\`,chain:(${N})\\},\\{step:\`intents\`,chain:\`near\`\\},\\{step:\`vault_in\`,chain:\`near\`\\}\\]`);
 const MOVE_STEPS = new RegExp(`\\[\\{step:\`vault_out\`,chain:\`near\`\\},\\{step:\`intents\`,chain:(${N})\\},\\{step:\`pool_in\`,chain:\\1\\}\\]`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the marks read from it. */
@@ -66,11 +79,12 @@ export function facts(index, js) {
     index,
     sha384: sha384(js),
     move: rules.some((r) => checkOf(r).test(js)) && MOVE_ID.test(js),
-    tap: TAP.test(js),
+    tap: TAP.test(js) || tapAll(js),
     max: MAX.test(js),
     level: LEVEL.test(js) && STRIP.test(js),
     version: /`1\.15`/.test(js),
     poolMove: MOVE_KIND.test(js) && /"pool\.move\.dry":(?:\([\w$,]*\)|[\w$]+)=>\{/.test(js) && MOVE_STEPS.test(js),
+    toCash: TO_CASH_STEPS.test(js) && ["sol", "base", "hood"].every((c) => js.includes(`nep141:${c}.omft.near`)),
   };
 }
 
@@ -81,6 +95,7 @@ export const SAYS = Object.freeze({
   level: "a kit-v1.14 app is not sent pool.buy.dry's answer with with_cash left out: its schema refuses the whole answer, and its Fee and Max with it",
   version: "the signing page does not read a kit 1.15 app in full: with_cash and the move step never reach the app that draws them",
   poolMove: "the signing page answers no pool.move or pool.move.dry of its own, checked first, with Cash's route out of the vault, over NEAR Intents and into the pool: Portfolio's Move cannot move money between chains",
+  toCash: "the signing page moves no pool's money back to Cash (out of the pool, over NEAR Intents, into the vault, for SOL and both ETH pools): money in a pool cannot reach Cash or another chain",
 });
 
 /** The verdict on an answer { index, sha384, move, tap, max, level, version, poolMove }. */

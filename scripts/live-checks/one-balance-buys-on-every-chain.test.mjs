@@ -18,8 +18,12 @@ test("recorded good answer: this card's SIGN_HOST build: PASS", () => {
   assert.deepEqual(v.lines, []);
 });
 
-test("recorded answer partOne (part 1's build, a0bd91187, before pool.move): FAIL, poolMove alone named", () => {
-  assert.deepEqual(judge(ANSWERS.partOne).lines, [`BAD ${SAYS.poolMove}`]);
+test("recorded answer partOne (part 1's build, a0bd91187, before pool.move): FAIL, poolMove and toCash named", () => {
+  assert.deepEqual(judge(ANSWERS.partOne).lines, [`BAD ${SAYS.poolMove}`, `BAD ${SAYS.toCash}`]);
+});
+
+test("recorded answer beforeToCash (8235063eb's build, Cash to every pool, no way back): FAIL, toCash alone named", () => {
+  assert.deepEqual(judge(ANSWERS.beforeToCash).lines, [`BAD ${SAYS.toCash}`]);
 });
 
 test("recorded answer liveBefore (SIGN_HOST before this card): FAIL, every mark named", () => {
@@ -48,6 +52,8 @@ const JS = [
   "Gh=(e,t)=>{if(typeof t!=`object`||!t||e!==`pool.buy.dry`)return t;let{with_cash:n,...r}=t;return r};",
   "x=`1.15`",
   'var zz=e=>[{step:`vault_out`,chain:`near`},{step:`intents`,chain:e},{step:`pool_in`,chain:e}];',
+  'var QG=e=>[{step:`pool_out`,chain:e},{step:`intents`,chain:`near`},{step:`vault_in`,chain:`near`}];',
+  "({solana:`nep141:sol.omft.near`,base:`nep141:base.omft.near`,robinhood:`nep141:hood.omft.near`});",
   'function Uz(e){return{"pool.move":(t,n)=>{let r=Hz(t);if(`error`in r)return r;return r},"pool.move.dry":t=>{let n=Hz(t);return n}}}',
 ].join("");
 const INDEX = (js) => `<script type="module" src="/app.js" integrity="${facts("", js).sha384}"></script>`;
@@ -80,6 +86,10 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     ["poolMove", JS.replace('"pool.move.dry":t=>', '"pool.move.x":t=>')],
     ["poolMove", JS.replace("{step:`intents`,chain:e},", "")],
     ["poolMove", JS.replace("{step:`pool_in`,chain:e}", "{step:`pool_in`,chain:`base`}")],
+    // no way back to Cash, a route that skips the vault, or a pool coin it never quotes
+    ["toCash", JS.replace("{step:`vault_in`,chain:`near`}", "{step:`pool_in`,chain:`near`}")],
+    ["toCash", JS.replace("{step:`pool_out`,chain:e},", "")],
+    ["toCash", JS.replace("`nep141:hood.omft.near`", "`x`")],
   ];
   for (const [mark, js] of cuts) {
     assert.notEqual(js, JS, `${mark}: the cut changed nothing`);
@@ -97,4 +107,15 @@ test("the tap as each build spells it: before any() (15b7ae910), with any() (par
   const op = forms[2];
   assert.equal(facts("", op.replace("await o.need(n.amount-s)", "null")).tap, false);
   assert.equal(facts("", op.replace("op:c})", "op:s})")).tap, false);
+});
+
+test("the tap on every pool chain (Cash to Base and Robinhood): the build's form PASS; the want not Solana's gap, the mover not asked for it, or the move op not told: FAIL", () => {
+  const all = "let o=e=>a===`solana`?n.amount-e:Nz(a,n.amount)?n.amount:null;let l=await c.any(a)?await c.tapMax(a,i):n.amount,u=l<n.amount?o(l):null,d=u===null?null:await c.need(a,u);if(d!==null){try{r?.route?.({move:`cash`,op:d})}catch{}}";
+  assert.equal(facts("", all).tap, true);
+  for (const bad of [
+    all.replace("?n.amount-e:", "?n.amount:"),
+    all.replace("await c.need(a,u)", "null"),
+    all.replace("op:d})", "op:u})"),
+    all.replace("c.tapMax(a,i)", "c.tapMax(`solana`,i)"),
+  ]) assert.equal(facts("", bad).tap, false, bad.slice(0, 90));
 });

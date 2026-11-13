@@ -36,10 +36,12 @@
 import { TRADE_CHAINS, type ErrorCode, type MoveStage, type PoolChain, type PoolMoveDry, type PoolStatePrice, type TradeChain, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
 import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
+import { chunkOf, type Ladder } from "../../wallet/src/pool/ladder.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import type { PoolAsk } from "./rules/pool.ts";
 import type { CheckedWithdraw } from "./withdraw/form.ts";
 import type { HandoffEnd } from "./withdraw/handoff.ts";
+import type { PoolToCash } from "./pool-to-cash.ts";
 
 /** How often a moved tap reads whether one tap now spends the ask. */
 export const CASH_MOVE_POLL_MS = 2_000;
@@ -68,6 +70,31 @@ export function withCash(tapMax: string, coming: bigint, cash: bigint, fee: bigi
  *  U_X under it): SOL on Solana, ETH on Base and Robinhood. */
 const POOL_DECIMALS: Readonly<Record<PoolChain, number>> = { solana: 9, base: 18, robinhood: 18 };
 const RUNG: Readonly<Record<PoolChain, bigint>> = { solana: SOL_LADDER.min, base: EVM_LADDER.min, robinhood: EVM_LADDER.min };
+const LADDER: Readonly<Record<PoolChain, Ladder>> = { solana: SOL_LADDER, base: EVM_LADDER, robinhood: EVM_LADDER };
+const isPoolChain = (c: unknown): c is PoolChain => typeof c === "string" && Object.hasOwn(LADDER, c);
+/** Whether `x` is a rung of `chain`'s ladder: an EVM tap spends one whole note, so only a rung can be made for it. */
+const isRung = (chain: PoolChain, x: bigint): boolean => x > 0n && x < 1n << 128n && chunkOf(LADDER[chain], x) === x;
+/** pool.buy.dry's with_cash on Base and Robinhood (kit 1.15), in whole ETH as tap_max is: an EVM tap spends one whole
+ *  note, so the larger of the ready note (tap_max) and the largest rung the largest Cash note less `fee` makes at the
+ *  device's price, CASH_MARGIN_BPS and one deposit's `gas` under it; null when tap_max is not an amount. */
+export function withCashNote(tapMax: string, cash: bigint, fee: bigint, p: Pick<PoolStatePrice, "price" | "expo"> | null, chain: "base" | "robinhood", gas: bigint): string | null {
+  const d = POOL_DECIMALS[chain];
+  const m = new RegExp(`^(\\d{1,30})(?:\\.(\\d{1,${d}}))?$`).exec(tapMax);
+  if (m === null) return null;
+  const tap = BigInt(m[1]!) * 10n ** BigInt(d) + BigInt((m[2] ?? "").padEnd(d, "0"));
+  const px = p === null ? null : priceOf(p);
+  const gross = px === null || cash <= fee ? 0n : ((cash - fee) * px.d * 10n ** BigInt(d) * 10_000n) / (px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS));
+  const note = gross > gas ? (chunkOf(LADDER[chain], gross - gas) ?? 0n) : 0n;
+  return unitsText(note > tap ? note : tap, d);
+}
+/** USDC (6 decimals) that buys `units` of `chain`'s pool coin at the device's price, CASH_MARGIN_BPS over, rounded up. */
+function cashUsdcExact(units: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: PoolChain): bigint | null {
+  const px = priceOf(p);
+  if (px === null || units <= 0n) return null;
+  const num = units * px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS);
+  const den = px.d * 10n ** BigInt(POOL_DECIMALS[chain]) * 10_000n;
+  return (num + den - 1n) / den;
+}
 
 /** USDC (6 decimals) a move asks for `short` base units of `chain`'s pool coin (lamports on Solana, wei on Base and
  *  Robinhood) at the device's price: the shortfall plus the ladder's least rung, plus CASH_MARGIN_BPS, rounded up; null
@@ -117,6 +144,9 @@ export type CashMoverDeps = {
   cash(): Promise<bigint>;
   /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. */
   handoff: ((w: CheckedWithdraw, drawnFee: bigint) => Promise<HandoffEnd>) | null;
+  /** The quote's floor on an EVM pool (its least rung plus one deposit's gas, read now), null with no read: a note made
+   *  for an EVM tap is quoted at the rung plus that gas. */
+  floor?(chain: PoolChain): Promise<bigint | null>;
   /** Whether the follow op under `id` has ended (its money in the pool, or refunded): no longer on its way. */
   landed(id: string): Promise<boolean>;
   now(): number;
@@ -247,9 +277,16 @@ export function cashMover(d: CashMoverDeps): CashMover {
     const coming = mine.reduce((a, w) => a + w.lamports, 0n);
     const joined = mine.length > 0 ? mine[mine.length - 1]!.op : null;
     if (coming >= short) return joined;
-    const left = short - coming;
     const p = d.price(chain);
-    const usdc = p === null ? null : cashUsdcFor(left, p, chain);
+    // Solana: what one tap still lacks, the ladder's least rung over it; Base and Robinhood: the whole note of `short`, a
+    // rung (an EVM tap spends one whole note), plus one deposit's gas, so the deposit lands that note
+    let left = short - coming;
+    let usdc: bigint | null = p === null ? null : cashUsdcFor(left, p, chain);
+    if (chain !== "solana") {
+      const floor = p === null ? null : await d.floor?.(chain).catch(() => null);
+      left = short + (typeof floor === "bigint" && floor > RUNG[chain] ? floor - RUNG[chain] : 0n);
+      usdc = p === null || typeof floor !== "bigint" ? null : cashUsdcExact(left, p, chain);
+    }
     if (usdc === null || d.handoff === null || d.rails.length === 0) return joined;
     const fee = await d.fee();
     if (usdc + fee > (await d.cash())) return joined;
@@ -300,26 +337,29 @@ export function cashMover(d: CashMoverDeps): CashMover {
 /** The steps of a move from Cash to pool X (kit messages.ts MoveStep; lite paper v2 §3-4): out of the vault, NEAR
  *  Intents to X, into X's pool. */
 const CASH_TO_POOL_STEPS = (x: PoolChain): PoolMoveDry["steps"] => [{ step: "vault_out", chain: "near" }, { step: "intents", chain: x }, { step: "pool_in", chain: x }];
-const MOVE_AMOUNT = /^(0|[1-9]\d{0,29})(?:\.(\d{1,6}))?$/;
+/** Pool X to Cash: out of X's pool, NEAR Intents to NEAR, into the vault. */
+const POOL_TO_CASH_STEPS = (x: PoolChain): PoolMoveDry["steps"] => [{ step: "pool_out", chain: x }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }];
 const isTrade = (c: unknown): c is TradeChain => (TRADE_CHAINS as readonly unknown[]).includes(c);
 
-/** The pair and the USDC of a pool.move or pool.move.dry the page runs, or its refusal: Cash (near) to a pool for now
- *  (pool to Cash and pool to pool build next), an amount in USDC above 0 at no more than its 6 decimals. */
-function moveAsk(params: Record<string, unknown>): Refusal | { to: PoolChain; usdc: bigint } {
+/** The pair and the amount of a pool.move or pool.move.dry the page runs, or its refusal: Cash (near) to a pool, the
+ *  amount in USDC; a pool to Cash (src/pool-to-cash.ts), the amount in the pool's coin; each above 0 at no more than
+ *  its asset's decimals. Pool to pool builds next. */
+function moveAsk(params: Record<string, unknown>): Refusal | { from: "near"; to: PoolChain; usdc: bigint } | { from: PoolChain; to: "near"; units: bigint } {
   const { from, to, amount } = params;
   if (!isTrade(from) || !isTrade(to) || from === to || typeof amount !== "string") return { error: "not_allowed" };
-  // Cash to any pool (to is a pool chain once from is near); pool to Cash and pool to pool build next
-  if (from !== "near" || to === "near") return { error: "not_allowed" };
-  const m = MOVE_AMOUNT.exec(amount);
+  if (from !== "near" && to !== "near") return { error: "not_allowed" };
+  const d = from === "near" ? USDC_DECIMALS : POOL_DECIMALS[from];
+  const m = new RegExp(`^(0|[1-9]\\d{0,29})(?:\\.(\\d{1,${d}}))?$`).exec(amount);
   if (m === null) return { error: "not_allowed" };
-  const usdc = BigInt(m[1]!) * 10n ** 6n + BigInt((m[2] ?? "").padEnd(6, "0"));
-  return usdc > 0n ? { to, usdc } : { error: "not_allowed" };
+  const x = BigInt(m[1]!) * 10n ** BigInt(d) + BigInt((m[2] ?? "").padEnd(d, "0"));
+  if (x <= 0n) return { error: "not_allowed" };
+  return from === "near" ? { from, to: to as PoolChain, usdc: x } : { from, to: "near", units: x };
 }
 
 /** pool.move and pool.move.dry (card one-balance-buys-on-every-chain): each checked here, then the mover's one move
  *  path. pool.move is answered once the move has left (leaving), its later stages in its op; its dry is refused as it
  *  is, so a dry never promises a move the page cannot run. */
-export function poolMoveKinds(mover: () => CashMover): {
+export function poolMoveKinds(mover: () => CashMover, toCash?: () => PoolToCash): {
   "pool.move": (params: Record<string, unknown>, ctx: KindContext) => HostRefusal | Running<"pool.move">;
   "pool.move.dry": (params: Record<string, unknown>, ctx: KindContext) => HostRefusal | Running<"pool.move.dry">;
 } {
@@ -327,16 +367,27 @@ export function poolMoveKinds(mover: () => CashMover): {
     "pool.move": (params, ctx) => {
       const ask = moveAsk(params);
       if ("error" in ask) return ask;
+      if (ask.from !== "near" && toCash === undefined) return { error: "not_allowed" };
       let answer: HostAnswer<"pool.move"> | HostRefusal = { error: "failed" };
-      const after = mover()
-        .move(ask.to, ask.usdc, ctx.id)
+      const after = (ask.from === "near" ? mover().move(ask.to, ask.usdc, ctx.id) : toCash!().move(ask.from, ask.units, ctx.id))
         .then((r) => void (answer = "error" in r ? { error: r.error } : { result: { stage: "leaving", txs: [] } }), () => void (answer = { error: "failed" }));
       return { running: true, after, answer: () => answer };
     },
     "pool.move.dry": (params) => {
       const ask = moveAsk(params);
       if ("error" in ask) return ask;
+      if (ask.from !== "near" && toCash === undefined) return { error: "not_allowed" };
       let answer: HostAnswer<"pool.move.dry"> | HostRefusal = { error: "failed" };
+      if (ask.from !== "near") {
+        const from = ask.from;
+        const after = toCash!()
+          .dry(from, ask.units)
+          .then(
+            (r) => void (answer = "error" in r ? { error: r.error } : { result: { out: unitsText(r.out, USDC_DECIMALS), fee: unitsText(r.fee, POOL_DECIMALS[from]), steps: POOL_TO_CASH_STEPS(from) } }),
+            () => void (answer = { error: "failed" }),
+          );
+        return { running: true, after, answer: () => answer };
+      }
       const after = mover()
         .dry(ask.to, ask.usdc)
         .then(
@@ -349,13 +400,14 @@ export function poolMoveKinds(mover: () => CashMover): {
 }
 
 export type CashToPoolDeps = {
-  /** Cash holds money that can move or a move is on its way: read on the device alone. With neither, a tap goes straight
-   *  to the pool buy, with no read of the coin's venue. */
-  any(): Promise<boolean>;
-  /** Lamports one pool.buy of `token` spends now (pool.buy.dry's tap_max on the coin's venue); 0n when none. */
-  tapMax(token: string): Promise<bigint>;
-  /** cashMover's need on Solana: the op id of the move on its way for the shortfall, or null. */
-  need(short: bigint): Promise<string | null>;
+  /** Cash holds money that can move or a move is on its way to `chain`: read on the device alone. With neither, a tap
+   *  goes straight to the pool buy, with no read of the coin's venue. */
+  any(chain: PoolChain): Promise<boolean>;
+  /** Base units one pool.buy of `token` on `chain` spends now (Solana: pool.buy.dry's tap_max on the coin's venue; Base
+   *  and Robinhood: the largest ready note, state.pools' tap_max); 0n when none. */
+  tapMax(chain: PoolChain, token: string): Promise<bigint>;
+  /** cashMover's need: the op id of the move on its way for it, or null. */
+  need(chain: PoolChain, short: bigint): Promise<string | null>;
   wait(ms: number): Promise<void>;
   now(): number;
   signal?: AbortSignal;
@@ -368,13 +420,17 @@ type Answer = HostAnswer<"pool.buy"> | HostRefusal;
  *  nothing is on its way. No async function here returns an answer: a HostAnswer's `then` would make it a thenable. */
 export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
   return (ask, ctx) => {
-    if (ask.kind !== "pool.buy" || ask.chain !== "solana" || ask.token === null) return inner(ask, ctx);
+    if (ask.kind !== "pool.buy" || !isPoolChain(ask.chain) || ask.token === null) return inner(ask, ctx);
     const token = ask.token;
+    const chain = ask.chain;
+    // Solana: the gap to one tap's spend; Base and Robinhood: the whole asked note, only when it is a rung
+    const want = (now: bigint): bigint | null => (chain === "solana" ? ask.amount - now : isRung(chain, ask.amount) ? ask.amount : null);
     let answer: Answer = { error: "failed" };
     const after = (async () => {
       const d = deps();
-      const now = (await d.any()) ? await d.tapMax(token) : ask.amount;
-      const op = now < ask.amount ? await d.need(ask.amount - now) : null;
+      const now = (await d.any(chain)) ? await d.tapMax(chain, token) : ask.amount;
+      const short = now < ask.amount ? want(now) : null;
+      const op = short === null ? null : await d.need(chain, short);
       if (op !== null) {
         try {
           ctx?.route?.({ move: "cash", op });
@@ -382,7 +438,7 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
           /* the app's display never stops a buy */
         }
         const until = d.now() + CASH_MOVE_WAIT_MS;
-        while (!d.signal?.aborted && d.now() < until && (await d.tapMax(token)) < ask.amount) await d.wait(CASH_MOVE_POLL_MS);
+        while (!d.signal?.aborted && d.now() < until && (await d.tapMax(chain, token)) < ask.amount) await d.wait(CASH_MOVE_POLL_MS);
       }
       const r = inner(ask, ctx);
       if (!("after" in r)) return void (answer = r);
