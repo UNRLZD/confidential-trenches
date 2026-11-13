@@ -13,7 +13,9 @@
 //   - max: pool.buy.dry's answer carries with_cash beside tap_max;
 //   - level: a kit-v1.14 app is read at its own level and sent pool.buy.dry with with_cash left out (its schema
 //     refuses the whole answer for it);
-//   - version: the page reads every kit at 1.15 and above in full (SIGNPAGE_KIT_VERSION `1.15`).
+//   - version: the page reads every kit at 1.15 and above in full (SIGNPAGE_KIT_VERSION `1.15`);
+//   - poolMove: the page answers pool.move and pool.move.dry itself, each checked first (the pair, the amount), and a
+//     dry from Cash names the route the v2 lite paper names: out of the vault, NEAR Intents, into the pool.
 // The numbers (sizes, the wait's bound, each refusal) are packages/signpage/test/cash-to-pool.test.ts,
 // pool-kinds-cash.test.ts and kit-version.test.ts at the released commit. The recorded answers are facts() over
 // packages/signpage/scripts/build-app.mjs's build (mainnet, as SIGN_HOST serves) and SIGN_HOST as served before.
@@ -53,6 +55,10 @@ const MAX = new RegExp(`\\{\\.\\.\\.(${N}),result:\\{\\.\\.\\.\\1\\.result,with_
 const LEVEL = new RegExp(`${N}\\(1,14\\)\\?\`1\\.14\`:${N}\\(1,13\\)\\?\`1\\.13\``);
 const STRIP = new RegExp(`${N}!==\`pool\\.buy\\.dry\`\\)return ${N};let\\{with_cash:${N},\\.\\.\\.(${N})\\}=${N};return \\1`);
 
+/** pool.move's kind, its ask checked before the mover is asked; and a move from Cash's steps (group 1: the chain). */
+const MOVE_KIND = new RegExp(`\\{"pool\\.move":\\((${N}),${N}\\)=>\\{let (${N})=${N}\\(\\1\\);if\\(\`error\`in \\2\\)return \\2;`);
+const MOVE_STEPS = new RegExp(`\\[\\{step:\`vault_out\`,chain:\`near\`\\},\\{step:\`intents\`,chain:(${N})\\},\\{step:\`pool_in\`,chain:\\1\\}\\]`);
+
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the marks read from it. */
 export function facts(index, js) {
   const rules = [...js.matchAll(IMPLICIT)].map((m) => m[1]);
@@ -64,6 +70,7 @@ export function facts(index, js) {
     max: MAX.test(js),
     level: LEVEL.test(js) && STRIP.test(js),
     version: /`1\.15`/.test(js),
+    poolMove: MOVE_KIND.test(js) && /"pool\.move\.dry":(?:\([\w$,]*\)|[\w$]+)=>\{/.test(js) && MOVE_STEPS.test(js),
   };
 }
 
@@ -73,9 +80,10 @@ export const SAYS = Object.freeze({
   max: "the signing page's pool.buy.dry answers no with_cash: the trade box's Max is the pool's money alone, not the whole balance",
   level: "a kit-v1.14 app is not sent pool.buy.dry's answer with with_cash left out: its schema refuses the whole answer, and its Fee and Max with it",
   version: "the signing page does not read a kit 1.15 app in full: with_cash and the move step never reach the app that draws them",
+  poolMove: "the signing page answers no pool.move or pool.move.dry of its own, checked first, with Cash's route out of the vault, over NEAR Intents and into the pool: Portfolio's Move cannot move money between chains",
 });
 
-/** The verdict on an answer { index, sha384, move, tap, max, level, version }. */
+/** The verdict on an answer { index, sha384, move, tap, max, level, version, poolMove }. */
 export function judge(a) {
   const lines = [];
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];

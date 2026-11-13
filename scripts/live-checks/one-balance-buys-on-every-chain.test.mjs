@@ -18,6 +18,10 @@ test("recorded good answer: this card's SIGN_HOST build: PASS", () => {
   assert.deepEqual(v.lines, []);
 });
 
+test("recorded answer partOne (part 1's build, a0bd91187, before pool.move): FAIL, poolMove alone named", () => {
+  assert.deepEqual(judge(ANSWERS.partOne).lines, [`BAD ${SAYS.poolMove}`]);
+});
+
 test("recorded answer liveBefore (SIGN_HOST before this card): FAIL, every mark named", () => {
   const v = judge(ANSWERS.liveBefore);
   assert.equal(v.ok, false);
@@ -43,6 +47,8 @@ const JS = [
   "return i(Th[0],Th[1])?`current`:i(1,14)?`1.14`:i(1,13)?`1.13`:`1.4`}",
   "Gh=(e,t)=>{if(typeof t!=`object`||!t||e!==`pool.buy.dry`)return t;let{with_cash:n,...r}=t;return r};",
   "x=`1.15`",
+  'var zz=e=>[{step:`vault_out`,chain:`near`},{step:`intents`,chain:e},{step:`pool_in`,chain:e}];',
+  'function Uz(e){return{"pool.move":(t,n)=>{let r=Hz(t);if(`error`in r)return r;return r},"pool.move.dry":t=>{let n=Hz(t);return n}}}',
 ].join("");
 const INDEX = (js) => `<script type="module" src="/app.js" integrity="${facts("", js).sha384}"></script>`;
 
@@ -69,6 +75,11 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     ["level", JS.replace("i(1,14)?`1.14`:", "")],
     ["level", JS.replace("let{with_cash:n,...r}=t;return r", "return t")],
     ["version", JS.replace("x=`1.15`", "x=`1.14`")],
+    // pool.move not checked before the mover, no dry of its own, or a route other than the paper's
+    ["poolMove", JS.replace("if(`error`in r)return r;return r", "return r")],
+    ["poolMove", JS.replace('"pool.move.dry":t=>', '"pool.move.x":t=>')],
+    ["poolMove", JS.replace("{step:`intents`,chain:e},", "")],
+    ["poolMove", JS.replace("{step:`pool_in`,chain:e}", "{step:`pool_in`,chain:`base`}")],
   ];
   for (const [mark, js] of cuts) {
     assert.notEqual(js, JS, `${mark}: the cut changed nothing`);
