@@ -1,0 +1,64 @@
+{
+  "_note": {
+    "good": "card/round-trip-costs-less build (mainnet) after the reviews of 024e8a89d and 3e288da51: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
+    "bad": "main 6430cba10 build (mainnet), before this card: packages/signpage/index.html and public/app.js as build-app.mjs wrote them there: FAIL, every mark named",
+    "beforeDelta": "card/round-trip-costs-less 024e8a89d build (mainnet), the head that review read: FAIL on the reads it moved (a W read empty listed empty while its note is RESERVED; the passes counted; the held W not passed; every rent back claiming the slot; the listing) and on the sale stamp, the trade lock and the load start"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-fvgK3G9vRVh/qRrB6Tgmw/ggIGbyDutZqL+u9RVJ8vgjgD8XI2AdXO5AJ5WVvqLP\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-fvgK3G9vRVh/qRrB6Tgmw/ggIGbyDutZqL+u9RVJ8vgjgD8XI2AdXO5AJ5WVvqLP",
+    "carries": {
+      "the sale's owed record keeps W's proven buy": true,
+      "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": true,
+      "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": true,
+      "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": true,
+      "an unproven W tried again on each load to its third pass, then held as its own state": true,
+      "the positions' passes held only while a W is read": true,
+      "the page reads the restore's no-buy mark": true,
+      "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": true,
+      "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": true,
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": true,
+      "a sale stamps the device's spacing after its record names the signature and before it is sent, W's record keeping that time as its own last send": true,
+      "no leftover W's pass starts while a pool buy or sell holds the trade lock, shared, in any tab; a lock read that throws holds it": true,
+      "a load's first leftover pass waits a start drawn from 15 to 60 s from the device's random source, a full sell's new record included": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-pf/UTp4+S8wKrLxjzMWScJkynMDiSHmwkpzuNCqAr22o95nO2FKJ4NRuAch4Sxy4\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-pf/UTp4+S8wKrLxjzMWScJkynMDiSHmwkpzuNCqAr22o95nO2FKJ4NRuAch4Sxy4",
+    "carries": {
+      "the sale's owed record keeps W's proven buy": false,
+      "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": false,
+      "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": false,
+      "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": false,
+      "an unproven W tried again on each load to its third pass, then held as its own state": false,
+      "the positions' passes held only while a W is read": false,
+      "the page reads the restore's no-buy mark": false,
+      "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": false,
+      "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": false,
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": false,
+      "a sale stamps the device's spacing after its record names the signature and before it is sent, W's record keeping that time as its own last send": false,
+      "no leftover W's pass starts while a pool buy or sell holds the trade lock, shared, in any tab; a lock read that throws holds it": false,
+      "a load's first leftover pass waits a start drawn from 15 to 60 s from the device's random source, a full sell's new record included": false
+    }
+  },
+  "beforeDelta": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-EQ0AXrQnNrEN+eN17T5e5ZLdZP9V3yUEpIis0r9VWMv63ql8L+6zCb1PJjsrAxJ+\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-EQ0AXrQnNrEN+eN17T5e5ZLdZP9V3yUEpIis0r9VWMv63ql8L+6zCb1PJjsrAxJ+",
+    "carries": {
+      "the sale's owed record keeps W's proven buy": true,
+      "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": false,
+      "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": false,
+      "W's buy proven on the public seat alone, once, against the restore's rebuilt record or its no-buy mark": true,
+      "an unproven W tried again on each load to its third pass, then held as its own state": true,
+      "the positions' passes held only while a W is read": false,
+      "the page reads the restore's no-buy mark": true,
+      "the sell's rule refuses a sale that pays more than 100,000 lamports of priority (a price with no limit at 1,400,000 units, rounded up as the runtime charges it) and a sale's fee over 105,000, full or partial": true,
+      "a leftover W's rent back is spaced: each rent-back send from a W is stamped before it is sent with a gap drawn from 10 to 60 minutes, in the device's own database that a sign out leaves; a leftover pass sends nothing while another W's gap runs (one past now and the largest gap is none), nor after this load's one sending pass, and takes the device's slot in one readwrite transaction so no other tab sends within it, before the teardown's sends and the sweep's note; a hold is no fault, never tried again": false,
+      "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": false,
+      "a sale stamps the device's spacing after its record names the signature and before it is sent, W's record keeping that time as its own last send": false,
+      "no leftover W's pass starts while a pool buy or sell holds the trade lock, shared, in any tab; a lock read that throws holds it": false,
+      "a load's first leftover pass waits a start drawn from 15 to 60 s from the device's random source, a full sell's new record included": false
+    }
+  }
+}

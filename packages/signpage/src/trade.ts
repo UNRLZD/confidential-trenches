@@ -52,7 +52,7 @@ export type TradeStore = Pick<WalletStore, "get" | "put" | "keys" | "update">;
 export const TRADE_STORE_MS = 10_000;
 
 /** `p`, or a rejection once `ms` have passed without it. */
-function within<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+export function within<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   let t: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([p, new Promise<never>((_, no) => (t = setTimeout(() => no(new Error(`${what}: no answer in ${ms} ms`)), ms)))]).finally(() => clearTimeout(t));
 }
@@ -213,6 +213,25 @@ type Locks = Pick<LockManager, "request">;
 export const TRADE_PICK_LOCK = "ct-wallet/trade-pick";
 /** Held by a trade for its whole run, in the tab that runs it: a mark whose op lock is free is a dead tab's. */
 export const tradeLock = (op: string): string => `ct-wallet/trade/${op}`;
+/** Held shared by every pool buy and sell from its tap to its end, on any chain and in any tab (card round-trip-costs-
+ *  less, review P2-1 of 024e8a89d): no leftover rent back starts while one is held (tradeRunning), so the device sends
+ *  no W's close or sweep beside a trade it is making. Never asked exclusive, so a trade never waits on it. */
+export const POOL_TRADE_LOCK = "ct-pool/trade";
+/** `f` with POOL_TRADE_LOCK held shared (with no lock manager, `f` alone). */
+export const duringTrade = <T>(locks: Pick<LockManager, "request"> | null, f: () => Promise<T>): Promise<T> =>
+  locks ? (locks.request(POOL_TRADE_LOCK, { mode: "shared" }, f) as Promise<T>) : f();
+/** Whether a pool buy or sell holds POOL_TRADE_LOCK now, in any tab; a lock manager with no query: false; a query that
+ *  throws or gives no answer within `ms` (the store's bound): true, as a spacing store that cannot answer holds the pass
+ *  (pool-sell.ts rentBack). Read by leftover passes only. */
+export const tradeRunning = async (locks: Pick<LockManager, "request"> | Partial<Pick<LockManager, "query">> | null, ms = TRADE_STORE_MS): Promise<boolean> => {
+  try {
+    const query = (locks as Partial<Pick<LockManager, "query">> | null)?.query;
+    const q = query === undefined ? undefined : await within(query.call(locks), ms, "the lock manager's query");
+    return (q?.held ?? []).some((l) => l.name === POOL_TRADE_LOCK);
+  } catch {
+    return true;
+  }
+};
 
 export type TradeKind = ((params: Record<string, unknown>, ctx: KindContext) => Running<"buy"> | null) & {
   /** Settles once no trade of this page is running (the shell's reload waits for it). */

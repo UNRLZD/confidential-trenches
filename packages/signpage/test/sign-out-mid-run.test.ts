@@ -11,6 +11,9 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
+// the page's IndexedDB as a browser gives it: the device's spacing database (src/device-spacing.ts) opens
+// globalThis.indexedDB, and with none every rent back is held (card round-trip-costs-less)
+import "fake-indexeddb/auto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { WALLET_SEED_LOCK, openWalletStore, type WalletStore } from "@blindfill/wallet/store";

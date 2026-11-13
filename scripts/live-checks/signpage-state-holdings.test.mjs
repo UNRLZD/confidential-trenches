@@ -147,7 +147,7 @@ test("a rebuilt bundle with an unrelated copy change passes with no re-record; o
   const noStop = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(PREEMPT, "wallets:async()=>{")));
   assert.deepEqual(BAD(noStop, NO_LEDGER), [RUNS]);
   // a sell's read that fails never ends its hold (the second review's P2-2): the passes wait for the next sell
-  const noRelease = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(PREEMPT, (m) => m.replace(/\?[\w$]+\.release\(\):/, "?0:"))));
+  const noRelease = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(PREEMPT, (m) => m.replace(/\?[\w$]+\??\.release\(\):/, "?0:"))));
   assert.equal(noRelease.app.marks.preempt, 0);
   assert.deepEqual(BAD(noRelease, NO_LEDGER), [RUNS]);
 });

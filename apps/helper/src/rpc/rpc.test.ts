@@ -75,6 +75,19 @@ test("card live-check-devnet-pair: solana-devnet forwards getGenesisHash to SOLA
   assert.deepEqual([m.status, code(m), seen.length], [400, "method_not_allowed", 0]);
 });
 
+// card round-trip-costs-less: a mainnet pool sale reads no fee price (it pays SOLANA_POOL_SELL_PRIORITY, as before the
+// card), so the kit's list does not hold getRecentPrioritizationFees and both Solana routes refuse it before any call
+test("card round-trip-costs-less: getRecentPrioritizationFees is off the kit's list: solana and solana-devnet answer 400 method_not_allowed, nothing sent", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  assert.ok(!(HELPER_RPC_METHODS.solana as readonly string[]).includes("getRecentPrioritizationFees"));
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
+  for (const chain of ["solana", "solana-devnet"]) {
+    seen.length = 0;
+    const a = await call(r, chain, { jsonrpc: "2.0", id: 9, method: "getRecentPrioritizationFees", params: [["SysvarC1ock11111111111111111111111111111111"]] });
+    assert.deepEqual([a.status, code(a), seen.length], [400, "method_not_allowed", 0], chain);
+  }
+});
+
 test("an allowlisted call on each chain is forwarded to that chain's provider and its answer passed back", async () => {
   next = { status: 200, type: "application/json; charset=utf-8", body: echo };
   const r = rpc();
