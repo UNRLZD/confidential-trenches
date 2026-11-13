@@ -39,6 +39,16 @@
 //   7. a withdraw whose onward send from W is lost (every page raw send dropped): it ends in_transit with the part owed;
 //      a reload (a new page on the same store) runs the state reads' finish and the op ends sent;
 //   8. device C, a fresh profile: the restore from the seed alone shows the spent notes SPENT and the same balance as A.
+// With --plain (card deposit-takes-each-pools-own-coin), the pool's own coin sent straight to U_X in place of 1Click's
+// delivery, and nothing played: step 1 also asks pool.address (src/pool-deposit-address.ts poolAddressHost, wired as
+// src/main.ts wires it: priced by poolQuotePricing(price, origin, chain) at the chain's Chainlink ETH/USD feed read on
+// the fork, the floor evmQuoteRoute's, checked by poolFollows' quoted into the store's op) with origin_asset
+// POOL_DEPOSIT_DESTINATION[chain] at the floor, which must answer U_X as its address and its quote's deposit address
+// with no request for 1Click or the helper's 1Click routes, and one wei under the floor, which must answer below_min;
+// steps 3 and 4 put money at U_X by two real sends on the fork from an outside wallet (an unlocked anvil dev account with
+// no code: floor - 1 wei, then the 1 wei that tops it up to the floor), and the follow runs on the op's own record with
+// a status read that throws if ever called (counted: 0). The follow reads on to the quote's real deadline (30 min, the
+// page's own), so the run ends it by its signal once the carry and the withdraws are done, at in_pool.
 // It writes every step, each transaction's receipt (gas used, price, its signed bytes' length for Base's L1 fee) and the
 // helper calls to <out.json>, and exits 0 only when every step held. Nothing here logs a key or the words.
 import { execFileSync, spawn } from "node:child_process";
@@ -50,8 +60,9 @@ import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
-const USAGE = "usage: pool-fork-evm-carry-withdraw.mjs <base|robinhood> <out.json> --slots <n>";
+const USAGE = "usage: pool-fork-evm-carry-withdraw.mjs <base|robinhood> <out.json> --slots <n> [--plain]";
 const [CHAIN, OUT] = process.argv.slice(2);
+const PLAIN = process.argv.includes("--plain");
 const SLOTS_AT = process.argv.indexOf("--slots");
 const SLOTS = SLOTS_AT > 0 && /^\d+$/.test(process.argv[SLOTS_AT + 1] ?? "") ? BigInt(process.argv[SLOTS_AT + 1]) : 0n;
 if ((CHAIN !== "base" && CHAIN !== "robinhood") || !OUT || OUT.startsWith("-") || SLOTS <= 0n) {
@@ -71,6 +82,8 @@ const hex = (n) => `0x${BigInt(n).toString(16)}`;
 
 // the sends, counted where they leave: the page's raw sends (through this fetch) and the helper sender's (its providers)
 const sent = { page: 0, helper: 0, dropped: 0 };
+// --plain: the follow's 1Click status reads (each one throws; the run needs none)
+let statusCalls = 0;
 const sends = () => sent.page + sent.helper;
 let losing = false;
 const realFetch = globalThis.fetch;
@@ -130,8 +143,11 @@ const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { evmPoolVenues } = await import("../../kit/src/trade/evm/buy-unpinned.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
 const { MAINNET_EVM_FEE_RPCS, MAINNET_POOL_HISTORY, MAINNET_POOL_RPCS, pageEvmHold, pageEvmPoolRpcs, pageEvmWalletRpc, testnetPool, testnetPoolDeps } = await import("../src/pool-testnet.ts");
-const { depositToEnd, evmQuoteRoute, followPoolQuote, uxNoteLanded, uxNoteOpen } = await import("../src/pool-deposit-follow.ts");
-const { readEvmPoolFloor } = await import("../src/pool-deposit-address.ts");
+const { depositToEnd, evmQuoteRoute, followPoolQuote, poolFollows, uxNoteLanded, uxNoteOpen } = await import("../src/pool-deposit-follow.ts");
+const { poolAddressHost, poolQuotePricing, readEvmPoolFloor } = await import("../src/pool-deposit-address.ts");
+const { POOL_DEPOSIT_DESTINATION } = await import("../../wallet/src/deposit/quote.ts");
+const { POOL_USD_FEEDS } = await import("../../kit/src/price/pool-usd.ts");
+const { frameState } = await import("../src/state.ts");
 const { depositNamer } = await import("../src/deposit-name.ts");
 const { restoreUxOf } = await import("../src/pool-restore.ts");
 const { checkPoolAmount, checkPoolTo, parseUnits, poolRefusalWords, poolSendable } = await import("../src/withdraw/pool-form.ts");
@@ -328,7 +344,7 @@ const restoreInto = async (ns) => {
 // for; the fork block and the book its answers were recorded into (fork-rpc.mjs FORK_RPC_BOOK_FILE), to replay it offline
 const SCRIPT = new URL(import.meta.url);
 const run = { commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), dirty: execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim() !== "", scriptSha256: createHash("sha256").update(readFileSync(SCRIPT)).digest("hex"), forkBlock: POOLS_FORK_BLOCKS[CHAIN], book: process.env.FORK_RPC_BOOK_FILE ?? null };
-const record = { by: "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs", run, chain: CHAIN, pool: PIN.pool, anvil: ANVIL, slots: SLOTS, helperSender: sender.sender, steps: [], txs: [], helperCalls, helperLines, refusedHosts: {} };
+const record = { by: "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs", run, chain: CHAIN, pool: PIN.pool, anvil: ANVIL, slots: SLOTS, helperSender: sender.sender, steps: [], txs: [], helperCalls, helperLines, refusedHosts: {}, plain: PLAIN };
 const failures = [];
 const step = (name, o, ok) => {
   record.steps.push({ name, atMs: Date.now() - t0, ok, ...o });
@@ -352,6 +368,16 @@ const finish = async (code) => {
   record.senderThrows = senderThrows;
   record.tapWaitMs = tapWaitMs;
   record.plannedAs = plannedAs;
+  if (PLAIN) {
+    // the whole run asked 1Click nothing: no status read, and no call to the helper's 1Click proxy
+    const oneclickCalls = helperCalls.filter((c) => c.path.startsWith("/v1/proxy/oneclick")).length;
+    record.statusCalls = statusCalls;
+    record.oneclickHelperCalls = oneclickCalls;
+    if (statusCalls !== 0) failures.push(`the follow read 1Click's status ${statusCalls} times`);
+    if (oneclickCalls !== 0) failures.push(`the helper's 1Click proxy was called ${oneclickCalls} times`);
+    const oneclickHosts = [...refused.keys()].filter((h) => /1click|chaindefuser|defuse/i.test(h));
+    if (oneclickHosts.length !== 0) failures.push(`1Click asked directly: ${oneclickHosts.join(", ")}`);
+  }
   writeFileSync(OUT, JSON.stringify(record, big, 2) + "\n");
   log("wrote", { out: OUT, failures, txs: record.txs.map((t) => [t.what, t.status, t.gasUsed]) });
   seed64.fill(0);
@@ -396,8 +422,9 @@ await guard("restore A", async () => {
   const bal = await balanceOf(A.w);
   step("restore A", { ms: Date.now() - s, block: r.block, notes: await statesOf(A.w), balance: bal }, true);
 });
+let uxNamer = null;
 const ux = await guard("U_X named", async () => {
-  const namer = depositNamer({ top: true, scope: () => null, pools: () => [{ chain: CHAIN, scope }], open: async () => A.w, startup: async () => {}, resyncing: () => null });
+  const namer = (uxNamer = depositNamer({ top: true, scope: () => null, pools: () => [{ chain: CHAIN, scope }], open: async () => A.w, startup: async () => {}, resyncing: () => null }));
   namer.name(ENTROPY.slice());
   await namer.named();
   const rec = depositRecordOf(await A.w.get("meta", depositKey(scope)));
@@ -408,6 +435,62 @@ const ux = await guard("U_X named", async () => {
 });
 const floor = await readEvmPoolFloor(pageEvmPoolRpcs(CHAIN), PIN);
 log("floor", { floor, ladderMin: EVM_LADDER.min });
+const evmRoute = evmQuoteRoute({ network: "mainnet", pool: (c) => t.evmPoolOf(c), wallet: (c) => pageEvmWalletRpc(c), notes: () => readNotes(A.w) });
+const fmt18 = (w) => { const x = w.toString().padStart(19, "0"); return `${x.slice(0, -18)}.${x.slice(-18)}`.replace(/\.?0+$/, ""); };
+
+// --plain, step 1: pool.address with the pool's own coin as origin, wired as src/main.ts wires it
+const PLAIN_ID = "plain-send";
+const plainF = !PLAIN ? null : await guard("plain: pool.address", async () => {
+  // the price: the chain's own ETH/USD feed (the kit's POOL_USD_FEEDS proxy), latestRoundData and decimals read on the
+  // fork; the page reads the same feed fresh, which a fork block hours old is not, so the run gives the read as the
+  // page's PoolStatePrice at the feed's own time (it only bounds the beta cap here)
+  const feed = POOL_USD_FEEDS[CHAIN];
+  const round = await anvil("eth_call", [{ to: feed.proxy, data: "0xfeaf968c" }, "latest"]);
+  const dec = Number(BigInt(await anvil("eth_call", [{ to: feed.proxy, data: "0x313ce567" }, "latest"])));
+  const answer = BigInt("0x" + round.slice(2 + 64, 2 + 128));
+  const updatedS = Number(BigInt("0x" + round.slice(2 + 192, 2 + 256)));
+  const price = { price: answer.toString(), expo: -dec, published_s: updatedS, read_ms: Date.now() };
+  const fs = frameState(async () => A.w, () => {});
+  const follow = poolFollows({ store: async () => A.w, decimals: () => 18, deps: () => null, locks: () => null });
+  const host = poolAddressHost({ pools: () => [{ chain: CHAIN, scope }], network: "mainnet", read: fs.depositRead, named: () => uxNamer.named(), priced: (c, o) => poolQuotePricing(price, o, c), floor: (c) => evmRoute.floor(c), checked: (id, c, q, u) => follow.quoted(id, c, q, u) });
+  const origin = POOL_DEPOSIT_DESTINATION[CHAIN];
+  const ask = async (amount, id) => {
+    const r = host({ chain: CHAIN, origin_asset: origin, amount }, { id });
+    await r.after;
+    return r.answer();
+  };
+  const calls0 = helperCalls.length, refused0 = refused.size;
+  const under = await ask(fmt18(floor - 1n), "plain-under");
+  const at = await ask(fmt18(floor), PLAIN_ID);
+  await follow.idle();
+  const asked = helperCalls.slice(calls0).map((c) => `${c.verb} ${c.path}`);
+  const op = await A.w.get("ops", PLAIN_ID);
+  const underOp = (await A.w.get("ops", "plain-under")) ?? null;
+  const q = at?.result?.quote;
+  const f = op?.follow;
+  const deadlineAheadMs = q === undefined ? null : Date.parse(q.deadline) - Date.now();
+  step("plain: pool.address", { origin, floor, price, under, at, asked, refusedHosts: [...refused.keys()].slice(refused0), op, underOp }, under?.error === "below_min" && underOp === null && at?.result?.address === ux.evm && q?.deposit_address === ux.evm && q?.origin_asset === origin && q?.amount_in === fmt18(floor) && q?.min_amount_out === fmt18(floor) && deadlineAheadMs > 29 * 60_000 && asked.every((a) => !/oneclick|quote|status/.test(a)) && refused.size === refused0 && op?.kind === "pool_deposit" && op?.stage === "quote_checked" && f?.address === ux.evm && f?.u === ux.evm && f?.min_out === floor.toString() && f?.origin === origin);
+  return f;
+});
+// --plain, steps 3 and 4: the outside wallet, an unlocked anvil dev account with no code on the fork
+const outside = !PLAIN ? null : await guard("plain: the outside wallet", async () => {
+  for (const a of await anvil("eth_accounts", [])) if ((await anvil("eth_getCode", [a, "latest"])) === "0x") return a;
+  throw new Error("no dev account without code on the fork");
+});
+const plainSends = [];
+// one plain send from the outside wallet to U_X, at the held base fee, mined at once (anvil automines); its receipt read
+const outsideSend = (what, value) => exclusive(async () => {
+  await anvil("anvil_setNextBlockBaseFeePerGas", [hex(BASE_FEE)]);
+  const hash = await anvil("eth_sendTransaction", [{ from: outside, to: ux.evm, value: hex(value) }]);
+  let rc = null;
+  for (let k = 0; k < 40 && rc === null; k++) (rc = await anvil("eth_getTransactionReceipt", [hash])) ?? (await sleep(250));
+  txHashes.set(hash, what);
+  const s = { what, hash, from: outside, to: ux.evm, value, status: rc?.status ?? null, block: rc?.blockNumber ? BigInt(rc.blockNumber) : null, uxBalance: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) };
+  plainSends.push(s);
+  log("plain send", s);
+  return s;
+});
+record.plainSends = plainSends;
 
 // 2. refused, 0 sent: a pool.deposit under the least rung
 await guard("under the least rung", async () => {
@@ -422,8 +505,7 @@ await guard("under the least rung", async () => {
 // 3 and 4. the follow of U_X: one wei under the floor carries nothing; topped up to the floor it carries the rung
 // the quote's deadline already past: the carry step reads the follow's end (in_pool read on past the deadline, as the
 // page ends a follow), which a future deadline would hold open past the run; no other step reads the deadline
-const f = { chain: CHAIN, s: scope.toString(), i: ux.index, u: ux.evm, refund_id: ux.id, address: "0x" + "00".repeat(20), deadline_ms: Date.now() - 1_000, origin: "nep141:base.omft.near", min_out: floor.toString() };
-const evmRoute = evmQuoteRoute({ network: "mainnet", pool: (c) => t.evmPoolOf(c), wallet: (c) => pageEvmWalletRpc(c), notes: () => readNotes(A.w) });
+const f = PLAIN ? plainF : { chain: CHAIN, s: scope.toString(), i: ux.index, u: ux.evm, refund_id: ux.id, address: "0x" + "00".repeat(20), deadline_ms: Date.now() - 1_000, origin: "nep141:base.omft.near", min_out: floor.toString() };
 const depositFromUx = (g, amount, signal) => depositToEnd((p, ctx) => t.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx), g.chain, 18, amount, signal);
 const noRefund = Object.assign(async () => "none", { settle: async () => true });
 const d = evmRoute.deps(CHAIN, depositFromUx, () => noRefund);
@@ -435,7 +517,8 @@ const follows = new AbortController();
 let rounds = 0;
 const deps = {
   ...d,
-  status: async () => ({ status: "SUCCESS" }), // 1Click's word once it delivered: played here
+  // 1Click's word once it delivered: played here; under --plain never asked (each call counted, and it throws)
+  status: PLAIN ? async () => { statusCalls++; throw new Error("a plain send asks 1Click nothing"); } : async () => ({ status: "SUCCESS" }),
   noted: async (g) => uxNoteLanded(await readNotes(A.w), g),
   open: async (g) => uxNoteOpen(await readNotes(A.w), g),
   stage: async (s) => void (stages.push(s), (stageAt[s] ??= Date.now()), log("follow stage", { stage: s }), pushRead()),
@@ -447,11 +530,12 @@ const deps = {
   // there, which the page itself never does (the 03:16Z run: the queue's first round waited 25 s for its turn)
   sleep: (ms, sg) => (rounds++, new Promise((r) => { const k = setTimeout(r, stages.includes("in_pool") ? ms : Math.min(ms, 1_000)); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
 };
-await anvil("anvil_setBalance", [ux.evm, hex(floor - 1n)]);
+if (PLAIN) await outsideSend("outside: plain send, one wei under the floor", floor - 1n);
+else await anvil("anvil_setBalance", [ux.evm, hex(floor - 1n)]);
 const beforeUnder = sends();
 const followRun = followPoolQuote(f, deps, "quote_checked");
 for (let k = 0; k < 40 && rounds < 4; k++) await sleep(500);
-step("U_X one wei under the floor", { rounds, sent: sends() - beforeUnder, stages: [...stages], uxBalance: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) }, sends() === beforeUnder && !stages.includes("in_pool"));
+step("U_X one wei under the floor", { rounds, sent: sends() - beforeUnder, stages: [...stages], uxBalance: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])), statusCalls }, sends() === beforeUnder && !stages.includes("in_pool") && (!PLAIN || (stages.includes("short") && plainSends[0]?.status === "0x1" && statusCalls === 0)));
 
 // the withdraw screen: pool.withdraw opens it, its funds read for To, its two fields checked as the screen checks them
 const toKey = keccak_256(Uint8Array.from([...seed64, ...new TextEncoder().encode("withdraw-to")]));
@@ -463,7 +547,6 @@ const toBalance = async () => BigInt(await anvil("eth_getBalance", [TO, "latest"
 const tapWaitMs = {};
 // the taps whose fixed amount was asked as the screen's nearest lower one (op -> the amount, below and above)
 const plannedAs = {};
-const fmt18 = (w) => { const x = w.toString().padStart(19, "0"); return `${x.slice(0, -18)}.${x.slice(-18)}`.replace(/\.?0+$/, ""); };
 const tap = async (pool, op, amount) => {
   const w0 = Date.now();
   const want = parseUnits(amount, 18);
@@ -524,7 +607,8 @@ const into = Date.now() % EPOCH;
 if (into > 1_000) await sleep(EPOCH - into + 250);
 const carryAt = Date.now();
 const balanceBefore = await balanceOf(A.w);
-await anvil("anvil_setBalance", [ux.evm, hex(floor)]);
+if (PLAIN) await outsideSend("outside: plain send, the top-up to the floor", floor - BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])));
+else await anvil("anvil_setBalance", [ux.evm, hex(floor)]);
 let shownMs = null;
 let finalizedAt = null;
 for (let k = 0; k < 240 && shownMs === null; k++) {
@@ -638,10 +722,12 @@ const inPoolMs = stageAt.in_pool === undefined ? null : stageAt.in_pool - carryA
 await finalize();
 const ended = await Promise.race([followRun.then((s) => s), sleep(60_000).then(() => null)]);
 if (ended === null) follows.abort();
+// --plain: the follow reads on to the quote's real deadline (30 min), so the run's signal ends it; what it shows then
+const shownAtStop = ended === null ? await followRun : ended;
 const uxNotes = (await mine(A.w)).filter((n) => n.ref.kind === "deposit" && n.ref.i === ux.index);
 for (const n of uxNotes) for (const s of n.evmSends ?? []) txHashes.set(s.hash, "carry: U_X deposit");
 for (const x of carried) txHashes.set(x.hash, "carry: U_X deposit");
-step("carry", { shownMs, finalizedAt, inPoolMs, followEnd: ended, stages: [...stages], txs: carried, sent: sends() - beforeUnder, balance: await balanceOf(A.w), notes: await statesOf(A.w), uxLeft: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) }, shownMs !== null && ended === "in_pool" && carried.length === 1);
+step("carry", { shownMs, finalizedAt, inPoolMs, followEnd: ended, shownAtStop, statusCalls, stages: [...stages], txs: carried, sent: sends() - beforeUnder, balance: await balanceOf(A.w), notes: await statesOf(A.w), uxLeft: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) }, shownMs !== null && (PLAIN ? shownAtStop === "in_pool" && stages.includes("in_transit") && statusCalls === 0 && plainSends.length === 2 && plainSends.every((x) => x.status === "0x1") : ended === "in_pool") && carried.length === 1);
 
 // 5. the restore's U_X read: the pool's own pair, never the helper
 await guard("restore reads U_X", async () => {
