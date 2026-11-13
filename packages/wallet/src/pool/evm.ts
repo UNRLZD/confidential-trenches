@@ -106,6 +106,15 @@ export const EVM_NATIVE_ASSET = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 export const EVM_POOL_TAG = "finalized";
 /** The tag every root, time and epoch block is read at (the newest block both RPCs agree on); never kept. */
 export const EVM_NEWEST_TAG = "latest";
+/**
+ * How long a pool sync takes its last newest agreed block again (ms, from the start of its read; card
+ * evm-first-proof-inside-ten-seconds). One proof pass reads the pool's time and then its trees twice within a few ms,
+ * and Base mines a block every 2 s, so within one pass the head has not moved: each read of it was the same block read
+ * again (publicnode answered 21 eth_getBlockByNumber for 8 heights in one pass on a Base mainnet copy). On Robinhood (a
+ * block about every 100 ms) the block taken again is at most this old, the newest one when it was read; a cut it has
+ * not reached is a lag, and a lag's retry reads the head again.
+ */
+export const EVM_NEWEST_REUSE_MS = 1_000;
 /** A W's Transfer read's first and widest eth_getLogs page, in blocks; a range-cap error halves it for that RPC. */
 export const EVM_LOG_PAGE_BLOCKS = 10_000n;
 /** The pool sync's first eth_getLogs page on each provider, in blocks (card evm-pool-sync-wide-pages). Base makes a block
@@ -623,11 +632,15 @@ export const evmAgreedRead = <T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal:
  */
 async function both<T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> {
   signal?.throwIfAborted();
+  return agreedSpan(rpcs, () => bothIn(rpcs, f, signal));
+}
+/** f as one agreed read on a pair's seats (evmPair): a provider that answered one seat inside it never sits on the other. */
+async function agreedSpan<T>(rpcs: Rpcs, f: () => Promise<T>): Promise<T> {
   const s = SEATS.get(rpcs[0]);
   const read = s !== undefined && SEATS.get(rpcs[1]) === s ? s : undefined;
   read?.begin();
   try {
-    return await bothIn(rpcs, f, signal);
+    return await f();
   } finally {
     read?.end();
   }
@@ -1191,6 +1204,9 @@ export type EvmTreeSync = {
    * `hash`, `block` must still be that block on both RPCs after the round (the round's chain), else a lag; then the
    * caller retries (it re-reads the block), not depthAt. */
   depthAt(block: bigint, signal?: AbortSignal, hash?: string): Promise<number>;
+  /** The pool's time (evmNow's, ms): the sync's newest agreed block's, the one its next round reads within
+   *  EVM_NEWEST_REUSE_MS, retried on a lag. */
+  now(signal?: AbortSignal): Promise<bigint>;
 };
 
 export type EvmSyncArgs = {
@@ -1206,6 +1222,8 @@ export type EvmSyncArgs = {
   history?: readonly EvmRpc[];
   /** tests only: the wait between lag retries */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** tests only: the clock (ms) EVM_NEWEST_REUSE_MS is counted on (performance.now unless given) */
+  clock?: () => number;
 };
 
 /**
@@ -1322,15 +1340,27 @@ export async function evmRetryLag<T>(f: () => Promise<T>, sleep: (ms: number, si
 }
 
 /**
- * The block both RPCs agree on at a tag: the lower of their `at` blocks, read by number on both, one hash, time and
- * number on both. Two blocks at that height are a retry at EVM_NEWEST_TAG (two honest RPCs may hold two blocks of one
- * height for a moment) and refused at a final tag (a final block never moves).
+ * The block both RPCs agree on at a tag: the lower of their `at` blocks, one hash, time and number on both. The lower
+ * RPC's tag answer is that block already, so only the higher one is read at its height, by number; two tag answers of
+ * one block are read no further (card evm-first-proof-inside-ten-seconds). Two blocks at that height are a retry at
+ * EVM_NEWEST_TAG (two honest RPCs may hold two blocks of one height for a moment) and refused at a final tag (a final
+ * block never moves). The two reads are one agreed read on a pair's seats.
  */
 export async function evmAgreedBlock(rpcs: readonly [EvmRpc, EvmRpc], at: string, signal?: AbortSignal, sleep: Sleep = wait): Promise<EvmBlock> {
+  return agreedSpan(rpcs, () => agreedBlockIn(rpcs, at, signal, sleep));
+}
+async function agreedBlockIn(rpcs: Rpcs, at: string, signal: AbortSignal | undefined, sleep: Sleep): Promise<EvmBlock> {
   const tops = await both(rpcs, (rpc, k, sig) => readBlock(rpc, at, `rpc ${k} ${at} block`, sig, sleep), signal);
   if (tops[0] === null || tops[1] === null) return lag(`an RPC has no ${at} block`);
   const n = tops[0].number < tops[1].number ? tops[0].number : tops[1].number;
-  const [x, y] = await both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(n), `rpc ${k} block ${n}`, sig, sleep), signal);
+  let x: EvmBlock | null = tops[0];
+  let y: EvmBlock | null = tops[1];
+  if (x.number !== y.number) {
+    const hi = x.number > y.number ? 0 : 1;
+    const b = await readBlock(rpcs[hi], tag(n), `rpc ${hi} block ${n}`, signal, sleep);
+    if (hi === 0) x = b;
+    else y = b;
+  }
   if (x === null || y === null) return lag(`rpc ${x === null ? 0 : 1} does not know block ${n} yet`);
   if (x.hash !== y.hash || x.timestamp !== y.timestamp || x.number !== n || y.number !== n) {
     if (at === EVM_NEWEST_TAG) return lag(`the two RPCs hold different blocks at ${n}`);
@@ -1438,7 +1468,31 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     return r;
   };
 
-  const anchorAt = (at: string, signal?: AbortSignal): Promise<EvmBlock> => evmAgreedBlock(rpcs, at, signal, sleep);
+  // the last newest agreed block and the clock at the start of its read: taken again within EVM_NEWEST_REUSE_MS (the
+  // head has not moved within one pass); a finalized anchor is read every round
+  const clock = a.clock ?? (() => performance.now());
+  let newest: { block: EvmBlock; at: number } | null = null;
+  const anchorAt = async (at: string, signal?: AbortSignal): Promise<EvmBlock> => {
+    if (at !== EVM_NEWEST_TAG) return evmAgreedBlock(rpcs, at, signal, sleep);
+    const t = clock();
+    if (newest !== null && t - newest.at < EVM_NEWEST_REUSE_MS) return newest.block;
+    const block = await evmAgreedBlock(rpcs, at, signal, sleep);
+    if (newest === null || t >= newest.at) newest = { block, at: t };
+    return block;
+  };
+  // a lag is the head not yet where a read needs it, or a block moved under it: its retry reads the head again, however
+  // short its wait (a test's) or long the window
+  const headAgainOnLag = async <T>(f: () => Promise<T>): Promise<T> => {
+    try {
+      return await f();
+    } catch (e) {
+      if (e instanceof EvmLagError) newest = null;
+      throw e;
+    }
+  };
+  // the last round that completed every check: a round whose newest agreed block is its anchor (one hash: the same
+  // chain up to it, so the same events and trees) returns it with no fin, view or log read
+  let last: (Round & { stateTree: VaultTree; labelTree: VaultTree }) | null = null;
 
   /** One view on both RPCs at the anchor; the two answers must be one. */
   async function agreed(data: string, h: string, what: string, signal?: AbortSignal): Promise<bigint> {
@@ -1486,9 +1540,10 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   }
 
   /**
-   * One round: the finalized anchor, the newest anchor, the pool's views at the newest, then the logs past what is
+   * One round: the newest anchor, the finalized anchor, the pool's views at the newest, then the logs past what is
    * held up to the newest, all on both RPCs. Only once the trees built from them are the pool's at the newest anchor
-   * does the cache take the leaves up to the finalized anchor; the tail is read again on the next round.
+   * does the cache take the leaves up to the finalized anchor; the tail is read again on the next round. A newest anchor
+   * that is the last completed round's (one hash) gives that round again, never a first round or one with a hold to prove.
    */
   async function round(signal?: AbortSignal): Promise<Round & { stateTree: VaultTree; labelTree: VaultTree }> {
     if (!read) {
@@ -1509,10 +1564,14 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       const ids = await both(rpcs, async (rpc, k, sig) => qty(await poolRead(`rpc ${k} eth_chainId`, () => rpc("eth_chainId", []), sig, sleep), `rpc ${k} eth_chainId`), signal);
       if (ids[0] !== chainId || ids[1] !== chainId) throw new Error(`rpcs: chain ${ids[0]} and ${ids[1]}, not ${a.pin.network}'s ${chainId}`);
     }
+    // the newest anchor first (the pass's own, within EVM_NEWEST_REUSE_MS): the last completed round's block again is
+    // that round again (card evm-first-proof-inside-ten-seconds), unless a hold is still to be proven
+    const anchor = await anchorAt(EVM_NEWEST_TAG, signal);
+    if (last !== null && !fromHold && !emptyHeld && anchor.hash === last.anchor.hash) return last;
+    last = null;
     // a finalized anchor at or below what is held (a pool just deployed, or an RPC's finalized behind another's) is
     // consistent: the cache stays where it is and the tail is read from past it
     const fin = await anchorAt(EVM_POOL_TAG, signal);
-    const anchor = await anchorAt(EVM_NEWEST_TAG, signal);
     // a newest anchor below what is held is behind a block already final, or the pool's deploy block: a retry, never
     // the views check, where a held leaf above the anchor would read as a lie
     if (anchor.number < heldTo) return lag(`the newest agreed block ${anchor.number} is below the ${heldTo} already read`);
@@ -1713,7 +1772,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       writtenAt = fin.timestamp;
       await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: top, events: held, at: fin.timestamp }).catch(() => {});
     }
-    return { fin, anchor, events, stateTree, labelTree };
+    return (last = { fin, anchor, events, stateTree, labelTree });
   }
 
   /** The number of events whose block's time * 1000 (leafTime) is below beforeMs: times never go back, so a search. */
@@ -1755,7 +1814,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     trees(beforeMs, signal, opts) {
       if (typeof beforeMs !== "bigint" || beforeMs <= 0n) return Promise.reject(new Error("beforeMs: a bigint above 0"));
       // a note that landed this epoch (opts.newest) reads the same newest agreed block as every epoch read
-      return serial(() => evmRetryLag(async () => {
+      return serial(() => evmRetryLag(() => headAgainOnLag(async () => {
         const r = await round(signal);
         // every leaf under the cut is in only once the anchor's time reached beforeMs; later blocks' times are too
         if (r.anchor.timestamp * 1000n < beforeMs) lag(`the anchor ${r.anchor.number} (${r.anchor.timestamp * 1000n} ms) has not reached ${beforeMs}`);
@@ -1782,18 +1841,18 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         // the anchor gives that fork's times, so another cut); a change is a retry
         if (top.hash !== r.anchor.hash) await heights([top, r.anchor], "the root times", signal);
         return { stateTree, labelTree, stateRoot: stateTree.root!, labelRoot: labelTree.root! };
-      }, sleep, signal));
+      }), sleep, signal));
     },
     events(signal, once) {
-      const one = async (): Promise<Round> => {
+      const one = (): Promise<Round> => headAgainOnLag(async () => {
         const { fin, anchor, events } = await round(signal);
         return { fin, anchor, events };
-      };
+      });
       return serial(() => (once === true ? one() : evmRetryLag(one, sleep, signal)));
     },
     depthAt(block, signal, hash) {
       if (typeof block !== "bigint" || block < 0n) return Promise.reject(new Error("block: a block number"));
-      const once = async () => {
+      const once = () => headAgainOnLag(async () => {
         const r = await round(signal);
         if (r.anchor.number < block) lag(`the newest agreed block ${r.anchor.number} is below block ${block}`);
         if (hash !== undefined) {
@@ -1801,9 +1860,11 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
           if (now.some((b) => b === null || b.hash !== hash)) lag(`block ${block} is no longer ${hash} (a reorg)`);
         }
         return depthOf(r.events.filter((e) => e.block <= block).length);
-      };
+      });
       return serial(() => (hash === undefined ? evmRetryLag(once, sleep, signal) : once()));
     },
+    // never behind a round in flight (serial): the pass reads the time first, and a cold round pages for minutes
+    now: (signal) => evmRetryLag(async () => (await anchorAt(EVM_NEWEST_TAG, signal)).timestamp * 1000n, sleep, signal),
   };
 }
 
@@ -1956,8 +2017,13 @@ export type EvmPoolArgs = {
   history?: readonly EvmRpc[];
   /** The caller's own sync of this pin on `rpcs` (card evm-deposit-on-mainnet): the pool's trees and depths read on it,
    *  so the page's background readers of the pool (its settle and this queue) keep one history and a round one of them
-   *  made is never read again by the other; with none, a sync of its own on `rpcs`, `held` and `history`. */
-  sync?: Pick<EvmTreeSync, "trees" | "depthAt">;
+   *  made is never read again by the other; with none, a sync of its own on `rpcs`, `held` and `history`. The pool's
+   *  time is the sync's too (card evm-first-proof-inside-ten-seconds), so a pass's trees read its own newest block. */
+  sync?: Pick<EvmTreeSync, "trees" | "depthAt" | "now">;
+  /** The period fee hold (evmFeeHold) this pool shares with another pool of the same pin (card
+   *  evm-first-proof-inside-ten-seconds): a read either made at a period's first block is the other's too; with none,
+   *  one of its own. */
+  feeHold?: EvmFeeHold;
   /** GET /v1/pool/fee?pool=&epoch= on the helper: its answer, refused unless every field is this pool's and its fee
    * the device's own. */
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
@@ -1980,6 +2046,13 @@ export type EvmPoolOf = Pool<EvmPoolRequest> & {
   holdFee(epochStartMs: bigint, signal?: AbortSignal): Promise<void>;
 };
 
+/** A period fee hold for one pin's pools (EvmPoolArgs feeHold; card evm-first-proof-inside-ten-seconds): the page's pass
+ *  pool holds each period's fee at the turn on its own hosts, and the pool a landing's pass binds on, on the deposit's
+ *  pair, binds on that read instead of reading the period's first block again, by then too old for a keyless operator.
+ *  What is held is what two operators of the fee list agreed on at the block's hash, whichever pool read it. */
+export type EvmFeeHold = { readonly network: EvmNetwork; readonly pool: string; readonly fees: Map<bigint, unknown> };
+export const evmFeeHold = (pin: EvmPoolPin): EvmFeeHold => ({ network: pin.network, pool: lower(pin.pool), fees: new Map() });
+
 export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   const rpcs = evmPair(a.rpcs);
   if (!Array.isArray(a.feeRpcs) || a.feeRpcs.length < 2 || a.feeRpcs.some((r) => typeof r !== "function")) throw new Error("feeRpcs: two or more");
@@ -1992,7 +2065,7 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   addr20(feeRecipient, "feeRecipient");
   if (feeRecipient === pool || BigInt(feeRecipient) === 0n) throw new Error("feeRecipient: the pool or the zero address");
   // the sources: the caller's, then the list's providers (the pair's seats are none)
-  if (a.sync !== undefined && (typeof a.sync?.trees !== "function" || typeof a.sync?.depthAt !== "function")) throw new Error("sync: an EVM tree sync");
+  if (a.sync !== undefined && (typeof a.sync?.trees !== "function" || typeof a.sync?.depthAt !== "function" || typeof a.sync?.now !== "function")) throw new Error("sync: an EVM tree sync");
   const sync = a.sync ?? evmTreeSync({ rpcs, pin: a.pin, history: [...(a.history ?? []), ...a.rpcs], ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
   const scope = evmPoolScopeOf(pool, EVM_CHAIN_IDS[a.pin.network]);
   const sleep = a.sleep ?? wait;
@@ -2008,7 +2081,8 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   // stops (delta review of 4b070771, P2: a page signed out asks no fee host after); a caller joining later keeps it
   // alive, and a read every caller left is dropped, never kept for the next.
   type HeldFee = { hash: string; read: Promise<{ depth: number | null; chainFee: bigint }>; done: boolean; waiting: number; stop: AbortController };
-  const heldFees = new Map<bigint, HeldFee>();
+  if (a.feeHold !== undefined && (a.feeHold.network !== a.pin.network || a.feeHold.pool !== pool)) throw new Error("feeHold: another pin's");
+  const heldFees = (a.feeHold?.fees as Map<bigint, HeldFee> | undefined) ?? new Map<bigint, HeldFee>();
   /** h's answer for one caller: its stop ends its wait, and the last waiting caller's stop ends the read. */
   const joinFee = (epochStartMs: bigint, h: HeldFee, signal?: AbortSignal): Promise<{ depth: number | null; chainFee: bigint }> => {
     if (h.done) return h.read;
@@ -2076,8 +2150,9 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
     epochMs: EVM_EPOCH_MS,
     lifeMs: EVM_LIFE_MS,
     sendMarginMs: EVM_SEND_MARGIN_MS,
-    // an agreed read: a moment's fork at the newest height is a retry here, as in every other agreed read
-    now: (signal) => evmRetryLag(() => evmNow(rpcs, signal, sleep), sleep, signal),
+    // an agreed read: a moment's fork at the newest height is a retry here, as in every other agreed read; the sync's
+    // newest block, so the pass's trees read the same one again (EVM_NEWEST_REUSE_MS)
+    now: (signal) => sync.now(signal),
     trees: (beforeMs, signal, opts) => sync.trees(beforeMs, signal, opts),
     async bind({ chunk, wallet, refundPrecommitment, epochStartMs, deadlineMs }, signal) {
       if (!(wallet?.publicKey instanceof Uint8Array) || typeof wallet.address !== "string" || wallet.address !== evmAddress(wallet.publicKey))
