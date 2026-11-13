@@ -69,7 +69,7 @@ import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
-import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeld, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
+import { depositToEnd, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
 import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
@@ -225,7 +225,14 @@ let poolFollowDeps: PoolFollowHost["deps"] = () => null;
 // the op a restore's U_X reads are taken under: it moves no refund (only the follow's refund carry asks these)
 const UX_ONLY = { move: async () => undefined, record: async () => Promise.reject(new Error("a restore records no refund move")) };
 const poolFollow = !framed
-  ? poolFollows({ store: () => open(), decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], deps: (f, op) => poolFollowDeps(f, op) })
+  ? poolFollows({
+      store: () => open(),
+      decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
+      deps: (f, op) => poolFollowDeps(f, op),
+      // an ended op's U_X read again at a landing: a restore's paced reads, after a drawn wait (review P2-b of the delta)
+      again: (chain) => restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program, undefined, (c) => testnet?.evmPoolOf(c) ?? null),
+      againWait: (signal) => poolAgainWait(signal),
+    })
   : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
@@ -1007,13 +1014,14 @@ const namer = depositNamer({
   startup: () => startup,
   resyncing: () => resyncing,
   // a pool's U_X that still holds what its follow left stays named (review P1 of card deposit-takes-each-pools-own-coin):
-  // read on the follow's own reads (U_X's balance, one deposit's costs), as the follow reads it
+  // from the store alone, its newest op (uxHeldOf), never a chain read: the namer runs at every note change, a buy's and
+  // a sell's too, and a read naming U_X then would tie U_X to W (review P2-a of the delta)
   held: async (chain, rec) => {
     const u = walletOf(chain, rec);
     if (u === null) return false;
-    const ux = { chain, s: rec.scope, i: rec.index, u, refund_id: rec.id, address: u, deadline_ms: 0, origin: "", min_out: "" };
-    const d = poolFollowDeps(ux, UX_ONLY);
-    return d === null ? false : uxHeld(d, ux);
+    const st = await open();
+    const ops = await Promise.all((await st.keys("ops")).map((k) => st.get("ops", k).catch(() => undefined)));
+    return uxHeldOf(ops, chain, u);
   },
 });
 // state.pools' notes (src/pools.ts): read only, with the wallet's readNotes on this page's own wallet store: no Web Lock,
