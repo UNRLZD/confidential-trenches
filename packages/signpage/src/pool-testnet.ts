@@ -2100,6 +2100,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // each buy's W and the decimals of the token it received, told by the run (pool-buy.ts outDecimals) until its records
   // are written; a W takes one buy only
   const boughtDecimals = new Map<string, number>();
+  // each W a buy on this page is running for, from its route's W to its records written (card
+  // closed-positions-show-every-trade): the rebuild of trades reads no such W, so it never writes an op beside the one the
+  // run is about to write
+  const runningBuys = new Set<string>();
   // each buy whose run ended "sent" (its end not known), by note id: its taken proof, where to post its end, and W's
   // history places read so far (card pool-buy-record-never-stays-sent)
   const lateBuys = new Map<string, { r: ReadyProof<SolanaReleaseRequest>; post: (stage: "filled" | "not_landed") => void; places: HistoryPlaces }>();
@@ -2425,7 +2429,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     // a rebuilt record is read again for W's trades until its final "trades read" mark (sol-buy-records.ts, card
     // closed-positions-after-a-restore): a device restored before that card has the records and none of the trades
-    done: async () => tradesDone(await page.store(), BUY_MINTS_KEY),
+    done: async () => new Set([...(await tradesDone(await page.store())), ...runningBuys]),
     from: async () => tradesFrom(await page.store()),
     // through the store only while it is open (page.held): another tab's sign out never lands a write in a store made
     // afresh (review of 42a99f81, d)
@@ -2527,10 +2531,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         boughtDecimals.delete(facts.wallet);
         if (end !== null && "result" in end && end.result.stage !== "not_landed") awaited.set(facts.wallet, ctx.id);
       }
+      const ran = facts.wallet;
       void early
         .then(async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))
         .catch(() => {})
-        .finally(() => (positions.refresh(), fillTrades()));
+        .finally(() => (ran !== undefined && runningBuys.delete(ran), positions.refresh(), fillTrades()));
     };
     const txsOf = (): TxRef[] => {
       const a = r && "answer" in r ? (r.answer() as { result?: { txs?: TxRef[] } }) : null;
@@ -2547,7 +2552,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       }
     };
     const into = routeInto(facts, ctx.route);
-    r = buy(ask, { ...ctx, progress, route: (x) => (into(x), "out" in x && out()) });
+    r = buy(ask, { ...ctx, progress, route: (x) => (into(x), !done && facts.wallet !== undefined && runningBuys.add(facts.wallet), "out" in x && out()) });
     const run = r;
     if ("after" in run)
       void run.after.then(() => {
