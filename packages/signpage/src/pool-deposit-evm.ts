@@ -200,7 +200,7 @@ async function headerOf(rpc: EvmRpc, at: string, what: string): Promise<Spent> {
  * Once final, every tx of U up to `nonce` is in a block at or below it and never moves, so any Deposited of the note's
  * sends is in the pool's events up to it. `check` runs before each read and `signal` ends the lag waits (sign out).
  */
-async function spentFinal(rpcs: readonly [EvmRpc, EvmRpc], u: string, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal, check: () => void = () => {}): Promise<{ final: bigint | null; kept: Spent | undefined }> {
+export async function spentFinal(rpcs: readonly [EvmRpc, EvmRpc], u: string, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal, check: () => void = () => {}): Promise<{ final: bigint | null; kept: Spent | undefined }> {
   if (kept === undefined) {
     check();
     const b = await evmRetryLag(() => evmAgreedBlock(rpcs, "latest", signal, sleep), sleep, signal);
@@ -259,7 +259,7 @@ function selectorOf(sig: string): string {
   return hex(keccak_256(new TextEncoder().encode(sig)).slice(0, 4));
 }
 /** The pool's state and label tree depths at `tag`, each as both RPCs read it (they must agree). */
-async function depthsOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, tag: string): Promise<{ state: [bigint, bigint]; label: [bigint, bigint] }> {
+export async function depthsOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, tag: string): Promise<{ state: [bigint, bigint]; label: [bigint, bigint] }> {
   const out: [bigint, bigint][] = [];
   for (const data of DEPTH_CALLS) {
     const d = await both(r.h.rpcs, async (rpc, k) => firstWord(await rpc("eth_call", [{ to: r.h.pin.pool, data }, tag]), `rpc ${k} tree depth`));
@@ -271,7 +271,7 @@ async function depthsOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, tag:
 
 /** The L1 fee bound for `gas` on the pin's network, as each RPC's chain fee reads give it (the kit's reads; they must
  *  agree), 0 on Nitro. */
-async function l1FeesOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, gas: bigint, tag: string): Promise<[bigint, bigint]> {
+export async function l1FeesOf(r: { h: Pick<PoolDepositEvmHost, "rpcs" | "pin"> }, gas: bigint, tag: string): Promise<[bigint, bigint]> {
   const net = r.h.pin.network;
   if (net === "robinhood" || net === "robinhood-testnet") return [0n, 0n];
   const calls = evmPoolChainFeeReads(net, gas);

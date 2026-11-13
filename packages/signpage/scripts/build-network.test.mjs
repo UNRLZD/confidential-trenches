@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { bundle, NETWORKS, signHeadersFor, TESTNET_CONNECT } from "./build-app.mjs";
 import { signBuilt } from "../../../scripts/signpage-built.mjs";
+import { evmTestnetVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 
 const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const TESTNET_ONLY = [
@@ -35,14 +36,28 @@ const TESTNET_ONLY = [
   // build (card evm-pools-on-mainnet): each testnet pool
   "0xeb967dfc1b4ffb22942f833c76866ea85fc42266", // the Base Sepolia pool
   "0xed9fac860e6bc5e932455232eedca8b71c44da4d", // the Robinhood testnet pool
-  // the EVM pool buy and sale, testnet only while mainnet keeps them closed (card evm-pools-on-mainnet, src/pool-testnet.ts)
-  "buy((address,bytes),", // the EVM pool buy's signature (src/evm-send.ts)
-  "owed/back-evm", // the EVM buy's owed-back record (src/pool-buy-evm.ts EVM_OWED_BACK_KEY)
-  "uniswap-v4", // the EVM buy's route search
-  "nonce()", // the sale's read of W's SellDelegate nonce (src/pool-sell-evm.ts)
-  // the Sell typed data W signs, whole (packages/kit/src/trade/evm/sell-unpinned.ts)
-  "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
 ];
+/** The EVM testnets' own values, read from the kit's testnet venues (packages/kit/src/trade/evm/buy-unpinned.ts
+ *  evmTestnetVenues), never typed here: each testnet's chain id, and its pool's sell delegate, fee collector and buy
+ *  adapters. SIGN_HOST's build carries none of them in any form. */
+const TESTNET_EVM = Object.entries(evmTestnetVenues()).flatMap(([net, v]) => [
+  { what: `${net}'s chain id`, id: BigInt(v.chainId) },
+  ...[["sell delegate", v.sellDelegate], ["fee collector", v.feeCollector], ...Object.entries(v.adapters ?? {}).map(([k, a]) => [`${k} adapter`, a])]
+    .filter(([, a]) => a !== undefined)
+    .map(([what, a]) => ({ what: `${net}'s ${what}`, address: a })),
+]);
+/** What of TESTNET_EVM a bundle carries: a chain id in decimal (a number or a bigint literal) or in hex (any case, any
+ *  leading zeros), never as part of a longer number; an address's 40 hex digits in any case, with or without 0x (a
+ *  padded word holds them too). */
+export function testnetEvmFaults(text) {
+  const low = text.toLowerCase();
+  return TESTNET_EVM.filter((t) => {
+    if (t.address !== undefined) return low.includes(t.address.toLowerCase().replace(/^0x/, ""));
+    const dec = new RegExp(`(?<![\\w$.])${t.id}n?(?![\\w$])`);
+    const hex = new RegExp(`(?<![\\w$])0x0*${t.id.toString(16)}n?(?![\\w$])`);
+    return dec.test(low) || hex.test(low);
+  }).map((t) => t.what);
+}
 /** What both builds carry (card evm-deposit-on-mainnet): a Base and Robinhood pool deposit is open on a build only where
  *  its withdraw is in it (src/pool-testnet.ts poolWayOut), so SIGN_HOST's bundle carries the EVM withdraw's release and
  *  the EVM deposit's own words. */
@@ -50,6 +65,29 @@ const BOTH = [
   "withdraw((address,bytes),(uint256[2],", // the EVM pool withdraw's release (src/evm-send.ts EVM_WITHDRAW_SIGNATURE)
   "0xe2bbb158", // the EVM pool deposit's selector, deposit(uint256,uint256), held by its rule (src/rules/pool.ts checkEvmDeposit)
 ];
+/** The EVM pool buy and sale in SIGN_HOST's build (src/pool-testnet.ts: open wherever the chain's withdraw is built,
+ *  poolWayOut), each with its way back into the pool: a buy's signature only beside the carry of a refused buy's ETH
+ *  on W (src/pool-carry-evm.ts EVM_CARRY_OPEN_KEY), the Sell typed data only beside the sale's open record, followed
+ *  until its return lands (src/pool-sell-evm.ts EVM_OPEN_SELLS_KEY). */
+const EVM_BUY = "buy((address,bytes),"; // the EVM pool buy's signature (src/evm-send.ts)
+const EVM_SELL = "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)"; // the Sell typed data W signs, whole (packages/kit/src/trade/evm/sell-unpinned.ts)
+const EVM_TRADE = [
+  EVM_BUY,
+  "owed/carry-evm-open", // the carry's open record (src/pool-carry-evm.ts EVM_CARRY_OPEN_KEY)
+  "owed/carry-evm", // the carry's done Ws (EVM_CARRY_DONE_KEY)
+  "uniswap-v4", // the EVM buy's route search
+  "nonce()", // the sale's read of W's SellDelegate nonce (src/pool-sell-evm.ts)
+  EVM_SELL,
+  "owed/sell-evm", // the sale's open record (src/pool-sell-evm.ts EVM_OPEN_SELLS_KEY)
+];
+/** What a bundle lacks of the EVM trade's ways back: [] when it carries neither the buy nor the sale, or each with its
+ *  own. A buy with no carry, or a sale with no open record, is named. */
+export function evmWayBackFaults(text) {
+  const out = [];
+  if (text.includes(EVM_BUY) && !text.includes("owed/carry-evm-open")) out.push("the buy without the carry of a refused buy's ETH");
+  if (text.includes(EVM_SELL) && !text.includes("owed/sell-evm")) out.push("the sale without its open record");
+  return out;
+}
 /** The mainnet pins (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
  *  sol-pools-mainnet-pin; packages/wallet/src/pool/evm.ts EVM_POOLS.base and .robinhood, card evm-pools-on-mainnet):
  *  the testnet build carries none of them. */
@@ -68,8 +106,44 @@ test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no t
   assert.ok(js.equals(readFileSync(join(PKG, "public/app.js"))), "the mainnet bundle is the one built in the package");
   const text = js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(!text.includes(s), `the mainnet bundle carries ${s}`);
+  assert.deepEqual(testnetEvmFaults(text), [], "the mainnet bundle carries an EVM testnet's chain id or pool address");
   for (const s of BOTH) assert.ok(text.includes(s), `the mainnet bundle lacks ${s}`);
   assert.ok(!text.includes("__SIGN_NETWORK__"), "the network is folded at build time");
+  for (const s of EVM_TRADE) assert.ok(text.includes(s), `the mainnet bundle lacks ${s}`);
+  assert.deepEqual(evmWayBackFaults(text), []);
+});
+
+test("the EVM trade's way-back rule refuses a bundle with a buy and no carry, or a sale and no open record", () => {
+  assert.deepEqual(evmWayBackFaults(""), [], "neither: nothing to bring back");
+  assert.deepEqual(evmWayBackFaults(`${EVM_BUY} owed/carry-evm-open ${EVM_SELL} owed/sell-evm`), []);
+  assert.deepEqual(evmWayBackFaults(`${EVM_BUY} owed/back-evm`), ["the buy without the carry of a refused buy's ETH"]);
+  assert.deepEqual(evmWayBackFaults(`${EVM_BUY} owed/carry-evm-open ${EVM_SELL}`), ["the sale without its open record"]);
+  assert.deepEqual(evmWayBackFaults(`${EVM_SELL} ${EVM_BUY}`), ["the buy without the carry of a refused buy's ETH", "the sale without its open record"]);
+});
+
+test("the EVM testnets' rule refuses a bundle naming a testnet chain id, in decimal or hex, or a testnet pool's delegate, fee collector or adapter", () => {
+  const ids = TESTNET_EVM.filter((t) => t.id !== undefined);
+  const addresses = TESTNET_EVM.filter((t) => t.address !== undefined);
+  // read from the kit's testnet venues: both testnets, each with a delegate, a fee collector and an adapter at least
+  assert.equal(ids.length, Object.keys(evmTestnetVenues()).length);
+  assert.ok(ids.length >= 2 && ids.every((t) => t.id > 0n));
+  for (const kind of ["sell delegate", "fee collector", "adapter"]) assert.equal(addresses.filter((t) => t.what.includes(kind)).length >= 2, true, kind);
+  assert.deepEqual(testnetEvmFaults(""), []);
+  // the mainnets' own ids, and numbers that hold a testnet id's digits inside a longer one: none is a testnet id
+  const near = ids.flatMap((t) => [`1${t.id}`, `${t.id}1`, `0.${t.id}`, `0x${t.id.toString(16)}0`, `0x1${t.id.toString(16)}`, `x${t.id}`]);
+  assert.deepEqual(testnetEvmFaults(`chainId:8453,chainId:4663,0x2105,0x1237,${near.join(",")}`), []);
+  for (const t of ids) {
+    const h = t.id.toString(16);
+    for (const planted of [`{chainId:${t.id}}`, `[${t.id}n]`, `"${t.id}"`, `"0x${h}"`, `"0x${h.toUpperCase()}"`, `0x${h}n`, `"0x${h.padStart(8, "0")}"`, `(${t.id})`]) {
+      assert.deepEqual(testnetEvmFaults(`var a=1;${planted};`), [t.what], planted);
+    }
+  }
+  for (const t of addresses) {
+    const body = t.address.slice(2);
+    for (const planted of [`"${t.address}"`, `"0x${body.toUpperCase()}"`, `"${"0".repeat(24)}${body}"`]) {
+      assert.deepEqual(testnetEvmFaults(`var a=1;${planted};`), [t.what], planted);
+    }
+  }
 });
 
 test("SIGN_HOST's policy names no testnet EVM provider; a testnet build's server adds exactly those, where they were (card evm-pools-on-mainnet)", () => {
@@ -98,6 +172,8 @@ test("SIGN_HOST's policy lets the mainnet build reach no testnet NEAR RPC (card 
 test("the testnet build carries the devnet pool's pins and the testnet providers", async () => {
   const text = (await bundle(undefined, { network: "testnet" })).js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(text.includes(s), `the testnet bundle lacks ${s}`);
+  // the rule reads the build's own forms: the testnet build carries every value it refuses on SIGN_HOST's
+  assert.deepEqual(testnetEvmFaults(text), TESTNET_EVM.map((t) => t.what));
   for (const s of MAINNET_ONLY) assert.ok(!text.includes(s), `the testnet bundle carries the mainnet pin's ${s}`);
   for (const s of BOTH) assert.ok(text.includes(s), `the testnet bundle lacks ${s}`);
   assert.ok(!text.includes("__SIGN_NETWORK__"));

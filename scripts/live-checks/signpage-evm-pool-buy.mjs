@@ -8,12 +8,11 @@
 //   2. HELPER_HOST's POST /v1/pool/evm/send, the route the page sends a buy through, asked from SIGN_HOST's origin with
 //      a buy that is not one (the selector alone) for each testnet pool, refuses it bad_shape before any send and
 //      echoes SIGN_HOST in Access-Control-Allow-Origin;
-//   3. SIGN_HOST's served /app.js is the one its index.html pins, and it is the mainnet build with no EVM buy in it
-//      (no "uniswap-v4", its route search; no "owed/back-evm", its failed swap's record): the mainnet build pins both
-//      EVM pools (card evm-pools-on-mainnet) but keeps the buy closed there until a failed swap's chunk has a way back,
-//      so pool.buy on Base or Robinhood is refused not_allowed before any read (packages/signpage/test/
-//      pool-mainnet-evm.test.ts) and the buy code is left out of it (POOL_TESTNET is a build constant). The buy records'
-//      key, "owed/cost-evm", is no mark: the positions pass, open on mainnet, reads it.
+//   3. SIGN_HOST's served /app.js is the one its index.html pins, and it is the mainnet build with the EVM buy in it
+//      beside its way back ("uniswap-v4", its route search; "owed/carry-evm-open", the carry of a refused buy's ETH on W
+//      back into the pool, src/pool-carry-evm.ts) and no testnet pool: the buy opens on Base and Robinhood where the
+//      build carries the chain's withdraw (change evm-buy-and-sell-on-mainnet, packages/signpage/test/
+//      pool-mainnet-evm.test.ts). The buy records' key, "owed/cost-evm", is no mark: the positions pass reads it too.
 // RPCS, CHAIN_IDS, BOUGHT and BUY_SELECTOR are this file's own (it reaches no package code: check:imports holds it);
 // packages/signpage/test/pool-buy-evm.test.ts holds each equal to the page's own (TESTNET_RPCS, EVM_CHAIN_IDS,
 // keccak256 of EVM_POOL_EVENTS.Bought, evm-send.ts EVM_BUY_SIGNATURE).
@@ -39,8 +38,10 @@ export const RPCS = Object.freeze({
   "robinhood-testnet": Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"]),
 });
 export const CHAIN_IDS = Object.freeze({ "base-sepolia": 84532n, "robinhood-testnet": 46630n });
-/** Strings only the EVM buy's code carries in a bundle (src/pool-buy-evm.ts). */
-export const EVM_BUY_MARKS = Object.freeze(["uniswap-v4", "owed/back-evm"]);
+/** Strings only the EVM buy's code and its carry carry in a bundle (src/pool-buy-evm.ts, src/pool-carry-evm.ts). */
+export const EVM_BUY_MARKS = Object.freeze(["uniswap-v4", "owed/carry-evm-open"]);
+/** The testnet pools (the kit's evmTestnetVenues): in the testnet build only. */
+export const TESTNET_POOL_MARKS = Object.freeze(["0xeb967dfc1b4ffb22942f833c76866ea85fc42266", "0xed9fac860e6bc5e932455232eedca8b71c44da4d"]);
 /** Each testnet's pinned pool, by network. */
 export const PINS_OF = Object.freeze(Object.fromEntries(Object.entries(PINS).map(([k, v]) => [k, v.pool])));
 const RECORD = new URL("./signpage-evm-pool-buy.md", import.meta.url);
@@ -49,9 +50,10 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 /** The buys of a run record: its `Buy: <network> <hash>` lines on the two testnets (each also a Tx line). */
 export const txsOf = (md) => [...md.matchAll(/^Buy: (base-sepolia|robinhood-testnet) (0x[0-9a-f]{64})$/gm)].map((m) => ({ network: m[1], hash: m[2] }));
 
-/** What the check keeps of SIGN_HOST: its index's /app.js pin, the served bundle's sha384 and the EVM buy marks it holds. */
+/** What the check keeps of SIGN_HOST: its index's /app.js pin, the served bundle's sha384, the EVM buy marks and the
+ *  testnet pools it holds. */
 export function pageFacts(index, js) {
-  return { pin: /src="\/app\.js" integrity="([^"]+)"/.exec(index)?.[1] ?? null, sha384: sha384(js), marks: EVM_BUY_MARKS.filter((m) => js.includes(m)) };
+  return { pin: /src="\/app\.js" integrity="([^"]+)"/.exec(index)?.[1] ?? null, sha384: sha384(js), marks: EVM_BUY_MARKS.filter((m) => js.includes(m)), testnet: TESTNET_POOL_MARKS.filter((m) => js.includes(m)) };
 }
 
 const json = (t) => {
@@ -111,7 +113,7 @@ export function judge(run) {
   }
   const p = run.page;
   say(typeof p?.pin === "string" && p.pin === p.sha384, `[SIGN_HOST] the served /app.js is the one index.html pins: ${p?.pin ?? "no pin"}`);
-  say(Array.isArray(p?.marks) && p.marks.length === 0, `[SIGN_HOST] the mainnet build carries no EVM buy (closed on mainnet: refused before any read): ${Array.isArray(p?.marks) ? p.marks.join(", ") || "none" : "not read"}`);
+  say(Array.isArray(p?.marks) && p.marks.length === EVM_BUY_MARKS.length && Array.isArray(p?.testnet) && p.testnet.length === 0, `[SIGN_HOST] the mainnet build carries the EVM buy beside its carry and no testnet pool: buy ${Array.isArray(p?.marks) ? p.marks.join(", ") || "none" : "not read"}; testnet ${Array.isArray(p?.testnet) ? p.testnet.join(", ") || "none" : "not read"}`);
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
   return { ok: verdict === "PASS", verdict, lines };
 }

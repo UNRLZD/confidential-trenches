@@ -411,7 +411,8 @@ test("a running kind (a trade) gets its id, holds no other message, runs once fo
       // a trade answered at "sent", its fill as a progress event (src/trade.ts); a progress before the answer waits for it
       buy: (p, ctx) => {
         ids.push(ctx.id);
-        if (p.side === "sell") return { error: "quote_check_failed" };
+        // a refusal's rule word is the page's own (src/refusal-rule.ts): the app is posted its code alone
+        if (p.side === "sell") return { error: "quote_check_failed", rule: "deadline_past" };
         ctx.progress("signed");
         return { running: true, after: held.then(() => ctx.progress("filled")), answer: () => ({ result: { stage: "sent" as const, txs: [{ chain: "solana" as const, hash: "sig" }] } }) };
       },

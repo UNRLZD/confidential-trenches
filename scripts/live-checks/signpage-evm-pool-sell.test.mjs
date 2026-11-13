@@ -1,13 +1,16 @@
 // node --test scripts/live-checks/signpage-evm-pool-sell.test.mjs: the live check replays recorded runs
 // (signpage-evm-pool-sell.answers.json). good: the card's two sales read back on both pool RPCs of their chains, the
-// helper's sell route refusing a malformed sale from SIGN_HOST, and SIGN_HOST's mainnet bundle with no EVM sell: PASS.
+// helper's sell route refusing a malformed sale from SIGN_HOST, and SIGN_HOST's mainnet bundle with the EVM sell and no
+// testnet pool: PASS.
 // bad_buys: the sold holdings' own buys named as sales: FAIL. Made from the good run: a sale read back on one RPC only,
 // a reverted receipt, a receipt with no Deposited, a Deposited from another address, another block, another chain id,
 // another sender, another delegate, no authorization, a helper that sends a malformed sale, a CORS echo of "*", one
-// testnet missing, a bundle that is not the pinned one, the EVM sell in the served bundle: each FAIL.
+// testnet missing, a bundle that is not the pinned one, a bundle with no EVM sell (before it opened), a testnet pool in
+// it: each FAIL.
 // Card evm-pools-on-mainnet: the good answers' page parts are re-made from a local mainnet build (and the testnet
 // build for a testnet page) of that card, which pins both EVM pools and keeps the kind closed there; re-recorded from
-// SIGN_HOST at the next sign deploy.
+// SIGN_HOST at the next sign deploy. Change evm-buy-and-sell-on-mainnet re-made good's page part from its mainnet build
+// (the sale opens on mainnet).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -15,7 +18,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { RETRY } from "./provider-answer.mjs";
 import { PINS } from "./evm-pool-pins.mjs";
-import { DEPOSITED, EVM_SELL_MARKS, HELPER, SIGN, judge, pageFacts, read, txsOf } from "./signpage-evm-pool-sell.mjs";
+import { DEPOSITED, EVM_SELL_MARKS, HELPER, SIGN, TESTNET_POOL_MARKS, judge, pageFacts, read, txsOf } from "./signpage-evm-pool-sell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 RETRY.ms = 0;
@@ -93,7 +96,9 @@ test("made from the good run: each break FAILs", async () => {
     "CORS *": { ...A.good, sends: A.good.sends.map((s) => ({ ...s, headers: { "access-control-allow-origin": "*" } })) },
     "one testnet": { ...A.good, txs: A.good.txs.slice(0, 1) },
     "not the pinned bundle": { ...A.good, page: { ...A.good.page, sha384: "sha384-other" } },
-    "the EVM sell served on SIGN_HOST": { ...A.good, page: { ...A.good.page, marks: [...EVM_SELL_MARKS] } },
+    "the bundle before the sale opened": { ...A.good, page: { ...A.good.page, marks: [] } },
+    "half the sale": { ...A.good, page: { ...A.good.page, marks: [EVM_SELL_MARKS[0]] } },
+    "a testnet pool": { ...A.good, page: { ...A.good.page, testnet: [TESTNET_POOL_MARKS[0]] } },
     "page not read": { ...A.good, page: undefined },
   };
   for (const [name, rec] of Object.entries(cases)) {

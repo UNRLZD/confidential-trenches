@@ -1,5 +1,5 @@
 {
- "note": "good: the live check on 2026-11-10 ~08:05Z after the card's third and fourth runs (Base Sepolia 0xd5b86cb3..., Robinhood testnet 0xd8c9f878..., by the read-back of the second review's fixes), read with the second run's two buys: each read on its chain's two testnet pool RPCs (Base Sepolia 0x41ddc17f... and 0xd5b86cb3..., Robinhood testnet 0xf190dfaf... and 0xd8c9f878...), HELPER_HOST's /v1/pool/evm/send refusing a malformed buy bad_shape from SIGN_HOST's origin for each testnet pool, and SIGN_HOST's served bundle (release-110, the mainnet build) with no EVM buy in it: PASS. bad_deposits: the same check, the same minutes, naming as buys the run's two pool deposits (U's deposit() into each pinned pool, selector 0xe2bbb158, no Bought): FAIL. bad_testnet_page: the good run with SIGN_HOST's page facts read from this branch's testnet build (build-app.mjs bundle(pkg, { network: \"testnet\" }) at 72e75a53, its own index and app.js), the EVM buy in it: FAIL.",
+ "note": "good: the live check on 2026-11-10 ~08:05Z after the card's third and fourth runs (Base Sepolia 0xd5b86cb3..., Robinhood testnet 0xd8c9f878..., by the read-back of the second review's fixes), read with the second run's two buys: each read on its chain's two testnet pool RPCs (Base Sepolia 0x41ddc17f... and 0xd5b86cb3..., Robinhood testnet 0xf190dfaf... and 0xd8c9f878...), HELPER_HOST's /v1/pool/evm/send refusing a malformed buy bad_shape from SIGN_HOST's origin for each testnet pool, and SIGN_HOST's served bundle (release-110, the mainnet build) with no EVM buy in it: PASS. bad_deposits: the same check, the same minutes, naming as buys the run's two pool deposits (U's deposit() into each pinned pool, selector 0xe2bbb158, no Bought): FAIL. bad_testnet_page: the good run with SIGN_HOST's page facts read from this branch's testnet build (build-app.mjs bundle(pkg, { network: \"testnet\" }) at 72e75a53, its own index and app.js), the EVM buy in it: FAIL. Change evm-buy-and-sell-on-mainnet (2026-11-12T22:28:42.115Z): good's and bad_testnet_page's page facts re-made from this branch's builds (signBuilt's mainnet build; build-app.mjs bundle(pkg, { network: \"testnet\" }) for the testnet page, its index pinning that bundle): the mainnet build now carries the buy beside its carry (uniswap-v4, owed/carry-evm-open) and no testnet pool; the testnet build carries both testnet pools: FAIL.",
  "good": {
   "readAt": "2026-11-10T08:03:03.350Z",
   "txs": [
@@ -1101,9 +1101,13 @@
    }
   ],
   "page": {
-   "pin": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
-   "sha384": "sha384-bEUwzsHsi7ni86xGdk4Jm5rAu1D/mbSdMYRyWB5aIjV0ttdon92LOVYPWoT/n2hS",
-   "marks": []
+   "pin": "sha384-7fKewwok7ykm59p3XiCmTJCd7gqFp2qJa7+h/kGHtQdjoxfhLNrQU1o/h2S4BJ2Z",
+   "sha384": "sha384-7fKewwok7ykm59p3XiCmTJCd7gqFp2qJa7+h/kGHtQdjoxfhLNrQU1o/h2S4BJ2Z",
+   "marks": [
+    "uniswap-v4",
+    "owed/carry-evm-open"
+   ],
+   "testnet": []
   }
  },
  "bad_deposits": {
@@ -2097,11 +2101,15 @@
    }
   ],
   "page": {
-   "pin": "sha384-8+LhWQD+9uzovEEtKR3j9MsAn3T2bJUmWzcKOqGA3hMOcTCTpiJiwfefJZ07SkBa",
-   "sha384": "sha384-8+LhWQD+9uzovEEtKR3j9MsAn3T2bJUmWzcKOqGA3hMOcTCTpiJiwfefJZ07SkBa",
+   "pin": "sha384-3isf5ZEdV17mi9GvsNtRYq6u8BXzHlYGyHfWszrOUUAbVxujUyeuCABTp1AgOuoZ",
+   "sha384": "sha384-3isf5ZEdV17mi9GvsNtRYq6u8BXzHlYGyHfWszrOUUAbVxujUyeuCABTp1AgOuoZ",
    "marks": [
     "uniswap-v4",
-    "owed/back-evm"
+    "owed/carry-evm-open"
+   ],
+   "testnet": [
+    "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "0xed9fac860e6bc5e932455232eedca8b71c44da4d"
    ]
   }
  }

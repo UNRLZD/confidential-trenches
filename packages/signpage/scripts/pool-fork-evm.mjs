@@ -151,7 +151,9 @@ const head0 = await block("latest");
 const fin0 = await block("finalized");
 step("trail", { forkBlock: forked.number, head: head0.number, finalized: fin0.number, trailBlocks: head0.number - fin0.number, headTime: head0.timestamp, finalizedTime: fin0.timestamp });
 if (fin0.number <= forked.number || head0.number - fin0.number !== 2n * SLOTS) throw new Error("finalized is not 2 x slots blocks back in this fork");
-if (Math.abs(Number(head0.timestamp) - Date.now() / 1000) > 30 || head0.timestamp - fin0.timestamp < TRAIL - SPACING) throw new Error(`the trail is not now less ${TRAIL} s: head ${head0.timestamp}, finalized ${fin0.timestamp}`);
+// the trail mined is 2 x slots spacings, the whole seconds of TRAIL less its remainder (a young Robinhood fork's TRAIL
+// of 69 s mines 60, which TRAIL - SPACING, 63, refused)
+if (Math.abs(Number(head0.timestamp) - Date.now() / 1000) > 30 || head0.timestamp - fin0.timestamp < 2n * SLOTS * SPACING) throw new Error(`the trail is not now less ${TRAIL} s: head ${head0.timestamp}, finalized ${fin0.timestamp}`);
 record.set.trailS = String(head0.timestamp - fin0.timestamp);
 record.set.trailSpacingS = String(SPACING);
 

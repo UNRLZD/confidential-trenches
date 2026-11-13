@@ -180,6 +180,9 @@ const MONEY_PATHS = {
     // the withdraw's selector, which the release's tx input must start with (card evm-withdraw-mainnet)
     "withdraw((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,bytes)",
   ],
+  "packages/signpage/src/pool-carry-evm.ts": [
+    "deposit(uint256,uint256)", // a refused buy's ETH on W goes back into the pool as W's own deposit (card evm-buy-and-sell-on-mainnet)
+  ],
   "packages/signpage/src/pool-deposit-evm.ts": [
     "currentLabelTreeDepth()", // the deposit's gas headroom reads both trees' depths (card pool-deposits)
     "currentTreeDepth()",

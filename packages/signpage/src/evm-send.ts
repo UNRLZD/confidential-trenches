@@ -204,24 +204,26 @@ export type EvmRelease = {
   blockHash: string;
 };
 /**
- * One RPC's read: its newest block, its `safe` block, the pool's releases from `from` to `to`, and `stop`: the
- * lowest safe block past the proof's deadline this RPC has shown (the one it was asked with, or this read's safe block
- * when that is the first past it), at which the range stops, since a release can only be in a block at or before the
- * first one past the deadline. `ended`: this read covered every block from `from` to `stop`, so no release in it
+ * One RPC's read: its newest block, its final block, the pool's releases from `from` to `to`, and `stop`: the
+ * lowest final block past the proof's deadline this RPC has shown (the one it was asked with, or this read's final
+ * block when that is the first past it), at which the range stops, since a release can only be in a block at or before
+ * the first one past the deadline. `ended`: this read covered every block from `from` to `stop`, so no release in it
  * is this RPC's word that none ever lands.
  *
- * Why `safe` on both chains (review P2-1 b). Base, OP stack: "block.timestamp = prev_l2_timestamp + l2_block_time"
- * (https://specs.optimism.io/protocol/derivation.html, Overview), so a block's time is its height's, and an unsafe block
- * rebuilt after a reorg keeps its time, while the release it held may come back in it: only a block no reorg rebuilds
- * (safe) can say the deadline passed. Robinhood, Arbitrum Nitro: "They are updated every child chain block based on the
- * sequencer's clock." and "Must always be equal to or greater than the previous child chain block timestamp"
- * (https://docs.arbitrum.io/build-decentralized-apps/arbitrum-vs-ethereum/block-numbers-and-time); the page does not
- * say that a release sequenced again after a reorg gets a later time (it allows a time up to 24 hours earlier than
- * now), so the newest block cannot be taken as final and Robinhood reads `safe` too. The cost: not_landed comes as
- * late as the safe block trails the newest, which moves: read on 2026-11-10 between 06:2xZ and 08:4xZ at 94 to 252 s on
- * Base Sepolia and 746 to 835 s on Robinhood testnet, and 123 s and 838 s on the mainnets at the review's read.
+ * Why the final block on both chains (review P2-1 b, then P3-2). Base, OP stack: "block.timestamp = prev_l2_timestamp +
+ * l2_block_time" (https://specs.optimism.io/protocol/derivation.html, Overview), so a block's time is its height's, and a
+ * block rebuilt after a reorg keeps its time, while the release it held may come back in it. Robinhood, Arbitrum Nitro:
+ * "They are updated every child chain block based on the sequencer's clock." and "Must always be equal to or greater
+ * than the previous child chain block timestamp"
+ * (https://docs.arbitrum.io/build-decentralized-apps/arbitrum-vs-ethereum/block-numbers-and-time), which does not say a
+ * release sequenced again after a reorg gets a later time. A safe block is one whose data is on L1, and an L1 reorg
+ * before L1 finality can still rebuild it; only a final block (L1 final) is never rebuilt, so only it can say the
+ * deadline passed: a buy's record is removed (src/pool-buy-evm.ts) and a sale's note put back (src/pool-sell-evm.ts) on
+ * its word alone. The cost: not_landed comes as late as the final block trails the newest, read on 2026-11-13 02:24Z at
+ * 813 s on Base and 1,270 s on Robinhood (the safe block then: 49 s and 875 s). A buy or sale that lands is read at the
+ * newest block, as before.
  */
-export type EvmReleaseRead = { head: { number: bigint; timeMs: bigint }; safe: { number: bigint; timeMs: bigint }; stop: bigint | null; to: bigint; ended: boolean; releases: EvmRelease[] };
+export type EvmReleaseRead = { head: { number: bigint; timeMs: bigint }; final: { number: bigint; timeMs: bigint }; stop: bigint | null; to: bigint; ended: boolean; releases: EvmRelease[] };
 /** The widest log range a read asks, in blocks: under the smallest cap read on the pairs, robinhood-sepolia-rpc.publicnode.com's
  *  "exceed maximum block range: 50000" (review read, 2026-11-10); a release past it is read on a later round once the
  *  range stops at the deadline, and a read cut by it is never `ended`. */
@@ -242,7 +244,7 @@ export async function evmHeadNumber(rpc: EvmRpc): Promise<bigint> {
   return n;
 }
 
-const blockOf = async (rpc: EvmRpc, at: "latest" | "safe" | bigint): Promise<{ number: bigint; timeMs: bigint }> => {
+const blockOf = async (rpc: EvmRpc, at: "latest" | "finalized" | bigint): Promise<{ number: bigint; timeMs: bigint }> => {
   const b = (await rpc("eth_getBlockByNumber", [typeof at === "bigint" ? hexQ(at) : at, false])) as Record<string, unknown> | null;
   const number = big(b?.number);
   const time = big(b?.timestamp);
@@ -250,27 +252,27 @@ const blockOf = async (rpc: EvmRpc, at: "latest" | "safe" | bigint): Promise<{ n
   return { number, timeMs: time * 1_000n };
 };
 
-/** One RPC's read of the pool's releases since `from` (EvmReleaseRead): its newest and safe blocks, then the pool's
+/** One RPC's read of the pool's releases since `from` (EvmReleaseRead): its newest and final blocks, then the pool's
  *  Bought and Withdrawn logs from `from` to the lowest of its newest block, `stop` and EVM_BUY_LOG_SPAN blocks, asked
  *  by the pool's address and the two topics only. A log of another address or topic, a removed one, or one whose fields
  *  do not parse is left out; a read that fails throws. */
 export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint, deadlineMs: bigint, stopWas: bigint | null): Promise<EvmReleaseRead> {
   const head = await blockOf(rpc, "latest");
-  const safe = await blockOf(rpc, "safe");
-  let stop = safe.timeMs > deadlineMs && (stopWas === null || safe.number < stopWas) ? safe.number : stopWas;
+  const final = await blockOf(rpc, "finalized");
+  let stop = final.timeMs > deadlineMs && (stopWas === null || final.number < stopWas) ? final.number : stopWas;
   const span = from + EVM_BUY_LOG_SPAN - 1n;
   const to = [head.number, stop ?? head.number, span].reduce((a, b) => (b < a ? b : a));
-  // the range cut short of `stop` (safe gone more than EVM_BUY_LOG_SPAN blocks past `from`): its last block, under a
-  // safe one, is read by number, and when it too is past the deadline the range stops there, so the read can end
+  // the range cut short of `stop` (final gone more than EVM_BUY_LOG_SPAN blocks past `from`): its last block, under a
+  // final one, is read by number, and when it too is past the deadline the range stops there, so the read can end
   // (review P1-A; one more read, only then)
-  // only a range the span cut: a range the head cut ends at no block this read's own safe does not cover (review P3-2)
+  // only a range the span cut: a range the head cut ends at no block this read's own final block does not cover (review P3-2)
   if (stop !== null && to < stop && to >= from && to === span) {
     const last = await blockOf(rpc, to);
     if (last.timeMs > deadlineMs) stop = to;
   }
   // a range that starts past its own end never ends: no read covered the blocks that would say so
   const ended = stop !== null && to >= stop && to >= from;
-  if (to < from) return { head, safe, stop, to, ended, releases: [] };
+  if (to < from) return { head, final, stop, to, ended, releases: [] };
   const number = to;
   const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [[TOPIC_BOUGHT, TOPIC_WITHDRAWN]], fromBlock: hexQ(from), toBlock: hexQ(to) }])) as unknown;
   if (!Array.isArray(logs)) throw new Error("read-back: not a log list");
@@ -294,7 +296,7 @@ export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint, de
       if (token !== null) releases.push({ kind: "bought", ...base, token, out: d[6]! });
     } else if (topics[0] === TOPIC_WITHDRAWN && d.length === 5) releases.push({ kind: "withdrawn", ...base });
   }
-  return { head, safe, stop, to, ended, releases };
+  return { head, final, stop, to, ended, releases };
 }
 
 /** What this buy is, from its two RPCs' reads: the nullifier's release the same on both (one each, the same block
@@ -302,7 +304,7 @@ export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint, de
  *  proof's cap (the sender picks the fee: PrivacyPool.sol _release refuses only one over the relay data's feeCap), as a
  *  Bought of the token at least min out (filled) or a Withdrawn (the swap failed: W holds the ETH); any other release
  *  of the nullifier spent the note elsewhere, so this buy can never land (not_landed). No release on either, and both
- *  reads `ended` (each covered every block to a safe block past the proof's deadline): the pool refuses it from then
+ *  reads `ended` (each covered every block to a final block past the proof's deadline): the pool refuses it from then
  *  on (not_landed, on this round; the run asks it of two rounds, src/pool-buy-evm.ts). Else null: read again. */
 export type EvmBuyWant = { nullifier: bigint; w: string; feeRecipient: string; token: string; minOut: bigint; value: bigint; feeCap: bigint; deadlineMs: bigint };
 export type EvmBuyVerdict = { end: "filled"; release: EvmRelease & { out: bigint } } | { end: "withdrawn"; release: EvmRelease } | { end: "not_landed"; release: EvmRelease | null } | null;
@@ -360,7 +362,7 @@ const quantity = (v: bigint | number | string): string => `0x${BigInt(v).toStrin
 const word32 = (v: bigint | string): string => `0x${BigInt(v).toString(16).padStart(64, "0")}`;
 export const evmAuthorizationJson = (a: EvmSellAuthorization) => ({ chainId: quantity(a.chainId), address: lower(a.address), nonce: quantity(a.nonce), yParity: quantity(a.yParity), r: word32(a.r), s: word32(a.s) });
 
-// read at the call, so a bundle that sends no sale (the mainnet build) keeps none of it
+// read at the call, so a bundle that sends no sale keeps none of it
 const sellAnswerMax = (): number => HELPER_V1_PATHS.find((p) => p.method === "POST" && p.path === "/v1/pool/evm/sell")!.limitBytes!;
 const retryAfterMs = (res: Response): number | null => {
   const header = res.headers.get("retry-after");
@@ -424,13 +426,13 @@ export async function evmSellSend(helper: string, body: { pool: string; w: strin
 const topicDeposited = (): string => topicOf(EVM_POOL_EVENTS.Deposited);
 /** A Deposited the pool logged: its depositor (topic 1), commitment, label, value and precommitment. */
 export type EvmDeposited = { block: bigint; blockHash: string; tx: string; index: bigint; depositor: string; commitment: bigint; label: bigint; value: bigint; precommitment: bigint };
-/** One RPC's read of the pool's deposits since `from`, as evmReleaseRead reads the releases (its `safe`, `stop`,
+/** One RPC's read of the pool's deposits since `from`, as evmReleaseRead reads the releases (its final block, `stop`,
  *  span and `ended` rules, `deadlineMs` the Sell's deadline in ms: SellDelegate.sol:146 refuses a block past it). */
 export type EvmDepositedRead = Omit<EvmReleaseRead, "releases"> & { deposits: EvmDeposited[] };
 export async function evmDepositedRead(rpc: EvmRpc, pool: string, from: bigint, deadlineMs: bigint, stopWas: bigint | null): Promise<EvmDepositedRead> {
   const head = await blockOf(rpc, "latest");
-  const safe = await blockOf(rpc, "safe");
-  let stop = safe.timeMs > deadlineMs && (stopWas === null || safe.number < stopWas) ? safe.number : stopWas;
+  const final = await blockOf(rpc, "finalized");
+  let stop = final.timeMs > deadlineMs && (stopWas === null || final.number < stopWas) ? final.number : stopWas;
   const span = from + EVM_BUY_LOG_SPAN - 1n;
   const to = [head.number, stop ?? head.number, span].reduce((a, b) => (b < a ? b : a));
   if (stop !== null && to < stop && to >= from && to === span) {
@@ -438,7 +440,7 @@ export async function evmDepositedRead(rpc: EvmRpc, pool: string, from: bigint, 
     if (last.timeMs > deadlineMs) stop = to;
   }
   const ended = stop !== null && to >= stop && to >= from;
-  if (to < from) return { head, safe, stop, to, ended, deposits: [] };
+  if (to < from) return { head, final, stop, to, ended, deposits: [] };
   const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [topicDeposited()], fromBlock: hexQ(from), toBlock: hexQ(to) }])) as unknown;
   if (!Array.isArray(logs)) throw new Error("read-back: not a log list");
   const deposits: EvmDeposited[] = [];
@@ -456,7 +458,7 @@ export async function evmDepositedRead(rpc: EvmRpc, pool: string, from: bigint, 
     if (depositor === null) continue;
     deposits.push({ block, blockHash, tx, index, depositor, commitment: d[0]!, label: d[1]!, value: d[2]!, precommitment: d[3]! });
   }
-  return { head, safe, stop, to, ended, deposits };
+  return { head, final, stop, to, ended, deposits };
 }
 
 /** What this sale is, from its two RPCs' reads: the deposit naming the return note's precommitment, the same on both,

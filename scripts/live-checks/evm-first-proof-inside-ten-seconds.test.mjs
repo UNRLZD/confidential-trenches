@@ -3,9 +3,12 @@
 // none edited:
 // - good: `--local`, this card's SIGN_HOST build in SIGN_HOST's place: PASS;
 // - bad_live_before: SIGN_HOST as served before this card (its landing's pass on the pass pool, no history read before
-//   the landing): FAIL.
+//   the landing): FAIL;
+// - bad_carry_before: `--local` on the build of 06f5ba7c4 (card evm-buy-and-sell-on-mainnet before evmLanded: the
+//   deposit host's hook inline and the carry's `landed:()=>void F(t)`): FAIL, landed and proofs alone.
 // And plants on this tree's own build: each part's code changed back to its shape before this card, or a second landing
-// pass asked some other way, FAILs that part alone.
+// pass asked some other way (a host's landed not the one hook, evmLanded, card evm-buy-and-sell-on-mainnet), FAILs that
+// part alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -27,6 +30,13 @@ test("the recorded bad run fails: SIGN_HOST before this card, every part", () =>
   assert.equal(v.verdict, "FAIL");
   assert.equal(A.bad_live_before.from, "https://confidential.unrealized.trade");
   for (const k of PARTS) assert.equal(A.bad_live_before.page[k], false, k);
+});
+
+test("the recorded bad run fails: the carry's landed a pass of its own, landed and proofs alone", () => {
+  const v = judge(A.bad_carry_before);
+  assert.equal(v.verdict, "FAIL");
+  assert.equal(A.bad_carry_before.from, "local build");
+  assert.deepEqual(PARTS.filter((k) => A.bad_carry_before.page[k] !== true), ["landed", "proofs"]);
 });
 
 test("each part missing from the good run fails it", () => {
@@ -56,8 +66,20 @@ test("this tree's build as it is: every part found", () => {
 });
 
 test("planted on this tree's build: each part back to its shape before this card fails that part alone", () => {
-  // a landing's pass asked as any other pass (`landed:()=>void F(t)`)
-  assert.deepEqual(off(planted(/landed:\(\)=>\{([\w$]+)\.has\(([\w$]+)\)\|\|\(\1\.add\(\2\),queueMicrotask\(\(\)=>\{\1\.delete\(\2\),([\w$]+)\(\2,!0\)\}\)\)\}/, (_m, _r, t, f) => `landed:()=>void ${f}(${t})`)), ["landed", "proofs"]);
+  // evmLanded, the one landing hook (`L=e=>()=>{R.has(e)||(R.add(e),queueMicrotask(()=>{R.delete(e),F(e,!0)}))}`)
+  const hook = /[,;{ ]([\w$]+)=([\w$]+)=>\(\)=>\{([\w$]+)\.has\(\2\)\|\|\(\3\.add\(\2\),queueMicrotask\(\(\)=>\{\3\.delete\(\2\),([\w$]+)\(\2,!0\)\}\)\)\}/.exec(js);
+  assert.ok(hook !== null, "planted: evmLanded is in the build");
+  const [, L, , R, F] = hook;
+  const use = new RegExp(`landed:${L.replace(/[$]/g, "\\$")}\\(([\\w$]+)\\)`);
+  // a host's landed back to its shape before card evm-first-proof-inside-ten-seconds (`landed:()=>void F(t)`), as the
+  // carry's was at 015c40524
+  assert.deepEqual(off(planted(use, (_m, t) => `landed:()=>void ${F}(${t})`)), ["landed"]);
+  // the hook's pass asked as any other pass
+  assert.deepEqual(off(planted(/queueMicrotask\(\(\)=>\{([\w$]+)\.delete\(([\w$]+)\),([\w$]+)\(\2,!0\)\}\)/, (_m, r, e, f) => `queueMicrotask(()=>{${r}.delete(${e}),${f}(${e})})`)), ["landed", "proofs"]);
+  // a second hook beside evmLanded: a host's landed its inline copy, a landing's pass asked another way
+  assert.deepEqual(off(planted(use, (_m, t) => `landed:()=>{${R}.has(${t})||(${R}.add(${t}),queueMicrotask(()=>{${R}.delete(${t}),${F}(${t},!0)}))}`)), ["landed"]);
+  // no host's landed is evmLanded
+  assert.deepEqual(off(pageFacts(index, js.replaceAll(new RegExp(use.source, "g"), "landed:void 0"))), ["landed"]);
   // the queue handed no landing signal
   assert.deepEqual(off(planted(/\.queue\.refresh\(([\w$]+)\?([\w$]+)\.landing\?\.\(\):void 0\)/, ".queue.refresh()")), ["proofs"]);
   // a second refresh with a signal, beside the landing's

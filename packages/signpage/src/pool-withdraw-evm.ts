@@ -280,7 +280,7 @@ export const evmToRefused = (to: string, pin: EvmPoolPin, ws: readonly string[])
 
 /** A release's verdict for an owed part: "mine" (both RPCs read the same one Withdrawn of the pinned pool for the
  *  nullifier, paying W the chunk to the pinned fee recipient at a fee up to the cap), "other" (another release of the
- *  nullifier: it spent the note elsewhere), "none" (no release, both reads past the deadline at a safe block), or null
+ *  nullifier: it spent the note elsewhere), "none" (no release, both reads past the deadline at a final block), or null
  *  (read again). The transaction that carried it is not read: a release sent through any contract (a wrapper that calls
  *  the pool) changes nothing W receives. The event is the pool's own (its log address the pin's; PrivacyPool.sol
  *  _release emits it in the call that pays W the chunk less the fee, W's signed relay data holding the fee cap), only

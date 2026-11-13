@@ -80,7 +80,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, evmTwoOperators, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type EvmTwoOperators, type EvmTwoOperatorsOpts, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
-import { POOL_TESTNET } from "./network.ts";
+import { POOL_TESTNET, SIGN_MAINNET } from "./network.ts";
 import { perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
@@ -324,8 +324,13 @@ export function evmPoolContextOf(req: EvmPoolRequest, scope: bigint): bigint {
 }
 
 export type EvmNetwork = "base" | "robinhood" | "base-sepolia" | "robinhood-testnet";
-/** Each network's chain id (eth_chainId), as the money gate pins them (scripts/ci/money-gate.mjs CHAIN_ID). */
-export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze({ base: 8453n, robinhood: 4663n, "base-sepolia": 84532n, "robinhood-testnet": 46630n });
+/** Each network's chain id (eth_chainId), as the money gate pins them (scripts/ci/money-gate.mjs CHAIN_ID). SIGN_HOST's
+ *  build carries the mainnets' alone, the testnets' folded away at build time as the kit's venue list is (evmPoolVenues),
+ *  so its bundle names no testnet chain id (scripts/build-network.test.mjs): it pins no testnet pool (EVM_POOLS), and a
+ *  testnet name there reads no id, which matches no chain. Everywhere else the table is whole. */
+export const EVM_CHAIN_IDS: Readonly<Record<EvmNetwork, bigint>> = Object.freeze(
+  SIGN_MAINNET ? { base: 8453n, robinhood: 4663n } : { base: 8453n, robinhood: 4663n, "base-sepolia": 84532n, "robinhood-testnet": 46630n },
+) as Readonly<Record<EvmNetwork, bigint>>;
 /**
  * Each testnet's Transfer RPCs, the restore's walletRpcs there (./evm-restore.ts evmRestoreNotes): a pinned list of
  * keyless providers of three operators, read as a pair with spares (evmPair, card evm-transfer-rpc-spares): the first
