@@ -6,6 +6,11 @@
 //   FLOW_RESUME=<seed file> node packages/signpage/scripts/pool-withdraw-devnet.mjs <to> <amount SOL> <out.json>
 // - The seed is a kept run's (~/.ct-devnet-runs/run-<time>.seed, pool-flow-devnet.mjs): its notes restored from the seed
 //   on both devnet RPCs (the wallet's solanaRestoreNotes), never printed. No new money goes in.
+// - WITHDRAW_DEST=<chain> (card pool-withdraws-to-any-chain, FLOW_COPY with COPY_ONECLICK=1 only): <to> is an address on
+//   that chain and the pool pays a live 1Click quote's deposit address on Solana, the quote asked and checked by the
+//   page's own exit (src/pool-exit.ts) at WITHDRAW_PRICE (the SOL PoolStatePrice, read by the parent on public mainnet
+//   RPCs); every onward send must pay that one deposit address, never <to>. The copy's money stays on the copy: 1Click
+//   never sees it, so nothing is swapped.
 // - WITHDRAW_DRY=1 stops before the press: the notes, the screen's view and the plan, nothing signed or sent.
 // - What differs from the page in a browser, and only that: the prover is snarkjs's fullProve in this process on the
 //   pinned setup files, and the screen's fields are given here, not typed. Every check, the send and every read-back are
@@ -38,6 +43,9 @@ if (!COPY && (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined)) throw ne
 const [TO, AMOUNT, OUT] = process.argv.slice(2);
 const RESUME = process.env.FLOW_RESUME;
 const DRY = process.env.WITHDRAW_DRY === "1";
+const DEST = process.env.WITHDRAW_DEST;
+const PRICE = DEST ? JSON.parse(process.env.WITHDRAW_PRICE ?? "null") : null;
+if (DEST && (!COPY || process.env.COPY_ONECLICK !== "1" || typeof PRICE?.price !== "string")) throw new Error("WITHDRAW_DEST: FLOW_COPY, COPY_ONECLICK=1 and WITHDRAW_PRICE");
 if (!OUT || !RESUME) throw new Error("usage: FLOW_RESUME=<seed file> pool-withdraw-devnet.mjs <to> <amount SOL> <out.json>");
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -84,6 +92,7 @@ const page = {
   seed64: async () => seed64.slice(),
   // the page's screen, as main.ts opens it: the chain the app named and the request's id
   openWithdraw: (chain, ctx) => ((opened = { chain, opId: ctx.id }), { result: { pending: true } }),
+  ...(PRICE ? { price: () => PRICE } : {}),
 };
 const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, fetch: helperFetch, ...(COPY ? { pin: copy.pin, holdings: copy.holdings } : {}) });
 const kinds = poolKinds({ ...testnetPoolDeps(t.flow), rpcs: (c) => (c === "solana" ? rpcs : testnetPoolDeps().rpcs(c)) });
@@ -110,7 +119,8 @@ const funds = await deps.funds();
 const { poolWithdrawable } = await import("../src/pool-withdraw.ts");
 const { formatUnits } = await import("../src/withdraw/pool-form.ts");
 const amount = AMOUNT === "max" ? formatUnits(poolWithdrawable(funds.notes, funds), 9) : AMOUNT;
-const view = evaluatePool("solana", TO, amount, deps.keys, funds);
+const view = evaluatePool("solana", TO, amount, deps.keys, funds, DEST ?? "solana");
+if (DEST && !deps.exits?.includes(DEST)) throw new Error(`the page offers no exit to ${DEST}`);
 const plan = view.ready ? planPoolWithdraw(funds.notes, view.ready.amount, funds) : null;
 log(`screen ${view.state}: ${JSON.stringify({ view, plan, fee: funds.fee, wFee: funds.wFee, minPart: funds.minPart }, big)}`);
 const record = { at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, pool, to: TO, amount, dry: DRY, answer, opened, view, plan, before };
@@ -137,6 +147,10 @@ const finalized = async (rpc, hash) => {
 };
 const checks = [];
 const txs = op?.txs ?? [];
+// To on Solana: the typed address, or on an exit the quote's deposit address (the first onward's own payee, which every
+// onward must name and which is never the typed address)
+const onwardTo = async (hash) => (await finalized(rpcs[0], hash))?.transaction?.message?.accountKeys?.[1] ?? null;
+const PAYEE = DEST && txs[1]?.hash ? await onwardTo(txs[1].hash) : TO;
 for (let k = 0; k * 2 < txs.length; k++) {
   const [release, onward] = [txs[2 * k]?.hash, txs[2 * k + 1]?.hash];
   const reads = [];
@@ -144,7 +158,7 @@ for (let k = 0; k * 2 < txs.length; k++) {
     const rel = release ? await finalized(rpc, release) : null;
     const on = onward ? await finalized(rpc, onward) : null;
     const keys = on?.transaction?.message?.accountKeys ?? [];
-    const at = keys.indexOf(TO);
+    const at = keys.indexOf(PAYEE);
     reads.push({
       release: rel?.meta?.err === null,
       onward: on?.meta?.err === null,
@@ -156,10 +170,10 @@ for (let k = 0; k * 2 < txs.length; k++) {
   checks.push({ release, onward, part: String(want), reads, landed: reads.every((x) => x.release && x.onward && x.toDelta === String(want) && x.wAfter === "0") });
 }
 const notes = await noteList();
-const sent = op?.stage === "sent" && checks.length === (plan?.length ?? -1) && checks.every((c) => c.landed);
+const sent = op?.stage === "sent" && checks.length === (plan?.length ?? -1) && checks.every((c) => c.landed) && (!DEST || (PAYEE !== null && PAYEE !== TO && copy.quotes.length === 1 && copy.quotes[0].status >= 200 && copy.quotes[0].status < 300));
 // FLOW_COPY: each send by its step, To and the fee payer watched
-const steps = COPY ? copy.sent.map((x, i) => ({ step: txs.findIndex((y) => y.hash === x.signature) % 2 === 1 ? "withdraw: onward to To" : "withdraw: release", signature: x.signature, watch: { to: TO, feePayer: PIN.feePayer } })) : undefined;
-writeFileSync(OUT, JSON.stringify({ ...record, op, checks, notes, sent, steps, simFails: copy?.simFails, sendLines: copy?.sendLines }, big, 2) + "\n");
+const steps = COPY ? copy.sent.map((x, i) => ({ step: txs.findIndex((y) => y.hash === x.signature) % 2 === 1 ? "withdraw: onward to To" : "withdraw: release", signature: x.signature, watch: { to: PAYEE, feePayer: PIN.feePayer } })) : undefined;
+writeFileSync(OUT, JSON.stringify({ ...record, dest: DEST ?? "solana", payee: PAYEE, quotes: copy?.quotes, op, checks, notes, sent, steps, simFails: copy?.simFails, sendLines: copy?.sendLines }, big, 2) + "\n");
 log(`checks ${JSON.stringify(checks)}; sent ${sent}`);
 seed64.fill(0);
 await t.signedOut();

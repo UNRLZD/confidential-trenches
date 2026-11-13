@@ -383,10 +383,13 @@ for (const kind of KINDS) {
     const f = existsSync(flowOut) ? JSON.parse(readFileSync(flowOut, "utf8")) : null;
     let withdraw = null;
     if (r.code === 0 && f?.seedFile) {
-      const to = base58.encode(ed25519.getPublicKey(randomBytes(32)));
+      // SOL_COPY_EXIT=near (card pool-withdraws-to-any-chain): the withdraw goes to a fresh NEAR implicit account through a
+      // live 1Click quote's deposit address (pool-withdraw-devnet.mjs WITHDRAW_DEST), else to a plain Solana address
+      const EXIT = process.env.SOL_COPY_EXIT;
+      const to = EXIT === "near" ? randomBytes(32).toString("hex") : base58.encode(ed25519.getPublicKey(randomBytes(32)));
       const wOut = join(dir, "withdraw.json");
-      log(`plain: withdraw of the carried note to the plain address ${to}`);
-      const wr = await runNode(["packages/signpage/scripts/pool-withdraw-devnet.mjs", to, "max", wOut], { FLOW_COPY: cfg, FLOW_RESUME: f.seedFile });
+      log(`plain: withdraw of the carried note to ${EXIT === "near" ? "the NEAR account" : "the plain address"} ${to}`);
+      const wr = await runNode(["packages/signpage/scripts/pool-withdraw-devnet.mjs", to, "max", wOut], { FLOW_COPY: cfg, FLOW_RESUME: f.seedFile, ...(EXIT === "near" ? { WITHDRAW_DEST: "near", WITHDRAW_PRICE: JSON.stringify(plainPrice), COPY_ONECLICK: "1" } : {}) });
       withdraw = { exit: wr.code, to, out: existsSync(wOut) ? JSON.parse(readFileSync(wOut, "utf8")) : null, tail: wr.out.split("\n").slice(-30) };
     }
     runs.plain = { exit: r.code, plain: f, withdraw, tail: r.out.split("\n").slice(-30) };
