@@ -58,7 +58,8 @@
 //   kit's teardown frames close W's emptied accounts to W, then W's sweep deposits every lamport W holds as its next
 //   return note, the sale's one note: on the pool's grid, the rest under it one System transfer to the pinned relayer's
 //   account in the same transaction (review P3-1; P1-1 of 1d3b96d9c: never the pool's), W at 0 (card every-lamport-can-move). It runs after the sell's stage is told, and never changes it. A partial sell
-//   runs neither.
+//   runs neither: after it fills, W's keep sweep (keepSweep, card partial-sell-pays-all-into-cash) deposits all W holds
+//   above the next sell's need as W's next return note, so what the venue paid above min out is in Cash too.
 // - Every RPC answer is hostile and parsed strictly. Every read names a public account or the transaction itself, one
 //   wallet of the user's at most; no request carries a key or the words. Nothing here logs.
 import { base58, base64 } from "@scure/base";
@@ -1502,6 +1503,10 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     // a full sell filled, with its deposit back or without one: W holds none of the token, so the rent its accounts lock
     // and every lamport it keeps go back, the sell's record with it (what a balance after it is checked against)
     // with what the helper reads W as before it (seenOf), kept on a steady end, so the next load skips a W left as it is
+    // a partial sell filled (card partial-sell-pays-all-into-cash): what the venue paid above min out, and anything else
+    // W holds above its keep, goes into the pool right after, under W's lock and the sell lock held throughout
+    const keep = after + keepPriority;
+    const swept: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait, async () => keepSweep(h, { rpcs, program, pool, scope, rent, store, sync, w, keep, wait: (ms) => waitUnless(h.wait, ms, h.signal) }));
     const back: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait, async (hold) => void (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: owedRec.mints, wait, sale: true, ride: true, ...(owedRec.sell ? { sell: owedRec.sell } : {}) }, owedRec, hold, await seenOf(h, w.address, owedRec.mints))));
     // the verdict: the chain's word on the note's mark, never an RPC's tx history alone
     const reads = h.reads ?? POOL_SELL_READS;
@@ -1520,7 +1525,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
         // kept for the next load (review P3-1 of 5de2165e)
         await h.settled?.(signature, v);
         await h.kept?.drop(signature).catch(() => {});
-        if (v === "filled" && !keeps) later.back = back;
+        if (v === "filled") later.back = keeps ? swept : back;
         return { stage: v, txs };
       }
       const got = await both(rpcs, (r) => readBackFailure(r, signature, signed)).catch((): { got: "none"; err?: unknown }[] => [{ got: "none" }, { got: "none" }]);
@@ -1535,7 +1540,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
       // its deposit (the last instruction) met a page another deposit filled first, and its note is PLANNED again (the
       // settle dropped it, review L-A): built again from new reads
       if (dead && end === "dropped" && got.every((g) => wrongAccount(g.err, depositAt))) later.rebuild = true;
-      if (end === "filled" && !keeps) later.back = back;
+      if (end === "filled") later.back = keeps ? swept : back;
       if (end !== "pending") return { stage: stageOf(end, dead), txs };
       // failed on both, its note's mark on one RPC only: refused; the note settles at the next load or sell
       if (dead) return { stage: "refused", txs };
@@ -1744,6 +1749,96 @@ export function restAdds(rest: bigint, fee: bigint, floor: bigint): bigint {
   if (own >= floor) return own;
   const lift = rest - fee;
   return lift >= SOL_GRID ? lift - (lift % SOL_GRID) : 0n;
+}
+
+/**
+ * W's sweep after a partial sell filled (card partial-sell-pays-all-into-cash): the sale's deposit back was signed before
+ * the sale landed, so it carries min out less the reserve, and what the venue paid above min out lands on W. Right after
+ * the fill, everything W holds above `keep` (the next sell's need, and on mainnet its priority: the sale's own `after`)
+ * goes into the pool as W's next return note (returnNote's walk: the sale's note is UNSPENT, so its R second arrival),
+ * on the grid, the rest under the grid left on W with the keep (W still holds tokens and sells again; the full sell's
+ * sweep takes it then). Under the floor nothing is sent. W's lamports alike on both RPCs, the deposit priced as the
+ * program prices it (solanaDepositRents), checked by the rule (checkSolanaSweep with the keep as its hold), simulated
+ * unsigned on both, signed by W, its note INCOMING before the send, then read to its verdict under the sell lock (the
+ * caller holds it throughout), so the next sell of W never meets it landing. Every fault is told and ends the sweep:
+ * what it did not move stays on W, W's own, and goes with W's next sell's sweep or its full sell's.
+ */
+type KeepSweep = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; keep: bigint; wait: (ms: number) => Promise<void> };
+async function keepSweep(h: PoolSellHost, x: KeepSweep): Promise<void> {
+  const { rpcs, w, rent } = x;
+  const tell = (state: RentBackTold["state"], detail: string): void => {
+    try {
+      h.told?.({ address: w.address, step: "sweep", state, detail });
+    } catch {
+      // a host that cannot be told changes nothing here
+    }
+  };
+  const seeds: Uint8Array[] = [];
+  let key: Uint8Array | null = null;
+  try {
+    if (h.stopped?.()) return;
+    const [a, b] = await both(rpcs, (r) => account(r, w.address, "confirmed"));
+    const lam = (v: Awaited<ReturnType<typeof account>>): bigint => ("none" in v ? 0n : BigInt(int(v.lamports)));
+    if (lam(a!) !== lam(b!)) return tell("gave_up", "W's lamports differ on the two RPCs: kept on W for its next sale");
+    const lamports = lam(a!);
+    let sizes = await treeSizes(rpcs, x.program, x.pool, x.wait);
+    const s = await h.seed64();
+    seeds.push(s);
+    let found: Awaited<ReturnType<typeof returnNote>>;
+    try {
+      found = await returnNote(rpcs, x.program, x.scope, x.store, x.sync, s, w.l, w.j, h.settled);
+    } finally {
+      s.fill(0);
+    }
+    const { ref, precommitment, planned } = found;
+    const pre = be32(precommitment);
+    const deposit = await depositHeld(rpcs, x.program, x.pool, sizes, pre, x.wait);
+    sizes = deposit.sizes;
+    const rest = lamports - SOLANA_POOL_SELL_FEE - solanaDepositRents(rent, sizes, deposit.held) - x.keep;
+    const value = solanaNoteOf(rest);
+    const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
+    if (value < floor) return tell("floor", `W's ${lamports} over its keep ${x.keep} would make ${rest}, under ${floor}: kept on W for its next sale`);
+    const bh = await blockhashOf(rpcs);
+    const { message } = solanaCompileV0(w.address, [depositIx(x.program, x.pool, w.address, sizes, pre, value)], bh.blockhash, []);
+    const wire = wireOf(message);
+    const fees = await both(rpcs, async (r) => BigInt(int(((await r("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown })?.value)));
+    if (fees[0] !== SOLANA_POOL_SELL_FEE || fees[1] !== SOLANA_POOL_SELL_FEE) return tell("gave_up", `the sweep's fee reads ${fees[0]} and ${fees[1]}`);
+    const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: w.address, feeCap: 0n, solana: h.pin, precommitment };
+    checkSolanaSweep(wire, ctx, { blockhash: bh.blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.labelSize }, lamports, rent, deposit.held, 0, 0, x.keep);
+    const sims = await both(rpcs, async (r) => ((await r("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed" }])) as { value?: { err?: unknown } } | null)?.value);
+    if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return tell("gave_up", `the sweep simulates ${safeDetail(JSON.stringify(sims.map((v) => v?.err ?? null)))}`);
+    if (h.stopped?.()) return;
+    const fw = freshWallet(await h.seed64().then((z) => (seeds.push(z), z)), "sol", w.l, w.j);
+    key = fw.secretKey;
+    for (const z of seeds) z.fill(0);
+    if (fw.address !== w.address) return tell("gave_up", "the seed's W is not the W the sweep was built for");
+    const sig = signSolana(key, wire);
+    key.fill(0);
+    key = null;
+    const signed = wire.slice();
+    signed.set(sig, 1);
+    const signature = base58.encode(sig);
+    // the note INCOMING with W's send before it leaves the device: a page closed from here on settles it at its next
+    // load (settlePoolSells), as every sell's and sweep's note
+    const id = planned ?? (await x.store.add({ ref, scope: x.scope, precommitment, state: "PLANNED" })).id;
+    const note = await x.store.move(id, "PLANNED", "INCOMING", { send: { signature, value, last_valid_block_height: BigInt(bh.lastHeight) } });
+    await Promise.allSettled(rpcs.map((r) => r("sendTransaction", [base64.encode(signed), { encoding: "base64", preflightCommitment: "confirmed" }])));
+    h.back?.(signature);
+    const reads = h.reads ?? POOL_SELL_READS;
+    const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
+    const sentAt = clock();
+    for (let i = 0; i < reads && (i === 0 || clock() - sentAt < POOL_SELL_READS * POOL_SELL_WAIT_MS); i++) {
+      if (i > 0) await x.wait(POOL_SELL_WAIT_MS);
+      const { end } = await settleSellNote(rpcs, x.program, x.scope, x.sync, x.store, note);
+      if (end !== "pending") return tell(end === "filled" ? "sent" : "gave_up", `${signature} ${end}`);
+    }
+    tell("sent", `${signature} still landing: settled at the next state read`);
+  } catch (e) {
+    tell("gave_up", faultOf(e));
+  } finally {
+    for (const z of seeds) z.fill(0);
+    key?.fill(0);
+  }
 }
 
 /** `unproven`: no buy of W's proven this time (no record, or the public seat read W's history otherwise than the

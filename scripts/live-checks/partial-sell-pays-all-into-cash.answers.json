@@ -1,0 +1,26 @@
+{
+ "_note": {
+  "good": "this card's build of packages/signpage (card/partial-sell-pays-all-into-cash), its index.html and public/app.js",
+  "bad": "SIGN_HOST as served at 13 Nov 15:06Z: main 22cc5238a's line, before this card"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-u07sddx5Ou3ANYFxGOcE58fJJx6Gfz5/KRnEXwXQKWK+qixizJh9iuW8TEeLFVMp\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-u07sddx5Ou3ANYFxGOcE58fJJx6Gfz5/KRnEXwXQKWK+qixizJh9iuW8TEeLFVMp",
+  "carries": {
+   "a filled sell runs the keep sweep while W holds tokens, the rent back when it holds none, on both verdict paths": true,
+   "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the floor, checked with the keep as the rule's hold": true,
+   "the sweep's rule with a hold: the deposit alone, W left at the hold and under one grid step more": true,
+   "the preview: one W's partial sale pays in both notes, at the expected out and at min out": true
+  }
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-SwW9WB2L3JwB1Ezcd84fGQ7V+99TrQR7aPak+TI4qtbdM2wzTLVtg9HA479/bQYR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-SwW9WB2L3JwB1Ezcd84fGQ7V+99TrQR7aPak+TI4qtbdM2wzTLVtg9HA479/bQYR",
+  "carries": {
+   "a filled sell runs the keep sweep while W holds tokens, the rent back when it holds none, on both verdict paths": false,
+   "the keep sweep: W's lamports less the sweep's fee, the deposit's rents and W's keep, on the grid, none under the floor, checked with the keep as the rule's hold": false,
+   "the sweep's rule with a hold: the deposit alone, W left at the hold and under one grid step more": false,
+   "the preview: one W's partial sale pays in both notes, at the expected out and at min out": false
+  }
+ }
+}
