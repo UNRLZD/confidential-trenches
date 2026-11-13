@@ -2318,11 +2318,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     }
     const p = (async () => {
       try {
-        if (settling) {
-          if (open !== null) statePass();
-          return await settling;
-        }
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
+        // the next buy's proofs (card signpage-pool-pins) before any settle step: a page that loads with the pool's
+        // notes landed opens the queue, and each read while it is open makes the epoch's proofs again, one pass at a
+        // time; a settle that throws or waits (a deposit run, a sell's verdict, a buy's owed pieces) never holds them back
+        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) statePass();
+        if (settling) return await settling;
         if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
         if (mine.some((n) => n.state === "RESERVED") || lateBuys.size > 0) await settleReserved().catch(() => {});
@@ -2334,9 +2335,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         }
         // a sell's note left INCOMING, or a sell with no deposit back (no note) left sent: both settled by the sell's verdict
         if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R"))) || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();
-        // the next buy's proofs (card signpage-pool-pins): a page that loads with the pool's notes landed opens the
-        // queue, and each read while it is open makes the epoch's proofs again, one pass at a time
-        if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) statePass();
+        // a note a settle step landed (INCOMING -> UNSPENT) is proved too: one more pass after the running one
+        if (mine.some((n) => n.state === "INCOMING") && (open !== null || (await readNotes(await page.store())).some((n) => n.scope === scope && n.state === "UNSPENT"))) statePass();
         await finishOnward();
         // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
         if (locks && !deadSettled) {

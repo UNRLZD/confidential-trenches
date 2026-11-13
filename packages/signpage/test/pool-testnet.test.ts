@@ -273,6 +273,59 @@ test("card signpage-pool-pins: a page that loads with the pool's notes landed op
   assert.equal((await t.readyWith(async () => null)).ready, undefined, "signed out: no queue, no ready list");
 });
 
+test("a state read proves the landed notes whatever its settle steps do: a deposit settle that throws or never ends, an owed pieces' read that throws, a kept sell's read that throws", async () => {
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const never = new Promise<never>(() => {});
+  // the wallet store with one meta record that reads `ok` times (the state read's checks) and then throws, or with
+  // `hang` never answers (the settle's own read)
+  const flaky = (w: WalletStore, key: string, rec: unknown, ok: number, hang = false): WalletStore => {
+    let reads = 0;
+    return new Proxy(w, {
+      get(target, prop) {
+        if (prop === "get")
+          return async (s: string, k: string) => {
+            if (s === "meta" && k === key) {
+              if (reads++ < ok) return rec;
+              if (hang) return never;
+              throw new Error(`planted: the store read of ${key} fails`);
+            }
+            return (target.get as (s: string, k: string) => Promise<unknown>)(s, k);
+          };
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+  };
+  // Web Locks whose request fails (the sell settle's seed lock): the sell settle throws
+  const locks = { request: async () => assert.fail("planted: the lock request fails"), query: async () => ({ held: [], pending: [] }) } as unknown as Pick<LockManager, "request" | "query">;
+  const cases: { name: string; incoming: boolean; store?: (w: WalletStore) => WalletStore; over: Record<string, unknown> }[] = [
+    { name: "the deposit settle throws", incoming: true, over: { depositKinds: { solana: () => () => assert.fail("planted: the deposit settle throws") } } },
+    { name: "the deposit settle never ends", incoming: true, over: { depositKinds: { solana: () => () => ({ running: true, after: never, answer: () => null }) } } },
+    // resumeOwedPieces catches what resumePieces throws (src/pool-testnet.ts resumeOwedPieces); its list read that never
+    // answers (the third: the state read's check, its own, resumePieces') holds the read
+    { name: "the owed pieces' settle never ends", incoming: false, store: (w) => flaky(w, "owed/pieces-sol", { W1: { address: "W1", primary: "p", pieces: ["q"] } }, 2, true), over: {} },
+    { name: "the sell settle's lock throws", incoming: false, store: (w) => flaky(w, "owed/kept-sell-sol", { s1: { signature: "s1", tx: "", last: 0 } }, 99), over: { locks } },
+  ];
+  const got: string[] = [];
+  for (const c of cases) {
+    const { w, ns } = await wallet();
+    const { pool, land } = fakePool();
+    const prover = signalsProver();
+    await land(ns, await incoming(ns, null, 1));
+    if (c.incoming) await incoming(ns, null, 2);
+    const store = c.store ? c.store(w) : w;
+    const t = testnetPool({ store: async () => store, seed64: async () => SEED64.slice() }, { pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], locks: null, ...c.over });
+    const proves = () => prover.log.filter((x) => x.startsWith("prove")).length;
+    void t.stateRead(); // it may wait on its settle for good: the pass is not behind it
+    for (let i = 0; i < 100 && proves() === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    got.push(`${c.name}: ${proves()} proved, ${(await t.readyWith(async () => null)).ready?.length ?? "no"} ready`);
+    await t.signedOut();
+  }
+  assert.deepEqual(got, cases.map((c) => `${c.name}: 1 proved, 1 ready`));
+});
+
 test("the testnet build's pool RPCs, every chain and both providers, read through a 429 once", async () => {
   const real = globalThis.fetch;
   const seen = new Map<string, number>();
