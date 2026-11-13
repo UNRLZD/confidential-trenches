@@ -1520,6 +1520,21 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     const size = await agreed(VIEWS.currentTreeSize, anchor.hash, "currentTreeSize()", signal);
     const labelRoot = await agreed(VIEWS.currentLabelRoot, anchor.hash, "currentLabelRoot()", signal);
     const labelSize = await agreed(VIEWS.currentLabelTreeSize, anchor.hash, "currentLabelTreeSize()", signal);
+    // a held part the pool's views do not prove: dropped, its record cleared, and the pool read from its deploy block
+    const dropHeld = async (): Promise<void> => {
+      const bad = heldTo;
+      held = [];
+      heldTo = writtenTo = a.pin.fromBlock - 1n;
+      writtenCount = 0;
+      writtenAt = null;
+      kept.clear();
+      await a.held!.drop(bad).catch(() => {});
+    };
+    // card evm-deposit-on-mainnet: a hold of no leaf while the pool has leaves (its first deposit landed past the
+    // finalized anchor the hold runs to) has no root for the root times to prove; this round's trees prove it instead
+    // (the pool's root binds every leaf, so trees of only the logs past the hold that are the pool's mean no leaf is at
+    // or below it), and seats' logs past it that do not make them drop it (below)
+    let emptyHeld = false;
     if (fromHold) {
       // the held part proven, never judged by its size (review of 7eb8cfb9, P2-1): the pool keeps a time for every
       // root it made (State.sol:63-65, 172, 188), head state that is never pruned, so the roots of the held leaves and
@@ -1528,15 +1543,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       // deploy block; so is one with leaves and no label (a pool's first leaf is a deposit). It does not prove that no
       // leaf is missing after the last held one and up to the hold's `to`: such a hold is kept and its rounds refuse,
       // and only a round whose trees were the pool's ever writes one.
-      if (!(await heldProven(anchor.hash, size, signal))) {
-        const bad = heldTo;
-        held = [];
-        heldTo = writtenTo = a.pin.fromBlock - 1n;
-        writtenCount = 0;
-        writtenAt = null;
-        kept.clear();
-        await a.held!.drop(bad).catch(() => {});
-      }
+      if (held.length === 0 && size !== 0n) emptyHeld = true;
+      else if (!(await heldProven(anchor.hash, size, signal))) await dropHeld();
       fromHold = false;
     }
     // the logs are read by range, not at a hash: a reorg between the views and the logs gives a tail of another chain
@@ -1656,20 +1664,31 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       if (lagged || moved || reads.some(behindOf)) lag(`a source's logs past block ${fin.number} are behind (${whys.join("; ")})`);
       throw new PoolReadError("no_agreed_logs", `${why}; no two sources of two operators gave the same logs making the pool's trees at ${anchor.hash}${whys.length > 0 ? ` (${whys.join("; ")})` : ""}`);
     };
-    let why = "";
-    let got: ReturnType<typeof build> | null = null;
-    try {
-      got = build(anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, pager, held.length, signal, sleep) : []);
-    } catch (e) {
-      // a lag stays a lag; any other refusal of the seats' read (two lists that differ, a seat that refuses a page) goes
-      // to the sources
-      if (e instanceof EvmLagError || signal?.aborted) throw e;
-      why = String((e as Error)?.message ?? e);
-    }
-    if (got !== null && got.wrong !== null) {
-      // a reorg under the read is a retry
-      why = got.wrong;
-      await still();
+    // the seats' logs past what is held, and why they are none or not the pool's trees ("": they are)
+    const seats = async (): Promise<{ got: ReturnType<typeof build> | null; why: string }> => {
+      let got: ReturnType<typeof build> | null = null;
+      let why = "";
+      try {
+        got = build(anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, pager, held.length, signal, sleep) : []);
+      } catch (e) {
+        // a lag stays a lag; any other refusal of the seats' read (two lists that differ, a seat that refuses a page)
+        // goes to the sources
+        if (e instanceof EvmLagError || signal?.aborted) throw e;
+        why = String((e as Error)?.message ?? e);
+      }
+      if (got !== null && got.wrong !== null) {
+        // a reorg under the read is a retry
+        why = got.wrong;
+        await still();
+      }
+      return { got, why };
+    };
+    let { got, why } = await seats();
+    // a hold of no leaf whose logs past it, agreed by the seats and not a reorg, do not make the pool's trees is not the
+    // pool's: dropped, and the pool read from its deploy block in this round
+    if (emptyHeld && got !== null && got.wrong !== null) {
+      await dropHeld();
+      ({ got, why } = await seats());
     }
     // the sources: the held part is proven (above), so logs that do not make the pool's trees with it are the logs'
     // fault, never the hold's; with no two operators' same logs the round fails and the hold stays

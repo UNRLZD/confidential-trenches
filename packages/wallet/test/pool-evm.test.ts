@@ -3197,3 +3197,42 @@ test("each refusal of the EVM tree read carries its code: rpc_disagree, root_mis
   rpcs[1] = flaky(rpcs[1], byNumber("latest"), Array(100).fill(() => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "b.example", 9_000)));
   await assert.rejects(evmNow(rpcs, undefined, async () => {}), (e) => e instanceof EvmUnansweredError && coded("unanswered", /latest block: no answer/)(e));
 });
+
+test("card evm-deposit-on-mainnet: a pass's fresh sync after the pool's first deposit reads only past the page's hold of no leaf, never from the deploy block; a hold of no leaf the pool's root does not prove is read again from it, on Base and Robinhood", async () => {
+  const getLogsFrom = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    let h: unknown = null;
+    const hold: EvmSyncHold = { read: async () => h as never, write: async (v) => void (h = v), drop: async () => void (h = null) };
+    // the pool before its first deposit: the page's sync holds its blocks up to the finalized anchor, with no leaf
+    const c = longChain([], 800_000);
+    const page = evmTreeSync({ rpcs: pair(c, c, { chainId }, { chainId }), pin, held: hold, ...noWait });
+    assert.equal((await page.events()).events.length, 0);
+    assert.equal((h as EvmSyncHeld).to, 799_990n);
+    assert.equal((h as EvmSyncHeld).events.length, 0);
+    // the first deposit lands past the finalized anchor; the page's sync is current (its round sees it)
+    c.events.push(...deps(PP, [800_080]));
+    c.head = 800_100;
+    c.finalized = 800_050;
+    assert.equal((await page.events()).events.length, 1);
+    // the proof queue's first pass: its pool's own sync, on the same hold
+    const la: string[] = [], lb: string[] = [];
+    const queue = evmPool({ pin, ...pairs(pair(c, c, { chainId, log: la }, { chainId, log: lb })), held: hold, relayFee: async () => answer(), epochFee: feeRule([]), ...noWait });
+    const t = await queue.trees(after(800_080));
+    assert.equal(t.stateTree.size, 1);
+    for (const l of [la, lb]) assert.deepEqual(getLogsFrom(l), [799_991], `${network}: one page past the hold's block 799,990, none from the deploy block: ${getLogsFrom(l)}`);
+    // a hold of no leaf below a leaf of the pool (not the pool's): the root from the logs past it is not the pool's, so
+    // it is dropped and the pool read from its deploy block, the trees the pool's
+    const d = longChain([...deps(PP, [10])], 800_000);
+    d.events.push({ block: 800_080, kind: "dep", leaf: BigInt(PP.commitments[1]!), label: BigInt(PP.labels[1]!) });
+    d.head = 800_100;
+    d.finalized = 800_050;
+    let g: unknown = { network, pool: POOL, fromBlock: 1n, to: 799_990n, events: [] };
+    const bad: EvmSyncHold = { read: async () => g as never, write: async (v) => void (g = v), drop: async () => void (g = null) };
+    const lc: string[] = [];
+    const r = await evmTreeSync({ rpcs: pair(d, d, { chainId, log: lc }, { chainId }), pin, held: bad, ...noWait }).events();
+    assert.equal(r.events.length, 2, `${network}: both leaves`);
+    assert.ok(getLogsFrom(lc).includes(1), `${network}: read again from the deploy block`);
+    assert.equal((g as EvmSyncHeld).events.length, 1, `${network}: the hold rewritten with the pool's leaf below the finalized anchor`);
+  }
+});
