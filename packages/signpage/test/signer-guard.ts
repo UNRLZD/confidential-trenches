@@ -79,6 +79,7 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     // call's bytes and the gas cap, and W's own buy's signer, which signs an adapter call on no precommitment (as
     // signEvmBuy and signEvmOnwardSend); W's change is signed by signEvmDeposit, held to its evmNextNote pick
     "planEvmBuy", "evmBuyMax", "checkEvmWBuy", "checkEvmChange", "evmAdapterBuyData", "EVM_WBUY_GAS_MAX", "signEvmWBuy",
+    "checkSolanaCarry", // a buy's first round of tag 2s, checked (card buy-spends-its-change-in-the-same-tap): signs nothing
   ],
 };
 /** What each file may do, and only that: `define` (a signer file: it calls its own signers with no pick), `calls`

@@ -126,7 +126,8 @@ import { throttleWaitMs, type ThrottleBounds } from "../../wallet/src/throttle.t
 import type { ChainNow, ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
-import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk, type SolanaBuyPiece } from "./rules/pool.ts";
+import { checkSolanaBuy, checkSolanaCarry, PoolRuleRefused, signSolana, type PoolAsk, type SolanaBuyPiece } from "./rules/pool.ts";
+import { carriesOf, carryOk, roundsOf } from "./pool-carry.ts";
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
 import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapDone, tapWaits, waitsOn, type ReadWaits } from "./read-waits.ts";
 import { duringTrade } from "./trade.ts";
@@ -185,6 +186,13 @@ export type PoolBuyHost = {
   chainNow?(): Promise<ChainNow>;
   /** The 64-byte seed; zeroed here when the run ends. */
   seed64(): Promise<Uint8Array>;
+  /** A buy that spends its change in the same tap (card buy-spends-its-change-in-the-same-tap; ./pool-carry.ts): each
+   *  ready note's value, for the change a release leaves; and, once a first round's release landed and settled, its
+   *  change proved to that round's W on the newest root (the queue's proveFor). Absent: no change is carried. */
+  carry?: {
+    values(noteIds: readonly string[]): Promise<ReadonlyMap<string, bigint>>;
+    prove(parentId: string, to: { l: bigint; j: number; address: string }): Promise<ReadyProof<SolanaReleaseRequest>>;
+  };
   /** POST /v1/pool/solana/send: the helper's answer as it came (hostile). */
   send(pool: string, tx: Uint8Array): Promise<unknown>;
   /** A buy's pieces (card buy-spends-several-pieces): the helper's send of these transactions in order, the tag 2s
@@ -687,9 +695,13 @@ export function solanaPieceWire(cfg: { program: string; pool: string }, wallet: 
  * rent back's sweep, W's own owed record), then the record goes; no piece spent, nothing reached W, the record goes. A
  * note that cannot be read keeps the record for the next read, and so does a strand that fails. The number stranded.
  */
-export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string): Promise<string | undefined>; owner(r: OwedPieces): Promise<"mine" | "other" | null>; strand(r: OwedPieces): Promise<void> }): Promise<number> {
+export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string): Promise<string | undefined>; owner(r: OwedPieces): Promise<"mine" | "other" | null>; strand(r: OwedPieces): Promise<void>; busy?(noteId: string): boolean }): Promise<number> {
   let stranded = 0;
   for (const r of await o.owed.list()) {
+    // a note a tap of this page holds now (its claim): the record's end is that tap's (card
+    // buy-spends-its-change-in-the-same-tap: between a first round that landed and the buy's round, the own note HELD and
+    // a piece SPENT, W is about to spend what it holds, never put back), kept
+    if (o.busy && [r.primary, ...r.pieces].some((id) => o.busy!(id))) continue;
     let states: (string | undefined)[];
     try {
       states = await Promise.all([r.primary, ...r.pieces].map((id) => o.state(id)));
@@ -749,7 +761,8 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || ask.token === null || pinned === null || pinned.length === 0) no("not_allowed");
     const token = ask.token!;
     const pool = solanaPoolAccount(h.pin.program);
-    const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && !h.claimed?.has(p.noteId));
+    // a note this run claimed (a first round's own note, held for the buy's round) stays this run's to pick
+    const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && (!h.claimed?.has(p.noteId) || claim?.includes(p.noteId) === true));
     // the ready proofs first: none (or every one held by another tap of this page) and no read is made
     if (mine(await h.ready()).length === 0) return no("not_funded");
     // the pool's time for the take, read beside the first round (card sol-buy-reads-side-by-side); a failed read is the
@@ -785,6 +798,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const label = roots.get(rootKey(1, p.publicSignals[5]));
       return state == null || label == null ? null : { state, label };
     };
+    // the tap's first round, once it landed (card buy-spends-its-change-in-the-same-tap): its releases to W, counted in
+    // W's funds and named first in the buy's `before`; W and its own note's proof's place, held for the buy's round
+    let landed: { releases: SolanaPoolRelease[]; wallet: string } | null = null;
     for (let round = 0; ; round++) {
       // round 1: the pool account's two tree sizes and the reference (the quote's age counts from it, so it is read
       // again each round), with the rent on the first
@@ -833,14 +849,21 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // takes that note's own proof alone and leaves every other note's ready, and a tap never parks more than it needs;
       // one piece when the host takes one only; filtered and claimed in one turn, so two runs of this page never
       // claim one note
+      // with the first round's landed releases counted, and only sets whose carried changes' notes they release (carryOk)
+      const prior: { withdrawnValue: bigint; relayFee: bigint }[] = landed?.releases.map((x) => ({ withdrawnValue: x.withdrawnValue, relayFee: x.relayFee })) ?? [];
       const pays = (set: readonly Ready[]): boolean =>
-        solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee })), venue, { spend: ask.amount, tip: tipOf(set.length) }, rent).problem === null;
-      const max = h.takeSet && h.sendPieces ? SOLANA_POOL_BUY_PIECES_MAX : 1;
+        carryOk(set) && solanaPoolBuyFunds([...prior, ...set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.request.relayFee }))], venue, { spend: ask.amount, tip: tipOf(prior.length + set.length) }, rent).problem === null;
+      const max: number = (h.takeSet && h.sendPieces ? SOLANA_POOL_BUY_PIECES_MAX : 1) - prior.length;
       // the takeable ones at the take's own time (the early read it takes on): a proof its take would refuse late (a
       // newest-root one past its grace while its remake runs) is never picked, so a set that pays only with it is
       // not_funded here, before any claim, never a take that fails
-      const now = mine(await h.ready(early));
-      const picked = pickPieces(now, pays, max);
+      // the buy's round after a first round: W's own proofs only (its own note's and the changes proved to it)
+      const now: Ready[] = mine(await h.ready(early)).filter((p) => landed === null || p.wallet.address === landed.wallet);
+      // the changes a first round would carry, weighed as Max weighs them (pools.ts): only before any round landed, and
+      // only when the host proves them and sends a round of pieces
+      const values: ReadonlyMap<string, bigint> | null = landed === null && h.carry && h.takeSet && h.sendPieces && h.piecesOwed ? await h.carry.values(now.map((p) => p.noteId)) : null;
+      const weighed: Ready[] = values === null ? now : carriesOf(now, (id) => values.get(id));
+      const picked = pickPieces(weighed, pays, max);
       if (picked === null) return no("not_funded");
       // a root the pick needs whose read failed (kept by the last-seen list's lookups): that fault, as the read's own
       for (const p of picked)
@@ -850,11 +873,52 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // roots are all found, or refused (a proof for another root is refused before anything is signed)
       if (set.some((p) => indexOf(p) === null)) {
         if (round === 0 && set.some((p) => !roots.has(rootKey(0, p.publicSignals[3])) || !roots.has(rootKey(1, p.publicSignals[5])))) continue;
-        const found = pickPieces(now.filter((p) => indexOf(p) !== null), pays, max);
+        const found = pickPieces(weighed.filter((p) => indexOf(p) !== null), pays, max);
         if (found === null) return no();
         set = found;
       }
       const r = set[set.length - 1]!;
+      const split = roundsOf(set);
+      if (split.carried.length > 0) {
+        // the first round (card buy-spends-its-change-in-the-same-tap): the carried changes' notes released to W alone,
+        // checked, signed by W, owed (so a page that closes leaves W found), sent, read back on both RPCs and settled;
+        // then each change proved to W, and the buy's round reads again with those releases in W's funds
+        const releases1 = split.first.map((p) => releaseOf(p, h.pin, r.wallet.address, indexOf(p)!));
+        const cfg1 = { program: h.pin.program, pool };
+        const pieces1: SolanaBuyPiece[] = releases1.map((x, i) => ({ wire: solanaPieceWire(cfg1, r.wallet.address, h.pin.feePayer, x, sizes.stateSize + i, bh.blockhash), release: x }));
+        claim = [...(claim ?? []), ...split.first.map((p) => p.noteId), r.noteId];
+        for (const id of claim) h.claimed?.add(id);
+        const ctx1 = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: r.wallet.address, feeCap, solana: h.pin };
+        const got1 = checkSolanaCarry(ask, ctx1, pieces1, { blockhash: bh.blockhash, stateSize: sizes.stateSize });
+        signing = true;
+        seed = await h.seed64();
+        const w1 = freshWallet(seed, "sol", r.wallet.l, r.wallet.j);
+        key = w1.secretKey;
+        seed.fill(0);
+        seed = null;
+        if (w1.address !== r.wallet.address) return no();
+        const signed1 = pieces1.map((p) => {
+          const out = p.wire.slice();
+          out.set(signSolana(key!, p.wire), 1 + 64);
+          return out;
+        });
+        key.fill(0);
+        key = null;
+        await h.piecesOwed!.put({
+          address: w1.address, l: r.wallet.l.toString(), j: r.wallet.j, primary: r.noteId, pieces: split.first.map((p) => p.noteId),
+          lastHeight: String(bh.lastHeight), mint: venue.mint, program: venue.tokenProgram,
+          spend: { program: r.binding.request.program, feePayer: r.binding.request.feePayer, context: r.binding.context.toString(), nullifier: BigInt(r.publicSignals[1]).toString() },
+        });
+        const parts1 = split.first.map((p, i) => ({ r: p, release: releases1[i]!, signed: signed1[i]! }));
+        const last1 = parts1[parts1.length - 1]!;
+        const a1 = await sendAndSettle(h, last1.r, last1.release, pool, last1.signed, bh.lastHeight, wait, undefined, parts1.slice(0, -1), true);
+        // the first round not landed whole: no buy is sent, and the tap failed (never "sent": no follow reads a release as
+        // a buy); any piece that landed waits in W, which its owed record names, for the state reads to put back
+        if (!("stage" in a1) || a1.stage !== "filled") return { error: "failed" };
+        for (const p of split.first) await h.carry!.prove(p.noteId, { l: r.wallet.l, j: r.wallet.j, address: r.wallet.address });
+        landed = { releases: got1, wallet: r.wallet.address };
+        continue;
+      }
       const k = set.length;
       // every piece to the one W its own note's proof is bound to, each at the state index it lands at: the pool's size
       // read, one more for each release before it; the tag 3 last
@@ -865,7 +929,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       const cuPrice = budget < SOLANA_CU_PRICE_MAX ? budget : SOLANA_CU_PRICE_MAX;
       const req: SolanaPoolBuyRequest = {
         wallet: r.wallet.address, feePayer: h.pin.feePayer, token, spend: ask.amount, minOut, tip: tipOf(k), cuPrice, cluster: h.cluster,
-        ...(k > 1 ? { before: releases.slice(0, -1).map((x) => ({ withdrawnValue: x.withdrawnValue, relayFee: x.relayFee })) } : {}),
+        ...(k > 1 || prior.length > 0 ? { before: [...prior, ...releases.slice(0, -1).map((x) => ({ withdrawnValue: x.withdrawnValue, relayFee: x.relayFee }))] } : {}),
       };
       const cfg = { program: h.pin.program, pool };
       // built on the venue's generation that makes the smallest transaction, before the claim and the seed: a buy that
@@ -881,17 +945,18 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       }
       const pieces: SolanaBuyPiece[] = releases.slice(0, -1).map((x, i) => ({ wire: solanaPieceWire(cfg, r.wallet.address, h.pin.feePayer, x, sizes.stateSize + i, bh.blockhash), release: x }));
       const used = own.find((t) => t.address === built.table.address)!;
-      claim = set.map((p) => p.noteId);
+      claim = [...(claim ?? []), ...set.map((p) => p.noteId)];
       for (const id of claim) h.claimed?.add(id);
       // the device's own fee cap: the epoch fee from the Rent sysvar it read, never the binding's word
       const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: r.wallet.address, feeCap, solana: h.pin };
-      checkSolanaBuy(built.wire, ask, ctx, release, venue, req, { blockhash: bh.blockhash, slot: bh.slot, tables: used.reads, stateSize: sizes.stateSize + k - 1, rent, reference: { amount: ask.amount, ref, slippageBps: ask.slippageBps } }, pieces);
+      checkSolanaBuy(built.wire, ask, ctx, release, venue, req, { blockhash: bh.blockhash, slot: bh.slot, tables: used.reads, stateSize: sizes.stateSize + k - 1, rent, reference: { amount: ask.amount, ref, slippageBps: ask.slippageBps } }, pieces, landed?.releases ?? []);
       // W, from the seed, right before it signs: it must be the proof's recipient the bytes were built and checked for
       signing = true;
       seed = await h.seed64();
       const w = freshWallet(seed, "sol", r.wallet.l, r.wallet.j);
       key = w.secretKey;
       seed.fill(0);
+      seed = null;
       if (w.address !== r.wallet.address) return no();
       // W signs every piece and the buy; each checked above (signSolana signs nothing a check did not pass)
       const signedOf = (wire: Uint8Array): Uint8Array => {
@@ -956,16 +1021,21 @@ export async function sendAndSettle(
   h: Pick<PoolBuyHost, "rpcs" | "take" | "takeSet" | "send" | "sendPieces" | "settle" | "settleSet" | "now" | "reads" | "named" | "sent" | "landed">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
   fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[]; decimals?: (d: number) => void; early?: Promise<ChainNow> },
   before: readonly { r: Ready; release: SolanaPoolRelease; signed: Uint8Array }[] = [],
+  round = false,
 ): Promise<PoolBuyAnswer> {
   // every part of the send, in its order (card buy-spends-several-pieces): the bundle's tag 2 pieces, then this one; one
-  // part is a plain send. A bundle lands whole or not at all on Jito, yet the helper holds every signed part, so each
+  // part is a plain send. `round` (card buy-spends-its-change-in-the-same-tap): a buy's first round, tag 2s alone, 1 to
+  // 3 of them: always the set's take and the helper's pieces route (POST /v1/pool/solana/pieces, which answers once every
+  // one filled on both its providers, and a partial round as an error: each part is then read back here and settled,
+  // any landed money sitting in W), never a re-send of its last part alone. A bundle lands whole or not at all on Jito, yet the helper holds every signed part, so each
   // part is read back, settled and owned on its own and the answer is filled only when every one is this run's
   const parts = [...before, { r, release, signed }];
   // the take, awaited before anything leaves: the queue hands out these very attempts, or refuses with every note
   // HELD (a set: takeSet, all or none); a buy's early read of the pool's time is its time when still fresh
   // with the signed transactions' last height: once both RPCs' finalized height is past it with no spent mark, the
   // state reads free each note at once (solana-restore.ts solanaSettleReserved), not at the proof's deadline
-  const taken = parts.length === 1 ? [await h.take(r.noteId, r.attempt, fill?.early, BigInt(lastHeight))] : h.takeSet && h.sendPieces ? await h.takeSet(parts.map((x) => ({ noteId: x.r.noteId, attempt: x.r.attempt })), fill?.early, BigInt(lastHeight)) : no();
+  const pieced = round || parts.length > 1;
+  const taken = !pieced ? [await h.take(r.noteId, r.attempt, fill?.early, BigInt(lastHeight))] : h.takeSet && h.sendPieces ? await h.takeSet(parts.map((x) => ({ noteId: x.r.noteId, attempt: x.r.attempt })), fill?.early, BigInt(lastHeight)) : no();
   if (taken.length !== parts.length || taken.some((t, i) => t.attempt !== parts[i]!.r.attempt || !sameBytes(solanaProofBytes(t.proof), parts[i]!.release.proof))) return no();
   // the take holds the note for this very transaction: W and the venue with its pool, told before it leaves
   if (fill) for (const x of fill.bound) fill.tell(x);
@@ -1088,7 +1158,7 @@ export async function sendAndSettle(
   let answer: unknown;
   for (let tries = 1; ; tries++) {
     try {
-      answer = parts.length === 1 ? await h.send(pool, signed) : await h.sendPieces!(pool, parts.map((p) => p.signed));
+      answer = !pieced ? await h.send(pool, signed) : h.sendPieces ? await h.sendPieces(pool, parts.map((p) => p.signed)) : no();
       break;
     } catch (e) {
       // the helper refused before it sent (a 4xx but 429): the run ends now, "failed"; its notes stay RESERVED until
@@ -1105,7 +1175,7 @@ export async function sendAndSettle(
   }
   // the helper's names, one per part in order (a bundle's `signatures`, one send's `signature`): each a signature,
   // else nothing it said is read
-  const named = parts.length === 1 ? [(answer as { signature?: unknown } | null)?.signature] : (answer as { signatures?: unknown } | null)?.signatures;
+  const named = !pieced ? [(answer as { signature?: unknown } | null)?.signature] : (answer as { signatures?: unknown } | null)?.signatures;
   const isSig = (x: unknown): x is string => typeof x === "string" && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(x) && base58.decode(x).length === 64;
   const sigs = Array.isArray(named) && named.length === parts.length && named.every(isSig) && new Set(named).size === named.length ? (named as string[]) : null;
   // the buy's own (the last part's): the one the hook below names, checked as the one-piece answer always was
@@ -1163,7 +1233,7 @@ export async function sendAndSettle(
     // first read landed and as often after, at most POOL_BUY_RESEND_MAX times. Nothing new is signed: its min out is the
     // user's own, and the helper carries a nullifier once, so a buy it still carries answers that carry's word
     const tag3 = got[got.length - 1]!;
-    if (!landed && parts.length > 1 && got.slice(0, -1).every((g) => g[0] === "ok" && g[1] === "ok") && tag3[0] === "none" && tag3[1] === "none") {
+    if (!landed && !round && parts.length > 1 && got.slice(0, -1).every((g) => g[0] === "ok" && g[1] === "ok") && tag3[0] === "none" && tag3[1] === "none") {
       piecesAt ??= clock();
       if (resends < POOL_BUY_RESEND_MAX && clock() - piecesAt >= (resends + 1) * POOL_BUY_RESEND_MS && clock() - signedAt < POOL_BLOCKHASH_LIFE_MS) {
         resends++;

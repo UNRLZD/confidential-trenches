@@ -8,7 +8,7 @@ import type { NoteRecord, NoteState } from "../src/notes/store.ts";
 import { SOLANA_JITO_TIP_MIN, SOLANA_POOL_VOLUME_ACCOUNT_SIZE, SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed, solanaPoolFee, solanaRentMin, type SolanaPoolRelease, type SolanaRent } from "@blindfill/kit";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type TapSpendOf } from "../src/pool/balances.ts";
 import { EVM_LADDER } from "../src/pool/evm.ts";
-import { SOL_LADDER, SOL_TIP_CAP } from "../src/pool/solana.ts";
+import { SOL_LADDER, SOL_PIECES, SOL_TIP_CAP } from "../src/pool/solana.ts";
 
 const LAMPORTS = 1_000_000_000n; // 1 SOL, 9 decimals
 const WEI = 1_000_000_000_000_000_000n; // 1 ETH, 18 decimals
@@ -296,7 +296,8 @@ test("the ladder's one never reaches the sum: one ladder step reads as that step
 });
 
 test("the table entry from a pool's kind: a Solana pool is SOL on solana, an EVM pool is ETH on base or robinhood", () => {
-  assert.deepEqual(solanaBalancePool("s", 7n), { id: "s", chain: "solana", scope: 7n, asset: "SOL" });
+  // a Solana pool carries a piece's change by the pool's piece rule (card buy-spends-its-change-in-the-same-tap)
+  assert.deepEqual(solanaBalancePool("s", 7n), { id: "s", chain: "solana", scope: 7n, asset: "SOL", carry: SOL_PIECES });
   assert.deepEqual(evmBalancePool("b", "base", 8n), { id: "b", chain: "base", scope: 8n, asset: "ETH" });
   assert.deepEqual(evmBalancePool("r", "robinhood", 9n), { id: "r", chain: "robinhood", scope: 9n, asset: "ETH" });
   assert.throws(() => evmBalancePool("x", "solana" as never, 1n), /chain/);
