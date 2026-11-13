@@ -188,7 +188,8 @@ abstract contract SellForkBase is SellBase {
     SellDelegate(payable(W)).sell(_s, FEE, _sig);
     assertEq(W.code, abi.encodePacked(hex'ef0100', address(delegate)), "the kit's authorization delegates W");
     (, , uint256 _value, uint256 _pre) = _deposited(vm.getRecordedLogs());
-    assertGe(_value, _minOut - FEE, 'the leaf holds at least minOut less the fee');
+    assertGe(_value, _rungOf(_minOut - FEE), 'the leaf holds at least the rung of minOut less the fee');
+    assertEq(_value, _rungOf(_value + W.balance), 'the largest rung of the sale less the fee, the rest on W');
     assertEq(_pre, PRE);
     assertEq(address(pool).balance, _poolBefore + _value);
     assertEq(_feeTo().balance, FEE, 'the fee recipient the kit signed is paid the fee');
