@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, receiveShown, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountOk, amountText, amountWrong, cashMax, cashMovesTo, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetOn, presetsOf, PRESETS, receiveShown, tradeBal, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -186,4 +186,49 @@ test("card solana-buy-preview-complete: You receive on a pool path is the dry an
   assert.equal(receiveShown(null, "solana:MINT", 16n), null);
   assert.equal(receiveShown(read, "solana:MINT", null), null, "no amount typed");
   assert.equal(receiveShown(read, "solana:MINT", 0n), null);
+});
+
+// Card one-balance-buys-on-every-chain: on Solana a tap above tap_max moves its shortfall from Cash (the NEAR vault's
+// USDC) into the pool and buys the whole ask once it lands (packages/signpage/src/cash-to-pool.ts cashFirst). The box's
+// Max is pool.buy.dry's with_cash, its Bal the pool and Cash's NEAR part, and an ask above tap_max at most with_cash is
+// sent as one pool.buy. with_cash is the page's answer: anything not a plain decimal at or above tap_max is not used.
+test("card one-balance-buys-on-every-chain: Max is with_cash, Bal is the pool and Cash, an ask above tap_max and at most with_cash is sent", () => {
+  // one 0.01 SOL proof whose tap spends 0.00337192 SOL on this coin ($0.31); with_cash 0.5 SOL ($46.50)
+  const pools = [sol("0.01", "0.01", "0.00337192")];
+  assert.equal(cashMax(pools, "solana", "0.5", SOL), 4_650n);
+  assert.equal(cashMax(pools, "solana", "0.00337192", SOL), 31n, "with_cash at tap_max: nothing to move");
+  // no with_cash, or one that is no plain decimal, has more digits than SOL, sits under tap_max: Max stays tap_max's
+  for (const w of [null, "", "x", "-1", "1e3", "0x10", "0.0000000001", "0.001", " 0.5"]) assert.equal(cashMax(pools, "solana", w, SOL), null, JSON.stringify(w));
+  // no price, no tap_max, no pool, another chain: none
+  assert.equal(cashMax(pools, "solana", "0.5", null), null);
+  assert.equal(cashMax([sol("0.01", "0.01")], "solana", "0.5", SOL), null);
+  assert.equal(cashMax(undefined, "solana", "0.5", SOL), null);
+  assert.equal(cashMax([base("0.03", "0.02", "0.01")], "base", "0.5", ETH), null);
+  // $30 is above one tap's $0.31 and under with_cash's $46.50: one pool.buy of the whole $30, never a refusal
+  const ask = poolBuyAsk(pools, "solana", "Mint1", 3_000n, SOL, 1_000, "0.5");
+  assert.deepEqual(ask, { ok: true, kind: "pool.buy", params: { chain: "solana", token: "Mint1", amount: unitsToDecimal(centsToUnits(3_000n, SOL), 9), slippage_bps: 1_000 } });
+  assert.equal(amountWrong(ask), false);
+  // at with_cash's Max it is sent; one cent above it is over
+  assert.equal(poolBuyAsk(pools, "solana", "Mint1", 4_650n, SOL, 1_000, "0.5").ok, true);
+  assert.deepEqual(poolBuyAsk(pools, "solana", "Mint1", 4_651n, SOL, 1_000, "0.5"), { ok: false, why: "over_tap" });
+  // no with_cash (or one not used): over one tap is over, as before
+  for (const w of [null, "x", "0.001"]) assert.deepEqual(poolBuyAsk(pools, "solana", "Mint1", 3_000n, SOL, 1_000, w), { ok: false, why: "over_tap" }, JSON.stringify(w));
+  // no proof ready: with_cash makes no ask
+  assert.deepEqual(poolBuyAsk([sol("0.01", "0")], "solana", "Mint1", 3_000n, SOL, 1_000, "0.5"), { ok: false, why: "no_proof" });
+  // Base spends a whole chunk: with_cash never widens it
+  assert.deepEqual(poolBuyAsk([base("0.03", "0.02", "0.01")], "base", "0xabc", 5_000n, ETH, 500, "0.5"), { ok: false, why: "over_tap" });
+  // the amount gate and the presets read that Max: $30 and the $25 and $10 presets are on under Bal
+  const pv = poolView(pools, "solana", SOL)!;
+  const bal = tradeBal(true, pv, 999n, 5_000n).cents;
+  assert.equal(bal, 93n + 5_000n, "Bal: the pool's $0.93 and Cash's $50 on NEAR");
+  assert.equal(amountOk(3_000n, cashMax(pools, "solana", "0.5", SOL), bal), true);
+  assert.equal(amountOk(3_000n, pv.tapMax, bal), false, "tap_max alone: $30 is over Max");
+  assert.equal(presetOn(2_500n, cashMax(pools, "solana", "0.5", SOL), bal, false), true);
+  assert.equal(presetOn(5_000n, cashMax(pools, "solana", "0.5", SOL), bal, false), false, "$50 over with_cash's $46.50");
+  // Bal: no pool view (no price) or Cash not read yet is no number; Cash moves into a buy on Solana only
+  assert.deepEqual(tradeBal(true, null, 999n, 5_000n), { from: "pool", cents: null });
+  assert.deepEqual(tradeBal(true, pv, 999n, null), { from: "pool", cents: null });
+  assert.deepEqual(tradeBal(false, pv, 999n, 5_000n), { from: "cash", cents: 999n });
+  assert.equal(cashMovesTo("solana"), true);
+  for (const c of ["base", "robinhood", "near"] as const) assert.equal(cashMovesTo(c), false, c);
 });
