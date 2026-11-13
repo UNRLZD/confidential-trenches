@@ -29,9 +29,18 @@ import { WORDS } from "./words.ts";
 
 export type StepId = "balance" | "wallet" | "pool" | "token";
 export const STEPS: readonly StepId[] = ["balance", "wallet", "pool", "token"];
+/** A sell's steps (card sell-box-works-like-the-buy-box): the buy's flow back, on the money's own path: the coin, its
+ *  one-time wallet, the pool, Private balance. The same events check them in this order: the tap waits on the coin, `sent` checks the coin and the
+ *  wallet (W signed and the sale went out), the fill checks the pool and Private balance (pool.sell puts the proceeds
+ *  back in the same transaction). */
+export const SELL_STEPS: readonly StepId[] = ["token", "wallet", "pool", "balance"];
+/** A route's steps in the order it runs them and the strip draws them. */
+export const stepsOf = (r: Route): readonly StepId[] => (r.side === "sell" ? SELL_STEPS : STEPS);
 export type StepState = "off" | "active" | "done" | "error";
 
 export interface Route {
+  /** A buy runs Private balance to the coin; a sell the coin back to Private balance (SELL_STEPS). */
+  side: "buy" | "sell";
   k: "idle" | "running" | "done" | "failed";
   id: string | null;
   /** The tap's time, Unix ms. */
@@ -48,9 +57,15 @@ export interface Route {
   pool: string | null;
   out: string | null;
   tx: string | null;
+  /** A sell's amount of the coin, token units, as the box sized it at the tap. */
+  sold: string | null;
+  /** A sell's USD back, in cents: the box's own preview at the tap (an estimate, drawn with ≈), null with none. */
+  back: Cents | null;
 }
 
-export const IDLE: Route = { k: "idle", id: null, at: 0, cents: null, walletIn: false, st: ["off", "off", "off", "off"], links: [false, false, false], wallet: null, venue: null, pool: null, out: null, tx: null };
+export const IDLE: Route = { side: "buy", k: "idle", id: null, at: 0, cents: null, walletIn: false, st: ["off", "off", "off", "off"], links: [false, false, false], wallet: null, venue: null, pool: null, out: null, tx: null, sold: null, back: null };
+/** A sell's strip before its tap. */
+export const SELL_IDLE: Route = { ...IDLE, side: "sell" };
 
 export type RouteEvent =
   | { t: "taken"; id: string }
@@ -65,6 +80,12 @@ export type RouteEvent =
 /** The Buy release: a new strip, the wallet step grown in, Private balance waiting. */
 export function routeTap(id: string, at: number, cents: Cents): Route {
   return { ...IDLE, k: "running", id, at, cents, walletIn: true, st: ["active", "off", "off", "off"] };
+}
+
+/** The Sell release: a new reversed strip, the wallet step grown in, the coin waiting. `wallet` is the one-time wallet
+ *  that holds the coin when the device's state names exactly one; the page's route event names it otherwise. */
+export function routeSell(id: string, at: number, sold: string, back: Cents | null, wallet: string | null): Route {
+  return { ...SELL_IDLE, k: "running", id, at, sold, back, wallet, walletIn: true, st: ["active", "off", "off", "off"] };
 }
 
 const set = (st: Route["st"], i: number, s: StepState): Route["st"] => st.map((x, j) => (j === i ? s : x)) as unknown as Route["st"];
@@ -185,18 +206,19 @@ const short = (a: string): string => `${a.slice(0, 4)}…${a.slice(-4)}`;
 /** Cents as the strip draws the amount: "$25.00", grouped, always two decimals. */
 export const usd2 = (c: Cents): string => `$${(c / 100n).toLocaleString("en-US")}.${centsToDecimal(c).slice(-2)}`;
 
-/** A step's state and its value, hidden until its step has happened: Private balance's amount once taken, the others once
- *  they are the step waiting (their value fades in before their check). */
+/** A step's state and its value, hidden until its step has happened: the first step's amount once taken (a buy's spend,
+ *  a sell's coin), the others once they are the step waiting (their value fades in before their check); a sell's
+ *  Private balance shows its USD back at the fill. */
 export function stepView(r: Route, step: StepId): { state: StepState; value: string | null } {
-  const i = STEPS.indexOf(step);
+  const i = stepsOf(r).indexOf(step);
   const state = r.st[i]!;
   const shown = state === "done" || (i > 0 && (state === "active" || state === "error"));
   let value: string | null = null;
   if (shown) {
-    if (step === "balance") value = r.cents === null ? null : usd2(r.cents);
+    if (step === "balance") value = r.side === "sell" ? (r.back === null ? null : `≈ ${usd2(r.back)}`) : r.cents === null ? null : usd2(r.cents);
     else if (step === "wallet") value = r.wallet ? short(r.wallet) : null;
     else if (step === "pool") value = r.pool ? short(r.pool) : null;
-    else value = r.out;
+    else value = r.side === "sell" ? r.sold : r.out;
   }
   return { state, value };
 }

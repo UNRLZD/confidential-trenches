@@ -563,7 +563,7 @@ function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
   const { row, risk } = r.data;
   return (
     <>
-      <TradeView t={t} symbol={row.symbol} toast={toast} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />
+      <TradeView t={t} symbol={row.symbol} toast={toast} logo={{ chain: row.chain, token: row.token, icon: row.icon === true }} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />
       <About row={row} links={r.data.links} />
     </>
   );

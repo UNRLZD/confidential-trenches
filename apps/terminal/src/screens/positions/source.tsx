@@ -2,7 +2,9 @@ import type { Chain } from "@blindfill/kit";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fillOf, fillStore } from "../portfolio/fills.ts";
 import { busy, outcome, progress, READY, sellShareOk, tap, tradeSellAsk } from "../trade/model.ts";
-import type { Phase } from "../trade/model.ts";
+import type { Cents, Phase } from "../trade/model.ts";
+import { fromOutcome, fromProgress, fromStage, routeEvent, routeSell, SELL_IDLE } from "../trade/route.ts";
+import type { Route } from "../trade/route.ts";
 import { useTradeSource } from "../trade/source.tsx";
 import type { PartCount } from "../trade/States.tsx";
 import { askSellPreview, baseUnits, sellLocked } from "./model.ts";
@@ -58,10 +60,13 @@ export interface Sell {
   takes(bps: number): boolean;
   /** A part-filled sell's count of slices, when the kit gives it (TradeKit.part, not in the kit yet). */
   part: PartCount | null;
+  /** The running or last sell's flow (card sell-box-works-like-the-buy-box): the buy's strip reversed, on the same events. */
+  route: Route;
   now(): number;
   /** Sells `amount` (token units) as `bps` of the position; nothing while a sell runs or with no amount. `decimals` is the
-   *  token's (the token read's): the vault's sell takes whole base units, so with none it is refused here, never sent. */
-  sell(amount: string | null, bps: number, decimals?: number | null): void;
+   *  token's (the token read's): the vault's sell takes whole base units, so with none it is refused here, never sent.
+   *  `back` is the box's own preview of the USD it gives, for the flow's last step (display only, never sent). */
+  sell(amount: string | null, bps: number, decimals?: number | null, back?: Cents | null): void;
 }
 
 /** The holding each sell was tapped on (chain, token, units), by its request id, kept for the page: a box mounted again
@@ -81,6 +86,7 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
   const ref = useRef<Phase>(READY);
   ref.current = phase;
   const [bps, setBps] = useState<number | null>(null);
+  const [route, setRoute] = useState<Route>(SELL_IDLE);
   const [, tick] = useState(0);
 
   useEffect(() => {
@@ -89,8 +95,16 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
     return kit.onProgress((id, stage) => {
       const at = src.now();
       setPhase((p) => progress(p, id, stage, at));
+      setRoute((r) => fromProgress(r, id, stage));
     });
   }, [kit.onProgress, src.now]);
+
+  // what the page tells of the sell besides its stage, by the sell's id (the buy's route events): its wallet, the venue
+  // and pool; a page that tells none leaves those values empty, never made up
+  useEffect(() => {
+    if (!kit.route) return;
+    return kit.route((d) => setRoute((r) => routeEvent(r, d)));
+  }, [kit.route]);
 
   // Landing's counter and Slow: a tick every 100 ms while a sell runs, none otherwise
   useEffect(() => {
@@ -125,7 +139,8 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
     takes: (b) => sellShareOk(chain, b),
     part: phase.k === "ended" ? (kit.part?.(phase.id) ?? null) : null,
     now: src.now,
-    sell(amount, b, decimals = null) {
+    route,
+    sell(amount, b, decimals = null, back = null) {
       if (!ready || amount === null || busy(ref.current)) return;
       // a share this chain does not sell (NEAR: anything but the whole) is never asked, nor the vault's sell in its place
       if (!sellShareOk(chain, b)) return;
@@ -136,12 +151,17 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
       // (trade.ts UNITS); NEAR sells the whole holding back to Cash (pool.sell with chain near, card app-near-trading)
       const ask = tradeSellAsk(src.snapshot.state?.pools, chain, token, { share_bps: b }, slippageBps);
       const base = baseUnits(amount, decimals);
+      // the one-time wallet that holds the coin, when the device's state names exactly one (a sale across several names
+      // none here: the page's route event names it)
+      const pos = src.snapshot.state?.positions.find((x) => x.chain === chain && x.token === token);
+      const w = pos?.wallets.length === 1 ? pos.wallets[0]! : null;
       if (!ask && base === null) {
         // no decimals read (or a share finer than the token's): the vault would refuse it, so nothing is sent
         const next: Phase = { k: "ended", id: `refused-here-${++refusedHere}`, at: src.now(), stage: "refused", code: "not_allowed" };
         ref.current = next;
         setPhase(next);
         setBps(b);
+        setRoute(fromStage(routeSell(next.id, next.at, amount, back, w), next.id, "refused"));
         return;
       }
       const h = ask ? kit.request!(ask.kind, ask.params) : kit.request!("buy", { chain, token, side: "sell", amount: base!, slippage_bps: slippageBps });
@@ -151,12 +171,14 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
       ref.current = next;
       setPhase(next);
       setBps(b);
+      setRoute(routeSell(h.id, src.now(), amount, back, w));
       void h.outcome.then((o) => {
         // a refusal sold nothing: its holding is not held for it (a client timeout says nothing yet, so it stays)
         if (!o.ok && o.error.code !== "client_timeout") TAPPED.delete(h.id);
         if (!o.ok && o.error.code !== "client_timeout") SOLD.delete(h.id);
         const at = src.now();
         setPhase((p) => outcome(p, h.id, o, at));
+        setRoute((r) => fromOutcome(r, h.id, o));
       });
     },
   };
