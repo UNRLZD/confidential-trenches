@@ -356,4 +356,7 @@ test("every wallet pool the page makes binds on the chain's one fee hold", async
   const made = src.split("walletEvmPool({").slice(1);
   assert.equal(made.length, 3, "the pass pool, the landing's pool and a withdraw's");
   for (const [i, body] of made.entries()) assert.match(body.slice(0, 600), /\n\s+feeHold: evmFeeHoldOf\(e\.pin\),\n/, `pool ${i + 1} on the fee hold`);
+  // and a deposit in sight's (card evm-landing-reads-batched), made from its arguments
+  const sight = src.split("const evmSightHold = ")[1] ?? "";
+  assert.match(sight.slice(0, 1200), /const args: Parameters<typeof walletEvmPool>\[0\] = \{[^}]*\n\s+feeHold: evmFeeHoldOf\(e\.pin\),\n[\s\S]*walletEvmPool\(args\)/, "the sight's pool on the fee hold");
 });

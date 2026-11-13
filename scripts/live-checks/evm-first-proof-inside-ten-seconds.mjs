@@ -89,7 +89,8 @@ const WAIT = (warm, pool, reads, fails, warmed) =>
 const BOUND = (b) => new RegExp(`[,;{ ]${esc(b)}=${N}\\.evmWarmWaitMs\\?\\?2e4[,;]`);
 const BEHIND = (wait, warmed) => new RegExp(`round:(${N})\\.evmRound\\?\\1\\.evmRound\\(${N},${N},${N}\\):\\((${N})=>async (${N})=>\\{let (${N})=${N}\\.signal,\\{stop:(${N}),off:(${N})\\}=(${N})\\(\\3,\\4\\);try\\{await ${esc(wait)}\\(${N},\\5\\),\\5\\.throwIfAborted\\(\\);let (${N})=await \\2\\(\\5\\);return \\4\\.aborted\\|\\|${esc(warmed)}\\.add\\(${N}\\),\\8\\}finally\\{\\6\\(\\)\\}\\}\\)\\(${N}\\(${N}\\)\\)`);
 const EITHER = (f) => new RegExp(`function ${esc(f)}\\((${N}),(${N})\\)\\{if\\(\\1===void 0\\)return\\{stop:\\2,off:\\(\\)=>\\{\\}\\};let (${N})=new AbortController,(${N})=\\(\\)=>\\3\\.abort\\(\\1\\.aborted\\?\\1\\.reason:\\2\\.reason\\);return \\1\\.aborted\\|\\|\\2\\.aborted\\?\\(\\4\\(\\),\\{stop:\\3\\.signal,off:\\(\\)=>\\{\\}\\}\\):\\(\\1\\.addEventListener\\(\`abort\`,\\4,\\{once:!0\\}\\),\\2\\.addEventListener\\(\`abort\`,\\4,\\{once:!0\\}\\),\\{stop:\\3\\.signal,off:\\(\\)=>\\(\\1\\.removeEventListener\\(\`abort\`,\\4\\),\\2\\.removeEventListener\\(\`abort\`,\\4\\)\\)\\}\\)\\}`);
-const POOL_OF = (warm, pool) => new RegExp(`evmPoolOf:(${N})=>\\((${N})=>\\2===null\\?null:\\(${esc(warm)}\\(\\1\\),\\{pin:\\2\\.pin,rpcs:\\2\\.rpcs\\}\\)\\)\\(${esc(pool)}\\(\\1\\)\\)`);
+// the warm read first, then (card evm-landing-reads-batched) the deposit's sight, which holds the period's fee
+const POOL_OF = (warm, pool) => new RegExp(`evmPoolOf:(${N})=>\\((${N})=>\\2===null\\?null:\\(${esc(warm)}\\(\\1\\),(?:${N}\\(\\1\\),)?\\{pin:\\2\\.pin,rpcs:\\2\\.rpcs\\}\\)\\)\\(${esc(pool)}\\(\\1\\)\\)`);
 
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, and each part found exactly once and bound. */
 export function pageFacts(index, js) {

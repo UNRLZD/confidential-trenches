@@ -36,6 +36,7 @@
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
+import type { PieceRule } from "../../../wallet/src/pool/pieces.ts";
 import { nearestPlannable, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
 import { EVM_ADDRESS, SOL_KEY, SOLANA_RESERVED_KEYS, type PoolChain } from "../rules/pool.ts";
 import { POOL_CHAIN_MARK } from "./chain-mark.ts";
@@ -76,7 +77,7 @@ export const POOL_ASSET: Readonly<Record<PoolChain, { symbol: string; decimals: 
 export type PoolKeys = { pool: string; program?: string; feePayer?: string };
 /** What the screen reads at open and at the press: the notes it may spend, the epoch fee, W's own send fee and the
  *  smallest part. */
-export type PoolFunds = { notes: readonly WithdrawSource[]; fee: bigint; wFee: bigint; minPart: bigint };
+export type PoolFunds = { notes: readonly WithdrawSource[]; fee: bigint; wFee: bigint; minPart: bigint; pieces?: PieceRule };
 
 export type PoolAddressCode = "address";
 export type PoolAmountCode = "amount" | "insufficient" | "min" | "unread" | "unplannable";
@@ -150,7 +151,10 @@ export function checkPoolAmount(chain: PoolChain, raw: string, funds: PoolFunds 
   if (amount < funds.minPart) return { ok: false, code: "min", min: funds.minPart };
   const plan = planPoolWithdraw(funds.notes, amount, funds);
   if (plan === null) return { ok: false, code: "unplannable", ...nearestPlannable(funds.notes, amount, funds) };
-  return { ok: true, amount, parts: plan.length, maxFee: BigInt(plan.length) * (funds.fee + funds.wFee) };
+  // the one number the screen shows and the run sends: the plan's sum, which on a pool with a piece rule may be up to a
+  // grid step over the typed amount (planPoolWithdraw; review P3-3 of 00d6bef00), and which plans exactly itself
+  const sum = plan.reduce((t, p) => t + p.part, 0n);
+  return { ok: true, amount: sum, parts: plan.length, maxFee: BigInt(plan.length) * (funds.fee + funds.wFee) };
 }
 
 /** What can be sent now: poolWithdrawable, the Insufficient rule's own sum. It is the largest amount checkPoolAmount
@@ -364,7 +368,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     shown.replaceChildren();
     shown.hidden = v.ready === null;
     if (v.ready) {
-      for (const [key, value] of [["to", v.ready.to], ["max-fee", `${formatUnits(v.ready.maxFee, decimals)} ${symbol}`]] as const) {
+      for (const [key, value] of [["amount", `${formatUnits(v.ready.amount, decimals)} ${symbol}`], ["to", v.ready.to], ["max-fee", `${formatUnits(v.ready.maxFee, decimals)} ${symbol}`]] as const) {
         const dt = doc.createElement("dt");
         dt.textContent = POOL_WITHDRAW_WORDS[key];
         markDraft(dt, key, POOL_DRAFT);
