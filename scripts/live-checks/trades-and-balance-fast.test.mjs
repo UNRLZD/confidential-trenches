@@ -37,7 +37,7 @@ test("planted in a bundle: each mark broken in place FAILs", () => {
   const good = [
     "var GX=1e3,KX=400,qX=120*GX/KX,JX=4e3",
     "o=await Promise.all(e.map(e=>e(`getSlot`,[{commitment:`finalized`}]))).then(e=>e.map(e=>cZ(e)),()=>null);if(o===null)return 0;let s=Math.max(a[0]-o[0],a[1]-o[1]);return s>0?Math.min(s*KX,AZ):0}",
-    "await y(j.one.signed,j.one.signature),n?.release();let P=0;return await MZ(jZ(s,j.one.signature,j.one.signed),async()=>0",
+    "await y(A.one.signed,A.one.signature);let N=0;return await MZ(jZ(s,A.one.signature,A.one.signed),async()=>(await DZ(s,t.program,t.scope,t.sync,t.store,M)).end,d,()=>++N<f&&p()<m)",
     "landed:e=>{v.add(e),y===null&&m.short!==!0&&m.legs!==void 0&&m.legs.length>0&&v.size===m.legs.length&&(y=`filled`,r.progress(`filled`))},ended:(e,t)=>{}",
   ];
   const ok = facts("", good.join(";"));
@@ -47,8 +47,8 @@ test("planted in a bundle: each mark broken in place FAILs", () => {
   assert.equal(broken(0, "120*GX/KX", "120").pace, false, "a read count off the wall-clock budget");
   assert.equal(broken(1, "return s>0?Math.min(s*KX,AZ):0", "return 0").gate, false, "no gap waited");
   assert.equal(broken(1, "`finalized`", "`confirmed`").gate, false, "the confirmed slot, not the finalized one");
-  assert.equal(broken(2, "n?.release();", "").follow, false, "the sell lock held through the follow");
-  assert.equal(broken(2, "await y(j.one.signed,j.one.signature),", "").follow, false, "no send before the follow");
+  assert.equal(broken(2, ".end,d,", ".end,t.wait,").follow, false, "the sell lock held through the follow's waits");
+  assert.equal(broken(2, "await y(A.one.signed,A.one.signature);", "").follow, false, "no send before the follow");
   assert.equal(broken(3, "v.size===m.legs.length", "v.size>0").landed, false, "filled told before every leg landed");
   assert.equal(broken(3, "m.short!==!0&&", "").landed, false, "filled told on a share left short");
 });

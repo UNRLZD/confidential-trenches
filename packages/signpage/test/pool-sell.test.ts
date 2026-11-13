@@ -1625,6 +1625,37 @@ test("a sale with a deposit back is told filled once it reads back on both RPCs,
   assert.equal(((await w.store.get("ops", "f1")) as { stage?: string }).stage, "filled", "the record's stage, at its note's settle");
 });
 
+// the sweep's follow holds the sell lock only between its waits, as the pass's other steps: a sell tapped while it waits
+// for finality takes the lock at once, and the follow ends, its note left INCOMING for the next state read, never
+// settled by two runs at once
+test("a sell tapped while a sale's sweep is followed takes the sell lock at once, and the follow ends, its note left for the next state read", async () => {
+  const lamports = 1_493_440n;
+  const { amount } = await amountFor(SWEPT_SALE);
+  const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT }, [wallet(amount)]);
+  const f = finalityTrails(w, 3);
+  const locks = fakeLocks();
+  let other: Promise<unknown> | undefined;
+  let leave!: () => void;
+  let tookAt = -1;
+  const waits: number[] = [];
+  const ended = { n: 0 };
+  const host = (): PoolSellKindHost => ({ ...w.host, reads: 10, rpcs: f.rpcs, ops: async () => w.store, end: () => void ended.n++, wait: async (ms: number) => {
+    waits.push(ms);
+    // the follow's first wait (the gate's gap): another sell takes the lock, and holds it
+    if (f.t.gating && other === undefined) other = locks.request(POOL_SELL_LOCK, { mode: "exclusive" }, () => ((tookAt = waits.length), new Promise<void>((r) => (leave = r))));
+  } });
+  const r = poolSellKind(host, locks)({ ...ASK, amount }, ctxOf("t1")) as KindAnswer;
+  await r.after;
+  await until(async () => ended.n > 0);
+  assert.equal(ended.n, 1, "the run ended with the other sell holding the lock");
+  assert.equal(tookAt, 1, "the other sell took the lock at the follow's first wait");
+  const rec = w.owed.get(W.address)!;
+  const note = (await w.ns.list()).find((n) => n.sends?.some((d) => d.signature === rec.sweep));
+  assert.equal(note?.state, "INCOMING", "left for the next state read");
+  leave();
+  await other;
+});
+
 // Review of T1+T2 (card every-lamport-can-move) P3-4: a full sale writes W's owed record before it leaves the device; a
 // write that fails sends nothing (before, its .catch let the sale go with no record, so no later load would sweep W)
 test("a full sale whose owed record cannot be written sends nothing", async () => {

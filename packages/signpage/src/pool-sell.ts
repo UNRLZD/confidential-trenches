@@ -2323,11 +2323,12 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     await send(sw.one.signed, sw.one.signature);
     // the sweep's note followed to its end here (card trades-and-balance-fast): its move to UNSPENT is the store change the
     // page's state follows, so the balance counts the sale's SOL once its mark is final, never at the next state read
-    // something else asks. The sell lock let go first, so a sell tapped meanwhile never waits on it; what it leaves
-    // INCOMING settles at the next state read, as before
-    hold?.release();
+    // something else asks. Its waits are the pass's own (`wait`): the sell lock let go for each and taken again only if
+    // free, so a sell tapped meanwhile waits for one read at most, and its own walk over W's notes never meets this
+    // settle on the same note; a sell that took the lock ends the follow, and what it leaves INCOMING settles at the
+    // next state read, as before
     let n = 0;
-    await followNote(settleGate(rpcs, sw.one.signature, sw.one.signed), async () => (await settleSellNote(rpcs, x.program, x.scope, x.sync, x.store, note)).end, x.wait, () => ++n < reads && clock() < deadline).catch(() => "pending");
+    await followNote(settleGate(rpcs, sw.one.signature, sw.one.signed), async () => (await settleSellNote(rpcs, x.program, x.scope, x.sync, x.store, note)).end, wait, () => ++n < reads && clock() < deadline).catch(() => "pending");
     return end("sent", sw.one.signature);
   } catch (e) {
     // the sell has landed; what is not closed or swept stays on W, owed, and its note, if sent, settles at the next read

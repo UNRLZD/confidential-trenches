@@ -9,8 +9,8 @@
 //     same wall-clock budget (120 x 1 s, read 400 ms apart);
 //   - gate: a sent note's settle (its mark at finalized) is asked once both RPCs' finalized slot reaches the send's, the
 //     wait between those reads the gap at a slot's time each, at most the buy's longest;
-//   - follow: a full sale's sweep, once sent, is followed to its note's end with the sell lock let go first, so the
-//     note's move to UNSPENT is the store change the page's state follows;
+//   - follow: a full sale's sweep, once sent, is followed to its note's end, the sell lock let go for each wait and taken
+//     again only if free, so the note's move to UNSPENT is the store change the page's state follows;
 //   - landed: a sale is told filled once every leg reads back on both RPCs as its very transaction, succeeded (a sale
 //     with a deposit back waited for its note's mark to be final), once, and a share left short at its end as before.
 // That a pool sale lands and fills on mainnet is pool-sol-mainnet-run's live check.
@@ -35,8 +35,11 @@ const PACE = new RegExp(`(${V})=1e3,(${V})=400,${V}=120\\*\\1\\/\\2[,;]`);
 const GATE = new RegExp(
   `${Q}getSlot${Q},\\[\\{commitment:${Q}finalized${Q}\\}\\]\\)\\)\\)\\.then\\(${V}=>${V}\\.map\\(${V}=>${V}\\(${V}\\)\\),\\(\\)=>null\\);if\\(${V}===null\\)return 0;let (${V})=Math\\.max\\(${V}\\[0\\]-${V}\\[0\\],${V}\\[1\\]-${V}\\[1\\]\\);return \\1>0\\?Math\\.min\\(\\1\\*${V},${V}\\):0`,
 );
-// the sweep sent, the sell lock let go, then its note followed through the gate
-const FOLLOW = new RegExp(`\\((${V})\\.one\\.signed,\\1\\.one\\.signature\\),${V}\\?\\.release\\(\\);let ${V}=0;return await ${V}\\(${V}\\(${V},\\1\\.one\\.signature,\\1\\.one\\.signed\\)`);
+// the sweep sent, then its note followed through the gate, each wait the pass's own (a bare name: the one that lets the
+// sell lock go per wait), not the tap's (a member, `x.wait`, which keeps the lock)
+const FOLLOW = new RegExp(
+  `\\((${V})\\.one\\.signed,\\1\\.one\\.signature\\);let (${V})=0;return await ${V}\\(${V}\\(${V},\\1\\.one\\.signature,\\1\\.one\\.signed\\),async\\(\\)=>\\(await ${V}\\([^()]*\\)\\)\\.end,${V},\\(\\)=>\\+\\+\\2<`,
+);
 
 // the kind's landed hook: every leg landed, not short, told filled once
 const LANDED = new RegExp(
