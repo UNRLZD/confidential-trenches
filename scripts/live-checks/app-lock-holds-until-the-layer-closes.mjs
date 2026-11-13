@@ -23,11 +23,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
-import { APP_HOST, CONTROL, SIGNED_OUT, WIDTHS } from "./app-hop-sync-lock.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
+import { CONTROL, SIGNED_OUT, WIDTHS } from "./app-hop-sync-lock.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-lock-holds-until-the-layer-closes";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const HELPER_HOST = "https://ct-api.unrealized.trade";
 const READY_MS = 15_000;
@@ -147,10 +149,11 @@ async function runOne(browser, w, shots, route) {
   }
 }
 
-/** Both widths in Chromium. `route` answers the hosts' names (see routeFor). */
-export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route, source }) {
+/** Both widths in Chromium. `route` answers the hosts' names (see routeFor); `harness`: a local build, its sockets
+ *  routed by the harness (harness-sockets.mjs). */
+export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route, source, harness = false }) {
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  const browser = await (harness ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const runs = [];
     for (const w of WIDTHS) runs.push(await runOne(browser, w, shots, route));
@@ -182,7 +185,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       build = path.resolve(opt("--build", path.join(REPO, "apps/terminal/dist")));
       source = `harness, terminal build ${named(build)}, the stand-in shell signed out, its open answered with closes`;
     }
-    const rec = await collect({ shots: opt("--shots", undefined), route: await routeFor(build), source });
+    const rec = await collect({ shots: opt("--shots", undefined), route: await routeFor(build), source, harness: build !== null });
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
