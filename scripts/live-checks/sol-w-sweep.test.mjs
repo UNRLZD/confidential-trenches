@@ -1,5 +1,7 @@
 // node --test scripts/live-checks/sol-w-sweep.test.mjs: the live check replays its recorded answers
-// (sol-w-sweep.answers.json). good: since card every-lamport-can-move that card's build, a full sell with no deposit back
+// (sol-w-sweep.answers.json). good: since card pool-amounts-are-standard-sizes that card's build (every note a rung, the
+// sweep's a rung with what W keeps and no transfer, W's rest recorded as its tail): PASS; liveBefore, SIGN_HOST before
+// it: FAIL on its rules alone (RUNG). Before it good was card every-lamport-can-move's build, a full sell with no deposit back
 // and no reserve, a partial sell's deposit back on the pool's grid, the sweep's grid note with the rest under the grid paid to the pin's fee payer,
 // and a sweep that leaves W only an owed claim's cost: PASS; beforeLamport, card round-trip-costs-less's build (a full
 // sell depositing W's surplus with its proceeds): FAIL on that card's seven rules alone (LAMPORT); before1d, that card's
@@ -25,7 +27,11 @@ const MOVED = [11, 12, 14, 26];
 // card every-lamport-can-move's rules, in the places of the full sell's reserve rules it deleted, and the sweep's keep
 // rules it rewrote (7, 8, 9: kept accounts counted, review P2-1): no build before it carries them
 const LAMPORT = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-const moved = (...more) => [...new Set([...MOVED, ...LAMPORT, ...more])].sort((a, b) => a - b).map((i) => ALL[i]);
+// card pool-amounts-are-standard-sizes's rules: the rules' note a rung, the sweep's rung note with what W keeps and no
+// transfer, its rule, the floor end, and W's tail record: no build before it carries them
+const RUNG = [1, 2, 4, 5, 6, 8, 21, 27];
+const rung = (list) => [...new Set([...list, ...RUNG])].sort((a, b) => a - b).map((i) => ALL[i]);
+const moved = (...more) => [...new Set([...MOVED, ...LAMPORT, ...RUNG, ...more])].sort((a, b) => a - b).map((i) => ALL[i]);
 
 test("recorded good answer: this card's build: PASS", () => {
   const v = judge(ANSWERS.good);
@@ -33,10 +39,18 @@ test("recorded good answer: this card's build: PASS", () => {
   assert.deepEqual(v.lines, []);
 });
 
+// SIGN_HOST as served when this card was built: release 130, before card found-wallet-sweep-reads-on-a-pair-that-answers
+// shipped its found W's token pair (26)
+test("recorded answer liveBefore (SIGN_HOST before card pool-amounts-are-standard-sizes): FAIL on that card's rules and the found W's pair alone", () => {
+  const v = judge(ANSWERS.liveBefore);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, rung([26]));
+});
+
 test("recorded answer beforeLamport (card round-trip-costs-less's build): FAIL on card every-lamport-can-move's rules alone", () => {
   const v = judge(ANSWERS.beforeLamport);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, LAMPORT.map((i) => ALL[i]));
+  assert.deepEqual(v.lines, rung(LAMPORT));
 });
 
 // Review P1-1 and P1-2 of 1d3b96d9c: that build paid the sweep's rest to the pool's account (the builder and the rule)
@@ -44,7 +58,7 @@ test("recorded answer beforeLamport (card round-trip-costs-less's build): FAIL o
 test("recorded answer before1d (1d3b96d9c's build): FAIL on the fee payer's and the own coins' marks alone", () => {
   const v = judge(ANSWERS.before1d);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, [5, 6, 9].map((i) => ALL[i]));
+  assert.deepEqual(v.lines, rung([5, 6, 9]));
 });
 
 test("recorded bad answer (11c963f9's build): FAIL, every mark named", () => {
@@ -90,16 +104,19 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 
 // The minified lines as the good build spells them, each changed so its rule no longer holds.
 const JS = [
-  "var BC=1000000n,VC=5000000n;function JA(e){if(typeof e!=`bigint`||e<=0n)return 0n;let t=e-e%BC;return t<5000000n?0n:t}function YA(e){let t=(dx(e)+BC-1n)/BC*BC;return t>5000000n?t:VC}",
-  "var cj=(e,t,n=0)=>t+n===0?0n:dm(e,0)+BigInt(t)*(wc+dm(e,165))+BigInt(n)*wc;function lj(e){let t=JA(e);return t===0n?{value:0n,under:0n}:{value:t,under:e-t}}function uj(e,t,n,r,i,a,o=0,s=0){let c=NA(t),l=FA(e,n);if(l.signers.length!==1||l.signers[0]!==t.wallet)return X(`signers`);if(l.ixs.length!==1&&l.ixs.length!==2)return X(`instructions`);let u=HA(l.ixs[0],c,t.wallet,t.precommitment,n),d=0n;if(l.ixs.length===2){let e=l.ixs[1];if(e.program!==`11111111111111111111111111111111`||e.data.length!==12||new DataView(e.data.buffer,e.data.byteOffset,4).getUint32(0,!0)!==2)return X(`transfer`);if(e.accounts.length!==2||!BA(e.accounts[0],t.wallet,!0,!0)||!BA(e.accounts[1],c.feePayer,!1,!0))return X(`transfer_to`);if(d=RA(e.data,4),d===0n||d>=1000000n)return X(`transfer_amount`)}return typeof r!=`bigint`||typeof i?.lamportsPerByte!=`bigint`||typeof i.factor!=`bigint`||i.lamportsPerByte<0n||i.factor<0n||!Number.isSafeInteger(o)||o<0||o>2||!Number.isSafeInteger(s)||s<0?X(`sweep_reads`):u+5000n+d+sj(i,n,a)+cj(i,o,s)===r?u%1000000n!=0n||u<5000000n||u<1000000n||u<oj(i)?X(`amount`):(_A(e),u):X(`sweep_amount`)}",
+  // card pool-amounts-are-standard-sizes: the rules' note (a rung, its rule the Solana pieces'), the sweep's note, its stay
+  "var BC=1000000n,VC=5000000n;var hD=(e,t)=>pD(e,t)===2n?t*5n/2n:t*2n;function iD(e,t){gD(e);let n=[];for(let r=e.min;r<=t;r=hD(e,r))n.push(r);return n.reverse()}function kD(e,t){if(typeof t!=`bigint`||t<0n)throw Error(`amount: not a whole amount`);let n=t<e.floor?0n:iD(e.ladder,t)[0]??0n;return{note:n,kept:t-n}}function jR(e,t){return typeof t==`bigint`&&fD(e.ladder,t)}var qP=Object.freeze({grid:BC,floor:VC,ladder:Object.freeze({one:BC,min:VC}),least:VC});function JA(e){return typeof e!=`bigint`||e<=0n?0n:kD(qP,e).note}function YA(e){let t=(dx(e)+BC-1n)/BC*BC;return t>5000000n?t:VC}",
+  "var cj=(e,t,n=0)=>t+n===0?0n:dm(e,0)+BigInt(t)*(wc+dm(e,165))+BigInt(n)*wc;function lj(e,t=0n){if(typeof e!=`bigint`||e<=0n)return{value:0n,under:0n};for(let n=e;;){let r=JA(n);if(r===0n)return{value:0n,under:0n};let i=e-r;if(i===0n||i>=t)return{value:r,under:i};n=r-1n}}var sk=(e,t)=>{let n=dm(e,0)-t;return n>0n?n:0n};function uj(e,t,n,r,i,a,o=0,s=0){let c=NA(t),l=FA(e,n);if(l.signers.length!==1||l.signers[0]!==t.wallet)return X(`signers`);if(l.ixs.length!==1)return X(`instructions`);let u=HA(l.ixs[0],c,t.wallet,t.precommitment,n);if(typeof r!=`bigint`||typeof i?.lamportsPerByte!=`bigint`||typeof i.factor!=`bigint`||i.lamportsPerByte<0n||i.factor<0n||!Number.isSafeInteger(o)||o<0||o>2||!Number.isSafeInteger(s)||s<0)return X(`sweep_reads`);let d=cj(i,o,s);return u===lj(r-5000n-sj(i,n,a)-d,sk(i,d)).value?!jR(qP,u)||u<1000000n||u<oj(i)?X(`amount`):(_A(e),u):X(`sweep_amount`)}",
   "var lc=`11111111111111111111111111111111`,wc=5000n,xm=wc,CY=(e,t,n)=>{let r=new Uint8Array(12),i=new DataView(r.buffer);return i.setUint32(0,2,!0),i.setBigUint64(4,n,!0),{program:lc,accounts:[{key:e,signer:!0,writable:!0},{key:t,signer:!1,writable:!0}],data:r}};",
   "var sd=5000n,ad=1000000n,nE=sd+BigInt(14e5)*ad/1000000n,rE=6960n,iE=nE+145n*rE+2n*216n*rE;",
   "let p=d.ixs.slice(f);if(p.length===0)return X(`instructions`);let m=p.find(e=>e.data.length===24&&e.program!==l.program);if(!m)return X(`sell`);let h=IA(m.data,16);if(h<u)return X(`min_out`);let g=gm(r,n.wallet,t.amount,h);if(typeof s!=`bigint`||s<0n||s>=h)return X(`reserve`);let _=c;if(_===void 0||typeof _.full!=`boolean`||typeof _.fee!=`bigint`||_.fee<0n||_.fee>105000n||s>(_.full?0n:iE))return X(`reserve`);let v=_.rent;if(v===void 0||typeof v.lamportsPerByte!=`bigint`||v.lamportsPerByte<1n||v.lamportsPerByte>1000000n||v.factor!==1n&&v.factor!==2n)return X(`reserve`);let y=h-s<YA(v),b=p.at(-1);if(y&&b.program===l.program)return X(`deposit_floor`);if(_.full&&b.program===l.program)return X(`deposit_full`);let x=y||_.full,S=x?p:p.slice(0,-1);if(S.length!==g.length)return X(`sell`);for(let e=0;e<g.length;e++){let t=g[e],n=S[e];if(n.program!==t.program||n.data.length!==t.data.length||n.data.some((e,n)=>e!==t.data[n]))return X(`sell`);if(!zA(n.accounts,t.accounts))return X(`sell_accounts`)}if(x)return hA(e),{chain:`solana`,op:t.kind,token:t.token,amount:t.amount,feeCap:0n,pool:l.pool,to:n.wallet,decimals:t.decimals,back:null};let C=BA(b,l,n.wallet,n.precommitment,o,!0);return C===JA(h-s)?(hA(e),{chain:`solana`,op:t.kind,token:t.token,amount:t.amount,feeCap:0n,pool:l.pool,to:l.pool,decimals:t.decimals,back:C}):X(`deposit_amount`)}",
   "function IY(e,t){let n=e.filter(e=>e.cashback===!0).length;return n>2||e.some(e=>e.tokens===!0&&t(e.address))?null:{owed:n,kept:e.length-n}}",
   "if(T<x)return{end:i>0?`owed`:`floor`,detail:``};",
   "async function JR(e,t,n){let r=[];}",
-  "var Uy=`SysvarRent111111111111111111111111111111111`;async function EG(e,t){let n=await Promise.resolve(e.bought?.get(t)).catch(()=>void 0);return{rec:n,none:n===void 0&&await Promise.resolve(e.buyNone?.(t)).catch(()=>!1)===!0}}var DG=e=>e.rec?`${e.rec.mint}:${e.rec.program}:${e.rec.rebuilt===!0?`rebuilt`:`own`}`:e.none?`none`:`-`,OG=100,kG=1e3;async function AG(e,t){let n=t.map(e=>{try{return[e.address,...tp(e.address,e.mints)]}catch{return[e.address]}}),r=[Uy,...n.flat()],i=[];for(let t=0;t<r.length;t+=OG)i.push(...await SW(e,r.slice(t,t+OG)));let a=e=>e===null?`-`:`${e.owner}:${String(e.lamports)}:${z.encode(e.data)}`,o=a(i[0]??null),s=1;return new Map(t.map((e,t)=>{let r=i.slice(s,s+n[t].length);return s+=n[t].length,[e.address,{any:r.some(e=>e!==null),seen:z.encode(dt(fW.encode(`${r.map(a).join(`|`)}#${o}#1#${DG(e.evidence)}`)))}]}))}async function jG(e,t,n,r){try{let i=await Ij(e,t).read(n);if(r===null)return i===`none`?null:void 0;if(i!==null&&i!==`none`&&i.mint===r.mint&&i.program===r.program)return{mint:i.mint,program:i.program}}catch{}}async function MG(e,t,n,r,i){let a=await EG(e,t.w.address),o=a.rec&&a.rec.rebuilt!==!0?{mint:a.rec.mint,program:a.rec.program}:void 0,s=n.buy;o===void 0&&s===void 0&&(a.rec!==void 0||a.none)&&(s=await jG(t.rpcs[0],t.program,t.w.address,a.rec?{mint:a.rec.mint,program:a.rec.program}:null)),o===void 0&&s&&(o=s);let c=o===void 0&&s===void 0?n.passes+1>=3?`steady`:`again`:void 0,l=await CG(e,o?{...t,mints:HG(t.mints,[o]),buy:o}:{...t,buy:null,...c?{unproven:c}:{}},r);return await PG(e,n,l.end,l.steady?i:void 0,s===void 0?{}:{buy:s}),l.end===`gave_up`||l.end===`sent`||l.end===`owed`||c===`again`}async function NG(e,t,n){let r=await EG(e,t),i=r.rec?HG(n,[{mint:r.rec.mint,program:r.rec.program}]):[...n];return(await AG(e.rpcs[1],[{address:t,mints:i,evidence:r}]).catch(()=>void 0))?.get(t)?.seen}async function PG(e,t,n,r,i={}){try{if(n===`nothing`)return await Promise.resolve(e.owed?.markEmpty?.(t.address)).catch(()=>{}),await e.owed?.drop(t.address);let a=(await e.owed?.list())?.find(e=>e.address===t.address)??t,{seen:o,left:s,...c}=a;await e.owed?.put({...c,mints:HG(a.mints,t.mints),passes:a.passes+1,...r!==void 0&&(n===`floor`||n===`holds`||n===`kept`||n===`refused`)?{seen:r}:{},...i.buy===void 0?{}:{buy:i.buy}})}catch{}}var FG=()=>!1;async function IG(e,t=globalThis.navigator?.locks??null){if(!t||!e.owed)return!1;let n=await e.owed.list(),r=e.pin.program,{pool:i,scope:a}=ww(r),o=e.rpcs,s=e.wait??(e=>new Promise(t=>setTimeout(t,e))),c=null,l=null;try{c=await e.wallets(FG)}catch(e){l=e}let u=await Promise.resolve(e.owed.empty?.()).catch(()=>void 0)??new Set,d=[...new Map((c??[]).filter(e=>e.chain===`sol`&&!u.has(e.address)&&!n.some(t=>t.address===e.address)).map(e=>[e.address,e])).values()];if(n.length===0&&d.length===0)return l!==null;let f=[];for(let{address:t,mints:r}of[...n,...d.map(e=>({address:e.address,mints:[]}))]){let n=await EG(e,t);f.push({address:t,evidence:n,mints:n.rec?HG(r,[{mint:n.rec.mint,program:n.rec.program}]):r})}let p=await AG(o[1],f).catch(()=>null),m=[];for(let{address:t}of f){let r=n.find(e=>e.address===t),i=p?.get(t);r?(i===void 0?r.seen===void 0:r.seen!==i.seen)&&m.push(t):i!==void 0&&(i.any?m.push(t):await Promise.resolve(e.owed.markEmpty?.(t)).catch(()=>{}))}if(m.length===0)return l!==null||p===null;for(let e=m.length-1;e>0;e--){let t=LG(e+1);[m[e],m[t]]=[m[t],m[e]]}let h;try{if(c===null)throw l;h={store:await e.notes(),sync:Uw(o,r),rent:await Jy(o),wallets:c}}catch(n){for(let r of m)if(!await VG(t,r,!0,s,async()=>{let t=(await e.owed.list()).find(e=>e.address===r);t&&(e.told?.({address:r,step:`rent_back`,state:`gave_up`,detail:`this load's reads: ${bG(n)}`}),await PG(e,t,`gave_up`))}))return!0;return!0}let{store:g,sync:_,rent:v}=h,y=p===null,b=e.preempt?.();try{for(let[n,c]of m.entries())if(n>0&&await s(kG+LG(kG)),!await VG(t,c,!0,s,async t=>{let n=d.find(e=>e.address===c),l=(await e.owed.list()).find(e=>e.address===c)??(n?{address:c,l:n.l.toString(),j:n.j,mints:[],passes:0}:void 0),u=l&&h.wallets.find(e=>e.chain===`sol`&&e.address===l.address&&e.l.toString()===l.l&&e.j===l.j);l&&u&&await MG(e,{rpcs:o,program:r,pool:i,scope:a,rent:v,store:g,sync:_,w:u,mints:l.mints,wait:s,...l.sell?{sell:l.sell}:{}},l,t,p?.get(c)?.seen)&&(y=!0)}))return!0}finally{b?.()}return y}function LG(e){if(e<=1)return 0;let t=Math.floor(4294967296/e)*e,n=new Uint32Array(1);for(;;)if(globalThis.crypto.getRandomValues(n),n[0]<t)return n[0]%e}var ez=Error(`a sell took the sell lock`),tz=1n<<62n;function nz(e,t,n){return new Promise((r,i)=>{e.request(t,n?{mode:`exclusive`,ifAvailable:!0}:{mode:`exclusive`},e=>e?new Promise(e=>r(e)):void r(null)).catch(i)})}async function rz(e,t,n,r,i){if(!e)return await i(),!0;let a=await nz(e,fR(t),n);if(!a)return!0;try{let t=await nz(e,uR,n);if(!t)return!1;let a={release:()=>{t?.(),t=null},nap:async n=>(a.release(),await r(n),t=await nz(e,uR,!0),t!==null)};try{await i(a)}finally{a.release()}return!0}finally{a()}}function iz(e,t){let n=[...e??[]];for(let e of t)n.some(t=>t.mint===e.mint)||n.push(e);return n}function az(e,t){return e===null||t===null?e===t:e.owner===t.owner&&e.lamports===t.lamports&&e.data.length===t.data.length&&e.data.every((e,n)=>e===t.data[n])}",
+  "var Uy=`SysvarRent111111111111111111111111111111111`;async function EG(e,t){let n=await Promise.resolve(e.bought?.get(t)).catch(()=>void 0);return{rec:n,none:n===void 0&&await Promise.resolve(e.buyNone?.(t)).catch(()=>!1)===!0}}var DG=e=>e.rec?`${e.rec.mint}:${e.rec.program}:${e.rec.rebuilt===!0?`rebuilt`:`own`}`:e.none?`none`:`-`,OG=100,kG=1e3;async function AG(e,t){let n=t.map(e=>{try{return[e.address,...tp(e.address,e.mints)]}catch{return[e.address]}}),r=[Uy,...n.flat()],i=[];for(let t=0;t<r.length;t+=OG)i.push(...await SW(e,r.slice(t,t+OG)));let a=e=>e===null?`-`:`${e.owner}:${String(e.lamports)}:${z.encode(e.data)}`,o=a(i[0]??null),s=1;return new Map(t.map((e,t)=>{let r=i.slice(s,s+n[t].length);return s+=n[t].length,[e.address,{any:r.some(e=>e!==null),seen:z.encode(dt(fW.encode(`${r.map(a).join(`|`)}#${o}#1#${DG(e.evidence)}`)))}]}))}async function jG(e,t,n,r){try{let i=await Ij(e,t).read(n);if(r===null)return i===`none`?null:void 0;if(i!==null&&i!==`none`&&i.mint===r.mint&&i.program===r.program)return{mint:i.mint,program:i.program}}catch{}}async function MG(e,t,n,r,i){let a=await EG(e,t.w.address),o=a.rec&&a.rec.rebuilt!==!0?{mint:a.rec.mint,program:a.rec.program}:void 0,s=n.buy;o===void 0&&s===void 0&&(a.rec!==void 0||a.none)&&(s=await jG(t.rpcs[0],t.program,t.w.address,a.rec?{mint:a.rec.mint,program:a.rec.program}:null)),o===void 0&&s&&(o=s);let c=o===void 0&&s===void 0?n.passes+1>=3?`steady`:`again`:void 0,l=await CG(e,o?{...t,mints:HG(t.mints,[o]),buy:o}:{...t,buy:null,...c?{unproven:c}:{}},r);return await PG(e,n,l.end,l.steady?i:void 0,s===void 0?{}:{buy:s}),l.end===`gave_up`||l.end===`sent`||l.end===`owed`||c===`again`}async function NG(e,t,n){let r=await EG(e,t),i=r.rec?HG(n,[{mint:r.rec.mint,program:r.rec.program}]):[...n];return(await AG(e.rpcs[1],[{address:t,mints:i,evidence:r}]).catch(()=>void 0))?.get(t)?.seen}async function PG(e,t,n,r,i={}){try{if(n===`floor`&&i.unlisted!==!0&&i.lamports!==void 0&&i.lamports>0n?await Promise.resolve(e.owed?.tail?.({chain:`sol`,address:t.address,l:t.l,j:t.j,amount:i.lamports.toString()})).catch(()=>{}):(n===`nothing`||n===`sent`||n===`floor`&&i.unlisted===!0)&&await Promise.resolve(e.owed?.untail?.(t.address)).catch(()=>{}),n===`nothing`)return await Promise.resolve(e.owed?.markEmpty?.(t.address)).catch(()=>{}),await e.owed?.drop(t.address);let a=(await e.owed?.list())?.find(e=>e.address===t.address)??t,{seen:o,left:s,...c}=a;await e.owed?.put({...c,mints:HG(a.mints,t.mints),passes:a.passes+1,...r!==void 0&&(n===`floor`||n===`holds`||n===`kept`||n===`refused`)?{seen:r}:{},...i.buy===void 0?{}:{buy:i.buy}})}catch{}}var FG=()=>!1;async function IG(e,t=globalThis.navigator?.locks??null){if(!t||!e.owed)return!1;let n=await e.owed.list(),r=e.pin.program,{pool:i,scope:a}=ww(r),o=e.rpcs,s=e.wait??(e=>new Promise(t=>setTimeout(t,e))),c=null,l=null;try{c=await e.wallets(FG)}catch(e){l=e}let u=await Promise.resolve(e.owed.empty?.()).catch(()=>void 0)??new Set,d=[...new Map((c??[]).filter(e=>e.chain===`sol`&&!u.has(e.address)&&!n.some(t=>t.address===e.address)).map(e=>[e.address,e])).values()];if(n.length===0&&d.length===0)return l!==null;let f=[];for(let{address:t,mints:r}of[...n,...d.map(e=>({address:e.address,mints:[]}))]){let n=await EG(e,t);f.push({address:t,evidence:n,mints:n.rec?HG(r,[{mint:n.rec.mint,program:n.rec.program}]):r})}let p=await AG(o[1],f).catch(()=>null),m=[];for(let{address:t}of f){let r=n.find(e=>e.address===t),i=p?.get(t);r?(i===void 0?r.seen===void 0:r.seen!==i.seen)&&m.push(t):i!==void 0&&(i.any?m.push(t):await Promise.resolve(e.owed.markEmpty?.(t)).catch(()=>{}))}if(m.length===0)return l!==null||p===null;for(let e=m.length-1;e>0;e--){let t=LG(e+1);[m[e],m[t]]=[m[t],m[e]]}let h;try{if(c===null)throw l;h={store:await e.notes(),sync:Uw(o,r),rent:await Jy(o),wallets:c}}catch(n){for(let r of m)if(!await VG(t,r,!0,s,async()=>{let t=(await e.owed.list()).find(e=>e.address===r);t&&(e.told?.({address:r,step:`rent_back`,state:`gave_up`,detail:`this load's reads: ${bG(n)}`}),await PG(e,t,`gave_up`))}))return!0;return!0}let{store:g,sync:_,rent:v}=h,y=p===null,b=e.preempt?.();try{for(let[n,c]of m.entries())if(n>0&&await s(kG+LG(kG)),!await VG(t,c,!0,s,async t=>{let n=d.find(e=>e.address===c),l=(await e.owed.list()).find(e=>e.address===c)??(n?{address:c,l:n.l.toString(),j:n.j,mints:[],passes:0}:void 0),u=l&&h.wallets.find(e=>e.chain===`sol`&&e.address===l.address&&e.l.toString()===l.l&&e.j===l.j);l&&u&&await MG(e,{rpcs:o,program:r,pool:i,scope:a,rent:v,store:g,sync:_,w:u,mints:l.mints,wait:s,...l.sell?{sell:l.sell}:{}},l,t,p?.get(c)?.seen)&&(y=!0)}))return!0}finally{b?.()}return y}function LG(e){if(e<=1)return 0;let t=Math.floor(4294967296/e)*e,n=new Uint32Array(1);for(;;)if(globalThis.crypto.getRandomValues(n),n[0]<t)return n[0]%e}var ez=Error(`a sell took the sell lock`),tz=1n<<62n;function nz(e,t,n){return new Promise((r,i)=>{e.request(t,n?{mode:`exclusive`,ifAvailable:!0}:{mode:`exclusive`},e=>e?new Promise(e=>r(e)):void r(null)).catch(i)})}async function rz(e,t,n,r,i){if(!e)return await i(),!0;let a=await nz(e,fR(t),n);if(!a)return!0;try{let t=await nz(e,uR,n);if(!t)return!1;let a={release:()=>{t?.(),t=null},nap:async n=>(a.release(),await r(n),t=await nz(e,uR,!0),t!==null)};try{await i(a)}finally{a.release()}return!0}finally{a()}}function iz(e,t){let n=[...e??[]];for(let e of t)n.some(t=>t.mint===e.mint)||n.push(e);return n}function az(e,t){return e===null||t===null?e===t:e.owner===t.owner&&e.lamports===t.lamports&&e.data.length===t.data.length&&e.data.every((e,n)=>e===t.data[n])}",
   ";lR=1e3,uR=`ct-pool/sell`,dR=120*lR,fR=e=>`ct-pool/back/${e}`,pR=22;",
+  // the tail's record (the CO's pick (c)): its key and the owed store's write and delete
+  "var RZ=e=>`w-tail/sol/${e}`,zZ=e=>({tail:async t=>void await(await e()).update(`meta`,RZ(t.address),()=>({chain:t.chain,address:t.address,l:t.l,j:t.j,amount:t.amount})),untail:async t=>{let n=await e();await n.get(`meta`,RZ(t))!==void 0&&await n.delete?.(`meta`,RZ(t))}});",
   ";u=async e=>{if(!n)return t.wait(e);if(!await n.nap(e))throw ez};",
   "if(n.plan.close.length>0)return{end:`gave_up`,detail:`still open after the teardown: ${n.plan.close.map(e=>e.address).join(`, `)}`};let[d,f]=n.held.map(e=>e[0]?.lamports??0n);if(d!==f)throw Error(`W's lamports differ on the two RPCs`);let p=d;if(p===0n)return{end:r>0?`owed`:`nothing`,",
   "{k:`plan`,held:n,accounts:i,burn:u,plan:Nf(c.address,i,e,u)}}catch(e){if(n[0].every((e,t)=>az(e,n[1][t]??null)))return{k:`refused`,why:GR(e)};throw e}",
@@ -109,7 +126,7 @@ const JS = [
   ";t.claims.reduce((e,t)=>e+(t.unwrap?t.amount+t.prefund:0n),0n)",
   ";e.open&&(typeof r!=`bigint`||r<e.prefund||r-e.prefund>kf?y.push(`${o}: ${e.to} opened with ${r??`nothing read`} lamports (want ${e.prefund} there before and at most ${kf} more)`):c+=r-e.prefund)",
   ";g=(e,t,n=e===`holds`||e===`kept`||e===`refused`)=>(h(`rent_back`,e,t),{end:e,steady:n})",
-  ";let M=v-xm-sj(l,b,j)-cj(l,p,h),N=v-xm-sj(l,b,{...j,state:[uX,uX],label:[uX,uX]})-cj(l,p,h),{value:P,under:F}=lj(M),I=lj(N).value,L=NY(M,Nm(l),w);if(P<w&&L===0n&&t.unlisted?.(),P<w&&L>0n&&(t.buy||S!==void 0)&&t.read?.(L),P<w&&p===0&&L>0n&&t.ride===!0&&!n&&e.ride!==void 0)return{end:`ride`,rest:M,lamports:v,steady:I<w};if(P<w)return{end:p>0?`owed`:`floor`,steady:I<w,detail:`W's ${v} would leave ${M} for a note, under ${w}: kept on W${p>0?`, owed ${p} cashback claim${p>1?`s`:``}`:``}`};let R=await ZH(s),ee=F===0n?[]:[CY(c.address,m.solana.feePayer,F)],{message:z}=Ku(c.address,[jY(t.program,t.pool,c.address,b,k,P),...ee],R.blockhash,[]),te=MY(z),ne=await AJ(s,async e=>BigInt(TJ((await e(`getFeeForMessage`,[B.encode(z),{commitment:`confirmed`}]))?.value)));if(ne[0]!==xm||ne[1]!==xm)throw Error(`the sweep's fee reads ${ne[0]} and ${ne[1]}`);",
+  ";let M=v-xm-sj(l,b,j)-cj(l,p,h),N=v-xm-sj(l,b,{...j,state:[uX,uX],label:[uX,uX]})-cj(l,p,h),Q=sk(l,cj(l,p,h)),{value:P}=lj(M,Q),I=lj(N,Q).value,L=NY(M,w);if(P<w&&L===0n&&t.unlisted?.(),P<w&&L>0n&&(t.buy||S!==void 0)&&t.read?.(L),P<w)return{end:p>0?`owed`:`floor`,steady:I<w,detail:`W's ${v} would leave ${M} for a note, under ${w}: kept on W${p>0?`, owed ${p} cashback claim${p>1?`s`:``}`:``}`};let R=await ZH(s),{message:z}=Ku(c.address,[jY(t.program,t.pool,c.address,b,k,P)],R.blockhash,[]),te=MY(z),ne=await AJ(s,async e=>BigInt(TJ((await e(`getFeeForMessage`,[B.encode(z),{commitment:`confirmed`}]))?.value)));if(ne[0]!==xm||ne[1]!==xm)throw Error(`the sweep's fee reads ${ne[0]} and ${ne[1]}`);",
   ";if(S.end!==`sent`)return`steady`in S?g(S.end,S.detail,S.end===`floor`&&S.steady):g(S.end,S.detail);",
   ";I||(be.mints=iz((await Promise.resolve(e.owed?.list()).then(e=>e?.find(e=>e.address===f.address),()=>void 0))?.mints,be.mints),await e.owed?.put(be)",
   // review P1-2 of 1d3b96d9c: W's own coins' accounts (a found W's every account), the keep count's caller
@@ -143,57 +160,43 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("X(`deposit_amount`)}", "X(`sell`)}"), 1],
     [JS.replace("let C=BA(b,l,", "let C=BA(m,l,"), 1],
     [JS.replace(",b=p.at(-1);", ",b=p.at(0);"), [1, 3]],
-    // the grid note: cut to whole 0.001 SOL, 0 under 0.005 SOL (the sweep's own note the same function's)
-    [JS.replace("let t=e-e%BC;", "let t=e;"), [2, 4]],
-    [JS.replace("return t<5000000n?0n:t}", "return t<1000000n?0n:t}"), [2, 4]],
-    [JS.replace("BC=1000000n", "BC=100000n"), [2, 3]],
+    // the rules' note (card pool-amounts-are-standard-sizes): the largest rung at or under, the ladder 1-2-5 from 0.005 SOL
+    [JS.replace("return n.reverse()}", "return n}"), [1, 2, 4, 5, 6]],
+    [JS.replace("t*5n/2n:t*2n", "t*3n:t*2n"), [1, 2, 4, 5, 6]],
+    [JS.replace("let n=t<e.floor?0n:iD(", "let n=t<e.grid?0n:iD("), [1, 2, 4, 5, 6]],
+    [JS.replace("return{note:n,kept:t-n}", "return{note:t,kept:0n}"), [1, 2, 4, 5, 6]],
+    [JS.replace("e<=0n?0n:kD(qP,e).note}", "e<=0n?0n:e}"), [1, 2, 4, 5, 6]],
+    [JS.replace("BC=1000000n", "BC=100000n"), [1, 2, 3, 4, 5, 6]],
+    [JS.replace("VC=5000000n", "VC=1000000n"), [1, 2, 3, 4, 5, 6]],
     // the sell's floor: the pool's note floor rounded up to the grid, never under 0.005 SOL, refused by name
     [JS.replace("let y=h-s<YA(v)", "let y=h-s<1000000n"), 3],
     [JS.replace("return t>5000000n?t:VC}", "return t>1000000n?t:VC}"), 3],
-    [JS.replace("VC=5000000n", "VC=1000000n"), 3],
     [JS.replace("(dx(e)+BC-1n)/BC*BC", "dx(e)/BC*BC"), 3],
     [JS.replace("if(y&&b.program===l.program)return X(`deposit_floor`);", ""), 3],
-    // the sweep's note and the rest under the grid its own part (review P3-1 of T1+T2)
-    [JS.replace("{value:t,under:e-t}", "{value:t,under:0n}"), 4],
-    [JS.replace("return t===0n?{value:0n,under:0n}:{value:t,under:e-t}", "return{value:t,under:e-t}"), 4],
-    [JS.replace("{value:P,under:F}=lj(M)", "{value:P,under:F}=M"), [4, 5, 21]],
-    // the sweep pays that rest to the pin's fee payer in one System transfer after its deposit, its fee the signature's
-    // (review P1-1 of 1d3b96d9c: not to the pool's account)
-    [JS.replace("ee=F===0n?[]:[CY(c.address,m.solana.feePayer,F)]", "ee=[CY(c.address,m.solana.feePayer,F)]"), 5],
-    [JS.replace("[CY(c.address,m.solana.feePayer,F)]", "[CY(c.address,m.solana.feePayer,M)]"), 5],
-    [JS.replace("[CY(c.address,m.solana.feePayer,F)]", "[CY(c.address,c.address,F)]"), 5],
-    [JS.replace("[CY(c.address,m.solana.feePayer,F)]", "[CY(c.address,t.pool,F)]"), 5],
-    [JS.replace(",...ee],R.blockhash", "],R.blockhash"), 5],
-    [JS.replace("[jY(t.program,t.pool,c.address,b,k,P),...ee]", "[...ee,jY(t.program,t.pool,c.address,b,k,P)]"), 5],
+    // the sweep's note: the largest rung whose remainder is 0 or at least what W must keep, none paid away
+    [JS.replace("if(i===0n||i>=t)return{value:r,under:i}", "if(!0)return{value:r,under:i}"), [4, 5, 6]],
+    [JS.replace("return n>0n?n:0n};", "return n};"), 4],
+    [JS.replace("Q=sk(l,cj(l,p,h))", "Q=0n"), [4, 21]],
+    [JS.replace("[jY(t.program,t.pool,c.address,b,k,P)]", "[jY(t.program,t.pool,c.address,b,k,M)]"), 5],
+    [JS.replace("[jY(t.program,t.pool,c.address,b,k,P)]", "[jY(t.program,t.pool,c.address,b,k,P),CY(c.address,m.solana.feePayer,M-P)]"), 5],
     [JS.replace("if(ne[0]!==xm||ne[1]!==xm)", "if(ne[0]!==xm)"), 5],
-    [JS.replace("if(ne[0]!==xm||ne[1]!==xm)", "if(ne[0]!==xm+F||ne[1]!==xm+F)"), 5],
-    [JS.replace("i.setUint32(0,2,!0)", "i.setUint32(0,3,!0)"), 5],
-    [JS.replace("i.setBigUint64(4,n,!0)", "i.setBigUint64(4,t,!0)"), 5],
-    [JS.replace("{key:t,signer:!1,writable:!0}", "{key:t,signer:!1,writable:!1}"), 5],
-    [JS.replace("{key:e,signer:!0,writable:!0}", "{key:e,signer:!1,writable:!0}"), 5],
-    [JS.replace("var lc=`11111111111111111111111111111111`", "var lc=`ComputeBudget111111111111111111111111111111`"), 5],
     [JS.replace("wc=5000n,xm=wc", "wc=5001n,xm=wc"), 5],
-    // the sweep's rule: one deposit, or it then one System transfer from W to the pin's fee payer under the grid, in the equation
-    [JS.replace("if(l.ixs.length!==1&&l.ixs.length!==2)return X(`instructions`);", ""), 6],
-    [JS.replace("if(l.ixs.length!==1&&l.ixs.length!==2)", "if(l.ixs.length!==1&&l.ixs.length!==3)"), 6],
-    [JS.replace("e.program!==`11111111111111111111111111111111`||", ""), 6],
-    [JS.replace("getUint32(0,!0)!==2)return X(`transfer`)", "getUint32(0,!0)>3)return X(`transfer`)"), 6],
-    [JS.replace("!BA(e.accounts[0],t.wallet,!0,!0)", "!BA(e.accounts[0],t.wallet,!1,!0)"), 6],
-    [JS.replace("!BA(e.accounts[1],c.feePayer,!1,!0)", "!BA(e.accounts[1],t.wallet,!1,!0)"), 6],
-    [JS.replace("!BA(e.accounts[1],c.feePayer,!1,!0)", "!BA(e.accounts[1],c.pool,!1,!0)"), 6],
-    [JS.replace("d===0n||d>=1000000n", "d>=1000000n"), 6],
-    [JS.replace("d===0n||d>=1000000n", "d===0n||d>1000000n"), 6],
-    [JS.replace("u+5000n+d+sj(", "u+5000n+sj("), 6],
-    [JS.replace("u%1000000n!=0n||", ""), 6],
-    [JS.replace("u<5000000n||", ""), 6],
+    // the sweep's rule: the deposit alone, its value the sweep's note with what W keeps, a rung
+    [JS.replace("if(l.ixs.length!==1)return X(`instructions`);", ""), 6],
+    [JS.replace("if(l.ixs.length!==1)return X(`instructions`);", "if(l.ixs.length>2)return X(`instructions`);"), 6],
+    [JS.replace("!jR(qP,u)||", ""), 6],
+    [JS.replace("u<1000000n||u<oj(i)", "u<oj(i)"), 6],
+    [JS.replace("return u===lj(", "return u>=lj("), [6, 8]],
+    [JS.replace("-d,sk(i,d)).value?", "-d,0n).value?"), [6, 8]],
     // an owed claim's cost, and a frame's fee per account kept for any other reason (review P2-1)
     [JS.replace("dm(e,0)+BigInt(t)*", "BigInt(t)*"), 7],
     [JS.replace("t+n===0?0n:", "t===0?0n:"), 7],
     [JS.replace("+BigInt(n)*wc;", ";"), 7],
     [JS.replace("(e,t,n=0)=>", "(e,t,n)=>"), 7],
-    [JS.replace("+cj(i,o,s)===r", "+cj(i,o)===r"), 8],
+    [JS.replace("let d=cj(i,o,s);", "let d=cj(i,o);"), [6, 8]],
     [JS.replace("||o<0||o>2||", "||o<0||"), 8],
-    [JS.replace("||!Number.isSafeInteger(s)||s<0?", "?"), 8],
+    [JS.replace("||!Number.isSafeInteger(s)||s<0)return X(`sweep_reads`)", ")return X(`sweep_reads`)"), 8],
+    [JS.replace("-sj(i,n,a)-d,", "-sj(i,n,a),"), [6, 8]],
     [JS.replace("e.some(e=>e.tokens===!0&&t(e.address))", "!1"), 9],
     [JS.replace("return n>2||", "return n>3||"), 9],
     [JS.replace("kept:e.length-n}", "kept:0}"), 9],
@@ -234,7 +237,14 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("seed64:e.seed64,bought:KR(e.store),send:", "seed64:e.seed64,bought:YR(e.store),send:"), 25],
     [JS.replace("#${o}#1#", "#1#"), 11],
     [JS.replace("try{return[e.address,...tp(e.address,e.mints)]}", "try{return[e.address]}"), 11],
-    [JS.replace("if(n===`nothing`)return await Promise", "if(n!==`floor`)return await Promise"), 12],
+    [JS.replace("n===`nothing`)return await Promise", "n!==`floor`)return await Promise"), [12, 27]],
+    // the tail's record (card pool-amounts-are-standard-sizes): written at the floor, deleted on an empty read or a sweep
+    [JS.replace("amount:i.lamports.toString()}", "amount:`0`}"), 27],
+    [JS.replace(":(n===`nothing`||n===`sent`||", ":(n===`nothing`||"), 27],
+    [JS.replace("i.lamports!==void 0&&i.lamports>0n?", "i.lamports!==void 0?"), 27],
+    [JS.replace("var RZ=e=>`w-tail/sol/${e}`", "var RZ=e=>`w-tail/solana/${e}`"), 27],
+    [JS.replace("await n.delete?.(`meta`,RZ(t))", "await n.put(`meta`,RZ(t),null)"), 27],
+    [JS.replace("l:t.l,j:t.j,amount:t.amount", "l:t.l,amount:t.amount"), 27],
     [JS.replace("return await Promise.resolve(e.owed?.markEmpty?.(t.address)).catch(()=>{}),await e.owed?.drop", "return await e.owed?.drop"), 12],
     [JS.replace(",...i.buy===void 0?{}:{buy:i.buy}", ""), 12],
     // card buy-spends-several-pieces: a found W (no buy recorded, `found` in its owed record) is swept only when both
@@ -323,9 +333,8 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("r<e.prefund||", ""), 19],
     [JS.replace("||e===`refused`)=>(h(", ")=>(h("), 20],
     [JS.replace("steady:I<w,detail", "steady:M<w,detail"), 21],
-    [JS.replace("I=lj(N).value", "I=lj(M).value"), 21],
+    [JS.replace("I=lj(N,Q).value", "I=lj(M,Q).value"), 21],
     [JS.replace("-cj(l,p,h),N=", "-cj(l,p),N="), 21],
-    [JS.replace("rest:M,lamports:v,steady:I<w}", "rest:M,lamports:v,steady:!0}"), 21],
     [JS.replace("S.end===`floor`&&S.steady", "S.end===`floor`"), 21],
     [JS.replace("I||(be.mints=iz((await Promise.resolve(e.owed?.list()).then(e=>e?.find(e=>e.address===f.address),()=>void 0))?.mints,be.mints),await e.owed?.put(be)", "I||(await e.owed?.put(be)"), 22],
     [JS.replace("return{end:`refused`,detail:n.why};let a=IY", "return{end:`gave_up`,detail:n.why};let a=IY"), 23],
@@ -339,15 +348,16 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
   }
 });
 
-// card round-trip-costs-less (the review of 024e8a89d): five marks read the rent back as that card now spells it (the
+// card round-trip-costs-less (the review of 024e8a89d): four marks read the rent back as that card now spells it (the
 // batched read gives W's lamports beside what W read as; the read lists a found W; the passes are counted and each
-// W's record is read again inside its locks; an owed end under the floor lists the note's value; the full sell's record
+// W's record is read again inside its locks; the full sell's record
 // stamps W's own send), as lines of that card's build of public/app.js (sol-w-sweep.rtcl.excerpt.txt): each holds, and
-// each rule broken in place FAILs its own mark alone
+// each rule broken in place FAILs its own mark alone; the floor end's mark is card pool-amounts-are-standard-sizes's
+// shape since, held by the test above
 test("the rent back as card round-trip-costs-less spells it: each mark holds, each break of it FAILs that mark alone", () => {
   const ex = readFileSync(new URL("./sol-w-sweep.rtcl.excerpt.txt", import.meta.url), "utf8");
   const pick = (p) => Object.keys(MARKS).find((k) => k.startsWith(p));
-  const keys = ["a load that reads W", "the only empty end", "a load whose own reads fail", "a floor end is steady", "a full sell's record"].map(pick);
+  const keys = ["a load that reads W", "the only empty end", "a load whose own reads fail", "a full sell's record"].map(pick);
   assert.deepEqual(keys.map((k) => facts("", ex).carries[k]), keys.map(() => true));
   const planted = [
     ["#${o}#1#${mJ(e.evidence)}", "#${o}#1#", 0],
@@ -356,8 +366,7 @@ test("the rent back as card round-trip-costs-less spells it: each mark holds, ea
     ["if(f!==p)throw Error", "if(!1)throw Error", 1],
     ["m=async()=>(await e.owed.list()).find(e=>e.address===l)", "m=async()=>n.find(e=>e.address===l)", 2],
     ["let n=await m()", "let n=h", 2],
-    ["k<w)return{end:d>0?`owed`:`floor`,steady:A<w,", "k<w)return{end:d>0?`owed`:`floor`,steady:!0,", 3],
-    ["Xe.mints=UJ(t?.mints,Xe.mints)", "Xe.mints=Xe.mints", 4],
+    ["Xe.mints=UJ(t?.mints,Xe.mints)", "Xe.mints=Xe.mints", 3],
   ];
   for (const [from, to, i] of planted) {
     assert.equal(ex.split(from).length, 2, `once: ${from}`);
