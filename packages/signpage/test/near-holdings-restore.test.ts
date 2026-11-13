@@ -27,6 +27,7 @@ import {
   NEAR_BUY_KEY,
   NEAR_BUY_RESUMES,
   NEAR_DELEGATE_LIFE_BLOCKS,
+  NEAR_PENDING_SETTLED_BLOCKS,
   NEAR_HOLDINGS_EMPTY_KEY,
   NEAR_HOLDINGS_W_KEY,
   NEAR_RECORD_MAX_BYTES,
@@ -110,8 +111,19 @@ const register = (token = TOKEN): Call => ({ receiver: token, method: "storage_d
 const buySwap = (token = TOKEN, mbh?: bigint): Call => ({ receiver: USDC, method: "ft_transfer_call", args: { receiver_id: EX, amount: PAID.toString(), msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: USDC, token_out: token, min_amount_out: "1" }], skip_degen_price_sync: true, skip_unwrap_near: true }) }, ...(mbh === undefined ? {} : { mbh }) });
 const sellSwap = (token = TOKEN): Call => ({ receiver: token, method: "ft_transfer_call", args: { receiver_id: EX, amount: "7", msg: JSON.stringify({ force: 0, actions: [{ pool_id: 9, token_in: token, token_out: USDC, min_amount_out: "1" }], skip_degen_price_sync: true, skip_unwrap_near: true }) } });
 /** The helper's record of W: its token and each call with its state. */
-function recordOf(w: string, token: string | null, calls: { tx: string; state?: NearWRecord["calls"][number]["state"]; side?: "buy" | "sell" }[], created: NearWRecord["created"] = { tx_hash: "c", state: "landed", height: String(H - 900) }): NearWRecord {
-  return { wallet: w, token, calls: calls.map((c, k) => ({ tx_hash: `t${k}`, signed_tx: c.tx, method: "m", side: c.side ?? "buy", state: c.state ?? "landed" })), created };
+/** As the helper answers it: a landed or failed call with its signed bytes, a pending or dropped one with its last block
+ *  alone (`mbh`, absent when the helper could not read it). */
+function recordOf(w: string, token: string | null, calls: { tx: string; state?: NearWRecord["calls"][number]["state"]; side?: "buy" | "sell"; mbh?: bigint }[], created: NearWRecord["created"] = { tx_hash: "c", state: "landed", height: String(H - 900) }): NearWRecord {
+  return {
+    wallet: w,
+    token,
+    calls: calls.map((c, k) => {
+      const state = c.state ?? "landed";
+      const bytes = state === "landed" || state === "failed" ? { signed_tx: c.tx } : c.mbh === undefined ? {} : { max_block_height: c.mbh.toString() };
+      return { tx_hash: `t${k}`, ...bytes, method: "m", side: c.side ?? "buy", state };
+    }),
+    created,
+  };
 }
 const none = (w: string): NearWRecord => ({ wallet: w, token: null, calls: [], created: null });
 const recordsFrom = (m: Record<string, NearWRecord>, asked: string[][] = []) => async (ws: readonly string[]) => (asked.push([...ws]), ws.map((w) => m[w] ?? none(w)));
@@ -157,6 +169,8 @@ function pageOf(v: { w: WalletStore; ns: NoteStore }, log: string[] = [], o: Par
 const records = async (w: WalletStore): Promise<NearBuyRecord[]> =>
   (await Promise.all((await w.keys("quotes")).filter((k) => k.startsWith(NEAR_BUY_KEY)).map(async (k) => nearBuyRecordOf(await w.get("quotes", k))))).filter((r): r is NearBuyRecord => r !== undefined);
 const keptEmpty = async (w: WalletStore) => ((await w.get("quotes", `${NEAR_HOLDINGS_EMPTY_KEY}mainnet`)) as { final: string[] } | undefined)?.final ?? [];
+/** The Ws one seat answer read empty: read again on a restore or a Sync, never on a plain load. */
+const softEmpty = async (w: WalletStore) => Object.keys(((await w.get("quotes", `${NEAR_HOLDINGS_EMPTY_KEY}mainnet`)) as { soft?: Record<string, number> } | undefined)?.soft ?? {});
 
 /** One W bought TOKEN (its registration and swap carried, landed), as the pass's reads see it. */
 async function bought(held: Record<string, Record<string, bigint>>, calls?: (n: NoteRecord) => { tx: string; state?: string }[]) {
@@ -198,11 +212,15 @@ test("probe 1: a stranger's token with more units on W is never read or shown; t
   assert.ok(!log.some((l) => l.startsWith(STRANGER)), "the stranger's token is never asked");
 });
 
-test("probe 1b: a sold W (its sell's swap landed) that a stranger airdrops the coin to again shows nothing, and is closed for good", async () => {
-  const { v, W, reads } = await bought({}, (n) => [{ tx: relayed(n, register()) }, { tx: relayed(n, buySwap()) }, { tx: relayed(n, sellSwap()), state: "landed" }]);
-  reads.seat = seatOf({ [TOKEN]: { [W]: 9n } });
-  assert.deepEqual(await nearHoldingsPass(pageOf(v), reads), { written: [], empty: [W], unread: [] });
-  assert.deepEqual(await nearPositions(pageOf(v)), []);
+test("a W whose sell's swap the helper read landed, holding its coin, is a position: the coin on W decides, never the helper's word; holding none, it is closed", async () => {
+  const sold = (n: NoteRecord) => [{ tx: relayed(n, register()) }, { tx: relayed(n, buySwap()) }, { tx: relayed(n, sellSwap()), state: "landed" as const, side: "sell" as const }];
+  const { v, W, reads } = await bought({}, sold);
+  reads.seat = seatOf({ [TOKEN]: { [W]: 9n * 10n ** 18n } });
+  assert.deepEqual(await nearHoldingsPass(pageOf(v), reads), { written: [W], empty: [], unread: [] });
+  assert.equal((await nearPositions(pageOf(v)))[0]?.amount, "9");
+  const b = await bought({}, sold);
+  assert.deepEqual(await nearHoldingsPass(pageOf(b.v), b.reads), { written: [], empty: [b.W], unread: [] });
+  assert.deepEqual(await nearPositions(pageOf(b.v)), []);
 });
 
 test("probe 2: decimals that do not read leave W unread (never a silent 18), shown on a later load once they read", async () => {
@@ -332,14 +350,21 @@ test("rule 6: USDC on W goes home only once nothing of W is in flight and no cal
   assert.equal(r.resumes, NEAR_BUY_RESUMES, "no buy is ever run from it");
   // a call of W's that can still land (its max_block_height at or past the seat's final): not yet
   assert.deepEqual((await usdcOnly((n) => [{ tx: relayed(n, register(TOKEN)), state: "landed" }, { tx: relayed(n, buySwap(TOKEN, BigInt(H))), state: "failed" }])).p.written, []);
-  // a call still pending at the helper: not yet
-  assert.deepEqual((await usdcOnly((n) => [{ tx: relayed(n, buySwap(TOKEN, BigInt(H - 500))), state: "pending" }])).p.written, []);
+  // a call still pending at the helper: not yet while the seat's final is within NEAR_PENDING_SETTLED_BLOCKS of its
+  // last block, or its last block is not known; past that, settled whatever the helper last read
+  const pending = (mbh?: bigint) => usdcOnly((n) => [{ tx: relayed(n, register()) }, { tx: relayed(n, buySwap(TOKEN, mbh)), state: "pending", ...(mbh === undefined ? {} : { mbh }) }]);
+  assert.deepEqual((await pending(BigInt(H) - NEAR_PENDING_SETTLED_BLOCKS)).p.written, []);
+  assert.deepEqual((await pending()).p.written, []);
+  const past = await pending(BigInt(H - 500));
+  assert.deepEqual(past.p.written, [past.W]);
+  assert.equal((await records(past.v.w))[0]!.token, TOKEN, "the proven token, never Rhea's wrapped NEAR");
   // no call yet: the creation's life must pass first; then home; with no creation at all, home at once
   const young: NearWRecord["created"] = { tx_hash: "c", state: "landed", height: String(H - Number(NEAR_DELEGATE_LIFE_BLOCKS)) };
   assert.deepEqual((await usdcOnly(() => [], young)).p.unread.length, 1);
   const old: NearWRecord["created"] = { tx_hash: "c", state: "landed", height: String(H - Number(NEAR_DELEGATE_LIFE_BLOCKS) - 1) };
   assert.equal((await usdcOnly(() => [], old)).p.written.length, 1);
-  assert.equal((await usdcOnly(() => [], null)).p.written.length, 1);
+  // with no creation and no call, the creation's life past the block this device first read W so
+  assert.equal((await usdcOnly(() => [], null)).p.unread.length, 1);
   // a creation still pending: not yet
   assert.deepEqual((await usdcOnly(() => [], { tx_hash: "c", state: "pending", height: "1" })).p.written, []);
 });
@@ -438,6 +463,8 @@ test("the helper's answer is hostile until shaped: one per wallet in order, each
   const answer = (body: unknown, status = 200) => async (u: string | URL | Request, init?: RequestInit) => (seen.push({ url: String(u), init: init! }), new Response(typeof body === "string" ? body : JSON.stringify(body), { status }));
   const ok = { records: [{ wallet: W, token: TOKEN, calls: [], created: null }] };
   assert.equal((await nearWRecords(NETWORK, [W], answer(ok) as typeof fetch))[0]!.token, TOKEN);
+  const open = { records: [{ ...ok.records[0], calls: [{ tx_hash: "t", max_block_height: "5", method: "m", side: "buy", state: "pending" }, { tx_hash: "u", method: "m", side: "sell", state: "dropped" }] }] };
+  assert.equal((await nearWRecords(NETWORK, [W], answer(open) as typeof fetch))[0]!.calls.length, 2);
   assert.equal(seen[0]!.url, "https://ct-api.unrealized.trade/v1/bind/record");
   assert.equal(seen[0]!.init.credentials, "omit");
   assert.equal(seen[0]!.init.method, "POST");
@@ -449,6 +476,12 @@ test("the helper's answer is hostile until shaped: one per wallet in order, each
     { records: [{ ...ok.records[0], token: "NOT AN ID" }] },
     { records: [{ ...ok.records[0], calls: [{ tx_hash: "t", signed_tx: 5, method: "m", side: "buy", state: "landed" }] }] },
     { records: [{ ...ok.records[0], calls: [{ tx_hash: "t", signed_tx: "x", method: "m", side: "buy", state: "maybe" }] }] },
+    // a final call carries its bytes and no last block; a call not on chain its last block alone, never bytes
+    { records: [{ ...ok.records[0], calls: [{ tx_hash: "t", method: "m", side: "buy", state: "landed" }] }] },
+    { records: [{ ...ok.records[0], calls: [{ tx_hash: "t", signed_tx: "x", max_block_height: "5", method: "m", side: "buy", state: "failed" }] }] },
+    { records: [{ ...ok.records[0], calls: [{ tx_hash: "t", signed_tx: "x", method: "m", side: "buy", state: "pending" }] }] },
+    { records: [{ ...ok.records[0], calls: [{ tx_hash: "t", max_block_height: "-1", method: "m", side: "buy", state: "dropped" }] }] },
+    { records: [{ ...ok.records[0], calls: [{ tx_hash: "t", max_block_height: 5, method: "m", side: "buy", state: "pending" }] }] },
     { records: [{ ...ok.records[0], created: { tx_hash: "c", state: "landed", height: "-1" } }] },
     "not json",
     `{"records":[${" ".repeat(NEAR_RECORD_MAX_BYTES)}]}`,
@@ -524,4 +557,92 @@ test("calls that name two tokens rebuild nothing; a seat answer of another block
   // a sell's swap that failed on chain: the coin is still W's, a position
   const failedSell = { [W]: recordOf(W, TOKEN, [{ tx: relayed(note, buySwap()) }, { tx: relayed(note, sellSwap()), state: "failed" }]) };
   assert.deepEqual((await nearHoldingsPass(pageOf(v), { spends: spendsOf([row(nh, W)]), records: recordsFrom(failedSell), seat })).written, [W]);
+});
+
+// ---- one seat answer never decides for good ----
+
+const HELD = 5n * 10n ** 18n;
+/** W read on the two providers as they truly stand: `coin` of the token, `usdc` of USDC; every read named. */
+const twoProviders = (coin: bigint, usdc: bigint, named: string[] = []) => async (x: { wallet: string; side: string }) =>
+  (named.push(x.wallet), { account: x.wallet, height: 1, blockHash: "h", nonce: 1n, held: x.side === "sell" ? coin : usdc, registered: true, storageMin: 0n, lostfound: 0n, exists: true }) as never;
+
+test("a seat answer of 0 for a W holding its coin closes it only until the next restore or Sync: a plain load asks nothing of it, the Sync reads it again and the coin shows", async () => {
+  const { v, W, reads } = await bought({});
+  assert.deepEqual((await nearHoldingsPass(pageOf(v), { ...reads, seat: seatOf({}) })).empty, [W]);
+  assert.deepEqual(await softEmpty(v.w), [W]);
+  assert.deepEqual(await keptEmpty(v.w), [], "never closed for good on a seat answer");
+  const log: string[] = [];
+  let asked = 0;
+  const honest = { ...reads, seat: seatOf({ [TOKEN]: { [W]: HELD } }, { log }), records: async (ws: readonly string[]) => (asked++, reads.records!(ws)) };
+  assert.deepEqual(await nearHoldingsPass(pageOf(v), honest), { written: [], empty: [], unread: [] }, "a plain load leaves it");
+  assert.equal(asked + log.length, 0);
+  assert.deepEqual(await nearHoldingsPass(pageOf(v), { ...honest, fresh: true }), { written: [W], empty: [], unread: [] });
+  assert.equal((await nearPositions(pageOf(v)))[0]?.amount, "5");
+  assert.deepEqual(await softEmpty(v.w), []);
+});
+
+test("a seat answer of USDC and no coin writes a record of the proven token; the two providers' read on the way home finds the coin and makes it a position, nothing sent", async () => {
+  const { v, W, reads } = await bought({});
+  assert.deepEqual((await nearHoldingsPass(pageOf(v), { ...reads, seat: seatOf({ [USDC]: { [W]: 2_000_000n } }) })).written, [W]);
+  const r = (await records(v.w))[0]!;
+  assert.equal(r.token, TOKEN, "the proven token, never Rhea's wrapped NEAR");
+  assert.equal(r.stage, "sent");
+  const log: string[] = [];
+  const page = pageOf(v, log, { readWallet: twoProviders(HELD, 0n) });
+  await resumeNearSells(page);
+  const after = (await records(v.w))[0]!;
+  assert.equal(after.stage, "filled");
+  assert.deepEqual(after.fill, { out: HELD.toString(), decimals: 18 });
+  assert.equal(after.sell, undefined, "nothing sold or sent");
+  assert.equal((await nearPositions(page))[0]?.amount, "5");
+  assert.ok(!log.includes("near sell recorded"));
+});
+
+test("a paid W with no creation and no call at the helper (another device between its payout and W's creation) is never sent home at once: the next Sync, once that device bought, shows the coin; with no call ever, home once a delegate's life passed", async () => {
+  const v = await world([5_000_000n], [true]);
+  const { w: W, note, nh } = v.ws[0]!;
+  const usdcOnW = seatOf({ [USDC]: { [W]: PAID - FEE } });
+  const mid = { spends: spendsOf([row(nh, W)]), records: recordsFrom({ [W]: none(W) }), seat: usdcOnW };
+  assert.deepEqual(await nearHoldingsPass(pageOf(v), mid), { written: [], empty: [], unread: [W] });
+  assert.deepEqual(await records(v.w), []);
+  // the other device created W and bought: its calls at the helper, the coin on W
+  const bought2 = { spends: spendsOf([row(nh, W)]), records: recordsFrom({ [W]: recordOf(W, TOKEN, [{ tx: relayed(note, register()) }, { tx: relayed(note, buySwap()) }]) }), seat: seatOf({ [TOKEN]: { [W]: HELD } }), fresh: true };
+  assert.deepEqual((await nearHoldingsPass(pageOf(v), bought2)).written, [W]);
+  assert.equal((await nearPositions(pageOf(v)))[0]?.amount, "5");
+  // no call ever: within a delegate's life of the first read, not yet; past it, home
+  const u = await world([5_000_000n], [true]);
+  const x = u.ws[0]!;
+  const at = (h: number) => ({ spends: spendsOf([row(x.nh, x.w)], h), records: recordsFrom({}), seat: seatOf({ [USDC]: { [x.w]: PAID - FEE } }, { height: h }) });
+  assert.deepEqual((await nearHoldingsPass(pageOf(u), at(H))).written, []);
+  assert.deepEqual((await nearHoldingsPass(pageOf(u), { ...at(H + Number(NEAR_DELEGATE_LIFE_BLOCKS)), fresh: true })).written, [], "a Sync never restarts or skips the wait");
+  assert.deepEqual((await nearHoldingsPass(pageOf(u), at(H + Number(NEAR_DELEGATE_LIFE_BLOCKS) + 1))).written, [x.w]);
+});
+
+test("the way home after a rebuild reads one rebuilt W a page load on the two providers: two USDC-only Ws, one named this load, the other on the next", async () => {
+  const v = await world([5_000_000n, 6_000_000n], [true, true]);
+  const recs = Object.fromEntries(v.ws.map((x) => [x.w, recordOf(x.w, TOKEN, [{ tx: relayed(x.note, buySwap(TOKEN, BigInt(H - 1))), state: "failed" }])]));
+  await nearHoldingsPass(pageOf(v), { spends: spendsOf(v.ws.map((x) => row(x.nh, x.w))), records: recordsFrom(recs), seat: seatOf({ [USDC]: Object.fromEntries(v.ws.map((x) => [x.w, 2_500_000n])) }) });
+  assert.equal((await records(v.w)).length, 2);
+  const named: string[] = [];
+  // W reads only, no sell run (its reads refused past the pick): what each load names to the providers
+  const load = () => pageOf(v, [], { readWallet: twoProviders(0n, 0n, named) });
+  const first = load();
+  await resumeNearSells(first);
+  await resumeNearSells(first);
+  assert.equal(new Set(named).size, 1, "one W this load, however often the pass runs");
+  await resumeNearSells(load());
+  assert.equal(new Set(named).size, 2, "the other on the next load");
+});
+
+test("a sold W's own USDC registration and its claim of USDC from the exchange's lost-found name no token, nor does a claim off the exchange: the bought coin alone is proven", async () => {
+  const { v, W, reads } = await bought({}, (n) => [
+    { tx: relayed(n, register()) },
+    { tx: relayed(n, buySwap()) },
+    { tx: relayed(n, register(USDC)) },
+    { tx: relayed(n, sellSwap()) },
+    { tx: relayed(n, { receiver: EX, method: "claim_lostfound", args: { token_id: USDC } }) },
+    { tx: relayed(n, { receiver: STRANGER, method: "claim_lostfound", args: { token_id: STRANGER } }) },
+  ]);
+  assert.deepEqual((await nearHoldingsPass(pageOf(v), { ...reads, seat: seatOf({ [USDC]: { [W]: 2_500_000n } }) })).written, [W]);
+  assert.equal((await records(v.w))[0]!.token, TOKEN);
 });

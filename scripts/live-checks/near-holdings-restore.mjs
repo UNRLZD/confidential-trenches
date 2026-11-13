@@ -4,8 +4,10 @@
 //   - SIGN_HOST's /app.js is the one its index.html pins (its sha384) and carries the rebuild of the NEAR buy records
 //     from W's own signed calls (src/near-buy.ts nearHoldingsPass: the helper's record path "/v1/bind/record" and the
 //     kept W key "near-holdings-w:");
-//   - SIGN_HOST's CSP connect-src names no FastNEAR API host (https://api.fastnear.com, https://test.api.fastnear.com):
-//     a restore names W to no public provider;
+//   - SIGN_HOST's CSP connect-src names no FastNEAR API host (https://api.fastnear.com, https://test.api.fastnear.com),
+//     the API that lists an account's tokens. That the rebuild reads W on the helper's seat alone, and that the way home
+//     reads one rebuilt W a page load on the two providers, is not read here: packages/signpage/test/
+//     near-holdings-restore.test.ts holds both ("probe 5" and "the way home after a rebuild reads one rebuilt W");
 //   - the helper's POST /v1/bind/record answers the page as the page asks it (SIGN_HOST's Origin, no credentials) for
 //     a W the vault never paid (the all-zero implicit id: no key derives it): 200, CORS allowing SIGN_HOST's origin, one
 //     record of the asked wallet in the empty shape (token null, no call, no creation), so it is no oracle of which W

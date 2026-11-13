@@ -185,7 +185,7 @@ const restore = !framed
       // a W's USDC on its way home goes on; never awaited by the restore
       nearWalked: () => {
         const page = nearBuyPage();
-        if (page) void nearHoldings(page).then(() => resumeNearSells(page)).catch(() => {});
+        if (page) void nearHoldings(page, true).then(() => resumeNearSells(page)).catch(() => {});
       },
       // a chain's buy records written (card signpage-positions-evm): its positions read again, with no reload; ahead of
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
@@ -728,10 +728,12 @@ function nearBuyPage(): NearBuyPage | null {
   });
 }
 // The NEAR buy records rebuilt from the chain (card near-holdings-restore): one pass at a time, on each landing and after
-// each restore's NEAR walk; it never throws, a read it could not make is read on the next pass
+// each restore's NEAR walk; it never throws, a read it could not make is read on the next pass. `fresh` (a restore or a
+// Sync): every W one seat answer read empty is read again; asked while a pass runs, it runs once that one ends
 let nearHoldingsRun: Promise<void> | null = null;
-function nearHoldings(page: NearBuyPage): Promise<void> {
-  return (nearHoldingsRun ??= nearHoldingsPass(page)
+function nearHoldings(page: NearBuyPage, fresh = false): Promise<void> {
+  if (fresh && nearHoldingsRun !== null) return nearHoldingsRun.then(() => nearHoldings(page, true));
+  return (nearHoldingsRun ??= nearHoldingsPass(page, { fresh })
     .then((p) => void (p.unread.length > 0 && console.warn(`near holdings unread: ${p.unread.length}, read again on the next load`)))
     .catch((e: unknown) => console.warn(`near holdings: ${e instanceof Error ? e.name : "failed"}`))
     .finally(() => (nearHoldingsRun = null)));
