@@ -1,12 +1,11 @@
 // The trade box's buy and sell on the pool path (card trade-box-pool; plan v2 A2): the USD the box shows turned into the
 // pool asset's units the tap spends, rounded down as the kit's poolUsdToUnits rounds (a tap never spends more than the
 // USD asked), the pool's balance and the most one tap can spend drawn in USD, and the ask the box sends: pool.buy only
-// with a proof ready and at most `tap_max`, a whole chunk on Base and Robinhood (the signing page refuses any other EVM
-// amount, rules/pool.ts checkEvmBuy), pool.sell for the position's units. Planted pools and prices.
+// with a proof ready and at most `tap_max`, any amount on every pool chain (card buy-any-amount-on-every-chain), pool.sell for the position's units. Planted pools and prices.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountOk, amountText, amountWrong, cashMax, cashMovesTo, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetOn, presetsOf, PRESETS, receiveShown, tradeBal, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountOk, amountText, amountWrong, cashMax, cashMovesTo, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetOn, receiveShown, tradeBal, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -65,10 +64,10 @@ test("pool.buy: the asked USD in SOL, only with a proof ready and at most what o
   assert.deepEqual(poolBuyAsk(ready, "near", "Mint1", 1_000n, SOL, 1_000), { ok: false, why: "no_pool" });
 });
 
-test("pool.buy on Base and Robinhood spends a whole chunk: only the chunk's own USD asks for it", () => {
+test("pool.buy on Base and Robinhood: any amount up to tap_max, as on Solana", () => {
   const pools = [base("0.03", "0.02", "0.01")];
   assert.deepEqual(poolBuyAsk(pools, "base", "0xabc", 3_500n, ETH, 500), { ok: true, kind: "pool.buy", params: { chain: "base", token: "0xabc", amount: "0.01", slippage_bps: 500 } });
-  assert.deepEqual(poolBuyAsk(pools, "base", "0xabc", 2_500n, ETH, 500), { ok: false, why: "chunk" });
+  assert.deepEqual(poolBuyAsk(pools, "base", "0xabc", 2_500n, ETH, 500), { ok: true, kind: "pool.buy", params: { chain: "base", token: "0xabc", amount: unitsToDecimal(centsToUnits(2_500n, ETH), 18), slippage_bps: 500 } });
   assert.deepEqual(poolBuyAsk(pools, "base", "0xabc", 5_000n, ETH, 500), { ok: false, why: "over_tap" });
 });
 
@@ -82,7 +81,7 @@ test("pool.sell: the position's token units for the chain's pool, the proceeds b
   assert.equal(poolSellAsk([sol("0.2")], "near", "x.near", "1", 1_000), null);
 });
 
-test("the amount field is marked wrong only when the amount is what is wrong: over one tap, not a whole chunk, under a base unit; never while a proof is making or the pool cannot be priced", () => {
+test("the amount field is marked wrong only when the amount is what is wrong: over one tap or under a base unit; never while a proof is making or the pool cannot be priced", () => {
   const ready = [sol("1.25", "0.4", "0.3")];
   // a proof still making, with or without the page's tap_max: the amount is not what is wrong
   assert.equal(amountWrong(poolBuyAsk([sol("0.2", "0", "0.1")], "solana", "Mint1", 1_000n, SOL, 1_000)), false);
@@ -90,35 +89,14 @@ test("the amount field is marked wrong only when the amount is what is wrong: ov
   assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 1_000n, null, 1_000)), false);
   assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 2_500n, SOL, 1_000)), false);
   assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 3_000n, SOL, 1_000)), true);
-  assert.equal(amountWrong(poolBuyAsk([base("0.03", "0.02", "0.01")], "base", "0xabc", 2_500n, ETH, 500)), true);
+  assert.equal(amountWrong(poolBuyAsk([base("0.03", "0.02", "0.01")], "base", "0xabc", 2_500n, ETH, 500)), false);
+  assert.equal(amountWrong(poolBuyAsk([base("0.03", "0.02", "0.01")], "base", "0xabc", 3_501n, ETH, 500)), true);
   assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 0n, SOL, 1_000)), true);
 });
 
-test("the presets row: on Base and Robinhood one button holding the chunk's USD, the one amount pool.buy takes; the four elsewhere", () => {
-  const rh = (balance: string, ready?: string, tap_max?: string): Pool => ({ ...base(balance, ready, tap_max), chain: "robinhood" });
-  for (const [chain, entry] of [["base", base], ["robinhood", rh]] as const) {
-    const pools = [entry("0.03", "0.02", "0.01")];
-    const row = presetsOf(chain, poolView(pools, chain, ETH));
-    assert.deepEqual(row, [3_500n], chain);
-    // the button's value is what the buy takes, and its tap's text parses back to it
-    assert.equal(poolBuyAsk(pools, chain, "0xabc", row[0]!, ETH, 500).ok, true, chain);
-    assert.equal(parseUsd(amountText(row[0]!)), row[0], chain);
-    // a chunk worth cents: 0.001 ETH at $3,500.12345678 is $3.50, drawn and filled as 3.50, never 3
-    const small = [entry("0.003", "0.003", "0.001")];
-    const one = presetsOf(chain, poolView(small, chain, ETH));
-    assert.deepEqual(one, [350n], chain);
-    assert.equal(amountText(one[0]!), "3.50");
-    assert.equal(poolBuyAsk(small, chain, "0xabc", parseUsd(amountText(one[0]!))!, ETH, 500).ok, true, chain);
-    // the value unknown: a proof still making (no tap_max), no price, no pool for the chain: one button, no value
-    assert.deepEqual(presetsOf(chain, poolView([entry("0.02", "0")], chain, ETH)), [null], chain);
-    assert.deepEqual(presetsOf(chain, poolView(pools, chain, null)), [null], chain);
-    assert.deepEqual(presetsOf(chain, null), [null], chain);
-    assert.deepEqual(presetsOf(chain, poolView([entry("0.02", "0.02", "0")], chain, ETH)), [null], chain);
-  }
-  // Solana and NEAR keep the four
-  assert.deepEqual(presetsOf("solana", poolView([sol("1.25", "0.4", "0.3")], "solana", SOL)), PRESETS);
-  assert.deepEqual(presetsOf("solana", null), PRESETS);
-  assert.deepEqual(presetsOf("near", null), PRESETS);
+test("an amount in cents as the box takes it: whole dollars bare, cents with two places, parsed back to the same cents", () => {
+  for (const c of [350n, 2_500n, 3_501n]) assert.equal(parseUsd(amountText(c)), c);
+  assert.equal(amountText(350n), "3.50");
   assert.equal(amountText(2_500n), "25");
 });
 
@@ -231,22 +209,22 @@ test("card one-balance-buys-on-every-chain: Max is with_cash, Bal is the pool an
   assert.equal(cashMovesTo("near"), false);
 });
 
-test("card one-balance-buys-on-every-chain on Base and Robinhood: Max is with_cash's whole note, and a tap asks exactly that note or the ready one, never another amount", () => {
+test("card one-balance-buys-on-every-chain on Base and Robinhood: Max is with_cash, and a tap asks any amount up to it (card buy-any-amount-on-every-chain)", () => {
   for (const chain of ["base", "robinhood"] as const) {
     const pools = [{ ...base("0.03", "0.02", "0.01"), chain }];
     const note = unitsToCents(decimalToUnits("0.05", 18)!, ETH);
     const ready = unitsToCents(decimalToUnits("0.01", 18)!, ETH);
     assert.equal(cashMax(pools, chain, "0.05", ETH), note);
-    // the whole 0.05 ETH note Cash makes, or the ready 0.01 ETH one: each one pool.buy of that whole note
+    // Max's cents ask the whole 0.05 ETH; the ready note's USD under it is asked as typed
     assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", note, ETH, 500, "0.05"), { ok: true, kind: "pool.buy", params: { chain, token: "0xabc", amount: "0.05", slippage_bps: 500 } });
-    assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", ready, ETH, 500, "0.05"), { ok: true, kind: "pool.buy", params: { chain, token: "0xabc", amount: "0.01", slippage_bps: 500 } });
-    // any other amount under with_cash: a chunk is asked whole; above it: over
-    assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", note - 1n, ETH, 500, "0.05"), { ok: false, why: "chunk" });
+    assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", ready, ETH, 500, "0.05"), { ok: true, kind: "pool.buy", params: { chain, token: "0xabc", amount: unitsToDecimal(centsToUnits(ready, ETH), 18), slippage_bps: 500 } });
+    // any other amount under with_cash: asked as typed; above it: over
+    assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", note - 1n, ETH, 500, "0.05"), { ok: true, kind: "pool.buy", params: { chain, token: "0xabc", amount: unitsToDecimal(centsToUnits(note - 1n, ETH), 18), slippage_bps: 500 } });
     assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", note + 1n, ETH, 500, "0.05"), { ok: false, why: "over_tap" });
     // no with_cash: the ready note alone, as before
     assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", note, ETH, 500, null), { ok: false, why: "over_tap" });
     assert.equal(coinTapKey(pools, chain, "0xabc") !== null, true, "the box asks the page's dry on this chain too");
-    assert.deepEqual(withCoinTap(pools, chain, "0.05"), pools, "the dry's tap_max never replaces the whole chunk");
+    assert.deepEqual(withCoinTap(pools, chain, "0.05"), pools, "the dry's with_cash, not its tap_max, is Base's Max");
   }
 });
 
@@ -257,16 +235,27 @@ test("card one-balance-buys-on-every-chain: a pool that holds nothing yet buys f
   assert.deepEqual(poolBuyAsk(empty, "solana", "Mint1", 3_000n, SOL, 1_000, "0.5"), { ok: true, kind: "pool.buy", params: { chain: "solana", token: "Mint1", amount: unitsToDecimal(centsToUnits(3_000n, SOL), 9), slippage_bps: 1_000 } });
   // no with_cash, or with_cash 0 (Cash makes nothing): no proof, no ask
   for (const w of [null, "0"]) assert.deepEqual(poolBuyAsk(empty, "solana", "Mint1", 3_000n, SOL, 1_000, w), { ok: false, why: "no_proof" }, JSON.stringify(w));
-  // Base and Robinhood: the whole note Cash makes is the tap, and the chunk button holds it
+  // Base and Robinhood: Cash's part is spent as typed
   for (const chain of ["base", "robinhood"] as const) {
     const pools = [{ ...base("0", "0", "0"), chain }];
     const note = unitsToCents(decimalToUnits("0.05", 18)!, ETH);
     assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", note, ETH, 500, "0.05"), { ok: true, kind: "pool.buy", params: { chain, token: "0xabc", amount: "0.05", slippage_bps: 500 } });
-    assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", note - 1n, ETH, 500, "0.05"), { ok: false, why: "chunk" });
+    assert.equal(poolBuyAsk(pools, chain, "0xabc", note - 1n, ETH, 500, "0.05").ok, true);
     assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", note, ETH, 500, null), { ok: false, why: "no_proof" });
-    assert.deepEqual(presetsOf(chain, poolView(pools, chain, ETH), cashMax(pools, chain, "0.05", ETH)), [note], chain);
-    assert.deepEqual(presetsOf(chain, poolView(pools, chain, ETH), null), [null], chain);
   }
-  // Solana's presets stay the four
-  assert.deepEqual(presetsOf("solana", poolView(empty, "solana", SOL), 4_650n), PRESETS);
+});
+
+test("card buy-any-amount-on-every-chain: a Base or Robinhood buy of any amount up to Max is one pool.buy of exactly that amount ($2.37 with notes 0.002 + 0.001 ETH), as on Solana", () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    // two notes, 0.002 and 0.001 ETH: the page's tap_max is what one tap can spend of both
+    const pools = [{ ...base("0.003", "0.003", "0.00298"), chain }];
+    const units = centsToUnits(237n, ETH);
+    assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", 237n, ETH, 500), { ok: true, kind: "pool.buy", params: { chain, token: "0xabc", amount: unitsToDecimal(units, 18), slippage_bps: 500 } }, chain);
+    // a non-rung amount above one note's chunk, under the two notes' Max: still one pool.buy
+    assert.equal(poolBuyAsk(pools, chain, "0xabc", 900n, ETH, 500).ok, true, chain);
+    // over Max is over, as on Solana
+    assert.deepEqual(poolBuyAsk(pools, chain, "0xabc", 1_100n, ETH, 500), { ok: false, why: "over_tap" }, chain);
+    // with_cash: any amount up to what Cash adds
+    assert.equal(poolBuyAsk(pools, chain, "0xabc", 1_100n, ETH, 500, "0.05").ok, true, chain);
+  }
 });

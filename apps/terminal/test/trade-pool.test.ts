@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { hasPool, presetsOf, PRESETS, poolBuyAsk, poolView, proofStatus, spendSoon, tradeBal } from "../src/screens/trade/model.ts";
+import { hasPool, poolBuyAsk, poolView, proofStatus, spendSoon, tradeBal } from "../src/screens/trade/model.ts";
 import { WORDS } from "../src/screens/trade/words.ts";
 
 type Pools = SignpageState["pools"];
@@ -92,7 +92,6 @@ test("NEAR: the vault's entry in state.pools is no pool; the box is the one a ch
   assert.equal(hasPool(pools, "base"), false);
   assert.equal(proofStatus(pools, "near"), "none", "no proof label: the vault has no proof queue");
   assert.equal(poolView(pools, "near", { price: 1n, expo: 0, decimals: 6 }), null);
-  assert.deepEqual(presetsOf("near", null), PRESETS);
   assert.deepEqual(poolBuyAsk(pools, "near", "wrap.near", 100n, { price: 1n, expo: 0, decimals: 6 }, 100), { ok: false, why: "no_pool" });
   // Bal is the vault path's Cash, as on any chain with no pool
   assert.deepEqual(tradeBal(hasPool(pools, "near"), null, 725n), { from: "cash", cents: 725n });

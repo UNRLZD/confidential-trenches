@@ -30,10 +30,10 @@ import {
   parseUsd,
   poolBuyAsk,
   poolView,
-  presetsOf,
   receiveShown,
   tradeBal,
   presetOn,
+  PRESETS,
   progress,
   READY,
   setMatches,
@@ -381,9 +381,9 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   }
 
   // a preset, in the box or the phone bar's chip (card app-quick-buy-one-tap): one tap is one buy of its size, through
-  // buy() and its checks; signed out it opens the sign-in sheet. On Base and Robinhood the row is the chunk's one button
-  // (presetsOf), off while its value is unknown (null).
-  const presets = presetsOf(chain, pool, onPool ? cashMax(pools, chain, withCash, price) : null);
+  // buy() and its checks; signed out it opens the sign-in sheet. The four on every chain (card
+  // buy-any-amount-on-every-chain: a Base or Robinhood buy takes any amount).
+  const presets: readonly (Cents | null)[] = PRESETS;
   const presetOff = (p: Cents | null) => !signedOut && (p === null || !ready || off || !presetOn(p, max, balance, running) || !askable(p));
   function tapPreset(p: Cents | null) {
     if (signedOut) return openSignin(true);
@@ -488,7 +488,7 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
           <span data-pending={pending || undefined}>{est}</span>
         </span>
       </label>
-      <div className="trb-presets" data-testid="trade-presets" data-one={presets.length === 1 || undefined}>
+      <div className="trb-presets" data-testid="trade-presets">
         {presets.map((p) => (
           <button
             key={String(p)}
