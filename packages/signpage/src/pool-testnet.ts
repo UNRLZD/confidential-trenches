@@ -1100,12 +1100,36 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       }
     }
   };
-  // the front lost (hidden, left, or taken by the tab in use): every queue closed, so that tab proves their notes; the
-  // front taken: a state read, whose passes open the queues and prove, and the app told to read the state again
+  // the front lost (hidden, left, or taken by the tab in use), once no tap of this tab is under way: every queue closed,
+  // its notes freed before the queues lock goes back (src/proof-front.ts), so the tab that took it proves them at its
+  // first pass; the front taken: a state read, whose passes open the queues and prove, and the app told to read again
   front.onChange((held) => {
-    if (!held) void closeQueues().then(() => watchers.forEach((f) => f()), () => {});
-    else void stateRead().then(() => watchers.forEach((f) => f()), () => {});
+    if (!held) return closeQueues().then(() => watchers.forEach((f) => f()), () => {});
+    void stateRead().then(() => watchers.forEach((f) => f()), () => {});
   });
+  // a tap's run (a buy's, from its first read of the ready proofs to its take): the front taken at the tap, and kept
+  // until the take (or the run's end), so a window switch never closes the queue under it; a tap in a tab that did not
+  // hold the front waits for the queue to open and for its pass (`pass`), as a tap right after a load does
+  const tapRun = (pass: () => Promise<unknown>) => {
+    let tapped: Promise<() => void> | null = null;
+    let first: Promise<void> | null = null;
+    let over = false;
+    return {
+      at: (): Promise<void> =>
+        (first ??= (async () => {
+          if (over) return;
+          const cold = !front.held();
+          tapped = front.tap();
+          await tapped;
+          if (cold) await pass().catch(() => {});
+        })()),
+      end: (): void => {
+        if (over) return;
+        over = true;
+        void tapped?.then((f) => f());
+      },
+    };
+  };
 
   // a deposit's own run reads as a trade, and so does the state reads' settle of the INCOMING notes (settleSolana): it
   // holds POOL_DEPOSIT_LOCK, which a deposit tapped meanwhile waits for (a reader that holds what a trade can wait for
@@ -1456,7 +1480,27 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // the buy holds the list's hosts from its run's start to its end: the passes' reads wait, the buy's own go first
     return (over.tradeKinds?.evmBuy ?? poolBuyEvmKind)(() => {
       const release = holdHosts(e.list.map((r) => r.url));
-      return { ...evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain)), end: release };
+      const h = evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain));
+      // the front taken at the tap's first read and kept to its take (tapRun)
+      const t = tapRun(() => evmProofs(chain));
+      return {
+        ...h,
+        ready: async () => {
+          await t.at();
+          return h.ready();
+        },
+        take: async (id: string, attempt: string, nullifier?: bigint) => {
+          try {
+            return await h.take(id, attempt, nullifier);
+          } finally {
+            t.end();
+          }
+        },
+        end: () => {
+          t.end();
+          release();
+        },
+      };
     });
   };
   // an EVM buy's or sell's run: the chain's positions read again at its end stage (both kinds post it as progress, the
@@ -2034,6 +2078,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         throw e;
       }
     };
+    // the front taken at the tap's first read and kept to its take (tapRun)
+    const t = tapRun(() => proofs());
     // the proof this run's take handed out: what a follow of its note reads (pool-buy.ts poolBuyKind follow)
     let taken: ReadyProof<SolanaReleaseRequest> | null = null;
     return {
@@ -2046,18 +2092,29 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       signal: solanaStop.signal,
       // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
       ready: async (early) => {
+        await t.at();
         const queue = await q();
         const list = early === undefined ? queue.ready() : await queue.readyAt(early);
         if (list.length === 0) void proofs();
         return list;
       },
-      take: async (id, attempt, early, lastHeight) => (taken = await (await q()).take(id, attempt, early, lastHeight)),
+      take: async (id, attempt, early, lastHeight) => {
+        try {
+          return (taken = await (await q()).take(id, attempt, early, lastHeight));
+        } finally {
+          t.end();
+        }
+      },
       chainNow: () => chainNow(over.pool ?? { now: (signal) => solanaNow(rpcs(), signal) }),
       // a buy's pieces, all RESERVED or none (card buy-spends-several-pieces); the run's buy is the last, its tag 3
       takeSet: async (items, early, lastHeight) => {
-        const got = await (await q()).takeSet(items, early, lastHeight);
-        taken = got[got.length - 1] ?? null;
-        return got;
+        try {
+          const got = await (await q()).takeSet(items, early, lastHeight);
+          taken = got[got.length - 1] ?? null;
+          return got;
+        } finally {
+          t.end();
+        }
       },
       // the run ended "sent": its note is followed by the state reads' pass until its end is known (followBuys)
       follow: (post) => {
@@ -2111,6 +2168,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         void markLanded(noteId, attempt, withdrawn).catch(() => {});
       },
       end: () => {
+        t.end();
         release();
         notes?.close();
         // the run's note settled now, not on the next state read: a buy that ended not landed has read its blockhash past
@@ -3099,9 +3157,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
     if (!locks || !wayOut(ready.chain) || (ready.chain === "solana" ? pin === undefined : evmPool(ready.chain) === null)) return;
     withdrawing.add(opId);
+    // the front taken at the tap and kept to the run's end (src/proof-front.ts tap): the tab that held it closes its
+    // queues first, so every note it held is free for this run's plan, and no window switch closes a queue it drops from
+    const tapped = await front.tap();
     try {
       await (ready.chain === "solana" ? withdrawRun(ready, opId) : evmWithdrawRun(ready.chain, ready, opId));
     } finally {
+      tapped();
       withdrawing.delete(opId);
     }
   };
@@ -3354,9 +3416,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     funds: () => (chain === "solana" && pin !== undefined ? funds() : Promise.reject(new Error("no flow for this chain"))),
     ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
   });
+  // a sell tapped here: the front taken at the tap, so the sale's return note is proved in the tab in use; the sell
+  // itself spends no proof and does not wait for it
+  const sellTapped = (): void => void front.tap().then((end) => end(), () => {});
   return {
-    flow: (ask, ctx) =>
-      ask.chain !== "solana"
+    flow: (ask, ctx) => {
+      if (ask.kind === "pool.sell") sellTapped();
+      return ask.chain !== "solana"
         ? ask.kind === "pool.deposit"
           ? (evmDeposit(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
           : ask.kind === "pool.buy"
@@ -3376,7 +3442,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               ? recordedSell(ask, ctx)
               : ask.kind === "pool.withdraw" && page.openWithdraw
                 ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
-                : { error: "not_allowed" },
+                : { error: "not_allowed" };
+    },
     depositFrom: (params, from, ctx) => {
       let ask: PoolAsk;
       try {
