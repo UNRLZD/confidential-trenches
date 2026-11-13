@@ -162,6 +162,9 @@ export type CashMover = {
   dry(chain: PoolChain, usdc: bigint): Promise<Refusal | { out: bigint; fee: bigint }>;
   ways(): number;
   coming(chain: PoolChain): bigint;
+  /** After a reload (main.ts, at sign-in): each move op not yet done or failed follows its quote's follow op
+   *  (`<op>/1click`, the one rail) on from its last stage; nothing is quoted or withdrawn again. */
+  resume(moves: readonly { id: string; rec: MoveOpRecord }[]): void;
   /** Settles once every move op this mover follows has stopped (tests). */
   idle(): Promise<void>;
 };
@@ -183,9 +186,14 @@ export function cashMover(d: CashMoverDeps): CashMover {
     const e = await ended;
     const txs: TxRef[] = e !== null && "tx" in e && typeof e.tx === "string" ? [{ chain: "near", hash: e.tx }] : [];
     if (e === null || !(e.kind === "arrived" || e.kind === "landed")) return put(op, { ...rec, stage: "failed", txs });
-    let cur: MoveOpRecord = { ...rec, stage: "in_transit", txs };
+    const cur: MoveOpRecord = { ...rec, stage: "in_transit", txs };
     await put(op, cur);
+    return followOn(op, followId, cur);
+  };
+  // the follow op's stages from `cur` on, until the move is done or failed (or the sign out)
+  const followOn = async (op: string, followId: string, from: MoveOpRecord): Promise<void> => {
     if (!d.follow) return;
+    let cur = from;
     const wait = d.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     while (!d.signal?.aborted) {
       const f = await d.follow(followId).catch(() => undefined);
@@ -279,6 +287,9 @@ export function cashMover(d: CashMoverDeps): CashMover {
     ways: () => ways.length,
     // the least of the pool's coin the moves on their way still bring (display only: a tap's most counts it)
     coming: (chain) => ways.filter((w) => w.chain === chain && d.now() - w.since <= CASH_MOVE_WAIT_MS).reduce((a, w) => a + w.lamports, 0n),
+    resume: (moves) => {
+      for (const { id, rec } of moves) if (rec.kind === "move" && rec.stage !== "done" && rec.stage !== "failed") tracks.push(followOn(id, `${id}/${d.rails[0] ?? "1click"}`, rec).catch(() => {}));
+    },
     idle: async () => {
       await turn;
       await Promise.all(tracks);

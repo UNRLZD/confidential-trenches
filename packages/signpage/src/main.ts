@@ -67,7 +67,7 @@ import { startApi, type KindContext } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
-import { cashMover, poolMoveKinds, withCash, type CashToPoolDeps, type MoveFollow } from "./cash-to-pool.ts";
+import { cashMover, poolMoveKinds, withCash, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -244,6 +244,9 @@ const poolFollow = !framed
   : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
+// a move out of Cash a reload cut short (src/cash-to-pool.ts resume, card one-balance-buys-on-every-chain): set where
+// the mover is built, run at sign-in after the vault's withdrawals are settled
+let resumeMoves: (() => Promise<void>) | null = null;
 // Sign out (this tab's or another's) stops every quote's asks (card helper-says-why-a-vendor-refused, review P3):
 // deposit.quote, pool.address and the deposit sheet's reads send nothing more, a re-ask's pause included.
 const quotes = quotesStop();
@@ -335,6 +338,16 @@ else {
     cashMoverOf = { signal, m };
     return m;
   };
+  if (prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null)
+    resumeMoves = async () => {
+      const st = await open();
+      const moves: { id: string; rec: MoveOpRecord }[] = [];
+      for (const id of await st.keys("ops")) {
+        const rec = (await st.get("ops", id).catch(() => undefined)) as MoveOpRecord | undefined;
+        if (rec?.kind === "move") moves.push({ id, rec });
+      }
+      cashMoverNow().resume(moves);
+    };
   // pool.buy.dry with with_cash on Solana (src/cash-to-pool.ts withCash): the dry answer as it is, plus Cash's largest
   // note less the relayer's fee at the device's price and what moves on their way bring; a read that fails leaves it out
   const dryWithCash = (params: Record<string, unknown>) => {
@@ -1210,6 +1223,9 @@ async function landed(l: Landing): Promise<void> {
       // and a USDC-only W it rebuilt goes home
       return page ? resumeNearBuys(page).then(() => resumeNearSells(page)).then(() => nearHoldings(page)).then(() => resumeNearSells(page)) : undefined;
     })
+    .catch(() => {})
+    // then a move out of Cash a reload cut short follows its quote's follow op on (src/cash-to-pool.ts resume)
+    .then(() => resumeMoves?.())
     .catch(() => {});
   // a held deposit's move out a reload cut short (src/withdraw/held.ts)
   void settleHeld().catch(() => {});

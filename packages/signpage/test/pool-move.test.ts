@@ -16,6 +16,7 @@ type Follow = { stage: string; final?: true; txs?: { chain: "solana"; hash: stri
 const ETH = { price: "300000000000", expo: -8 }; // ETH at 3,000 USD
 function page(o: { cash?: bigint; quote?: (usdc: bigint) => CashQuote | { error: string }; end?: HandoffEnd; follows?: Follow[]; price?: null } = {}) {
   const chains: string[] = [];
+  const followed: string[] = [];
   const paid: { recipient: string; amount: bigint; fee: bigint }[] = [];
   const quoted: { usdc: bigint; id: string }[] = [];
   const puts: { id: string; rec: MoveOpRecord }[] = [];
@@ -31,11 +32,11 @@ function page(o: { cash?: bigint; quote?: (usdc: bigint) => CashQuote | { error:
     landed: async () => false,
     now: () => 1_000,
     put: async (id, rec) => void puts.push({ id, rec: structuredClone(rec) }),
-    follow: async () => follows[Math.min(f++, follows.length - 1)],
+    follow: async (id) => (followed.push(id), follows[Math.min(f++, follows.length - 1)]),
     wait: async () => {},
   };
   const m = cashMover(d);
-  return { m, k: poolMoveKinds(() => m), paid, quoted, puts, chains };
+  return { m, k: poolMoveKinds(() => m), paid, quoted, puts, chains, followed };
 }
 
 async function settle(a: unknown): Promise<unknown> {
@@ -150,4 +151,18 @@ test("pool.move near -> base and near -> robinhood: the quote asked for that cha
       result: { out: "0.007252427184466019", fee: "0.05", steps: [{ step: "vault_out", chain: "near" }, { step: "intents", chain: to }, { step: "pool_in", chain: to }] },
     });
   }
+});
+
+test("resume after a reload: each move op not yet done or failed follows its quote's follow op (<op>/1click) on from its last stage; an ended one is left as it is; nothing is withdrawn", async () => {
+  const p = page({ follows: [{ stage: "in_pool", txs: [{ chain: "solana", hash: "SolTx1" }] }, { stage: "in_pool", final: true, txs: [{ chain: "solana", hash: "SolTx1" }] }] });
+  const rec = (stage: MoveOpRecord["stage"]): MoveOpRecord => ({ kind: "move", from: "near", to: "solana", stage, txs: [{ chain: "near", hash: "NearTx1" }], amount: "25.5", out: "0.3", created_ms: 5 });
+  p.m.resume([
+    { id: "mv-run", rec: rec("in_transit") },
+    { id: "mv-done", rec: rec("done") },
+    { id: "mv-failed", rec: rec("failed") },
+  ]);
+  await p.m.idle();
+  assert.deepEqual([...new Set(p.followed)], ["mv-run/1click"], "only the op on its way is followed, by its follow op's id");
+  assert.deepEqual(p.puts.map((x) => [x.id, x.rec.stage, x.rec.txs.map((t) => t.hash)]), [["mv-run", "into_pool", ["NearTx1", "SolTx1"]], ["mv-run", "done", ["NearTx1", "SolTx1"]]]);
+  assert.deepEqual([p.paid, p.quoted], [[], []]);
 });
