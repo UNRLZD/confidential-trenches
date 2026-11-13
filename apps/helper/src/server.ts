@@ -52,6 +52,7 @@ import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./w
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
+import { POOL_SOLANA_PIECES_BODY_MAX } from "./pool/solana-pieces.ts";
 import { poolSendLine, type PoolSendNote } from "./pool/send-log.ts";
 import { evmFeeWarm, evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
@@ -82,9 +83,9 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 const ONECLICK_STATUS = "oneclick/v0/status";
 /** The proxy path whose live answers are POST /v1/intents's quote records (card helper-id-intents, intents/records.ts). */
 const ONECLICK_QUOTE = "oneclick/v0/quote";
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX] = MOUNTED.proxy;
-const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
+const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL, POOL_SOLANA_PIECES] = MOUNTED.relay;
 const [BIND, BIND_RECORD] = MOUNTED.delegate;
 const [INTENTS] = MOUNTED.intents;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
@@ -370,7 +371,7 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, undefined, cors(req))));
         return;
       }
-      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL && path !== BIND_RECORD) {
+      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_SOLANA_PIECES && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL && path !== BIND_RECORD) {
         const wait = apiRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
       }
@@ -427,9 +428,12 @@ export function handler(
           .catch((e) => (res.headersSent ? res.destroy() : throttleOf(e) > 0 ? reply(throttled(throttleOf(e), undefined, "provider limit")) : send(503, { error: { code: "upstream" } }, { ...cors(req), ...UPSTREAM_WAIT })));
         return;
       }
-      if (path === POOL_SOLANA_SEND) {
+      if (path === POOL_SOLANA_SEND || path === POOL_SOLANA_PIECES) {
         if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
         const began = performance.now();
+        // card buy-spends-several-pieces: a buy's pieces as one bundle (pool/solana.ts carryPieces), mounted as the one
+        // send is: the same rate take, 404 for a pool this helper does not carry, and one log line
+        const pieces = path === POOL_SOLANA_PIECES;
         // the send's one log line (pool/send-log.ts): the chain and net once the body names a pool this helper carries
         let net = "?";
         let note: PoolSendNote | undefined;
@@ -440,13 +444,13 @@ export function handler(
           } catch {
             body = null;
           }
-          sendLog(poolSendLine({ chain: net === "?" ? "unknown" : "solana", net, route: "send", status: a.status, body, ms: performance.now() - began, note }));
+          sendLog(poolSendLine({ chain: net === "?" ? "unknown" : "solana", net, route: pieces ? "pieces" : "send", status: a.status, body, ms: performance.now() - began, note }));
           reply(a);
         };
         const wait = poolRate.take(clientOf(req));
         if (wait > 0) return logged(throttled(wait, undefined, CLIENT_WINDOW));
-        // pool/solana.ts: { pool, tx }, the pool one this helper carries (else 404 not_found)
-        void readBody(req, POOL_SOLANA_BODY_MAX)
+        // pool/solana.ts: { pool, tx } (or { pool, txs }), the pool one this helper carries (else 404 not_found)
+        void readBody(req, pieces ? POOL_SOLANA_PIECES_BODY_MAX : POOL_SOLANA_BODY_MAX)
           .then(async (text) => {
             if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
             let body: unknown;
@@ -461,7 +465,7 @@ export function handler(
             if (pool === undefined) return { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
             net = pool.cluster;
             if (!(await heldWithin(senders))) return SENDERS_LATE;
-            const a = await pool.carry(body, clientOf(req));
+            const a = pieces ? await pool.carryPieces(body, clientOf(req)) : await pool.carry(body, clientOf(req));
             note = a.note;
             return { status: a.status, headers: (a.retryAfterS === undefined ? {} : { "Retry-After": String(a.retryAfterS) }) as Headers, body: JSON.stringify(a.body) };
           })

@@ -72,11 +72,12 @@ const assetsAsk =
     client.request("deposit.assets", {}).outcome.then((o) => (o.ok ? { ok: true, list: o.result.assets.map(assetOf) } : { ok: false, code: refusal(o.error.code) }));
 
 /** The shell's warm read (DepositMount): the asset list asked once the signing page is READY, before any sheet opens,
- *  and held (assets.ts DEPOSIT_ASSETS), so the first open draws it at once. */
+ *  and held (assets.ts DEPOSIT_ASSETS), so the first open draws it at once; skipped while a list is held or one was
+ *  asked in the last minute (card app-faults-seen-on-124: one ask a minute per device). */
 export function useDepositAssetsWarm(): void {
   const { client, moneyOn } = useSignpage();
   useEffect(() => {
-    if (client && moneyOn && DEPOSIT_ASSETS.view().list === null) DEPOSIT_ASSETS.ask(assetsAsk(client));
+    if (client && moneyOn) DEPOSIT_ASSETS.warm(assetsAsk(client));
   }, [client, moneyOn]);
 }
 
@@ -84,8 +85,9 @@ export function useDepositSource(): DepositSource {
   const fixture = useContext(Fixture);
   const { client, snapshot, moneyOn } = useSignpage();
   const { hop, locked } = useReturnHop();
-  // the held list (assets.ts): drawn at once when an earlier read answered, and asked again as the sheet opens so its
-  // minimum follows the live fees; Retry after a refusal asks again. The fixture brings its own.
+  // the held list (assets.ts): drawn at once when an earlier read answered, and asked again as the sheet opens unless it
+  // is younger than a minute, so its minimum follows the live fees; Retry after a refusal asks again (no list is then
+  // held). The fixture brings its own.
   const assets = useSyncExternalStore(DEPOSIT_ASSETS.subscribe, DEPOSIT_ASSETS.view);
   const [asks, setAsks] = useState(0);
   useEffect(() => {

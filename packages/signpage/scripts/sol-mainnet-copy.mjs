@@ -20,6 +20,9 @@
 // - SOL_COPY_ONLY=<kind,...> runs those kinds only; SOL_COPY_STEPS=buy stops each after its buy.
 // - SOL_COPY_PLANT=mayhem-drop: the Mayhem coin's buy is built with its curve read as not Mayhem, so the buy names the
 //   plain fee recipient in place of the Mayhem one; the run must fail with pump's own error.
+// - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, its engine stand-in landing each bundle,
+//   through pool-buy-pieces-devnet.mjs's copy-part1 in place of the flow: 6 notes of 0.01 SOL, a buy only 5 pay (refused,
+//   nothing sent), a buy of 2 pieces and Max of the 4 left, each one bundle of the pieces and the helper's tip.
 // - Keys are made fresh for the copy and live only in the run's temp folder, removed at the end.
 import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -37,7 +40,12 @@ const ONLY = (process.env.SOL_COPY_ONLY ?? "").split(",").filter(Boolean);
 const PLANT = process.env.SOL_COPY_PLANT ?? "";
 const STEPS = process.env.SOL_COPY_STEPS ?? "all"; // "buy": deposit and buy only
 // the helper's block engine stand-in (./copy-net.mjs): swallow (takes the bundle, never lands it), busy, refused, lands
-const ENGINE = process.env.SOL_COPY_ENGINE ?? "swallow";
+const FLOW = process.env.SOL_COPY_FLOW ?? "pool";
+if (!["pool", "pieces"].includes(FLOW)) throw new Error(`SOL_COPY_FLOW: pool or pieces, not ${FLOW}`);
+const PIECES = FLOW === "pieces";
+if (PIECES && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=pieces runs the curve coin alone, with no plant and every step");
+const ENGINE = process.env.SOL_COPY_ENGINE ?? (PIECES ? "lands" : "swallow");
+if (PIECES && ENGINE !== "lands") throw new Error("SOL_COPY_FLOW=pieces needs the stand-in that lands each bundle");
 if (!["swallow", "busy", "refused", "lands"].includes(ENGINE)) throw new Error(`SOL_COPY_ENGINE: swallow, busy, refused or lands, not ${ENGINE}`);
 const log = (s) => console.log(`${new Date().toISOString()} copy: ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -78,7 +86,7 @@ const many = async (keys) => {
 
 // 1. the coins
 const coins = Object.fromEntries(given.map((g) => g.split("=")).map(([k, v]) => [k, { mint: v, list: "given" }]));
-const KINDS = ["curve", "mayhem", "graduated"].filter((k) => ONLY.length === 0 || ONLY.includes(k));
+const KINDS = PIECES ? ["curve"] : ["curve", "mayhem", "graduated"].filter((k) => ONLY.length === 0 || ONLY.includes(k));
 let candidates = [];
 if (KINDS.some((k) => !coins[k])) {
   const lists = await (await fetch("https://ct-api.unrealized.trade/v1/market/lists?chain=solana", { headers: { origin: "https://ct.unrealized.trade" } })).json();
@@ -318,6 +326,23 @@ for (const kind of KINDS) {
   mkdirSync(dir, { mode: 0o700 });
   writeFileSync(cfg, JSON.stringify({ rpcs: URLS, feePayerKeyFile: fpFile, dir, mint: c.mint, engine: ENGINE, plant: kind === "mayhem" ? PLANT : "" }));
   const flowOut = join(dir, "flow.json");
+  if (PIECES) {
+    log(`${kind} ${c.mint}: copy-part1 of pool-buy-pieces-devnet.mjs`);
+    const r = await runNode(["packages/signpage/scripts/pool-buy-pieces-devnet.mjs", "copy-part1", "pinned", c.mint, flowOut], { FLOW_COPY: cfg });
+    const f = existsSync(flowOut) ? JSON.parse(readFileSync(flowOut, "utf8")) : null;
+    runs[kind] = { exit: r.code, pieces: f, tail: r.out.split("\n").slice(-30) };
+    const Ws = { "buy-2": f?.two?.W ?? null, max: f?.max?.W ?? null };
+    const seen = new Set();
+    for (const s of f?.steps ?? []) {
+      if (seen.has(s.signature)) continue;
+      seen.add(s.signature);
+      const tx = await local("getTransaction", [s.signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]);
+      records.push(txRecord(kind, s.step, s.signature, tx, Ws[s.step] ? { W: Ws[s.step] } : {}, (x) => base58.decode(x)));
+    }
+    for (const s of f?.simFails ?? []) records.push({ coin: kind, step: s.phase, ok: false, simulation: s });
+    records.push({ coin: kind, step: "pieces", ok: r.code === 0 && f?.ok === true, exit: r.code, why: f?.why ?? null });
+    continue;
+  }
   log(`${kind} ${c.mint}: deposit, buy${STEPS === "buy" ? "" : ", sell"}`);
   // a graduated coin runs on the copy's own PumpSwap table, with the pump curve's pinned one
   let tables = "pinned";
@@ -363,8 +388,14 @@ for (const kind of KINDS) {
   if (!f) records.push({ coin: kind, step: "flow", ok: false, exit: flow.code, tail: flow.out.split("\n").slice(-15) });
 }
 const record = {
+  ...(PIECES ? { onlyTheOwnersRealTap: [
+    "the real Jito block engine landing the bundle of the pieces and the tip in one slot, at the real tip floor: the copy's stand-in sends each to the copy on its own, in order",
+    "the real tap to filled time: the copy has one local RPC, no network and no engine round trip",
+    "the real fee payer and relay fees on the deployed helper: the copy's helper sender runs in this process with a fresh fee payer, the fee the kit's for the copy's rent",
+    "the 151-block clock on real slot times on the real RPC pair: the copy's slots run on this machine's clock",
+  ] } : {}),
   at: new Date().toISOString(),
-  what: "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
+  what: PIECES ? "a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): 6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max" : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
   validator: version,
   mainnetSlot: read.slot,
   rent: { mainnet: mainRent, copy: copyRent },
