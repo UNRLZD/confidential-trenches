@@ -26,8 +26,9 @@ import { EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolSellQuote, type EvmPoo
 import { BOUGHT, flat, provider, refreshHead, sellQuoteWith, TOKEN } from "../../kit/test/evm-sell-quote-fx.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
-import { EVM_OPEN_SELLS_KEY, EVM_SELL_DEADLINE_S, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, planEvmSell, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
+import { EVM_OPEN_SELLS_KEY, EVM_SELL_DEADLINE_S, evmBuyRouteRead, evmSellPlanQuote, evmSellAnswer, followEvmSells, planEvmSell, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
@@ -1150,4 +1151,18 @@ test("a sale quote read again at W's signature that fails: nothing signed, recor
   assert.equal(x.posts.length, 0);
   assert.deepEqual(await openOf(x), []);
   assert.notEqual((await returnNote(x.store))?.state, "INCOMING");
+});
+
+test("a two-W sale's answer to the app is its stage and transactions, which the kit's pool.sell schema takes; the legs and their rule words stay on the page (review of 586284afc, P3)", () => {
+  const tx = { chain: "base" as const, hash: "0x" + "ab".repeat(32) };
+  const run = { stage: "part_filled" as const, txs: [tx], legs: [
+    { wallet: W, amount: "1000", tx: tx.hash, stage: "filled" as const },
+    { wallet: "0x" + "e2".repeat(20), amount: "500", tx: null, stage: null, error: "quote_check_failed" as const, rule: "below_reference" },
+  ] };
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS["pool.sell"](run), false, "the run as it is, legs and all, is refused by the kit");
+  const a = evmSellAnswer(run);
+  assert.deepEqual(a, { result: { stage: "part_filled", txs: [tx] } });
+  assert.ok("result" in a && SIGNPAGE_RESULT_SCHEMAS["pool.sell"](a.result), "the kit's client takes the answer");
+  assert.deepEqual(evmSellAnswer({ error: "quote_check_failed", rule: "below_reference" }), { error: "quote_check_failed", rule: "below_reference" });
+  assert.deepEqual(evmSellAnswer({ error: "down" }), { error: "down" });
 });

@@ -991,6 +991,13 @@ export function evmSellHost(chain: Chain, pin: EvmPoolPin, scope: bigint, rpcs: 
 
 type Locks = Pick<LockManager, "request">;
 
+/** A sale's answer to the app: its stage and transactions, as the Solana sell's kind posts it (pool-sell.ts). The legs,
+ *  with each leg's rule word, stay on the page (review of 586284afc, P3: the kit's pool.sell schema refuses legs). */
+export function evmSellAnswer(a: PoolSellAnswer): HostAnswer<"pool.sell"> | HostRefusal {
+  if ("error" in a) return a.rule !== undefined ? { error: a.error, rule: a.rule } : { error: a.error };
+  return { result: { stage: a.stage, txs: a.txs } };
+}
+
 /** The pool.sell kind on an EVM chain: one run per tap; the part up to each send under the seed's shared lock, the
  *  read-back outside it. Answered "sent" once the first bytes have left, or with the run's own answer. */
 export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
@@ -1017,7 +1024,7 @@ export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, lock
           },
           ask,
         );
-        if (!answer) answer = "error" in a ? ("rule" in a && a.rule !== undefined ? { error: a.error, rule: a.rule } : { error: a.error }) : { result: a };
+        if (!answer) answer = evmSellAnswer(a);
         if ("stage" in a) ctx?.progress(a.stage);
       } finally {
         h.end?.();
