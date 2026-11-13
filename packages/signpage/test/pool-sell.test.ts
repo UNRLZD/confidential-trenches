@@ -6099,7 +6099,7 @@ for (const broken of ["spacing", "claim"] as const) test(`round-trip-costs-less 
   assert.equal(w.owed.size, 3, "every record kept");
 });
 
-// item 4: a stamp whose gap ends past now + the largest gap (a clock set ahead) is none, in the load's read and the claim
+// item 4: a stamp more than the largest gap ahead of now (a clock set ahead) is none, in the load's read and the claim
 test("round-trip-costs-less P3-e: a stamp from the future reads as none", async () => {
   const { w, senders } = await leftovers(true);
   const idb = new IDBFactory();
@@ -6107,8 +6107,8 @@ test("round-trip-costs-less P3-e: a stamp from the future reads as none", async 
   const now = 5_000_000;
   await d.space({ at: now + 2 * POOL_RENT_BACK_SPACE_MAX_MS, gap: POOL_RENT_BACK_SPACE_MIN_MS });
   assert.equal(spaceOpen(await d.spacing(), now), false);
-  assert.equal(spaceOpen({ at: now, gap: POOL_RENT_BACK_SPACE_MAX_MS }, now), true, "the largest gap from now is open");
-  assert.equal(spaceOpen({ at: now + 1, gap: POOL_RENT_BACK_SPACE_MAX_MS }, now), false, "one ms past it is not");
+  assert.equal(spaceOpen({ at: now + POOL_RENT_BACK_SPACE_MAX_MS, gap: POOL_RENT_BACK_SPACE_MAX_MS }, now), true, "the largest gap ahead of now is trusted");
+  assert.equal(spaceOpen({ at: now + POOL_RENT_BACK_SPACE_MAX_MS + 1, gap: POOL_RENT_BACK_SPACE_MAX_MS }, now), false, "one ms past it is not");
   const host: PoolSellHost = { ...w.host, now: () => BigInt(now), owed: { ...w.host.owed!, ...d } };
   forgetPageLoad();
   const from = w.c.calls.length;
@@ -6146,25 +6146,19 @@ test("round-trip-costs-less P2-1: a sale stamps the device before its send, and 
   assert.equal(senders(from).size, 1, "past the sale's gap: one W");
 });
 
-// review P2-1 of 024e8a89d: a sale's own rent back claims the device's slot as a leftover pass does; its own sale's stamp
-// never holds it, another W's newer one does (another tab's leftover send right after the sale)
-test("round-trip-costs-less P2-1: a sale's own rent back is held when another W's stamp is the device's last, nothing sent", async () => {
+// the review of 3e288da51 (P2): a sale's own rent back claims no slot and is never held, even when another W's stamp is
+// the device's last (another tab's leftover send right after the sale): its W's sale is on chain already
+test("round-trip-costs-less: a sale's own rent back is never held, even when another W's stamp is the device's last", async () => {
   const w = await world();
   let space: RentBackSpacing | undefined;
+  let claims = 0;
   const sends = () => w.c.calls.filter((c) => c.method === "sendTransaction").length;
-  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, sent: (sig: string) => (w.host.sent?.(sig), (space = { at: 5_000_001, gap: 1_200_000 })), owed: { ...w.host.owed!, spacing: async () => space, space: async (v) => void (space = v), claim: async (v, own) => (spaceOpen(space, v.at, own) ? false : ((space = v), true)) } };
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, sent: (sig: string) => (w.host.sent?.(sig), (space = { at: 5_000_001, gap: 1_200_000 })), owed: { ...w.host.owed!, spacing: async () => space, space: async (v) => void (!space || v.at > space.at ? (space = v) : undefined), claim: async (v, own) => (claims++, spaceOpen(space, v.at, own) ? false : ((space = v), true)) } };
   const a = await runPoolSell(host, ASK);
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-  assert.equal(sends(), 2, "the sale alone, to both RPCs");
-  assert.deepEqual(space, { at: 5_000_001, gap: 1_200_000 }, "the other W's stamp stands");
-  assert.ok(w.told.some((t) => t.step === "rent_back" && t.state === "gave_up" && /^spaced/.test(t.detail ?? "")), JSON.stringify(w.told));
-  assert.equal(w.owed.get(W.address)?.spaced, 5_000_000, "W's record kept, its own last send the sale");
-  // its own sale's stamp alone: the rent back goes
-  const v = await world();
-  let own: RentBackSpacing | undefined;
-  const b = await runPoolSell({ ...v.host, now: () => 5_000_000n, owed: { ...v.host.owed!, spacing: async () => own, space: async (x) => void (own = x), claim: async (x, o) => (spaceOpen(own, x.at, o) ? false : ((own = x), true)) } }, ASK);
-  assert.equal("stage" in b && b.stage, "filled");
-  assert.ok(v.c.calls.filter((c) => c.method === "sendTransaction").length > 2, "the sale's own rent back sent");
+  assert.ok(sends() > 2, "the sale's own rent back sent");
+  assert.equal(claims, 0, "no claim");
+  assert.ok(!w.told.some((t) => t.state === "gave_up"), JSON.stringify(w.told));
 });
 
 // review P2-1 of 024e8a89d: no leftover W's close or sweep goes while a pool buy or sell holds POOL_TRADE_LOCK in any tab;
@@ -6186,6 +6180,175 @@ test("round-trip-costs-less P2-1: no leftover pass while a trade holds the trade
   forgetPageLoad();
   await resumeRentBacks(host, fakeLocks());
   assert.ok(sends().length > 0, "the trade ended: the next run passes");
+});
+
+/** An IndexedDB whose open never answers (WebKit under storage pressure, some private windows: only onerror and onblocked
+ *  reject): the device's spacing on it, raced against `ms`. */
+const neverOpens = (ms = 30) => deviceSpacing({ open: () => ({}) } as unknown as IDBFactory, "never", ms);
+/** Locks as fakeLocks, each name's holds counted, shared ones too: what is still held when a run ends. */
+function countedLocks(): Pick<LockManager, "request" | "query"> & { held: Map<string, number> } {
+  const base = fakeLocks();
+  const held = new Map<string, number>();
+  return {
+    held,
+    query: (async () => ({ held: [...held.entries()].filter(([, n]) => n > 0).map(([name]) => ({ name, mode: "shared" })), pending: [] })) as never,
+    request: (async (name: string, opts: never, f: (l: unknown) => Promise<unknown>) =>
+      base.request(name, opts, (async (l: unknown) => {
+        if (l === null) return f(l);
+        held.set(name, (held.get(name) ?? 0) + 1);
+        try {
+          return await f(l);
+        } finally {
+          held.set(name, held.get(name)! - 1);
+        }
+      }) as never)) as never,
+  };
+}
+const stillHeld = (l: { held: Map<string, number> }) => [...l.held.entries()].filter(([, n]) => n > 0).map(([k]) => k);
+
+// probe P-J of the review of 3e288da51: the sale's stamp is started before its send and not awaited there, so a spacing
+// store that never answers holds no sale: its send goes in the same turn of the event loop as with no store at all
+test("round-trip-costs-less P-J: a spacing store that never answers never holds a sale's send", async () => {
+  for (const store of ["none", "never"] as const) {
+    const w = await world();
+    const d = neverOpens();
+    let calls = 0;
+    let turned = false;
+    let first: { calls: number; turned: boolean } | undefined;
+    const rpcs = w.host.rpcs.map((r) => ((m: string, p: unknown) => (m === "sendTransaction" && first === undefined && (first = { calls, turned }), (r as (m: string, p: unknown) => unknown)(m, p))) as never) as unknown as typeof w.host.rpcs;
+    const owed = store === "none" ? w.host.owed! : { ...w.host.owed!, ...d, space: (v: RentBackSpacing) => (calls++, setImmediate(() => (turned = true)), d.space(v)) };
+    const ended = { n: 0 };
+    const r = poolSellKind(() => ({ ...w.host, rpcs, owed, now: () => 5_000_000n, storeMs: 30, ops: async () => w.store, end: () => void ended.n++ }), fakeLocks())(ASK, ctxOf(`pj-${store}`)) as KindAnswer;
+    await Promise.race([r.after, new Promise((_, no) => setTimeout(() => no(new Error(`${store}: the sale never sent`)), 2_000))]);
+    assert.equal(r.answer().result?.stage, "sent", store);
+    // the stamp's write started before the send, and no turn of the event loop between them
+    assert.deepEqual(first, { calls: store === "none" ? 0 : 1, turned: false }, store);
+    await until(async () => ended.n > 0);
+    assert.equal(ended.n, 1, store);
+  }
+});
+
+// probe P-K: a claim that never answers holds a leftover pass at the store's bound, and the pass ends; a sale's run with
+// that store makes no claim (its own rent back is never held) and ends with every lock it took free
+test("round-trip-costs-less P-K: a spacing store that never answers holds a leftover pass at its bound; a sale's run still ends with its locks free", async () => {
+  const { w, sends } = await leftovers(false);
+  forgetPageLoad();
+  await Promise.race([resumeRentBacks({ ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, ...neverOpens() } }, fakeLocks()), new Promise((_, no) => setTimeout(() => no(new Error("the pass never ended")), 3_000))]);
+  assert.equal(sends().length, 0, "held");
+  assert.equal(w.owed.size, 3, "every record kept");
+  const s = await world();
+  const locks = countedLocks();
+  const ended = { n: 0 };
+  const r = poolSellKind(() => ({ ...s.host, now: () => 5_000_000n, storeMs: 30, owed: { ...s.host.owed!, ...neverOpens() }, ops: async () => s.store, end: () => void ended.n++ }), locks)(ASK, ctxOf("pk")) as KindAnswer;
+  await r.after;
+  await until(async () => ended.n > 0);
+  assert.equal(ended.n, 1, "the run ended");
+  assert.deepEqual(stillHeld(locks), [], "no lock held");
+  for (const name of [POOL_TRADE_LOCK, "ct-wallet/seed", `ct-pool/back/${W.address}`, POOL_SELL_LOCK]) assert.ok(locks.held.has(name), `${name} taken and let go`);
+  assert.ok(s.c.calls.filter((c) => c.method === "sendTransaction").length > 2, "the sale's own rent back's teardown sent, its stamps dropped at the bound");
+  assert.ok(!s.told.some((t) => t.state === "gave_up"), `never held: ${JSON.stringify(s.told)}`);
+});
+
+// item 5: the lock manager's query, raced against the store's bound: one that never answers holds the leftover pass
+test("round-trip-costs-less: a lock query that never answers holds every leftover pass", async () => {
+  const { w, sends } = await leftovers(false);
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, storeMs: 30, owed: { ...w.host.owed!, spacing: async () => undefined, space: async () => {}, claim: async () => true } };
+  forgetPageLoad();
+  assert.equal(await resumeRentBacks(host, { ...fakeLocks(), query: (() => new Promise(() => {})) as never } as never), true, "a W left to try");
+  assert.equal(sends().length, 0);
+});
+
+// the stamp a sale started lands 50 ms after its send: it is in the store before the run lets go of POOL_TRADE_LOCK, and a
+// leftover pass asked in between is held by that lock, one asked after by the sale's gap
+test("round-trip-costs-less: a sale's stamp that lands late is in before the trade lock goes; a leftover pass in between is held", async () => {
+  let space: RentBackSpacing | undefined;
+  const dev = { spacing: async () => space, claim: async (v: RentBackSpacing, own?: number) => (spaceOpen(space, v.at, own) ? false : ((space = v), true)) };
+  const s = await world({ held: 2n * AMOUNT }, [wallet(2n * AMOUNT)]);
+  const locks = countedLocks();
+  const atRelease: (RentBackSpacing | undefined)[] = [];
+  const request = locks.request;
+  locks.request = (async (name: string, opts: never, f: (l: unknown) => Promise<unknown>) => (name !== POOL_TRADE_LOCK ? request(name, opts, f as never) : request(name, opts, (async (l: unknown) => {
+    try {
+      return await f(l);
+    } finally {
+      atRelease.push(space);
+    }
+  }) as never))) as never;
+  const late = (v: RentBackSpacing) => new Promise<void>((ok) => setTimeout(() => ((space = v), ok()), 50));
+  const ended = { n: 0 };
+  const r = poolSellKind(() => ({ ...s.host, now: () => 5_000_000n, owed: { ...s.host.owed!, ...dev, space: late }, ops: async () => s.store, end: () => void ended.n++ }), locks)(ASK, ctxOf("late")) as KindAnswer;
+  await r.after;
+  assert.equal(r.answer().result?.stage, "sent");
+  assert.equal(space, undefined, "the send went before the stamp landed");
+  // another W of the device's, owed a leftover rent back, its load while the sale's run holds the trade lock: held
+  const { w, senders } = await leftovers(false);
+  let now = 5_000_100n;
+  const host: PoolSellHost = { ...w.host, now: () => now, owed: { ...w.host.owed!, ...dev, space: async (v) => void (space = v) } };
+  forgetPageLoad();
+  let from = w.c.calls.length;
+  assert.ok((locks.held.get(POOL_TRADE_LOCK) ?? 0) > 0, "asked while the run holds the trade lock");
+  assert.equal(await resumeRentBacks(host, locks), true, "a W left to try");
+  assert.equal(senders(from).size, 0);
+  await until(async () => ended.n > 0);
+  assert.equal(atRelease.length, 1);
+  assert.equal(atRelease[0]?.at, 5_000_000, "the sale's stamp in before the trade lock went");
+  // after it, inside the sale's gap: held by the gap
+  now = 5_060_000n;
+  forgetPageLoad();
+  from = w.c.calls.length;
+  await resumeRentBacks(host, locks);
+  assert.equal(senders(from).size, 0, "inside the sale's gap: held");
+});
+
+// probe P-L: a stamp that lands late never puts an older time back over a newer one (a claim at 2,000, then a sale's stamp
+// at 1,000 that landed after it); one over a stamp the clock does not trust (far ahead) replaces it
+test("round-trip-costs-less P-L: a late older stamp never overwrites a newer one; a stamp too far ahead is replaced", async () => {
+  const d = deviceSpacing(new IDBFactory());
+  assert.equal(await d.claim({ at: 2_000, gap: POOL_RENT_BACK_SPACE_MIN_MS }), true);
+  await d.space({ at: 1_000, gap: POOL_RENT_BACK_SPACE_MAX_MS });
+  assert.deepEqual(await d.spacing(), { at: 2_000, gap: POOL_RENT_BACK_SPACE_MIN_MS });
+  await d.space({ at: 3_000, gap: POOL_RENT_BACK_SPACE_MAX_MS });
+  assert.deepEqual(await d.spacing(), { at: 3_000, gap: POOL_RENT_BACK_SPACE_MAX_MS }, "a newer one is written");
+  const far = 3_000 + POOL_RENT_BACK_SPACE_MAX_MS + 1;
+  const e = deviceSpacing(new IDBFactory());
+  await e.space({ at: far + 5_000, gap: POOL_RENT_BACK_SPACE_MIN_MS });
+  await e.space({ at: 5_000, gap: POOL_RENT_BACK_SPACE_MIN_MS });
+  assert.deepEqual(await e.spacing(), { at: 5_000, gap: POOL_RENT_BACK_SPACE_MIN_MS }, "a stamp past now + the largest gap is not trusted");
+});
+
+// probe P-N: the clock set back after a stamp: a stamp up to the largest gap ahead of now holds to its at + gap, so a gap
+// never reads closed because the clock moved back 15 minutes; one further ahead is not trusted
+test("round-trip-costs-less P-N: a clock set back 15 minutes still holds the gap to at + gap", async () => {
+  const T = 50_000_000;
+  const s = { at: T, gap: POOL_RENT_BACK_SPACE_MAX_MS };
+  for (const now of [T - 15 * 60_000, T, T + POOL_RENT_BACK_SPACE_MAX_MS - 1]) assert.equal(spaceOpen(s, now), true, String(now - T));
+  assert.equal(spaceOpen(s, T + POOL_RENT_BACK_SPACE_MAX_MS), false, "closed at at + gap");
+  assert.equal(spaceOpen(s, T - POOL_RENT_BACK_SPACE_MAX_MS), true, "the largest gap ahead: trusted");
+  assert.equal(spaceOpen(s, T - POOL_RENT_BACK_SPACE_MAX_MS - 1), false, "further ahead: none");
+  const d = deviceSpacing(new IDBFactory());
+  await d.space(s);
+  assert.equal(await d.claim({ at: T - 15 * 60_000, gap: POOL_RENT_BACK_SPACE_MIN_MS }), false, "the claim refused under a clock set back");
+});
+
+// a sale over 3 Ws: each W's own rent back goes in the sale's run, none held by the others' stamps (each W's sale is on
+// chain already); each still stamps the device, so a leftover pass asked right after is held
+test("round-trip-costs-less: a sale over 3 Ws sends all 3 own rent backs in its run; a leftover pass right after is held", async () => {
+  const w = await world({ held: T5, ataLamports: TOKEN_RENT, others: [{ l: 8n, j: 0, held: T3 }, { l: 9n, j: 0, held: T3 }] }, [listedW(T5), walletX(T3), walletY(T3)]);
+  const idb = new IDBFactory();
+  const d = deviceSpacing(idb);
+  // a clock that moves (1 s a read), so each W's sale and sends stamp a time of their own
+  let clock = 5_000_000;
+  const a = await runPoolSell({ ...w.host, now: () => BigInt((clock += 1_000)), owed: { ...w.host.owed!, ...d } }, share(10_000));
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal("legs" in a && a.legs?.length, 3);
+  for (const at of [W.address, X.address, Y.address]) assert.ok(w.told.some((t) => t.address === at && t.step === "rent_back" && t.state === "sent"), `${at}: ${JSON.stringify(w.told)}`);
+  assert.equal(w.c.deposits.filter((x) => x.sweep).length, 3, "one sweep per W");
+  assert.ok(!w.told.some((t) => t.state === "gave_up"), JSON.stringify(w.told));
+  const { w: o, senders } = await leftovers(false);
+  forgetPageLoad();
+  const from = o.c.calls.length;
+  await resumeRentBacks({ ...o.host, now: () => BigInt(clock + 60_000), owed: { ...o.host.owed!, ...deviceSpacing(idb) } }, fakeLocks());
+  assert.equal(senders(from).size, 0, "held by the sale's rent backs' gap");
 });
 
 test("round-trip-costs-less a: the Ws a load passes go in an order drawn at random, apart by the gap", async () => {

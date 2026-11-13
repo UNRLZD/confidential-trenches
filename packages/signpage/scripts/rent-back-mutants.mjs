@@ -125,7 +125,7 @@ export const M = [
   ["review F4 the record kept after its verdict", SELL, T, "        await h.kept?.drop(signature).catch(() => {});\n", ""],
   // review of fcd67b72: P1 the load settles a kept sell with no note; P2 the kept record before the request's record
   ["review P1 the load settles sells only on a note", TESTNET, TT, " || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();", ") await settleSells();"],
-  ["review P2 the kept record after the request's record", SELL, T, [["    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bhv.lastHeight });\n", ""], ["    await h.signed?.(signature);\n    // a store that cannot be written leaves the last stamp", "    await h.signed?.(signature);\n    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bhv.lastHeight });\n    // a store that cannot be written leaves the last stamp"]]],
+  ["review P2 the kept record after the request's record", SELL, T, [["    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bhv.lastHeight });\n", ""], ["    await h.signed?.(signature);\n    // the stamp's write starts here and the send goes at once", "    await h.signed?.(signature);\n    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bhv.lastHeight });\n    // the stamp's write starts here and the send goes at once"]]],
   // card pool-sell-share-across-wallets: each sale of a sell names its signature on the request's record (its leg) before
   // the run's own signed hook and before the send; the leg's write moved after the send would let a sale leave unnamed
   ["a sell leg's record names its signature only after the send", SELL, T, [["        await hooks.signed?.(i, signature);\n        await h.signed?.(signature);\n", "        await h.signed?.(signature);\n"], ["        open();\n        hooks.sent?.(i, signature);\n", "        open();\n        void hooks.signed?.(i, signature);\n        hooks.sent?.(i, signature);\n"]]],
@@ -171,12 +171,19 @@ export const M = [
   ["c24 a held W listed with no amount", SELL, T, "          await owedAfter(h, o, \"gave_up\", undefined, lamports === undefined ? {} : { lamports });", "          await owedAfter(h, o, \"gave_up\", undefined, {});"],
   ["c25 a found W past its time part not listed", SELL, T, "if ((x.buy || since !== undefined) && la === lb) x.read?.(la!);", "if (x.buy && la === lb) x.read?.(la!);"],
   ["c26 this device's own unrecorded buy W listed while held", SELL, T, "  if (account && evidence?.rec !== undefined && evidence.rec.rebuilt !== true) return undefined;\n", ""],
-  ["c27 any W that ever sent exempt from the gap", SPACING, T, "s !== undefined && s.at !== own && now", "s !== undefined && own === undefined && now"],
-  // review P2-1 of 024e8a89d: the sale stamps the device, its own rent back claims the slot, no leftover pass beside a
-  // trade (the trade lock's own reads and the load's start are held by their tests' red runs)
-  ["c28 a sale sent with no stamp", SELL, T, "    await Promise.resolve(h.owed?.space?.({ at: saleAt, gap: gapDrawn() })).catch(() => {});\n", ""],
-  ["c29 a sale's own rent back takes no slot", SELL, T, "    if (claimed || h.owed?.claim === undefined) return;", "    if (x.own !== undefined || claimed || h.owed?.claim === undefined) return;"],
-  ["c30 a leftover pass beside a trade", SELL, T, "      if (await tradeRunning(locks)) {", "      if (false) {"],
+  ["c27 any W that ever sent exempt from the gap", SPACING, T, "s !== undefined && s.at !== own && trusted", "s !== undefined && own === undefined && trusted"],
+  // review P2-1 of 024e8a89d and the review of 3e288da51: the sale stamps the device, its own rent back claims no slot,
+  // no leftover pass beside a trade (the trade lock's own reads and the load's start are held by their tests' red runs)
+  ["c28 a sale sent with no stamp", SELL, T, "    later.stamp = Promise.all([later.stamp, (async () => h.owed?.space?.({ at: saleAt, gap: gapDrawn() }))().catch(() => {})]);\n", ""],
+  ["c29 a sale's own rent back claims a slot (held by another W's stamp)", SELL, T, "    if (claimed || x.sale === true || h.owed?.claim === undefined) return;", "    if (claimed || h.owed?.claim === undefined) return;"],
+  ["c30 a leftover pass beside a trade", SELL, T, "      if (await tradeRunning(locks, h.storeMs ?? TRADE_STORE_MS)) {", "      if (false) {"],
+  // a spacing store that never answers (an IndexedDB open with no onsuccess): the sale's send waits on no stamp, and the
+  // run lets go of the trade lock only once its stamps are in or their bound has passed
+  ["c31 a sale's send waits on its stamp", SELL, T, "    later.stamp = Promise.all([later.stamp, (async () => h.owed?.space?.({ at: saleAt, gap: gapDrawn() }))().catch(() => {})]);\n", "    later.stamp = Promise.all([later.stamp, (async () => h.owed?.space?.({ at: saleAt, gap: gapDrawn() }))().catch(() => {})]);\n    await later.stamp;\n"],
+  ["c32 the trade lock let go before the sale's stamp is in", SELL, T, "}).finally(() => stamped(laters, ran?.storeMs ?? TRADE_STORE_MS));", "});"],
+  ["c33 a late older stamp put over a newer one", SPACING, T, "if (was === undefined || v.at > was.at || !trusted(was, v.at)) s.put(", "s.put("],
+  ["c34 a clock set back closes the gap", SPACING, T, "s.at !== own && trusted(s, now) && now < s.at + s.gap", "s.at !== own && now < s.at + s.gap && s.at + s.gap <= now + POOL_RENT_BACK_SPACE_MAX_MS"],
+  ["c35 the device's spacing with no bound", SPACING, T, "return within(go(), ms, \"the device's spacing\").catch(", "return go().catch("],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = M.map(([name]) => name);

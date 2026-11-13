@@ -15,10 +15,12 @@
 //     read; the page reads the restore's no-buy mark;
 //   - the sell's rule: a sale paying over 100,000 lamports of priority refused, and a sale's fee over 105,000, full or
 //     partial;
-//   - a leftover W's rent back spaced: a gap of 10 to 60 minutes from each send from a W into the pool (a sale stamps the
-//     device before it is sent, W's record keeping the time as its own), every rent back claiming the device's slot, one
-//     sending pass a load, none while a pool buy or sell holds the trade lock, a load's first pass at a start drawn from
-//     15 to 60 s, a W waiting so listed on its way (state.wallets RETURNING) at its last read;
+//   - a leftover W's rent back spaced: a gap of 10 to 60 minutes from each send from a W into the pool (a sale's stamp
+//     started before its send and never awaited there, in before the trade lock goes; W's record keeping the time as its
+//     own), every leftover pass claiming the device's slot and a sale's own rent back none, the device's store bounded
+//     and its stamps newer-only, one sending pass a load, none while a pool buy or sell holds the trade lock (a lock read
+//     past the bound holds it), a load's first pass at a start drawn from 15 to 60 s, a W waiting so listed on its way
+//     (state.wallets RETURNING) at its last read;
 //   - a W read empty listed empty only once no note of its is RESERVED.
 // It does not prove those lines run: that is the signing page's tests at the released commit (test/pool-sell.test.ts,
 // test/pool-testnet.test.ts, test/rules-pool.test.ts), and that the served files are that commit's build is
@@ -102,9 +104,13 @@ export const MARKS = Object.freeze({
     (g) => [
       // the gap's draw: 10 minutes and up to 50 more, from the device's random source
       R`[,; ](${I})=6e5,(${I})=36e5,[^]*?[,; ]${esc(g.gd)}=\(\)=>\1\+(${I})\(\2-\1\+1\);function \3\((${I})\)\{if\(\4<=1\)return 0;`,
-      // the device's database, its gap rule (own W's exempt, one ending past now + 60 minutes none), the claim in one
-      // readwrite transaction over that rule, the owed store's spacing on it by default
-      R`[,; ](${I})=` + "`ct-device`" + R`,(${I})=` + "`space`" + R`,(${I})=` + "`rentback-sol`" + R`,(${I})=\((${I}),(${I}),(${I})\)=>\5!==void 0&&\5\.at!==\7&&\6<\5\.at\+\5\.gap&&\5\.at\+\5\.gap<=\6\+36e5,`,
+      // the device's database, its gap rule (own W's exempt; a stamp up to 60 minutes ahead of now, a clock set back,
+      // holds to at + gap; one further ahead none), the claim in one readwrite transaction over that rule, a stamp
+      // written only over an older or untrusted one in one readwrite transaction, each call raced against the store's
+      // bound (an open that answers late closed unused), the owed store's spacing on it by default
+      R`[,; ](${I})=36e5,(${I})=` + "`ct-device`" + R`,(${I})=` + "`space`" + R`,(${I})=` + "`rentback-sol`" + R`,(${I})=\((${I}),(${I})\)=>\6\.at<=\7\+\1,(${I})=\((${I}),(${I}),(${I})\)=>\9!==void 0&&\9\.at!==\11&&\5\(\9,\10\)&&\10<\9\.at\+\9\.gap,`,
+      R`space:(${I})=>(${I})\(` + "`readwrite`" + R`,\((${I}),(${I})\)=>\{let (${I})=\3\.get\((${I})\);\5\.onsuccess=\(\)=>\{let (${I})=(${I})\(\5\.result\);\(\7===void 0\|\|\1\.at>\7\.at\|\|!(${I})\(\7,\1\.at\)\)&&\3\.put\(\{at:\1\.at,gap:\1\.gap\},\6\),\4\(\)\}\}\)`,
+      R`\.onsuccess=\(\)=>(${I})\?(${I})\.result\.close\(\):(${I})\(\2\.result\),[^]{0,500}?\}\)\(\),(${I}),` + "`the device's spacing`" + R`\)\.catch\(`,
       R`claim:\((${I}),(${I})\)=>(${I})\(` + "`readwrite`" + R`,\((${I}),(${I})\)=>\{let (${I})=\4\.get\((${I})\);\6\.onsuccess=\(\)=>\{if\((${I})\((${I})\(\6\.result\),\1\.at,\2\)\)return \5\(!1\);\4\.put\(\{at:\1\.at,gap:\1\.gap\},\7\),\5\(!0\)\}\}\)`,
       R`=\((${I}),(${I})=(${I})\(\)\)=>\{let (${I})=` + "`owed/rentback-sol`" + R`;return\{`,
       R`spacing:\(\)=>(${I})\.spacing\(\),space:(${I})=>\1\.space\(\2\),claim:\((${I}),(${I})\)=>\1\.claim\(\3,\4\)\}`,
@@ -113,8 +119,9 @@ export const MARKS = Object.freeze({
       R`${esc(g.ms)}>(${I})&&\((${I})=(${I})\)\}`,
       // a held W: not passed, told spaced, its record kept
       R`if\((${I})&&(${I})\(\1\)\)\{if\(!await ${I}\(${I},(${I}),!0,${I},async\(\)=>\{let (${I})=await ${I}\(\);if\(!\4\)return;${I}\.told\?\.\(\{address:\3,step:` + "`rent_back`,state:`gave_up`,detail:`spaced: ",
-      // every rent back's claim, a sale's own as a leftover pass's (review P2-1 of 024e8a89d)
-      R`(${I})=async\(\)=>\{if\((${I})\|\|(${I})\.owed\?\.claim===void 0\)return;let (${I})=\{at:(${I})\(\),gap:${esc(g.gd)}\(\)\};if\(!await \3\.owed\.claim\(\4,(${I})\.own\)\.catch\(\(\)=>!1\)\)throw (${I});\6\.stamped\?\.\(\4\.at\),\2=!0\}`,
+      // every leftover pass's claim; a sale's own rent back (sale) claims none and is never held (the review of 3e288da51)
+      R`(${I})=async\(\)=>\{if\((${I})\|\|(${I})\.sale===!0\|\|(${I})\.owed\?\.claim===void 0\)return;let (${I})=\{at:(${I})\(\),gap:${esc(g.gd)}\(\)\};if\(!await \4\.owed\.claim\(\5,\3\.own\)\.catch\(\(\)=>!1\)\)throw (${I});\3\.stamped\?\.\(\5\.at\),\2=!0\}`,
+      R`,mints:(${I})\.mints,wait:(${I}),sale:!0,`,
       R`(${I})\.ok\.signed\.length>0&&await (${I})\(\);for\(let (${I}) of \1\.ok\.signed\)await ${esc(g.sd)}\(`,
       R`;await (${I})\(\);let (${I})=(${I})\.planned\?\?\(await (${I})\.store\.add\(`,
       R`catch\((${I})\)\{if\(\1===(${I})\|\|\1===(${I})\)throw \1;(${I})=\1,(${I})\((${I}),` + "`fault`",
@@ -139,13 +146,19 @@ export const MARKS = Object.freeze({
   ),
   "a sale stamps the device's spacing after its record names the signature and before it is sent, W's record keeping that time as its own last send": tied(
     re(R`(?<rc>${I})=\{address:${I}\.address,l:${I}\.l\.toString\(\),j:${I}\.j,mints:\[\{mint:${I},program:${I}\.program\}\],passes:0\},(?<at>${I})=Number\((?<h>${I})\.now\?\.\(\)\?\?BigInt\(Date\.now\(\)\)\);if\(!${I}\)\{\k<rc>\.spaced=\k<at>;`),
-    (g) => [R`await ${esc(g.h)}\.signed\?\.\((${I})\),await Promise\.resolve\(${esc(g.h)}\.owed\?\.space\?\.\(\{at:${esc(g.at)},gap:(${I})\(\)\}\)\)\.catch\(\(\)=>\{\}\),(${I})=\1,await Promise\.allSettled\(${I}\.map\((${I})=>\4\(` + "`sendTransaction`"],
+    (g) => [
+      // the stamp's write started, not awaited, and the send at once: a spacing store that never answers holds no sale
+      R`await ${esc(g.h)}\.signed\?\.\((${I})\),(${I})\.stamp=Promise\.all\(\[\2\.stamp,\(async\(\)=>${esc(g.h)}\.owed\?\.space\?\.\(\{at:${esc(g.at)},gap:(${I})\(\)\}\)\)\(\)\.catch\(\(\)=>\{\}\)\]\),(${I})=\1,await Promise\.allSettled\(${I}\.map\((${I})=>\5\(` + "`sendTransaction`",
+      // each stamp awaited, bounded, before the run's rent backs and before it lets go of the trade lock
+      R`(?:[,;]|var |let |const )(${I})=\((${I}),(${I})\)=>Promise\.all\(\2\.map\((${I})=>\4\.stamp&&(${I})\(\4\.stamp,\3,` + "`the device's spacing`" + R`\)\.catch\(\(\)=>\{\}\)\)\)[,;]`,
+      R`\}\)\.finally\(\(\)=>(${I})\((${I}),(${I})\?\.storeMs\?\?[\w$.]+\)\);for\(let (${I}) of \2\)await \4\.back\?\.\(${I}\)\}finally\{\3\?\.end\?\.\(\)\}`,
+    ],
   ),
   "no leftover W's pass starts while a pool buy or sell holds the trade lock, shared, in any tab; a lock read that throws holds it": tied(
-    re(R`(?<nm>${I})=` + "`ct-pool/trade`" + R`,(?<dt>${I})=\((${I}),(${I})\)=>\3\?\3\.request\(\k<nm>,\{mode:` + "`shared`" + R`\},\4\):\4\(\),(?<tr>${I})=async (${I})=>\{try\{return\(\(await \6\?\.query\?\.\(\)\)\?\.held\?\?\[\]\)\.some\((${I})=>\7\.name===\k<nm>\)\}catch\{return!0\}\}`),
+    re(R`(?<nm>${I})=` + "`ct-pool/trade`" + R`,(?<dt>${I})=\((${I}),(${I})\)=>\3\?\3\.request\(\k<nm>,\{mode:` + "`shared`" + R`\},\4\):\4\(\),(?<tr>${I})=async\((${I}),(${I})=(${I})\)=>\{try\{let (${I})=\6\?\.query;return\(\(\9===void 0\?void 0:await (${I})\(\9\.call\(\6\),\7,` + "`the lock manager's query`" + R`\)\)\?\.held\?\?\[\]\)\.some\((${I})=>\11\.name===\k<nm>\)\}catch\{return!0\}\}`),
     (g) => [
       // read before each W's pass, after the gap between passes: the run ends with the Ws left
-      R`>0&&await ${I}\(${I}\+${I}\(${I}\)\),await ${esc(g.tr)}\(${I}\)\)\{${I}=!0;break\}`,
+      R`>0&&await ${I}\(${I}\+${I}\(${I}\)\),await ${esc(g.tr)}\(${I},${I}\.storeMs\?\?[\w$.]+\)\)\{${I}=!0;break\}`,
       // the Solana buy's and sell's whole runs
       R`return ${esc(g.dt)}\((${I}),\(\)=>\1\.request\(${I},\{mode:` + "`shared`" + R`\},async\(\)=>\{let ${I}=${I}=${I}\(\);try\{`,
       R`return ${esc(g.dt)}\((${I}),\(\)=>\1\.request\(${I},\{mode:` + "`shared`" + R`\},async\(\)=>\{try\{await \1\.request\(`,
