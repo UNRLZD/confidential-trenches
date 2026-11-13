@@ -1420,6 +1420,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // pool-buy-record-never-stays-sent)
     landed: (noteId, attempt, withdrawn, block) => void markLanded(noteId, attempt, withdrawn, block).catch(() => {}),
     marks: async () => readReservedMarks(await page.store()),
+    // a filled buy's trade op priced at the page's own price (card closed-positions-show-every-trade)
+    price: (c) => page.price?.(c) ?? null,
   });
   const evmBuy = (chain: "base" | "robinhood") => {
     // first, alone: only where the build carries the chain's withdraw (poolWayOut); a swap that misses its floor leaves
@@ -1648,6 +1650,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // the session's sign out (signingOut, at its tap): it ends a wait between the sale's reads' attempts
       stop: evmStop.signal,
       stopped: ((at) => () => signOuts !== at)(signOuts),
+      // a filled sale's trade op priced at the page's own price (card closed-positions-show-every-trade)
+      price: (c) => page.price?.(c) ?? null,
     });
     // a sale's record written: its token held (evmHolds), the chain read again
     const record: typeof host.record = async (o) => {
