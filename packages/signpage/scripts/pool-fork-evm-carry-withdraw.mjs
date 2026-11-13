@@ -373,6 +373,22 @@ const poolOn = (w) => testnetPool(page(w), { prover: { vault, stop: () => {} } }
 // 1. device A: the restore, then U_X named
 const A = await profile();
 const t = poolOn(A.w);
+// the page's state reads in the carry and the first-leaf watch at the page's own pace: a read at each change the page
+// pushes (its watch: a proof made, a record written; many changes while one read runs make one more, as src/api.ts
+// host.watch) and at each stage of the deposit the app is shown (the app asks state for what it shows), never on a timer
+// (the page has none: src/api.ts, main.ts state). A timer of 500 ms, then 5 s, ran the settle round far past that pace
+let pushReads = 0;
+let pushRunning = null;
+let pushAgain = false;
+const pushRead = () => {
+  if (pushRunning !== null) return void (pushAgain = true);
+  pushReads++;
+  pushRunning = t.stateRead().catch(() => {}).finally(() => {
+    pushRunning = null;
+    if (pushAgain) (pushAgain = false), pushRead();
+  });
+};
+t.watch(pushRead);
 const kinds = poolKinds(testnetPoolDeps(t.flow));
 await guard("restore A", async () => {
   const s = Date.now();
@@ -422,7 +438,7 @@ const deps = {
   status: async () => ({ status: "SUCCESS" }), // 1Click's word once it delivered: played here
   noted: async (g) => uxNoteLanded(await readNotes(A.w), g),
   open: async (g) => uxNoteOpen(await readNotes(A.w), g),
-  stage: async (s) => void (stages.push(s), (stageAt[s] ??= Date.now()), log("follow stage", { stage: s })),
+  stage: async (s) => void (stages.push(s), (stageAt[s] ??= Date.now()), log("follow stage", { stage: s }), pushRead()),
   txs: async (x) => void carried.push(...x),
   signal: follows.signal,
   // the page's own pace once the follow shows in_pool (15 s doubling to 60 s, pool-deposit-follow.ts): the 1 s cap only before,
@@ -508,25 +524,11 @@ const into = Date.now() % EPOCH;
 if (into > 1_000) await sleep(EPOCH - into + 250);
 const carryAt = Date.now();
 const balanceBefore = await balanceOf(A.w);
-// the page's state reads in the carry and the first-leaf watch: one every STATE_READ_MS. Each runs the RESERVED and
-// unfinal settle's round on the pool's seats as trade reads (src/pool-testnet.ts reserveEvm), so one every 500 ms (the
-// 03:16Z and 03:42Z runs) kept the seats' lanes full and the proof queue's first round, a pass read there, waited 25 s
-// for its turn; the page asks no such pace (the app asks state at its own taps and the page pushes it on a change)
-const STATE_READ_MS = 5_000;
-let stateReadAt = 0;
-const stateReadDue = async (pool) => {
-  if (Date.now() - stateReadAt < STATE_READ_MS) return;
-  stateReadAt = Date.now();
-  await pool.stateRead().catch(() => {});
-};
 await anvil("anvil_setBalance", [ux.evm, hex(floor)]);
 let shownMs = null;
 let finalizedAt = null;
 for (let k = 0; k < 240 && shownMs === null; k++) {
   await sleep(500);
-  // the page's state reads, as SIGN_HOST runs them while it is open (a state read is the app's ask or a change the page
-  // pushes, never a timer of its own: src/api.ts): one every STATE_READ_MS here, while the balance is looked at every 500 ms
-  await stateReadDue(t);
   if ((await balanceOf(A.w)) >= balanceBefore + EVM_LADDER.min) shownMs = Date.now() - carryAt;
   // the deposit sent: its block made final, as on the chain after its lag
   else if (finalizedAt === null && (await mine(A.w)).some((n) => n.state === "INCOMING" && (n.evmSends ?? []).length > 0)) {
@@ -568,14 +570,13 @@ await guard("first leaf: a ready proof inside its first minute", async () => {
   let found = null;
   let reads = 0;
   while (found === null && depAtMs !== null && depNote !== undefined && Date.now() < depAtMs + 50_000) {
-    await stateReadDue(t);
     reads++;
     const { ready } = await t.readyWith(async () => null);
     found = (ready ?? []).find((p) => p.noteId === depNote.id) ?? null;
     if (found === null) await sleep(500);
   }
   const at = Date.now();
-  step("first leaf: a ready proof inside its first minute", { ...first, reads, readyMsAfterDeposit: found === null ? null : at - depAtMs, root: found?.root ?? null, proofEpochStartMs: found?.epochStartMs ?? null, deadlineMs: found?.deadlineMs ?? null }, found !== null && sizeBefore === 0 && sizeAtDep === 1 && at - depAtMs < EPOCH && found.root === "newest" && found.epochStartMs === BigInt(epochOf(depAtMs)));
+  step("first leaf: a ready proof inside its first minute", { ...first, reads, pushReads, readyMsAfterDeposit: found === null ? null : at - depAtMs, root: found?.root ?? null, proofEpochStartMs: found?.epochStartMs ?? null, deadlineMs: found?.deadlineMs ?? null }, found !== null && sizeBefore === 0 && sizeAtDep === 1 && at - depAtMs < EPOCH && found.root === "newest" && found.epochStartMs === BigInt(epochOf(depAtMs)));
 });
 await guard("withdraw: the first leaf, tapped inside its first minute", async () => {
   const AMOUNT = "0.0001";
