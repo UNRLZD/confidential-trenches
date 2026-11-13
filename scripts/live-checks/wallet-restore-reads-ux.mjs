@@ -120,6 +120,13 @@ const ID_HELD_TOKEN = (t, nets) => new RegExp(`[,; ]${esc(t)}=${esc(nets)}\\[(${
 // `T` given a value once in the whole bundle, so a dead `T=NEAR_NETWORKS[mainnet].usdc` beside a real one reading
 // another network is not the one the rule compares with
 const ASSIGNED = (v) => new RegExp(`[^\\w$.]${esc(v)}=(?!=)`);
+// a field in a class's leading field list (`class extends X{h0=…;h1=…;`, as the hashes' state classes are built) is a
+// property of the class, never a write to the binding: the minifier may give `T` that same name (`h1` in the build of
+// card evm-money-shows-and-spends-at-once). Only that run is left out; a write anywhere else, a method's body included,
+// still counts, and a field list the window does not reach back to its class counts too
+const FIELD_RUN = /class(?: [\w$]+)?(?: extends [\w$.]+)?\{(?:[\w$]+=[^;{}]*;)*$/;
+const assignedOnce = (v, js) =>
+  [...js.matchAll(new RegExp(ASSIGNED(v).source, "g"))].filter((m) => !FIELD_RUN.test(js.slice(Math.max(0, m.index - 2000), m.index + 1))).length === 1;
 const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
 // step 5's head (review P2-2 of 39c5fdd7; on main's keptIdReader since wallet-id-reader-paced): the id reader on the
 // restore's kept pass (keptIdReader, which hands back the pair and the pass it reads at) and the held reader `H` opened
@@ -193,7 +200,7 @@ export function bundleFacts(index, js) {
   const rule = held ? ID_HELD_RULE(held[6]) : null;
   const ruled = rule && once(rule, js) ? rule.exec(js) : null;
   const nets = once(NEAR_NETS, js) ? NEAR_NETS.exec(js) : null;
-  const token = ruled && nets && once(ASSIGNED(ruled[9]), js) && once(ID_HELD_TOKEN(ruled[9], nets[1]), js) ? ID_HELD_TOKEN(ruled[9], nets[1]).exec(js) : null;
+  const token = ruled && nets && assignedOnce(ruled[9], js) && once(ID_HELD_TOKEN(ruled[9], nets[1]), js) ? ID_HELD_TOKEN(ruled[9], nets[1]).exec(js) : null;
   const both = head && once(ID_HELD_BOTH(head.groups.R), js) ? ID_HELD_BOTH(head.groups.R).exec(js) : null;
   const intents = both && once(INTENTS_HELD(both[16]), js) ? INTENTS_HELD(both[16]).exec(js) : null;
   const pair = once(UX_PAIR, js) ? UX_PAIR.exec(js) : null;

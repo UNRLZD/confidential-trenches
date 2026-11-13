@@ -49,9 +49,16 @@ export { outages, rpcRows, verifyEvidence };
 
 const KEY = "app-shell";
 export const APP_HOST = "https://ct-app.unrealized.trade";
+/** The first token page "/" links to (its first /token/ link: the phone's Trenches list, the desktop's rail), opened
+ *  right after "/" at each width. The phone's "/" is the Trenches list (owner 12 Nov: "Phone home: Trenches list"), so
+ *  this load is the phone's token page; on the desktop it is the token route by its own address. */
+export const TOKEN_PAGE = "/token/<first listed>";
+/** A load that draws a token page: every token load but the phone's "/", which draws the Trenches list. */
+export const drawsToken = (l) => l.expect === "token" && !(l.width === "phone" && l.path === "/");
 // the shell's routes (apps/terminal/src/routes/routes.ts)
 export const ROUTES = [
   ["token", "/"],
+  ["token", TOKEN_PAGE],
   ["discover", "/discover"],
   ["portfolio", "/portfolio"],
   ["orders", "/orders"],
@@ -111,8 +118,10 @@ export function judge(rec) {
     if (l.hscroll) bad.push("horizontal scroll");
     if (l.smallText.length) bad.push(`text under 11 px: ${l.smallText.join(", ")}`);
     if (l.smallTaps.length) bad.push(`tap under 44 px: ${l.smallTaps.join(", ")}`);
+    // the phone's "/" is the Trenches list, judged with its rows drawn
+    if (l.expect === "token" && !drawsToken(l) && !(l.list > 0)) bad.push("no row on the Trenches list");
     // the token page is judged with its marks drawn and trades arriving (plantTape), never on an empty tape
-    if (l.expect === "token") {
+    if (drawsToken(l)) {
       const t = l.tape ?? {};
       if (!(t.marks > 0)) bad.push("no trade mark on the chart");
       if (!(t.rows > 0)) bad.push("no trade row");
@@ -193,6 +202,9 @@ export const MEASURE = ({ phone, vw }) => {
   const shown = (e) => e.getBoundingClientRect().width > 0;
   return {
     route: document.querySelector("main[data-route]")?.dataset.route ?? null,
+    list: document.querySelectorAll('[data-testid="phone-trenches-row"]').length,
+    // the first token page this page links to (TOKEN_PAGE)
+    firstToken: document.querySelector('main a[href^="/token/"]')?.getAttribute("href") ?? null,
     marks: [...document.querySelectorAll('[data-testid="trade-mark"]')].filter(shown).length,
     rows: [...document.querySelectorAll('[data-testid="lower-rows-trades"] [data-testid="lower-row"]')].filter(shown).length,
     // a drawn mark's own box, as the eye sees it (its tap area is a ::before, not in this box)
@@ -355,11 +367,14 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
       await ctx.addInitScript(INIT);
       if (prepare) await prepare(ctx);
       const tape = await plantTape(ctx, origin);
+      let first = null;
       for (const [id, p] of ROUTES) {
         const page = await ctx.newPage();
         const seenBy = watch(page, origin);
         const sent0 = tape.sent;
-        const { resp, doc, framed, top } = await open(page, origin + p, origin);
+        // TOKEN_PAGE opens the token "/" linked to first (none linked: a token no list names, judged on its empty tape)
+        const href = p === TOKEN_PAGE ? (first ?? "/token/solana/none") : p;
+        const { resp, doc, framed, top } = await open(page, origin + href, origin);
         if (!rec.headers) {
           const h = resp.headers();
           rec.headers = { csp: h["content-security-policy"] ?? "", integrityPolicy: h["integrity-policy"] ?? "" };
@@ -369,8 +384,14 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
         // a page that draws the token (/, and / under Verify's panel) settles SETTLE_MS as every load does, and never
         // before its tape is in play, a mark drawn and 2 trades pushed (up to TAPE_WAIT_MS: a cold live load reads the
         // lists, the token and its candles first, and this check's first live run read phone / before any arrived)
+        // (on the phone "/" and Verify draw the Trenches list: its rows, up to the same wait)
+        const list = w.isMobile && (p === "/" || id === "verify");
         if (id === "token" || id === "verify") {
           for (const until = Date.now() + TAPE_WAIT_MS; Date.now() < until; await page.waitForTimeout(100)) {
+            if (list) {
+              if (await doc.evaluate(() => document.querySelector('[data-testid="phone-trenches-row"]') !== null).catch(() => false)) break;
+              continue;
+            }
             const marks = await doc.evaluate(() => document.querySelectorAll('[data-testid="trade-mark"]').length).catch(() => 0);
             if (marks > 0 && tape.sent - sent0 >= 2) break;
           }
@@ -379,14 +400,15 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
         const verify = id === "verify" ? await verifyEvidence(doc) : null;
         const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
         const pushed = tape.sent - sent0;
+        if (p === "/") first = m.firstToken;
         // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
-        const shot = `${w.name}-${id}.png`;
+        const shot = `${w.name}-${p === TOKEN_PAGE ? "token-page" : id}.png`;
         await page.screenshot({ path: path.join(shots, shot) });
         // the footer's clock for outages()'s read cap is read last, as the load's error list closes
         const footer = await footerEvidence(doc);
         for (const s of m.scripts) seen.set(`${s.src} ${s.integrity}`, s);
         rec.loadedScripts.push(...seenBy.loadedScripts);
-        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, verify, footer, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, tape: { marks: m.marks, rows: m.rows, pushed, markPx: m.markPx }, shot });
+        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, verify, footer, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, ...(p === TOKEN_PAGE ? { href } : {}), list: m.list, tape: { marks: m.marks, rows: m.rows, pushed, markPx: m.markPx }, shot });
         await page.close();
       }
       // inside the shell: load the first route, then click every navigation link in turn

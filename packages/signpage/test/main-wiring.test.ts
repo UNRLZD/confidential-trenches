@@ -145,13 +145,15 @@ const doc = Object.assign(new EventTarget(), {
   createElement: (t: string) => (t === "iframe" ? new Frame(t) : new El(t)),
 });
 const g = globalThis as Record<string, unknown>;
+// each reload the page asks for (a landed sign out, a landing on a closed gate): the stub keeps this document
+let reloads = 0;
 Object.assign(g, {
   window: globalThis,
   top: globalThis,
   document: doc,
   addEventListener: win.addEventListener.bind(win),
   removeEventListener: win.removeEventListener.bind(win),
-  location: { origin: "https://sign.test", pathname: "/", search: "", href: "https://sign.test/", reload() {} },
+  location: { origin: "https://sign.test", pathname: "/", search: "", href: "https://sign.test/", reload: () => void reloads++ },
   history: { replaceState() {} },
   matchMedia: () => Object.assign(new EventTarget(), { matches: false }),
   requestAnimationFrame: (f: () => void) => setTimeout(f, 0),
@@ -226,7 +228,7 @@ async function until(what: string, ok: () => Promise<boolean>): Promise<void> {
   throw new Error(`never: ${what}`);
 }
 
-test("main.ts wires the namer: a landing names, a quote waits for it, a notes change and a resync name again", async () => {
+test("main.ts wires the namer: a landing names, a quote waits for it, a notes change names again; after another tab's sign out, its sign in reloads and never names", async () => {
   // another tab signed in before this page loads: the 12 words typed, saved
   let other = await openWalletStore({});
   await other.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 1 });
@@ -276,15 +278,20 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   assert.deepEqual((await askState()).pools, [{ chain: "near", asset: "USDC", balance: "25" }]);
   assert.equal(fromPageNotes("openNoteStore").length, 0, "pageNotes opened the note store");
 
-  // 3. another tab signs out and signs in again: the store starts over (no record), the page resyncs and names; a quote
-  // asked as the resync starts waits for that naming
+  // 3. another tab signs out and signs in again (card sign-out-stops-the-pages-reads): the sign out closes this page's
+  // gate and reloads it; this document, kept by the stub, hears the sign in, resyncs and lands on a closed gate, which
+  // reloads again and never signs in: a quote asked as the resync starts is refused, nothing named on the new store
   // the screens draw in the sheet's body, inside the layer (src/sheet.ts)
   const layer = doc.body.children.find((c) => c.tagName === "section")!;
   const inside = (e: El): El[] => e.children.flatMap((c) => [c, ...inside(c)]);
   const root = inside(layer).find((c) => c.tagName === "main")!;
   assert.equal(root.dataset.signin, "signed-in");
+  const reloadsAtSignOut = reloads;
   await other.signOut();
   await until("this page shows signed out", async () => root.dataset.signin !== "signed-in");
+  // both channels hear it (the shell's and the store's own), each asking for the reload: one reload in a browser
+  assert.ok(reloads > reloadsAtSignOut, "another tab's sign out reloads this page");
+  const reloadsSignedOut = reloads;
   other = await openWalletStore({});
   await new Promise((ok) => setTimeout(ok, 50));
   assert.equal(await recordOf(other), undefined);
@@ -301,9 +308,10 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   await other.insertSeed({ v: 1, entropy: ENTROPY(), source: "code", code_saved: true, created_ms: 2 });
   const third = await asking;
   heard.close();
-  assert.equal(third.code, "down", "a quote asked as the resync started did not wait for the resync's naming");
-  const rec3 = (await recordOf(other))!;
-  assert.ok(third.body?.includes(U(rec3.index)));
+  assert.equal(third.code, "not_allowed", "a quote asked as the resync started reached the helper on a signed-out page");
+  await until("the landing on a closed gate reloads", async () => reloads > reloadsSignedOut);
+  assert.notEqual(root.dataset.signin, "signed-in", "a page whose gate is closed showed signed in");
+  assert.equal(await recordOf(other), undefined, "a page whose gate is closed named on the new store");
   other.close();
 });
 
@@ -434,4 +442,49 @@ test("main.ts wires the deposit follows to the store's connection: a close ends 
   await until("the follows settled from open() on the store opened again", async () => follows.slice(from).includes("settle:open"));
   assert.equal(follows.slice(from).filter((k) => k === "settle:open").length, 1, "settled from open() once");
   again.close();
+});
+
+// card sign-out-stops-the-pages-reads: another tab's sign out reaches main.ts twice, on the shell's channel (storeMoved,
+// the first task) and on the store's own (open's onEvent, a later task). Whichever task hears it first stops every read
+// of the account: one function, called from both, stops the restore before the pool flow (whose stop ends the lanes'
+// waits, which a restore read still running would meet with a page halved and asked again).
+test("card sign-out-stops-the-pages-reads: both ways another tab's sign out reaches main.ts stop the restore, the follows and the pool flow, the restore first", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const moved = /function storeMoved\(e: WalletEvent\): void \{\n([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  assert.match(moved, /^  if \(e\.kind === "signout"\) signedOutElsewhere\(\);$/m, "storeMoved stops every read");
+  const onEvent = /onEvent: \(e\) => \{\n([\s\S]*?)\n    \},\n  \}\)\);/.exec(src)?.[1] ?? "";
+  assert.match(onEvent, /^      signedOutElsewhere\(\);$/m, "the store's signout event stops every read");
+  const body = /function signedOutElsewhere\(\): void \{\n([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  const at = (s: string) => body.indexOf(s);
+  for (const s of ["restore?.signedOut();", "follows?.signedOut();", "poolFollow?.stop();", "withdrawsSignedOut();", "void testnet?.signedOut();"]) assert.ok(at(s) >= 0, `signedOutElsewhere: ${s}`);
+  assert.ok(at("restore?.signedOut();") < at("void testnet?.signedOut();"), "the restore stops before the lanes' waits end");
+});
+
+// The page's one gate (../../wallet/src/throttle.ts; its behaviour in test/sign-out-gate.test.ts and the store's `locked`
+// in ../../wallet/test/store.test.ts; in a browser, the live check signpage-shell's count of requests after each sign
+// out and after the next landing): main.ts makes the page's fetch the gate and never opens it. This tab's sign out
+// refuses every kind from its tap, closes the gate in the store's `locked` and reloads once the database is gone;
+// another tab's closes it first and reloads; a refusal stays signed in only while the seed is still stored; a landing on
+// a closed gate reloads (the review of 03d5b772: P1, an old account's loop read again once a landing opened the gate;
+// P2, a refusal opened it on a signed-out page and the gate closed at the tap cut a running trade; P3-5, a sign-in seen
+// from another tab while the sheet was busy).
+test("card sign-out-stops-the-pages-reads: the page's fetch is the gate; it closes in the store's lock or at another tab's sign out, never opens, and every landed sign out reloads", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(src, /^globalThis\.fetch = gatedFetch\(globalThis\.fetch\.bind\(globalThis\), location\.origin\);$/m, "the page's fetch is the gate");
+  assert.doesNotMatch(src, /openHostLanes|stopHostLaneWaits/, "main.ts never opens the gate, nor stops lanes beside it");
+  const body = (name: string, sig: string) => new RegExp(`function ${name}${sig.replace(/[()[\]<>]/g, "\\$&")} \\{\\n([\\s\\S]*?)\\n\\}`).exec(src)?.[1] ?? "";
+  const lines = (b: string) => b.split("\n").map((l) => l.trim()).filter((l) => l !== "" && !l.startsWith("//"));
+  const reload = body("reloadSignedOut", "(): void");
+  assert.deepEqual(lines(reload), ["closeHostLanes();", "location.reload();"], "a landed sign out: the gate closed, then the page reloads");
+  const elsewhere = lines(body("signedOutElsewhere", "(): void"));
+  assert.deepEqual([elsewhere[0], elsewhere[1], elsewhere.at(-1)], ["if (leaving) return;", "closeHostLanes();", "reloadSignedOut();"], "another tab's: closed first, then reloaded (this tab's own post left to its own path)");
+  const own = body("signOut", "(): Promise<void>");
+  const at = (x: string) => own.indexOf(x);
+  assert.ok(at("leaving = true;") >= 0 && at("leaving = true;") < at("restore?.signedOut();"), "from the tap, no new kind runs");
+  assert.ok(at("closeHostLanes") === at("s.signOut({ locked: () => closeHostLanes() })") + "s.signOut({ locked: () => ".length, "the gate closes only in the store's lock");
+  assert.match(own, /const still = hostLanesClosed\(\) \? undefined : await readSeed\(\)\.catch\(\(\) => undefined\);\n\s+if \(still !== undefined\) \{\n\s+still\.entropy\.fill\(0\);\n\s+leaving = false;\n\s+throw refused\.e;\n\s+\}\n\s+return reloadSignedOut\(\);/, "a refusal stays signed in only with the seed still stored, else reloads");
+  assert.equal(lines(own).at(-1), "reloadSignedOut();", "a sign out that landed reloads");
+  assert.equal(lines(body("landed", "(l: Landing): Promise<void>"))[0], "if (hostLanesClosed()) return void (l.seed.entropy.fill(0), location.reload());", "a landing on a closed gate reloads");
+  assert.match(src, /kinds: whileSignedIn\(follows!\.withFollow\(\{/, "every shell kind is refused while leaving");
+  assert.match(src, /\(\.\.\.a: never\[\]\) => \(leaving \? null : f\(\.\.\.a\)\)/, "refused not_allowed (null) while leaving");
 });

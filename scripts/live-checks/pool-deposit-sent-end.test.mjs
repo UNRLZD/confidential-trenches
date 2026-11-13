@@ -107,8 +107,11 @@ const PLANTED = [
   ["the hand-off keeps settled sends (S12)", [["let t=new Set(d().map(e=>e.hash))", "let t=new Set(l.map(e=>e.hash))"]], "solLeft"],
   ["EVM: the round read before U's nonce (E1)", [["s!==void 0&&n(s.hash);let c=", "s!==void 0&&n(s.hash);let d=await e.round(e.signal);let c="], ["nF(e);let d=await e.round(e.signal),f=", "nF(e);let f="]], "evmEnd"],
   ["EVM: the first send's nonce (E8)", [["(a?.evmSends??[]).reduce((e,t)=>t.nonce>e?t.nonce:e,t.nonce)", "(a?.evmSends?.[0]?.nonce??t.nonce)"]], "evmEnd"],
-  ["EVM: a Deposited not final read as an end (E4)", [["f.block>d.finalBlock?null:", ""]], "evmEnd"],
-  ["EVM: a Deposited at another value read as landed (E5)", [["f.value===t.value?`landed`:`dead`;", "`landed`;"]], "evmEnd"],
+  ["EVM: a take at another value not final read as dead (E4)", [["f.block>d.finalBlock?null:", ""]], "evmEnd"],
+  // card evm-money-shows-and-spends-at-once: a Deposited at the note's value is landed at the newest agreed block, never
+  // held back until final (the old rule)
+  ["EVM: a Deposited at the note's value waits for final", [["return f.value===t.value?`landed`:f.block>d.finalBlock?null:`dead`;", "return f.block>d.finalBlock?null:f.value===t.value?`landed`:`dead`;"]], "evmEnd"],
+  ["EVM: a Deposited at another value read as landed (E5)", [["return f.value===t.value?`landed`:f.block>d.finalBlock?null:`dead`;", "return `landed`;"]], "evmEnd"],
   ["EVM: every send dead read as dead (review 1)", [["d.finalBlock>=l?`expired`:null", "d.finalBlock>=l?`dead`:null"]], "evmEnd"],
   ["EVM: the store read before the keys are zeroed (review 6)", [["finally{n.fill(0);for(let e of r)e.fill(0);let i=p;", "finally{let i=p;"]], "evmLeft"],
   ["EVM: part_filled with an open note read as the end (review 3)", [["e.stage===`part_filled`&&(a===null||a.notes.length===0)", "e.stage===`part_filled`"]], "evmKind"],

@@ -383,16 +383,55 @@ function stoppable(p: Promise<void>, signal?: AbortSignal): Promise<void> {
   });
 }
 
-// every lane's waits end at a sign out: this controller aborted, a new one made for the next sign-in
+// A sign out's two stops (card sign-out-stops-the-pages-reads):
+// - At the tap, every wait for a turn or a pause on every lane ends (stopHostLaneWaits: this controller aborted, a new
+//   one made), as before the card: a money run that already holds the seed lock reads on and finishes.
+// - The page's one gate for every request past its own origin closes once the store's sign out holds the seed lock
+//   exclusive (closeHostLanes, src/main.ts) and stays closed: the page reloads after the sign out, so nothing opens it
+//   again in this page's life (a page load starts it open). Closed, every wait ends, every turn and laned ask is refused
+//   (a paced queue's slot and a seat's failover that come after it included: each takes its signal when it runs),
+//   laneFetch refuses, and the page's own fetch (gatedFetch, installed by src/main.ts) refuses any request past the
+//   page's origin, whatever reader made it.
 let laneStop = new AbortController();
-/** Ends every wait for a turn or a pause on every lane now (a sign out), with `reason`. */
+let gate = new AbortController();
+/** Ends every wait for a turn or a pause on every lane now (a sign out's tap), with `reason`; the gate stays as it is. */
 export function stopHostLaneWaits(reason: unknown = new Error("signed out")): void {
   laneStop.abort(reason);
-  laneStop = new AbortController();
+  laneStop = gate.signal.aborted ? laneStop : new AbortController();
 }
-/** `given` with the lanes' sign-out stop: a wait on it ends at either. */
+/** Closes the gate for this page's life (a sign out holding the seed lock), with `reason`; every wait ends too. */
+export function closeHostLanes(reason: unknown = new Error("signed out")): void {
+  if (!gate.signal.aborted) gate.abort(reason);
+  stopHostLaneWaits(reason);
+}
+/** Whether the gate is closed (signed out). */
+export function hostLanesClosed(): boolean {
+  return gate.signal.aborted;
+}
+/** `given` with the gate: an ask on it is refused once the gate is closed. */
+export function gateSignal(given?: AbortSignal): AbortSignal {
+  return given === undefined ? gate.signal : AbortSignal.any([given, gate.signal]);
+}
+/** `given` with the lanes' stops: a wait on it ends at a tap's stop, at the gate's close, or at `given`. */
 export function laneSignal(given?: AbortSignal): AbortSignal {
-  return given === undefined ? laneStop.signal : AbortSignal.any([given, laneStop.signal]);
+  return AbortSignal.any(given === undefined ? [laneStop.signal, gate.signal] : [given, laneStop.signal, gate.signal]);
+}
+/** `raw` held by the gate: while it is closed, a request to any origin but `own` (the page's) is refused, never sent,
+ *  with the sign out's reason; the page's own files (the prover's setup files) still load. */
+export function gatedFetch(raw: typeof fetch, own: string): typeof fetch {
+  return ((url: string | URL | Request, init?: RequestInit) => {
+    if (gate.signal.aborted) {
+      const href = url instanceof Request ? url.url : String(url);
+      let origin: string | null = null;
+      try {
+        origin = new URL(href, own).origin;
+      } catch {
+        // no URL: refused as any other while closed
+      }
+      if (origin !== own) return Promise.reject(gate.signal.reason);
+    }
+    return raw(url, init);
+  }) as typeof fetch;
 }
 
 const LANES = new Map<string, HostLane>();
@@ -428,11 +467,16 @@ export function holdHosts(urls: Iterable<string | undefined>): () => void {
  *  budget as the rest, as the host counts them. */
 export function laneFetch(f?: (url: string, init?: RequestInit) => Promise<Response>): typeof fetch {
   return ((url: string | URL | Request, init?: RequestInit) => {
+    // the gate closed (a sign out): never sent, never counted
+    if (gate.signal.aborted) return Promise.reject(gate.signal.reason);
     hostLane(url instanceof Request ? url.url : String(url)).count();
     return (f ?? globalThis.fetch)(url as string, init);
   }) as typeof fetch;
 }
-/** Forgets every host's lane (tests: each test's clock starts at its own zero). */
+/** Forgets every host's lane and opens the gate (tests only: each test's clock starts at its own zero; a page opens it
+ *  only by loading). */
 export function resetHostLanes(): void {
   LANES.clear();
+  gate = new AbortController();
+  laneStop = new AbortController();
 }

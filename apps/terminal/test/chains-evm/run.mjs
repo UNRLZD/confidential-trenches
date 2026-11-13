@@ -240,6 +240,13 @@ try {
     loads++;
     const h = await appFrame(page);
     const topOf = async () => {
+      if (phone) {
+        // the phone's / is the Trenches list (owner 12 Nov, "Phone home: Trenches list"): its first row is the top
+        // Trending token (source.ts loadTopToken's rule), and its rows' chain badges are the chain filter's
+        const ok = h ? await h.waitForSelector('[data-testid="phone-trenches-row"]', { timeout: 10_000 }).then(() => true, () => false) : false;
+        await page.waitForTimeout(400);
+        return ok ? h.evaluate(() => { const rows = [...document.querySelectorAll('[data-testid="phone-trenches-row"]')]; return { token: rows[0]?.getAttribute("data-key")?.split(":")[1] ?? null, badges: rows.flatMap((r) => [...r.querySelectorAll(".tok-cb")]).filter((b) => b.getClientRects().length).map((b) => b.getAttribute("data-chain")) }; }) : null;
+      }
       const ok = h ? await h.waitForSelector('main[data-route="token"] [data-token-page="ready"]', { timeout: 10_000 }).then(() => true, () => false) : false;
       await page.waitForTimeout(400);
       return ok ? h.evaluate(() => ({ token: document.querySelector("[data-token-page]")?.getAttribute("data-token") ?? null, badges: [...document.querySelectorAll("main [data-token-page] .tok-cb")].filter((b) => b.getClientRects().length && !b.closest(".tkr-row")).map((b) => b.getAttribute("data-chain")) })) : null;
@@ -249,7 +256,7 @@ try {
     await shot(page, `top-all-${w.name}`);
     if (h) {
       await pick(h, page, phone, "base");
-      await h.waitForFunction((id) => document.querySelector('[data-token-page="ready"]')?.getAttribute("data-token") === id, TOP_BASE.token, { timeout: 10_000 }).catch(() => {});
+      await h.waitForFunction((id) => document.querySelector('[data-token-page="ready"]')?.getAttribute("data-token") === id || document.querySelector('[data-testid="phone-trenches-row"]')?.getAttribute("data-key")?.endsWith(`:${id}`), TOP_BASE.token, { timeout: 10_000 }).catch(() => {});
       top = await topOf();
       check(top?.token === TOP_BASE.token, `${tag} / on Base: data-token ${top?.token ?? "none"}, not Base's top Trending ${TOP_BASE.token}`);
       check(!!top && top.badges.length > 0 && top.badges.every((b) => b === "base"), `${tag} / on Base: the page's chain badges [${top?.badges.join(",") ?? ""}], not base`);

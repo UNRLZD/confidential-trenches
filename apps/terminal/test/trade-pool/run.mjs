@@ -6,7 +6,7 @@
 // The pools are stand-ins recorded from real runs (test/trade-box/fixtures.tsx): the devnet Solana pool's 0.01 SOL note
 // and the Base Sepolia pool's 0.001 ETH chunks. Per state: app-shell's BAR-10 rules (MEASURE), no external request, no
 // dialog. Then:
-//   - a proof ready on Solana: Bal and Max are the pool's balance and one tap's most in USD ($0.93, $0.16), the line
+//   - a proof ready on Solana: the balance line (`$N available`, UNRLZD's ticket) and Max are the pool's balance and one tap's most in USD ($0.93, $0.16), the line
 //     reads "Proof ready", every preset is off (all over one tap), and the button sends pool.buy with the USD in SOL,
 //     rounded down (0.001720236), never the vault's buy; it fills on the kit's stage in under 2 s (Filled 1.1s);
 //   - over one tap ($0.17) and a proof still making: the button is off and a tap sends nothing; the amount field is
@@ -51,15 +51,15 @@ const SCHEMES = ["dark", "light"];
 // the buy states: name, query, the path, the proof label, Bal, the line above the button, whether the button is on, the
 // request one tap sends (null: none)
 const BUYS = [
-  ["sol-ready", "pool=sol-ready&amt=0.16", "pool", "ready", "Bal $0.93", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
-  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", "ready", "Bal $0.93", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
-  ["sol-over", "pool=sol-ready&amt=0.17", "pool", "ready", "Bal $0.93", "Proof ready Max $0.16", false, null],
-  ["sol-making", "pool=sol-making&amt=0.16", "pool", "making", "Bal $0.93", "Making proof", false, null],
-  ["sol-none", "pool=sol-none&amt=0.16", "pool", null, "Bal $0.93", "", false, null],
-  ["base-chunk", "pool=base-ready&amt=3.50", "pool", "ready", "Bal $10.50", "Proof ready Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
-  ["base-other", "pool=base-ready&amt=3", "pool", "ready", "Bal $10.50", "Proof ready Max $3.50", false, null],
-  ["base-making", "pool=base-making&amt=3.50", "pool", "making", "Bal $10.50", "Making proof", false, null],
-  ["vault", "amt=25", "vault", null, "Bal $73.18", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
+  ["sol-ready", "pool=sol-ready&amt=0.16", "pool", "ready", "$0.93 available", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", "ready", "$0.93 available", "Proof ready Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-over", "pool=sol-ready&amt=0.17", "pool", "ready", "$0.93 available", "Proof ready Max $0.16", false, null],
+  ["sol-making", "pool=sol-making&amt=0.16", "pool", "making", "$0.93 available", "Making proof", false, null],
+  ["sol-none", "pool=sol-none&amt=0.16", "pool", null, "$0.93 available", "", false, null],
+  ["base-chunk", "pool=base-ready&amt=3.50", "pool", "ready", "$10.50 available", "Proof ready Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
+  ["base-other", "pool=base-ready&amt=3", "pool", "ready", "$10.50 available", "Proof ready Max $3.50", false, null],
+  ["base-making", "pool=base-making&amt=3.50", "pool", "making", "$10.50 available", "Making proof", false, null],
+  ["vault", "amt=25", "vault", null, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
 const FEE = { "sol-ready": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-none": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };

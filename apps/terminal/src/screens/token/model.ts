@@ -146,6 +146,11 @@ export type TokenLink =
   | { id: "xSearch"; href: string }
   | { id: "site" | "x" | "telegram" | "pad"; href: string; label: string };
 
+/** The mark each link kind draws, as on UNRLZD's link row (the globe, X's and Telegram's own marks, the magnifier, the
+ *  pad's logo, the explorer): one per kind, so no two icons on a row look alike (owner 13 Nov: the site, X and the
+ *  explorer all drew one chain-link icon, three of the same in a row). */
+export const LINK_MARK = { site: "web", x: "x", xSearch: "search", telegram: "telegram", pad: "pad", explorer: "explorer" } as const satisfies Record<TokenLink["id"], string>;
+
 /** The links a token's identity draws, in R5's order (socials, then the explorer): never one without data behind it.
  *  The token's own X account takes Search on X's place (R5: the search is the link when no X account is listed). */
 export function tokenLinks(chain: string, token: string, social: SocialLinks = {}, launchpad: string | null = null): TokenLink[] {
@@ -183,6 +188,8 @@ export async function copyText(text: string, clip: { writeText(t: string): Promi
 /** The watchlist star (R5 token-watch): the tokens kept on this device, `chain/token`, in the browser's storage. A
  *  storage that throws or holds something else reads as an empty list and the star still toggles for the page. */
 export const WATCH_KEY = "ct.watch.v1";
+/** Fired on the window when a star toggles, so this page's rail Watchlist redraws at once (Rail.tsx useWatch). */
+export const WATCH_EVENT = "ct:watch";
 export function readWatch(store: Pick<Storage, "getItem"> | null): string[] {
   try {
     const v = JSON.parse(store?.getItem(WATCH_KEY) ?? "[]") as unknown;
@@ -200,5 +207,6 @@ export function toggleWatch(store: Pick<Storage, "getItem" | "setItem"> | null, 
   } catch {
     // the page's own state still shows the press
   }
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") window.dispatchEvent(new Event(WATCH_EVENT));
   return on;
 }

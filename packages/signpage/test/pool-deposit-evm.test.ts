@@ -21,7 +21,7 @@ import { EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom } from "../src/rules/pool.ts";
 import { EVM_READ_TRY_MS } from "../../wallet/src/pool/evm.ts";
 import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS } from "../src/pool-deposit-evm.ts";
 import { mock } from "node:test";
-import { followPoolDepositEvm, POOL_DEPOSIT_EVM_LANDING_MS, poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
+import { followPoolDepositEvm, POOL_DEPOSIT_EVM_LANDING_MS, POOL_DEPOSIT_EVM_WAIT_MS, poolDepositEvmKind, runPoolDepositEvm, type PoolDepositEvmHost } from "../src/pool-deposit-evm.ts";
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
@@ -656,7 +656,7 @@ test("one index across asks until money reaches it: planDeposit hands the same P
   assert.equal(ch.c.sent.length, 0);
 });
 
-test("a take of U's deposit note in a block not final yet: nothing signed, the run's wait rejects with EvmNotFinalError (pool-kinds answers busy)", async () => {
+test("a take of U's deposit note in a block not final yet: the note is the user's at once (UNSPENT at the take's value, its block kept), nothing more signed past it, the run's wait rejects with EvmNotFinalError (pool-kinds answers busy)", async () => {
   const { ch, ns, planned } = await funded(RUNG + FEE);
   ch.deposit(planned.precommitment, EVM_POOL_MIN_DEPOSIT);
   ch.c.events[0]!.block = ch.c.fin + 1n; // above the round's finalized block
@@ -665,7 +665,11 @@ test("a take of U's deposit note in a block not final yet: nothing signed, the r
   const run = kind(ASK, null) as { after: Promise<void>; answer(): unknown };
   await assert.rejects(run.after, (e: unknown) => e instanceof EvmNotFinalError);
   assert.equal(ch.c.sent.length, 0, "nothing sent");
-  assert.equal((await ns.get(planned.id))!.state, "PLANNED");
+  // card evm-money-shows-and-spends-at-once: the newest agreed block holds the take, so the note shows now
+  const got = (await ns.get(planned.id))!;
+  assert.equal(got.state, "UNSPENT");
+  assert.equal(got.leaf?.value, EVM_POOL_MIN_DEPOSIT);
+  assert.equal((await ns.landings()).get(got.id), ch.c.fin + 1n, "its block kept beside it");
 });
 
 test("a rule refusal answers not_allowed, by its class (a PoolRuleRefused), whatever its name", async () => {
@@ -796,11 +800,11 @@ const estBound = (c: { baseFee: bigint; depth: bigint[] }) => (250_000n + evmDep
 test("R1: an earlier ask's note that lands later is settled by the next run, never credited to it: the later ask sends its own deposit and answers with its own tx", async () => {
   const { ch, ns, planned } = await funded(0n);
   ch.c.balance = [RUNG + capBound(ch.c), RUNG + capBound(ch.c)];
-  // ask X: sent, its Deposited in a block not final within the run (finality ~18 to 24 min on all four networks)
+  // ask X: sent, its Deposited not in any round within the run (mined after the run's last read)
+  let landX = () => {};
   ch.c.onSend = (raw) => {
     const s = sentOf(raw);
-    ch.deposit(s.pre, s.value);
-    ch.c.events.at(-1)!.block = ch.c.fin + 10n;
+    landX = () => ch.deposit(s.pre, s.value);
     ch.c.nonce = s.nonce + 1n;
     ch.c.balance = ch.c.balance.map((b) => b - s.value - 250_000n * (ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP));
   };
@@ -808,8 +812,8 @@ test("R1: an earlier ask's note that lands later is settled by the next run, nev
   assert.equal("stage" in a && a.stage, "sent");
   const x = sentOf(ch.c.sent[0]!).hash;
   assert.equal((await ns.get(planned.id))!.state, "INCOMING");
-  // later: X's block is final; the user funds U for a second deposit Y of one rung and asks it
-  ch.c.fin += 20n;
+  // later: X's Deposited is in the round and final (Y's deposit index is found past X's note, so Y is signed once X's block is final); the user funds U for a second deposit Y of one rung and asks it
+  landX();
   ch.c.balance = ch.c.balance.map((b) => b + RUNG + capBound(ch.c));
   ch.c.onSend = (raw) => ch.land(raw);
   const sent: string[] = [];
@@ -958,7 +962,7 @@ function followedEvm(ch: ReturnType<typeof chain>, ns: NoteStore, o: Partial<Poo
   };
 }
 
-test("pool-deposit-sent-end (EVM): a send that lands after the run, its Deposited final only later, gives filled; while that block is not final, nothing", async () => {
+test("pool-deposit-sent-end (EVM): a send that lands after the run gives filled as soon as its Deposited is in the round, its block not final yet; before it lands, nothing", async () => {
   const { ch, ns } = await funded(RUNG + FEE);
   const f = followedEvm(ch, ns);
   await f.r.after;
@@ -967,16 +971,17 @@ test("pool-deposit-sent-end (EVM): a send that lands after the run, its Deposite
   await f.runEnd;
   assert.deepEqual(f.stages, []);
   assert.equal(await f.parked(), true, "the end's reads go on after the run: the app is never left at sent");
-  // it lands in a block not final yet: nothing told
-  ch.land(ch.c.sent[0]!); // its Deposited at block 100
-  ch.c.fin = 90n; // finalized only up to 90
+  // not landed yet: nothing told
   f.go();
   assert.equal(await f.parked(), true);
-  assert.deepEqual(f.stages, [], "a Deposited above the finalized block tells nothing");
-  ch.c.fin = 100n;
+  assert.deepEqual(f.stages, [], "no Deposited in the round tells nothing");
+  // it lands in a block not final yet: filled at once (card evm-money-shows-and-spends-at-once)
+  ch.land(ch.c.sent[0]!);
+  ch.c.events.at(-1)!.block = 100n; // the newest agreed block
+  ch.c.fin = 90n; // finalized only up to 90
   f.go();
   assert.equal(await f.staged(1), true);
-  assert.deepEqual(f.stages, ["filled"]);
+  assert.deepEqual(f.stages, ["filled"], "a Deposited above the finalized block, in the round, is filled");
   assert.equal(ch.c.sent.length, 1, "never sent again");
 });
 
@@ -1574,4 +1579,89 @@ test("evm-deposit-route-mainnet review: a short fixed U is not_funded with its o
   assert.deepEqual(shorts, [u1]);
   assert.equal(ch.c.sent.length, sent);
   assert.ok(!named.some((x) => x.includes(u0.slice(2).toLowerCase())), "no read names U_0");
+});
+
+// card evm-money-shows-and-spends-at-once: the run's two reads, and a sign out or a stop around them (on every network
+// this file runs on: no chain, pin or L1 fee of its own)
+test("evm-money-shows-and-spends-at-once: a send mined only after the run's first read is read again POOL_DEPOSIT_EVM_WAIT_MS later and lands in the run (UNSPENT, filled), not on the next load pass", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const waits: number[] = [];
+  // the page's own read count (no `reads`): the first read finds no block holding the send, the next one does
+  const h = hostOf(ch, ns, { reads: undefined, wait: async (ms) => void (waits.push(ms), ch.c.sent.length === 1 && !ch.c.events.some((e) => e.kind === "deposit") && ch.land(ch.c.sent[0]!)) });
+  const a = await runPoolDepositEvm(h, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: ASK.chain, hash: sentOf(ch.c.sent[0]!).hash }] });
+  assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
+  assert.deepEqual(waits, [POOL_DEPOSIT_EVM_WAIT_MS], "one wait between the run's two reads");
+  assert.equal(ch.c.sent.length, 1, "never sent again");
+});
+
+test("evm-money-shows-and-spends-at-once: a sign out or a stop during the run's own wait between its two reads ends the wait at once: no read and no write after it", async () => {
+  for (const k of ["signal", "stop"] as const) {
+    const { ch, ns, planned } = await funded(RUNG + FEE);
+    const ac = new AbortController();
+    let rounds = 0;
+    let after = 0;
+    // the run's own wait (no `wait`): the first read after the send finds no block holding it; the send lands and the
+    // sign out comes 100 ms into the POOL_DEPOSIT_EVM_WAIT_MS wait
+    const h = hostOf(ch, ns, { reads: undefined, wait: undefined, [k]: ac.signal, round: async () => {
+      if (ac.signal.aborted) after++;
+      if (ch.c.sent.length === 1 && rounds++ === 0) {
+        const events = [...ch.c.events];
+        ch.land(ch.c.sent[0]!);
+        setTimeout(() => ac.abort(), 100);
+        return { events, finalBlock: ch.c.fin };
+      }
+      return { events: [...ch.c.events], finalBlock: ch.c.fin };
+    } });
+    // a run that sits out its wait ends after POOL_DEPOSIT_EVM_WAIT_MS; one that ends at the sign out (100 ms in) wins
+    // this race by over a second
+    const a = await Promise.race([runPoolDepositEvm(h, ASK), settleMs((POOL_DEPOSIT_EVM_WAIT_MS * 3) / 4).then(() => "sat out the wait" as const)]);
+    assert.notEqual(a, "sat out the wait", `${k}: the wait ended at the sign out`);
+    assert.equal((a as { stage?: string }).stage, "sent", k);
+    assert.equal(after, 0, `${k}: no read after the sign out`);
+    assert.equal((await ns.get(planned.id))!.state, "INCOMING", `${k}: nothing written after the sign out`);
+  }
+});
+
+test("evm-money-shows-and-spends-at-once: a sign out while the second read's round is in hand writes nothing: the note stays INCOMING for the next sign in", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  const ac = new AbortController();
+  let rounds = 0;
+  const h = hostOf(ch, ns, { reads: undefined, signal: ac.signal, wait: async () => void ch.land(ch.c.sent[0]!), round: async () => {
+    if (ch.c.sent.length === 1 && rounds++ === 1) ac.abort(); // the second read's round: the sign out lands meanwhile
+    return { events: [...ch.c.events], finalBlock: ch.c.fin };
+  } });
+  const a = await runPoolDepositEvm(h, ASK);
+  assert.equal((a as { stage?: string }).stage, "sent");
+  assert.equal(rounds, 2);
+  assert.equal((await ns.get(planned.id))!.state, "INCOMING", "no landing written after the sign out");
+});
+
+test("evm-money-shows-and-spends-at-once: a round that fails right after the send (logs behind the pool's state at the newest block) is read again POOL_DEPOSIT_EVM_WAIT_MS later, and the note lands in the run", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  ch.c.onSend = (raw) => ch.land(raw);
+  let failed = 0;
+  // the first round after the send fails as the sync refuses a lagging read (its logs 0 leaves, the pool's state 1)
+  const h = hostOf(ch, ns, { reads: undefined, round: async () => {
+    if (ch.c.sent.length === 1 && failed++ === 0) throw new Error("the state tree from the logs (0 leaves) is not the pool's");
+    return { events: [...ch.c.events], finalBlock: ch.c.fin };
+  } });
+  const a = await runPoolDepositEvm(h, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: ASK.chain, hash: sentOf(ch.c.sent[0]!).hash }] });
+  assert.equal((await ns.get(planned.id))!.state, "UNSPENT");
+  assert.equal(ch.c.sent.length, 1, "never sent again");
+  // after a sign out or a stop, that failed read ends the run at once: "sent", never read again, no wait
+  for (const k of ["signal", "stop"] as const) {
+    const t = await funded(RUNG + FEE);
+    t.ch.c.onSend = (raw) => t.ch.land(raw);
+    const ac = new AbortController();
+    let waits = 0;
+    const g = hostOf(t.ch, t.ns, { reads: undefined, [k]: ac.signal, wait: async () => void waits++, round: async () => {
+      if (t.ch.c.sent.length === 1) (ac.abort(), (() => { throw new Error("the state tree from the logs (0 leaves) is not the pool's"); })());
+      return { events: [...t.ch.c.events], finalBlock: t.ch.c.fin };
+    } });
+    const b = await runPoolDepositEvm(g, ASK);
+    assert.equal((b as { stage?: string }).stage, "sent", k);
+    assert.equal(waits, 0, `${k}: no wait for a read again`);
+  }
 });

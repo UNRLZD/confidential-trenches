@@ -29,9 +29,10 @@
 // says the read came from, its path no file's (an app script printing the same words is an error).
 // The footer's clock (FOOTER_DOM ms) is read last, as the load's error list closes, so a footer read after the first DOM
 // read is counted by the cap.
-// A walked-past EVM read (card device-evm-fee-read-walks-operators): Verify reads each EVM pool on two operators of the
-// kit's read list, walking past one that fails (an HTTP status, 400 included: dRPC's code 27 "Unknown state", 10 Nov),
-// so a failed load of one listed host (a 4xx too) is let through when, and only when, that chain's row shows ok on two
+// A walked-past pool read (card device-evm-fee-read-walks-operators): Verify reads each EVM pool on two operators of the
+// kit's read list, and Solana's on two of its three (card verify-row-survives-one-provider: Pocket's 400 to the page's
+// getMultipleAccounts from GitHub's runners, 12 Nov), walking past one that fails (an HTTP status, 400 included: dRPC's
+// code 27 "Unknown state", 10 Nov), so a failed load of one listed host (a 4xx too) is let through when, and only when, that chain's row shows ok on two
 // other hosts of its list, of two operators (the kit's evmRpcOperator), neither of which failed a load in the same load
 // (a check that records the reads, verify-pools, also holds each of the two to every read 200). Ok shown on the host
 // that failed, a host the list does not name, one host, two of one operator: refused.
@@ -107,14 +108,15 @@ const FOOTER_TAGGED = / \[footer read\]$/;
 
 /** The origin a failed-load line names, "" for any other line. */
 const failedOrigin = (line) => originOf((FAILED_LOAD.exec(line)?.[1] ?? preflightOf(line)) ?? "") ?? "";
-// a load an RPC answered with a 4xx other than 429: an error, except a walked-past EVM read's (above)
+// a load an RPC answered with a 4xx other than 429: an error, except a walked-past pool read's (above)
 const FAILED_4XX = new RegExp(`^Failed to load resource: the server responded with a status of 4(?!29)\\d\\d(?: \\([^()]*\\))? \\((https?:\\/\\/[^\\s()]+)\\)${TAG}$`);
 const failed4xxOrigin = (line) => originOf(FAILED_4XX.exec(line)?.[1] ?? "") ?? "";
 
-/** The EVM chains whose row reads two operators of a list (the kit's read list): each chain, to its list's origins. */
-const evmLists = (network) => {
+/** The pool chains whose row reads two operators of a list (an EVM chain's the kit's read list, Solana's its three):
+ *  each chain, to its list's origins. */
+const poolLists = (network) => {
   const out = new Map();
-  for (const [chain, pool] of Object.entries(VERIFY_RELEASES[network]?.pools ?? {})) if (pool && chain !== "solana") out.set(chain, pool.rpcs.map(originOf));
+  for (const [chain, pool] of Object.entries(VERIFY_RELEASES[network]?.pools ?? {})) if (pool) out.set(chain, pool.rpcs.map(originOf));
   return out;
 };
 /** Why a failed load of `origin` (a host of `chain`'s list) is no walked-past read, or null when it is one: the row shows
@@ -254,7 +256,8 @@ export function watchPreflights(ctx, page, sink) {
   });
 }
 
-/** The pairs of RPCs the release names for a network: the NEAR pair and each pool's pair, as their origins. */
+/** The pairs of RPCs the release names for a network: the NEAR pair and each pool's list (down only when all of it is), as
+ *  their origins. */
 function pairsOf(network) {
   const release = VERIFY_RELEASES[network];
   const pairs = release ? [(release.rpcs ?? []).map(originOf)] : [];
@@ -271,7 +274,7 @@ export function outages(lines, verify, network = "mainnet", footer = null) {
   const rows = rpcRows(network);
   const near = new Set((VERIFY_RELEASES[network]?.rpcs ?? []).map(originOf));
   const failedAt = new Set(lines.flatMap((l) => [failedOrigin(l), failed4xxOrigin(l)]).filter(Boolean));
-  const lists = evmLists(network);
+  const lists = poolLists(network);
   const chainOf = (origin) => [...lists].find(([, l]) => l.includes(origin))?.[0];
   const pairs = pairsOf(network);
   const pairDown = (origin) => pairs.some((p) => p.includes(origin) && p.every((o) => failedAt.has(o)));

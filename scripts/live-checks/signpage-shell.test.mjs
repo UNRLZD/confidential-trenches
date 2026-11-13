@@ -17,12 +17,15 @@
 // sign-live-checks-read-a-pinned-page): PASS, with the pinned hosts' cases planted from it at the end.
 // release119.<engine>.<width>: the live page on release 119, the Base and Robinhood pools pinned too (card
 // sign-live-checks-name-evm-pool-hosts): PASS, with the EVM hosts' cases planted from it at the end.
+// reload.chromium.phone: card sign-out-stops-the-pages-reads's build on the harness (12 Nov, Chrome 157): every landed
+// sign out reloads the top window; the passkey account signs out by this tab's own button, the words' in another tab,
+// and a second passkey account lands after it: PASS, with that card's cases planted from it at the end.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { connectHosts, EVENT_MS, judge, PINNED_HOSTS, START, WIDTHS } from "./signpage-shell.mjs";
+import { connectHosts, EVENT_MS, judge, namesIn, PINNED_HOSTS, RELOAD_MS, START, WIDTHS } from "./signpage-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-shell.answers.json"), "utf8"));
@@ -348,6 +351,10 @@ test("release 111 planted: a pinned host asked signed out, at no time, or not in
   badLine(at(st.passkeyOut.t + 1), out); // after the passkey's sign out
   badLine(at(st.words.t - 1), out); // before the words' Continue
   badLine(at(st.wordsOut.t + 1), out); // after the words' sign out
+  // card sign-out-stops-the-pages-reads: the sign out's time is the post's acknowledgement; a request from that time on
+  // is signed out, one just before it signed in
+  badLine(at(st.wordsOut.t), out);
+  assert.equal(at(st.wordsOut.t - 1).ok, true, at(st.wordsOut.t - 1).lines.join("\n"));
   badLine(at(st.stranger.t + 1, { host: "rpc.mainnet.fastnear.com", path: "/", rpc: [{ method: "query", params: { request_type: "view_account", account_id: "a".repeat(64), finality: "final" } }] }), out); // an account id, signed out
   badLine(at(undefined), out); // at no known time
   const noCsp = clone(g);
@@ -403,4 +410,83 @@ test("release 119 planted: an EVM host no pin names, a pinned EVM host signed ou
     r.requests.push({ ...clone(read), t: st.words.t + 1, host });
     badLine(judge(r), new RegExp(`^BAD no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts \\(1: ${host.replaceAll(".", "\\.")}\\)$`));
   }
+});
+
+// card sign-out-stops-the-pages-reads: a landed sign out reloads the top window, and no request after the words' sign out
+// names that account
+const RELOAD = ANSWERS.reload.chromium.phone;
+test("recorded run on card sign-out-stops-the-pages-reads's build (chromium, phone): PASS, each sign out reloads the top window and its new frame answers signed out", () => {
+  const r = judge(RELOAD);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const start of [
+    "ok  Sign out in this tab, by its own Sign out button: the top window reloads and its new frame answers exactly signed out (signout answered pending, signed-out, a new document",
+    "ok  Sign out in another tab: the top window reloads and its new frame answers exactly signed out (signed-out, a new document",
+    "ok  a second passkey account lands after it",
+    "ok  the second passkey account's Sign out in this tab: the top window reloads",
+    "ok  after the words' account signs out and a second account lands, no request names the words' account",
+  ]) assert.ok(r.lines.some((l) => l.startsWith(start)), `${start}\n${r.lines.join("\n")}`);
+});
+
+test("sign-out-stops-the-pages-reads planted: no reload, a late or a signed-in new frame, the tap not this tab's, or a later request naming the words' account: FAIL", () => {
+  const st = RELOAD.steps;
+  const badLine = (rec, re) => {
+    const j = judge(rec);
+    assert.equal(j.ok, false, j.lines.join("\n"));
+    assert.ok(j.lines.some((l) => l.startsWith("BAD") && re.test(l)), `${re}\n${j.lines.join("\n")}`);
+  };
+  const thisTab = /^BAD Sign out in this tab, by its own Sign out button: the top window reloads/;
+  // no new document after the tap: the page stayed (a build before the card)
+  let r = clone(RELOAD);
+  r.steps.passkeyOut.doc = null;
+  badLine(r, thisTab);
+  // the new frame's ready past RELOAD_MS
+  r = clone(RELOAD);
+  r.steps.passkeyOut.t = r.steps.passkeyOut.doc - RELOAD_MS - 1;
+  badLine(r, thisTab);
+  // the new frame answers signed in
+  r = clone(RELOAD);
+  r.messages.find((m) => m.data?.id === st.passkeyOut.id).data.result.signed_in = true;
+  badLine(r, thisTab);
+  // made by another tab's post, not this tab's button
+  r = clone(RELOAD);
+  r.steps.passkeyOut.by = "channel";
+  badLine(r, thisTab);
+  // the other tab's sign out with no new document
+  r = clone(RELOAD);
+  r.steps.wordsOut.doc = null;
+  badLine(r, /^BAD Sign out in another tab: the top window reloads/);
+  // the second account's own sign out, its signout refused
+  r = clone(RELOAD);
+  r.messages.find((m) => m.data?.id === st.passkeyOut2.openId).data.result = { pending: false };
+  badLine(r, /^BAD the second passkey account's Sign out in this tab/);
+
+  // the words' account's names: on this harness run its reads were refused before the walk named any (0), so they are
+  // planted from release 119's live run, whose walk read the vault's Solana accounts
+  const names = /^BAD after the words' account signs out and a second account lands, no request names the words' account/;
+  const live = ANSWERS.release119.chromium.phone;
+  const walk = live.requests.find((x) => x.host === "solana-rpc.publicnode.com" && x.rpc?.[0]?.method === "getMultipleAccounts" && x.t >= live.steps.words.t && namesIn(x).some((n) => !JSON.stringify(RELOAD.requests).includes(n)));
+  assert.ok(walk, "release 119 holds a walk read of the words' account");
+  const own = (rec) => ({ ...clone(walk), t: rec.steps.words.t + 1 });
+  // read in the words' window, then again after its sign out (in the second account's): BAD
+  for (const t of [st.wordsOut.doc, st.created2.t + 1, st.passkeyOut2.t - 1]) {
+    r = clone(RELOAD);
+    r.requests.push(own(r), { ...clone(walk), t });
+    badLine(r, names);
+  }
+  // the same name on another host after the sign out: BAD
+  r = clone(RELOAD);
+  r.requests.push(own(r), { ...clone(walk), t: st.created2.t + 1, host: "ct-api.unrealized.trade", path: "/v1/rpc/solana" });
+  badLine(r, names);
+  // read only in the words' window: ok
+  r = clone(RELOAD);
+  r.requests.push(own(r));
+  assert.ok(judge(r).lines.some((l) => /^ok  after the words' account signs out and a second account lands, no request names the words' account \([1-9]\d* of its addresses and ids; \d+ requests after its sign out, 0 naming one\)$/.test(l)), judge(r).lines.join("\n"));
+  // a name the first account's requests carried too is not the words' account's: ok
+  r = clone(RELOAD);
+  r.requests.push({ ...clone(walk), t: st.created.t + 1 }, own(r), { ...clone(walk), t: st.created2.t + 1 });
+  assert.ok(!judge(r).lines.some((l) => names.test(l)), judge(r).lines.join("\n"));
+  // a live run whose words' account named nothing: BAD (nothing was checked)
+  r = clone(RELOAD);
+  r.source = "live https://confidential.unrealized.trade";
+  badLine(r, names);
 });
