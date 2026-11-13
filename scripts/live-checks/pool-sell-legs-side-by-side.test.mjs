@@ -10,7 +10,8 @@
 // kept pass's listing taken over this tab's newer read, or the finder list asked with no stop (review P2 and P3 of
 // 8da6b97f); the sale's reads unshared, shared past 4 s, shared on a failed read, never forgotten after a wait, or naming a W's read;
 // the young reads kept at a leg's turn; a sale's wait off the tap's bound, not marking it old, or not ended at a sign
-// out; the plan's wait off the bound; an old sale signed, or the plan's wait not making it old; a sale's simulation
+// out; the plan's wait off the bound; a sale's finder list at the passes' turn, the turn never reaching its reader, or
+// every finder list at a trade's (card evm-quote-rides-out-a-one-block-answer); an old sale signed, or the plan's wait not making it old; a sale's simulation
 // refused while an earlier leg is in flight not priced again, or its cause naming no provider: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -62,13 +63,17 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["the seed copy not zeroed", "finally{s.fill(0)}", "finally{}", "listed"],
     ["an unrecorded W never read (review of 55d4c6eb, P2-A)", "o=e=>!Object.hasOwn(t,e)&&r?.has(e)!==!0", "o=e=>!1", "listed"],
     ["every W read through the finder, recorded or not", "!Object.hasOwn(t,e)&&", "", "listed"],
-    ["the finder asked for every W, not the unrecorded ones only", "await Be(await d(),i,o,c)", "await Be(await d(),i,()=>!0,c)", "listed"],
+    ["the finder asked for every W, not the unrecorded ones only", "await Be(await d(),i,o,c,", "await Be(await d(),i,()=>!0,c,", "listed"],
     ["the seed read with no W", "if(o.length===0)return[];", "", "listed"],
     ["the finder's Ws read one after another (card wallets-found-in-one-read)", "HV(c,i,{together:!0,", "HV(c,i,{", "listed"],
     ["each W the finder did not read with no listing (card wallets-found-in-one-read)", "l=e=>r?.has(e)?new Map(r.get(e)):null;", "l=e=>null;", "listed"],
     ["the kept pass's listing over this tab's newer read (review P2 of 8da6b97f)", "t?He.listed()??ZN(", "t?ZN(", "listed"],
     ["the finder list asked with no stop (review P3 of 8da6b97f)", "{together:!0,...a?{signal:a}:{}}", "{together:!0}", "listed"],
-    ["the sale's stop not handed to its finder list (review P3 of 8da6b97f)", "await Be(await d(),i,o,c)", "await Be(await d(),i,o)", "listed"],
+    ["the sale's stop not handed to its finder list (review P3 of 8da6b97f)", "await Be(await d(),i,o,c,", "await Be(await d(),i,o,", "listed"],
+    ["a sale's finder list at the passes' turn (card evm-quote-rides-out-a-one-block-answer)", "c,t?`trade`:`pass`)", "c)", "listed"],
+    ["every finder list at the passes' turn, a sale's too", "t?`trade`:`pass`", "`pass`", "listed"],
+    ["the list's turn never reaching its reader", "reader:ze(r,u)}", "reader:ze(r)}", "listed"],
+    ["every finder list at a trade's turn, the positions pass's too", "u=`pass`)=>", "u=`trade`)=>", "listed"],
     ["the sale's reads unshared", "rpcs:tR(eR(e.rpcs,iR(t.token)),rR(t.token),nU,", "rpcs:(eR(e.rpcs,iR(t.token)),rR(t.token),nU,", "young"],
     ["shared past 4 s", "nU=4e3", "nU=6e4", "young"],
     ["shared at any age", "if(l&&c-l.at<n)return l.read", "if(l)return l.read", "young"],

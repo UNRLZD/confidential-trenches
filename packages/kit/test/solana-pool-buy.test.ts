@@ -243,21 +243,57 @@ const BUYBACK = [
   "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD", "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
 ];
 
-test("Global is exactly 1,088 bytes and GlobalConfig 949, and both list the same eight buyback recipients", async () => {
+test("Global is at least 1,088 bytes and GlobalConfig exactly 949, and both list the same eight buyback recipients", async () => {
   for (const v of ["pump", "pumpswap"] as const) {
     const kind = v === "pump" ? "pump-curve" : "pumpswap";
     const venue = await readSolanaPoolBuyVenue(providers(v), kind, fx[v].mint, () => 0);
     assert.deepEqual(venue.buybackFeeRecipients, BUYBACK, v);
-    // a Global one byte longer or shorter on both providers (a layout change) is refused
-    for (const delta of [1, -1]) {
+    // a GlobalConfig one byte longer or shorter on both providers (a layout change) is refused, and a Global one byte
+    // shorter; a longer Global is the pump-curve-upgrade-still-buys test's
+    for (const delta of v === "pump" ? [-1] : [1, -1]) {
       const resized = (p: 0 | 1) => replay(fx[v], p, (_list, ans) => {
         const d = Buffer.from(ans.value[2].data[0], "base64");
         ans.value[2].data[0] = (delta > 0 ? Buffer.concat([d, Buffer.alloc(1)]) : d.subarray(0, d.length - 1)).toString("base64");
         return ans;
       });
-      await assert.rejects(readSolanaPoolBuyVenue([resized(0), resized(1)], kind, fx[v].mint, () => 0), /bytes, not/, `${v} ${delta}`);
+      await assert.rejects(readSolanaPoolBuyVenue([resized(0), resized(1)], kind, fx[v].mint, () => 0), /bytes, (not|under)/, `${v} ${delta}`);
     }
   }
+});
+
+// Card pump-curve-upgrade-still-buys: pump's upgrade of 2026-11-13 20:12:28Z grew Global to 1,096 bytes (one u64
+// appended), and a 1,088-only check refused every curve buy. The venue as mainnet's code reads it
+// (contracts/pool-solana/fixtures/venues/pump.json, read after the upgrade, the accounts the pool's LiteSVM buy ran on)
+// gives the fee and buyback recipients its buy step names. Global is read at any size from 1,088 bytes up, its
+// recipients from the same offsets (pump appends, never moves a field); under 1,088 bytes it is refused.
+test("a curve buy reads pump's Global at 1,088 bytes or more, as after the 13 Nov upgrade (1,096), from the same offsets", async () => {
+  const ran = JSON.parse(readFileSync(new URL("../../../contracts/pool-solana/fixtures/venues/pump.json", import.meta.url), "utf8"));
+  const acc = (k: string) => ran.accounts.find((a: { address: string }) => a.address === k);
+  const answer = (list: string[], global?: (d: Buffer) => Buffer) => ({
+    context: { slot: Number(ran.slot) },
+    value: list.map((k) => {
+      const a = acc(k);
+      const d = Buffer.from(a.data, "base64");
+      return { owner: a.owner, lamports: Number(a.lamports), executable: false, rentEpoch: 0, space: d.length, data: [(global && k === list[2] ? global(d) : d).toString("base64"), "base64"] };
+    }),
+  });
+  const rpcs = (global?: (d: Buffer) => Buffer) => [0, 1].map(() => (async (method: string, params: readonly unknown[]) => {
+    assert.equal(method, "getMultipleAccounts");
+    return answer(params[0] as string[], global);
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+  const buy = ran.buy.find((s: { program: string }) => s.program === SOLANA_PUMP_PROGRAM);
+  assert.equal(Buffer.from(acc(buy.accounts[0].address).data, "base64").length, 1_096);
+  // mainnet's Global as read, and cut or grown to each size: the prefix is mainnet's, a grown tail is zeros
+  const sized = (n: number) => (d: Buffer) => (n <= d.length ? d.subarray(0, n) : Buffer.concat([d, Buffer.alloc(n - d.length)]));
+  for (const n of [undefined, 1_088, 1_096, 1_200]) {
+    const venue = await readSolanaPoolBuyVenue(rpcs(n === undefined ? undefined : sized(n)), "pump-curve", ran.mint, () => 0);
+    if (venue.kind !== "pump-curve") throw new Error("not a curve");
+    assert.equal(venue.feeRecipient, buy.accounts[1].address, `${n}`);
+    assert.equal(venue.buybackFeeRecipient, buy.accounts[17].address, `${n}`);
+    assert.deepEqual(venue.buybackFeeRecipients, BUYBACK, `${n}`);
+  }
+  await assert.rejects(readSolanaPoolBuyVenue(rpcs(sized(1_087)), "pump-curve", ran.mint, () => 0), /pump Global is 1087 bytes, under 1088/);
+  await assert.rejects(readSolanaPoolBuyVenue(rpcs(sized(0)), "pump-curve", ran.mint, () => 0), /Global/);
 });
 
 test("rent is read from the sysvar (5,080 a byte on 2 Nov), and a token account's size from its mint", async () => {
