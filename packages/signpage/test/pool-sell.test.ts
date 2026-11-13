@@ -7047,9 +7047,9 @@ test("round-trip-costs-less: a sent sweep's record lists the note's value, also 
   assert.ok(boundary < steady, `a page opened on both trees: ${boundary} listed against ${steady}`);
 });
 
-// the owed end (a claim still owed, the note under the floor): listed as what W adds once moved (restAdds,
-// pick (a), every path), never W's whole lamports nor its raw rest; this W's rest adds nothing, so it is not listed
-test("round-trip-costs-less: an owed end under the floor lists what W adds once moved, not W's lamports nor its rest", async () => {
+// the owed end (a claim still owed, the note under the floor): listed at its rest (restAdds, card
+// pool-amounts-are-standard-sizes, pick (c), every path), never W's whole lamports
+test("round-trip-costs-less: an owed end under the floor lists W's rest, not W's lamports", async () => {
   const mint = VF.pumpswap.mint;
   const w = await world({ venue: "pumpswap", cashback: true, buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }], claimFails: true, lamports: OWED_LAMPORTS }, [{ ...wallet(0n, false, mint), holdings: null } as never]);
   w.host.rpcs = withBuy(w.c.rpcs, [mint, mint]);
@@ -7057,11 +7057,12 @@ test("round-trip-costs-less: an owed end under the floor lists what W adds once 
   await resumeRentBacks(w.host, fakeLocks());
   const last = w.told.filter((t) => t.step === "rent_back").at(-1)!;
   assert.equal(last.state, "owed", JSON.stringify(w.told.filter((t) => t.step === "rent_back")));
-  // card every-lamport-can-move: the rest the sweep would carry, and what it adds once moved
+  // the rest the sweep would carry: under the floor it stays on W, listed at that rest
   const [, held, rest] = /W's (\d+) would leave (-?\d+) for a note, under/.exec(last.detail)!;
   assert.ok(BigInt(rest!) > 0n && BigInt(rest!) < BigInt(held!), last.detail);
-  const adds = restAdds(BigInt(rest!), solanaPoolFee(rent), FLOOR);
-  assert.equal(w.owed.get(W.address)?.lamports, adds === 0n ? undefined : adds.toString(), `W holds ${held}, a rest of ${rest}: listed at ${adds}`);
+  const adds = restAdds(BigInt(rest!), FLOOR);
+  assert.equal(adds, BigInt(rest!), "under the floor: the rest itself");
+  assert.equal(w.owed.get(W.address)?.lamports, adds.toString(), `W holds ${held}, a rest of ${rest}: listed at ${adds}`);
 });
 const OWED_LAMPORTS = 3_400_000;
 
