@@ -1302,8 +1302,20 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (got !== false) return;
     }
   };
-  // the chains whose landing pass is asked in this tick (evmKind's landed)
+  // the chains whose landing pass is asked in this tick (evmLanded)
   const evmLandingAsked = new Set<"base" | "robinhood">();
+  // a chain's one landing hook, the deposit host's (evmKind) and the carry's (evmCarry) alike: the notes one round claims
+  // (one tick) start one pass, the landing's own (evmProofs' landing); no landing starts one any other way
+  const evmLanded =
+    (chain: "base" | "robinhood") =>
+    (): void => {
+      if (evmLandingAsked.has(chain)) return;
+      evmLandingAsked.add(chain);
+      queueMicrotask(() => {
+        evmLandingAsked.delete(chain);
+        void evmProofs(chain, true);
+      });
+    };
   const evmKind = (chain: "base" | "robinhood", end?: () => void) => {
     const e = evmPool(chain);
     if (e === null) return null;
@@ -1317,17 +1329,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         notes: async () => (notes = await openNoteStore(await page.store())),
         records: async () => readNotes(await page.store()),
         seed64: page.seed64,
-        // each landed note runs the chain's queue pass, as the Solana deposit's does: the notes one round claims (one
-        // tick) start one pass, the deposit's own (evmProofs' landing). Only this host's landed starts one: the deposit
-        // kind calls it once the round on the pool's two RPCs holds the note's Deposited (pool-deposit-evm.ts)
-        landed: () => {
-          if (evmLandingAsked.has(chain)) return;
-          evmLandingAsked.add(chain);
-          queueMicrotask(() => {
-            evmLandingAsked.delete(chain);
-            void evmProofs(chain, true);
-          });
-        },
+        // each landed note runs the chain's queue pass, as the Solana deposit's does (evmLanded): the deposit kind calls
+        // it once the round on the pool's two RPCs holds the note's Deposited (pool-deposit-evm.ts)
+        landed: evmLanded(chain),
         settle: () => void settleEvm(chain),
         signal: follows.signal,
         // the session's sign out (signingOut, at its tap): it ends a wait between the ask's attempts
@@ -1469,7 +1473,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               notes: async () => notes,
               seed64: page.seed64,
               held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
-              landed: () => void evmProofs(chain),
+              // a carried note is a landing too: its pass is the landing's, one a tick (evmLanded)
+              landed: evmLanded(chain),
               signal,
             });
           } finally {
