@@ -379,7 +379,7 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
   const root = find(doc.body);
   assert.ok(root, "the page's root is in the document");
   root.dataset.signin = "signed-in";
-  assert.deepEqual(await ask({ type: "pool.withdraw", chain: "solana", return_key: "portfolio" }), { ok: true, result: { pending: true } }, "pool.withdraw: the flow's own answer");
+  assert.deepEqual(await ask({ type: "pool.withdraw", chain: "solana", return_key: "portfolio" }), { ok: true, result: { pending: true, closes: true } }, "pool.withdraw: the flow's own answer, at kit 1.13 with closes (card signing-layer-says-when-it-closes)");
   ns.close();
   w.close();
 });

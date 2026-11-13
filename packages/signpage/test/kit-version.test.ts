@@ -853,3 +853,19 @@ test("every level below kit 1.13 is sent each open's answer with no closes; resu
     assert.deepEqual(resultFor(kitLevel("1.12"), k, given), want, k);
   }
 });
+
+test("hello kit 1.12: the state answer and every state event as they are (each pool entry's making, each position's decimals and asset_held kept), and kit-v1.12's own schema reads both", async () => {
+  // the state carries no closes, so kit-v1.12 reads it at the current level's shape; an event goes through stateFor,
+  // the answer through resultFor, and each must keep the making kit-v1.12 reads (a 1.11-level strip would take it)
+  assert.ok(FULL.pools?.some((x) => "making" in x), "the planted state has a pool entry with making");
+  const p = page();
+  p.send(hello("1.12"));
+  const id = await p.ask();
+  assert.deepEqual(p.answer(id).result, FULL);
+  assert.ok(reads(V112, p.answer(id), "state"));
+  p.set({ ...FULL, vault_balance: "77" });
+  await p.api.idle();
+  const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
+  assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "77" } }]);
+  assert.ok(reads(V112, ev[0], "state"));
+});
