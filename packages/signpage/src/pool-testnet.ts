@@ -2784,6 +2784,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const stranded = await resumePieces({
       owed: piecesOwed,
       state,
+      // a note a tap of this page holds (pool.buy's claim): that tap decides its W
+      busy: (id) => claimed.has(id),
       // whose spend the buy's own note is, on both RPCs at finalized (pool-spend.ts spendOwner, as followBuys reads a
       // buy's): this buy's tag 3, another's, or not known yet; W's history read on across the state reads from piecesPlaces
       owner: async (r) => {

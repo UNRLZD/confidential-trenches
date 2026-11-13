@@ -136,3 +136,17 @@ test("proveFor: drop frees a carried note; the next pass may use it again", asyn
   assert.equal((await v.ns.get(C.id))!.state, "UNSPENT");
   assert.equal(q.ready().some((x) => x.noteId === C.id), false);
 });
+
+test("proveFor: the carried mark lasts its epoch only: a pass of the next epoch makes the note's proof again to the primary's W, as any other", async () => {
+  const v = await vaultWith(FIVE);
+  const pool = piecesPool(v);
+  const q = queue(v, pool as Pool<unknown>);
+  await q.refresh();
+  const C = await lastTwo(v);
+  const r = await q.proveFor(C.id, toOf(await noteOf(v, usd(10))));
+  pool.t.now += E; // the next epoch
+  await q.refresh();
+  const again = q.ready().find((x) => x.noteId === C.id && x.own !== true);
+  assert.notEqual(again?.attempt, r.attempt, "no longer the carried proof");
+  assert.notEqual(again?.wallet.address, W(await noteOf(v, usd(10))), "not bound to the carried W any more");
+});

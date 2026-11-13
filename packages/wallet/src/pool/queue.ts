@@ -400,6 +400,8 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     if (typeof nowMs !== "bigint" || nowMs < 0n) throw new PassFail("network", new Error(`pool ${pool.id}: now is not a bigint`));
     const start = epochOf(nowMs);
     for (const [attempt, id] of [...unfreed]) await free(id, attempt);
+    // a carried proof is the tap's for its own epoch only (its round 2 follows in seconds): past it, a pass's as any other
+    for (const id of [...carried]) if (alt.get(id)?.epochStartMs !== start) carried.delete(id);
     // let go of proofs whose attempt no longer holds its note; those of an earlier epoch stay ready (and HELD) until remade
     const all = await notes.list();
     const byId = new Map(all.map((n) => [n.id, n]));

@@ -2780,18 +2780,16 @@ async function twoRounds(round1: "lands" | "never") {
     return items.map((x) => byId.get(x.noteId)!);
   };
   const sent: Uint8Array[][] = [];
-  w.host.send = async (_pool, tx) => {
-    log.push(`send:${(await owed.list()).length === 1 ? "owed" : "not-owed"}`);
-    sent.push([tx.slice()]);
-    const sig = sigOf();
-    lands(sig, tx, ["note-2"]);
-    return { signature: sig };
-  };
+  // round 1 goes to the helper's pieces route too (POST /v1/pool/solana/pieces), never the one-send route
+  w.host.send = async () => assert.fail("no part of a carried tap goes to /send");
   w.host.sendPieces = async (_pool, txs) => {
-    log.push(`sendPieces:${txs.length}`);
+    log.push(`sendPieces:${txs.length}:${(await owed.list()).length === 1 ? "owed" : "not-owed"}`);
     sent.push(txs.map((t) => t.slice()));
     const sigs = txs.map(() => sigOf());
-    txs.forEach((t, i) => lands(sigs[i]!, t, [["note-3", "note-1"][i]!]));
+    const notes = stage === 1 ? ["note-2"] : ["note-3", "note-1"];
+    txs.forEach((t, i) => lands(sigs[i]!, t, [notes[i]!]));
+    // a round that does not land whole: the helper's 503 not_landed
+    if (round1 === "never" && stage === 1) throw new Error("pool send: HTTP 503");
     return { signatures: sigs };
   };
   const verdict = (id: string) => ({ kind: spentNotes.has(id) ? ("spent" as const) : ("unspent" as const) });
@@ -2821,8 +2819,9 @@ test("card buy-spends-its-change-in-the-same-tap: a buy past the ready pieces re
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   // round 1: the parent's tag 2 alone, owed before it leaves, settled, its change proved to the same W; round 2: the
   // change's tag 2 and the own note's tag 3, taken together
-  assert.deepEqual(x.log.filter((l) => !l.startsWith("settle")), ["take:note-2", "send:owed", "prove:note-2->W", "takeSet:note-3,note-1", "sendPieces:2"]);
-  assert.ok(x.log.indexOf("settle:note-2") > x.log.indexOf("send:owed") && x.log.indexOf("settle:note-2") < x.log.indexOf("prove:note-2->W"), "round 1 settled before its change is proved");
+  assert.deepEqual(x.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed", "prove:note-2->W", "takeSet:note-3,note-1", "sendPieces:2:owed"]);
+  const settled = x.log.findIndex((l) => l.startsWith("settle") && l.includes("note-2"));
+  assert.ok(settled > x.log.indexOf("sendPieces:1:owed") && settled < x.log.indexOf("prove:note-2->W"), "round 1 settled before its change is proved");
   const msgOf = (tx: Uint8Array) => solanaDecodeMessage(tx.subarray(1 + 64 * tx[0]!));
   const [[one], [two, three]] = x.sent as [[Uint8Array], [Uint8Array, Uint8Array]];
   for (const tx of [one!, two!, three!]) {
@@ -2836,12 +2835,28 @@ test("card buy-spends-its-change-in-the-same-tap: a buy past the ready pieces re
   assert.equal(msgOf(three!).instructions.at(-1)!.data[0], 3);
 });
 
-test("card buy-spends-its-change-in-the-same-tap: round 1 that never lands sends no buy: no change proved, nothing more sent, and W's owed record stays for the state reads", async () => {
+test("card buy-spends-its-change-in-the-same-tap: round 1 that the helper answers 503 (not landed whole) sends no buy: failed, no change proved, nothing more sent, and W's owed record stays for the state reads", async () => {
   const x = await twoRounds("never");
-  x.w.host.finalHeight = undefined;
   const a = await runPoolBuy(x.w.host, { ...ASK, amount: x.spend });
-  assert.ok("stage" in a && a.stage !== "filled", JSON.stringify(a));
-  assert.equal(x.log.some((l) => l.startsWith("prove") || l.startsWith("takeSet") || l.startsWith("sendPieces")), false, x.log.join(","));
+  assert.deepEqual(a, { error: "failed" });
+  assert.deepEqual(x.log.filter((l) => !l.startsWith("settle")), ["takeSet:note-2", "sendPieces:1:owed"], "round 1 alone: no change proved, no buy taken or sent");
   assert.equal(x.sent.length, 1);
   assert.equal((await x.owed.list()).length, 1, "W stays found");
+});
+
+test("card buy-spends-its-change-in-the-same-tap: between a first round that landed and the buy's round (own note HELD, a piece SPENT) a state read keeps W's record while a tap holds a note of it; once no tap does, W is swept back", async () => {
+  const rec: OwedPieces = { address: "W", l: "3", j: 0, primary: "W-own", pieces: ["W-p1"], lastHeight: "151", mint: "M", program: "T", spend: { program: "P", feePayer: "F", context: "7", nullifier: "9" } };
+  const st: Record<string, string> = { "W-own": "HELD", "W-p1": "SPENT" };
+  const owed = owedMem();
+  await owed.put(rec);
+  const stranded: string[] = [];
+  const run = (busy?: (id: string) => boolean) => resumePieces({ owed, state: async (id) => st[id], owner: async () => assert.fail("an unspent own note's owner is never read"), strand: async (r) => void stranded.push(r.address), ...(busy ? { busy } : {}) });
+  // the tap holds its own note between the rounds: nothing put back from under it
+  assert.equal(await run((id) => id === "W-own"), 0);
+  assert.deepEqual(stranded, []);
+  assert.equal(owed.all.size, 1);
+  // the tap ended without its buy: W holds the landed piece, swept back
+  assert.equal(await run(() => false), 1);
+  assert.deepEqual(stranded, ["W"]);
+  assert.equal(owed.all.size, 0);
 });

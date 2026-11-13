@@ -695,9 +695,13 @@ export function solanaPieceWire(cfg: { program: string; pool: string }, wallet: 
  * rent back's sweep, W's own owed record), then the record goes; no piece spent, nothing reached W, the record goes. A
  * note that cannot be read keeps the record for the next read, and so does a strand that fails. The number stranded.
  */
-export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string): Promise<string | undefined>; owner(r: OwedPieces): Promise<"mine" | "other" | null>; strand(r: OwedPieces): Promise<void> }): Promise<number> {
+export async function resumePieces(o: { owed: PiecesOwed; state(noteId: string): Promise<string | undefined>; owner(r: OwedPieces): Promise<"mine" | "other" | null>; strand(r: OwedPieces): Promise<void>; busy?(noteId: string): boolean }): Promise<number> {
   let stranded = 0;
   for (const r of await o.owed.list()) {
+    // a note a tap of this page holds now (its claim): the record's end is that tap's (card
+    // buy-spends-its-change-in-the-same-tap: between a first round that landed and the buy's round, the own note HELD and
+    // a piece SPENT, W is about to spend what it holds, never put back), kept
+    if (o.busy && [r.primary, ...r.pieces].some((id) => o.busy!(id))) continue;
     let states: (string | undefined)[];
     try {
       states = await Promise.all([r.primary, ...r.pieces].map((id) => o.state(id)));
@@ -907,9 +911,10 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
         });
         const parts1 = split.first.map((p, i) => ({ r: p, release: releases1[i]!, signed: signed1[i]! }));
         const last1 = parts1[parts1.length - 1]!;
-        const a1 = await sendAndSettle(h, last1.r, last1.release, pool, last1.signed, bh.lastHeight, wait, undefined, parts1.slice(0, -1));
-        // the first round not landed whole: no buy is sent; what it says is the tap's answer (W found by its owed record)
-        if (!("stage" in a1) || a1.stage !== "filled") return a1;
+        const a1 = await sendAndSettle(h, last1.r, last1.release, pool, last1.signed, bh.lastHeight, wait, undefined, parts1.slice(0, -1), true);
+        // the first round not landed whole: no buy is sent, and the tap failed (never "sent": no follow reads a release as
+        // a buy); any piece that landed waits in W, which its owed record names, for the state reads to put back
+        if (!("stage" in a1) || a1.stage !== "filled") return { error: "failed" };
         for (const p of split.first) await h.carry!.prove(p.noteId, { l: r.wallet.l, j: r.wallet.j, address: r.wallet.address });
         landed = { releases: got1, wallet: r.wallet.address };
         continue;
@@ -1016,16 +1021,21 @@ export async function sendAndSettle(
   h: Pick<PoolBuyHost, "rpcs" | "take" | "takeSet" | "send" | "sendPieces" | "settle" | "settleSet" | "now" | "reads" | "named" | "sent" | "landed">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
   fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[]; decimals?: (d: number) => void; early?: Promise<ChainNow> },
   before: readonly { r: Ready; release: SolanaPoolRelease; signed: Uint8Array }[] = [],
+  round = false,
 ): Promise<PoolBuyAnswer> {
   // every part of the send, in its order (card buy-spends-several-pieces): the bundle's tag 2 pieces, then this one; one
-  // part is a plain send. A bundle lands whole or not at all on Jito, yet the helper holds every signed part, so each
+  // part is a plain send. `round` (card buy-spends-its-change-in-the-same-tap): a buy's first round, tag 2s alone, 1 to
+  // 3 of them: always the set's take and the helper's pieces route (POST /v1/pool/solana/pieces, which answers once every
+  // one filled on both its providers, and a partial round as an error: each part is then read back here and settled,
+  // any landed money sitting in W), never a re-send of its last part alone. A bundle lands whole or not at all on Jito, yet the helper holds every signed part, so each
   // part is read back, settled and owned on its own and the answer is filled only when every one is this run's
   const parts = [...before, { r, release, signed }];
   // the take, awaited before anything leaves: the queue hands out these very attempts, or refuses with every note
   // HELD (a set: takeSet, all or none); a buy's early read of the pool's time is its time when still fresh
   // with the signed transactions' last height: once both RPCs' finalized height is past it with no spent mark, the
   // state reads free each note at once (solana-restore.ts solanaSettleReserved), not at the proof's deadline
-  const taken = parts.length === 1 ? [await h.take(r.noteId, r.attempt, fill?.early, BigInt(lastHeight))] : h.takeSet && h.sendPieces ? await h.takeSet(parts.map((x) => ({ noteId: x.r.noteId, attempt: x.r.attempt })), fill?.early, BigInt(lastHeight)) : no();
+  const pieced = round || parts.length > 1;
+  const taken = !pieced ? [await h.take(r.noteId, r.attempt, fill?.early, BigInt(lastHeight))] : h.takeSet && h.sendPieces ? await h.takeSet(parts.map((x) => ({ noteId: x.r.noteId, attempt: x.r.attempt })), fill?.early, BigInt(lastHeight)) : no();
   if (taken.length !== parts.length || taken.some((t, i) => t.attempt !== parts[i]!.r.attempt || !sameBytes(solanaProofBytes(t.proof), parts[i]!.release.proof))) return no();
   // the take holds the note for this very transaction: W and the venue with its pool, told before it leaves
   if (fill) for (const x of fill.bound) fill.tell(x);
@@ -1148,7 +1158,7 @@ export async function sendAndSettle(
   let answer: unknown;
   for (let tries = 1; ; tries++) {
     try {
-      answer = parts.length === 1 ? await h.send(pool, signed) : await h.sendPieces!(pool, parts.map((p) => p.signed));
+      answer = !pieced ? await h.send(pool, signed) : h.sendPieces ? await h.sendPieces(pool, parts.map((p) => p.signed)) : no();
       break;
     } catch (e) {
       // the helper refused before it sent (a 4xx but 429): the run ends now, "failed"; its notes stay RESERVED until
@@ -1165,7 +1175,7 @@ export async function sendAndSettle(
   }
   // the helper's names, one per part in order (a bundle's `signatures`, one send's `signature`): each a signature,
   // else nothing it said is read
-  const named = parts.length === 1 ? [(answer as { signature?: unknown } | null)?.signature] : (answer as { signatures?: unknown } | null)?.signatures;
+  const named = !pieced ? [(answer as { signature?: unknown } | null)?.signature] : (answer as { signatures?: unknown } | null)?.signatures;
   const isSig = (x: unknown): x is string => typeof x === "string" && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(x) && base58.decode(x).length === 64;
   const sigs = Array.isArray(named) && named.length === parts.length && named.every(isSig) && new Set(named).size === named.length ? (named as string[]) : null;
   // the buy's own (the last part's): the one the hook below names, checked as the one-piece answer always was
@@ -1223,7 +1233,7 @@ export async function sendAndSettle(
     // first read landed and as often after, at most POOL_BUY_RESEND_MAX times. Nothing new is signed: its min out is the
     // user's own, and the helper carries a nullifier once, so a buy it still carries answers that carry's word
     const tag3 = got[got.length - 1]!;
-    if (!landed && parts.length > 1 && got.slice(0, -1).every((g) => g[0] === "ok" && g[1] === "ok") && tag3[0] === "none" && tag3[1] === "none") {
+    if (!landed && !round && parts.length > 1 && got.slice(0, -1).every((g) => g[0] === "ok" && g[1] === "ok") && tag3[0] === "none" && tag3[1] === "none") {
       piecesAt ??= clock();
       if (resends < POOL_BUY_RESEND_MAX && clock() - piecesAt >= (resends + 1) * POOL_BUY_RESEND_MS && clock() - signedAt < POOL_BLOCKHASH_LIFE_MS) {
         resends++;
