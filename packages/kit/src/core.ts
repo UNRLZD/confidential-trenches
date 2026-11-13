@@ -61,3 +61,8 @@ export { HEIGHT_SPREAD_MAX } from "../../wallet/src/deposit/account.ts";
 // wallet's refusal of one provider twice
 export { solanaRestoreNotes, type SolanaRestoredNote, type SolanaRestoredSpend } from "../../wallet/src/pool/solana-restore.ts";
 export { solanaPoolOf, checkSolanaRpcs } from "../../wallet/src/pool/solana.ts";
+// card exit-with-only-the-words: the Solana pool's exit, run by the wallet's own code. Its fresh wallet W_{sol, l, j} and
+// the words' standard Solana key (m/44'/501'/0'/0', the exit's fee wallet), the pool's bind on a pin whose fee payer is
+// that wallet, and the program's context of a release, which the exit checks the bind's answer against
+export { freshWallet, slip10Ed25519 } from "../../wallet/src/derive/keys.ts";
+export { solanaPool, solanaContextOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";

@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // blindfill-exit (card exit-with-only-the-words): the exit command on a terminal. ./cli.ts holds the run; this file
 // gives it the real prompts and the chains this build carries, each on its release's two public RPCs on mainnet.
-//   node packages/exit/src/bin.ts [--chains near]
+//   node packages/exit/src/bin.ts [--chains near,solana]
 import { createInterface } from "node:readline";
 import { EXIT_NETWORKS } from "./rpc.ts";
 import { runCli, type CliIo } from "./cli.ts";
 import { nearExit } from "./near-out.ts";
+import { solExit } from "./sol-out.ts";
+import { EXIT_SOL_CLUSTERS } from "./sol-rpc.ts";
 
 /** One line from the terminal with nothing echoed (raw mode). Ctrl-C ends the run. */
 function hidden(prompt: string): Promise<string> {
@@ -66,6 +68,7 @@ const io: CliIo = {
   say: (l) => process.stderr.write(`${l}\n`),
   chains: {
     near: { run: nearExit, rpcs: [...EXIT_NETWORKS.mainnet.rpcs] as [string, string], asks: "a NEAR account, such as you.near" },
+    solana: { run: solExit, rpcs: [...EXIT_SOL_CLUSTERS.mainnet.rpcs] as [string, string], asks: "a Solana address" },
   },
 };
 runCli(io).then(
