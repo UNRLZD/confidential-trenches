@@ -99,6 +99,18 @@ export function cuLimitOf(accountKeys, instructions, decode) {
   }
   return null;
 }
+/** A transaction's compute unit price, micro-lamports (its SetComputeUnitPrice, tag 3), or null with none. */
+export function cuPriceOf(accountKeys, instructions, decode) {
+  for (const ix of instructions ?? []) {
+    if (accountKeys[ix.programIdIndex] !== COMPUTE_BUDGET) continue;
+    const d = Buffer.from(decode(ix.data));
+    if (d[0] === 3 && d.length >= 9) return d.readBigUInt64LE(1);
+  }
+  return null;
+}
+
+/** A transaction's price and the priority it pays (the limit times the price, rounded up), as decimal strings. */
+const priorityOf = (limit, price) => (price === null ? {} : { cuPrice: String(price), ...(limit === null ? {} : { priority: String((BigInt(limit) * price + 999_999n) / 1_000_000n) }) });
 
 /**
  * One transaction's record from its getTransaction answer (json encoding: the message's account keys, loaded
@@ -123,10 +135,12 @@ export function txRecord(coin, step, signature, tx, watch = {}, decode = (x) => 
     signature,
     found: true,
     slot: tx.slot,
+    blockTime: tx.blockTime ?? null,
     ok: err === null,
     err,
     cu: tx.meta?.computeUnitsConsumed ?? null,
     cuLimit: cuLimitOf(m?.accountKeys ?? [], m?.instructions, decode),
+    ...priorityOf(cuLimitOf(m?.accountKeys ?? [], m?.instructions, decode), cuPriceOf(m?.accountKeys ?? [], m?.instructions, decode)),
     fee: tx.meta?.fee ?? null,
     accounts: keys.length,
     lookups: (m?.addressTableLookups ?? []).map((l) => l.accountKey),

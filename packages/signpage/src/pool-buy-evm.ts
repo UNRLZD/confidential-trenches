@@ -65,7 +65,7 @@ import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type PoolAsk } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmReleaseRead } from "./evm-send.ts";
 import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
-import { TRADE_HELPER } from "./trade.ts";
+import { duringTrade, TRADE_HELPER } from "./trade.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 type Ready = ReadyProof<EvmPoolRequest>;
@@ -609,7 +609,7 @@ export function poolBuyEvmKind(host: () => EvmPoolBuyHost & { end?(): void }, lo
     let answer: HostAnswer<"pool.buy"> | HostRefusal | null = null;
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
-    const run = (async () => {
+    const run = duringTrade(locks, async () => {
       const h = host();
       try {
         const a = await runEvmPoolBuy(
@@ -629,7 +629,7 @@ export function poolBuyEvmKind(host: () => EvmPoolBuyHost & { end?(): void }, lo
       } finally {
         h.end?.();
       }
-    })()
+    })
       .catch(() => {
         if (!answer) answer = { error: "failed" };
       })

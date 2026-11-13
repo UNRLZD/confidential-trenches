@@ -13,8 +13,8 @@ import { sha512 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
-import { solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
+import { SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaEventAuthority, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
+import { solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import {
   buildSolanaPoolBuy,
   solanaPoolBuyMaxSpend,
@@ -54,6 +54,7 @@ import {
   type SolanaOnwardReads,
   drawPool,
   SOLANA_POOL_SELL_RESERVE_MAX,
+  SOLANA_POOL_SELL_PRIORITY,
   SOLANA_POOL_MIN_DEPOSIT,
   solanaSweepFloor,
   solanaDepositRents,
@@ -536,6 +537,11 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
     [sellWire({ dep: { pre: PRE + 1n } }), "precommitment"],
     [sellWire({ dep: { program: key(43) } }), "program"],
     [sellWire({ extra: [send(key(79), 1n)] }), "sell"],
+    // no account of W's closes inside a sale (card round-trip-costs-less's closes in the sale were taken out: on a fixed
+    // deposit value they save one frame fee and a relayed dust unit makes them fail): W's token account's close or its
+    // volume account's, between the venue's sell and the deposit, is refused as any other step
+    [sellWire({ extra: [{ program: venue.tokenProgram, accounts: [{ key: solanaAta(SOL_W, venue.mint, venue.tokenProgram), signer: false, writable: true }, { key: SOL_W, signer: false, writable: true }, { key: SOL_W, signer: true, writable: false }], data: Uint8Array.of(9) }] }), "sell"],
+    [sellWire({ extra: [{ program: SOLANA_PUMP_PROGRAM, accounts: [{ key: SOL_W, signer: true, writable: true }, { key: solanaVolumeAccumulator(SOL_W, SOLANA_PUMP_PROGRAM), signer: false, writable: true }, { key: solanaEventAuthority(SOLANA_PUMP_PROGRAM), signer: false, writable: false }, { key: SOLANA_PUMP_PROGRAM, signer: false, writable: false }], data: Uint8Array.from(SOLANA_CLOSE_VOLUME_ACCUMULATOR) }] }), "sell"],
     // the sell's accounts are the ones the kit builds from the device's own venue read, never the wire's: a sell paying
     // another fee recipient (pump's sell names it second, writable), or sending the SOL out of another curve
     [sellWire({ account: [1, key(80)] }), "sell_accounts"],
@@ -1092,7 +1098,8 @@ test("Solana full sell: the rule passes exactly the device's reserve, a note und
     const next = rnd() < 0.5;
     const pair = () => { const v = rnd() < 0.5 ? null : ri(0n, 3_000_000n); return [v, v] as const; };
     const held: SolanaDepositHeld = { mark: pair(), state: pair(), label: pair() };
-    const fee = rnd() < 0.5 ? 5_000n : ri(0n, 1_405_000n);
+    // the most a sale's fee can be: one signature and SOLANA_POOL_SELL_PRIORITY (the rule refuses more, P2-2)
+    const fee = rnd() < 0.5 ? 5_000n : ri(0n, 5_000n + SOLANA_POOL_SELL_PRIORITY);
     let made = rnd() < 0.5 ? 0n : ri(0n, 3_000_000n);
     const rents = solanaDepositRents(rent, SOL_READS, held, next);
     const full = solanaSellAfterFull(rent, owed);
@@ -1118,4 +1125,72 @@ test("Solana full sell: the rule passes exactly the device's reserve, a note und
   }
   assert.ok(n > 200, String(n));
   assert.deepEqual(bad.slice(0, 10), []);
+});
+
+// card round-trip-costs-less, review P2-2 of 4f9217972: the sale's priority is bounded by the rule itself, not only by
+// the builder (src/pool-sell.ts solanaSellBudget): a sale whose compute budget pays over SOLANA_POOL_SELL_PRIORITY is
+// refused at any price the head's own caps pass (its 1,400,000 limit and 1,000,000 price paid 1,400,000 before), and a
+// full sell's keep is priced at no fee over one signature and that priority (105,000)
+test("round-trip-costs-less P2-2: a Solana sale paying more priority than SOLANA_POOL_SELL_PRIORITY is refused, the cap itself passes, and a full sell's fee is held to 5,000 plus that priority", async () => {
+  const { venue, ref, reads } = await setup("pump");
+  const amount = 5_000_000n;
+  const reference = { amount, ref, slippageBps: 300 };
+  const floor = (ref.pools.find((p) => p.venue === "pump-curve")!.expectedOut * 9_700n) / 10_000n;
+  const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
+  const RESERVE = 5_000n;
+  const PART: SolanaSellSurplus = { full: false, lamports: 0n, fee: 5_000n, made: 0n, rent: { lamportsPerByte: 5_080n, factor: 1n }, held: { mark: [null, null], state: [null, null], label: [null, null] }, next: false, owed: 0 };
+  const limitIx = (l: number) => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, ...u64(BigInt(l)).slice(0, 4)) });
+  const priceIx = (p: bigint) => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(3, ...u64(p)) });
+  const steps = () => solanaPoolSellSteps(venue, SOL_W, amount, floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+  const sale = (budget: Ixx[], reserve = RESERVE, p: SolanaSellSurplus = PART) => checkSolanaSell(wire(SOL_W, [...budget, ...steps(), depositIx({ value: floor - reserve })]), ask, solCtx(), venue, reference, reads.slot, SOL_READS, reserve, p);
+  assert.equal(SOLANA_POOL_SELL_PRIORITY, 100_000n);
+  // the pump sale's limit (87,102 units x 1.2) at the price the cap buys: 100,000 lamports exactly, passes; one more
+  // micro-lamport a unit is 100,001, refused
+  assert.equal(sale([limitIx(104_523), priceIx(956_727n)]).back, floor - RESERVE);
+  assert.throws(() => sale([limitIx(104_523), priceIx(956_728n)]), refusedAs("priority"));
+  // the head's own caps (1,400,000 units, 1,000,000 a unit) pass the head and are refused here: 1,400,000 lamports
+  assert.throws(() => sale([limitIx(1_400_000), priceIx(1_000_000n)]), refusedAs("priority"));
+  // a price with no limit is priced at the runtime's most, 1,400,000 units: 71,428 a unit is 99,999.2, 100,000 rounded
+  // up, passes; 71,429 is 100,000.6, 100,001, refused
+  assert.equal(sale([priceIx(71_428n)]).back, floor - RESERVE);
+  assert.throws(() => sale([priceIx(71_429n)]), refusedAs("priority"));
+  // a limit alone, or no budget, pays no priority
+  assert.equal(sale([limitIx(1_400_000)]).back, floor - RESERVE);
+  assert.equal(sale([]).back, floor - RESERVE);
+  // a full sell: its keep priced at a fee of 5,000 plus SOLANA_POOL_SELL_PRIORITY passes; a lamport of fee over it, W
+  // holding a lamport more so the keep is the same, is refused, with a budget or none
+  const rent = { lamportsPerByte: 5_080n, factor: 1n } as SolanaSellSurplus["rent"];
+  const none = [null, null] as const;
+  const held: SolanaDepositHeld = { mark: none, state: none, label: none };
+  const rents = solanaDepositRents(rent, SOL_READS, held, false);
+  const keep = solanaSellAfterFull(rent, 0);
+  const surplus = 3_000_000n;
+  const budget = [limitIx(104_523), priceIx(956_727n)];
+  const fee = 5_000n + 100_000n;
+  const FULL: SolanaSellSurplus = { full: true, lamports: fee + rents + keep + surplus, fee, made: 0n, rent, held, next: false, owed: 0 };
+  assert.equal(sale(budget, -surplus, FULL).back, floor + surplus);
+  assert.throws(() => sale(budget, -surplus, { ...FULL, fee: fee + 1n, lamports: FULL.lamports + 1n }), refusedAs("reserve"));
+  assert.equal(sale([], -surplus, FULL).back, floor + surplus);
+  assert.throws(() => sale([], -surplus, { ...FULL, fee: fee + 1n, lamports: FULL.lamports + 1n }), refusedAs("reserve"));
+});
+
+// review 2 P3-b of c0dd55d02: a partial sale's reserve is priced at a fee too, and the rule held only a full sell's; a
+// partial sale priced at a 1,405,000 fee (its priority 100,000) passed and held up to SOLANA_POOL_SELL_RESERVE_MAX back
+// on W. The fee a sale names is held to one signature and SOLANA_POOL_SELL_PRIORITY on every sale that names one.
+test("round-trip-costs-less P3-b: a partial Solana sale's fee is held to 5,000 plus SOLANA_POOL_SELL_PRIORITY as a full one's: 105,000 passes, 105,001 and 1,405,000 are refused", async () => {
+  const { venue, ref, reads } = await setup("pump");
+  const amount = 5_000_000n;
+  const reference = { amount, ref, slippageBps: 300 };
+  const floor = (ref.pools.find((p) => p.venue === "pump-curve")!.expectedOut * 9_700n) / 10_000n;
+  const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
+  const limit = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, ...u64(104_523n).slice(0, 4)) };
+  const price = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(3, ...u64(956_727n)) };
+  const steps = () => solanaPoolSellSteps(venue, SOL_W, amount, floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+  const part = (fee: bigint): SolanaSellSurplus => ({ full: false, lamports: 0n, fee, made: 0n, rent: { lamportsPerByte: 5_080n, factor: 1n }, held: { mark: [null, null], state: [null, null], label: [null, null] }, next: false, owed: 0 });
+  const sale = (fee: bigint) => checkSolanaSell(wire(SOL_W, [limit, price, ...steps(), depositIx({ value: floor - fee })]), ask, solCtx(), venue, reference, reads.slot, SOL_READS, fee, part(fee));
+  assert.equal(sale(5_000n + SOLANA_POOL_SELL_PRIORITY).back, floor - 5_000n - SOLANA_POOL_SELL_PRIORITY);
+  assert.throws(() => sale(5_001n + SOLANA_POOL_SELL_PRIORITY), refusedAs("reserve"));
+  assert.throws(() => sale(1_405_000n), refusedAs("reserve"));
+  // a fee that is no number, or under 0, is refused on a partial sale as on a full one
+  assert.throws(() => checkSolanaSell(wire(SOL_W, [limit, price, ...steps(), depositIx({ value: floor - 5_000n })]), ask, solCtx(), venue, reference, reads.slot, SOL_READS, 5_000n, { ...part(5_000n), fee: -1n }), refusedAs("reserve"));
 });

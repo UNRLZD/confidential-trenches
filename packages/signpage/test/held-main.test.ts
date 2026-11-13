@@ -103,7 +103,8 @@ test("withdraw.open with the from_id of a held op holding a move: the recorded a
   const root = gl.__ctRoot as { dataset: Record<string, string> };
   await until("signed in", () => root.dataset.signin === "signed-in" && !(gl.__ctBusy as () => boolean)());
   // the sign-in's own resume (settleHeld) runs the real wallet move on refused fetches; only the page's calls count here
-  const a = (gl.__ctDecide as (k: string, w: unknown, f?: string) => { then: () => void } | null)("withdraw.open", undefined, U);
+  // decide takes the open's request id first (card signing-layer-says-when-it-closes: the id its closed notice names)
+  const a = (gl.__ctDecide as (id: string, k: string, w: unknown, f?: string) => { then: () => void } | null)("held-open", "withdraw.open", undefined, U);
   assert.ok(a, "withdraw.open taken");
   a!.then();
   await until("the held page drawn", () => root.dataset.signin === "held");

@@ -192,15 +192,17 @@ const PLANTED = {
   "the wallet's sweeps by pnpm --filter, no run": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: pnpm --filter @blindfill/wallet test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
   "the wallet's sweeps by pnpm -C": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: pnpm -C packages/wallet test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
   "the wallet's sweeps by npm in a run block": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: |\n          cd packages/wallet && npm run test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
-  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
-  "five mutant parts once the wallet's sweeps joined": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5]", "test-mutants' heaviest of 5 part(s) is planned at"],
-  "seven mutant parts once the rent back's sweep grew": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5, 6, 7]", "test-mutants' heaviest of 7 part(s) is planned at"],
-  "eight mutant parts once the sell's deposit back floor grew the rent back": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8]", "test-mutants' heaviest of 8 part(s) is planned at"],
+  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
+  "five mutant parts once the wallet's sweeps joined": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1, 2, 3, 4, 5]", "test-mutants' heaviest of 5 part(s) is planned at"],
+  "seven mutant parts once the rent back's sweep grew": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1, 2, 3, 4, 5, 6, 7]", "test-mutants' heaviest of 7 part(s) is planned at"],
+  "eight mutant parts once the sell's deposit back floor grew the rent back": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8]", "test-mutants' heaviest of 8 part(s) is planned at"],
   // card ci-mutant-shards-true-times: nine parts planned 536 s by the table that had gone stale; the true one plans 780 s there
-  "nine mutant parts, the count before the table read the true times": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9]", "test-mutants' heaviest of 9 part(s) is planned at"],
-  "thirteen mutant parts, one short of the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]", "test-mutants' heaviest of 13 part(s) is planned at"],
-  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
-  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [" + Array.from({ length: 40 }, (_, i) => i + 1).join(", ") + "]", "test-mutants: the sweeps are"],
+  "nine mutant parts, the count before the table read the true times": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9]", "test-mutants' heaviest of 9 part(s) is planned at"],
+  "thirteen mutant parts, one short of the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]", "test-mutants' heaviest of 13 part(s) is planned at"],
+  "fourteen mutant parts, the count before the rent back's sweep grew to 126": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]", "test-mutants' heaviest of 14 part(s) is planned at"],
+  "fifteen mutant parts, one short of the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]", "test-mutants' heaviest of 15 part(s) is planned at"],
+  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
+  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16\]/, "$1part: [" + Array.from({ length: 60 }, (_, i) => i + 1).join(", ") + "]", "test-mutants: the sweeps are"],
   "no test-mutants job": [/\n {2}test-mutants:\n/, "\n  test-mutantz:\n", "ci.yml has no test-mutants shard"],
   "a shard job left out of the list": [/(\n {2}test:\n)/, "\n  test-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: \"true\"\n$1", "test does not need test-extra"],
   // card ci-fast-checks-on-the-pr: the sweeps stay nightly, test never waits on them, and a package job's failure fails test
@@ -347,7 +349,7 @@ test("planted: a part added to the matrix drops nothing and doubles nothing; pas
     const seen = Array.from({ length: total }, (_, i) => mutantsPart(SWEEPS, i, total)).flat().map(key);
     assert.deepEqual(seen.toSorted(), SWEEPS.map(key).toSorted(), `${total} parts`);
   }
-  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)\]/, `$1, 15]`);
+  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)\]/, `$1, 17]`);
   assert.notEqual(more, CI);
   assert.deepEqual(shardProblems(more), []);
   assert.throws(() => mutantsPart(SWEEPS, 0, SWEEPS.length + 1), /fewer than/);

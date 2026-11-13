@@ -80,6 +80,7 @@ import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/sr
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
 import { poolUnits } from "./rules/pool.ts";
+import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 
 export type Position = SignpageState["positions"][number];
 
@@ -786,6 +787,38 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
 }
 
 const utf8 = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v)).length;
+
+/** The device's Ws whose money waits for its rent back (review 2 P3-e of c0dd55d02: a leftover W's sweep waits out the
+ *  device's gap, src/pool-sell.ts RentBackSpacing): each owed record carrying the lamports its last pass read alike on
+ *  both RPCs, its buy proven, as a state.wallets entry RETURNING at the pool's price, so the app counts it on its way and
+ *  never as gone. A W whose sweep is sent (`sweep`) stays listed while the note that sweep wrote is not counted yet
+ *  (PLANNED or INCOMING, or none carries it), read from `notes`, the very notes the state's balance counts, so the money
+ *  is in one total and never two; with no notes read, it lists nothing. A record with no such read, nothing on W or no
+ *  price lists nothing: never a guessed size. */
+export function returningWallets(owed: readonly { address: string; lamports?: string; sweep?: string }[], price: PoolStatePrice | null, notes: readonly NoteRecord[] | null): SignpageState["wallets"][number][] {
+  if (price === null) return [];
+  const out: SignpageState["wallets"][number][] = [];
+  for (const r of owed) {
+    if (typeof r.lamports !== "string" || !/^[1-9]\d{0,19}$/.test(r.lamports)) continue;
+    if (r.sweep !== undefined) {
+      if (notes === null) continue;
+      const n = notes.find((x) => x.sends?.some((d) => d.signature === r.sweep));
+      if (n !== undefined && n.state !== "PLANNED" && n.state !== "INCOMING") continue;
+    }
+    const size = usdOf(BigInt(r.lamports), SOL_DECIMALS, price);
+    if (size !== null) out.push({ chain: "solana", address: r.address, role: "fresh", size, state: "RETURNING" });
+  }
+  return out;
+}
+
+/** `state` with `wallets` added when signed in; a state they cannot fit, or that the kit's schema refuses with them, goes
+ *  as it was. */
+export function withReturning(state: SignpageState, wallets: readonly SignpageState["wallets"][number][]): SignpageState {
+  if (!state.signed_in || wallets.length === 0) return state;
+  const out: SignpageState = { ...state, wallets: [...state.wallets, ...wallets] };
+  if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) return state;
+  return SIGNPAGE_RESULT_SCHEMAS.state(out) ? out : state;
+}
 
 /** `state` with `positions` when signed in and a pass has run; the oldest ops give way for them as for the vault's
  *  balance (src/vault-balance.ts), and a state they cannot fit, or that the kit's schema refuses with them, goes as it
