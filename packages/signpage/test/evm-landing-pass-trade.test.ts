@@ -355,6 +355,6 @@ test("every wallet pool the page makes binds on the chain's one fee hold", async
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   const made = src.split("walletEvmPool({").slice(1);
-  assert.equal(made.length, 3, "the pass pool, the landing's pool and a withdraw's");
+  assert.equal(made.length, 4, "the pass pool, the landing's pool, a withdraw's and a deposit in sight's (card evm-landing-reads-batched)");
   for (const [i, body] of made.entries()) assert.match(body.slice(0, 600), /\n\s+feeHold: evmFeeHoldOf\(e\.pin\),\n/, `pool ${i + 1} on the fee hold`);
 });

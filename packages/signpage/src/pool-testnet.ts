@@ -801,6 +801,10 @@ export const EVM_TURN_SPREAD_MS = 2_000;
  *  54 s with the follow's fee reads filling its hosts' pass budget and about 15 s without them. Past it, the round
  *  reads the history itself, as before. */
 export const EVM_WARM_WAIT_MS = 20_000;
+/** How long after a deposit was last in sight (a quote's floor, its follow, a restore: evmPoolOf) the turn's pass still
+ *  holds that chain's period fee for it (card evm-landing-reads-batched), as it does for a chain with notes: a first
+ *  deposit's landing then finds its period's fee read at the turn, while the period's first block is fresh. */
+export const EVM_SIGHT_MS = 600_000;
 /** One stop for `signal` (when given) and `session`: it fires with the first one's reason; `off` takes its listeners
  *  off both, so a round that ends leaves none on a signal that outlives it. */
 function eitherStop(signal: AbortSignal | undefined, session: AbortSignal): { stop: AbortSignal; off: () => void } {
@@ -948,6 +952,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     evmWarms.clear();
     evmWarmed.clear();
     evmWarmFails.clear();
+    evmSighted.clear();
+    evmSightHeld.clear();
     evmFeeHolds.clear();
     evmShownGen.clear();
     evmRearmed.clear();
@@ -1178,6 +1184,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmWarms = new Map<"base" | "robinhood", Promise<boolean>>();
   const evmWarmed = new Set<"base" | "robinhood">();
   const evmWarmFails = new Map<"base" | "robinhood", number>();
+  // card evm-landing-reads-batched: when each chain's deposit was last in sight (turnNow), and the pool's period its
+  // sight last held the fee for
+  const evmSighted = new Map<"base" | "robinhood", number>();
+  const evmSightHeld = new Map<"base" | "robinhood", number>();
   const evmWarm = (chain: "base" | "robinhood"): Promise<boolean> | null => {
     const e = evmPool(chain);
     if (e === null) return null;
@@ -1623,7 +1633,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     await Promise.all(
       chains.map(async (chain) => {
         const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
-        if (signal.aborted || !(evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD"))) return;
+        if (signal.aborted) return;
+        if (!(evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD"))) {
+          // a deposit in sight (EVM_SIGHT_MS): its period's fee held for its landing, no queue and no pass
+          if ((evmSighted.get(chain) ?? -Infinity) + EVM_SIGHT_MS > turnNow()) await evmSightHold(chain, signal).catch(() => {});
+          return;
+        }
         let p = evmQueues.get(chain);
         if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
         const q = await p.catch(() => null);
@@ -1650,6 +1665,42 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     );
   };
   const E_MS = Number(EVM_EPOCH_MS);
+  // the period fee for a deposit in sight, on the pass's hosts, into the page's one hold for the pin (evmFeeHoldOf):
+  // the queue its landing opens binds on it. No queue, no notes and no seed: a queue opened here would run a pass at
+  // every state read
+  const evmSightHold = async (chain: "base" | "robinhood", signal: AbortSignal): Promise<void> => {
+    const e = evmPool(chain);
+    if (e === null || signal.aborted) return;
+    const pool =
+      over.evmQueuePool?.(chain) ??
+      walletEvmPool({
+        pin: e.pin,
+        rpcs: e.passRpcs,
+        feeRpcs: pageEvmFeeRpcs(chain, "pass"),
+        feeHold: evmFeeHoldOf(e.pin),
+        held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
+        history: [...e.passList, ...pageEvmHistory(e.pin)],
+        ...(typeof (e.passSync as Partial<EvmTreeSync>).trees === "function" ? { sync: e.passSync as EvmTreeSync } : {}),
+        relayFee: (ep, s) => evmPoolRelayFee(e.pin.pool, ep, s, over.fetch),
+        epochFee: evmEpochFee,
+      });
+    const holdFee = (pool as Partial<Pick<EvmPoolOf, "holdFee">>).holdFee;
+    if (typeof holdFee !== "function") return;
+    const now = await pool.now(signal);
+    await holdFee.call(pool, now - (now % EVM_EPOCH_MS), signal);
+  };
+  // a deposit in sight (evmPoolOf): marked for the turns of EVM_SIGHT_MS, and the pool's period it is in held now, once
+  // a period, so a landing in this period finds its fee read seconds earlier than its own bind would ask it
+  const evmSight = (chain: "base" | "robinhood"): void => {
+    const t = turnNow();
+    evmSighted.set(chain, t);
+    const at = t + turnOffset;
+    const period = at - (at % E_MS);
+    if (evmSightHeld.get(chain) === period) return;
+    evmSightHeld.set(chain, period);
+    const signal = evmStop.signal;
+    void evmSightHold(chain, signal).catch(() => {});
+  };
   // the turn's pass, once for the period it is in on the pool's time
   const runTurn = (): Promise<void> | undefined => {
     const t = turnNow() + turnOffset;
@@ -2994,7 +3045,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (ask.chain !== "solana") return evmDeposit(ask.chain)?.(ask, ctx, from) ?? { error: "not_allowed" };
       return pin === undefined || !wayOut("solana") ? { error: "not_allowed" } : deposit(ask, ctx, from);
     },
-    evmPoolOf: (chain) => ((e) => (e === null ? null : (evmWarm(chain), { pin: e.pin, rpcs: e.rpcs })))(evmPool(chain)),
+    evmPoolOf: (chain) => ((e) => (e === null ? null : (evmWarm(chain), evmSight(chain), { pin: e.pin, rpcs: e.rpcs })))(evmPool(chain)),
     host: () => host(),
     settle,
     stateRead,

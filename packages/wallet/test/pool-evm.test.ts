@@ -553,6 +553,115 @@ test("the epoch's first block is the first at or after its start, the same on bo
   await assert.rejects(evmEpochBlock(pair(c, c, {}, { hashOf: (n) => (n === 40 ? h32("other 40") : c.hashOf(n)) }), start), /hold different blocks at 40/);
 });
 
+// card evm-landing-reads-batched: the search reads by rounds, a step's guess and the block below it at once
+/** rpc's block reads by number, by round: a read started while none is in flight opens a round (each answered a
+ *  macrotask later, so reads asked together overlap and reads asked in turn do not). */
+const blockRounds = (r: EvmRpc) => {
+  const out = { rounds: 0, most: 0, reads: [] as string[], rpc: r };
+  let live = 0;
+  out.rpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m !== "eth_getBlockByNumber" || !/^0x/.test(String(p[0]))) return r(m, p);
+    if (live++ === 0) out.rounds++;
+    out.most = Math.max(out.most, live);
+    out.reads.push(String(p[0]));
+    try {
+      await new Promise((x) => setImmediate(x));
+      return await r(m, p);
+    } finally {
+      live--;
+    }
+  }, { url: r.url });
+  return out;
+};
+/** A small seeded generator (mulberry32), so a failing case can be replayed. */
+const seeded = (seed: number) => () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
+test("card evm-landing-reads-batched: on a 2 s chain the first guess is the period's first block, one round, then both checks in one round", async () => {
+  for (const [back, first] of [[30, 85], [120, 40]] as const) {
+    const c = C3();
+    const start = (T0 + 200n - BigInt(back)) * 1000n - 1000n; // the head (100) is at T0 + 200 s; between first-1 and first
+    const [a, b] = pair(c, c);
+    const r0 = blockRounds(a), r1 = blockRounds(b);
+    assert.equal((await evmEpochBlock([r0.rpc, r1.rpc], start)).number, BigInt(first));
+    assert.equal(r0.rounds, 2, `${back} s back: rpc 0 read ${JSON.stringify(r0.reads)}`);
+    assert.equal(r0.most, 2, "a round's two blocks asked at once");
+    assert.deepEqual(r0.reads.slice(0, 2).sort(), [q(first - 1), q(first)].sort());
+    assert.equal(r1.rounds, 1, "rpc 1 reads only the check, its two blocks at once");
+  }
+});
+
+test("card evm-landing-reads-batched: on any chain's times, equal times and long gaps included, the search finds the first block at or after the start", async () => {
+  const rand = seeded(0x5eed);
+  for (let k = 0; k < 400; k++) {
+    const head = 2 + Math.floor(rand() * 400);
+    const times: bigint[] = [T0];
+    for (let n = 1; n <= head; n++) {
+      const x = rand();
+      // a Robinhood-like chain: blocks only when there is work, several in one second, or a minute apart
+      times.push(times[n - 1]! + BigInt(x < 0.3 ? 0 : x < 0.9 ? 1 + Math.floor(rand() * 4) : 30 + Math.floor(rand() * 60)));
+    }
+    const lo = times[0]! * 1000n + 1n, hiMs = times[head]! * 1000n;
+    const start = lo + BigInt(Math.floor(rand() * Number(hiMs - lo + 1n)));
+    const want = times.findIndex((t) => t * 1000n >= start);
+    const c = { ...C3(), head, finalized: Math.max(0, head - 10), ts: (n: number) => times[n]! };
+    const r0 = blockRounds(pair(c, c)[0]);
+    const got = await evmEpochBlock([r0.rpc, pair(c, c)[1]], start);
+    assert.equal(got.number, BigInt(want), `case ${k}: head ${head}, start ${start}`);
+    // the halving taken whenever a guess does not halve the span: about two steps per halving at worst, and the check
+    assert.ok(r0.rounds <= 2 * Math.ceil(Math.log2(head + 1)) + 3, `case ${k}: ${r0.rounds} rounds for ${head} blocks`);
+  }
+});
+
+test("card evm-landing-reads-batched: a held period's first block is read again by number on both RPCs, never searched again", async () => {
+  const c = { ...CB(), head: 31 };
+  const log: string[] = [];
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c, { log }, { log }), feeRpcs: freshOnly(c, 2, []), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+  await p.holdFee(EPOCH);
+  c.head = 45;
+  log.length = 0;
+  await p.holdFee(EPOCH);
+  // block 30 on each RPC (the held block's check, then the depth's own), never the newest block, never a search
+  const blocks = log.filter((x) => x.startsWith("eth_getBlockByNumber"));
+  assert.ok(blocks.length > 0 && blocks.every((x) => x === `eth_getBlockByNumber ["${q(30)}",false]`), JSON.stringify(blocks));
+  // a reorg of the held block, at the turn again: the search runs again and holds the new block
+  const old = c.hashOf;
+  c.hashOf = (n) => (n === 30 ? h32("reorged 30") : old(n));
+  c.head = 31;
+  log.length = 0;
+  await p.holdFee(EPOCH);
+  assert.ok(log.some((x) => x.includes('"latest"')), "the search read the newest block again");
+  log.length = 0;
+  await p.holdFee(EPOCH);
+  assert.ok(!log.some((x) => x.includes('"latest"')), "and the new block is held");
+});
+
+test("card evm-landing-reads-batched: a round asks the finalized anchor and the pool's five views together, on each RPC", async () => {
+  const c = C3();
+  const [a, b] = pair(c, c);
+  const seen = [0, 1].map(() => ({ live: 0, most: 0, asked: [] as string[] }));
+  const held = (r: EvmRpc, s: (typeof seen)[number]): EvmRpc =>
+    Object.assign(async (m: string, p: readonly unknown[]) => {
+      const one = m === "eth_call" || (m === "eth_getBlockByNumber" && p[0] === "finalized");
+      if (!one) return r(m, p);
+      s.live++;
+      s.most = Math.max(s.most, s.live);
+      s.asked.push(m === "eth_call" ? String((p[0] as { data: string }).data).slice(0, 10) : "finalized");
+      try {
+        await new Promise((x) => setImmediate(x));
+        return await r(m, p);
+      } finally {
+        s.live--;
+      }
+    }, { url: r.url });
+  await syncOn([held(a, seen[0]!), held(b, seen[1]!)], async () => {}).trees(after(25));
+  for (const [k, s] of seen.entries()) assert.ok(s.most >= 6, `rpc ${k}: at most ${s.most} of the round's reads at once (${JSON.stringify(s.asked)})`);
+});
+
 // ---- bind ----
 
 const EPOCH = 1_800_000_060_000n; // block 30's time is T0 + 60 s: the epoch's first block
@@ -2011,7 +2120,8 @@ const READS: Read[] = [
   { name: "the tree sync's view (currentRoot)", side: 1, hit: viewCall("currentRoot()"), what: /^rpc 1 currentRoot\(\): /, run: (r, s) => syncOn(r, s).trees(after(25)) },
   { name: "the tree sync's root time view (stateRootTimes)", side: 1, hit: viewCall("stateRootTimes(uint256)"), what: /^rpc 1 stateRootTimes\(root\): /, run: (r, s) => syncOn(r, s).trees(after(25)) },
   { name: "the tree sync's depthAt block on its own chain", side: 1, hit: byNumber(q(30)), what: /^rpc 1 block 30: /, run: (r, s) => syncOn(r, s).depthAt(30n, undefined, c3.hashOf(30)) },
-  { name: "evmEpochBlock's search on rpc 0", side: 0, hit: byNumber(q(99)), what: /^rpc 0 block 99: /, run: (r, s) => evmEpochBlock(r, START, undefined, s) },
+  // the paced search's first guess on C3 (2 s blocks) is block 41 with 40 beside it: block 40 is the one before the start
+  { name: "evmEpochBlock's search on rpc 0", side: 0, hit: byNumber(q(40)), what: /^rpc 0 block 40: /, run: (r, s) => evmEpochBlock(r, START, undefined, s) },
   { name: "evmEpochBlock's read of the first block on both", side: 1, hit: byNumber(q(41)), what: /^rpc 1 block 41: /, run: (r, s) => evmEpochBlock(r, START, undefined, s) },
   { name: "bind's evmLatestHigh", side: 1, hit: byNumber("latest"), what: /^rpc 1 latest block: /, run: (r, s) => bindOn(r, r, s) },
 ];
