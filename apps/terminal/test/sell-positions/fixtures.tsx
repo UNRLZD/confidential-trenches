@@ -23,6 +23,9 @@
 // quote_check_failed; ?dry=busy: busy first, then the numbers; ?dry=busyafter: the numbers first, then busy; ?dry=busyfor,
 // unfunded or downfor with &n=N: busy, not_funded or down for the first N asks, then the numbers) at the page's pool price
 // of $150 a SOL, with the pool in the state; each ask is in window.__dry, its time (Date.now) in window.__dryAt.
+// ?w=1 names one one-time wallet for the position (W1W), so the sell's flow shows it (card sell-box-works-like-the-buy-box);
+// ?logo=1 gives the box the coin's logo (the helper's /v1/logo, which run.mjs answers itself), ?logo=none a coin with
+// none; with neither the box has no logo, as a mount with no token read.
 // Test only.
 import type { SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
 import { StrictMode, useState } from "react";
@@ -42,6 +45,8 @@ import "../../src/shell/shell.css";
 const NOW = Date.parse("2026-11-02T06:00:00Z");
 // a mint in Solana's form, kept apart from a `token:` key (gitleaks reads a long id beside that word as a secret)
 const MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
+/** The one-time wallet ?w=1 names: drawn 3Rrv…EQfn, as the owner's run showed W (13 Nov 18:11Z). */
+const W1W = "3RrvQ4m2x7Vn8Kp3Rt5Yb1Zc6Hf9LsEw9GdUaBEQfn";
 
 declare global {
   interface Window {
@@ -62,6 +67,7 @@ const LIVE = q.get("kit") === "live";
 /** ?lag=1: the holdings read lags the sell (card app-holding-follows-a-fill): the record shows the sell's stages, the
  *  positions stay as they were, as the signing page's finalized read does until the sale is final. */
 const LAG = q.get("lag") === "1";
+const LOGO = q.get("logo") === "1" ? true : q.get("logo") === "none" ? false : null;
 
 // the position: amount (token units, the kit's string), cost (USD), the market price (USD per unit), the token's decimals
 // as the token read gives them (null: none read)
@@ -89,7 +95,7 @@ const STATE: SignpageState = {
   code_saved: true,
   vault_balance: "73.18",
   wallets: [],
-  positions: [{ chain: "solana", token: MINT, amount: P.amount, cost: P.cost, wallets: ["W1", "W2"], ...(P.decimals === null ? {} : { decimals: P.decimals }) }],
+  positions: [{ chain: "solana", token: MINT, amount: P.amount, cost: P.cost, wallets: q.get("w") === "1" ? [W1W] : ["W1", "W2"], ...(P.decimals === null ? {} : { decimals: P.decimals }) }],
   orders: [],
   held: [],
   // open: the device's record holds a sell at sent that this mount did not start (a remount while it runs)
@@ -232,7 +238,7 @@ function Panels() {
   if (!row) return null;
   return (
     <div className="sp-fx">
-      <SellBox row={row} s={s} onBuy={() => {}} />
+      <SellBox row={row} s={s} onBuy={() => {}} {...(LOGO === null ? {} : { logo: { chain: "solana", token: MINT, icon: LOGO } })} />
       <PositionPanel row={row} s={s} now={NOW} onShare={() => void window.__shares++} />
     </div>
   );

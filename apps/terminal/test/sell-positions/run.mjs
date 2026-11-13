@@ -174,6 +174,9 @@ async function settle(read, want) {
 
 const onMap = (page, sel, attr) => page.$$eval(sel, (bs, a) => bs.map((b) => (b.disabled ? "0" : "1")).join(""), attr);
 const calls = (page) => page.evaluate(() => window.__calls);
+/** An attribute or the text of the first match, or null with none: never waits (a missing element reads null at once). */
+const attr = (page, sel, a) => page.evaluate(([s, n]) => document.querySelector(s)?.getAttribute(n) ?? null, [sel, a]);
+const textOf = (page, sel) => page.evaluate((s) => (document.querySelector(s)?.textContent ?? "").replace(/\s+/g, " ").trim(), sel);
 
 /** MEASURE reads only what is on screen, so it runs at the top and again scrolled to the bottom: a tap or a line below
  * the fold at 390 is held to the same rules. */
@@ -307,9 +310,104 @@ try {
       check((await settle(() => page.locator('[data-testid="sell-box"]').getAttribute("data-state"), "filled")) === "filled", `@${w.name}: the double tap's sell did not fill`);
       await ctx.close();
     }
-    // 100% sends the kit's whole amount (its base units on the vault's path); All too; Initials sends the share that
-    // returns the cost
-    for (const [sel, want] of [['[data-pct="10000"]', ALL], ['[data-quick="10000"]', ALL], ['[data-quick="initials"]', INITIALS]]) {
+    // card sell-box-works-like-the-buy-box (owner 13 Nov 18:11Z, "these button are to choose"): a percent only picks the
+    // share, a tap (or two) on it sends nothing; Sell then sends that share, once for a double tap; 100% sends the kit's
+    // whole amount (its base units on the vault's path)
+    for (const [b, want] of [[2500, QUARTER], [5000, HALF], [7500, vault("925925918425")], [10000, ALL]]) {
+      const tag = `@${w.name} ${b / 100}% preset`;
+      const { ctx, page, dialogs } = await open(browser, w, "up");
+      await page.locator(`[data-pct="${b}"]`).click();
+      await page.locator(`[data-pct="${b}"]`).click({ force: true });
+      await page.clock.runFor(1_200);
+      check((await calls(page)).length === 0, `${tag}: sent ${(await calls(page)).length} sells on the preset, want none`);
+      check((await page.locator('[data-testid="sell-box"] .trb-input').inputValue()) === String(b / 100), `${tag}: the box does not hold ${b / 100}`);
+      const lab = await settle(async () => norm(await page.locator('[data-testid="sell-cta"]').innerText()), `Sell ${b / 100}%`);
+      check(lab === `Sell ${b / 100}%`, `${tag}: button "${lab}"`);
+      check((await page.$$eval("[data-pct][data-on]", (bs) => bs.map((x) => x.getAttribute("data-pct")).join(" "))) === String(b), `${tag}: the lit preset`);
+      check((await page.locator('[data-testid="sell-box"]').getAttribute("data-state")) === "S8.29", `${tag}: the box left Ready on a preset`);
+      check((await attr(page, '[data-testid="sell-box"] [data-testid="route-strip"]', "data-route")) === "idle", `${tag}: the flow ran on a preset`);
+      // forced: a box that sold on the preset has its button off now, and the run reports that, never waits on it
+      await page.locator('[data-testid="sell-cta"]').click({ force: true });
+      await page.locator('[data-testid="sell-cta"]').click({ force: true });
+      await page.clock.runFor(100);
+      const c = await calls(page);
+      check(c.length === 1 && sent(c[0]) === want, `${tag} then Sell: sent ${JSON.stringify(c)}, want one ${want}`);
+      check(dialogs.length === 0, `${tag}: a dialog`);
+      await ctx.close();
+    }
+    // a running sell draws the buy's flow back, the coin, its one-time wallet, the pool, Private balance, with the same
+    // marks, links and checks, each on its own event, and the sell's values (the amount sold, W, the USD back)
+    {
+      const tag = `@${w.name} sell flow`;
+      const { ctx, page, external, dialogs } = await open(browser, w, "up", "&w=1");
+      const STRIP = '[data-testid="sell-box"] [data-testid="route-strip"]';
+      const order = await page.$$eval('[data-testid="sell-box"] .rs-n', (els) => els.map((e) => e.getAttribute("data-step")).join(" "));
+      check(order === "token wallet pool balance", `${tag}: steps drawn ${order}, want token wallet pool balance`);
+      const labels = await page.$$eval('[data-testid="sell-box"] .rs-k', (els) => els.map((e) => (e.textContent ?? "").trim()));
+      check(JSON.stringify(labels) === JSON.stringify(["TORCH", "One-timewallet", "Pool", "Privatebalance"]), `${tag}: labels ${JSON.stringify(labels)}`);
+      check((await attr(page, STRIP, "data-side")) === "sell" && (await attr(page, STRIP, "data-steps")) === "off off off off", `${tag}: idle`);
+      check((await page.locator('[data-testid="sell-box"] .rs-grp').count()) === 1 && (await attr(page, '[data-testid="sell-box"] .rs-grp', "data-in")) === null, `${tag}: no wallet step, or it grew in before the tap`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `sell-flow-0-ready-${w.name}.png`), fullPage: true });
+      const vals = () => page.$$eval('[data-testid="sell-box"] [data-testid$="-value"]', (els) => els.map((e) => (e.textContent ?? "").replace(/\u00a0/g, "").trim()));
+      const links = () => page.$$eval('[data-testid="sell-box"] .rs-l', (els) => els.map((e) => (e.hasAttribute("data-full") ? 1 : 0)).join(""));
+      await page.locator('[data-testid="sell-cta"]').click();
+      const rows = [
+        [100, "active off off off", ["", "", "", ""], "000", "Sending", "1-tap"],
+        [50, "done done active off", ["617.2K", "3Rrv…EQfn", "", ""], "110", "Landing 0.1s", "2-sent"],
+        [950, "done done done done", ["617.2K", "3Rrv…EQfn", "", "≈ $108.40"], "111", "Filled 1.1s", "3-filled"],
+      ];
+      for (const [ms, steps, values, l, button, shot] of rows) {
+        await page.clock.runFor(ms);
+        const got = await settle(async () => `${await attr(page, STRIP, "data-steps")}|${norm(await page.locator('[data-testid="sell-cta"]').innerText())}`, `${steps}|${button}`);
+        check(got === `${steps}|${button}`, `${tag} ${shot}: steps and button "${got}", want "${steps}|${button}"`);
+        const v = await vals();
+        check(JSON.stringify(v) === JSON.stringify(values), `${tag} ${shot}: values ${JSON.stringify(v)}, want ${JSON.stringify(values)}`);
+        check((await links()) === l, `${tag} ${shot}: links ${await links()}, want ${l}`);
+        check((await attr(page, '[data-testid="sell-box"] .rs-grp', "data-in")) === "true", `${tag} ${shot}: the wallet step not grown in`);
+        const m = await measure(page, w);
+        check(!m.hscroll && m.smallText.length === 0 && m.smallTaps.length === 0, `${tag} ${shot}: ${JSON.stringify(m)}`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `sell-flow-${shot}-${w.name}.png`), fullPage: true });
+      }
+      check((await calls(page)).length === 1, `${tag}: ${(await calls(page)).length} sells`);
+      check(external.length === 0 && dialogs.length === 0, `${tag}: external ${external.join(" ")} dialogs ${dialogs.join(" ")}`);
+      await ctx.close();
+    }
+    // the coin step draws the coin's own logo (owner 13 Nov 18:20Z, "Coin's own logo"), from the helper as the token header
+    // and the rail do; a coin with none draws its letters, the rail's fallback
+    for (const [logo, img] of [["1", true], ["none", false], ["", false]]) {
+      const tag = `@${w.name} coin logo ${logo || "not given"}`;
+      const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });
+      await ctx.addInitScript(INIT);
+      const page = await ctx.newPage();
+      const asked = [];
+      // the helper's logo, answered here: an 8 x 8 PNG of one opaque colour, so a shot tells it from the letters
+      await page.route("https://ct-api.unrealized.trade/v1/logo/**", (r) => {
+        asked.push(r.request().url());
+        return r.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGP4ulQFK2IYWhIAxY1vgUfhbXMAAAAASUVORK5CYII=", "base64") });
+      });
+      await page.goto(`${BASE}/?f=up&w=1${logo ? `&logo=${logo}` : ""}`);
+      await page.waitForSelector('[data-testid="sell-box"]');
+      const glyph = page.locator('[data-testid="sell-box"] [data-testid="route-token-glyph"]');
+      const STRIP_SEL = '[data-testid="sell-box"] [data-testid="route-strip"]';
+      const want = `https://ct-api.unrealized.trade/v1/logo/solana/${MINT}`;
+      if (img) {
+        await page.waitForSelector('[data-testid="sell-box"] [data-testid="route-token-glyph"] img[data-loaded="true"]', { timeout: 5_000 }).catch(() => {});
+        const src = await attr(page, '[data-testid="sell-box"] [data-testid="route-token-glyph"] img', "src");
+        check(src === want, `${tag}: logo src ${src}, want ${want}`);
+        check((await glyph.locator('img[data-loaded="true"]').count()) === 1, `${tag}: the logo not shown once loaded`);
+        check(asked.length === 1, `${tag}: asked the helper ${asked.length} times`);
+      } else {
+        check((await glyph.count()) === 1 && (await glyph.locator("img").count()) === 0 && asked.length === 0, `${tag}: no coin step, or an image asked for a coin with none`);
+        const letters = await textOf(page, '[data-testid="sell-box"] [data-testid="route-token-glyph"]');
+        check(letters === "TO", `${tag}: letters "${letters}", want TO`);
+      }
+      const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
+      check(m.smallText.length === 0 && m.violations.length === 0, `${tag}: ${JSON.stringify(m.smallText)} ${JSON.stringify(m.violations)}`);
+      if (SHOTS && (await page.locator(STRIP_SEL).count())) await page.locator(STRIP_SEL).screenshot({ path: path.join(SHOTS, `coin-step-${logo || "none-given"}-${w.name}.png`) });
+      await ctx.close();
+    }
+    // All sends the kit's whole amount; Initials sends the share that returns the cost
+    for (const [sel, want] of [['[data-quick="10000"]', ALL], ['[data-quick="initials"]', INITIALS]]) {
       const { ctx, page } = await open(browser, w, "up");
       await page.locator(sel).click();
       await page.clock.runFor(100);
