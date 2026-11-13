@@ -9,14 +9,17 @@
 //   - Rhea's pools 4512 (USDC/wNEAR) and 4771 (the token/wNEAR) hold the same two tokens, in the same order, with the
 //     same fee as the copy built (amounts move with every trade and are not checked).
 // A Rhea or USDC upgrade, a key on the vault or a pool's fee change fails it: the run no longer proves what users run.
-// After: sign
+// Each read goes through provider-answer.mjs: an operator that answers nothing usable is its no-answer, never a FAIL,
+// and fewer than two operators answering is INCONCLUSIVE.
+// Runs: once, by hand before the owner's mainnet run and after it: it reads mainnet's contracts, which no host deploy changes
 //   node scripts/live-checks/near-buy-and-sell-run-for-real.mjs [--record <file>]
 //   node scripts/live-checks/near-buy-and-sell-run-for-real.mjs --answer <file>     judge a recorded answer, no network
-// PASS exit 0, FAIL exit 1, error exit 2; the last line is "PASS near-buy-and-sell-run-for-real" or
-// "FAIL near-buy-and-sell-run-for-real", each failure a "BAD ..." line.
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3; the last line is the verdict and the key, each failure a
+// "BAD ..." line, each no-answer a "-- ..." line.
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "near-buy-and-sell-run-for-real";
 export const RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
@@ -37,14 +40,17 @@ export const POOLS = Object.freeze({
   4771: { tokens: ["touched.tkn.near", "wrap.near"], fee: 30 },
 });
 
-/** The verdict on one answer: { ok, lines } with a BAD line per failure. */
+/** The verdict on one answer: { ok, verdict, lines } with a BAD line per failure and a "--" line per no-answer. */
 export function judge(a) {
   const lines = [];
-  const bad = (s) => lines.push(`BAD ${s}`);
+  let bads = 0;
+  let quiet = 0;
+  const bad = (s) => (bads++, lines.push(`BAD ${s}`));
   for (const url of RPCS) {
     const r = a?.reads?.[url];
-    if (r === null || typeof r !== "object") {
-      bad(`${url}: no answer`);
+    if (r === null || typeof r !== "object" || typeof r.noAnswer === "string") {
+      quiet++;
+      lines.push(`--  ${url}: no answer${typeof r?.noAnswer === "string" ? ` (${r.noAnswer})` : ""}`);
       continue;
     }
     for (const [account, hash] of Object.entries(CODE))
@@ -57,14 +63,17 @@ export function judge(a) {
         bad(`${url}: Rhea's pool ${id} is ${JSON.stringify(p.token_account_ids)} at fee ${p.total_fee}, not the route the run built (${JSON.stringify(want.tokens)} at ${want.fee})`);
     }
   }
-  return { ok: lines.length === 0, lines };
+  const verdict = verdictOf(bads > 0, quiet > 0);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
+/** A no-answer of one operator: the whole operator's read is its no-answer. */
+class NoAnswer extends Error {}
 async function query(url, params) {
-  const res = await fetch(url, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params }), signal: AbortSignal.timeout(20_000) });
-  const j = await res.json();
-  if (j.error || !j.result) throw new Error(`${url}: ${JSON.stringify(j.error ?? j).slice(0, 200)}`);
-  return j.result;
+  const a = await rpcAnswer(url, "query", params);
+  if (a.noAnswer !== undefined) throw new NoAnswer(a.noAnswer);
+  if (a.error !== undefined) throw new Error(`${url}: ${JSON.stringify(a.error).slice(0, 200)}`);
+  return a.result;
 }
 
 /** One operator's reads, at its final block. */
@@ -87,8 +96,8 @@ export async function read() {
     try {
       reads[url] = await readOne(url);
     } catch (e) {
-      reads[url] = null;
-      console.error(`${url}: ${e instanceof Error ? e.message : String(e)}`);
+      // a JSON-RPC error is an answer, and nothing it names is the pinned code: judged as no code read
+      reads[url] = e instanceof NoAnswer ? { noAnswer: e.message } : { code: {}, vaultKeys: null, pools: {}, error: e instanceof Error ? e.message : String(e) };
     }
   }
   return { at: new Date().toISOString(), reads };
@@ -102,8 +111,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (at("--record")) writeFileSync(at("--record"), `${JSON.stringify(answer, null, 2)}\n`);
     const v = judge(answer);
     for (const l of v.lines) console.log(l);
-    console.log(`${v.ok ? "PASS" : "FAIL"} ${KEY}`);
-    process.exit(v.ok ? 0 : 1);
+    console.log(`${v.verdict} ${KEY}`);
+    process.exit(EXIT[v.verdict]);
   } catch (e) {
     console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(2);
