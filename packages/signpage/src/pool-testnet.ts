@@ -1188,7 +1188,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // an answer after a sign out (its reads stopped, these maps cleared) is not this session's: neither counted nor
         // kept, and a failure whose stop fired is no failure of the read (review of 584af1495, P3-1)
         () => (!session.aborted && evmWarms.get(chain) === read && (evmWarmFails.delete(chain), evmWarmed.add(chain)), true),
-        () => (!session.aborted && evmWarms.get(chain) === read && (evmWarms.delete(chain), evmWarmFails.set(chain, (evmWarmFails.get(chain) ?? 0) + 1)), false),
+        // the entry always goes, so the next ask reads again (a sign out refused after its tap leaves the maps as they are)
+        () => (evmWarms.get(chain) === read && (evmWarms.delete(chain), session.aborted || evmWarmFails.set(chain, (evmWarmFails.get(chain) ?? 0) + 1)), false),
       );
       evmWarms.set(chain, (w = read));
     }

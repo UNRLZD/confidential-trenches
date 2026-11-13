@@ -311,6 +311,43 @@ test("a round with a signal the tap leaves alone still ends at the sign out tap:
   assert.deepEqual(s.calls, ["pass:events"], "no read after the tap");
 });
 
+// delta review of 679ec10f7, P2: a sign out tapped while the history read runs, then refused (the backup not done:
+// signingOut, never signedOut, so the maps stay), leaves no history read that ended for good: the next ask reads it
+// again for the session still signed in, and the deposit's round waits for that one
+test("a sign out refused after its tap stopped the history read: the next ask reads the history again and the round waits for it", async () => {
+  const { w } = await wallet();
+  const calls: string[] = [];
+  const hosts: (() => Round)[] = [];
+  let made = 0;
+  let passes = 0;
+  const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c: string) => (c === "base" ? PIN : undefined),
+    evmSync: () => {
+      const name = made++ === 0 ? "deposit" : "pass";
+      return {
+        events: async (signal?: AbortSignal) => {
+          calls.push(`${name}:events`);
+          if (name === "deposit") return { fin: { number: 1n }, anchor: {}, events: [] };
+          // the first history read ends only at its stop; the one asked again answers after 150 ms
+          if (passes++ === 0) return new Promise((_, rej) => signal?.addEventListener("abort", () => rej(signal.reason), { once: true }));
+          return new Promise((r) => setTimeout(() => r({ fin: {}, anchor: {}, events: [] }), 150));
+        },
+      };
+    },
+    evmWarmWaitMs: 2_000,
+    depositKinds: { solana: () => () => ({ error: "not_allowed" }), evm: (host: () => Round) => () => (hosts.push(host), { error: "not_allowed" }) },
+  } as never);
+  t.flow(ASK as never, CTX);
+  t.evmPoolOf("base");
+  await until(() => calls.includes("pass:events"));
+  (t as unknown as { signingOut: () => void }).signingOut();
+  await new Promise((x) => setTimeout(x, 30));
+  t.evmPoolOf("base");
+  await hosts[0]!().round!();
+  assert.deepEqual(calls, ["pass:events", "pass:events", "deposit:events"], "the history read asked again, the round after it");
+});
+
 // review of evm-first-proof-inside-ten-seconds, item 1: every wallet pool the page makes of an EVM pin (the queue's pass
 // pool, the landing pass's pool on the deposit's pair, a withdraw's) binds on the chain's one period fee hold, so a pass
 // in a held period reads no period fee again (the wallet's pool-evm.test.ts: two pools of one pin on one hold read it once)
