@@ -137,6 +137,7 @@ export const CHILD_RUNS = [
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
+  "owners-solana-buy-lands": "the helper's pieces route (a planted 2-piece buy) and mainnet's rent on two public RPCs; its bundle part, the kit's one tip for every set, is held on the sources by packages/kit/test/solana-pool-buy-pieces.test.ts and on a build by its own replay (owners-solana-buy-lands.test.mjs)",
   "hosts-main-on-top": "DNS on two resolvers, the CT logs, the hosts' response headers, the helper and the retired names",
   "signpage-skeleton": "response headers (the sign deploy's gate runs it on the build's _headers)",
   "app-host-gate": "response headers (the app deploy's gate reads the build's _headers)",
