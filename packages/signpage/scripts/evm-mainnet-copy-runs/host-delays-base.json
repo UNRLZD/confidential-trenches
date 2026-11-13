@@ -1,0 +1,84 @@
+{
+  "measuredAt": "2026-11-13T09:37:04.361Z",
+  "chain": "base",
+  "tries": 3,
+  "hosts": {
+    "base-rpc.publicnode.com": {
+      "block": 271,
+      "call": 170,
+      "logs": 94,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 3
+      },
+      "of": 3
+    },
+    "base.api.pocket.network": {
+      "block": 897,
+      "call": 244,
+      "logs": 213,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 3
+      },
+      "of": 3
+    },
+    "mainnet.base.org": {
+      "block": 974,
+      "call": 255,
+      "logs": null,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 0
+      },
+      "of": 3
+    },
+    "base.gateway.tenderly.co": {
+      "block": 269,
+      "call": 268,
+      "logs": 290,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 2
+      },
+      "of": 3
+    },
+    "base.rpc.blxrbdn.com": {
+      "block": 281,
+      "call": 269,
+      "logs": 270,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 3
+      },
+      "of": 3
+    },
+    "base-mainnet.public.blastapi.io": {
+      "block": 408,
+      "call": 299,
+      "logs": null,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 0
+      },
+      "of": 3
+    },
+    "rpc.sentio.xyz": {
+      "block": 179,
+      "call": 185,
+      "logs": 177,
+      "answered": {
+        "block": 3,
+        "call": 3,
+        "logs": 3
+      },
+      "of": 3
+    }
+  }
+}

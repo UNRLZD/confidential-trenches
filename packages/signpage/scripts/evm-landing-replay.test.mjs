@@ -3,7 +3,7 @@
 // none is refused before anything is sent; a send is never replayed as a send, and nothing is read but the pool.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { asRead, refused, replayPlan } from "./evm-landing-replay.mjs";
+import { asRead, refused, replayPlan, sentPlan } from "./evm-landing-replay.mjs";
 
 const POOL = "0xaa080e74ec99cf5c684548c77ca145edfcf899cf";
 const rec = (windows) => ({ chain: "base", steps: [{ name: "first leaf: a ready proof inside its first minute", hostWindowMax: windows }] });
@@ -39,4 +39,21 @@ test("a refusal for rate: HTTP 429, a JSON-RPC rate error or -32005; a revert or
   assert.ok(refused({ status: 200, body: { error: { code: -32000, message: "Too many requests" } } }));
   assert.ok(!refused({ status: 200, body: { error: { code: 3, message: "execution reverted" } } }));
   assert.ok(!refused({ status: 403, body: { error: { code: -32602, message: "Archive requests require a personal token" } } }));
+});
+
+// review of 584af1495, P3-2: a record with the window's sends is replayed as sent, each batch at its own time and as one
+// batch, never spread evenly
+test("as sent: per host its batches in order, each at its time after the window's first send, its methods together", () => {
+  const r = { chain: "base", steps: [{ name: "first leaf: ready inside 10 s, each pool host inside its window", sentInWindow: [
+    { host: "base-rpc.publicnode.com", ms: -9_000, batch: 7, m: "eth_getBlockByNumber" },
+    { host: "base-rpc.publicnode.com", ms: -9_000, batch: 7, m: "eth_call 0xfdab463d" },
+    { host: "base.api.pocket.network", ms: -8_500, batch: 8, m: "eth_getBlockByNumber" },
+    { host: "base-rpc.publicnode.com", ms: 1_200, batch: 12, m: "eth_getLogs" },
+  ] }] };
+  assert.deepEqual(sentPlan(r, LISTS), [
+    { host: "base-rpc.publicnode.com", url: "https://base-rpc.publicnode.com", n: 3, batches: [{ atMs: 0, methods: ["eth_getBlockByNumber", "eth_call 0xfdab463d"] }, { atMs: 10_200, methods: ["eth_getLogs"] }] },
+    { host: "base.api.pocket.network", url: "https://base.api.pocket.network", n: 1, batches: [{ atMs: 500, methods: ["eth_getBlockByNumber"] }] },
+  ]);
+  assert.equal(sentPlan(rec({}), LISTS), null, "an older record has none: replayed by its windows");
+  assert.throws(() => sentPlan({ chain: "base", steps: [{ name: "first leaf: ready inside 10 s, each pool host inside its window", sentInWindow: [{ host: "evil.example", ms: 0, batch: 1, m: "eth_chainId" }] }] }, LISTS), /evil\.example: in no list/);
 });

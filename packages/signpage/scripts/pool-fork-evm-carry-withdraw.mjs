@@ -103,8 +103,9 @@ const hostSends = [];
 // card evm-first-proof-inside-ten-seconds: the first leaf's proof ready inside READY_MS of its block, and each pool host
 // sent at most HOST_WINDOW_BOUND requests (each of a batch counted) in any 10 s window from 10 s before that block to the
 // proof. The reads go from the page to the pool's public providers on the deposit's lane, which has no budget: the
-// copies of 13 Nov measured 58 to 73, and that pattern sent again to the real providers met no refusal for rate
-// (scripts/evm-landing-replay.mjs)
+// copies of 13 Nov measured 58 to 74. HOST_WINDOW_BOUND is a regression guard on the page's own pattern (a change that
+// sends a host more fails the copy), never a provider's limit: what a provider takes is read by sending it the window
+// as sent, its times and batches (scripts/evm-landing-replay.mjs, review of 584af1495, P3-2)
 const READY_MS = 10_000;
 const HOST_WINDOW_BOUND = 80;
 /** A request body's method (an eth_call's selector beside it), each of a batch. */
@@ -165,11 +166,35 @@ const stateAgeOf = async (body) => {
   }
   return most;
 };
+// review of 584af1495, P2-2: the providers as the page meets them, not one local anvil.
+// - CT_HOST_DELAYS_FILE (scripts/evm-host-delays.mjs, measured read-only from the real providers): each request a host
+//   answers waits that host's median answer time for its kind (a log page, a view, else a block), a batch its slowest
+//   kind's; a host or kind with no figure waits the chain's median of every figure. Recorded in the run.
+// - CT_LAG_HOST: that host serves the head one block behind ("latest" in a request's params is the block before the
+//   head, and eth_blockNumber answers it), as a seat a block behind its pair does.
+const HOST_DELAYS = process.env.CT_HOST_DELAYS_FILE ? JSON.parse(readFileSync(process.env.CT_HOST_DELAYS_FILE, "utf8")) : null;
+const LAG_HOST = process.env.CT_LAG_HOST ?? null;
+const delayFigures = HOST_DELAYS === null ? [] : Object.values(HOST_DELAYS.hosts).flatMap((h) => [h.block, h.call, h.logs]).filter((x) => typeof x === "number").sort((a, b) => a - b);
+const DELAY_MEDIAN = delayFigures.length === 0 ? 0 : delayFigures[Math.floor((delayFigures.length - 1) / 2)];
+const delayKind = (m) => (m === "eth_getLogs" ? "logs" : m.startsWith("eth_call") || m === "eth_estimateGas" ? "call" : "block");
+const delayOf = (host, ms) => (HOST_DELAYS === null ? 0 : Math.max(0, ...ms.map(({ m }) => HOST_DELAYS.hosts[host]?.[delayKind(m)] ?? DELAY_MEDIAN)));
+/** `body` as LAG_HOST serves it: "latest" the block before the head. */
+const lagged = async (body) => {
+  const behind = hex(BigInt((await head()).number) - 1n);
+  const b = JSON.parse(String(body));
+  const one = (c) => ({ ...c, params: Array.isArray(c?.params) ? JSON.parse(JSON.stringify(c.params).replaceAll('"latest"', JSON.stringify(behind))) : c?.params });
+  return { body: JSON.stringify(Array.isArray(b) ? b.map(one) : one(b)), behind };
+};
+let batches = 0;
 globalThis.fetch = async (input, init) => {
   const u = new URL(String(input instanceof Request ? input.url : input));
   if (u.origin === ANVIL || (route.local !== null && u.origin === route.local)) return realFetch(input, init);
   if (route.fork.has(u.host)) {
-    for (const { m, from } of methodsOf(init?.body)) hostSends.push({ host: u.host, at: Date.now(), m, from });
+    const batch = ++batches;
+    const ms = methodsOf(init?.body);
+    for (const { m, from } of ms) hostSends.push({ host: u.host, at: Date.now(), m, from, batch });
+    const wait = delayOf(u.host, ms);
+    if (wait > 0) await sleep(wait);
     const kept = STATE_KEPT_MS.get(u.host);
     const old = kept === undefined ? null : await stateAgeOf(init?.body);
     if (old !== null && old.age > kept) {
@@ -182,6 +207,15 @@ globalThis.fetch = async (input, init) => {
         throw new TypeError("fetch failed");
       }
       sent.page++;
+    }
+    if (LAG_HOST === u.host && typeof init?.body === "string") {
+      const l = await lagged(init.body);
+      const res = await realFetch(ANVIL, { ...init, body: l.body });
+      const j = await res.json();
+      const asked = JSON.parse(l.body);
+      const fix = (a, q) => (q?.method === "eth_blockNumber" && typeof a?.result === "string" ? { ...a, result: l.behind } : a);
+      const out = Array.isArray(j) ? j.map((a) => fix(a, (Array.isArray(asked) ? asked : [asked]).find((q) => String(q.id) === String(a?.id)))) : fix(j, asked);
+      return traced(u.host, init, new Response(JSON.stringify(out), { status: res.status, headers: { "content-type": "application/json" } }));
     }
     return traced(u.host, init, await realFetch(ANVIL, init));
   }
@@ -402,7 +436,7 @@ const restoreInto = async (ns) => {
 // for; the fork block and the book its answers were recorded into (fork-rpc.mjs FORK_RPC_BOOK_FILE), to replay it offline
 const SCRIPT = new URL(import.meta.url);
 const run = { commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), dirty: execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim() !== "", scriptSha256: createHash("sha256").update(readFileSync(SCRIPT)).digest("hex"), forkBlock: POOLS_FORK_BLOCKS[CHAIN], book: process.env.FORK_RPC_BOOK_FILE ?? null };
-const record = { by: "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs", run, chain: CHAIN, pool: PIN.pool, anvil: ANVIL, slots: SLOTS, helperSender: sender.sender, steps: [], txs: [], helperCalls, helperLines, refusedHosts: {} };
+const record = { by: "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs", run, providers: { delays: HOST_DELAYS, delayMedianMs: DELAY_MEDIAN, lagHost: LAG_HOST, intoMs: Number(process.env.CT_DEPOSIT_INTO_MS ?? 0), heldNote: process.env.CT_HELD_NOTE === "1" }, chain: CHAIN, pool: PIN.pool, anvil: ANVIL, slots: SLOTS, helperSender: sender.sender, steps: [], txs: [], helperCalls, helperLines, refusedHosts: {} };
 const failures = [];
 const step = (name, o, ok) => {
   record.steps.push({ name, atMs: Date.now() - t0, ok, ...o });
@@ -469,6 +503,32 @@ await guard("restore A", async () => {
   const r = await restoreInto(A.ns);
   const bal = await balanceOf(A.w);
   step("restore A", { ms: Date.now() - s, block: r.block, notes: await statesOf(A.w), balance: bal }, true);
+});
+// review of 584af1495, P2-2, CT_HELD_NOTE=1: a note of this device already in the pool and ready when the measured
+// deposit lands, so the queue's pass holds the period's fee and the landing's pass binds on that held fee (the chain's
+// one fee hold, pool-testnet.ts evmFeeHoldOf): a first U_X named and funded to the floor, its rung carried by the
+// page's own deposit from U_X (the follow's deposit), and its proof ready; the measured deposit is then the pool's
+// second leaf, and the run ends after its ready steps
+const HELD = process.env.CT_HELD_NOTE === "1";
+if (HELD) await guard("held note", async () => {
+  const s0 = Date.now();
+  const namer0 = depositNamer({ top: true, scope: () => null, pools: () => [{ chain: CHAIN, scope }], open: async () => A.w, startup: async () => {}, resyncing: () => null });
+  namer0.name(ENTROPY.slice());
+  await namer0.named();
+  const r0 = depositRecordOf(await A.w.get("meta", depositKey(scope)));
+  const fl = await readEvmPoolFloor(pageEvmPoolRpcs(CHAIN), PIN);
+  await anvil("anvil_setBalance", [r0.evm, hex(fl)]);
+  t.evmPoolOf(CHAIN);
+  const end = await depositToEnd((p, ctx) => t.depositFrom(p, { s: scope, i: r0.index, u: r0.evm }, ctx), CHAIN, 18, EVM_LADDER.min, new AbortController().signal);
+  for (const x of end.txs ?? []) if (typeof x?.hash === "string") txHashes.set(x.hash, "held note deposit");
+  let ready = null;
+  for (let k = 0; k < 900 && ready === null; k++) {
+    const r = await t.readyWith(async () => null).catch(() => ({ ready: [] }));
+    const mineNow = await mine(A.w);
+    ready = (r.ready ?? []).find((q) => mineNow.some((n) => n.id === q.noteId && n.ref.kind === "deposit" && n.ref.i === r0.index)) ?? null;
+    if (ready === null) await sleep(100);
+  }
+  step("held note", { index: r0.index, end: end.end, ms: Date.now() - s0, readyRoot: ready?.root ?? null, poolSize: Number(BigInt(await anvil("eth_call", [{ to: PIN.pool, data: "0xa8f0f95a" }, "latest"]))) }, (end.end === "filled" || end.end === "part_filled") && ready !== null);
 });
 const ux = await guard("U_X named", async () => {
   const namer = depositNamer({ top: true, scope: () => null, pools: () => [{ chain: CHAIN, scope }], open: async () => A.w, startup: async () => {}, resyncing: () => null });
@@ -667,14 +727,23 @@ await guard("first leaf: a ready proof inside its first minute", async () => {
   const at = found === null ? Date.now() : readyAt.get(depNote.id).at;
   const windows = depAtMs === null ? null : windowMax(depAtMs - 10_000, at, depAtMs);
   const deployPages = depAtMs === null ? null : hostSends.filter((x) => x.m === "eth_getLogs" && x.from !== undefined && BigInt(x.from) === PIN.fromBlock && x.at > depAtMs - 10_000 && x.at <= at).length;
-  step("first leaf: a ready proof inside its first minute", { ...first, reads, pushReads, hostWindowMax: windows, deployPages, poolOfFirstMs: poolOfFirstMs === null || depAtMs === null ? null : poolOfFirstMs - depAtMs, readyMsAfterDeposit: found === null ? null : at - depAtMs, root: found?.root ?? null, proofEpochStartMs: found?.epochStartMs ?? null, deadlineMs: found?.deadlineMs ?? null }, found !== null && sizeBefore === 0 && sizeAtDep === 1 && at - depAtMs < EPOCH && found.root === "newest" && found.epochStartMs === BigInt(epochOf(depAtMs)));
+  step("first leaf: a ready proof inside its first minute", { ...first, reads, pushReads, hostWindowMax: windows, deployPages, poolOfFirstMs: poolOfFirstMs === null || depAtMs === null ? null : poolOfFirstMs - depAtMs, readyMsAfterDeposit: found === null ? null : at - depAtMs, root: found?.root ?? null, proofEpochStartMs: found?.epochStartMs ?? null, deadlineMs: found?.deadlineMs ?? null }, found !== null && sizeBefore === (HELD ? 1 : 0) && sizeAtDep === sizeBefore + 1 && at - depAtMs < EPOCH && found.root === "newest" && found.epochStartMs === BigInt(epochOf(depAtMs)));
   // card evm-first-proof-inside-ten-seconds: the proof ready inside READY_MS of the deposit's block, every pool host sent
   // at most HOST_WINDOW_BOUND requests (each of a batch counted) in any 10 s window from 10 s before that block to the
   // proof, and no log read from the pool's deploy block among them
   const most = windows === null ? null : Math.max(0, ...Object.values(windows).map((w) => w.n));
   const refusedOld = depAtMs === null ? [] : stateRefused.filter((x) => x.at > depAtMs - 10_000 && x.at <= at);
-  step("first leaf: ready inside 10 s, each pool host inside its window", { readyMsAfterDeposit: found === null ? null : at - depAtMs, depositIntoPeriodMs: depAtMs === null ? null : depAtMs - epochOf(depAtMs), stateRefusedInWindow: refusedOld, stateRefusedRun: stateRefused.length, readyBoundMs: READY_MS, hostWindowMost: most, hostWindowBound: HOST_WINDOW_BOUND, deployPages }, found !== null && at - depAtMs <= READY_MS && most !== null && most <= HOST_WINDOW_BOUND && deployPages === 0);
+  // review of 584af1495, P3-2: every request each host was sent from 10 s before the deposit's block to the proof, as
+  // sent (ms after that block, its batch), so scripts/evm-landing-replay.mjs sends the real providers the same times and
+  // batches
+  const sentInWindow = depAtMs === null ? [] : hostSends.filter((x) => x.at >= depAtMs - 10_000 && x.at <= at).map((x) => ({ host: x.host, ms: x.at - depAtMs, batch: x.batch, m: x.m }));
+  step("first leaf: ready inside 10 s, each pool host inside its window", { readyMsAfterDeposit: found === null ? null : at - depAtMs, depositIntoPeriodMs: depAtMs === null ? null : depAtMs - epochOf(depAtMs), stateRefusedInWindow: refusedOld, stateRefusedRun: stateRefused.length, sentInWindow, readyBoundMs: READY_MS, hostWindowMost: most, hostWindowBound: HOST_WINDOW_BOUND, deployPages }, found !== null && at - depAtMs <= READY_MS && most !== null && most <= HOST_WINDOW_BOUND && deployPages === 0);
 });
+// the held-note copy measures the landing beside a held note; the withdraw steps below are the first leaf's
+if (HELD) {
+  follows.abort();
+  await finish(failures.length === 0 ? 0 : 1);
+}
 await guard("withdraw: the first leaf, tapped inside its first minute", async () => {
   const AMOUNT = "0.0001";
   const toWas = await toBalance();
