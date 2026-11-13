@@ -69,14 +69,14 @@ import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
-import { depositToEnd, evmQuoteRoute, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
-import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import { depositToEnd, depositWalletsOf, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
+import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
-import { PAGE_POOLS, poolBuyDryKind, rentOnce, withPools, withSolanaRent } from "./pools.ts";
+import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -104,7 +104,7 @@ import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
 import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
-import { PAGE_CLUSTER, PAGE_SOL_PIN, pageEvmWalletRpc, pageSolanaRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { PAGE_CLUSTER, PAGE_SOL_PIN, pageEvmFloorPool, pageEvmWalletRpc, pageSolanaRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { closeHostLanes, gatedFetch, hostLane, hostLanesClosed } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import { walkWorkerPort } from "./walk-workers.ts";
@@ -199,7 +199,11 @@ const restore = !framed
       // pool's own pair, card evm-deposit-on-mainnet), and the follow's own deposit (poolFollowDeps below), so a restore
       // and a live pool deposit read U_X and carry it the same way; null on a chain the follow has no reads for (the
       // restore then names U_X unread there)
-      ux: (chain) => restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program, undefined, (c) => testnet?.evmPoolOf(c) ?? null),
+      // and what it reads U_X holds is U_X's op's `left` (state.deposit_wallets; review r3 P2-1)
+      ux: (chain) => {
+        const r = restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program, undefined, (c) => testnet?.evmPoolOf(c) ?? null);
+        return r === null ? null : { ...r, leftAt: async (f, low) => void (await poolFollow?.left(f.chain, f.u, low)) };
+      },
       // each reason a run ends stalled, on this device's console only: lanes, indices, providers, scopes and the user's own
       // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts), a one-time wallet U_X
       // and its balance; no key, no words
@@ -227,7 +231,14 @@ let poolFollowDeps: PoolFollowHost["deps"] = () => null;
 // the op a restore's U_X reads are taken under: it moves no refund (only the follow's refund carry asks these)
 const UX_ONLY = { move: async () => undefined, record: async () => Promise.reject(new Error("a restore records no refund move")) };
 const poolFollow = !framed
-  ? poolFollows({ store: () => open(), decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], deps: (f, op) => poolFollowDeps(f, op) })
+  ? poolFollows({
+      store: () => open(),
+      decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
+      deps: (f, op) => poolFollowDeps(f, op),
+      // an ended op's U_X read again at a landing: a restore's paced reads, after a drawn wait (review P2-b of the delta)
+      again: (chain) => restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program, undefined, (c) => testnet?.evmPoolOf(c) ?? null),
+      againWait: (signal) => poolAgainWait(signal),
+    })
   : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
 let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
@@ -323,8 +334,9 @@ else {
     trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
   });
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
-  // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
-  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin);
+  // own Pyth read on its two RPCs (src/pool-price.ts), X's own coin on X (a plain send) at that read; any other origin
+  // has none yet, so it gets no quote
+  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin, chain);
   const solPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null));
   // Base's and Robinhood's pool for a quote into U_X (card evm-deposit-route-mainnet): the pool the page's network pins
   // there (the wallet's EVM_POOLS, src/pool-testnet.ts evmPoolOf: its pin and the deposit's own pair) and the one reader
@@ -402,7 +414,11 @@ else {
         let read: Promise<NoteRecord[]> | null = null;
         const shared = () => (read ??= notes());
         const withVault = await withVaultBalance(s, shared, pageScope());
-        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making);
+        // and each U_X a follow left money at (card deposit-takes-each-pools-own-coin): the ops read after those notes, from
+        // the store alone, so a carry the pools count is never listed too (pool-deposit-follow.ts depositWalletsOf)
+        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making).then(async (p) =>
+          !p.signed_in || PAGE_POOLS.length === 0 ? p : withDepositWallets(p, depositWalletsOf(await pageOps().catch(() => []), (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c])),
+        );
         prices.refresh((pooled.pools ?? []).map((p) => p.chain));
         // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
         // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
@@ -437,7 +453,7 @@ else {
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
-      ...depositReadHosts({ stop: quotesStopped }),
+      ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only
@@ -990,6 +1006,16 @@ function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
 function pageAddressPools(): { chain: PoolChain; scope: bigint }[] {
   return pagePoolScopes().filter((p) => poolWayOut(p.chain));
 }
+// deposit.assets' minimum for each pool's own coin (card deposit-takes-each-pools-own-coin): the pool's floor read now on
+// its two RPCs, as pool.address reads it (one deposit's worst-case cost from U_X and the rent U_X keeps), on a pool
+// pool.address answers; no U_X named (the Solana fee message is priced at POOL_FLOOR_PLACEHOLDER). The frame and the
+// top-level page alike: a function declaration, held by the kinds made above this line
+async function pagePoolFloor(chain: PoolChain, signal?: AbortSignal): Promise<bigint | null> {
+  if (!pageAddressPools().some((p) => p.chain === chain)) return null;
+  if (chain === "solana") return PAGE_SOL_PIN === undefined ? null : readSolanaPoolFloor(pageSolanaRpcs("pass"), PAGE_SOL_PIN.program, POOL_FLOOR_PLACEHOLDER, signal);
+  const e = pageEvmFloorPool(chain);
+  return e === null ? null : readEvmPoolFloor(e.rpcs, e.pin);
+}
 const namer = depositNamer({
   top: !framed,
   scope: pageScope,
@@ -997,12 +1023,25 @@ const namer = depositNamer({
   open,
   startup: () => startup,
   resyncing: () => resyncing,
+  // a pool's U_X that still holds what its follow left stays named (review P1 of card deposit-takes-each-pools-own-coin):
+  // from the store alone, its newest op (uxHeldOf), never a chain read: the namer runs at every note change, a buy's and
+  // a sell's too, and a read naming U_X then would tie U_X to W (review P2-a of the delta)
+  held: async (chain, rec) => {
+    const u = walletOf(chain, rec);
+    if (u === null) return false;
+    return uxHeldOf(await pageOps(), chain, u);
+  },
 });
 // state.pools' notes (src/pools.ts): read only, with the wallet's readNotes on this page's own wallet store: no Web Lock,
 // no write, so a state read never frees a note or finishes a parent (the note store's own paths do). Top-level only, as
 // the frame keeps no note data. A function declaration, as the shell's state, made at the top, holds it.
 async function pageNotes(): Promise<NoteRecord[]> {
   return readNotes(await open());
+}
+// the ops store's records, read only (state.deposit_wallets, and the namer's held: pool-deposit-follow.ts uxHeldOf)
+async function pageOps(): Promise<unknown[]> {
+  const st = await open();
+  return Promise.all((await st.keys("ops")).map((k) => st.get("ops", k).catch(() => undefined)));
 }
 // pageNotes for the queue's readyWith: its failure kept as a value, so the turn ends and the state's withPools throws it
 // in its own catch
@@ -1052,8 +1091,9 @@ async function landed(l: Landing): Promise<void> {
   void namer.named().then(() => testnet?.settle()).catch(() => {});
   // a NEAR deposit followed on from its stage (src/deposit-follow.ts)
   void follows?.settle().catch(() => {});
-  // a pool quote's money followed on into its pool from its stage (src/pool-deposit-follow.ts)
-  void poolFollow?.settle().catch(() => {});
+  // a pool quote's money followed on into its pool from its stage (src/pool-deposit-follow.ts); a load reads every
+  // ended op's U_X once, paced (a send to an old address is carried from the next load on)
+  void poolFollow?.settle({ load: true }).catch(() => {});
   // a vault withdrawal a reload cut short is followed to settled (src/withdraw/handoff.ts withdrawSettle)
   // then a NEAR buy a reload cut short goes on from its record (src/near-buy.ts), after its payout's note is settled
   void settleWithdraws()
@@ -1262,6 +1302,6 @@ if (framed) {
     state: fs.state,
     watch: fs.watch,
     // deposit.quote only on the top-level page, which follows its address (src/deposit-follow.ts): the frame refuses it
-    kinds: { ...depositReadHosts({ stop: quotesStopped }) },
+    kinds: { ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }) },
   });
 }

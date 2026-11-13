@@ -48,7 +48,7 @@ import { BIND_MAX_BYTES } from "./bind/checks.ts";
 import { RECORD_BODY_MAX } from "./bind/record.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { INTENTS_BODY_MAX } from "./intents/carry.ts";
-import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
+import { pairNames, statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
 import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./withdraw/fee.ts";
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
@@ -84,6 +84,9 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 const ONECLICK_STATUS = "oneclick/v0/status";
 /** The proxy path whose live answers are POST /v1/intents's quote records (card helper-id-intents, intents/records.ts). */
 const ONECLICK_QUOTE = "oneclick/v0/quote";
+/** GET /v1/health's header naming mainnet NEAR's agreement pair (card near-pair-on-keyed-providers; token-status/status.ts
+ *  pairNames): "<first>, <second>", each "<company's domain>[ key<n>][ keyless]", never a URL or a key. */
+export const NEAR_PAIR_HEADER = "X-Helper-Near-Pair";
 const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL, POOL_SOLANA_PIECES] = MOUNTED.relay;
@@ -285,6 +288,10 @@ export function handler(
   // card helper-near-lists-and-token: chain=near's lists, token page, holders, candles and tape (src/data/near/); none
   // mounted answers 404 as before
   near: NearMarket | undefined = undefined,
+  // card near-pair-on-keyed-providers: the two providers mainnet's two-provider reads agree on (token-status/status.ts
+  // readUrls: the watch, the fee quote, the carries), named on /v1/health in X-Helper-Near-Pair. A header, as the
+  // commit is: the body is held to the kit's frozen 1 KB (HELPER_V1_PATHS), which its longest config leaves 11 B of
+  nearPair: string[] = pairNames(process.env),
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -408,7 +415,7 @@ export function handler(
       }
       if (path === "/v1/health") {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "method_not_allowed" }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
-        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), cors(req));
+        return send(200, health(commit, SERVED, release, ready(), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", ") });
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });

@@ -277,3 +277,17 @@ export async function withPools(
     return state;
   }
 }
+
+/**
+ * `state` with `deposit_wallets` (card deposit-takes-each-pools-own-coin: src/pool-deposit-follow.ts depositWalletsOf,
+ * each U_X a follow left money at), when signed in and any is listed. The ops it is made from are read after the notes
+ * the pools were summed from (main.ts), so money is never in both. As the pools: the oldest ops give way for the room,
+ * and a state that still does not fit, or that the schema refuses, goes as it was.
+ */
+export function withDepositWallets(state: SignpageState, wallets: NonNullable<SignpageState["deposit_wallets"]>): SignpageState {
+  if (!state.signed_in || wallets.length === 0) return state;
+  let out: SignpageState = { ...state, deposit_wallets: wallets };
+  if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) out = { ...out, ops: pickOps({ ...out, ops: [] }, state.ops.map((op, t) => ({ op, t }))) };
+  if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) return state;
+  return SIGNPAGE_RESULT_SCHEMAS.state(out) ? out : state;
+}
