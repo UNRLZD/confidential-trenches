@@ -15,8 +15,11 @@
 //     read; the page reads the restore's no-buy mark;
 //   - the sell's rule: a sale paying over 100,000 lamports of priority refused, and a sale's fee over 105,000, full or
 //     partial;
-//   - a leftover W's rent back spaced: a gap of 10 to 60 minutes from each rent-back send, one sending pass a load, a W
-//     waiting so listed on its way (state.wallets RETURNING) at its last read.
+//   - a leftover W's rent back spaced: a gap of 10 to 60 minutes from each send from a W into the pool (a sale stamps the
+//     device before it is sent, W's record keeping the time as its own), every rent back claiming the device's slot, one
+//     sending pass a load, none while a pool buy or sell holds the trade lock, a load's first pass at a start drawn from
+//     15 to 60 s, a W waiting so listed on its way (state.wallets RETURNING) at its last read;
+//   - a W read empty listed empty only once no note of its is RESERVED.
 // It does not prove those lines run: that is the signing page's tests at the released commit (test/pool-sell.test.ts,
 // test/pool-testnet.test.ts, test/rules-pool.test.ts), and that the served files are that commit's build is
 // signpage-release's. The money it saves is the card's run record (round-trip-costs-less.md), written with the real run.
@@ -50,7 +53,7 @@ const R = String.raw;
 export const MARKS = Object.freeze({
   "the sale's owed record keeps W's proven buy": re(R`(?<p>${I})\?\.buy!==void 0&&\((?<o>${I})\.buy=\k<p>\.buy\),await ${I}\.owed\?\.put\(\k<o>\)`),
   "every W of the account's found on the helper's seat alone, in batches; one with no record the helper reads empty listed empty; a W read as at its last end on its own state read on neither seat; the load's own reads only with a W to pass": tied(
-    re(R`let (?<rd>${I})=await (?<fo>${I})\((?<rp>${I})\[1\],(?<ls>${I})\)\.catch\(\(\)=>null\),(?<td>${I})=\[\];for\(let\{address:(?<a>${I})\}of \k<ls>\)\{let (?<o>${I})=${I}\.find\((?<q>${I})=>\k<q>\.address===\k<a>\),(?<r>${I})=\k<rd>\?\.get\(\k<a>\);\k<o>\?\(\k<r>===void 0\?\k<o>\.seen===void 0:\k<o>\.seen!==\k<r>\.seen\)&&\k<td>\.push\(\k<a>\):\k<r>!==void 0&&\(\k<r>\.any\?\k<td>\.push\(\k<a>\):await Promise\.resolve\(${I}\.owed\.markEmpty\?\.\(\k<a>\)\)\.catch\(\(\)=>\{\}\)\)\}if\(\k<td>\.length===0\)return ${I}!==null\|\|\k<rd>===null;`),
+    re(R`let (?<rd>${I})=await (?<fo>${I})\((?<rp>${I})\[1\],(?<ls>${I})\)\.catch\(\(\)=>null\),(?<ns>${I}),(?<sp>${I})=async (?<x>${I})=>\(\k<ns>===void 0&&\(\k<ns>=await ${I}\.notes\(\)\.then\(async (?<s1>${I})=>new Set\(\(await \k<s1>\.list\(\)\)\.filter\((?<s2>${I})=>\k<s2>\.state===` + "`RESERVED`" + R`\)\.map\((?<s3>${I})=>${I}\(\k<s3>\.ref\)\)\)\)\.catch\(\(\)=>null\)\),\k<ns>!==null&&\(${I}\?\?\[\]\)\.every\((?<s4>${I})=>\k<s4>\.address!==\k<x>\|\|!\k<ns>\.has\(\k<s4>\.note\)\)\),(?<td>${I})=\[\];for\(let\{address:(?<a>${I})\}of \k<ls>\)\{let (?<o>${I})=${I}\.find\((?<q>${I})=>\k<q>\.address===\k<a>\),(?<r>${I})=\k<rd>\?\.get\(\k<a>\);\k<o>\?\(\k<r>===void 0\?\k<o>\.seen===void 0:\k<o>\.seen!==\k<r>\.seen\)&&\k<td>\.push\(\k<a>\):\k<r>!==void 0&&\(\k<r>\.any\?\k<td>\.push\(\k<a>\):await \k<sp>\(\k<a>\)&&await Promise\.resolve\(${I}\.owed\.markEmpty\?\.\(\k<a>\)\)\.catch\(\(\)=>\{\}\)\)\}if\(\k<td>\.length===0\)return ${I}!==null\|\|\k<rd>===null;`),
     (g) => [
       // the finding read: W and its accounts for every W, the Rent sysvar first, at most 100 addresses a request
       R`[,; ](${I})=100,(?:${I}=[^,;{}]+[,;])*?async function ${esc(g.fo)}\((${I}),(${I})\)\{let (${I})=\3\.map\([^]{0,200}?,(${I})=\[(${I}),\.\.\.\4\.flat\(\)\],(${I})=\[\];for\(let (${I})=0;\8<\5\.length;\8\+=\1\)\7\.push\(\.\.\.await ${I}\(\2,\5\.slice\(\8,\8\+\1\)\)\)`,
@@ -60,7 +63,7 @@ export const MARKS = Object.freeze({
   ),
   "the Ws passed in an order drawn from the device's random source, a second and up to a second more apart": tied(
     // the list's own order drawn, then each W after the first a gap and a draw of up to as much again apart
-    re(R`for\(let (?<i>${I})=(?<m>${I})\.length-1;\k<i>>0;\k<i>--\)\{let (?<k>${I})=(?<rb>${I})\(\k<i>\+1\);\[\k<m>\[\k<i>\],\k<m>\[\k<k>\]\]=\[\k<m>\[\k<k>\],\k<m>\[\k<i>\]\]\}[^]{0,800}?for\(let\[(?<n>${I}),${I}\]of \k<m>\.entries\(\)\)(?:if\(|\{)\k<n>>0&&await ${I}\((?<gap>${I})\+\k<rb>\(\k<gap>\)\)`),
+    re(R`for\(let (?<i>${I})=(?<m>${I})\.length-1;\k<i>>0;\k<i>--\)\{let (?<k>${I})=(?<rb>${I})\(\k<i>\+1\);\[\k<m>\[\k<i>\],\k<m>\[\k<k>\]\]=\[\k<m>\[\k<k>\],\k<m>\[\k<i>\]\]\}[^]{0,2400}?if\((?<n>${I})\+\+>0&&await ${I}\((?<gap>${I})\+\k<rb>\(\k<gap>\)\)`),
     (g) => [
       R`function ${esc(g.rb)}\((${I})\)\{if\(\1<=1\)return 0;let (${I})=Math\.floor\(4294967296/\1\)\*\1,(${I})=new Uint32Array\(1\);for\(;;\)if\(globalThis\.crypto\.getRandomValues\(\3\),\3\[0\]<\2\)return \3\[0\]%\1\}`,
       R`[,; ]${esc(g.gap)}=1e3[,;]`,
@@ -80,7 +83,7 @@ export const MARKS = Object.freeze({
       R`(${I})\.steady&&(${I})\.bare!==!0\?(${I}):void 0`],
   ),
   "the positions' passes held only while a W is read": tied(
-    re(R`let\{store:${I},sync:${I},rent:${I}\}=${I},(?<y>${I})=${I}===null,(?<rel>${I})=(?<h>${I})\.preempt\?\.\(\);try\{for\(`),
+    re(R`let\{store:${I},sync:${I},rent:${I}\}=${I},(?<y>${I})=${I}===null,(?<rel>${I})=(?<h>${I})\.preempt\?\.\(\);try\{let ${I}=0;for\(`),
     (g) => [R`\}finally\{${esc(g.rel)}\?\.\(\)\}return ${esc(g.y)}\}`, R`wallets:async (${I})=>\{let (${I})=\1===(${I})\?null:(${I})\.preempt\(\),`, R`preempt:\(\)=>\{let (${I})=(${I})\.preempt\(\);return\(\)=>\1\.release\(\)\}`],
   ),
   "the page reads the restore's no-buy mark": tied(
@@ -106,10 +109,12 @@ export const MARKS = Object.freeze({
       R`=\((${I}),(${I})=(${I})\(\)\)=>\{let (${I})=` + "`owed/rentback-sol`" + R`;return\{`,
       R`spacing:\(\)=>(${I})\.spacing\(\),space:(${I})=>\1\.space\(\2\),claim:\((${I}),(${I})\)=>\1\.claim\(\3,\4\)\}`,
       // the load's hold per W: another W's send this load, a store not read, a gap open that is not W's own
-      R`let (${I})=(${I})=>(${I})!==null&&\3!==\2\.address\|\|!(${I})\|\|(${I})\((${I}),Number\((${I})\.now\?\.\(\)\?\?BigInt\(Date\.now\(\)\)\),\2\.spaced\);`,
+      R`[,; ](${I})=(${I})=>(${I})!==null&&\3!==\2\.address\|\|!(${I})\|\|(${I})\((${I}),Number\((${I})\.now\?\.\(\)\?\?BigInt\(Date\.now\(\)\)\),\2\.spaced\);`,
       R`${esc(g.ms)}>(${I})&&\((${I})=(${I})\)\}`,
-      R`quiet:(${I})\((${I})\),leftover:!0,`,
-      R`(${I})=async\(\)=>\{if\((${I})\.quiet===!0\)throw (${I});if\(\2\.leftover!==!0\|\|(${I})\|\|(${I})\.owed\?\.claim===void 0\)return;let (${I})=\{at:(${I})\(\),gap:${esc(g.gd)}\(\)\};if\(!await \5\.owed\.claim\(\6,\2\.own\)\.catch\(\(\)=>!1\)\)throw \3;\2\.stamped\?\.\(\6\.at\),\4=!0\}`,
+      // a held W: not passed, told spaced, its record kept
+      R`if\((${I})&&(${I})\(\1\)\)\{if\(!await ${I}\(${I},(${I}),!0,${I},async\(\)=>\{let (${I})=await ${I}\(\);if\(!\4\)return;${I}\.told\?\.\(\{address:\3,step:` + "`rent_back`,state:`gave_up`,detail:`spaced: ",
+      // every rent back's claim, a sale's own as a leftover pass's (review P2-1 of 024e8a89d)
+      R`(${I})=async\(\)=>\{if\((${I})\|\|(${I})\.owed\?\.claim===void 0\)return;let (${I})=\{at:(${I})\(\),gap:${esc(g.gd)}\(\)\};if\(!await \3\.owed\.claim\(\4,(${I})\.own\)\.catch\(\(\)=>!1\)\)throw (${I});\6\.stamped\?\.\(\4\.at\),\2=!0\}`,
       R`(${I})\.ok\.signed\.length>0&&await (${I})\(\);for\(let (${I}) of \1\.ok\.signed\)await ${esc(g.sd)}\(`,
       R`;await (${I})\(\);let (${I})=(${I})\.planned\?\?\(await (${I})\.store\.add\(`,
       R`catch\((${I})\)\{if\(\1===(${I})\|\|\1===(${I})\)throw \1;(${I})=\1,(${I})\((${I}),` + "`fault`",
@@ -118,17 +123,37 @@ export const MARKS = Object.freeze({
     ],
   ),
   "a leftover W waiting so is listed on its way: its record keeps what its pass read on W, its buy proven, at its teardown as at its sweep, and a held pass reads and signs nothing more; once its sweep is sent W stays RETURNING with that sweep's signature until the note it wrote is counted in the same notes the balance reads, never in both totals; a W whose pass ended at the floor keeps no amount, so it is never listed": tied(
-    re(R`\[(?<la>${I}),(?<lb>${I})\]=(?<hd>${I})\.map\((?<e>${I})=>\k<e>\[0\]\?\.lamports\?\?0n\);if\((?<x>${I})\.buy&&\k<la>===\k<lb>&&\k<x>\.read\?\.\(\k<la>\),(?<pl>${I})\.close\.length===0\)return\{keep:\k<pl>\.keep,signed:\[\],last:0,unclaimed:void 0,since:${I}\};if\(\k<x>\.quiet===!0\)throw (?<held>${I});`),
+    re(R`\[(?<la>${I}),(?<lb>${I})\]=(?<hd>${I})\.map\((?<e>${I})=>\k<e>\[0\]\?\.lamports\?\?0n\);if\(\((?<x>${I})\.buy\|\|(?<sn>${I})!==void 0\)&&\k<la>===\k<lb>&&\k<x>\.read\?\.\(\k<la>\),(?<pl>${I})\.close\.length===0\)return\{keep:\k<pl>\.keep,signed:\[\],last:0,unclaimed:void 0,since:\k<sn>\};`),
     (g) => [
-      R`if\((${I})\.buy&&\1\.read\?\.\((${I})\),\2===0n\)return\{end:`,
-      "`W holds nothing`" + R`\};if\((${I})\.quiet===!0\)throw ${esc(g.held)};`,
-      R`(${I})\.swept\?\.\((${I})\.one\.signature\),await (${I})\(\2\.one\.signed,\2\.one\.signature\)`,
+      R`if\(\((${I})\.buy\|\|(${I})!==void 0\)&&\1\.read\?\.\((${I})\),\3===0n\)return\{end:`,
+      // an owed end under the floor lists the note's value, 0 at the least
+      R`if\((${I})<(${I})&&(${I})>0&&\((${I})\.buy\|\|(${I})!==void 0\)&&\4\.read\?\.\(\1>0n\?\1:0n\),\1<\2\)return\{end:\3>0\?` + "`owed`:`floor`",
+      // the sweep's record (signature and the note's value) written before its send
+      R`await (${I})\.swept\?\.\((${I})\.one\.signature,\2\.value\),await (${I})\(\2\.one\.signed,\2\.one\.signature\)`,
       // a pass that ended at the floor carries no amount: never listed, never in On the way or Total
-      R`(${I})=(${I})===` + "`floor`" + R`\?void 0:(${I})\.lamports===void 0\?(${I}):\3\.lamports\.toString\(\),(${I})=\2===` + "`sent`" + R`\?\3\.sweep:\3\.lamports===void 0\?(${I}):void 0,`,
+      R`(${I})=(${I})===` + "`floor`" + R`\?void 0:(${I})\.lamports===void 0\?(${I}):\3\.lamports\.toString\(\),(${I})=\2===` + "`sent`" + R`\?\3\.sweep:\3\.lamports!==void 0&&\2!==` + "`gave_up`" + R`\?void 0:(${I}),`,
       R`if\(typeof (${I})\.lamports!=` + "`string`" + R`\|\|!/\^\[1-9\]\\d\{0,19\}\$/\.test\(\1\.lamports\)\)continue;if\(\1\.sweep!==void 0\)\{if\((${I})===null\)continue;let (${I})=\2\.find\((${I})=>\4\.sends\?\.some\((${I})=>\5\.signature===\1\.sweep\)\);if\(\3!==void 0&&\3\.state!==` + "`PLANNED`" + R`&&\3\.state!==` + "`INCOMING`" + R`\)continue\}let (${I})=(${I})\(BigInt\(\1\.lamports\),(${I}),(${I})\);\6!==null&&(${I})\.push\(\{chain:` + "`solana`" + R`,address:\1\.address,role:` + "`fresh`" + R`,size:\6,state:` + "`RETURNING`" + R`\}\)`,
       // the page: the same shared notes read the balance counted
       R`(${I})=null,(${I})=\(\)=>\1\?\?=(${I})\(\),(${I})=await (${I})\(await (${I})\((${I}),\2,[^]{0,1600}?(${I})=\7\.signed_in&&(${I})\?await \9\.returning\(\)\.catch\(\(\)=>\[\]\):\[\],(${I})=\8\.some\((${I})=>\11\.sweep!==void 0\)\?await \2\(\)\.catch\(\(\)=>null\):\[\];return (${I})\((${I}),(${I})\(\8,(${I})\.get\(` + "`solana`" + R`\),\10\)\)`,
     ],
+  ),
+  "a sale stamps the device's spacing after its record names the signature and before it is sent, W's record keeping that time as its own last send": tied(
+    re(R`(?<rc>${I})=\{address:${I}\.address,l:${I}\.l\.toString\(\),j:${I}\.j,mints:\[\{mint:${I},program:${I}\.program\}\],passes:0\},(?<at>${I})=Number\((?<h>${I})\.now\?\.\(\)\?\?BigInt\(Date\.now\(\)\)\);if\(!${I}\)\{\k<rc>\.spaced=\k<at>;`),
+    (g) => [R`await ${esc(g.h)}\.signed\?\.\((${I})\),await Promise\.resolve\(${esc(g.h)}\.owed\?\.space\?\.\(\{at:${esc(g.at)},gap:(${I})\(\)\}\)\)\.catch\(\(\)=>\{\}\),(${I})=\1,await Promise\.allSettled\(${I}\.map\((${I})=>\4\(` + "`sendTransaction`"],
+  ),
+  "no leftover W's pass starts while a pool buy or sell holds the trade lock, shared, in any tab; a lock read that throws holds it": tied(
+    re(R`(?<nm>${I})=` + "`ct-pool/trade`" + R`,(?<dt>${I})=\((${I}),(${I})\)=>\3\?\3\.request\(\k<nm>,\{mode:` + "`shared`" + R`\},\4\):\4\(\),(?<tr>${I})=async (${I})=>\{try\{return\(\(await \6\?\.query\?\.\(\)\)\?\.held\?\?\[\]\)\.some\((${I})=>\7\.name===\k<nm>\)\}catch\{return!0\}\}`),
+    (g) => [
+      // read before each W's pass, after the gap between passes: the run ends with the Ws left
+      R`>0&&await ${I}\(${I}\+${I}\(${I}\)\),await ${esc(g.tr)}\(${I}\)\)\{${I}=!0;break\}`,
+      // the Solana buy's and sell's whole runs
+      R`return ${esc(g.dt)}\((${I}),\(\)=>\1\.request\(${I},\{mode:` + "`shared`" + R`\},async\(\)=>\{let ${I}=${I}=${I}\(\);try\{`,
+      R`return ${esc(g.dt)}\((${I}),\(\)=>\1\.request\(${I},\{mode:` + "`shared`" + R`\},async\(\)=>\{try\{await \1\.request\(`,
+    ],
+  ),
+  "a load's first leftover pass waits a start drawn from 15 to 60 s from the device's random source, a full sell's new record included": tied(
+    re(R`(?<mn>${I})=15e3,(?<dr>${I})=\(\)=>\{let (${I})=new Uint32Array\(1\);do globalThis\.crypto\.getRandomValues\(\3\);while\(\3\[0\]>=4294940441\);return \k<mn>\+\3\[0\]%45001\};function (?<bs>${I})\((${I})=\(\)=>Date\.now\(\),(${I})=\k<dr>\(\)\)\{let (${I})=!1,(${I})=\5\(\)\+\6,(${I})=\8,(${I})=${I};return\{take\(\)\{return \7\|\|\5\(\)<\9\?!1:\(\7=!0,!0\)\}[^]{0,120}?again\(\)\{\9=\8,`),
+    (g) => [R`[,; ](${I})=${esc(g.bs)}\(\)[,;]`],
   ),
 });
 
