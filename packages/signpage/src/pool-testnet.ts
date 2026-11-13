@@ -801,6 +801,20 @@ export const EVM_TURN_SPREAD_MS = 2_000;
  *  54 s with the follow's fee reads filling its hosts' pass budget and about 15 s without them. Past it, the round
  *  reads the history itself, as before. */
 export const EVM_WARM_WAIT_MS = 20_000;
+/** One stop for `signal` (when given) and `session`: it fires with the first one's reason; `off` takes its listeners
+ *  off both, so a round that ends leaves none on a signal that outlives it. */
+function eitherStop(signal: AbortSignal | undefined, session: AbortSignal): { stop: AbortSignal; off: () => void } {
+  if (signal === undefined) return { stop: session, off: () => {} };
+  const c = new AbortController();
+  const fire = (): void => c.abort(signal.aborted ? signal.reason : session.reason);
+  if (signal.aborted || session.aborted) {
+    fire();
+    return { stop: c.signal, off: () => {} };
+  }
+  signal.addEventListener("abort", fire, { once: true });
+  session.addEventListener("abort", fire, { once: true });
+  return { stop: c.signal, off: () => (signal.removeEventListener("abort", fire), session.removeEventListener("abort", fire)) };
+}
 export type EvmTurnDeps = {
   now?: () => number;
   random?: () => number;
@@ -1016,10 +1030,23 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const passList = over.evmRpcs || r === null ? r : (pageEvmPoolRpcs(chain, "pass") ?? r);
       const passRpcs = passList === null || passList === r ? pair : evmPair(passList);
       evmPools.set(chain, p === undefined || r === null || pair === null || sync === null || passList === null || passRpcs === null ? null : { pin: p, list: r, rpcs: pair, passList, passRpcs, sync, passSync: passList === r ? sync : evmSyncOf(p, passRpcs, passList), round: over.evmRound ? over.evmRound(p, pair, r) : ((one) => async (signal?: AbortSignal) => {
-              const stop = signal ?? evmStop.signal;
-              await evmWarmWait(chain, stop);
-              stop.throwIfAborted();
-              return one(signal);
+              // the round ends at its own signal or at a sign out, whichever fires first (review of 584af1495, P3-1: the
+              // end follow's signal fires only at signedOut, so a round on it read on after the tap); both listeners go
+              // when the round ends
+              const session = evmStop.signal;
+              const { stop, off } = eitherStop(signal, session);
+              try {
+                await evmWarmWait(chain, stop);
+                stop.throwIfAborted();
+                const got = await one(stop);
+                // the deposit's own sync has read the pool (its hold kept): every later round of this session reads on
+                // from it, so none waits for the history read again (review of 584af1495, P2-1); a round of a session
+                // signed out meanwhile marks nothing
+                if (!session.aborted) evmWarmed.add(chain);
+                return got;
+              } finally {
+                off();
+              }
             })(roundOf(sync)), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
     }
     return evmPools.get(chain)!;
@@ -1156,10 +1183,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (e === null) return null;
     let w = evmWarms.get(chain);
     if (w === undefined) {
-      const read: Promise<boolean> = e.passSync.events(evmStop.signal).then(
-        // an answer after a sign out (its reads stopped, these maps cleared) is not this session's: neither counted nor kept
-        () => (evmWarms.get(chain) === read && (evmWarmFails.delete(chain), evmWarmed.add(chain)), true),
-        () => (evmWarms.get(chain) === read && (evmWarms.delete(chain), evmWarmFails.set(chain, (evmWarmFails.get(chain) ?? 0) + 1)), false),
+      const session = evmStop.signal;
+      const read: Promise<boolean> = e.passSync.events(session).then(
+        // an answer after a sign out (its reads stopped, these maps cleared) is not this session's: neither counted nor
+        // kept, and a failure whose stop fired is no failure of the read (review of 584af1495, P3-1)
+        () => (!session.aborted && evmWarms.get(chain) === read && (evmWarmFails.delete(chain), evmWarmed.add(chain)), true),
+        () => (!session.aborted && evmWarms.get(chain) === read && (evmWarms.delete(chain), evmWarmFails.set(chain, (evmWarmFails.get(chain) ?? 0) + 1)), false),
       );
       evmWarms.set(chain, (w = read));
     }

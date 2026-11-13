@@ -273,10 +273,42 @@ test("the round's own signal ends the wait the same way; the wait leaves no list
   done({ fin: {}, anchor: {}, events: [] });
   await p2;
   assert.equal(live, 0, "the wait's abort listener removed");
-  const before = added;
   await s2.round(c2.signal);
-  assert.equal(added, before, "a round after the read holds waits on nothing");
-  assert.deepEqual(s2.calls, ["pass:events", "deposit:events", "deposit:events"]);
+  assert.equal(live, 0, "a round after the read holds leaves no listener either");
+  assert.deepEqual(s2.calls, ["pass:events", "deposit:events", "deposit:events"], "and waits on nothing");
+});
+
+// review of 584af1495, P2-1: once a round has read on the deposit's own sync (the wait's bound passed, the history read
+// still running), every later round of the session reads at once: that sync's hold has the pool, so none waits the 20 s
+// again, the round that sees the landing included. A sign out clears it with the rest of the session.
+test("a round that read on its own sync past the bound: the next round reads at once, the history read still running", async () => {
+  const { w } = await wallet();
+  const s = twoSyncs(w, () => new Promise(() => {}), { waitMs: 400 });
+  s.t.evmPoolOf("base");
+  await until(() => s.calls.includes("pass:events"));
+  await s.round();
+  const t0 = Date.now();
+  await s.round();
+  const second = Date.now() - t0;
+  assert.ok(second < 100, `the second round waited ${second} ms though its own sync already read`);
+  assert.deepEqual(s.calls, ["pass:events", "deposit:events", "deposit:events"]);
+});
+
+// review of 584af1495, P3-1: a round given its own signal (the end follow's, which fires only at signedOut) ends at a
+// sign out tapped during its wait too: thrown, no read after the tap.
+test("a round with a signal the tap leaves alone still ends at the sign out tap: no read after it", async () => {
+  const { w } = await wallet();
+  const s = twoSyncs(w, () => new Promise(() => {}), { waitMs: 300 });
+  s.t.evmPoolOf("base");
+  await until(() => s.calls.includes("pass:events"));
+  const follows = new AbortController(); // the page's follows signal: aborted only at signedOut
+  const r = s.round(follows.signal).then(() => "read", () => "thrown");
+  await new Promise((x) => setTimeout(x, 30));
+  (s.t as unknown as { signingOut: () => void }).signingOut();
+  const got = await Promise.race([r, new Promise((x) => setTimeout(() => x("still waiting"), 1_000))]);
+  assert.equal(got, "thrown", "the round ends at the tap");
+  await new Promise((x) => setTimeout(x, 50));
+  assert.deepEqual(s.calls, ["pass:events"], "no read after the tap");
 });
 
 // review of evm-first-proof-inside-ten-seconds, item 1: every wallet pool the page makes of an EVM pin (the queue's pass
