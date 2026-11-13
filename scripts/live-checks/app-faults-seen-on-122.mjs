@@ -5,7 +5,8 @@
 // $82.37, and the 12 Nov open buy whose one-time wallet holds 0.008478835 SOL (asset_held); it answers deposit.assets as
 // the real page does. Headless Chromium opens /portfolio at 390 x 844 (phone, dpr 2, touch) and 1440 x 900 (desktop,
 // dpr 1) and reads, in each:
-//   - Private balance's first row is NEAR's vault, in USDC, its balance in base units, Ready and Pending a dash (row 4);
+//   - Private balance's first row is NEAR's vault, in USDC, its balance in base units, with no data-ready or data-pending
+//     mark (row 4; 13 Nov 07:53Z: removed, the app names no proof: a pool row is chain, Balance, Withdraw);
 //   - the Positions tile opens to two parts, Coins and Reserve: Reserve is the held SOL at the pool's price, exact and
 //     rounded down once (69 cents, on Solana), and the two add up to the tile; on the desktop Allocation draws a
 //     Reserve tile at the same cents (owner pick 12 Nov 16:17:50Z, option B);
@@ -48,7 +49,7 @@ export const ACCOUNT = {
 };
 /** 0.008478835 SOL x $82.37 = $0.69840... : 69 cents, rounded down once. */
 export const RESERVE_CENTS = "69";
-export const NEAR_ROW = { chain: "near", asset: "USDC", balance: "73180000", ready: "none", pending: "none" };
+export const NEAR_ROW = { chain: "near", asset: "USDC", balance: "73180000", marks: [] };
 const NEAR = { origin_asset: "nep141:wrap.near", chain: "near", symbol: "NEAR", decimals: 24, min: "2.1", max_usd: "1000" };
 export const ANSWERS = { "deposit.assets": { assets: [NEAR] } };
 export const WIDTHS = [
@@ -75,7 +76,7 @@ export function judge(rec) {
     say(r.framed === true, `${n}: ${r.framed ? "inside SIGN_HOST's shell" : "not inside SIGN_HOST's shell"}`);
     if (!r.framed) continue;
     const first = r.pools?.[0] ?? null;
-    say(first !== null && same({ chain: first.chain, asset: first.asset, balance: first.balance, ready: first.ready, pending: first.pending }, NEAR_ROW), `${n}: Private balance's first row is ${first ? JSON.stringify({ chain: first.chain, asset: first.asset, balance: first.balance, ready: first.ready, pending: first.pending }) : "missing"}, want NEAR's vault ${JSON.stringify(NEAR_ROW)}`);
+    say(first !== null && same({ chain: first.chain, asset: first.asset, balance: first.balance, marks: first.marks }, NEAR_ROW), `${n}: Private balance's first row is ${first ? JSON.stringify({ chain: first.chain, asset: first.asset, balance: first.balance, marks: first.marks }) : "missing"}, want NEAR's vault ${JSON.stringify(NEAR_ROW)}`);
     const p = r.parts ?? {};
     const partNames = (p.parts ?? []).map((x) => x.part);
     say(same(partNames, ["coins", "reserve"]) && p.open === true, `${n}: the Positions tile ${p.open ? "opens" : "does not open"} to ${JSON.stringify(partNames)}, want ["coins","reserve"]`);
@@ -122,7 +123,7 @@ const asked = (page) => page.evaluate(() => (window.__ctShellAsked ?? []).map((m
 
 const POOLS = (phone) => {
   const b = document.querySelector(phone ? ".pfm .pools" : ".pfd .pools");
-  return b ? [...b.querySelectorAll("[data-pool]")].filter((x) => x.dataset.pool !== "unread").map((x) => ({ chain: x.dataset.pool, asset: x.dataset.asset, balance: x.dataset.balance, ready: x.dataset.ready, pending: x.dataset.pending })) : null;
+  return b ? [...b.querySelectorAll("[data-pool]")].filter((x) => x.dataset.pool !== "unread").map((x) => ({ chain: x.dataset.pool, asset: x.dataset.asset, balance: x.dataset.balance, marks: ["data-ready", "data-pending"].filter((a) => x.hasAttribute(a)) })) : null;
 };
 
 const PARTS = () => {

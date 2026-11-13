@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 // Live check of card trade-box-pool: on a chain whose pool the signing page reports, APP_HOST's trade box is on the pool
-// path, shows whether a proof is ready, and a tap never sends the vault's buy. APP_HOST's terminal is framed by a stand-in
+// path, says nothing of a proof, shows Max once the pool's money can be spent and the busy Buy until then, and a tap never
+// sends the vault's buy. 13 Nov 07:53Z: removed, the app names no proof: the box's proof line is gone.
+// APP_HOST's terminal is framed by a stand-in
 // for SIGN_HOST's shell (app-in-shell.mjs) that sends a signed-in state holding the devnet Solana pool as the signing page
 // reported it after the recorded pool deposit (signpage-pool-notes.run.json: one 0.01 SOL note; tap_max by the kit's own
 // rule, solanaPoolBuyMaxSpend at the worst venue, the 0.001 SOL tip cap, rent 5,080/1: 1,736,080 lamports), once with the
-// proof ready and once with it still making, since no check can sign a real account in. Headless Chromium opens a Solana
+// money ready to spend and once with it still being made ready, since no check can sign a real account in. Headless Chromium opens a Solana
 // token's own page, /token/solana/<DJT> (app-sell-mount's PATH; never /, which draws the live Trending column's top, a
 // token of any chain, on the deployed app), reads the token and chain it drew, at 1440 x 900 (desktop, the box in the
 // right column) and 390 x 844 (phone, dpr 2, the bar's Buy opens the trade sheet) and reads:
 //   - the box is on the pool path (data-path="pool");
-//   - its proof label is the state's: ready with the proof ready, making while it is not, and it has words;
+//   - no proof line (no [data-testid="trade-proof"]) and no text matching /proof/i anywhere in the box;
+//   - with the money ready the line above the button reads "Max $N" and Buy is the plain trade button; while it is being
+//     made ready the box shows no Max and Buy is data-kind="live" with aria-busy="true" (and aria-disabled="true", no
+//     disabled attribute: a tap sends nothing);
 //   - one tap on its main button asks the shell for no vault buy (kind "buy"): only pool.buy, or nothing while the box
 //     cannot price the pool.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
@@ -33,29 +38,32 @@ const KEY = "trade-box-pool";
 export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const HELPER_HOST = "https://ct-api.unrealized.trade";
-/** The devnet Solana pool after the recorded 0.01 SOL deposit, with the proof ready ("ready") or still making ("making"):
- *  the state names what the device is proving now (`making`, kit 1.12), since the box says a proof is coming only then
- *  (card buy-spends-several-pieces: a balance with no proof ready and none being made draws no label). */
+/** The devnet Solana pool after the recorded 0.01 SOL deposit, with its money ready to spend ("ready") or still being made
+ *  ready ("making": the state names it in `making`, kit 1.12, and has no tap_max yet, so the box draws no Max and Buy takes
+ *  the busy look of a tap in flight). */
 export const POOL = {
   ready: { chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" },
   making: { chain: "solana", asset: "SOL", balance: "0.01", ready: "0", making: "0.01" },
 };
+/** SOL's pool price in the state, read just now at $150 (the box turns tap_max into the Max line with it, for a minute from
+ *  its publish), so each run builds its own state. */
+export const priceNow = (nowMs = Date.now()) => ({ price: String(150 * 1e8), expo: -8, published_s: Math.floor(nowMs / 1000) - 2, read_ms: nowMs - 1000 });
 /** The signed-in state the stand-in shell sends: cash in the vault too, so a box on the vault's path would buy from it. */
-export const account = (proof) => ({
+export const account = (state, nowMs = Date.now()) => ({
   release: "harness-shell",
   api: 1,
   signed_in: true,
   way: "passkey",
   code_saved: true,
   vault_balance: "73.18",
-  pools: [POOL[proof]],
+  pools: [{ ...POOL[state], price: priceNow(nowMs) }],
   wallets: [],
   positions: [],
   orders: [],
   held: [],
   ops: [],
 });
-export const PROOFS = ["ready", "making"];
+export const STATES = ["ready", "making"];
 export const WIDTHS = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
@@ -70,11 +78,11 @@ export function judge(rec) {
   const say = (ok, s) => lines.push(`${ok ? "ok " : "BAD"} ${s}`);
   say(typeof rec.entry === "string" && /^\/assets\/[\w.-]+\.js$/.test(rec.entry), `the served / names its entry script ${rec.entry ?? "none"}`);
   const runs = rec.runs ?? [];
-  const want = WIDTHS.flatMap((w) => PROOFS.map((p) => `${w.name} ${p}`));
-  const have = new Set(runs.map((r) => `${r.width} ${r.proof}`));
-  say(want.every((k) => have.has(k)), `${runs.length} run(s) of ${want.length} (desktop and phone, a proof ready and making)`);
+  const want = WIDTHS.flatMap((w) => STATES.map((p) => `${w.name} ${p}`));
+  const have = new Set(runs.map((r) => `${r.width} ${r.state}`));
+  say(want.every((k) => have.has(k)), `${runs.length} run(s) of ${want.length} (desktop and phone, the pool's money ready and being made ready)`);
   for (const r of runs) {
-    const n = `${r.width} ${r.proof}`;
+    const n = `${r.width} ${r.state}`;
     const bad = [];
     if (r.framed !== true) bad.push("not inside SIGN_HOST's shell");
     if (r.route !== "token") bad.push(`drew ${r.route ?? "nothing"}, not the token route`);
@@ -82,15 +90,27 @@ export function judge(rec) {
     if (!r.box) bad.push("no trade box");
     else {
       if (r.box.path !== "pool") bad.push(`the box is on the ${r.box.path ?? "unmarked"} path, not the pool's`);
-      if (r.box.proof !== r.proof) bad.push(`its proof label is ${r.box.proof ?? "none"}, the state's is ${r.proof}`);
-      else if (!r.box.proofText) bad.push("its proof label has no words");
+      if (r.box.proofMarks !== 0) bad.push(`the box draws a proof line (${r.box.proofMarks ?? "unread"} [data-testid="trade-proof"])`);
+      if (r.box.says !== false) bad.push(r.box.says === true ? "the box's text says proof" : "the box's text was not read");
+      const c = r.box.cta;
+      const maxOk = typeof r.box.max === "string" && /^Max \$\d[\d,]*(\.\d+)?$/.test(r.box.max) && Number(r.box.max.replace(/[^\d.]/g, "")) > 0;
+      if (!c) bad.push("no Buy button");
+      else if (r.state === "ready") {
+        if (!maxOk) bad.push(`the line above Buy reads ${JSON.stringify(r.box.max ?? null)}, not Max $N`);
+        if (c.kind === "live" || c.busy !== null) bad.push(`Buy looks busy with the money ready (data-kind ${c.kind}, aria-busy ${c.busy})`);
+      } else {
+        if (r.box.max !== "") bad.push(`the box shows ${JSON.stringify(r.box.max ?? null)} while the money is still being made ready, not no Max`);
+        if (c.kind !== "live") bad.push(`Buy is data-kind ${c.kind ?? "none"}, not live`);
+        if (c.busy !== "true") bad.push(`Buy is aria-busy ${c.busy ?? "unset"}, not true`);
+        if (c.ariaDisabled !== "true" || c.disabled) bad.push("Buy is not aria-disabled true with no disabled attribute");
+      }
       const sent = r.sent ?? null;
       if (sent === null) bad.push("the tap was not read");
       else if (sent.includes("buy")) bad.push(`a tap asked the shell for the vault's buy (${sent.join(", ")})`);
       else if (sent.some((k) => k !== "pool.buy")) bad.push(`a tap asked the shell for ${sent.join(", ")}`);
     }
     if (!r.shot) bad.push("no screenshot");
-    say(bad.length === 0, `${n}: ${bad.length ? bad.join("; ") : `the box is on the pool path, its proof label "${r.box.proofText}" (${r.proof}), a tap asked for ${r.sent.length ? r.sent.join(", ") : "nothing"}`}`);
+    say(bad.length === 0, `${n}: ${bad.length ? bad.join("; ") : `the box is on the pool path, no proof line, ${r.state === "ready" ? `the line reads "${r.box.max}", Buy is the trade button` : `no Max, Buy is live and busy`}, a tap asked for ${r.sent.length ? r.sent.join(", ") : "nothing"}`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -100,12 +120,12 @@ const READ = (sheet) => {
   const main = document.querySelector("main[data-route]");
   const scope = sheet ? document.querySelector('[data-sheet="trade"]') : main?.querySelector(".tkp-desk .tkp-trade");
   const el = scope?.querySelector('[data-testid="trade-box"]');
-  const p = el?.querySelector('[data-testid="trade-proof"]');
+  const cta = el?.querySelector('[data-testid="trade-cta"]');
   return {
     route: main?.dataset.route ?? null,
     mint: main?.querySelector("section.tkp[data-token]")?.getAttribute("data-token") ?? null,
     chain: main?.querySelector("section.tkp[data-token] .tkp-head .tok-cb[data-chain]")?.getAttribute("data-chain") ?? null,
-    box: el ? { path: el.getAttribute("data-path"), proof: p?.getAttribute("data-proof") ?? null, proofText: p?.textContent?.trim() || null, cta: el.querySelector('[data-testid="trade-cta"]')?.textContent?.trim() ?? null } : null,
+    box: el ? { path: el.getAttribute("data-path"), proofMarks: el.querySelectorAll('[data-testid="trade-proof"]').length, says: /proof/i.test(el.textContent ?? ""), max: el.querySelector('[data-testid="trade-max"]')?.textContent?.replace(/\s+/g, " ").trim() ?? null, cta: cta ? { text: cta.textContent?.trim() ?? "", kind: cta.getAttribute("data-kind"), busy: cta.getAttribute("aria-busy"), ariaDisabled: cta.getAttribute("aria-disabled"), disabled: cta.hasAttribute("disabled") } : null } : null,
   };
 };
 
@@ -130,9 +150,9 @@ async function terminal(page) {
 const asked = async (page, from) => (await page.evaluate(() => window.__ctShellSeen ?? [])).slice(from).filter((k) => k !== "state" && k !== "nav");
 const seen = (page) => page.evaluate(() => (window.__ctShellSeen ?? []).length);
 
-async function runOne(browser, w, proof, shots, route) {
+async function runOne(browser, w, state, shots, route) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
-  const run = { width: w.name, proof, framed: false, route: null, mint: null, chain: null, box: null, sent: null, shot: null };
+  const run = { width: w.name, state, framed: false, route: null, mint: null, chain: null, box: null, sent: null, shot: null };
   try {
     await ctx.route("**/*", route);
     const page = await ctx.newPage();
@@ -150,14 +170,14 @@ async function runOne(browser, w, proof, shots, route) {
     await f.waitForFunction((s) => { const t = document.querySelector(`${s} [data-testid="trade-cta"]`)?.textContent?.trim(); return !!t && t !== "Sign in to trade"; }, sel, { timeout: 8_000 }).catch(() => {});
     await page.waitForTimeout(400);
     Object.assign(run, await f.evaluate(READ, w.isMobile));
-    run.shot = `${w.name}-${proof}.png`;
+    run.shot = `${w.name}-${state}.png`;
     await page.screenshot({ path: path.join(shots, run.shot) });
     if (!run.box) return run;
     const from = await seen(page);
     await f.locator(`${sel} [data-testid="trade-cta"]`).click({ force: true, timeout: 5_000 }).catch(() => {});
     await page.waitForTimeout(800);
     run.sent = await asked(page, from);
-    await page.screenshot({ path: path.join(shots, `${w.name}-${proof}-tap.png`) });
+    await page.screenshot({ path: path.join(shots, `${w.name}-${state}-tap.png`) });
     return run;
   } finally {
     await ctx.close();
@@ -176,11 +196,14 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
   const browser = await launchBrowser("chromium");
   try {
     const runs = [];
-    for (const proof of PROOFS) {
-      const shell = await harnessRoute(build ?? path.join(REPO, "apps/terminal/public"), "signed", { state: account(proof) });
-      // the deployed run reads only the shell from the stand-in; APP_HOST and the helper as served
-      const route = build ? shell : (r) => (originOf(r.request().url()) === APP_HOST || originOf(r.request().url()) === HELPER_HOST ? r.continue() : shell(r));
-      for (const w of WIDTHS) runs.push(await runOne(browser, w, proof, shots, route));
+    for (const state of STATES) {
+      for (const w of WIDTHS) {
+        // each run's state carries a price read just now
+        const shell = await harnessRoute(build ?? path.join(REPO, "apps/terminal/public"), "signed", { state: account(state) });
+        // the deployed run reads only the shell from the stand-in; APP_HOST and the helper as served
+        const route = build ? shell : (r) => (originOf(r.request().url()) === APP_HOST || originOf(r.request().url()) === HELPER_HOST ? r.continue() : shell(r));
+        runs.push(await runOne(browser, w, state, shots, route));
+      }
     }
     return { check: KEY, at: new Date().toISOString(), source, browser: browser.version(), entry, shots, runs };
   } finally {
