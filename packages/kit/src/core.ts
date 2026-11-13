@@ -68,3 +68,5 @@ export { evmRestoreNotes, type EvmRestoredNote, type EvmRestoredSpend } from "..
 export { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, evmTreeSync, type EvmPoolPin, type EvmRelayData, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 export { freshWallet } from "../../wallet/src/derive/keys.ts";
 export { jOf } from "../../wallet/src/pool/queue.ts";
+// and the exit's EVM signatures, each key derived and zeroed inside the wallet: G's release send, W's Withdraw and W's send
+export { evmExitGasAddress, evmExitSignSend, evmExitWithdrawCalldata, evmExitWithdrawSignature, EvmExitRefused, type EvmExitProof, type EvmExitSigner, type EvmExitTx } from "../../wallet/src/pool/evm-exit.ts";

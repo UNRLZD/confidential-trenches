@@ -40,6 +40,8 @@ export const SIGN_SITES = {
   "packages/wallet/src/deposit/refund.ts:runRefundMove": { n: 1, test: "packages/wallet/test/deposit-refund.test.ts" },
   "packages/wallet/src/near/swap-delegate.ts:signNearSwapDelegates": { n: 1, test: "packages/wallet/test/near-swap-delegate.test.ts" },
   "packages/wallet/src/arming/records.ts:solanaArmedSigner": { n: 1, test: "packages/wallet/test/arm-records.test.ts" },
+  "packages/wallet/src/pool/evm-exit.ts:evmExitWithdrawSignature": { n: 1, test: "packages/wallet/test/pool-evm-exit.test.ts" },
+  "packages/wallet/src/pool/evm-exit.ts:evmExitSignSend": { n: 1, test: "packages/wallet/test/pool-evm-exit.test.ts" },
   "packages/kit/src/trade/evm/buy-unpinned.ts:evmPoolSignBuyUnpinned": { n: 1, test: "packages/kit/test/evm-pool-buy.test.ts" },
   "packages/kit/src/trade/evm/sell-unpinned.ts:signDigest": { n: 1, test: "packages/kit/test/evm-pool-sell.test.ts" },
   "packages/kit/src/trade/evm/sell-unpinned.ts:evmPoolSignSellAuthorizationUnpinned": { n: 1, test: "packages/kit/test/evm-pool-sell.test.ts" },
