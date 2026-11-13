@@ -1,9 +1,9 @@
 {
  "good": {
-  "note": "this card tree on card/rail-open-pushes-the-middle (base 4c1826a75 plus this card change, uncommitted at record time): apps/terminal built fresh (vite build) and served at APP_HOST under its _headers inside the stand-in shell (app-in-shell.mjs harnessRoute, tap), HELPER_HOST answered live",
-  "source": "harness: the build apps/terminal/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
-  "at": "2026-11-13T08:51:41.114Z",
-  "browser": "156.0.8078.79",
+  "note": "card rail-open-keeps-the-symbol-whole: this card tree (base bd3fb3097 plus this card change, uncommitted at record time): apps/terminal built fresh (vite build) and served at APP_HOST under its _headers inside the stand-in shell (app-in-shell.mjs harnessRoute, tap), HELPER_HOST answered live with Anthropic on top of Trending: opened, Holders gives way at 1440, Holders and Liquidity at 1280, and the symbol is whole",
+  "source": "harness: the build dist-fix at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-13T15:39:54.441Z",
+  "browser": "157.0.8103.51",
   "views": [
    {
     "width": 1440,
@@ -19,8 +19,8 @@
      "chartLeft": 70.5,
      "lowerLeft": 70.5,
      "scroll": 0,
-     "identInk": 483,
-     "stripLeft": 493.5,
+     "identInk": 482.984375,
+     "stripLeft": 493.484375,
      "symCut": false,
      "tiles": [
       "price",
@@ -42,16 +42,15 @@
      "chartLeft": 267,
      "lowerLeft": 267,
      "scroll": 0,
-     "identInk": 483,
-     "stripLeft": 493.5,
+     "identInk": 562.484375,
+     "stripLeft": 572.984375,
      "symCut": false,
      "tiles": [
       "price",
       "change",
       "tax",
       "vol",
-      "liq",
-      "holders"
+      "liq"
      ]
     },
     "shut": {
@@ -65,8 +64,8 @@
      "chartLeft": 70.5,
      "lowerLeft": 70.5,
      "scroll": 0,
-     "identInk": 483,
-     "stripLeft": 493.5,
+     "identInk": 482.984375,
+     "stripLeft": 493.484375,
      "symCut": false,
      "tiles": [
       "price",
@@ -97,8 +96,8 @@
      "chartLeft": 67.65625,
      "lowerLeft": 67.65625,
      "scroll": 0,
-     "identInk": 361.5625,
-     "stripLeft": 371.640625,
+     "identInk": 361.4375,
+     "stripLeft": 371.515625,
      "symCut": false,
      "tiles": [
       "price",
@@ -120,15 +119,14 @@
      "chartLeft": 256.296875,
      "lowerLeft": 256.296875,
      "scroll": 0,
-     "identInk": 437.84375,
-     "stripLeft": 447.921875,
+     "identInk": 514.03125,
+     "stripLeft": 524.109375,
      "symCut": false,
      "tiles": [
       "price",
       "change",
       "tax",
-      "vol",
-      "liq"
+      "vol"
      ]
     },
     "shut": {
@@ -142,8 +140,8 @@
      "chartLeft": 67.65625,
      "lowerLeft": 67.65625,
      "scroll": 0,
-     "identInk": 361.5625,
-     "stripLeft": 371.640625,
+     "identInk": 361.4375,
+     "stripLeft": 371.515625,
      "symCut": false,
      "tiles": [
       "price",
@@ -308,6 +306,169 @@
      "scroll": 0,
      "identInk": 361.5625,
      "stripLeft": 371.640625,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq",
+      "holders"
+     ]
+    },
+    "shots": [
+     "1280-closed.png",
+     "1280-open.png",
+     "1280-shut.png"
+    ]
+   }
+  ]
+ },
+ "bad_long_symbol": {
+  "note": "the build of main at bd3fb3097 (the tile steps sized for a short symbol), served the same way with Anthropic on top of Trending: opened, the symbol is cut at 1440 and 1280 (as the live run 43449871228 read on the deploy of f6549ca66)",
+  "source": "harness: the build dist-main at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-13T15:39:38.991Z",
+  "browser": "157.0.8103.51",
+  "views": [
+   {
+    "width": 1440,
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "railW": 78,
+     "track": 78,
+     "railRight": 64.5,
+     "chartLeft": 70.5,
+     "lowerLeft": 70.5,
+     "scroll": 0,
+     "identInk": 482.984375,
+     "stripLeft": 493.484375,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq",
+      "holders"
+     ]
+    },
+    "open": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "true",
+     "slim": "false",
+     "railW": 340,
+     "track": 340,
+     "railRight": 261,
+     "chartLeft": 267,
+     "lowerLeft": 267,
+     "scroll": 0,
+     "identInk": 482.984375,
+     "stripLeft": 493.484375,
+     "symCut": true,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq",
+      "holders"
+     ]
+    },
+    "shut": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "railW": 78,
+     "track": 78,
+     "railRight": 64.5,
+     "chartLeft": 70.5,
+     "lowerLeft": 70.5,
+     "scroll": 0,
+     "identInk": 482.984375,
+     "stripLeft": 493.484375,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq",
+      "holders"
+     ]
+    },
+    "shots": [
+     "1440-closed.png",
+     "1440-open.png",
+     "1440-shut.png"
+    ]
+   },
+   {
+    "width": 1280,
+    "state": "ready",
+    "closed": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "railW": 78,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
+     "scroll": 0,
+     "identInk": 361.4375,
+     "stripLeft": 371.515625,
+     "symCut": false,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq",
+      "holders"
+     ]
+    },
+    "open": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "true",
+     "slim": "false",
+     "railW": 340,
+     "track": 339.996,
+     "railRight": 250.546875,
+     "chartLeft": 256.296875,
+     "lowerLeft": 256.296875,
+     "scroll": 0,
+     "identInk": 437.734375,
+     "stripLeft": 447.8125,
+     "symCut": true,
+     "tiles": [
+      "price",
+      "change",
+      "tax",
+      "vol",
+      "liq"
+     ]
+    },
+    "shut": {
+     "state": "ready",
+     "rail": "ready",
+     "open": "false",
+     "slim": "true",
+     "railW": 78,
+     "track": 77.9948,
+     "railRight": 61.90625,
+     "chartLeft": 67.65625,
+     "lowerLeft": 67.65625,
+     "scroll": 0,
+     "identInk": 361.4375,
+     "stripLeft": 371.515625,
      "symCut": false,
      "tiles": [
       "price",

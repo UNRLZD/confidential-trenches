@@ -9,7 +9,7 @@
 //   - the full rail's chips as UNRLZD's rail (owner 12 Nov parity): Trending, Watchlist, New, Hot, Graduating (Trending pressed), its rows the Trending column as Discover orders it, each
 //     a link to /token/solana/<mint>, the page's own token marked (aria-current);
 //   - the header's strip whole in every mode (no tile cut, clear of the trade column and the rail: the design's one-row
-//     rule), no horizontal scroll, no text under 11 px, no layout shift from the first paint (CLS 0), no page error;
+//     rule) and its symbol whole, the top token's a long one (card rail-open-keeps-the-symbol-whole), no horizontal scroll, no text under 11 px, no layout shift from the first paint (CLS 0), no page error;
 //   - opening / reads the lists once, each chain's once (the rail and the top-token read share the read in flight; every
 //     chain's lists since card app-chains-evm-rail, the other chains answered with Solana's recording and so dropped);
 //   - a click on another rail row opens that token's page (its data-token, the frame at /token/solana/<mint>) with the
@@ -58,6 +58,10 @@ const unzip = (v) => Object.fromEntries(recorded.fields.map((k, i) => [k, v[i]])
 const SNAP = { chain: recorded.chain, as_of_ms: recorded.as_of_ms, lists: Object.fromEntries(Object.entries(recorded.lists).map(([k, rows]) => [k, rows.map(unzip)])) };
 const ROWS = new Map(Object.values(SNAP.lists).flat().map((r) => [r.token, r]));
 const TRENDING = columnRows(SNAP, "trending").map((r) => r.token);
+// the top token's symbol as long as the live top token's on 13 Nov (Anthropic, cut with the rail opened at 1440 and
+// 1280; card rail-open-keeps-the-symbol-whole), so every view's header holds a symbol longer than the tile steps' budget
+const LONG_SYMBOL = "Anthropic";
+for (const r of Object.values(SNAP.lists).flat()) if (r.token === TRENDING[0]) r.symbol = LONG_SYMBOL;
 const NEW = columnRows(SNAP, "new").map((r) => r.token);
 // the lists a later read answers: a new token with the most 1h volume (a decimal string, as the helper sends it), so it
 // lands on top of Trending

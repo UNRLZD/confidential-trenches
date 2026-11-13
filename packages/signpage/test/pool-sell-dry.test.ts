@@ -22,7 +22,7 @@ import { tokenDecimalsKept } from "../src/pool-kinds.ts";
 import { liveRuns, POOL_SELL_DRY_ANSWER_MS, POOL_SELL_DRY_CALLS, POOL_SELL_DRY_KEEP_MS, POOL_SELL_DRY_WINDOW_MS, poolSellDry, poolSellDryKind, poolSellPays, type DryWallet, type PoolSellDryDeps } from "../src/pool-sell-dry.ts";
 import { SOLANA_POOL_SELL_PRIORITY, solanaSellReserve } from "../src/pool-sell.ts";
 import type { Position } from "../src/positions.ts";
-import { poolUnits, solanaDepositRents, solanaSellNoteFloor, solanaSweepKeep, solanaSweepOf } from "../src/rules/pool.ts";
+import { poolUnits, solanaDepositRents, solanaNoteOf, solanaSellNoteFloor, solanaSweepKeep, solanaSweepOf } from "../src/rules/pool.ts";
 import { SOL_GRID } from "../../wallet/src/pool/pieces.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 
@@ -89,15 +89,16 @@ test("the preview's out is the sale's own quote for the units pool.sell would se
       assert.equal(cashback, false, "the recorded coins are plain: the reference read the flag");
       const pays = poolSellPays(RENT, v === "pump" ? "pump-curve" : "pumpswap", [{ lamports: ENOUGH, claim: [false, false] }], units === HELD, e, solanaSellFloor(e, params.slippage_bps), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] });
       assert.ok(!("refused" in pays));
-      // a partial sale from a W that holds ENOUGH keeps nothing out of the note; a full one puts W's surplus in it too
-      if (units === HELD) assert.ok(pays.out > e, `${v} full: W's surplus and its sweep go in`);
-      else assert.equal(pays.out, e, `${v} partial: the expected out`);
+      // W's surplus over its keep goes in with the sale: a full one's sweep, a partial one's keep sweep (card
+      // partial-sell-pays-all-into-cash)
+      assert.ok(pays.out > e, `${v} ${units === HELD ? "full" : "partial"}: W's surplus and its sweep go in`);
       assert.equal(a.result.out, poolUnits(pays.out, 9), `${v} ${JSON.stringify(params)}`);
       assert.equal(a.result.min_out, poolUnits(pays.minOut, 9), "the same at the floor the sale signs");
       // a partial sale: its one signature, no priority fee; a full one (card every-lamport-can-move) also its teardown
       // frame's and its sweep's signatures, the sweep's rents and the rest under the grid at its bound
       if (units === HELD) assert.equal(pays.network, SIG + 2n * SIG + rentsAt(SIZES[0], SIZES[1], 0n) + SOL_GRID - 1n, `${v} full: the Fee`);
-      else assert.equal(pays.network, SIG, `${v} partial: one signature, no priority fee`);
+      // a partial one: its signature, and its keep sweep's signature and rents (card partial-sell-pays-all-into-cash)
+      else assert.equal(pays.network, SIG + SIG + rentsAt(SIZES[0], SIZES[1], 0n), `${v} partial: two signatures and the sweep's rents, no priority fee`);
       assert.equal(a.result.network, poolUnits(pays.network, 9));
       assert.equal(a.result.fee_bps, 0, "no platform fee on a Solana pool sale");
       assert.equal(SIGNPAGE_RESULT_SCHEMAS["pool.sell.dry"](a.result), true, "the kit's client takes it");
@@ -144,9 +145,12 @@ test("on mainnet the preview counts the priority the sale pays: none on a PumpSw
   const need = solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, RENT);
   assert.equal(ok(main("pump-curve", false, need + 30_000n)).priority, 30_000n);
   assert.equal(ok(main("pump-curve", false, need)).priority, 0n);
-  // a partial sale from a tight W: W keeps the next sale's need and its priority, out of what the sale pays in
+  // a partial sale from a tight W: W keeps the next sale's need and its priority, out of what the sale pays in; at a
+  // sale of min out the keep sweep has nothing to take, so out is the deposit back on the grid
   const tight = solanaPoolBuySellNeed({ kind: "pump-curve", cashback: false }, RENT);
-  assert.equal(ok(dev("pump-curve", false, tight, false)).out - ok(main("pump-curve", false, tight, false)).out, SOLANA_POOL_SELL_PRIORITY + ok(main("pump-curve", false, tight, false)).priority);
+  const r = rentsAt(SIZES[0], SIZES[1], 0n);
+  assert.equal(ok(dev("pump-curve", false, tight, false)).out, solanaNoteOf(e - SIG - r));
+  assert.equal(ok(main("pump-curve", false, tight, false)).out, solanaNoteOf(e - SIG - r - SOLANA_POOL_SELL_PRIORITY - ok(main("pump-curve", false, tight, false)).priority));
 });
 
 test("one code path: every sale reads its quote through poolSellReference, the one reference read in pool-sell.ts", () => {
@@ -242,7 +246,7 @@ test("the gap on recorded full sales is under the grid: a plain coin, no claims,
   }
 });
 
-test("partial sales: out is at most the expected out less the reserve the sale's rule takes, on every input", () => {
+test("partial sales: out is never more than W and the sale hold less the sale's fee, what it makes and W's keep, on every input", () => {
   let checked = 0;
   for (const venue of ["pump-curve", "pumpswap"] as const)
     for (const cashback of [false, true])
@@ -258,24 +262,27 @@ test("partial sales: out is at most the expected out less the reserve the sale's
               if ("refused" in real) continue;
               for (const flag of [cashback, undefined]) {
                 const pays = poolSellPays(RENT, venue, [{ lamports }], false, e, minOut, flag, { stateSize: st, labelSize: lb });
-                assert.ok(!("refused" in pays) && pays.out <= e - real.reserve && pays.minOut <= minOut - real.reserve, `${venue} ${cashback} ${lamports} ${st}/${lb}`);
+                const bound = (x: bigint) => lamports + x - SIG - made - solanaPoolBuySellNeed(v, RENT);
+                assert.ok(!("refused" in pays) && pays.out <= bound(e) && pays.minOut <= bound(minOut), `${venue} ${cashback} ${lamports} ${st}/${lb}`);
                 checked++;
               }
             }
   assert.ok(checked > 300, `checked ${checked}`);
 });
 
-// Today a partial sale's note gets the floor less the reserve and the rest waits on W for its last sale's sweep, so
-// `out` (the expected amount) is above that note by the slippage share; card partial-sell-pays-all-into-cash makes the
-// sale pay it all in, and this turns on there.
-test("partial sales: out is at most what reaches the notes at the sale", { todo: "card partial-sell-pays-all-into-cash" }, () => {
+// Card partial-sell-pays-all-into-cash: a partial sale's deposit back is min out less the reserve, and W's keep sweep
+// right after the fill takes the rest above W's keep, so out is both notes at the expected out.
+test("partial sales: out is what reaches the notes at the sale, both notes", () => {
   const e = 200_000_000n;
   const minOut = solanaSellFloor(e, 300);
   const real = solanaSellReserve({ fee: SIG, made: 0n, rents: rentsAt(100, 100, 0n), after: solanaPoolBuySellNeed({ kind: "pump-curve", cashback: false }, RENT), lamports: ENOUGH, minOut, noteFloor: solanaSellNoteFloor(RENT) });
   assert.ok(!("refused" in real));
   const pays = poolSellPays(RENT, "pump-curve", [{ lamports: ENOUGH }], false, e, minOut, false, { stateSize: 100, labelSize: 100 });
   assert.ok(!("refused" in pays));
-  assert.ok(pays.out <= real.value, `out ${pays.out} > note ${real.value}`);
+  const r = rentsAt(100, 100, 0n);
+  const after = solanaPoolBuySellNeed({ kind: "pump-curve", cashback: false }, RENT);
+  const sweep = solanaNoteOf(ENOUGH - SIG - r + e - real.value - SIG - r - after);
+  assert.equal(pays.out, real.value + sweep, `out ${pays.out}, notes ${real.value} + ${sweep}`);
 });
 
 test("the decimals: the positions pass's, else the page's kept ones, else one read on both providers (then kept)", async () => {

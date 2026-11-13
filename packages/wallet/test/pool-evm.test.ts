@@ -531,7 +531,9 @@ test("the cache never advances past finalized: each read starts past the finaliz
   for (const opts of [{ newest: true }, undefined]) {
     c.head++;
     la.length = 0;
-    assert.equal((await s.trees(after(96), undefined, opts)).stateTree.size, 5);
+    // a newest read asks for every leaf up to the caller's now (the new head's time; card evm-pass-in-two-seconds: one
+    // at or below the last round's anchor takes that round, with no read)
+    assert.equal((await s.trees(opts === undefined ? after(96) : after(c.head), undefined, opts)).stateTree.size, 5);
     assert.deepEqual(la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1)), [["0x5b", q(c.head)]]);
   }
 });
