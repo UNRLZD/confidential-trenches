@@ -92,6 +92,8 @@ import { WITHDRAW_BOUNDARY_LAG_MS, finishPoolOnward, runPoolWithdraw, solanaOnwa
 import { EVM_WITHDRAW_BOUNDARY_LAG_MS, evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
 import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { evmPoolIndexSync, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../kit/src/checks/evm/pool-index.ts";
+import { evmJsonRpc, evmPoolIndexUse } from "../../kit/src/checks/evm/quote.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
@@ -554,6 +556,8 @@ export type TestnetOver = {
   /** The helper's /v1/rpc/{chain} the buy records' rebuild reads a buy's transaction on (pageEvmWalletRpc otherwise,
    *  none in the testnet build; tests). */
   evmHelper?: (chain: "base" | "robinhood") => EvmRpc | undefined;
+  /** A chain's pool index sync (the kit's evmPoolIndexSync on the venue's two index readers otherwise; tests). */
+  evmIndexSync?: (chain: "base" | "robinhood", prev: EvmPoolIndexData | null) => Promise<EvmPoolIndexSync>;
 };
 
 /** The page network's lookup tables by venue (the wallet's SOL_POOL_TABLES of PAGE_CLUSTER): a pool buy loads one of
@@ -1170,6 +1174,37 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const waitMs = Math.min(EVM_HOLDINGS_RETRY_MAX_MS, 2 * (evmHoldingsRetry.get(chain)?.waitMs ?? EVM_HOLDINGS_RETRY_MS / 2));
     evmHoldingsRetry.set(chain, { at: turnNow() + waitMs, waitMs });
   };
+  // The device's pool index of each mainnet chain (kit checks/evm/pool-index.ts: every pool of the venue's PoolManager,
+  // each span proven on two readers of two operators), synced at each state read and turn pass and served to the kit's
+  // quote (evmPoolIndexUse), so a buy's quote at the tap asks the scan provider only the blocks past the index's N, not
+  // the venue's 1M (Base) of Initialize logs. Read on Base mainnet 13 Nov 04:51-04:54Z, nothing signed: a cold sync
+  // 16.5-28.5 s, 4,591 pools, no 429; the gap a moment on, one batch on each reader, 563 ms. One sync a chain at once;
+  // none past a sign out. It names no wallet: every pool of the PoolManager, read on public providers.
+  const evmIndex = new Map<"base" | "robinhood", EvmPoolIndexData | null>();
+  const evmIndexing = new Set<"base" | "robinhood">();
+  const evmIndexOf = (chain: "base" | "robinhood"): void => {
+    const e = evmPool(chain);
+    if (e === null || evmIndexing.has(chain)) return;
+    const network = e.pin.network as EvmPoolChain;
+    const v = evmPoolVenues()[network];
+    const ix = v?.index;
+    // a page whose pool RPCs are planted (tests) syncs only through a planted sync, never on the public readers
+    if (over.evmIndexSync === undefined && (over.evmRpcs !== undefined || ix === undefined || v?.poolManager === undefined || v.scan === undefined)) return;
+    const signal = evmStop.signal;
+    evmIndexing.add(chain);
+    const sync = over.evmIndexSync
+      ? over.evmIndexSync(chain, evmIndex.get(chain) ?? null)
+      : evmPoolIndexSync(evmIndex.get(chain) ?? null, { chainId: v!.chainId, poolManager: v!.poolManager!, readers: [evmJsonRpc(ix!.readers[0], fetch, 64 << 20), evmJsonRpc(ix!.readers[1], fetch, 64 << 20)], depth: v!.scan!.depth, span: ix!.span, margin: ix!.margin, cap: ix!.cap, perBatch: ix!.perBatch, parallel: ix!.parallel });
+    void sync
+      .then((s) => {
+        if (signal.aborted) return;
+        // a partial sync keeps what it proved for the next; only a whole one is served
+        if (s.index !== null) evmIndex.set(chain, s.index);
+        evmPoolIndexUse(network, s);
+      })
+      .catch(() => {})
+      .finally(() => evmIndexing.delete(chain));
+  };
   const evmHoldings = (chain: "base" | "robinhood"): void => {
     if (!wayOut(chain)) return;
     const e = evmPool(chain);
@@ -1412,6 +1447,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     for (const chain of chains) evmCarry(chain);
     // and each chain's buy records a device that never made the buy lacks, from the chain (never awaited)
     for (const chain of chains) evmHoldings(chain);
+    // and each chain's pool index, for the buy's quote (never awaited)
+    for (const chain of chains) evmIndexOf(chain);
     const all = await readNotes(await page.store());
     await Promise.all(
       chains.map(async (chain) => {
@@ -1462,6 +1499,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (chains.length === 0) return;
     // a rebuild that left a W unrecorded, asked again once its wait is over
     for (const c of chains) if ((evmHoldingsRetry.get(c)?.at ?? Infinity) <= turnNow()) evmHoldings(c);
+    // the pool index's gap since the last sync
+    for (const c of chains) evmIndexOf(c);
     const all = await readNotes(await page.store());
     await Promise.all(
       chains.map(async (chain) => {

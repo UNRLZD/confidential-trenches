@@ -1321,3 +1321,43 @@ test("a rebuild of the buy records that failed is asked again at the turn pass, 
     await t.signedOut();
   }
 });
+
+test("each state read and turn pass syncs the chain's pool index, the last one passed to the next sync", async () => {
+  const { w, ns } = await wallet();
+  await landed(ns);
+  const START = 1_800_000_000_000;
+  const o = { now: START + 20_000 };
+  const tt = turnTimers(o);
+  const calls: { chain: string; prev: number | null }[] = [];
+  let n = 100;
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => ({ fin: { number: 1n, timestamp: 0n }, anchor: { number: 2n, timestamp: 0n }, events: [] }) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    evmHelper: (c) => (c === "base" ? (async () => null) as EvmRpc : undefined),
+    evmTurn: tt.evmTurn,
+    evmIndexSync: async (chain: string, prev: { through: number } | null) => {
+      calls.push({ chain, prev: prev?.through ?? null });
+      n += 10;
+      const index = { v: 1, chainId: 84532, poolManager: "0x0000000000000000000000000000000000000001", from: 1, through: n, head: { number: n, hash: "0x" + "0".repeat(64) }, spans: [[1, n]], pools: [] };
+      return { index, coversThrough: n, pools: [], error: null, stats: { requests: [1, 1], getLogs: [1, 1], limited: [0, 0], limitedMaxMs: [0, 0], failed: [0, 0], ms: 1 } };
+    },
+  } as unknown as Parameters<typeof testnetPool>[1]);
+  const settle = async () => {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  try {
+    await t.stateRead();
+    await settle();
+    assert.deepEqual(calls, [{ chain: "base", prev: null }], "the state read's sync, cold");
+    o.now = START + 60_000 + 3_000;
+    await tt.set.at(-1)!.f();
+    await settle();
+    assert.deepEqual(calls.at(-1), { chain: "base", prev: 110 }, "the turn pass's sync reads on from the last");
+    assert.equal(calls.length, 2);
+  } finally {
+    await t.signedOut();
+  }
+});
