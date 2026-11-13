@@ -91,7 +91,16 @@ const TABLES = TABLE === "pinned" ? PAGE_TABLES : Object.freeze(Object.fromEntri
   if ((v !== "pump-curve" && v !== "pumpswap") || !a) throw new Error(`not a venue=table pair: ${x}`);
   return [v, Object.freeze(a.split("+"))];
 })));
-const RUNG = 10_000_000n;
+// FLOW_RUNG=<lamports> (card round-trip-costs-less): the one note's size, a rung of the deposit ladder from 0.01 SOL
+// (1, 2 or 5 x 10^k x 0.001 SOL); 0.01 SOL by default. A larger one leaves W enough after a full sell for its sweep, so
+// a run times the sale, the teardown and the sweep.
+const RUNG = process.env.FLOW_RUNG === undefined ? 10_000_000n : BigInt(process.env.FLOW_RUNG);
+{
+  let q = RUNG / 1_000_000n;
+  while (q > 0n && q % 10n === 0n) q /= 10n;
+  if (RUNG < 10_000_000n || RUNG % 1_000_000n !== 0n || ![1n, 2n, 5n].includes(q)) throw new Error(`FLOW_RUNG: a rung from 0.01 SOL, not ${RUNG}`);
+}
+const RUNG_SOL = (Number(RUNG) / 1e9).toString();
 const FEE = 5_000n;
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -406,9 +415,9 @@ if (RESUME) {
     if (b > 0n) log(`U holds ${b}: waiting for exactly ${NEED} or at least ${NEED + EMPTY}`);
     await sleep(10_000);
   }
-  log("U funded; pool.deposit of 0.01 SOL");
+  log(`U funded; pool.deposit of ${RUNG_SOL} SOL`);
   phase = "deposit";
-  deposit = await run("pool.deposit", { chain: "solana", amount: "0.01" });
+  deposit = await run("pool.deposit", { chain: "solana", amount: RUNG_SOL });
   log(`deposit ${JSON.stringify(deposit)}`);
   if (process.env.FLOW_CRASH_AFTER === "deposit") {
     log("stopped after the deposit (FLOW_CRASH_AFTER=deposit): the seed stays in its file");

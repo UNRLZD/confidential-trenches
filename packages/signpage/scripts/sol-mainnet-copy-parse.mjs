@@ -121,10 +121,11 @@ export function feePlantAnswer(plant, id, second, slot = 1) {
   return null;
 }
 /** The sale's priority as the copy's transaction pays it, against what the plant asks (card round-trip-costs-less):
- *  the pump sale (step sell, the pump program among its programs) filled; with no plant, at most 2 lamports (the price
+ *  the pump sale (step sell, pump's curve or PumpSwap among its programs) filled; with no plant, at most 2 lamports (the price
  *  floor of 1 micro-lamport at a limit of 2,000,000 at most); planted, the cap of 100,000 less at most one lamport. */
-export function feeRunVerdict(plant, records, pump = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P") {
-  const sale = records.find((r) => r.step === "sell" && r.found && (r.programs ?? []).includes(pump));
+export function feeRunVerdict(plant, records, pumps = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]) {
+  // the first sell step that runs pump's curve or PumpSwap (a graduated coin's) is the sale; its teardown comes after
+  const sale = records.find((r) => r.step === "sell" && r.found && pumps.some((p) => (r.programs ?? []).includes(p)));
   if (!sale) return { ok: false, why: "no pump sale read back" };
   if (!sale.ok) return { ok: false, why: "the sale failed", sale: sale.signature };
   if (sale.priority === undefined || sale.priority === null) return { ok: false, why: "the sale set no compute unit price" };

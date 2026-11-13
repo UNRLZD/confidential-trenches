@@ -130,6 +130,12 @@ test("round-trip-costs-less: a transaction's price and priority read back; the f
   }
   assert.equal(feeRunVerdict("fees-fail", [r(956_727n, { InstructionError: [2, { Custom: 1 }] })]).ok, false);
   assert.equal(feeRunVerdict("", [r(null)]).ok, false);
+  // a graduated coin's sale is on PumpSwap: its priority read the same way
+  const AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
+  const amm = (p) => { const t = sale(p); t.transaction.message.accountKeys = ["W", COMPUTE_BUDGET, AMM]; return txRecord("graduated", "sell", "S", t); };
+  assert.equal(feeRunVerdict("", [amm(1n)]).ok, true);
+  assert.equal(feeRunVerdict("fees-busy", [amm(956_727n)]).ok, true);
+  assert.equal(feeRunVerdict("", [amm(956_727n)]).ok, false);
   assert.equal(feeRunVerdict("", [txRecord("curve", "buy", "B", sale(1n))]).ok, false);
   assert.equal(feeRunVerdict("mayhem-drop", [r(1n)]).ok, false);
 });
