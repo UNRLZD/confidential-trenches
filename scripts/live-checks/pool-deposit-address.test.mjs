@@ -6,7 +6,8 @@
 // record read, the host and its wiring): each rule the card adds taken away, and
 // pool.address wired with no follow or no floor read, the network or floor-read gate, or the pool floor taken away
 // (review F2, F3), and each stop check (card helper-says-why-a-vendor-refused): the mark it rests on FAILs. good: re-recorded
-// at card pool-deposit-follow's build, then at card helper-says-why-a-vendor-refused's, its excerpt re-cut from that build. The namer's line
+// at card pool-deposit-follow's build, then at card helper-says-why-a-vendor-refused's, its excerpt re-cut from that build
+// (its delta review: the page's floor, the Solana floor and its reads added as the excerpt's last three lines). The namer's line
 // re-cut from card signpage-passes-yield-to-a-trade's build (its lock-free read before nameDeposit), its name kept.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -76,8 +77,17 @@ const PLANTED = [
   ["no stop check after the namer's wait", new RegExp(`if\\(await (${N})\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);`), "await $1.named?.().catch(()=>{});", ["stopped"]],
   ["no stop check after the floor read", new RegExp(`(\\}catch\\{${N}=\\{error:\`down\`\\};return\\})if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);(if\\(${N}===null\\)return;)`), "$1$2", ["stopped"]],
   ["no stop check after the second record read", new RegExp(`(let ${N}=${N}\\(await ${N}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);(if\\(!${N}\\|\\|!${N}\\(${N},${N}\\)\\)return;)`), "$1$2", ["stopped"]],
+  // delta review P3-5, P3-6: the stop after the follow's write, handed to the floor read and on to its RPC reads
+  ["no stop check after the follow's write", new RegExp(`if\\(await (${N}\\.checked\\([^;]*?\\)),${N}\\(\\)\\)return void\\(${N}=\\{error:\`down\`\\}\\);`), "await $1;", ["stopped"]],
+  ["the floor read not handed the stop", new RegExp(`(=await ${N}\\.floor\\(${N},${N}\\.wallet),${N}\\)\\}`), "$1)}", ["stopped"]],
+  ["the page's floor keeps the stop from the Solana floor", new RegExp(`(\\?${N}\\(${N},${N}\\.program,${N}),${N}\\):null\\}`), "$1):null}", ["stopped"]],
+  ["the Solana floor keeps it from its reads", new RegExp(`(\\{let\\{fee:${N},rent:${N}\\}=await ${N}\\(${N},${N},${N}),${N}\\);`), "$1);", ["stopped"]],
+  ["no check before the floor's reads start", new RegExp(`(\\{)${N}\\?\\.throwIfAborted\\(\\);(let ${N}=await ${N}\\(${N}\\),${N}=await Promise\\.all)`), "$1$2", ["stopped"]],
+  ["no check before a blockhash read", new RegExp(`(async ${N}=>\\{)${N}\\?\\.throwIfAborted\\(\\);(let ${N}=\\(await ${N}\\(\`getLatestBlockhash\`)`), "$1$2", ["stopped"]],
+  ["no check before a fee read, whose message names U_X", new RegExp(`(\\{stateSize:0,labelSize:0\\},${N},${N}\\);)${N}\\?\\.throwIfAborted\\(\\);`), "$1", ["stopped"]],
   ["the quote's ask not handed the stop", new RegExp(`(,${N}\\.fetch,void 0,void 0),${N}\\)\\}`), "$1)}", ["stopped"]],
-  ["pool.address wired with no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["unfollowed"]],
+  // with no floor read wired, none is handed the stop either
+  ["pool.address wired with no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["unfollowed", "stopped"]],
   ["no floor-read gate", new RegExp(`\\|\\|${N}\\.floor===void 0\\|\\|`), "||", ["unfollowed"]],
   ["no network gate (review F2)", new RegExp(`\\|\\|${N}\\.network!==\`mainnet\`\\)return;`), ")return;", ["unfollowed"]],
   ["the page's network not passed (review F2)", new RegExp(`(\\{pools:${N},)network:${N},(read:)`), "$1$2", ["unfollowed"]],
