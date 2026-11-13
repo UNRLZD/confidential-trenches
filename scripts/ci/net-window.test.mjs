@@ -286,6 +286,7 @@ export const CHANGED = [
   "scripts/live-checks/helper-says-why-a-vendor-refused.mjs",
   "scripts/live-checks/owners-solana-buy-lands.mjs",
   "scripts/live-checks/evm-first-proof-inside-ten-seconds.mjs",
+  "scripts/live-checks/evm-pass-in-two-seconds.mjs",
   "scripts/live-checks/screens-never-say-proof.mjs",
   "scripts/live-checks/pool-balance-counts-the-remainder.mjs",
 ];
