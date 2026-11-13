@@ -32,18 +32,23 @@ test("every note-making step stays in the closed set: a deposit or a sale's retu
   assert.deepEqual(strays(afterCarry, NOTES), []);
 });
 
-test("every piece a tap carries is a listed release size", () => {
-  const off = NOTES.filter((v) => {
-    const k = carriedChunk(SOL_PIECES, v, pieceChunk(SOL_PIECES, v)!);
-    return k !== null && !isReleaseSize(SOL_PIECES, k);
-  });
+/** A carried piece off the rule of every release (card pool-amounts-are-standard-sizes): a rung, or the last remainder of
+ *  a note made before the rule, released whole and once (the change it is carried from, all of it). */
+const offRule = (v: bigint, k: bigint | null): boolean => k !== null && !isReleaseSize(SOL_PIECES, k) && k !== change(v);
+
+test("every piece a tap carries is a listed release size, or the whole last remainder of a note made before the rule", () => {
+  const off = NOTES.filter((v) => offRule(v, carriedChunk(SOL_PIECES, v, pieceChunk(SOL_PIECES, v)!)));
   assert.deepEqual(off, []);
-  // the owner's 0.012 return (made before the rule): its 0.005 piece leaves 0.007, no rung, so the tap carries none; a
-  // later tap releases the 0.007 alone, once and whole (pieceChunk), so it still moves
-  assert.equal(carriedChunk(SOL_PIECES, 12_000_000n, 5_000_000n), null);
-  assert.equal(pieceChunk(SOL_PIECES, 7_000_000n), 7_000_000n);
-  // a change that holds a rung is carried as that rung: 0.03 less its 0.02 piece leaves 0.01, carried
+  // a note made under the rule is a rung: its piece is the whole note, nothing carried
+  for (const v of [5_000_000n, 10_000_000n, 20_000_000n, 50_000_000n, 1_000_000_000n]) assert.equal(carriedChunk(SOL_PIECES, v, pieceChunk(SOL_PIECES, v)!), null, `${v}`);
+  // the owner's 0.012 return (made before the rule): its 0.005 piece leaves 0.007, carried whole, its last remainder
+  assert.equal(carriedChunk(SOL_PIECES, 12_000_000n, 5_000_000n), 7_000_000n);
+  // a change that holds a rung is carried as that rung: 0.03 less its 0.02 piece leaves 0.01
   assert.equal(carriedChunk(SOL_PIECES, 30_000_000n, 20_000_000n), 10_000_000n);
+  // planted: a carried piece off the ladder that leaves a change behind (not the last remainder) fails the rule
+  assert.ok(offRule(12_000_000n, 6_000_000n), "0.006 of a 0.007 change: off the ladder, and not the whole remainder");
+  assert.ok(offRule(207_000_000n, 3_000_000n), "0.003 of a 0.007 change");
+  assert.ok(!offRule(207_000_000n, 7_000_000n) && !offRule(30_000_000n, 10_000_000n));
 });
 
 test("the gate refuses a planted maker of a new note off the grid or under the floor", () => {
