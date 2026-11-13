@@ -47,7 +47,9 @@ export const SIGN_MARKS = Object.freeze({
   route: new RegExp(`${q("/v1/pool/solana/pieces")},\\{pool:${N},txs:${N}\\.map\\(`),
 });
 export const APP_MARKS = Object.freeze({
-  ask: new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:${q("solana")},token:${N},amount:${N}\\}\\)\\.outcome\\.then\\(${N}=>\\{if\\(!${N}\\)return;if\\(${N}\\.ok\\)return void\\(${N}\\.result\\.cost!==void 0&&${N}\\(\\{key:${N},cost:${N}\\.result\\.cost\\}\\)\\)`),
+  // the cost kept for this coin, with (from card solana-buy-preview-complete, kit 1.14) the answer's out and the amount
+  // asked beside it
+  ask: new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:${q("solana")},token:${N},amount:${N}\\}\\)\\.outcome\\.then\\(${N}=>\\{if\\(!${N}\\)return;if\\(${N}\\.ok\\)return void\\(${N}\\.result\\.cost!==void 0&&${N}\\(\\{key:${N},cost:${N}\\.result\\.cost(?:,\\.\\.\\.${N}\\.result\\.out===void 0\\?\\{\\}:\\{out:${N}\\.result\\.out\\},\\.\\.\\.${N}===null\\?\\{\\}:\\{amount:${N}\\})?\\}\\)\\)`),
   row: new RegExp(`"data-testid":${q("trade-cost")},children:\\[[^\\]]{0,160}children:${N}===null\\?${q("—")}:${N}\\(${N}\\)`),
   making: new RegExp(`${N}\\.making!==void 0&&${N}\\(${N}\\.making\\)===!0\\?${q("making")}`),
 });

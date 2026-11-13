@@ -23,7 +23,8 @@ import type { ErrorCode, PoolBuyDry, PoolStatePrice, SignpageState } from "../..
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { readSolanaPoolBuyVenue, readSolanaRent, solanaPoolBuyFunds, solanaPoolBuyTip, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { pickPieces } from "./pool-buy.ts";
+import { pickPieces, unitsOf } from "./pool-buy.ts";
+import { pageReference } from "./page-rpc.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { heldBy, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type LandedRelease } from "../../wallet/src/pool/balances.ts";
@@ -77,8 +78,9 @@ export function withSolanaRent(pools: readonly BalancePool[], rent: SolanaRent, 
 }
 
 /** What a coin's tap spend reads of its venue (the kit's solanaPoolBuyMaxSpend): pump's curve or PumpSwap, its token
- *  account's size (Token or Token-2022 with its extensions) and whether it is a cashback coin. */
-export type CoinVenue = Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback">;
+ *  account's size (Token or Token-2022 with its extensions) and whether it is a cashback coin; and the mint's decimals,
+ *  which pool.buy.dry's out is written in. */
+export type CoinVenue = Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "cashback" | "decimals">;
 
 /**
  * The coin's venue as the buy reads it (the kit's readSolanaPoolBuyVenue: both providers' accounts the same): pump's
@@ -89,7 +91,7 @@ export type CoinVenue = Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "
  * graduation.
  */
 export async function readCoinVenue(rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> {
-  const of = (v: SolanaPoolBuyVenue): CoinVenue => ({ kind: v.kind, tokenAccountSize: v.tokenAccountSize, cashback: v.cashback });
+  const of = (v: SolanaPoolBuyVenue): CoinVenue => ({ kind: v.kind, tokenAccountSize: v.tokenAccountSize, cashback: v.cashback, ...(v.decimals === undefined ? {} : { decimals: v.decimals }) });
   try {
     return of(await readSolanaPoolBuyVenue(rpcs, "pump-curve", token));
   } catch {
@@ -132,7 +134,11 @@ export type PoolBuyDryDeps = {
  * With the ask's `amount` (kit 1.12, card buy-spends-several-pieces), at most that tap_max: `pieces`, the count of the
  * set src/pool-buy.ts's pick (pickPieces) spends for it from the same ready proofs (each still HELD by its attempt, as
  * poolBalances counts them) on the same venue and rent, and `cost`, that set's relay fees and the page's tip: what the
- * buy costs for good (W's accounts' rent comes back with the sale). An amount that is not a SOL decimal: not_allowed.
+ * buy costs for good (W's accounts' rent comes back with the sale). With them, `out` (kit 1.14, card
+ * solana-buy-preview-complete): what that buy gets, in whole units of the token, from the same quote src/pool-buy.ts
+ * takes (pageReference on the pair, both providers' reads the same; the venue that gives the most of pump's curve and
+ * PumpSwap), at the expected out before slippage; read beside the venue and the proofs, so it adds no wait after them,
+ * and left out when that read fails (the Fee still shows). An amount that is not a SOL decimal: not_allowed.
  */
 /** A SOL decimal (at most 9 fraction digits, 30 digits whole) in lamports; undefined when it is not one. */
 const lamportsOf = (x: unknown): bigint | undefined => {
@@ -167,6 +173,9 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
     const pair = d.rpcs();
     if (pair === null) return { error: "not_allowed" };
     if (d.trading()) return { error: "busy" };
+    // the quote for `out`, beside the proofs and the venue (never awaited before them); a failed read is no out
+    const token = params.token;
+    const quote = amount !== null && amount > 0n ? pageReference(pair, { side: "buy", token, amount }).catch(() => null) : null;
     const got = await d.ready();
     if (got === null) return { error: "not_funded" };
     let venue: CoinVenue;
@@ -189,7 +198,9 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
       solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.feeCap })), venue, { spend: amount, tip: tipOf(set.length) }, rent).problem === null;
     const set = pickPieces(live, pays);
     if (set === null) return { result: { tap_max: tap } };
-    return { result: { tap_max: tap, pieces: set.length, cost: solOf(set.reduce((a, p) => a + p.binding.feeCap, tipOf(set.length))) } };
+    const best = (await quote)?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+    const out = best !== undefined && venue.decimals !== undefined && best.expectedOut > 0n ? unitsOf(best.expectedOut, venue.decimals) : undefined;
+    return { result: { tap_max: tap, pieces: set.length, cost: solOf(set.reduce((a, p) => a + p.binding.feeCap, tipOf(set.length))), ...(out === undefined ? {} : { out }) } };
   };
   return (params) => {
     let out: BuyDryAnswer = { error: "down" };

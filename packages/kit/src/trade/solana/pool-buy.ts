@@ -237,8 +237,10 @@ export function solanaPoolTag2Accounts(cfg: SolanaPoolConfig, wallet: string, fe
 
 // ------------------------------------------------------------------------------------------------- the venue
 
-/** What the buy needs from the venue's accounts, as both providers read them (readSolanaPoolBuyVenue). */
-export type SolanaPoolBuyVenue =
+/** What the buy needs from the venue's accounts, as both providers read them (readSolanaPoolBuyVenue). `decimals`: the
+ *  mint's (an SPL mint's byte 44, Token and Token-2022 alike), as the venue's read gives it; a venue made by hand may
+ *  leave it out. For display only (pool.buy.dry's out, card solana-buy-preview-complete): no build or check reads it. */
+export type SolanaPoolBuyVenue = { readonly decimals?: number } & (
   | {
       readonly kind: "pump-curve"; readonly mint: string; readonly tokenProgram: string; readonly tokenAccountSize: number; readonly curve: string; readonly creator: string; readonly feeRecipient: string;
       readonly cashback: boolean; // the curve's is_cashback_coin (byte 82): a cashback coin's sell also names W's volume accumulator
@@ -248,7 +250,7 @@ export type SolanaPoolBuyVenue =
       readonly kind: "pumpswap"; readonly mint: string; readonly tokenProgram: string; readonly tokenAccountSize: number; readonly pool: string; readonly baseVault: string;
       readonly quoteVault: string; readonly coinCreator: string; readonly cashback: boolean; readonly protocolFeeRecipient: string;
       readonly buybackFeeRecipients: readonly string[]; readonly buybackFeeRecipient: string;
-    };
+    });
 
 const PUMP_GLOBAL = solanaProgramAddress([enc("global")], SOLANA_PUMP_PROGRAM);
 const PUMP_FEE_CONFIG = solanaProgramAddress([enc("fee_config"), base58.decode(SOLANA_PUMP_PROGRAM)], SOLANA_PUMP_FEES_PROGRAM);
@@ -986,6 +988,8 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
   const [m, main, global] = accounts;
   if (!m || !main || !global) throw new Error("an account is missing");
   if (m.owner !== SOLANA_TOKEN_PROGRAM && m.owner !== SOLANA_TOKEN_2022_PROGRAM) throw new Error(`mint owned by ${m.owner}`);
+  if (m.data.length < 82) throw new Error("the mint is shorter than a mint");
+  const decimals = m.data[44] as number;
   const addr = solanaPoolAddresses(mint);
   const keyAt = (d: Uint8Array, o: number): string => {
     if (d.length < o + 32) throw new Error("account too short");
@@ -1004,7 +1008,7 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
     if (c.quoteMint !== SOLANA_SYSTEM_PROGRAM && c.quoteMint !== SOLANA_SOL_MINT) throw new SolanaPoolBuyError("venue_not_built", "the curve is not quoted in SOL");
     // a Mayhem curve pays Global's reserved fee recipient, every other curve its fee recipient: both from the bytes
     const feeRecipient = pumpGlobalFeeRecipient(global, c.isMayhemMode);
-    return { kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), curve: addr.curve, creator: c.creator, feeRecipient, cashback: c.isCashbackCoin, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
+    return { kind, mint, decimals, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), curve: addr.curve, creator: c.creator, feeRecipient, cashback: c.isCashbackCoin, ...buyback(global.data, PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
   }
   const p = solanaDecodePumpSwapPool(main);
   if (p.index !== 0 || p.creator !== addr.poolAuthority || p.baseMint !== mint || p.quoteMint !== SOLANA_SOL_MINT) throw new Error("the pool is not the mint's canonical pool");
@@ -1015,7 +1019,7 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
   const cashback = solanaPumpSwapCashback(main.data);
   if (cashback === null) throw new Error("the pool's cashback flag is not a bool");
   return {
-    kind, mint, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), pool: addr.pool, baseVault: p.baseVault, quoteVault: p.quoteVault, coinCreator: p.coinCreator, cashback,
+    kind, mint, decimals, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), pool: addr.pool, baseVault: p.baseVault, quoteVault: p.quoteVault, coinCreator: p.coinCreator, cashback,
     protocolFeeRecipient, ...buyback(global.data, AMM_GLOBAL_BUYBACK_RECIPIENTS),
   };
 }

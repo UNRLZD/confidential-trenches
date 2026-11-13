@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountText, amountWrong, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, receiveShown, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -173,4 +173,17 @@ test("card buy-spends-several-pieces: the Fee row asks the cost of the typed amo
   assert.equal(feeShown(read, "solana:OTHER", 16n, SOL), null, "another coin's answer is never shown");
   assert.equal(feeShown(null, "solana:MINT", 16n, SOL), null);
   assert.equal(feeShown(read, "solana:MINT", null, SOL), null, "no amount typed");
+});
+
+test("card solana-buy-preview-complete: You receive on a pool path is the dry answer's out for this coin, dimmed while another amount is asked; a dash with none", () => {
+  // red before this card: the live source had no set preview and the dry answer no out, so You receive was a dash on
+  // every amount
+  const read = { key: "solana:MINT", cost: "0.0014", out: "35294.263662", amount: 16n };
+  assert.deepEqual(receiveShown(read, "solana:MINT", 16n), { out: "35294.263662", pending: false });
+  assert.deepEqual(receiveShown(read, "solana:MINT", 99n), { out: "35294.263662", pending: true }, "a newer amount typed: the last out, dimmed, until its own answer");
+  assert.equal(receiveShown(read, "solana:OTHER", 16n), null, "another coin's answer is never shown");
+  assert.equal(receiveShown({ key: "solana:MINT", cost: "0.0014" }, "solana:MINT", 16n), null, "an answer with no out (a page below kit 1.14, or its quote not read): the dash");
+  assert.equal(receiveShown(null, "solana:MINT", 16n), null);
+  assert.equal(receiveShown(read, "solana:MINT", null), null, "no amount typed");
+  assert.equal(receiveShown(read, "solana:MINT", 0n), null);
 });

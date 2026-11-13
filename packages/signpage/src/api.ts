@@ -383,10 +383,11 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   };
   if (!host.readyOnLoad) ready();
   // the shell posts `ready` on each load of its frame instead: each APP_HOST document needs its own, once
-  // the notice that an open's layer has closed: the type and the id alone, to an app at the current level only, as the
-  // hello of the frame's document since its ready named it (a ready's reset still in the queue: none)
+  // the notice that an open's layer has closed: the type and the id alone, to an app at kit-v1.13's level or above only
+  // (kit 1.13 reads it), as the hello of the frame's document since its ready named it (a ready's reset still in the
+  // queue: none)
   const closed = (id: string): void => {
-    if (!hello || level !== "current") return;
+    if (!hello || (level !== "current" && level !== "1.13")) return;
     const msg: ClosedEvent = { v: 1, type: "closed", id };
     post(msg);
   };

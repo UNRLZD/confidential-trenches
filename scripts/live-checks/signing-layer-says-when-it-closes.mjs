@@ -42,8 +42,10 @@ export const PROTECT_MS = 500;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The api's notice: posted with a hello read since the last ready, at the current level alone, the type and the id
- *  alone (groups: id, hello flag, level, post). */
+ *  alone (groups: id, hello flag, level, post); from kit 1.14 (card solana-buy-preview-complete) at the current level
+ *  or kit-v1.13's, the two that read it, as NOTICE_1_14 (its groups the same, in the same order). */
 const NOTICE = /closed:([\w$]+)=>\{([\w$]+)&&([\w$]+)===`current`&&([\w$]+)\(\{v:1,type:`closed`,id:\1\}\)\}/;
+const NOTICE_1_14 = /closed:([\w$]+)=>\{!([\w$]+)\|\|([\w$]+)!==`current`&&\3!==`1\.13`\|\|([\w$]+)\(\{v:1,type:`closed`,id:\1\}\)\}/;
 const esc = (v) => v.replace(/\$/g, "\\$");
 /** The shell's open: the id recorded to tell, over the frame it opened over, unless done, shown or to tell already
  *  (groups: id, done, shown, to tell, frame). */
@@ -62,7 +64,7 @@ const RUN_OPEN = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let ([\w$]+)=!1;[\w$]+
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the facts read from the bundle. */
 export function facts(index, js) {
-  const notice = NOTICE.exec(js);
+  const notice = NOTICE.exec(js) ?? NOTICE_1_14.exec(js);
   // the notice's post is the one through the shaper; its level and flag the ones a hello sets, the flag cleared by ready
   const post = notice ? new RegExp(`(?:^|[^\\w$.])${esc(notice[4])}=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=[\\w$]+\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
   const level = notice ? new RegExp(`return void\\(${esc(notice[3])}=[\\w$]+\\([\\w$]+\\),${esc(notice[2])}=!0\\)`).test(js) : false;
