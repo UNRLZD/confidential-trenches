@@ -4312,7 +4312,9 @@ test("L2: a W whose pass never progresses, with a tap during it each load: the o
     const locks = fifoLocks();
     let tap: Promise<unknown> | null = null;
     let leave = (): void => {};
-    const host: PoolSellHost = { ...w.host, rpcs, owed, wallets, wait: async () => void (tap ??= locks.request(POOL_SELL_LOCK, { mode: "exclusive" }, () => new Promise<void>((r) => (leave = r)))) };
+    // the device's spacing read and empty (no IndexedDB here: an unread spacing holds every pass, review P2-6 of
+    // 024e8a89d: a held W is not passed)
+    const host: PoolSellHost = { ...w.host, rpcs, owed: { ...owed, spacing: async () => undefined, claim: async () => true }, wallets, wait: async () => void (tap ??= locks.request(POOL_SELL_LOCK, { mode: "exclusive" }, () => new Promise<void>((r) => (leave = r)))) };
     await resumeRentBacks(host, locks);
     leave();
     await tap;
@@ -7277,3 +7279,86 @@ test("round-trip-costs-less P3-9: a W read empty while its note is RESERVED is n
 /** `ns` whose list also holds one more record (its ref and state alone), every other method `ns`'s own. */
 const withNote = (ns: NoteStore, extra: () => { ref: unknown; state: string }): NoteStore =>
   new Proxy(ns as object, { get: (t, k) => (k === "list" ? async () => [...(await ns.list()), extra() as never] : typeof (t as Record<PropertyKey, unknown>)[k] === "function" ? ((t as Record<PropertyKey, (...a: unknown[]) => unknown>)[k]!).bind(t) : (t as Record<PropertyKey, unknown>)[k]) }) as NoteStore;
+
+// review P2-6 of 024e8a89d (probe P-E): a held pass read its W on the public seat at every run though it signed nothing.
+// A held W is not passed: no public request names it; its record takes W's lamports from the helper's find read
+test("round-trip-costs-less P2-6: held leftover Ws are named in no public-seat request over three runs, and each record lists W's lamports from the helper's find read", async () => {
+  const w = await world({ buy: null, held: 0n, ataLamports: TOKEN_RENT, volumes: [], lamports: ENOUGH, others: [{ l: 8n, j: 0, held: 0n }] }, [{ ...wallet(0n), holdings: null } as never, { ...walletX(0n), holdings: null } as never]);
+  for (const x of [W.address, X.address]) w.c.accounts.delete(solanaAta(x, MINT, TOKEN_PROGRAM));
+  const log: Call[] = [];
+  w.host.rpcs = withBuy(w.c.rpcs, [MINT, MINT], log);
+  await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM, rebuilt: true } as never);
+  for (const [address, l] of [[W.address, "7"], [X.address, "8"]] as const) await w.host.owed!.put({ address, l, j: 0, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, spacing: async () => ({ at: 4_900_000, gap: 1_200_000 }), space: async () => {}, claim: async () => false } };
+  forgetPageLoad();
+  const publicNaming = () => log.filter((c) => c.p === 0 && [W.address, X.address].some((a) => JSON.stringify(c.params).includes(a))).length;
+  for (let i = 0; i < 3; i++) assert.equal(await resumeRentBacks(host, fakeLocks()), true, "held: tried again later");
+  assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0, "held: nothing sent");
+  assert.ok(w.told.filter((x) => x.step === "rent_back").every((x) => x.state === "gave_up" && x.detail.startsWith("spaced")), JSON.stringify(w.told.filter((x) => x.step === "rent_back")));
+  assert.equal(publicNaming(), 0, "no public request names a held W");
+  for (const a of [W.address, X.address]) assert.equal(w.owed.get(a)?.lamports, String(w.c.accounts.get(a)!.lamports), `${a.slice(0, 6)}: the find read's lamports`);
+});
+
+// review P2-4b of 024e8a89d (probe P-B): a found W (a W of a several-pieces buy, after a restore) held by the spacing
+// carried no amount, so its SOL was shown nowhere. Held, it lists W's lamports from the helper's find read
+test("round-trip-costs-less P2-4b: a found W held by the spacing lists its SOL from the helper's find read and draws one RETURNING row", async () => {
+  const w = await world({ buy: null }, []);
+  w.c.accounts.delete(VF.pump.ata);
+  await w.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, spacing: async () => ({ at: 4_900_000, gap: 1_200_000 }), space: async () => {}, claim: async () => false } };
+  forgetPageLoad();
+  await resumeRentBacks(host, fakeLocks());
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, "held: no sweep");
+  const onW = w.c.accounts.get(W.address)!.lamports;
+  const rec = w.owed.get(W.address)!;
+  assert.equal(rec.lamports, String(onW), "the found W's SOL on its record");
+  const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 };
+  assert.equal(returningWallets([rec], price, await w.ns.list()).length, 1, "one RETURNING row");
+});
+
+// review P2-4b and P3-11 of 024e8a89d: a found W not held carries no amount while young (its latest transaction's
+// blockhash not past on both RPCs: a buy in several pieces may still land on it), and lists W's lamports once its pass
+// reads it on both RPCs with the rule's time part passed
+test("round-trip-costs-less P3-11: a found W that is young and not held carries no amount; past the rule's time part it lists W's lamports", async () => {
+  const w = await world({ buy: null }, []);
+  w.c.accounts.delete(VF.pump.ata);
+  await w.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0, found: true });
+  const block = 2_000_000;
+  let height = 0;
+  for (const p of [0, 1] as const) around(w, p, (m, params, r) => (m === "getBlockHeight" && (params[0] as { commitment: string }).commitment === "finalized" ? height : r(m, params)));
+  forgetPageLoad();
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.match(w.told.at(-1)!.detail, /a found W: not yet past/, JSON.stringify(w.told.slice(-2)));
+  assert.equal(w.owed.get(W.address)?.lamports, undefined, "young: no amount");
+  const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 };
+  assert.deepEqual(returningWallets([w.owed.get(W.address)!], price, await w.ns.list()), [], "never listed RETURNING while young");
+  height = block;
+  // past its time part, the sweep waiting on the gap: W read on both RPCs, listed
+  const host: PoolSellHost = { ...w.host, owed: { ...w.host.owed!, claim: async () => false } };
+  await resumeRentBacks(host, fakeLocks());
+  const rec = w.owed.get(W.address)!;
+  assert.ok(rec.lamports !== undefined && BigInt(rec.lamports) > 0n, `past its time part: listed (${JSON.stringify(w.told.slice(-2))})`);
+});
+
+// the overstatement the held listing keeps (review of 024e8a89d, P2-4b): a W of the account's found holding SOL with
+// no record here (another device's buy in several pieces, not landed yet) shows its SOL while held, counted once; the
+// same W on the device whose buy record names it is that buy's, and is never listed beside it
+test("round-trip-costs-less P2-4b: a held W of another device's unlanded buy shows its SOL once; on the device with its buy record it is not listed", async () => {
+  const held = { now: () => 5_000_000n, spacing: async () => ({ at: 4_900_000, gap: 1_200_000 }), claim: async () => false };
+  const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 };
+  for (const own of [false, true]) {
+    const w = await world({ buy: null }, [{ ...wallet(0n), holdings: null } as never]);
+    w.c.accounts.delete(VF.pump.ata);
+    if (own) await w.host.bought!.put(W.address, { mint: MINT, program: TOKEN_PROGRAM });
+    const host: PoolSellHost = { ...w.host, now: held.now, owed: { ...w.host.owed!, spacing: held.spacing, space: async () => {}, claim: held.claim } };
+    forgetPageLoad();
+    await resumeRentBacks(host, fakeLocks());
+    assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0, "held: nothing sent");
+    const rows = returningWallets([...w.owed.values()], price, await w.ns.list());
+    if (own) assert.deepEqual(rows, [], "this device's own buy W: not listed beside the buy");
+    else {
+      assert.equal(rows.length, 1, "another device's W: its SOL shown once");
+      assert.equal(w.owed.get(W.address)?.lamports, String(w.c.accounts.get(W.address)!.lamports));
+    }
+  }
+});
