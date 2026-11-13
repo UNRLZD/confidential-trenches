@@ -41,10 +41,24 @@ test("the excerpt of this build: every mark holds, no wallet reader yet", () => 
   assert.equal(f.reader, "none");
 });
 
-test("the wallet reader wired: read as wired, never judged", () => {
-  const f = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:pageEvmWalletRpc,notes:"));
+// pool-testnet.ts pageEvmWalletRpc as SIGN_HOST's build minifies it (evm-deposit-on-mainnet.test.mjs plants the same), and
+// its helper address: planted beside the excerpt, which holds neither
+const HELPER_READER =
+  ";var H=`https://ct-api.unrealized.trade`;var pageEvmWalletRpc=(e,t=!1)=>{if(t)return;let n=M.get(e);if(n===void 0){let t=C(H,e);M.set(e,n=Object.assign((e,n)=>t(e,n),{url:`${H}/v1/rpc/${e}`}))}return n};";
+
+test("the wallet reader wired (the helper's reader by its name): read as wired, never judged", () => {
+  const f = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:pageEvmWalletRpc,notes:") + HELPER_READER);
   assert.equal(f.reader, "wired");
   for (const k of MARKS) assert.equal(f[k], true, k);
+});
+
+test("review P3-4: a wallet reader that is not the helper's route (another function, or the reader with another address) reads other and FAILs on wired", () => {
+  const other = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:e=>Y(e),notes:") + HELPER_READER + "var Y=e=>fetch(e);");
+  assert.equal(other.reader, "other");
+  assert.equal(other.wired, false);
+  const elsewhere = facts(INDEX, JS.replace(/wallet:[\w$]+=>void 0,notes:/, "wallet:pageEvmWalletRpc,notes:") + HELPER_READER.replace("https://ct-api.unrealized.trade", "https://rpc.example"));
+  assert.equal(elsewhere.reader, "other");
+  assert.equal(elsewhere.wired, false);
 });
 
 const PLANTED = [
@@ -103,3 +117,25 @@ for (const [name, from, to, fails] of PLANTED) {
     assert.deepEqual(judge(f).lines, bad(...fails), name);
   });
 }
+
+// card evm-deposit-on-mainnet: the new shapes this check reads, each with its bad twin
+const pinned = (js) => facts(INDEX.replace(/integrity="sha384-[^"]+"/, `integrity="${facts("", js).sha384}"`), js);
+test("planted in the excerpt: depositFrom's Solana branch with the withdraw rule beside the pin guard: PASS; the rule in the pin guard's place: FAIL on fromUX", () => {
+  const site = /n===void 0\?\{error:`not_allowed`\}:C\(i,r,t\)/;
+  assert.equal((JS.match(new RegExp(site.source, "g")) ?? []).length, 1, "the plant's site is in the build once");
+  assert.deepEqual(judge(pinned(JS.replace(site, "n===void 0||!X(`solana`)?{error:`not_allowed`}:C(i,r,t)"))).lines, [], "the rule beside the pin guard");
+  assert.deepEqual(judge(pinned(JS.replace(site, "!X(`solana`)?{error:`not_allowed`}:C(i,r,t)"))).lines, bad("fromUX"), "the pin guard dropped for the rule");
+});
+
+test("planted in the excerpt: main.ts's reader as a call (wallet:e=>Z(e), the helper's route): PASS and wired; with it, a route that quotes a non-testnet page with no reader: FAIL on wired", () => {
+  const call = (js) => js.replace(/wallet:([\w$]+)=>void 0,notes:/, "wallet:$1=>pageEvmWalletRpc($1),notes:") + HELPER_READER;
+  const js = call(JS);
+  assert.notEqual(js, JS, "the reader's site is in the build");
+  assert.deepEqual(judge(pinned(js)).lines, []);
+  assert.equal(pinned(js).reader, "wired");
+  const guard = /network!==`testnet`&&r===void 0\?null:/;
+  assert.equal((js.match(new RegExp(guard.source, "g")) ?? []).length, 1, "the guard's site is in the build once");
+  assert.deepEqual(judge(pinned(js.replace(guard, ""))).lines, bad("wired"), "no reader still quotes");
+  // what the reader reads (the helper's /v1/rpc route, nothing else) is evm-deposit-on-mainnet's: its planted cases
+  // "a reader that is not our helper" and "no wallet reader" read false there
+});

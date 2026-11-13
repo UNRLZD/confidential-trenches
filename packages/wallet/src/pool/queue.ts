@@ -65,7 +65,7 @@ import { changeIndex, freshWallet } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { heldBy, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { checkLadder, chunkOf } from "./ladder.ts";
-import { checkBinding, checkPool, failAs, NEWEST_GRACE_MS, PassFail, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type PassReason, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
+import { checkBinding, checkPool, cutOrEmpty, failAs, NEWEST_GRACE_MS, PassFail, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type PassReason, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
 /** Proofs kept ready: min(hardwareConcurrency - 1, 3), at least 1, all made by the one prover in turn. */
 export function readySetSize(hardwareConcurrency: number | undefined): number {
@@ -401,7 +401,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     let newest: PoolTrees | Error | undefined;
     const t1: Todo[] = [];
     if (want > 0 && (open.length > 0 || again.length > 0)) {
-      epochTrees = await pool.trees(start, signal).catch(failAs("network"));
+      epochTrees = await cutOrEmpty(pool.trees(start, signal)).catch(failAs("network"));
       // the ready set's own notes first (each landed before the epoch began), then the open notes, up to the ready set
       // a take or a drop during the epoch-tree read above removes a ready proof: that note is left out of the remakes
       for (const n of again.filter((x) => ready.has(x.id))) t1.push({ n, trees: epochTrees, root: "epoch", prev: ready.get(n.id)! });
@@ -446,7 +446,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       for (const n of kept) {
         const r = alt.get(n.id);
         if (r !== undefined && r.epochStartMs === start && r.wallet.address === to!.address) continue;
-        epochTrees ??= await pool.trees(start, signal).catch(failAs("network"));
+        epochTrees ??= await cutOrEmpty(pool.trees(start, signal)).catch(failAs("network"));
         let trees: PoolTrees = epochTrees;
         let root: "epoch" | "newest" = "epoch";
         if (n.leaf!.leafIndex >= BigInt(epochTrees.stateTree.size)) {

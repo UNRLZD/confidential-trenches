@@ -24,11 +24,19 @@ const wrap = (src: string, name: string, body: string): string => {
   if (!src.includes(anchor)) throw new Error(`${name}: its line moved; update this test's hook`);
   return `${src.replace(anchor, `function ${name}__real(`)}\n${body}\n`;
 };
+// the build's table of the chains whose withdraw it carries (POOL_WITHDRAW_BUILT), read live from globalThis.__ctBuilt so
+// a test can plant a build without one chain's withdraw (unset: the real table)
+const BUILT = "Object.freeze({ solana: true, base: true, robinhood: true })";
+const plantBuilt = (src: string): string => {
+  if (src.split(BUILT).length !== 2) throw new Error("POOL_WITHDRAW_BUILT: its line moved; update this test's hook");
+  const live = ["solana", "base", "robinhood"].map((c) => `get ${c}() { return globalThis.__ctBuilt?.${c} ?? true; }`).join(", ");
+  return src.replace(BUILT, `({ ${live} })`);
+};
 registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
-      return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
+      return { ...r, source: plantBuilt(wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }")) };
     // the restore host main.ts builds, kept for the wiring test below
     if (url.endsWith("/signpage/src/pool-restore.ts"))
       return { ...r, source: wrap(String(r.source), "poolRestore", "export function poolRestore(h) { globalThis.__ctRestoreHost = h; return poolRestore__real(h); }") };
@@ -293,7 +301,7 @@ test("pool.address's quote reads the price for the origin asked (main.ts pricedF
   assert.deepEqual(calls.slice(from).filter((c) => c.url.includes("/oneclick/")), [], "no quote asked for an unpriced origin");
 });
 
-test("review of d5699312: on the mainnet build pool.address gives no Base or Robinhood U_X (the pools are pinned, but a deposit there has no carry into the pool nor a way out yet): refused not_allowed, as Solana's is answered", async () => {
+test("card evm-deposit-on-mainnet: on the mainnet build pool.address gives Base's and Robinhood's U_X as it gives Solana's, each the one-time wallet of the chain's pool scope (the build carries their withdraw)", async () => {
   const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> => {
     const id = crypto.randomUUID();
     const e = new Event("message");
@@ -310,15 +318,49 @@ test("review of d5699312: on the mainnet build pool.address gives no Base or Rob
   for (let t = 0; t < 50 && !named.ok; t++) named = await ask({ chain: "solana" });
   assert.equal(named.ok, true, JSON.stringify(named));
   for (const chain of ["base", "robinhood"]) {
-    const got = await ask({ chain });
-    assert.equal(got.error?.code, "not_allowed", `${chain}: ${JSON.stringify(got)}`);
+    let got: { ok?: boolean; result?: unknown; error?: { code: string } } = {};
+    for (let t = 0; t < 50 && !got.ok; t++) got = await ask({ chain });
+    assert.equal(got.ok, true, `${chain}: ${JSON.stringify(got)}`);
+    const address = (got.result as { address?: unknown } | undefined)?.address;
+    assert.match(String(address), /^0x[0-9a-fA-F]{40}$/, `${chain}: an EVM U_X`);
   }
 });
 
-test("review of 56a57ed2: main.ts's restore host says this mainnet build gives a deposit address on Solana alone, as pool.address does, so a Solana-only restore still reads Solana's U_X and no Base or Robinhood pool stalls it", () => {
-  const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean } }).__ctRestoreHost;
+test("review of 56a57ed2, card evm-deposit-on-mainnet: main.ts's restore host says this mainnet build gives a deposit address on Solana, Base and Robinhood, as pool.address does", () => {
+  const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean; ux?: (chain: string) => unknown } }).__ctRestoreHost;
   assert.ok(h?.addressed, "the page's restore host has its addressed wiring");
-  assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.addressed!(c)]), [["solana", true], ["base", false], ["robinhood", false]]);
+  assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.addressed!(c)]), [["solana", true], ["base", true], ["robinhood", true]]);
+  // and each addressed chain has its U_X reads, so a restore reads every U_X it could have paid and none stalls it unread
+  assert.deepEqual(["solana", "base", "robinhood"].map((c) => [c, h.ux?.(c) != null]), [["solana", true], ["base", true], ["robinhood", true]]);
+});
+
+test("review P2-1 (G3), the one rule at its doors: a build planted to carry no Base withdraw gives no Base deposit address on pool.address, and its restore host says Base is not addressed; Robinhood as before", async () => {
+  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> => {
+    const id = crypto.randomUUID();
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
+    win.dispatchEvent(e);
+    for (let t = 0; t < 1500; t++) {
+      const a = posted.find((m) => m.id === id);
+      if (a) return a;
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    throw new Error("no answer to pool.address");
+  };
+  const h = (globalThis as { __ctRestoreHost?: { addressed?: (chain: string) => boolean } }).__ctRestoreHost;
+  gl.__ctBuilt = { base: false };
+  try {
+    const got = await ask({ chain: "base" });
+    assert.notEqual(got.ok, true, `base: ${JSON.stringify(got)}`);
+    assert.equal(got.error?.code, "not_allowed", `base: ${JSON.stringify(got)}`);
+    assert.equal(h?.addressed?.("base"), false, "the restore host: no Base address on this build");
+    assert.equal(h?.addressed?.("robinhood"), true, "the restore host: Robinhood as before");
+    let rh: { ok?: boolean } = {};
+    for (let t = 0; t < 50 && !rh.ok; t++) rh = await ask({ chain: "robinhood" });
+    assert.equal(rh.ok, true, `robinhood: ${JSON.stringify(rh)}`);
+  } finally {
+    delete gl.__ctBuilt;
+  }
 });
 
 // last in this file: pool.withdraw opens the page's screen, and while a sheet shows the shell reads no message from the

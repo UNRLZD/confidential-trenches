@@ -27,12 +27,25 @@ const BOOKS = {
 };
 /** The pools' fork blocks: after each pool's deploy (wallet EVM_POOLS fromBlock 54,325,671 and 108,420,674). Base: read
  *  12 Nov 20:49Z as both providers' agreed head less a few hundred blocks. Robinhood: its own RPC's head less 200, read
- *  12 Nov 22:0xZ and recorded at once, since it keeps state about 3,000 blocks back (5 min) and Pocket's less. */
-export const POOLS_FORK_BLOCKS = Object.freeze({ base: 56_630_000, robinhood: 112_859_537 });
+ *  12 Nov 22:0xZ and recorded at once, since it keeps state about 3,000 blocks back (5 min) and Pocket's less.
+ *  POOLS_FORK_BLOCK_BASE / POOLS_FORK_BLOCK_ROBINHOOD name another block (a run recorded at a fresh head, replayed at
+ *  the block it was recorded at); anything but a block number after the pool's deploy is refused. */
+const forkBlock = (env, dflt, deployed) => {
+  const v = process.env[env];
+  const n = v === undefined ? dflt : /^[0-9]+$/.test(v) ? Number(v) : NaN;
+  if (!Number.isSafeInteger(n) || n < deployed) throw new Error(`fork-rpc: ${env} ${v} is no block after the pool's deploy (${deployed})`);
+  return n;
+};
+export const POOLS_FORK_BLOCKS = Object.freeze({ base: forkBlock("POOLS_FORK_BLOCK_BASE", 56_630_000, 54_325_671), robinhood: forkBlock("POOLS_FORK_BLOCK_ROBINHOOD", 112_859_537, 108_420_674) });
+/** The most upstream requests one recording makes; past it the request is refused and the run stops, so a run that
+ *  loops never floods a public RPC. */
+export const UPSTREAM_CAP = 400;
+let upstreamN = 0;
 const bookArg = process.argv.indexOf("--book");
 const BOOK = BOOKS[bookArg > 0 && process.argv.indexOf("--") > bookArg ? process.argv[bookArg + 1] : "forge"];
 if (!BOOK) throw new Error("fork-rpc: --book is forge or pools");
-const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), BOOK.file);
+// FORK_RPC_BOOK_FILE: another file for the book (a copy run's own, kept beside its record so the run replays offline)
+const FILE = process.env.FORK_RPC_BOOK_FILE ? path.resolve(process.env.FORK_RPC_BOOK_FILE) : path.join(path.dirname(fileURLToPath(import.meta.url)), BOOK.file);
 const PORT = Number(process.env.FORK_RPC_PORT ?? 47545);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`fork-rpc: FORK_RPC_PORT ${process.env.FORK_RPC_PORT} is no port`);
 const UPSTREAM = BOOK.upstream;
@@ -72,6 +85,8 @@ async function answer(book, chain, req, record) {
     console.error(`fork-rpc: not recorded for ${chain}: ${key}`);
     return { jsonrpc: "2.0", id: req.id, error: { code: -32000, message: `fork-rpc: not recorded for ${chain}: ${key}` } };
   }
+  if (++upstreamN > UPSTREAM_CAP) throw new Error(`fork-rpc: ${UPSTREAM_CAP} upstream requests, stopped (${key})`);
+  console.error(`fork-rpc: upstream ${upstreamN} ${chain}: ${key.slice(0, 160)}`);
   let got;
   for (let i = 0; i < 5 && !got; i++) {
     try {

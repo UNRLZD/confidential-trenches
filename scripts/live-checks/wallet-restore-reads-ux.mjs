@@ -13,8 +13,9 @@
 // that never moves, so two providers at different finalized slots still give one number) and an account no one holds
 // (sha256 of this card's key, as a public key: 0 on both). PASS: neither provider is our helper, each answers HTTP 200
 // with a balance and lets SIGN_HOST's origin read it (Access-Control-Allow-Origin: that origin or *), and the two give the
-// same balance, above 0 for the program data account and 0 for the empty one. Base and Robinhood pin no pool on any build
-// yet (EVM_POOLS is empty), so the restore names their U_X unread and this check reads none there.
+// same balance, above 0 for the program data account and 0 for the empty one. On Base and Robinhood (card
+// evm-deposit-on-mainnet) the restore reads U_X with the EVM follow's own reader on the pool's own two public RPCs (the
+// pair every Base and Robinhood pool read of the page uses); this check reads the bundle's wiring of it, no EVM provider.
 // And SIGN_HOST's served build (/app.js, the one its index.html pins by sha384) holds, as minified, each marker exactly
 // once in the whole bundle (review P2: a dead same-shaped copy beside a broken real one fails), each bound to its use:
 //   - ux_read: step 5's reader of an id reads its U_X beside the id's NEAR read (both asked at once, `balances({u})`, the
@@ -164,9 +165,16 @@ const INTENTS_HELD = (i) =>
 const INTENTS = (x) => new RegExp(`[,; ]${esc(x)}=${Q}intents\\.near${Q}[,;]`);
 const UX_PAIR = new RegExp(
   `var (${N})=Object\\.freeze\\(\\[${Q}https://solana-rpc\\.publicnode\\.com${Q},${Q}https://solana\\.api\\.pocket\\.network${Q}\\]\\);function (${N})\\(\\)\\{return\\[(${N})\\((${N})\\(\\1\\[0\\]\\)\\),\\3\\(\\4\\(\\1\\[1\\]\\)\\)\\]\\}` +
-    `function (${N})\\((${N}),(${N}),(${N}),(${N})=\\2\\)\\{if\\(\\6!==${Q}solana${Q}\\|\\|\\7===null\\|\\|\\8===void 0\\)return null;let (${N})=\\9\\(\\);if\\(\\10===null\\)return null;` +
-    `let (${N})=(${N})\\(\\{rpcs:\\10,program:\\8,deposit:\\7\\.deposit\\}\\);return\\{balances:\\11\\.balances,costs:\\11\\.costs,ladder:\\11\\.ladder,deposit:\\7\\.deposit\\}\\}`,
+    // Base and Robinhood first (card evm-deposit-on-mainnet): the EVM follow's own reader (`\\13`, EVM_FOLLOW_READER) on
+    // the pair the host hands (`\\10`: the pool's two public RPCs), each on its queue by the same pacer (`\\3`, review
+    // P2-3), the follow's own deposit
+    `function (${N})\\((${N}),(${N}),(${N}),(${N})=\\2,(${N})=\\(\\)=>null\\)\\{if\\(\\6!==${Q}solana${Q}\\)\\{let (${N})=\\7===null\\?null:\\10\\(\\6\\);if\\(\\11===null\\)return null;` +
+    `let (${N})=(${N})\\(\\{rpcs:\\[\\3\\(\\11\\.rpcs\\[0\\]\\),\\3\\(\\11\\.rpcs\\[1\\]\\)\\],pin:\\11\\.pin,deposit:\\7\\.deposit\\}\\);return\\{balances:\\12\\.balances,costs:\\12\\.costs,ladder:\\12\\.ladder,deposit:\\7\\.deposit\\}\\}` +
+    `if\\(\\7===null\\|\\|\\8===void 0\\)return null;let (${N})=\\9\\(\\);if\\(\\14===null\\)return null;` +
+    `let (${N})=(${N})\\(\\{rpcs:\\14,program:\\8,deposit:\\7\\.deposit\\}\\);return\\{balances:\\15\\.balances,costs:\\15\\.costs,ladder:\\15\\.ladder,deposit:\\7\\.deposit\\}\\}`,
 );
+// the EVM follow's own reader with no wallet reader handed: each U_X balance on both of the pair's RPCs, never one
+const EVM_FOLLOW_READER = (f) => new RegExp(`function ${esc(f)}\\((${N})\\)\\{let (${N})=(${N})=>Promise\\.all\\(\\[\\3\\(\\1\\.rpcs\\[0\\],0\\),\\3\\(\\1\\.rpcs\\[1\\],1\\)\\]\\),[^]{0,200}?balances:async (${N})=>\\{if\\(\\1\\.wallet===void 0\\)return \\2\\(`);
 // the kit's pacer at its default (keyless) limit: solanaPacedRpc(rpc, limit = SOLANA_KEYLESS_RPC_LIMIT)
 const PACED = (p) => new RegExp(`function ${esc(p)}\\((${N}),(${N})=(${N})\\)\\{`);
 const KEYLESS = (l) => new RegExp(`[,; ]${esc(l)}=\\{windowMs:1e4,total:100,perMethod:40\\};${N}\\(${esc(l)}\\)`);
@@ -174,7 +182,8 @@ const KEYLESS = (l) => new RegExp(`[,; ]${esc(l)}=\\{windowMs:1e4,total:100,perM
 const FOLLOW_READER = (f) => new RegExp(`function ${esc(f)}\\((${N})\\)\\{let (${N})=(${N})=>Promise\\.all\\(\\[\\3\\(\\1\\.rpcs\\[0\\]\\),\\3\\(\\1\\.rpcs\\[1\\]\\)\\]\\);return\\{status:[^]{0,200}?balances:(${N})=>\\2\\(async (${N})=>${N}\\(await \\5\\(${Q}getBalance${Q},\\[\\4\\.u,\\{commitment:${Q}finalized${Q}\\}\\]\\)\\)\\)`);
 // the restore host's ux, bound to the host itself (its signedIn and written before it, its ended after), so a copy of
 // the ux line alone elsewhere is not the restore's
-const UX_WIRED = (c) => new RegExp(`written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),ux:(${N})=>${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program\\),ended:`);
+// (and on Base and Robinhood the page's own pool pair, evmPoolOf: card evm-deposit-on-mainnet)
+const UX_WIRED = (c) => new RegExp(`written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),ux:(${N})=>${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program,void 0,(${N})=>${N}\\?\\.evmPoolOf\\(\\3\\)\\?\\?null\\),ended:`);
 const UX_ANY = (c) => new RegExp(`ux:(${N})=>${esc(c)}\\(`);
 // each marker's own words, once in the whole bundle, so no second copy of it rides beside the real one
 const WORDS = Object.freeze({
@@ -212,7 +221,7 @@ export function bundleFacts(index, js) {
     ux_read: !!read && once(WORDS.ux_read, js),
     ux_carry: !!read && !!carry && once(UX_NOTED(read[11], read[9], carry[1]), js) && once(WORDS.ux_carry, js),
     id_held: !!held && !!head && held[7] === head.groups.H && once(LET_GO(head.groups.lg), js) && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
-    ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[12]), js) && once(WORDS.ux_pair, js),
+    ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[16]), js) && once(EVM_FOLLOW_READER(pair[13]), js) && once(WORDS.ux_pair, js),
     ux_wired: !!wired && once(FOLLOW_DEPS(wired[2]), js),
   };
 }
@@ -235,8 +244,8 @@ export const BUNDLE_WHY = {
   ux_read: "step 5 does not read each id's U_X beside it on the pool's two RPCs and hand that reader to the scope's id read, refusing two balances, keeping a held one for the carry and noting each id NEAR reads as money",
   ux_carry: "a U_X is not carried as the follow carries it (its floor and ask, the page's pool.deposit, read again after a fill, named when it does not fill), or one whose index has no deposit note here is not named",
   id_held: "an id NEAR reads as money is not read on both providers by asset and named while it holds more than the kept unit a move out leaves, or the two read it apart",
-  ux_pair: "the restore's U_X pair is not PublicNode and Pocket's Solana gateway, each on its own queue at the kit's keyless limit, through the follow's own reader",
-  ux_wired: "the restore's U_X reads are not built from the follows' own deps, keyed by the pool's chain",
+  ux_pair: "the restore's U_X pair is not PublicNode and Pocket's Solana gateway, each on its own queue at the kit's keyless limit, through the follow's own reader (on Base and Robinhood the EVM follow's reader on both of the pair handed, each on its queue by the same pacer)",
+  ux_wired: "the restore's U_X reads are not built from the follows' own deps, keyed by the pool's chain, with the page's own Base and Robinhood pool pair",
 };
 
 /** One provider's getBalance at finalized of `u`, asked from `origin` through provider-answer.mjs: its status, its CORS

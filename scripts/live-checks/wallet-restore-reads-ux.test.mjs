@@ -10,6 +10,8 @@
 //   request with an Origin header 403 (re-recorded 13:26Z through provider-answer.mjs: a JSON-RPC error, code 403
 //   "Access forbidden", ACAO *; the non-JSON 403 with no ACAO a page would get is planted below): FAIL;
 // - bad_live_before: the live SIGN_HOST before this card's release, whose step 5 reads no U_X: FAIL on the bundle alone;
+// - bad_before_evm_ux: the live SIGN_HOST of release 124 (12 Nov 21:42Z), whose restore reads no Base or Robinhood U_X
+//   (card evm-deposit-on-mainnet re-recorded good from its build): FAIL on the U_X pair and its wiring;
 // - bad_one_provider and bad_dead_held_binding: the delta review's P2-2 plants on this card's build (the held reader's two
 //   amounts from one provider's map; step 5's held reader returning nothing beside a dead live-looking copy of the head);
 // - bad_dead_copy and bad_reader_not_handed: review P2's plant-ux.mjs (the real reader broken, a dead same-shaped copy
@@ -75,6 +77,12 @@ test("the recorded bad runs fail: our helper relay among the restore's providers
   assert.deepEqual(l.lines, Object.values(BUNDLE_WHY).map((w) => `BAD ${w}`));
 });
 
+test("card evm-deposit-on-mainnet: the live SIGN_HOST before it (release 124), whose restore reads no Base or Robinhood U_X, fails on the U_X pair and its wiring alone", () => {
+  const l = judge(A.bad_before_evm_ux);
+  assert.equal(l.ok, false);
+  assert.deepEqual(l.lines, [`BAD ${BUNDLE_WHY.ux_pair}`, `BAD ${BUNDLE_WHY.ux_wired}`]);
+});
+
 test("planted: no preflight read is a FAIL", () => {
   assert.equal(spoil((a) => delete a.clusters.mainnet.providers[1].preflight).verdict, "FAIL");
 });
@@ -114,6 +122,10 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://ct-api.unrealized.trade`]);function").ux_pair, false, "our helper as the second");
   assert.equal(mut(/(\[`https:\/\/solana-rpc\.publicnode\.com`,)`https:\/\/solana\.api\.pocket\.network`\]\);function/, "$1`https://api.mainnet-beta.solana.com`]);function").ux_pair, false, "the operator that refuses a page as the second");
   assert.equal(mut(/return\[([\w$]+)\(([\w$]+)\(([\w$]+)\[0\]\)\),\1\(\2\(\3\[1\]\)\)\]\}/, "return[$1($2($3[0])),$2($3[1])]}").ux_pair, false, "the second unpaced");
+  // review P2-3: the Base and Robinhood pair each on its queue by the same pacer, never handed bare
+  const evmPair = /rpcs:\[([\w$]+)\(([\w$]+)\.rpcs\[0\]\),\1\(\2\.rpcs\[1\]\)\],pin:\2\.pin,deposit:/;
+  assert.equal(mut(evmPair, "rpcs:$2.rpcs,pin:$2.pin,deposit:").ux_pair, false, "the EVM pair handed unpaced");
+  assert.equal(mut(evmPair, "rpcs:[$1($2.rpcs[0]),$2.rpcs[1]],pin:$2.pin,deposit:").ux_pair, false, "the EVM pair's second unpaced");
   assert.equal(mut(/\[([\w$]+),\[([\w$]+),([\w$]+)\]\]=await Promise\.all\(\[([\w$]+)\(([\w$]+),([\w$]+)\),([\w$]+)\.balances/, "[$1,[$2,$3]]=await Promise.all([$4($5,$6),$7.balancez").ux_read, false, "the U_X not read");
   assert.equal(mut(/if\(!([\w$]+)\)return\{why:`holds \$\{String\(([\w$]+)\)\}, with no deposit note/, "if(!1)return{why:`holds ${String($2)}, with no deposit note").ux_carry, false, "a U_X with no note here carried");
   assert.equal(mut(/,([\w$]+)\.has\(([\w$]+)\.i\),/, ",!0,").ux_carry, false, "the store's word on the index not asked");

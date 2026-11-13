@@ -2069,7 +2069,7 @@ test("the tree sync's reorg check (a mismatch: is the newest anchor's block stil
   // both RPCs say one more leaf than the logs make: a mismatch, refused once the anchor's block 100 reads unmoved
   const lie = { view: (name: string, v: bigint) => (name === "currentTreeSize" ? v + 1n : v) };
   // rpc 1's first read of block 100 is the agreed block's own; every later one is the check's
-  for (const [faults, want, reads] of [[[HTTP_429], /^Error: the state tree from the logs \(4 leaves\) is not the pool's/, 3], [Array(100).fill(HTTP_429), /^EvmUnansweredError: rpc 1 block 100: no answer in 4 tries/, 1 + EVM_POOL_READ_TRIES]] as const) {
+  for (const [faults, want, reads] of [[[HTTP_429], /^PoolReadError: the state tree from the logs \(4 leaves\) is not the pool's/, 3], [Array(100).fill(HTTP_429), /^EvmUnansweredError: rpc 1 block 100: no answer in 4 tries/, 1 + EVM_POOL_READ_TRIES]] as const) {
     const rpcs = pair(c3, c3, lie, lie);
     let seen = 0;
     rpcs[1] = flaky(rpcs[1], (m, p) => byNumber(q(100))(m, p, 0) && seen++ >= 1, [...faults]);
@@ -3181,4 +3181,142 @@ test("review of 39a4c67a, P3-4: Tenderly's cap, named in its error's data, pages
   assert.equal(r.events.length, 3);
   assert.ok(pages.length > 0 && pages.length <= Math.ceil(60_000 / 1_000) + 1, `${pages.length} pages`);
   assert.ok(pages.slice(0, -1).every((n) => n === 1_000), `pages: ${[...new Set(pages)].join(", ")}`);
+});
+
+// a stop names its cause by code (pool-sell.ts legCause), never by message, so each refusal
+// of a tree read carries one, its words kept (before: a plain Error, or a named one with no code)
+test("each refusal of the EVM tree read carries its code: rpc_disagree, root_mismatch, no_agreed_logs, no_leaf, lag, unanswered", async () => {
+  const coded = (code: string, words: RegExp) => (e: unknown) => {
+    assert.match(String((e as Error).message), words);
+    assert.equal((e as { code?: unknown }).code, code, String((e as Error).message));
+    return true;
+  };
+  const c = C3();
+  const off = (name: string) => ({ view: (n: string, v: bigint) => (n === name ? v + 1n : v) });
+  await assert.rejects(sync(pair(c, c, {}, off("currentRoot"))).trees(after(25)), coded("rpc_disagree", /the two RPCs differ on currentRoot\(\)/));
+  await assert.rejects(sync(pair(c, c, {}, { hashOf: (n) => (n === 90 ? h32("other 90") : c.hashOf(n)) })).trees(after(25)), coded("rpc_disagree", /hold different blocks at 90/));
+  const unmade = { view: (n: string, v: bigint) => (n === "stateRootTimes" ? 0n : v) };
+  await assert.rejects(sync(pair(c, c, unmade, unmade)).trees(after(25)), coded("root_mismatch", /is not one the pool made/));
+  await assert.rejects(sync(pair(c, c, off("labelRootTimes"), off("labelRootTimes"))).trees(after(25)), coded("root_mismatch", /the label root built from the cut is not the pool's root/));
+  const drop = (l: Record<string, unknown>[]) => l.filter((_, i) => i !== 3);
+  await assert.rejects(sync(pair(c, c, { logs: drop }, { logs: drop })).trees(after(25)), coded("no_agreed_logs", /the state tree from the logs \(3 leaves\) is not the pool's/));
+  await assert.rejects(sync(pair(c, c)).trees(after(5)), coded("no_leaf", /no leaf before/));
+  const any = anyChain();
+  const forged = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : x));
+  await assert.rejects(evmTreeSync({ rpcs: anySeats(any), pin: PIN, history: [helperSrc(any, forged)], ...noWait }).events(), coded("no_agreed_logs", /no two sources of two operators gave the same logs/));
+  const moved = C3();
+  const old = moved.hashOf;
+  let seen = 0;
+  moved.hashOf = (n) => (n === 41 && seen++ > 0 ? h32("fork 41") : old(n));
+  await assert.rejects(evmEpochBlock(pair(moved, moved), (T0 + 2n * 41n) * 1000n - 1000n), (e) => e instanceof EvmLagError && coded("lag", /moved under the search/)(e));
+  const rpcs = pair(c, c);
+  rpcs[1] = flaky(rpcs[1], byNumber("latest"), Array(100).fill(() => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "b.example", 9_000)));
+  await assert.rejects(evmNow(rpcs, undefined, async () => {}), (e) => e instanceof EvmUnansweredError && coded("unanswered", /latest block: no answer/)(e));
+});
+
+test("card evm-deposit-on-mainnet: a pass's fresh sync after the pool's first deposit reads only past the page's hold of no leaf, never from the deploy block; a hold of no leaf the pool's root does not prove is read again from it, on Base and Robinhood", async () => {
+  const getLogsFrom = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    let h: unknown = null;
+    const hold: EvmSyncHold = { read: async () => h as never, write: async (v) => void (h = v), drop: async () => void (h = null) };
+    // the pool before its first deposit: the page's sync holds its blocks up to the finalized anchor, with no leaf
+    const c = longChain([], 800_000);
+    const page = evmTreeSync({ rpcs: pair(c, c, { chainId }, { chainId }), pin, held: hold, ...noWait });
+    assert.equal((await page.events()).events.length, 0);
+    assert.equal((h as EvmSyncHeld).to, 799_990n);
+    assert.equal((h as EvmSyncHeld).events.length, 0);
+    // the first deposit lands past the finalized anchor; the page's sync is current (its round sees it)
+    c.events.push(...deps(PP, [800_080]));
+    c.head = 800_100;
+    c.finalized = 800_050;
+    assert.equal((await page.events()).events.length, 1);
+    // the proof queue's first pass: its pool's own sync, on the same hold
+    const la: string[] = [], lb: string[] = [];
+    const queue = evmPool({ pin, ...pairs(pair(c, c, { chainId, log: la }, { chainId, log: lb })), held: hold, relayFee: async () => answer(), epochFee: feeRule([]), ...noWait });
+    const t = await queue.trees(after(800_080));
+    assert.equal(t.stateTree.size, 1);
+    for (const l of [la, lb]) assert.deepEqual(getLogsFrom(l), [799_991], `${network}: one page past the hold's block 799,990, none from the deploy block: ${getLogsFrom(l)}`);
+    // a hold of no leaf below a leaf of the pool (not the pool's): the root from the logs past it is not the pool's, so
+    // it is dropped and the pool read from its deploy block, the trees the pool's
+    const d = longChain([...deps(PP, [10])], 800_000);
+    d.events.push({ block: 800_080, kind: "dep", leaf: BigInt(PP.commitments[1]!), label: BigInt(PP.labels[1]!) });
+    d.head = 800_100;
+    d.finalized = 800_050;
+    let g: unknown = { network, pool: POOL, fromBlock: 1n, to: 799_990n, events: [] };
+    const bad: EvmSyncHold = { read: async () => g as never, write: async (v) => void (g = v), drop: async () => void (g = null) };
+    const lc: string[] = [];
+    const r = await evmTreeSync({ rpcs: pair(d, d, { chainId, log: lc }, { chainId }), pin, held: bad, ...noWait }).events();
+    assert.equal(r.events.length, 2, `${network}: both leaves`);
+    assert.ok(getLogsFrom(lc).includes(1), `${network}: read again from the deploy block`);
+    assert.equal((g as EvmSyncHeld).events.length, 1, `${network}: the hold rewritten with the pool's leaf below the finalized anchor`);
+  }
+});
+
+test("card evm-deposit-on-mainnet: a pool given the page's sync reads its trees on it: after the settle's round on that sync, the queue's first pass reads only the pages past the sync's cursor, on Base and Robinhood", async () => {
+  const getLogsFrom = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    const c = longChain([...deps(PP, [10, 400_000])], 800_000);
+    const log: string[] = [];
+    const rpcs = pair(c, c, { chainId, log }, { chainId });
+    // the settle's round on the page's pass sync: the pool's history up to the finalized anchor, no hold
+    const passSync = evmTreeSync({ rpcs, pin, ...noWait });
+    assert.equal((await passSync.events()).events.length, 2);
+    assert.ok(getLogsFrom(log).includes(1));
+    // a deposit lands past it; the queue's pool on that same sync reads only past its cursor (block 799,990)
+    c.events.push({ block: 800_080, kind: "dep", leaf: BigInt(PP.commitments[2]!), label: BigInt(PP.labels[2]!) });
+    c.head = 800_100;
+    c.finalized = 800_050;
+    log.length = 0;
+    const queue = evmPool({ pin, ...pairs(rpcs), sync: passSync, relayFee: async () => answer(), epochFee: feeRule([]), ...noWait });
+    assert.equal((await queue.trees(after(800_080))).stateTree.size, 3);
+    assert.deepEqual(getLogsFrom(log), [799_991], `${network}: ${getLogsFrom(log)}`);
+  }
+  assert.throws(() => evmPool({ pin: PIN, ...pairs(pair(chain([]), chain([]))), sync: {} as never, relayFee: async () => answer(), epochFee: feeRule([]) }), /sync: an EVM tree sync/);
+});
+
+test("card evm-deposit-on-mainnet: a hold of no leaf over a real leaf is dropped when the seats refuse the logs past it, read from the deploy block in that round, never stuck, on Base and Robinhood", async () => {
+  const getLogsFrom = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    const d = longChain([...deps(PP, [10])], 800_000);
+    d.events.push({ block: 800_080, kind: "dep", leaf: BigInt(PP.commitments[1]!), label: BigInt(PP.labels[1]!) });
+    d.head = 800_100;
+    d.finalized = 800_050;
+    let g: unknown = { network, pool: POOL, fromBlock: 1n, to: 799_990n, events: [] };
+    const bad: EvmSyncHold = { read: async () => g as never, write: async (v) => void (g = v), drop: async () => void (g = null) };
+    // one seat refuses every page from past the hold (not a size, not a lag): the seats' read is refused, and the
+    // other, a source, gives the logs past the hold, which do not make the pool's trees
+    const refusing = { getLogs: ({ from }: { from: number }) => { if (from === 799_991) throw new Error("RPC error -32000: planted refusal"); } };
+    const lc: string[] = [];
+    const r = await evmTreeSync({ rpcs: pair(d, d, { chainId, log: lc, ...refusing }, { chainId }), pin, held: bad, ...noWait }).events();
+    assert.equal(r.events.length, 2, `${network}: both leaves`);
+    assert.ok(getLogsFrom(lc).includes(1), `${network}: read again from the deploy block: ${getLogsFrom(lc)}`);
+    assert.equal((g as EvmSyncHeld).events.length, 1, `${network}: the hold rewritten with the pool's leaf below the finalized anchor`);
+  }
+});
+
+test("card evm-deposit-on-mainnet: a reorg under the seats' read of a hold of no leaf over a real leaf is a lag that keeps the hold unproven; the retry drops it and reads from the deploy block, on Base and Robinhood", async () => {
+  const getLogsFrom = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    const d = longChain([...deps(PP, [10])], 800_000);
+    d.events.push({ block: 800_080, kind: "dep", leaf: BigInt(PP.commitments[1]!), label: BigInt(PP.labels[1]!) });
+    d.head = 800_100;
+    d.finalized = 800_050;
+    let g: unknown = { network, pool: POOL, fromBlock: 1n, to: 799_990n, events: [] };
+    const bad: EvmSyncHold = { read: async () => g as never, write: async (v) => void (g = v), drop: async () => void (g = null) };
+    const hashOf = d.hashOf;
+    let pages = 0;
+    const lc: string[] = [];
+    const waits: number[] = [];
+    // the newest blocks move under the seats' first page (a reorg): still() reads it, a lag, and the next round reads again
+    const reorg = { getLogs: () => void (pages++ === 0 && (d.hashOf = (n: number) => (n >= 800_095 ? h32(`reorged ${n}`) : hashOf(n)))) };
+    const r = await evmTreeSync({ rpcs: pair(d, d, { chainId, log: lc, ...reorg }, { chainId }), pin, held: bad, sleep: async (ms: number) => void waits.push(ms) }).events();
+    assert.ok(waits.length > 0, `${network}: a retry`);
+    assert.equal(r.events.length, 2, `${network}: both leaves`);
+    assert.ok(getLogsFrom(lc).includes(1), `${network}: read again from the deploy block: ${getLogsFrom(lc)}`);
+    d.hashOf = hashOf;
+  }
 });

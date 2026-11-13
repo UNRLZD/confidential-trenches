@@ -60,7 +60,7 @@ import { evmAddress, freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, evmRetryLag, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
-import { checkBinding, type Pool } from "../../wallet/src/pool/pool.ts";
+import { checkBinding, PoolNoLeafError, type Pool, type PoolTrees } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
@@ -620,8 +620,9 @@ async function evmRestedNotes(P: Pool<EvmPoolRequest>, list: readonly NoteRecord
     const nowMs = await P.now();
     const size = BigInt((await P.trees(nowMs - (nowMs % P.epochMs), AbortSignal.timeout(EVM_WITHDRAW_TREES_MS))).stateTree.size);
     return new Set(list.filter((n) => n.leaf !== undefined && n.leaf.leafIndex < size).map((n) => n.id));
-  } catch {
-    return null;
+  } catch (e) {
+    // an epoch root that holds no leaf (PoolNoLeafError): none rested
+    return e instanceof PoolNoLeafError ? new Set() : null;
   }
 }
 
@@ -661,8 +662,14 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     await keepOut();
     // one budget for every wait of this part on chain time
     const left = { ms: P.epochMs + EVM_WITHDRAW_BOUNDARY_LAG_MS };
-    const read = (cut: bigint, opts?: { newest?: boolean }) => P.trees(cut, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS), opts);
-    const holds = (t: Awaited<ReturnType<typeof P.trees>>): boolean => leaf.leafIndex < BigInt(t.stateTree.size);
+    // a cut that holds no leaf (an empty pool's first leaf landing this epoch: PoolNoLeafError) is a cut that does not
+    // hold the note: null, so the newest root is taken at once
+    const read = (cut: bigint, opts?: { newest?: boolean }): Promise<PoolTrees | null> =>
+      P.trees(cut, AbortSignal.timeout(EVM_WITHDRAW_TREES_MS), opts).catch((e: unknown) => {
+        if (e instanceof PoolNoLeafError) return null;
+        throw e;
+      });
+    const holds = (t: PoolTrees | null): t is PoolTrees => t !== null && leaf.leafIndex < BigInt(t.stateTree.size);
     let epochStartMs = nowMs - (nowMs % P.epochMs);
     let trees = await read(epochStartMs);
     for (let waited = false; !holds(trees); ) {

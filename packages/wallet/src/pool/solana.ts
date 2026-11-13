@@ -46,7 +46,7 @@ import { base58, base64 } from "@scure/base";
 import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import { POOL_TESTNET } from "./network.ts";
 import type { Ladder } from "./ladder.ts";
-import { bindNow, perEpoch, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { bindNow, perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** SOL's ladder: one = 0.001 SOL (the program's MIN_DEPOSIT), from 0.01 SOL [design: the owner's $2 floor, OD:268, in kind]. */
 export const SOL_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 10_000_000n });
@@ -443,23 +443,23 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
         const fresh = pages[tree]!;
         // the entries held past the last full page were read before: a later read that holds them holds them unchanged
         for (let i = start; i < kept.length && i - start < fresh.length; i++)
-          if (!same(fresh[i - start]!.bytes, kept[i]!.bytes)) throw new Error(`tree ${tree}: page ${Math.floor(i / SOL_PAGE_ENTRIES)} changed since it was read`);
+          if (!same(fresh[i - start]!.bytes, kept[i]!.bytes)) throw new PoolReadError("page_changed", `tree ${tree}: page ${Math.floor(i / SOL_PAGE_ENTRIES)} changed since it was read`);
         return [...kept.slice(0, start), ...fresh];
       });
       const [x, y] = lists as [Entry[], Entry[]];
       counts[0][tree] = x.length;
       counts[1][tree] = y.length;
       const common = Math.min(x.length, y.length);
-      for (let i = start; i < common; i++) if (!same(x[i]!.bytes, y[i]!.bytes)) throw new Error(`tree ${tree}: the two RPCs differ at leaf ${i}`);
-      for (const l of lists) for (let i = Math.max(1, start); i < l.length; i++) if (l[i]!.t < l[i - 1]!.t) throw new Error(`tree ${tree}: a time goes back at leaf ${i}`);
+      for (let i = start; i < common; i++) if (!same(x[i]!.bytes, y[i]!.bytes)) throw new PoolReadError("rpc_disagree", `tree ${tree}: the two RPCs differ at leaf ${i}`);
+      for (const l of lists) for (let i = Math.max(1, start); i < l.length; i++) if (l[i]!.t < l[i - 1]!.t) throw new PoolReadError("time_back", `tree ${tree}: a time goes back at leaf ${i}`);
       const agreed = x.slice(0, common);
       next.push(agreed);
       if (beforeMs === null) continue;
       // the cut: every entry below beforeMs, which both RPCs must hold, since both read past beforeMs
       let n = 0;
       while (n < agreed.length && agreed[n]!.t < beforeMs) n++;
-      if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw new Error(`tree ${tree}: the two RPCs differ below the cut`);
-      if (n === 0) throw new Error(`tree ${tree}: no leaf before ${beforeMs}`);
+      if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw new PoolReadError("rpc_disagree", `tree ${tree}: the two RPCs differ below the cut`);
+      if (n === 0) throw new PoolNoLeafError(`tree ${tree}: no leaf before ${beforeMs}`);
       cuts.push(agreed.slice(0, n));
     }
     if (commitment === "finalized") {
@@ -474,7 +474,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
       if (typeof beforeMs !== "bigint" || beforeMs <= 0n) throw new Error("beforeMs: a bigint above 0");
       const out = (await run(beforeMs, opts?.newest === true ? "confirmed" : "finalized", 0, signal)).lists.map((cut, tree) => {
         const t = new VaultTree(cut.map((e) => e.leaf));
-        if (t.root !== cut[cut.length - 1]!.root) throw new Error(`tree ${tree}: the root built from the leaves is not the page's root at leaf ${cut.length - 1}`);
+        if (t.root !== cut[cut.length - 1]!.root) throw new PoolReadError("root_mismatch", `tree ${tree}: the root built from the leaves is not the page's root at leaf ${cut.length - 1}`);
         return { tree: t, root: t.root };
       });
       return { stateTree: out[0]!.tree, labelTree: out[1]!.tree, stateRoot: out[0]!.root, labelRoot: out[1]!.root };
