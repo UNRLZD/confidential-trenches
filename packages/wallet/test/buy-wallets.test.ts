@@ -17,7 +17,7 @@ import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "../src/pool/solana.ts";
 import { hostLane, PASS_BUDGET, ThrottleGate } from "../src/throttle.ts";
-import { type ReaderOpts, buyWallets, derivedBuyWallets, wantedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, HOLDINGS_THROTTLE_MAX_MS, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
+import { type ReaderOpts, buyWallets, derivedBuyWallets, wantedBuyWallets, evmHelperHoldings, HOLDINGS_RPC_LIMIT, HOLDINGS_THROTTLE_MAX_MS, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsAt, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
 
 const A8 = JSON.parse(readFileSync(new URL("./vectors/a8.json", import.meta.url), "utf8")) as { inputs: { entropy: string }; l: string; wallets: { name: string; c: string; l: string; j: number; path: string; address: string }[] };
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inputs.entropy, "hex"))));
@@ -576,6 +576,118 @@ test("card wallets-found-in-one-read: on a provider that takes about 10 getToken
   }
 }));
 
+// ---- card solana-holdings-reads-inside-the-public-limit: api.mainnet-beta.solana.com as read 2026-11-13 17:09-17:14Z ----
+// x-ratelimit-method-limit 10 for getTokenAccountsByOwner in a sliding 10 s; past it a 429 with Retry-After 10, and the
+// 429 itself counted in the window (x-ratelimit-method-remaining went to -6 while 429s were asked again 1.7 s apart).
+/** That host, its gTABO window kept here; every 429 counted in `n429`. `slots(owner, k)`: the k-th answered round's
+ *  [getBalance slot, getTokenAccountsByOwner slot] for that W. */
+function mainnetBetaModel(origin: string, slots: (owner: string, k: number) => readonly [number, number]) {
+  const window: number[] = [];
+  const answered = new Map<string, number>();
+  const got = { n429: 0, gtabo: [] as number[] };
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    if (!String(u).startsWith(origin)) return real(u, init);
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
+    const owner = q.params[0] as string;
+    const now = Date.now();
+    if (q.method === "getTokenAccountsByOwner") {
+      while (window.length > 0 && window[0]! <= now - 10_000) window.shift();
+      window.push(now);
+      got.gtabo.push(now);
+      if (window.length > 10) return got.n429++, too("10");
+    }
+    // a round's three calls share one k: getBalance starts each round (the reader sends it first)
+    if (q.method === "getBalance") answered.set(owner, (answered.get(owner) ?? -1) + 1);
+    const [b, t] = slots(owner, answered.get(owner) ?? 0);
+    return ok(q.id, { context: { slot: q.method === "getBalance" ? b : t }, value: q.method === "getBalance" ? 0 : [] });
+  }) as typeof fetch;
+  return { got, restore: () => void (globalThis.fetch = real) };
+}
+/** The recorded public route's rounds (the CO's wallet-per-buy record of 2026-11-13 17:02Z, api.mainnet-beta): per W,
+ *  each answered round's [getBalance, getTokenAccountsByOwner] slots; j=3 met at one slot only in its fourth answered
+ *  round. */
+const RECORDED_ROUNDS: Record<number, readonly (readonly [number, number])[]> = {
+  0: [[469002633, 469002633]],
+  1: [[469002717, 469002716], [469002723, 469002723]],
+  2: [[469002640, 469002640]],
+  3: [[469002648, 469002647], [469002655, 469002653], [469002663, 469002662], [469002709, 469002709]],
+};
+const recordedSlots = (owner: string, k: number): readonly [number, number] => {
+  const j = [0, 1, 2, 3].find((x) => solWj(x) === owner)!;
+  const r = RECORDED_ROUNDS[j]!;
+  return r[Math.min(k, r.length - 1)]!;
+};
+/** W j of the A.8 seed's label (the vector holds j 0 and 1 only). */
+const solWj = (j: number) => { const w = d.freshWallet(SEED, "sol", L, j); w.secretKey.fill(0); return w.address; };
+const fourWs = () => [{ ref: DEP, label: L }, ...[0, 1, 2].map((j) => ({ ref: { kind: "change" as const, l: L, j }, label: L }))];
+
+test("card solana-holdings-reads-inside-the-public-limit: the device-direct reader keeps a public host's getTokenAccountsByOwner under the 10 in 10 s it names: the recorded run's 4 Ws all read with no 429", () => onTestClock(async () => {
+  const origin = "https://mainnet-beta-model.example";
+  const m = mainnetBetaModel(origin, recordedSlots);
+  let r: Awaited<ReturnType<typeof buyWallets>>;
+  const t0 = Date.now();
+  try {
+    r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: fourWs(), reader: solanaHoldingsAt(origin) }]);
+  } finally {
+    m.restore();
+  }
+  const took = Date.now() - t0;
+  assert.deepEqual(r.failed, []);
+  assert.deepEqual(r.wallets.map((w) => w.address).sort(), [0, 1, 2, 3].map(solWj).sort());
+  assert.equal(m.got.n429, 0, "no 429 from the host");
+  // never more than 8 in any 10 s: the 2 spare calls of HOLDINGS_PUBLIC_RPC_LIMIT
+  for (const t of m.got.gtabo) assert.ok(m.got.gtabo.filter((x) => x > t - 10_000 && x <= t).length <= 8, `${m.got.gtabo.map((x) => x - t0).join(", ")}`);
+  // 8 rounds (1 + 1 + 4 + 2), one each 2.5 s
+  assert.equal(m.got.gtabo.length, 16);
+  // the public pace, read through the module so this test fails on its reads, not its import, where it is missing
+  const pace = (buyWalletsModule as { HOLDINGS_PUBLIC_RPC_LIMIT?: { windowMs: number } }).HOLDINGS_PUBLIC_RPC_LIMIT;
+  assert.deepEqual({ ...pace }, { windowMs: 2_500, total: 3, perMethod: 2 });
+  assert.ok(took >= 7 * pace!.windowMs && took < 7 * pace!.windowMs + 1_000, `${took} ms`);
+}));
+
+test("card solana-holdings-reads-inside-the-public-limit: a 429 never spends one of a W's slot rounds: the recorded W j=3 (3 rounds apart, then throttled) is read through 4 throttles, each waited out to its Retry-After", () => onTestClock(async () => {
+  // W j=3's recorded rounds on api.mainnet-beta (17:02Z): apart, apart, apart, 429, 429, 429, met, its 7th of the 8
+  // allowed. Here, with its recorded slots, two throttles, one more round apart, two more throttles, then it meets: 8
+  // failed rounds, 4 of them throttles, never more than two in a row (inside the route's 30 s bound). The reader refused
+  // it before ("its reads drew the helper's 429 in 8 rounds"): a W left unread although the host only asked for its 10 s.
+  const origin = "https://w2-rounds.example";
+  const plan = ["apart", "apart", "apart", "429", "429", "apart", "429", "429", "met"] as const;
+  const slots: readonly (readonly [number, number])[] = [[469002648, 469002647], [469002655, 469002653], [469002663, 469002662], [469002690, 469002689], [469002709, 469002709]];
+  let round = -1, answered = -1;
+  const roundAt: number[] = [];
+  const st = stubFetch(origin, (method, id) => {
+    if (method === "getBalance") roundAt.push(Date.now()), round++;
+    const p = plan[round]!;
+    // a throttled round: getBalance answered (150 a window), both getTokenAccountsByOwner refused
+    if (p === "429") return method === "getBalance" ? ok(id, { context: { slot: 469002700 }, value: 0 }) : too("10");
+    if (method === "getBalance") answered++;
+    const [b, t] = slots[answered]!;
+    return ok(id, { context: { slot: method === "getBalance" ? b : t }, value: method === "getBalance" ? 0 : [] });
+  });
+  let h: Awaited<ReturnType<HoldingsReader["read"]>>;
+  try {
+    h = await solanaHoldingsAt(origin).read(solWj(3));
+  } finally {
+    st.restore();
+  }
+  assert.equal(h.native, 0n);
+  assert.equal(round, plan.length - 1, "every round of the plan asked, the last met");
+  for (const k of [3, 4, 6, 7]) assert.ok(roundAt[k + 1]! - roundAt[k]! >= 10_000, `round ${k + 1}'s 429 waited out its Retry-After 10: ${roundAt[k + 1]! - roundAt[k]!} ms`);
+}));
+
+test("card solana-holdings-reads-inside-the-public-limit: an EVM W whose helper answers 429 four times, Retry-After 1, is read on the fifth round, not refused at the fourth", () => onTestClock(async () => {
+  const st = stubFetch("https://evm-r429x4.example", (m, id, n) => (n <= 4 ? too("1") : evmOk(m, id)));
+  let e: Awaited<ReturnType<HoldingsReader["read"]>>;
+  try {
+    e = await evmHelperHoldings("https://evm-r429x4.example", "base", []).read(evmW(L, 0));
+  } finally {
+    st.restore();
+  }
+  assert.equal(e.native, 0n);
+  assert.equal(st.starts.filter(([, m]) => m === "eth_getBlockByNumber").length, 5);
+}));
+
 test("card wallets-found-in-one-read: a finder 429 never pauses a trade: the finder's throttle is its route's own, the host's lane stays open for a trade's read", () => onTestClock(async () => {
   const origin = "https://finder-429.example";
   const sol = stubFetch(origin, (m, id) => (m === "getTokenAccountsByOwner" ? too("10") : solOk(m, id)));
@@ -901,11 +1013,11 @@ test("a 429 on every round is a refusal at the bound, after a growing wait betwe
   };
   // Solana: the gate's own bound comes first (card wallets-found-in-one-read: a provider in doubt for
   // HOLDINGS_THROTTLE_MAX_MS on the gate's clock is not waited: 18.5 s of waits, then a 10 s one would end at 28.5 s, the
-  // next past 30 s); EVM's 4 rounds come before it
+  // next past 30 s); EVM's the same bound, no round count of its own (card solana-holdings-reads-inside-the-public-limit)
   const runs = [
     // the refusal as the kit's transport fault (card pool-sell-legs-side-by-side: a sale counts it as the provider's)
     ["sol", solanaHoldingsReader(always429(), own()), "its reads drew the provider's 429 past 30 s (http_429, 1 try at the holdings route)", [1234, 2468, 4936, 9872, 10_000]],
-    ["evm", evmHoldingsReader(always429(), [], own()), `its reads drew the helper's 429 in ${EVM_HOLDINGS_ROUNDS} rounds`, [1234, 2468, 4936]],
+    ["evm", evmHoldingsReader(always429(), [], own()), "its reads drew the provider's 429 past 30 s (http_429, 1 try at the holdings route)", [1234, 2468, 4936, 9872, 10_000]],
   ] as const;
   for (const [chain, reader, error, want] of runs) {
     waits.length = 0;

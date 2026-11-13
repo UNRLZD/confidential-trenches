@@ -3,15 +3,17 @@
 // device runs, for Ws j = 0..3 of the published A.8 test seed (test/vectors/a8.json: the all-zero entropy and its label;
 // never any other key), on Solana mainnet and Base, each on two RPCs:
 //   - the helper's /v1/rpc/{chain}, through solanaHelperHoldings or evmHelperHoldings exactly as the device builds them;
-//   - a public RPC device-direct (api.mainnet-beta.solana.com, base-rpc.publicnode.com), through the same reader on its own url-less queue at HOLDINGS_RPC_LIMIT, as
-//     holdingsRoute builds the helper's.
+//   - a public RPC device-direct: on Solana api.mainnet-beta.solana.com through solanaHoldingsAt, the device's own
+//     device-direct reader (its rounds at HOLDINGS_PUBLIC_RPC_LIMIT, a 429 waited out to the host's Retry-After); on
+//     Base base-rpc.publicnode.com through the same reader on its own url-less queue at HOLDINGS_RPC_LIMIT.
 // Every request is recorded as it goes out (route, method, the W it names, minContextSlot or block hash, HTTP status,
-// the answer's context slot), and it prints one JSON record on stdout:
+// the answer's context slot, and the limit the host names for the method: x-ratelimit-method-limit), and it prints
+// one JSON record on stdout:
 //   node --import ./scripts/net-window.mjs packages/wallet/scripts/buy-wallets-live.ts [--helper <origin>]
 import { readFileSync } from "node:fs";
 import { SOLANA_PUBLIC_RPC_URL, solanaJsonRpc, solanaPacedRpc, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
-import { buyWallets, evmHelperHoldings, evmHoldingsReader, HOLDINGS_RPC_LIMIT, solanaHelperHoldings, solanaHoldingsReader, type BuyChain, type HoldingsReader, type SpentNote } from "../src/pool/buy-wallets.ts";
+import { buyWallets, evmHelperHoldings, evmHoldingsReader, HOLDINGS_PUBLIC_RPC_LIMIT, HOLDINGS_RPC_LIMIT, solanaHelperHoldings, solanaHoldingsAt, type HoldingsReader, type SpentNote } from "../src/pool/buy-wallets.ts";
 
 const A8 = JSON.parse(readFileSync(new URL("../test/vectors/a8.json", import.meta.url), "utf8")) as { inputs: { entropy: string }; l: string };
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inputs.entropy, "hex"))));
@@ -24,7 +26,7 @@ const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 // the spent notes whose Ws are j = 0..3: a deposit (j 0) and change notes 0..2 (j 1..3)
 const SPENT: SpentNote[] = [{ ref: { kind: "deposit", s: 1n, i: 0 }, label: L }, ...[0, 1, 2].map((j) => ({ ref: { kind: "change" as const, l: L, j }, label: L }))];
 
-type Call = { route: string; method: string; owner?: string; min?: number; at?: string; status: number; slot?: number; ms: number };
+type Call = { route: string; method: string; owner?: string; min?: number; at?: string; status: number; slot?: number; ms: number; methodLimit?: number };
 const calls: Call[] = [];
 const t0 = Date.now();
 const real = globalThis.fetch;
@@ -40,6 +42,8 @@ globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
   calls.push(c);
   const r = await real(u, init);
   c.status = r.status;
+  const named = Number(r.headers.get("x-ratelimit-method-limit"));
+  if (Number.isSafeInteger(named) && named > 0) c.methodLimit = named;
   if (r.ok) {
     try {
       const slot = ((await r.clone().json()) as { result?: { context?: { slot?: unknown } } }).result?.context?.slot;
@@ -49,12 +53,13 @@ globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
   return r;
 }) as typeof fetch;
 
-/** The reader on a public RPC: the reader the device runs, on its own url-less queue at HOLDINGS_RPC_LIMIT. */
-function publicReader(chain: BuyChain, url: string): HoldingsReader {
-  const bare = solanaJsonRpc(url);
+/** The reader on a public RPC: on Solana the device's own device-direct reader; on Base the reader the device runs,
+ *  on its own url-less queue at HOLDINGS_RPC_LIMIT. */
+function publicReader(chain: "sol" | "base"): HoldingsReader {
+  if (chain === "sol") return solanaHoldingsAt(PUBLIC.sol);
+  const bare = solanaJsonRpc(PUBLIC.base);
   const own: SolanaRpc = (method, params) => bare(method, params);
-  const rpc = solanaPacedRpc(own, HOLDINGS_RPC_LIMIT);
-  return chain === "sol" ? solanaHoldingsReader(rpc) : evmHoldingsReader(rpc, [BASE_USDC]);
+  return evmHoldingsReader(solanaPacedRpc(own, HOLDINGS_RPC_LIMIT), [BASE_USDC]);
 }
 
 const plain = (h: { native: bigint; tokens: ReadonlyMap<string, { amount: bigint; frozen: boolean }>; unreadable: readonly string[] }) => ({
@@ -66,7 +71,7 @@ const plain = (h: { native: bigint; tokens: ReadonlyMap<string, { amount: bigint
 async function route(chain: "sol" | "base", rpc: "helper" | "public") {
   const reader = rpc === "helper"
     ? (chain === "sol" ? solanaHelperHoldings(HELPER) : evmHelperHoldings(HELPER, "base", [BASE_USDC]))
-    : publicReader(chain === "sol" ? "sol" : "evm", PUBLIC[chain]);
+    : publicReader(chain);
   const t = Date.now();
   const r = await buyWallets(SEED, [{ id: `${chain}-${rpc}`, chain: chain === "sol" ? "sol" : "evm", spent: SPENT, reader }]);
   return {
@@ -82,4 +87,4 @@ const [sol, base] = await Promise.all([
   (async () => [await route("sol", "helper"), await route("sol", "public")])(),
   (async () => [await route("base", "helper"), await route("base", "public")])(),
 ]);
-process.stdout.write(`${JSON.stringify({ readAt, limit: HOLDINGS_RPC_LIMIT, routes: [...sol, ...base], calls })}\n`);
+process.stdout.write(`${JSON.stringify({ readAt, limit: HOLDINGS_RPC_LIMIT, publicLimit: HOLDINGS_PUBLIC_RPC_LIMIT, routes: [...sol, ...base], calls })}\n`);

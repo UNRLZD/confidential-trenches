@@ -2,7 +2,10 @@
 // (wallet-per-buy.answers.json). good: a live run of the wallet's reader (2026-11-03 06:08Z, HOLDINGS_RPC_LIMIT): PASS.
 // Each bad is that run with one change: one Solana round's slots split, one RPC's holdings changed, one answer a 429:
 // each FAIL. Made here from the good run: a W missing, a pool failed, a W not the A.8 vector's, a Base W's reads at two
-// blocks: each FAIL.
+// blocks: each FAIL. Card solana-holdings-reads-inside-the-public-limit: goodPublicPace, a live run with the Solana
+// public route at HOLDINGS_PUBLIC_RPC_LIMIT and the hosts' named limits: PASS; badLive429, the CO's recorded run of
+// 2026-11-13 17:02Z (12 getTokenAccountsByOwner in 10 s on api.mainnet-beta, which names 10; 6 429s): FAIL; made from
+// goodPublicPace, its public route's getTokenAccountsByOwner sent at the helper's pace with no 429: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,6 +25,32 @@ test("the recorded good run passes, and prints each W's address, slot or block a
   assert.equal(r.ok, true);
   assert.equal(r.lines.filter((l) => /^ {4}(sol|base) (helper|public) j=[0-3] \S+ (slot \d+\/\d+\/\d+|block 0x[0-9a-f]{64}): native \d+/.test(l)).length, 16);
   assert.ok(r.lines.includes("ok  HTTP 429s: 0 of 54 calls"));
+});
+
+test("card solana-holdings-reads-inside-the-public-limit: the live run at the public pace passes, inside the 10 the host named; the recorded 17:02Z run fails on its 429s and its pace", () => {
+  const g = judge(A.goodPublicPace);
+  assert.deepEqual(bads(g), []);
+  assert.ok(g.lines.includes("ok  https://api.mainnet-beta.solana.com/ getTokenAccountsByOwner: at most 8 in any 10 s, the host's limit 10"), g.lines.join("\n"));
+  assert.ok(A.goodPublicPace.calls.some((c) => c.methodLimit === 10 && c.method === "getTokenAccountsByOwner"), "the host named its limit on the run's answers");
+  const b = judge(A.badLive429);
+  assert.equal(b.ok, false);
+  assert.ok(bads(b).includes("BAD HTTP 429s: 6 of 69 calls"), bads(b).join(" | "));
+  assert.ok(bads(b).includes("BAD https://api.mainnet-beta.solana.com/ getTokenAccountsByOwner: at most 12 in any 10 s, the host's limit 10"), bads(b).join(" | "));
+});
+
+test("card solana-holdings-reads-inside-the-public-limit: made from the live good run, the public route's getTokenAccountsByOwner at the helper's pace (12 in 10 s) fails with no 429 at all", () => {
+  const fast = copy(A.goodPublicPace);
+  const pub = fast.calls.filter((c) => c.route.includes("api.mainnet-beta"));
+  const t0 = pub[0].ms;
+  // each round 1,667 ms after the one before (its three calls share one start), in place of 2,500
+  let round = -1;
+  for (const c of pub) {
+    if (c.method === "getBalance") round++;
+    c.ms = t0 + Math.max(round, 0) * 1_667;
+  }
+  const r = judge(fast);
+  assert.equal(r.ok, false);
+  assert.deepEqual(bads(r), ["BAD https://api.mainnet-beta.solana.com/ getTokenAccountsByOwner: at most 12 in any 10 s, the host's limit 10"]);
 });
 
 test("the recorded bad runs fail: one round's slots split, one RPC's holdings changed, one 429", () => {
@@ -57,4 +86,6 @@ test("the check runs the wallet's own reader, with the shared 2000 ms connect wi
   assert.match(src, /from "\.\.\/src\/pool\/buy-wallets\.ts"/);
   assert.match(src, /solanaHelperHoldings\(HELPER\)/);
   assert.match(src, /evmHelperHoldings\(HELPER, "base"/);
+  // the Solana public route is the device's own device-direct reader (card solana-holdings-reads-inside-the-public-limit)
+  assert.match(src, /solanaHoldingsAt\(PUBLIC\.sol\)/);
 });
