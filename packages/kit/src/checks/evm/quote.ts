@@ -1576,7 +1576,8 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
           // request goes to the next at once (card evm-rpc-spare-list: bloXroute answered every request 503 "No server
           // is available to handle this request" for 10 minutes, 2026-11-05 17:59-18:09Z; asked as its halves, each
           // 503 again); the last asks its halves, as before
-          // the provider answered: its halves are asked of it (scanPools `short`), at once, never again whole
+          // the provider answered: its halves are asked of it (scanPools `short`), at once, never again whole here (one
+          // block, which has no halves, is asked again whole there)
           if (e instanceof BadAnswer) throw new ScanAnswered("rpc_error", `the scan provider answered: ${e.message}`);
           if (spareNext && /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message))) throw new ScanRefused("rpc_error", `the scan provider is out: ${(e as Error).message}`);
           if (e instanceof Unreachable) {
