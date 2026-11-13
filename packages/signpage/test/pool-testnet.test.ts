@@ -2391,3 +2391,45 @@ test("a proof queue's opening loads the prover's withdraw circuit before the pas
   assert.ok(order.includes("prove"));
   await t.signedOut();
 });
+
+// the page's real prover (src/prover-host.ts) on a stand-in worker: the queue's opening starts its one worker and loads
+// the withdraw circuit before the pass's first proof, which finds it loaded; signed out, no worker starts
+test("a proof queue's opening starts the page's one prover worker and loads the withdraw circuit once, before its first proof; signed out, nothing starts (card max-ready-seconds-after-a-load)", async () => {
+  const { proverHost } = await import("../src/prover-host.ts");
+  const inner = signalsProver();
+  const log: string[] = [];
+  let n = 0;
+  const start = () => {
+    const k = ++n;
+    log.push(`start ${k}`);
+    return {
+      load: async (c: string) => void log.push(`load ${k} ${c}`),
+      prove: async (c: string, i: unknown) => (log.push(`prove ${k} ${c}`), inner.prove(c as never, i as never)),
+      terminate: () => void log.push(`stop ${k}`),
+    } as never;
+  };
+  for (const signedIn of [false, true]) {
+    log.length = 0;
+    n = 0;
+    const { w, ns } = await wallet();
+    const { pool: inPool, land } = fakePool();
+    const trees = inPool.trees.bind(inPool);
+    const pool = { ...inPool, trees: async (...a: Parameters<typeof inPool.trees>) => (log.push("trees"), trees(...a)) };
+    const host = proverHost(start);
+    const seed64 = async () => {
+      if (!signedIn) throw new Error("no seed: signed out");
+      return SEED64.slice();
+    };
+    const t = testnetPool({ store: async () => w, seed64 }, { pool, prover: host, hardwareConcurrency: 4, locks: null });
+    await land(ns, await incoming(ns, null, 1));
+    await t.proofs().catch(() => {});
+    if (!signedIn) assert.deepEqual(log.filter((x) => x !== "trees"), [], "signed out: no worker starts");
+    else {
+      assert.deepEqual(log.slice(0, 3), ["start 1", "load 1 withdraw", "trees"], log.join(", "));
+      assert.ok(log.includes("prove 1 withdraw"), log.join(", "));
+      assert.equal(log.filter((x) => x.startsWith("start")).length, 1, "one worker");
+      assert.equal(log.filter((x) => x.startsWith("load")).length, 1, "loaded once");
+    }
+    await t.signedOut();
+  }
+});
