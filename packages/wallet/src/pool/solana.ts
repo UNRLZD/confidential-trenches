@@ -46,7 +46,7 @@ import { base58, base64 } from "@scure/base";
 import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import { POOL_TESTNET } from "./network.ts";
 import type { Ladder } from "./ladder.ts";
-import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { bindNow, perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** SOL's ladder: one = 0.001 SOL (the program's MIN_DEPOSIT), from 0.01 SOL [design: the owner's $2 floor, OD:268, in kind]. */
 export const SOL_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 10_000_000n });
@@ -443,23 +443,23 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
         const fresh = pages[tree]!;
         // the entries held past the last full page were read before: a later read that holds them holds them unchanged
         for (let i = start; i < kept.length && i - start < fresh.length; i++)
-          if (!same(fresh[i - start]!.bytes, kept[i]!.bytes)) throw new Error(`tree ${tree}: page ${Math.floor(i / SOL_PAGE_ENTRIES)} changed since it was read`);
+          if (!same(fresh[i - start]!.bytes, kept[i]!.bytes)) throw new PoolReadError("page_changed", `tree ${tree}: page ${Math.floor(i / SOL_PAGE_ENTRIES)} changed since it was read`);
         return [...kept.slice(0, start), ...fresh];
       });
       const [x, y] = lists as [Entry[], Entry[]];
       counts[0][tree] = x.length;
       counts[1][tree] = y.length;
       const common = Math.min(x.length, y.length);
-      for (let i = start; i < common; i++) if (!same(x[i]!.bytes, y[i]!.bytes)) throw new Error(`tree ${tree}: the two RPCs differ at leaf ${i}`);
-      for (const l of lists) for (let i = Math.max(1, start); i < l.length; i++) if (l[i]!.t < l[i - 1]!.t) throw new Error(`tree ${tree}: a time goes back at leaf ${i}`);
+      for (let i = start; i < common; i++) if (!same(x[i]!.bytes, y[i]!.bytes)) throw new PoolReadError("rpc_disagree", `tree ${tree}: the two RPCs differ at leaf ${i}`);
+      for (const l of lists) for (let i = Math.max(1, start); i < l.length; i++) if (l[i]!.t < l[i - 1]!.t) throw new PoolReadError("time_back", `tree ${tree}: a time goes back at leaf ${i}`);
       const agreed = x.slice(0, common);
       next.push(agreed);
       if (beforeMs === null) continue;
       // the cut: every entry below beforeMs, which both RPCs must hold, since both read past beforeMs
       let n = 0;
       while (n < agreed.length && agreed[n]!.t < beforeMs) n++;
-      if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw new Error(`tree ${tree}: the two RPCs differ below the cut`);
-      if (n === 0) throw new Error(`tree ${tree}: no leaf before ${beforeMs}`);
+      if ((x.length > n && x[n]!.t < beforeMs) || (y.length > n && y[n]!.t < beforeMs)) throw new PoolReadError("rpc_disagree", `tree ${tree}: the two RPCs differ below the cut`);
+      if (n === 0) throw new PoolNoLeafError(`tree ${tree}: no leaf before ${beforeMs}`);
       cuts.push(agreed.slice(0, n));
     }
     if (commitment === "finalized") {
@@ -474,7 +474,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
       if (typeof beforeMs !== "bigint" || beforeMs <= 0n) throw new Error("beforeMs: a bigint above 0");
       const out = (await run(beforeMs, opts?.newest === true ? "confirmed" : "finalized", 0, signal)).lists.map((cut, tree) => {
         const t = new VaultTree(cut.map((e) => e.leaf));
-        if (t.root !== cut[cut.length - 1]!.root) throw new Error(`tree ${tree}: the root built from the leaves is not the page's root at leaf ${cut.length - 1}`);
+        if (t.root !== cut[cut.length - 1]!.root) throw new PoolReadError("root_mismatch", `tree ${tree}: the root built from the leaves is not the page's root at leaf ${cut.length - 1}`);
         return { tree: t, root: t.root };
       });
       return { stateTree: out[0]!.tree, labelTree: out[1]!.tree, stateRoot: out[0]!.root, labelRoot: out[1]!.root };
@@ -546,18 +546,12 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
   const { pool, scope } = solanaPoolOf(program);
   if (feePayer === pool) throw new Error("feePayer: the pool");
   const sync = solanaTreeSync(a.rpcs, program, a.lagWait);
-  // the epoch's fee, computed once per epoch from the device's own reads
-  const fees = new Map<bigint, Promise<{ rent: SolanaRent; cost: bigint; fee: bigint }>>();
-  const feeOf = (epochStartMs: bigint, signal?: AbortSignal) => {
-    let f = fees.get(epochStartMs);
-    if (f === undefined) {
-      f = solanaCostReads(a.rpcs, a.pin, signal).then(({ rent }) => ({ rent, ...solanaEpochFee(rent) }));
-      f.catch(() => fees.delete(epochStartMs));
-      for (const k of fees.keys()) if (k < epochStartMs - SOL_LIFE_MS) fees.delete(k);
-      fees.set(epochStartMs, f);
-    }
-    return f;
-  };
+  // the epoch's fee, computed once per epoch from the device's own reads, on the read's own stop (perEpoch): a bind that
+  // stops never stops another bind's wait on it (card max-ready-seconds-after-a-load)
+  const fees = perEpoch((e: bigint, s?: AbortSignal): Promise<{ rent: SolanaRent; cost: bigint; fee: bigint }> => solanaCostReads(a.rpcs, a.pin, s).then(({ rent }) => ({ rent, ...solanaEpochFee(rent) })));
+  const feeOf = (epochStartMs: bigint, signal?: AbortSignal) => fees.get(epochStartMs, signal);
+  // the helper's fee answer, asked once an epoch (each bind still checks it whole); one a bind refuses is asked again
+  const relayFees = perEpoch((e, s) => a.relayFee(e, s));
   return {
     id: `sol:${program}`,
     chain: "sol",
@@ -569,7 +563,7 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
     sendMarginMs: SOL_SEND_MARGIN_MS,
     now: (signal) => solanaNow(a.rpcs, signal),
     trees: (beforeMs, signal, opts) => sync.trees(beforeMs, signal, opts),
-    async bind({ chunk, wallet, epochStartMs, deadlineMs, tipCap = SOL_TIP_CAP }, signal) {
+    async bind({ chunk, wallet, epochStartMs, deadlineMs, tipCap = SOL_TIP_CAP, now, readNow }, signal) {
       if (!(wallet.publicKey instanceof Uint8Array) || wallet.publicKey.length !== 32 || wallet.address !== base58.encode(wallet.publicKey))
         throw new Error("wallet: a Solana W is base58 of its ed25519 public key");
       if (wallet.address === pool || wallet.address === feePayer) throw new Error("wallet: W is the pool or the fee payer");
@@ -578,14 +572,26 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
       // tip); a cap per request would mark one user
       if (tipCap !== SOL_TIP_CAP && tipCap !== 0n) throw new Error("tipCap: SOL_TIP_CAP for a buy or 0 for a withdraw");
       if (typeof epochStartMs !== "bigint" || epochStartMs % SOL_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
-      const nowMs = await solanaNow(a.rpcs, signal);
+      // the pool's time as now() reads it (solanaNow): the caller's read of a moment before while it stands, else read here
+      let nowMs = bindNow(now, epochStartMs, SOL_EPOCH_MS);
+      if (nowMs === undefined) {
+        const at = performance.now(), wall = Date.now();
+        nowMs = await solanaNow(a.rpcs, signal);
+        readNow?.({ ms: nowMs, at, wall });
+      }
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + SOL_LIFE_MS || deadlineMs <= nowMs + SOL_SEND_MARGIN_MS)
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
-      const f = await a.relayFee(epochStartMs, signal);
-      if (f?.chain !== "solana" || f.program !== program || f.pool !== pool || f.fee_payer !== feePayer) throw new Error("relayFee: not this pool's or this fee payer's answer");
-      if (f.epoch_ms !== Number(SOL_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || f.step !== SOL_FEE_STEP.toString()) throw new Error("relayFee: not this epoch's, or not on the step");
+      const asked = relayFees.get(epochStartMs, signal);
+      const f = await asked;
       const { rent, fee } = await feeOf(epochStartMs, signal);
-      if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
+      try {
+        if (f?.chain !== "solana" || f.program !== program || f.pool !== pool || f.fee_payer !== feePayer) throw new Error("relayFee: not this pool's or this fee payer's answer");
+        if (f.epoch_ms !== Number(SOL_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || f.step !== SOL_FEE_STEP.toString()) throw new Error("relayFee: not this epoch's, or not on the step");
+        if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
+      } catch (e) {
+        relayFees.drop(epochStartMs, asked);
+        throw e;
+      }
       if (fee * 10_000n > chunk * MAX_RELAY_FEE_BPS) throw new Error("chunk: under the program's backstop at this fee");
       if (chunk - fee - tipCap < solanaRentMin(rent, 0)) throw new Error("chunk: W would end under rent(0) at this fee and the tip cap");
       const salt = (a.salt ?? (() => crypto.getRandomValues(new Uint8Array(16))))();

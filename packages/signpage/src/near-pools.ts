@@ -4,7 +4,10 @@
 // - Where: Rhea's own exchange, get_number_of_pools then get_pools pages of NEAR_POOLS_PAGE, read on BOTH providers of
 //   the page's paced pair, each once a session per network and kept (a provider whose read failed is read again on the
 //   next quote, the other's list used meanwhile); nothing names the user, W or the token, so the read says nothing of
-//   what is bought. 9,015 pools on mainnet at 12 Nov 07:15Z, about 95 KB a page of 500.
+//   what is bought. 9,015 pools on mainnet at 12 Nov 07:15Z, about 95 KB a page of 500. Pages of 2000 (card
+//   near-quote-under-the-pace): 5 reads a provider, not 19; a page of 2000 from index 0 answered on both providers,
+//   1,225,371 bytes each as JSON-RPC sends it (the result a list of byte numbers), 2000 rows (12 Nov 22:27Z), a
+//   quarter of the helper's RPC_ANSWER_MAX (4 MiB).
 // - Which: SIMPLE_POOL rows of exactly two tokens, at most RHEA_QUOTE_POOLS_MAX in all: the token's pools with USDC
 //   and with wrapped NEAR, deepest first (by the other token's reserve), then the deepest wrapped NEAR / USDC pools for
 //   the route through wrapped NEAR. Each provider's list is ranked on its own and the two are taken in turn (its first,
@@ -17,7 +20,7 @@ import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/nea
 import { NEAR_RHEA, RHEA_QUOTE_POOLS_MAX } from "../../kit/src/near/rhea.ts";
 
 /** One get_pools page. */
-export const NEAR_POOLS_PAGE = 500;
+export const NEAR_POOLS_PAGE = 2000;
 /** The most pools read: past it the count is refused (mainnet held 9,015). */
 export const NEAR_POOLS_MAX = 50_000;
 /** Pages in flight at once (the provider's pace still spaces them). */

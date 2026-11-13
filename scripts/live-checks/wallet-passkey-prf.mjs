@@ -37,6 +37,10 @@
 //     out (wallet.md:922).
 //   In each signed-in step the store is read raw (card wallet-store): K_wrap a non-extractable AES-GCM CryptoKey, the
 //     seed record only { iv, ct }, localStorage empty.
+//   After each sign out (the prf run's Sign out, the phone's still tap; card sign-out-checks-read-the-store-after-the-
+//     reload): the page deletes the database and reloads, and the new load opens a fresh store. Read raw in that new
+//     document: signed out, no account, every object store empty but meta, meta holding k_wrap and the lane alone (FRESH_META), localStorage
+//     empty; and a block sealed under the K_wrap before the press does not open under the one after (a new key).
 //   no-prf run (hasPrf false; card wallet-typed-words, 06b ses.4, ses.5, ses.12, W:914): Create passkey stores a random
 //     seed, wrapped, with code_saved false and goes on in the same visit to the backup screen (data-signin="backup")
 //     with its account and 12 words drawn (counted, never read). Copy, Saved and Backup take Sign out's activation
@@ -68,6 +72,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { consoleError } from "./console-errors.mjs";
+import { HARNESS_UNRESOLVED, keptAfterSignOut, sealProbe, SIGN_OUT_NOW, signedOutClean, storeAfter } from "./signpage-signin-kinds.mjs";
 
 const KEY = "wallet-passkey-prf";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -206,7 +211,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
 /** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2), as app-chart-live's. */
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 /** The check on one recorded run: { verdict: PASS | FAIL | INCONCLUSIVE, pass, lines }. */
-export function judge(rec) {
+export function judge(rec, era = SIGN_OUT_NOW) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   // a press meant for the window: inside it, held(t) is the line as before; made on its control but never inside in
@@ -225,7 +230,8 @@ export function judge(rec) {
   say(s.open?.state === "signed-out" && !s.open?.account, `prf: opens signed out (${s.open?.state})`);
   say(s.create?.state === "signed-in" && HEX64.test(A ?? ""), `prf: Create passkey signs in (${s.create?.state}, account ${A ? "shown" : "none"})`);
   say(s.reload?.state === "signed-in" && s.reload?.account === A, `prf: a reload is the same account with no sheet (${s.reload?.state})`);
-  say(s.signout?.state === "signed-out" && !s.signout?.account && s.signout?.db === false, `prf: Sign out deletes the store (${s.signout?.state}, store ${s.signout?.db ? "kept" : "gone"})`);
+  if (era.signOut === "db") say(signedOutClean(s.signout, era), `prf: Sign out deletes the store (${s.signout?.state}, store ${s.signout?.db ? "kept" : "gone"})`);
+  else say(signedOutClean(s.signout), `prf: Sign out leaves the store with no account, no seed, no record and a new K_wrap, nothing in localStorage (${s.signout?.state}, ${signedOutText(s.signout)})`);
   say(s.signin?.state === "signed-in" && s.signin?.account === A && HEX64.test(A ?? ""), `prf: Use passkey signs in as the same account (${s.signin?.state}, ${s.signin?.account === A ? "same" : "other"})`);
   for (const k of ["create", "reload", "signin"]) {
     const t = s[k] ?? {};
@@ -267,8 +273,9 @@ export function judge(rec) {
   windowed("press", ph.tap, "signout", (t) => kept(t, P), "phone: a tap within 500 ms of Sign out shown does nothing", ph.tap?.after?.state);
   const ms = (t) => (typeof t?.withinMs === "number" ? `${Math.round(t.withinMs)} ms` : "no press");
   const st = ph.still ?? {};
-  say(st.pressed === true && st.pressOn === "signout" && st.withinMs >= PROTECT_MS && st.after?.state === "signed-out" && !st.after?.account && st.after?.db === false,
-    `phone: a still tap after 500 ms signs out (${ms(st)}, ${st.after?.state}, store ${st.after?.db ? "kept" : "gone"})`);
+  const still = st.pressed === true && st.pressOn === "signout" && st.withinMs >= PROTECT_MS && signedOutClean(st.after, era);
+  if (era.signOut === "db") say(still, `phone: a still tap after 500 ms signs out (${ms(st)}, ${st.after?.state}, store ${st.after?.db ? "kept" : "gone"})`);
+  else say(still, `phone: a still tap after 500 ms signs out, the store left with nothing but a new K_wrap (${ms(st)}, ${st.after?.state}, ${signedOutText(st.after)})`);
   const n = rec.noPrf ?? {};
   const bg = n.backupGate ?? {};
   say(bg.state === "signed-in" && HEX64.test(bg.account ?? "") && bg.signoutButtons === 0 && bg.codeSaved === "false",
@@ -312,7 +319,13 @@ export function judge(rec) {
   // the terminal's market reads refused 429, each matched by a 429 response the page read on that route
   const market = new Map(HELPER_MARKET.map((u) => [u, (Array.isArray(rec.marketRefused) ? rec.marketRefused : []).filter((x) => x?.url === u && x?.status === 429).length]));
   const marketLoad = new Map();
+  // the harness maps every name but its own to not found (launch(): MAP * ~NOTFOUND), so on a harness run a resource of
+  // a host SIGN_HOST may reach (its connect-src) that failed to resolve is the harness's refusal, never the page's error
+  // (as signpage-signin-kinds reads it, HARNESS_UNRESOLVED; since release 126's page reads those hosts as it signs in);
+  // any other line, and the same line on the live host, still is
+  let unresolved = 0;
   const errs = (rec.errors ?? []).filter((e) => {
+    if (rec.mode === "harness" && HARNESS_UNRESOLVED.test(e)) return (unresolved++, false);
     if (e === HELPER_SOLANA_429 && room > 0 && room-- > 0) return false;
     const u = HELPER_MARKET.find((m) => e === marketLine(m));
     if (u === undefined || market.get(u) <= 0) return true;
@@ -320,7 +333,7 @@ export function judge(rec) {
     marketLoad.set(u, (marketLoad.get(u) ?? 0) + 1);
     return false;
   });
-  const load = (rec.errors ?? []).length - errs.length - [...marketLoad.values()].reduce((a, b) => a + b, 0);
+  const load = (rec.errors ?? []).length - errs.length - unresolved - [...marketLoad.values()].reduce((a, b) => a + b, 0);
   say(errs.length === 0, `no page error or CSP violation (${errs.length})${errs.length ? `: ${errs.join("; ")}` : ""}`);
   if (load) lines.push(`WARN the helper's Solana route refused ${load} price or display read${load === 1 ? "" : "s"} for its shared budget (429), the run's load`);
   if (marketLoad.size) lines.push(`INCONCLUSIVE the helper refused the terminal's market reads 429 (${[...marketLoad].map(([u, n]) => `${new URL(u).pathname} ${n}`).join(", ")}): its window for this run's own pages, not the page's error`);
@@ -444,6 +457,10 @@ async function settled(page) {
     return { state: m.dataset.signin, account: m.dataset.account ?? null, codeSaved: m.dataset.codeSaved ?? null, db, seed, kWrap, seedWrapped, seedIv, localStorage: localStorage.length };
   });
 }
+const signedOutText = (a) => {
+  const k = keptAfterSignOut(a);
+  return k.length ? `kept: ${k.join("; ")}` : `nothing kept${a?.store?.reloaded ? ", read after the reload" : ""}`;
+};
 // Runs attempt(i), each try on a fresh draw its own setup makes, until its press lands inside the guard's window, TRIES
 // times at most (card live-press-window-retry): only a press made and timed but landed at or past the window is pressed
 // again, so a try inside it is the step's whatever the page did. The step is the last try's, with the earlier tries'
@@ -712,7 +729,9 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       record.prf.burst = await burst(page);
       record.prf.repeat = await repeatEnter(page, creds.cdp);
       await page.waitForTimeout(PROTECT_MS + 200);
+      const sealed = await sealProbe(page);
       steps.signout = await click(page, "signout");
+      steps.signout.store = await storeAfter(page, sealed);
       // the other tab hears the sign out
       await tab2.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signed-out", null, { timeout: WAIT_MS }).catch(() => {});
       record.prf.crossTab = await tab2.evaluate(() => ({ state: document.getElementById("signin").dataset.signin, account: document.getElementById("signin").dataset.account ?? null }));
@@ -832,12 +851,14 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
         const box = await b.boundingBox();
         const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
         await page.waitForTimeout(PROTECT_MS + 300);
+        const sealed = await sealProbe(page);
         const withinMs = await page.evaluate(() => performance.now() - globalThis.__ctDrawn);
         await touch("touchStart", [at]);
         await touch("touchEnd", []);
         const pressOn = await page.evaluate(() => globalThis.__ctPressOn ?? null);
         await page.waitForFunction(() => document.getElementById("signin")?.dataset.signin === "signed-out", null, { timeout: 3_000 }).catch(() => {});
         phone.still = { pressed: true, withinMs, pressOn, after: await settled(page) };
+        phone.still.after.store = await storeAfter(page, sealed);
       } else phone.still = { pressed: false, after: await settled(page) };
       record.phone = phone;
     } finally {

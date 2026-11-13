@@ -74,9 +74,12 @@ export interface PoolAddressDeps {
   /** The follow that takes a checked quote under request `id` on into X's pool; none, and no quote is answered. */
   /** The device's floor for a quote into X's pool to U_X, read at quote time on two RPCs (readSolanaPoolFloor); null
    *  when it has none for the chain. None given: no quote. */
-  floor?(chain: PoolChain, wallet: string): Promise<bigint | null>;
+  floor?(chain: PoolChain, wallet: string, signal?: AbortSignal): Promise<bigint | null>;
   checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string }): Promise<void>;
   fetch?: typeof fetch;
+  /** The page's stop for the quote's asks (card helper-says-why-a-vendor-refused, review P3). Once it aborts no ask
+   *  leaves (packages/wallet/src/deposit/quote.ts askDepositQuoteAgain). */
+  stop?: () => AbortSignal;
   now?: () => number;
 }
 
@@ -135,8 +138,8 @@ function aboveCap(amount: bigint, decimalsIn: number, reads: readonly [string, s
  * deposit tx at that RPC's latest blockhash; the fee is per signature, so the note's value, precommitment and the trees'
  * sizes do not move it), the higher of the two. A read that does not answer throws (the host answers down).
  */
-export async function readSolanaPoolFloor(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string): Promise<bigint> {
-  const { fee, rent } = await readSolanaPoolCosts(rpcs, program, wallet);
+export async function readSolanaPoolFloor(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string, signal?: AbortSignal): Promise<bigint> {
+  const { fee, rent } = await readSolanaPoolCosts(rpcs, program, wallet, signal);
   return solanaPoolDepositFloor(fee, rent);
 }
 
@@ -151,14 +154,18 @@ export async function readEvmPoolFloor(rpcs: readonly [EvmRpc, EvmRpc], pin: Evm
 }
 
 /** The reads readSolanaPoolFloor prices the floor at: the Rent sysvar on both RPCs, and the higher of the two RPCs' fee
- *  for a deposit message by `wallet`. */
-export async function readSolanaPoolCosts(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string): Promise<{ fee: bigint; rent: SolanaRent }> {
+ *  for a deposit message by `wallet`. `signal` aborted (the page signed out): no read starts after it, the fee read,
+ *  whose message names `wallet`, included; the call throws. */
+export async function readSolanaPoolCosts(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string, signal?: AbortSignal): Promise<{ fee: bigint; rent: SolanaRent }> {
+  signal?.throwIfAborted();
   const rent = await readSolanaRent(rpcs);
   const fees = await Promise.all(rpcs.map(async (rpc) => {
+    signal?.throwIfAborted();
     const bh = (await rpc("getLatestBlockhash", [{ commitment: "confirmed" }])) as { value?: { blockhash?: unknown } } | null;
     const blockhash = bh?.value?.blockhash;
     if (typeof blockhash !== "string") throw new Error("no blockhash");
     const { message } = solanaPoolDepositTx(program, wallet, { value: SOL_LADDER.min, precommitment: 1n }, { stateSize: 0, labelSize: 0 }, blockhash, rent);
+    signal?.throwIfAborted();
     const v = ((await rpc("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown } | null)?.value;
     if (!Number.isSafeInteger(v) || (v as number) < 0) throw new Error("no fee for the deposit message");
     return BigInt(v as number);
@@ -170,6 +177,11 @@ export async function readSolanaPoolCosts(rpcs: readonly [SolanaRpc, SolanaRpc],
 export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, unknown>, ctx?: { id: string }) => Deferred<"pool.address"> {
   return (params, ctx) => {
     let out: HostAnswer<"pool.address"> | HostRefusal = { error: "not_allowed" };
+    // the page's stop as the request arrives (re-review P2 of card helper-says-why-a-vendor-refused): a sign out swaps in
+    // a fresh one, so one read after an await would never be aborted. Read again after each await: stopped, nothing goes,
+    // and the answer is a signed-out page's, not_allowed (final; a read or an ask the sign out cut mid-flight answers down)
+    const stop = deps.stop?.();
+    const stopped = () => stop?.aborted === true;
     const after = (async () => {
       const chain = params.chain as PoolChain;
       const pool = deps.pools().find((p) => p.chain === chain);
@@ -177,7 +189,9 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       const asset = POOL_ADDRESS_ASSET[chain];
       const quoted = params.origin_asset !== undefined || params.amount !== undefined;
       await deps.named?.().catch(() => {});
+      if (stopped()) return void (out = { error: "not_allowed" });
       const before = usable(await deps.read(pool.scope), chain, pool.scope);
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!before) return;
       if (!quoted) return void (out = { result: { chain, address: before.wallet, asset } });
 
@@ -198,10 +212,11 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
 
       let floor: bigint | null;
       try {
-        floor = await deps.floor(chain, before.wallet);
+        floor = await deps.floor(chain, before.wallet, stop);
       } catch {
         return void (out = { error: "down" });
       }
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (floor === null) return;
 
       const now = deps.now ?? Date.now;
@@ -214,7 +229,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       let reply;
       try {
         // asked again on 1Click's no-liquidity answer, inside the one ask's window (card deposit-quote-no-liquidity)
-        reply = await askDepositQuoteAgain(request, deps.fetch);
+        reply = await askDepositQuoteAgain(request, deps.fetch, undefined, undefined, stop);
       } catch {
         return void (out = { error: "down" });
       }
@@ -245,6 +260,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
 
       // the address stands only while the records are the ones it was asked under
       const now2 = usable(await deps.read(pool.scope), chain, pool.scope);
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!now2 || !same(now2, before)) return;
       const quote = {
         deposit_address: checked.depositAddress,
@@ -255,6 +271,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
         time_estimate_s: timeEstimate,
       };
       await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id });
+      if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: { chain, address: before.wallet, asset, quote } };
     })().catch(() => {
       out = { error: "down" };

@@ -39,7 +39,8 @@
 // under a keyed name), never an EVM chain's pinned public list, the chain's public fallback or Solana's public endpoint.
 // None set, or none answering, is 503 upstream (a throttle still its 429), never a public provider's answer: the device's
 // EVM pool sync keeps old logs only when two operators agree, and a public provider it reads itself, relayed here, would
-// count as two. Any other value of `keyed` is the route's 400 method_not_allowed (server.ts), before any call.
+// count as two. NEAR's keyed URLs here are FastNEAR's alone (NEAR_SEAT: the page's other NEAR seat is dRPC). Any other
+// value of `keyed` is the route's 400 method_not_allowed (server.ts), before any call.
 //
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
@@ -50,7 +51,7 @@
 //                           params, and a method off the list in any request of a batch.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { HELPER_SOLANA_BLOCK_HEADER } from "@blindfill/kit";
-import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
+import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_CLIENTS, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 
@@ -65,8 +66,8 @@ export const RPC_TIMEOUT_MS = 10_000; // NEAR send_tx waits for execution; the s
  */
 export const RPC_CHAIN_MAX = 100;
 /**
- * Requests one caller draws per chain per window on a public endpoint, and on our keyed providers for a route the
- * signing page does not read (NEAR; RPC_PAGE_NEED names the others): what a device's
+ * Requests one caller draws per chain per window on a public endpoint (on our keyed providers each route's share is
+ * RPC_PAGE_NEED's): what a device's
  * one-transaction trade asks of one provider when it fills within its read burst, from the kit's own pattern
  * (packages/kit/src/trade/solana/send.ts): the send (l.6-8), the burst of C = B/5 = 8 status reads over the keyless
  * B = 40 (l.190-193), and a blockhash read, about 11, rounded up to 16.
@@ -84,12 +85,18 @@ export const RPC_CLIENT_MAX = 16;
  *     and 20 plus a trade's 22 helper reads with one: 42.
  *   - solana-marks (the mark lister) and base, robinhood (the EVM pools' holdings and history reads): 30. Only the
  *     page's background passes read them, never a trade's reads, and the page's budget per host holds those to 30.
- *   - near: none; the page reads NEAR on its own providers, so its share stays RPC_CLIENT_MAX.
+ *   - near (the page's FastNEAR seat, ?keyed=only, beside dRPC read device-direct; card near-quote-under-the-pace): 30.
+ *     The page's busiest 10 s on it is one buy's (packages/signpage/src/near-trade.ts), about 25 reads: the register
+ *     round's one-block pair, 10 (one final block, then W's key list, ft_balance_of, storage_balance_of,
+ *     storage_balance_bounds, get_lostfound_token, and the quote's metadata, get_frozenlist_tokens, get_pool_by_ids,
+ *     view_account); two read-backs of the registration, 2 each (the final block and storage_balance_of); the swap
+ *     round's pair and the baseline, 11. One sell's (near-sell.ts) is about the same. Rounded up to the other page
+ *     routes' 30.
  * The share of a chain on our keyed providers (keyedBudget) and the least RPC_BUDGET_<CHAIN> may name. Callers at their
  * full share at once: (the total less RPC_RESERVE) / this; on the deployed lists (summedTotal: Helius free's 100 and
  * QuickNode's half, 135) three on Solana.
  */
-export const RPC_PAGE_NEED: Readonly<Partial<Record<RpcChain, number>>> = { solana: 42, "solana-devnet": 42, "solana-marks": 30, base: 30, robinhood: 30 };
+export const RPC_PAGE_NEED: Readonly<Partial<Record<RpcChain, number>>> = { solana: 42, "solana-devnet": 42, "solana-marks": 30, base: 30, robinhood: 30, near: 30 };
 /**
  * Requests of one method the public Solana endpoint takes in 10 s from every caller together: "Maximum number of
  * requests per 10 seconds per IP for a single RPC: 40" (clusters.mdx:154, the same "Mainnet rate limits" list as
@@ -364,6 +371,19 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
 /** The one name the first route's mark scan (getProgramAccounts on /v1/rpc/solana) is sent to (card
  *  sol-pools-mainnet-pin): never a keyed spare or the public endpoint, so the two routes' answers are two companies'. */
 export const MARKS_A_ENV = "SOLANA_RPC_URL";
+/** The one operator POST /v1/rpc/near?keyed=only sends to (operatorOf; card near-quote-under-the-pace): the signing
+ *  page's other NEAR seat is dRPC, read device-direct, so this one is FastNEAR's key. */
+export const NEAR_SEAT = "fastnear.com";
+/**
+ * The most reads one caller's ?keyed=only NEAR seat takes in a UTC day (review P3-2 of e6c66cce3). Without it one
+ * caller at its share (30 a 10 s window) is 259,200 a day against FastNEAR's key's 322,580 (limits.ts KEYED_DAY), so
+ * two callers end the seat for every page until midnight. Past it the caller's 429 names RETRY_AFTER_MAX_S, which the
+ * page takes for the seat down and reads its keyless spare (packages/wallet/src/pace.ts nearSeatRpc). [design: 15,000:
+ * 300 trades a day of about 50 seat reads each (a buy 47, a session's first 53 with Rhea's pool pages:
+ * packages/signpage/test/near-seat-down.test.ts); 21 callers at it fill the key's day.]
+ */
+export const NEAR_SEAT_DAY = 15_000;
+const SEAT_DAY_MS = 86_400_000;
 /** The company each new keyed name is (card rpc-keyed-lists), whose pace it reads under (limits.ts KEYED_PACE). The
  *  existing names keep the pace they had (the chain's budget, rpc.ts createPacer). */
 export const KEYED_PROVIDER: Readonly<Record<string, KeyedProvider>> = {
@@ -435,7 +455,8 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
  *  caller's read when the configured one is held or has no room in its pace (callList). */
 /** `pacer`: another client's, when this one sends to the same keyed URL (card helper-crowd-429); else its own. */
 /** `sleep`: the waits' timer (card helper-rpc-wait-timing), a test's clock beside `now`. */
-type Deps = { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
+/** `seatClients`: how many callers the NEAR seat's day map holds (LIMIT_CLIENTS); smaller only in a test. */
+type Deps = { seatClients?: number; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 /** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
  *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint.
@@ -630,6 +651,27 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
+  // each caller's ?keyed=only NEAR reads this UTC day (NEAR_SEAT_DAY), in memory as the shares are; a new day clears it.
+  // At most seatClients callers a day (LIMIT_CLIENTS, as the shares): a new one past that is refused, so its page reads
+  // its spare (review P3-2 of 997ce7a7f). `take`: false only looks
+  const seatClients = deps.seatClients ?? LIMIT_CLIENTS;
+  const seatDay = { day: -1, used: new Map<string, number>() };
+  const seatDayTake = (client: string, n: number, take: boolean): boolean => {
+    const d = Math.floor(now() / SEAT_DAY_MS);
+    if (d !== seatDay.day) (seatDay.day = d), seatDay.used.clear();
+    const u = seatDay.used.get(client);
+    if (u === undefined && seatDay.used.size >= seatClients) return false;
+    if ((u ?? 0) + n > NEAR_SEAT_DAY) return false;
+    if (take) seatDay.used.set(client, (u ?? 0) + n);
+    return true;
+  };
+  // a read no provider answered (callList's own 429 or 503) gives its day back; a new day since has nothing to give back
+  const seatDayRefund = (client: string, n: number, day: number): void => {
+    const u = seatDay.used.get(client);
+    if (day !== seatDay.day || u === undefined) return;
+    if (u <= n) seatDay.used.delete(client);
+    else seatDay.used.set(client, u - n);
+  };
   const scanPrograms: Partial<Record<RpcChain, readonly string[]>> = Object.fromEntries(Object.entries(RPC_SCAN_PROGRAM_ENV).map(([c, name]) => [c, !env[name] ? [] : c === "solana-devnet" ? env[name]!.split(",") : [env[name]!]]));
   // a keyed Solana provider's slot: its fallback is the public endpoint, on a budget of its own
   const keyed = upstreams.solana.url !== SOLANA_PUBLIC;
@@ -829,9 +871,26 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
     // card evm-pool-leaves-any-source: the keyed URLs that hold a key, walked in order; past them 503, never a public
     // one. After the mark routes, which ?keyed=only never widens (review P3-1)
+    // card near-quote-under-the-pace: NEAR's keyed seat is FastNEAR's alone (NEAR_SEAT). The page trusts a NEAR read
+    // only when this seat and its other, dRPC read device-direct, agree byte for byte, so this seat must be another
+    // operator: never dRPC's URL or any other company's, and none of FastNEAR's set is 503
     if (keyedOnly) {
-      const own = upstreams[c].keyed.filter((k) => !k.keyless).map((k) => k.url);
-      return own.length === 0 ? UPSTREAM() : callList(c, own, forward, methods, client, reserved, by);
+      const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT)).map((k) => k.url);
+      if (own.length === 0) return UPSTREAM();
+      if (c !== "near" || client === undefined) return callList(c, own, forward, methods, client, reserved, by);
+      // the seat's day (review P3-3 of 997ce7a7f): looked at first, so a read past it costs no share; taken only once the
+      // share admits the read (a share refusal spends none of it); given back when the walk answers its own 429 or 503 (no
+      // provider answered: every one held past the wait, down or out)
+      const seat = client;
+      if (!seatDayTake(seat, methods.length, false)) return throttled(RETRY_AFTER_MAX_S, undefined, "near seat day");
+      let takenOn = -1;
+      const a = await callList(c, own, forward, methods, client, reserved, by, c, () => {
+        if (!seatDayTake(seat, methods.length, true)) return false;
+        takenOn = seatDay.day;
+        return true;
+      });
+      if ((a.status === 429 || a.status === 503) && takenOn >= 0) seatDayRefund(seat, methods.length, takenOn);
+      return a;
     }
     if (c === "solana" && keyed && companyUrls.has(upstreams.solana.url)) return solanaRest(forward, methods, client, reserved, by, c, 0);
     if (c === "solana" && keyed && upstreams.solana.keyed.length > 1 && (!slot.useKeyed() || budget.heldFor("solana") > 0)) return solanaRest(forward, methods, client, reserved, by, SPARES_KEY);
@@ -875,7 +934,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   // card rpc-keyed-lists: the walk of any chain's list (listOf: its keyed URLs, then the public spares; Solana's spares
   // after its first keyed one). `key`: the budget the read draws on, the chain's by default; null when it already drew
   // (Solana's first key failed it after its draw). `by`: the read's walk's end (WALK_MS, review L4)
-  async function callList(c: RpcChain, providers: readonly string[], forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = c): Promise<Answer> {
+  // `admit`: a last check once the share admitted the read (the NEAR seat's day, taken there); false refuses it
+  async function callList(c: RpcChain, providers: readonly string[], forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = c, admit?: () => boolean): Promise<Answer> {
     const holds = holdsAll;
     // review L4: a read that drew on the chain's budget before (Solana's first key failed it) draws its retry on the
     // spares' budget, never the chain's, which that key's 429 holds
@@ -887,6 +947,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       if (!(await holdOver(key, deadline, undefined, waitFor))) return throttled(budget.heldFor(key), undefined, `${key} held`);
       const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
       if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
+      if (admit !== undefined && !admit()) return throttled(RETRY_AFTER_MAX_S, undefined, "near seat day");
     }
     // a log read is never sent to a provider that refuses every one (LOGS_REFUSED): its 429 would hold it for the reads
     // it does answer

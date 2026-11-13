@@ -460,6 +460,23 @@ test("card sign-out-stops-the-pages-reads: both ways another tab's sign out reac
   assert.ok(at("restore?.signedOut();") < at("void testnet?.signedOut();"), "the restore stops before the lanes' waits end");
 });
 
+// review P3-4 of 997ce7a7f (card near-quote-under-the-pace): a NEAR seat taken for down is the session's
+// (../../wallet/src/pace.ts seatsUp; its behaviour in test/near-seat-down.test.ts): every sign out forgets it, another
+// tab's (both ways it reaches main.ts go through signedOutElsewhere) and this tab's once its store signed out
+test("review P3-4 of 997ce7a7f: every sign out forgets the NEAR seats taken for down (seatsUp)", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(src, /import \{[^}]*\bseatsUp\b[^}]*\} from "\.\.\/\.\.\/wallet\/src\/pace\.ts";/);
+  const moved = /function storeMoved\(e: WalletEvent\): void \{\n([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  assert.match(moved, /^  if \(e\.kind === "signout"\) signedOutElsewhere\(\);$/m, "storeMoved's sign out");
+  const onEvent = /onEvent: \(e\) => \{\n([\s\S]*?)\n    \},\n  \}\)\);/.exec(src)?.[1] ?? "";
+  assert.match(onEvent, /^      signedOutElsewhere\(\);$/m, "the store's signout event");
+  const elsewhere = /function signedOutElsewhere\(\): void \{\n([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  assert.match(elsewhere, /^  seatsUp\(\);\n  reloadSignedOut\(\);$/m, "another tab's sign out: seatsUp before the reload");
+  const own = /async function signOut\(\): Promise<void> \{\n([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  assert.match(own, /^  store = null;\n  seatsUp\(\);$/m, "this tab's sign out: seatsUp once the store signed out");
+  assert.equal(src.split("\n").filter((l) => /^\s*seatsUp\(\);$/.test(l)).length, 2, "the two calls, no other");
+});
+
 // The page's one gate (../../wallet/src/throttle.ts; its behaviour in test/sign-out-gate.test.ts and the store's `locked`
 // in ../../wallet/test/store.test.ts; in a browser, the live check signpage-shell's count of requests after each sign
 // out and after the next landing): main.ts makes the page's fetch the gate and never opens it. This tab's sign out
@@ -482,7 +499,7 @@ test("card sign-out-stops-the-pages-reads: the page's fetch is the gate; it clos
   const at = (x: string) => own.indexOf(x);
   assert.ok(at("leaving = true;") >= 0 && at("leaving = true;") < at("restore?.signedOut();"), "from the tap, no new kind runs");
   assert.ok(at("closeHostLanes") === at("s.signOut({ locked: () => closeHostLanes() })") + "s.signOut({ locked: () => ".length, "the gate closes only in the store's lock");
-  assert.match(own, /const still = hostLanesClosed\(\) \? undefined : await readSeed\(\)\.catch\(\(\) => undefined\);\n\s+if \(still !== undefined\) \{\n\s+still\.entropy\.fill\(0\);\n\s+leaving = false;\n\s+throw refused\.e;\n\s+\}\n\s+return reloadSignedOut\(\);/, "a refusal stays signed in only with the seed still stored, else reloads");
+  assert.match(own, /const still = hostLanesClosed\(\) \? undefined : await readSeed\(\)\.catch\(\(\) => undefined\);\n\s+if \(still !== undefined\) \{\n\s+still\.entropy\.fill\(0\);\n\s+leaving = false;\n(?:\s+\/\/[^\n]*\n)?\s+quotesSignedIn\(\);\n\s+throw refused\.e;\n\s+\}\n\s+return reloadSignedOut\(\);/, "a refusal stays signed in only with the seed still stored, else reloads");
   assert.equal(lines(own).at(-1), "reloadSignedOut();", "a sign out that landed reloads");
   assert.equal(lines(body("landed", "(l: Landing): Promise<void>"))[0], "if (hostLanesClosed()) return void (l.seed.entropy.fill(0), location.reload());", "a landing on a closed gate reloads");
   assert.match(src, /kinds: whileSignedIn\(follows!\.withFollow\(\{/, "every shell kind is refused while leaving");

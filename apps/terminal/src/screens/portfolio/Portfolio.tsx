@@ -12,6 +12,7 @@ import { ExitIc, Ic } from "./icons.tsx";
 import { activity, amount, axisLabels, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, signOf, stats, units, usd, walletRows } from "./model.ts";
 import type { CashPart, ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
 import { chainOf } from "../market/pads.ts";
+import { useDepositIntent } from "../deposit/source.tsx";
 import { usePortfolioSource } from "./source.tsx";
 import type { PortfolioAction, PortfolioSource } from "./source.tsx";
 import { W } from "./W.tsx";
@@ -356,10 +357,9 @@ function PositionsTile({ t, top, col, children }: { t: Totals; top: Row | null; 
 // Chain names are names, drawn as data.
 const CHAIN_NAME = { solana: "Solana", base: "Base", robinhood: "Robinhood", near: "NEAR" } as const;
 
-/** Each chain's pool (card balances-per-chain, v2 A1), in its own asset: the private balance from the device's own
- *  notes ("12.5 SOL"), the part ready to buy (a proof made) and the rest still being proved, in the same unit. No dollar
- *  figure: a SOL or ETH pool has none until a price read exists. No proof queue running: Ready and Pending are dashes,
- *  never 0. data-pools names the view, each row its chain, asset and base units, for the checks.
+/** Each chain's pool (card balances-per-chain, v2 A1), in its own asset: one Balance, the private balance from the
+ *  device's own notes ("12.5 SOL"). No dollar figure: a SOL or ETH pool has none until a price read exists. data-pools
+ *  names the view, each row its chain, asset and base units, for the checks.
  *  Each row with a balance ends in Withdraw (card app-pool-withdraw): an icon that opens SIGN_HOST's pool withdraw for
  *  that chain, where the amount and the address are typed; an open that did not happen draws its HopLine on the
  *  heading's row (portfolio.css), so the block never grows inside the desktop panel. */
@@ -367,29 +367,26 @@ function PoolRows({ p, src, phone }: { p: Pools; src: PortfolioSource; phone?: b
   const { locked } = useReturnHop();
   const on = src.snapshot.status === "ready" && locked === null;
   const cols = p.view === "rows" || p.view === "unread" || p.view === "loading";
-  const amt = (r: PoolRow, c: bigint | null, cls = ""): ReactNode => (c === null ? DASH : <span className={cls}>{amount(c, r.decimals)}</span>);
   return (
     <div className={`pools${phone ? " ph" : ""}`} data-pools={p.view}>
       <span className="plk"><W id="privateBalance" /></span>
       {cols ? (
-        <><span /><span className="plc"><W id="balance" /></span><span className="plc"><W id="ready" /></span><span className="plc"><W id="pending" /></span><span /></>
+        <><span /><span className="plc"><W id="balance" /></span><span /></>
       ) : (
         <span className="plst" data-pools-state={p.view}>{p.view === "offline" ? <W id="offline" /> : <W id="noBalance" />}</span>
       )}
       {p.view === "loading" &&
         [0, 1].map((i) => (
-          <div className="plr" key={i}><Sk w={64} h={12} /><Sk w={56} h={12} /><Sk w={48} h={12} /><Sk w={48} h={12} /><span /></div>
+          <div className="plr" key={i}><Sk w={64} h={12} /><Sk w={56} h={12} /><span /></div>
         ))}
       {p.view === "unread" && (
-        <div className="plr" data-pool="unread"><span className="t3">{"—"}</span><span className="num">{DASH}</span><span className="num">{DASH}</span><span className="num">{DASH}</span><span /></div>
+        <div className="plr" data-pool="unread"><span className="t3">{"—"}</span><span className="num">{DASH}</span><span /></div>
       )}
       {p.view === "rows" &&
         p.rows.map((r) => (
-          <div className="plr" key={r.chain} data-pool={r.chain} data-asset={r.asset} data-balance={r.balance.toString()} data-ready={r.ready === null ? "none" : r.ready.toString()} data-pending={r.pending === null ? "none" : r.pending.toString()}>
+          <div className="plr" key={r.chain} data-pool={r.chain} data-asset={r.asset} data-balance={r.balance.toString()}>
             <span className="ell">{CHAIN_NAME[r.chain]}</span>
             <span className="num">{amount(r.balance, r.decimals)} <span className="t3">{r.asset}</span></span>
-            <span className="num">{amt(r, r.ready, r.ready ? "gain" : "")}</span>
-            <span className="num t2">{amt(r, r.pending)}</span>
             <PoolWithdraw r={r} on={on} act={src.act} />
             <HopLine control={`pool-withdraw-${r.chain}`} />
           </div>
@@ -426,7 +423,6 @@ function WalletRows({ src, phone }: { src: PortfolioSource; phone?: boolean }) {
           <span className="ell">{CHAIN_NAME[w.chain]}</span>
           <span className="t2 adr" title={w.address}>{shortAddress(w.address)}</span>
           <span className="num">{holds(w)}</span>
-          <span />
           <ExportKey chain={w.chain} address={w.address} act={src.act} className="plw" size={12} />
         </div>
       ))}
@@ -754,6 +750,7 @@ export function Plate() {
 // ------------------------------------------------------------------------------------------------------------ phone
 
 function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: HeadProps) {
+  const intent = useDepositIntent();
   const pts = line(src.data.series, ui.range, now);
   const v = (c: bigint | null, sign: bigint | null): ReactNode => (loading ? <Sk w={70} h={18} /> : c === null || !t ? "—" : <span className={sgn(sign)}>{usd(c, true)}</span>);
   return (
@@ -761,7 +758,7 @@ function PhoneTop({ src, t, pools, loading, offline, rows, ui, setUi, now }: Hea
       <div className="lbl"><W id="total" />{offline && <span className="tag warn" data-offline-tag><W id="offline" /></span>}</div>
       <div className="tot num">{loading ? <Sk w={220} h={46} /> : usd(t?.total ?? 0n)}</div>
       <div className="macts">
-        <button type="button" className="mbtn buy" data-control="deposit" onClick={() => src.act({ kind: "deposit" })}><Ic name="arrowDown" size={14} /><W id="deposit" /></button>
+        <button type="button" className="mbtn buy" data-control="deposit" {...intent} onClick={() => src.act({ kind: "deposit" })}><Ic name="arrowDown" size={14} /><W id="deposit" /></button>
         <button type="button" className="mbtn ghost" data-control="withdraw" onClick={() => src.act({ kind: "withdraw" })}><Ic name="arrowUp" size={14} /><W id="withdraw" /></button>
       </div>
       <div className="chartw">

@@ -67,9 +67,7 @@ export const WORDS = {
   soldOf: draft("sold", "09-design-brief S8.35 [draft copy: 2/3 sold]"),
   partFilled: draft("Part filled", "app.md CH-045 (set partly filled); drawn when the kit gives no count"),
   partSold: draft("Part sold", "09-design-brief S8.35, drawn when the kit gives no count"),
-  // the pool's proof (card trade-box-pool, plan v2 A2): a terse label from state.pools, nothing drawn when none
-  proofReady: ok("Proof ready", "owner 8 Nov 07:55Z, kept; drafted on card trade-box-pool (plan v2 A2): the chain's pool has a proof ready to buy"),
-  proofMaking: ok("Making proof", "owner 8 Nov 07:55Z, kept; drafted on card trade-box-pool (plan v2 A2): notes landed, their first proof still being made"),
+  // proofReady ("Proof ready"), proofMaking ("Making proof"): 13 Nov 07:53Z: removed, the app names no proof
   // the buy route strip (card app-buy-route-strip): the spec's words (docs/drafts/buy-route-strip-spec.md, "Words on
   // screen", owner 3 Nov 10:11Z, the film's still) and the locked design's PV-01 and PV-02 (round-3 proposals, unsigned),
   // drafts until the words are picked (`poolBare` and `poolSuffix` kept 8 Nov). "Private balance" is Portfolio's approved entry. The venue is data: the pool's

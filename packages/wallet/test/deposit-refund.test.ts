@@ -205,3 +205,27 @@ test("card pool-deposit-op-txs: the relayer's 200 {tx_hash} is kept as heard (tx
     assert.deepEqual(r.log, ["quote", "sign", "record", "send"], what);
   }
 });
+
+// Review P3 of card helper-says-why-a-vendor-refused: the move's stop reaches the quote's re-ask. 1Click's 400 "Failed to
+// get quote" puts the ask in its 500 ms pause; the stop there ends the move: no second quote leaves, nothing signed or sent.
+test("the move's stop during the quote's re-ask pause: no second quote, the stop thrown, nothing signed or sent", async () => {
+  const log: string[] = [];
+  const stop = new AbortController();
+  const check: RefundMoveCheck<{ q: true }, { i: true }> = {
+    quote: () => ({ q: true }),
+    read: () => ({ depositAddress: "ab".repeat(32), amountIn: 25_000_000n, deadlineMs: NOW + 72 * 3_600_000 }),
+    intent: () => ({ i: true }),
+    sign: () => (log.push("sign"), { standard: "raw_ed25519", payload: "{}", public_key: "ed25519:1", signature: "ed25519:1" }),
+  };
+  const fetchFn = (async (url: string) => {
+    log.push(url === DEPOSIT_QUOTE_URL ? "quote" : url === RELEASE_INTENTS_URL ? "send" : url);
+    if (url === DEPOSIT_QUOTE_URL) setTimeout(() => stop.abort(new Error("stopped")), 50);
+    return Response.json(url === DEPOSIT_QUOTE_URL ? { message: "Failed to get quote" } : {}, { status: url === DEPOSIT_QUOTE_URL ? 400 : 200 });
+  }) as typeof fetch;
+  const p = runRefundMove(
+    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: 25_000_000n, registered: true }, { blockTimeNs: T + 5_000_000n, held: 25_000_000n, registered: true }], salt: "252812b3", priorMs: null, height: 223_478_949 },
+    { check, fetchFn, now: () => NOW, signal: stop.signal, openKey: async (fn) => (log.push("key"), fn(new Uint8Array(32))), record: async () => void log.push("record") },
+  );
+  await assert.rejects(p, /stopped/);
+  assert.deepEqual(log, ["quote"]);
+});

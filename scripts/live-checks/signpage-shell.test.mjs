@@ -290,10 +290,12 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     assert.ok(m, `${f}: ${re}`);
     return m.slice(1).map((u) => new URL(u).host);
   };
-  // the NEAR pair through the kit's public entry: its rule names the mainnet list in order, fastnear's first and drpc's last
+  // the NEAR pair through the kit's public entry: its rule names the mainnet list in order, fastnear's first, the
+  // helper's FastNEAR seat (card near-quote-under-the-pace, on TRADE_HELPER's host) third and drpc's last
   const { nearPairRule } = await import("../../packages/kit/src/index.ts");
   const near = nearPairRule("mainnet").match(/https:\/\/[^\s,]+/g);
-  assert.equal(near.length, 3, nearPairRule("mainnet"));
+  assert.equal(near.length, 4, nearPairRule("mainnet"));
+  assert.equal(new URL(near[2]).host, new URL(one("packages/signpage/src/trade.ts", /export const TRADE_HELPER = "([^"]+)"/).map((h) => `https://${h}`)[0]).host);
   const want = [
     ...one("packages/signpage/src/trade.ts", /export const TRADE_HELPER = "([^"]+)"/),
     ...one("packages/signpage/src/trade.ts", /export const SOLANA_PROVIDER_A = "([^"]+)"/),
@@ -301,7 +303,7 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     ...one("packages/signpage/src/trade.ts", /export const SOLANA_PUBLIC_SEAT: readonly string\[\] = Object\.freeze\(\[SOLANA_PROVIDER_A, "([^"]+)"\]\);/),
     ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
     new URL(near[0]).host,
-    new URL(near[2]).host,
+    new URL(near[3]).host,
     // each EVM pool's list on mainnet: exactly two per chain, so a third host the page adds fails here
     ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_POOL_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n\}\);/),
   ];
@@ -489,4 +491,61 @@ test("sign-out-stops-the-pages-reads planted: no reload, a late or a signed-in n
   r = clone(RELOAD);
   r.source = "live https://confidential.unrealized.trade";
   badLine(r, names);
+});
+
+// card signing-layer-says-when-it-closes (kit 1.13): an open kind answers { pending: true, closes: true } to an app whose
+// hello names 1.13, and the layer's close may post one { v: 1, type: "closed", id } for it. closes.chromium.phone: this
+// tree's build on the harness (13 Nov, Chrome 156): PASS. release128.<engine>.phone: the live page on release 128: PASS.
+// Then cases planted on the harness run.
+const CLOSES = ANSWERS.closes.chromium.phone;
+test("recorded runs on release 128's answers (the harness at this tree; the live page on Chromium and Firefox): PASS, each open answered pending with closes", () => {
+  for (const [name, rec] of [["closes.chromium.phone", CLOSES], ["release128.chromium.phone", ANSWERS.release128.chromium.phone], ["release128.firefox.phone", ANSWERS.release128.firefox.phone]]) {
+    const r = judge(rec);
+    assert.equal(r.ok, true, `${name}\n${r.lines.join("\n")}`);
+    const opens = rec.messages.filter((m) => m.data?.ok === true && m.data.result?.pending === true);
+    // Chromium: the two passkey opens, their two sign outs and the words; Firefox (no virtual authenticator): the words
+    assert.ok(opens.length === (rec.engine === "chromium" ? 5 : 1) && opens.every((m) => JSON.stringify(m.data.result) === '{"pending":true,"closes":true}'), `${name}: ${opens.length} opens`);
+  }
+  assert.match(ANSWERS.release128.chromium.phone.source, /^live https:\/\/confidential\.unrealized\.trade$/);
+  assert.equal(ANSWERS.release128.firefox.phone.engine, "firefox");
+});
+
+test("release 128 planted: an open answered closes false, closes not true, an extra key or not pending, a stray or second closed notice: FAIL", () => {
+  const st = CLOSES.steps;
+  const badLine = (rec, re) => {
+    const j = judge(rec);
+    assert.equal(j.ok, false, j.lines.join("\n"));
+    assert.ok(j.lines.some((l) => l.startsWith("BAD") && re.test(l)), `${re}\n${j.lines.join("\n")}`);
+  };
+  const okLine = (rec, re) => {
+    const j = judge(rec);
+    assert.equal(j.ok, true, j.lines.join("\n"));
+    assert.ok(j.lines.some((l) => l.startsWith("ok ") && re.test(l)), `${re}\n${j.lines.join("\n")}`);
+  };
+  const setResult = (rec, id, result) => {
+    const a = rec.messages.find((m) => m.data?.id === id && m.data.ok === true);
+    assert.ok(a, `an answer to ${id}`);
+    a.data.result = result;
+    return rec;
+  };
+  const passkey = /^BAD signin\.open passkey: answered pending, the layer opens/;
+  const words = /^BAD signin\.open words: answered pending/;
+  const thisTab = /^BAD Sign out in this tab, by its own Sign out button: the top window reloads/;
+  for (const result of [{ pending: true, closes: false }, { pending: true, closes: "true" }, { pending: true, closes: 1 }, { pending: true, closes: true, extra: true }, { pending: true, extra: true }, { pending: false, closes: true }, { closes: true }]) {
+    badLine(setResult(clone(CLOSES), st.passkeyIn.openId, result), passkey);
+    badLine(setResult(clone(CLOSES), st.wordsIn.openId, result), words);
+    badLine(setResult(clone(CLOSES), st.passkeyOut.openId, result), thisTab);
+  }
+  // the answer before kit 1.13 still counts: { pending: true }
+  okLine(setResult(clone(CLOSES), st.passkeyIn.openId, { pending: true }), /^ok  signin\.open passkey: answered pending/);
+  // one closed notice for an open answered closes: taken; a second for it, one for an id no open answered closes, or one
+  // with another key: another message
+  const every = /^BAD every message is ready, an answer, a state event or one closed notice/;
+  const notice = (rec, data) => (rec.messages.push({ t: st.saved.t + 600, data }), rec);
+  okLine(notice(clone(CLOSES), { v: 1, type: "closed", id: st.passkeyIn.openId }), /^ok  every message is ready, an answer, a state event or one closed notice for an open answered closes, each state exact \(\d+ states, 1 closed, 0 other\)$/);
+  badLine(notice(notice(clone(CLOSES), { v: 1, type: "closed", id: st.passkeyIn.openId }), { v: 1, type: "closed", id: st.passkeyIn.openId }), every);
+  badLine(notice(clone(CLOSES), { v: 1, type: "closed", id: st.first.id }), every);
+  badLine(notice(clone(CLOSES), { v: 1, type: "closed", id: "no-such-open" }), every);
+  badLine(notice(clone(CLOSES), { v: 1, type: "closed", id: st.passkeyIn.openId, result: {} }), every);
+  badLine(notice(setResult(clone(CLOSES), st.passkeyIn.openId, { pending: true }), { v: 1, type: "closed", id: st.passkeyIn.openId }), every);
 });

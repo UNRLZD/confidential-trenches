@@ -17,11 +17,12 @@
 //   2. create: W read first (a W that exists, made by the helper or by anyone's transfer, is not created again); else a
 //      quote (the helper's trade kind needs the trade even for the creation) and POST /v1/bind with no delegates;
 //      wallet_created and wallet_exists go on to the reads (W's read requires its key list to be its own key alone).
-//   3. register: W read; not registered on the token: W read then a quote (fresh, below), the registration alone
-//      signed and sent, then W read again until it reads registered (bounded). Registered already: skipped.
-//   4. swap: what W holds of the token read first (the baseline, kept in the record); a swap that left before (the
-//      record says so) and USDC no longer on W goes straight to 5. Else W read then a fresh quote, the swap round signed
-//      from that read and sent. The floor and the baseline go to the record before the swap is sent. A swap the relayer
+//   3. register: W's light read (deps.held: what it holds and its registration); not registered on the token: a fresh
+//      pair (below), the registration alone signed from it and sent, then W's light read again until it reads
+//      registered (bounded). Registered already: skipped.
+//   4. swap: a swap that left before (the record says so) and USDC no longer on W goes straight to 5. Else a fresh pair
+//      with the baseline (what W holds of the token, read at the pair's block), the swap round signed from that pair
+//      and sent. The floor and the baseline go to the record before the swap is sent. A swap the relayer
 //      answers carry_failed (it failed on chain) is signed again in the same run while W reads its USDC back in full and
 //      none of the token past the baseline: a fresh pair whose W read has W's nonce at or past the failed swap's (so no
 //      signed bytes go twice), its own floor from the new quote and the user's slippage, up to NEAR_BUY_SWAP_ROUNDS
@@ -32,8 +33,11 @@
 // Once the payout has landed the answer is never an error: the app would read it as nothing moved and offer a retry.
 // It is { stage: "sent", txs } with every transaction so far (the payout first), and the code and its cause go to the
 // log and the record; "filled" comes only from the device's own read of what W received.
-// Fresh (W read, then a quote at or after that read and at most NEAR_SWAP_READ_AGE_MAX blocks past it): what is
-// signed is from one moment; the pair is asked again, bounded, when a read or the quote throws or they are apart.
+// Fresh (deps.pair, card near-quote-under-the-pace: one final height read on both providers at one moment, then W, the
+// quote and the baseline all read at that block; the kit's readNearSwapPair): what is signed is from one block, and
+// the signer's age check (W read at or before the quote, at most NEAR_SWAP_READ_AGE_MAX blocks) still holds it. The
+// pair is asked again, bounded, when a read throws (a lag between the providers, a busy one) or the two are apart.
+// A light read (deps.held) is what a step waits on: what W holds and its registration, never what is signed.
 // The helper: the same body is sent again, bounded, while its answer is a "not yet" (in_flight, no_payout, upstream) or
 // no answer at all; the same signed bytes can land only once (W's nonce), and the creation is the helper's once per W.
 // relayer_low is not asked again. A refusal not in the trade kind's codes is not_known. No answer is ever a "not now"
@@ -48,6 +52,7 @@ import type { BuyRoute, SignpageResults, TradeStage, TxRef } from "../../kit/src
 import { NEAR_SWAP_READ_AGE_MAX, type SignedNearSwapDelegate } from "../../wallet/src/near/swap-delegate.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { SIGNPAGE_ROUTE_OUT } from "../../kit/src/signpage/schema.ts";
+import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { unitsOf } from "./pool-buy.ts";
 import { legCause } from "./pool-sell.ts";
 
@@ -99,6 +104,13 @@ export type NearBuyProgress = {
   fill?: { out: string; decimals: number };
 };
 
+/** What one pair read asks: the side, the token and the amount quoted, and the token whose balance of W's is the baseline. */
+export type NearPairAsk = Pick<RheaQuoteArgs, "side" | "token" | "amountIn"> & { wallet: string; baseline?: string };
+/** W and the quote at one block (the kit's NearSwapPair). */
+export type NearPair = { state: NearSwapWalletState; quote: RheaQuote; baseline?: bigint };
+/** W's light read: the fields of NearSwapWalletState the waits read. */
+export type NearHeldState = Pick<NearSwapWalletState, "account" | "height" | "held" | "registered">;
+
 export type NearBuyDeps = {
   /** The page's network (one per build). */
   network: NearNetwork;
@@ -114,6 +126,12 @@ export type NearBuyDeps = {
   readWallet(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState>;
   /** The kit's rheaQuote with the network, its pair and the candidate pools bound. */
   quote(a: Pick<RheaQuoteArgs, "side" | "token" | "amountIn">): Promise<RheaQuote>;
+  /** The kit's readNearSwapPair with the network, its pair and the candidate pools bound: W read and the quote at one
+   *  block (`baseline`: W's balance of that token at the same block). */
+  pair(a: NearPairAsk): Promise<NearPair>;
+  /** W's light read (the kit's readNearHeld: what W holds of the token it sends and whether it is registered on the one
+   *  it receives, at one block on both providers), for the waits that only ask "has it arrived"; absent: readWallet. */
+  held?(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearHeldState>;
   /** The wallet's signNearSwapDelegates with the seed and W's indexes bound (the binding derives W from them, the same
    *  W as `w.id`). */
   sign(given: readonly NearSwapCall[], request: NearSwapRequest, quote: RheaQuote, state: NearSwapWalletState, bound: string | null): Awaitable<SignedNearSwapDelegate[]>;
@@ -239,15 +257,17 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
     deps.log("payout", "payout landed");
     await progress({ stage: "sent" });
 
-    // W read on both providers, asked again (reads only) until `done` holds, at most NEAR_BUY_READ_TRIES times
-    const readUntil = async (side: "buy" | "sell", done: (s: NearSwapWalletState) => boolean, missed: string): Promise<NearSwapWalletState> => {
-      let last: NearSwapWalletState | null = null;
+    // W's light read on both providers (what it holds and its registration: nothing signed is taken from it), asked
+    // again (reads only) until `done` holds, at most NEAR_BUY_READ_TRIES times
+    const light = (side: "buy" | "sell"): Promise<NearHeldState> => (deps.held ? deps.held({ wallet: w.id, side, token: ask.token }) : deps.readWallet({ wallet: w.id, side, token: ask.token }));
+    const readUntil = async (side: "buy" | "sell", done: (s: NearHeldState) => boolean, missed: string): Promise<NearHeldState> => {
+      let last: NearHeldState | null = null;
       let thrown: unknown;
       for (let i = 0; i < NEAR_BUY_READ_TRIES; i++) {
         if (i > 0) await deps.wait(NEAR_BUY_READ_WAIT_MS);
-        let s: NearSwapWalletState;
+        let s: NearHeldState;
         try {
-          s = await deps.readWallet({ wallet: w.id, side, token: ask.token });
+          s = await light(side);
         } catch (e) {
           thrown = e;
           continue;
@@ -259,16 +279,18 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
       }
       return last === null ? fail("read_failed", thrown) : fail(missed);
     };
-    // W (buy side) read, then a quote of the request's own at or after that read and close to it; asked again, bounded
-    const fresh = async (want: (s: NearSwapWalletState) => boolean): Promise<{ s: NearSwapWalletState; q: RheaQuote }> => {
+    // W (buy side) and a quote of the request's own at ONE block (deps.pair); asked again, bounded, when it throws (a
+    // provider lagging or busy) or W's read does not yet show what `want` waits for. `baseline`: the token's balance of W's
+    // at the same block
+    const fresh = async (want: (s: NearSwapWalletState) => boolean, baseline?: string): Promise<{ s: NearSwapWalletState; q: RheaQuote; base?: bigint }> => {
       let thrown: unknown;
       for (let i = 0; i < NEAR_BUY_READ_TRIES; i++) {
         if (i > 0) await deps.wait(NEAR_BUY_READ_WAIT_MS);
         let s: NearSwapWalletState;
         let q: RheaQuote;
+        let base: bigint | undefined;
         try {
-          s = await deps.readWallet({ wallet: w.id, side: "buy", token: ask.token });
-          q = await deps.quote({ side: "buy", token: ask.token, amountIn: ask.amount });
+          ({ state: s, quote: q, baseline: base } = await deps.pair({ side: "buy", token: ask.token, amountIn: ask.amount, wallet: w.id, ...(baseline === undefined ? {} : { baseline }) }));
         } catch (e) {
           thrown = e;
           continue;
@@ -277,10 +299,11 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
         // a provider that has not caught up with the registration: both read again
         if (!want(s)) continue;
         if (q.network !== deps.network || q.side !== "buy" || q.token !== ask.token || q.amountIn !== ask.amount) return fail("quote_check_failed");
-        // one moment: the quote read at or after W's state and close to it, else both are read again
+        if (baseline !== undefined && typeof base !== "bigint") return fail("read_failed");
+        // one moment: the quote at or after W's state and close to it (one block from deps.pair), else both read again
         if (!(Number.isSafeInteger(q.height) && q.height >= s.height && q.height - s.height <= NEAR_SWAP_READ_AGE_MAX)) continue;
         deps.log("quote", "quote");
-        return { s, q };
+        return { s, q, ...(base === undefined ? {} : { base }) };
       }
       return fail("quote_check_failed", thrown);
     };
@@ -330,9 +353,12 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
     // W's calls signed for a fresh pair (W read, then the quote): the body the caller sends, the pair's quote and the
     // first call's nonce; null for a registration round whose fresh read finds W registered already (a provider that
     // caught up): nothing to sign. `spent`: a nonce W's key holds already (a failed swap's), read again until it does
-    const signedRound = async (registered: boolean, spent = -1n): Promise<{ q: RheaQuote; s: NearSwapWalletState; body: HelperBindTradeRequest; count: number; nonce: bigint } | null> => {
-      const { s, q } = await fresh((x) => (!registered || x.registered) && x.nonce >= spent);
+    // `baseline`: the token read at the pair's block (the swap's first round). Never signed for a W short of the amount.
+    const signedRound = async (registered: boolean, spent = -1n, baseline?: string): Promise<{ q: RheaQuote; s: NearSwapWalletState; base?: bigint; body: HelperBindTradeRequest; count: number; nonce: bigint } | null> => {
+      const { s, q, base } = await fresh((x) => (!registered || x.registered) && x.nonce >= spent, baseline);
       if (!registered && s.registered) return null;
+      // the payout's USDC is W's in full (the vault takes its fee from the note on top of the amount): less is not swapped
+      if (registered && s.held < ask.amount) return fail("not_funded");
       let calls: NearSwapCall[];
       let signed: SignedNearSwapDelegate[];
       try {
@@ -347,18 +373,18 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
         return fail("not_signed", e);
       }
       if (!Array.isArray(signed) || signed.length !== calls.length || typeof signed[0]?.nonce !== "bigint") fail("not_signed");
-      return { q, s, body: { trade: tradeOf(q), signed_delegates: signed.map((d) => d.signed_delegate) }, count: calls.length, nonce: signed[0]!.nonce };
+      return { q, s, ...(base === undefined ? {} : { base }), body: { trade: tradeOf(q), signed_delegates: signed.map((d) => d.signed_delegate) }, count: calls.length, nonce: signed[0]!.nonce };
     };
     // after a swap that failed on chain: W read (both sides, reads only, bounded) until its USDC is back in full (true),
     // or it holds the token past the baseline (false: the swap landed, what W received decides); unread: false
     const inputBack = async (before: bigint): Promise<boolean> => {
       for (let i = 0; i < NEAR_BUY_READ_TRIES; i++) {
         if (i > 0) await deps.wait(NEAR_BUY_READ_WAIT_MS);
-        let u: NearSwapWalletState;
-        let t: NearSwapWalletState;
+        let u: NearHeldState;
+        let t: NearHeldState;
         try {
-          u = await deps.readWallet({ wallet: w.id, side: "buy", token: ask.token });
-          t = await deps.readWallet({ wallet: w.id, side: "sell", token: ask.token });
+          u = await light("buy");
+          t = await light("sell");
         } catch {
           continue;
         }
@@ -385,37 +411,50 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
     } else deps.log("create", "wallet exists");
     await progress({ stage: "sent" });
 
-    // 3. W's registration on the token, as its own round
+    // 3. W's registration on the token, as its own round: W's light read decides; not registered, the round is signed
+    // from its own pair (a pair that reads W registered after all signs nothing), then read back
     step = "register";
-    let s = await readUntil("buy", () => true, "read_failed");
-    if (!s.registered) {
+    // what W holds of USDC, from the last read of W
+    let usdc: bigint;
+    const first = await readUntil("buy", () => true, "read_failed");
+    if (!first.registered) {
       // a second registration of one W is refused by the helper: the read decides after it
       const r = await signedRound(false);
       // a second registration (this W's carried before, or W reads registered) is already_registered: the read decides
       if (r !== null) await send(r.body, [r.count], new Set(["replayed", "trade_used", "already_registered"]));
-      s = await readUntil("buy", (x) => x.registered, "not_registered");
+      usdc = (await readUntil("buy", (x) => x.registered, "not_registered")).held;
       deps.log("register", "registered");
-    } else deps.log("register", "already registered");
+    } else {
+      usdc = first.held;
+      deps.log("register", "already registered");
+    }
     await progress({ stage: "sent" });
 
     // 4. the swap on a fresh pair, unless one that left before took W's USDC already
     step = "swap";
-    if (swap === undefined || s.held >= ask.amount) {
-      // the payout's USDC is W's in full (the vault takes its fee from the note on top of the amount): less is not swapped
-      if (s.held < ask.amount) fail("not_funded");
-      const before = (await readUntil("sell", () => true, "read_failed")).held;
+    if (swap === undefined || usdc >= ask.amount) {
+      if (usdc < ask.amount) fail("not_funded");
+      // the baseline of the token W holds: read at the first round's pair block
+      let before: bigint | null = null;
       // the nonce of the last swap that failed on chain (W's key holds it): the next round's read must reach it
       let spent = -1n;
       for (let round = 1; ; round++) {
-        const r = await signedRound(true, spent);
+        const r = await signedRound(true, spent, before === null ? ask.token : undefined);
         if (r === null) return fail("not_registered"); // a swap round is signed only once W reads registered
+        if (before === null) before = r.base!;
         // the venue and the pool the device checked and signs against (its first hop)
         const hop = r.q.hops[0];
         if (hop !== undefined) tell({ venue: "Rhea", pool: String(hop.pool) });
         // the floor of the pair the round signs and the baseline, in the record before the swap leaves: a stop after the
         // send finds them, and a resume reads what W received against them
         swap = { floor: nearFeeBuyerReceives(r.q.fee, r.q.exchange, nearSwapFloor(r.q.venueOut, ask.slippageBps)), before };
-        await progress({ stage: "sent", swap: { floor: swap.floor.toString(), before: swap.before.toString() } });
+        // the one write a send waits on: a swap whose floor is not on the record is never sent (a stop before the next
+        // write would leave a coin no floor counts), so nothing leaves and W's USDC goes home by the load's way home
+        try {
+          await deps.progress({ step, txs: txs.map((t) => ({ ...t })), stage: "sent", swap: { floor: swap.floor.toString(), before: swap.before.toString() } });
+        } catch (e) {
+          return fail("record_not_written", e);
+        }
         const sent = await send(r.body, [r.count], new Set(["replayed", "carry_failed"]));
         if (sent !== "carry_failed") {
           deps.log("swap", sent ?? "swapped");
@@ -449,14 +488,18 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
     };
     // W's last read: a run that ends below the floor (or on a later read that failed) with some of the token on W writes
     // what it received, so W is a position whatever code the record ends with
-    let last: NearSwapWalletState | null = null;
+    let last: NearHeldState | null = null;
     let held: bigint;
     try {
       held = (await readUntil("sell", (x) => ((last = x), x.held - got.before >= got.floor), "received_below_floor")).held;
     } catch (e) {
-      const seen = last as NearSwapWalletState | null;
-      if (seen !== null && seen.held > got.before) {
-        const { fill } = await fillOf(seen.held - got.before);
+      const lastRead = last as NearHeldState | null;
+      // the USDC decision apart from the coin's: W holding USDC of the least deposit is on its way home whatever it
+      // holds of the token (a swap that failed, a stranger's dust after it), so no fill is written that would make it a
+      // position the load never sends home; a USDC read that fails writes none either (the way home decides)
+      const usdcLow = lastRead !== null && lastRead.held > got.before ? await light("buy").then((u) => u.held < VAULT_CONSTANTS.MIN_DEPOSIT, () => false) : false;
+      if (lastRead !== null && lastRead.held > got.before && usdcLow) {
+        const { fill } = await fillOf(lastRead.held - got.before);
         if (fill) await progress({ stage: "sent", fill });
       }
       throw e;

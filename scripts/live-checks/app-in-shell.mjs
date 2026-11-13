@@ -406,7 +406,9 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // that frame's window only, with targetOrigin APP_HOST, signed in, at any time (the silent run's shell: only from its
 // ready on); keeps the app's path and query in its address on nav and reloads the top window on reload, as the real
 // shell does; refuses every other kind (not_allowed), but for the open kinds a check names in `opens`, which it answers
-// as the real shell answers an open it drew ({ pending: true }); every request the app sent is kept whole in
+// as the real shell answers an open it drew ({ pending: true }, and with `closes` { pending: true, closes: true }, as a
+// shell of kit 1.13 that tells the app when the open's layer closed; card app-lock-holds-until-the-layer-closes; the check
+// posts the closed notice itself); every request the app sent is kept whole in
 // window.__ctShellAsked for a check to read (card app-pool-withdraw). A check may name read kinds in `answers` (kind ->
 // result), which it answers as the real page answers them (card app-deposit-mount: deposit.assets, deposit.dry and
 // deposit.quote, the quote's deadline 72 h from the answer); an `answers` entry { error: <code> } is answered as the page
@@ -418,8 +420,10 @@ export async function collect({ launchers, shots, source, expect, routes }) {
 // are SIGN_HOST's _headers with section 4's frame rules: frame-ancestors 'none' and frame-src APP_HOST.
 const SIGNED_IN = { release: "harness-shell", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "1250.00", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const SIGNED_OUT = { release: "harness-shell", api: 1, signed_in: false, code_saved: false, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
-const shellJs = (kind, state = null, opens = [], answers = {}, holds = []) => `const APP = ${JSON.stringify(APP_HOST)};
+const shellJs = (kind, state = null, opens = [], answers = {}, holds = [], closes = false) => `const APP = ${JSON.stringify(APP_HOST)};
 const OPENS = ${JSON.stringify(opens)};
+const OPENED = ${JSON.stringify(closes ? { pending: true, closes: true } : { pending: true })};
+window.__ctShellCloses = ${closes};
 const HOLDS = ${JSON.stringify(holds)};
 const ANSWERS = ${JSON.stringify(answers)};
 let DEPOSIT = null;
@@ -458,7 +462,7 @@ addEventListener("message", (e) => {
     read.deadline = new Date(Date.now() + 72 * 3600000).toISOString();
   }
   const refused = read && typeof read.error === "string" ? { v: 1, id: e.data.id, ok: false, error: { code: read.error } } : null;
-  const answer = e.data.type === "state" ? ok(STATE) : nav || e.data.type === "reload" ? ok({}) : refused ? refused : read ? ok(read) : OPENS.includes(e.data.type) ? ok({ pending: true }) : no;
+  const answer = e.data.type === "state" ? ok(STATE) : nav || e.data.type === "reload" ? ok({}) : refused ? refused : read ? ok(read) : OPENS.includes(e.data.type) ? ok({ ...OPENED }) : no;
   if (nav) history.replaceState(null, "", location.origin + new URL(APP + p).pathname + new URL(APP + p).search);
   f.contentWindow.postMessage(answer, APP);
   if (e.data.type === "reload") location.reload();
@@ -600,7 +604,7 @@ export async function kitRefuses(state) {
   }
 }
 
-export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, holds = [], near = nearChain() } = {}) {
+export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, holds = [], closes = false, near = nearChain() } = {}) {
   // the state the shell sends, as the kit's client reads it: a fixture the real app would drop fails here, by name
   const why = await kitRefuses(state ?? (kind === "tap" ? SIGNED_OUT : SIGNED_IN));
   if (why) throw new Error(`${KEY}: the planted state: ${why}`);
@@ -613,7 +617,7 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
   };
   const appRules = rulesOf(readFileSync(path.join(appBuild, "_headers"), "utf8"));
   const signRules = rulesOf(shellHeaders(readFileSync(path.join(REPO, "packages/signpage/public/_headers"), "utf8")));
-  const js = shellJs(kind, state, opens, answers, holds);
+  const js = shellJs(kind, state, opens, answers, holds, closes);
   const pools = await poolAnswers();
   const shellFiles = { "/shell.js": js, "/shell.css": SHELL_CSS };
   const headers = (rules, p, type) => ({ ...Object.fromEntries(headersFor(rules, p)), "content-type": type });

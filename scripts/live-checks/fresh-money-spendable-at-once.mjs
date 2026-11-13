@@ -30,7 +30,7 @@ const Q = "[`'\"]"; // a string's quote, as the minifier picks it
 const s = (w) => `${Q}${w}${Q}`;
 export const MARKS = Object.freeze({
   "the queue proves a note of any kind that landed this epoch on the newest root": new RegExp(
-    `instanceof Error\\?${I}\\.failed\\.push\\(\\{noteId:${I}\\.id,error:${I}\\(${I}\\)\\}\\):${I}\\.leaf\\.leafIndex<BigInt\\(${I}\\.stateTree\\.size\\)&&${I}\\.push\\(\\{n:${I},trees:${I},root:${s("newest")}\\}\\)`,
+    `instanceof Error\\?${I}\\.failed\\.push\\(\\{noteId:${I}\\.id,error:${I}\\(${I}\\)(?:,reason:${s("network")})?\\}\\):${I}\\.leaf\\.leafIndex<BigInt\\(${I}\\.stateTree\\.size\\)&&${I}\\.push\\(\\{n:${I},trees:${I},root:${s("newest")}\\}\\)`,
   ),
   "a withdraw part proves a fresh note on the newest root with no boundary wait": new RegExp(
     `=${s("epoch")};for\\(let ${I}=!1;!${I}\\(${I}\\);\\)\\{let ${I}=await ${I}\\(${I}\\+1n,\\{newest:!0\\}\\);if\\(${I}\\(${I}\\)\\)\\{${I}=${I},${I}=${s("newest")}`,

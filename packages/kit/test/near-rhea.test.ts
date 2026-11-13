@@ -12,8 +12,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { onTestClock } from "./test-clock.ts";
 import { rheaQuote, RheaQuoteRefused, type RheaRefusalCode } from "@blindfill/kit";
-import { NEAR_RHEA, rheaSimpleOut, type RheaPool } from "../src/near/rhea.ts";
+import { NEAR_RHEA, nearFinal, rheaSimpleOut, type RheaPool } from "../src/near/rhea.ts";
+import { readNearHeld, readNearSwapPair, readNearSwapWallet } from "../src/trade/near/wallet.ts";
 import { NEAR_PLAIN_TOKEN_CODES, NEAR_TOKEN_NO_FEE, nearPlainTokenFee, nearSellAmount, nearTokenFee, nearTokenFeeView } from "../src/near/token-fee.ts";
 
 const FAST = "https://rpc.mainnet.fastnear.com";
@@ -342,4 +344,137 @@ test("F6 a token under no listed launchpad: 0% only for a pinned plain code, rea
 
 test("F4 the exchange and wNEAR ids per network are the UNRLZD trading terminal's venue facts", () => {
   assert.deepEqual(NEAR_RHEA, { mainnet: { exchange: "v2.ref-finance.near", wrap: "wrap.near" }, testnet: { exchange: "ref-finance-101.testnet", wrap: "wrap.testnet" } });
+});
+
+// ---------- the two final heights, of one moment (card near-quote-under-the-pace) ----------
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** One provider on a chain that moves a block every BLOCK_MS: its "final" is the chain's tip less `behind`; each query
+ *  waits `turnMs` for the provider's turn first (a paced provider), and its reserve() waits for that turn once and gives
+ *  back a sender that asks at once. */
+const BLOCK_MS = 20;
+function clocked(w: World, behind: readonly [number, number], turnMs: readonly [number, number]) {
+  const t0 = performance.now();
+  const tip = () => w.height + Math.floor((performance.now() - t0) / BLOCK_MS);
+  return pair(w).map((r, i) => {
+    const at = (p: Record<string, unknown>) => {
+      if (!("finality" in p)) return p;
+      const { finality: _f, ...q } = p;
+      return { ...q, block_id: tip() - behind[i]! };
+    };
+    const now = { name: r.name, query: (p: Record<string, unknown>, s?: AbortSignal) => r.query(at(p), s) };
+    const turn = turnMs[i]!;
+    return {
+      name: r.name,
+      async query(p: Record<string, unknown>, s?: AbortSignal) {
+        await sleep(turn);
+        return now.query(p, s);
+      },
+      ...(turn > 0 ? { reserve: async () => (await sleep(turn), now) } : {}),
+    };
+  }) as unknown as Parameters<typeof rheaQuote>[0]["rpcs"];
+}
+
+test("Q8 the two final heights are of one moment: a provider's wait for its turn is never read as lag; a real lag still refuses", () => onTestClock(async () => {
+  const w = world();
+  // FastNEAR's turn 6 blocks off, dRPC's at once: both turns are taken before either height is asked
+  const q = await rheaQuote({ network: "mainnet", rpcs: clocked(w, [0, 0], [6 * BLOCK_MS, 0]), side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9] });
+  assert.ok(q.height >= w.height);
+  // a provider 6 blocks behind the chain, its turn at once: the chain's lag, refused
+  await refused(rheaQuote({ network: "mainnet", rpcs: clocked(w, [0, 6], [0, 0]), side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9] }), "lag");
+}));
+
+// ---------- W and the quote at one block (card near-quote-under-the-pace) ----------
+const WID = "0".repeat(64);
+function walletWorld(): World {
+  const w = world();
+  w.views[`${USDC}.ft_balance_of`] = "5000000";
+  w.views[`${RHEA}.ft_balance_of`] = "7";
+  w.views[`${RHEA}.storage_balance_of`] = null;
+  w.views[`${RHEA}.storage_balance_bounds`] = { min: "1250000000000000000000", max: null };
+  w.views[`${EX}.get_lostfound_token`] = "0";
+  return w;
+}
+/** The world's pair, W's key list answered, every query counted per provider and per kind ("final" or the method). */
+/** The world's pair with W's key list answered (W's own implicit key, nonce 40). */
+function withKeys(w: World, tweak?: Tweak) {
+  return pair(w, tweak).map((r) => ({
+    name: r.name,
+    async query(p: Record<string, unknown>, s?: AbortSignal) {
+      if (p.request_type !== "view_access_key_list") return r.query(p, s);
+      const height = "finality" in p ? w.height : (p.block_id as number);
+      return { jsonrpc: "2.0", id: "1", result: { block_height: height, block_hash: height === w.height ? w.hash : `Other${height}`, keys: [{ public_key: `ed25519:${"1".repeat(32)}`, access_key: { nonce: 40, permission: "FullAccess" } }] } };
+    },
+  })) as unknown as Parameters<typeof rheaQuote>[0]["rpcs"];
+}
+/** withKeys, every query counted per provider and per kind ("final" or the method). */
+function countedPair(w: World) {
+  const asked: { name: string; what: string }[] = [];
+  const rpcs = withKeys(w).map((r) => ({
+    name: r.name,
+    query: (p: Record<string, unknown>, s?: AbortSignal) => (asked.push({ name: r.name, what: "finality" in p ? "final" : String(p.method_name ?? p.request_type) }), r.query(p, s)),
+  })) as unknown as Parameters<typeof rheaQuote>[0]["rpcs"];
+  return { rpcs, asked };
+}
+
+test("P1 W and the quote at one block: one final height on each provider, then both reads at it, the baseline too", async () => {
+  const w = walletWorld();
+  const { rpcs, asked } = countedPair(w);
+  const p = await readNearSwapPair({ network: "mainnet", rpcs, wallet: WID, side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9], baseline: RHEA });
+  assert.equal(p.state.height, p.quote.height);
+  assert.equal(p.state.blockHash, p.quote.blockHash);
+  assert.equal(p.baseline, 7n);
+  assert.equal(p.state.held, 5_000_000n);
+  for (const name of [FAST, DRPC]) {
+    const mine = asked.filter((x) => x.name === name);
+    assert.equal(mine.filter((x) => x.what === "final").length, 1, `${name}: one final height for the pair`);
+    // W: keys, ft_balance_of, storage_balance_of, storage_balance_bounds, get_lostfound_token; the quote: metadata,
+    // get_frozenlist_tokens, get_pool_by_ids, view_account; the baseline: ft_balance_of
+    assert.equal(mine.length, 11, `${name}: ${JSON.stringify(mine.map((x) => x.what))}`);
+  }
+});
+
+test("P2 a final height no nearFinal read on these providers is refused; another block in one of the pair's reads is refused", async () => {
+  const w = walletWorld();
+  const { rpcs } = countedPair(w);
+  const forged = Object.freeze({ network: "mainnet" as const, height: w.height - 500 });
+  await refused(rheaQuote({ network: "mainnet", rpcs, side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9], final: forged }), "input", /nearFinal/);
+  await refused(readNearSwapWallet({ network: "mainnet", rpcs, wallet: WID, side: "buy", token: RHEA, final: forged }), "input", /nearFinal/);
+  const other = countedPair(w).rpcs;
+  const f = await nearFinal("mainnet", other);
+  await refused(rheaQuote({ network: "mainnet", rpcs, side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9], final: f }), "input", /nearFinal/);
+  // the same final for both reads, one provider answering W's balance at another block hash
+  const forked = withKeys(w, (name, p, a) => (name === DRPC && p.method_name === "ft_balance_of" ? { ...a, result: { ...(a.result as object), block_hash: "Fork" } } : a));
+  await refused(readNearSwapPair({ network: "mainnet", rpcs: forked, wallet: WID, side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9] }), "disagree");
+});
+
+test("P3 what W holds and its registration, read alone: one final and one or two views on each provider, equal on both", async () => {
+  const w = walletWorld();
+  const { rpcs, asked } = countedPair(w);
+  const h = await readNearHeld({ network: "mainnet", rpcs, wallet: WID, token: USDC, on: RHEA });
+  assert.deepEqual([h.held, h.registered, h.height], [5_000_000n, false, w.height]);
+  assert.equal(asked.length, 6);
+  const only = await readNearHeld({ network: "mainnet", rpcs, wallet: WID, token: RHEA });
+  assert.deepEqual([only.held, "registered" in only], [7n, false]);
+  await refused(readNearHeld({ network: "mainnet", rpcs: pair(w, (name, p, a) => (name === DRPC && p.method_name === "ft_balance_of" ? { ...a, result: { ...(a.result as { result: number[] }), result: bytes("8") } } : a)), wallet: WID, token: RHEA }), "disagree");
+});
+
+// review P3-5 of e6c66cce3: the pair's and the light read's block rules, each planted with both providers agreeing, so
+// only that rule can refuse it
+const QUOTE_VIEWS = new Set(["metadata", "get_frozenlist_tokens", "get_pool_by_ids"]);
+const atHash = (hash: string, when: (p: Record<string, unknown>) => boolean): Tweak => (_name, p, a) => (when(p) ? { ...a, result: { ...(a.result as object), block_hash: hash } } : a);
+test("P4 W's read and the quote at one height but two block hashes (both providers agreeing on each): refused disagree, never a pair", async () => {
+  const w = walletWorld();
+  const quoteElsewhere = withKeys(w, atHash("QuoteHash111111111111111111111111111111111111", (p) => p.request_type === "view_account" || (p.account_id === EX && QUOTE_VIEWS.has(String(p.method_name)))));
+  await refused(readNearSwapPair({ network: "mainnet", rpcs: quoteElsewhere, wallet: WID, side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9] }), "disagree", /not of one block/);
+  // the baseline's balance at another hash of the same height
+  const baseElsewhere = withKeys(w, atHash("BaseHash1111111111111111111111111111111111111", (p) => p.method_name === "ft_balance_of" && p.account_id === RHEA));
+  await refused(readNearSwapPair({ network: "mainnet", rpcs: baseElsewhere, wallet: WID, side: "buy", token: RHEA, amountIn: 1_000_000n, pools: [4512, 6458, 9], baseline: RHEA }), "disagree", /not of one block/);
+});
+
+test("P5 readNearHeld: an answer at another height (both providers), one provider at another block hash, or the second view at another hash (both): each refused", async () => {
+  const w = walletWorld();
+  const read = (tweak: Tweak) => readNearHeld({ network: "mainnet", rpcs: pair(w, tweak), wallet: WID, token: USDC, on: RHEA });
+  await refused(read((_n, p, a) => (p.method_name === "ft_balance_of" ? { ...a, result: { ...(a.result as object), block_height: w.height - 1 } } : a)), "rpc", /not at block/);
+  await refused(read((n, p, a) => (n === DRPC && p.method_name === "ft_balance_of" ? { ...a, result: { ...(a.result as object), block_hash: "Fork" } } : a)), "disagree", /two blocks/);
+  await refused(read(atHash("Other1111111111111111111111111111111111111111", (p) => p.method_name === "storage_balance_of")), "disagree", /two blocks/);
 });

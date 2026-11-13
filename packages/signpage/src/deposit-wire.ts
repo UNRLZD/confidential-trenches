@@ -39,6 +39,8 @@ export interface DepositWireDeps {
   named?(): Promise<unknown>;
   priced?: DepositQuoteKindContext["priced"];
   fetch?: typeof fetch;
+  /** The page's stop on sign out, read at each request (src/main.ts quotesSignedOut): its quote sends nothing once it aborts. */
+  stop?: () => AbortSignal;
   now?: () => number;
   /**
    * The quote checked under request `id`, before its answer goes out (src/deposit-follow.ts quoted): U named by the
@@ -64,11 +66,18 @@ const same = (a: DepositRecord, b: DepositRecord): boolean => a.scope === b.scop
 export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string, unknown>, ctx?: { id: string }) => Deferred<"deposit.quote"> {
   return (params, ctx) => {
     let out: HostAnswer<"deposit.quote"> | HostRefusal = { error: "not_allowed" };
+    // the page's stop as the request arrives (re-review P2 of card helper-says-why-a-vendor-refused): a sign out swaps in
+    // a fresh one, so one read after an await would never be aborted. Read again after each await: stopped, nothing goes,
+    // and the answer is a signed-out page's, not_allowed (final; a read or an ask the sign out cut mid-flight answers down)
+    const stop = deps.stop?.();
+    const stopped = () => stop?.aborted === true;
     const after = (async () => {
       await deps.named?.().catch(() => {});
+      if (stopped()) return void (out = { error: "not_allowed" });
       const scope = deps.scope();
       if (scope === null) return;
       const before = usable(await deps.read(scope), scope);
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!before) return;
       const got = await depositQuoteKind(params, {
         seed: before.status,
@@ -76,14 +85,17 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
         priced: deps.priced,
         fetch: deps.fetch,
         now: deps.now,
+        signal: stop,
       });
       if (!got.ok) return void (out = { error: got.code });
       // the address stands only while the records are the ones it was asked under
       const now = usable(await deps.read(scope), deps.scope());
+      if (stopped()) return void (out = { error: "not_allowed" });
       if (!now || !same(now.deposit, before.deposit)) return;
       // no request id, no follow: no address goes out
       if (ctx === undefined) return;
       await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id });
+      if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: got.result };
     })().catch(() => {
       // a read that threw (the records not answering) is no rule's refusal: "not now" (card pool-read-down), which
@@ -112,13 +124,13 @@ function running<K extends "deposit.assets" | "deposit.dry">(
   deadlineMs: number,
 ): Running<K> {
   let out: HostAnswer<K> | HostRefusal = { error: "down" };
-  const deadline = AbortSignal.timeout(deadlineMs);
+  const deadline = deps.signal ? AbortSignal.any([deps.signal, AbortSignal.timeout(deadlineMs)]) : AbortSignal.timeout(deadlineMs);
   const base = deps.fetch ?? fetch;
   // every request of the read carries the deadline beside its own signal
   const cut = ((url: string | URL | Request, init?: RequestInit) =>
     base(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline })) as typeof fetch;
   const late = new Promise<null>((ok) => (deadline.aborted ? ok(null) : deadline.addEventListener("abort", () => ok(null), { once: true })));
-  const after = Promise.race([run({ ...deps, fetch: cut }), late]).then(
+  const after = Promise.race([run({ ...deps, fetch: cut, signal: deadline }), late]).then(
     (got) => void (out = got === null ? { error: "down" } : got.ok ? { result: got.result } : { error: got.code }),
     () => void (out = { error: "down" }),
   );
@@ -130,13 +142,24 @@ function running<K extends "deposit.assets" | "deposit.dry">(
  * deposit.dry. Neither reads the store or the seed, so the frame and the top-level page answer them alike, signed in or
  * not: the requests name the public placeholder, never U. Each runs at most `deadlineMs` (DEPOSIT_READ_DEADLINE_MS).
  */
-export function depositReadHosts(deps: DepositReadContext & { deadlineMs?: number } = {}): {
+export function depositReadHosts(deps: Omit<DepositReadContext, "signal"> & { deadlineMs?: number; stop?: () => AbortSignal } = {}): {
   "deposit.assets": () => Running<"deposit.assets">;
   "deposit.dry": (params: Record<string, unknown>) => Running<"deposit.dry">;
 } {
   const ms = deps.deadlineMs ?? DEPOSIT_READ_DEADLINE_MS;
+  // review P3 of card helper-says-why-a-vendor-refused: a deposit.dry ends the one before it (the sheet keeps only the
+  // newest amount's answer), and the page's sign out ends every read; neither sends another ask
+  let dry: AbortController | null = null;
+  const stopped = (own?: AbortSignal) => {
+    const all = [own, deps.stop?.()].filter((s): s is AbortSignal => s !== undefined);
+    return all.length === 0 ? undefined : AbortSignal.any(all);
+  };
   return {
-    "deposit.assets": () => running<"deposit.assets">((ctx) => depositAssetsKind(ctx), deps, ms),
-    "deposit.dry": (params) => running<"deposit.dry">((ctx) => depositDryKind(params, ctx), deps, ms),
+    "deposit.assets": () => running<"deposit.assets">((ctx) => depositAssetsKind(ctx), { ...deps, signal: stopped() }, ms),
+    "deposit.dry": (params) => {
+      dry?.abort(new DOMException("a newer deposit.dry", "AbortError"));
+      dry = new AbortController();
+      return running<"deposit.dry">((ctx) => depositDryKind(params, ctx), { ...deps, signal: stopped(dry.signal) }, ms);
+    },
   };
 }

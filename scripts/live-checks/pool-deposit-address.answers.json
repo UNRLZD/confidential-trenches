@@ -1,17 +1,19 @@
 {
   "_note": {
-    "good": "facts() over the build of card pool-deposit-follow on main 3a351685 (the follow wired, the floor read passed): PASS",
+    "good": "facts() over the build of card pool-deposit-follow on main 3a351685 (the follow wired, the floor read passed): PASS; re-recorded by card helper-says-why-a-vendor-refused on its build at c735c9486 (main 697ba9b91 merged; a stopped quote answers not_allowed; pool.address handed the page stop, read once, checked after each wait and the follow, handed to the floor read and on to its RPC reads)",
     "bad": "facts() over main 7d70c9fd's build, before this card: FAIL, each mark named",
-    "liveBefore": "SIGN_HOST read at 2026-11-08 before this card's deploy: FAIL, each mark named"
+    "liveBefore": "SIGN_HOST read at 2026-11-08 before this card's deploy: FAIL, each mark named",
+    "beforeStop": "SIGN_HOST read at 2026-11-13T00:08:02.513Z (release 125, pool.address with no stop): FAIL on unfollowed and stopped"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Dag0rSWPXOaLdRbi52nSQr0qxs9MDQCh5OuDtrcycwLRFkiKvf0gi6s9qDRyLM5A\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-Dag0rSWPXOaLdRbi52nSQr0qxs9MDQCh5OuDtrcycwLRFkiKvf0gi6s9qDRyLM5A",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Ih1DRh5q6A9OMOHpcNLGDYyHpsMsmkW4c0niXuEE+f23IAB2YdKUbFFG92sqBM8G\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Ih1DRh5q6A9OMOHpcNLGDYyHpsMsmkW4c0niXuEE+f23IAB2YdKUbFFG92sqBM8G",
     "namerPools": true,
     "namesEach": true,
     "namesRecord": true,
     "sameChain": true,
     "unfollowed": true,
+    "stopped": true,
     "floored": true
   },
   "bad": {
@@ -31,5 +33,15 @@
     "namesRecord": false,
     "sameChain": false,
     "unfollowed": false
+  },
+  "beforeStop": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-xhGWqj+mSNnlpkeN0Pg91FQK+TxnUDTHnC0QkCDmOH2oHLgei9kQNFAYFLqwMC7s\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-xhGWqj+mSNnlpkeN0Pg91FQK+TxnUDTHnC0QkCDmOH2oHLgei9kQNFAYFLqwMC7s",
+    "namerPools": true,
+    "namesEach": true,
+    "namesRecord": true,
+    "sameChain": true,
+    "unfollowed": false,
+    "floored": true
   }
 }

@@ -17,7 +17,7 @@ test("the module imports nothing, and names no field token (the bundle then hold
   const src = readFileSync(new URL("../src/near/networks.ts", import.meta.url), "utf8");
   assert.deepEqual(src.split("\n").filter((l) => /^\s*(import|export .* from)\b/.test(l)), []);
   assert.doesNotMatch(src, /\btoken\s*:/i);
-  for (const net of Object.values(near.NEAR_NETWORKS)) assert.deepEqual(Object.keys(net), ["usdc", "vault", "fastnear", "drpc", "archival"]);
+  for (const net of Object.values(near.NEAR_NETWORKS)) assert.deepEqual(Object.keys(net), ["usdc", "vault", "fastnear", "drpc", "archival", "seat"]);
 });
 
 test("the entry exports the pair rule and its network type, the very same functions, and not the table or the provider", async () => {
@@ -43,6 +43,27 @@ test("exactly one FastNEAR URL and the network's dRPC, in either order, is a pai
   assert.equal(near.nearPairNetwork("not a pair"), null);
   assert.match(near.nearPairRule(), /^the RPCs must be one of .* exactly$/);
   assert.ok(near.nearPairRule("testnet").includes(drpc));
+});
+
+test("the helper's FastNEAR seat is a FastNEAR seat: with dRPC a pair, with any FastNEAR URL (or itself) one operator and refused", () => {
+  const { fastnear, drpc, seat } = near.NEAR_NETWORKS.mainnet;
+  assert.equal(seat, "https://ct-api.unrealized.trade/v1/rpc/near?keyed=only");
+  assert.equal(near.nearPairNetwork([rpc(seat), rpc(drpc)]), "mainnet");
+  assert.equal(near.nearPairNetwork([rpc(drpc), rpc(seat)]), "mainnet");
+  // two seats of one operator: the helper relays FastNEAR's key alone (its rpc.ts NEAR_SEAT)
+  for (const f of fastnear) {
+    assert.equal(near.nearPairNetwork([rpc(seat), rpc(f)]), null, f);
+    assert.equal(near.nearPairNetwork([rpc(f), rpc(seat)]), null, f);
+  }
+  assert.equal(near.nearPairNetwork([rpc(seat), rpc(seat)]), null);
+  // another path or query on the helper is not the seat
+  // (built from the seat: a literal NEAR RPC the operator map does not hold is refused by scripts/ci/near-rpc-operators.mjs)
+  for (const other of [seat.replace("?keyed=only", ""), seat.replace("/near?", "/solana?"), `${seat}&x=1`])
+    assert.equal(near.nearPairNetwork([rpc(other), rpc(drpc)]), null, other);
+  // no seat on testnet, and the mainnet seat is no testnet seat
+  assert.equal(near.NEAR_NETWORKS.testnet.seat, null);
+  assert.equal(near.nearPairNetwork([rpc(seat), rpc(near.NEAR_NETWORKS.testnet.drpc)]), null);
+  assert.ok(near.nearPairRule("mainnet").includes(seat));
 });
 
 test("R-03: nearRpc gives back a 408's JSON body (dRPC's free-plan timeout), which the kit's page reads ask again on; any other status throws", async () => {

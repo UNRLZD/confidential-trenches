@@ -23,6 +23,8 @@
 // - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, its engine stand-in landing each bundle,
 //   through pool-buy-pieces-devnet.mjs's copy-part1 in place of the flow: 6 notes of 0.01 SOL, a buy only 5 pay (refused,
 //   nothing sent), a buy of 2 pieces and Max of the 4 left, each one bundle of the pieces and the helper's tip.
+// - FLOW_RUNG=<lamports> (card round-trip-costs-less, pool-flow-devnet.mjs): the run's one note, 0.01 SOL by default; a
+//   larger rung leaves W enough after its full sell for the sweep, so the record times the sale, teardown and sweep.
 // - Keys are made fresh for the copy and live only in the run's temp folder, removed at the end.
 import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -43,6 +45,9 @@ const STEPS = process.env.SOL_COPY_STEPS ?? "all"; // "buy": deposit and buy onl
 const FLOW = process.env.SOL_COPY_FLOW ?? "pool";
 if (!["pool", "pieces"].includes(FLOW)) throw new Error(`SOL_COPY_FLOW: pool or pieces, not ${FLOW}`);
 const PIECES = FLOW === "pieces";
+// the pieces driver's scenario: copy-part1 (the default), or copy-takeable (the Max past an epoch boundary, the load)
+const SCENARIO = process.env.SOL_COPY_SCENARIO ?? "copy-part1";
+if (!["copy-part1", "copy-takeable"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1 or copy-takeable, not ${SCENARIO}`);
 if (PIECES && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=pieces runs the curve coin alone, with no plant and every step");
 const ENGINE = process.env.SOL_COPY_ENGINE ?? (PIECES ? "lands" : "swallow");
 if (PIECES && ENGINE !== "lands") throw new Error("SOL_COPY_FLOW=pieces needs the stand-in that lands each bundle");
@@ -327,8 +332,8 @@ for (const kind of KINDS) {
   writeFileSync(cfg, JSON.stringify({ rpcs: URLS, feePayerKeyFile: fpFile, dir, mint: c.mint, engine: ENGINE, plant: kind === "mayhem" ? PLANT : "" }));
   const flowOut = join(dir, "flow.json");
   if (PIECES) {
-    log(`${kind} ${c.mint}: copy-part1 of pool-buy-pieces-devnet.mjs`);
-    const r = await runNode(["packages/signpage/scripts/pool-buy-pieces-devnet.mjs", "copy-part1", "pinned", c.mint, flowOut], { FLOW_COPY: cfg });
+    log(`${kind} ${c.mint}: ${SCENARIO} of pool-buy-pieces-devnet.mjs`);
+    const r = await runNode(["packages/signpage/scripts/pool-buy-pieces-devnet.mjs", SCENARIO, "pinned", c.mint, flowOut], { FLOW_COPY: cfg });
     const f = existsSync(flowOut) ? JSON.parse(readFileSync(flowOut, "utf8")) : null;
     runs[kind] = { exit: r.code, pieces: f, tail: r.out.split("\n").slice(-30) };
     const Ws = { "buy-2": f?.two?.W ?? null, max: f?.max?.W ?? null };
@@ -384,6 +389,8 @@ for (const kind of KINDS) {
   runs[kind].proofWait = f?.proofWait ?? null;
   runs[kind].buySend = { lines: (f?.sendLines ?? []).filter((x) => x.phase === "buy").map((x) => x.line), sendStartMs: sendAt?.at ?? null, helperMs: sendAt?.ms ?? null, filledMs: filledAt?.at ?? null, sendToFilledMs: sendAt && filledAt ? filledAt.at - sendAt.at : null, engineCalls: f?.engineCalls ?? [] };
   log(`${kind} buy send: ${JSON.stringify(runs[kind].buySend)}`);
+  // the device's spacing stamps (pool-flow-devnet.mjs): each with the count of transactions sent before it
+  log(`${kind} device stamps: ${JSON.stringify(f?.stamps ?? null)} over ${JSON.stringify((f?.steps ?? []).map((x) => [x.step, x.signature.slice(0, 8)]))}`);
   if (withdraw && !withdraw.sent) records.push({ coin: kind, step: "withdraw", ok: false, op: withdraw.op ?? null, view: withdraw.view?.state ?? null, tail: runs[kind].withdraw.tail.slice(-8) });
   if (!f) records.push({ coin: kind, step: "flow", ok: false, exit: flow.code, tail: flow.out.split("\n").slice(-15) });
 }

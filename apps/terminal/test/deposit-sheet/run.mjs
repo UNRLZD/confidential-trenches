@@ -14,8 +14,12 @@
 // picked back draws the quote again and Get address sends deposit.quote; Recent's header is whole or not drawn. Card
 // deposit-to-pool-pools: the Solana pool, which pool.address answers (Base and Robinhood refuse), draws the form with no
 // dry quote and Get address on; its Get address sends pool.address with the chain, asset and amount only (never a vault
-// quote), and every pool_deposit stage draws its own state, the done screen (pool-in) only at in_pool with Ready and
-// Pending from state.pools; another chain's answer draws no address.
+// quote), and every pool_deposit stage draws its own state, the done screen (pool-in) only at in_pool with the chain's
+// Balance from state.pools and no Ready or Pending (13 Nov 07:53Z: removed, the app names no proof); another chain's
+// answer draws no address.
+// Card deposit-pool-picks-its-own-coin: each place picked starts on its own coin, whatever was picked before: the NEAR
+// vault USDC on NEAR, the Solana pool SOL on Solana, the Base pool ETH on Base, the Robinhood pool ETH on Robinhood,
+// every other asset still offered.
 //   node apps/terminal/test/deposit-sheet/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -125,6 +129,7 @@ function serve(dir) {
 const fails = [];
 const drafts = new Map();
 const check = (ok, what) => ok || fails.push(what);
+const norm = (s) => s.replace(/\s+/g, " ").trim();
 const rect = (page, sel) => page.locator(sel).first().evaluate((e) => { const r = e.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
 const near = (a, b, tol) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
 
@@ -187,14 +192,18 @@ try {
       // BAR-12: the done screen only at the kit's done
       // a pool's done screen (pool-in) only at the kit's in_pool, with what its pool holds ready to buy
       check(["S4.16", "pool-in"].includes(want) === ((await page.locator(".ddone").count()) === 1), `${tag}: done screen ${want}`);
+      if (want === "pool-in") {
+        const done = norm(await page.locator(".ddone").innerText());
+        check(!/proo?f|\bready\b|pending/i.test(done) && (await page.locator(".ddone [data-ready], .ddone [data-pending]").count()) === 0, `${tag}: the done screen says ${JSON.stringify(done)}`);
+      }
       if (want === "pool-in" && f === "pool-in-noentry") {
-        const n = await page.locator("[data-ready], [data-pending]").count();
-        check(n === 0 && !(await page.locator(".ddone").innerText()).includes("Ready"), `${tag}: no state.pools entry, yet a Ready or Pending line`);
+        check((await page.locator(".ddone [data-balance]").count()) === 0, `${tag}: no state.pools entry, yet a Balance`);
       } else if (want === "pool-in") {
-        const ready = await page.locator("[data-ready]").first().getAttribute("data-ready");
-        check(ready === (f === "pool-in" ? "0.4" : "none"), `${tag}: Ready ${ready}`);
-        const pend = await page.locator("[data-pending]").first().getAttribute("data-pending").catch(() => null);
-        check(pend === (f === "pool-in" ? "0.01" : "0.41"), `${tag}: Pending ${pend}`);
+        // the chain's one Balance, whatever of it is ready
+        const bal = await page.locator(".ddone [data-balance]").first().getAttribute("data-balance");
+        check(bal === "0.41", `${tag}: Balance ${bal}, want 0.41`);
+        const done = norm(await page.locator(".ddone").innerText());
+        check(done.includes("Balance 0.41 SOL"), `${tag}: the done screen ${JSON.stringify(done)}, want "Balance 0.41 SOL"`);
         // Recent's row for the pool deposit: its word and its pool, as a done vault row its word and USD
         const row = await page.$$eval(".drecent .it", (els) => els.map((e) => e.innerText.replace(/\s+/g, " ").trim()));
         check(JSON.stringify(row) === '["Deposited Solana"]', `${tag}: Recent ${JSON.stringify(row)}`);
@@ -282,21 +291,44 @@ try {
       check(q.length === 1 && q[0].params.amount === "15" && (await page.locator(".dep").getAttribute("data-state")) === "S4.13", `@${w.name}: the vault picked back: ${JSON.stringify(q)}`);
       await ctx.close();
     }
+    {
+      // card deposit-pool-picks-its-own-coin: each place picked starts on its own coin, in a row from the last pick (the
+      // owner's walk: Solana, Base and Robinhood each drew USDC on NEAR), the vault picked back included, and after a
+      // coin picked by hand
+      const { ctx, page } = await open(browser, w, "own-coins");
+      const read = async () => ({
+        asset: await page.locator('[data-control="deposit-asset"]').inputValue().catch(() => null),
+        chain: await page.locator('[data-control="deposit-chain"]').inputValue().catch(() => null),
+        unit: (await page.locator(".damt .u").innerText().catch(() => "")).trim(),
+        assets: await page.locator('[data-control="deposit-asset"] option').allInnerTexts().catch(() => []),
+      });
+      await page.locator('[data-control="deposit-asset"]').selectOption("NEAR");
+      for (const [dest, coin, chain] of [["solana", "SOL", "Solana"], ["base", "ETH", "Base"], ["robinhood", "ETH", "Robinhood"], ["near", "USDC", "NEAR"]]) {
+        await page.locator(`[data-dest="${dest}"]`).click();
+        await page.waitForSelector('.dep[data-state="S4.3"]', { timeout: 5_000 }).catch(() => {});
+        const r = await read();
+        check(r.asset === coin && r.chain === chain && r.unit === coin, `@${w.name} ${dest}: picked, the sheet draws ${r.asset} on ${r.chain} (amount in ${r.unit}), want ${coin} on ${chain}`);
+        check(JSON.stringify(r.assets) === JSON.stringify(["USDC", "NEAR", "SOL", "ETH"]), `@${w.name} ${dest}: the asset picker offers ${JSON.stringify(r.assets)}, want every asset`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `own-coin-${dest}-${w.name}.png`) });
+      }
+      await ctx.close();
+    }
     // card deposit-to-pool-pools (review P1): while a checked quote is pending the asset, chain and amount are held still,
     // and the address block draws the asset and amount asked, never a pick made after; the vault's and the pool's alike
-    for (const dest of ["near", "solana"]) {
+    // (the vault asked in NEAR, the Solana pool in its own SOL: card deposit-pool-picks-its-own-coin)
+    for (const [dest, coin, other, head0] of [["near", "NEAR", "SOL", "NEAR"], ["solana", "SOL", "NEAR", "SOL Solana"]]) {
       const { ctx, page } = await open(browser, w, "hold", { dest: dest === "near" ? null : dest });
       await page.waitForSelector('.dep[data-state="S4.3"]');
       await page.locator('[data-control="deposit-get"]').click();
       await page.waitForSelector('.dep[data-state="S4.2"]');
       const off = await Promise.all(['[data-control="deposit-asset"]', '[data-control="deposit-chain"]', '[data-field="amount"]'].map((sel) => page.locator(sel).isDisabled()));
-      await page.locator('[data-control="deposit-asset"]').selectOption("SOL", { force: true, timeout: 1_000 }).catch(() => {});
+      await page.locator('[data-control="deposit-asset"]').selectOption(other, { force: true, timeout: 1_000 }).catch(() => {});
       await page.locator('[data-field="amount"]').fill("99", { force: true, timeout: 1_000 }).catch(() => {});
       await page.evaluate(() => window.__release?.());
       await page.waitForSelector('.dep[data-state="S4.13"]', { timeout: 5_000 }).catch(() => {});
       const head = (await page.locator(".addrb .ca").innerText().catch(() => "")).replace(/\s+/g, " ").trim();
       const kv = (await page.locator(".addrb .kv").innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-      check(off.every(Boolean) && head === "NEAR" && kv.includes("15 NEAR") && kv.includes("NEAR"), `@${w.name} ${dest}: pending pickers off ${JSON.stringify(off)}, address block ${JSON.stringify([head, kv])}, want NEAR and 15 NEAR as asked`);
+      check(off.every(Boolean) && head === head0 && kv.includes(`15 ${coin}`), `@${w.name} ${dest}: pending pickers off ${JSON.stringify(off)}, address block ${JSON.stringify([head, kv])}, want ${head0} and 15 ${coin} as asked`);
       await ctx.close();
     }
     {

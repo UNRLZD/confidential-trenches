@@ -1668,3 +1668,42 @@ test("review of 418af7d5: withdraw, a release with no signature to read back who
   assert.ok(s.asked.length > 1 && s.asked.length < 20, `${s.asked.length} settles`);
   assert.ok(t - Number(NOW) <= POOL_BUY_SETTLE_MS + 2_000, `${t - Number(NOW)} ms`);
 });
+
+// on Solana: a cut that holds no leaf is refused, as the wallet's tree sync refuses it
+// (solana.ts: "no leaf before"; the typed PoolNoLeafError, a plain Error before it was typed)
+const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
+function cutRefusingEmpty(times: readonly bigint[]) {
+  return (state: readonly bigint[], labels: readonly bigint[]): Pool<SolanaReleaseRequest>["trees"] =>
+    async (beforeMs) => {
+      const n = times.filter((t) => t < beforeMs).length;
+      if (n === 0) throw new NoLeaf(`tree 0: no leaf before ${beforeMs}`);
+      const s = new VaultTree(state.slice(0, n)), l = new VaultTree(labels.slice(0, n));
+      return { stateTree: s, labelTree: l, stateRoot: s.root!, labelRoot: l.root! };
+    };
+}
+
+test("an empty pool's leaves all landed this epoch: the epoch cut holds no leaf, so the note proves at once on the newest root, one the pool holds, and sends (before: stopped)", async () => {
+  const waits: number[] = [];
+  // the note is the pool's first leaf (leaf 0), landed after the epoch began (NOW is 1 s into it); leaves 1 and 2 after now
+  const wd = await world([30_000_000n, 1_000n, 1_000n], { trees: cutRefusingEmpty([NOW - 1n, NOW + 29_000n, NOW + 29_001n]), wait: async (ms) => void waits.push(ms) });
+  const amount = 2_000_000n + MIN;
+  const a = await runPoolWithdraw(wd.host, ASK, TO, amount, COST);
+  assert.equal(a.stage, "sent", a.cause);
+  assert.equal(wd.balance.get(TO), amount);
+  assert.equal(rootIndexOf(wd), 0, "the newest root up to now, the pool's one leaf: a root the pool holds");
+  assert.equal(wd.binds[0]!.deadlineMs, BOUNDARY - E + SOL_LIFE_MS, "the current epoch's deadline and fee");
+  assert.deepEqual(waits.filter((ms) => ms >= 1_000), [], `no boundary wait: ${waits}`);
+});
+
+test("beside it, on Solana: a pool with an older leaf and the note landed this epoch plans and proves as before on a pool that refuses an empty cut", async () => {
+  for (const amount of [2_000_000n + MIN, 25_000_000n]) {
+    const ends = [];
+    for (const trees of [cutTrees, cutRefusingEmpty([NOW - 30_000n, NOW - 1n, NOW + 29_000n])]) {
+      const wd = await world([20_000_000n, 30_000_000n, 1_000n], { trees, refs: [undefined, RETURN] });
+      const a = await runPoolWithdraw(wd.host, ASK, TO, amount, COST);
+      assert.equal(a.stage, "sent", a.cause);
+      ends.push({ root: rootIndexOf(wd), left: [(await wd.ns.get(wd.ids[0]!))?.state, (await wd.ns.get(wd.ids[1]!))?.state] });
+    }
+    assert.deepEqual(ends[1], ends[0], `amount ${amount}: the same plan and root`);
+  }
+});

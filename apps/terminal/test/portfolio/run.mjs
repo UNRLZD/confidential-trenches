@@ -7,8 +7,10 @@
 // (S10) and 9 Activity rows' worth of height; phone rows 68 with at least 6 under the sticky segments; and the taps:
 // Closed, search and hide small, the Activity tab, a type chip, a row opened to its receipt, the phone action sheet and
 // its sell, each tx link on its explorer with target _blank.
-// The pool rows (card balances-per-chain): each pool view's data-pools, Ready a dash (never $0.00) when the page sends
-// no ready, and the block inside its panel with no clipped text. --scheme light|dark emulates the viewer's scheme.
+// The pool rows (card balances-per-chain): each pool view's data-pools, one Balance column (13 Nov 07:53Z: Ready and
+// Pending removed, the app names no proof) whose numbers end under its header, and the block inside its panel with no
+// clipped text; the four pool rows also at 1280 x 720 (card
+// app-faults-seen-on-126). --scheme light|dark emulates the viewer's scheme.
 //   node apps/terminal/test/portfolio/run.mjs [--shots <dir>] [--scheme light|dark]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -32,6 +34,8 @@ const NOW = Date.parse("2026-11-02T03:00:00Z");
 const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+  // card app-faults-seen-on-126: Private balance's four rows at the desktop's shortest common screen (the pools fixture only)
+  { name: "1280", viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 // fixture, the brief state it must show, the widths it is drawn at (S10.10 and S10.11 are desktop's toolbar; S10.13 is
 // the phone's sheet: R5 draws them only there), and whether the phone shot scrolls to the segments
@@ -58,7 +62,7 @@ const STATES = [
   ["exported", "S14.4", ["390", "1440"], true],
   ["filtered", "S14.5", ["390", "1440"], true],
   ["receipt", "S14.6", ["390", "1440"], true],
-  ["pools", "S10.3", ["390", "1440"], false],
+  ["pools", "S10.3", ["390", "1440", "1280"], false],
   ["pools-noready", "S10.3", ["390", "1440"], false],
   ["pools-empty", "S10.3", ["390", "1440"], false],
   ["cash-vault", "S10.3", ["390", "1440"], false],
@@ -72,6 +76,8 @@ const STATES = [
   ["pooltrades-open", "S10.9", ["390", "1440"], false],
   ["pooltrades-mixed", "S10.10", ["1440"], false],
   ["pooltrades-unknown", "S10.9", ["390", "1440"], false],
+  // card app-faults-seen-on-126: the closed coin named and pictured by the screen's own held read
+  ["closed-reads", "S10.10", ["390", "1440"], true],
   // card portfolio-counts-money-an-open-buy-holds: the open buy's wallet counted, the axis's ticks distinct
   ["openbuy", "S10.3", ["390", "1440"], false],
   ["openbuy-noheld", "S10.3", ["390", "1440"], false],
@@ -88,14 +94,14 @@ const CASH = {
 // item 7 (card app-faults-seen-on-122): each fixture's Positions tile and its parts as drawn, [tile, Coins, Reserve];
 // null: nothing held, no parts
 const HELD = { openbuy: ["$0.70", "$0.01", "$0.69"], "openbuy-noheld": null };
-// each fixture's pool view, and per row [chain, Balance, Ready, Pending] as drawn
+// each fixture's pool view, and per row [chain, Balance, Withdraw] as drawn
 const POOLS = {
   loading: ["loading"],
   offline: ["offline"],
   rows: ["unread"],
-  // card app-faults-seen-on-122: NEAR's vault USDC first, Ready and Pending dashes (the vault sends no proof queue)
-  pools: ["rows", [["NEAR", "73.18 USDC", "—", "—", ""], ["Solana", "1.25M SOL", "999.99K", "250K", ""], ["Base", "0.25 ETH", "0.2", "0.05", ""], ["Robinhood", "0 ETH", "0", "0", ""]]],
-  "pools-noready": ["rows", [["NEAR", "73.18 USDC", "—", "—", ""], ["Solana", "12.5 SOL", "—", "—", ""], ["Base", "0.001 ETH", "—", "—", ""]]],
+  // card app-faults-seen-on-122: NEAR's vault USDC first; one balance a chain, whatever is ready
+  pools: ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "1.25M SOL", ""], ["Base", "0.25 ETH", ""], ["Robinhood", "0 ETH", ""]]],
+  "pools-noready": ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "12.5 SOL", ""], ["Base", "0.001 ETH", ""]]],
   "pools-empty": ["empty"],
 };
 
@@ -129,7 +135,15 @@ const check = (ok, what) => ok || fails.push(what);
 const states = (page) => page.locator(".pf").getAttribute("data-states").then((s) => (s ?? "").split(" "));
 
 let BASE = "";
-const LOGO = "https://ct-api.unrealized.trade/v1/logo/";
+const HELPER = "https://ct-api.unrealized.trade";
+const LOGO = `${HELPER}/v1/logo/`;
+const ICM = "78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump";
+/** A 1 x 1 orange PNG: the helper's logo for ICM, a picture over the initials in the shots. */
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4NEsPAAQ8Abv9b7JQAAAAAElFTkSuQmCC", "base64");
+/** The stand-in helper's market read: what it knows of each token (its live answer for ICM, 13 Nov 06:15Z). */
+const HELD_READ = { [`solana:${ICM}`]: { symbol: "Icm", name: "Internet cat money", price_usd: "0.00000233298725715" } };
+/** The tokens each page's held read asked for (fixture Fx.reads), by page. */
+const asked = new WeakMap();
 async function open(browser, w, f) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce", timezoneId: "UTC", colorScheme: SCHEME });
   await ctx.addInitScript(INIT);
@@ -137,11 +151,27 @@ async function open(browser, w, f) {
   await page.clock.install({ time: NOW - 1000 });
   await page.clock.pauseAt(NOW);
   // each token avatar asks the helper for its logo (Avatar.tsx logoUrl, GET /v1/logo/{chain}/{token}; the signed-in walk of release 124, 12 Nov:
-  // Closed drew "78GaXF" with no picture): answered here as the helper answers a token it has no logo for, a 404, so
-  // each keeps its initials. Our own host, so not an external request; anything else leaving the page still is.
-  await page.route((u) => u.href.startsWith(LOGO), (r) => r.fulfill({ status: 404, body: "" }));
+  // Closed drew "78GaXF" with no picture): ICM's answered with a picture, as the helper answers it, every other one as
+  // the helper answers a token it has no logo for, a 404, so it keeps its initials. Our own host, so not an external
+  // request; anything else leaving the page still is.
+  await page.route((u) => u.href.startsWith(LOGO), (r) => (r.request().url() === `${LOGO}solana/${ICM}` ? r.fulfill({ status: 200, headers: { "content-type": "image/png", "access-control-allow-origin": "*" }, body: PNG }) : r.fulfill({ status: 404, body: "" })));
+  // the screen's own held reads (fixture Fx.reads, source.tsx useHeldReads through the kit): GET /v1/market/held answers
+  // one entry per asked token, in the asked order, named only when HELD_READ knows it (the helper's shape,
+  // apps/helper/src/data/held.ts); GET /v1/market/candles no bars
+  const mine = [];
+  asked.set(page, mine);
+  await page.route((u) => u.href.startsWith(`${HELPER}/v1/market/held?`) || u.href.startsWith(`${HELPER}/v1/market/candles?`), (r) => {
+    const u = new URL(r.request().url());
+    const json = (body) => r.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+    if (u.pathname === "/v1/market/candles") return json({ tf: u.searchParams.get("tf"), candles: [], as_of_ms: NOW });
+    const chain = u.searchParams.get("chain");
+    const tokens = u.searchParams.getAll("token");
+    mine.push(...tokens.map((t) => `${chain}:${t}`));
+    return json({ tokens: tokens.map((token) => ({ token, ...(HELD_READ[`${chain}:${token}`] ?? { symbol: null, name: null, price_usd: null }) })), as_of_ms: NOW });
+  });
   const external = [];
-  page.on("request", (r) => !r.url().startsWith(BASE) && !r.url().startsWith("data:") && !r.url().startsWith(LOGO) && external.push(r.url()));
+  const ours = (u) => u.startsWith(LOGO) || u.startsWith(`${HELPER}/v1/market/held?`) || u.startsWith(`${HELPER}/v1/market/candles?`);
+  page.on("request", (r) => !r.url().startsWith(BASE) && !r.url().startsWith("data:") && !ours(r.url()) && external.push(r.url()));
   await page.goto(`${BASE}/?f=${f}`);
   await page.waitForSelector(".pf");
   await page.evaluate(() => document.fonts.ready);
@@ -195,6 +225,18 @@ try {
         const tones = await page.$$eval(".pf [data-closed]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => { const c = r.querySelectorAll("td")[6]; return `${c?.className}|${c?.querySelector(".s2")?.className}`; }));
         check(JSON.stringify(tones) === JSON.stringify(["loss|s2 loss", "loss|s2 loss"]), `${tag}: closed rows' tones ${JSON.stringify(tones)}`);
       }
+      // card app-faults-seen-on-126 (the signed-in walk of release 126: Closed drew "78GaXF", with no logo, nothing open):
+      // the screen's own held read asks for the closed coin, and each closed row draws its symbol and its logo
+      if (f === "closed-reads") {
+        const rows = async () => page.$$eval(".pf [data-closed]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => `${r.querySelector(".sy")?.textContent}|${r.querySelector("img.tok-logo")?.getAttribute("data-loaded") === "true" ? "logo" : "no logo"}`));
+        let got = await rows();
+        for (let i = 0; i < 30 && !(got.length === 2 && got.every((x) => x === "Icm|logo")); i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          got = await rows();
+        }
+        check(JSON.stringify(got) === JSON.stringify(["Icm|logo", "Icm|logo"]), `${tag}: closed rows ${JSON.stringify(got)}, want Icm with its logo on both (the held read asked ${JSON.stringify(asked.get(page))})`);
+        check(asked.get(page).includes(`solana:${ICM}`), `${tag}: the held read never asked for the closed coin (asked ${JSON.stringify(asked.get(page))})`);
+      }
       if (f === "pooltrades-open" && !phone) {
         const row = await page.$$eval(".pf [data-pos]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => r.getAttribute("data-pos")));
         check(JSON.stringify(row) === JSON.stringify(["solana:78GaXFTJzkCWpdxkNHMSP3TXEKbhQTpb3EqMt7Uupump"]), `${tag}: open rows ${JSON.stringify(row)}`);
@@ -240,16 +282,23 @@ try {
           // the row's words and numbers (not Withdraw's tap box or its HopLine, padded past the line on purpose)
           const cells = (x) => [...x.children].filter((c) => !c.matches(".plw, .hopline"));
           const hidden = [...b.querySelectorAll("[data-pool]")].filter((x) => cells(x).some((c) => c.getBoundingClientRect().bottom > edge + 0.5)).map((x) => x.getAttribute("data-pool"));
-          return { view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped, hidden, scroll: sc ? [sc.scrollHeight, sc.clientHeight] : null };
+          // one column header, Balance, and every row's balance ending where it ends: no empty column, no shifted number
+          const heads = [...b.querySelectorAll(".plc")].map((h) => h.textContent);
+          const headRight = b.querySelector(".plc")?.getBoundingClientRect().right ?? null;
+          const shifted = [...b.querySelectorAll("[data-pool]")].filter((x) => x.getAttribute("data-pool") !== "unread").map((x) => x.children[1]?.getBoundingClientRect().right).filter((rt) => headRight === null || rt === undefined || Math.abs(rt - headRight) > 0.5);
+          const named = /proo?f|\bready\b|pending/i.test(b.innerText);
+          return { heads, shifted, named, view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped, hidden, scroll: sc ? [sc.scrollHeight, sc.clientHeight] : null };
         }, phone ? ".pfm .pools" : ".pfd .pools");
         const [view, rows] = POOLS[f];
         check(r?.view === view, `${tag}: pools view ${r?.view}, want ${view}`);
         if (rows) check(JSON.stringify(r.rows) === JSON.stringify(rows), `${tag}: pool rows ${JSON.stringify(r?.rows)}`);
+        if (view === "rows" || view === "unread" || view === "loading") check(JSON.stringify(r?.heads) === '["Balance"]' && r.shifted.length === 0, `${tag}: pool columns ${JSON.stringify(r?.heads)}, balances off their header ${JSON.stringify(r?.shifted)}`);
+        check(r?.named === false, `${tag}: the pool block names a proof, Ready or Pending`);
         check(r?.inside && r.clipped.length === 0, `${tag}: pool block outside its panel or clipped ${JSON.stringify(r)}`);
         check(r?.hidden.length === 0, `${tag}: pool rows past the bottom of what shows them ${JSON.stringify(r?.hidden)} (scroll ${JSON.stringify(r?.scroll)})`);
       }
       // the S10 row bars need a full list: the open buy's fixture holds one row
-      if (want === "S10.3" && !phone && !f.startsWith("openbuy")) {
+      if (want === "S10.3" && w.name === "1440" && !f.startsWith("openbuy")) {
         // the brief's S10 bar at 1440: rows 72 layout px (54 CSS px), at least 9 visible, at least 9 fields a row
         const r = await page.evaluate(() => {
           const box = document.querySelector(".ptw").getBoundingClientRect();
@@ -349,7 +398,8 @@ try {
       await ctx.close();
     }
 
-    // the taps
+    // the taps (at 390 and 1440; 1280 draws the pools fixture alone)
+    if (w.name === "1280") continue;
     if (!phone) {
       const { ctx, page } = await open(browser, w, "rows");
       await page.locator('.pfd [data-control="closed"]').click();
@@ -430,4 +480,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} shots, the bars and the taps`);
   process.exit(1);
 }
-console.log(`PASS ${n} shots (${STATES.length} states over 390/1440), BAR-10 per shot, the S10 and S14 row bars and the taps${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${n} shots (${STATES.length} states over 390/1440, the pools also at 1280), BAR-10 per shot, the S10 and S14 row bars and the taps${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

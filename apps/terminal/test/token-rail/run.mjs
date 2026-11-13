@@ -2,7 +2,7 @@
 // The token page's left rail (card app-token-rail), from the built app at / inside the stand-in shell (as
 // test/token-page/run.mjs): APP_HOST the build under its _headers, SIGN_HOST the stand-in shell, HELPER_HOST answered
 // from the recorded lists (test/discover-data, as app-in-shell.mjs's harness) and, for any listed mint, a token read of
-// that list row (as test/token-route/run.mjs). Signed in and signed out, at 1600, 1440, 1280, 1180 and 1179 x 900:
+// that list row (as test/token-route/run.mjs). Signed in and signed out, at 1600, 1440, 1280, 1180, 1179 and 1024 x 900:
 //   - the width mode, read off the desktop grid's first track and the rail's own box: the full rail (340 layout px) from
 //     1500 css px, the slim rail (78: the rings and the expand button) from 1180, no rail under it (and no lists read
 //     for it: the page's one read of / is the only one);
@@ -14,7 +14,9 @@
 //     chain's lists since card app-chains-evm-rail, the other chains answered with Solana's recording and so dropped);
 //   - a click on another rail row opens that token's page (its data-token, the frame at /token/solana/<mint>) with the
 //     rail still drawn and no second lists read; New shows the New column and its row opens its token; on the slim rail
-//     the expand button draws the full rail over the chart with the main column unmoved, and its row opens its token;
+//     (1440 and 1280) the expand button opens the full rail in its own column: the chart's and the orders' left edges
+//     move right by what the rail grew, the rail's box never overlaps them, and it stays open across a hop to its row's
+//     token and a reload; « closes it back to the rings (card rail-open-pushes-the-middle);
 //   - a refresh that lands a new token on top of Trending (signed out, full at 1600 and slim at 1440) shows it in the
 //     first row and moves no row already drawn: each row's element keeps its box, no value is cut, and no element shifts
 //     (text re-aligned inside its own right-aligned cell is named on a NOTE line).
@@ -43,6 +45,7 @@ const WIDTHS = [
   { name: "1280", width: 1280, mode: "slim", track: 78 },
   { name: "1180", width: 1180, mode: "slim", track: 78 },
   { name: "1179", width: 1179, mode: "hidden", track: null },
+  { name: "1024", width: 1024, mode: "hidden", track: null },
 ];
 const KINDS = [
   { name: "in", kind: "signed" },
@@ -139,8 +142,15 @@ const readPage = (f) =>
     const vis = (e) => !!e && e.getClientRects().length > 0;
     const R = (e) => e?.getBoundingClientRect() ?? null;
     const strip = R(document.querySelector(".tkp-desk .tkp-strip"));
-    const ident = R(document.querySelector(".tkp-desk .tkp-ident"));
+    const identEl = document.querySelector(".tkp-desk .tkp-ident");
+    const ident = R(identEl);
+    // the identity's drawn content (avatar, symbol, icons, meta): its right-most edge, and the symbol drawn whole
+    const identInk = identEl ? Math.max(...[...identEl.querySelectorAll("*")].filter((e) => e.getClientRects().length).map((e) => e.getBoundingClientRect().right)) : null;
+    const sym = document.querySelector(".tkp-desk .tkp-sym");
+    const symCut = !sym || sym.clientWidth < 1 || sym.scrollWidth > sym.clientWidth + 0.5;
     const main = R(document.querySelector(".tkp-desk .tkp-main"));
+    const chart = R(document.querySelector(".tkp-desk .tkp-chart"));
+    const lower = R(document.querySelector(".tkp-desk .tkp-main > :last-child"));
     const trade = R(document.querySelector(".tkp-desk .tkp-trade"));
     const railR = vis(rail) ? R(rail) : null;
     const cut = [...document.querySelectorAll(".tkp-desk .tkp-strip > *, .tkp-desk .tkp-strip .tkp-val, .tkp-desk .tkp-strip .tkp-lbl, .tkp-desk .tkp-strip .tkp-mcval")].filter((e) => e.scrollWidth > e.clientWidth + 0.5).map((e) => e.textContent.trim());
@@ -160,8 +170,13 @@ const readPage = (f) =>
       stripRight: strip?.right ?? null,
       stripLeft: strip?.left ?? null,
       identRight: ident?.right ?? null,
+      identInk,
+      symCut,
+      tiles: [...document.querySelectorAll(".tkp-desk .tkp-strip > [data-k]")].filter((e) => e.getClientRects().length).map((e) => e.getAttribute("data-k")),
       mainLeft: main?.left ?? null,
       mainRight: main?.right ?? null,
+      chartLeft: chart?.left ?? null,
+      lowerLeft: lower?.left ?? null,
       tradeLeft: trade?.left ?? null,
       railRight: railR?.right ?? null,
       scroll: document.documentElement.scrollWidth - window.innerWidth,
@@ -220,6 +235,7 @@ try {
       check(p.cut.length === 0, `${tag}: strip tiles cut: ${JSON.stringify(p.cut)}`);
       check(p.stripRight !== null && p.stripRight <= p.tradeLeft + 0.5 && p.stripRight <= p.mainRight + 0.5, `${tag}: the strip runs past the main column (${p.stripRight} > ${p.mainRight}, trade at ${p.tradeLeft})`);
       check(p.stripLeft !== null && p.stripLeft >= p.mainLeft - 0.5 && p.identRight <= p.stripLeft + 0.5, `${tag}: the strip overlaps the identity or leaves the main column (strip ${p.stripLeft}, ident ${p.identRight}, main ${p.mainLeft})`);
+      check(!p.symCut && p.identInk !== null && p.identInk <= p.stripLeft + 0.5, `${tag}: the identity runs under the strip or loses its symbol (content right ${p.identInk}, strip ${p.stripLeft}, symbol cut ${p.symCut}; tiles ${p.tiles.join(" ")})`);
       check(p.scroll <= 0, `${tag}: horizontal scroll ${p.scroll}px`);
       check(p.small.length === 0, `${tag}: text under 11 px: ${JSON.stringify(p.small.slice(0, 4))}`);
       check(p.cls === 0, `${tag}: layout shift ${p.cls} from the first paint, want 0`);
@@ -247,20 +263,35 @@ try {
         await f.locator(`[data-testid="token-rail"] [data-token="${pick}"] a`).click();
         check(await ready(f, pick), `${tag}: a New row click did not open ${pick}`);
       }
-      if (k.name === "in" && w.mode === "slim" && w.name === "1440") {
+      if (k.name === "in" && w.mode === "slim") {
         const before = await readPage(f);
         await f.locator('[data-testid="rail-expand"]').click();
-        await page.waitForTimeout(200);
+        await page.waitForTimeout(400);
         const ex = await readPage(f);
-        check(ex.open === "true" && Math.abs(ex.railW - 340) <= 1, `${tag}: expand drew the rail ${ex.railW} wide (open ${ex.open}), want 340`);
-        check(ex.mainLeft === before.mainLeft && ex.tracks === before.tracks, `${tag}: expanding moved the page (main ${before.mainLeft} -> ${ex.mainLeft}, tracks ${before.tracks} -> ${ex.tracks})`);
+        const grew = ex.railRight - before.railRight;
+        const first0 = parseFloat(ex.tracks.split(" ")[0]);
+        check(ex.open === "true" && Math.abs(ex.railW - 340) <= 1 && Math.abs(first0 - 340) < 0.5, `${tag}: expand drew the rail ${ex.railW} wide in a ${ex.tracks} grid (open ${ex.open}), want 340 in its own 340 track`);
+        check(grew > 100, `${tag}: expanding grew the rail's box by ${grew}px`);
+        check(Math.abs(ex.chartLeft - before.chartLeft - grew) < 0.5 && Math.abs(ex.lowerLeft - before.lowerLeft - grew) < 0.5 && Math.abs(ex.mainLeft - before.mainLeft - grew) < 0.5, `${tag}: the chart (${before.chartLeft} -> ${ex.chartLeft}) and the orders (${before.lowerLeft} -> ${ex.lowerLeft}) did not move right by the rail's ${grew}px`);
+        check(ex.railRight <= ex.chartLeft + 0.5 && ex.railRight <= ex.lowerLeft + 0.5 && ex.railRight <= ex.mainLeft + 0.5, `${tag}: the open rail (right ${ex.railRight}) overlaps the chart (${ex.chartLeft}) or the orders (${ex.lowerLeft})`);
+        check(ex.cut.length === 0 && ex.scroll <= 0 && ex.stripRight <= ex.tradeLeft + 0.5, `${tag}: with the rail open: strip tiles cut ${JSON.stringify(ex.cut)}, scroll ${ex.scroll}, strip ${ex.stripRight} past trade ${ex.tradeLeft}`);
+        check(!ex.symCut && ex.identInk <= ex.stripLeft + 0.5 && ex.tiles[0] === "price", `${tag}: with the rail open the identity runs under the strip or loses its symbol (content right ${ex.identInk}, strip ${ex.stripLeft}, symbol cut ${ex.symCut}; tiles ${ex.tiles.join(" ")})`);
         check(JSON.stringify(ex.chips) === JSON.stringify(["Trending:true", "Watchlist:false", "New:false", "Hot:false", "Graduating:false"]) && ex.rows.every((r) => r.sym), `${tag}: the expanded rail: chips ${JSON.stringify(ex.chips)}, rows with text ${ex.rows.filter((r) => r.sym).length}/${ex.rows.length}`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-expanded.png`) });
         const next = TRENDING[2];
         await f.locator(`[data-testid="token-rail"] [data-token="${next}"] a`).click();
         check(await ready(f, next), `${tag}: an expanded rail row did not open ${next}`);
         const after = await readPage(f);
-        check(after.open === "false" && after.railW !== null && Math.abs(after.railW - 78) <= 1, `${tag}: after the hop the rail is ${after.railW} wide (open ${after.open}), want slim`);
+        check(after.open === "true" && Math.abs(after.railW - 340) <= 1 && Math.abs(after.chartLeft - ex.chartLeft) < 0.5, `${tag}: after the hop the rail is ${after.railW} wide (open ${after.open}), chart at ${after.chartLeft} (was ${ex.chartLeft}): want it still open, the chart unmoved`);
+        await f.goto(f.url(), { waitUntil: "load" });
+        check(await ready(f, next), `${tag}: ${next}'s page not ready after a reload`);
+        await f.waitForSelector('[data-testid="token-rail"][data-state="ready"]', { timeout: 10_000 }).catch(() => {});
+        const re = await readPage(f);
+        check(re.open === "true" && Math.abs(re.railW - 340) <= 1, `${tag}: after a reload the rail is ${re.railW} wide (open ${re.open}), want it kept open`);
+        await f.locator('[data-testid="rail-collapse"]').click({ timeout: 3_000 }).catch(() => {});
+        await page.waitForTimeout(400);
+        const shut = await readPage(f);
+        check(shut.open === "false" && Math.abs(shut.railW - 78) <= 1 && Math.abs(shut.chartLeft - before.chartLeft) < 0.5, `${tag}: « left the rail ${shut.railW} wide (open ${shut.open}), chart at ${shut.chartLeft} (closed ${before.chartLeft}): want the rings and the chart back`);
       }
       // a refresh lands a token on top: it is drawn in the first row, and no drawn row moves
       if (k.name === "out" && (w.name === "1600" || w.name === "1440")) {
@@ -307,4 +338,4 @@ if (fails.length) {
   process.exit(1);
 }
 for (const x of notes) console.log(`NOTE ${x}`);
-console.log(`PASS ${n} views (1600, 1440, 1280, 1180, 1179; signed in and out) from the built app at / inside the stand-in shell, Trending ${TRENDING.length} and New ${NEW.length} rows${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${n} views (1600, 1440, 1280, 1180, 1179, 1024; signed in and out) from the built app at / inside the stand-in shell, Trending ${TRENDING.length} and New ${NEW.length} rows${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

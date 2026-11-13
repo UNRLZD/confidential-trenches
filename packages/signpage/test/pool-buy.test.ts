@@ -721,18 +721,19 @@ test("a take that hands back another attempt's proof, or other proof bytes, is r
 });
 
 test("fold 1 (6): the pick reads the ready proofs again after the quote: a proof remade during the reads is the one bought", async () => {
-  const w = await world({ readies: [[readyProof()], [readyProof()], [readyProof({ attempt: "attempt-2" })]] });
+  // the ready lists asked in order: the gate, round 1's lookups now and on the take's clock, then the pick
+  const w = await world({ readies: [[readyProof()], [readyProof()], [readyProof()], [readyProof({ attempt: "attempt-2" })]] });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
   assert.equal(w.state(), "SPENT");
   // remade onto a newer root (one the pool's pages hold at leaf 4) during the reads: its root is looked up, the reads run
   // once more, and that proof is bought with its own root index
   const p2 = readyProof({ attempt: "attempt-2", stateRoot: 1004n });
-  const n = await world({ readies: [[readyProof()], [readyProof()], [p2]] });
+  const n = await world({ readies: [[readyProof()], [readyProof()], [readyProof()], [p2]] });
   assert.deepEqual(await runPoolBuy(n.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
   assert.equal(n.state(), "SPENT");
   assert.equal(n.log.filter((x) => x === "0:getLatestBlockhash").length, 2, "the quote and slot read again for it");
   // gone during the reads (taken by another tab): none to buy with, nothing taken
-  const g = await world({ readies: [[readyProof()], [readyProof()], []] });
+  const g = await world({ readies: [[readyProof()], [readyProof()], [readyProof()], []] });
   assert.deepEqual(await runPoolBuy(g.host, ASK), { error: "not_funded" });
   assert.ok(!g.log.some((x) => x.startsWith("take")));
 });
@@ -793,7 +794,8 @@ test("the kind answers sent with its signature once it read back on both RPCs as
   await new Promise((res) => setTimeout(res, 50));
   assert.deepEqual(stages, ["filled"]);
   assert.equal(ended, 1);
-  assert.deepEqual(modes, ["ct-wallet/seed:shared"]);
+  // the run under POOL_TRADE_LOCK, shared: no leftover rent back starts beside a buy (review P2-1 of 024e8a89d)
+  assert.deepEqual(modes, ["ct-pool/trade:shared", "ct-wallet/seed:shared"]);
   assert.equal(w.state(), "SPENT");
 });
 
@@ -2389,6 +2391,123 @@ test("pieces: a spend past the own note's Max sends one bundle: the other piece'
   assert.equal(new DataView(d3.buffer, d3.byteOffset, d3.byteLength).getBigUint64(2 + (d3[1]! & 1 ? 128 : 256) + 130, true), SOLANA_JITO_TIP_MIN);
   // each note settled before not_landed
   assert.ok(w.log.includes("settle:note-1") && w.log.includes("settle:note-2"), w.log.filter((x) => x.startsWith("settle")).join(","));
+});
+
+// Card buy-spends-several-pieces (the mainnet copy's Max of 4 pieces, "failed" in 2 of 3 runs): the pick reads the
+// ready proofs on the take's own clock (the host's ready(early), queue.ts readyAt), so a piece its take refuses late (a
+// newest-root proof past its grace while its remake runs) is never picked. A set that pays only with it is not_funded
+// before any claim, with nothing taken, signed or sent; never a take that fails.
+test("pieces: a piece its take would refuse late is never picked: the pick reads on the early read, and a set that needs it is not_funded before the take", async () => {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const late = pieceProof("note-2", 777n, 5_000_000n);
+  const s = await setup("pump", SPEND);
+  const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  const w = await world({ readies: [[late, own]] });
+  const read = Promise.resolve({ ms: 1n, at: 0, wall: 0 });
+  const takes: string[][] = [];
+  const asked: unknown[] = [];
+  const list = w.host.ready;
+  w.host.chainNow = () => read;
+  // on the take's clock note-2's proof is late: the take refuses it, so readyAt leaves it out
+  w.host.ready = async (early) => (asked.push(early), early === read ? (await list()).filter((p) => p.noteId !== late.noteId) : list());
+  w.host.takeSet = async (items, early) => {
+    takes.push(items.map((x) => x.noteId));
+    if (early === read && items.some((x) => x.noteId === late.noteId)) throw new Error(`the proof for note ${late.noteId} is on the newest root and its epoch ended over 15000 ms ago: it is made again first`);
+    return items.map((x) => (x.noteId === own.noteId ? own : late));
+  };
+  w.host.sendPieces = async () => assert.fail("nothing is sent");
+  w.host.piecesOwed = owedMem();
+  assert.deepEqual(await runPoolBuy(w.host, { ...ASK, amount: spend }), { error: "not_funded" });
+  assert.deepEqual(takes, [], "nothing taken");
+  assert.ok(asked.includes(read), "the pick reads the ready proofs on the early read");
+  assert.equal((await w.host.piecesOwed.list()).length, 0, "no owed record written");
+});
+
+// review P3-2 of b57f4eb28: the reverse gap. The list on the last-seen time leaves out a piece the take's own early read
+// still takes (the last pass's read ran ahead of the take's); the pick reads on the early read, so the root lookups do
+// too, or that piece is picked with roots never looked up and the buy answers failed.
+test("pieces: a piece only the take's own clock lists has its roots looked up: the buy takes the set, never failed", async () => {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const gap = pieceProof("note-2", 777n, 5_000_000n);
+  // made on older roots, each at index 3 of its tree's page 0
+  const older = [...gap.publicSignals] as VaultWithdrawSignals;
+  older[3] = "1003";
+  older[5] = "1003";
+  const piece = { ...gap, publicSignals: older };
+  const s = await setup("pump", SPEND);
+  const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  const w = await world({ readies: [[piece, own]], helper: "502" });
+  const read = Promise.resolve({ ms: 1n, at: 0, wall: 0 });
+  const list = w.host.ready;
+  w.host.chainNow = () => read;
+  // on the last-seen time note-2's proof is out of the list; on the take's clock it is takeable
+  w.host.ready = async (early) => (early === read ? list() : (await list()).filter((p) => p.noteId !== piece.noteId));
+  const takes: string[][] = [];
+  w.host.takeSet = async (items) => (takes.push(items.map((x) => x.noteId)), items.map((x) => (x.noteId === own.noteId ? own : piece)));
+  w.host.sendPieces = async () => {
+    throw new Error("pool send: HTTP 502");
+  };
+  w.host.piecesOwed = owedMem();
+  const a = await runPoolBuy(w.host, { ...ASK, amount: spend });
+  assert.deepEqual(takes, [["note-2", "note-1"]], `the set taken: ${JSON.stringify(a)}`);
+  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+});
+
+// review P3-3 of b8df326b6: the roots of a proof only the last-seen list names (the pick on the take's own clock never
+// takes it) are read in the same round, and that read's fault (a 429) never costs the buy a wait: it is kept, and thrown
+// only by a pick that needs that root. A pick that needs it still answers by the fault
+test("a root read that fails for a proof the pick does not take costs no wait; the buy fills", async () => {
+  const own = readyProof();
+  const piece = pieceProof("note-2", 777n, 5_000_000n);
+  const older = [...piece.publicSignals] as VaultWithdrawSignals;
+  older[3] = "1003";
+  older[5] = "1003";
+  const other = { ...piece, publicSignals: older };
+  const statePage = solanaPoolPage(PROGRAM, 0, 0);
+  // the n-th read of the state tree's first page on RPC 0 answers 429: the 2nd is the other proof's root (the pick never
+  // needs it: no wait), the 1st the bought proof's own (the pick needs it: the fault is thrown, waited out, then bought)
+  for (const [n, waits] of [[2, []], [1, [1_000]]] as const) {
+    const w = await world();
+    let pageReads = 0;
+    const f = faultAt(w.host.rpcs, 0, (m, q) => m === "getAccountInfo" && q[0] === statePage && ++pageReads === n, 1);
+    const read = Promise.resolve({ ms: 1n, at: 0, wall: 0 });
+    // the last-seen list names both; the take's own clock lists the bought proof only
+    const a = await runPoolBuy({ ...w.host, rpcs: f.rpcs, chainNow: () => read, ready: async (early) => (early === read ? [own] : [own, other]) }, ASK);
+    assert.ok(f.fired(), `read ${n}: answered 429`);
+    assert.equal("stage" in a && a.stage, "filled", `read ${n}: ${JSON.stringify(a)}`);
+    assert.deepEqual(beforeSend(w), waits, `read ${n}: the waits before the send`);
+  }
+});
+
+// review P2-1 of 92ae9ded1: the round of the root lookups, the venue and the blockhash runs beside the early read of the
+// pool's time, never after it, so a buy pays the slower of the two, not their sum. The early read here answers only once
+// the round's blockhash read has started; a round that waits for it first never starts that read, and the early read is
+// let go after many turns of the event loop instead, which the test refuses.
+test("the buy's round 2 (root lookups, venue, blockhash) starts before the early read of the pool's time answers", async () => {
+  const w = await world();
+  let open!: () => void;
+  const answered = new Promise<void>((ok) => (open = ok));
+  let started = false;
+  let forced = false;
+  const read = (p: 0 | 1): SolanaRpc => (async (m: string, q: readonly unknown[]) => {
+    if (m === "getLatestBlockhash" && !started) (started = true), open();
+    return w.host.rpcs[p](m, q);
+  }) as SolanaRpc;
+  void (async () => {
+    for (let k = 0; k < 2_000 && !started; k++) await new Promise((ok) => setImmediate(ok));
+    if (!started) (forced = true), open();
+  })();
+  const list = w.host.ready;
+  const host: PoolBuyHost = {
+    ...w.host,
+    rpcs: [read(0), read(1)],
+    chainNow: () => answered.then(() => ({ ms: 1n, at: performance.now(), wall: Date.now() })),
+    // as the page's host does: ready(early) is the queue's readyAt, which waits for the early read (queue.ts takeNow)
+    ready: async (early) => (early !== undefined && (await early.catch(() => undefined)), list()),
+  };
+  const a = (await runPoolBuy(host, ASK)) as { stage?: string };
+  assert.equal(a.stage, "filled", JSON.stringify(a));
+  assert.equal(forced, false, "round 2 waited for the early read before its blockhash read");
 });
 
 test("pieces: the releases land and the buy does not (a helper that sent the tag 2s alone): the answer is not_landed, never filled; each landed piece is settled SPENT and the buy's own note is not", async () => {

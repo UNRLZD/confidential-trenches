@@ -1,7 +1,7 @@
 {
  "good": {
   "check": "app-faults-seen-on-122",
-  "at": "2026-11-12T17:13:37.012Z",
+  "at": "2026-11-13T08:36:07.429Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
   "browser": "157.0.8103.51",
   "runs": [
@@ -13,18 +13,16 @@
       "chain": "near",
       "asset": "USDC",
       "balance": "73180000",
-      "ready": "none",
-      "pending": "none"
+      "marks": []
      },
      {
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": []
      }
     ],
-    "warm": true,
+    "loadAsks": 0,
     "parts": {
      "open": true,
      "tile": "$0.69",
@@ -50,7 +48,8 @@
      "closed": 1,
      "tapped": true
     },
-    "firstState": "S4.3"
+    "firstState": "S4.3",
+    "asks": 1
    },
    {
     "width": "desktop",
@@ -60,18 +59,16 @@
       "chain": "near",
       "asset": "USDC",
       "balance": "73180000",
-      "ready": "none",
-      "pending": "none"
+      "marks": []
      },
      {
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": []
      }
     ],
-    "warm": true,
+    "loadAsks": 0,
     "parts": {
      "open": true,
      "tile": "$0.69",
@@ -93,13 +90,14 @@
      ]
     },
     "alloc": "69",
-    "firstState": "S4.3"
+    "firstState": "S4.3",
+    "asks": 1
    }
   ]
  },
  "bad": {
   "check": "app-faults-seen-on-122",
-  "at": "2026-11-12T17:13:53.316Z",
+  "at": "2026-11-13T02:10:33.124Z",
   "source": "harness, terminal build of main 2498306e9 (before this card), the stand-in shell signed in",
   "browser": "157.0.8103.51",
   "runs": [
@@ -111,11 +109,13 @@
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
      }
     ],
-    "warm": false,
+    "loadAsks": 0,
     "parts": {
      "open": false,
      "tile": "$0.69",
@@ -127,7 +127,8 @@
      "closed": 0,
      "tapped": false
     },
-    "firstState": "S4.3"
+    "firstState": "S4.1",
+    "asks": 1
    },
    {
     "width": "desktop",
@@ -137,11 +138,13 @@
       "chain": "solana",
       "asset": "SOL",
       "balance": "30426000",
-      "ready": "0",
-      "pending": "30426000"
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
      }
     ],
-    "warm": false,
+    "loadAsks": 0,
     "parts": {
      "open": false,
      "tile": "$0.69",
@@ -149,7 +152,224 @@
      "words": []
     },
     "alloc": null,
-    "firstState": "S4.3"
+    "firstState": "S4.1",
+    "asks": 1
+   }
+  ]
+ },
+ "beforeFault9": {
+  "check": "app-faults-seen-on-122",
+  "at": "2026-11-13T02:10:43.948Z",
+  "source": "harness, terminal build of 24caa6cdc (main before card app-faults-seen-on-124's fault 9), the stand-in shell signed in",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "near",
+      "asset": "USDC",
+      "balance": "73180000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     },
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     }
+    ],
+    "loadAsks": 1,
+    "parts": {
+     "open": true,
+     "tile": "$0.69",
+     "parts": [
+      {
+       "part": "coins",
+       "cents": "0",
+       "chains": null
+      },
+      {
+       "part": "reserve",
+       "cents": "69",
+       "chains": "solana"
+      }
+     ],
+     "words": [
+      "Coins",
+      "Reserve"
+     ]
+    },
+    "control": {
+     "open": 1,
+     "closed": 1,
+     "tapped": true
+    },
+    "firstState": "S4.3",
+    "asks": 2
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "near",
+      "asset": "USDC",
+      "balance": "73180000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     },
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     }
+    ],
+    "loadAsks": 1,
+    "parts": {
+     "open": true,
+     "tile": "$0.69",
+     "parts": [
+      {
+       "part": "coins",
+       "cents": "0",
+       "chains": null
+      },
+      {
+       "part": "reserve",
+       "cents": "69",
+       "chains": "solana"
+      }
+     ],
+     "words": [
+      "Coins",
+      "Reserve"
+     ]
+    },
+    "alloc": "69",
+    "firstState": "S4.3",
+    "asks": 2
+   }
+  ]
+ },
+ "main": {
+  "check": "app-faults-seen-on-122",
+  "at": "2026-11-13T08:36:18.677Z",
+  "source": "harness, terminal build of main 4c1826a75, the stand-in shell signed in",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "near",
+      "asset": "USDC",
+      "balance": "73180000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     },
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     }
+    ],
+    "loadAsks": 0,
+    "parts": {
+     "open": true,
+     "tile": "$0.69",
+     "parts": [
+      {
+       "part": "coins",
+       "cents": "0",
+       "chains": null
+      },
+      {
+       "part": "reserve",
+       "cents": "69",
+       "chains": "solana"
+      }
+     ],
+     "words": [
+      "Coins",
+      "Reserve"
+     ]
+    },
+    "control": {
+     "open": 1,
+     "closed": 1,
+     "tapped": true
+    },
+    "firstState": "S4.3",
+    "asks": 1
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "pools": [
+     {
+      "chain": "near",
+      "asset": "USDC",
+      "balance": "73180000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     },
+     {
+      "chain": "solana",
+      "asset": "SOL",
+      "balance": "30426000",
+      "marks": [
+       "data-ready",
+       "data-pending"
+      ]
+     }
+    ],
+    "loadAsks": 0,
+    "parts": {
+     "open": true,
+     "tile": "$0.69",
+     "parts": [
+      {
+       "part": "coins",
+       "cents": "0",
+       "chains": null
+      },
+      {
+       "part": "reserve",
+       "cents": "69",
+       "chains": "solana"
+      }
+     ],
+     "words": [
+      "Coins",
+      "Reserve"
+     ]
+    },
+    "alloc": "69",
+    "firstState": "S4.3",
+    "asks": 1
    }
   ]
  }

@@ -33,6 +33,7 @@
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import { DEPOSIT_DRY_PLACEHOLDER, checkOneClickQuote } from "../../packages/kit/src/index.ts";
+import { saidOf, saidPart } from "./vendor-said.mjs";
 
 const KEY = "oneclick-partner-fee-live";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -119,7 +120,8 @@ export function judge(rec) {
     const a = rec?.answers?.[route];
     if (!a) { bad(`${route}: no answer recorded`); continue; }
     if (noLiquidity(a)) { vendor.push(`INCONCLUSIVE ${route}: 1Click answered 400 No liquidity available: its solvers, not the helper`); continue; }
-    if (a.status !== 200 && a.status !== 201) { bad(`${route}: HTTP ${a.status}, want 1Click's 200 or 201`); continue; }
+    // card helper-says-why-a-vendor-refused: the line says what the vendor answered (its message, cut and made safe)
+    if (a.status !== 200 && a.status !== 201) { bad(`${route}: HTTP ${a.status}${saidPart(saidOf(a.body))}, want 1Click's 200 or 201`); continue; }
     if (a.body === null) { bad(`${route}: an answer over ${ANSWER_MAX} B`); continue; }
     let body;
     try { body = JSON.parse(a.body); } catch { bad(`${route}: the answer is not JSON`); continue; }

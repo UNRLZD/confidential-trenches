@@ -75,6 +75,19 @@ test("card live-check-devnet-pair: solana-devnet forwards getGenesisHash to SOLA
   assert.deepEqual([m.status, code(m), seen.length], [400, "method_not_allowed", 0]);
 });
 
+// card round-trip-costs-less: a mainnet pool sale reads no fee price (it pays SOLANA_POOL_SELL_PRIORITY, as before the
+// card), so the kit's list does not hold getRecentPrioritizationFees and both Solana routes refuse it before any call
+test("card round-trip-costs-less: getRecentPrioritizationFees is off the kit's list: solana and solana-devnet answer 400 method_not_allowed, nothing sent", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  assert.ok(!(HELPER_RPC_METHODS.solana as readonly string[]).includes("getRecentPrioritizationFees"));
+  const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet` });
+  for (const chain of ["solana", "solana-devnet"]) {
+    seen.length = 0;
+    const a = await call(r, chain, { jsonrpc: "2.0", id: 9, method: "getRecentPrioritizationFees", params: [["SysvarC1ock11111111111111111111111111111111"]] });
+    assert.deepEqual([a.status, code(a), seen.length], [400, "method_not_allowed", 0], chain);
+  }
+});
+
 test("an allowlisted call on each chain is forwarded to that chain's provider and its answer passed back", async () => {
   next = { status: 200, type: "application/json; charset=utf-8", body: echo };
   const r = rpc();
@@ -1241,7 +1254,7 @@ test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives 
   };
   assert.equal(await served({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}` }, "solana", "getSlot", 43), 42, "Solana: the page's 42, the 43rd its own 429");
   assert.equal(await served({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}` }, "base", "eth_blockNumber", 31), 30, "Base: the page's 30");
-  for (const [name, bad] of [["RPC_BUDGET_SOLANA", "100,16"], ["RPC_BUDGET_SOLANA", "100,41"], ["RPC_BUDGET_SOLANA_DEVNET", "100,16"], ["RPC_BUDGET_SOLANA_MARKS", "100,29"], ["RPC_BUDGET_BASE", "100,29"], ["RPC_BUDGET_ROBINHOOD", "100,16"]] as const)
+  for (const [name, bad] of [["RPC_BUDGET_SOLANA", "100,16"], ["RPC_BUDGET_SOLANA", "100,41"], ["RPC_BUDGET_SOLANA_DEVNET", "100,16"], ["RPC_BUDGET_SOLANA_MARKS", "100,29"], ["RPC_BUDGET_BASE", "100,29"], ["RPC_BUDGET_ROBINHOOD", "100,16"], ["RPC_BUDGET_NEAR", "100,29"]] as const)
     assert.throws(() => createRpc({ [name]: bad }), (e: Error) => e.message.startsWith(`${name} must be`) && !e.message.includes(bad), `${name}=${bad}`);
-  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: "100,42", RPC_BUDGET_SOLANA_DEVNET: "100,42", RPC_BUDGET_SOLANA_MARKS: "100,30", RPC_BUDGET_BASE: "100,30", RPC_BUDGET_ROBINHOOD: "100,30", RPC_BUDGET_NEAR: "100,16" }));
+  assert.doesNotThrow(() => createRpc({ RPC_BUDGET_SOLANA: "100,42", RPC_BUDGET_SOLANA_DEVNET: "100,42", RPC_BUDGET_SOLANA_MARKS: "100,30", RPC_BUDGET_BASE: "100,30", RPC_BUDGET_ROBINHOOD: "100,30", RPC_BUDGET_NEAR: "100,30" }));
 });

@@ -112,7 +112,7 @@ export function readerOf(js, w) {
   const r = z !== null && once(READER(z), js) ? READER(z).exec(js) : null;
   return r && once(HELPER_AT(r[6]), js) ? "wired" : "other";
 }
-const FLOOR_WIRE = (m) => new RegExp(`=async\\((${N}),(${N})\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${esc(m)}\\.floor\\(\\1\\);`);
+const FLOOR_WIRE = (m) => new RegExp(`=async\\((${N}),(${N})(?:,${N})?\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${esc(m)}\\.floor\\(\\1\\);`);
 const DEPS_WIRE = (m) =>
   new RegExp(`=\\((${N}),(${N})\\)=>\\{if\\(\\1\\.chain!==${Q}solana${Q}\\)\\{let (${N})=${esc(m)}\\.deps\\(\\1\\.chain,(${N}),(${N})=>(${N})\\(\\5,\\2\\)\\);return \\3===null\\?null:\\{\\.\\.\\.\\3,noted:(${N}),open:(${N})\\}\\}`);
 // main.ts uxNoted (review P2a): the store's landed deposit note of (s,i) read on the page's notes

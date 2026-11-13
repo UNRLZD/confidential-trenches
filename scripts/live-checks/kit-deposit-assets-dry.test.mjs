@@ -19,7 +19,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ASSETS, BASE_USDC, DEVICE_ASKS, EXIT, NEAR_USDC, PLACEHOLDER, SOL_USDC, dec, judge } from "./kit-deposit-assets-dry.mjs";
+import { ASSETS, BASE_USDC, DEVICE_ASKS, DEVICE_ASKS_MAX, EXIT, NEAR_USDC, PLACEHOLDER, SOL_USDC, dec, judge } from "./kit-deposit-assets-dry.mjs";
+import { QUOTE_RULE } from "./deposit-quote-no-liquidity.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "kit-deposit-assets-dry.answers.json"), "utf8"));
@@ -282,8 +283,7 @@ test("planted, one real no-liquidity body on the 25 USDC route: deposit.dry not_
 
 test("planted: a display read asked again, another status or message, another code, or beside a BAD line: FAIL", () => {
   const cases = {
-    "two asks (a page that asks a display read again)": (a) => dryRefused(a, [NL, NL]),
-    "four asks": (a) => dryRefused(a, [NL, NL, NL, NL]),
+    "four asks (past the page's two re-asks)": (a) => dryRefused(a, [NL, NL, NL, NL]),
     "the ask the helper's 503": (a) => dryRefused(a, [{ status: 503 }]),
     "a 400 of another message": (a) => dryRefused(a, [{ status: 400, message: "Amount is too low" }]),
     "a 400 with no message": (a) => dryRefused(a, [{ status: 400 }]),
@@ -297,4 +297,22 @@ test("planted: a display read asked again, another status or message, another co
     assert.equal(v.verdict, "FAIL", `${name}: ${v.lines.join(" | ")}`);
   }
   assert.equal(EXIT.FAIL, 1);
+});
+
+// Card helper-says-why-a-vendor-refused: the page asks a display quote 1Click refused for a reason not about the request
+// again, twice at most (wallet/src/deposit/quote.ts askDepositQuoteAgain); a page before it asks once. A no-liquidity
+// stretch over each of those asks is 1Click's, as one ask was. And a refused read's BAD line names what the helper answered
+// its quotes (live run 43289722533 printed "deposit.assets answered refused not_available" and nothing of why).
+test("planted: a display quote asked again on no liquidity, up to the page's three asks, is 1Click's: INCONCLUSIVE", () => {
+  assert.equal(DEVICE_ASKS_MAX, QUOTE_RULE.maxAsks);
+  for (const n of [1, 2, 3]) {
+    const v = judge(plant((a) => dryRefused(a, Array(n).fill(NL))));
+    assert.equal(v.verdict, "INCONCLUSIVE", `${n}: ${v.lines.join(" | ")}`);
+  }
+});
+
+test("planted: a refused read's BAD line names the helper's 400 messages to its quotes", () => {
+  const v = judge(plant((a) => dryRefused(a, [{ status: 400, message: "Failed to get quote" }, { status: 400, message: "Failed to get quote" }, { status: 400, message: "Failed to get quote" }])));
+  assert.equal(v.verdict, "FAIL");
+  assert.ok(v.lines.includes('BAD deposit.dry answered refused "not_available", want ok (the helper answered its quotes 400 "Failed to get quote" x3)'), v.lines.join("\n"));
 });

@@ -13,7 +13,7 @@
 // never one inside a busy hold (delta review 4: giving back only the queue's tail kept every slot a sign-out ended but
 // the last, since one signal's listeners run in slot order, 51.2 s for the next request after 20 queued; lowering tat
 // one gap for a slot in the middle instead put the next request on the tail's slot, 12 at one instant on a burst of 8).
-import { NEAR_NETWORKS, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./deposit/account.ts";
+import { NEAR_NETWORKS, type NearNetwork, type NearRpc, nearRpc, RPC_TIMEOUT_MS, type RpcHttpError } from "./deposit/account.ts";
 
 /**
  * Each provider's pace: `perSec` requests a second, `burst` at once. FastNEAR's is its sustained rate, read 9 Nov
@@ -26,21 +26,40 @@ import { NEAR_NETWORKS, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./deposit/
  * 03:23-03:45Z; at 1.5 a second, 763 s with 513 busy of 1016). Its 429 carries access-control-allow-origin: * (read
  * 03:20Z with the page's Origin), so the page sees the status and waits it out. dRPC answered 181 of 181 at 3 a second,
  * 151 of 151 asked at 5 a second (3.8 a second answered, p50 253 ms) and 300 of 300 flat out, with no 429 (9 Nov
- * 01:27-01:38Z).
+ * 01:27-01:38Z). dRPC's own docs: "Under normal conditions for the free tier, we have a limit of 25 RPS"
+ * (docs.drpc.org/howitworks/ratelimiting, read 2026-11-12 22:1xZ), so its pace is 10 a second, 20 at once, 40% of that
+ * (card near-quote-under-the-pace: at 3.5 a second a quote's five reads took 1.4 s of turns alone); a busy answer still
+ * holds it (pacedNearRpc).
+ *
+ * `seat`: the helper's FastNEAR seat (NEAR_NETWORKS seat, card near-quote-under-the-pace), FastNEAR's key behind the
+ * helper's own pace for it (apps/helper/src/limits/limits.ts KEYED_PACE fastnear: 5 a second, 5 at once). The device
+ * asks no faster than the key, but faster than the helper's share for one caller (apps/helper/src/rpc/rpc.ts
+ * RPC_PAGE_NEED near: 30 a 10 s window), so a session's first buy meets that 429 once: its busiest 10 s asks the seat
+ * 52 times (Rhea's 6 pool pages and the buy's reads; packages/signpage/test/near-seat-down.test.ts, on the test clock),
+ * the share answers the rest 429 with the seconds left, and pacedNearRpc waits it out. Measured there (review P3-3 of
+ * e6c66cce3), the buy fills in 10.0 s with no share, 14.4 s at 5 a second with the share (1 refused), 17.0 s at 3 (1
+ * refused), 19.2 s at 2.5 (none: 5 + 25 fits 30) and 24.0 s at 2: the share's one wait costs less than any slower
+ * pace, and no share fits the 52 inside the key's own 50 a 10 s. Another device's reads at the same moment can meet the
+ * key's 429 too; past NEAR_BUSY_TRIES the keyless seat answers (nearSeatRpc).
  */
-export const PACE: Readonly<Record<"fastnear" | "drpc", { perSec: number; burst: number }>> = Object.freeze({ fastnear: Object.freeze({ perSec: 0.39, burst: 8 }), drpc: Object.freeze({ perSec: 3.5, burst: 10 }) });
+export const PACE: Readonly<Record<"fastnear" | "drpc" | "seat", { perSec: number; burst: number }>> = Object.freeze({
+  fastnear: Object.freeze({ perSec: 0.39, burst: 8 }),
+  drpc: Object.freeze({ perSec: 10, burst: 20 }),
+  seat: Object.freeze({ perSec: 5, burst: 5 }),
+});
 
 /** A provider URL's pace: the theoretical arrival time of its next request, the gap one request takes, the floor the
  *  last busy hold set (tat as it held it: a slot given back never takes tat below it), and the slots given back that
  *  are still ahead (send times, in order), which the next requests take before a new slot. */
 export type Pace = { tat: number; every: number; burst: number; floor: number; holes: number[] };
 const PACES = new Map<string, Pace>();
-/** The one pace of provider `url` (a FastNEAR URL or a dRPC URL of NEAR_NETWORKS; any other URL is not paced). */
+/** The one pace of provider `url` (a FastNEAR URL, a dRPC URL or the helper's seat of NEAR_NETWORKS; any other URL is
+ *  not paced). */
 export function paceOf(url: string): Pace {
   let p = PACES.get(url);
   if (p === undefined) {
-    const net = Object.values(NEAR_NETWORKS).find((n) => (n.fastnear as readonly string[]).includes(url) || n.drpc === url);
-    const pace = net === undefined ? null : PACE[(net.fastnear as readonly string[]).includes(url) ? "fastnear" : "drpc"];
+    const net = Object.values(NEAR_NETWORKS).find((n) => (n.fastnear as readonly string[]).includes(url) || n.drpc === url || n.seat === url);
+    const pace = net === undefined ? null : PACE[(net.fastnear as readonly string[]).includes(url) ? "fastnear" : net.seat === url ? "seat" : "drpc"];
     p = pace === null ? { tat: 0, every: 0, burst: 1, floor: 0, holes: [] } : { tat: 0, every: 1000 / pace.perSec, burst: pace.burst, floor: 0, holes: [] };
     PACES.set(url, p);
   }
@@ -86,6 +105,7 @@ export function paceHold(p: Pace, now: number, ms: number): void {
 /** Forgets every provider's pace (tests: each test's clock starts at its own zero). */
 export function resetPaces(): void {
   PACES.clear();
+  SEATS_DOWN.clear();
 }
 
 const PACED = new WeakSet<object>();
@@ -100,31 +120,40 @@ export function pacedFetch(url: string, fetchFn: typeof fetch = (...a) => fetch(
   const p = paceOf(url);
   const f = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
     const signal = init?.signal ?? undefined;
-    signal?.throwIfAborted();
-    const t = performance.now();
-    const at = paceTake(p, t);
-    const w = at - t;
-    if (w > 0) {
-      await new Promise<void>((res, rej) => {
-        const k = setTimeout(() => {
-          signal?.removeEventListener("abort", stop);
-          res();
-        }, w);
-        const stop = (): void => {
-          clearTimeout(k);
-          // every ended wait gives its own slot back (delta review 4)
-          paceGiveBack(p, at);
-          rej(signal!.reason);
-        };
-        signal?.addEventListener("abort", stop, { once: true });
-      });
-    }
-    const deadline = AbortSignal.timeout(timeoutMs);
-    return fetchFn(input, { ...init, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+    await paceTurn(p, signal);
+    return deadlineFetch(fetchFn, timeoutMs)(input, init);
   };
   PACED.add(f);
   return f as typeof fetch;
 }
+/** The wait for one slot of `p` on the real clock, under the caller's signal only: an ended wait gives its slot back
+ *  (delta review 4) and throws the signal's reason; a signal already ended takes no slot. */
+async function paceTurn(p: Pace, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  const t = performance.now();
+  const at = paceTake(p, t);
+  const w = at - t;
+  if (w <= 0) return;
+  await new Promise<void>((res, rej) => {
+    const k = setTimeout(() => {
+      signal?.removeEventListener("abort", stop);
+      res();
+    }, w);
+    const stop = (): void => {
+      clearTimeout(k);
+      // every ended wait gives its own slot back (delta review 4)
+      paceGiveBack(p, at);
+      rej(signal!.reason);
+    };
+    signal?.addEventListener("abort", stop, { once: true });
+  });
+}
+/** `fetchFn` with no pace, each request bounded by `timeoutMs` from its send and by its caller's signal. */
+const deadlineFetch = (fetchFn: typeof fetch, timeoutMs: number): typeof fetch => (input, init) => {
+  const signal = init?.signal ?? undefined;
+  const deadline = AbortSignal.timeout(timeoutMs);
+  return fetchFn(input, { ...init, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+};
 
 const PACED_RPCS = new WeakSet<object>();
 /** `rpc`, marked paced at its transport when `fetchFn` is a pacedFetch (so the IdReader takes no second slot). */
@@ -142,8 +171,127 @@ export function requestSignal(fetchFn: unknown, timeoutMs: number, signal?: Abor
   if (ms === null) return signal;
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
 }
-/** The kit's nearRpc for `url` on its one pace (the withdraw form's pair). */
-export function pacedNearRpc(url: string): NearRpc {
-  const f = pacedFetch(url);
-  return pacedRpc(nearRpc(url, f, null), f);
+/** The most tries of one request a provider answers busy (HTTP 429) on (pacedNearRpc), and the waits between them:
+ *  its Retry-After, else NEAR_BUSY_WAIT_MS doubling, at least the pace's gap, at most NEAR_BUSY_WAIT_MAX_MS. */
+export const NEAR_BUSY_TRIES = 4;
+export const NEAR_BUSY_WAIT_MS = 1_000;
+export const NEAR_BUSY_WAIT_MAX_MS = 10_000;
+const isBusy = (e: unknown): e is RpcHttpError => e instanceof Error && (e as Partial<RpcHttpError>).status === 429;
+
+/**
+ * The kit's nearRpc for `url` on its one pace (the withdraw form's pair, the NEAR trade's pair). A busy answer (HTTP
+ * 429) holds the URL's pace for every reader for its Retry-After (or the backoff) and the request is asked again after
+ * it, up to NEAR_BUSY_TRIES in all: a provider's "not now" is waited out, never read as a failed read. `reserve` takes
+ * the URL's next turn and gives back a sender whose first query goes at once (the kit's nearFinal: two providers' final
+ * heights asked at one moment); its later queries, and a first one answered busy, take turns as any other.
+ */
+export function pacedNearRpc(url: string, fetchFn: typeof fetch = (...a) => fetch(...a)): NearRpc {
+  const p = paceOf(url);
+  const f = pacedFetch(url, fetchFn);
+  const paced = nearRpc(url, f, null);
+  // the helper's seat alone names a wait past NEAR_BUSY_WAIT_MAX_MS on purpose (its day cap): it is not waited out, the
+  // seat falls to its spare (nearSeatRpc); any other provider's long wait is waited out in its tries as before
+  const seat = Object.values(NEAR_NETWORKS).some((n) => n.seat === url);
+  const again = async (first: () => Promise<unknown>, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
+    for (let k = 0; ; k++) {
+      try {
+        return await (k === 0 ? first() : paced.query(params, signal));
+      } catch (e) {
+        if (!isBusy(e) || k + 1 >= NEAR_BUSY_TRIES || signal?.aborted || (seat && (e.retryAfterMs ?? 0) > NEAR_BUSY_WAIT_MAX_MS)) throw e;
+        const wait = Math.min(NEAR_BUSY_WAIT_MAX_MS, Math.max(e.retryAfterMs ?? NEAR_BUSY_WAIT_MS * 2 ** k, p.every));
+        paceHold(p, performance.now(), wait);
+      }
+    }
+  };
+  const rpc: NearRpc = {
+    name: url,
+    query: (params, signal) => again(() => paced.query(params, signal), params, signal),
+    async reserve(signal) {
+      await paceTurn(p, signal);
+      const now = nearRpc(url, deadlineFetch(fetchFn, RPC_TIMEOUT_MS), null);
+      let used = false;
+      return {
+        name: url,
+        query: (params, s) => {
+          if (used) return rpc.query(params, s);
+          used = true;
+          return again(() => now.query(params, s), params, s);
+        },
+      };
+    },
+  };
+  return pacedRpc(rpc, f);
+}
+
+/** Whether the helper's seat failed a read the keyless seat may answer instead: a busy answer past its tries (HTTP
+ *  429), the helper or its upstream down (5xx: its 503 upstream when FastNEAR's key answers nothing), no answer in
+ *  time, or no answer at all (a network error). Any other status (a 4xx: the page's request or origin refused) is a
+ *  fault of ours that shows, never hidden by the spare. */
+const seatDown = (e: unknown): boolean => {
+  if (!(e instanceof Error)) return false;
+  const status = (e as Partial<RpcHttpError>).status;
+  if (typeof status === "number") return status === 429 || status >= 500;
+  return e.name === "TimeoutError" || e.name === "TypeError";
+};
+/**
+ * How long a seat that fell to its spare stays down: its reads go straight to the spare meanwhile, then the seat is
+ * asked again (review P2-1 of e6c66cce3: with nothing remembered, every read of a trade waited the seat out again, up
+ * to the 10 s deadline or four busy tries, before the spare). [design: 10 s, the helper's window (apps/helper
+ * src/limits/limits.ts LIMIT_WINDOW_MS): its per-caller 429 names at most the seconds to that window's end, so the
+ * seat is asked again once the window that refused it has turned; a trade loses at most one seat wait per 10 s.]
+ */
+export const SEAT_DOWN_MS = 10_000;
+/** The longest a busy seat's named wait keeps it down: the longest wait the helper names (apps/helper/src/limits/limits.ts
+ *  RETRY_AFTER_MAX_S, 75 s; its day cap names it), so a seat that names more is asked again no later than that. */
+export const SEAT_DOWN_MAX_MS = 75_000;
+/** Each seat's down-until time (performance.now), for the whole page as its paces are; seatsUp() clears it. */
+const SEATS_DOWN = new Map<string, number>();
+/** Forget every seat taken for down (the page's sign out, so nothing of a session outlives it; resetPaces too). */
+export function seatsUp(): void {
+  SEATS_DOWN.clear();
+}
+/**
+ * The page's FastNEAR seat on `network` (card near-quote-under-the-pace): the helper's POST /v1/rpc/near?keyed=only,
+ * FastNEAR's key at PACE.seat, a 429 waited out as pacedNearRpc does; past that, or with the helper down or slow
+ * (seatDown), the same read on FastNEAR's keyless URL at its own pace (PACE.fastnear), so a trade never stops for the
+ * helper. Both are FastNEAR's, so the seat stays one operator and its name is the helper's URL (the kit's
+ * nearPairNetwork). A caller's own abort is never taken for the seat down. `reserve` takes the helper's turn (the kit's
+ * nearFinal); a first query it fails goes to the keyless seat in turn. A network with no seat (testnet) has FastNEAR's
+ * keyless URL alone.
+ */
+export function nearSeatRpc(network: NearNetwork, fetchFn: typeof fetch = (...a) => fetch(...a)): NearRpc {
+  const net = NEAR_NETWORKS[network];
+  const spare = pacedNearRpc(net.fastnear[0], fetchFn);
+  if (net.seat === null) return spare;
+  const url = net.seat;
+  const seat = pacedNearRpc(url, fetchFn);
+  const down = () => (SEATS_DOWN.get(url) ?? -Infinity) > performance.now();
+  const or = async (read: () => Promise<unknown>, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
+    try {
+      return await read();
+    } catch (e) {
+      if (signal?.aborted || !seatDown(e)) throw e;
+      // down SEAT_DOWN_MS, or as long as a busy seat names up to SEAT_DOWN_MAX_MS (the helper's day cap)
+      const named = isBusy(e) ? Math.min(SEAT_DOWN_MAX_MS, e.retryAfterMs ?? 0) : 0;
+      SEATS_DOWN.set(url, performance.now() + Math.max(SEAT_DOWN_MS, named));
+      return spare.query(params, signal);
+    }
+  };
+  const rpc: NearRpc = {
+    name: url,
+    query: (params, signal) => (down() ? spare.query(params, signal) : or(() => seat.query(params, signal), params, signal)),
+    async reserve(signal) {
+      // the reserved turn is the first query's alone; every later one goes through rpc.query, so a seat that fell to
+      // its spare meanwhile is not asked again (review P3-5 of 997ce7a7f)
+      let used = false;
+      const later = (params: Record<string, unknown>, s?: AbortSignal) => rpc.query(params, s);
+      if (down()) {
+        const first = await spare.reserve!(signal);
+        return { name: url, query: (params, s) => (used ? later(params, s) : ((used = true), first.query(params, s))) };
+      }
+      const first = await seat.reserve!(signal);
+      return { name: url, query: (params, s) => (used ? later(params, s) : ((used = true), or(() => first.query(params, s), params, s))) };
+    },
+  };
+  return rpc;
 }

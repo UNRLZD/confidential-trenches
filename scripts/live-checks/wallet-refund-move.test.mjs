@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { INTENTS_URL, judge, read, RELAY_ANSWER_MAX_BYTES, relayAnswer, relayCode } from "./wallet-refund-move.mjs";
+import { INTENTS_URL, judge, quoteFacts, read, refundRequest, RELAY_ANSWER_MAX_BYTES, relayAnswer, relayCode } from "./wallet-refund-move.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./wallet-refund-move.answers.json", import.meta.url), "utf8"));
 
@@ -136,4 +136,16 @@ test("read() reads the relay's answer through the cap: a 1025-byte refusal from 
   const a = await read(fetchFn, Date.parse("2026-11-07T14:40:00Z"));
   assert.deepEqual(a.relay, { status: 400, code: null, cors: "https://confidential.unrealized.trade" });
   assert.ok(judge(a).lines.some((l) => l.startsWith("BAD the helper carries no id's intent: POST /v1/intents answers 400 null")));
+});
+
+// Card helper-says-why-a-vendor-refused: live run 43289730843 printed "answers the refund move's quote 400" and nothing of
+// why; the quote's facts keep the message and the BAD line carries it.
+test("planted on the good answer: a quote answered 400 FAILs with 1Click's message on its BAD line, recorded in the facts", () => {
+  const a = structuredClone(A.good);
+  a.quote = quoteFacts(400, refundRequest("ab".repeat(32), Date.parse("2026-11-12T19:25:00Z")), { message: "Failed to get quote", correlationId: "x" });
+  assert.equal(a.quote.message, "Failed to get quote");
+  const v = judge(a);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines.filter((l) => l.includes("quote")), [`BAD the helper's 1Click proxy answers the refund move's quote 400 "Failed to get quote"`]);
+  assert.equal(quoteFacts(201, refundRequest("ab".repeat(32), 0), null).message, undefined, "a 2xx keeps no message");
 });

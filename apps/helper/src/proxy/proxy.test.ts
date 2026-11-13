@@ -192,6 +192,36 @@ test("an answer that holds one of our keys in any form is refused, never passed 
   assert.equal(b.status, 503);
 });
 
+// Card helper-says-why-a-vendor-refused, review P3: a key holding ", \ or / leaves a JSON body escaped ("\/", "\"",
+// "\\", "\u0066"), a form keyForms does not spell; the decoded strings of the body are read for it too.
+test("an answer that holds one of our keys JSON-escaped is refused too, never passed on", async () => {
+  const key = 'fake/oneclick"jwt\\-' + "o".repeat(16);
+  const env = { ...ENV, ONECLICK_JWT: key };
+  const esc = JSON.stringify(key).slice(1, -1);
+  const bodies = [
+    `{"echo":"${esc}"}`,
+    `{"echo":"${esc.replaceAll("/", "\\/")}"}`,
+    `{"echo":"\\u0066${esc.slice(1)}"}`,
+    `{"${esc}":1}`,
+  ];
+  for (const body of bodies) {
+    assert.equal(JSON.parse(body).echo ?? Object.keys(JSON.parse(body))[0], key, body);
+    for (const status of [200, 400]) {
+      const a = await createProxy(env, { fetch: vendor(() => new Response(body, { status, headers: { "content-type": "application/json" } })).fetch }).handle("oneclick", "/v0/tokens", "", "");
+      assert.deepEqual([a.status, JSON.parse(a.body)], [503, { error: { code: "upstream" } }], `${status} ${body}`);
+    }
+  }
+});
+
+test("the decoded read is never recursive: an answer of a million-element list passes as it is", async () => {
+  // one escaped string, so the decoded read runs (it runs only on a text that holds an escape)
+  const body = JSON.stringify(Array.from({ length: 1_000_000 }, (_, i) => (i === 0 ? "a\\b" : i % 2 ? "x" : 1)));
+  assert.ok(body.includes("\\"));
+  const a = await createProxy(ENV, { fetch: vendor(() => new Response(body, { status: 200, headers: { "content-type": "application/json" } })).fetch }).handle("oneclick", "/v0/tokens", "", "");
+  assert.equal(a.status, 200);
+  assert.equal(a.body, body);
+});
+
 // card helper-abuse-limits (review finding 3): the helper is the vendor's one client, so a vendor's 429 holds the
 // vendor until its reset (at 06a656f the next caller still reached the vendor). Card helper-crowd-429 fold 6: the hold
 // is never the caller's 429 (a 429 of ours says the caller is past its own limit, live run 41943005189): a reset inside
@@ -228,7 +258,7 @@ test("429: the vendor is held until its reset (at most a minute); a reset inside
   assert.ok(WAIT_MAX_MS < 30_000);
 });
 
-test("each vendor is one budget callers draw from fairly: a heavy caller is lent past its share while a share stays free, then throttled while an honest one still goes; a cache hit counts in the caller's share only", async () => {
+test("each vendor is one budget callers draw from fairly: a heavy caller is lent past its share while a share stays free, then throttled while an honest one still goes; a cache hit draws nothing, not even the caller's share (card chart-candles-never-429)", async () => {
   const c = clock();
   const f = vendor(() => json({ ok: 1 }));
   // a refused caller's wait (card helper-crowd-429) passes no time here
@@ -245,11 +275,10 @@ test("each vendor is one budget callers draw from fairly: a heavy caller is lent
   assert.equal(f.seen.length, lent, "the throttled draw never reached the vendor");
   assert.equal((await p.handle("jupiter", "/swap/v2/build", "n=y", "", "honest")).status, 200, "an honest caller in the same window");
   assert.equal((await p.handle("relay", "/quote/v2", "", "{}", "heavy")).status, 200, "another vendor is its own budget");
-  // a cached list: the first read draws; a hit reaches no vendor but counts in the reader's share, so a heavy reader
-  // of a hit is throttled at its share while the vendor sees one call
+  // a cached list: the first read draws; a hit reaches no vendor and draws nothing, so readers behind one address are
+  // served it past any share while the vendor sees one call
   const before = f.seen.length;
-  for (let i = 0; i < PROXY_CLIENT_MAX; i++) assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 200, `read ${i}`);
-  assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 429, "past its share, a hit too");
+  for (let i = 0; i < PROXY_CLIENT_MAX * 3; i++) assert.equal((await p.handle("jupiter", "/tokens/v2/recent", "", "", "reader")).status, 200, `read ${i}`);
   assert.equal(f.seen.length, before + 1, "one vendor call for every read");
   // readers enough that their hits, were they drawn from the vendor's total, would spend all of it
   for (let r = 0; r < PROXY_VENDOR_MAX / PROXY_CLIENT_MAX; r++) for (let i = 0; i < PROXY_CLIENT_MAX; i++) await p.handle("jupiter", "/tokens/v2/recent", "", "", `reader-${r}`);
@@ -260,14 +289,17 @@ test("each vendor is one budget callers draw from fairly: a heavy caller is lent
   assert.ok(PROXY_CLIENT_MAX * 5 <= PROXY_VENDOR_MAX);
 });
 
-test("review F-C2: one address reading a cached proxy list 1000 times in one window meets a 429", async () => {
+// review F-C2's bound (one address reading a cached list 1000 times in one window meets a 429) is the route's own window
+// since card chart-candles-never-429 (server.ts UPSTREAM_ROUTE_MAX, held in server.test.ts "review F-C2"): a hit draws
+// no share here, so viewers behind one address are served one cached answer
+test("card chart-candles-never-429: one address reading a cached proxy list 1000 times is served it every time from one vendor call", async () => {
   let t = 1_800_000_000_000;
   let up = 0;
   const big = JSON.stringify({ tokens: "x".repeat(250_000) });
   const p = createProxy(WIDE, { now: () => (t += 1), fetch: async () => (up++, new Response(big, { status: 200, headers: { "content-type": "application/json" } })) });
-  let throttled = 0;
-  for (let i = 0; i < 1000; i++) if ((await p.handle("jupiter", "/tokens/v2/toptrending/1h", "", "", "203.0.113.67")).status === 429) throttled++;
-  assert.ok(throttled >= 1000 - PROXY_CLIENT_MAX, `${throttled} of 1000 cached reads throttled`);
+  let served = 0;
+  for (let i = 0; i < 1000; i++) if ((await p.handle("jupiter", "/tokens/v2/toptrending/1h", "", "", "203.0.113.67")).status === 200) served++;
+  assert.equal(served, 1000);
   assert.equal(up, 1, "one vendor call");
 });
 
@@ -462,7 +494,7 @@ test("re-check F-D: a retry after a vendor's short reset reaches the vendor agai
   assert.equal(f.seen.length, 2, "nothing past the total reached the vendor");
 });
 
-test("re-check F-D: a call joining one in flight reaches no vendor, so it draws only the caller's share", async () => {
+test("re-check F-D: a call joining one in flight reaches no vendor, so it draws nothing (card chart-candles-never-429)", async () => {
   const c = clock();
   let release!: () => void;
   const gate = new Promise<void>((ok) => (release = ok));
@@ -785,9 +817,14 @@ test("card helper-page-jup-429 (d): the live run's crowd (six legs, two builds, 
   assert.equal((await page).status, 200);
   assert.ok(j.sent.filter((s) => s.at > sentAt - 10_000 && s.at <= sentAt).length <= 10, "the window held");
   // one line a send: the lane, the wait, the window, the answer; never a path, query or client
-  assert.equal(lines.length, j.sent.length);
-  assert.ok(lines.every((l) => /^jupiter turn: (caller|background), waited \d+ ms, \d+ of 10 sent in 10 s, answered 200 in \d+ ms$/.test(l)), lines.join("\n"));
-  assert.ok(lines.every((l) => !/198\.51|query|leg=|\/swap|\/tokens/.test(l)));
+  const turns = lines.filter((l) => l.startsWith("jupiter turn: "));
+  assert.equal(turns.length, j.sent.length);
+  assert.ok(turns.every((l) => /^jupiter turn: (caller|background), waited \d+ ms, \d+ of 10 sent in 10 s, answered 200 in \d+ ms$/.test(l)), turns.join("\n"));
+  assert.ok(turns.every((l) => !/198\.51|query|leg=|\/swap|\/tokens/.test(l)));
+  // card helper-says-why-a-vendor-refused: every other line is a refusal of ours (a page's turn past its wait), with the
+  // allowlisted path alone, never a query or client
+  const rest = lines.filter((l) => !l.startsWith("jupiter turn: "));
+  assert.ok(rest.every((l) => /^proxy jupiter \/tokens\/v2\/search answered 503, ours: jupiter (turn|budget|held)/.test(l) && !/198\.51|query|leg=/.test(l)), rest.join("\n"));
   void t0;
 });
 test("card helper-page-jup-429: a turn's log line keeps only whole numbers of the vendor's own count (hostile headers)", async () => {

@@ -490,6 +490,8 @@ jobs:
   # mutant files run a file at a time, the largest in halves; the wallet's held-moveout sweep, the kit's quote sweep and
   # the helper's sell sweep in halves or quarters; the rent back's in eight parts), and 14 parts plan the heaviest at 540 s
   # (13 would plan 581 s). A sweep that runs more than 1.25 times its listed seconds prints a warning on the run.
+  # Sixteen parts (card round-trip-costs-less): the rent back's sweep grew to 126 plants; it runs as fourteen commands of
+  # 9 plants (244 s at the table's 27.06 s a plant), and 16 parts plan the heaviest at 502 s (15 would plan 566 s).
   # scripts/ci/test-shards.test.mjs fails when any ci.yml line but a comment names test:mutants, in any runner's form.
   # Nightly on main and by hand only (card ci-fast-checks-on-the-pr): no pull request, queue group or push waits on the
   # sweeps, and the required check test does not need this job. It needs no changes job (that one skips a scheduled
@@ -502,7 +504,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

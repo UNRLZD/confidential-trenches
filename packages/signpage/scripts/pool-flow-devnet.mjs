@@ -58,7 +58,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { h2Fetch } from "./h2-fetch.mjs";
-import { IDBFactory } from "fake-indexeddb";
+import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { COPY, copyAirdrop, copyNet } from "./copy-net.mjs";
@@ -91,7 +91,16 @@ const TABLES = TABLE === "pinned" ? PAGE_TABLES : Object.freeze(Object.fromEntri
   if ((v !== "pump-curve" && v !== "pumpswap") || !a) throw new Error(`not a venue=table pair: ${x}`);
   return [v, Object.freeze(a.split("+"))];
 })));
-const RUNG = 10_000_000n;
+// FLOW_RUNG=<lamports> (card round-trip-costs-less): the one note's size, a rung of the deposit ladder from 0.01 SOL
+// (1, 2 or 5 x 10^k x 0.001 SOL); 0.01 SOL by default. A larger one leaves W enough after a full sell for its sweep, so
+// a run times the sale, the teardown and the sweep.
+const RUNG = process.env.FLOW_RUNG === undefined ? 10_000_000n : BigInt(process.env.FLOW_RUNG);
+{
+  let q = RUNG / 1_000_000n;
+  while (q > 0n && q % 10n === 0n) q /= 10n;
+  if (RUNG < 10_000_000n || RUNG % 1_000_000n !== 0n || ![1n, 2n, 5n].includes(q)) throw new Error(`FLOW_RUNG: a rung from 0.01 SOL, not ${RUNG}`);
+}
+const RUNG_SOL = (Number(RUNG) / 1e9).toString();
 const FEE = 5_000n;
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -107,6 +116,16 @@ const asked = new Map();
 // then its rent back, the teardown frames and the sweep); public bytes only
 const sentTxs = [];
 const sentWire = new Map();
+// the device's spacing database, as a browser page has one (src/device-spacing.ts, card round-trip-costs-less: every rent
+// back claims its slot there, and a database that cannot answer holds the pass); each stamp kept with the step and the
+// count of transactions sent before it (the copy's own list on a copy), so the record shows each send stamped before it goes
+globalThis.indexedDB ??= new IDBFactory();
+const stamps = [];
+const putRow = IDBObjectStore.prototype.put;
+IDBObjectStore.prototype.put = function (v, k) {
+  if (this.name === "space" && k === "rentback-sol") stamps.push({ at: v?.at, gap: v?.gap, phase, sentBefore: (copy?.sent ?? sentTxs).length });
+  return putRow.call(this, v, k);
+};
 const sentOf = (init) => {
   try {
     const b = JSON.parse(String(init?.body ?? ""));
@@ -406,9 +425,9 @@ if (RESUME) {
     if (b > 0n) log(`U holds ${b}: waiting for exactly ${NEED} or at least ${NEED + EMPTY}`);
     await sleep(10_000);
   }
-  log("U funded; pool.deposit of 0.01 SOL");
+  log(`U funded; pool.deposit of ${RUNG_SOL} SOL`);
   phase = "deposit";
-  deposit = await run("pool.deposit", { chain: "solana", amount: "0.01" });
+  deposit = await run("pool.deposit", { chain: "solana", amount: RUNG_SOL });
   log(`deposit ${JSON.stringify(deposit)}`);
   if (process.env.FLOW_CRASH_AFTER === "deposit") {
     log("stopped after the deposit (FLOW_CRASH_AFTER=deposit): the seed stays in its file");
@@ -578,6 +597,7 @@ if (bought && process.env.FLOW_COPY_STOP !== "buy") {
   phase = "after the sell";
   rentBack = { W, tokenAccount: await left(solanaAta(W, MINT, program)), pumpVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM)), ammVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM)), w: await left(W) };
   log(`after the rent back ${JSON.stringify(rentBack)}`);
+  log(`the device's stamps ${JSON.stringify(stamps)}; sent ${JSON.stringify(copy?.sent ?? sentTxs)}`);
   // FLOW_DUST: the teardown frame that burned S's unit (a token program's Burn, tag 8, of W's token account)
   if (DUST) {
     for (const sig of sentTxs) {
@@ -601,7 +621,7 @@ const filled = REFUSE ? back : COPY && process.env.FLOW_COPY_STOP === "buy" ? la
 seed64.fill(0);
 // FLOW_COPY: each send by its step (the copy's record reads each back), the W of the buy and the tip accounts watched
 const steps = COPY ? copy.sent.map((s) => ({ step: s.phase, signature: s.signature, watch: { W: rentBack?.W ?? null, feePayer: PIN.feePayer, ...Object.fromEntries(SOLANA_JITO_TIP_ACCOUNTS.map((a, i) => [`tip${i}`, a])) } })) : undefined;
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, sendLines: copy?.sendLines, proofWait, engine: copy?.engine, engineCalls: copy?.engineCalls, pool, tables: TABLES, mint: MINT, spend: SPEND, maxSpend, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, sendLines: copy?.sendLines, proofWait, engine: copy?.engine, engineCalls: copy?.engineCalls, pool, tables: TABLES, mint: MINT, spend: SPEND, maxSpend, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stamps, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

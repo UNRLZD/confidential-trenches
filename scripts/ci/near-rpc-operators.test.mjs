@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { ALLOW, BUNDLES, NEAR_RPC_OPERATORS, SKIP, fileProblems, isNearRpc, lineProblems, networkOf, operatorOf, scanFiles, scanTree } from "./near-rpc-operators.mjs";
+import { ALLOW, BUNDLES, NEAR_RPC_OPERATORS, NEAR_RPC_SEATS, SKIP, fileProblems, isNearRpc, lineProblems, networkOf, operatorOf, scanFiles, scanTree } from "./near-rpc-operators.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 import { RPCS, operatorOf as gateOperatorOf } from "./money-gate.mjs";
 import { RPC_OPERATORS } from "./rpc-operators.mjs";
@@ -166,6 +166,30 @@ test("the helper's two token-status defaults are two operators, mainnet both", (
   const urls = WATCH_RPCS.map((r) => r.fallback);
   assert.equal(new Set(urls.map(operatorOf)).size, 2, urls.join(", "));
   for (const u of urls) assert.equal(networkOf(u), "mainnet", u);
+});
+
+test("the helper's ?keyed=only NEAR seat is FastNEAR's on mainnet: with dRPC two operators; planted: with a FastNEAR host one operator, refused; its other routes are no seat", () => {
+  const SEAT = "https://ct-api.unrealized.trade/v1/rpc/near?keyed=only";
+  assert.deepEqual(Object.keys(NEAR_RPC_SEATS), ["ct-api.unrealized.trade/v1/rpc/near?keyed=only"]);
+  assert.equal(operatorOf(SEAT), "fastnear");
+  assert.equal(networkOf(SEAT), "mainnet");
+  assert.equal(operatorOf("https://ct-api.unrealized.trade/v1/rpc/near"), null, "the plain route walks every keyed URL and the public fallback");
+  assert.equal(operatorOf("https://ct-api.unrealized.trade/v1/bind"), null);
+  assert.deepEqual(lineProblems(`const pair = ["${SEAT}", "https://near.drpc.org"];`, "a.ts"), []);
+  for (const fast of ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"]) {
+    const p = lineProblems(`const pair = ["${SEAT}",\n  "${fast}"];`, "a.ts");
+    assert.equal(p.length, 1, fast);
+    assert.match(p[0], /are one operator \(fastnear\)/);
+  }
+  // marked as one operator's alternatives on purpose (the seat and its keyless spare): passes
+  assert.deepEqual(lineProblems(`const s = seat("${SEAT}", // ${ALLOW}\n  "https://rpc.mainnet.fastnear.com"); // ${ALLOW}`, "a.ts"), []);
+  // a mainnet seat and a testnet FastNEAR host are no pair
+  assert.deepEqual(lineProblems(`const x = ["${SEAT}", "https://test.rpc.fastnear.com"];`, "a.ts"), []);
+  for (const other of ["https://ct-api.unrealized.trade/v1/rpc/near", "https://ct-api.unrealized.trade/v1/rpc/near?keyed=only&x=1", "https://ct-api.unrealized.trade/v1/rpc/near?keyed=1"]) {
+    const p = lineProblems(`const u = "${other}";`, "a.ts");
+    assert.equal(p.length, 1, other);
+    assert.match(p[0], /is a NEAR RPC the operator map does not hold/, other);
+  }
 });
 
 test("the real tree: every NEAR RPC host is in the map and no unit pairs one operator", () => {

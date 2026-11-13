@@ -8,7 +8,7 @@ import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { CHAINS } from "../market/pads.ts";
 import { usd as usdCents } from "../signin/model.ts";
-import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, formHeld, pickAsset, poolAskAgainIn, poolQuote, poolReady, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, destAsset, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, formHeld, pickAsset, poolAskAgainIn, poolQuote, poolBalance, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
 import type { Answer, Asset, Dest, DryQuote, PoolOpen, QuoteRefusal, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
@@ -88,8 +88,10 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
     };
   }, [asksPools, poolAddress]);
   const fundable = destFundable(dest, open);
+  // the asset picked on this place; none picked, the place's own coin (destAsset: SOL on Solana, ETH on Base and
+  // Robinhood, USDC on NEAR), the other assets still offered in the pickers
   const [picked, setPicked] = useState<{ symbol: string; chain: string } | null>(null);
-  const asset = pickAsset(src.assets, picked);
+  const asset = pickAsset(src.assets, picked ?? destAsset(src.assets, dest));
   const [amount, setAmount] = useState(() => src.start?.amount ?? "");
   const [typedDry, setDry] = useState<Answer<DryQuote>>({ kind: "idle" });
   // no asset list (refused, or none to take) is the sheet's answer before any amount: S4.6, S4.7 or S4.8, never a skeleton
@@ -146,9 +148,11 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
     setReq({ id, dest: d, ...asked });
     setChecked(q && quoteFits(q, asked) ? { kind: "ok", value: q } : { kind: "refused", code });
   }
-  // another place picked: a refusal belongs to the place it was asked for, so the new place starts unasked
+  // another place picked: a refusal belongs to the place it was asked for, so the new place starts unasked, and on its
+  // own coin (card deposit-pool-picks-its-own-coin)
   function pickDest(d: Dest) {
     setDest(d);
+    setPicked(null);
     if (checked.kind === "refused") setChecked({ kind: "idle" });
   }
   function again() {
@@ -166,27 +170,22 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   let body: ReactNode;
   let foot: ReactNode = null;
   if (s === "pool-in" && req && req.dest !== "near") {
-    // the notes read on the pool's two RPCs (the kit's in_pool): what the pool holds ready to buy, and the rest still
-    // being proved, in its own asset, as Portfolio's row for the chain
-    const p = poolReady(state?.pools, req.dest);
+    // the notes read on the pool's two RPCs (the kit's in_pool): the chain's balance in its own asset, as Portfolio's
+    // row for the chain
+    const p = poolBalance(state?.pools, req.dest);
     body = (
       <>
         <div className="ddone" data-pool={req.dest}>
           <Ring />
           {p && (
             <>
-              <div className="dsub"><W id="ready" /></div>
-              <div className="damt-done num" data-ready={p.ready ?? "none"}>{p.ready ?? "0"} {p.asset}</div>
+              <div className="dsub"><W id="balance" /></div>
+              <div className="damt-done num" data-balance={p.balance}>{p.balance} {p.asset}</div>
             </>
           )}
           <div className="dsub">
             <W id="deposited" /> <span className="num">{checked.kind === "ok" ? checked.value.amount_in : ""}</span> {req?.asset.symbol}
           </div>
-          {p?.pending != null && (
-            <div className="dsub" data-pending={p.pending}>
-              <W id="pending" /> <span className="num">{p.pending}</span> {p.asset}
-            </div>
-          )}
         </div>
         <Recent rows={recentRows(state?.ops)} />
       </>

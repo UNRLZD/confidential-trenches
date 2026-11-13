@@ -81,7 +81,7 @@ import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChai
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { POOL_TESTNET, SIGN_MAINNET } from "./network.ts";
-import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
 export type EvmRpc = SolanaRpc;
@@ -385,6 +385,8 @@ export type EvmBlock = { number: bigint; hash: string; timestamp: bigint; baseFe
 
 /** An RPC behind the other: a retry, never an answer. */
 export class EvmLagError extends Error {
+  /** The cause a stop names (pool-sell.ts legCause), never the message. */
+  readonly code = "lag";
   constructor(m: string) {
     super(m);
     this.name = "EvmLagError";
@@ -675,6 +677,8 @@ const throttleWaitMs = (tries: number, afterMs: number | null): number => Math.m
 /** A read a throttle or no answer in time left unanswered through its every try: named by the read, and never a
  * throttle to a read around it, so one bound is never tried again inside another. */
 export class EvmUnansweredError extends Error {
+  /** The cause a stop names (pool-sell.ts legCause), never the message. */
+  readonly code = "unanswered";
   constructor(m: string, cause: unknown) {
     super(m, { cause });
     this.name = "EvmUnansweredError";
@@ -1335,7 +1339,7 @@ export async function evmAgreedBlock(rpcs: readonly [EvmRpc, EvmRpc], at: string
   if (x === null || y === null) return lag(`rpc ${x === null ? 0 : 1} does not know block ${n} yet`);
   if (x.hash !== y.hash || x.timestamp !== y.timestamp || x.number !== n || y.number !== n) {
     if (at === EVM_NEWEST_TAG) return lag(`the two RPCs hold different blocks at ${n}`);
-    throw new Error(`the two RPCs hold different blocks at ${n}`);
+    throw new PoolReadError("rpc_disagree", `the two RPCs hold different blocks at ${n}`);
   }
   return x;
 }
@@ -1419,6 +1423,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   // the device's held part (a.held): read at the first round; `fromHold` until the pool's views have proven it
   let read = a.held === undefined;
   let fromHold = false;
+  // card evm-deposit-on-mainnet: a held part of no leaf while the pool has leaves, kept only until a round's own trees
+  // from the logs past it are the pool's (round, below)
+  let emptyHeld = false;
   // what the device's record holds: its last block, its leaves and the time of the block it was written at (null: not
   // known), so a write comes only with new leaves or a day of blocks (review of 7eb8cfb9, P3-4)
   let writtenTo = heldTo;
@@ -1441,7 +1448,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   /** One view on both RPCs at the anchor; the two answers must be one. */
   async function agreed(data: string, h: string, what: string, signal?: AbortSignal): Promise<bigint> {
     const [x, y] = await both(rpcs, (rpc, k, sig) => view(rpc, pool, data, h, `rpc ${k} ${what}`, sig, sleep), signal);
-    if (x !== y) throw new Error(`the two RPCs differ on ${what} at ${h}`);
+    if (x !== y) throw new PoolReadError("rpc_disagree", `the two RPCs differ on ${what} at ${h}`);
     return x;
   }
 
@@ -1467,7 +1474,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     if (known !== undefined) return known;
     const t = await agreed(VIEWS.stateRootTimes + hex(word(root)), h, "stateRootTimes(root)", signal);
     if (t !== 0n) rootTimes.set(root, t);
-    if (t === 0n) throw new Error(`the state root of the pool's first ${k} leaves (to block ${events[k - 1]!.block}) is not one the pool made`);
+    if (t === 0n) throw new PoolReadError("root_mismatch", `the state root of the pool's first ${k} leaves (to block ${events[k - 1]!.block}) is not one the pool made`);
     return t;
   }
 
@@ -1521,6 +1528,20 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     const size = await agreed(VIEWS.currentTreeSize, anchor.hash, "currentTreeSize()", signal);
     const labelRoot = await agreed(VIEWS.currentLabelRoot, anchor.hash, "currentLabelRoot()", signal);
     const labelSize = await agreed(VIEWS.currentLabelTreeSize, anchor.hash, "currentLabelTreeSize()", signal);
+    // a held part the pool's views do not prove: dropped, its record cleared, and the pool read from its deploy block
+    const dropHeld = async (): Promise<void> => {
+      const bad = heldTo;
+      held = [];
+      heldTo = writtenTo = a.pin.fromBlock - 1n;
+      writtenCount = 0;
+      writtenAt = null;
+      kept.clear();
+      await a.held!.drop(bad).catch(() => {});
+    };
+    // card evm-deposit-on-mainnet: a hold of no leaf while the pool has leaves (its first deposit landed past the
+    // finalized anchor the hold runs to) has no root for the root times to prove; the seats' trees prove it instead
+    // (the pool's root binds every leaf, so trees of only the logs past the hold that are the pool's mean no leaf is at
+    // or below it), and any other end of their read but a lag drops it (below)
     if (fromHold) {
       // the held part proven, never judged by its size (review of 7eb8cfb9, P2-1): the pool keeps a time for every
       // root it made (State.sol:63-65, 172, 188), head state that is never pruned, so the roots of the held leaves and
@@ -1529,15 +1550,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       // deploy block; so is one with leaves and no label (a pool's first leaf is a deposit). It does not prove that no
       // leaf is missing after the last held one and up to the hold's `to`: such a hold is kept and its rounds refuse,
       // and only a round whose trees were the pool's ever writes one.
-      if (!(await heldProven(anchor.hash, size, signal))) {
-        const bad = heldTo;
-        held = [];
-        heldTo = writtenTo = a.pin.fromBlock - 1n;
-        writtenCount = 0;
-        writtenAt = null;
-        kept.clear();
-        await a.held!.drop(bad).catch(() => {});
-      }
+      if (held.length === 0 && size !== 0n) emptyHeld = true;
+      else if (!(await heldProven(anchor.hash, size, signal))) await dropHeld();
       fromHold = false;
     }
     // the logs are read by range, not at a hash: a reorg between the views and the logs gives a tail of another chain
@@ -1655,22 +1669,37 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: heldTo, events: held, kept: ks, ...(writtenAt === null ? {} : { at: writtenAt }) }).catch(() => {});
       }
       if (lagged || moved || reads.some(behindOf)) lag(`a source's logs past block ${fin.number} are behind (${whys.join("; ")})`);
-      throw new Error(`${why}; no two sources of two operators gave the same logs making the pool's trees at ${anchor.hash}${whys.length > 0 ? ` (${whys.join("; ")})` : ""}`);
+      throw new PoolReadError("no_agreed_logs", `${why}; no two sources of two operators gave the same logs making the pool's trees at ${anchor.hash}${whys.length > 0 ? ` (${whys.join("; ")})` : ""}`);
     };
-    let why = "";
-    let got: ReturnType<typeof build> | null = null;
-    try {
-      got = build(anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, pager, held.length, signal, sleep) : []);
-    } catch (e) {
-      // a lag stays a lag; any other refusal of the seats' read (two lists that differ, a seat that refuses a page) goes
-      // to the sources
-      if (e instanceof EvmLagError || signal?.aborted) throw e;
-      why = String((e as Error)?.message ?? e);
-    }
-    if (got !== null && got.wrong !== null) {
-      // a reorg under the read is a retry
-      why = got.wrong;
-      await still();
+    // the seats' logs past what is held, and why they are none or not the pool's trees ("": they are)
+    const seats = async (): Promise<{ got: ReturnType<typeof build> | null; why: string }> => {
+      let got: ReturnType<typeof build> | null = null;
+      let why = "";
+      try {
+        got = build(anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, pager, held.length, signal, sleep) : []);
+      } catch (e) {
+        // a lag stays a lag; any other refusal of the seats' read (two lists that differ, a seat that refuses a page)
+        // goes to the sources
+        if (e instanceof EvmLagError || signal?.aborted) throw e;
+        why = String((e as Error)?.message ?? e);
+      }
+      if (got !== null && got.wrong !== null) {
+        // a reorg under the read is a retry
+        why = got.wrong;
+        await still();
+      }
+      return { got, why };
+    };
+    let { got, why } = await seats();
+    // a hold of no leaf is kept only when the seats' trees from the logs past it are the pool's: past them not the
+    // pool's (not a reorg) or refused, it is dropped and the pool read from its deploy block in this round (a lag or a
+    // stop above keeps it unproven for the next round)
+    if (emptyHeld) {
+      emptyHeld = false;
+      if (got === null || got.wrong !== null) {
+        await dropHeld();
+        ({ got, why } = await seats());
+      }
     }
     // the sources: the held part is proven (above), so logs that do not make the pool's trees with it are the logs'
     // fault, never the hold's; with no two operators' same logs the round fails and the hold stays
@@ -1743,7 +1772,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const n = await cutOf(r.events, prefix, beforeMs, h, signal);
         const cut = r.events.slice(0, n);
         const labels = cut.flatMap((e) => (e.label === null ? [] : [e]));
-        if (n === 0 || labels.length === 0) throw new Error(`no leaf before ${beforeMs}`);
+        if (n === 0 || labels.length === 0) throw new PoolNoLeafError(`no leaf before ${beforeMs}`);
         const stateTree = n === r.events.length ? r.stateTree : new VaultTree(cut.map((e) => e.state));
         const labelTree = labels.length === r.labelTree.size ? r.labelTree : new VaultTree(labels.map((e) => e.label!));
         // the pool's own record of each epoch root: the time of the block that made it (State.sol:63-65, 172, 188); the
@@ -1752,7 +1781,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const st = await leafTime(r.events, prefix, n, h, signal);
         const lt = await agreed(VIEWS.labelRootTimes + hex(word(labelTree.root!)), h, "labelRootTimes(root)", signal);
         const labelAt = cut.lastIndexOf(lastLabel) + 1;
-        if (lt === 0n || lt !== (labelAt === n ? st : await leafTime(r.events, prefix, labelAt, h, signal))) throw new Error(`the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
+        if (lt === 0n || lt !== (labelAt === n ? st : await leafTime(r.events, prefix, labelAt, h, signal))) throw new PoolReadError("root_mismatch", `the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
         // the times were the anchor's chain's only if the block they were read at and the anchor both still hold their
         // heights on both RPCs once they are read (review of 7fbf2af3, P2-1: a newest block named on a fork that lacks
         // the anchor gives that fork's times, so another cut); a change is a retry
@@ -1930,6 +1959,10 @@ export type EvmPoolArgs = {
   held?: EvmSyncHold;
   /** Where else the pool's logs may be read (EvmSyncArgs history), before the providers of `rpcs`. */
   history?: readonly EvmRpc[];
+  /** The caller's own sync of this pin on `rpcs` (card evm-deposit-on-mainnet): the pool's trees and depths read on it,
+   *  so the page's background readers of the pool (its settle and this queue) keep one history and a round one of them
+   *  made is never read again by the other; with none, a sync of its own on `rpcs`, `held` and `history`. */
+  sync?: Pick<EvmTreeSync, "trees" | "depthAt">;
   /** GET /v1/pool/fee?pool=&epoch= on the helper: its answer, refused unless every field is this pool's and its fee
    * the device's own. */
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
@@ -1964,7 +1997,8 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   addr20(feeRecipient, "feeRecipient");
   if (feeRecipient === pool || BigInt(feeRecipient) === 0n) throw new Error("feeRecipient: the pool or the zero address");
   // the sources: the caller's, then the list's providers (the pair's seats are none)
-  const sync = evmTreeSync({ rpcs, pin: a.pin, history: [...(a.history ?? []), ...a.rpcs], ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
+  if (a.sync !== undefined && (typeof a.sync?.trees !== "function" || typeof a.sync?.depthAt !== "function")) throw new Error("sync: an EVM tree sync");
+  const sync = a.sync ?? evmTreeSync({ rpcs, pin: a.pin, history: [...(a.history ?? []), ...a.rpcs], ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
   const scope = evmPoolScopeOf(pool, EVM_CHAIN_IDS[a.pin.network]);
   const sleep = a.sleep ?? wait;
   // the fee hold (card evm-device-reads-need-no-old-state): the chain fee read at a period's first block, by period,
@@ -2032,6 +2066,9 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
       // period too, the two-operator limit of every read here (evmTwoOperators), where before it lasted one bind
       return { block, depth: logs, chainFee };
     }, sleep, signal);
+  // the helper's fee answer, asked once an epoch (each bind still checks it whole); one a bind refuses is asked again.
+  // The bind's own time stays its own read: the higher of the two RPCs' latest, stricter than now()'s
+  const relayFees = perEpoch((e: bigint, s?: AbortSignal) => a.relayFee(e, s));
   return {
     async holdFee(epochStartMs, signal) {
       if (typeof epochStartMs !== "bigint" || epochStartMs <= 0n || epochStartMs % EVM_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
@@ -2064,11 +2101,17 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
       const { block, depth, chainFee } = await feeAt(epochStartMs, signal);
       const fee = a.epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas!, depth, chainFee });
       if (typeof fee !== "bigint" || fee < 0n) throw new Error("epochFee: not a fee");
-      const f = await a.relayFee(epochStartMs, signal);
-      if (f?.chain !== "evm" || f.network !== a.pin.network || typeof f.pool !== "string" || lower(f.pool) !== pool || typeof f.fee_recipient !== "string" || lower(f.fee_recipient) !== feeRecipient)
-        throw new Error("relayFee: not this pool's or this fee recipient's answer");
-      if (f.epoch_ms !== Number(EVM_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || evmRpcHex(f.block) !== tag(block.number)) throw new Error("relayFee: not this epoch's or not its first block");
-      if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
+      const asked = relayFees.get(epochStartMs, signal);
+      const f = await asked;
+      try {
+        if (f?.chain !== "evm" || f.network !== a.pin.network || typeof f.pool !== "string" || lower(f.pool) !== pool || typeof f.fee_recipient !== "string" || lower(f.fee_recipient) !== feeRecipient)
+          throw new Error("relayFee: not this pool's or this fee recipient's answer");
+        if (f.epoch_ms !== Number(EVM_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || evmRpcHex(f.block) !== tag(block.number)) throw new Error("relayFee: not this epoch's or not its first block");
+        if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
+      } catch (e) {
+        relayFees.drop(epochStartMs, asked);
+        throw e;
+      }
       if (fee * 10_000n > chunk * MAX_RELAY_FEE_BPS) throw new Error("chunk: under the pool's backstop at this fee");
       const salt = (a.salt ?? (() => crypto.getRandomValues(new Uint8Array(16))))();
       if (!(salt instanceof Uint8Array) || salt.length !== 16) throw new Error("salt: not 16 bytes");

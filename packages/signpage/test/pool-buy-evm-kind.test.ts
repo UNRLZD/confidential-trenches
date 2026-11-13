@@ -19,7 +19,7 @@ import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { EVM_POSITION_COSTS_KEY, evmBuyHost, poolBuyEvmKind, type EvmBuyPage, type EvmHolding, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import type { KindContext } from "../src/api.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
-import { TRADE_HELPER } from "../src/trade.ts";
+import { POOL_TRADE_LOCK, TRADE_HELPER } from "../src/trade.ts";
 
 // the kit's recorded quote: 0.01 ETH of USDC on Base through a v3 pool (kit test/fixtures/evm-quote.json "base-ok")
 type Exchange = { calls: EvmRpcCall[]; answers: unknown[] };
@@ -195,11 +195,12 @@ test("kind: an ask on another chain, or no lock manager, is not_allowed with no 
   assert.equal(made, 0);
 });
 
-test("kind: the run up to the send holds the seed's lock, shared", async () => {
+test("kind: the run holds the trade lock and, up to the send, the seed's lock, both shared", async () => {
   const { locks, asked } = lockManager();
   const r = poolBuyEvmKind(() => unfunded(), locks)(ASK, context().ctx) as { after: Promise<unknown> };
   await within(r.after, "the answer");
-  assert.deepEqual(asked, [{ name: WALLET_SEED_LOCK, mode: "shared" }]);
+  // POOL_TRADE_LOCK: no leftover rent back starts beside a trade, on any chain (review P2-1 of 024e8a89d)
+  assert.deepEqual(asked, [{ name: POOL_TRADE_LOCK, mode: "shared" }, { name: WALLET_SEED_LOCK, mode: "shared" }]);
 });
 
 test("kind: a run that ends with an error answers it, never sent", async () => {

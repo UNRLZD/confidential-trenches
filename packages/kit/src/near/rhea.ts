@@ -85,6 +85,9 @@ export type RheaQuoteArgs = {
   amountIn: bigint;
   /** Candidate pool ids, from any list: each is read here and used only as the chain shows it. */
   pools: readonly number[];
+  /** The two providers' final height already read (nearFinal, on these providers): the quote reads at it and asks no
+   *  height of its own, so a read of W at the same final is of the same block (../trade/near/wallet.ts readNearSwapPair). */
+  final?: NearFinal;
   signal?: AbortSignal;
 };
 
@@ -133,11 +136,7 @@ export async function rheaQuote(args: RheaQuoteArgs): Promise<RheaQuote> {
     throw new RheaQuoteRefused("input", `pools: 1 to ${RHEA_QUOTE_POOLS_MAX} distinct pool ids`);
 
   // The two final heights; every read after this one names the lower.
-  signal?.throwIfAborted();
-  const finals = await Promise.all(rpcs.map((r) => answer(r, view(exchange, "metadata", {}, { finality: "final" }), signal)));
-  const [fa, fb] = finals as [Answer, Answer];
-  if (Math.abs(fa.height - fb.height) > RHEA_QUOTE_LAG_MAX) throw new RheaQuoteRefused("lag", `the providers' final heights ${fa.height} and ${fb.height} are over ${RHEA_QUOTE_LAG_MAX} blocks apart`);
-  const height = Math.min(fa.height, fb.height);
+  const { height } = await finalOf(network, rpcs, args.final, signal);
   let blockHash = "";
   const same = (what: string, x: Answer, y: Answer): void => {
     if (x.height !== height || y.height !== height) throw new RheaQuoteRefused("rpc", `${what}: an answer not at block ${height}`);
@@ -238,6 +237,47 @@ function poolRow(row: unknown, id: number): RheaPool | null {
   const [t0, t1] = t as [string, string];
   const [a0, a1] = a as [string, string];
   return { id, tokens: [t0, t1], amounts: [BigInt(a0), BigInt(a1)], feeBps: f };
+}
+
+// ---------- the two final heights ----------
+/** The two providers' final heights of one moment, at most RHEA_QUOTE_LAG_MAX apart, and the lower of them: the block
+ *  every read after it names. Made only by nearFinal, which keeps the pair it read it on, so no caller hands a height
+ *  of its own to a quote or a read of W. */
+export type NearFinal = { readonly network: NearNetwork; readonly height: number };
+const FINALS = new WeakMap<object, readonly [NearRpc, NearRpc]>();
+
+/**
+ * Each provider's final height, both asked at one moment: a paced provider's turn (NearRpc.reserve) is taken on both
+ * first, then both heights are asked at once, so a wait for one provider's turn is never read as that
+ * provider being ahead of the other (card near-quote-under-the-pace: FastNEAR's turn 2.5 s off made it 4 to 5 blocks "ahead" and
+ * refused half the quotes). Over RHEA_QUOTE_LAG_MAX apart, the lower one's final is asked once more at once and the two
+ * compared again: an answer that came late (a provider's busy retry, or the page's FastNEAR seat falling to its spare
+ * seconds after the other answered) reads ahead by the time it took, never behind, and the re-ask closes that gap; a
+ * provider truly behind the chain is behind again, and the pair is refused "lag" (review P2-1 of e6c66cce3).
+ */
+export async function nearFinal(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], signal?: AbortSignal): Promise<NearFinal> {
+  if (!(network in NEAR_RHEA)) throw new RheaQuoteRefused("input", `unknown network ${String(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new RheaQuoteRefused("input", nearPairRule(network));
+  signal?.throwIfAborted();
+  const go = await Promise.all(rpcs.map((r) => (typeof r.reserve === "function" ? r.reserve(signal) : r)));
+  const ask = (r: NearRpc) => answer(r, view(NEAR_RHEA[network].exchange, "metadata", {}, { finality: "final" }), signal);
+  let [fa, fb] = (await Promise.all(go.map(ask))) as [Answer, Answer];
+  if (Math.abs(fa.height - fb.height) > RHEA_QUOTE_LAG_MAX) {
+    if (fa.height < fb.height) fa = await ask(go[0]!);
+    else fb = await ask(go[1]!);
+  }
+  if (Math.abs(fa.height - fb.height) > RHEA_QUOTE_LAG_MAX) throw new RheaQuoteRefused("lag", `the providers' final heights ${fa.height} and ${fb.height} are over ${RHEA_QUOTE_LAG_MAX} blocks apart`);
+  const f: NearFinal = Object.freeze({ network, height: Math.min(fa.height, fb.height) });
+  FINALS.set(f, [rpcs[0], rpcs[1]]);
+  return f;
+}
+
+/** `final` when nearFinal read it on these two providers for this network, else a new one read now. */
+export async function finalOf(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], final: NearFinal | undefined, signal?: AbortSignal): Promise<NearFinal> {
+  if (final === undefined) return nearFinal(network, rpcs, signal);
+  const on = typeof final === "object" && final !== null ? FINALS.get(final) : undefined;
+  if (on === undefined || on[0] !== rpcs[0] || on[1] !== rpcs[1] || final.network !== network) throw new RheaQuoteRefused("input", "the final height is not one nearFinal read on these providers");
+  return final;
 }
 
 // ---------- reads ----------

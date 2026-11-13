@@ -68,7 +68,7 @@ const { openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { jOf } = await import("../../wallet/src/pool/queue.ts");
-const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
+const { SOL_EPOCH_MS, SOL_POOLS, SOL_POOL_TABLES, solanaNow, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySteps } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { HELPER_SOLANA_BLOCK_HEADER } = await import("../../kit/src/index.ts");
@@ -88,10 +88,16 @@ const { SOLANA_POOL_JITO_TIP } = await import("../../kit/src/checks/solana/check
 
 // copy-part1 (FLOW_COPY only): 6 deposits of 0.01 SOL, none enough alone; with all 6 ready, a buy that needs 5 (past
 // SOLANA_POOL_BUY_PIECES_MAX): refused, nothing taken or sent; a buy that needs 2 pieces; then Max, which takes the 4 left
-const SCENARIOS = { "copy-part1": 6, "pieces-2": 2, "pieces-3": 3, "pieces-4": 4, "back-to-back": 4, "landed-reload": 2, "tag3-fail": 2, found: 0 };
+// copy-takeable (FLOW_COPY only): 5 deposits of 0.01 SOL (an account of several small notes); the ms until Max reads 4
+// pieces ready, then again on a fresh load of the same store (a reload: the new page's queue makes every proof again);
+// then, on a note landed this epoch (its proof on the newest root), Max tapped 16 to 40 s past the next boundary of the
+// pool's time, while that proof's remake may run past its 15 s grace: it fills (or is not_funded), never fails. A
+// timeline each second (the pool's time, Max and its pieces, the ready proofs by root and epoch) and every pass and
+// proof's ms go in the record. FLOW_TAKEABLE_ROUNDS=0 stops after the load's Max; FLOW_PROVER_THREADS=1 proves on threads.
+const SCENARIOS = { "copy-part1": 6, "copy-takeable": 5, "pieces-2": 2, "pieces-3": 3, "pieces-4": 4, "back-to-back": 4, "landed-reload": 2, "tag3-fail": 2, found: 0 };
 const [SCENARIO, TABLE, MINT, OUT] = process.argv.slice(2);
 if (!OUT || !Object.hasOwn(SCENARIOS, SCENARIO)) throw new Error(`usage: pool-buy-pieces-devnet.mjs <${Object.keys(SCENARIOS).join("|")}> <table> <mint> <out.json>`);
-if (SCENARIO === "copy-part1" && !COPY) throw new Error("copy-part1 runs on the copy only (FLOW_COPY)");
+if (SCENARIO.startsWith("copy-") && !COPY) throw new Error(`${SCENARIO} runs on the copy only (FLOW_COPY)`);
 // the page loads the tables its build pins (PAGE_TABLES); <table> names the pump-curve one the run expects (the copy: pinned)
 if (COPY ? TABLE !== "pinned" : !(SOL_POOL_TABLES.devnet?.["pump-curve"] ?? []).includes(TABLE)) throw new Error(`<table> is not a pump-curve table the testnet build pins: ${JSON.stringify(SOL_POOL_TABLES.devnet?.["pump-curve"] ?? [])}`);
 const AFTER = process.env.FLOW_AFTER ?? "stay";
@@ -155,6 +161,12 @@ const again = async (f) => {
 };
 const both = (f) => Promise.all(rpcs.map((r) => again(() => f(r))));
 
+// FLOW_PROVER_THREADS=1: snarkjs proves on its own threads in this process (worker_threads), as the page's prover does on
+// its workers; else one thread
+const THREADED = process.env.FLOW_PROVER_THREADS === "1";
+// FLOW_TAKEABLE_ROUNDS: copy-takeable's taps past a boundary (default 3; 0 stops after the load's Max)
+const ROUNDS = Number(process.env.FLOW_TAKEABLE_ROUNDS ?? 3);
+if (!Number.isInteger(ROUNDS) || ROUNDS < 0 || ROUNDS > 3) throw new Error("FLOW_TAKEABLE_ROUNDS is 0 to 3");
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
 const file = (name) => {
   const b = readFileSync(new URL(name, KIT_ZK));
@@ -164,13 +176,16 @@ const file = (name) => {
 const WASM = file("withdraw.wasm");
 const ZKEY = file("withdraw.zkey");
 const snarkjs = createRequire(new URL("../../kit/package.json", import.meta.url))("snarkjs");
+const proveLog = []; // every proof's end and ms (this machine's one thread)
 const vault = {
   load: async () => {},
   prove: async (circuit, input) => {
     if (circuit !== "withdraw") throw new Error(`no ${circuit} prover here`);
     const t0 = performance.now();
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY, undefined, undefined, { singleThread: true });
-    return { proof, publicSignals, proveMs: Math.round(performance.now() - t0) };
+    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY, undefined, undefined, { singleThread: !THREADED });
+    const proveMs = Math.round(performance.now() - t0);
+    proveLog.push({ at: Date.now(), ms: proveMs });
+    return { proof, publicSignals, proveMs };
   },
 };
 
@@ -327,12 +342,20 @@ const once = async (p, kind, params, noEnd = false) => {
 const lastStage = (p, kind) => stages.filter((x) => x.page === p.name && x.kind === kind).at(-1)?.stage ?? null;
 const stageName = (s) => (typeof s === "string" ? s : s?.stage ?? null);
 
-/** Each signature read on both RPCs at finalized: its error, or "missing". */
-const readBack = async (sigs) => {
+/** Each signature read on both RPCs at finalized: its error, or "missing" once 30 s passed with an RPC not holding it
+ *  (the copy's engine stand-in lands a bundle one transaction at a time, each after the one before it confirmed, so
+ *  the helper's tip, last, can land after the page saw the tag 3 filled; a real engine lands the bundle at once).
+ *  `waited` gets, per signature, the seconds from the read-back's start until both RPCs held it, or null at 30 s. */
+const readBack = async (sigs, waited = {}) => {
   const out = {};
+  const t0 = performance.now();
   for (const s of sigs) {
-    const st = await both(async (r) => (await r("getSignatureStatuses", [[s], { searchTransactionHistory: true }])).value[0]);
-    out[s] = st.map((x) => (x === null ? "missing" : x.err === null ? x.confirmationStatus : `err ${JSON.stringify(x.err)}`));
+    const read = async () => (await both(async (r) => (await r("getSignatureStatuses", [[s], { searchTransactionHistory: true }])).value[0])).map((x) => (x === null ? "missing" : x.err === null ? x.confirmationStatus : `err ${JSON.stringify(x.err)}`));
+    let st = await read();
+    while (st.includes("missing") && performance.now() - t0 < 30_000) await new Promise((r) => setTimeout(r, 500)), (st = await read());
+    out[s] = st;
+    waited[s] = st.includes("missing") ? null : Math.round(performance.now() - t0) / 1000;
+    log(`read-back ${s}: ${st.join(", ")}, ${waited[s] === null ? "not held by both RPCs at 30 s" : `held by both RPCs ${waited[s]} s after the read-back began`}`);
   }
   return out;
 };
@@ -362,6 +385,7 @@ const finish = (ok, why) => {
   out.ok = ok;
   out.why = why;
   out.stages = stages;
+  out.proofs = proveLog;
   out.sent = sent;
   out.told = told;
   // FLOW_COPY: each send by its step (the copy's record reads each back), the helper's send lines, the stand-in's calls
@@ -558,7 +582,8 @@ if (SCENARIO === "copy-part1") {
   phase = "buy-2";
   const two = await buyOf(2, 300, false, maxOf(1) + 1_000_000n);
   two.bundle = bundles().at(-1) ?? null;
-  two.readBack = await readBack(two.bundle?.signatures ?? []);
+  two.waitedS = {};
+  two.readBack = await readBack(two.bundle?.signatures ?? [], two.waitedS);
   two.holds = two.W ? await wHolds(two.W) : null;
   out.two = two;
   // 3. Max: pool.buy.dry's tap_max with no amount, once the set of the 4 notes left is ready at it
@@ -566,13 +591,113 @@ if (SCENARIO === "copy-part1") {
   const { tapMax } = await maxReady(4);
   const max = await buyOf(4, 300, false, lamportsOf(tapMax));
   max.bundle = bundles().at(-1) ?? null;
-  max.readBack = await readBack(max.bundle?.signatures ?? []);
+  max.waitedS = {};
+  max.readBack = await readBack(max.bundle?.signatures ?? [], max.waitedS);
   max.holds = max.W ? await wHolds(max.W) : null;
   out.max = { tapMax, ...max };
   const notes = (await A.notesOf()).filter((n) => n.scope === scope).map((n) => ({ ref: n.ref.kind, state: n.state, value: n.leaf ? String(n.leaf.value) : null }));
   out.notes = notes;
   const allSpent = notes.filter((n) => n.ref === "deposit").length === 6 && notes.filter((n) => n.ref === "deposit").every((n) => n.state === "SPENT");
-  finish(okFive && okBuy(two, 2) && okBuy(max, 4) && allSpent && two.W !== max.W, `5 pieces asked (${out.five.amount} SOL, 4 pieces' most ${out.five.fourMost}): ${JSON.stringify(ask5.answer)}, dry ${JSON.stringify(dry5)}, ${out.five.sent} sent, ${out.five.engineCalls} engine calls, ${out.five.helperLines} helper sends, ${out.five.reserved} notes taken; 2 pieces: ${two.end}, ${two.spent} spent, bundle of ${two.bundle?.txs}, W ${two.W} holds ${JSON.stringify(two.holds)}, tap to filled ${filledMs(two) ?? "-"} ms; Max ${tapMax} SOL: ${max.end}, ${max.spent} spent, bundle of ${max.bundle?.txs}, W ${max.W} holds ${JSON.stringify(max.holds)}, tap to filled ${filledMs(max) ?? "-"} ms; every deposit note spent: ${allSpent}`);
+  finish(okFive && okBuy(two, 2) && okBuy(max, 4) && allSpent && two.W !== max.W, `5 pieces asked (${out.five.amount} SOL, 4 pieces' most ${out.five.fourMost}): ${JSON.stringify(ask5.answer)}, dry ${JSON.stringify(dry5)}, ${out.five.sent} sent, ${out.five.engineCalls} engine calls, ${out.five.helperLines} helper sends, ${out.five.reserved} notes taken; 2 pieces: ${two.end}, ${two.spent} spent, bundle of ${two.bundle?.txs}, W ${two.W} holds ${JSON.stringify(two.holds)}, tap to filled ${filledMs(two) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(two.waitedS ?? {}))}; Max ${tapMax} SOL: ${max.end}, ${max.spent} spent, bundle of ${max.bundle?.txs}, W ${max.W} holds ${JSON.stringify(max.holds)}, tap to filled ${filledMs(max) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(max.waitedS ?? {}))}; every deposit note spent: ${allSpent}`);
+}
+
+if (SCENARIO === "copy-takeable") {
+  const E = Number(SOL_EPOCH_MS);
+  const poolMs = async () => Number(await solanaNow(rpcs));
+  const lastDeposit = Date.now();
+  const lamportsOf = (x) => BigInt(x.split(".")[0]) * 1_000_000_000n + BigInt((x.split(".")[1] ?? "").padEnd(9, "0").slice(0, 9));
+  // the page's own pass loop (a state read's pass, one after another) and a sampler each second, on page `p`
+  const timeline = [];
+  const passes = [];
+  const watch = (p) => {
+    let on = true;
+    const loop = (async () => {
+      while (on && !p.dead) {
+        const at = Date.now();
+        const r = await p.t.proofs().catch((e) => ({ error: String(e?.message ?? e) }));
+        passes.push({ page: p.name, phase, at, ms: Date.now() - at, made: r?.made?.length ?? 0, remade: r?.remade?.length ?? 0, failed: r?.failed?.map((x) => x.error.slice(0, 120)) ?? r?.error ?? null });
+        await sleep(250);
+      }
+    })();
+    const sample = (async () => {
+      while (on && !p.dead) {
+        const at = Date.now();
+        const [pm, max, rw] = await Promise.all([poolMs().catch(() => null), p.askMax().catch(() => null), p.t.readyWith(async () => null).catch(() => null)]);
+        const tapMax = max?.result?.tap_max ?? null;
+        const at4 = tapMax ? await p.ask(tapMax).catch(() => null) : null;
+        const proofs = (rw?.ready ?? []).filter((r) => r.wallet.chain === "sol").map((r) => ({ note: r.noteId.slice(0, 8), own: r.own === true, root: r.root, epoch: Number(r.epochStartMs) }));
+        timeline.push({ page: p.name, phase, at, pool: pm, intoEpoch: pm === null ? null : pm % E, tapMax, pieces: at4?.result?.pieces ?? null, making: [...(rw?.making ?? [])].length, proofs });
+        await sleep(Math.max(0, 1_000 - (Date.now() - at)));
+      }
+    })();
+    return { stop: async () => ((on = false), await Promise.all([loop, sample])) };
+  };
+  /** The ms from `t0` until Max reads `k` pieces on `p` (the sampler's own reads). */
+  const maxAt = async (p, k, t0, limitMs) => {
+    for (;;) {
+      const tapMax = (await p.askMax())?.result?.tap_max ?? null;
+      const at = tapMax ? await p.ask(tapMax) : null;
+      if (at?.result?.pieces === k) return { ms: Date.now() - t0, tapMax };
+      if (Date.now() - t0 > limitMs) return { ms: null, tapMax };
+      await sleep(500);
+    }
+  };
+  // 1. after the deposits: Max at 4 pieces
+  phase = "ready";
+  let w = watch(A);
+  out.ready = await maxAt(A, 4, lastDeposit, 10 * 60_000);
+  log(`ready: Max at 4 pieces ${out.ready.ms} ms after the last deposit's end (${out.ready.tapMax})`);
+  await w.stop();
+  // 2. a fresh load of the same store: the old page's queue closed (as a closed tab's dead lock frees its HELD notes), the
+  // new page's queue proves every note again
+  phase = "load";
+  await A.t.signedOut();
+  A.cut();
+  const L = page("L", await openWalletStore({ indexedDB: idb }));
+  const loadAt = Date.now();
+  w = watch(L);
+  out.load = await maxAt(L, 4, loadAt, 10 * 60_000);
+  log(`load: Max at 4 pieces ${out.load.ms} ms after the load (${out.load.tapMax})`);
+  // 3. three times: a note landed this epoch, so a proof on the newest root is ready when the boundary comes; then Max
+  // 16 to 40 s past it, while that proof's remake may run past its grace: it fills with takeable pieces or is not_funded
+  const lns = await openNoteStore(L.w);
+  out.boundaries = [];
+  for (let round = 0; round < ROUNDS; round++) {
+    phase = `fresh-${round}`;
+    const planned = await lns.planDeposit(scope, (ref) => noteSecrets(seed64, ref).precommitment);
+    const id = depositId(seed64, scope, planned.ref.i);
+    const U = base58.encode(id.publicKey);
+    id.secretKey.fill(0);
+    await pay(U, NEED);
+    const fresh = await once(L, "pool.deposit", { chain: "solana", amount: "0.01" });
+    for (let i = 0; i < 120 && !(await L.t.readyWith(async () => null)).ready.some((r) => r.root === "newest"); i++) await sleep(500);
+    const nowPool = await poolMs();
+    const boundary = nowPool - (nowPool % E) + E;
+    const newestReady = (await L.t.readyWith(async () => null)).ready.filter((r) => r.root === "newest").map((r) => ({ note: r.noteId.slice(0, 8), own: r.own === true, epoch: Number(r.epochStartMs) }));
+    phase = `boundary-${round}`;
+    while ((await poolMs()) < boundary + 16_000) await sleep(250);
+    const tapMax = (await L.askMax())?.result?.tap_max ?? null;
+    const tapPool = await poolMs();
+    const at = tapMax ? await L.ask(tapMax) : null;
+    const spentBefore = (await L.notesOf()).filter((n) => n.state === "SPENT").length;
+    const calls = copy.engineCalls.length;
+    const b = tapMax ? await once(L, "pool.buy", { chain: "solana", token: MINT, amount: solOf(lamportsOf(tapMax)), slippage_bps: 300 }) : { answer: null, times: {} };
+    const end = stageName(lastStage(L, "pool.buy")) ?? b.answer?.result?.stage ?? b.answer?.error ?? null;
+    const bundle = copy.engineCalls.slice(calls).filter((x) => x.call === "sendBundle").at(-1) ?? null;
+    const spent = (await L.notesOf()).filter((n) => n.state === "SPENT").length - spentBefore;
+    const r = { round, fresh: fresh.answer, boundary, newestReady, tapMax, intoEpoch: tapPool - boundary, pieces: at?.result?.pieces ?? null, answer: b.answer, end, times: b.times, spent, bundleTxs: bundle?.txs ?? null };
+    r.ok = b.answer?.error !== "failed" && (b.answer?.error === "not_funded" ? spent === 0 && bundle === null : end === "filled" && spent === r.pieces && (r.pieces === 1 ? bundle === null || bundle.txs === 2 : bundle?.txs === r.pieces + 1));
+    out.boundaries.push(r);
+    log(`boundary ${round}: Max ${tapMax} (${r.pieces} pieces) ${r.intoEpoch} ms past the boundary, newest-root ready before it ${JSON.stringify(newestReady)}: ${end}, ${spent} spent, bundle ${r.bundleTxs}; ok ${r.ok}`);
+  }
+  await sleep(3_000);
+  await w.stop();
+  Object.assign(out, { timeline, passes, proveMs: { n: proveLog.length, p50: proveLog.map((x) => x.ms).sort((x, y) => x - y)[Math.floor(proveLog.length / 2)] ?? null, max: Math.max(0, ...proveLog.map((x) => x.ms)) } });
+  // what was offered, not takeable: a sample past the boundary + 15 s that names a newest-root proof of the epoch before
+  const offeredLate = timeline.filter((x) => x.intoEpoch !== null && x.intoEpoch >= 15_000 && x.proofs.some((r) => r.root === "newest" && r.epoch < x.pool - x.intoEpoch));
+  out.offeredLate = offeredLate.length;
+  const ok = out.ready.ms !== null && out.load.ms !== null && out.boundaries.length === ROUNDS && out.boundaries.every((x) => x.ok) && offeredLate.length === 0;
+  finish(ok, `Max at 4 pieces ${out.ready.ms} ms after the deposits, ${out.load.ms} ms after a load; Max tapped 16 s past a boundary: ${out.boundaries.map((x) => `${x.end} (${x.pieces} pieces, ${x.spent} spent, ${x.intoEpoch} ms in, ${x.newestReady.length} newest-root ready before)`).join("; ")}; samples offering a late proof: ${offeredLate.length}; proofs ${proveLog.length}, p50 ${out.proveMs.p50} ms, max ${out.proveMs.max} ms`);
 }
 
 if (SCENARIO.startsWith("pieces-")) {

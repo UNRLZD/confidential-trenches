@@ -1,17 +1,17 @@
 // node --test scripts/live-checks/evm-deposit-on-mainnet.test.mjs: card evm-deposit-on-mainnet's live check, replayed.
-// evm-deposit-on-mainnet.answers.json holds two real runs from the Mac (`--record`, 12 Nov 23:44Z and 23:45Z), none edited:
-// - good: `--local`, this card's SIGN_HOST build in SIGN_HOST's place, both mainnet pools on both of their RPCs, the
+// evm-deposit-on-mainnet.answers.json holds two real runs from the Mac (`--record`, 13 Nov 04:46Z and 00:41Z), none edited:
+// - good: `--local`, this card's SIGN_HOST build (its no-leaf read marked) in SIGN_HOST's place, both mainnet pools on both of their RPCs, the
 //   device's bind reads and the deployed helper read live: PASS;
 // - bad_live_before: SIGN_HOST as served before this card (no Base or Robinhood deposit address, no EVM withdraw in the
 //   mainnet bundle), the same chain, bind and helper reads: FAIL on the page alone.
 // The fee part's bad answer is real too: each run keeps the helper's answer for the period before the bind's (`other`,
 // another block), which in the bind's place FAILs. And plants on the good run: each page marker missing, a pool with no
 // code or two scopes, a chain id that is not the chain's, a helper that does not carry a pool, a helper fee one step off
-// the device's, a provider silent.
+// the device's, a provider silent, each EVM withdraw site off the rule (and, on planted bundles, each one folded).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { checkChain, deviceFee, judge, judgeBundle, pageFacts } from "./evm-deposit-on-mainnet.mjs";
+import { checkChain, deviceFee, judge, judgeBundle, noLeafRead, pageFacts } from "./evm-deposit-on-mainnet.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-deposit-on-mainnet.answers.json", import.meta.url), "utf8"));
 const spoil = (f) => {
@@ -117,4 +117,74 @@ test("the page markers on planted bundles: a table that leaves a chain out, or a
   assert.equal(pageFacts(index, js.replace("wallet:e=>Z(e)", "wallet:e=>void 0")).reader, false, "no wallet reader");
   assert.equal(pageFacts(index, js.replace("`https://ct-api.unrealized.trade`", "`https://rpc.example`")).reader, false, "a reader that is not our helper");
   assert.equal(pageFacts(index, js + "var X2=Object.freeze({solana:!0,base:!0,robinhood:!0}),F2=(e,t=X2)=>t[e]===!0;").rule, false, "a second copy beside it");
+});
+
+test("planted: each EVM withdraw site off the rule, or not read, is a FAIL on the page alone", () => {
+  for (const k of ["host", "flow", "deps", "run", "owed"]) {
+    const v = spoil((a) => (a.page.withdrawSites[k] = false));
+    assert.equal(v.verdict, "FAIL", k);
+    assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")).map((l) => l.slice(-(k.length + 2))), [`(${k})`], v.lines.join("\n"));
+  }
+  assert.equal(spoil((a) => delete a.page.withdrawSites).verdict, "FAIL", "not read");
+});
+
+test("the withdraw sites on planted bundles, in the minified shape of this build: each one folded behind a constant (POOL_TESTNET on SIGN_HOST) reads false", () => {
+  const Q = "`";
+  const js =
+    "var X=Object.freeze({solana:!0,base:!0,robinhood:!0}),F=(e,t=X)=>t[e]===!0;" +
+    "function P(t){let n=t.pin,r=e=>F(e,t.withdrawBuilt),A=e=>null,Kt=(n,i)=>{if(!r(n))return null;let a=A(n);if(a===null)return null;let o=t.evmQueuePool?.(n)??0;return o}," +
+    `Ut=async(e,t)=>{if(!(!Ot||!r(e.chain)||(e.chain===${Q}solana${Q}?n===void 0:A(e.chain)===null))){}},` +
+    `Xt=(e,t)=>{let n=r(e)?A(e):null;return{chain:e,keys:{pool:n?.pin.pool??${Q}${Q}}}},` +
+    `S=async()=>{let p=d.chain;if(p===${Q}base${Q}||p===${Q}robinhood${Q}){let e=Kt(p,s)}},` +
+    `w=(t,i)=>t.kind===${Q}pool.withdraw${Q}&&r(t.chain)&&e.openWithdraw&&A(t.chain)!==null?e.openWithdraw(t.chain,i)??{error:${Q}not_allowed${Q}}:{error:${Q}not_allowed${Q}};return w}`;
+  const sites = (s) => pageFacts("", s).withdrawSites;
+  assert.deepEqual(sites(js), { host: true, flow: true, deps: true, run: true, owed: true }, "the planted good shape reads true");
+  const folds = {
+    // M1: the host's first statement a constant's return
+    host: js.replace("Kt=(n,i)=>{if(!r(n))return null;", "Kt=(n,i)=>{return null;if(!r(n))return null;"),
+    // M1d: the flow's branch without the rule
+    flow: js.replace(`&&r(t.chain)&&e.openWithdraw`, "&&e.openWithdraw"),
+    // M1c: the screen's pool folded to null
+    deps: js.replace("let n=r(e)?A(e):null;", "let n=null;"),
+    // M1e: the run refused for every chain but Solana
+    run: js.replace("if(!(!Ot||!r(e.chain)||", `if(!(!Ot||e.chain!==${Q}solana${Q}||!r(e.chain)||`),
+    // G9: a reload's owed finish dropped
+    owed: js.replace(`if(p===${Q}base${Q}||p===${Q}robinhood${Q}){let e=Kt(p,s)}`, ""),
+  };
+  for (const [k, s] of Object.entries(folds)) {
+    assert.notEqual(s, js, k);
+    assert.equal(sites(s)[k], false, k);
+  }
+  assert.equal(sites(js.replace("r=e=>F(e,t.withdrawBuilt)", "r=e=>!0")).host, false, "a wayOut that is not the rule");
+  assert.equal(sites(js + ";var K2=(n,i)=>{if(!r(n))return null;let a=A(n);if(a===null)return null;let o=t.evmQueuePool?.(n)??0;return o};").host, false, "a second host beside it");
+});
+
+test("planted: the EVM withdraw's no-leaf read missing, or not read, is a FAIL on the page alone", () => {
+  for (const plant of [(a) => (a.page.noLeaf = false), (a) => delete a.page.noLeaf]) {
+    const v = spoil(plant);
+    assert.equal(v.verdict, "FAIL");
+    assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")).map((l) => l.slice(-"(noLeaf)".length)), ["(noLeaf)"], v.lines.join("\n"));
+  }
+});
+
+test("the no-leaf read on planted bundles, in the minified shape of this build: a catch of every refusal, no catch, another class, or a second read reads false", () => {
+  const Q = "`";
+  const cls = `var SC=class extends Error{code=${Q}no_leaf${Q};constructor(e){super(e),this.name=${Q}PoolNoLeafError${Q}}},CC=class extends Error{code=${Q}rpc_disagree${Q}};`;
+  const read = "y=(e,t)=>c.trees(e,AbortSignal.timeout(J$),t).catch(e=>{if(e instanceof SC)return null;throw e}),b=e=>e!==null&&g.leafIndex<BigInt(e.stateTree.size),x=1;";
+  const js = `${cls}let v={ms:1},${read}`;
+  assert.equal(noLeafRead(js), true, "the planted good shape reads true");
+  const plants = {
+    // the red mutant of test/pool-withdraw-evm.test.ts, minified: every refusal read as no leaf
+    "every refusal": js.replace("if(e instanceof SC)return null;throw e", "if(e instanceof SC||!0)return null;throw e"),
+    "every refusal, folded": js.replace(".catch(e=>{if(e instanceof SC)return null;throw e})", ".catch(e=>null)"),
+    "no catch": js.replace(".catch(e=>{if(e instanceof SC)return null;throw e})", ""),
+    "another class": js.replace("e instanceof SC)", "e instanceof CC)"),
+    "no rethrow": js.replace("return null;throw e}", "return null}"),
+    "no class": js.replace("this.name=`PoolNoLeafError`", "this.name=`PoolReadError`"),
+    "a second read": js + `let w=1,${read}`,
+  };
+  for (const [k, s] of Object.entries(plants)) {
+    assert.notEqual(s, js, k);
+    assert.equal(noLeafRead(s), false, k);
+  }
 });

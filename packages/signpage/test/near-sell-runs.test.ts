@@ -11,6 +11,7 @@ import type { HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import type { SignedNearSwapDelegate } from "../../wallet/src/near/swap-delegate.ts";
 import type { KindContext } from "../src/api.ts";
 import { nearSellFlow, type NearMoveEnd, type NearSellAnswer, type NearSellDeps, type NearTradeSigned } from "../src/near-sell.ts";
+import { fakePair, type WithQuote } from "./near-pair-fake.ts";
 
 const USDC = NEAR_NETWORKS.mainnet.usdc;
 const EXCHANGE = NEAR_RHEA.mainnet.exchange;
@@ -27,7 +28,8 @@ type Note = { id: string; state: string; amount: bigint | null; takenBy?: "stran
 type Chain = { token: bigint; usdc: bigint; nonce: bigint; lostfound: bigint; height: number; notes: Note[]; trade?: NearTradeSigned | null };
 type Opts = { claimLands?: boolean; swap?: (body: HelperBindTradeRequest) => { ok: false; code: string; tx_hashes?: string[] } | null; read?: (chain: Chain, side: "buy" | "sell") => Partial<NearSwapWalletState> | void };
 function deps(chain: Chain, ev: unknown[][], opts: Opts = {}): NearSellDeps {
-  return {
+  const d: NearSellDeps & WithQuote = {
+    pair: fakePair(() => d),
     network: "mainnet",
     wallet: () => ({ id: W, l: 5n, j: 2, token: TOKEN }),
     helper: async (body: HelperBindTradeRequest) => {
@@ -77,6 +79,7 @@ function deps(chain: Chain, ev: unknown[][], opts: Opts = {}): NearSellDeps {
     lastTrade: () => chain.trade ?? null,
     traded: (t) => void (chain.trade = { ...t }),
   };
+  return d;
 }
 const run = async (d: NearSellDeps): Promise<NearSellAnswer | null> => {
   const r = nearSellFlow(d)({ token: TOKEN, slippageBps: 100 }, ctx);

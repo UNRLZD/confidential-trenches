@@ -73,3 +73,7 @@ the settle, read 0 notes. The restore counts a leaf only at or under the finaliz
 finalized trails latest by 1,275 s on Base Sepolia (read 20:05Z; 1,108 s on Base, 1,131 s on Robinhood, 956 s on
 Robinhood testnet), and the two providers' finalized answers differ, one by 218,765 blocks once in 12 reads. The same
 restores at 20:02Z and 20:03Z each read the note UNSPENT. The fix is card evm-money-shows-and-spends-at-once.
+
+Mainnet: the real Base and Robinhood mainnet withdraws come from the owner's own withdraw taps on the signing page after
+its deploy, and only from them; none is in this record yet. Once the record names one mainnet withdraw, the check asks
+one on Base mainnet and one on Robinhood mainnet, each read back on both of its chain's pool RPCs.

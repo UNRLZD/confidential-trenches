@@ -42,8 +42,8 @@ export const LISTS = Object.keys(GAS_PER_ROW);
 export const PROBE_KEYS = 20_000;
 /** The release's NEAR RPCs: per network, its FastNEAR URLs and its dRPC URL (packages/kit/src/near/networks.ts). */
 export const RPCS = {
-  mainnet: { fastnear: ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"], drpc: "https://near.drpc.org" }, // near-rpc-operators: one operator (the release's FastNEAR alternatives, each probed alone, never paired)
-  testnet: { fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], drpc: "https://near-testnet.drpc.org" }, // near-rpc-operators: one operator (the same)
+  mainnet: { fastnear: ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org"], seat: "https://ct-api.unrealized.trade/v1/rpc/near?keyed=only", drpc: "https://near.drpc.org" }, // near-rpc-operators: one operator (the release's FastNEAR alternatives, each probed alone, never paired)
+  testnet: { fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], seat: null, drpc: "https://near-testnet.drpc.org" }, // near-rpc-operators: one operator (the same)
 };
 /** The exit tool's pair and the testnet vault (packages/exit/src/rpc.ts EXIT_NETWORKS.testnet). */
 export const EXIT = { rpcs: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"], vault: "vault.bf-vt-20261102t071444.testnet" }; // gitleaks:allow (a public account id)
@@ -55,7 +55,8 @@ export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   for (const [network, n] of Object.entries(RPCS)) {
-    const rule = `the RPCs must be one of ${n.fastnear.join(", ")} and ${n.drpc}, exactly`;
+    // the helper's FastNEAR seat (card near-quote-under-the-pace) is in the rule, never probed here: it is the helper's
+    const rule = `the RPCs must be one of ${[...n.fastnear, ...(n.seat === null ? [] : [n.seat])].join(", ")} and ${n.drpc}, exactly`;
     say(kit.nearPairRule(network) === rule, `${network}: the URLs read are the release's (the kit's pair rule: ${kit.nearPairRule(network) === rule ? "the same" : kit.nearPairRule(network)})`);
   }
   const urls = Object.values(RPCS).flatMap((n) => [...n.fastnear, n.drpc]);

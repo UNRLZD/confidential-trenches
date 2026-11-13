@@ -323,7 +323,7 @@ test("pools: loading, offline, unread (none sent), empty, and rows in the pool's
   assert.deepEqual(portfolio(snap(STATE, "down"), data(), NOW).pools, { view: "offline", rows: [] });
   // nothing in the vault or a pool: empty (the vault's row is there, at 0, as every configured chain's)
   const none = { ...STATE, vault_balance: "0" };
-  const NEAR0 = { chain: "near", asset: "USDC", decimals: 6, balance: 0n, ready: null, pending: null };
+  const NEAR0 = { chain: "near", asset: "USDC", decimals: 6, balance: 0n };
   assert.deepEqual(portfolio(snap({ ...none, pools: [] }), data(), NOW).pools, { view: "empty", rows: [NEAR0] });
   // a configured chain with none: still empty while no pool holds anything
   assert.equal(portfolio(snap({ ...none, pools: [{ chain: "solana", asset: "SOL", balance: "0", ready: "0" }] }), data(), NOW).pools.view, "empty");
@@ -331,20 +331,20 @@ test("pools: loading, offline, unread (none sent), empty, and rows in the pool's
   assert.equal(p.view, "rows");
   assert.deepEqual(p.rows, [
     NEAR0,
-    // 12.5 SOL in lamports (9 decimals, the kit's table), 10 of it ready
-    { chain: "solana", asset: "SOL", decimals: 9, balance: 12_500_000_000n, ready: 10_000_000_000n, pending: 2_500_000_000n },
-    // 0.25 ETH in wei (18 decimals); no ready sent: ready and pending are null (dashes)
-    { chain: "base", asset: "ETH", decimals: 18, balance: 250_000_000_000_000_000n, ready: null, pending: null },
-    // a ready of 0 is a real 0
-    { chain: "robinhood", asset: "ETH", decimals: 18, balance: 0n, ready: 0n, pending: 0n },
+    // 12.5 SOL in lamports (9 decimals, the kit's table): one balance, however much of it is ready (13 Nov 07:53Z: the
+    // app names no proof)
+    { chain: "solana", asset: "SOL", decimals: 9, balance: 12_500_000_000n },
+    // 0.25 ETH in wei (18 decimals), no ready sent: the same one balance
+    { chain: "base", asset: "ETH", decimals: 18, balance: 250_000_000_000_000_000n },
+    { chain: "robinhood", asset: "ETH", decimals: 18, balance: 0n },
   ]);
 });
 
 // card app-faults-seen-on-122 (walk of release 122, row 4): NEAR's private balance is the vault's USDC (vault_balance),
 // which the page's pool table never holds (packages/signpage/src/pools.ts PAGE_POOLS: Solana, Base, Robinhood). It is a
-// row of the same list, first as in Cash's parts, in USDC; the vault sends no proof queue, so Ready and Pending are dashes.
-test("pools: NEAR's vault USDC is the list's first row, Ready and Pending dashes", () => {
-  const NEAR = (balance: bigint) => ({ chain: "near", asset: "USDC", decimals: 6, balance, ready: null, pending: null });
+// row of the same list, first as in Cash's parts, in USDC; one balance, as every pool's.
+test("pools: NEAR's vault USDC is the list's first row, one balance", () => {
+  const NEAR = (balance: bigint) => ({ chain: "near", asset: "USDC", decimals: 6, balance });
   const sol = { chain: "solana" as const, asset: "SOL" as const, balance: "0.033928", ready: "0" };
   // the walk's account: SOL in the pool, USDC in the vault
   const p = portfolio(snap({ ...STATE, vault_balance: "2.75", pools: [sol, { chain: "base", asset: "ETH", balance: "0" }, { chain: "robinhood", asset: "ETH", balance: "0" }] }), data(), NOW).pools;
@@ -383,11 +383,11 @@ test("pools: amounts in the asset's own units, short and rounded down, never a d
   assert.ok(!amount(12_500_000_000n, 9).includes("$"));
 });
 
-test("pools: a ready above the balance is held to it; a garbled amount reads as 0", () => {
+test("pools: the balance alone, whatever ready says; a garbled amount reads as 0", () => {
   const p = portfolio(snap({ ...STATE, pools: [{ chain: "solana", asset: "SOL", balance: "10", ready: "12" }, { chain: "base", asset: "ETH", balance: "x", ready: "1" }] }), data(), NOW).pools;
   assert.deepEqual(p.rows.slice(1), [
-    { chain: "solana", asset: "SOL", decimals: 9, balance: 10_000_000_000n, ready: 10_000_000_000n, pending: 0n },
-    { chain: "base", asset: "ETH", decimals: 18, balance: 0n, ready: 0n, pending: 0n },
+    { chain: "solana", asset: "SOL", decimals: 9, balance: 10_000_000_000n },
+    { chain: "base", asset: "ETH", decimals: 18, balance: 0n },
   ]);
 });
 
@@ -503,7 +503,10 @@ test("words: every word has a source; the drafts left are the overflow button's 
   // owner 2 Nov 06:08Z, all approved
   for (const k of ["cash", "noPositions", "noActivity", "open", "closed", "offline", "noRoute", "reverted", "held", "today", "yesterday", "notRestorable"] as const) assert.equal(WORDS[k].draft, false, k);
   // owner 3 Nov 09:17Z, keep (card balances-per-chain)
-  for (const k of ["privateBalance", "balance", "ready", "pending", "noBalance"] as const) assert.equal(WORDS[k].draft, false, k);
+  for (const k of ["privateBalance", "balance", "noBalance"] as const) assert.equal(WORDS[k].draft, false, k);
+  // 13 Nov 07:53Z: removed, the app names no proof: one Balance per chain, no Ready or Pending, no word of proof
+  for (const k of ["ready", "pending"]) assert.equal(k in WORDS, false, k);
+  for (const [k, w] of Object.entries(WORDS)) assert.doesNotMatch(w.text, /proo?f|prov(e|ed|ing)|\bready\b|pending/i, k);
   assert.deepEqual([...DRAFTS], ["more"], "Export key and Wallets were kept (owner 8 Nov 07:55Z)");
 });
 
@@ -520,4 +523,21 @@ test("export (card app-export-every-wallet): each row names the wallets that hol
   assert.deepEqual(walletRows(null), []);
   assert.equal(shortAddress("SoU3xxxxxxxxxxxxxxxx"), "SoU3…xxxx");
   assert.equal(shortAddress("u.near"), "u.near");
+});
+
+// card round-trip-costs-less, review 2 P3-e of c0dd55d02: a leftover W waiting out the device's gap for its sweep, as the
+// signing page lists it (packages/signpage/src/positions.ts returningWallets: RETURNING, its size its lamports at the
+// pool's price), is on its way: in the total, never gone. Once its sweep's note is the pool's, the page lists it no more
+// and the note counts once, in the pool
+test("round-trip-costs-less P3-e: a W waiting for its sweep counts on its way, and once swept its note counts once, in the pool", () => {
+  const base: SignpageState = { ...STATE, vault_balance: "0", wallets: [], positions: [], pools: [{ chain: "solana", asset: "SOL", balance: "1", price: PX(150) }] };
+  const waiting: SignpageState = { ...base, wallets: [{ chain: "solana", address: "w9", role: "fresh", size: "0.305892", state: "RETURNING" }] };
+  const swept: SignpageState = { ...base, pools: [{ chain: "solana", asset: "SOL", balance: "1.00203928", price: PX(150) }] };
+  const t0 = portfolio(snap(base), data(), NOW).totals!;
+  const t1 = portfolio(snap(waiting), data(), NOW).totals!;
+  const t2 = portfolio(snap(swept), data(), NOW).totals!;
+  assert.equal(t1.onWay, 30n, "on its way: 0.002039 SOL at $150, rounded down");
+  assert.equal(t1.total, t0.total + 30n);
+  assert.equal(t2.onWay, 0n);
+  assert.equal(t2.total, t0.total + 30n, "in the pool, once");
 });

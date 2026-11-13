@@ -38,14 +38,71 @@
 //   fields the pool recomputes that context from at the tap, so a context the pool would not recompute exactly is
 //   refused there.
 // Nothing here holds a secret: W's secret key never reaches a pool, only its address and public key.
-import { VAULT_FIELD_P, type VaultSnarkjsProof, type VaultTree, type VaultWithdrawSignals } from "@blindfill/kit";
+import { VAULT_FIELD_P, VaultTree, type VaultSnarkjsProof, type VaultWithdrawSignals } from "@blindfill/kit";
 import { CHAINS, type Chain } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 
 /** A pool's two trees, holding every leaf it has, and its newest roots, read on two RPCs. */
 export type PoolTrees = { stateTree: VaultTree; labelTree: VaultTree; stateRoot: bigint; labelRoot: bigint };
 
+/** trees(beforeMs)'s answer for a cut that holds no leaf (an empty pool's first leaf landing this epoch): not a fault,
+ *  the cut holds no note, so a caller takes the newest root at once. `code`: the
+ *  cause a stop names (pool-sell.ts legCause), never the message. */
+export class PoolNoLeafError extends Error {
+  readonly code = "no_leaf";
+  constructor(message: string) {
+    super(message);
+    this.name = "PoolNoLeafError";
+  }
+}
+
+/** A tree read refused for what its RPCs answered, its cause in `code` (pool-sell.ts legCause), never the message:
+ *  rpc_disagree (the two RPCs, or the sources, differ), root_mismatch (a root built from the leaves is not the pool's),
+ *  page_changed (a page read before holds other bytes now), time_back (a leaf's time below the one before it),
+ *  no_agreed_logs (no two sources of two operators gave the same logs making the pool's trees). */
+export type PoolReadCode = "rpc_disagree" | "root_mismatch" | "page_changed" | "time_back" | "no_agreed_logs";
+export class PoolReadError extends Error {
+  readonly code: PoolReadCode;
+  constructor(code: PoolReadCode, message: string) {
+    super(message);
+    this.name = "PoolReadError";
+    this.code = code;
+  }
+}
+
+/** An epoch cut's trees with a cut that holds no leaf read as trees of no leaf (the proof queue's epoch read): every
+ *  note is then past the cut and waits on the newest root, so an empty pool's first leaf is proved in its first epoch. */
+export function cutOrEmpty(read: Promise<PoolTrees>): Promise<PoolTrees> {
+  return read.catch((e: unknown) => {
+    if (!(e instanceof PoolNoLeafError)) throw e;
+    return { stateTree: new VaultTree(), labelTree: new VaultTree(), stateRoot: 0n, labelRoot: 0n };
+  });
+}
+
 /** What the queue hands the context function for one chunk. */
+/** Which step a proof failed at (a console line names these codes only, never the error's text): a pool read (the
+ *  pool's time or its trees), or a read the fee binding makes that did not answer (a throttle, a 5xx, no connection,
+ *  no answer in time) "network"; the fee binding refused (the helper's fee answer, or the device's own reads it is
+ *  checked against, disagreeing) "fee_refused"; the note's hold (another tab or pass holds it) "held_elsewhere"; the
+ *  prover "prover_failed". */
+export type PassReason = "network" | "fee_refused" | "held_elsewhere" | "prover_failed";
+/** An error tagged with the step it came from; its message is the cause's. A pool's bind throws one for its own reads
+ *  that did not answer, so the queue's fee_refused never names a throttle. */
+export class PassFail extends Error {
+  readonly reason: PassReason;
+  constructor(reason: PassReason, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "PassFail";
+    this.reason = reason;
+  }
+}
+/** A catch that tags what it is given with `reason`; a PassFail keeps its own, and an abort or a sign out (a trade's
+ *  stop, ../throttle.ts SignedOut) is no failure of a step: it goes on as it was. */
+export const failAs = (reason: PassReason) => (e: unknown): never => {
+  const name = (e as { name?: unknown } | null)?.name;
+  throw e instanceof PassFail || name === "AbortError" || name === "SignedOut" ? e : new PassFail(reason, e);
+};
+
 export type PoolBindArgs = {
   /** withdrawnValue: one rung of the pool's ladder, in the asset's base units. */
   chunk: bigint;
@@ -59,6 +116,13 @@ export type PoolBindArgs = {
   deadlineMs: bigint;
   /** A pool that binds a tip cap (Solana): 0 for a withdraw, which pays no tip; the pool's own cap when absent (a buy). */
   tipCap?: bigint;
+  /** The pool's time a read made a moment before (the proof queue's pass, card max-ready-seconds-after-a-load): a pool
+   *  whose bind reads the same time as its now() takes it for its send-margin guard (bindNow) in place of a read of its
+   *  own; absent, or too old, or past the epoch of epochStartMs, the bind reads it. */
+  now?: ChainNow;
+  /** Called with the bind's own read of the pool's time, when it made one (its start on both device clocks), so the
+   *  caller hands it to the binds after it. */
+  readNow?: (now: ChainNow) => void;
 };
 
 /** One chunk's binding: what the proof's last public signal must be, and what the tap sends for the pool to check it. */
@@ -95,7 +159,8 @@ export interface Pool<R = unknown> {
   now(signal?: AbortSignal): Promise<bigint>;
   /** The tree source: both trees holding only the leaves that landed before `beforeMs`, and their roots. `newest`: the
    * read for a note that landed this epoch (beforeMs = now + 1), which a pool may make at a lower commitment than its epoch
-   * roots (Solana: confirmed, M355 (5)); its failure fails only the notes that wait on it. */
+   * roots (Solana: confirmed, M355 (5)); its failure fails only the notes that wait on it. A cut that holds no leaf
+   * rejects with PoolNoLeafError. */
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: { newest?: boolean }): Promise<PoolTrees>;
   /** The context function. */
   bind(a: PoolBindArgs, signal?: AbortSignal): Promise<PoolBinding<R>>;
@@ -153,6 +218,82 @@ export async function chainNow(pool: Pick<Pool<unknown>, "now">, signal?: AbortS
   const at = performance.now();
   const wall = Date.now();
   return { ms: await pool.now(signal), at, wall };
+}
+
+/** The pool's time for a bind's send-margin guard from `now` (ChainNow): its ms plus the time since its start on the
+ *  larger of the device's two clocks, while the monotonic one is 0 to NOW_REUSE_MS and the wall clock's at most
+ *  NOW_REUSE_MS, and while that time is still inside the epoch of `epochStartMs` (an epoch that may have turned is read
+ *  again); else undefined, and the bind reads the pool's time itself. Counting from the read's start only makes the time
+ *  later, so the guard can only refuse sooner than a fresh read would. */
+export function bindNow(now: ChainNow | undefined, epochStartMs: bigint, epochMs: bigint): bigint | undefined {
+  if (now === undefined || typeof now.ms !== "bigint" || typeof now.at !== "number" || typeof now.wall !== "number") return undefined;
+  const mono = performance.now() - now.at;
+  const wall = Date.now() - now.wall;
+  if (!(mono >= 0 && mono <= NOW_REUSE_MS && wall <= NOW_REUSE_MS)) return undefined;
+  const ms = now.ms + BigInt(Math.ceil(Math.max(mono, wall, 0)));
+  return ms >= epochStartMs && ms < epochStartMs + epochMs ? ms : undefined;
+}
+
+/** One answer per epoch (card max-ready-seconds-after-a-load: the relayer's fee is the same for every proof of an epoch):
+ *  `get` asks once per epoch and hands the same answer to every bind of it; an ask that fails, or an answer a bind
+ *  refuses (`drop`), is asked again by the next bind. Only the newest `keep` epochs are kept. The ask runs on its own
+ *  stop, as evm.ts joinFee's read does: a caller's signal ends that caller's wait only, the ask is stopped (and asked
+ *  again by the next caller) when every caller waiting on it has stopped, and an answer in hand is handed to any caller. */
+export function perEpoch<T>(ask: (epochStartMs: bigint, signal?: AbortSignal) => Promise<T>, keep = 4): { get(epochStartMs: bigint, signal?: AbortSignal): Promise<T>; drop(epochStartMs: bigint, got: Promise<T>): void } {
+  type Held = { read: Promise<T>; done: boolean; waiting: number; stop: AbortController };
+  const m = new Map<bigint, Held>();
+  const of = new WeakMap<Promise<T>, Held>(); // each promise handed out, to the ask it waits on
+  const forget = (e: bigint, h: Held): void => {
+    if (m.get(e) === h) m.delete(e);
+  };
+  const join = (e: bigint, h: Held, signal?: AbortSignal): Promise<T> => {
+    if (h.done) return h.read;
+    h.waiting++;
+    return new Promise<T>((res, rej) => {
+      let out = false;
+      const end = (): boolean => {
+        if (out) return false;
+        out = true;
+        h.waiting--;
+        signal?.removeEventListener("abort", leave);
+        return true;
+      };
+      const leave = (): void => {
+        if (!end()) return;
+        if (h.waiting === 0 && !h.done) {
+          h.stop.abort(signal!.reason);
+          forget(e, h);
+        }
+        rej(signal!.reason);
+      };
+      if (signal?.aborted) return leave();
+      signal?.addEventListener("abort", leave, { once: true });
+      h.read.then((v) => void (end() && res(v)), (x: unknown) => void (end() && rej(x)));
+    });
+  };
+  return {
+    get(e, signal) {
+      let h = m.get(e);
+      if (h === undefined) {
+        if (signal?.aborted) return Promise.reject(signal.reason);
+        const stop = new AbortController();
+        const mine: Held = { read: ask(e, stop.signal), done: false, waiting: 0, stop };
+        mine.read.then(
+          () => void (mine.done = true),
+          () => forget(e, mine),
+        );
+        m.set(e, (h = mine));
+        for (const k of [...m.keys()].sort((x, y) => (x < y ? 1 : -1)).slice(keep)) m.delete(k);
+      }
+      const p = join(e, h, signal);
+      of.set(p, h);
+      return p;
+    },
+    drop(e, got) {
+      const h = of.get(got);
+      if (h !== undefined) forget(e, h);
+    },
+  };
 }
 
 const field = (x: unknown): boolean => typeof x === "bigint" && x >= 0n && x < VAULT_FIELD_P;

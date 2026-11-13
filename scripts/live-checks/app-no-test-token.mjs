@@ -2,7 +2,8 @@
 // Live check of card app-no-test-token: opening the app shows a real token, never a test one. Headless Chromium opens
 // APP_HOST/ at 1440 x 900 (desktop) and 390 x 844 (phone, dpr 2, touch), and APP_HOST/?fx=curve at 1440 (the old
 // fixture switch in the address bar), finds the frame that draws the token route (APP_HOST runs inside SIGN_HOST's
-// shell), waits for it to leave its loading state and reads:
+// shell), waits for it to leave its loading state and reads (the phone's / is the Trenches list since card
+// ui-parity-with-unrlzd, TokenPage.tsx's PHONE_MEDIA rule, so the phone's load reads the list, not a token page):
 //   - the served JS: every script APP_HOST answered the frame holds no fixture id or name ("fixture", any case: the old
 //     GlowFixtureCurve ids, the fixture source tag);
 //   - the page: main[data-route="token"] draws the page ready, and its data-token is the top of the Trending column
@@ -11,7 +12,11 @@
 //     the app merges them, those that answered 200: card app-chains-evm-rail, / on the chain filter's default, All);
 //     the page read each chain's lists;
 //   - the token read: the page read GET /v1/market/token on that top's own chain for that same token, 200, and its row
-//     is that token.
+//     is that token;
+//   - at the phone's width, in place of the page and the token read: the Trenches list (PhoneTrenches.tsx,
+//     [data-testid="phone-trenches"]) is ready on its Trending chip, and its first row's data-key (<chain>:<id>) is that
+//     same top, never a fixture. Its lists are the last answer of each chain before the read, as the list redraws on
+//     every re-read.
 // A screenshot of every load is kept.
 // After: app
 //   node scripts/live-checks/app-no-test-token.mjs [--build <dir>] [--shots <dir>] [--record <file>]
@@ -35,10 +40,12 @@ export const LISTS_URL = (chain) => `${HELPER_HOST}/v1/market/lists?chain=${chai
 export const TOKEN_URL = (chain, mint) => `${HELPER_HOST}/v1/market/token?chain=${chain}&token=${encodeURIComponent(mint)}`;
 export const FIXTURE = /fixture/i;
 export const LOADS = [
-  { name: "desktop", path: "/", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
-  { name: "phone", path: "/", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
-  { name: "desktop", path: "/?fx=curve", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+  { name: "desktop", path: "/", home: "page", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+  { name: "phone", path: "/", home: "list", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  { name: "desktop", path: "/?fx=curve", home: "page", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
+/** What a recorded load's / draws: "list" (the phone's Trenches list) or "page" (the top token's page). */
+const homeOf = (l) => LOADS.find((w) => w.name === l.width && w.path === l.path)?.home ?? "page";
 const READ_MS = 25_000;
 
 // ------------------------------------------------------------------------------------------------ the verdict
@@ -69,9 +76,13 @@ export function judge(rec) {
     const lists = Array.isArray(l.lists) ? l.lists : [];
     const top = topOf(lists);
     const bad = [];
+    const unread = CHAINS.filter((c) => !lists.some((x) => x.chain === c && x.url === LISTS_URL(c)));
+    if (homeOf(l) === "list") {
+      say(phoneList(l, lists, top, unread, bad), `${tag}: ${bad.length ? bad.join("; ") : `the Trenches list on Trending, ${l.list.rows} row(s), its first ${top.chain}/${l.list.first.mint} (${l.list.first.symbol}) = the top of Trending in every chain's lists it read (${lists.map((x) => `${x.chain} ${x.status}`).join(", ")})`}`);
+      continue;
+    }
     if (l.route !== "token") bad.push(`drew ${l.route ?? "nothing"}`);
     else if (l.state !== "ready") bad.push(`state ${l.state ?? "none"}, not ready`);
-    const unread = CHAINS.filter((c) => !lists.some((x) => x.chain === c && x.url === LISTS_URL(c)));
     if (unread.length) bad.push(`the page read no lists of ${unread.join(", ")}`);
     if (lists.length && !lists.some((x) => x.status === 200)) bad.push(`lists status ${lists.map((x) => `${x.chain} ${x.status}`).join(", ")}`);
     else if (lists.length && !top) bad.push("the lists' Trending column is empty");
@@ -90,12 +101,41 @@ export function judge(rec) {
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
+/** The phone's / (the Trenches list): pushes what is wrong into bad, answers whether nothing is. */
+function phoneList(l, lists, top, unread, bad) {
+  const p = l.list;
+  if (l.route !== "token") bad.push(`drew ${l.route ?? "nothing"}`);
+  else if (!p) bad.push(`drew no Trenches list${l.state ? ` (a token page, ${l.state})` : ""}`);
+  else if (p.state !== "ready") bad.push(`list state ${p.state ?? "none"}, not ready`);
+  else if (p.chip !== "trending") bad.push(`list on ${p.chip ?? "no"} chip, not Trending`);
+  if (unread.length) bad.push(`the page read no lists of ${unread.join(", ")}`);
+  if (lists.length && !lists.some((x) => x.status === 200)) bad.push(`lists status ${lists.map((x) => `${x.chain} ${x.status}`).join(", ")}`);
+  else if (lists.length && !top) bad.push("the lists' Trending column is empty");
+  if (p?.state === "ready") {
+    const f = p.first;
+    if (!f) bad.push("the list drew no row");
+    else {
+      if (FIXTURE.test(f.mint ?? "") || FIXTURE.test(f.symbol ?? "")) bad.push(`first row ${f.chain}/${f.mint} (${f.symbol}) is a fixture`);
+      if (top && (f.chain !== top.chain || f.mint !== top.mint)) bad.push(`first row ${f.chain}/${f.mint}, the lists' top Trending token is ${top.chain}/${top.mint}`);
+    }
+  }
+  if (!l.shot) bad.push("no screenshot");
+  return bad.length === 0;
+}
+
 // ------------------------------------------------------------------------------------------------ the live read
 const MEASURE = () => {
   const root = document.querySelector('main[data-route="token"]');
   const p = root?.querySelector("[data-token-page]");
   const vis = [...(root?.querySelectorAll("h1.tkp-sym") ?? [])].find((e) => e.getClientRects().length);
-  return { route: root?.dataset.route ?? null, state: p?.getAttribute("data-token-page") ?? null, shown: p?.getAttribute("data-token") ?? null, symbol: vis?.textContent ?? null };
+  // the phone's Trenches list: its state, chip and first row (data-key is keyOf's <chain>:<id>)
+  const pt = root?.querySelector('[data-testid="phone-trenches"]');
+  const rows = [...(pt?.querySelectorAll('[data-testid="phone-trenches-row"]') ?? [])];
+  const k = rows[0]?.getAttribute("data-key") ?? null;
+  const at = k ? k.indexOf(":") : -1;
+  const first = k ? { chain: k.slice(0, at), mint: k.slice(at + 1), symbol: rows[0].querySelector(".ptr-sym")?.textContent ?? null } : null;
+  const list = pt ? { state: pt.getAttribute("data-state"), chip: pt.getAttribute("data-list"), rows: rows.length, first } : null;
+  return { route: root?.dataset.route ?? null, state: p?.getAttribute("data-token-page") ?? null, shown: p?.getAttribute("data-token") ?? null, symbol: vis?.textContent ?? null, list };
 };
 
 export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
@@ -115,9 +155,13 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
       const scripts = [];
       const lists = new Map();
       let token = null;
+      // the page keeps the first lists answer of each chain (it picks its token once); the list, the last one before
+      // the read (it redraws on each re-read)
+      const last = w.home === "list";
+      let read = false;
       page.on("response", (r) => {
         const u = r.url();
-        for (const c of CHAINS) if (u === LISTS_URL(c) && !lists.has(c)) lists.set(c, r);
+        for (const c of CHAINS) if (u === LISTS_URL(c) && (last ? !read : !lists.has(c))) lists.set(c, r);
         if (u.startsWith(`${HELPER_HOST}/v1/market/token?`) && !token) token = r;
         if (r.request().resourceType() === "script" && new URL(u).origin === APP_HOST) scripts.push(r);
       });
@@ -134,9 +178,11 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
           }
         }
         if (m && m.state && m.state !== "loading") break;
+        if (m?.list?.state && m.list.state !== "loading") break;
       }
       await page.waitForTimeout(500);
       if (app) m = await app.evaluate(MEASURE).catch(() => m);
+      read = true;
       // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
       const shot = `${i}-${w.name}-${w.path === "/" ? "root" : "fx"}.png`;
       await page.screenshot({ path: path.join(shots, shot) });
@@ -163,6 +209,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
         state: m?.state ?? null,
         shown: m?.shown ?? null,
         symbol: m?.symbol ?? null,
+        list: m?.list ?? null,
         scripts: js,
         lists: listsRead,
         // the read's URL kept as its path, chain and mint (gitleaks reads a long id after `token=` as a secret)

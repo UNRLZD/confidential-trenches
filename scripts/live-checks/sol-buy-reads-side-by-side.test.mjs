@@ -58,6 +58,34 @@ for (const [name, field, from, to, lines] of CASES) {
   });
 }
 
+test("recorded reader answer: SIGN_HOST's build of card buy-spends-several-pieces, the take's own read through the queue's reader: PASS", () => {
+  assert.equal(ANSWERS.reader.read !== null && ANSWERS.reader.now.endsWith("return s()}"), true, "the recorded answer is the reader shape");
+  const v = judge(ANSWERS.reader);
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  assert.deepEqual(v.lines, []);
+});
+
+const READER_CASES = [
+  ["the reader answering something else than the pool's time", "read", "i=await r.now(e)", "i=await r.then(e)", [NOW]],
+  ["the reader dropping its signal", "read", "i=await r.now(e)", "i=await r.now()", [NOW]],
+  ["the reader answering another value than its read", "read", "(o={ms:i,at:t,wall:n}),i}", "(o={ms:i,at:t,wall:n}),0n}", [NOW]],
+  ["the take falling back to another function", "now", "return s()}", "return z()}", [NOW]],
+  ["the take's wall clock bound gone, on the reader shape", "now", "&&n<=5e3)", ")", [NOW]],
+  ["the take's monotonic bound gone, on the reader shape", "now", "&&e<=5e3&&", "&&", [NOW]],
+];
+for (const [name, field, from, to, lines] of READER_CASES) {
+  test(`planted on the reader answer, ${name}: FAIL, that fact named`, () => {
+    assert.ok(ANSWERS.reader[field].includes(from), "the recorded answer holds the planted text");
+    const v = judge({ ...ANSWERS.reader, [field]: ANSWERS.reader[field].replace(from, to) });
+    assert.equal(v.ok, false);
+    assert.deepEqual(v.lines, lines);
+  });
+}
+
+test("planted: the reader shape with no reader read: FAIL", () => {
+  assert.deepEqual(judge({ ...ANSWERS.reader, read: null }).lines, [NOW]);
+});
+
 test("planted: a stretch not read at all: FAIL", () => {
   assert.deepEqual(judge({ ...ANSWERS.good, now: null }).lines, [NOW]);
   assert.deepEqual(judge({ ...ANSWERS.good, buy: null }).lines, [BUY]);

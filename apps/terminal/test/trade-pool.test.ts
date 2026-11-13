@@ -1,11 +1,12 @@
-// The trade box's proof label on the pool path (card trade-box-pool; plan v2 A2): whether the chain's pool has a proof
+// The pool path's proof state (card trade-box-pool; plan v2 A2; since 13 Nov 07:53Z it gates a buy and no screen names
+// it): whether the chain's pool has a proof
 // ready to buy, one being made, or none, read only from the signing page's `state.pools` (messages.ts: `ready` is the
 // chunks with a proof ready, absent while no proof queue runs, never "0" in its place). Planted notes, as the device's
 // totals would carry them.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { hasPool, presetsOf, PRESETS, poolBuyAsk, poolView, proofStatus, tradeBal } from "../src/screens/trade/model.ts";
+import { hasPool, presetsOf, PRESETS, poolBuyAsk, poolView, proofStatus, spendSoon, tradeBal } from "../src/screens/trade/model.ts";
 import { WORDS } from "../src/screens/trade/words.ts";
 
 type Pools = SignpageState["pools"];
@@ -54,9 +55,27 @@ test("a total that is not a plain decimal reads none, never a label the data doe
   }
 });
 
-test("the two labels are terse and kept (owner 8 Nov 07:55Z), no draft mark", () => {
-  assert.deepEqual([WORDS.proofReady.text, WORDS.proofReady.draft], ["Proof ready", false]);
-  assert.deepEqual([WORDS.proofMaking.text, WORDS.proofMaking.draft], ["Making proof", false]);
+test("13 Nov 07:53Z: the box names no proof: no word of it says proof, proving, ready or pending", () => {
+  assert.equal("proofReady" in WORDS, false);
+  assert.equal("proofMaking" in WORDS, false);
+  for (const [k, w] of Object.entries(WORDS)) assert.doesNotMatch(w.text, /proo?f|prov(e|ed|ing)|\bready\b|pending/i, k);
+});
+
+test("spendSoon: a pool balance a tap cannot spend yet but will, while the device gets it ready", () => {
+  // no queue yet (the seconds after a load) and a fresh deposit being made ready: soon, with no Max or a Max of zero
+  assert.equal(spendSoon([sol("0.2")], "solana", null), true);
+  assert.equal(spendSoon([sol("0.2", "0", "0.2")], "solana", null), true);
+  assert.equal(spendSoon([{ ...sol("0.2", "0", "0.2"), tap_max: "0" }], "solana", 0n), true);
+  // spendable now: a Max above zero
+  assert.equal(spendSoon([{ ...sol("0.2", "0.2"), tap_max: "0.1" }], "solana", 16n), false);
+  // nothing on the chain, no pool, another chain's pool
+  assert.equal(spendSoon([sol("0")], "solana", null), false);
+  assert.equal(spendSoon(undefined, "solana", null), false);
+  assert.equal(spendSoon([sol("0.2")], "base", null), false);
+  // none coming: too small for any proof or held by a running withdraw (ready sent, making "0" or absent)
+  assert.equal(spendSoon([sol("0.2", "0", "0")], "solana", null), false);
+  assert.equal(spendSoon([sol("0.2", "0")], "solana", null), false);
+  assert.equal(spendSoon([sol("x")], "solana", null), false);
 });
 
 // A NEAR token has no pool: the vault is NEAR's money (deposit/model.ts DESTS), and the signing page lists it in
