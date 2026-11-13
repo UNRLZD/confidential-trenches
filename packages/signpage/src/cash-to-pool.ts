@@ -156,6 +156,9 @@ export function cashMover(d: CashMoverDeps): { need(chain: PoolChain, short: big
 }
 
 export type CashToPoolDeps = {
+  /** Cash holds money that can move or a move is on its way: read on the device alone. With neither, a tap goes straight
+   *  to the pool buy, with no read of the coin's venue. */
+  any(): Promise<boolean>;
   /** Lamports one pool.buy of `token` spends now (pool.buy.dry's tap_max on the coin's venue); 0n when none. */
   tapMax(token: string): Promise<bigint>;
   /** cashMover's need on Solana. */
@@ -177,7 +180,7 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
     let answer: Answer = { error: "failed" };
     const after = (async () => {
       const d = deps();
-      const now = await d.tapMax(token);
+      const now = (await d.any()) ? await d.tapMax(token) : ask.amount;
       if (now < ask.amount && (await d.need(ask.amount - now))) {
         try {
           ctx?.route?.({ move: "cash" });

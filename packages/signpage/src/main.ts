@@ -355,6 +355,12 @@ else {
     };
   };
   const cashDeps = (): CashToPoolDeps => ({
+    // Cash's largest note (the note store, on the device) or a move on its way
+    any: async () => {
+      if (cashMoverNow().coming("solana") > 0n) return true;
+      const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+      return (await withdrawFormDeps(vault).available().catch(() => 0n)) > 0n;
+    },
     tapMax: async (token) => {
       const r = tapDry({ chain: "solana", token });
       await r.after;
