@@ -49,7 +49,7 @@ import { HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_DEPOSIT_CODES, HELPER_BIND_TRADE_C
 import { NEAR_NETWORKS, type NearNetwork } from "../../kit/src/near/networks.ts";
 import type { RheaQuote } from "../../kit/src/near/rhea.ts";
 import { nearSellAmount } from "../../kit/src/near/token-fee.ts";
-import { NEAR_SWAP_SLIPPAGE_MAX_BPS, nearSwapCalls, nearSwapFloor, type NearSwapCall, type NearSwapRequest } from "../../kit/src/trade/near/swap.ts";
+import { NEAR_SWAP_SLIPPAGE_MAX_BPS, nearSwapCalls, nearSwapFloor, NearSwapRefused, type NearSwapCall, type NearSwapRequest } from "../../kit/src/trade/near/swap.ts";
 import type { NearSwapWalletArgs, NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
 import type { SignpageResults, TxRef } from "../../kit/src/signpage/messages.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
@@ -275,7 +275,16 @@ async function runSell(deps: NearSellDeps, ask: NearSellAsk): Promise<NearSellAn
           if (q.network !== deps.network || q.side !== "sell" || q.token !== ask.token || q.amountIn !== amountIn) return fail("quote", "quote_check_failed");
           if (baseline !== undefined && typeof r.baseline !== "bigint") return fail(step, "read_failed");
           // proceeds the vault would refuse are never sold for: nothing is signed (the token stays in W)
-          if (nearSwapFloor(q.venueOut, ask.slippageBps) < MIN) return fail("quote", "amount_too_low");
+          // a floor of 0 at this slippage (a coin that sells for about nothing; the slippage is checked before the run) is
+          // such proceeds too, so W's USDC still goes home by the refused sale's path
+          let floor: bigint;
+          try {
+            floor = nearSwapFloor(q.venueOut, ask.slippageBps);
+          } catch (e) {
+            if (e instanceof NearSwapRefused) return fail("quote", "amount_too_low");
+            throw e;
+          }
+          if (floor < MIN) return fail("quote", "amount_too_low");
           if (!want(x)) continue;
           say("quote", "quote");
           return { s: x, q, ...(r.baseline === undefined ? {} : { base: r.baseline }) };

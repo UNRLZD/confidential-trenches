@@ -141,9 +141,11 @@ export type NearSellMark = {
   /** The last trade delegate signed for this W's sell (decimal nonce and max_block_height), kept before it is sent: every
    *  later run waits for W's nonce to reach it or its window to pass before a move is signed (near-sell.ts). */
   trade?: { nonce: string; mbh: string };
-  /** The way home (a load's run: W's USDC moved, nothing sold), stored so a run that stops partway is taken up as the
-   *  way home again, never as a sale; absent: a sale the user asked. A tap on it makes it a sale. */
-  home?: true;
+  /** Which run the mark is, stored both ways so a run that stops partway goes on as what it was, never inferred: true,
+   *  the way home (a load's run: W's USDC moved, nothing sold); false, a sale the user asked. Absent (a mark a build
+   *  before this one wrote): taken up by a load as the way home, so nothing is ever sold unasked (a sale such a build
+   *  left partway waits for the user's next tap). A tap on any mark makes it a sale. */
+  home?: boolean;
 };
 
 /** What the page gives the binding, each opened when a step needs it; the parts that reach a network can be replaced. */
@@ -729,7 +731,7 @@ export async function resumeNearSells(page: NearBuyPage): Promise<void> {
     // nothing sold, a coin still on W after it a position
     // which it is, read from the mark the run stored (never inferred from its stage): a run that stopped partway goes on
     // as what it was
-    const deps = sellDepsOf(page, r.id, id, slippage, !sellOpen(r.sell) || r.sell.home === true);
+    const deps = sellDepsOf(page, r.id, id, slippage, !sellOpen(r.sell) || r.sell.home !== false);
     const run = nearSellFlow(deps)({ token: r.token, slippageBps: slippage }, { id } as KindContext);
     if (!("running" in run)) {
       deps.release();
@@ -962,8 +964,7 @@ export function sellDepsOf(page: NearBuyPage, only: string | null, id: string, s
       const kept = (r.sell as NearSellMark | undefined)?.trade;
       const m: NearSellMark = sellOpen(r.sell) ? { ...r.sell, resumes: r.sell.resumes + 1 } : { id, slippage_bps: slippageBps, created_ms: now(), resumes: 0, stage: "pending", step: "read", txs: [], ...(kept === undefined ? {} : { trade: kept }) };
       // which run this is, stored on the mark: the way home, or a sale (a tap, or a sale the user asked taken up)
-      if (home) m.home = true;
-      else delete m.home;
+      m.home = home;
       rec = { ...r, sell: m };
       await write((x) => x);
       log(sellOpen(r.sell) ? `near sell resumed at ${r.sell.step}` : "near sell recorded");

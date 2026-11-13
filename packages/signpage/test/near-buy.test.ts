@@ -246,7 +246,7 @@ test("sell: W is the oldest paid buy of the token (its note SPENT), its sell and
   d.release();
   assert.deepEqual(got, { ...w1, token: TOKEN, coinMin: 1n }, "the older paid buy, with the token its record names");
   const rec = await recOf(v, "b1");
-  assert.deepEqual({ ...rec.sell, created_ms: 0 }, { id: "s1", slippage_bps: 150, created_ms: 0, resumes: 0, stage: "pending", step: "read", txs: [] });
+  assert.deepEqual({ ...rec.sell, created_ms: 0 }, { id: "s1", slippage_bps: 150, created_ms: 0, resumes: 0, stage: "pending", step: "read", txs: [], home: false }, "a tap's mark says a sale");
   assert.deepEqual(await v.w.get("ops", "s1"), { kind: "sell", chain: "near", token: TOKEN, stage: "pending", txs: [], created_ms: rec.sell!.created_ms });
   assert.ok(!JSON.stringify(await v.w.get("ops", "s1")).includes(w1.id), "the op names no W");
   d.release();

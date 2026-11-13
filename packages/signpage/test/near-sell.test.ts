@@ -515,6 +515,18 @@ test("2(b) a sale the vault would refuse (its proceeds under 1 USDC) with 2.5 US
   assert.equal(chain.token, HELD);
 });
 
+test("P3-N a tap on a coin that quotes about nothing (its floor at the slippage 0) with 2.5 USDC on W: refused amount_too_low, nothing signed, W's USDC in the vault, the coin kept", async () => {
+  for (const venueOut of [0n, 1n]) {
+    const { deps, ev, chain } = world({ venueOut, pays: 0n, usdc: 2_500_000n });
+    const kept: bigint[] = [];
+    deps.kept = (h) => void kept.push(h);
+    assert.deepEqual(await run(deps), { error: "amount_too_low" }, `venueOut ${venueOut}`);
+    assert.ok(!names(ev).includes("sign"), "no swap signed");
+    assert.equal(chain.usdc, 0n, "W's USDC in the vault");
+    assert.deepEqual(kept, [HELD], "the coin kept");
+  }
+});
+
 test("2(a) the way home (home): W's USDC moved, nothing sold whatever W holds; a coin still on W after the move is kept; W empty after it ends filled", async () => {
   {
     const { deps, ev, chain } = world({ usdc: 2_500_000n });

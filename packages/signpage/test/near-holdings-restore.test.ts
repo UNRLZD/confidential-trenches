@@ -1113,7 +1113,7 @@ test("P2-L a way home whose page closes during the move's wait is taken up on th
 });
 
 test("P2-L the other side: a tap's sale that stopped partway resumes on the next load as a sale (its quote read); a tap on a way home that stopped makes it a sale", async () => {
-  const sale = { id: "tap-1", slippage_bps: 100, created_ms: 1, resumes: 0, stage: "sent", step: "quote", txs: [] };
+  const sale = { id: "tap-1", slippage_bps: 100, created_ms: 1, resumes: 0, stage: "sent", step: "quote", txs: [], home: false };
   const a = await liveAtSwap(5000n, 0n, { sell: sale });
   const la: string[] = [];
   await resumeNearSells(a.page(la)).catch(() => {});
@@ -1129,7 +1129,7 @@ test("P2-L the other side: a tap's sale that stopped partway resumes on the next
   const r = nearSellKind(c.page(lc))({ token: TOKEN, slippageBps: 100 }, { id: "tap-2", sha: "00", progress: () => {} });
   if ("running" in r) await r.after.catch(() => {});
   assert.ok(lc.some((l) => l.startsWith("near sell quote")), `the tap sells: ${lc.join(" | ")}`);
-  assert.equal((await c.rec8()).sell?.home, undefined);
+  assert.equal((await c.rec8()).sell?.home, false);
 });
 
 test("P3-K a buy that ended below its floor with no fill (its USDC read failed): the way home writes the fill once W's USDC is under the least deposit and W holds more than its baseline", async () => {
@@ -1151,4 +1151,22 @@ test("a record whose tap sale was refused with nothing sent (its quote not read)
   const x = await liveAtSwap(5000n, 0n, { sell: { id: "tap-1", slippage_bps: 100, created_ms: 1, resumes: 0, stage: "refused", step: "quote", code: "quote_check_failed", txs: [] } });
   await resumeNearSells(x.page([])).catch(() => {});
   assert.deepEqual((await x.rec8()).fill?.out, "5000");
+});
+
+test("P3-M the run type stored both ways: an open mark with no home field (a build before this one wrote it) is taken up by a load as the way home, no quote read, W's USDC home and the coin kept; the cost: a sale tapped on release 127 or 128 that stopped partway does not sell on the next load, the user taps Sell again", async () => {
+  const old = { id: "old-1", slippage_bps: 100, created_ms: 1, resumes: 0, stage: "sent", step: "move", txs: [] };
+  const x = await liveAtSwap(5000n, 2_500_000n, { sell: old });
+  const log: string[] = [];
+  await resumeNearSells(x.page(log)).catch(() => {});
+  assert.deepEqual(saleLines(log), [], `no sale: ${log.join(" | ")}`);
+  assert.equal(x.st.pools, 0, "no pool read for a quote");
+  assert.deepEqual(x.st.moved, [2_500_000n], "W's USDC in the vault");
+  const r = await x.rec8();
+  assert.deepEqual([r.fill?.out, r.sell?.home], ["5000", true], "the coin kept; the mark now says the way home");
+  // a mark that says home: false is a sale and resumes as one
+  const y = await liveAtSwap(5000n, 0n, { sell: { ...old, id: "tap-1", step: "quote", home: false } });
+  const ly: string[] = [];
+  await resumeNearSells(y.page(ly)).catch(() => {});
+  assert.ok(ly.some((l) => l.startsWith("near sell quote")), `the sale goes on: ${ly.join(" | ")}`);
+  assert.equal((await y.rec8()).sell?.home, false);
 });
