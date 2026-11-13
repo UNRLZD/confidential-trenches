@@ -1,11 +1,13 @@
 // node --test scripts/live-checks/rail-open-pushes-the-middle.test.mjs: the live check's verdict replays recorded runs
 // (rail-open-pushes-the-middle.answers.json), each read on 13 Nov by rail-open-pushes-the-middle.mjs collect() with
-// --build, the terminal's build served at APP_HOST's name inside the stand-in shell, HELPER_HOST live, headless Chrome 156:
-//   good: this card's build: at 1440 and 1280 the opened rail takes its own 340 column, the chart and the orders move
-//         right by what it grew, nothing overlaps, the header's identity stays whole (at 1280 open the Holders tile gives
-//         way), and « brings the rings and the chart back: PASS;
+// --build, the terminal's build served at APP_HOST's name inside the stand-in shell, HELPER_HOST live, headless Chrome:
+//   good: card rail-open-keeps-the-symbol-whole's build, Anthropic on top of Trending: at 1440 and 1280 the opened rail
+//         takes its own 340 column, the chart and the orders move right by what it grew, nothing overlaps, the header's
+//         symbol stays whole (the strip's last tiles give way), and « brings the rings and the chart back: PASS;
 //   bad:  the build of main at 4c1826a75 (the opened rail drawn over the chart, its column still 78): the chart and the
-//         orders unmoved under the rail's box: FAIL.
+//         orders unmoved under the rail's box: FAIL;
+//   bad_long_symbol: the build of main at bd3fb3097 with Anthropic on top (the live run 43449871228's failure): opened,
+//         the symbol cut at 1440 and 1280 with every other rule held: FAIL.
 // Planted from the good run: the rail drawn over the chart, a missing width, a close that leaves the rail open, the
 // identity run under the strip or its symbol cut.
 import assert from "node:assert/strict";
@@ -37,6 +39,14 @@ test("recorded bad answer: main's opened rail lies over the chart and the orders
     assert.ok(bad(r.lines).some((l) => new RegExp(`^BAD / at ${w}: opened, the rail is 340 wide in a 7[78](\\.\\d+)? column`).test(l)), r.lines.join("\n"));
     assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD / at ${w}: opened, the rail's right edge`) && l.endsWith("want no overlap")), r.lines.join("\n"));
   }
+});
+
+test("recorded bad answer: main's header cuts a long symbol with the rail opened: FAIL", () => {
+  const r = judge(ANSWERS.bad_long_symbol);
+  assert.equal(r.ok, false);
+  for (const w of WIDTHS) assert.ok(bad(r.lines).some((l) => l.startsWith(`BAD / at ${w}: opened, the identity's content ends`) && l.includes("symbol cut true")), r.lines.join("\n"));
+  // the symbol is the only rule broken
+  assert.equal(bad(r.lines).length, WIDTHS.length, r.lines.join("\n"));
 });
 
 test("planted: the chart left under the rail, a missing width, a close that leaves it open each fail", () => {

@@ -36,6 +36,7 @@ import { copyText, LINK_MARK, readWatch, shareHref, toggleWatch, tokenLinks, tok
 import type { TokenLink, TokenView } from "./model.ts";
 import { useToken, useTopToken } from "./source.ts";
 import { flashNum, useFlash } from "./useFlash.ts";
+import { useStripFit } from "./strip-fit.ts";
 import type { TokenData } from "./source.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
@@ -579,11 +580,13 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
   // null draws the tile's skeleton: the page is loading, or its row is still filling (card token-page-fills-after)
   const s = (x: string | null | undefined) => (v === null ? null : (x ?? null));
   const tax = r ? taxOf(r) : null;
+  const headRef = useRef<HTMLElement>(null);
+  useStripFit(headRef, v?.symbol ?? "");
   return (
     <div className="tkp-desk">
       <Rail chain={c.chain} token={v?.token ?? null} />
       <div className="tkp-main">
-        <header className="tkp-head">
+        <header className="tkp-head" ref={headRef}>
           <div className="tkp-ident">
             {v ? <Avatar symbol={v.symbol} size={54} pad={v.launchpad} chain={v.chain} logo={{ chain: v.chain, token: v.token, icon: v.icon }} /> : <span className="tkp-sk tkp-skc" style={{ width: 54, height: 54 }} />}
             <div className="tkp-idtext">
