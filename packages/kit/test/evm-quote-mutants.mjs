@@ -368,7 +368,7 @@ export const MUTANTS = [
   [QUOTE, "[e0, null, null, t]", "[e0, t]", R, "N1a "],
   [QUOTE, "const fromScan = scanned?.pools.get(lower(token)) ?? [];", "const fromScan: EvmPoolKey[] = [];", R, "N1a "],
   [QUOTE, "gaps: gapsOf(spans, floor, head),", "gaps: [[floor, head]] as Spans,", R, "G4 "],
-  [QUOTE, "  return {\n    // a copy: the later read adds its pools to the next quote's, never to this one's candidates\n", "  commit();\n  return {\n    // a copy: the later read adds its pools to the next quote's, never to this one's candidates\n", R, "S2b "],
+  [QUOTE, "  return {\n    pools: new Map(each.map((e) => [e.c, e.pools])),\n", "  commit();\n  return {\n    pools: new Map(each.map((e) => [e.c, e.pools])),\n", R, "S2b "],
   // card evm-buy-and-sell-on-mainnet: the blocks within maxLag of a kept scan read beside the quote, not before it
   [QUOTE, "    if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "    if (e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],
   [QUOTE, "    if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "    if (e.pools.length > 0 && e.gaps.length > 0) {", R, "W2 "],
@@ -376,6 +376,11 @@ export const MUTANTS = [
   [QUOTE, "    for (const e of each) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);\n", "", R, "W2d "],
   [QUOTE, "    await settle(js.map(run));\n    commit();\n", "    await settle(js.map(run));\n", R, "W2b "],
   [QUOTE, "      if (later.length > 0) void rest().catch(() => {});", "", R, "W2b "],
+  // review of 98a87843b: a gap left for later that starts more than maxLag before the agreed block is read before the
+  // answer (P2-1), and a later commit keeps what a newer quote kept (P3)
+  [QUOTE, "    for (const e of each) if (e.later.length > 0 && b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);\n", "", R, "W2e "],
+  [QUOTE, "b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag", "b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > 2n * maxLag", R, "W2e "],
+  [QUOTE, "now === undefined ? { spans: e.spans, pools: e.pools } :", "true ? { spans: e.spans, pools: e.pools } :", R, "W2f "],
   [QUOTE, "    const sc = await scanOf(cs, \"markets\");", "    const sc = await (scanOf(cs, \"markets\") ?? Promise.resolve(null)).catch(() => null);", R, "G2 "],
   [QUOTE, "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [mk.key, p.key]))", "hops: [hopTo(x, mk.key), hopTo(lower(token), p.key)] }, [p.key]))", R, "S3c "],
   [QUOTE, "hops: [hopTo(via.other, mk.key), hopTo(x, via.key), hopTo(lower(token), p.key)]", "hops: [hopTo(x, via.key), hopTo(lower(token), p.key)]", R, "T5 "],

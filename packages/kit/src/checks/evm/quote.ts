@@ -1651,9 +1651,11 @@ async function scanPools(
   // a currency whose kept or index scan already holds pools and reads to within maxLag of the scan provider's head is
   // not scanned for those last blocks before this quote (card evm-buy-and-sell-on-mainnet: the round cost a warm Base
   // quote 280-520 ms): the kit accepts the same blocks unread where the scan provider's head is behind the agreed block
-  // by as much, so a pool made in them is missed for this quote only, and only its price (each pool read is read on both
-  // providers like any candidate). Its gap is read right after, beside the quote's next round, and kept for the next
-  // quote. A currency with no pool kept is scanned whole first: a coin made inside the gap is never "no pool" for this.
+  // by as much, so a pool made in the last maxLag blocks before the agreed block is missed, and only its price (each
+  // pool read is read on both providers like any candidate), by every quote that answers before this gap's read lands.
+  // Its gap is read right after, beside the quote's next round, and kept for the next quotes; one that starts more than
+  // maxLag blocks before the agreed block is read before the answer (below). A currency with no pool kept is scanned
+  // whole first: a coin made inside the gap is never "no pool" for this.
   const lag = Number(maxLag);
   for (const e of each) {
     if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {
@@ -1840,7 +1842,13 @@ async function scanPools(
     for (const e of each) {
       for (const g of got) if (g.part.includes(e)) e.spans = withSpan(e.spans, g.a, g.b);
       if (!SCANS.has(e.key) && SCANS.size >= SCAN_TOKENS) SCANS.delete(SCANS.keys().next().value!);
-      SCANS.set(e.key, { spans: e.spans, pools: e.pools });
+      // with what a quote after this one kept meanwhile (review of 98a87843b, P3: a gap read later committed over a
+      // newer quote's entry, and the next quote asked its blocks again): both read their spans and pools
+      const now = SCANS.get(e.key);
+      SCANS.set(
+        e.key,
+        now === undefined ? { spans: e.spans, pools: e.pools } : { spans: now.spans.reduce((s, [x, y]) => withSpan(s, x, y), e.spans), pools: [...new Map([...now.pools, ...e.pools].map((k) => [poolId(k), k])).values()] },
+      );
     }
   };
   const failing = async (e: unknown, at?: Block): Promise<never> => {
@@ -1856,6 +1864,17 @@ async function scanPools(
   const agreedAt = await agreed();
   const b = agreedAt.number;
   if (scanHead - b > maxLag) return refuse("rpc_disagree", `the scan provider's head ${scanHead} is more than ${maxLag} blocks past the agreed block ${b}`);
+  // the blocks a quote answers without are at most maxLag before the agreed block, deferred ones and those past the scan
+  // head together (review of 98a87843b, P2-1: a gap left for later from 5,000,001 and an agreed block 5,000,099 left 99
+  // blocks unread on Base): a gap left for later that starts further back is read now, before the answer
+  if (b - scanHead <= maxLag) {
+    jobs.length = 0;
+    for (const e of each) if (e.later.length > 0 && b - BigInt(Math.min(...e.later.map(([x]) => x))) + 1n > maxLag) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);
+    if (jobs.length > 0) {
+      shortMax += 2 * jobs.length;
+      await settle(jobs.map(run)).catch((e) => failing(e, agreedAt));
+    }
+  }
   if (b - scanHead > maxLag) {
     // the scan outlasted maxLag blocks: on from the block after the head up to the agreed block, which the provider
     // answering each request must hold, by hash, in that request's own batch (`pin`; review of 4830f1f, H1: a backend
@@ -1906,8 +1925,7 @@ async function scanPools(
     commit();
   };
   return {
-    // a copy: the later read adds its pools to the next quote's, never to this one's candidates
-    pools: new Map(each.map((e) => [e.c, [...e.pools]])),
+    pools: new Map(each.map((e) => [e.c, e.pools])),
     commit: () => {
       commit();
       if (later.length > 0) void rest().catch(() => {});

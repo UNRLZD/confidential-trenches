@@ -3106,7 +3106,7 @@ const heldFrom = (scan: EvmRpc, from: number) => {
   return { rpc, order, answered };
 };
 
-test("W2b a pool made within maxLag of the head is missed by that quote only: its blocks are read beside the quote, which answers without waiting for them, and the next quote is held to it", async () => {
+test("W2b a pool made in the last maxLag blocks before the agreed block is missed until the quote's later read lands: its blocks are read beside the quote, which answers without waiting for them, and the next quote after the read is held to it", async () => {
   const token = "0x00000000000000000000000000000000000ee0eb";
   const x = xAt(0x3a90);
   const viaX: ModelPool = { key: keyOf(token, x, 3000, 60, NATIVE), give: (a) => a / 20n };
@@ -3158,6 +3158,48 @@ test("W2d blocks left for later are read before the answer once the scan provide
   const caught = scanner(5_000_070, made);
   const both: EvmRpc = (calls) => (calls.some((c) => c.method === "eth_getBlockByNumber" && Number(c.params[0]) === 5_000_070) ? caught(calls) : late(calls));
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_070), chain(now, 1, 5_000_070)], NOW, both)), below);
+});
+
+test("W2e a gap left for later that starts more than maxLag blocks before the agreed block is read before the answer: a pool made at its first block holds the quote", async () => {
+  // review of 98a87843b, PROBE-1a: the kept scan to 5,000,000, the scan provider's head 5,000,049 (within maxLag 50: its
+  // gap left for later), the agreed block 5,000,099 (50 past the scan head: no catch-up), a better pool at 5,000,001,
+  // 99 blocks before the agreed block. 98a87843b answered with the worse route
+  const token = "0x00000000000000000000000000000000000ee901";
+  const pools = [seeded(token)];
+  const req = { ...warmReq(token), route: seededRoute(token) };
+  const logs = [{ key: seeded(token).key, at: 4_100_000 }];
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)))).accepted, true);
+  const better: ModelPool = { key: keyOf(token, NATIVE, 9000, 9, NATIVE), give: (a) => a };
+  const now = [...pools, better];
+  assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_099), chain(now, 1, 5_000_099)], NOW, scanner(5_000_049, [...logs, { key: better.key, at: 5_000_001 }]))), below);
+});
+
+test("W2f a gap read later keeps what a newer quote kept meanwhile: the next quote asks only the blocks past the newer one's", async () => {
+  // review of 98a87843b, P3: Q1's later read held, Q2 reads further and keeps it, Q1's read lands and kept its own
+  // blocks over Q2's, so Q3 asked Q2's blocks again
+  const token = "0x00000000000000000000000000000000000ee902";
+  const pools = [seeded(token)];
+  const req = { ...warmReq(token), route: seededRoute(token) };
+  const logs = [{ key: seeded(token).key, at: 4_100_000 }];
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)))).accepted, true);
+  let release = () => {};
+  const released = new Promise<void>((r) => (release = r));
+  const q1scan = scanner(5_000_010, logs);
+  const held: EvmRpc = async (calls) => {
+    if (getLogsOf(calls).some((f) => Number(f.toBlock) === 5_000_010)) await released;
+    return q1scan(calls);
+  };
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_010), chain(pools, 1, 5_000_010)], NOW, held))).accepted, true);
+  const q2asked: [number, number][] = [];
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_020), chain(pools, 1, 5_000_020)], NOW, scanner(5_000_020, logs, q2asked)))).accepted, true);
+  await pause(20);
+  assert.ok(q2asked.some(([, y]) => y === 5_000_020), JSON.stringify(q2asked));
+  release();
+  await pause(20);
+  const q3asked: [number, number][] = [];
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, 5_000_030), chain(pools, 1, 5_000_030)], NOW, scanner(5_000_030, logs, q3asked)))).accepted, true);
+  await pause(20);
+  assert.ok(q3asked.length > 0 && q3asked.every(([x]) => x >= 5_000_021), JSON.stringify(q3asked));
 });
 
 test("W3 a kept route whose pool vanished inside the range counts for nothing: the second quote decides without it", async () => {
