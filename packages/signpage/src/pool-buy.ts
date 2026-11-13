@@ -798,7 +798,9 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // round 2: each ready proof's root indexes not found yet (the sizes name the newest page), the venue, then the
       // device's blockhash and slot, started last (the venue's read and a page past the first start after it: below)
       const lookups: Promise<void>[] = [];
-      for (const p of mine(await h.ready()))
+      // the proofs the pick will read, at the take's own time: a proof the pick takes has its roots looked up here
+      // (review P3-2 of b57f4eb28: on the last-seen time a proof in the gap was picked with no lookup, then failed)
+      for (const p of mine(await h.ready(early)))
         for (const [tree, size, root] of [[0, sizes.state, p.publicSignals[3]], [1, sizes.label, p.publicSignals[5]]] as const) {
           const k = rootKey(tree, root);
           if (roots.has(k)) continue;

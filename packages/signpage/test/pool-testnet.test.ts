@@ -1714,6 +1714,33 @@ test("card sol-buy-reads-side-by-side: the page's buy host hands the early read 
   }
 });
 
+// review P3-3 of b57f4eb28: the page's buy host lists on the take's own clock when the pick hands it the early read
+// (queue.readyAt), and on the last-seen time without one (queue.ready): one the early read finds late is never offered
+test("card buy-spends-several-pieces: the page's buy host lists the ready proofs on the early read it is given", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const b = buyHost!();
+  try {
+    const [r] = await b.ready();
+    assert.ok(r, "a ready proof on the last-seen time");
+    // two epochs on, on the early read's own clock: the proof is from before the previous epoch, so not takeable
+    const later = Promise.resolve({ ms: r.epochStartMs + 2n * SOL_EPOCH_MS, at: performance.now(), wall: Date.now() });
+    assert.deepEqual(await b.ready(later), [], "the host offered a proof the early read finds late");
+    assert.ok((await b.ready()).some((p) => p.noteId === r.noteId), "still listed on the last-seen time");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
+});
+
 // card pool-buy-record-never-stays-sent, on the page: the buy host's take writes the last height, its landed reaches the
 // state's view (readyWith's landed, which state.pools counts) and the watchers, and a run that ended "sent" is followed by
 // the page's state reads: its end posted once, to that run, once its note is out of RESERVED

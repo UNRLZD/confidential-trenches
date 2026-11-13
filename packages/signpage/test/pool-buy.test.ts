@@ -2421,6 +2421,36 @@ test("pieces: a piece its take would refuse late is never picked: the pick reads
   assert.equal((await w.host.piecesOwed.list()).length, 0, "no owed record written");
 });
 
+// review P3-2 of b57f4eb28: the reverse gap. The list on the last-seen time leaves out a piece the take's own early read
+// still takes (the last pass's read ran ahead of the take's); the pick reads on the early read, so the root lookups do
+// too, or that piece is picked with roots never looked up and the buy answers failed.
+test("pieces: a piece only the take's own clock lists has its roots looked up: the buy takes the set, never failed", async () => {
+  const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
+  const gap = pieceProof("note-2", 777n, 5_000_000n);
+  // made on older roots, each at index 3 of its tree's page 0
+  const older = [...gap.publicSignals] as VaultWithdrawSignals;
+  older[3] = "1003";
+  older[5] = "1003";
+  const piece = { ...gap, publicSignals: older };
+  const s = await setup("pump", SPEND);
+  const spend = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent) + 1_000_000n;
+  const w = await world({ readies: [[piece, own]], helper: "502" });
+  const read = Promise.resolve({ ms: 1n, at: 0, wall: 0 });
+  const list = w.host.ready;
+  w.host.chainNow = () => read;
+  // on the last-seen time note-2's proof is out of the list; on the take's clock it is takeable
+  w.host.ready = async (early) => (early === read ? list() : (await list()).filter((p) => p.noteId !== piece.noteId));
+  const takes: string[][] = [];
+  w.host.takeSet = async (items) => (takes.push(items.map((x) => x.noteId)), items.map((x) => (x.noteId === own.noteId ? own : piece)));
+  w.host.sendPieces = async () => {
+    throw new Error("pool send: HTTP 502");
+  };
+  w.host.piecesOwed = owedMem();
+  const a = await runPoolBuy(w.host, { ...ASK, amount: spend });
+  assert.deepEqual(takes, [["note-2", "note-1"]], `the set taken: ${JSON.stringify(a)}`);
+  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
+});
+
 test("pieces: the releases land and the buy does not (a helper that sent the tag 2s alone): the answer is not_landed, never filled; each landed piece is settled SPENT and the buy's own note is not", async () => {
   const own = pieceProof("note-1", BigInt("0x" + Buffer.from(unhex(r.nullifier_hash)).toString("hex")), BigInt(r.withdrawn), true);
   const other = pieceProof("note-2", 777n, 5_000_000n);

@@ -507,11 +507,14 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       const a = order.get(x.noteId)!, b = order.get(y.noteId)!;
       return a !== b ? (a < b ? -1 : 1) : x.own === true ? -1 : y.own === true ? 1 : 0;
     });
-  /** The ready proofs takeable at `nowMs` (none late), and the notes whose every ready proof is late. */
+  /** The ready proofs takeable at `nowMs` and NOW_REUSE_MS past it (none late), and the notes whose every ready proof is
+   *  late: a list leaves a proof the reuse window before take() would refuse it, so the pick's own reads, signing and
+   *  writes between the pick and the take never meet a proof that went late meanwhile (review P3-1 of b57f4eb28); take()
+   *  keeps the exact rule. */
   const takeableAt = (nowMs: bigint | undefined): { ready: ReadyProof<R>[]; late: string[] } => {
     const all = sorted();
     if (nowMs === undefined) return { ready: all, late: [] };
-    const ok = all.filter((r) => lateOf(r, nowMs) === undefined);
+    const ok = all.filter((r) => lateOf(r, nowMs + BigInt(NOW_REUSE_MS)) === undefined);
     const kept = new Set(ok.map((r) => r.noteId));
     return { ready: ok, late: [...new Set(all.filter((r) => !kept.has(r.noteId)).map((r) => r.noteId))] };
   };
