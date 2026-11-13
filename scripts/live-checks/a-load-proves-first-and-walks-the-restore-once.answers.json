@@ -1,18 +1,20 @@
 {
   "_note": {
     "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js built at card/a-load-proves-first-and-walks-the-restore-once (build-app.mjs)",
-    "bad": "main 63cdf7cb4's build (mainnet): a load's resume reads beside the first proof pass and walks every pool while step 5 is owed: FAIL"
+    "bad": "main fe1ad9879's build (mainnet), before this card: a load's resume reads beside the first proof pass, as a trade, and a Sync joins it: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-cr5VPoY3aKnoYdy1hVbE7GagWwNE7xuFnfFKNwKq32Aj/t38a7t2zjxLrWC2yfxd\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-cr5VPoY3aKnoYdy1hVbE7GagWwNE7xuFnfFKNwKq32Aj/t38a7t2zjxLrWC2yfxd",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oGUmqaazFEVaIJhJQfs2Eq8JCqeMocdhETcU0zfZOORSRsnyLq72JLjee1lVUpvS\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-oGUmqaazFEVaIJhJQfs2Eq8JCqeMocdhETcU0zfZOORSRsnyLq72JLjee1lVUpvS",
     "first": true,
-    "walks": true
+    "pass": true,
+    "sync": true
   },
   "bad": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-q/eobANRJkmfWDxW1bve67qc+YxcGnsemo6mgGO2sj4Amk/aIbJlEFfabuwDYdaK\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-q/eobANRJkmfWDxW1bve67qc+YxcGnsemo6mgGO2sj4Amk/aIbJlEFfabuwDYdaK",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-SwW9WB2L3JwB1Ezcd84fGQ7V+99TrQR7aPak+TI4qtbdM2wzTLVtg9HA479/bQYR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-SwW9WB2L3JwB1Ezcd84fGQ7V+99TrQR7aPak+TI4qtbdM2wzTLVtg9HA479/bQYR",
     "first": false,
-    "walks": false
+    "pass": false,
+    "sync": false
   }
 }

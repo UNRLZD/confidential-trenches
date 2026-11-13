@@ -187,7 +187,7 @@ const restore = !framed
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
       written: () => void testnet?.proofs().catch(() => {}),
       // a load's first proof passes go ahead of the resume's reads (card a-load-proves-first-and-walks-the-restore-once)
-      firstPass: () => testnet?.firstPass() ?? Promise.resolve(),
+      firstPass: (startMs) => testnet?.firstPass(startMs) ?? Promise.resolve(),
       // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
       // follow's own reader on the restore's two public operators (never our helper relay: on Base and Robinhood the
       // pool's own pair, card evm-deposit-on-mainnet), and the follow's own deposit (poolFollowDeps below), so a restore

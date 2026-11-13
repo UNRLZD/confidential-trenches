@@ -180,7 +180,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   const read = /,([\w$]+)=async\(([\w$]+),([\w$]+)\)=>\{if\(\3===void 0\)throw Error\(`no deposit index for its U_X`\);[^]*?`money`\)\}/.exec(js)[0];
   const carry = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+)=null;for\(;;\)\{[^]*?\6=[\w$]+\}\}/.exec(js)[0];
   const held = /async function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let ([\w$]+);try\{\4=await \2\(\3\)\}[^]*?return [\w$]+\}/.exec(js)[0];
-  const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),(?:firstPass:\(\)=>[\w$]+\?\.firstPass\(\)\?\?Promise\.resolve\(\),)?ux:[^]*?\),ended:/.exec(js)[0];
+  const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),(?:firstPass:[\w$]+=>[\w$]+\?\.firstPass\([\w$]+\)\?\?Promise\.resolve\(\),)?ux:[^]*?\),ended:/.exec(js)[0];
   const broken = (from, to) => {
     const t = js.replace(from, to);
     assert.notEqual(t, js, String(from));

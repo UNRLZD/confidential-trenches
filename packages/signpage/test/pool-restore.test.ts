@@ -437,10 +437,18 @@ test("pagePools: the mainnet build pins the NEAR vault on its release pair (card
   const [vault, sol, ...evm] = pagePools();
   assert.ok(vault?.chain === "near");
   assert.deepEqual([vault.network, vault.scope, vault.rpcs?.().map((r) => r.name)], ["mainnet", vaultScope("mainnet"), [NEAR_NETWORKS.mainnet.fastnear[0], NEAR_NETWORKS.mainnet.drpc]]);
-  // the page's Solana pair and lister, each built for the read's kind (a load's resume reads as a pass)
-  const { rpcs: solRpcs, lister: solLister, ...solRest } = sol as { rpcs: () => readonly unknown[]; lister: () => unknown };
+  // the page's Solana pair and lister, each built for the read's kind (a load's resume reads as a pass): the same URLs as
+  // the page's own seats of that kind, for both kinds
+  const { rpcs: _r, lister: _l, ...solRest } = sol as { rpcs: () => readonly unknown[]; lister: () => unknown };
   assert.deepEqual(solRest, { chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
-  assert.deepEqual([solRpcs().length, typeof solLister(), pageSolanaSettleRpcs().length, typeof pageSolanaLister()], [2, typeof pageSolanaLister(), 2, typeof solLister()]);
+  const urls = (xs: readonly unknown[] | null | undefined) => (xs ?? []).map((r) => (r as { url?: string }).url);
+  for (const kind of ["pass", "trade"] as const) {
+    const [, s, ...e] = pagePools(EVM_POOLS, kind);
+    assert.deepEqual(urls((s as { rpcs: () => readonly unknown[] }).rpcs()), urls(pageSolanaSettleRpcs(kind)), `${kind}: the Solana pair`);
+    assert.ok(urls(pageSolanaSettleRpcs(kind)).every((u) => typeof u === "string"), `${kind}: each seat has its URL`);
+    assert.equal(typeof (s as { lister: () => unknown }).lister(), typeof pageSolanaLister(kind));
+    for (const [i, chain] of (["base", "robinhood"] as const).entries()) assert.deepEqual(urls((e[i] as { rpcs: (() => readonly unknown[]) | null }).rpcs?.()), urls(pageEvmPoolRpcs(chain, kind)), `${kind} ${chain}: its pool list`);
+  }
   assert.deepEqual(evm.map((p) => [p.chain, (p as { pin?: unknown }).pin, (p as { scope?: unknown }).scope]), [
     ["evm", EVM_POOLS.base, evmPoolScopeOf(EVM_POOLS.base!.pool, 8453n)],
     ["evm", EVM_POOLS.robinhood, evmPoolScopeOf(EVM_POOLS.robinhood!.pool, 4663n)],
@@ -1358,6 +1366,8 @@ test("planted (review P3-3): a mainnet pin on each chain is read on MAINNET_POOL
 // file loads on a base without them and each test fails on its own assertion there.
 const K = restoreKind as unknown as Record<string, unknown>;
 const IDS_KEY = (): string => K.RESTORE_IDS_KEY as string;
+// each deposit id a test's NEAR pair was asked, in order
+const idsAsked = (log: readonly string[]): string[] => log.filter((x) => x.startsWith(`${FAST} `)).map((x) => x.slice(FAST.length + 1));
 const idOfU = (p: Record<string, unknown>): string => (p.request_type === "view_account" ? p.account_id : argsOf(p).account_id) as string;
 /** The replayed pair with every view of a deposit id held until `open()`: step 5 starts and no id read answers. */
 function gated(n: ReturnType<typeof nearOf>) {
@@ -1494,7 +1504,10 @@ test("E3: step 5 is owed by a marker (scopes only) from the walk's end; a reload
   assert.equal((await store.keys("ops")).length, before, "a resume writes no op");
   assert.deepEqual(steps, [{ retry: [], held: [], named: [], tries: 1, last: true }]);
   assert.equal(await store.get("meta", IDS_KEY()), undefined, "removed once every id is read");
-  assert.equal(await next.resume(), null, "nothing owed: no run");
+  // nothing owed: the load walks (every load does, card a-load-proves-first-and-walks-the-restore-once), no step 5
+  assert.equal(await next.resume(), "done");
+  await next.idle();
+  assert.equal(steps.length, 1, "nothing owed: no step 5");
   // a sign out drops it with the store
   await store.put("meta", IDS_KEY(), { scopes: ["1"] });
   await store.signOut();
@@ -1757,8 +1770,9 @@ test("review P3-6 (2): a pool whose walk failed keeps the marker though every id
   assert.notEqual(await w.store.get("meta", IDS_KEY()), undefined, "the next load walks the failed pool and reads its ids");
 });
 
-test("review P3-6 (3): a load's rerun checks the marker again under the restore lock: removed meanwhile, it walks nothing", async () => {
-  const probe = await world({ ids: nearOf().ids, ux: () => uxOf(new Map()).reads, pools: () => SOL_ONLY });
+test("review P3-6 (3): a load's rerun checks the marker again under the restore lock: removed meanwhile, it reads no id (its walk is every load's)", async () => {
+  const n = nearOf();
+  const probe = await world({ ids: n.ids, ux: () => uxOf(new Map()).reads, pools: () => SOL_ONLY });
   await probe.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
   let open!: () => void;
   const held = new Promise<void>((r) => (open = r));
@@ -1773,7 +1787,9 @@ test("review P3-6 (3): a load's rerun checks the marker again under the restore 
   open();
   assert.equal(await run, "done");
   await r.idle();
-  assert.equal(walks, 0);
+  assert.equal(walks, 1);
+  assert.deepEqual(idsAsked(n.log), []);
+  assert.equal(await probe.store.get("meta", IDS_KEY()), undefined, "no marker written again");
 });
 
 test("review P3-6 (4): the marker is written only while the run's seed is the one stored: other words signed in before it, no marker", async () => {
@@ -1860,16 +1876,8 @@ test("delta P2-A zd6: a kept lane whose notes changed since is read whole again 
   await r1.idle();
   const kept = ((await markerOf(probe.store))!.read![SOL_SCOPE.toString()] as number[][]).find(([l]) => l === B);
   assert.deepEqual(kept?.slice(0, 2), [B, B + 8 * 27]);
-  // a deposit lands on lane B below that id, and money rests further up the lane. A load's resume walks no pool its
-  // marker owes no walk (card a-load-proves-first-and-walks-the-restore-once): it reads the notes the store holds, so
-  // the deposit is this device's own, stored as its deposit wrote it
+  // a deposit lands on lane B below that id, and money rests further up the lane
   notes = [depositNote(B + 8 * 2, 0n)];
-  const ns = await openNoteStore(probe.store);
-  try {
-    await writeRestored(ns, { notes });
-  } finally {
-    ns.close();
-  }
   const up = idOf(SOL_SCOPE, B + 8 * 10);
   planted.set(solUx(up), "held");
   const t2 = tracked();
@@ -2045,15 +2053,16 @@ test("a sign out while the walk's read is in flight ends the run at once though 
   assert.equal(n.log.length, 0, "no id read after it");
 });
 
-// card a-load-proves-first-and-walks-the-restore-once (a): a load's resume reads nothing before the load's first proof
-// passes settle, and never waits past its bound for them
-test("L1: a load's resume starts no read before the first proof passes settle; with none settled it starts at its bound", async () => {
+// card a-load-proves-first-and-walks-the-restore-once (a): a load's resume walks nothing before the load's first proof
+// passes settle; it hands the page its bound, past which a pass that never started is not waited for
+test("L1: a load's resume walks nothing before the first proof passes settle, and hands them its bound", async () => {
   const walks: number[] = [];
   const solana = (async () => (walks.push(Date.now()), { notes: [], spends: [] })) as never;
   // the first pass settles 150 ms after the resume is asked
   let settle!: () => void;
   const first = new Promise<void>((r) => (settle = r));
-  const w = await world({ pools: () => SOL_ONLY, solana, firstPass: () => first, firstPassMaxMs: 60_000 } as Partial<PoolRestoreHost>);
+  const bounds: number[] = [];
+  const w = await world({ pools: () => SOL_ONLY, solana, firstPass: (ms: number) => (bounds.push(ms), first), firstPassMaxMs: 60_000 } as Partial<PoolRestoreHost>);
   await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
   const asked = Date.now();
   const run = w.r.resume();
@@ -2064,15 +2073,12 @@ test("L1: a load's resume starts no read before the first proof passes settle; w
   await w.r.idle();
   assert.equal(walks.length, 1);
   assert.ok(walks[0]! - asked >= 150);
-  // a first pass that never settles: the resume reads at its bound, not before it, not never
-  const v = await world({ pools: () => SOL_ONLY, solana, firstPass: () => new Promise(() => {}), firstPassMaxMs: 200 } as Partial<PoolRestoreHost>);
-  await v.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
-  walks.length = 0;
-  const at = Date.now();
+  assert.deepEqual(bounds, [60_000]);
+  // the page's bound when none is given
+  const v = await world({ pools: () => SOL_ONLY, solana, firstPass: async (ms: number) => void bounds.push(ms) } as Partial<PoolRestoreHost>);
   assert.notEqual(await v.r.resume(), null);
   await v.r.idle();
-  assert.equal(walks.length, 1);
-  assert.ok(walks[0]! - at >= 190, `walked ${walks[0]! - at} ms after the resume, before its bound`);
+  assert.deepEqual(bounds, [60_000, 20_000]);
   assert.equal(restoreKind.RESUME_FIRST_PASS_MAX_MS, 20_000);
 });
 
@@ -2091,9 +2097,9 @@ test("L2: a resume that waited for the first pass reads nothing when the user si
   assert.deepEqual(walks, []);
 });
 
-// card a-load-proves-first-and-walks-the-restore-once (b): a load that finds step 5 owed reads its ids on the notes the
-// store holds and walks no pool again; a pool whose walk failed is the only one a later load walks, once due
-test("L3: a reload mid step 5 walks no pool again: its ids are read on the stored notes, the same ids as the walk's run; the marker holds progress only and a sign out drops it", async () => {
+// card a-load-proves-first-and-walks-the-restore-once (b): every load walks each pool once, as a pass; step 5 reads on
+// from what earlier pages read, and the marker names no id
+test("L3: a reload mid step 5 walks each pool once more and reads the ids a walk's run reads; the marker names none of them and a sign out drops it", async () => {
   const n = nearOf();
   const g = gated(n);
   const factory = new IDBFactory();
@@ -2104,21 +2110,19 @@ test("L3: a reload mid step 5 walks no pool again: its ids are read on the store
   const solana = (async () => (walks.push("solana"), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never;
   const w = await world({ store: async () => store, pools: () => SOL_ONLY, solana, ids: g.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await w.r.auto(), "done");
-  const m = (await store.get("meta", IDS_KEY())) as Record<string, unknown>;
-  // progress only: the scopes, the run, the walks owed (none); no id, no address
-  assert.deepEqual(Object.keys(m).sort(), ["run", "scopes", "walks"]);
-  assert.deepEqual(m.walks, {});
   // the page reloads mid step 5
   w.r.signedOut();
   g.open();
   await w.r.idle();
-  // the next load: no walk, step 5 read whole on the stored notes, the marker removed
+  const m = await store.get("meta", IDS_KEY());
+  assert.notEqual(m, undefined, "step 5 owed");
+  // the next load: one walk more, step 5 read to its end, the marker removed
   const n2 = nearOf();
   const steps: Step5End[] = [];
   const next = poolRestore({ ...w.host, ids: n2.ids, step5: (e) => void steps.push(e) });
   assert.equal(await next.resume(), "done");
   await next.idle();
-  assert.deepEqual(walks, ["solana"], "the reload walked no pool");
+  assert.deepEqual(walks, ["solana", "solana"], "the reload walked the pool once");
   assert.deepEqual(steps, [{ retry: [], held: [], named: [], tries: 1, last: true }]);
   assert.equal(await store.get("meta", IDS_KEY()), undefined);
   // the ids it read are the ones a walk's run reads: the same lanes, from the same notes
@@ -2127,16 +2131,19 @@ test("L3: a reload mid step 5 walks no pool again: its ids are read on the store
   const fresh = poolRestore({ ...once.host, ids: n3.ids });
   assert.equal(await fresh.auto(), "done");
   await fresh.idle();
-  assert.deepEqual([...new Set(n2.log)].sort(), [...new Set(n3.log)].sort());
-  // a sign out drops a marker with walks owed and a next ask
-  await store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()], walks: { [EVM_SCOPE.toString()]: { tries: 2, next: Date.now() + 30_000 } }, next: Date.now() + 30_000 });
+  assert.deepEqual([...new Set([...idsAsked(n.log), ...idsAsked(n2.log)])].sort(), [...new Set(idsAsked(n3.log))].sort());
+  // the marker the reload found named no id any page asked
+  const text = JSON.stringify(m);
+  assert.deepEqual(idsAsked(n3.log).filter((id) => text.includes(id)), [], "no id on the marker");
+  // a sign out drops a marker with step 5's progress and next ask
+  await store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()], part: { [SOL_SCOPE.toString()]: [[0, 8, null, null]] }, next: Date.now() + 30_000 });
   await store.signOut();
   const again = await openWalletStore({ name, indexedDB: factory });
   closers.push(() => again.close());
   assert.equal(await again.get("meta", IDS_KEY()), undefined);
 });
 
-test("L4: one chain's failed walk is the only walk a later load makes, asked again on a growing pause; the others' ids are read on their stored notes", async () => {
+test("L4: a chain's failed walk keeps step 5 owed; the next load walks every pool once and reads no lane a try already read whole", async () => {
   const seen: string[] = [];
   let evmUp = false;
   const solana = (async () => (seen.push("solana"), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never;
@@ -2145,32 +2152,23 @@ test("L4: one chain's failed walk is the only walk a later load makes, asked aga
     if (!evmUp) throw new Error("HTTP 403");
     return { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n };
   }) as never;
-  const w = await world({ pools: () => POOLS, solana, evm, ids: nearOf().ids, ux: () => uxOf(new Map()).reads, addressed: (c) => c === "solana" } as Partial<PoolRestoreHost>);
-  assert.equal(await w.r.auto(), "done");
+  const n1 = nearOf();
+  const w = await world({ pools: () => POOLS, solana, evm, ids: n1.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "stalled");
   await w.r.idle();
-  const m1 = (await w.store.get("meta", IDS_KEY())) as { walks: Record<string, { tries: number; next: number }>; answered?: boolean };
-  assert.deepEqual(Object.keys(m1.walks), [EVM_SCOPE.toString()], "the failed walk is owed, and only it");
-  assert.equal(m1.walks[EVM_SCOPE.toString()]!.tries, 1);
-  assert.equal(m1.answered, true, "the walked pools' ids are answered");
-  // the next load: only the failed pool is walked; it fails again, its next ask K.WALK_PAUSES_MS[1] later
-  seen.length = 0;
-  const r2 = poolRestore(w.host);
-  assert.equal(await r2.resume(), "done");
-  await r2.idle();
-  assert.deepEqual(seen, ["evm"]);
-  const m2 = (await w.store.get("meta", IDS_KEY())) as { walks: Record<string, { tries: number; next: number }> };
-  assert.equal(m2.walks[EVM_SCOPE.toString()]!.tries, 2);
-  assert.ok(m2.walks[EVM_SCOPE.toString()]!.next - Date.now() > (K.WALK_PAUSES_MS as number[])[1]! - 5_000);
-  // before its next ask a load reads nothing: resumeAt names that time
-  assert.equal((K.resumeAt as (o: unknown) => number | null)(m2), m2.walks[EVM_SCOPE.toString()]!.next);
-  // once it is due and the provider answers, its walk lands, its ids are read, and the marker is gone
-  await w.store.put("meta", IDS_KEY(), { ...m2, walks: { [EVM_SCOPE.toString()]: { tries: 2, next: 0 } } });
+  assert.notEqual(await w.store.get("meta", IDS_KEY()), undefined, "the failed walk keeps step 5 owed");
+  const first = new Set(idsAsked(n1.log));
+  assert.ok(first.size > 20, "Solana's lanes read");
+  // the next load: the provider answers again; both pools walked once, Solana's lanes not read again
   evmUp = true;
   seen.length = 0;
-  const r3 = poolRestore(w.host);
-  assert.equal(await r3.resume(), "done");
-  await r3.idle();
-  assert.deepEqual(seen, ["evm"]);
+  const n2 = nearOf();
+  const r2 = poolRestore({ ...w.host, ids: n2.ids });
+  assert.equal(await r2.resume(), "done");
+  await r2.idle();
+  assert.deepEqual(seen.sort(), ["evm", "solana"]);
+  assert.deepEqual(idsAsked(n2.log).filter((id) => first.has(id)), [], "no id read again");
+  assert.ok(idsAsked(n2.log).length > 20, "the walked chain's lanes read");
   assert.equal(await w.store.get("meta", IDS_KEY()), undefined);
 });
 
@@ -2180,7 +2178,7 @@ test("L5: a reload mid lane goes on past the last id the page read: two page liv
   const a = await world({ pools: () => SOL_ONLY, ids: alone.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await a.r.auto(), "done");
   await a.r.idle();
-  const ids = (log: readonly string[]): string[] => log.filter((x) => x.startsWith(`${FAST} `)).map((x) => x.slice(FAST.length + 1));
+  const ids = idsAsked;
   const once = [...new Set(ids(alone.log))];
   assert.ok(once.length > 20, "a whole step 5 asks many ids");
   // two page lives: the first reloads once 7 ids are asked (its seventh in flight), the next goes on
@@ -2210,4 +2208,100 @@ test("L5: a reload mid lane goes on past the last id the page read: two page liv
   const twice = once.filter((id) => lives(id) > 1);
   assert.ok(twice.length <= 1, `asked again after the reload: ${twice.length} ids`);
   assert.equal(await w.store.get("meta", IDS_KEY()), undefined);
+});
+
+// review P2-1 of 6e2d24a7d: a Sync tapped while a load's resume runs stops that run and starts its own, which walks
+// again as a trade and tells the Sync its own end
+test("L6: a Sync during a load's resume stops the resume and walks on its own, as a trade", async () => {
+  const kinds: string[] = [];
+  const walks: string[] = [];
+  let entered!: () => void;
+  const inWalk = new Promise<void>((r) => (entered = r));
+  const solana = (async () => {
+    walks.push("solana");
+    if (walks.length === 1) return (entered(), new Promise(() => {}));
+    return { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] };
+  }) as never;
+  const w = await world({ pools: (k: string) => (kinds.push(k), SOL_ONLY), solana, ids: nearOf().ids, ux: () => uxOf(new Map()).reads } as Partial<PoolRestoreHost>);
+  await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
+  const resumed = w.r.resume();
+  await inWalk;
+  const a = api(w.r.kind);
+  const id = a.ask();
+  await until("sync answered", () => a.posted.some((m) => m.id === id && (m.stage === "done" || m.stage === "stalled")), 5_000);
+  assert.equal(a.posted.filter((m) => m.id === id && m.stage !== undefined && m.stage !== "reading" && m.stage !== "started").at(-1)?.stage, "done");
+  assert.equal(await resumed, "stalled", "the resume stopped");
+  await w.r.idle();
+  assert.deepEqual(walks, ["solana", "solana"], "the Sync walked on its own");
+  assert.deepEqual(kinds, ["pass", "trade"]);
+  assert.deepEqual((await listed(w.store)).length, notesOf(SOL_SCOPE, LABEL_S, 1000n).length, "the Sync's notes written");
+});
+
+// review item 4 of 6e2d24a7d: the read kind is the rule that keeps a load's reads behind every trade's
+test("L7: a load's resume reads as a pass; a sign-in's run and a Sync read as a trade", async () => {
+  const kinds: string[] = [];
+  const pools = (k: string) => (kinds.push(k), SOL_ONLY);
+  const w = await world({ pools, solana: (async () => ({ notes: [], spends: [] })) as never } as Partial<PoolRestoreHost>);
+  assert.notEqual(await w.r.resume(), null);
+  await w.r.idle();
+  assert.notEqual(await w.r.auto(), null);
+  await w.r.idle();
+  const a = api(w.r.kind);
+  const id = a.ask();
+  await until("sync answered", () => a.posted.some((m) => m.id === id && m.stage === "done"));
+  await w.r.idle();
+  assert.deepEqual(kinds, ["pass", "trade", "trade"]);
+});
+
+// card a-load-proves-first-and-walks-the-restore-once, P2-2: with nothing owed a load still walks every pool once, so
+// a deposit another device made shows here; it reads no deposit id
+test("L8: a load with nothing owed walks every pool once and writes the notes it finds; no id read, no marker written", async () => {
+  const n = nearOf();
+  const w = await world({ ids: n.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.resume(), "done");
+  await w.r.idle();
+  assert.equal(w.seen.length, POOLS.length, `each pool once: ${w.seen.join(", ")}`);
+  assert.equal((await listed(w.store)).length, notesOf(SOL_SCOPE, LABEL_S, 1000n).length + notesOf(EVM_SCOPE, LABEL_E, 2000n).length);
+  assert.deepEqual(idsAsked(n.log), []);
+  assert.equal(await w.store.get("meta", IDS_KEY()), undefined);
+});
+
+// review P3 of 6e2d24a7d: a load's step 5 asks no id before the marker's next, and a next past the longest pause (a
+// clock moved back) is due at once: no timer past it, no stall
+test("L9: step 5 waits for the marker's next; a next past the longest pause counts as due", async () => {
+  const wait = K.step5Wait as (o: { scopes: string[]; next?: number } | null, at: number) => number;
+  assert.equal(wait(null, 1_000), 0);
+  assert.equal(wait({ scopes: [], next: 1_500 }, 1_000), 500);
+  assert.equal(wait({ scopes: [], next: 500 }, 1_000), 0);
+  assert.equal(wait({ scopes: [], next: 1_000 + 600_000 }, 1_000), 600_000);
+  assert.equal(wait({ scopes: [], next: 1_000 + 600_001 }, 1_000), 0);
+  for (const [next, early] of [[Date.now() + 300, true], [Date.now() + 1e12, false]] as const) {
+    const n = nearOf();
+    const w = await world({ pools: () => SOL_ONLY, ids: n.ids, ux: () => uxOf(new Map()).reads });
+    await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()], next });
+    const at = Date.now();
+    assert.equal(await w.r.resume(), "done");
+    await new Promise((ok) => setTimeout(ok, 100));
+    assert.equal(idsAsked(n.log).length === 0, early, early ? "no id before the next" : "a far next is due");
+    await w.r.idle();
+    assert.ok(idsAsked(n.log).length > 0);
+    if (early) assert.ok(Date.now() - at >= 290);
+  }
+});
+
+// review P3 of 6e2d24a7d: a sign out during the resume's wait ends it, though the user signs in again before it ends
+test("L10: a resume whose wait spans a sign out reads nothing after it", async () => {
+  const walks: number[] = [];
+  let settle!: () => void;
+  const first = new Promise<void>((r) => (settle = r));
+  const w = await world({ pools: () => SOL_ONLY, solana: (async () => (walks.push(1), { notes: [], spends: [] })) as never, firstPass: () => first } as Partial<PoolRestoreHost>);
+  await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
+  const run = w.r.resume();
+  await new Promise((ok) => setTimeout(ok, 20));
+  // this tab signs out, and the user signs in again (signedIn stays true) before the wait ends
+  w.r.signedOut();
+  settle();
+  assert.equal(await run, null);
+  await w.r.idle();
+  assert.deepEqual(walks, []);
 });

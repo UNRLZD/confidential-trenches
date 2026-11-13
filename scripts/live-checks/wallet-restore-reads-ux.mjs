@@ -183,7 +183,7 @@ const FOLLOW_READER = (f) => new RegExp(`function ${esc(f)}\\((${N})\\)\\{let ($
 // the restore host's ux, bound to the host itself (its signedIn and written before it, its ended after), so a copy of
 // the ux line alone elsewhere is not the restore's
 // (and on Base and Robinhood the page's own pool pair, evmPoolOf: card evm-deposit-on-mainnet)
-const UX_WIRED = (c) => new RegExp(`written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),(?:firstPass:\\(\\)=>${N}\\?\\.firstPass\\(\\)\\?\\?Promise\\.resolve\\(\\),)?ux:(${N})=>${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program,void 0,(${N})=>${N}\\?\\.evmPoolOf\\(\\3\\)\\?\\?null\\),ended:`);
+const UX_WIRED = (c) => new RegExp(`written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),(?:firstPass:${N}=>${N}\\?\\.firstPass\\(${N}\\)\\?\\?Promise\\.resolve\\(\\),)?ux:(${N})=>${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program,void 0,(${N})=>${N}\\?\\.evmPoolOf\\(\\3\\)\\?\\?null\\),ended:`);
 const UX_ANY = (c) => new RegExp(`ux:(${N})=>${esc(c)}\\(`);
 // each marker's own words, once in the whole bundle, so no second copy of it rides beside the real one
 const WORDS = Object.freeze({

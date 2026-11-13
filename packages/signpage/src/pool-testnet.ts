@@ -750,10 +750,10 @@ export type TestnetPool = {
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. Called by the restore once
    *  it wrote its notes (src/main.ts `written`), so it also starts the buy records' rebuild (src/sol-buy-records.ts). */
   proofs(): Promise<QueuePass | null>;
-  /** This page life's first proof pass of each chain, settled: Solana's (once it starts, with a pool pinned) and every
-   *  other chain's that started before it ended. The restore's resume waits on it, bounded (src/pool-restore.ts
-   *  RESUME_FIRST_PASS_MAX_MS). */
-  firstPass(): Promise<void>;
+  /** This page life's first proof pass of each chain, settled: Solana's (with a pool pinned) when it starts within
+   *  `startMs`, waited for to its end, and every other chain's that started before then. The restore's resume walks
+   *  nothing before it (src/pool-restore.ts RESUME_FIRST_PASS_MAX_MS). */
+  firstPass(startMs: number): Promise<void>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
    * `open`: the ids of the pools whose queue is open, so a chain with no open queue reads no ready (src/pools.ts
@@ -2890,8 +2890,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     // the restore's notes written: each Solana W with no buy record gets it back from its own buy, in the background
     proofs: () => (buyRecords.run(), proofs()),
-    firstPass: async () => {
-      if (pin !== undefined) await solanaFirst;
+    firstPass: async (startMs) => {
+      if (pin !== undefined && !firstPasses.has("solana")) {
+        let t: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([solanaFirst, new Promise<void>((r) => (t = setTimeout(r, startMs)))]).finally(() => clearTimeout(t));
+      }
       await Promise.all(firstPasses.values());
     },
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
