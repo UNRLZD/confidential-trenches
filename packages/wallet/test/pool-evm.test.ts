@@ -19,7 +19,7 @@ import { SOL_LADDER } from "../src/pool/solana.ts";
 import { evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import {
   EvmLagError, EVM_LAG_WAIT_MS, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
-  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, EVM_NEWEST_REUSE_MS, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
+  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, EVM_NEWEST_REUSE_MS, EVM_POOL_LOG_PAGES_IN_FLIGHT, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHeld, type EvmSyncHold,
 } from "../src/pool/evm.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
@@ -1672,7 +1672,10 @@ test("card helper-evm-range-cap-walk: sepolia.base.org's HTTP 413 \"limited to a
   assert.deepEqual(b.slice(0, 9), [100_000, ...Array(8).fill(200)], `b: ${b.slice(0, 12)}`);
   const answered = b.filter((n) => n <= 200);
   assert.ok(answered.slice(0, -1).every((n) => n === 200), `b's pages under the cap: ${[...new Set(answered)]}`);
-  assert.ok(b.length <= Math.ceil(span / 200) + 10, `the 200 cap: ${b.length} pages`);
+  // a few probes a part: the 200 cap's narrow pages go EVM_POOL_LOG_PAGES_IN_FLIGHT at once (card
+  // restore-walks-every-pool-on-129), each part probing its own blocks past the cap the read held (29 more refused
+  // calls over 7,500 pages at the card's head)
+  assert.ok(b.length <= Math.ceil(span / 200) + 10 * EVM_POOL_LOG_PAGES_IN_FLIGHT, `the 200 cap: ${b.length} pages`);
   assert.ok(pageSizes(la).length <= Math.ceil(span / 50_000) + 10, `the 50,000 cap: ${pageSizes(la).length} pages`);
 });
 
