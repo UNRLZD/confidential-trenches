@@ -155,6 +155,21 @@ export const EVM_POOL_LOG_PAGE_MAX_BLOCKS = 800_000n;
  * Sepolia pool's deploy block "query exceeds max block range 10000" and answered the rest (6 Nov 07:44Z), and the
  * restore's Base Sepolia sync there took 96 pages and 21 refusals where PublicNode took 31 and 3 (07:47Z). */
 export const EVM_LOG_REFUSED_AGAIN = 2;
+/** A pool sync's page at or under this many blocks on a provider is narrow (card restore-walks-every-pool-on-129):
+ * the seats' read keeps EVM_POOL_LOG_PAGES_IN_FLIGHT of its pages in flight there, never one after another. Release
+ * 129's live run 43449697702 (13 Nov 15:10Z) never walked every pool in 120 s: robinhood.api.pocket.network's
+ * backends of "max 10001 blocks" made the Robinhood pool's 5,039,892 blocks from its deploy block 507 calls, one at a
+ * time at about 250 ms; its rerun at the same build paged them in 108 and walked in 67 s. A quarter of the first page,
+ * so the wide pages (Robinhood's own and Pocket's 100,000, publicnode's 50,000 on Base) stay one at a time. */
+export const EVM_POOL_LOG_NARROW_BLOCKS = EVM_POOL_LOG_PAGE_BLOCKS / 4n;
+/** A narrow provider's pages in flight on the seats' read: robinhood.api.pocket.network answered the scan's 4 at once
+ * in every round (kit buy-unpinned.ts, 5 Nov 19:48Z) and limits 1,200 a minute (x-ratelimit-limit), which 4 pages of
+ * about 250 ms (16 a second) stay under; base.api.pocket.network answered the index's 4 at once. Robinhood's own
+ * answers 429 to 4 at once, and its 100,000-block pages are never narrow. */
+export const EVM_POOL_LOG_PAGES_IN_FLIGHT = 4;
+/** The narrow pages each part must have left before a read is spread: below EVM_POOL_LOG_PAGES_IN_FLIGHT times this
+ * (64 pages, about 16 s at 250 ms) one page after another is no walk's bound, and the cap's probes stay one read's. */
+export const EVM_POOL_LOG_PART_PAGES = 16n;
 /** A log read's ceiling (the smallest page size refused in it) holds for this many full pages in a row, then the page
  * may double past it once more: a W's Transfer read (card restore-check-bounded; evmTokensSentTo, evmTokensSentToOne)
  * and the pool sync's (card notes-per-pool-evm-base-hang, evmTreeSync). The pager reads no cap's words but a span named (CAP_SPANS), so a refusal under a provider's
@@ -616,6 +631,8 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   const pair: Rpcs = [seat(0), seat(1)];
   const read = {
     pair,
+    // a seat of a list with a spare walks between providers by its calls (above): a read on it pages one call at a time
+    walks: list.length > 2,
     begin: () => void inflight++,
     end: () => {
       if (--inflight === 0) sides[0].clear(), sides[1].clear(), paged[0].clear(), paged[1].clear();
@@ -626,7 +643,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   return pair;
 }
 /** Each pair's seats (evmPair), to its reads in flight: both() opens one around each agreed read. */
-const SEATS = new WeakMap<EvmRpc, { pair: Rpcs; begin(): void; end(): void }>();
+const SEATS = new WeakMap<EvmRpc, { pair: Rpcs; walks: boolean; begin(): void; end(): void }>();
 /** both(), an agreed read on a pair's two seats: for the tests (not in the index). */
 export const evmAgreedRead = <T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> => both(rpcs, f, signal);
 
@@ -930,8 +947,9 @@ export type EvmLogDecode<E extends EvmLogRow> = (raw: unknown, from: bigint, to:
  * page over one block halves it (a W's Transfer read, whose filter names no address: base-testnet.api.pocket.network
  * answered no 10,000-block one in time, 5 Nov 13:44Z) or never does (the pool sync, card evm-pool-sync-wide-pages: its
  * filter names the pool, and the pool pairs answered its pages of 50,000 and 100,000 blocks in 0.1-0.9 s, 6 Nov
- * 07:31-07:44Z). */
-export type EvmLogRules = { max: bigint; ceilingPages: number; slowHalves: boolean };
+ * 07:31-07:44Z). `inFlight`: pages in flight on a provider whose page is narrow (EVM_POOL_LOG_NARROW_BLOCKS), the
+ * pool sync's (one at a time when not given). */
+export type EvmLogRules = { max: bigint; ceilingPages: number; slowHalves: boolean; inFlight?: number };
 /** One provider's page: its size now and the widest it answered in full (null: none yet). */
 export type EvmLogPage = { size: bigint; answered: bigint | null };
 /** Where each read finds its page: by the RPC and its index, at each page (a seat's provider may change mid-read). */
@@ -948,12 +966,13 @@ const transferPager = (page: bigint[], ceilingPages = Infinity): EvmLogPager => 
  * evmPair), so a spare that takes a seat pages at its own size and the provider it left keeps its own. Each starts at
  * EVM_POOL_LOG_PAGE_BLOCKS, doubles after each full page up to EVM_POOL_LOG_PAGE_MAX_BLOCKS, halves only on its own
  * refusal (a range cap, in any words), never on a 429 or no answer in time (the same page again), and keeps its size
- * and the widest it answered across the sync's rounds.
+ * and the widest it answered across the sync's rounds. A provider whose page is narrow keeps EVM_POOL_LOG_PAGES_IN_FLIGHT
+ * pages in flight on the seats' read (readLogs).
  */
 export function evmPoolLogPager(): EvmLogPager {
   const pages = new Map<string, EvmLogPage>();
   return {
-    rules: { max: EVM_POOL_LOG_PAGE_MAX_BLOCKS, ceilingPages: EVM_LOG_CEILING_PAGES, slowHalves: false },
+    rules: { max: EVM_POOL_LOG_PAGE_MAX_BLOCKS, ceilingPages: EVM_LOG_CEILING_PAGES, slowHalves: false, inFlight: EVM_POOL_LOG_PAGES_IN_FLIGHT },
     of(rpc, k) {
       const key = (rpc as { url?: unknown }).url;
       const id = typeof key === "string" ? key : `rpc ${k}`;
@@ -978,23 +997,33 @@ export function evmPoolLogPager(): EvmLogPager {
  * rules' ceilingPages full pages in a row have read under it (doubled while its probe meets that same size), so a
  * cap lifted, a refusal under the cap or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG)
  * is a lag. A page of one block refused is the read's failure, with the provider's own error.
+ * With the rules' `inFlight` and no `progress` (the seats' read; a source's read keeps its pages in order), a page at or
+ * under EVM_POOL_LOG_NARROW_BLOCKS, once the seat's provider answered the last page in full, with more than
+ * EVM_POOL_LOG_PART_PAGES pages a part left, splits the rest into `inFlight` parts of contiguous blocks, each read so at
+ * once (spreadLogs), their logs in block order; never on a seat that walks (a list with a spare, evmPair).
  */
-async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, progress?: { to: bigint; logs: E[] }): Promise<E[]> {
+async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, progress?: { to: bigint; logs: E[] }, part?: LogReadState): Promise<E[]> {
   const { max, slowHalves } = pager.rules;
+  // never on a seat that walks (a list with a spare): its moves read one call of a seat in a read at a time, and the
+  // pool lists the page reads (Base's and Robinhood's) are two providers each
+  const parts = part === undefined && progress === undefined && SEATS.get(rpc)?.walks !== true ? (pager.rules.inFlight ?? 1) : 1;
   // `progress`: the pages read so far, kept by a caller whose read may be stopped (evmTreeSync's sources)
   const out: E[] = progress?.logs ?? [];
-  let refused: bigint | null = null;
+  // a part of a spread read (spreadLogs) starts from the read's own ceiling and widest, so its probes are the read's
+  let refused: bigint | null = part?.refused ?? null;
   // full pages read in a row since the ceiling was set, and how many it holds for: doubled when the size refused is the
   // last ceiling's again (its probe met the same cap), else the rules' ceilingPages (a refusal under the cap)
-  let held = 0;
-  let hold = pager.rules.ceilingPages;
-  let lastCeiling: bigint | null = null;
+  let held = part?.held ?? 0;
+  let hold = part?.hold ?? pager.rules.ceilingPages;
+  let lastCeiling: bigint | null = part?.lastCeiling ?? null;
   let tries = 0;
   // refusals in a row of a page no wider than its provider answered (EVM_LOG_REFUSED_AGAIN)
   let again = 0;
   // the widest page this read answered in full: a named span under it is one backend's, never this provider's cap (a
   // W's Transfer pager keeps no `answered`, review fold 3)
-  let widest: bigint | null = null;
+  let widest: bigint | null = part?.widest ?? null;
+  // the provider that answered this read's last page in full (its URL), null after a refusal: spreadLogs' gate
+  let lastFull: unknown = null;
   const ceiling = (size: bigint) => {
     hold = size === lastCeiling ? hold * 2 : pager.rules.ceilingPages;
     refused = lastCeiling = size;
@@ -1007,11 +1036,18 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     // object at each call (a W's Transfer pager does)
     const via = (rpc as { url?: unknown }).url;
     const size = p.size;
+    // only once the provider seated now answered this read's last page in full at this size: a seat still walking
+    // (a move back to a wide provider at its first call) is never spread
+    if (parts > 1 && size <= EVM_POOL_LOG_NARROW_BLOCKS && lastFull === via && to - at + 1n > size * BigInt(parts) * EVM_POOL_LOG_PART_PAGES) {
+      out.push(...(await spreadLogs(rpc, k, filter, decode, at, to, pager, parts, size, { refused, held, hold, lastCeiling, widest }, signal, sleep)));
+      break;
+    }
     const end = at + size - 1n < to ? at + size - 1n : to;
     let got: unknown;
     try {
       got = await rpc("eth_getLogs", [{ ...filter, fromBlock: tag(at), toBlock: tag(end) }]);
     } catch (e) {
+      lastFull = null;
       // the other RPC failed and this read was stopped: never a smaller page for the next W
       signal?.throwIfAborted();
       // the refusal is the page of the provider that refused it: the seat's provider now, which a cap walk may have
@@ -1059,6 +1095,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     const q = pager.of(rpc, k);
     out.push(...got.map((g, i) => decode(g, at, end, `rpc ${k}: log ${i} of ${at}..${end}`)));
     const full = end - at + 1n === size;
+    lastFull = full && (rpc as { url?: unknown }).url === via ? via : null;
     // the provider that answered is the one asked: a page asked at another provider's size is neither its widest nor
     // grown (a move back mid-call: review of e30c5c46, P6; review of a81876ab, P7)
     const same = (rpc as { url?: unknown }).url === via;
@@ -1074,6 +1111,70 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     if (b.block < a.block || (b.block === a.block && (b.logIndex <= a.logIndex || b.blockHash !== a.blockHash))) throw new Error(`rpc ${k}: the logs are not in order at ${i}`);
   }
   return out;
+}
+
+/** A log read's ceiling and widest page, handed to the parts of a spread read. */
+type LogReadState = { refused: bigint | null; held: number; hold: number; lastCeiling: bigint | null; widest: bigint | null };
+
+/**
+ * from..to as `parts` runs of contiguous blocks, each a readLogs of its own on the same provider and pager, all at once
+ * (card restore-walks-every-pool-on-129); their logs joined in block order. The first part that fails stops the others,
+ * and every part settles before its error is thrown, so a failed read leaves no call of it behind (as both()).
+ */
+async function spreadLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, parts: number, size: bigint, state: LogReadState, signal?: AbortSignal, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>): Promise<E[]> {
+  const n = BigInt(parts);
+  // each part a whole number of pages at the read's size, so its pages tile as one read's would; the last part the tail
+  const count = (to - from + size) / size;
+  const span = ((count + n - 1n) / n) * size;
+  // each part's own page per provider, from the read's at the split: one part's probe past a cap never cuts another's
+  // page, and the shared page takes only the widest any part answered back (it only grows, as readLogs keeps it)
+  const own: Map<string, EvmLogPage>[] = [];
+  const partPager = (): EvmLogPager => {
+    const pages = new Map<string, EvmLogPage>();
+    own.push(pages);
+    return {
+      rules: pager.rules,
+      of(r, i) {
+        const key = (r as { url?: unknown }).url;
+        const id = typeof key === "string" ? key : `rpc ${i}`;
+        let p = pages.get(id);
+        if (p === undefined) {
+          const s = pager.of(r, i);
+          pages.set(id, (p = { size: s.size, answered: s.answered }));
+        }
+        return p;
+      },
+    };
+  };
+  const stop = new AbortController();
+  const outer = () => stop.abort(signal!.reason);
+  if (signal?.aborted) stop.abort(signal.reason);
+  else signal?.addEventListener("abort", outer, { once: true });
+  let first: { e: unknown } | null = null;
+  try {
+    const runs: Promise<E[]>[] = [];
+    for (let at = from; at <= to; at += span) {
+      const end = at + span - 1n < to ? at + span - 1n : to;
+      runs.push(
+        readLogs(rpc, k, filter, decode, at, end, partPager(), stop.signal, sleep, undefined, state).catch((e: unknown) => {
+          first ??= { e };
+          stop.abort(e);
+          throw e;
+        }),
+      );
+    }
+    const got = await Promise.allSettled(runs);
+    const p = pager.of(rpc, k);
+    const id = (rpc as { url?: unknown }).url;
+    for (const pages of own) {
+      const q = pages.get(typeof id === "string" ? id : `rpc ${k}`);
+      if (q?.answered != null && (p.answered === null || q.answered > p.answered)) p.answered = q.answered;
+    }
+    if (first !== null) throw (first as { e: unknown }).e;
+    return got.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+  } finally {
+    signal?.removeEventListener("abort", outer);
+  }
 }
 
 /** The two anchors of one read: the finalized one and the newest agreed one (evmAgreedBlock at each tag). */

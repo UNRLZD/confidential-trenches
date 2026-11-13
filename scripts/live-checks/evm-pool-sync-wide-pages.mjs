@@ -29,7 +29,7 @@ export const FIRST = 100_000;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** evmPoolLogPager: a Map of pages by the provider's URL (else its index), each new one at the first size. */
-const PAGER = /function ([\w$]+)\(\)\{let ([\w$]+)=new Map;return\{rules:\{max:([\w$]+),ceilingPages:(\d+),slowHalves:(!0|!1)\},of\(([\w$]+),([\w$]+)\)\{let ([\w$]+)=\6\.url,([\w$]+)=typeof \8==`string`\?\8:`rpc \$\{\7\}`,([\w$]+)=\2\.get\(\9\);return \10===void 0&&\2\.set\(\9,\10=\{size:([\w$]+),answered:null\}\),\10\}\}\}/;
+const PAGER = /function ([\w$]+)\(\)\{let ([\w$]+)=new Map;return\{rules:\{max:([\w$]+),ceilingPages:(\d+),slowHalves:(!0|!1)(?:,inFlight:[\w$]+)?\},of\(([\w$]+),([\w$]+)\)\{let ([\w$]+)=\6\.url,([\w$]+)=typeof \8==`string`\?\8:`rpc \$\{\7\}`,([\w$]+)=\2\.get\(\9\);return \10===void 0&&\2\.set\(\9,\10=\{size:([\w$]+),answered:null\}\),\10\}\}\}/;
 /** readLogs' throttle branch: a throttle, a one-block page, or any timeout where the rules do not halve on one. */
 const RETRY = /if\(([\w$]+)!==null&&\(\1\.kind===`throttle`\|\|([\w$]+)===([\w$]+)\|\|!([\w$]+)\)\)\{if\(\+\+([\w$]+)>=\d+\)throw ([\w$]+);/;
 /** The rules' slowHalves read into readLogs' own name: `let{max:l,slowHalves:u}=o.rules`. */
