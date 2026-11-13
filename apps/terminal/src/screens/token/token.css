@@ -45,8 +45,19 @@
 @media (max-width: 1499.98px) { .tkp-desk { grid-template-columns: 78px minmax(0, 1fr) 440px; } }
 /* the rail folded by its « (Rail.tsx, kept on this device): its rings column, as under 1500 */
 .tkp-desk:has(> .tkr[data-collapsed="true"]) { grid-template-columns: 78px minmax(0, 1fr) 440px; }
+/* the slim rail opened by its » (card rail-open-pushes-the-middle): the full rail's own column, taken from the main
+   column (the chart and the orders move right, never under it), as the UNRLZD terminal's rail slot takes its width */
+@media (min-width: 1180px) and (max-width: 1499.98px) { .tkp-desk:has(> .tkr[data-open="true"]) { grid-template-columns: 340px minmax(0, 1fr) 440px; } }
 @media (max-width: 1179.98px) { .tkp-desk { grid-template-columns: minmax(0, 1fr) 440px; } .tkp-desk > .tkr { display: none; } }
-.tkp-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.tkp-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; container: tkp-mid / inline-size; }
+/* a narrow main column (the rail opened under 1500, or a 1024 laptop) keeps the identity whole: the strip's last tiles
+   give way from the end, as UNRLZD's headerTiles slices them (Holders, then Liquidity, 24h vol and Tax; each is also in
+   the trade column's stats). Each step is a tile and its gap (~105 layout px) over the full strip (~800) and the
+   identity's avatar, symbol and icons (~210), with ~40 px to spare (card rail-open-pushes-the-middle) */
+@container tkp-mid (max-width: 1069.98px) { .tkp-strip > [data-k="holders"] { display: none; } }
+@container tkp-mid (max-width: 964.98px) { .tkp-strip > [data-k="liq"] { display: none; } }
+@container tkp-mid (max-width: 859.98px) { .tkp-strip > [data-k="vol"] { display: none; } }
+@container tkp-mid (max-width: 754.98px) { .tkp-strip > [data-k="tax"] { display: none; } }
 .tkp-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 6px 4px 2px; flex-wrap: nowrap; }
 /* one row (the locked design): the identity takes what the strip leaves and its text truncates, so the strip's width
    comes only from its own tiles and it starts at the same x before and after the read (CLS 0) */

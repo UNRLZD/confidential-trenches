@@ -56,6 +56,7 @@ import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { named } from "./record-names.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 import { saidOf, saidPart } from "./vendor-said.mjs";
+import { QUOTE_RULE } from "./deposit-quote-no-liquidity.mjs";
 
 const KEY = "kit-deposit-assets-dry";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -99,9 +100,10 @@ const show = (v) => JSON.stringify(v);
 
 /** The asks the page makes of one display quote: one first (wallet/src/deposit/quote.ts askDepositQuote), and card
  *  helper-says-why-a-vendor-refused: asked again twice at most on a 1Click 400 not about the request (askDepositQuoteAgain,
- *  NO_LIQUIDITY_PAUSES_MS), so up to DEVICE_ASKS_MAX; a page before it asks once. More is not the page's. */
+ *  NO_LIQUIDITY_PAUSES_MS), so up to DEVICE_ASKS_MAX, the rule quote.ts writes (deposit-quote-no-liquidity.mjs QUOTE_RULE);
+ *  a page before it asks once. More is not the page's. */
 export const DEVICE_ASKS = 1;
-export const DEVICE_ASKS_MAX = 3;
+export const DEVICE_ASKS_MAX = QUOTE_RULE.maxAsks;
 const NO_LIQUIDITY = /^No liquidity available\b/;
 const MESSAGE_MAX = 120;
 /** True when a recorded helper answer is 1Click's no-liquidity 400. */

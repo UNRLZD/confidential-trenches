@@ -263,6 +263,18 @@ export function proofStatus(pools: SignpageState["pools"], chain: Chain): ProofS
   return bal && p.making !== undefined && positive(p.making) === true ? "making" : "none";
 }
 
+/**
+ * Money on the chain's pool that one tap cannot spend yet but will: a balance above zero, no Max or a Max of zero, and
+ * the device getting it ready, by the page's `state.pools` (messages.ts): no `ready` yet (the seconds after a load, before
+ * the queue runs) or a `making` above zero (a fresh deposit). A balance none is being made for (too small, or held by a
+ * running withdraw: `ready` sent and `making` "0" or absent) is not: the box never waits on what is not coming.
+ */
+export function spendSoon(pools: SignpageState["pools"], chain: Chain, max: Cents | null): boolean {
+  const p = poolOf(pools, chain);
+  if (!p || (max !== null && max > 0n) || positive(p.balance) !== true) return false;
+  return p.ready === undefined || (p.making !== undefined && positive(p.making) === true);
+}
+
 // ------------------------------------------------------------------------------------------------ the pool path
 
 /** The price the box converts with: one asset (10^decimals base units) is price x 10^expo USD (the kit's PoolUsdPrice). */

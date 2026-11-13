@@ -98,8 +98,7 @@ export const WORDS = {
   // card balances-per-chain (v2 A1), the per-chain pool rows: kept as drafted with their placement (owner 3 Nov 09:17Z)
   privateBalance: ok("Private balance", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain; R5 portfolio-1440.html round 3 note (owner round 15) names \"private balance\""),
   balance: ok("Balance", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain; approved on Verify (src/screens/verify/words.ts balance, owner 2 Nov 06:08Z), new on this screen"),
-  ready: ok("Ready", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: the part with a proof ready to buy"),
-  pending: ok("Pending", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: the part still being proved"),
+  // ready ("Ready"), pending ("Pending"): 13 Nov 07:53Z: removed, the app names no proof
   noBalance: ok("No balance", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: no pool holds anything"),
   // card app-export-every-wallet: kept as drafted (the 8 Nov words page)
   exportKey: ok("Export key", "owner 8 Nov 07:55Z, kept; drafted on card app-export-every-wallet: the export icon's hover label and accessible name (words-pending)"),

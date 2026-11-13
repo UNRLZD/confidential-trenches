@@ -851,6 +851,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     for (const id of await keptOutNotes(ops, BigInt(Date.now()))) out.add(id);
     return out;
   };
+  // a queue's opening starts the prover (card max-ready-seconds-after-a-load): its worker, threads and withdraw setup
+  // files load while the pass reads the pool's time and trees, not after them; the prover loads once per worker
+  // (src/prover-host.ts), so the pass's first proof finds it loaded. A load that fails is asked again by that proof.
+  const warmProver = (): void => void prover.vault.load("withdraw").catch(() => {});
   // the proof queue: opened at the first landing, closed at sign out
   let open: Promise<OpenQueue> | null = null;
   const openQueue = async (): Promise<OpenQueue> => {
@@ -862,6 +866,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const passPool = solanaPool({ pin: pin!, rpcs: rpcs("pass"), relayFee: (e, s) => poolRelayFee(solanaPoolOf(pin!.program).pool, e, s, over.fetch) });
       const pool = over.pool ?? { ...passPool, now: (signal?: AbortSignal) => solanaNow(rpcs(), signal) };
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
+      warmProver();
       return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id };
     } catch (e) {
       notes.close();
@@ -1053,6 +1058,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seen?.(now);
         await holdFee.call(passPool, now - (now % passPool.epochMs), s);
       } : undefined;
+      warmProver();
       return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id, ...(hold ? { hold } : {}) };
     } catch (err) {
       notes.close();

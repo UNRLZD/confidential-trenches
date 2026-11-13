@@ -13,7 +13,6 @@
           "status": 200,
           "marks": {
             "trade-box": 1,
-            "trade-proof": 1,
             "trade-max": 1,
             "trade-cta": 1,
             "trade-side-sell": 1,
@@ -116,7 +115,6 @@
           "status": 200,
           "marks": {
             "trade-box": 1,
-            "trade-proof": 1,
             "trade-max": 1,
             "trade-cta": 1,
             "trade-side-sell": 1,

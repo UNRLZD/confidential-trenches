@@ -112,16 +112,18 @@ const storage = (): Storage | null => {
     return null;
   }
 };
-export type Prefs = { list: List; sort: Sort; collapsed: boolean };
+/** `collapsed`: folded by « from 1500 (full by default); `open`: opened by » under 1500 (slim by default). Both kept on
+ *  this device, so a hop to another token or a reload keeps the rail as it was left (card rail-open-pushes-the-middle). */
+export type Prefs = { list: List; sort: Sort; collapsed: boolean; open: boolean };
 export function readPrefs(): Prefs {
-  const d: Prefs = { list: "trending", sort: null, collapsed: false };
+  const d: Prefs = { list: "trending", sort: null, collapsed: false, open: false };
   try {
     const v = JSON.parse(storage()?.getItem(PREFS) ?? "null") as Partial<Prefs> | null;
     if (!v || typeof v !== "object") return d;
     const list = LISTS.some((l) => l.key === v.list) ? (v.list as List) : d.list;
     const s = v.sort as Sort;
     const sort = s && SORTS.some((x) => x.key === s.key) && (s.dir === "asc" || s.dir === "desc") ? s : null;
-    return { list, sort, collapsed: v.collapsed === true };
+    return { list, sort, collapsed: v.collapsed === true, open: v.open === true };
   } catch {
     return d;
   }
@@ -263,8 +265,7 @@ export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null
       writePrefs(n);
       return n;
     });
-  const { list, sort, collapsed } = prefs;
-  const [open, setOpen] = useState(false);
+  const { list, sort, collapsed, open } = prefs;
   const [held, setHeld] = useState(false);
   const [menu, setMenu] = useState(false);
   const watch = useWatch();
@@ -298,7 +299,7 @@ export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null
   useLayoutEffect(() => setHeld(false), [list]);
   const closeMenu = useCallback(() => setMenu(false), []);
   return (
-    <aside className="tkr" data-testid="token-rail" data-open={open} data-slim={slim} data-collapsed={!narrow && collapsed} data-list={list} data-state={data.status}>
+    <aside className="tkr" data-testid="token-rail" data-open={narrow && open} data-slim={slim} data-collapsed={!narrow && collapsed} data-list={list} data-state={data.status}>
       {slim ? (
         <button
           type="button"
@@ -306,7 +307,7 @@ export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null
           aria-label={WORDS.expand.text}
           aria-expanded={false}
           data-testid="rail-expand"
-          onClick={() => (narrow ? setOpen(true) : set({ collapsed: false }))}
+          onClick={() => set(narrow ? { open: true } : { collapsed: false })}
         >
           <Ic n="chevR" size={14} />
         </button>
@@ -320,7 +321,7 @@ export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null
               aria-label={WORDS.collapse.text}
               title={WORDS.collapse.text}
               data-testid="rail-collapse"
-              onClick={() => (narrow ? setOpen(false) : set({ collapsed: true }))}
+              onClick={() => set(narrow ? { open: false } : { collapsed: true })}
             >
               <Ic n="chevL" size={15} />
             </button>

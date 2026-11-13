@@ -38,6 +38,35 @@ test("every check the SIGN_HOST and APP_HOST deploys run is run here or left out
   for (const k of [...ran, ...Object.keys(OUT)]) assert.ok(listed.has(k), `${k} is no deploy's live check`);
 });
 
+// A check left out here because it needs a browser may say its build run is in test-browser (apps/terminal's test:e2e,
+// which ci.yml's test-browser runs): that claim must be true, so a check that leaves test:e2e is not thought run.
+//   "its --<flag> run is in test-browser|test:e2e": test:e2e runs live-checks/<key>.mjs with that flag;
+//   "its harness run is in test-browser|test:e2e": test:e2e runs live-checks/<key>.mjs with no --live.
+function claimedBrowserRuns(out, e2e) {
+  const runs = String(e2e).split("&&").map((c) => c.trim());
+  const wrong = [];
+  for (const [key, why] of Object.entries(out)) {
+    const m = /\bits (--[a-z][a-z-]*|harness) run is in (?:test-browser|test:e2e)\b/.exec(why);
+    if (!m) continue;
+    const own = runs.filter((c) => c.split(/\s+/)[1]?.endsWith(`/live-checks/${key}.mjs`));
+    const ok = m[1] === "harness" ? own.some((c) => !/\s--live\b/.test(c)) : own.some((c) => c.split(/\s+/).includes(m[1]));
+    if (!ok) wrong.push(`${key}: says its ${m[1]} run is in test-browser, and test:e2e runs no such command`);
+  }
+  return wrong;
+}
+
+test("every left-out check that says its run is in test-browser is run there by test:e2e, as it says", () => {
+  const e2e = JSON.parse(readFileSync(path.join(ROOT, "apps/terminal/package.json"), "utf8")).scripts["test:e2e"];
+  assert.deepEqual(claimedBrowserRuns(OUT, e2e), []);
+  for (const k of ["signpage-shell", "sign-out-stops-the-pages-reads", "deposit-quote-no-liquidity"]) assert.match(OUT[k], /run is in test-browser/, k);
+  // planted: the claim with its command gone, with another flag, or with only a --live run
+  const drop = (k) => e2e.split("&&").filter((c) => !c.includes(`/live-checks/${k}.mjs`)).join("&&");
+  assert.deepEqual(claimedBrowserRuns({ "deposit-quote-no-liquidity": OUT["deposit-quote-no-liquidity"] }, drop("deposit-quote-no-liquidity")).length, 1);
+  assert.deepEqual(claimedBrowserRuns({ "deposit-quote-no-liquidity": OUT["deposit-quote-no-liquidity"] }, e2e.replace("deposit-quote-no-liquidity.mjs --local", "deposit-quote-no-liquidity.mjs --url x")).length, 1);
+  assert.deepEqual(claimedBrowserRuns({ "signpage-shell": OUT["signpage-shell"] }, e2e.replace("signpage-shell.mjs --engine", "signpage-shell.mjs --live --engine")).length, 1);
+  assert.deepEqual(claimedBrowserRuns({ "signpage-shell": OUT["signpage-shell"] }, drop("signpage-shell")).length, 1);
+});
+
 test("this checkout's SIGN_HOST build as it is: every check PASS", async () => {
   const dir = signCopy();
   try {

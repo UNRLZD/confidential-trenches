@@ -40,12 +40,14 @@
 .trb-warn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the pool's proof (card trade-box-pool): a terse label beside Max, the buy colour when a proof is ready */
 .trb-warn { gap: 10px; }
-.trb-proof { flex: none; color: var(--text-3); }
-.trb-proof[data-proof="ready"] { color: var(--acc, #50e397); }
 .trb .trb-cta { width: 100%; height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 13px; font-size: 17px; font-weight: 600; text-align: center; background: var(--acc); color: var(--on-acc); box-shadow: 0 0 28px rgba(var(--acc-rgb), 0.28); white-space: nowrap; overflow: hidden; padding: 0 12px; }
 .trb .trb-cta:disabled { background: var(--bg-raised); color: var(--text-3); box-shadow: none; }
 .trb .trb-cta[data-kind="live"] { cursor: default; }
 .trb-ctaLbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* money on the pool a tap cannot spend yet (TradeBox.tsx `coming`, aria-busy): the label pulses as the app's skeletons
+   do, no word; off under reduced motion */
+.trb .trb-cta[aria-busy="true"] .trb-ctaLbl { animation: trb-skp 1.2s linear infinite; }
+@keyframes trb-skp { 50% { opacity: 0.55; } }
 .trb-cta [data-time] { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .trb-cta .trb-live { color: var(--blue); }
 /* Slow's counter holds the room of 99.9s, so the centred label does not move when it reaches 10.0s (card
@@ -149,7 +151,7 @@
 .qt .trb-end { color: var(--text-1); }
 .qt-retry { flex: none; min-width: 72px; height: 44px; margin: -8px -6px -8px 0; padding: 0 14px; border: 0; border-radius: 10px; background: var(--acc); color: #04140b; font: 600 14px var(--font-ui); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
-  .rs-n[data-state="active"] .rs-g, .rs-ck { animation: none; }
+  .rs-n[data-state="active"] .rs-g, .rs-ck, .trb .trb-cta[aria-busy="true"] .trb-ctaLbl { animation: none; }
   .rs-ld > i, .rs-grp, .rs-toast, .rs-v, .rs-l { transition: none; }
 }
 

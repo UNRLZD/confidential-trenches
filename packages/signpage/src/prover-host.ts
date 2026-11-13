@@ -3,7 +3,8 @@
 // Types policy prover-worker (public/_headers), and APP_HOST's never has the first. Its worker, /prover-worker.js (the
 // kit's build.mjs, written into public/ by scripts/build-app.mjs), and the six setup files at
 // /assets/zk/<sha256>.<ext> (copied by the deploy build) are served from SIGN_HOST's own origin, never another.
-// - The worker starts at the first proof whose input the kit accepts, never at page load, so the Trusted Types policy
+// - The worker starts at the first proof whose input the kit accepts, or when a proof queue opens and loads the withdraw
+//   circuit ahead of its first proof (src/pool-testnet.ts warmProver), never at page load, so the Trusted Types policy
 //   prover-worker is made only then, once per page (the kit's client.ts; the CSP allows no duplicate).
 // - One worker serves every proof on the page and loads the withdraw setup files once (the kit's prove.ts), each
 //   checked by size and sha256 in the worker before snarkjs sees it.
@@ -14,8 +15,9 @@
 //   a proof asked after stop() runs on a new worker.
 // - Every proof is the kit's vaultProveWithdraw: it refuses an input the vault would refuse before the worker sees it,
 //   and a worker answer that is not that input's. The proof queue's (card signpage-pool-notes-2) are the kit's
-//   poolProveWithdraw through `vault`, the same worker as a VaultProver: its load starts nothing, each prove runs in the
-//   same one-at-a-time line, loads the circuit on the worker that runs it (once per worker), and is refused by stop().
+//   poolProveWithdraw through `vault`, the same worker as a VaultProver: its load starts the worker and loads the
+//   circuit in the same one-at-a-time line (card max-ready-seconds-after-a-load), each prove runs in that line, loads the
+//   circuit on the worker that runs it (once per worker), and both are refused by stop().
 // Nothing here logs: the input holds the note's secrets.
 import { isProverDead, PROVER_DEAD_PREFIX, startProver, type Prover, type ProverCircuit, type ProverOptions } from "../../kit/src/prover/client.ts";
 import { vaultProveWithdraw, type VaultProver, type VaultWithdrawProof } from "../../kit/src/prover/prove.ts";
@@ -86,8 +88,10 @@ export function proverHost(start: (o: ProverOptions) => Prover = startProver): P
   return {
     proveWithdraw: (args) => step((g) => vaultProveWithdraw(g, args)),
     vault: {
-      // the kit loads once per VaultProver; the worker that runs the prove loads it (a replaced worker again)
-      load: async () => {},
+      // the proof queue's warm-up (src/pool-testnet.ts warmProver): starts the worker and loads the circuit in the same
+      // one-at-a-time line, so the first proof after a load waits for neither; the worker that runs a prove still loads
+      // it (once per worker, so a replaced worker again)
+      load: (c) => step((g) => g.load(c)),
       prove: (c, input) =>
         step(async (g) => {
           await g.load(c);

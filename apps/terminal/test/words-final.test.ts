@@ -30,6 +30,10 @@ const ROWS = JSON.parse(readFileSync(new URL("./words-final.json", import.meta.u
 const NOV8 = JSON.parse(readFileSync(new URL("./words-nov8.json", import.meta.url), "utf8")) as Row[];
 const NOV8_PICKS = ["owner 8 Nov 07:55Z, kept", "8 Nov 19:40Z, kept as drawn"];
 const NOV8_SCREENS: Record<string, { WORDS: Record<string, Word>; DRAFTS: readonly string[] }> = { token, trade, positions, discover, deposit, portfolio, search };
+// 13 Nov 07:53Z: removed, the app names no proof. These rows stay on the lists as they were picked; each is gone from
+// its screen, and the checks below read only the words still drawn.
+const REMOVED = new Set(["portfolio.ready", "portfolio.pending", "trade.proofReady", "trade.proofMaking"]);
+const drawn = (r: Row): boolean => !REMOVED.has(`${r.screen}.${r.key}`);
 const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "owner 3 Nov 09:17Z, keep", "owner 8 Nov 07:50Z, Moved"];
 // the screens' words not on the list, still drafts: Portfolio's overflow button's accessible name and the lower panel's
 // and About's words R5 marks as draft copy (card app-token-lower-panel, on the owner's next picks page). Discover's list
@@ -47,9 +51,17 @@ test("the list: 104 words on these screens, each once, each with a pick", () => 
   for (const r of ROWS) assert.ok(PICKS.includes(r.pick), `${r.screen}.${r.key}: ${r.pick}`);
 });
 
+test("13 Nov 07:53Z: the four removed words are on no screen", () => {
+  assert.deepEqual([...REMOVED].filter((k) => !ROWS.some((r) => `${r.screen}.${r.key}` === k) && !NOV8.some((r) => `${r.screen}.${r.key}` === k)), []);
+  for (const k of REMOVED) {
+    const [s, key] = k.split(".") as [string, string];
+    assert.equal(({ ...SCREENS, ...NOV8_SCREENS })[s]!.WORDS[key], undefined, k);
+  }
+});
+
 test("every listed word: its text unchanged, no draft, its source naming its pick", () => {
   const bad: string[] = [];
-  for (const r of ROWS) {
+  for (const r of ROWS.filter(drawn)) {
     const w = SCREENS[r.screen]?.WORDS[r.key];
     if (!w) bad.push(`${r.screen}.${r.key}: missing`);
     else if (w.text !== r.text) bad.push(`${r.screen}.${r.key}: text ${JSON.stringify(w.text)}, want ${JSON.stringify(r.text)}`);
@@ -69,13 +81,13 @@ test("each screen's drafts: only the words not on the list", () => {
 test("the trade box's own words stay drafts: none names a pick unless it is Portfolio's approved entry itself", () => {
   assert.ok(trade.DRAFTS.length > 0);
   const shared = new Set(Object.values(portfolio.WORDS as Record<string, Word>).filter((w) => !w.draft));
-  const kept = new Set(NOV8.filter((r) => r.screen === "trade").map((r) => r.key));
+  const kept = new Set(NOV8.filter((r) => r.screen === "trade" && drawn(r)).map((r) => r.key));
   for (const [k, w] of Object.entries(trade.WORDS as Record<string, Word>)) {
     if (shared.has(w)) continue;
     if (kept.has(k)) assert.ok(!w.draft, `trade.${k} was kept on 8 Nov`);
     else for (const p of [...PICKS, ...NOV8_PICKS]) assert.ok(!w.source.includes(p), `trade.${k}`);
   }
-  assert.deepEqual([...kept].sort(), ["poolBare", "poolSuffix", "proofMaking", "proofReady"]);
+  assert.deepEqual([...kept].sort(), ["poolBare", "poolSuffix"]);
   assert.deepEqual(Object.entries(trade.WORDS as Record<string, Word>).filter(([, w]) => shared.has(w)).map(([k]) => k), ["sending", "landing", "privateBalance"]);
 });
 
@@ -101,6 +113,7 @@ test("words-nov8-final: 18 words kept as drafted, each text unchanged, no draft,
   const bad: string[] = [];
   for (const r of NOV8) {
     assert.ok(NOV8_PICKS.includes(r.pick), `${r.screen}.${r.key}: ${r.pick}`);
+    if (!drawn(r)) continue;
     const w = NOV8_SCREENS[r.screen]?.WORDS[r.key];
     if (!w) bad.push(`${r.screen}.${r.key}: missing`);
     else if (w.text !== r.text) bad.push(`${r.screen}.${r.key}: text ${JSON.stringify(w.text)}, want ${JSON.stringify(r.text)}`);
@@ -122,7 +135,7 @@ test("words-nov8-final: the 8 Nov page's texts, byte for byte, as the page lists
     "search.placeholder": "Name, symbol or address",
   };
   assert.deepEqual(Object.keys(page).sort(), NOV8.map((r) => `${r.screen}.${r.key}`).sort());
-  for (const r of NOV8) assert.equal(NOV8_SCREENS[r.screen]!.WORDS[r.key]!.text, page[`${r.screen}.${r.key}`], `${r.screen}.${r.key}`);
+  for (const r of NOV8.filter(drawn)) assert.equal(NOV8_SCREENS[r.screen]!.WORDS[r.key]!.text, page[`${r.screen}.${r.key}`], `${r.screen}.${r.key}`);
 });
 
 test("words-nov8-final: no screen lists one of them among its drafts", () => {
