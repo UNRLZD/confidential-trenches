@@ -56,6 +56,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import os from "node:os";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -418,7 +419,17 @@ if (!walletRpcUrl) throw new Error("the mainnet build has no U_X reader on the h
 route.helper.add(new URL(walletRpcUrl).origin);
 log("helper", { local: route.local, sender: sender.sender, pool: sender.pool, walletReader: walletRpcUrl });
 
-// the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files
+// the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files, on the page's threads (card
+// evm-deposit-ready-in-ten-seconds): SIGN_HOST's prover worker proves on min(hardwareConcurrency - 1, 4) threads, one
+// core left to the page (packages/kit/src/prover/worker.js THREADS), and warms its circuit when the proof queue opens
+// (src/pool-testnet.ts warmProver), so a landing's prove is fullProve alone. This copy proved on one thread (4.4 s on
+// the Base copy, ep2-final), the page's time on no device. snarkjs in Node takes os.cpus().length threads
+// (ffjavascript's thread manager), so this process reports the page's count there before its first proof
+const PROVER_THREADS = Math.max(1, Math.min(os.cpus().length - 1, 4));
+{
+  const cpus = os.cpus;
+  os.cpus = () => cpus().slice(0, PROVER_THREADS);
+}
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
 const file = (name) => {
   const b = readFileSync(new URL(name, KIT_ZK));
@@ -433,9 +444,9 @@ const vault = {
   prove: async (circuit, input) => {
     if (circuit !== "withdraw") throw new Error(`no ${circuit} prover here`);
     const s = performance.now();
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY, undefined, undefined, { singleThread: true });
+    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, WASM, ZKEY, undefined, undefined, { singleThread: PROVER_THREADS < 2 });
     const ms = Math.round(performance.now() - s);
-    log("proved", { ms });
+    log("proved", { ms, threads: PROVER_THREADS });
     return { proof, publicSignals, proveMs: ms };
   },
 };
