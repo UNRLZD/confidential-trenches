@@ -521,3 +521,20 @@ test("export (card app-export-every-wallet): each row names the wallets that hol
   assert.equal(shortAddress("SoU3xxxxxxxxxxxxxxxx"), "SoU3…xxxx");
   assert.equal(shortAddress("u.near"), "u.near");
 });
+
+// card round-trip-costs-less, review 2 P3-e of c0dd55d02: a leftover W waiting out the device's gap for its sweep, as the
+// signing page lists it (packages/signpage/src/positions.ts returningWallets: RETURNING, its size its lamports at the
+// pool's price), is on its way: in the total, never gone. Once its sweep's note is the pool's, the page lists it no more
+// and the note counts once, in the pool
+test("round-trip-costs-less P3-e: a W waiting for its sweep counts on its way, and once swept its note counts once, in the pool", () => {
+  const base: SignpageState = { ...STATE, vault_balance: "0", wallets: [], positions: [], pools: [{ chain: "solana", asset: "SOL", balance: "1", price: PX(150) }] };
+  const waiting: SignpageState = { ...base, wallets: [{ chain: "solana", address: "w9", role: "fresh", size: "0.305892", state: "RETURNING" }] };
+  const swept: SignpageState = { ...base, pools: [{ chain: "solana", asset: "SOL", balance: "1.00203928", price: PX(150) }] };
+  const t0 = portfolio(snap(base), data(), NOW).totals!;
+  const t1 = portfolio(snap(waiting), data(), NOW).totals!;
+  const t2 = portfolio(snap(swept), data(), NOW).totals!;
+  assert.equal(t1.onWay, 30n, "on its way: 0.002039 SOL at $150, rounded down");
+  assert.equal(t1.total, t0.total + 30n);
+  assert.equal(t2.onWay, 0n);
+  assert.equal(t2.total, t0.total + 30n, "in the pool, once");
+});

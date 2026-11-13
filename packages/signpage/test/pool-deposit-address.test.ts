@@ -259,6 +259,21 @@ test("pool-deposit-follow floor: readSolanaPoolFloor reads the rent on both RPCs
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", null)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", 5_000, 6_000n)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://a.example", 5_000)], program, SOL_U));
+  // card helper-says-why-a-vendor-refused, delta review P3-5: the page's stop pulled before or during a read, no read
+  // starts after it, the fee read (its message names U_X) included
+  for (const [at, left] of [["before", []], ["getAccountInfo", ["getAccountInfo", "getAccountInfo"]], ["getLatestBlockhash", ["getAccountInfo", "getAccountInfo", "getLatestBlockhash"]]] as const) {
+    const stop = new AbortController();
+    if (at === "before") stop.abort();
+    const asked: string[] = [];
+    const watched = (url: string) => {
+      const r = rpcOf(url, 5_000);
+      const f = (async (method: string, params: readonly unknown[]) => (asked.push(method), method === at && stop.abort(), r(method, params))) as unknown as import("../../kit/src/trade/solana/send.ts").SolanaRpc;
+      Object.defineProperty(f, "url", { value: url });
+      return f;
+    };
+    await assert.rejects(readSolanaPoolFloor([watched("https://a.example"), watched("https://b.example")], program, SOL_U, stop.signal), { name: "AbortError" }, at);
+    assert.deepEqual(asked, left, at);
+  }
 });
 
 // card evm-deposit-route-mainnet: the floor of a quote into an EVM pool's U_X, read now on the pool's two RPCs (names no
@@ -478,4 +493,74 @@ test("evm-deposit-route-mainnet review: readEvmPoolFloor reads every value at th
     await readEvmPoolFloor([rpcOf(AT + 1), rpcOf(AT)], pin),
     evmPoolDepositFloor({ baseFee: 5_000_000n, tip: EVM_DEPOSIT_PRIORITY_CAP, l1Fee: 7_000_000_000n + gas * 3n, stateDepth: 3n, labelDepth: 2n }),
   );
+});
+
+// Review P3 of card helper-says-why-a-vendor-refused: the page's stop (src/main.ts quotesSignedOut) reaches the quote's
+// re-ask: a sign out in its pause sends no second quote and gives no address.
+test("a sign out in the quote's re-ask pause: no second quote leaves, no address, nothing handed to the follow", async () => {
+  const w = world({ noLiquidity: 99 });
+  const stop = new AbortController();
+  w.deps.stop = () => stop.signal;
+  const asked = ask(w, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
+  while (w.sent.length < 1) await new Promise((ok) => setImmediate(ok));
+  stop.abort(new DOMException("signed out", "AbortError"));
+  assert.deepEqual(await asked, { error: "down" });
+  assert.equal(w.sent.length, 1);
+  assert.equal(w.took.length, 0);
+});
+
+// Re-review P2 of card helper-says-why-a-vendor-refused: the stop is read once, as the request arrives. A sign out swaps
+// in a fresh signal (src/quotes-stop.ts), so a host that read it only after its awaits would send its quote anyway.
+test("a sign out during pool.address's floor read: no quote leaves, the answer is not_allowed", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  const w = world();
+  const page = quotesStop();
+  w.deps.stop = page.stopped;
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  let reading = false;
+  const floor = w.deps.floor!;
+  w.deps.floor = async (chain, wallet) => ((reading = true), await gate, floor(chain, wallet));
+  const asked = ask(w, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
+  while (!reading) await new Promise((ok) => setImmediate(ok));
+  page.signedOut();
+  release();
+  assert.deepEqual(await asked, { error: "not_allowed" });
+  assert.equal(w.sent.length, 0);
+});
+
+// Each wait held in turn, a sign out during it, on the page's own stop: nothing after it runs (the floor read carries the
+// deposit address to an RPC, the follow reads it on chain).
+test("a sign out at each of pool.address's waits: nothing after it runs (no records read, no floor read, no quote, no follow), the answer is not_allowed", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  for (const at of ["named", "read", "floor", "read again", "follow"] as const) {
+    const w = world();
+    const page = quotesStop();
+    w.deps.stop = page.stopped;
+    const steps: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => (release = ok));
+    let held = false;
+    const hold = async (step: string) => {
+      steps.push(step);
+      if (step === at) (held = true), await gate;
+    };
+    const { read, floor, fetch: send, checked } = w.deps;
+    w.deps.named = () => hold("named");
+    w.deps.read = async (scope) => (await hold(steps.includes("read") ? "read again" : "read"), read(scope));
+    let floorSignal: AbortSignal | undefined;
+    w.deps.floor = async (chain, wallet, signal) => ((floorSignal = signal), await hold("floor"), floor!(chain, wallet));
+    w.deps.fetch = ((url: string | URL | Request, init?: RequestInit) => (steps.push("ask"), send!(url, init))) as typeof fetch;
+    w.deps.checked = async (...a) => (await hold("follow"), checked!(...a));
+    const asked = ask(w, { chain: "solana", origin_asset: BASE_USDC, amount: "25" });
+    while (!held) await new Promise((ok) => setImmediate(ok));
+    page.signedOut();
+    release();
+    assert.deepEqual(await asked, { error: "not_allowed" }, at);
+    assert.equal(steps.at(-1), at, `${at}: ${steps.join(", ")}`);
+    // the follow's write ran before the sign out was seen: it holds the op, but the answer names no address
+    assert.equal(w.took.length, at === "follow" ? 1 : 0, at);
+    // the floor read is handed the stop, so its own reads end too (readSolanaPoolCosts)
+    if (at !== "named" && at !== "read") assert.equal(floorSignal?.aborted, true, at);
+  }
 });

@@ -28,6 +28,9 @@
 //     words, never refused for coming at that moment.
 //   broken store: signin.open opens the passkey page; a seed record that decrypts but fails checkSeed is put in the
 //     store; Cancel still goes back to the app.
+//   After each Sign out (prf and no-prf; card sign-out-checks-read-the-store-after-the-reload): the store as the page's
+//     reload leaves it, read raw (storeAfter below): no record in any object store but meta's k_wrap and lane,
+//     nothing in localStorage, and the K_wrap before the press not the one after.
 //   Every press waits out the page's 500 ms activation guard first, which each layer opening restarts.
 //   Every screen above opens as a sheet over the app with the APP_HOST frame kept in the page under it (card
 //   signing-views-open-over-the-app); none of them has a field typed into, the one kind of screen that takes it out.
@@ -107,9 +110,114 @@ const PLANT_BROKEN_SEED = async () => {
   }
 };
 
+// card sign-out-checks-read-the-store-after-the-reload: a sign out is judged by the store after the page's reload
+// (keptAfterSignOut, sealProbe, storeAfter below; wallet-passkey-prf.mjs reads its sign outs with them too)
+const keptText = (a) => {
+  const k = keptAfterSignOut(a);
+  return k.length ? `kept: ${k.join("; ")}` : `nothing kept${a?.store?.reloaded ? ", read after the reload" : ""}`;
+};
+
+// ------------------------------------------------------------------------------------------------ the store after a sign out
+// (card sign-out-checks-read-the-store-after-the-reload) A sign out deletes the database and reloads the page
+// (packages/wallet/src/store/index.ts signOut's deleteDatabase, packages/signpage/src/main.ts reloadSignedOut), and the
+// new load opens a fresh store with a new K_wrap. So a sign out is judged by what the store holds after that reload, read
+// raw in the new document: every object store's record count, meta's keys (only k_wrap may be there), localStorage; and
+// whether the K_wrap before it is gone: a fixed block is sealed with it before the press (sealProbe) and opened with the
+// K_wrap after it (storeAfter). A new key refuses it; the same key opens it. The key is never exported (it cannot be:
+// non-extractable); the block and its ciphertext stay in the check's process and never reach a record.
+const PROBE_AAD = "ct/check/k-wrap-probe";
+/** Before a sign out's press: marks this document (so the read after waits for the reload's new one) and seals 32 zero
+ *  bytes under the store's K_wrap. null when the page has no store or no K_wrap. */
+export async function sealProbe(page) {
+  return page.evaluate(async (aad) => {
+    globalThis.__ctBeforeSignOut = true;
+    const req = (x) => new Promise((ok, no) => ((x.onsuccess = () => ok(x.result)), (x.onerror = () => no(x.error))));
+    if (!(await indexedDB.databases()).some((d) => d.name === "ct-wallet")) return null;
+    const d = await req(indexedDB.open("ct-wallet"));
+    try {
+      if (!d.objectStoreNames.contains("meta")) return null;
+      const key = await req(d.transaction("meta").objectStore("meta").get("k_wrap"));
+      if (!(key instanceof CryptoKey)) return null;
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) }, key, new Uint8Array(32));
+      return { iv: Array.from(iv), ct: Array.from(new Uint8Array(ct)) };
+    } finally {
+      d.close();
+    }
+  }, PROBE_AAD);
+}
+/** After a sign out: the store as the reloaded page holds it. { reloaded, db, stores: { name: records }, metaKeys (each
+ *  key's id past its first "/" read as "*"),
+ *  localStorage, oldKey }: oldKey "refused" (the K_wrap after is a new key), "opened" (the same key), "no-key" (none
+ *  after), "not-sealed" (none before). `reloaded`: the marked document was replaced within RELOAD_MS. */
+const RELOAD_MS = 8_000;
+export async function storeAfter(page, probe) {
+  const reloaded = await page
+    .waitForFunction(() => {
+      const s = document.getElementById("signin")?.dataset.signin;
+      return globalThis.__ctBeforeSignOut !== true && !!s && s !== "loading";
+    }, null, { timeout: RELOAD_MS })
+    .then(() => true, () => false);
+  const r = await page.evaluate(async ({ aad, probe }) => {
+    const req = (x) => new Promise((ok, no) => ((x.onsuccess = () => ok(x.result)), (x.onerror = () => no(x.error))));
+    const ls = localStorage.length;
+    if (!(await indexedDB.databases()).some((d) => d.name === "ct-wallet")) return { db: false, stores: {}, metaKeys: [], localStorage: ls, oldKey: probe ? "no-key" : "not-sealed" };
+    const d = await req(indexedDB.open("ct-wallet"));
+    try {
+      const stores = {};
+      let metaKeys = [];
+      for (const n of Array.from(d.objectStoreNames)) {
+        stores[n] = await req(d.transaction(n).objectStore(n).count());
+        // a key's own id (meta/deposit/<scope>, owed/<op id>) is never recorded: its kind and a star
+        if (n === "meta") metaKeys = (await req(d.transaction(n).objectStore(n).getAllKeys())).map((k) => String(k).replace(/\/.*$/, "/*"));
+      }
+      let oldKey = "not-sealed";
+      if (probe) {
+        const key = d.objectStoreNames.contains("meta") ? await req(d.transaction("meta").objectStore("meta").get("k_wrap")) : undefined;
+        oldKey = !(key instanceof CryptoKey)
+          ? "no-key"
+          : await crypto.subtle
+            .decrypt({ name: "AES-GCM", iv: new Uint8Array(probe.iv), additionalData: new TextEncoder().encode(aad) }, key, new Uint8Array(probe.ct))
+            .then(() => "opened", () => "refused");
+      }
+      return { db: true, stores, metaKeys, localStorage: ls, oldKey };
+    } finally {
+      d.close();
+    }
+  }, { aad: PROBE_AAD, probe });
+  return { reloaded, ...r };
+}
+/** The meta keys a fresh store writes as it opens, and nothing else may be there after a sign out: K_wrap and the
+ *  device's lane, the store's own (packages/wallet/src/store/index.ts: "K_wrap and the lane are the store's own"; the lane
+ *  drawn anew on the new database, readLane, wrapped under the new K_wrap). */
+export const FRESH_META = Object.freeze(["k_wrap", "lane"]);
+/** What a sign out left (the step's after: its state, account and store): [] when it left nothing. */
+export function keptAfterSignOut(a) {
+  const kept = [];
+  if (a?.state !== "signed-out") kept.push(`state ${a?.state ?? "none"}`);
+  if (a?.account) kept.push("an account shown");
+  const st = a?.store;
+  if (!st || typeof st.stores !== "object" || st.stores === null || !Array.isArray(st.metaKeys)) return [...kept, "the store not read"];
+  for (const [n, c] of Object.entries(st.stores)) if (n !== "meta" && c !== 0) kept.push(`${c} record(s) in ${n}`);
+  const extra = st.metaKeys.filter((k) => !FRESH_META.includes(k));
+  if (extra.length) kept.push(`meta ${extra.join(", ")}`);
+  if (st.stores.meta !== undefined && st.stores.meta !== st.metaKeys.length) kept.push("meta's count and keys disagree");
+  if (st.localStorage !== 0) kept.push(`${st.localStorage ?? "?"} localStorage item(s)`);
+  if (st.oldKey !== "refused" && st.oldKey !== "no-key") kept.push(`the K_wrap before ${st.oldKey === "opened" ? "still the store's" : `not tried (${st.oldKey ?? "none"})`}`);
+  return kept;
+}
+/** The sign-out reading a judge applies: the store after the page's reload (this card's, every run now), or, for a
+ *  record cut before card sign-out-checks-read-the-store-after-the-reload (no store read in it), the reading then: the
+ *  database gone (db false), as a page that deleted it and reloaded nothing left it. */
+export const SIGN_OUT_NOW = Object.freeze({ signOut: "store" });
+export const SIGN_OUT_BEFORE_RELOAD = Object.freeze({ signOut: "db" });
+/** Whether a sign out's after (its state, account and store) left nothing, at `era`. */
+export const signedOutClean = (a, era = SIGN_OUT_NOW) =>
+  era.signOut === "db" ? a?.state === "signed-out" && !a?.account && a?.db === false : keptAfterSignOut(a).length === 0;
+
 // ------------------------------------------------------------------------------------------------ the verdict
 const HEX64 = /^[0-9a-f]{64}$/;
-export function judge(rec) {
+export function judge(rec, era = SIGN_OUT_NOW) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const p = rec.prf ?? {};
@@ -147,8 +255,11 @@ export function judge(rec) {
   const fast = so.early?.pressLanded === true && Number.isFinite(so.early?.pressMs) && so.early.pressMs >= 0 && so.early.pressMs < 500;
   say(fast && inLayer(so.early, "signout") && so.early?.db === true && so.early?.account === A,
     `prf: a press on Sign out within 500 ms of the page opening does nothing (${so.early?.state ?? "no step"}, store ${so.early?.db ? "kept" : "gone"}, press ${so.early?.pressLanded ? `landed at ${so.early.pressMs} ms` : "never landed"})`);
-  say(backToApp(so.after, "signed-out") && so.after?.db === false && !so.after?.account,
-    `prf: Sign out deletes the store and goes back to the app signed out (${so.after?.state}, store ${so.after?.db ? "kept" : "gone"})`);
+  if (era.signOut === "db")
+    say(backToApp(so.after, "signed-out") && signedOutClean(so.after, era), `prf: Sign out deletes the store and goes back to the app signed out (${so.after?.state}, store ${so.after?.db ? "kept" : "gone"})`);
+  else
+    say(backToApp(so.after, "signed-out") && signedOutClean(so.after),
+      `prf: Sign out goes back to the app signed out, the store left with no account, no seed, no record and a new K_wrap, nothing in localStorage (${so.after?.state}, ${keptText(so.after)})`);
   say(refusedNA(p.refused?.signout) && refusedNA(p.refused?.backup) && p.refused?.layer === "hidden",
     `prf: signout and backup.open sent signed out are refused (${p.refused?.signout?.error?.code ?? "answered"}, ${p.refused?.backup?.error?.code ?? "answered"})`);
 
@@ -160,8 +271,8 @@ export function judge(rec) {
     `no-prf: signout with the words not saved draws the backup first, no Sign out (${n.signout?.page?.state}, ${n.signout?.page?.signoutButtons ?? "?"} Sign out)`);
   say(inLayer(n.saved, "signout") && n.saved?.signoutButtons === 1 && n.saved?.codeSaved === "true" && n.saved?.account === B,
     `no-prf: Saved goes on to the sign-out page (${n.saved?.state}, code_saved ${n.saved?.codeSaved})`);
-  say(backToApp(n.after, "signed-out") && n.after?.db === false,
-    `no-prf: Sign out then deletes the store (${n.after?.state}, store ${n.after?.db ? "kept" : "gone"})`);
+  if (era.signOut === "db") say(backToApp(n.after, "signed-out") && n.after?.db === false, `no-prf: Sign out then deletes the store (${n.after?.state}, store ${n.after?.db ? "kept" : "gone"})`);
+  else say(backToApp(n.after, "signed-out") && signedOutClean(n.after), `no-prf: Sign out then leaves the store with nothing but a new K_wrap (${n.after?.state}, ${keptText(n.after)})`);
 
   const w = rec.wallet ?? {};
   say(pending(w.answer) && inLayer(w.choose, "choose") && w.choose?.newAccount === 1 && w.choose?.haveOne === 1,
@@ -460,7 +571,9 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       early.pressLanded = typeof at.d === "number" && typeof at.p === "number";
       early.pressMs = early.pressLanded ? Math.round(at.p - at.d) : null;
       const soPage = await read(page, ["signed-in"]);
+      const sealed = await sealProbe(page);
       p.signout = { answer: signout, page: soPage, early, after: await press(page, "signout", ["signout"]) };
+      p.signout.after.store = await storeAfter(page, sealed);
       p.refused = { signout: await send(page, "signout", { return_key: "settings" }), backup: await send(page, "backup.open", { return_key: "settings" }) };
       p.refused.layer = (await read(page)).layer;
       await ctx.close();
@@ -482,7 +595,9 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const answer = await send(page, "signout", { return_key: "settings" });
       n.signout = { answer, page: await read(page, ["signed-in"]) };
       n.saved = await press(page, "saved", ["backup"]);
+      const sealedB = await sealProbe(page);
       n.after = await press(page, "signout", ["signout"]);
+      n.after.store = await storeAfter(page, sealedB);
       await ctx.close();
     }
     // wallet run

@@ -1,7 +1,8 @@
 // SIGN_HOST's build on Base and Robinhood (card evm-pools-on-mainnet): the wallet's mainnet EVM pins (EVM_POOLS.base,
 // EVM_POOLS.robinhood), the page's USD price pair (the pool list's two seats) and the chains' positions, which read
-// each W on the helper's route alone (pageEvmPassReads), so a public provider is never named one device's Ws. pool.deposit,
-// pool.buy, pool.sell, pool.withdraw and the buy's and sale's follows stay refused there, each read nothing.
+// each W on the helper's route alone (pageEvmPassReads), so a public provider is never named one device's Ws. pool.deposit
+// and pool.withdraw run there (card evm-deposit-on-mainnet); pool.buy, pool.sell and the buy's and sale's follows stay
+// refused, each read nothing.
 //   node --test test/pool-mainnet-evm.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
@@ -85,10 +86,11 @@ test("a Base and a Robinhood pool.sell read the token's decimals on the chain's 
   assert.ok(calls.length > 0 && calls.every((c) => String(c.to ?? TOKEN).toLowerCase() === TOKEN.toLowerCase()), "only the token is read, never a W");
 });
 
-// Closed on SIGN_HOST's build until what each needs exists (review of d5699312): a buy whose swap misses its floor
-// leaves the chunk on W with no way back yet, a restored device has no buy record to sell from, and a pool deposit has
-// no way out (no EVM withdraw, no exit tool). Each kind and both follows refuse on both chains, and read nothing.
-test("on SIGN_HOST's build a Base and a Robinhood pool.deposit, pool.buy, pool.sell and pool.withdraw are refused not_allowed, a deposit from U too, and none reads the chain or reaches its runner", async () => {
+// On SIGN_HOST's build (card evm-deposit-on-mainnet) a Base and a Robinhood pool.deposit, a deposit from U and
+// pool.withdraw reach their runners, as the build carries the chain's withdraw (src/pool-testnet.ts poolWayOut). The buy
+// and the sale stay closed until a refused swap's ETH on W has its way back (card evm-buy-and-sell-on-mainnet): each is
+// refused and reads nothing.
+test("on SIGN_HOST's build a Base and a Robinhood pool.deposit, a deposit from U and pool.withdraw reach their runners; pool.buy and pool.sell are refused not_allowed and read nothing", async () => {
   const WITHDRAW: Ask = { kind: "pool.withdraw", chain: "base", token: null, amount: 10n ** 15n, slippageBps: 0, decimals: 18 };
   for (const chain of ["base", "robinhood"] as const) {
     const r = rpcs();
@@ -98,18 +100,22 @@ test("on SIGN_HOST's build a Base and a Robinhood pool.deposit, pool.buy, pool.s
       evmRpcs: () => r.pair,
       evmRound: () => async () => (ran.push("round"), { events: [], finalBlock: 100n }),
       evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+      depositKinds: { evm: (() => (ask: Ask | null) => (ran.push(`deposit ${ask?.chain}`), { error: "not_allowed" })) as never },
       tradeKinds: {
         evmBuy: () => () => (ran.push("buy"), { error: "not_allowed" }),
         evmSell: () => () => (ran.push("sell"), { error: "not_allowed" }),
       },
     });
-    for (const ask of [DEPOSIT, BUY, SELL, { ...SELL, amount: 0n, shareBps: 2_500 }, WITHDRAW] as Ask[]) {
+    for (const ask of [BUY, SELL, { ...SELL, amount: 0n, shareBps: 2_500 }] as Ask[]) {
       assert.deepEqual(t.flow({ ...ask, chain }, ctx), { error: "not_allowed" }, `${chain}: ${ask.kind} refused`);
     }
-    assert.deepEqual(t.depositFrom({ chain, token: null, amount: "0.001", slippage_bps: 0 }, { s: "1", i: 0 } as never, ctx), { error: "not_allowed" }, `${chain}: a deposit from U refused`);
-    assert.deepEqual(ran, [], `${chain}: no runner reached`);
-    assert.deepEqual(withdrawn, [], `${chain}: the withdraw form is not opened`);
-    assert.deepEqual(r.calls, [], `${chain}: nothing read`);
+    assert.deepEqual(ran, [], `${chain}: no buy or sale runner reached`);
+    assert.deepEqual(r.calls, [], `${chain}: the refused buy and sale read nothing`);
+    t.flow({ ...DEPOSIT, chain }, ctx);
+    t.depositFrom({ chain, token: null, amount: "0.001", slippage_bps: 0 }, { s: "1", i: 0, u: "x" } as never, ctx);
+    assert.deepEqual(ran, [`deposit ${chain}`, `deposit ${chain}`], `${chain}: the deposit and the deposit from U reach the deposit runner`);
+    t.flow({ ...WITHDRAW, chain }, ctx);
+    assert.deepEqual(withdrawn, [chain], `${chain}: the withdraw form is opened`);
     await t.signedOut();
   }
 });

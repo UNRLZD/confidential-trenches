@@ -119,6 +119,20 @@ test("read() keeps a 400's message, bounded, and nothing of any other answer's b
   assert.equal(a.sheet[4].message, "No liquidity available");
   assert.ok([...a.sheet.slice(0, 4), ...a.share].every((c) => !("message" in c)));
   assert.equal(messageOf(JSON.stringify({ message: "x".repeat(500) })).length, NO_LIQUIDITY_MESSAGE_MAX);
+  // card helper-says-why-a-vendor-refused: a list of messages, an error string, a line break the vendor sent
+  assert.equal(messageOf(JSON.stringify({ message: ["a", "b"] })), "a; b");
+  assert.equal(messageOf(JSON.stringify({ error: "Bad Request" })), "Bad Request");
+  assert.equal(messageOf(JSON.stringify({ message: "one\nproxy two" })), "one proxy two");
   assert.equal(messageOf("<html>"), null);
   assert.equal(messageOf(JSON.stringify({ message: 5 })), null);
+});
+
+// Card helper-says-why-a-vendor-refused: live runs 43276439006 and 43289730843 printed "quote 1 ... answered 400, want 200 or
+// 201" and nothing of why; each BAD line now carries the 400's message the run recorded.
+test("planted on the good answer: a quote 1Click answered 400 with another message FAILs with that message on its BAD line", () => {
+  const v = plant((a) => Object.assign(a.sheet[1], { status: 400, message: "Failed to get quote" }));
+  assert.equal(v.verdict, "FAIL");
+  assert.deepEqual(v.lines, [`BAD sheet: ${A.good.sheet[1].what} answered 400 "Failed to get quote", want 200 or 201`]);
+  const none = plant((a) => Object.assign(a.sheet[1], { status: 400 }));
+  assert.deepEqual(none.lines, [`BAD sheet: ${A.good.sheet[1].what} answered 400, want 200 or 201`]);
 });

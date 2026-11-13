@@ -44,10 +44,11 @@ const FLOOR_FN = new RegExp(
 );
 const LADDER = (n) => new RegExp(`${esc(n)}=Object\\.freeze\\(\\{one:1000000n,min:10000000n\\}\\)`);
 // readSolanaPoolFloor: the floor at readSolanaPoolCosts' fee and rent; the costs: the fee on both RPCs, the higher.
-const FLOOR_READ = new RegExp(`async function (${N})\\((${N}),(${N}),(${N})\\)\\{let\\{fee:(${N}),rent:(${N})\\}=await (${N})\\(\\2,\\3,\\4\\);return ${N}\\(\\5,\\6\\)\\}`);
+// the page's stop passed on as a fourth argument since card helper-says-why-a-vendor-refused (its own check holds it)
+const FLOOR_READ = new RegExp(`async function (${N})\\((${N}),(${N}),(${N})(?:,${N})?\\)\\{let\\{fee:(${N}),rent:(${N})\\}=await (${N})\\(\\2,\\3,\\4(?:,${N})?\\);return ${N}\\(\\5,\\6\\)\\}`);
 const COSTS = (c) =>
   new RegExp(
-    `async function ${esc(c)}\\((${N}),${N},${N}\\)\\{let (${N})=await ${N}\\(\\1\\),(${N})=await Promise\\.all\\(\\1\\.map\\(async ${N}=>\\{[^}]*getLatestBlockhash[\\s\\S]{0,400}?getFeeForMessage[\\s\\S]{0,200}?\\}\\)\\);return\\{fee:\\3\\[0\\]>\\3\\[1\\]\\?\\3\\[0\\]:\\3\\[1\\],rent:\\2\\}\\}`,
+    `async function ${esc(c)}\\((${N}),${N},${N}(?:,${N})?\\)\\{(?:${N}\\?\\.throwIfAborted\\(\\);)?let (${N})=await ${N}\\(\\1\\),(${N})=await Promise\\.all\\(\\1\\.map\\(async ${N}=>\\{[^}]*getLatestBlockhash[\\s\\S]{0,400}?getFeeForMessage[\\s\\S]{0,200}?\\}\\)\\);return\\{fee:\\3\\[0\\]>\\3\\[1\\]\\?\\3\\[0\\]:\\3\\[1\\],rent:\\2\\}\\}`,
   );
 // pool-deposit-quote.ts: the context floor at least the rung; after the kit's check, min out at least the floor.
 const QUOTE_FLOOR = new RegExp(
@@ -55,13 +56,13 @@ const QUOTE_FLOOR = new RegExp(
 );
 // main.ts: pool.address with the price, the floor read and the follow's quoted.
 const WIRED = new RegExp(
-  `"pool\\.address":${N}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:(${N}),checked:\\((${N}),(${N}),(${N}),(${N})\\)=>(${N})\\.quoted\\(\\2,\\3,\\4,\\5\\)\\}\\)`,
+  `"pool\\.address":${N}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:(${N}),checked:\\((${N}),(${N}),(${N}),(${N})\\)=>(${N})\\.quoted\\(\\2,\\3,\\4,\\5\\),stop:${N}\\}\\)`,
 );
 // (card evm-deposit-route-mainnet: Base's and Robinhood's floor goes first, its own check's mark; Solana's as before)
 const FLOOR_WIRE = (u) =>
   new RegExp(
-    `[,;]${esc(u)}=async\\((${N}),(${N})\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${N}\\.floor\\(\\1\\);` +
-      `let (${N})=${N}\\(\\);return \\3!==null&&${N}!==void 0\\?${N}\\(\\3,${N}\\.program,\\2\\):null\\}`,
+    `[,;]${esc(u)}=async\\((${N}),(${N})(?:,${N})?\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${N}\\.floor\\(\\1\\);` +
+      `let (${N})=${N}\\(\\);return \\3!==null&&${N}!==void 0\\?${N}\\(\\3,${N}\\.program,\\2(?:,${N})?\\):null\\}`,
   );
 const FOLLOW_INST = (f) => new RegExp(`[,;]${esc(f)}=${N}\\?null:${N}\\(\\{store:\\(\\)=>${N}\\(\\),decimals:${N}=>${N}\\[${N}\\[${N}\\]\\],deps:\\((${N}),(${N})\\)=>(${N})\\(\\1,\\2\\)\\}\\)`);
 // (card evm-deposit-route-mainnet: Base's and Robinhood's deps go first, its own check's mark; the deposit from U_X and
@@ -114,7 +115,7 @@ const KIND = new RegExp(`return\\((${N}),(${N}),(${N})\\)=>\\{if\\(\\1!==null&&\
 // (card evm-deposit-route-mainnet: Base and Robinhood to the chain's EVM kind with the same fixed source)
 const FROM_ENTRY = new RegExp(
   `depositFrom:\\((${N}),(${N}),(${N})\\)=>\\{let (${N});try\\{\\4=${N}\\(\\{\\.\\.\\.\\1,kind:${Q}pool\\.deposit${Q}\\}\\)\\}catch\\{return\\{error:${Q}not_allowed${Q}\\}\\}` +
-    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
+    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0(?:\\|\\|!${N}\\(${Q}solana${Q}\\))?\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
 );
 // rules/refund.ts checkPoolRefundQuote, and the mover's key open (poolRefundMover).
 const REFUND_RULE = new RegExp(

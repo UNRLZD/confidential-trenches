@@ -33,6 +33,13 @@ for (const k of ["bad", "liveBefore"]) {
   });
 }
 
+// card helper-says-why-a-vendor-refused: pool.address is handed the page's stop; SIGN_HOST before it fails on that mark alone
+test("recorded bad answer beforeStop: FAIL on wired alone", () => {
+  const v = judge(ANSWERS.beforeStop);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, bad("wired"));
+});
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -54,7 +61,9 @@ const PLANTED = [
   ["the lower of the two RPCs' fees", new RegExp(`fee:(${N})\\[0\\]>\\1\\[1\\]`), "fee:$1[0]<$1[1]", ["floorRead"]],
   ["one RPC's fee only", new RegExp(`fee:(${N})\\[0\\]>\\1\\[1\\]\\?\\1\\[0\\]:\\1\\[1\\]`), "fee:$1[0]", ["floorRead"]],
   ["pool.address handed no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["wired"]],
-  ["pool.address handed no follow", new RegExp(`=>(${N})\\.quoted\\((${N}),(${N}),(${N}),(${N})\\)\\}\\)`), "=>void 0})", ["wired"]],
+  ["pool.address handed no follow", new RegExp(`=>(${N})\\.quoted\\((${N}),(${N}),(${N}),(${N})\\),stop:`), "=>void 0,stop:", ["wired"]],
+  // card helper-says-why-a-vendor-refused: pool.address is handed the page's stop on sign out (src/main.ts quotesStopped)
+  ["pool.address handed no stop", new RegExp(`(=>${N}\\.quoted\\(${N},${N},${N},${N}\\)),stop:${N}\\}\\)`), "$1})", ["wired"]],
   ["the follow depositing from index 0, not the op's own U", new RegExp(`\\{s:BigInt\\((${N})\\.s\\),i:\\1\\.i,u:\\1\\.u\\}`), "{s:BigInt($1.s),i:0,u:$1.u}", ["wired"]],
   ["the follow depositing through the kinds' handler, not depositFrom", /\.depositFrom\(/, ".flow(", ["wired"]],
   ["the follow with no refund mover", new RegExp(`,refund:(${N})\\(async (${N})=>`), ",other:$1(async $2=>", ["wired"]],
@@ -97,3 +106,15 @@ for (const [name, from, to, fails] of PLANTED) {
     assert.deepEqual(judge(f).lines, bad(...fails), name);
   });
 }
+
+// card evm-deposit-on-mainnet: depositFrom's Solana branch under the one rule (the pool's withdraw in the build,
+// src/pool-testnet.ts poolWayOut) reads as before; the rule's clause standing in for the pin guard does not
+test("planted in the excerpt: depositFrom's Solana branch with the withdraw rule beside the pin guard: PASS; the rule in the pin guard's place: FAIL on fromUX", () => {
+  const site = /n===void 0\?\{error:`not_allowed`\}:S\(i,r,t\)/;
+  assert.equal((JS.match(new RegExp(site.source, "g")) ?? []).length, 1, "the plant's site is in the build once");
+  const pinned = (js) => facts(INDEX.replace(/integrity="sha384-[^"]+"/, `integrity="${facts("", js).sha384}"`), js);
+  const ruled = JS.replace(site, "n===void 0||!X(`solana`)?{error:`not_allowed`}:S(i,r,t)");
+  assert.deepEqual(judge(pinned(ruled)).lines, [], "the rule beside the pin guard");
+  const dropped = JS.replace(site, "!X(`solana`)?{error:`not_allowed`}:S(i,r,t)");
+  assert.deepEqual(judge(pinned(dropped)).lines, bad("fromUX"), "the pin guard dropped for the rule");
+});

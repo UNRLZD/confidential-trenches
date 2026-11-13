@@ -8,7 +8,7 @@
 /*! @license KLineChart v10.0.3 Copyright (c) 2019 lihu. Licensed under the Apache License 2.0
  *  https://www.apache.org/licenses/LICENSE-2.0. NOTICE: KLineChart, Copyright (c) 2019 lihu. TradingView Lightweight
  *  Charts, Copyright (c) 2019 TradingView, Inc. https://www.tradingview.com */
-import { dispose, init } from "klinecharts";
+import { dispose, init, utils } from "klinecharts";
 import type { Chart, Crosshair, DeepPartial, KLineData, PeriodType, Point, Styles } from "klinecharts";
 import { sameBar } from "./candles.ts";
 import { drawStyles, registerDrawOverlays } from "./draw/overlays.ts";
@@ -68,6 +68,9 @@ function styles(el: HTMLElement): DeepPartial<Styles> {
 /** The price range starts under the legend (its rows: two on desktop, three on the phone), in px. */
 const gapOf = (phone: boolean) => ({ top: phone ? 80 : 44, bottom: 0.1 });
 
+/** How far a time label's text box keeps from the plot's edge, in the plot's px. */
+const AXIS_EDGE_PX = 2;
+
 /** The volume pane, under the candles. Its pane is named here: createIndicator answers the indicator's id, not its
  *  pane's, so the pane's height is set by the name it was made with. */
 const VOL_PANE = "pane_VOL";
@@ -95,6 +98,19 @@ export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData
   chart.setOffsetRightDistance(offsetRight);
   // the price range starts under the legend (its rows: two on desktop, three on the phone), in px
   chart.overrideYAxis({ paneId: "candle_pane", gap: gapOf(phone) });
+  // a time label drawn whole or not at all: the library centres each tick's text on its bar and draws it clipped to the
+  // plot, so a tick within half its text's width of either edge drew cut ("01::", the signed-in walk of release 126,
+  // 13 Nov, at 1440 and 390); such a tick is dropped, as TradingView drops an edge label, and a kept one ends
+  // AXIS_EDGE_PX clear of the edge, so a glyph's antialiasing never reaches it
+  chart.overrideXAxis({
+    createTicks: ({ bounding, defaultTicks }) => {
+      const t = chart.getStyles().xAxis.tickText;
+      return defaultTicks.filter((k) => {
+        const half = utils.calcTextWidth(k.text, t.size, t.weight, t.family) / 2;
+        return k.coord - half >= AXIS_EDGE_PX && k.coord + half <= bounding.width - AXIS_EDGE_PX;
+      });
+    },
+  });
   // the library hands this action the pointer's own coordinates, never the bar under them (klinecharts 10.0.3
   // index.esm.js:14092-14093 passes setCrosshair's argument on): the bar is read from x, clamped to the bars drawn as
   // the crosshair's own is (index.esm.js:14071-14079)

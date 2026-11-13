@@ -725,3 +725,209 @@ test("the dim over a new frame that never loads fades at VEIL_CAP_MS", () => {
     resetTimers(mock.timers);
   }
 });
+
+// ------------------------------------------------------------------------------------------------ card signing-layer-says-when-it-closes
+// The closed notice: once an open kind's layer has closed and the kept frame is live again (inert cleared, PROTECT_MS
+// after the close), the shell posts {v: 1, type: "closed", id} for that open to that frame, in that task. Red before
+// this card: open() took no id and the shell posted nothing at a close, so an app's lock on the control lifted on its
+// window's blur, before the layer took taps (fault f, 13 Nov).
+const CLOSED = (id: string) => ({ v: 1, type: "closed", id });
+const HELLO = (kit: string) => ({ v: 1, type: "hello", kit });
+/** The shell on a fake DOM with mocked timers; `hello` names the app's kit version first (null: none). */
+async function closing(hello: string | null = "1.13") {
+  const d = fakeDom();
+  const sh = mountShell(d.doc, { state: () => signedOutState() });
+  const f = d.frames()[0]!;
+  // the frame's inert at each post to its window: the order rule (inert cleared before the notice)
+  const inertAt: (boolean | undefined)[] = [];
+  const win = f.contentWindow!;
+  const post = win.postMessage.bind(win);
+  win.postMessage = (m: unknown, o: string) => (inertAt.push(f.inert), post(m, o));
+  f.fire("load");
+  if (hello !== null) d.send(HELLO(hello), win);
+  // the hello is read in the page's queue: past it before any open
+  await new Promise((ok) => setImmediate(ok));
+  await new Promise((ok) => setImmediate(ok));
+  const notices = () => d.posted.filter((p) => (p.msg as { type?: string }).type === "closed");
+  return { d, sh, f, win, inertAt, notices };
+}
+
+test("closed notice: one per open, {v, type, id} only, to the frame it opened over at APP_HOST, in the task its inert is cleared, never before", async () => {
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const id = crypto.randomUUID();
+    c.sh.open(false, id);
+    mock.timers.tick(PROTECT_MS * 3);
+    assert.deepEqual(c.notices(), [], "none while the layer shows");
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS - 1);
+    assert.deepEqual(c.notices(), [], "none while the frame is still inert after the close");
+    assert.equal(c.f.inert, true);
+    mock.timers.tick(1);
+    assert.deepEqual(c.notices().map((p) => p.msg), [CLOSED(id)]);
+    const [n] = c.notices();
+    assert.deepEqual(Object.keys(n!.msg as object).sort(), ["id", "type", "v"], "the type and the id, nothing else");
+    assert.equal(n!.to, APP_ORIGIN);
+    assert.equal(n!.win, c.win, "to the frame the open was shown over");
+    assert.equal(c.inertAt.at(-1), false, "the frame's inert was cleared before the notice was posted");
+    // never twice: a later close, open or tick posts no second one for it
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    c.sh.open(false, id);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    assert.equal(c.notices().length, 1, "at most once per id");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: none for an open with no id, a close with no layer shown, a frame taken out under a typed screen, an app below kit 1.13", async () => {
+  for (const hello of ["1.12", "1.11", null]) {
+    const c = await closing(hello);
+    enableTimers(mock.timers, { apis: ["setTimeout"] });
+    try {
+      c.sh.open(false, crypto.randomUUID());
+      c.sh.close();
+      mock.timers.tick(PROTECT_MS * 2);
+      assert.deepEqual(c.notices(), [], `kit ${hello ?? "none"}: no notice`);
+    } finally {
+      resetTimers(mock.timers);
+    }
+  }
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    c.sh.open(false);
+    c.sh.close();
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    assert.deepEqual(c.notices(), [], "no id, and a close with no layer shown");
+    // typed: the frame leaves in the open's task, so its document and the app's lock are gone; the new frame is told nothing
+    c.sh.open(true, crypto.randomUUID());
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    // an untyped open sealed later (a typed screen drawn on the shown sheet) the same
+    c.sh.open(false, crypto.randomUUID());
+    c.sh.seal();
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    assert.deepEqual(c.notices(), [], "no notice for an open whose frame was taken out");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: a layer opened again before the frame is live keeps the first open's notice for its own close; each id once, in order", async () => {
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const [a, b] = [crypto.randomUUID(), crypto.randomUUID()];
+    c.sh.open(false, a);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS - 1);
+    c.sh.open(false, b);
+    mock.timers.tick(PROTECT_MS * 3);
+    assert.deepEqual(c.notices(), [], "the frame is inert under the second layer: no notice for the first yet");
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS);
+    assert.deepEqual(c.notices().map((p) => p.msg), [CLOSED(a), CLOSED(b)]);
+    assert.ok(c.inertAt.slice(-2).every((x) => x === false));
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: an open told with no layer (told) is told as a close tells it: the frame inert from then, the notice PROTECT_MS later with it live again, once", async () => {
+  // review P2-1: an open answered closes: true that showed no layer (signed in already, no held op, a read that failed)
+  // was never told. Red before the fix: the shell had no told().
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const id = crypto.randomUUID();
+    c.sh.told(id);
+    assert.equal(c.f.inert, true, "the frame inert from the told, as from a close");
+    mock.timers.tick(PROTECT_MS - 1);
+    assert.deepEqual(c.notices(), [], "never before PROTECT_MS");
+    mock.timers.tick(1);
+    assert.deepEqual(c.notices().map((p) => p.msg), [CLOSED(id)]);
+    assert.equal(c.f.inert, false);
+    assert.equal(c.inertAt.at(-1), false, "the frame live again when the notice went");
+    c.sh.told(id);
+    c.sh.open(false, id);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    assert.equal(c.notices().length, 1, "once per id");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: told while another open's layer shows waits for that layer's close; told twice, or for an id shown, still once", async () => {
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const [a, b] = [crypto.randomUUID(), crypto.randomUUID()];
+    c.sh.open(false, a);
+    c.sh.told(b);
+    c.sh.told(b);
+    c.sh.told(a);
+    mock.timers.tick(PROTECT_MS * 3);
+    assert.deepEqual(c.notices(), [], "none while a layer shows");
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS);
+    assert.deepEqual(c.notices().map((p) => p.msg), [CLOSED(a), CLOSED(b)]);
+    // told under a frame taken out (a typed screen): the app's document went with it, nothing is told
+    const t = crypto.randomUUID();
+    c.sh.open(true, crypto.randomUUID());
+    c.sh.told(t);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS * 2);
+    assert.equal(c.notices().length, 2, "none for an id told under a frame taken out");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: open(id) twice, before its close or after it and before the frame is live, tells it once", async () => {
+  // review P3-3: open()'s dedupe of an id still to tell. A shell opened twice for one id (the layer redrawn) without it
+  // tells that id twice.
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const [a, b] = [crypto.randomUUID(), crypto.randomUUID()];
+    c.sh.open(false, a);
+    c.sh.open(false, a);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS - 1);
+    c.sh.open(false, a);
+    c.sh.open(false, b);
+    c.sh.close();
+    mock.timers.tick(PROTECT_MS);
+    assert.deepEqual(c.notices().map((p) => p.msg), [CLOSED(a), CLOSED(b)]);
+  } finally {
+    resetTimers(mock.timers);
+  }
+});
+
+test("closed notice: the shell keeps the last 1024 ids told (CLOSED_KEPT) and lets the oldest go first", async () => {
+  // review P3-3: an id told is never told again while kept; past 1024 the oldest is forgotten, so the set stays bounded
+  const c = await closing();
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const ids = Array.from({ length: 1025 }, () => crypto.randomUUID());
+    for (const id of ids) c.sh.told(id);
+    mock.timers.tick(PROTECT_MS);
+    assert.equal(c.notices().length, 1025);
+    // the first is the one let go: told again, it is told again; the second is still kept
+    c.sh.told(ids[1]!);
+    mock.timers.tick(PROTECT_MS);
+    assert.equal(c.notices().length, 1025, "the 1024 newest are kept");
+    c.sh.told(ids[0]!);
+    mock.timers.tick(PROTECT_MS);
+    assert.equal(c.notices().length, 1026, "the oldest past 1024 is let go");
+  } finally {
+    resetTimers(mock.timers);
+  }
+});

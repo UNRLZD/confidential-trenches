@@ -141,7 +141,7 @@ import { coverTo, restoreDepositIds, type DepositIds, type IdReader, type LaneId
 import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import { base58, hex } from "@scure/base";
 import type { Deferred, KindContext } from "./api.ts";
-import { askOf, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
+import { askOf, evmPoolFollowDeps, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
 import { pageRpc } from "./page-rpc.ts";
 import { solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, PAGE_SOL_PIN, pageEvmHistory, pageEvmHold, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } from "./pool-testnet.ts";
@@ -441,11 +441,22 @@ export function restoreUxSolanaRpcs(): readonly [SolanaRpc, SolanaRpc] | null {
 /**
  * A pool chain's U_X reads for the restore: the follow's own reader (solanaPoolFollowDeps' balances, costs and ladder)
  * on the restore's public pair (restoreUxSolanaRpcs), and the follow's own deposit (`follow`: the page's pool.deposit
- * from U_{s,i}, which reads and sends on the pool kinds' pair as a live deposit does). null on a chain with no pair or
- * no follow here (Base and Robinhood until the EVM follow and their public pairs land).
+ * from U_{s,i}, which reads and sends on the pool kinds' pair as a live deposit does). On Base and Robinhood (card
+ * evm-deposit-on-mainnet) the EVM follow's own reader (evmPoolFollowDeps with no wallet reader: each U_X's balance on
+ * both of the pool's two public RPCs, `evm`, the pool kinds' pair, each paced as Solana's pair), for Solana's reason: one restore asks for every one
+ * of a user's U_X in a row, so never our helper relay; mainnet only, as Solana's (1Click pays a pool deposit out there
+ * alone). null on a chain with no pair or no follow here.
  */
-export function restoreUxOf(chain: PoolChain, follow: PoolUxReads | null, program: string | undefined, rpcs: (() => readonly [SolanaRpc, SolanaRpc] | null) = restoreUxSolanaRpcs): PoolUxReads | null {
-  if (chain !== "solana" || follow === null || program === undefined) return null;
+export function restoreUxOf(chain: PoolChain, follow: PoolUxReads | null, program: string | undefined, rpcs: (() => readonly [SolanaRpc, SolanaRpc] | null) = restoreUxSolanaRpcs, evm: (chain: "base" | "robinhood") => { pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc] } | null = () => null): PoolUxReads | null {
+  if (chain !== "solana") {
+    const e = follow === null || POOL_TESTNET ? null : evm(chain);
+    if (e === null) return null;
+    // each of the pair on its own provider's queue at the kit's keyless limit, as Solana's (restoreUxSolanaRpcs): one U_X
+    // a request, never a lane's ids in one burst to a provider (review P2-3)
+    const r = evmPoolFollowDeps({ rpcs: [solanaPacedRpc(e.rpcs[0]), solanaPacedRpc(e.rpcs[1])], pin: e.pin, deposit: follow!.deposit });
+    return { balances: r.balances, costs: r.costs, ladder: r.ladder, deposit: follow!.deposit };
+  }
+  if (follow === null || program === undefined) return null;
   const pair = rpcs();
   if (pair === null) return null;
   const r = solanaPoolFollowDeps({ rpcs: pair, program, deposit: follow.deposit });

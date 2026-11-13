@@ -197,3 +197,82 @@ test("card pool-read-down: a records read that throws answers down, not kept for
   assert.ok(reads >= 2, "read again");
   assert.deepEqual(posted.at(-1), refused(q.id, "down"));
 });
+
+// Review P3 of card helper-says-why-a-vendor-refused: the page's stop reaches deposit.quote's re-ask through the host.
+test("a sign out in deposit.quote's re-ask pause: the host sends no second quote and gives no address", async () => {
+  const stop = new AbortController();
+  let asks = 0;
+  const deps: DepositWireDeps = {
+    scope: () => SCOPE,
+    read: async () => SAVED,
+    fetch: (async () => {
+      asks++;
+      setTimeout(() => stop.abort(new DOMException("signed out", "AbortError")), 20);
+      return new Response(JSON.stringify({ message: "Failed to get quote" }), { status: 400, headers: { "content-type": "application/json" } });
+    }) as typeof fetch,
+    now: () => NOW,
+    checked: async () => assert.fail("no address goes to the follow"),
+    stop: () => stop.signal,
+  };
+  const d = depositQuoteHost(deps)({ origin_asset: SOL_USDC, amount: "25" }, { id: "op-1" });
+  await d.after;
+  assert.deepEqual(d.answer(), { error: "down" });
+  assert.equal(asks, 1);
+});
+
+test("a sign out during deposit.quote's records read: no quote leaves, the answer is not_allowed", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  const page = quotesStop();
+  let asks = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  let reading = false;
+  const deps: DepositWireDeps = {
+    scope: () => SCOPE,
+    read: async () => ((reading = true), await gate, SAVED),
+    fetch: (async () => (asks++, new Response("{}", { status: 503, headers: { "content-type": "application/json" } }))) as typeof fetch,
+    now: () => NOW,
+    checked: async () => assert.fail("no address goes to the follow"),
+    stop: page.stopped,
+  };
+  const d = depositQuoteHost(deps)({ origin_asset: SOL_USDC, amount: "25" }, { id: "op-1" });
+  while (!reading) await new Promise((ok) => setImmediate(ok));
+  page.signedOut();
+  release();
+  await d.after;
+  assert.deepEqual(d.answer(), { error: "not_allowed" });
+  assert.equal(asks, 0);
+});
+
+// Re-review P2: the stop is read once as the request arrives and checked after each wait. Each wait held in turn, a sign
+// out during it, on the page's own stop (src/quotes-stop.ts, which swaps in a fresh signal): nothing after it runs.
+test("a sign out at each of deposit.quote's waits: nothing after it runs (no records read, no quote, no follow), the answer is not_allowed", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  for (const at of ["named", "read", "read again", "follow"] as const) {
+    const page = quotesStop();
+    const steps: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => (release = ok));
+    let held = false;
+    const hold = async (step: string) => {
+      steps.push(step);
+      if (step === at) (held = true), await gate;
+    };
+    const mock = h1c({});
+    const d = depositQuoteHost({
+      scope: () => SCOPE,
+      named: () => hold("named"),
+      read: async () => (await hold(steps.includes("read") ? "read again" : "read"), SAVED),
+      fetch: ((url: string | URL | Request, init?: RequestInit) => (steps.push("ask"), mock.fetch(url, init))) as typeof fetch,
+      now: () => NOW,
+      checked: () => hold("follow"),
+      stop: page.stopped,
+    })({ origin_asset: SOL_USDC, amount: "25" }, { id: "op-1" });
+    while (!held) await new Promise((ok) => setImmediate(ok));
+    page.signedOut();
+    release();
+    await d.after;
+    assert.deepEqual(d.answer(), { error: "not_allowed" }, at);
+    assert.equal(steps.at(-1), at, `${at}: ${steps.join(", ")}`);
+  }
+});

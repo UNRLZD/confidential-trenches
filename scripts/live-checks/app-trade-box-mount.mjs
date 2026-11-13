@@ -84,6 +84,12 @@ export function expectedCells(read) {
   return CELLS.map(([id, label], i) => ({ id, label, ...by[id], cross: by[id].cross ?? false, tone: i < 3 && by[id].tone === "plain" ? "good" : by[id].tone }));
 }
 
+/** What a skeleton cell holds as text (SafetyGrid.tsx: a no-break space in `.rg-value.tkp-sk`). */
+export const SKELETON = "\u00a0";
+/** How long the read waits for a filling page to fill before it measures: two of the page's re-reads (source.ts
+ *  FILL_MS 5 s) and a margin. A page still filling after it is measured as it is, and judged as a filling page. */
+export const FILL_WAIT_MS = 12_000;
+
 /** The exit plan block's two lines (R5 token.js U.exitBlock). */
 export const EXIT_TEXT = "Exit plan Sells automatically once this buy fills";
 
@@ -104,7 +110,9 @@ export function boxFaults(m, read) {
   if (b.cta?.text !== "Sign in to trade") bad.push(`the main button reads ${JSON.stringify(b.cta?.text)}, not "Sign in to trade"`);
   else if (b.cta.disabled) bad.push("the main button is disabled");
   if (!(b.gridTop >= b.lineBottom - 0.5)) bad.push(`the grid is not under the Route & fees line (grid top ${b.gridTop}, line bottom ${b.lineBottom})`);
-  const want = read ? expectedCells(read) : null;
+  // a page still filling (card token-page-fills-after: the helper's quick answer came first, Jupiter's fields are still
+  // coming) draws its skeleton, not the dash, in every cell with no value yet: SafetyGrid's `filling && unknown`
+  const want = read ? expectedCells(read).map((w) => (m.filling === true && w.tone === "unknown" ? { ...w, value: SKELETON } : w)) : null;
   const got = b.cells ?? [];
   if (got.length !== CELLS.length) bad.push(`${got.length} grid cells, not ${CELLS.length}`);
   else if (want) {
@@ -136,6 +144,9 @@ export function judge(rec) {
       if (t.status !== 200) bad.push(`token read status ${t.status}`);
       if (t.rowMint !== l.shown) bad.push(`the token read's row is ${t.rowMint ?? "none"}, the page draws ${l.shown ?? "none"}`);
       if (!t.read) bad.push("the token read held no row");
+      // the page and the read it drew agree on whether the row is still filling (a record from before this field has neither)
+      const drawn = (phone ? l.sheet : l.page)?.filling === true;
+      if (drawn !== (t.filling === true)) bad.push(`the page draws ${drawn ? "a filling" : "a filled"} row, its last token read is ${t.filling === true ? "filling" : "filled"}`);
     }
     const read = t?.read ?? null;
     if (!phone) {
@@ -178,7 +189,7 @@ const MEASURE = (mode) => {
   const vis = (q) => [...(root?.querySelectorAll(q) ?? [])].find((e) => e.getClientRects().length);
   const scope = sheet ? document.querySelector('[data-sheet="trade"]') : mode === "phone" ? root?.querySelector(".tkp-phone") : root?.querySelector(".tkp-desk .tkp-trade");
   const el = scope?.querySelector('[data-testid="trade-box"]');
-  const out = { route: root?.dataset.route ?? null, state: p?.getAttribute("data-token-page") ?? null, shown: p?.getAttribute("data-token") ?? null, symbol: vis("h1.tkp-sym")?.textContent ?? null, bar: !!vis(".tkp-bottom"), box: null };
+  const out = { route: root?.dataset.route ?? null, state: p?.getAttribute("data-token-page") ?? null, filling: p?.getAttribute("data-filling") === "true", shown: p?.getAttribute("data-token") ?? null, symbol: vis("h1.tkp-sym")?.textContent ?? null, bar: !!vis(".tkp-bottom"), box: null };
   const r = (e) => e?.getBoundingClientRect();
   out.chartRight = r(root?.querySelector(".tkp-desk .tkp-chart"))?.right ?? null;
   if (sheet) {
@@ -236,18 +247,35 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
       // the harness answers APP_HOST's own files and the shell; the helper is the live one
       if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
       const page = await ctx.newPage();
+      // the page reads its token again while the row is filling (and on its own poll): the grid is held to the last
+      // answer the page had when it was measured (`seen`), not to the first
       let token = null;
+      let seen = null;
       page.on("response", (r) => {
-        if (r.url().startsWith(`${HELPER_HOST}/v1/market/token?`) && !token) token = r;
+        if (r.url().startsWith(`${HELPER_HOST}/v1/market/token?`)) token = r;
       });
+      const fillingOf = async (r) => ((await r?.json().catch(() => null))?.filling === true);
+      // measures, and once more when the page and its last read disagree on filling (an answer that landed between
+      // the page's render and the measure)
+      const measure = async (f, mode) => {
+        let m = await f.evaluate(MEASURE, mode);
+        seen = token;
+        if (m.filling !== (await fillingOf(seen))) {
+          await page.waitForTimeout(600);
+          m = await f.evaluate(MEASURE, mode);
+          seen = token;
+        }
+        return m;
+      };
       await page.goto(`${APP_HOST}${PATH}`, { waitUntil: "load" });
       const f = await appFrame(page);
       const load = { width: w.name, opened: `${APP_HOST}${PATH}`, frame: f ? f.url() : null, route: null, state: null, shown: null, symbol: null, page: null, token: null, shot: null };
       if (f) {
         // the shell's signed-out state has landed when the box's button reads Sign in to trade
         await f.waitForFunction(() => document.querySelector('[data-testid="trade-cta"]')?.textContent?.trim() === "Sign in to trade", null, { timeout: 8_000 }).catch(() => {});
+        await f.waitForFunction(() => document.querySelector('main[data-route="token"] [data-token-page]')?.getAttribute("data-filling") !== "true", null, { timeout: FILL_WAIT_MS }).catch(() => {});
         await page.waitForTimeout(400);
-        load.page = await f.evaluate(MEASURE, w.isMobile ? "phone" : "desk");
+        load.page = await measure(f, w.isMobile ? "phone" : "desk");
         Object.assign(load, { route: load.page.route, state: load.page.state, shown: load.page.shown, symbol: load.page.symbol });
         // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
         load.shot = `${i}-${w.name}.png`;
@@ -262,7 +290,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
           await f.locator(".tkp-buy").click({ timeout: 5_000 }).catch(() => {});
           await f.locator('[data-sheet="trade"]').waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
           await page.waitForTimeout(300);
-          load.sheet = await f.evaluate(MEASURE, "sheet");
+          load.sheet = await measure(f, "sheet");
           await page.screenshot({ path: path.join(shots, `${i}-${w.name}-sheet.png`) });
           await f.locator('[data-sheet="trade"] [data-testid="trade-cta"]').click({ timeout: 5_000 }).catch(() => {});
           const opened = await sheetUp();
@@ -274,6 +302,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
         load.shot = `${i}-${w.name}.png`;
         await page.screenshot({ path: path.join(shots, load.shot) });
       }
+      token = seen ?? token;
       const tb = token ? await token.json().catch(() => null) : null;
       const row = tb?.row ?? null;
       const rk = (k) => tb?.risk?.[k]?.v;
@@ -283,6 +312,7 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
             url: token.url().split("?")[0],
             status: token.status(),
             rowMint: row?.token ?? null,
+            filling: tb?.filling === true,
             // the values the grid draws, as the answer holds them
             read: row
               ? { row: { top10_bps: row.top10_bps ?? null, dev_bps: row.dev_bps ?? null, snipers_bps: row.snipers_bps ?? null, holders: row.holders ?? null, liq_usd: row.liq_usd ?? null, created_s: row.created_s ?? null, mint_auth: row.mint_auth ?? null, freeze_auth: row.freeze_auth ?? null, launchpad: row.launchpad ?? null, curve_bps: row.curve_bps ?? null }, risk: { insiders_bps: rk("insiders_bps") ?? null, tax: rk("tax") ?? null, lp: rk("lp") ?? null, honeypot: rk("honeypot") ?? null } }

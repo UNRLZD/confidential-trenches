@@ -63,6 +63,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-buy-gas-floor.mjs",
   "scripts/live-checks/evm-buy-quote-ends-on-node.mjs",
   "scripts/live-checks/evm-deposit-note-stays-incoming.mjs",
+  "scripts/live-checks/evm-deposit-on-mainnet.mjs",
   "scripts/live-checks/evm-fee-collector.mjs",
   "scripts/live-checks/evm-fee-quiet-epoch.mjs",
   "scripts/live-checks/evm-mainnet-senders.mjs",
@@ -197,6 +198,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-buy-own-spend.mjs",
   "scripts/live-checks/sol-pool-buy-lands-on-mainnet.mjs",
   "scripts/live-checks/signpage-error-after-timeout.mjs",
+  "scripts/live-checks/signing-layer-says-when-it-closes.mjs",
   "scripts/live-checks/evm-withdraw-mainnet.mjs",
   "scripts/live-checks/signpage-evm-pool-buy.mjs",
   "scripts/live-checks/signpage-evm-pool-sell.mjs",
@@ -241,6 +243,7 @@ export const CHANGED = [
   "scripts/live-checks/intents-u-registered-first.mjs",
   "scripts/live-checks/intents-u-registered-first-run.mjs",
   "scripts/live-checks/sol-rent-back-dust-burn.mjs",
+  "scripts/live-checks/round-trip-costs-less.mjs",
   "scripts/live-checks/kit-sol-pool-deposit-floor.mjs",
   "scripts/live-checks/sol-sell-deposit-back-floor.mjs",
   "scripts/live-checks/pool-sell-share-across-wallets.mjs",
@@ -276,6 +279,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sol-mainnet-run.record.mjs",
   "scripts/live-checks/withdraw-form-shows-what-you-can-send.mjs",
   "scripts/live-checks/restore-shows-the-balance-in-seconds.mjs",
+  "scripts/live-checks/helper-says-why-a-vendor-refused.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

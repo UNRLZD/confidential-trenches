@@ -13,12 +13,16 @@
 // Planted from the good run: a balance of $0 or the old `Bal —`, a Buy button in place of Sign in to trade, an exit plan left on,
 // a box left of the chart or outside its column, the grid above the Route & fees line, a wrong or missing grid cell, a token
 // read for another token, a sheet outside the window, a sign-in sheet under the trade sheet or not opened.
+// A page still filling (card trade-box-check-reads-a-filling-page): on 13 Nov 03:42Z, minutes after an app deploy, the live
+// run read the desktop grid while the helper's quick token answer was the page's only one; the page drew its skeleton in
+// the nine cells with no value and the check, which wanted a dash there, failed a correct deploy. That run kept no record
+// (its log and shots only), so the filling cases are planted from the good run too.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CELLS, expectedCells, judge, LOADS } from "./app-trade-box-mount.mjs";
+import { CELLS, expectedCells, judge, LOADS, SKELETON } from "./app-trade-box-mount.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-trade-box-mount.answers.json"), "utf8"));
@@ -84,6 +88,40 @@ test("planted: a grid cell that is not what the token read holds, or a missing c
   some(mut((rec) => { rec.loads[0].page.box.cells.pop(); }), /11 grid cells, not 12/);
   // the read the grid is held to changes: a token read that holds a tax makes a 0% cell wrong
   some(mut((rec) => { rec.loads[0].token.read.risk.tax = { buy_bps: 500, sell_bps: 500 }; }), /cell 7 \(Tax\)/);
+});
+
+/** The good run as a page still filling: the read holds no Jupiter field and says so, the page says so, and every cell
+ *  with no value draws `empty` (the skeleton, as the page does). */
+const fillingRun = (empty = SKELETON) => (rec) => {
+  for (const l of rec.loads) {
+    Object.assign(l.token, { filling: true });
+    Object.assign(l.token.read.row, { top10_bps: null, dev_bps: null, snipers_bps: null, holders: null, liq_usd: null, created_s: null });
+    const want = expectedCells(l.token.read);
+    for (const m of [l.page, l.sheet]) {
+      if (!m) continue;
+      m.filling = true;
+      if (m.box) m.box.cells = want.map((w) => ({ id: w.id, label: w.label, value: w.tone === "unknown" ? empty : m.box.cells.find((c) => c.id === w.id).value, cross: w.cross, tone: w.tone }));
+    }
+  }
+};
+
+test("a page still filling: the skeleton in every cell with no value passes, at both widths; the values the read holds are still held", () => {
+  const r = mut(fillingRun());
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  // the 03:42Z shape: nine skeleton cells, Tax and the two authorities drawn
+  const rec = structuredClone(ANSWERS.good);
+  fillingRun()(rec);
+  assert.equal(rec.loads[0].page.box.cells.filter((c) => c.value === SKELETON).length, 9);
+  some(mut((x) => { fillingRun()(x); x.loads[0].page.box.cells[7].value = "5.0%"; }), /cell 7 \(Tax\)/);
+});
+
+test("planted: a dash on a filling page, a skeleton on a filled page, and a page and a read that disagree on filling each fail", () => {
+  some(mut(fillingRun("—")), /^BAD desktop .*cell 0 \(Top 10\)/);
+  some(mut(fillingRun("—")), /^BAD phone .*sheet: cell 0 \(Top 10\)/);
+  // a filled page (the good run: Snipers has no value, a dash) that draws the skeleton there
+  some(mut((rec) => { rec.loads[0].page.box.cells[2].value = SKELETON; }), /cell 2 \(Snipers\)/);
+  some(mut((rec) => { fillingRun()(rec); rec.loads[0].token.filling = false; }), /the page draws a filling row, its last token read is filled/);
+  some(mut((rec) => { rec.loads[1].token.filling = true; }), /^BAD phone .*the page draws a filled row, its last token read is filling/);
 });
 
 test("planted: a token read that is not the page's token, a failed read, or a page left loading fails", () => {

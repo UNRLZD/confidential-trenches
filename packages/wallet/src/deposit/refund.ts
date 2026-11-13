@@ -239,7 +239,7 @@ export async function runRefundMove<Q, I>(ask: RefundMoveAsk, deps: RefundMoveDe
   let reply: DepositQuoteReply;
   try {
     // asked again on 1Click's no-liquidity answer, inside the one ask's window (card deposit-quote-no-liquidity)
-    reply = await askDepositQuoteAgain(request, deps.fetchFn);
+    reply = await askDepositQuoteAgain(request, deps.fetchFn, undefined, undefined, deps.signal);
   } catch {
     deps.signal?.throwIfAborted();
     return { kind: "refused", why: "down" };

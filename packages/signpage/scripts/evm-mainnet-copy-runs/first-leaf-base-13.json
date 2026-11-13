@@ -1,0 +1,1270 @@
+{
+  "by": "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs",
+  "run": {
+    "commit": "a9b7c6f51668faa7f8cefd8b57054a43f8df59a5",
+    "dirty": false,
+    "scriptSha256": "34c04d8cd40d29628ace5e59e865d536697a12735a7568ac902146040061fb1d",
+    "forkBlock": 56630000,
+    "book": "packages/signpage/scripts/evm-mainnet-copy-runs/first-leaf-base-13.book.json"
+  },
+  "chain": "base",
+  "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+  "anvil": "http://127.0.0.1:48762",
+  "slots": "5",
+  "helperSender": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+  "steps": [
+    {
+      "name": "restore A",
+      "atMs": 27632,
+      "ok": true,
+      "ms": 27252,
+      "block": "56630011",
+      "notes": [],
+      "balance": "0"
+    },
+    {
+      "name": "U_X named",
+      "atMs": 27652,
+      "ok": true,
+      "index": 1,
+      "u": "0xfD9e766A2cF9Be0987d3D49485f789B0da89eb73",
+      "refundId": "c8e9b3e2095e83e8197c4dd9f576e40046bd9b711cbc06cb2a8c8bbbb5ac797c"
+    },
+    {
+      "name": "under the least rung",
+      "atMs": 27664,
+      "ok": true,
+      "answer": {
+        "error": "not_allowed"
+      },
+      "sent": 0
+    },
+    {
+      "name": "U_X one wei under the floor",
+      "atMs": 31171,
+      "ok": true,
+      "rounds": 4,
+      "sent": 0,
+      "stages": [
+        "in_transit"
+      ],
+      "uxBalance": "1021038143003530"
+    },
+    {
+      "name": "first leaf: a ready proof inside its first minute",
+      "atMs": 105536,
+      "ok": true,
+      "sizeBefore": 0,
+      "depositBlock": "56630045",
+      "depositAtMs": 1794545340000,
+      "depositEpochStartMs": 1794545340000,
+      "sizeAtDeposit": 1,
+      "reads": 47,
+      "pushReads": 3,
+      "readyMsAfterDeposit": 37206,
+      "root": "newest",
+      "proofEpochStartMs": "1794545340000",
+      "deadlineMs": "1794545550000"
+    },
+    {
+      "name": "withdraw: the first leaf, tapped inside its first minute",
+      "atMs": 130576,
+      "ok": true,
+      "sizeBefore": 0,
+      "depositBlock": "56630045",
+      "depositAtMs": 1794545340000,
+      "depositEpochStartMs": 1794545340000,
+      "sizeAtDeposit": 1,
+      "sizeAtTap": 1,
+      "depthAtTap": 0,
+      "tapChainMs": 1794545377000,
+      "tapEpochStartMs": 1794545340000,
+      "tapMsAfterDeposit": 37000,
+      "runMs": 22559,
+      "sentMs": 22559,
+      "end": "sent",
+      "op": {
+        "kind": "withdraw",
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "base",
+            "hash": "0x727f06baf407c12413f3c3726b6e6157776ef8ab2c3c71646acb23461c62284c"
+          },
+          {
+            "chain": "base",
+            "hash": "0x7f645cdbf717b72a44cd038e8454a26a379f8fece465311cee2c1c8254f6b1ed"
+          }
+        ],
+        "created_ms": 1794545377701,
+        "arrived": {
+          "0x7f645cdbf717b72a44cd038e8454a26a379f8fece465311cee2c1c8254f6b1ed": "100000000000000"
+        }
+      },
+      "owed": {},
+      "arrived": "100000000000000",
+      "asked": "100000000000000",
+      "noLeaf": {
+        "cut": "no_leaf",
+        "cutMs": 1794545340000,
+        "newestAfterSendStateRoot": "11325554124123249363783712796331181535278223025278333632186201225212878507431",
+        "newestAfterSendSize": 2,
+        "boundStateRoot": "2051671440900236806103813186220779300906398853437781780918539988435917525530",
+        "poolRootAtDeposit": "2051671440900236806103813186220779300906398853437781780918539988435917525530"
+      }
+    },
+    {
+      "name": "withdraw: the second, at depth 1",
+      "atMs": 150987,
+      "ok": true,
+      "changeShownMs": 26,
+      "windowRows": [
+        {
+          "ms": 25,
+          "balance": "0.000879579196524091",
+          "max": "859158393048182",
+          "refusal": null,
+          "states": [
+            "UNSPENT",
+            "SPENT"
+          ]
+        }
+      ],
+      "sizeAtTap": 2,
+      "depthAtTap": 1,
+      "runMs": 20382,
+      "sentMs": 20383,
+      "end": "sent",
+      "op": {
+        "kind": "withdraw",
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "base",
+            "hash": "0x9a8438f4981dd347844abcb454c40f10b589deaa32c79118f32b9c49a47d8511"
+          },
+          {
+            "chain": "base",
+            "hash": "0xae980840dc9e55ce0702af9ac8218c0a40282eae0180c7ea12db9b1de659f5fa"
+          }
+        ],
+        "created_ms": 1794545402291,
+        "arrived": {
+          "0xae980840dc9e55ce0702af9ac8218c0a40282eae0180c7ea12db9b1de659f5fa": "100000000000000"
+        }
+      },
+      "owed": {},
+      "arrived": "100000000000000",
+      "asked": "100000000000000"
+    },
+    {
+      "name": "carry",
+      "atMs": 160001,
+      "ok": true,
+      "shownMs": 10022,
+      "finalizedAt": 9517,
+      "inPoolMs": 511,
+      "followEnd": "in_pool",
+      "stages": [
+        "in_transit",
+        "in_pool"
+      ],
+      "txs": [
+        {
+          "chain": "base",
+          "hash": "0x8e8cfb91fdc568961715f2cf67aba9fcfc35e7f4e234474e98346c8fcb3b4bf3"
+        }
+      ],
+      "sent": 14,
+      "balance": "759158393048182",
+      "notes": [
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "879579196524091"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "UNSPENT",
+          "value": "759158393048182"
+        },
+        {
+          "ref": "deposit",
+          "i": 1,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        }
+      ],
+      "uxLeft": "16809391753531"
+    },
+    {
+      "name": "restore reads U_X",
+      "atMs": 160001,
+      "ok": true,
+      "balances": [
+        "16809391753531",
+        "16809391753531"
+      ],
+      "helperCalls": 0
+    },
+    {
+      "name": "withdraw: helper 503, the page's state",
+      "atMs": 287379,
+      "ok": true,
+      "ms": 127376,
+      "plantedHit": true,
+      "op": {
+        "kind": "withdraw",
+        "stage": "in_transit",
+        "txs": [],
+        "created_ms": 1794545431699,
+        "owed": "0c8ab4e0dc4f9b3f235004efd6fc1f5f"
+      },
+      "owed": {
+        "0c8ab4e0dc4f9b3f235004efd6fc1f5f": {
+          "noteId": "0c8ab4e0dc4f9b3f235004efd6fc1f5f",
+          "attempt": "f2ccb287cf6c23c62e9f5ac3700df0b6",
+          "context": "9291050360867089314239741252744487891967859649736236791826545351332523178586",
+          "to": "0xb128Db46D39632499D268e2F5Ef399f0747868cc",
+          "last": true,
+          "feeCap": "420803475909",
+          "chain": "base",
+          "part": "300000000000000",
+          "nullifier": "529522055711651692385837314558591175246371986188106407694500819608147070606",
+          "from": "56629699",
+          "deadlineMs": "1794545610000",
+          "chunk": "320420803475909",
+          "fee": "20000000000000"
+        }
+      },
+      "helperSent": 0,
+      "notes": [
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "879579196524091"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "RESERVED",
+          "value": "759158393048182"
+        },
+        {
+          "ref": "deposit",
+          "i": 1,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "withdraw: helper 503, the retry",
+      "atMs": 366063,
+      "ok": true,
+      "retriedAs": "w503-again",
+      "stoppedAtMs": 348716,
+      "stoppedWallMs": 1794545620386,
+      "deadlineMs": "1794545610000",
+      "stopPastDeadlineMs": 10386,
+      "againMs": 17342,
+      "end": "sent",
+      "op": {
+        "kind": "withdraw",
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "base",
+            "hash": "0x50972db430e32aa5a3e715a5f71769c86c5a5e57674641efc1781aafae23f640"
+          },
+          {
+            "chain": "base",
+            "hash": "0xf216ec173a904a0bcf715793c4bf54eb13fa94dd5469222c5e31b657c9b651a5"
+          }
+        ],
+        "created_ms": 1794545620412,
+        "arrived": {
+          "0xf216ec173a904a0bcf715793c4bf54eb13fa94dd5469222c5e31b657c9b651a5": "300000000000000"
+        }
+      },
+      "owed": {},
+      "arrived": "300000000000000",
+      "asked": "300000000000000",
+      "notes": [
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "879579196524091"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "759158393048182"
+        },
+        {
+          "ref": "deposit",
+          "i": 1,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "UNSPENT",
+          "value": "438737589572273"
+        }
+      ],
+      "balance": "438737589572273"
+    },
+    {
+      "name": "withdraw: onward lost, the run's end",
+      "atMs": 540829,
+      "ok": true,
+      "op": {
+        "kind": "withdraw",
+        "stage": "in_transit",
+        "txs": [
+          {
+            "chain": "base",
+            "hash": "0x9140f0c064cc26e898a8f48ea9496f9fb07758d310b7731e18a546204c9d718c"
+          }
+        ],
+        "created_ms": 1794545637760,
+        "owed": "cf21e057ec0769e87d5236b4cc345e4e"
+      },
+      "owed": {
+        "cf21e057ec0769e87d5236b4cc345e4e": {
+          "noteId": "cf21e057ec0769e87d5236b4cc345e4e",
+          "attempt": "b6137011ccc17db0bbaefd7231fc068f",
+          "context": "5511947536213965648903811642875689671148433750137610566199250760658709289397",
+          "to": "0xb128Db46D39632499D268e2F5Ef399f0747868cc",
+          "last": true,
+          "feeCap": "420803475909",
+          "chain": "base",
+          "part": "100000000000000",
+          "nullifier": "14629141558064943560521578442950270343462735632445239172335078031667757246769",
+          "from": "56629827",
+          "deadlineMs": "1794545790000",
+          "chunk": "120420803475909",
+          "fee": "20000000000000",
+          "release": "0x9140f0c064cc26e898a8f48ea9496f9fb07758d310b7731e18a546204c9d718c",
+          "onward": "0x770b50ab5a4694541ad0f3b574b5dc19b094c0598a8576befc59a81dc6314c94",
+          "onwards": [
+            "0x770b50ab5a4694541ad0f3b574b5dc19b094c0598a8576befc59a81dc6314c94"
+          ]
+        }
+      },
+      "dropped": 24,
+      "arrivedYet": "0"
+    },
+    {
+      "name": "withdraw: onward lost, finished on the next load",
+      "atMs": 568404,
+      "ok": true,
+      "end": "sent",
+      "op": {
+        "kind": "withdraw",
+        "stage": "sent",
+        "txs": [
+          {
+            "chain": "base",
+            "hash": "0x9140f0c064cc26e898a8f48ea9496f9fb07758d310b7731e18a546204c9d718c"
+          },
+          {
+            "chain": "base",
+            "hash": "0xeef74c31087abbf5048dc096bd845ca1a2fba4629ddf66db91eab0e3ba0c5095"
+          }
+        ],
+        "created_ms": 1794545637760,
+        "arrived": {
+          "0xeef74c31087abbf5048dc096bd845ca1a2fba4629ddf66db91eab0e3ba0c5095": "100000000000000"
+        }
+      },
+      "owed": {},
+      "arrived": "100000000000000",
+      "asked": "100000000000000",
+      "notes": [
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "879579196524091"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "759158393048182"
+        },
+        {
+          "ref": "deposit",
+          "i": 1,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "UNSPENT",
+          "value": "318316786096364"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "438737589572273"
+        }
+      ],
+      "balance": "318316786096364"
+    },
+    {
+      "name": "withdraw fee: the device's rule is the helper's",
+      "atMs": 568410,
+      "ok": true,
+      "rows": [
+        {
+          "block": 56630045,
+          "size": 1,
+          "depth": 0,
+          "baseFee": "4375000",
+          "chainFee": "13183003531",
+          "device": "20000000000000",
+          "helper": "20000000000000"
+        },
+        {
+          "block": 56630079,
+          "size": 2,
+          "depth": 1,
+          "baseFee": "5000000",
+          "chainFee": "13183003531",
+          "device": "20000000000000",
+          "helper": "20000000000000"
+        },
+        {
+          "block": 56630182,
+          "size": 3,
+          "depth": 2,
+          "baseFee": "5000000",
+          "chainFee": "13183003531",
+          "device": "20000000000000",
+          "helper": "20000000000000"
+        }
+      ],
+      "depths": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "name": "restore C with notes spent",
+      "atMs": 596144,
+      "ok": true,
+      "ms": 27730,
+      "block": "56630332",
+      "spends": 4,
+      "notes": [
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "879579196524091"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "759158393048182"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "UNSPENT",
+          "value": "318316786096364"
+        },
+        {
+          "ref": "change",
+          "i": null,
+          "state": "SPENT",
+          "value": "438737589572273"
+        },
+        {
+          "ref": "deposit",
+          "i": 1,
+          "state": "SPENT",
+          "value": "1000000000000000"
+        }
+      ],
+      "balanceC": "318316786096364",
+      "balanceA": "318316786096364"
+    }
+  ],
+  "txs": [
+    {
+      "what": "withdraw first leaf",
+      "hash": "0x727f06baf407c12413f3c3726b6e6157776ef8ab2c3c71646acb23461c62284c",
+      "from": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+      "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "value": "0",
+      "block": "56630071",
+      "status": "0x1",
+      "gasUsed": "478277",
+      "effectiveGasPrice": "34847333",
+      "signedBytes": 1143
+    },
+    {
+      "what": "withdraw first leaf",
+      "hash": "0x7f645cdbf717b72a44cd038e8454a26a379f8fece465311cee2c1c8254f6b1ed",
+      "from": "0xa60f03c30a9e81fc197879e418dd259195a43886",
+      "to": "0xb128db46d39632499d268e2f5ef399f0747868cc",
+      "value": "100000000000000",
+      "block": "56630073",
+      "status": "0x1",
+      "gasUsed": "21000",
+      "effectiveGasPrice": "14375000",
+      "signedBytes": 116
+    },
+    {
+      "what": "withdraw second",
+      "hash": "0x9a8438f4981dd347844abcb454c40f10b589deaa32c79118f32b9c49a47d8511",
+      "from": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+      "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "value": "0",
+      "block": "56630081",
+      "status": "0x1",
+      "gasUsed": "466451",
+      "effectiveGasPrice": "35730811",
+      "signedBytes": 1143
+    },
+    {
+      "what": "withdraw second",
+      "hash": "0xae980840dc9e55ce0702af9ac8218c0a40282eae0180c7ea12db9b1de659f5fa",
+      "from": "0x7a0e9dad700430fcf44f41bdbf9c40131b250c12",
+      "to": "0xb128db46d39632499d268e2f5ef399f0747868cc",
+      "value": "100000000000000",
+      "block": "56630082",
+      "status": "0x1",
+      "gasUsed": "21000",
+      "effectiveGasPrice": "13840880",
+      "signedBytes": 116
+    },
+    {
+      "what": "carry: U_X deposit",
+      "hash": "0x8e8cfb91fdc568961715f2cf67aba9fcfc35e7f4e234474e98346c8fcb3b4bf3",
+      "from": "0xfd9e766a2cf9be0987d3d49485f789b0da89eb73",
+      "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "value": "1000000000000000",
+      "block": "56630045",
+      "status": "0x1",
+      "gasUsed": "294174",
+      "effectiveGasPrice": "14375000",
+      "signedBytes": 187
+    },
+    {
+      "what": "withdraw 503 retry",
+      "hash": "0x50972db430e32aa5a3e715a5f71769c86c5a5e57674641efc1781aafae23f640",
+      "from": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+      "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "value": "0",
+      "block": "56630220",
+      "status": "0x1",
+      "gasUsed": "462342",
+      "effectiveGasPrice": "36048376",
+      "signedBytes": 1143
+    },
+    {
+      "what": "withdraw 503 retry",
+      "hash": "0xf216ec173a904a0bcf715793c4bf54eb13fa94dd5469222c5e31b657c9b651a5",
+      "from": "0x3abc939efa5e41e18873e75d779aa0ca12cc5703",
+      "to": "0xb128db46d39632499d268e2f5ef399f0747868cc",
+      "value": "300000000000000",
+      "block": "56630221",
+      "status": "0x1",
+      "gasUsed": "21000",
+      "effectiveGasPrice": "13840768",
+      "signedBytes": 117
+    },
+    {
+      "what": "withdraw lost-send",
+      "hash": "0x9140f0c064cc26e898a8f48ea9496f9fb07758d310b7731e18a546204c9d718c",
+      "from": "0x7f844da934a8dac0d1594152c452cbc5c8e5a26e",
+      "to": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "value": "0",
+      "block": "56630229",
+      "status": "0x1",
+      "gasUsed": "471601",
+      "effectiveGasPrice": "35340621",
+      "signedBytes": 1143
+    },
+    {
+      "what": "withdraw lost-send finished",
+      "hash": "0xeef74c31087abbf5048dc096bd845ca1a2fba4629ddf66db91eab0e3ba0c5095",
+      "from": "0xbb62940767f46794d020866b85e11c64d2d3d008",
+      "to": "0xb128db46d39632499d268e2f5ef399f0747868cc",
+      "value": "100000000000000",
+      "block": "56630326",
+      "status": "0x1",
+      "gasUsed": "21000",
+      "effectiveGasPrice": "14375000",
+      "signedBytes": 116
+    }
+  ],
+  "helperCalls": [
+    {
+      "atMs": 27666,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 28678,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 29691,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 30701,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 31708,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 32718,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 33726,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 34736,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 35744,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 36758,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 37771,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 38783,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 39792,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 40798,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 41807,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 42815,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 43821,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 44833,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 45844,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 46852,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 47858,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 48866,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 49873,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 50880,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 51887,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 52895,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 53900,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 54907,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 55914,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 56925,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 57931,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 58939,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 59946,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 60955,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 61960,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 62969,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 63976,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 64981,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 65990,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 66997,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 68005,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 69013,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 71095,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 86101,
+      "verb": "POST",
+      "path": "/v1/rpc/base",
+      "planted": false,
+      "status": 200,
+      "body": null
+    },
+    {
+      "atMs": 101101,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545340000,\"block\":\"0x3601b1d\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 106022,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545340000,\"block\":\"0x3601b1d\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 106046,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545340000,\"block\":\"0x3601b1d\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 108077,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545340000,\"block\":\"0x3601b1d\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 112500,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": false,
+      "status": 200,
+      "body": "{\"hash\":\"0x727f06baf407c12413f3c3726b6e6157776ef8ab2c3c71646acb23461c62284c\"}"
+    },
+    {
+      "atMs": 130590,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545400000,\"block\":\"0x3601b3f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 130614,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545400000,\"block\":\"0x3601b3f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 130638,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545400000,\"block\":\"0x3601b3f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 130661,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545400000,\"block\":\"0x3601b3f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 135095,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": false,
+      "status": 200,
+      "body": "{\"hash\":\"0x9a8438f4981dd347844abcb454c40f10b589deaa32c79118f32b9c49a47d8511\"}"
+    },
+    {
+      "atMs": 160019,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545400000,\"block\":\"0x3601b3f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 160050,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545400000,\"block\":\"0x3601b3f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 162090,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545400000,\"block\":\"0x3601b3f\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 166506,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": true,
+      "status": 503,
+      "body": "{\"error\":{\"code\":\"down\"}}"
+    },
+    {
+      "atMs": 348731,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545580000,\"block\":\"0x3601ba6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 348760,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545580000,\"block\":\"0x3601ba6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 348787,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545580000,\"block\":\"0x3601ba6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 353101,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": false,
+      "status": 200,
+      "body": "{\"hash\":\"0x50972db430e32aa5a3e715a5f71769c86c5a5e57674641efc1781aafae23f640\"}"
+    },
+    {
+      "atMs": 366079,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545580000,\"block\":\"0x3601ba6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 366111,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545580000,\"block\":\"0x3601ba6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 368154,
+      "verb": "GET",
+      "path": "/v1/pool/fee",
+      "planted": false,
+      "status": 200,
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794545580000,\"block\":\"0x3601ba6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    {
+      "atMs": 372489,
+      "verb": "POST",
+      "path": "/v1/pool/evm/send",
+      "planted": false,
+      "status": 200,
+      "body": "{\"hash\":\"0x9140f0c064cc26e898a8f48ea9496f9fb07758d310b7731e18a546204c9d718c\"}"
+    }
+  ],
+  "helperLines": [
+    "pool send evm base send outcome=sent status=200 ms=3760",
+    "pool send evm base send outcome=sent status=200 ms=1599",
+    "pool send evm base send outcome=sent status=200 ms=1168",
+    "pool send evm base send outcome=sent status=200 ms=1477"
+  ],
+  "refusedHosts": {},
+  "trace": [
+    {
+      "at": 166507,
+      "host": "helper/v1/pool/evm/send",
+      "methods": [
+        "undefined"
+      ],
+      "status": 503,
+      "answer": "{\"error\":{\"code\":\"down\"}}"
+    },
+    {
+      "at": 354537,
+      "host": "base.api.pocket.network",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3167\",\"error\":{\"code\":-32003,\"message\":\"transaction already imported\"}}"
+    },
+    {
+      "at": 555377,
+      "host": "base.api.pocket.network",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3845\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 565391,
+      "host": "base-rpc.publicnode.com",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3866\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 565391,
+      "host": "base.api.pocket.network",
+      "methods": [
+        "eth_sendRawTransaction"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3867\",\"error\":{\"code\":-32003,\"message\":\"nonce too low\"}}"
+    },
+    {
+      "at": 568420,
+      "host": "base-rpc.publicnode.com",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3896\",\"error\":{\"code\":-32701,\"message\":\"exceed maximum block range: 50000\"}}"
+    },
+    {
+      "at": 568420,
+      "host": "base.api.pocket.network",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3897\",\"error\":{\"code\":-32701,\"message\":\"exceed maximum block range: 50000\"}}"
+    },
+    {
+      "at": 568426,
+      "host": "base-rpc.publicnode.com",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3914\",\"error\":{\"code\":-32701,\"message\":\"exceed maximum block range: 50000\"}}"
+    },
+    {
+      "at": 568426,
+      "host": "base.api.pocket.network",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3915\",\"error\":{\"code\":-32701,\"message\":\"exceed maximum block range: 50000\"}}"
+    },
+    {
+      "at": 568450,
+      "host": "base.api.pocket.network",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3948\",\"error\":{\"code\":-32701,\"message\":\"exceed maximum block range: 50000\"}}"
+    },
+    {
+      "at": 568450,
+      "host": "base-rpc.publicnode.com",
+      "methods": [
+        "eth_getLogs"
+      ],
+      "status": 200,
+      "answer": "{\"jsonrpc\":\"2.0\",\"id\":\"3949\",\"error\":{\"code\":-32701,\"message\":\"exceed maximum block range: 50000\"}}"
+    }
+  ],
+  "sent": {
+    "page": 16,
+    "helper": 8,
+    "dropped": 24
+  },
+  "failures": [],
+  "senderThrows": [],
+  "tapWaitMs": {
+    "wfirst": 1,
+    "wsecond": 1,
+    "w503": 1,
+    "w503-again": 1,
+    "wlost": 1
+  },
+  "plannedAs": {}
+}

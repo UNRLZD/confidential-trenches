@@ -49,7 +49,9 @@
 //   429 late in a long list, after rounds went through, starts its own 30 s. Within it, SOL_HOLDINGS_ROUNDS or
 //   EVM_HOLDINGS_ROUNDS.
 // - One failure never hides the rest: a pool that fails reports its error and the others still list.
-// - Privacy: every request names one W and nothing else of the user's: no batch, no call carries two Ws. The Ws of every
+// - Privacy: every request these reads make names one W and nothing else of the user's: no batch, no call carries two
+//   Ws, so no public provider is given two Ws in one request. One read elsewhere batches: the rent backs' find read
+//   (packages/signpage/src/pool-sell.ts findOn) gives the helper's seat every W of the account in one request. The Ws of every
 //   pool are read one after another in a random order, never in the notes' order.
 // - Errors carry a wallet's index in its pool, never a note's ref, label, W or path; an RPC's error is cut to its code.
 // - Not here: a full EVM restore from the 12 words alone (the EVM pool's notes, and W's tokens found from its Transfer
@@ -757,7 +759,8 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
 //   one queue, so the provider is never asked past its one budget; the testnet build's devnet RPC) with a gate of its
 //   own (buyGateOf): a throttle met here pauses these reads only, never the finder's next read or a trade's. Each call
 //   is one round of that gate and takes the host's pass turn (inTurn's lane), so the lane's pause and budget hold it.
-//   Every request names one W, or a signature of W's: no batch, no request carries two Ws.
+//   Every request of these reads names one W, or a signature of W's: no batch, no request carries two Ws. (The rent
+//   backs' find read gives the helper's seat a batch of the account's Ws: packages/signpage/src/pool-sell.ts findOn.)
 // - W's trades too (card closed-positions-after-a-restore): with a buy, the read hands back W's buy transaction and
 //   W's successful transactions after it, oldest first, as the route answered them ("json", finalized), read until the
 //   one that leaves W none of the bought mint (W's sale in full: what follows is W's teardown and sweep, never a trade)

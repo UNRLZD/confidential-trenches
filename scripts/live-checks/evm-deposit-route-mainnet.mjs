@@ -91,9 +91,28 @@ const ROUTE = (deps) =>
       `return\\{floor:async (${N})=>\\{let (${N})=\\3\\(\\7\\);return \\8===null\\?null:(${N})\\(\\8\\.rpcs,\\8\\.pin\\)\\},` +
       `deps:\\((${N}),(${N}),(${N})\\)=>\\{let (${N})=\\3\\(\\10\\);return \\13===null\\?null:${esc(deps)}\\(\\{\\.\\.\\.\\13,deposit:\\11,refund:\\12\\(\\(\\)=>\\9\\(\\13\\.rpcs,\\13\\.pin\\)\\),\\.\\.\\.\\2\\.notes===void 0\\?\\{\\}:\\{notes:\\2\\.notes\\}\\}\\)\\}\\}\\}`,
   );
-// main.ts: the route on the page's network, its pools and its wallet reader
-const ROUTE_CALL = (route) => new RegExp(`[,;](${N})=${esc(route)}\\(\\{network:(${N}),pool:(${N})=>(${N})\\?\\.evmPoolOf\\(\\3\\)\\?\\?null,wallet:(${N}=>void 0|${N}),notes:\\(\\)=>(${N})\\(\\)\\}\\)`);
-const FLOOR_WIRE = (m) => new RegExp(`=async\\((${N}),(${N})\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${esc(m)}\\.floor\\(\\1\\);`);
+// main.ts: the route on the page's network, its pools and its wallet reader (none, a call of one function, or its name)
+const ROUTE_CALL = (route) => new RegExp(`[,;](${N})=${esc(route)}\\(\\{network:(${N}),pool:(${N})=>(${N})\\?\\.evmPoolOf\\(\\3\\)\\?\\?null,wallet:(${N}=>void 0|${N}=>${N}\\(${N}\\)|${N}),notes:\\(\\)=>(${N})\\(\\)\\}\\)`);
+/** pool-testnet.ts pageEvmWalletRpc on the mainnet build: no testnet return taken, the helper's route at TRADE_HELPER's
+ *  /v1/rpc/{chain} (decision M359); evm-deposit-on-mainnet.mjs reads it by the same two marks. */
+export const READER = (z) =>
+  new RegExp(
+    `[,; ]${esc(z)}=\\((${N}),(${N})=!1\\)=>\\{if\\(\\2\\)return;let (${N})=(${N})\\.get\\(\\1\\);if\\(\\3===void 0\\)\\{let (${N})=${N}\\((${N}),\\1\\);\\4\\.set\\(\\1,\\3=Object\\.assign\\(\\((${N}),(${N})\\)=>\\5\\(\\7,\\8\\),\\{url:${Q}\\$\\{\\6\\}/v1/rpc/\\$\\{\\1\\}${Q}\\}\\)\\)\\}return \\3\\}`,
+  );
+export const HELPER_AT = (h) => new RegExp(`[,; ]${esc(h)}=${Q}https://ct-api\\.unrealized\\.trade${Q}[,;]`);
+const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length === 1;
+/** The route's wallet reader (ROUTE_CALL's fifth group): "none" for `e=>void 0`; "wired" when it is the helper's reader
+ *  (READER bound to HELPER_AT, each once), named itself, called as `e=>Z(e)`, or named by a `X=e=>Z(e)` beside it; else
+ *  "other". */
+export function readerOf(js, w) {
+  if (/=>void 0$/.test(w)) return "none";
+  const call = new RegExp(`^(${N})=>(${N})\\(\\1\\)$`).exec(w);
+  const def = new RegExp(`[,;\\s]${esc(w)}=\\(?(${N})\\)?=>(${N})\\(\\1\\)[,;]`);
+  const z = call ? call[2] : once(READER(w), js) ? w : once(def, js) ? def.exec(js)[2] : null;
+  const r = z !== null && once(READER(z), js) ? READER(z).exec(js) : null;
+  return r && once(HELPER_AT(r[6]), js) ? "wired" : "other";
+}
+const FLOOR_WIRE = (m) => new RegExp(`=async\\((${N}),(${N})(?:,${N})?\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${esc(m)}\\.floor\\(\\1\\);`);
 const DEPS_WIRE = (m) =>
   new RegExp(`=\\((${N}),(${N})\\)=>\\{if\\(\\1\\.chain!==${Q}solana${Q}\\)\\{let (${N})=${esc(m)}\\.deps\\(\\1\\.chain,(${N}),(${N})=>(${N})\\(\\5,\\2\\)\\);return \\3===null\\?null:\\{\\.\\.\\.\\3,noted:(${N}),open:(${N})\\}\\}`);
 // main.ts uxNoted (review P2a): the store's landed deposit note of (s,i) read on the page's notes
@@ -125,7 +144,7 @@ const KIND = new RegExp(
 // pool-testnet.ts depositFrom: Base and Robinhood to the chain's EVM kind with the same fixed source
 const FROM_ENTRY = new RegExp(
   `depositFrom:\\((${N}),(${N}),(${N})\\)=>\\{let (${N});try\\{\\4=${N}\\(\\{\\.\\.\\.\\1,kind:${Q}pool\\.deposit${Q}\\}\\)\\}catch\\{return\\{error:${Q}not_allowed${Q}\\}\\}` +
-    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
+    `return \\4\\.chain===${Q}solana${Q}\\?${N}===void 0(?:\\|\\|!${N}\\(${Q}solana${Q}\\))?\\?\\{error:${Q}not_allowed${Q}\\}:${N}\\(\\4,\\3,\\2\\):${N}\\(\\4\\.chain\\)\\?\\.\\(\\4,\\3,\\2\\)\\?\\?\\{error:${Q}not_allowed${Q}\\}\\}`,
 );
 
 // evmLanded reads each send by the tx read whose receipt and finalized block it asks
@@ -153,17 +172,17 @@ export function facts(index, js) {
     sha384: sha384(js),
     floor: !!fl && LADDER(fl[4]).test(js) && CONST(fl[5], "1000000n").test(js) && !!pr && pr[12] === fl[5] && CONST(pr[13], "10000000n").test(js),
     follow: !!deps && READ_NAME(deps[18]).test(js) && LADDER(deps[19]).test(js),
-    wired: !!rt && READ_NAME(rt[9]).test(js) && !!rc && NETWORK(rc[2]).test(js) && fw && !!dw && DEPOSIT_FN(dw[4]).test(js) && REFUND_FN(dw[6]).test(js) && NOTED(dw[7]).test(js) && !!op && UX_OPEN(op[2]).test(js),
+    wired: !!rt && READ_NAME(rt[9]).test(js) && !!rc && readerOf(js, rc[5]) !== "other" && NETWORK(rc[2]).test(js) && fw && !!dw && DEPOSIT_FN(dw[4]).test(js) && REFUND_FN(dw[6]).test(js) && NOTED(dw[7]).test(js) && !!op && UX_OPEN(op[2]).test(js),
     fromUX: FIXED.test(js) && KIND.test(js) && FROM_ENTRY.test(js),
     landed: !!ls && LANDED(ls[5]).test(js) && LANDED_READ_OF(js, ls[5]),
-    reader: rc === null ? "unread" : /=>void 0$/.test(rc[5]) ? "none" : "wired",
+    reader: rc === null ? "unread" : readerOf(js, rc[5]),
   };
 }
 
 export const WHY = {
   floor: "a quote into an EVM pool is not held to the rung (0.001 ETH) plus one deposit at the capped gas (1,000,000) and headroom at 2 x base fee + tip (0.01 gwei) plus the L1 fee, read on both RPCs at one block, the base fees the same",
   follow: "the EVM follow does not poll U_X on the one wallet reader (else both RPCs), cost one deposit at that floor with nothing kept, read the deadline on both clocks, or read the status with the op's refund id",
-  wired: "Base's and Robinhood's quote floor and follow are not the page's pool there with the deposit from U_X and the refund mover, or a non-testnet page with no wallet reader still quotes",
+  wired: "Base's and Robinhood's quote floor and follow are not the page's pool there with the deposit from U_X and the refund mover, or their wallet reader is neither none nor the helper's route, or a non-testnet page with no wallet reader still quotes",
   landed: "the EVM follow does not read each landed note's send of U_X's on the pool's two RPCs (its receipt and the finalized block on each, the two alike) into the op's txs",
   fromUX: "an EVM deposit's fixed source is not U_X alone (its scope, its address, a deposit note the store planned, no other U's landing), the kind does not hand it to the run, or depositFrom does not route Base and Robinhood with it",
 };

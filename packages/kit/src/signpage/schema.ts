@@ -300,7 +300,7 @@ export function signpageReadableOps(v: unknown): unknown {
   return ops.length === v.ops.length ? v : { ...v, ops };
 }
 
-const open = obj({ pending: lit(true) });
+const open = obj({ pending: lit(true) }, { closes: lit(true) });
 
 /** A dec string as an exact fraction's numerator at 78 fraction digits (dec's most), for comparing two of them. */
 const at78 = (s: string): bigint => unitsAt(s, 78)!;
@@ -430,6 +430,8 @@ deepFreeze(SIGNPAGE_PARAM_SCHEMAS);
 export const signpageReadySchema = obj({ v: lit(1), type: lit("ready"), release: str, api: uint });
 export const signpageStateEventSchema = obj({ v: lit(1), type: lit("state"), state });
 export const signpageProgressSchema = obj({ v: lit(1), type: lit("progress"), id: str, stage: oneOf(STAGES) });
+/** The closed notice (messages.ts ClosedEvent): the type and the id, nothing else. */
+export const signpageClosedSchema = obj({ v: lit(1), type: lit("closed"), id: str });
 /** A route event's `out`: a token amount above 0 in whole units, at most 78 digits each side of the point, no leading
  *  zero, no trailing zero after it. The signing page tells no amount this refuses (src/pool-buy.ts). */
 export const SIGNPAGE_ROUTE_OUT = /^(0|[1-9]\d{0,77})(\.\d{0,77}[1-9])?$/;

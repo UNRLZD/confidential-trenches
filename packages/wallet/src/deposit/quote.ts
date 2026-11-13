@@ -172,6 +172,37 @@ export const NO_LIQUIDITY_PAUSES_MS: readonly number[] = Object.freeze([500, 1_0
 /** No re-ask starts with less than this left of the ask's window: a quote's own answer time, 1.4 s at most read (18:59Z). */
 export const NO_LIQUIDITY_ASK_MIN_MS = 2_000;
 
+/**
+ * 1Click's 400s about the request itself (card helper-says-why-a-vendor-refused): its amount ("Amount is too low for
+ * bridge, try at least N", "Amount is too low for the destination chain", "Temporary swap limits: minimum swap amount is
+ * $N"), its pair ("Quoting for this pair is not available"), a field it refuses ("recipient is not valid", "<asset> is not
+ * supported as origin asset", "<asset> supports only ORIGIN_CHAIN refundType") or its deadline: 1Click's own words as the
+ * deposit runs and research proofs/p3-coverage read them. "Invalid token" is not one: 1Click answers it for a key it does
+ * not honour (401, scripts/live-checks/oneclick-partner-fee-live.answers.json bad_key_refused). The same request gets the same answer, so it
+ * is shown at once. A list of messages is a list of what is wrong with the request (a validation answer).
+ */
+const ABOUT_THE_REQUEST: readonly RegExp[] = [/^Amount is too low\b/, /^Temporary swap limits\b/, /^Quoting for this pair is not available\b/,
+  /\bis not valid\b/, /\bis not supported\b/, /\bsupports only\b/, /\bdeadline\b/i];
+
+/**
+ * True when a reply is a refusal worth asking again (card helper-says-why-a-vendor-refused): a 400 in 1Click's shape (a
+ * JSON object with no helper code) that is not about the request: no liquidity at that second, "Failed to get quote", a
+ * message the page does not know, or none (live runs 43276439006 and 43289730843: every quote 400 for minutes, green again
+ * within half an hour). A helper's own 400 ({ error: { code } }) and a 400 about the request (ABOUT_THE_REQUEST) are not.
+ */
+export function askAgainFor(reply: DepositQuoteReply): boolean {
+  return refusalOf(reply) === "again";
+}
+/** A reply's kind of refusal: a 400 of 1Click's worth asking again, a 400 of 1Click's about the request, or neither. */
+function refusalOf(reply: DepositQuoteReply): "again" | "request" | null {
+  const b = reply.body;
+  if (reply.status !== 400 || typeof b !== "object" || b === null || Array.isArray(b)) return null;
+  const o = b as { message?: unknown; error?: unknown };
+  if (typeof o.error === "object" && o.error !== null && typeof (o.error as { code?: unknown }).code === "string") return null;
+  if (Array.isArray(o.message)) return "request";
+  return typeof o.message === "string" && ABOUT_THE_REQUEST.some((r) => r.test(o.message as string)) ? "request" : "again";
+}
+
 /** True when a reply is 1Click's no-liquidity answer: 400 with that message. */
 export function noLiquidity(reply: DepositQuoteReply): boolean {
   const b = reply.body;
@@ -182,8 +213,8 @@ export function noLiquidity(reply: DepositQuoteReply): boolean {
 /**
  * One ask: POSTs `request` as it is to the helper's 1Click proxy, with no cookie and no referrer. Returns the status and
  * the parsed body; throws when the helper does not answer in DEPOSIT_QUOTE_TIMEOUT_MS, answers over
- * DEPOSIT_QUOTE_ANSWER_MAX or not in JSON. The display reads ask this way (signpage rules/deposit-dry.ts: the dry lines
- * and the asset list's probes, asked again as the user types and opens the sheet).
+ * DEPOSIT_QUOTE_ANSWER_MAX or not in JSON. Every quote path asks through askDepositQuoteAgain, which makes this ask
+ * first (card helper-says-why-a-vendor-refused: the display reads too).
  */
 export function askDepositQuote(request: OneClickRequest, fetchFn: typeof fetch = fetch): Promise<DepositQuoteReply> {
   return askOnce(request, fetchFn, DEPOSIT_QUOTE_TIMEOUT_MS);
@@ -207,39 +238,64 @@ const askFailed = (e: unknown): boolean =>
  * faster ones, three. Only a 200 or 201, or another no-liquidity answer, replaces the standing one: a re-ask the helper
  * answers 429, 503 or anything else, or that fails as an ask fails, leaves the no-liquidity answer standing and asks no
  * more. The last standing reply comes back, and every caller checks it as it checks one answer.
+ * Card helper-says-why-a-vendor-refused: every 1Click 400 that is not about the request (askAgainFor) is asked again the
+ * same way, and the display reads ask this way too (signpage rules/deposit-dry.ts): a sheet that asked its assets once
+ * showed Not available for a few minutes of 1Click 400s (live run 43289730843). A re-ask 1Click answers about the request
+ * (ABOUT_THE_REQUEST) ends the asks with that answer.
+ * `signal` (review P3 of that card): the caller's stop (a refund move's, a superseded read's, the page's sign out). Once it
+ * aborts, the pause ends, no ask leaves and an ask under way is cut; the asks throw its reason, never answer.
  */
-export async function askDepositQuoteAgain(request: OneClickRequest, fetchFn: typeof fetch = fetch, sleep: (ms: number) => Promise<void> = pause, clock: () => number = Date.now): Promise<DepositQuoteReply> {
+export async function askDepositQuoteAgain(request: OneClickRequest, fetchFn: typeof fetch = fetch, sleep: (ms: number) => Promise<void> = pause, clock: () => number = Date.now, signal?: AbortSignal): Promise<DepositQuoteReply> {
+  signal?.throwIfAborted();
   const end = clock() + DEPOSIT_QUOTE_TIMEOUT_MS;
-  let reply = await askOnce(request, fetchFn, DEPOSIT_QUOTE_TIMEOUT_MS);
+  let reply = await askOnce(request, fetchFn, DEPOSIT_QUOTE_TIMEOUT_MS, signal);
   for (const ms of NO_LIQUIDITY_PAUSES_MS) {
-    if (!noLiquidity(reply) || end - clock() - ms < NO_LIQUIDITY_ASK_MIN_MS) break;
-    await sleep(ms);
+    if (!askAgainFor(reply) || end - clock() - ms < NO_LIQUIDITY_ASK_MIN_MS) break;
+    await stoppable(sleep(ms), signal);
+    signal?.throwIfAborted();
     // never more than the one ask's own window, whatever the clock reads (a wall clock set back mid-ask)
     const left = Math.min(Math.floor(end - clock()), DEPOSIT_QUOTE_TIMEOUT_MS);
     if (!(left >= NO_LIQUIDITY_ASK_MIN_MS)) break;
     let next: DepositQuoteReply;
     try {
-      next = await askOnce(request, fetchFn, left);
+      next = await askOnce(request, fetchFn, left, signal);
     } catch (e) {
+      signal?.throwIfAborted();
       if (askFailed(e)) break;
       throw e;
     }
-    if (!ANSWERED.includes(next.status) && !noLiquidity(next)) break;
+    // 1Click's answer about the request is the newest word on it and stands; a 429, 503 or anything else leaves the
+    // refusal before it standing
+    if (refusalOf(next) === "request") return next;
+    if (!ANSWERED.includes(next.status) && !askAgainFor(next)) break;
     reply = next;
   }
   return reply;
 }
 
 const pause = (ms: number): Promise<void> => new Promise((ok) => setTimeout(ok, ms));
+/** `p`, ended early by `signal`'s abort (its reason thrown). */
+function stoppable(p: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return p;
+  return new Promise((ok, no) => {
+    const stop = () => no(signal.reason);
+    if (signal.aborted) return stop();
+    signal.addEventListener("abort", stop, { once: true });
+    p.then(
+      () => (signal.removeEventListener("abort", stop), ok()),
+      (e) => (signal.removeEventListener("abort", stop), no(e)),
+    );
+  });
+}
 
-async function askOnce(request: OneClickRequest, fetchFn: typeof fetch, timeoutMs: number): Promise<DepositQuoteReply> {
+async function askOnce(request: OneClickRequest, fetchFn: typeof fetch, timeoutMs: number, signal?: AbortSignal): Promise<DepositQuoteReply> {
   const res = await fetchFn(DEPOSIT_QUOTE_URL, {
     ...HELPER_FETCH_INIT,
     redirect: "error",
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(request),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
   });
   const bytes = await readCapped(res, DEPOSIT_QUOTE_ANSWER_MAX);
   let body: unknown;
