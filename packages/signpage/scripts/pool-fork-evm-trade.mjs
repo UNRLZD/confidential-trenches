@@ -6,7 +6,7 @@
 // route and EVM sender run in this process, with nothing signed or sent on any real chain:
 //   node contracts/pool-evm/test/fork-rpc.mjs --book pools -- sh packages/signpage/scripts/pool-fork-evm.sh <base|robinhood> <S> <lag> <fork.json> \
 //     packages/signpage/scripts/pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token>
-// (anvil is a heavy job: scripts/heavy.sh). The mainnet build: __SIGN_NETWORK__ is not set, so the pins and lists are
+// (anvil runs for minutes: run it as a long job). The mainnet build: __SIGN_NETWORK__ is not set, so the pins and lists are
 // SIGN_HOST's (the wallet's EVM_POOLS, src/pool-testnet.ts MAINNET_POOL_RPCS and MAINNET_EVM_FEE_RPCS).
 // - Every request is answered on this machine: the chain's hosts the page and the kit name (the pool list, the fee
 //   list, the history list, every URL in the kit's venue entry for the chain) by the fork's anvil, each URL kept so a
@@ -279,7 +279,10 @@ const helperFetch = async (url, init) => {
   return r;
 };
 const page = { store: async () => w, held: async () => w, seed64: async () => seed64.slice() };
-const t = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch });
+// FORK_NO_INDEX=1 (a diagnostic, never a recorded pass): the page's pool index sync planted as one that syncs nothing,
+// so the proof queue's reads meet none of the index's (run 21, 13 Nov 09:59Z: on a Robinhood copy, 1,834 Initialize
+// log reads of the index and no proof in 13 min)
+const t = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch, ...(process.env.FORK_NO_INDEX === "1" ? { evmIndexSync: async () => ({ index: null, coversThrough: null, pools: null }) } : {}) });
 const kinds = poolKinds(testnetPoolDeps(t.flow));
 
 // 2. the proof queue's proof: the state read starts the chain's pass; its ready proof. The queue proves at an epoch's
@@ -299,8 +302,14 @@ let ready = [];
 // upstreams first (run 14, 13 Nov 09:06Z: on a Robinhood copy no proof yet at 4 min, where Base's took 176-206 s)
 for (let i = 0; i < 300 && ready.length === 0; i++) {
   await sleep(2_000);
-  ready = ((await t.readyWith(async () => null)).ready ?? []).filter((p) => p.wallet.chain === "evm");
-  if (ready.length === 0 && i % 10 === 9) await t.stateRead();
+  const rw = await t.readyWith(async () => null);
+  ready = (rw.ready ?? []).filter((p) => p.wallet.chain === "evm");
+  if (ready.length === 0 && i % 10 === 9) {
+    // what the queue answers while it has no proof, beside the fork's head and finalized block (run 21's 13 min held none)
+    const [hd, fz] = await Promise.all([anvil("eth_getBlockByNumber", ["latest", false]), anvil("eth_getBlockByNumber", ["finalized", false])]);
+    log("no proof yet", { i, head: BigInt(hd.number), headTime: Number(BigInt(hd.timestamp)), finalized: BigInt(fz.number), answer: JSON.stringify(rw, big).slice(0, 600) });
+    await t.stateRead();
+  }
 }
 const readyMs = Date.now() - proveAt;
 const notesNow = async () => (await ns.list()).map((n) => ({ id: n.id, ref: n.ref.kind, state: n.state, value: n.leaf ? n.leaf.value : null }));

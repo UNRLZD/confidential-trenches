@@ -133,7 +133,7 @@ export async function answer(book, chain, req, record) {
   // and a block by number: mainnet.base.org and base.drpc.org answered 429 to most of a copy run's (13 Nov 06:4xZ)
   const fit = (req.method === "eth_getLogs" || req.method === "eth_getBlockByNumber") && wide.length > 0 ? wide : all;
   // and none that answered 403 this run while another is left: it refused this machine (robinhood-rpc.publicnode.com
-  // answered 403 to 711 of a Robinhood copy run's reads from the heavy box, 13 Nov 09:1xZ, each try a backoff)
+  // answered 403 to 711 of a Robinhood copy run's reads from one test machine, 13 Nov 09:1xZ, each try a backoff)
   const open = fit.filter((u) => !REFUSED.has(new URL(u).host));
   const list = open.length > 0 ? open : fit;
   const first = (turn[chain] = ((turn[chain] ?? -1) + 1) % list.length);
