@@ -92,7 +92,14 @@ async function sendOnce(m: readonly [MoveOutRpc, MoveOutRpc], signer: string, s:
   for (let k = 0; k < TX_POLLS; k++) {
     const sides = await Promise.all(m.map((r) => r.call("tx", { tx_hash: s.hash, sender_account_id: signer, wait_until: "NONE" }).then((a) => (isObj(a) && isObj(a.result) ? a.result : null), () => null)));
     if (sides.every((r) => r !== null && r.final_execution_status === "FINAL")) {
-      const failures = sides.flatMap((r) => [r!.status, ...((r!.receipts_outcome as Obj[] | undefined) ?? []).map((o) => (isObj(o.outcome) ? o.outcome.status : undefined))].filter((st): st is Obj => isObj(st) && "Failure" in st));
+      // A's gas refund after its own DeleteAccount: the refund receipt runs on A, which no longer exists, and fails with
+      // AccountDoesNotExist(A) (run 3 of contracts/vault/tests/exit_words.rs); that one receipt is not the tx failing
+      const refundToGone = (o: Obj): boolean => {
+        const st = isObj(o.outcome) ? o.outcome.status : undefined;
+        const kind = isObj(st) && isObj(st.Failure) && isObj(st.Failure.ActionError) ? st.Failure.ActionError.kind : undefined;
+        return isObj(o.outcome) && o.outcome.executor_id === signer && isObj(kind) && isObj(kind.AccountDoesNotExist) && kind.AccountDoesNotExist.account_id === signer;
+      };
+      const failures = sides.flatMap((r) => [r!.status, ...((r!.receipts_outcome as Obj[] | undefined) ?? []).filter((o) => !refundToGone(o)).map((o) => (isObj(o.outcome) ? o.outcome.status : undefined))].filter((st): st is Obj => isObj(st) && "Failure" in st));
       // the failure as the chain wrote it, so the stop says why
       if (failures.length) say(`tx ${s.hash} failed: ${JSON.stringify(failures[0]!.Failure).slice(0, 400)}`);
       return failures.length ? "failed" : "ok";
