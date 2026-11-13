@@ -235,6 +235,40 @@ test("the next buy's proof: a landed deposit starts one proof, a second deposit 
   assert.deepEqual((await states(ns)).sort(), ["UNSPENT", "UNSPENT"]);
 });
 
+// card a-load-proves-first-and-walks-the-restore-once: the restore's resume walks after firstPass(startMs). A Solana pass
+// that has started is waited for to its end, however long; with none started, firstPass waits at most startMs (the
+// restore hands it RESUME_FIRST_PASS_MAX_MS) for one to start, never for good
+test("firstPass(startMs): a started pass is waited to its end; with none started it is bounded by startMs", async () => {
+  // settled within a turn of the timers: true once it resolved, false while it is still waiting
+  const settled = (p: Promise<unknown>): Promise<boolean> => Promise.race([p.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 50))]);
+  // no note, no pass ever started: bounded by its startMs
+  {
+    const { w } = await wallet();
+    const { pool } = fakePool();
+    const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4 });
+    assert.equal(await settled(t.firstPass(10)), true, "no pass started: it ends at its bound");
+    assert.equal(await settled(t.firstPass(60_000)), false, "no pass started: it waits for one up to its bound");
+  }
+  // a pass that started and proves slowly: waited for to its end, whatever the bound
+  {
+    const { w, ns } = await wallet();
+    const { pool, land } = fakePool();
+    const inner = signalsProver();
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const prover = { ...inner, prove: async (...a: Parameters<typeof inner.prove>) => (await gate, inner.prove(...a)) };
+    const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4 });
+    await land(ns, await incoming(ns, null, 1));
+    const pass = t.proofs();
+    const first = t.firstPass(10);
+    assert.equal(await settled(first), false, "a started pass is waited for past the bound");
+    open();
+    await pass;
+    assert.equal(await settled(first), true, "and ends with the pass");
+    assert.equal(inner.log.filter((x) => x.startsWith("prove")).length, 1);
+  }
+});
+
 test("card signpage-pool-pins: a page that loads with the pool's notes landed opens the queue on a state read; its proofs reach ready() and the watchers hear the pass", async () => {
   const { w, ns } = await wallet();
   const { pool, land } = fakePool();
