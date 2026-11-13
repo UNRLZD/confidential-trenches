@@ -3,8 +3,13 @@
 // colour, in the main app's four-column layout from 1024 px. Headless Chromium opens APP_HOST/discover inside SIGN_HOST's
 // shell at 1440 x 900, 1024 x 768 and 390 x 844 (dpr 2, touch), signed out, waits for rows and reads every drawn row:
 // its chain, its token id, its launchpad badge's pad id, its ring colour, whether it draws initials, and its logo: the
-// logo route's status and content type as the page received them and whether the image is drawn. The same run reads the
-// helper's lists (HELPER_HOST /v1/market/lists, each chain) for each token's `icon` flag and the pads they hold. Only these
+// logo route's status and content type as the page received them and whether the image is drawn. Each token's `icon`
+// flag is the one the lists answers that page itself received (HELPER_HOST /v1/market/lists, each chain) before its rows
+// were read: the helper turns a token's icon true once it learns a logo URL (apps/helper/src/data/logo.ts remember,
+// fromMeta), so a read of its own after the page drew could name a logo the page was never served (card
+// app-faults-seen-on-124: release 123's and 124's runs at 1440 and 1024, "served icon true, logo null"). A token whose
+// answers that page read disagree (it flipped between two of the page's 12 s reads) is named and not judged on its logo.
+// The same run reads the helper's lists once more for the pads they hold. Only these
 // are recorded: never a name, a symbol or any other text a token carries. Judged:
 //   - every row whose launchpad the terminal's table knows (apps/terminal/src/screens/market/pads.ts padRing) draws that
 //     pad's ring colour; a row with no known pad a stage colour; the rows drawn at 1440 hold at least three pad colours
@@ -50,10 +55,12 @@ export function judge(rec) {
   const lines = [];
   const bad = (t) => lines.push(`BAD ${t}`);
   const ok = (t) => lines.push(`OK ${t}`);
-  const icons = rec.icons ?? {};
-  const served = Object.values(icons).filter(Boolean).length;
   if (!rec.widths?.length) bad("no width was read");
   for (const w of rec.widths ?? []) {
+    // the flags the page itself was served (older records: the run's own read after the page)
+    const icons = w.icons ?? rec.icons ?? {};
+    const served = Object.values(icons).filter((v) => v === true).length;
+    const flipped = Object.values(icons).filter((v) => v === "both").length;
     if (w.errors?.length) bad(`${w.name}: page errors ${w.errors.join(" | ")}`);
     if (!w.rows?.length) {
       bad(`${w.name}: no row drawn`);
@@ -91,7 +98,7 @@ export function judge(rec) {
     if (ringBad) bad(`${w.name}: ${ringBad} of ${w.rows.length} rings off their launchpad's colour`);
     else ok(`${w.name}: ${w.rows.length} rows, every ring its launchpad's colour or a stage colour`);
     if (servedInView > 0 && drawn === 0) bad(`${w.name}: ${servedInView} rows in view served a logo and none drew one`);
-    else if (!logoBad) ok(`${w.name}: logos as served (${served} tokens served with a logo; in view ${drawn} drawn${refused ? `, ${refused} answered with no image and drew initials` : ""})`);
+    else if (!logoBad) ok(`${w.name}: logos as served (${served} tokens served with a logo; in view ${drawn} drawn${refused ? `, ${refused} answered with no image and drew initials` : ""}${flipped ? `; ${flipped} turned between the page's reads, not judged` : ""})`);
     if (w.name === "1440") {
       const pads = new Set(w.rows.map((r) => padRing(r.pad)).filter(Boolean));
       const listed = new Set((rec.pads ?? []).map(padRing).filter(Boolean));
@@ -167,9 +174,22 @@ async function readWidth(browser, w, harness, shots) {
     page.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
     // each logo route's answer: its status and content type, by token
     const answers = new Map();
+    // each lists answer the page received until its rows are read: every token's icon flags in them
+    const flags = new Map();
+    const parsing = [];
+    let reading = true;
     page.on("response", (res) => {
       const m = LOGO.exec(res.url());
       if (m) answers.set(decodeURIComponent(m[1]), { status: res.status(), type: res.headers()["content-type"] ?? null });
+      if (reading && originOf(res.url()) === HELPER_HOST && new URL(res.url()).pathname === "/v1/market/lists" && res.status() === 200)
+        parsing.push(
+          res.json().then(
+            (b) => {
+              for (const rows of Object.values(b?.lists ?? {})) for (const row of rows ?? []) if (typeof row?.token === "string") (flags.get(row.token) ?? flags.set(row.token, new Set()).get(row.token)).add(row.icon === true);
+            },
+            () => {},
+          ),
+        );
     });
     await page.goto(`${APP_HOST}/discover`, { waitUntil: "load" });
     const f = await terminalFrame(page);
@@ -190,9 +210,17 @@ async function readWidth(browser, w, harness, shots) {
     }), scope, { timeout: 30_000 }).catch(() => {});
     await page.waitForTimeout(300);
     const rows = (await f.evaluate(ROWS, scope)).map(({ drawn, ...r }) => ({ ...r, logo: drawn === null && !answers.has(r.id) ? null : { ...(answers.get(r.id) ?? { status: null, type: null }), drawn: drawn === true } }));
+    // an answer that came after the rows were read was not drawn in them
+    reading = false;
+    await Promise.all(parsing);
+    const icons = {};
+    for (const r of rows) {
+      const v = flags.get(r.id);
+      if (v) icons[r.id] = v.size > 1 ? "both" : [...v][0];
+    }
     const cols = w.name === "1024" ? await f.evaluate(() => [...document.querySelectorAll(".dsc-grid .dsc-col")].map((c) => c.getBoundingClientRect()).map((b) => ({ x: Math.round(b.x), y: Math.round(b.y) }))) : undefined;
     await page.screenshot({ path: path.join(shots, `discover-${w.name}.png`) });
-    return { name: w.name, rows, ...(cols && { cols }), errors };
+    return { name: w.name, rows, icons, ...(cols && { cols }), errors };
   } finally {
     await ctx.close();
   }

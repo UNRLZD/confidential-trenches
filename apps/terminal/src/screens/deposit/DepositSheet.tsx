@@ -39,13 +39,28 @@ function W({ id }: { id: WordId }) {
   return w.draft ? <span data-draft-copy={id}>{w.text}</span> : <>{w.text}</>;
 }
 
+const COPIED_MS = 1500;
+
 export function DepositSheet({ onClose }: { onClose(): void }) {
   const src = useDepositSource();
   const openWithdraw = useWithdrawOpen();
+  // Escape closes it, as the sign-in sheet does (UNRLZD's sheets and drawers close on Escape)
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
   const { pathname } = useLocation();
   const state = src.snapshot.state;
   const balance = useBalance(src.snapshot) ?? 0n;
   const [dest, setDest] = useState<Dest>("near");
+  // the address just copied: Copy reads Copied for COPIED_MS (UNRLZD's deposit address), a new address starts at Copy
+  const [copied, setCopied] = useState<string | null>(null);
+  useEffect(() => {
+    if (copied === null) return;
+    const t = setTimeout(() => setCopied(null), COPIED_MS);
+    return () => clearTimeout(t);
+  }, [copied]);
   const signedIn = state?.signed_in === true;
   const codeSaved = state?.code_saved !== false;
   // what pool.address answers for each pool's chain, asked once signed in with the words saved (the page refuses it
@@ -252,7 +267,11 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
         </div>
       </>
     );
-    foot = <Action kind="buy" on control="deposit-copy" onClick={() => src.copy(q.deposit_address)}><W id="copy" /></Action>;
+    foot = (
+      <Action kind="buy" on control="deposit-copy" onClick={() => (src.copy(q.deposit_address), setCopied(q.deposit_address))}>
+        <W id={copied === q.deposit_address ? "copied" : "copy"} />
+      </Action>
+    );
   } else if (s === "pool-off") {
     body = (
       <>

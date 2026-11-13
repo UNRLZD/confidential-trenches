@@ -4,14 +4,37 @@ import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const S = `${W}/src/pool/evm.ts`, R = `${W}/src/pool/evm-restore.ts`, H = `${W}/src/pool/evm-hold-store.ts`;
-const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts";
+const ST = `${W}/src/pool/evm-settle.ts`, N = `${W}/src/notes/store.ts`;
+const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts", TS = "test/pool-evm-settle.test.ts", TH = "test/pool-evm-heal.test.ts";
 // [file, find, replace, test file, test name pattern]
 const M = [
   // the restore's checks on the pool's events
-  // review P3-4 of 53f5e92f and its delta P3-E (card restore-first-sign-in-under-two-minutes): the restore of the chain
-  // at its finalized block, the events cut before it: up to the newest agreed block, or one block short of the finalized
-  [R, "const final = r.events.filter((e) => e.block <= r.fin.number);", "const final = r.events.filter((e) => e.block <= r.anchor.number);", T, "P3-"],
-  [R, "const final = r.events.filter((e) => e.block <= r.fin.number);", "const final = r.events.filter((e) => e.block < r.fin.number);", T, "P3-E"],
+  // card evm-money-shows-and-spends-at-once: the restore at the newest agreed block, every event of the round kept; the
+  // old cut at the finalized block, or one block short of the head, hides a deposit or a release that has landed
+  [R, "const final = r.events;", "const final = r.events.filter((e) => e.block <= r.fin.number);", T, "^head: "],
+  [R, "const final = r.events;", "const final = r.events.filter((e) => e.block < r.anchor.number);", T, "^head: "],
+  // the hazard the finalized cut guarded (review P3-4 of 53f5e92f): a note landed on a block a reorg can drop, or SPENT on
+  // a release not final. Now held by the tail mark, the heal and the store's refusal to back out a finalized fact
+  [R, "const landed = a.fin !== undefined && block > a.fin ? { landed: { block, fin: a.fin } } : {};", "const landed = {};", T, "^head: a deposit 4 s old"],
+  [ST, "        await a.notes.backOut(n.id, r.fin.number, anchorMs + EVM_LIFE_MS);\n        out.backedOut.push(n.id);\n", "", TS, "^head: a reorg drops"],
+  [ST, "  await a.notes.finalized(a.scope, r.fin.number, final);\n", "", TS, "^head: a finalized fact never backs out"],
+  [N, "if (l.block.get(id) === undefined || !LANDED.includes(cur.state)) throw", "if (!LANDED.includes(cur.state)) throw", TS, "^head: a finalized fact never backs out"],
+  // the review of the card's heal (probes A-F, pool-evm-heal.test.ts): (1) a round short of the note's block backs
+  // nothing out; (3) a fact final only once a round held it, never by a number; (4) the child deleted before its
+  // marks; (5) a release elsewhere held until final, in the settle and the restore; (2) a backed-out note of any kind
+  // landed again from the chain, its mark kept and read until it lands or is final with no deposit
+  [ST, " && kept.get(n.id)! <= r.anchor.number", "", TH, "^heal A"],
+  [N, "b <= fin && done.has(id)", "b <= fin", TH, "^heal: a back out that fails|^store: finalized"],
+  [ST, "    } else if (n.leaf !== undefined && r.events[Number(n.leaf.leafIndex)]?.state === n.leaf.commitment) final.push(n.id);\n", "    } else final.push(n.id);\n", TH, "^heal: a back out that fails under a chain"],
+  [N, "if (l.block.get(id) === undefined || !LANDED.includes(cur.state)) throw", "if (l.block.get(id) === undefined || l.block.get(id)! <= l.final.get(cur.scope.toString())! || !LANDED.includes(cur.state)) throw", TH, "^heal C"],
+  [N, "    await store.delete(\"notes\", id);\n    await dropReserved();\n    await landingsUpdate((x) => x.block.delete(id)).catch(() => {});\n", "    await dropReserved();\n    await landingsUpdate((x) => x.block.delete(id)).catch(() => {});\n    await store.delete(\"notes\", id);\n", "test/note-store-crash.test.ts", "^backOut: a kill"],
+  [ST, "    if (e.block > r.fin.number) return \"held\";\n", "", TH, "^heal D:"],
+  [R, "    else if (a.fin !== undefined && e.block > a.fin) {", "    else if (false) {", TH, "^heal D \\(restore\\)"],
+  [ST, "        await evmClaimTaken(a.notes,", "        if (false) await evmClaimTaken(a.notes,", TH, "^heal re-land \\(deposit"],
+  [N, "      await write({ ...rest, state: \"INCOMING\" });\n      await dropReserved();\n", "      await write({ ...rest, state: \"INCOMING\" });\n      await dropReserved();\n      await landingsUpdate((x) => x.block.delete(id));\n", TH, "^heal re-land \\(return"],
+  [N, "if (b !== undefined && keeps(n)) out.set", "if (b !== undefined && n.state !== \"INCOMING\" && keeps(n)) out.set", TH, "^heal re-land \\(R second"],
+  [ST, "n.state === \"RESERVED\" || landings.has(n.id)", "n.state === \"RESERVED\"", TH, "^heal re-land \\(U second"],
+  [ST, "          if (b <= r.fin.number) final.push(n.id);", "", TH, "^heal: a backed-out note no Deposited"],
   [R, "if (leaves.has(e.state)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byPre.has(e.precommitment!)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byNull.has(e.nullifier!)) throw", "if (false) throw", T, "evmRestore refuses"],
@@ -27,15 +50,15 @@ const M = [
   [R, "    if (changeOurs) put(cref,", "    if (true) put(cref,", T, "released elsewhere"],
   [R, "    w.secretKey.fill(0);\n", "", "test/pool-zeroing.test.ts", "evmRestore zeroes"],
   // the walk and the follow
-  [R, "(P) => byPre.has(P)", "() => false", T, "restore of a seeded chain"],
+  [R, "match: { kind: \"pre\", precommitments: [...byPre.keys()] }", "match: { kind: \"pre\", precommitments: [] }", T, "restore of a seeded chain"],
   [R, "const j = jOf(ref);", "const j = 0;", T, "restore of a seeded chain"],
   [R, "const cValue = note.leaf.value - e.value;", "const cValue = 0n;", T, "restore of a seeded chain"],
-  [R, "    if (ref.kind === \"deposit\") seconds({ id: \"U\", s: ref.s, i: ref.i });\n", "", T, "restore of a seeded chain"],
-  [R, "    asDeposit({ kind: \"move\", l, j });\n", "", T, "restore of a seeded chain"],
-  [R, "    seconds({ id: \"V\", l, j });\n", "", T, "restore of a seeded chain"],
-  [R, "    seconds({ id: \"A\", l, j });\n", "", T, "restore of a seeded chain"],
-  [R, "      asDeposit({ kind: \"return\", c, l, j });\n", "", T, "restore of a seeded chain"],
-  [R, "      seconds({ id: \"R\", c, l, j });\n", "", T, "restore of a seeded chain"],
+  [R, "    if (ref.kind === \"deposit\") yield* seconds({ id: \"U\", s: ref.s, i: ref.i });\n", "", T, "restore of a seeded chain"],
+  [R, "    yield* asDeposit({ kind: \"move\", l, j });\n", "", T, "restore of a seeded chain"],
+  [R, "    yield* seconds({ id: \"V\", l, j });\n", "", T, "restore of a seeded chain"],
+  [R, "    yield* seconds({ id: \"A\", l, j });\n", "", T, "restore of a seeded chain"],
+  [R, "      yield* asDeposit({ kind: \"return\", c, l, j });\n", "", T, "restore of a seeded chain"],
+  [R, "      yield* seconds({ id: \"R\", c, l, j });\n", "", T, "restore of a seeded chain"],
   // W's tokens, the order, the lag
   [R, "wallets[k]!.tokens = s.token === null || tokens.includes(s.token) ? tokens : [...tokens, s.token].sort();", "wallets[k]!.tokens = tokens;", T, "outside any list"],
   [R, "    [order[i], order[x]] = [order[x]!, order[i]!];\n", "", T, "no read names a note"],

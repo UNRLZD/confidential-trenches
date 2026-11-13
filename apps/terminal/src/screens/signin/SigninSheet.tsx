@@ -8,7 +8,7 @@ import { HopLine } from "./HopLine.tsx";
 import { Icon } from "./Icon.tsx";
 import type { IconName } from "./Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
-import { restoreModel, restoreView, showRestore, signinWays, usd } from "./model.ts";
+import { failLine, restoreModel, restoreView, showRestore, signinWays, usd } from "./model.ts";
 import type { RestoreModel } from "./model.ts";
 import { useSigninSheet, useSigninSource } from "./source.tsx";
 import { text, W } from "./Word.tsx";
@@ -94,8 +94,17 @@ function Ways({ route }: { route: RouteId }) {
   const src = useSigninSource();
   const ways = signinWays(src.snapshot.state);
   const off = !src.moneyOn;
+  // the way tapped in this sheet: a failure the signing page then reports for it shows under it (failLine), never while
+  // its hop is still opening
+  const [tapped, setTapped] = useState<SigninWay | null>(null);
+  const fail = tapped && src.locked !== controlOf(tapped) ? failLine(src.snapshot.state, tapped) : null;
   return (
     <div className="sgn-ways">
+      {fail?.kind === "nopasskey" && (
+        <div className="hopline sgn-fail" role="status" data-signin-failed="nopasskey">
+          <span className="warn"><W id="noPasskeyHere" /></span>
+        </div>
+      )}
       {ways.map((way, i) => {
         const control = controlOf(way);
         return (
@@ -107,7 +116,7 @@ function Ways({ route }: { route: RouteId }) {
               data-control={control}
               disabled={off || src.locked !== null}
               aria-busy={src.locked === control}
-              onClick={() => void src.hop("signin.open", { way }, { route, sheet: SHEET_ID, control, fields: {} })}
+              onClick={() => (setTapped(way), void src.hop("signin.open", { way }, { route, sheet: SHEET_ID, control, fields: {} }))}
             >
               <span className="ic">
                 <Icon name={WAYS[way].icon} size={18} stroke={1.2} />
@@ -117,6 +126,12 @@ function Ways({ route }: { route: RouteId }) {
               </span>
             </button>
             <HopLine control={control} />
+            {fail?.kind === "cancelled" && fail.way === way && (
+              <div className="hopline sgn-fail" role="status" data-signin-failed={way}>
+                <span className="warn"><W id="cancelled" /></span>
+                <span className="t2"><W id="nothingSent" /></span>
+              </div>
+            )}
           </Fragment>
         );
       })}

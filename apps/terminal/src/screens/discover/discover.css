@@ -5,6 +5,7 @@
   --bg-panel: #0f0f0f; --border-panel: #1f1f1f; --border-strong: #2a2a2a; --border-row: #171717; --bg-row-hover: #141414;
   --bg-floating: #151515; --border-active: #383838;
   --acc: #50e397; --sell: #ff5d4d; --sell-rgb: 255, 93, 77; --warn: #f2b543; --warn-rgb: 242, 181, 67; --blue: #5b8cff;
+  --blue-rgb: 91, 140, 255; --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   display: flex; flex-direction: column; gap: 10px; padding: 0 8px 8px;
   height: calc(100dvh / var(--fit-zoom, 1) - 92px); min-height: 0;
 }
@@ -41,7 +42,15 @@
 .dsc-sym { flex: none; max-width: 70%; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsc-name { min-width: 0; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsc-age { flex: none; font: 12px var(--font-num); color: var(--text-2); }
-.dsc-age[data-fresh="true"] { color: var(--acc); }
+/* ages count every second (Discover.tsx useClock): the age's box holds three characters from its start ("59s", "12m",
+   "23h"), so a tick never moves what follows it on the line */
+.dsc-age { min-width: 3ch; font-variant-numeric: tabular-nums; }
+/* the age is UNRLZD's pill (Discover.module.css .age): 11 px on the raised fill, blue under 30 minutes old; a fresh row
+   carries the blue edge tint (.row[data-bg="fresh"]); its box keeps the three characters inside the padding (border-box) */
+.dsc-age { min-width: calc(3ch + 12px); padding: 2px 6px; border-radius: 4px; background: var(--bg-raised); font-size: 11px; text-align: center; }
+.dsc-age[data-fresh="true"] { background: var(--blue); color: var(--bg-page, #0a0a0a); }
+.dsc-row[data-bg="fresh"], .dsc-prow[data-bg="fresh"] { background: linear-gradient(90deg, rgba(var(--blue-rgb), 0.07), transparent 60%); }
+.dsc-row[data-bg="fresh"]:hover { background: var(--bg-row-hover); }
 .dsc-mp { flex: none; display: flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 4px; background: var(--bg-raised); color: var(--text-2); font: 11px var(--font-num); font-variant-numeric: tabular-nums; }
 .dsc-mp[data-level="warn"] { background: rgba(var(--warn-rgb), 0.13); color: var(--warn); }
 .dsc-mp[data-level="sell"] { background: rgba(var(--sell-rgb), 0.13); color: var(--sell); }
@@ -59,7 +68,8 @@
 .dsc-chg[data-dir="up"] { color: var(--acc); }
 .dsc-chg[data-dir="down"] { color: var(--sell); }
 .dsc-vol { font-size: 12px; color: var(--text-2); }
-.dsc .sk { display: block; background: #181818; border-radius: 6px; }
+.dsc .sk { display: block; background: #181818; border-radius: 6px; animation: dsc-skp 1.2s linear infinite; }
+@keyframes dsc-skp { 50% { opacity: 0.55; } }
 .dsc .sk.dsc-skc { border-radius: 50%; }
 
 /* the phone: one list, the tabs (S5.18) */
@@ -254,4 +264,43 @@
   .dsc-dockpanel .dsc-qb { height: 50px; border-radius: 16px; background: #161616; border-color: #2a2a2a; box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5); }
   .dsc-dockpanel .dsc-qblabel { flex: 1; font-size: 14px; }
   .dsc-dockpanel .dsc-qbinput { width: 96px; }
+}
+
+/* The live list's motion (Discover.tsx Rows; UNRLZD styles/arrive.module.css, Discover.module.css and
+   mobile/discover/Discover.module.css): transform and opacity only, so nothing on the page moves.
+   - the arrival cue on a desktop row new to the top of its column: a live-blue wash under the row's content, up in
+     110 ms and gone by 900 ms, and one damped 2 px nudge over 300 ms (none while the pointer is on the column) */
+.dsc-arrive { position: relative; isolation: isolate; }
+.dsc-arrive::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(90deg, rgba(var(--blue-rgb), 0.11), rgba(var(--blue-rgb), 0.025) 72%); opacity: 0; animation: dsc-glow 900ms ease var(--arrive-delay, 0ms) both; }
+@keyframes dsc-glow { 0% { opacity: 0; animation-timing-function: var(--ease-out); } 12% { opacity: 1; animation-timing-function: ease; } 100% { opacity: 0; } }
+.dsc-arrive[data-nudge="true"] { animation: dsc-nudge 300ms var(--ease-out) var(--arrive-delay, 0ms) both; }
+@keyframes dsc-nudge { 0% { transform: translateX(0); } 30% { transform: translateX(2px); } 65% { transform: translateX(-1px); } 100% { transform: translateX(0); } }
+/* - the phone's new first row drops in */
+.dsc-drop { animation: dsc-drop 0.5s ease-out both; }
+@keyframes dsc-drop { from { opacity: 0; transform: translateY(-16px) scale(0.98); } }
+/* - the first rows fade in from the skeleton (a slot mounts once; a refresh redraws it in place, no fade) */
+.dsc-rows > [role="listitem"]:nth-child(-n + 10) { animation: dsc-in 180ms var(--ease-out) both; }
+@keyframes dsc-in { from { opacity: 0; } }
+/* - a desktop column's Pause: shown while the column is hovered or focused (a hover never pauses), the white pill while
+     paused (UNRLZD Column .pauseTouch / .pause) */
+.dsc-cpause { position: relative; flex: none; height: 26px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 13px; background: var(--bg-raised); color: var(--text-2); font: 600 11px var(--font-ui); white-space: nowrap; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 150ms var(--ease-out); }
+.dsc-col:hover .dsc-cpause, .dsc-col:focus-within .dsc-cpause, .dsc-cpause[data-on="true"] { opacity: 1; pointer-events: auto; }
+.dsc-cpause[data-on="true"] { background: var(--text-1); color: var(--bg-page); }
+@media (hover: none) and (pointer: coarse) {
+  .dsc-cpause { opacity: 1; pointer-events: auto; }
+}
+/* - the filter sheet rises and its scrim fades (UNRLZD mobile/Sheet.module.css); the launchpad menu opens from its corner */
+.dsc-fscrim { animation: dsc-fade 0.25s ease-out both; }
+@keyframes dsc-fade { from { opacity: 0; } }
+.dsc-fpanel.ph { animation: dsc-rise 0.38s cubic-bezier(0.2, 0.85, 0.2, 1) both; }
+@keyframes dsc-rise { from { transform: translateY(100%); } }
+.dsc-padmenu { transform-origin: top left; transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out); }
+@starting-style { .dsc-padmenu { opacity: 0; transform: scale(0.98); } }
+@media (prefers-reduced-motion: reduce) {
+  .dsc-arrive::before { animation-duration: 600ms; background: linear-gradient(90deg, rgba(var(--blue-rgb), 0.08), transparent 72%); }
+  .dsc-arrive[data-nudge="true"], .dsc-drop, .dsc-rows > [role="listitem"], .dsc-fpanel.ph, .dsc-fscrim, .dsc .sk { animation: none; }
+}
+/* - the phone's tabs and chips stay on top of the list as it scrolls, over a blur (UNRLZD mobile Discover .sticky) */
+@media (max-width: 767.98px) {
+  .dsc-stick { position: sticky; top: 56px; z-index: 30; background: rgba(10, 10, 10, 0.92); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
 }

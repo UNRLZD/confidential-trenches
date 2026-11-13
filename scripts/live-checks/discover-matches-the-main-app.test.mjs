@@ -7,6 +7,9 @@
 // or a non-image drawn, served rows none of which draws, a row served none that asks for one, a broken image, three
 // columns at 1024, or a page error fails; a served row whose answer is no image and draws initials passes, named. The
 // record holds no name or symbol.
+// Planted for card app-faults-seen-on-124 (release 123's and 124's runs: "1440 solana:26EUqU…: served icon true, logo
+// null"): a coin served icon false in the lists the page drew and true in a read after it draws no logo and passes;
+// served true in the page's own lists with no logo still fails; one that turned between the page's reads is named.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -89,4 +92,25 @@ test("planted: three columns at 1024, a page error, under three pad colours at 1
   assert.equal(mut((rec) => {
     for (const r of w(rec, "1440").rows) if (r.pad !== "pump.fun") r.pad = null, (r.ring = "var(--blue)");
   }).verdict, "FAIL");
+});
+
+test("planted: icon flags are the page's own lists answers, not a read after it", () => {
+  // a coin the page was served with icon false, which the helper turned true before a later read: no logo, rightly
+  const flip = (pageIcon) =>
+    mut((rec) => {
+      const wd = w(rec, "1440");
+      const row = wd.rows.find((r) => r.inView && r.logo === null && r.initials);
+      // every width's page was served the flags of the recorded read; the read after them names the coin's logo
+      for (const x of rec.widths) x.icons = Object.fromEntries(x.rows.map((r) => [r.id, rec.icons[r.id] ?? false]));
+      rec.icons[row.id] = true;
+      wd.icons[row.id] = pageIcon;
+    });
+  const later = flip(false);
+  assert.equal(later.verdict, "PASS", later.lines.join("\n"));
+  const own = flip(true);
+  assert.equal(own.verdict, "FAIL", own.lines.join("\n"));
+  assert.ok(own.lines.some((l) => /^BAD 1440 [a-z]+:\S+: served icon true, logo null$/.test(l)), own.lines.join("\n"));
+  const turned = flip("both");
+  assert.equal(turned.verdict, "PASS", turned.lines.join("\n"));
+  assert.ok(turned.lines.some((l) => /^OK 1440: logos as served .*; 1 turned between the page's reads, not judged\)$/.test(l)), turned.lines.join("\n"));
 });
