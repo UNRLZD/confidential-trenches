@@ -99,6 +99,11 @@ export const EXEMPT: Readonly<Record<string, Exempt>> = {
   // the helper (a server file, never on the page): its sender key signs its own relay sends (signEvmTx, signEvmTx4),
   // and it checks a sell's signature against the Sell digest (evmSellDigest reads SELL_TYPE); it signs no sell
   "apps/helper/src/pool/evm.ts": { curve: ["signEvmTx", "signEvmTx4"], sellType: ["SELL_TYPE"] },
+  // the exit tool's EVM release and sends with the words alone (card exit-evm-pools-with-the-words): W's Withdraw
+  // signature of a release paying W itself, as rules/pool.ts signEvmWithdraw; and one type 2 send, G's only the pool's
+  // withdraw call at value 0, W's only a plain send with no data (evm-exit.ts evmExitSignSend), so neither signs a pool
+  // deposit or a sell; test/pool-evm-exit.test.ts
+  "packages/wallet/src/pool/evm-exit.ts": { curve: ["evmExitWithdrawSignature", "evmExitSignSend"] },
 };
 /** The wallet's note pick, and the name it is exported by. */
 export const NEXT_NOTE = { file: "packages/wallet/src/pool/evm-restore.ts", name: "evmNextNote" };
