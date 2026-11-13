@@ -365,7 +365,8 @@ else {
         const r = poolCoinQuote({ origin_asset: POOL_COIN_ASSET[chain], amount: formatPoolUnits(amount, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) }, { id });
         await r.after;
         const a = r.answer();
-        return a === null || "error" in a ? { error: a === null ? "failed" : a.error } : { address: a.result.deposit_address };
+        const minOut = a === null || "error" in a ? null : parsePoolUnits(a.result.min_amount_out, 6);
+        return a === null || "error" in a || minOut === null ? { error: a === null ? "failed" : "error" in a ? a.error : "quote_check_failed" } : { address: a.result.deposit_address, minOut };
       },
       onChain: onPoolChain,
       withdraw: (chain) => {
@@ -377,6 +378,8 @@ else {
       put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
       now: () => Date.now(),
       signal,
+      // pool to pool: Cash's own move on into the other pool (the mover's move), sized by the deposit's least USDC
+      onward: { move: (to, usdc, id) => cashMoverNow().move(to, usdc, id), fee: () => withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal }).fee() },
     });
     toCashOf = { signal, m };
     return m;

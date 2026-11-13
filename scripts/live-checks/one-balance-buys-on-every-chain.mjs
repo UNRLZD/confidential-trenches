@@ -17,7 +17,10 @@
 //   - poolMove: the page answers pool.move and pool.move.dry itself, each checked first (the pair, the amount), and a
 //     dry from Cash names the route the v2 lite paper names: out of the vault, NEAR Intents, into the pool;
 //   - toCash: a pool's money moves back to Cash (src/pool-to-cash.ts): its dry names pool_out, NEAR Intents to NEAR,
-//     into the vault, and the page quotes each pool coin (SOL, Base's and Robinhood's ETH on 1Click) into Cash.
+//     into the vault, and the page quotes each pool coin (SOL, Base's and Robinhood's ETH on 1Click) into Cash;
+//   - poolToPool: a pool's money moves into another chain's pool through Cash (src/pool-to-cash.ts onward): its dry
+//     names the six steps (out of the pool and into the vault, then out of the vault and into the other pool), and
+//     once in the vault Cash's own move of the USDC less its fee runs under `<op>/on`.
 // The numbers (sizes, the wait's bound, each refusal) are packages/signpage/test/cash-to-pool.test.ts,
 // pool-kinds-cash.test.ts and kit-version.test.ts at the released commit. The recorded answers are facts() over
 // packages/signpage/scripts/build-app.mjs's build (mainnet, as SIGN_HOST serves) and SIGN_HOST as served before.
@@ -70,6 +73,15 @@ const STRIP = new RegExp(`${N}!==\`pool\\.buy\\.dry\`\\)return ${N};let\\{with_c
 /** pool.move's kind, its ask checked before the mover is asked; and a move from Cash's steps (group 1: the chain). */
 const MOVE_KIND = new RegExp(`\\{"pool\\.move":\\((${N}),${N}\\)=>\\{let (${N})=${N}\\(\\1\\);if\\(\`error\`in \\2\\)return \\2;`);
 const TO_CASH_STEPS = new RegExp(`\\[\\{step:\`pool_out\`,chain:(${N})\\},\\{step:\`intents\`,chain:\`near\`\\},\\{step:\`vault_in\`,chain:\`near\`\\}\\]`);
+/** The six steps of a pool-to-pool dry: the pool-to-Cash steps' function, then the Cash-to-pool steps' one. */
+const POOL_TO_POOL = (js) => {
+  const out = new RegExp(`(?:^|[^\\w$])(${N})=${N}=>\\[\\{step:\`pool_out\``).exec(js)?.[1];
+  const into = new RegExp(`(?:^|[^\\w$])(${N})=${N}=>\\[\\{step:\`vault_out\``).exec(js)?.[1];
+  if (out === undefined || into === undefined) return false;
+  const six = new RegExp(`steps:\\[\\.\\.\\.${esc(out)}\\(${N}\\),\\.\\.\\.${esc(into)}\\(${N}\\)\\]`);
+  const onward = new RegExp(`\\.onward\\.move\\(${N},${N}-${N},\`\\$\\{${N}\\}/on\`\\)`);
+  return six.test(js) && onward.test(js);
+};
 const MOVE_STEPS = new RegExp(`\\[\\{step:\`vault_out\`,chain:\`near\`\\},\\{step:\`intents\`,chain:(${N})\\},\\{step:\`pool_in\`,chain:\\1\\}\\]`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the marks read from it. */
@@ -85,6 +97,7 @@ export function facts(index, js) {
     version: /`1\.15`/.test(js),
     poolMove: MOVE_KIND.test(js) && /"pool\.move\.dry":(?:\([\w$,]*\)|[\w$]+)=>\{/.test(js) && MOVE_STEPS.test(js),
     toCash: TO_CASH_STEPS.test(js) && ["sol", "base", "hood"].every((c) => js.includes(`nep141:${c}.omft.near`)),
+    poolToPool: POOL_TO_POOL(js),
   };
 }
 
@@ -96,6 +109,7 @@ export const SAYS = Object.freeze({
   version: "the signing page does not read a kit 1.15 app in full: with_cash and the move step never reach the app that draws them",
   poolMove: "the signing page answers no pool.move or pool.move.dry of its own, checked first, with Cash's route out of the vault, over NEAR Intents and into the pool: Portfolio's Move cannot move money between chains",
   toCash: "the signing page moves no pool's money back to Cash (out of the pool, over NEAR Intents, into the vault, for SOL and both ETH pools): money in a pool cannot reach Cash or another chain",
+  poolToPool: "the signing page moves no pool's money into another chain's pool (out of the pool into the vault, then Cash's own move into the other pool): Portfolio's Move between two pools cannot run",
 });
 
 /** The verdict on an answer { index, sha384, move, tap, max, level, version, poolMove }. */
