@@ -64,9 +64,10 @@
 //     stalled at the end of each try that has one (a new stalled op when the newest is not), so the app's sheet shows
 //     it with Retry (S19.5), and every request that joins the run after it is told stalled (review P2-1). Both go to
 //     the host's `step5`.
-//   - Step 5 is owed by a marker (RESTORE_IDS_KEY: the pinned pools' scopes) from the walk's end until a try reads
-//     every id and finds nothing; a signed-in load that finds it runs the restore again in the background, no op
-//     written (resume).
+//   - Step 5 is owed by a marker (RESTORE_IDS_KEY: the pinned pools' scopes and step 5's progress) from the walk's end
+//     until a try reads every id and finds nothing. A signed-in load walks every pool once in the background, as a pass,
+//     after its first proof pass, no op written (resume), and reads step 5 again when the marker owes it; a later call
+//     of resume in the same page life (a landing, a resync) runs only while the marker owes step 5.
 //   - The testnet build reads no deposit id: it makes no 1Click quote (src/pool-deposit-address.ts), so no id of its
 //     pools can hold a trace on NEAR.
 //   - A pool deposit's money can also wait at its one-time account U_X on the pool's own chain (1Click's delivery there,
@@ -662,7 +663,9 @@ export type PoolRestore = {
   kind(params: Record<string, unknown>, ctx: KindContext): Deferred<"restore">;
   /** After a sign-in: a run under its own op id when the note store holds no note; resolves to its walk's end (or null). */
   auto(): Promise<RestoreStage | null>;
-  /** A signed-in load: a run with no op when step 5 is owed (RESTORE_IDS_KEY); resolves to its walk's end (or null). */
+  /** A signed-in load: a run with no op that walks every pool once as a pass, after the first proof pass, and reads step
+   *  5 when the marker owes it (RESTORE_IDS_KEY); a later call in this page life (any run started since) runs only while
+   *  the marker owes step 5. Resolves to its walk's end (or null). */
   resume(): Promise<RestoreStage | null>;
   /** This tab signed out: the run in flight stops. */
   signedOut(): void;
@@ -705,8 +708,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   let abort: AbortController | null = null;
   // step 5's pass and answers, kept across this page's runs (a Retry reads on) and dropped at a sign out
   let keep = idReadKeep();
-  // this tab's sign outs, counted: a resume that waited across one reads nothing after it
+  // this tab's sign outs, counted: a resume or a Sync that waited across one reads nothing after it
   let epoch = 0;
+  // a run started in this page life: a later resume (a landing's, a resync's) walks again only while step 5 is owed
+  let started = false;
 
   // one run: the walk, its notes written (the floor), `first` told; then step 5, tried again by itself on a read that did
   // not answer. `owed`: a load's resume, which reads nothing when another tab removed the marker meanwhile
@@ -843,7 +848,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           }
           // the notes only: no W's Transfer logs are read (wallets: false)
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
-          const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin), turn, ...walkers }), signal);
+          const r = await letGo(evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin, kind), turn, ...walkers }), signal);
           await floor(chainOf(p), p.scope, r.notes);
           // each buy's record again from its own transaction, so a restored W sells on its buy's route (card
           // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings: no read names W or a transaction); the testnet
@@ -1066,6 +1071,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   };
 
   const start = (owed: boolean): Run => {
+    started = true;
     if (run) return run;
     // each follower's op record, its writes in order (a stage never lands before the one it follows)
     type Follower = { id: string; created: number; writes: Promise<void>; progress?: (s: RestoreStage) => void; told: () => void; fin: Promise<void> };
@@ -1134,13 +1140,15 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   // a run the user asks for (a Sync, a Retry, a sign-in's) while a load's resume runs: that run stops (its own reads,
   // as passes, and its step 5 on the marker it took on) and the asked run starts on its own, walking every pool and
   // reading every lane whole, so a Sync is never told the resume's end (review P2-1 of 6e2d24a7d)
-  const fresh = async (): Promise<Run> => {
+  // null: this tab signed out meanwhile (no run after a sign out, review P3-1 of 44ba573da)
+  const fresh = async (): Promise<Run | null> => {
+    const e = epoch;
     while (run?.owed) {
       const r = run;
       abort?.abort();
       await r.done;
     }
-    return start(false);
+    return epoch === e ? start(false) : null;
   };
 
   return {
@@ -1148,7 +1156,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       let yes = false;
       const after = h.signedIn().then(async (s) => {
         if (!(yes = s)) return;
-        (await fresh()).follow(ctx.id, (stage) => ctx.progress(stage));
+        const r = await fresh();
+        if (r === null) return void (yes = false);
+        r.follow(ctx.id, (stage) => ctx.progress(stage));
       });
       return { after, answer: () => (yes ? { result: { stage: "started" } } : { error: "not_allowed" }) };
     },
@@ -1163,6 +1173,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       }
       if (!empty || (run && !run.owed)) return null;
       const r = await fresh();
+      if (r === null) return null;
       r.follow(crypto.randomUUID());
       return r.first;
     },
@@ -1171,10 +1182,13 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       const e = epoch;
       const live = async (): Promise<boolean> => epoch === e && !run && (await h.signedIn()) && epoch === e && !run;
       if (!(await live())) return null;
+      // a later call in this page life (a landing, a resync, a sign-in screen while signed in): only while step 5 is owed
+      const owes = async (): Promise<boolean> => !started || (await (await h.store()).get("meta", RESTORE_IDS_KEY)) !== undefined;
+      if (!(await owes())) return null;
       // the load's first proofs go first: no read of the resume starts before they settle (one that has not started by
       // the bound is not waited for), so Max is never later for the resume
       if (h.firstPass) await h.firstPass(h.firstPassMaxMs ?? RESUME_FIRST_PASS_MAX_MS);
-      if (!(await live())) return null;
+      if (!(await live()) || !(await owes())) return null;
       // every pool walked once as a pass; step 5 after it while the marker owes it, no sooner than the marker's next
       return start(true).first;
     },

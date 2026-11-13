@@ -191,10 +191,13 @@ const HISTORY = new Map<string, readonly EvmRpc[]>();
  *  fallback: a keyless seat keeps a window of logs only), one operator, then MAINNET_POOL_HISTORY's, each held to the
  *  pool's root at the head like any source and never taken on its word alone; none on a testnet, whose helper has no
  *  route for the chain. The same RPCs each time (one pace per provider). */
-export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => {
+export const pageEvmHistory = (pin: EvmPoolPin, kind: ReadKind = "trade"): readonly EvmRpc[] => {
   if (pin.network !== "base" && pin.network !== "robinhood") return [];
-  let h = HISTORY.get(pin.network);
-  if (h === undefined) HISTORY.set(pin.network, (h = Object.freeze([evmHelperKeyedRpc(TRADE_HELPER, pin.network), ...MAINNET_POOL_HISTORY[pin.network].map((u) => pageRpc(u))])));
+  // one list per read kind: a load's restore reads the public sources as a pass (card
+  // a-load-proves-first-and-walks-the-restore-once); the helper's keyed route keeps its own holdings queue
+  const k = `${pin.network} ${kind}`;
+  let h = HISTORY.get(k);
+  if (h === undefined) HISTORY.set(k, (h = Object.freeze([evmHelperKeyedRpc(TRADE_HELPER, pin.network), ...MAINNET_POOL_HISTORY[pin.network].map((u) => pageRpc(u, kind))])));
   return h;
 };
 /** The read of each W's asset_held (card portfolio-counts-money-an-open-buy-holds) on the finder's own route, never a
@@ -2895,7 +2898,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         let t: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([solanaFirst, new Promise<void>((r) => (t = setTimeout(r, startMs)))]).finally(() => clearTimeout(t));
       }
-      await Promise.all(firstPasses.values());
+      // an EVM chain's first pass may start while those before it run (it starts after the EVM open's settle and a
+      // notes read, review P2-b of 44ba573da): waited for too, until no new one started meanwhile
+      for (;;) {
+        const n = firstPasses.size;
+        await Promise.all(firstPasses.values());
+        if (firstPasses.size === n) break;
+      }
     },
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
     // of every queue's view: each queue's readyWith holds its view while the next one's and then `read` run, always in

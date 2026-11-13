@@ -4,8 +4,8 @@
     "bad": "main fe1ad9879's build (mainnet), before this card: a load's resume reads beside the first proof pass, as a trade, and a Sync joins it: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oGUmqaazFEVaIJhJQfs2Eq8JCqeMocdhETcU0zfZOORSRsnyLq72JLjee1lVUpvS\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-oGUmqaazFEVaIJhJQfs2Eq8JCqeMocdhETcU0zfZOORSRsnyLq72JLjee1lVUpvS",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-6pzv0hPjZd9oEvWGUzVS67e8sEtEY6gcK1Ie4OU0od8Qbhw7ybUEFeh113cF7v5s\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-6pzv0hPjZd9oEvWGUzVS67e8sEtEY6gcK1Ie4OU0od8Qbhw7ybUEFeh113cF7v5s",
     "first": true,
     "pass": true,
     "sync": true

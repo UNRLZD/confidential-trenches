@@ -8,7 +8,7 @@
 //   - pass: a load's resume reads its pools as a pass (`pass`, behind every trade's read), a run the user asks for as a
 //     trade (`pass`:`trade` on the run's owed flag, handed to the pools);
 //   - sync: a run the user asks for while a load's resume runs stops that run and starts its own (the `.owed` loop), so
-//     a Sync is never told the resume's end.
+//     a Sync is never told the resume's end, and starts none when this tab signed out meanwhile.
 // What each does is held by the card's tests (packages/signpage/test/pool-restore.test.ts L1-L10); the signed-in part
 // (Max inside seconds of a load, no helper 429, one "restore: <chain> walked" line per chain a load) is a signed-in walk.
 // The recorded answers are facts() over each tree's packages/signpage/index.html and public/app.js.
@@ -30,8 +30,9 @@ const HANDED = new RegExp(`firstPass:(${ID})=>${ID}\\?\\.firstPass\\(\\1\\)\\?\\
 const WAITS = new RegExp(`(${ID})\\.firstPass&&await \\1\\.firstPass\\(\\1\\.firstPassMaxMs\\?\\?2e4\\)`);
 // the run's read kind from its owed flag, handed to the pools (the host's, or pagePools')
 const PASS = new RegExp(`let (${ID})=(${ID})\\?\`pass\`:\`trade\`,(${ID})=(${ID})\\.pools\\?\\4\\.pools\\(\\1\\):${ID}\\(${ID},\\1\\)`);
-// a run the user asks for stops a load's resume, waits its end, then starts its own
-const SYNC = new RegExp(`for\\(;(${ID})\\?\\.owed;\\)\\{let (${ID})=\\1;${ID}\\?\\.abort\\(\\),await \\2\\.done\\}return ${ID}\\(!1\\)`);
+// a run the user asks for stops a load's resume, waits its end, then starts its own, unless this tab signed out
+// meanwhile (the epoch taken first, compared last)
+const SYNC = new RegExp(`let (${ID})=(${ID});for\\(;(${ID})\\?\\.owed;\\)\\{let (${ID})=\\3;${ID}\\?\\.abort\\(\\),await \\4\\.done\\}return (?:\\2===\\1|\\1===\\2)\\?${ID}\\(!1\\):null`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {

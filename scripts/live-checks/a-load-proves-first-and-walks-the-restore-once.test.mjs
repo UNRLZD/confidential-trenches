@@ -39,7 +39,7 @@ test("planted in a bundle: each mark broken in place FAILs", () => {
     "written:()=>void b3?.proofs().catch(()=>{}),firstPass:e=>b3?.firstPass(e)??Promise.resolve(),ux:e=>1",
     "return!await n()||(e.firstPass&&await e.firstPass(e.firstPassMaxMs??2e4),!await n())?null:l(!0).first",
     "c=async(t,i,a,s)=>{let c=i?`pass`:`trade`,l=e.pools?e.pools(c):J4(kw,c),u=1}",
-    "u=async()=>{for(;i?.owed;){let e=i;a?.abort(),await e.done}return l(!1)}",
+    "u=async()=>{let e=s;for(;i?.owed;){let t=i;a?.abort(),await t.done}return s===e?l(!1):null}",
   ].join(";");
   const at = (s) => facts("", s);
   assert.deepEqual([at(js).first, at(js).pass, at(js).sync], [true, true, true]);
@@ -49,5 +49,6 @@ test("planted in a bundle: each mark broken in place FAILs", () => {
   assert.equal(at(js.replace("i?`pass`:`trade`", "`trade`")).pass, false, "every run read as a trade");
   assert.equal(at(js.replace("e.pools(c)", "e.pools()")).pass, false, "the kind not handed to the pools");
   assert.equal(at(js.replace("a?.abort(),", "")).sync, false, "a Sync that waits the resume out");
-  assert.equal(at(js.replace("for(;i?.owed;){let e=i;a?.abort(),await e.done}", "")).sync, false, "a Sync that joins the resume");
+  assert.equal(at(js.replace("for(;i?.owed;){let t=i;a?.abort(),await t.done}", "")).sync, false, "a Sync that joins the resume");
+  assert.equal(at(js.replace("return s===e?l(!1):null", "return l(!1)")).sync, false, "a Sync that starts after this tab signed out");
 });

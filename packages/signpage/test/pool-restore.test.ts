@@ -1504,10 +1504,8 @@ test("E3: step 5 is owed by a marker (scopes only) from the walk's end; a reload
   assert.equal((await store.keys("ops")).length, before, "a resume writes no op");
   assert.deepEqual(steps, [{ retry: [], held: [], named: [], tries: 1, last: true }]);
   assert.equal(await store.get("meta", IDS_KEY()), undefined, "removed once every id is read");
-  // nothing owed: the load walks (every load does, card a-load-proves-first-and-walks-the-restore-once), no step 5
-  assert.equal(await next.resume(), "done");
-  await next.idle();
-  assert.equal(steps.length, 1, "nothing owed: no step 5");
+  // a later resume in the same page life (a landing's) with nothing owed: no run
+  assert.equal(await next.resume(), null, "nothing owed: no run");
   // a sign out drops it with the store
   await store.put("meta", IDS_KEY(), { scopes: ["1"] });
   await store.signOut();
@@ -2302,4 +2300,61 @@ test("L10: a resume whose wait spans a sign out reads nothing after it", async (
   assert.equal(await run, null);
   await w.r.idle();
   assert.deepEqual(walks, []);
+});
+
+// review P2-a of 44ba573da: a landing and a resync call resume again in the same page life; only the load's walks every
+// pool, a later one runs only while step 5 is owed
+test("L11: two resumes in one page life walk once; a later one runs while the marker owes step 5", async () => {
+  const w = await world({ pools: () => SOL_ONLY });
+  assert.equal(await w.r.resume(), "done");
+  await w.r.idle();
+  assert.equal(await w.r.resume(), null, "a second resume with nothing owed: no run");
+  await w.r.idle();
+  assert.equal(w.seen.length, 1, `walked once: ${w.seen.join(", ")}`);
+  await w.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
+  assert.equal(await w.r.resume(), "done", "step 5 owed: it runs");
+  await w.r.idle();
+  assert.equal(w.seen.length, 2);
+});
+
+// review P3-1 of 44ba573da: a Sync waiting for the load's resume it stopped, across this tab's sign out, starts no run
+test("L12: a Sync whose wait for the stopped resume spans a sign out is refused and walks nothing after it", async () => {
+  let signed = true;
+  const w0 = await world({ pools: () => SOL_ONLY });
+  let gateOpen!: () => void;
+  const gate = new Promise<void>((r) => (gateOpen = r));
+  let inFloor!: () => void;
+  const entered = new Promise<void>((r) => (inFloor = r));
+  let firstRaise = true;
+  const walks: string[] = [];
+  // the resume's floor write held in flight, so the Sync waits for it
+  const wrapped = new Proxy(w0.store, {
+    get(t, k) {
+      if (k === "raiseDepositIndex")
+        return async (s: bigint, m: number) => {
+          if (firstRaise) {
+            firstRaise = false;
+            inFloor();
+            await gate;
+          }
+          return t.raiseDepositIndex(s, m);
+        };
+      const v = Reflect.get(t, k, t);
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+  const solana = (async () => (walks.push(signed ? "signed in" : "after the sign out"), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never;
+  const r = poolRestore({ ...w0.host, store: async () => wrapped as unknown as WalletStore, solana, signedIn: async () => signed });
+  void r.resume();
+  await entered;
+  const a = api(r.kind);
+  const id = a.ask();
+  await new Promise((ok) => setTimeout(ok, 20));
+  r.signedOut();
+  signed = false;
+  gateOpen();
+  await until("the Sync answered", () => a.posted.some((m) => m.id === id && m.error !== undefined));
+  await r.idle();
+  assert.deepEqual(walks, ["signed in"], "no walk after the sign out");
+  assert.equal(a.posted.find((m) => m.id === id && m.error !== undefined)?.error?.code, "not_allowed");
 });
