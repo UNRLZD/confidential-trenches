@@ -669,7 +669,8 @@ test("review H1: the day files are hostile input: a file that does not parse, a 
 
 test("review H1: the server keeps each account's daily spend in its store (HELPER_STORE_DIR), shared with the helper it replaces", () => {
   const main = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
-  assert.match(main, /providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, /);
+  // card helper-candles-keyed-gt: CoinGecko's keyed account in the same day files
+  assert.match(main, /providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\), \.\.\.coingeckoPace\(process\.env\) \}, dayFiles\(storeDir, /);
 });
 
 for (const chain of ["solana", "base"] as const) {

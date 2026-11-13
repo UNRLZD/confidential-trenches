@@ -380,11 +380,13 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const \{ ready, warmed \} = readyGate\(warmUntilReady\(\{ lists, evmLists, token \}\), checked\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
-  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
+  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds, keyed\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
   // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
   // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health; each account's
   // daily spend in the store, shared with the helper this one replaces (review H1 of 424dce1e)
-  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
+  // card helper-candles-keyed-gt: and CoinGecko's keyed account, whose reads every chart asks first (none with no key)
+  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\), \.\.\.coingeckoPace\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
+  assert.match(main, /const keyed = createKeyed\(process\.env, holds\);/);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held, near\);/);
@@ -412,7 +414,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /^ {1,}setDefaultAutoSelectFamilyAttemptTimeout\(CONNECT_ATTEMPT_MS\);/m);
   assert.ok(CONNECT_ATTEMPT_MS > 1_000, "past the 1 s SYN resend");
   assert.match(main, /const evmLists: EvmLists = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmLists\(c, gecko, \{ holds \}\)\]\)\);/);
-  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko, slots\);/);
+  assert.match(main, /const token = solanaTokenFromEnv\(process\.env, proxy, lists, rpc, gecko, slots, keyed\);/);
   assert.match(main, /for \(const l of Object\.values\(evmLists\)\) l\.warm\(\);/);
   await new Promise<void>((ok) => helper.on("listening", () => ok()));
   const to = (helper.address() as AddressInfo).port;
@@ -896,7 +898,7 @@ test("the RPC and proxy routes: past UPSTREAM_ROUTE_MAX a client meets the same 
   }
 });
 
-test("a throttle behind a read answers the same 429 contract, never 503: the market lists, token, holders and candles, the withdraw fee (a NEAR provider's 429) and the pool fee (a pool provider's 429)", async () => {
+test("a throttle behind a read answers the same 429 contract, never 503: the market lists, token and holders, the withdraw fee (a NEAR provider's 429) and the pool fee (a pool provider's 429); the candles are a chart filling (card chart-candles-never-429)", async () => {
   const limitedRead = async () => ({ status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 9 });
   const lists = { get: limitedRead } as never;
   const token = { page: limitedRead, holders: limitedRead, candles: limitedRead } as never;
@@ -912,9 +914,12 @@ test("a throttle behind a read answers the same 429 contract, never 503: the mar
   const to = (h.address() as AddressInfo).port;
   try {
     const mint = "So11111111111111111111111111111111111111112";
-    for (const p of ["/v1/market/lists?chain=solana", `/v1/market/token?chain=solana&token=${mint}`, `/v1/market/holders?chain=solana&token=${mint}`, `/v1/market/candles?chain=solana&token=${mint}&tf=1h`]) {
+    for (const p of ["/v1/market/lists?chain=solana", `/v1/market/token?chain=solana&token=${mint}`, `/v1/market/holders?chain=solana&token=${mint}`]) {
       assert.equal(isThrottle(await call("GET", p, { origin: APP }, undefined, to)), 9, p);
     }
+    const c = await call("GET", `/v1/market/candles?chain=solana&token=${mint}&tf=1h`, { origin: APP }, undefined, to);
+    assert.equal(c.status, 200, c.body);
+    assert.deepEqual({ ...JSON.parse(c.body), as_of_ms: 0 }, { tf: "1h", candles: [], filling: true, src: "chain", as_of_ms: 0 });
     assert.equal(isThrottle(await call("GET", "/v1/withdraw/fee?token=x.near", { origin: APP }, undefined, to)), 1);
     assert.equal(isThrottle(await call("GET", `/v1/pool/fee?pool=${POOL}`, { origin: APP }, undefined, to)), 1);
   } finally {
@@ -953,6 +958,27 @@ test("review F-C: one address sending 600 off-list RPC calls of ~250 KB in one w
     await new Promise<void>((r) => (h.closeAllConnections(), h.close(() => r())));
   }
   assert.ok((statuses.get(429) ?? 0) > 0, `no 429 for one address's 600 requests in one window: ${JSON.stringify([...statuses])}`);
+});
+
+// review F-C2: one address reading a cached proxy list (250 KB) 1000 times in one window meets a 429, so it cannot make
+// the helper send 250 MB; since card chart-candles-never-429 a cache hit draws no vendor share, and the bound is the
+// proxy route's own window per address (UPSTREAM_ROUTE_MAX)
+test("review F-C2: one address reading a cached proxy list 1000 times in one window meets the route's 429 past UPSTREAM_ROUTE_MAX, from one vendor call", async () => {
+  const { UPSTREAM_ROUTE_MAX } = (await import("./server.ts")) as unknown as { UPSTREAM_ROUTE_MAX: number };
+  let t = 1_800_000_000_000;
+  let up = 0;
+  const big = JSON.stringify({ tokens: "x".repeat(250_000) });
+  const proxy = createProxy({ ...TEST_VENDOR_KEYS }, { now: () => t, fetch: async () => (up++, new Response(big, { status: 200, headers: { "content-type": "application/json" } })) });
+  const h = own(createServer(handler(COMMIT, proxy, undefined, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map(), () => t)));
+  await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
+  const to = (h.address() as AddressInfo).port;
+  const statuses = new Map<number, number>();
+  for (let i = 0; i < 1000; i++) {
+    const s = await postRaw(to, "/v1/proxy/jupiter/tokens/v2/toptrending/1h", "", "203.0.113.67");
+    statuses.set(s, (statuses.get(s) ?? 0) + 1);
+  }
+  assert.deepEqual(Object.fromEntries(statuses), { 200: UPSTREAM_ROUTE_MAX, 429: 1000 - UPSTREAM_ROUTE_MAX });
+  assert.equal(up, 1, "one vendor call");
 });
 
 // End state 5: no limit path writes or logs the address. Every console method (the helper's only logger) and every fs

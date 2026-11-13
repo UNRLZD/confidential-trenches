@@ -1,71 +1,99 @@
 {
  "good": {
   "check": "trade-box-pool",
-  "at": "2026-11-10T03:27:53.949Z",
-  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool",
-  "browser": "156.0.8078.79",
-  "entry": "/assets/index-XvbkxnaR.js",
+  "at": "2026-11-13T08:42:22.399Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the devnet pool",
+  "browser": "157.0.8103.51",
+  "entry": "/assets/index-BI-eXmgg.js",
   "runs": [
    {
     "width": "desktop",
-    "proof": "ready",
+    "state": "ready",
     "framed": true,
     "route": "token",
     "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
     "chain": "solana",
     "box": {
      "path": "pool",
-     "proof": "ready",
-     "proofText": "Proof ready",
-     "cta": "Buy DJT"
+     "proofMarks": 0,
+     "says": false,
+     "max": "Max $0.26",
+     "cta": {
+      "text": "Buy DJT",
+      "kind": "trade",
+      "busy": null,
+      "ariaDisabled": null,
+      "disabled": true
+     }
     },
     "sent": [],
     "shot": "desktop-ready.png"
    },
    {
     "width": "phone",
-    "proof": "ready",
+    "state": "ready",
     "framed": true,
     "route": "token",
     "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
     "chain": "solana",
     "box": {
      "path": "pool",
-     "proof": "ready",
-     "proofText": "Proof ready",
-     "cta": "Buy DJT"
+     "proofMarks": 0,
+     "says": false,
+     "max": "Max $0.26",
+     "cta": {
+      "text": "Buy DJT",
+      "kind": "trade",
+      "busy": null,
+      "ariaDisabled": null,
+      "disabled": true
+     }
     },
     "sent": [],
     "shot": "phone-ready.png"
    },
    {
     "width": "desktop",
-    "proof": "making",
+    "state": "making",
     "framed": true,
     "route": "token",
     "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
     "chain": "solana",
     "box": {
      "path": "pool",
-     "proof": "making",
-     "proofText": "Making proof",
-     "cta": "Buy DJT"
+     "proofMarks": 0,
+     "says": false,
+     "max": "",
+     "cta": {
+      "text": "Buy DJT",
+      "kind": "live",
+      "busy": "true",
+      "ariaDisabled": "true",
+      "disabled": false
+     }
     },
     "sent": [],
     "shot": "desktop-making.png"
    },
    {
     "width": "phone",
-    "proof": "making",
+    "state": "making",
     "framed": true,
     "route": "token",
     "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
     "chain": "solana",
     "box": {
      "path": "pool",
-     "proof": "making",
-     "proofText": "Making proof",
-     "cta": "Buy DJT"
+     "proofMarks": 0,
+     "says": false,
+     "max": "",
+     "cta": {
+      "text": "Buy DJT",
+      "kind": "live",
+      "busy": "true",
+      "ariaDisabled": "true",
+      "disabled": false
+     }
     },
     "sent": [],
     "shot": "phone-making.png"
@@ -81,7 +109,6 @@
   "runs": [
    {
     "width": "desktop",
-    "proof": "ready",
     "framed": true,
     "route": "token",
     "box": {
@@ -91,11 +118,11 @@
      "cta": "Buy ZEC"
     },
     "sent": [],
-    "shot": "desktop-ready.png"
+    "shot": "desktop-ready.png",
+    "state": "ready"
    },
    {
     "width": "phone",
-    "proof": "ready",
     "framed": true,
     "route": "token",
     "box": {
@@ -105,11 +132,11 @@
      "cta": "Buy ZEC"
     },
     "sent": [],
-    "shot": "phone-ready.png"
+    "shot": "phone-ready.png",
+    "state": "ready"
    },
    {
     "width": "desktop",
-    "proof": "making",
     "framed": true,
     "route": "token",
     "box": {
@@ -119,11 +146,11 @@
      "cta": "Buy ZEC"
     },
     "sent": [],
-    "shot": "desktop-making.png"
+    "shot": "desktop-making.png",
+    "state": "making"
    },
    {
     "width": "phone",
-    "proof": "making",
     "framed": true,
     "route": "token",
     "box": {
@@ -133,7 +160,8 @@
      "cta": "Buy ZEC"
     },
     "sent": [],
-    "shot": "phone-making.png"
+    "shot": "phone-making.png",
+    "state": "making"
    }
   ]
  },
@@ -146,7 +174,6 @@
   "runs": [
    {
     "width": "desktop",
-    "proof": "ready",
     "framed": true,
     "route": "token",
     "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
@@ -156,54 +183,156 @@
      "proof": null,
      "proofText": null,
      "cta": "Buy Anthropic"
+    },
+    "sent": [],
+    "shot": "desktop-ready.png",
+    "state": "ready"
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy Anthropic"
+    },
+    "sent": [],
+    "shot": "phone-ready.png",
+    "state": "ready"
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy Anthropic"
+    },
+    "sent": [],
+    "shot": "desktop-making.png",
+    "state": "making"
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy Anthropic"
+    },
+    "sent": [],
+    "shot": "phone-making.png",
+    "state": "making"
+   }
+  ]
+ },
+ "main": {
+  "check": "trade-box-pool",
+  "at": "2026-11-13T08:42:29.894Z",
+  "source": "harness, terminal build of main 4c1826a75, the stand-in shell signed in with the devnet pool",
+  "browser": "157.0.8103.51",
+  "entry": "/assets/index-JGC1LmlZ.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "state": "ready",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "proofMarks": 1,
+     "says": true,
+     "max": "Proof readyMax $0.26",
+     "cta": {
+      "text": "Buy DJT",
+      "kind": "trade",
+      "busy": null,
+      "ariaDisabled": null,
+      "disabled": true
+     }
     },
     "sent": [],
     "shot": "desktop-ready.png"
    },
    {
     "width": "phone",
-    "proof": "ready",
+    "state": "ready",
     "framed": true,
     "route": "token",
-    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
-    "chain": "robinhood",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
-     "path": "vault",
-     "proof": null,
-     "proofText": null,
-     "cta": "Buy Anthropic"
+     "path": "pool",
+     "proofMarks": 1,
+     "says": true,
+     "max": "Proof readyMax $0.26",
+     "cta": {
+      "text": "Buy DJT",
+      "kind": "trade",
+      "busy": null,
+      "ariaDisabled": null,
+      "disabled": true
+     }
     },
     "sent": [],
     "shot": "phone-ready.png"
    },
    {
     "width": "desktop",
-    "proof": "making",
+    "state": "making",
     "framed": true,
     "route": "token",
-    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
-    "chain": "robinhood",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
-     "path": "vault",
-     "proof": null,
-     "proofText": null,
-     "cta": "Buy Anthropic"
+     "path": "pool",
+     "proofMarks": 1,
+     "says": true,
+     "max": "Making proof",
+     "cta": {
+      "text": "Buy DJT",
+      "kind": "trade",
+      "busy": null,
+      "ariaDisabled": null,
+      "disabled": true
+     }
     },
     "sent": [],
     "shot": "desktop-making.png"
    },
    {
     "width": "phone",
-    "proof": "making",
+    "state": "making",
     "framed": true,
     "route": "token",
-    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
-    "chain": "robinhood",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
-     "path": "vault",
-     "proof": null,
-     "proofText": null,
-     "cta": "Buy Anthropic"
+     "path": "pool",
+     "proofMarks": 1,
+     "says": true,
+     "max": "Making proof",
+     "cta": {
+      "text": "Buy DJT",
+      "kind": "trade",
+      "busy": null,
+      "ariaDisabled": null,
+      "disabled": true
+     }
     },
     "sent": [],
     "shot": "phone-making.png"

@@ -1,13 +1,15 @@
 // node --test scripts/live-checks/balances-per-chain.test.mjs: the live check's verdict on recorded runs
 // (balances-per-chain.answers.json), each read by balances-per-chain.mjs collect() in headless Chromium: the terminal on
 // APP_HOST's real name inside the stand-in shell that answers `state` with three pools.
-//   good:     this card's terminal build with Portfolio mounted on /portfolio (the one route line of card
-//             app-portfolio-mount; this branch does not mount it) (--harness): every pool a row at both widths, in
-//             cents, the pool sent with no ready drawn with dashes: PASS;
+//   good:     card screens-never-say-proof's terminal build, recorded 13 Nov (--harness): every pool a row at both widths,
+//             in its own asset, one Balance column header and no Ready or Pending anywhere in the block, though the
+//             answer sends a ready for one pool: PASS;
+//   main:     main's build 4c1826a75 before that card (--harness --build), which still draws Ready and Pending columns
+//             and a data-ready and data-pending mark on each row: FAIL (13 Nov 07:53Z: removed, the app names no proof);
 //   deployed: APP_HOST as served on 3 Nov before this card and app-portfolio-mount deploy: /portfolio draws no pool
 //             block: FAIL;
-//   planted from good: a pool row missing, a false 0 in Ready where the pool sent none, a SOL balance drawn as dollars
-//             ("$12.50"), and the wrong asset: each FAIL.
+//   planted from good: a pool row missing, a Ready or Pending header or text back, a data-ready mark on a row, a SOL
+//             balance drawn as dollars ("$12.50"), and the wrong asset: each FAIL.
 // Each answer's `at` is when it was recorded.
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -79,25 +81,38 @@ test("planted: the wrong asset on a row: FAIL", () => {
   assert.equal(r.ok, false);
 });
 
-test("planted: a false 0 where the pool sent no ready: FAIL", () => {
-  const r = mut((rec) => {
-    const x = rec.runs.find((y) => y.width === "desktop").rows.find((y) => y.chain === "base");
-    x.ready = "0";
-    x.pending = "250000000000000000";
-    x.text[2] = "0";
-    x.text[3] = "0.25";
-  });
+test("main's build before the card: Ready and Pending columns and marks on each row: FAIL", () => {
+  const r = judge(ANSWERS.main);
   assert.equal(r.ok, false);
-  assert.ok(bad(r).some((l) => /base sends no ready/.test(l)), bad(r).join("\n"));
+  for (const w of ["phone", "desktop"]) {
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w} /portfolio: the column headers are ["Balance","Ready","Pending"], want one, Balance`)), r.lines.join("\n"));
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w} /portfolio: the block says "Ready"`)), r.lines.join("\n"));
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w} /portfolio: solana row marks ["data-ready","data-pending"]`)), r.lines.join("\n"));
+  }
+  // what main got right stays right: the rows, their assets and balances
+  assert.ok(!bad(r).some((l) => /balance \d+ base units|drawn \[/.test(l)), bad(r).join("\n"));
 });
 
-test("planted: a ready drawn as a dash where the pool sent one: FAIL", () => {
-  const r = mut((rec) => {
-    const x = rec.runs.find((y) => y.width === "phone").rows.find((y) => y.chain === "solana");
-    x.ready = "none";
-    x.text[2] = "—";
-  });
-  assert.equal(r.ok, false);
+test("good: one Balance header, no text of Ready or Pending, no mark on a row, and the answer still sends a ready", () => {
+  for (const x of ANSWERS.good.runs) {
+    assert.deepEqual(x.headers, ["Balance"], x.width);
+    assert.doesNotMatch(x.blockText, /ready|pending/i, x.width);
+    assert.ok(x.rows.every((y) => y.marks.length === 0), x.width);
+  }
+  assert.ok(ANSWERS.good.answer.pools.some((p) => p.ready !== undefined));
+});
+
+test("planted: a Ready or Pending header, text of either, or a data-ready mark on a row: FAIL", () => {
+  const head = mut((rec) => void (rec.runs[0].headers = ["Balance", "Ready", "Pending"]));
+  assert.ok(bad(head).some((l) => /the column headers are \["Balance","Ready","Pending"\]/.test(l)), bad(head).join("\n"));
+  assert.equal(mut((rec) => void (rec.runs[1].headers = [])).ok, false);
+  assert.equal(mut((rec) => void delete rec.runs[1].headers).ok, false);
+  const text = mut((rec) => void (rec.runs[1].blockText += " Pending —"));
+  assert.ok(bad(text).some((l) => /the block says "Pending"/.test(l)), bad(text).join("\n"));
+  assert.equal(mut((rec) => void delete rec.runs[0].blockText).ok, false);
+  const mark = mut((rec) => void (rec.runs[0].rows.find((x) => x.chain === "solana").marks = ["data-ready"]));
+  assert.ok(bad(mark).some((l) => /solana row marks \["data-ready"\]/.test(l)), bad(mark).join("\n"));
+  assert.equal(mut((rec) => void delete rec.runs[0].rows.find((x) => x.chain === "solana").marks).ok, false);
 });
 
 // a page as the check hooks it: Playwright's console and pageerror events, emitted by hand

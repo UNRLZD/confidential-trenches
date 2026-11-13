@@ -91,6 +91,8 @@ test("SIGN_HOST's policy lets the mainnet build reach no testnet NEAR RPC (card 
   for (const h of ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org", "https://near-testnet.drpc.org"]) assert.ok(!connect.split(" ").includes(h), `SIGN_HOST's connect-src names ${h}`);
   for (const h of ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://archival-rpc.mainnet.near.org", "https://archival-rpc.mainnet.fastnear.com"]) assert.ok(connect.split(" ").includes(h), `SIGN_HOST's connect-src lacks ${h}`);
   for (const h of ["https://archival-rpc.testnet.near.org", "https://archival-rpc.testnet.fastnear.com"]) assert.ok(!connect.split(" ").includes(h), `SIGN_HOST's connect-src names ${h}`); // near-rpc-operators: one operator (testnet's archival list: on no mainnet policy)
+  // a W is named to no public provider on a restore (card near-holdings-restore): no FastNEAR API host on any build
+  for (const t of [headers, signHeadersFor("testnet", headers)]) for (const h of ["https://api.fastnear.com", "https://test.api.fastnear.com"]) assert.ok(!(/connect-src ([^;]*);/.exec(t)?.[1] ?? "").split(" ").includes(h), `a build's connect-src names ${h}`);
 });
 
 test("the testnet build carries the devnet pool's pins and the testnet providers", async () => {

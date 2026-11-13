@@ -235,6 +235,88 @@ test("the next buy's proof: a landed deposit starts one proof, a second deposit 
   assert.deepEqual((await states(ns)).sort(), ["UNSPENT", "UNSPENT"]);
 });
 
+// card a-load-proves-first-and-walks-the-restore-once: the restore's resume walks after firstPass(startMs). A Solana pass
+// that has started is waited for to its end, however long; with none started, firstPass waits at most startMs (the
+// restore hands it RESUME_FIRST_PASS_MAX_MS) for one to start, never for good
+test("firstPass(startMs): a started pass is waited to its end; with none started it is bounded by startMs", async () => {
+  // settled within a turn of the timers: true once it resolved, false while it is still waiting
+  const settled = (p: Promise<unknown>): Promise<boolean> => Promise.race([p.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 50))]);
+  // no note, no pass ever started: bounded by its startMs
+  {
+    const { w } = await wallet();
+    const { pool } = fakePool();
+    const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4 });
+    assert.equal(await settled(t.firstPass(10)), true, "no pass started: it ends at its bound");
+    assert.equal(await settled(t.firstPass(60_000)), false, "no pass started: it waits for one up to its bound");
+  }
+  // a pass that started and proves slowly: waited for to its end, whatever the bound
+  {
+    const { w, ns } = await wallet();
+    const { pool, land } = fakePool();
+    const inner = signalsProver();
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const prover = { ...inner, prove: async (...a: Parameters<typeof inner.prove>) => (await gate, inner.prove(...a)) };
+    const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4 });
+    await land(ns, await incoming(ns, null, 1));
+    const pass = t.proofs();
+    const first = t.firstPass(10);
+    assert.equal(await settled(first), false, "a started pass is waited for past the bound");
+    open();
+    await pass;
+    assert.equal(await settled(first), true, "and ends with the pass");
+    assert.equal(inner.log.filter((x) => x.startsWith("prove")).length, 1);
+  }
+});
+
+// review P2-b of 44ba573da: an EVM chain's first pass starts after the EVM open's settle and a notes read, so it can
+// begin while Solana's runs; firstPass waits for it too
+test("firstPass: an EVM first pass that starts while Solana's runs is waited for to its end", async () => {
+  const settled = (p: Promise<unknown>): Promise<boolean> => Promise.race([p.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 50))]);
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const inner = signalsProver();
+  let openSol!: () => void;
+  const solGate = new Promise<void>((r) => (openSol = r));
+  const prover = { ...inner, prove: async (...a: Parameters<typeof inner.prove>) => (await solGate, inner.prove(...a)) };
+  // a Base note of this device's, so a state read starts Base's pass; its queue's open waits on the seed, held after
+  // Solana's own open took it
+  const { evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+  const pin = EVM_POOLS["base-sepolia"]!;
+  const scope = evmPoolScopeOf(pin.pool, 84532n);
+  const ref: NoteRef = { kind: "deposit", s: scope, i: 0 };
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  await ns.add({ ref, scope, precommitment: pre, state: "UNSPENT", leaf: { value: 10n ** 15n, label, commitment: noteCommitment(10n ** 15n, label, pre), leafIndex: 0n } });
+  let openEvm!: () => void;
+  const evmGate = new Promise<void>((r) => (openEvm = r));
+  let seeds = 0;
+  let opened = false;
+  const rpc = (k: string) => Object.assign(async () => Promise.reject(new Error("offline")), { url: `https://${k}.invalid` });
+  const t = testnetPool({ store: async () => w, seed64: async () => (seeds++ === 0 ? SEED64.slice() : (await evmGate, SEED64.slice())) }, {
+    pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4,
+    evmPin: (c) => (c === "base" ? pin : undefined), evmRpcs: (c) => (c === "base" ? [rpc("a"), rpc("b")] : null),
+    evmSync: () => ({ events: async () => Promise.reject(new Error("offline")) }),
+    evmQueuePool: () => ((opened = true), { ...({} as Pool<unknown>), id: "evm:x", scope, now: async () => Promise.reject(new Error("offline")), trees: async () => Promise.reject(new Error("offline")) }) as unknown as Pool<unknown>,
+    wait: async () => {},
+  });
+  await land(ns, await incoming(ns, null, 1));
+  const solPass = t.proofs();
+  const first = t.firstPass(10);
+  // Base's first pass starts while Solana's is held: its queue's open waits on the seed
+  void t.stateRead();
+  for (let i = 0; i < 200 && seeds < 2; i++) await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(seeds >= 2 && !opened, "Base's pass started, its open held");
+  openSol();
+  await solPass;
+  assert.equal(await settled(first), false, "Solana's pass ended, Base's runs: still waiting");
+  openEvm();
+  assert.equal(await settled(first), true, "and ends with Base's");
+  assert.ok(opened, "Base's queue opened");
+  await t.signedOut();
+});
+
 test("card signpage-pool-pins: a page that loads with the pool's notes landed opens the queue on a state read; its proofs reach ready() and the watchers hear the pass", async () => {
   const { w, ns } = await wallet();
   const { pool, land } = fakePool();
@@ -2374,4 +2456,62 @@ test("(review 4 P2, the page's host) an EVM withdraw of a note another page's qu
   assert.equal(planned?.["op-w"], undefined, "the keep-out cleared at the run's end");
   assert.equal(state, "UNSPENT");
   assert.match(op?.cause ?? "", /^Error\b/, "the part's stop at its bind on the op's record");
+});
+
+test("a proof queue's opening loads the prover's withdraw circuit before the pass reads the pool's trees (card max-ready-seconds-after-a-load)", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  const order: string[] = [];
+  const inner = signalsProver();
+  const prover = { ...inner, load: async (c: string) => void order.push(`load ${c}`), prove: async (c: string, i: unknown) => (order.push("prove"), inner.prove(c as never, i as never)) } as typeof inner;
+  const trees = pool.trees.bind(pool);
+  const planted = { ...pool, trees: async (...a: Parameters<typeof pool.trees>) => (order.push("trees"), trees(...a)) };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool: planted, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, locks: null });
+  await land(ns, await incoming(ns, null, 1));
+  await t.proofs();
+  assert.deepEqual(order.slice(0, 2), ["load withdraw", "trees"], order.join(", "));
+  assert.ok(order.includes("prove"));
+  await t.signedOut();
+});
+
+// the page's real prover (src/prover-host.ts) on a stand-in worker: the queue's opening starts its one worker and loads
+// the withdraw circuit before the pass's first proof, which finds it loaded; signed out, no worker starts
+test("a proof queue's opening starts the page's one prover worker and loads the withdraw circuit once, before its first proof; signed out, nothing starts (card max-ready-seconds-after-a-load)", async () => {
+  const { proverHost } = await import("../src/prover-host.ts");
+  const inner = signalsProver();
+  const log: string[] = [];
+  let n = 0;
+  const start = () => {
+    const k = ++n;
+    log.push(`start ${k}`);
+    return {
+      load: async (c: string) => void log.push(`load ${k} ${c}`),
+      prove: async (c: string, i: unknown) => (log.push(`prove ${k} ${c}`), inner.prove(c as never, i as never)),
+      terminate: () => void log.push(`stop ${k}`),
+    } as never;
+  };
+  for (const signedIn of [false, true]) {
+    log.length = 0;
+    n = 0;
+    const { w, ns } = await wallet();
+    const { pool: inPool, land } = fakePool();
+    const trees = inPool.trees.bind(inPool);
+    const pool = { ...inPool, trees: async (...a: Parameters<typeof inPool.trees>) => (log.push("trees"), trees(...a)) };
+    const host = proverHost(start);
+    const seed64 = async () => {
+      if (!signedIn) throw new Error("no seed: signed out");
+      return SEED64.slice();
+    };
+    const t = testnetPool({ store: async () => w, seed64 }, { pool, prover: host, hardwareConcurrency: 4, locks: null });
+    await land(ns, await incoming(ns, null, 1));
+    await t.proofs().catch(() => {});
+    if (!signedIn) assert.deepEqual(log.filter((x) => x !== "trees"), [], "signed out: no worker starts");
+    else {
+      assert.deepEqual(log.slice(0, 3), ["start 1", "load 1 withdraw", "trees"], log.join(", "));
+      assert.ok(log.includes("prove 1 withdraw"), log.join(", "));
+      assert.equal(log.filter((x) => x.startsWith("start")).length, 1, "one worker");
+      assert.equal(log.filter((x) => x.startsWith("load")).length, 1, "loaded once");
+    }
+    await t.signedOut();
+  }
 });

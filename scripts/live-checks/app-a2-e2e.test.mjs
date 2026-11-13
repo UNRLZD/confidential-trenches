@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { judge, STUB_SHAPE } from "./app-a2-e2e.mjs";
+import { judge, MARKS, marksOf, STUB_SHAPE } from "./app-a2-e2e.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./app-a2-e2e.answers.json", import.meta.url), "utf8"));
 const bad = (v) => v.lines.filter((l) => l.startsWith("BAD")).join("\n");
@@ -30,6 +30,13 @@ test("recorded bad answer: an origin the helper does not serve gets no CORS on e
   assert.equal(v.ok, false);
   assert.match(bad(v), /market token CORS for APP_HOST: none/);
   assert.match(bad(v), /devnet RPC CORS for SIGN_HOST: none/);
+});
+
+test("13 Nov 07:53Z: removed, the app names no proof: no proof mark is one the run drives, and a script without it holds every mark", () => {
+  assert.ok(!MARKS.some((m) => /proof/i.test(m)), MARKS.join(", "));
+  assert.ok(MARKS.every((m) => ANSWERS.good.app.js[0].marks[m] > 0));
+  assert.ok(!("trade-proof" in ANSWERS.good.app.js[0].marks));
+  assert.deepEqual(Object.keys(marksOf("x=`trade-proof`,y=`trade-max`")), MARKS);
 });
 
 test("the stub's shape is the run's fixture: a row and a risk the token page draws from", () => {

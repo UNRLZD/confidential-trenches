@@ -9,13 +9,17 @@
 //         quote's address; every follower stage draws its own state, Deposited only at done, the balance moving only
 //         then; Done closes the sheet and Portfolio reads $73.18; the sheet again, Solana picked draws the form with Get
 //         address on, which sends one pool.address for Solana, the asset and 15, draws the pool quote's address, every
-//         pool stage its own state, Ready only at in_pool; Done closes it and Portfolio's Solana row reads the pool: PASS;
+//         pool stage its own state, the pool's Balance (`.damt-done[data-balance]`) only at in_pool, with the label Balance and
+//         no Ready or Pending; Done closes it and Portfolio's Solana row reads the pool's balance: PASS (re-recorded 13 Nov on
+//         card screens-never-say-proof's build; 13 Nov 07:53Z: removed, the app names no proof);
+//   main:  main's build 4c1826a75 (--harness --build), which still draws the in-pool state's Ready and Pending and Portfolio's
+//         data-ready: FAIL;
 //   bad:  main's build before this card (--harness --build of main 56bcd0d0): Solana is Not available, never
 //         fundable, its Get address off, no pool.address quote, no pool stage: FAIL.
 // Planted from the good run: a closed pool that sends a quote or keeps Get address on, a tile with another chain's mark,
 // a row out of order, the sheet opening on a pool, Deposited before done, a balance that moves early, Portfolio not
-// updated; Solana's quote sent to another chain or as a vault quote, another address, a pool stage out of turn, Ready
-// before in_pool, Portfolio's Solana row not updated.
+// updated; Solana's quote sent to another chain or as a vault quote, another address, a pool stage out of turn, the
+// pool's Balance before in_pool, a Ready or Pending mark in the in-pool state, Portfolio's Solana row not updated.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -40,7 +44,7 @@ const fails = (r, re) => {
 test("recorded good answer: the To row, the closed pools asking nothing, the vault's deposit and Solana's pool deposit through every stage, Portfolio updated: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  for (const x of ANSWERS.good.runs) assert.deepEqual([x.tiles.map((t) => t.dest), x.tiles.map((t) => t.fundable), x.totalAfter, x.open.stages.at(-1), x.open.rowAfter], [["near", "solana", "base", "robinhood"], ["yes", "yes", "no", "no"], "$73.18", "pool-in", { balance: "410000000", ready: "400000000" }], `${x.width} ${x.scheme}`);
+  for (const x of ANSWERS.good.runs) assert.deepEqual([x.tiles.map((t) => t.dest), x.tiles.map((t) => t.fundable), x.totalAfter, x.open.stages.at(-1), x.open.rowAfter], [["near", "solana", "base", "robinhood"], ["yes", "yes", "no", "no"], "$73.18", "pool-in", { balance: "410000000" }], `${x.width} ${x.scheme}`);
 });
 
 test("recorded bad answer: main's build before this card keeps Solana Not available: FAIL", () => {
@@ -86,16 +90,31 @@ test("planted: a quote with an extra field, a dry quote per key, another address
   fails(mut((rec) => (run(rec, "desktop", "light").framed = false)), /^BAD desktop light: not inside SIGN_HOST's shell/);
 });
 
-test("planted: Solana's quote to another chain, as a vault quote or twice, another address, a pool stage out of turn, Ready before in_pool, Portfolio's row not updated fail", () => {
+test("main's build before the screens named no proof: the in-pool state draws Ready (data-ready) and Pending: FAIL", () => {
+  const r = judge(ANSWERS.main);
+  assert.equal(r.ok, false);
+  for (const n of ["phone dark", "phone light", "desktop dark", "desktop light"]) {
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${n}: the pool's Balance per pool stage`)), `${n}\n${r.lines.join("\n")}`);
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${n}: the in-the-pool state's label "Ready"`)), `${n}\n${r.lines.join("\n")}`);
+  }
+  // what main got right stays right: the stages, the vault's deposit, the pool's quote
+  assert.ok(!bad(r).some((l) => /pool stages draw|Get address sends|fundable tiles/.test(l)), bad(r).join("\n"));
+});
+
+test("planted: Solana's quote to another chain, as a vault quote or twice, another address, a pool stage out of turn, the pool's Balance before in_pool, Portfolio's row not updated fail", () => {
   fails(mut((rec) => (run(rec, "phone", "dark").open.asked[0].chain = "base")), /^BAD phone dark: solana's Get address sends/);
   fails(mut((rec) => run(rec, "desktop", "dark").open.asked.push({ type: "deposit.quote" })), /^BAD desktop dark: solana's Get address sends/);
   fails(mut((rec) => run(rec, "phone", "light").open.asked.push({ ...run(rec, "phone", "light").open.asked[0] })), /^BAD phone light: solana's Get address sends/);
   fails(mut((rec) => (run(rec, "desktop", "light").open.address = "0xdead")), /^BAD desktop light: solana's address state S4\.13 draws 0xdead/);
   fails(mut((rec) => (run(rec, "phone", "dark").open.stages[1] = "pool-in")), /^BAD phone dark: solana's pool stages draw/);
-  fails(mut((rec) => (run(rec, "desktop", "dark").open.readies[2] = "0.4")), /^BAD desktop dark: Ready per pool stage/);
-  fails(mut((rec) => (run(rec, "phone", "light").open.readies[7] = null)), /^BAD phone light: Ready per pool stage/);
+  fails(mut((rec) => (run(rec, "desktop", "dark").open.poolBalances[2] = "0.41")), /^BAD desktop dark: the pool's Balance per pool stage/);
+  fails(mut((rec) => (run(rec, "phone", "light").open.poolBalances[7] = null)), /^BAD phone light: the pool's Balance per pool stage/);
+  fails(mut((rec) => (run(rec, "phone", "light").open.poolBalances[7] = "0.4")), /^BAD phone light: the pool's Balance per pool stage/);
+  fails(mut((rec) => (run(rec, "desktop", "dark").open.inPool.marks = 1)), /^BAD desktop dark: the in-the-pool state's label "Balance" with 1 data-ready or data-pending marks/);
+  fails(mut((rec) => (run(rec, "desktop", "dark").open.inPool.label = "Ready")), /^BAD desktop dark: the in-the-pool state's label "Ready"/);
+  fails(mut((rec) => delete run(rec, "desktop", "dark").open.inPool), /^BAD desktop dark: the in-the-pool state's label null with unread/);
   fails(mut((rec) => (run(rec, "desktop", "light").open.rowAfter = null)), /^BAD desktop light: Portfolio's solana row after reads null/);
-  fails(mut((rec) => (run(rec, "desktop", "light").open.rowBefore = { balance: "1", ready: "1" })), /^BAD desktop light: Portfolio's solana row before/);
+  fails(mut((rec) => (run(rec, "desktop", "light").open.rowBefore = { balance: "1" })), /^BAD desktop light: Portfolio's solana row before/);
   fails(mut((rec) => (run(rec, "phone", "dark").open.getOn = false)), /^BAD phone dark: solana picked draws S4\.3, Get address OFF/);
   fails(mut((rec) => (run(rec, "phone", "dark").open.closed = false)), /^BAD phone dark: solana's Done leaves the sheet open/);
 });

@@ -29,9 +29,11 @@
 //   - the sheet opened again, Solana picked: the form with Get address on, no deposit.dry; typing 15 and Get address
 //     sends pool.address with Solana, the asset and 15 only, and the pool quote's own address draws (S4.13); every pool
 //     stage draws its own state, posted in turn on that one pool_deposit op (waiting, in transit, failed, short,
-//     refunded, the refund move, expired, then in the pool); Ready only at in_pool, with what state.pools holds ready
-//     for Solana, which the stand-in sets in that same state as the real page does once the notes read on two RPCs;
-//   - Done closes the sheet, and Portfolio's Solana row reads that balance and ready (absent before).
+//     refunded, the refund move, expired, then in the pool); the pool's Balance (`.damt-done[data-balance]`) only at
+//     in_pool, with what state.pools holds for Solana, which the stand-in sets in that same state as the real page does
+//     once the notes read on two RPCs. 13 Nov 07:53Z: removed, the app names no proof: the sheet shows the label Balance
+//     and no Ready or Pending (no [data-ready] or [data-pending]), though the state also sends a ready;
+//   - Done closes the sheet, and Portfolio's Solana row reads that balance (data-balance only; absent before).
 // A screenshot of the To row, a pool picked, the addresses and the deposited states is kept per width and scheme.
 // After: app
 //   node scripts/live-checks/deposit-to-pool.mjs [--shots <dir>] [--record <file>]
@@ -64,9 +66,10 @@ export const OPEN = "solana";
  *  asset, and the checked quote to it (min out in SOL); Base and Robinhood refused not_allowed. */
 export const U_SOL = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 export const POOL_ANSWERS = { solana: { address: U_SOL, asset: "SOL", quote: { deposit_address: ADDRESS, origin_asset: NEAR.origin_asset, amount_in: AMOUNT, min_amount_out: "0.4", time_estimate_s: 37 } } };
-/** state.pools once the notes read on two RPCs: 0.41 SOL, 0.4 of it ready to buy (base units as Portfolio's row keeps them). */
+/** state.pools once the notes read on two RPCs: 0.41 SOL, 0.4 of it ready to buy (the screen shows the balance alone;
+ *  Portfolio's row keeps it in base units). */
 export const SOL_POOL = { chain: "solana", asset: "SOL", balance: "0.41", ready: "0.4" };
-export const SOL_ROW = { balance: "410000000", ready: "400000000" };
+export const SOL_ROW = { balance: "410000000" };
 /** The pool stages posted in turn (since_ms 12 s back on each stage the kit allows it), and the state each draws. */
 export const POOL_STAGES = [
   [{ stage: "waiting" }, "S4.14"],
@@ -144,8 +147,9 @@ export function judge(rec) {
     say(o.addressState === "S4.13" && o.address === ADDRESS, `${n}: ${OPEN}'s address state ${o.addressState ?? "none"} draws ${o.address === ADDRESS ? "the pool quote's own address" : (o.address ?? "no address")}`);
     const ps = POOL_STAGES.map(([, s]) => s);
     say(same(o.stages, ps), `${n}: ${OPEN}'s pool stages draw ${JSON.stringify(o.stages ?? [])}, want ${JSON.stringify(ps)}`);
-    const readies = o.readies ?? [];
-    say(readies.length === POOL_STAGES.length && readies.slice(0, -1).every((x) => x === null) && readies.at(-1) === SOL_POOL.ready, `${n}: Ready per pool stage ${JSON.stringify(readies)}, want none until in_pool, then ${SOL_POOL.ready}`);
+    const bals = o.poolBalances ?? [];
+    say(bals.length === POOL_STAGES.length && bals.slice(0, -1).every((x) => x === null) && bals.at(-1) === SOL_POOL.balance, `${n}: the pool's Balance per pool stage ${JSON.stringify(bals)}, want none until in_pool, then ${SOL_POOL.balance}`);
+    say(o.inPool?.label === "Balance" && o.inPool?.marks === 0, `${n}: the in-the-pool state's label ${JSON.stringify(o.inPool?.label ?? null)} with ${o.inPool?.marks ?? "unread"} data-ready or data-pending marks, want Balance and none`);
     say(o.rowBefore === null, `${n}: Portfolio's ${OPEN} row before ${o.rowBefore === null ? "absent" : JSON.stringify(o.rowBefore)}`);
     say(o.closed === true, `${n}: ${OPEN}'s Done ${o.closed ? "closes the sheet" : "leaves the sheet open"}`);
     say(same(o.rowAfter, SOL_ROW), `${n}: Portfolio's ${OPEN} row after reads ${JSON.stringify(o.rowAfter ?? null)}, want ${JSON.stringify(SOL_ROW)}`);
@@ -191,7 +195,7 @@ async function press(page, loc, touch) {
 
 /** Portfolio's pool row for `chain` (portfolio/Portfolio.tsx PoolRows: base units), or null when none is drawn. */
 const poolRow = (f, chain) =>
-  f.locator(`[data-pool='${chain}']`).filter({ visible: true }).first().evaluate((e) => ({ balance: e.getAttribute("data-balance"), ready: e.getAttribute("data-ready") }), null, { timeout: 1_000 }).catch(() => null);
+  f.locator(`[data-pool='${chain}']`).filter({ visible: true }).first().evaluate((e) => ({ balance: e.getAttribute("data-balance") }), null, { timeout: 1_000 }).catch(() => null);
 
 /**
  * pool.address in the stand-in shell (app-in-shell.mjs answers only the kinds it is given, the same answer for any
@@ -311,7 +315,7 @@ async function runOne(browser, w, scheme, shots, route) {
     run.totalAfter = await total(f);
     await shot(page, "portfolio-after");
 
-    // the sheet again, Solana's pool: the form, Get address, the pool quote's address, the pool stages, Ready, Portfolio
+    // the sheet again, Solana's pool: the form, Get address, the pool quote's address, the pool stages, the pool's Balance, Portfolio
     const o = (run.open = {});
     o.rowBefore = await poolRow(f, OPEN);
     await f.locator("[data-action='deposit']").filter({ visible: true }).first().click({ timeout: 5_000 }).catch(() => {});
@@ -336,13 +340,14 @@ async function runOne(browser, w, scheme, shots, route) {
     o.address = await f.locator(`${SHEET} [data-address]`).first().getAttribute("data-address", { timeout: 1_000 }).catch(() => null);
     await shot(page, "pool-address");
     o.stages = [];
-    o.readies = [];
+    o.poolBalances = [];
     for (const [facts, want] of POOL_STAGES) {
       await page.evaluate(({ x, pool }) => window.__ctPoolPush({ ...x, ...(x.stage === "expired" ? {} : { since_ms: Date.now() - 12_000 }) }, x.stage === "in_pool" ? [pool] : undefined), { x: facts, pool: SOL_POOL });
       await waitState(f, want);
       o.stages.push(await sheetState(f));
-      o.readies.push(await f.locator(`${SHEET} [data-ready]`).first().getAttribute("data-ready", { timeout: 300 }).catch(() => null));
+      o.poolBalances.push(await f.locator(`${SHEET} .damt-done[data-balance]`).first().getAttribute("data-balance", { timeout: 300 }).catch(() => null));
     }
+    o.inPool = await f.locator(`${SHEET} .ddone`).first().evaluate((e) => ({ label: e.querySelector(".dsub")?.textContent?.trim() ?? null, marks: e.querySelectorAll("[data-ready], [data-pending]").length }), null, { timeout: 1_000 }).catch(() => null);
     await shot(page, "pool-in");
     await f.locator("[data-control='deposit-done']").filter({ visible: true }).first().click({ timeout: 3_000 }).catch(() => {});
     await page.waitForTimeout(300);

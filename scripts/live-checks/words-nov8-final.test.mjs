@@ -1,9 +1,10 @@
 // node --test scripts/live-checks/words-nov8-final.test.mjs: the live check's verdict replays recorded answers
-// (words-nov8-final.answers.json), each read on 2026-11-08 by words-nov8-final.mjs collect():
-//   good: this card's checkout (--local): the terminal's fresh build holds the 18 kept words as final entries, the signing
+// (words-nov8-final.answers.json), each read on 2026-11-13 by words-nov8-final.mjs collect():
+//   good: this card's checkout (--local): the terminal's fresh build holds the 16 kept words as final entries and none of
+//         the removed texts ("Proof ready", "Making proof"; 13 Nov 07:53Z: removed, the app names no proof), the signing
 //         page's committed bundle holds the 18 held and withdraw texts and writes data-draft-copy only through its key
 //         helper, the two key sets naming only the unpicked words: PASS;
-//   bad:  SIGN_HOST and APP_HOST as deployed before this card, read over https: the kept words are drafts there: FAIL.
+//   bad:  a terminal build of main 4c1826a75 (--local --build), which still draws the two proof words: FAIL.
 // Planted from the good answer: one host's script lost a marker, a script the host did not answer, a page naming no script,
 // a host this check does not know, no host at all. The markers themselves are run over the signing page's own bundle
 // (the committed public/app.js) and over minified snippets in the shapes the terminal's build writes.
@@ -12,7 +13,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_WORDS, appFinal, found, judge, KEPT, MARKERS, NOT_SHIPPED, scriptsOf, signMarks } from "./words-nov8-final.mjs";
+import { APP_WORDS, appFinal, found, judge, KEPT, MARKERS, NOT_SHIPPED, REMOVED_TEXTS, removedIn, scriptsOf, signMarks } from "./words-nov8-final.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -28,18 +29,32 @@ test("recorded good answer: every kept word final on both hosts: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   for (const h of ["sign", "app"]) assert.deepEqual(new Set(ANSWERS.good.hosts[h].js.flatMap((f) => f.found)), new Set(MARKERS[h]));
-  assert.equal(MARKERS.app.length, 18);
+  assert.equal(MARKERS.app.length, 16);
+  assert.ok(ANSWERS.good.hosts.app.js.every((f) => Array.isArray(f.removed) && f.removed.length === 0));
   assert.equal(MARKERS.sign.length, 21);
 });
 
-test("recorded bad answer: the hosts before this card draw the kept words as drafts: FAIL", () => {
+test("recorded bad answer: main's build still draws the two proof words: FAIL", () => {
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
-  const b = bad(r.lines);
-  assert.ok(b.some((l) => /^BAD sign: the scripts lack 3 of 21: no draft mark for a fixed word, the vault form's draft keys, the pool form's draft keys$/.test(l)), r.lines.join("\n"));
-  const app = b.find((l) => l.startsWith("BAD app: the scripts lack 17 of 18"));
-  assert.ok(app, r.lines.join("\n"));
-  for (const [id] of APP_WORDS.filter(([id]) => !NOT_SHIPPED.includes(id))) assert.ok(app.includes(`final ${id}`), id);
+  assert.deepEqual(bad(r.lines), ["BAD app: the scripts still hold the removed texts: Proof ready, Making proof"], r.lines.join("\n"));
+  assert.deepEqual(ANSWERS.bad.hosts.app.js[0].removed, REMOVED_TEXTS);
+});
+
+test("planted: one removed text back in a script, or an answer that does not say, fails", () => {
+  const one = mut((rec) => void (rec.hosts.app.js[0].removed = ["Making proof"]));
+  assert.deepEqual(bad(one.lines), ["BAD app: the scripts still hold the removed text: Making proof"]);
+  const second = mut((rec) => rec.hosts.app.js.push({ url: "/assets/b.js", status: 200, found: [], removed: ["Proof ready"] }));
+  assert.equal(second.ok, false);
+  assert.ok(bad(second.lines).some((l) => /still hold the removed text: Proof ready$/.test(l)), second.lines.join("\n"));
+  const silent = mut((rec) => void delete rec.hosts.app.js[0].removed);
+  assert.deepEqual(bad(silent.lines), ["BAD app: the answer does not say which removed texts each script holds"]);
+});
+
+test("the removed texts are read in a script's text, in any quoting", () => {
+  assert.deepEqual(removedIn("x={a:`Proof ready`}"), ["Proof ready"]);
+  assert.deepEqual(removedIn('y="Making proof";z=\'Proof ready\''), ["Proof ready", "Making proof"]);
+  assert.deepEqual(removedIn("x={a:`Proof`,b:`ready`}"), []);
 });
 
 test("planted: one marker lost on either host fails, naming it", () => {
@@ -49,10 +64,10 @@ test("planted: one marker lost on either host fails, naming it", () => {
   assert.equal(sign.ok, false);
   assert.ok(bad(sign.lines).some((l) => /^BAD sign: the scripts lack 1 of 21: no draft mark for a fixed word$/.test(l)), sign.lines.join("\n"));
   const app = mut((rec) => {
-    rec.hosts.app.js[0].found = rec.hosts.app.js[0].found.filter((m) => m !== "final trade.proofReady");
+    rec.hosts.app.js[0].found = rec.hosts.app.js[0].found.filter((m) => m !== "final trade.poolBare");
   });
   assert.equal(app.ok, false);
-  assert.ok(bad(app.lines).some((l) => /^BAD app: the scripts lack 1 of 18: final trade\.proofReady$/.test(l)), app.lines.join("\n"));
+  assert.ok(bad(app.lines).some((l) => /^BAD app: the scripts lack 1 of 16: final trade\.poolBare$/.test(l)), app.lines.join("\n"));
 });
 
 test("planted: a script the host did not answer, a page naming no script, an unknown host, no host: each fails", () => {
@@ -82,12 +97,11 @@ test("the signing page's own bundle: every marker, and a draft mark written for 
 test("the terminal's build: a kept word is final only with its pick and a helper that sets draft:!1", () => {
   const def = (n, d) => `${n}=(e,t)=>({text:e,source:t,draft:!${d}})`;
   const call = (n, text, pick) => `x={k:${n}(\`${text}\`,\`${pick}; drafted on card x\`)}`;
-  assert.equal(appFinal("Proof ready", KEPT, `${def("dm", 1)};${call("dm", "Proof ready", KEPT)}`), true);
-  assert.equal(appFinal("Proof ready", KEPT, `${def("dm", 1)};${call("dm", "Proof ready", KEPT)}`), true);
-  assert.equal(appFinal("Proof ready", KEPT, `${def("dm", 0)};${call("dm", "Proof ready", KEPT)}`), false, "the helper makes drafts");
-  assert.equal(appFinal("Proof ready", KEPT, `${def("dm", 1)};x={k:dm(\`Proof ready\`,\`card trade-box-pool: the chain's pool\`)}`), false, "no pick on its source");
-  assert.equal(appFinal("Proof ready", KEPT, call("dm", "Proof ready", KEPT)), false, "no definition of the helper");
-  assert.equal(appFinal("Proof ready", KEPT, `${def("dm", 1)};${call("dm", "Making proof", KEPT)}`), false, "another word");
+  assert.equal(appFinal("Pool", KEPT, `${def("dm", 1)};${call("dm", "Pool", KEPT)}`), true);
+  assert.equal(appFinal("Pool", KEPT, `${def("dm", 0)};${call("dm", "Pool", KEPT)}`), false, "the helper makes drafts");
+  assert.equal(appFinal("Pool", KEPT, `${def("dm", 1)};x={k:dm(\`Pool\`,\`card trade-box-pool: the chain's pool\`)}`), false, "no pick on its source");
+  assert.equal(appFinal("Pool", KEPT, call("dm", "Pool", KEPT)), false, "no definition of the helper");
+  assert.equal(appFinal("Pool", KEPT, `${def("dm", 1)};${call("dm", "Making proof", KEPT)}`), false, "another word");
   // a literal entry (the search placeholder)
   const lit = (d) => `O={placeholder:{text:\`Name, symbol or address\`,source:\`8 Nov 19:40Z, kept as drawn; from R5 P.dc("Name, symbol or address", "CN-10")\`,draft:!${d}}}`;
   assert.equal(appFinal("Name, symbol or address", "8 Nov 19:40Z, kept as drawn", lit(1)), true);

@@ -9,6 +9,10 @@
 //   run4: a paid run whose buy filled ("Filled 7.8s Final", W read on both RPCs) and whose sell was tapped once and sent
 //         one pool.sell, which SIGN_HOST refused at +23.7 s with nothing sent (the box: Failed, Retry; W still holds the
 //         coin on both RPCs): every buy line and the sell's tap ok, FAIL on the sell's end.
+// The runs were recorded on 10 Nov, when the box drew a proof line the run waited on; on 13 Nov 07:53Z the app named no
+// proof, and the records' box fields were renamed to the run's new wait (proofReady to maxShown, and proofMs, the time
+// to the proof, dropped for priceMs, the time the Max line first read above $0, now maxMs; the line's "Proof ready " lead
+// cut), nothing else touched.
 // Planted from run2: W read apart on the two RPCs, a buy tx not read back on one RPC, a host past the devnet RPC and the
 // helper.
 import assert from "node:assert/strict";
@@ -25,7 +29,7 @@ const mut = (f) => {
   f(rec);
   return judge(rec);
 };
-const BUY = [/signed in the no-PRF way/, /pool.address answered U/, /U funded \d+ lamports/, /pool.deposit answered/, /on the pool path: pool/, /Proof ready drawn/, /the buy tapped once: 1/, /one pool.buy sent: 1/, /the box ended "Filled/, /the buy's transactions sent: 1/, /every transaction read back ok/, /CSP violations: none/, /hosts reached/];
+const BUY = [/signed in the no-PRF way/, /pool.address answered U/, /U funded \d+ lamports/, /pool.deposit answered/, /on the pool path: pool/, /Max drawn/, /the buy tapped once: 1/, /one pool.buy sent: 1/, /the box ended "Filled/, /the buy's transactions sent: 1/, /every transaction read back ok/, /CSP violations: none/, /hosts reached/];
 
 test("the free run fails: no funding, no tap, no buy", () => {
   const v = judge(answers.free);
@@ -80,6 +84,15 @@ test("a buy line that is not ok fails the buy verdict; a sell line never does", 
   assert.equal(four((r) => (r.buy.end = "Slow 89.9s")).buy.ok, false);
   assert.equal(four((r) => (r.hosts = [...r.hosts, "api.mainnet-beta.solana.com"])).buy.ok, false);
   assert.equal(four((r) => (r.sell = { taps: 0, asks: 0 })).buy.ok, true);
+});
+
+test("13 Nov 07:53Z: the run waits on the Max line above $0, not on a proof mark, and a run whose Max never showed fails", () => {
+  assert.equal(/trade-proof|proofReady|proofMs|PROOF_MS|data-proof/.test(SRC), false);
+  assert.match(SRC, /\[data-testid="trade-max"\]/);
+  for (const k of ["run2", "run3", "run4"]) assert.deepEqual(Object.keys(answers[k].box).sort(), ["line", "maxMs", "maxShown", "path"], k);
+  assert.ok(ok(judge(answers.run4), /Max drawn \(19257 ms after the deposit answered\)/), bad(judge(answers.run4)));
+  assert.match(bad(mut((r) => (r.box.maxShown = false))), /Max drawn \(\d+ ms after the deposit answered\)/);
+  assert.match(bad(mut((r) => delete r.box.maxShown)), /Max drawn/);
 });
 
 test("W read apart on the two RPCs, or none after the buy, fails", () => {

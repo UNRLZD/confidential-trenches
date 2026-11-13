@@ -159,7 +159,8 @@ test("the ready set: up to the provers' count, largest chunk first, each its run
   }
   assert.equal(new Set(ready.map((r) => r.wallet.address)).size, 3, "no W serves two notes");
   for (const b of pool.binds) {
-    assert.deepEqual(Object.keys(b).sort(), ["chunk", "deadlineMs", "epochStartMs", "refundPrecommitment", "wallet"]);
+    // and the pool's time the queue read and a hook for the bind's own read (card max-ready-seconds-after-a-load): no secret
+    assert.deepEqual(Object.keys(b).sort(), ["chunk", "deadlineMs", "epochStartMs", "now", "readNow", "refundPrecommitment", "wallet"]);
     assert.deepEqual(Object.keys(b.wallet).sort(), ["address", "publicKey"]);
   }
   // the $1.50 note covers no rung: never proved; a taken note makes room for the next largest
