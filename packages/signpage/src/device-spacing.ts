@@ -4,10 +4,14 @@
 // device's one address, whoever is signed in. It holds two times and nothing else: no address, no account, no W. Only
 // read and written, never a reason for a request; the frame never opens it (only a rent back's pass does).
 
-/** When this device last sent a transaction from a W for a rent back (a close or a sweep, in a sale's own run or a
- *  leftover pass), ms, and the gap drawn for it (review 2 P3-e of c0dd55d02): no other leftover W's pass sends before
- *  at + gap, so no two of the device's Ws close or sweep within a gap of each other and their timing never groups them
- *  as one user. */
+/** When this device last sent a transaction from a W into the pool (a sale, with its deposit back in the same
+ *  transaction, or a rent back's close or sweep), ms, and the gap drawn for it (review 2 P3-e of c0dd55d02, review P2-1
+ *  of 024e8a89d). What holds: every rent back (a sale's own, a leftover pass) waits out an open gap that is not W's own
+ *  last send, so a W's close or sweep never goes within a gap of another W's sale, close or sweep; no leftover pass
+ *  starts while a pool buy or sell runs in any tab (POOL_TRADE_LOCK, trade.ts); a load's first leftover pass waits a
+ *  start drawn from 15 to 60 s (pool-testnet.ts BACKS_LOAD_MIN_MS). What does not: a trade never waits on the gap, so a
+ *  sale the user taps right after another W's close or sweep goes at once, and the legs of one sale over several Ws go
+ *  together; that sale's own rent back is then held for a later pass. */
 export type RentBackSpacing = { at: number; gap: number };
 /** The gap after a rent back's transaction before a leftover W's pass: drawn at random from [MIN, MAX] each send. */
 export const POOL_RENT_BACK_SPACE_MIN_MS = 10 * 60_000;

@@ -25,7 +25,8 @@ import type { EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts"
 import { BOUGHT, flat, provider, refreshHead, sellQuoteWith, TOKEN } from "../../kit/test/evm-sell-quote-fx.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
-import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, planEvmSell, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
+import { EVM_OPEN_SELLS_KEY, evmBuyRouteRead, evmSellPlanQuote, followEvmSells, planEvmSell, poolSellEvmKind, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
+import { POOL_TRADE_LOCK } from "../src/trade.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
@@ -960,4 +961,17 @@ test("a sign out while the sale's read waits ends the wait at once: failed, noth
   assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "failed" });
   assert.equal(reads, 1);
   assert.equal(x.posts.length, 0);
+});
+
+// review P2-1 of 024e8a89d: the EVM sale's whole run holds POOL_TRADE_LOCK, shared, so no Solana leftover rent back
+// starts beside it in any tab
+test("kind: the run holds the trade lock, shared, before the host is made", async () => {
+  const asked: { name: string; mode: string | undefined }[] = [];
+  const locks = { request: (name: string, o: LockOptions, f: () => unknown) => (asked.push({ name, mode: o.mode }), Promise.resolve().then(f)) } as unknown as Pick<LockManager, "request">;
+  const r = poolSellEvmKind(() => {
+    throw new Error("no host");
+  }, locks)(ASK, null) as { after: Promise<void>; answer(): unknown };
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "failed" });
+  assert.deepEqual(asked, [{ name: POOL_TRADE_LOCK, mode: "shared" }]);
 });

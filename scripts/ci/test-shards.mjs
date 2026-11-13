@@ -106,9 +106,10 @@ export const MUTANT_SECONDS = {
   // parts of 14 or 15 on the queue's runner (jobs 129687360235 (7), 129687360305 (8), 129687360082 (9)): 304.5, 333.8,
   // 378.8, 375.3, 279.4 and 259.4 s, the slowest 27.06 s a plant (part 3, 14 plants, 378.8 s), and eight parts of 11 or
   // 10 plants plan 11 * 27.06 = 298 s at most (six planned 379 s)
-  // card round-trip-costs-less: 123 plants (the rent backs' one-W reads added 24; the held passes, the sweep's record and
-  // the found W's listing 11), mutant i in part (i % 14) + 1, so 9 at most in each: 9 * 27.06 = 244 s at the slowest plant above; parts of 9 share out
-  // among the other sweeps where eight parts of 15 would not
+  // card round-trip-costs-less: 126 plants (the rent backs' one-W reads added 24; the held passes, the sweep's record and
+  // the found W's listing 11; the sale's stamp and the trade lock 3), mutant i in part (i % 14) + 1, so 9 at most in
+  // each: 9 * 27.06 = 244 s at the slowest plant above; parts of 9 share out among the other sweeps where eight parts
+  // of 16 would not
   "packages/signpage: node scripts/rent-back-mutants.mjs 1/14": 244,
   "packages/signpage: node scripts/rent-back-mutants.mjs 2/14": 244,
   "packages/signpage: node scripts/rent-back-mutants.mjs 3/14": 244,

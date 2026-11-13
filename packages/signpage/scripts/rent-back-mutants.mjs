@@ -54,7 +54,7 @@ export const M = [
   ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
   ["D9 the burn list dropped", SELL, T, "const burn = holding.map((t) => t.ata);", "const burn: string[] = [];"],
   ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bhv.lastHeight } };\n", ""],
-  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, leftover: true, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait, leftover: true }"],
+  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait }"],
   // the review of bf467ae7's named ones: X2 (F3), Y2, Y3, Y4, Y7 (F4), its read order and commitment (F5), and the
   // armed path's burn list (F6); and a sell read's fault counted for a mint W no longer holds
   ["review X2 a burn's next close of another account", KIT, K, " && next.data[0] === 9 && next.accounts[0]?.key === h?.address;\n          if (!h || h.kind !== \"token\" || h.burn", " && next.data[0] === 9;\n          if (!h || h.kind !== \"token\" || h.burn"],
@@ -172,6 +172,11 @@ export const M = [
   ["c25 a found W past its time part not listed", SELL, T, "if ((x.buy || since !== undefined) && la === lb) x.read?.(la!);", "if (x.buy && la === lb) x.read?.(la!);"],
   ["c26 this device's own unrecorded buy W listed while held", SELL, T, "  if (account && evidence?.rec !== undefined && evidence.rec.rebuilt !== true) return undefined;\n", ""],
   ["c27 any W that ever sent exempt from the gap", SPACING, T, "s !== undefined && s.at !== own && now", "s !== undefined && own === undefined && now"],
+  // review P2-1 of 024e8a89d: the sale stamps the device, its own rent back claims the slot, no leftover pass beside a
+  // trade (the trade lock's own reads and the load's start are held by their tests' red runs)
+  ["c28 a sale sent with no stamp", SELL, T, "    await Promise.resolve(h.owed?.space?.({ at: saleAt, gap: gapDrawn() })).catch(() => {});\n", ""],
+  ["c29 a sale's own rent back takes no slot", SELL, T, "    if (claimed || h.owed?.claim === undefined) return;", "    if (x.own !== undefined || claimed || h.owed?.claim === undefined) return;"],
+  ["c30 a leftover pass beside a trade", SELL, T, "      if (await tradeRunning(locks)) {", "      if (false) {"],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = M.map(([name]) => name);

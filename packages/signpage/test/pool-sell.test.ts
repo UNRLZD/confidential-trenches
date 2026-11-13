@@ -42,7 +42,7 @@ import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, 
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
-import { tradeLock, type TradeStore } from "../src/trade.ts";
+import { POOL_TRADE_LOCK, tradeLock, type TradeStore } from "../src/trade.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
 const L = 7n;
@@ -1295,8 +1295,9 @@ test("the kind runs under the seed's shared lock, the request's own lock and the
   await until(async () => ended.n > 0);
   assert.equal(ended.n, 1);
   assert.equal(POOL_SELL_LOCK, "ct-pool/sell");
-  // the rent back after the full sell: under W's own lock, then the sell lock again, once the request's lock is free
-  assert.deepEqual(modes, ["ct-wallet/seed:shared", "ct-wallet/trade/r1:exclusive?", "ct-pool/sell:exclusive", `ct-pool/back/${W.address}:exclusive`, "ct-pool/sell:exclusive"]);
+  // the whole run under POOL_TRADE_LOCK, shared (no leftover rent back starts beside it, review P2-1 of 024e8a89d); the
+  // rent back after the full sell: under W's own lock, then the sell lock again, once the request's lock is free
+  assert.deepEqual(modes, [`${POOL_TRADE_LOCK}:shared`, "ct-wallet/seed:shared", "ct-wallet/trade/r1:exclusive?", "ct-pool/sell:exclusive", `ct-pool/back/${W.address}:exclusive`, "ct-pool/sell:exclusive"]);
   assert.deepEqual(sells(w, await ours(w.ns)).map((n) => n.state), ["UNSPENT"]);
   // another kind, no Web Locks or no request: refused, nothing run
   assert.deepEqual(poolSellKind(kindHost(w), locks)({ ...ASK, kind: "pool.buy" }, ctxOf("r2")), { error: "not_allowed" });
@@ -2606,7 +2607,8 @@ test("a rent back owed is recorded before the sell's send and run again on the n
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "filled");
   const { sell, ...rest } = atSend!;
-  assert.deepEqual(rest, { address: W.address, l: L.toString(), j: J, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0 });
+  // spaced: the sale's own time, the device's last send (review P2-1 of 024e8a89d), so W's rent back waits no gap of its own
+  assert.deepEqual(rest, { address: W.address, l: L.toString(), j: J, mints: [{ mint: MINT, program: TOKEN_PROGRAM }], passes: 0, spaced: 1_000 });
   // the sell itself, by its mint (card sol-rent-back-dust-burn): the very bytes sent and their blockhash's last height
   assert.deepEqual(Object.keys(sell ?? {}), [MINT]);
   assert.ok(w.c.txs.has(base58.encode(base64.decode(sell![MINT]!.tx).subarray(1, 65))), "the record's sell is the transaction sent");
@@ -6879,6 +6881,77 @@ test("round-trip-costs-less P3-e: a stamp from the future reads as none", async 
   await resumeRentBacks(host, fakeLocks());
   assert.equal(senders(from).size, 1, "the claim takes the slot over it");
   assert.equal((await d.spacing())!.at, now);
+});
+
+// review P2-1 of 024e8a89d: the sale is a send from W into the pool as a rent back's is. It stamps the device's spacing
+// after its record names the signature and before it goes, so a leftover W's pass inside the gap after a sale is held
+// (a partial sale here: no rent back of its own that would stamp)
+test("round-trip-costs-less P2-1: a sale stamps the device before its send, and a leftover W inside that gap is held", async () => {
+  let space: RentBackSpacing | undefined;
+  const dev = { spacing: async () => space, claim: async (v: RentBackSpacing, own?: number) => (spaceOpen(space, v.at, own) ? false : ((space = v), true)) };
+  const s = await world({ held: 2n * AMOUNT }, [wallet(2n * AMOUNT)]);
+  let signed = false;
+  const at: { sends: number; signed: boolean }[] = [];
+  const saleSends = () => s.c.calls.filter((c) => c.method === "sendTransaction").length;
+  const a = await runPoolSell({ ...s.host, now: () => 5_000_000n, signed: async () => void (signed = true), owed: { ...s.host.owed!, ...dev, space: async (v) => void (at.push({ sends: saleSends(), signed }), (space = v)) } }, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.deepEqual(at, [{ sends: 0, signed: true }], "one stamp, after the record named the signature, before the send");
+  assert.ok(space!.at === 5_000_000 && space!.gap >= POOL_RENT_BACK_SPACE_MIN_MS && space!.gap <= POOL_RENT_BACK_SPACE_MAX_MS, JSON.stringify(space));
+  // another W of the device's, owed a leftover rent back: its load a minute after the sale sends nothing
+  const { w, senders } = await leftovers(false);
+  let now = 5_060_000n;
+  const host: PoolSellHost = { ...w.host, now: () => now, owed: { ...w.host.owed!, ...dev, space: async (v) => void (space = v) } };
+  forgetPageLoad();
+  let from = w.c.calls.length;
+  await resumeRentBacks(host, fakeLocks());
+  assert.equal(senders(from).size, 0, "inside the sale's gap: held");
+  now = BigInt(5_000_000 + space!.gap);
+  forgetPageLoad();
+  from = w.c.calls.length;
+  await resumeRentBacks(host, fakeLocks());
+  assert.equal(senders(from).size, 1, "past the sale's gap: one W");
+});
+
+// review P2-1 of 024e8a89d: a sale's own rent back claims the device's slot as a leftover pass does; its own sale's stamp
+// never holds it, another W's newer one does (another tab's leftover send right after the sale)
+test("round-trip-costs-less P2-1: a sale's own rent back is held when another W's stamp is the device's last, nothing sent", async () => {
+  const w = await world();
+  let space: RentBackSpacing | undefined;
+  const sends = () => w.c.calls.filter((c) => c.method === "sendTransaction").length;
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, sent: (sig: string) => (w.host.sent?.(sig), (space = { at: 5_000_001, gap: 1_200_000 })), owed: { ...w.host.owed!, spacing: async () => space, space: async (v) => void (space = v), claim: async (v, own) => (spaceOpen(space, v.at, own) ? false : ((space = v), true)) } };
+  const a = await runPoolSell(host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(sends(), 2, "the sale alone, to both RPCs");
+  assert.deepEqual(space, { at: 5_000_001, gap: 1_200_000 }, "the other W's stamp stands");
+  assert.ok(w.told.some((t) => t.step === "rent_back" && t.state === "gave_up" && /^spaced/.test(t.detail ?? "")), JSON.stringify(w.told));
+  assert.equal(w.owed.get(W.address)?.spaced, 5_000_000, "W's record kept, its own last send the sale");
+  // its own sale's stamp alone: the rent back goes
+  const v = await world();
+  let own: RentBackSpacing | undefined;
+  const b = await runPoolSell({ ...v.host, now: () => 5_000_000n, owed: { ...v.host.owed!, spacing: async () => own, space: async (x) => void (own = x), claim: async (x, o) => (spaceOpen(own, x.at, o) ? false : ((own = x), true)) } }, ASK);
+  assert.equal("stage" in b && b.stage, "filled");
+  assert.ok(v.c.calls.filter((c) => c.method === "sendTransaction").length > 2, "the sale's own rent back sent");
+});
+
+// review P2-1 of 024e8a89d: no leftover W's close or sweep goes while a pool buy or sell holds POOL_TRADE_LOCK in any tab;
+// the run ends with the Ws left for a later one
+test("round-trip-costs-less P2-1: no leftover pass while a trade holds the trade lock; the Ws wait for a later run", async () => {
+  const { w, sends } = await leftovers(false);
+  const host: PoolSellHost = { ...w.host, now: () => 5_000_000n, owed: { ...w.host.owed!, spacing: async () => undefined, space: async () => {}, claim: async () => true } };
+  const base = fakeLocks();
+  const trading = { ...base, query: (async () => ({ held: [{ name: POOL_TRADE_LOCK, mode: "shared" }], pending: [] })) as never };
+  forgetPageLoad();
+  assert.equal(await resumeRentBacks(host, trading), true, "a W left to try");
+  assert.equal(sends().length, 0);
+  assert.equal(w.owed.size, 3, "every record kept");
+  // a lock manager whose query throws cannot say: held too
+  const blind = { ...base, query: (async () => Promise.reject(new Error("no query"))) as never };
+  forgetPageLoad();
+  assert.equal(await resumeRentBacks(host, blind), true);
+  assert.equal(sends().length, 0, "a query that throws: held");
+  forgetPageLoad();
+  await resumeRentBacks(host, fakeLocks());
+  assert.ok(sends().length > 0, "the trade ended: the next run passes");
 });
 
 test("round-trip-costs-less a: the Ws a load passes go in an order drawn at random, apart by the gap", async () => {

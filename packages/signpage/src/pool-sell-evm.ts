@@ -81,7 +81,7 @@ import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS, EVM_POSITION_C
 import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
 import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
-import { TRADE_HELPER } from "./trade.ts";
+import { duringTrade, TRADE_HELPER } from "./trade.ts";
 import { shuffled } from "./positions-evm.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -964,7 +964,7 @@ export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, lock
     let answer: HostAnswer<"pool.sell"> | HostRefusal | null = null;
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
-    const run = (async () => {
+    const run = duringTrade(locks, async () => {
       const h = host();
       try {
         const a = await runEvmPoolSell(
@@ -985,7 +985,7 @@ export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, lock
       } finally {
         h.end?.();
       }
-    })()
+    })
       .catch(() => {
         if (!answer) answer = { error: "failed" };
       })

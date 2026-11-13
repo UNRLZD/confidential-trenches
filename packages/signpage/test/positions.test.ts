@@ -23,7 +23,7 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { keptPositions, passMemo, returningWallets, withReturning, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
-import { testnetPool as makePool, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { BACKS_LOAD_MAX_MS, testnetPool as makePool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { poolKinds, type PoolRpc } from "../src/pool-kinds.ts";
 import { tokenDecimalsShown } from "../src/rules/pool.ts";
 import { BUY_MINTS_KEY, buyMints } from "../src/pool-sell.ts";
@@ -1773,8 +1773,16 @@ test("P2-2 (the load route): the rent backs a load resumes take the Ws through t
   await until(async () => ((await tp.positions()) ?? []).length === 1);
   c.state.fail = true;
   const before = c.calls.finder;
-  await tp.stateRead();
-  await until(() => timers.length === 1);
+  // past the load's drawn start of the rent backs (src/pool-testnet.ts BACKS_LOAD_MAX_MS)
+  const realNow = Date.now;
+  const opened = realNow();
+  Date.now = () => opened + BACKS_LOAD_MAX_MS;
+  try {
+    await tp.stateRead();
+    await until(() => timers.length === 1);
+  } finally {
+    Date.now = realNow;
+  }
   assert.equal(c.calls.finder, before + 1, "the pass's read alone: the rent back read no W's holdings");
 });
 

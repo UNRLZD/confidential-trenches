@@ -80,7 +80,7 @@ import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
-import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
+import { duringTrade, fromRecord, timedStore, TRADE_STORE_MS, tradeLock, tradeRunning, type TradeStore } from "./trade.ts";
 import { deviceSpacing, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type DeviceSpacing, type RentBackSpacing } from "./device-spacing.ts";
 import { checkSolanaSell, checkSolanaSweep, SOLANA_POOL_SELL_PRIORITY, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_CU_LIMIT_MAX, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
@@ -1440,7 +1440,12 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     // W's record keeps every mint W traded (review 5 of 38e59182, info: a W that fully sells a second mint keeps its
     // first mint's accounts in its rent back)
     const owedRec: OwedRentBack = { address: w.address, l: w.l.toString(), j: w.j, mints: [{ mint: token, program: tokens.program }], passes: 0 };
+    // the sale is a send from W into the pool as a rent back's is (review P2-1 of 024e8a89d): it stamps the device's
+    // spacing before it goes, W's record keeping the time as its own, so no leftover W's pass sends within the gap after
+    // it and the sale's own rent back is W's own last send; the trade itself never waits on the gap
+    const saleAt = Number(h.now?.() ?? BigInt(Date.now()));
     if (!keeps) {
+      owedRec.spaced = saleAt;
       const prior = await Promise.resolve(h.owed?.list()).then((l) => l?.find((r) => r.address === w.address), () => undefined);
       owedRec.mints = mintsOf(prior?.mints, owedRec.mints);
       // this sell, by its mint: what a balance after it is checked against (card sol-rent-back-dust-burn)
@@ -1452,6 +1457,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     }
     // the request's record names the signature before it leaves the device (a write that fails sends nothing)
     await h.signed?.(signature);
+    // a store that cannot be written leaves the last stamp: the sale goes all the same
+    await Promise.resolve(h.owed?.space?.({ at: saleAt, gap: gapDrawn() })).catch(() => {});
     sent = signature;
     await Promise.allSettled(rpcs.map((r) => r("sendTransaction", [base64.encode(signed), { encoding: "base64", preflightCommitment: "confirmed" }])));
     h.sent?.(signature);
@@ -1693,7 +1700,7 @@ const wireOf = (message: Uint8Array): Uint8Array => {
 /** `unproven`: no buy of W's proven this time (no record, or the public seat read W's history otherwise than the
  *  rebuild): the pass holds as with no buy, read again on a later state read ("again") until its POOL_RENT_BACK_
  *  UNPROVEN_PASSES-th pass, then as W's own state ("steady"; card round-trip-costs-less, review of 20ba2481b P2-6). */
-type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; bare?: true; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; leftover?: boolean; own?: number; stamped?: (at: number) => void; swept?: (signature: string, value: bigint) => Promise<void> };
+type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; bare?: true; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; own?: number; stamped?: (at: number) => void; swept?: (signature: string, value: bigint) => Promise<void> };
 
 /**
  * W's rent back (card sol-buy-rent-back), after a full sell filled or at a later load while it is owed: what W's
@@ -1805,12 +1812,13 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     rentBackSends++;
     h.back?.(signature);
   };
-  // a leftover pass, before its first send and before the sweep's note is written: held while the load holds it
-  // (`quiet`), and it takes the device's slot in the store (claim), so another tab whose load read the store before this
-  // send never sends within the gap; a store that cannot answer holds it
+  // every rent back, a sale's own as a leftover pass's (review P2-1 of 024e8a89d), before its first send and before the
+  // sweep's note is written: it takes the device's slot in the store (claim), held while a gap is open that is not W's
+  // own last send (`own`: the sale's stamp, for a sale's own rent back), so another tab whose load read the store
+  // before this send never sends within the gap; a store that cannot answer holds it
   let claimed = false;
   const spaced = async (): Promise<void> => {
-    if (x.leftover !== true || claimed || h.owed?.claim === undefined) return;
+    if (claimed || h.owed?.claim === undefined) return;
     const v = { at: clock(), gap: gapDrawn() };
     if (!(await h.owed.claim(v, x.own).catch(() => false))) throw HELD;
     x.stamped?.(v.at);
@@ -2378,11 +2386,17 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
         continue;
       }
       if (passed++ > 0) await wait(POOL_RENT_BACK_GAP_MS + randomBelow(POOL_RENT_BACK_GAP_MS));
+      // a pool buy or sell between its tap and its end, in any tab (POOL_TRADE_LOCK; review P2-1 of 024e8a89d): this W's
+      // pass and the rest wait for a later run, so no W's close or sweep goes beside a trade
+      if (await tradeRunning(locks)) {
+        more = true;
+        break;
+      }
       const sends = rentBackSends;
       const go = await withHolds(locks, address, true, wait, async (hold) => {
         const o = await current();
         const w = o && setup.wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j);
-        if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, leftover: true, ...(o.sell ? { sell: o.sell } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
+        if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
       });
       if (!go) return true;
       // this pass sent from its W: the run's one; the rest send nothing in this run
@@ -2698,8 +2712,8 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
     // one per leg (card pool-sell-share-across-wallets)
     const laters: Later[] = [];
     let ran: PoolSellKindHost | null = null;
-    const run = locks
-      .request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+    const run = duringTrade(locks, () =>
+      locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
         try {
           await locks.request(tradeLock(ctx.id), { mode: "exclusive", ifAvailable: true }, async (own) => {
             if (!own) return void (answer ??= { error: "id_reused" });
@@ -2788,7 +2802,7 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
           // the run's end (the page closes its note store): after the rent back, which writes its note there
           ran?.end?.();
         }
-      })
+      }))
       .catch(() => {
         if (!answer) answer = { error: "failed" };
       })

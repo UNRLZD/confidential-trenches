@@ -1961,7 +1961,7 @@ test("the kept-out record's write reaches another page as a store change (its st
 // (the wait doubling); one that leaves none books none, however long; a full sell's new owed record (one with no pass
 // yet, written through the sell host's owed list) runs them at the next read.
 test("the rent backs run on the state reads: again after the wait while a W is left, never once none is, again at a full sell's new record", async () => {
-  const { BACKS_FIRST_MS, BACKS_MAX_MS } = await import("../src/pool-testnet.ts");
+  const { BACKS_FIRST_MS, BACKS_LOAD_MAX_MS, BACKS_MAX_MS } = await import("../src/pool-testnet.ts");
   const { SOLANA_RENT_SYSVAR } = await import("../../kit/src/trade/solana/pool-buy.ts");
   const { poolSellKind } = await import("../src/pool-sell.ts");
   const { w } = await wallet();
@@ -2006,7 +2006,10 @@ test("the rent backs run on the state reads: again after the wait while a W is l
     const X = base58.encode(new Uint8Array(32).fill(7));
     await put(X, 1);
     await read();
-    assert.deepEqual([runs.length, finds], [1, [X]], "the load's first read runs them; the providers down, W is left to try");
+    assert.deepEqual([runs.length, finds], [0, []], "the page just opened: no run before the load's drawn start (review P2-1)");
+    now += BACKS_LOAD_MAX_MS;
+    await read();
+    assert.deepEqual([runs.length, finds], [1, [X]], "the first read past the load's start runs them; the providers down, W is left to try");
     await read();
     assert.equal(runs.length, 1, "before the wait: no run");
     now += BACKS_FIRST_MS;

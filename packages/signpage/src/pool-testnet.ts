@@ -120,13 +120,28 @@ export const testnetRpc = (url: string, helperRetry: SolanaRpcRetry = SOLANA_RPC
 /** The rent backs' retry while a W is left to try (card round-trip-costs-less): the first wait and the most, doubling. */
 export const BACKS_FIRST_MS = 30_000;
 export const BACKS_MAX_MS = 600_000;
+/** A load's first run of the rent backs, at the first state read past a time drawn once a load from [MIN, MAX] after it
+ *  (review P2-1 of 024e8a89d): no leftover W's pass goes at the instant a page opens, which a network could tie to the
+ *  page's own first reads. */
+export const BACKS_LOAD_MIN_MS = 15_000;
+export const BACKS_LOAD_MAX_MS = 60_000;
+const drawLoadStart = (): number => {
+  const span = BACKS_LOAD_MAX_MS - BACKS_LOAD_MIN_MS + 1;
+  const b = new Uint32Array(1);
+  const max = Math.floor(0x1_0000_0000 / span) * span;
+  do globalThis.crypto.getRandomValues(b);
+  while (b[0]! >= max);
+  return BACKS_LOAD_MIN_MS + (b[0]! % span);
+};
 /** When the rent backs run (card round-trip-costs-less): one run at a time, on a state read once due; a run that leaves
  *  a W to try again books the next at a wait doubling from BACKS_FIRST_MS to BACKS_MAX_MS, one that leaves none (or the
  *  run's own failure: the next load's) books none, until `again` (a full sell wrote a new owed record). No timer: a run
  *  only ever starts on a state read the page makes anyway. */
-export function backsSchedule(now: () => number = Date.now) {
+export function backsSchedule(now: () => number = () => Date.now(), first: number = drawLoadStart()) {
   let running = false;
-  let at = 0;
+  // the load's first run: not before the drawn start, a full sell's `again` included
+  const start = now() + first;
+  let at = start;
   let wait = BACKS_FIRST_MS;
   return {
     /** Whether a run starts now; if so, it is marked running. */
@@ -148,7 +163,7 @@ export function backsSchedule(now: () => number = Date.now) {
     },
     /** A full sell wrote a new owed record: the next state read runs. */
     again(): void {
-      at = 0;
+      at = start;
       wait = BACKS_FIRST_MS;
     },
   };

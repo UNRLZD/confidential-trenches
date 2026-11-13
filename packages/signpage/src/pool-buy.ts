@@ -128,6 +128,7 @@ import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk, type SolanaBuyPiece } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
 import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapDone, tapWaits, waitsOn, type ReadWaits } from "./read-waits.ts";
+import { duringTrade } from "./trade.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The page's own copy of the kit's route bound: a frozen RegExp's matcher can still be swapped
@@ -1273,8 +1274,8 @@ export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?()
     };
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
-    const run = locks
-      .request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+    const run = duringTrade(locks, () =>
+      locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
         const h0 = (h = host());
         try {
           const a = await runPoolBuy({ ...h0, sent: (signature) => {
@@ -1295,7 +1296,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { release?(): void; end?()
         } finally {
           h0.end?.();
         }
-      })
+      }))
       .catch(() => {
         // a run that threw past its own catch: its error is the answer, or, after the early answer, "sent"; a run that
         // answered its own error (nothing sent) and then threw (the host's end) posts nothing more
