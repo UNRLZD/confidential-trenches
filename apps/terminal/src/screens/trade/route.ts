@@ -18,6 +18,12 @@
 //   the buy's id (the kit's BuyRoute, card signpage-buy-route-events), through TradeKit.route (fromBuyRoute). A page of
 //   an earlier release sends none: a step checks and its value stays empty, never made up. The route's `tx` (card
 //   pool-buy-send-fast) is the toast link's transaction when the answer that names it was dropped at the client's 10 s.
+// - `move` (card one-balance-buys-on-every-chain): a Solana tap above what one tap spends moves its shortfall from Cash
+//   into the pool first (the page's route { move: "cash" }, packages/signpage/src/cash-to-pool.ts cashFirst), about
+//   40-60 s. The strip draws it as its own step before the one-time wallet, its running time from the moment the page
+//   told it (stamped by the screen as it arrives, else the tap's), checked by the take with the time it took, or marked
+//   the error with it when the buy ends first. A buy with no move draws no move step. The time is the move's own, read
+//   from the screen's clock at its two events, never a fixed one.
 // A step checks only when it is the one waiting and its own event comes: an event out of order is ignored. A failure
 // marks the step that was waiting and nothing after it ever checks. No time is held here: an animation runs on its own
 // clock from the event, and the times on the button and the toast are the buy's own measured ones (model.ts).
@@ -48,15 +54,20 @@ export interface Route {
   pool: string | null;
   out: string | null;
   tx: string | null;
+  /** The move from Cash before the buy (card one-balance-buys-on-every-chain): null when none was told; its state, when
+   *  it started (Unix ms) and, once it ended, how long it ran (null when its end came with no time). */
+  move: { st: "active" | "done" | "error"; at: number; ms: number | null } | null;
 }
 
-export const IDLE: Route = { k: "idle", id: null, at: 0, cents: null, walletIn: false, st: ["off", "off", "off", "off"], links: [false, false, false], wallet: null, venue: null, pool: null, out: null, tx: null };
+export const IDLE: Route = { k: "idle", id: null, at: 0, cents: null, walletIn: false, st: ["off", "off", "off", "off"], links: [false, false, false], wallet: null, venue: null, pool: null, out: null, tx: null, move: null };
 
+/** `at` on taken, fail and move: the screen's time of the event, Unix ms, for the move step's time. */
 export type RouteEvent =
-  | { t: "taken"; id: string }
+  | { t: "taken"; id: string; at?: number }
   | { t: "sent"; id: string; tx?: string }
   | { t: "filled"; id: string }
-  | { t: "fail"; id: string }
+  | { t: "fail"; id: string; at?: number }
+  | { t: "move"; id: string; at?: number }
   | { t: "wallet"; id: string; address: string }
   | { t: "route"; id: string; venue: string | null; pool: string }
   | { t: "out"; id: string; amount: string }
@@ -69,6 +80,9 @@ export function routeTap(id: string, at: number, cents: Cents): Route {
 
 const set = (st: Route["st"], i: number, s: StepState): Route["st"] => st.map((x, j) => (j === i ? s : x)) as unknown as Route["st"];
 const link = (l: Route["links"], i: number): Route["links"] => l.map((x, j) => (j === i ? true : x)) as unknown as Route["links"];
+/** The running move ended at `at` as `st`: its time kept; a strip with no running move as it is. */
+const endMove = (m: Route["move"], st: "done" | "error", at: number | undefined): Route["move"] =>
+  m === null || m.st !== "active" ? m : { st, at: m.at, ms: at === undefined ? null : Math.max(0, at - m.at) };
 
 export function routeEvent(r: Route, ev: RouteEvent): Route {
   if (r.k === "idle" || r.id !== ev.id) return r;
@@ -87,8 +101,11 @@ export function routeEvent(r: Route, ev: RouteEvent): Route {
   if (ev.t === "tx") return r.tx ? r : { ...r, tx: ev.tx };
   if (r.k !== "running") return r;
   switch (ev.t) {
+    case "move":
+      // told once, before the take: a second one, or one after the take, draws nothing new
+      return r.move === null && r.st[0] === "active" ? { ...r, move: { st: "active", at: ev.at ?? r.at, ms: null } } : r;
     case "taken":
-      return r.st[0] === "active" ? { ...r, st: set(set(r.st, 0, "done"), 1, "active"), links: link(r.links, 0) } : r;
+      return r.st[0] === "active" ? { ...r, st: set(set(r.st, 0, "done"), 1, "active"), links: link(r.links, 0), move: endMove(r.move, "done", ev.at) } : r;
     case "sent":
       // the same stage comes twice, as the request's answer (with the transaction) and as a progress event (without one),
       // in either order: the second only gives the transaction, it checks nothing
@@ -100,7 +117,7 @@ export function routeEvent(r: Route, ev: RouteEvent): Route {
     case "fail": {
       if (filledOnly(r)) return { ...unfill(r), k: "failed", st: set(unfill(r).st, 2, "error") };
       const i = r.st.indexOf("active");
-      return i < 0 ? r : { ...r, k: "failed", st: set(r.st, i, "error") };
+      return i < 0 ? r : { ...r, k: "failed", st: set(r.st, i, "error"), move: endMove(r.move, "error", ev.at) };
     }
   }
 }
@@ -115,27 +132,29 @@ const unfill = (r: Route): Route => ({ ...r, st: set(set(r.st, 2, "active"), 3, 
  * "sent", pool-buy.ts poolBuyKind) after the amount out puts the strip back to the pool waiting, as the button goes
  * back to Landing (model.ts progress). The request's answer "sent" is the early one and never does (fromOutcome).
  */
-export function fromProgress(r: Route, id: string, stage: Stage | "refused"): Route {
+export function fromProgress(r: Route, id: string, stage: Stage | "refused", at?: number): Route {
   if (stage === "sent" && r.id === id && filledOnly(r)) return unfill(r);
-  return fromStage(r, id, stage);
+  return fromStage(r, id, stage, undefined, at);
 }
 
 /**
  * The kit's stage for the running buy as events. `sent` is taken and sent (the take comes before the send). A `filled`
  * with no `sent` before it (the answer came at the run's end) is a transaction that was taken and sent, in that order.
- * `signed` moves nothing; the stages that end a buy without a complete fill fail the step that was waiting.
+ * `signed` moves nothing; the stages that end a buy without a complete fill fail the step that was waiting. `at`: the
+ * screen's time of the stage, the end of a running move from Cash.
  */
-export function fromStage(r: Route, id: string, stage: Stage | "refused", tx?: string): Route {
+export function fromStage(r: Route, id: string, stage: Stage | "refused", tx?: string, at?: number): Route {
   let n = r;
   const ev = (e: RouteEvent) => (n = routeEvent(n, e));
+  const when = at === undefined ? {} : { at };
   if (stage === "sent") {
-    ev({ t: "taken", id });
+    ev({ t: "taken", id, ...when });
     ev({ t: "sent", id, ...(tx ? { tx } : {}) });
   } else if (stage === "filled") {
-    ev({ t: "taken", id });
+    ev({ t: "taken", id, ...when });
     ev({ t: "sent", id, ...(tx ? { tx } : {}) });
     ev({ t: "filled", id });
-  } else if (stage === "part_filled" || stage === "not_landed" || stage === "refused") ev({ t: "fail", id });
+  } else if (stage === "part_filled" || stage === "not_landed" || stage === "refused") ev({ t: "fail", id, ...when });
   return n;
 }
 
@@ -145,13 +164,14 @@ export function fromOutcome(
   r: Route,
   id: string,
   o: { ok: true; result: { stage: Stage; txs?: readonly { hash: string }[] } } | { ok: false; error: { code: string } },
+  at?: number,
 ): Route {
-  if (o.ok) return fromStage(r, id, o.result.stage, o.result.txs?.[0]?.hash);
-  return o.error.code === "client_timeout" ? r : fromStage(r, id, "refused");
+  if (o.ok) return fromStage(r, id, o.result.stage, o.result.txs?.[0]?.hash, at);
+  return o.error.code === "client_timeout" ? r : fromStage(r, id, "refused", undefined, at);
 }
 
 /** What the signing page tells the app of a buy besides its stage (TradeKit.route). */
-export type RouteData = Extract<RouteEvent, { t: "wallet" | "route" | "out" | "tx" }>;
+export type RouteData = Extract<RouteEvent, { t: "wallet" | "route" | "out" | "tx" | "move" }>;
 
 /** The kit's venue ids the strip names, each by a name already on screen (market/pads.ts): the bonding curve is
  *  pump.fun's own. An id with none names no venue, so the pool's label stays the bare one: never the raw id. */
@@ -160,7 +180,7 @@ const VENUE_PAD: Readonly<Record<string, string>> = { "pump-curve": "pump.fun" }
 /** One route event of the kit (the signing page's own reads, by the buy's id) as the strip's data. */
 export function fromBuyRoute(id: string, r: BuyRoute): RouteData | null {
   // the kit's own keys only (its client checked the shape): an inherited field names nothing
-  const x = r as Partial<Record<"wallet" | "venue" | "pool" | "out" | "tx", string>>;
+  const x = r as Partial<Record<"wallet" | "venue" | "pool" | "out" | "tx" | "move", string>>;
   if (Object.hasOwn(r, "wallet") && x.wallet) return { t: "wallet", id, address: x.wallet };
   if (Object.hasOwn(r, "venue") && Object.hasOwn(r, "pool") && x.venue !== undefined && x.pool) {
     const pad = Object.hasOwn(VENUE_PAD, x.venue) ? padOf(VENUE_PAD[x.venue]) : null;
@@ -168,6 +188,7 @@ export function fromBuyRoute(id: string, r: BuyRoute): RouteData | null {
   }
   if (Object.hasOwn(r, "out") && x.out) return { t: "out", id, amount: x.out };
   if (Object.hasOwn(r, "tx") && x.tx) return { t: "tx", id, tx: x.tx };
+  if (Object.hasOwn(r, "move") && x.move === "cash") return { t: "move", id };
   return null;
 }
 
@@ -199,6 +220,14 @@ export function stepView(r: Route, step: StepId): { state: StepState; value: str
     else value = r.out;
   }
   return { state, value };
+}
+
+/** The move step (card one-balance-buys-on-every-chain): its state and its time, running from its start while it runs
+ *  (`now`, the screen's clock), the time it took once it ended; null when the buy moves nothing from Cash. */
+export function moveView(r: Route, now: number): { state: "active" | "done" | "error"; value: string | null } | null {
+  const m = r.move;
+  if (m === null) return null;
+  return { state: m.st, value: m.st === "active" ? secs(now - m.at) : m.ms === null ? null : secs(m.ms) };
 }
 
 /** The toast's second line: this buy's measured time, the filled amount when an event gave it, the buy amount. */

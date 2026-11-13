@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { stepView } from "./route.ts";
-import type { Route, StepId } from "./route.ts";
+import { moveView, stepView } from "./route.ts";
+import type { Route, StepId, StepState } from "./route.ts";
 import { WORDS } from "./words.ts";
 import { WORDS as TOKEN_WORDS } from "../token/words.ts";
 
@@ -9,6 +9,8 @@ import { WORDS as TOKEN_WORDS } from "../token/words.ts";
 // design design-lock-r5, assets/private.js P.pvTrade, P.pvGlyph, P.pvLink and the film's four-step path): Private balance,
 // the buy's one-time wallet, the pool, the token, joined by dotted links. It draws what route.ts says and times nothing:
 // a check pops, a link fills and a value fades in on its own CSS clock from the moment its event sets the state.
+// A buy that moves its shortfall from Cash first (card one-balance-buys-on-every-chain) grows a move step in before the
+// one-time wallet, its value the move's time (route.ts moveView, on the screen's clock `now` the box ticks while a buy runs).
 
 // ---------------------------------------------------------------------------------------------------- the dot glyphs
 // An 11 x 11 dot cell lit from the top left (private.js SHAPES notes, ghost, pool and light()).
@@ -86,16 +88,20 @@ function Label({ text }: { text: string }) {
 /** Each step's test id, spelled out so the deployed bundle can be read for them (the live check). */
 const TID: Record<StepId, string> = { balance: "route-balance", wallet: "route-wallet", pool: "route-pool", token: "route-token" };
 
-function Node({ route, step, glyph, label, value }: { route: Route; step: StepId; glyph: ReactNode; label: ReactNode; value: string | null }) {
-  const { state } = stepView(route, step);
+/** The move step's test id (card one-balance-buys-on-every-chain), spelled out as TID's are. */
+const MOVE_TID = "route-move";
+
+function Node({ route, step, glyph, label, value, state: given }: { route: Route; step: StepId | "move"; glyph: ReactNode; label: ReactNode; value: string | null; state?: StepState }) {
+  const state = given ?? stepView(route, step as StepId).state;
+  const tid = step === "move" ? MOVE_TID : TID[step];
   return (
-    <span className="rs-n" data-step={step} data-state={state} data-testid={TID[step]}>
+    <span className="rs-n" data-step={step} data-state={state} data-testid={tid}>
       <span className="rs-g">
         {glyph}
         {(state === "done" || state === "error") && <span className="rs-ck" data-kind={state}>{state === "done" ? <Check /> : <Cross />}</span>}
       </span>
       <span className="rs-k">{label}</span>
-      <span className="rs-v" data-on={value !== null || undefined} data-testid={`${TID[step]}-value`}>{value ?? " "}</span>
+      <span className="rs-v" data-on={value !== null || undefined} data-testid={`${tid}-value`}>{value ?? " "}</span>
     </span>
   );
 }
@@ -103,8 +109,9 @@ function Node({ route, step, glyph, label, value }: { route: Route; step: StepId
 /** The token step's picture: the symbol's first letter in a ring (the box has no token image). */
 const TokenGlyph = ({ symbol }: { symbol: string }) => <span className="rs-tk" aria-hidden="true">{symbol.slice(0, 1)}</span>;
 
-export function RouteStrip({ route, symbol, outText }: { route: Route; symbol: string; outText: string | null }) {
+export function RouteStrip({ route, symbol, outText, now }: { route: Route; symbol: string; outText: string | null; now: number }) {
   const v = (s: StepId) => stepView(route, s).value;
+  const move = moveView(route, now);
   const poolLabel = route.venue ? `${route.venue} ${WORDS.poolSuffix.text}` : WORDS.poolBare.text;
   const poolDraft = route.venue ? WORDS.poolSuffix.draft : WORDS.poolBare.draft;
   return (
@@ -112,6 +119,12 @@ export function RouteStrip({ route, symbol, outText }: { route: Route; symbol: s
       <div className="rs-flow">
         <Node route={route} step="balance" glyph={<Glyph kind="notes" />} label={<Label text={WORDS.privateBalance.text} />} value={v("balance")} />
         <Link full={route.links[0]} id="1" />
+        {move !== null && (
+          <div className="rs-grp" data-in>
+            <Node route={route} step="move" state={move.state} glyph={<Glyph kind="pool" />} label={<span data-draft-copy={WORDS.moveFromCash.text}><Label text={WORDS.moveFromCash.text} /></span>} value={move.value} />
+            <Link full={move.state === "done"} id="move" />
+          </div>
+        )}
         <div className="rs-grp" data-in={route.walletIn || undefined} aria-hidden={!route.walletIn || undefined}>
           <Node route={route} step="wallet" glyph={<Glyph kind="ghost" />} label={<span data-draft-copy={WORDS.newWallet.text}><Label text={WORDS.newWallet.text} /></span>} value={v("wallet")} />
           <Link full={route.links[1]} id="2" />
