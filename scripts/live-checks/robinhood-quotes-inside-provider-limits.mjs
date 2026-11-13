@@ -10,8 +10,7 @@
 // WARM_MAX_MS, and each warm tap asks each paced provider no more than its pace takes in WARM_MAX_MS (its burst and
 // WARM_MAX_MS of its rate, by the post or the call as limits.ts paces it). The kit asks the providers; this check reads
 // no JSON-RPC answer itself.
-// Runs: pending robinhood-quotes-inside-provider-limits, warm Robinhood taps still take 3-9 s and ask the scan provider past its pace after the scan's grouped gaps (95977bbbe), so a list would undo the next sign deploy; it moves to "After: sign" with the card's last part
-// Bundle: out the quotes are the kit's own on real mainnet providers, which a pull request's build cannot change; the scan's request count is held by packages/kit/test/evm-quote-attacks.test.ts (card robinhood-quotes-inside-provider-limits)
+// Runs: pending robinhood-quotes-inside-provider-limits, warm Robinhood taps still take 3-9 s and ask the scan provider past its pace after the scan's grouped gaps (95977bbbe), so a list would undo the next sign deploy; it moves to "After: sign" with a "Bundle: out" line with the card's last part (the quotes are the kit's own on real mainnet providers, which a build cannot hold; the scan's count is held by packages/kit/test/evm-quote-attacks.test.ts)
 //   node scripts/live-checks/robinhood-quotes-inside-provider-limits.mjs [--record <file>]
 //   node scripts/live-checks/robinhood-quotes-inside-provider-limits.mjs --answer <file>     judge a recorded run
 //   PASS exit 0, FAIL 1, error 2.
