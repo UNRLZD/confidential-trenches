@@ -1549,7 +1549,10 @@ const riding = (spare: { id: string; value: bigint }[]) => {
   };
   return { rides, ride };
 };
-test("T3: a full sale whose rest is under the floor, a spare 5M note in the pool: one release of it to the sale's W, then one sweep into one note, W at 0", async () => {
+// Card pool-amounts-are-standard-sizes: the ride never runs (it would release a rung only to deposit the same rung
+// back): a rest under the floor stays on W, the user's own, listed at its rest (restAdds), whatever spare piece the
+// pool holds.
+test("T3: a full sale whose rest is under the floor, a spare 5M note in the pool: no release, no sweep, W keeps its lamports, listed at its rest", async () => {
   const lamports = 1_493_440n;
   const { amount } = await amountFor(FLOOR_SALE);
   const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT }, [wallet(amount)]);
@@ -1557,12 +1560,12 @@ test("T3: a full sale whose rest is under the floor, a spare 5M note in the pool
   w.host.ride = ride(w);
   const a = await runPoolSell(w.host, { ...ASK, amount });
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-  assert.deepEqual(rides, [{ to: W.address, noteId: "spare", chunk: SOL_NOTE_FLOOR }], JSON.stringify(w.told.slice(-3)));
-  assert.ok(isReleaseSize(SOL_PIECES, rides[0]!.chunk));
-  assert.equal(w.c.deposits.length, 1, JSON.stringify(w.c.deposits, (_, v) => (typeof v === "bigint" ? String(v) : v)));
-  assert.equal(w.c.deposits[0]!.sweep, true);
-  assert.ok(w.c.deposits[0]!.value >= SOL_NOTE_FLOOR && w.c.deposits[0]!.value % SOL_GRID === 0n, String(w.c.deposits[0]!.value));
-  assert.equal(w.c.accounts.get(W.address), undefined, "W at 0");
+  assert.deepEqual(rides, [], JSON.stringify(w.told.slice(-3)));
+  assert.equal(w.c.deposits.length, 0, JSON.stringify(w.c.deposits, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  assert.equal(BigInt(w.c.accounts.get(W.address)!.lamports), 4_971_880n, "W keeps its lamports");
+  assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.slice(-2)));
+  assert.equal(w.owed.get(W.address)?.lamports, restAdds(4_971_880n - 5_000n - 1_468_120n, FLOOR).toString());
+  assert.equal(w.owed.get(W.address)?.lamports, "3498760", "listed at its rest");
 });
 test("T3: the same sale with no spare piece in the pool: no release, W keeps its lamports, and the told detail says so", async () => {
   const lamports = 1_493_440n;
@@ -1577,28 +1580,29 @@ test("T3: the same sale with no spare piece in the pool: no release, W keeps its
   assert.equal(w.c.deposits.length, 0, "nothing swept");
   assert.ok(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0) > 0n, "W keeps its lamports");
   assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.slice(-2)));
-  assert.match(w.told.at(-1)!.detail, /no spare piece/);
+  assert.match(w.told.at(-1)!.detail, /: kept on W$/);
   assert.equal(w.owed.get(W.address)?.passes, 1, "W's record kept");
-  // 13 Nov 09:31Z: a leftover is counted in the balance, at what it adds once moved (pick (a), restAdds), never
-  // W's lamports: W at 4,971,880 leaves a rest of 3,498,760, which a ride makes 2,000,000 more of; its RETURNING row
-  // lists that (Portfolio's On the way and Total count it: apps/terminal portfolio/model.ts totals)
+  // 13 Nov 09:31Z: a leftover is counted in the balance; card pool-amounts-are-standard-sizes (pick (c)): at its rest
+  // (restAdds), never W's lamports: W at 4,971,880 leaves a rest of 3,498,760; its RETURNING row lists that (Portfolio's
+  // On the way and Total count it: apps/terminal portfolio/model.ts totals)
   const held = BigInt(w.c.accounts.get(W.address)!.lamports);
   assert.equal(held, 4_971_880n);
-  assert.equal(w.owed.get(W.address)?.lamports, restAdds(held - 5_000n - 1_468_120n, solanaPoolFee(rent), FLOOR).toString());
-  assert.equal(w.owed.get(W.address)?.lamports, "2000000", "what W adds on its record");
+  assert.equal(w.owed.get(W.address)?.lamports, restAdds(held - 5_000n - 1_468_120n, FLOOR).toString());
+  assert.equal(w.owed.get(W.address)?.lamports, "3498760", "W's rest on its record");
   const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 }; // 81 USD a SOL
   const rows = returningWallets([...w.owed.values()], price, await w.ns.list());
   assert.deepEqual(rows.map((r) => [r.address, r.state]), [[W.address, "RETURNING"]]);
   assert.ok(rows[0]!.size !== "0" && rows[0]!.size !== "0.00", JSON.stringify(rows));
 });
-test("T3: the ride's pick is the least size of the closed list whose change moves and that lifts the rest; every pick is a release size", () => {
+test("T3: the ride's pick is the least rung whose change moves and that lifts the rest; every pick is a rung", () => {
   const at = (need: bigint) => (got: bigint) => got >= need;
   // the least size first, then the least note: the 5M note whole before 5M off the 10M one
   assert.deepEqual(ridePiece(SOL_PIECES, [{ id: "ten", value: 10_000_000n }, { id: "five", value: 5_000_000n }], at(1n)), { noteId: "five", chunk: 5_000_000n });
-  // a 9M note: 5M would leave 4M, which cannot move; its whole finish of 9M
-  assert.deepEqual(ridePiece(SOL_PIECES, [{ id: "nine", value: 9_000_000n }], at(1n)), { noteId: "nine", chunk: 9_000_000n });
-  // a need over 5M: the next size that lifts it
-  assert.deepEqual(ridePiece(SOL_PIECES, [{ id: "big", value: 100_000_000n }], at(5_500_000n)), { noteId: "big", chunk: 6_000_000n });
+  // a 9M note (made before the rule): 5M would leave 4M, which cannot move, and 9M is no rung (card
+  // pool-amounts-are-standard-sizes: no finishing sizes): none
+  assert.equal(ridePiece(SOL_PIECES, [{ id: "nine", value: 9_000_000n }], at(1n)), null);
+  // a need over 5M: the next rung that lifts it
+  assert.deepEqual(ridePiece(SOL_PIECES, [{ id: "big", value: 100_000_000n }], at(5_500_000n)), { noteId: "big", chunk: 10_000_000n });
   // off the grid, or under the floor: none
   assert.equal(ridePiece(SOL_PIECES, [{ id: "off", value: 7_500_000n }, { id: "small", value: 4_000_000n }], at(1n)), null);
   for (let v = 5_000_000n; v <= 60_000_000n; v += 1_000_000n)
@@ -2730,7 +2734,7 @@ test("buyMints: each W's record read back as its buy wrote it, under meta/owed/b
   assert.deepEqual([...rows.keys()], ["meta/owed/buy-sol"]);
 });
 
-test("the sweep's rule: W the only signer, the deposit alone, its value exactly W's lamports less the fee and the deposit's rents, on the grid and at least the floor", async () => {
+test("the sweep's rule: W the only signer, the deposit alone, its value exactly the largest rung of W's lamports less the fee and the deposit's rents, at least the floor", async () => {
   const pre = preOf(SECOND(0));
   const sizes = { stateSize: N + 1, labelSize: N + 1 };
   const ctx = { nowMs: 1_000n, wallet: W.address, feeCap: 0n, solana: PIN, precommitment: pre };
@@ -2768,25 +2772,36 @@ test("the sweep's rule: W the only signer, the deposit alone, its value exactly 
   refused(() => checkSolanaSweep(wire([dep(lamports - costs - 1n)]), ctx, reads, lamports, rent, held), "sweep_amount");
   refused(() => checkSolanaSweep(wire([dep(lamports - costs + 1n)]), ctx, reads, lamports, rent, held), "sweep_amount");
   refused(() => checkSolanaSweep(wire([dep(lamports - costs, W.address, pre + 1n)]), ctx, reads, lamports, rent, held), "precommitment");
-  refused(() => checkSolanaSweep(wire([{ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(3, 1, 0, 0, 0, 0, 0, 0, 0) }, dep(lamports - costs)] as never), ctx, reads, lamports, rent, held), "program");
-  refused(() => checkSolanaSweep(wire([dep(lamports - costs), dep(1n)] as never), ctx, reads, lamports, rent, held), "transfer");
+  // card pool-amounts-are-standard-sizes: the deposit alone; a budget, a second deposit or a transfer of the rest is refused
+  refused(() => checkSolanaSweep(wire([{ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(3, 1, 0, 0, 0, 0, 0, 0, 0) }, dep(lamports - costs)] as never), ctx, reads, lamports, rent, held), "instructions");
+  refused(() => checkSolanaSweep(wire([dep(lamports - costs), dep(1n)] as never), ctx, reads, lamports, rent, held), "instructions");
+  const tailIx = (v: bigint) => ({ program: SOLANA_SYSTEM_PROGRAM, accounts: [{ key: W.address, signer: true, writable: true }, { key: PIN.feePayer, signer: false, writable: true }], data: Uint8Array.of(2, 0, 0, 0, ...new Uint8Array(new BigUint64Array([v]).buffer)) });
+  refused(() => checkSolanaSweep(wire([dep(lamports - costs), tailIx(1n)] as never), ctx, reads, lamports + 1n, rent, held), "instructions");
+  // a rest past a rung: the largest rung goes in and the rest stays on W (here 2,000,000, over rent(0)); the rest whole,
+  // or that rung with the rest paid away, is refused
+  assert.equal(checkSolanaSweep(wire([dep(SOL_NOTE_FLOOR)]), ctx, reads, lamports + 2_000_000n, rent, held), SOL_NOTE_FLOOR);
+  refused(() => checkSolanaSweep(wire([dep(SOL_NOTE_FLOOR + 2_000_000n)]), ctx, reads, lamports + 2_000_000n, rent, held), "sweep_amount");
+  refused(() => checkSolanaSweep(wire([dep(SOL_NOTE_FLOOR), tailIx(2_000_000n)] as never), ctx, reads, lamports + 2_000_000n, rent, held), "instructions");
   refused(() => checkSolanaSweep(wire([dep(lamports - costs, FEE_PAYER)], FEE_PAYER), ctx, reads, lamports, rent, held), "signers");
   // the six, the form before d3edab1: a sweep the device builds always names the next pages
   const six = dep(lamports - costs);
   refused(() => checkSolanaSweep(wire([{ ...six, accounts: six.accounts.slice(0, 6) }]), ctx, reads, lamports, rent, held), "deposit_accounts");
   const small = costs + SOLANA_POOL_MIN_DEPOSIT - 1n;
-  refused(() => checkSolanaSweep(wire([dep(small - costs)]), ctx, reads, small, rent, held), "amount");
-  // card partial-sell-pays-all-into-cash: a partial sell's sweep holds W's keep (`hold`) and the rest under the grid on
-  // W, the deposit alone: W left at the hold, or up to a lamport under the grid more; never under the hold, never a whole
-  // grid step over it, never a transfer
+  // under the floor solanaSweepOf gives no note, so the equation refuses it (card pool-amounts-are-standard-sizes)
+  refused(() => checkSolanaSweep(wire([dep(small - costs)]), ctx, reads, small, rent, held), "sweep_amount");
+  // card partial-sell-pays-all-into-cash: a partial sell's sweep holds W's keep (`hold`) on W, the deposit alone; card
+  // pool-amounts-are-standard-sizes: the deposit the largest rung of what W holds above that, the rest under the next
+  // rung staying on W: W left at the hold, or up to a lamport under the next rung's step more; never under the hold,
+  // never a rung that fits left out, never a transfer
   const hold = BigInt(FEE) + rentMin(165);
-  for (const tail of [0n, SOL_GRID - 1n]) assert.equal(checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold + tail, rent, held, hold), lamports - costs);
+  for (const tail of [0n, SOL_GRID - 1n, SOL_NOTE_FLOOR - 1n]) assert.equal(checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold + tail, rent, held, hold), lamports - costs);
   refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold - 1n, rent, held, hold), "keep_amount");
-  refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold + SOL_GRID, rent, held, hold), "keep_amount");
+  refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports + hold + SOL_NOTE_FLOOR, rent, held, hold), "keep_amount");
+  assert.equal(checkSolanaKeepSweep(wire([dep(2n * SOL_NOTE_FLOOR)]), ctx, reads, lamports + hold + SOL_NOTE_FLOOR, rent, held, hold), 2n * SOL_NOTE_FLOOR);
   refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs), { program: SOLANA_SYSTEM_PROGRAM, accounts: [{ key: W.address, signer: true, writable: true }, { key: PIN.feePayer, signer: false, writable: true }], data: Uint8Array.of(2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0) }] as never), ctx, reads, lamports + hold + 1n, rent, held, hold), "instructions");
   refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs)]), ctx, reads, lamports, rent, held, 0n), "sweep_reads");
   refused(() => checkSolanaKeepSweep(wire([dep(lamports - costs, FEE_PAYER)], FEE_PAYER), ctx, reads, lamports + hold, rent, held, hold), "signers");
-  refused(() => checkSolanaKeepSweep(wire([dep(small - costs)]), ctx, reads, small + hold, rent, held, hold), "amount");
+  refused(() => checkSolanaKeepSweep(wire([dep(small - costs)]), ctx, reads, small + hold, rent, held, hold), "keep_amount");
   // card sol-w-sweep: per volume account still owed cashback, W keeps exactly what its later claim costs (rent(0), the
   // claim frame's fee, the claim account's rent), and nothing more or less; no more owed accounts than the two programs
   const keep = (n: bigint) => (n === 0n ? 0n : rentMin(0) + n * (BigInt(FEE) + rentMin(165)));
@@ -2800,7 +2815,10 @@ test("the sweep's rule: W the only signer, the deposit alone, its value exactly 
     refused(() => checkSolanaSweep(wire([dep(big - costs - keep(BigInt(n)) + 1n)]), ctx, reads, big, rent, held, n), "sweep_amount");
     refused(() => checkSolanaSweep(wire([dep(big - costs - keep(BigInt(n)) - 1n)]), ctx, reads, big, rent, held, n), "sweep_amount");
   }
-  refused(() => checkSolanaSweep(wire([dep(10_000_000n)]), ctx, reads, bigOf(1n), rent, held), "sweep_amount");
+  // an owed claim's keep comes off the rest before the rung: at 10,000,000 past the costs, one owed claim leaves no room
+  // for the 10,000,000 rung
+  assert.equal(checkSolanaSweep(wire([dep(10_000_000n)]), ctx, reads, 10_000_000n + costs, rent, held), 10_000_000n);
+  refused(() => checkSolanaSweep(wire([dep(10_000_000n)]), ctx, reads, 10_000_000n + costs, rent, held, 1), "sweep_amount");
   for (const n of [3, -1, 1.5, Number.NaN]) refused(() => checkSolanaSweep(wire([dep(10_000_000n)]), ctx, reads, bigOf(1n), rent, held, n), "sweep_reads");
 });
 
@@ -2824,13 +2842,15 @@ test("the sweep's rule refuses a note under the smallest one a withdraw spends (
     x.set(message, 65);
     return x;
   };
+  // card pool-amounts-are-standard-sizes: the value must be the rung solanaSweepOf gives W's rest, none under the floor,
+  // so a note under the floor is refused by that equation (sweep_amount), before the floor's own check
   const under = (SOLANA_POOL_MIN_DEPOSIT + floor) / 2n;
-  assert.throws(() => checkSolanaSweep(wire(under), ctx, reads, under + costs, rent, held), (e: unknown) => e instanceof PoolRuleRefused && e.rule === "amount");
-  // card every-lamport-can-move: the least note is the larger of SOL_NOTE_FLOOR and that floor up to the grid; an on-grid
-  // note a step under it is refused too
+  assert.throws(() => checkSolanaSweep(wire(under), ctx, reads, under + costs, rent, held), (e: unknown) => e instanceof PoolRuleRefused && e.rule === "sweep_amount");
+  // the least note is the least rung at or over SOL_NOTE_FLOOR and that floor; an on-grid note a step under it is refused too
   const least = SOL_NOTE_FLOOR > floor ? SOL_NOTE_FLOOR : floor + ((SOL_GRID - (floor % SOL_GRID)) % SOL_GRID);
+  assert.ok(isReleaseSize(SOL_PIECES, least), String(least));
   assert.equal(checkSolanaSweep(wire(least), ctx, reads, least + costs, rent, held), least);
-  assert.throws(() => checkSolanaSweep(wire(least - SOL_GRID), ctx, reads, least - SOL_GRID + costs, rent, held), (e: unknown) => e instanceof PoolRuleRefused && e.rule === "amount");
+  assert.throws(() => checkSolanaSweep(wire(least - SOL_GRID), ctx, reads, least - SOL_GRID + costs, rent, held), (e: unknown) => e instanceof PoolRuleRefused && e.rule === "sweep_amount");
 });
 
 // Review L1 of 0068524a: the deposit's rents were the device's own formula, not what the program takes: a page or a mark
@@ -6186,16 +6206,16 @@ test("round-trip-costs-less a: 20 Ws, one holding SOL: the helper finds them in 
 // is sent the record keeps that read with the sweep's signature (the page lists W until the sweep's note is counted, never
 // twice; the delta review's item 6); a W whose buy is not proven reads none
 test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass read, with the sweep's signature once it is sent, none while its buy is unproven", async () => {
-  // a rest of 3,501,520: under the note, and one a ride moves at a gain (restAdds 2,000,000), so it is listed
+  // a rest of 3,501,520: under the note, listed at that rest (restAdds; card pool-amounts-are-standard-sizes)
   const floor = await soldElsewhere(2_150_000);
   await resumeRentBacks(floor.w.host, fakeLocks());
   const onW = floor.w.c.accounts.get(W.address)!.lamports;
   assert.ok(onW > 0n, "under the floor: W keeps its SOL");
   assert.ok(floor.w.owed.has(W.address), "under the floor: the record kept, a later top-up may make W sweepable");
-  // 13 Nov 09:31Z (card every-lamport-can-move T3): a leftover is counted in the balance, at what it adds once
-  // moved (pick (a): restAdds of its rest 3,501,520), never W's lamports
-  assert.equal(floor.w.owed.get(W.address)?.lamports, restAdds(3_501_520n, solanaPoolFee(rent), FLOOR).toString(), "under the floor: what W adds carried, shown");
-  assert.equal(floor.w.owed.get(W.address)?.lamports, "2000000");
+  // 13 Nov 09:31Z (card every-lamport-can-move T3): a leftover is counted in the balance, at its rest (pick (c):
+  // restAdds of its rest 3,501,520), never W's lamports
+  assert.equal(floor.w.owed.get(W.address)?.lamports, restAdds(3_501_520n, FLOOR).toString(), "under the floor: W's rest carried, shown");
+  assert.equal(floor.w.owed.get(W.address)?.lamports, "3501520");
   assert.equal(floor.w.owed.get(W.address)?.floor, true, "the floor end marked, for a tap's ride");
   const swept = await soldElsewhere(ENOUGH);
   await resumeRentBacks(swept.w.host, fakeLocks());
@@ -6216,7 +6236,7 @@ test("round-trip-costs-less P3-e: a W's owed record keeps the lamports its pass 
 // RETURNING row (On the way and Total) until a tap's ride sweeps it. Before T3 it drew none (the review of 024e8a89d,
 // P2-4a: up to 5,536,159 lamports a W unshown).
 test("round-trip-costs-less P3-e: a W that ended at the floor draws a RETURNING row of what it holds, counted in On the way and Total", async () => {
-  // a rest of 3,501,520 (restAdds 2,000,000); a rest no ride moves at a gain draws none (the T3 found-W test)
+  // a rest of 3,501,520 (restAdds: that rest)
   const floor = await soldElsewhere(2_150_000);
   await resumeRentBacks(floor.w.host, fakeLocks());
   assert.equal(floor.w.c.deposits.filter((d) => d.sweep).length, 0, "under the floor: no sweep");
@@ -6229,10 +6249,10 @@ test("round-trip-costs-less P3-e: a W that ended at the floor draws a RETURNING 
   assert.equal(returningWallets([...swept.w.owed.values()], price, await swept.w.ns.list()).length, 1, "a W whose sweep is on its way: listed");
 });
 
-// Card every-lamport-can-move T3: a tap's pass over the leftover Ws carries the ride (resumeRentBacks' `ride`): a W
-// whose last pass ended at the floor is passed again, though the helper reads it the same, and its ride's piece lifts it
-// to a note, W at 0. A load's own pass never rides: the same W, read the same, is not passed and nothing is released.
-test("T3: a tap's leftover pass with ride passes a W left at the floor, releases one spare piece to it and sweeps it to 0; a load's pass never rides", async () => {
+// Card every-lamport-can-move T3: a tap's pass over the leftover Ws carries `ride`: a W whose last pass ended at the
+// floor is passed again, though the helper reads it the same. Card pool-amounts-are-standard-sizes: that pass releases
+// nothing (no ride runs), W keeps its rest, listed at it. A load's own pass does not pass the same W again.
+test("T3: a tap's leftover pass with ride passes a W left at the floor again and releases nothing, W keeping its rest; a load's pass never rides", async () => {
   // W at 4,974,640 after its closes: a rest of 3,501,520, under the note and over what a ride costs
   const { w } = await soldElsewhere(2_150_000);
   await resumeRentBacks(w.host, fakeLocks());
@@ -6242,16 +6262,19 @@ test("T3: a tap's leftover pass with ride passes a W left at the floor, releases
   await resumeRentBacks(w.host, fakeLocks());
   assert.equal(rides.length, 0, "a load's pass: no ride");
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+  const told = w.told.length;
   await resumeRentBacks(w.host, fakeLocks(), { ride: true });
-  assert.deepEqual(rides.map((r) => [r.to, r.chunk]), [[W.address, SOL_NOTE_FLOOR]], JSON.stringify(w.told.slice(-3)));
-  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
-  assert.equal(w.c.accounts.get(W.address), undefined, "W at 0");
+  assert.deepEqual(rides.map((r) => [r.to, r.chunk]), [], JSON.stringify(w.told.slice(-3)));
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.ok(w.told.length > told && w.told.at(-1)?.state === "floor", JSON.stringify(w.told.slice(-2)));
+  assert.equal(w.c.accounts.get(W.address)?.lamports, 4_974_640, "W keeps its lamports");
+  assert.equal(w.owed.get(W.address)?.lamports, "3501520");
 });
 
 // Card every-lamport-can-move T3: the ride pays for itself: the note it makes is worth more than the piece it takes (its
 // value over the chunk, the relay fee F counted), so a W holding little (a found W at 1,000,000, a stranger's dust on an
 // old W) never burns about 2.77M a tap; it ends at the floor as with no spare piece, W keeping its lamports
-test("T3: a found W holding little (2,824,641 after its closes, a rest of 1,351,521) and a spare 20M note: the ride releases nothing, W keeps its lamports, unlisted", async () => {
+test("T3: a found W holding little (2,824,641 after its closes, a rest of 1,351,521) and a spare 20M note: no ride, W keeps its lamports, listed at its rest", async () => {
   const { w } = await soldElsewhere(1);
   const { rides, ride } = riding([{ id: "spare", value: 20_000_000n }]);
   w.host.ride = ride(w);
@@ -6260,32 +6283,36 @@ test("T3: a found W holding little (2,824,641 after its closes, a rest of 1,351,
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
   assert.ok(w.c.accounts.get(W.address)!.lamports > 0, "W keeps its lamports");
   assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.slice(-2)));
-  // and it is not listed: less than its own move costs, no RETURNING row, nothing in the balance
-  assert.equal(w.owed.get(W.address)?.lamports, undefined);
+  // card pool-amounts-are-standard-sizes: the rest is the user's own, on W, so it is listed at that rest (restAdds),
+  // never hidden and never W's lamports
+  assert.equal(w.owed.get(W.address)?.lamports, "1351521");
+  assert.equal(restAdds(1_351_521n, FLOOR), 1_351_521n);
   const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 };
-  assert.deepEqual(returningWallets([...w.owed.values()], price, await w.ns.list()), []);
+  assert.deepEqual(returningWallets([...w.owed.values()], price, await w.ns.list()).map((r) => r.state), ["RETURNING"]);
 });
 // Pick (a), 13 Nov (card every-lamport-can-move T3): a W counts at what it adds once moved (restAdds), never
 // its lamports or its raw rest, all in W's lamports here: the rest is W's lamports less the sweep's 5,000 fee and the
 // deposit's rents (1,468,120; 2,931,160 when the deposit opens a page: the mark's 736,600 and 2 x 1,097,280)
-test("T3, pick (a): restAdds counts a W at what it adds once moved: its own note, else what a ride adds (the rest less the relay fee, down to the grid), else 0", () => {
-  const F = solanaPoolFee(rent);
+test("T3, pick (c): restAdds lists a W at its own sweep's rung, else at its rest (the user's own, on W), else 0", () => {
   const restOf = (w: bigint, rents: bigint) => w - 5_000n - rents;
-  // (1) W at 3,766,880 (rest 2,293,760): 0, no ride, not listed
-  assert.equal(restAdds(restOf(3_766_880n, 1_468_120n), F, FLOOR), 0n);
-  // (2) W at 3,773,120 (rest 2,300,000): a ride adds 1,000,000 whatever list size it takes
-  assert.equal(restAdds(restOf(3_773_120n, 1_468_120n), F, FLOOR), 1_000_000n);
-  for (const q of [5_000_000n, 6_000_000n, 10_000_000n, 20_000_000n, 1_000_000_000n]) assert.equal(solanaSweepOf(2_300_000n + q - F).value - q, 1_000_000n, String(q));
-  // (3) a deposit that opens a page moves the threshold: W at 3,773,120 counts 0, W at 5,236,160 (rest 2,300,000) 1,000,000
-  assert.equal(restAdds(restOf(3_773_120n, 2_931_160n), F, FLOOR), 0n);
-  assert.equal(restAdds(restOf(5_236_160n, 2_931_160n), F, FLOOR), 1_000_000n);
-  // (4) a found W at 1,000,000: 0
-  assert.equal(restAdds(restOf(1_000_000n, 1_468_120n), F, FLOOR), 0n);
-  // a rest its own sweep makes a note of (the note floor, over the sweep's floor here) counts at that note
-  assert.equal(restAdds(SOL_NOTE_FLOOR + 999_999n, F, FLOOR), SOL_NOTE_FLOOR);
+  // card pool-amounts-are-standard-sizes: under the floor no ride lifts the rest, and it is never paid away: W is listed
+  // at its rest, whatever the rents
+  // (1) W at 3,766,880 (rest 2,293,760) and (2) W at 3,773,120 (rest 2,300,000): each its rest
+  assert.equal(restAdds(restOf(3_766_880n, 1_468_120n), FLOOR), 2_293_760n);
+  assert.equal(restAdds(restOf(3_773_120n, 1_468_120n), FLOOR), 2_300_000n);
+  // (3) a deposit that opens a page: still the rest
+  assert.equal(restAdds(restOf(3_773_120n, 2_931_160n), FLOOR), 836_960n);
+  assert.equal(restAdds(restOf(5_236_160n, 2_931_160n), FLOOR), 2_300_000n);
+  // (4) a found W at 1,000,000: its rest is under 0, not listed
+  assert.equal(restAdds(restOf(1_000_000n, 1_468_120n), FLOOR), 0n);
+  assert.equal(restAdds(0n, FLOOR), 0n);
+  // a rest its own sweep makes a note of counts at that rung, never the rest past it
+  assert.equal(restAdds(SOL_NOTE_FLOOR + 999_999n, FLOOR), SOL_NOTE_FLOOR);
+  assert.equal(restAdds(27_000_000n, FLOOR), 20_000_000n);
+  assert.equal(restAdds(4_999_999n, FLOOR), 4_999_999n);
 });
 // (1) and (2) on a W read on chain: soldElsewhere(x) leaves W at x + 2,824,640 after its closes
-test("T3, pick (a): W at 3,766,880 counts 0 (no ride with a spare 20M note, unlisted); W at 3,773,120 is listed at 1,000,000, and its ride makes one note, W at 0", async () => {
+test("T3, pick (c): W at 3,766,880 and W at 3,773,120 are each listed at their rest; a spare note in the pool never rides, W keeps its lamports", async () => {
   const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 };
   const none = await soldElsewhere(942_240);
   const spare = riding([{ id: "spare", value: 20_000_000n }]);
@@ -6293,19 +6320,22 @@ test("T3, pick (a): W at 3,766,880 counts 0 (no ride with a spare 20M note, unli
   await resumeRentBacks(none.w.host, fakeLocks(), { ride: true });
   assert.equal(spare.rides.length, 0, "no ride");
   assert.equal(none.w.c.accounts.get(W.address)?.lamports, 3_766_880, "W keeps its lamports");
-  assert.equal(none.w.owed.get(W.address)?.lamports, undefined, "unlisted");
-  assert.deepEqual(returningWallets([...none.w.owed.values()], price, await none.w.ns.list()), []);
+  assert.equal(none.w.owed.get(W.address)?.lamports, "2293760", "listed at its rest, never W's lamports");
+  assert.deepEqual(returningWallets([...none.w.owed.values()], price, await none.w.ns.list()).map((r) => r.state), ["RETURNING"]);
   const one = await soldElsewhere(948_480);
   await resumeRentBacks(one.w.host, fakeLocks());
   assert.equal(one.w.c.accounts.get(W.address)?.lamports, 3_773_120);
-  assert.equal(one.w.owed.get(W.address)?.lamports, "1000000", "listed at what it adds, never W's lamports");
+  assert.equal(one.w.owed.get(W.address)?.lamports, "2300000", "listed at its rest, never W's lamports");
   assert.deepEqual(returningWallets([...one.w.owed.values()], price, await one.w.ns.list()).map((r) => r.state), ["RETURNING"]);
+  // card pool-amounts-are-standard-sizes: a tap's pass with a spare piece rides nothing (a ride would release a rung
+  // only to deposit the same rung back): no release, no sweep, W keeps its lamports, still listed at its rest
   const { rides, ride } = riding([{ id: "spare", value: 10_000_000n }]);
   one.w.host.ride = ride(one.w);
   await resumeRentBacks(one.w.host, fakeLocks(), { ride: true });
-  assert.deepEqual(rides.map((r) => r.chunk), [SOL_NOTE_FLOOR], JSON.stringify(one.w.told.slice(-3)));
-  assert.deepEqual(one.w.c.deposits.filter((d) => d.sweep).map((d) => d.value), [SOL_NOTE_FLOOR + 1_000_000n]);
-  assert.equal(one.w.c.accounts.get(W.address), undefined, "W at 0");
+  assert.deepEqual(rides.map((r) => r.chunk), [], JSON.stringify(one.w.told.slice(-3)));
+  assert.deepEqual(one.w.c.deposits.filter((d) => d.sweep).map((d) => d.value), []);
+  assert.equal(one.w.c.accounts.get(W.address)?.lamports, 3_773_120, "W keeps its lamports");
+  assert.equal(one.w.owed.get(W.address)?.lamports, "2300000");
 });
 
 // review 2 P3-e of c0dd55d02: leftover Ws swept at a later load went 1 to 2 s apart, so Ws whose sales were hours apart
