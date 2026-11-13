@@ -47,7 +47,7 @@ import { poseidon3 } from "poseidon-lite/poseidon3";
 import { nearPairNetwork, nearPairRule } from "../deposit/account.ts";
 import { CHAINS, type Chain, masters, type SecondId } from "../derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "./secrets.ts";
-import { refKey, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "./store.ts";
+import { refKey, type Landed, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "./store.ts";
 
 /** Indices of one lane in a row with no note before the deposit index walk stops (wallet.md l.271-272). */
 export const RESTORE_GAP = 10_000;
@@ -78,6 +78,8 @@ export type RestoredNote = {
   state: "UNSPENT" | "SPENT";
   /** a change or refund note: the refKey of the note whose withdrawal made it */
   parent?: string;
+  /** an EVM pool note whose leaf is in a block above the round's finalized one (../pool/evm-restore.ts) */
+  landed?: Landed;
 };
 /** A spend of one of our notes: the withdrawal (l, j) and the vault's row for it. */
 export type RestoredSpend = { l: bigint; j: number; note: string; spend: VaultSpendRow };
@@ -513,7 +515,7 @@ export async function writeRestored(store: NoteStore, r: Pick<NoteRestore, "note
       if (cur.precommitment !== n.precommitment) throw new Error(`note ${key} in the store has another precommitment`);
       // a PLANNED index the restore found landed (E5, above): landed now, with the leaf the restore read
       if (cur.state === "PLANNED") {
-        have.set(key, await landNote(store, cur, n.leaf));
+        have.set(key, await landNote(store, cur, n.leaf, n.landed));
         continue;
       }
       const why = WHY[cur.state];
@@ -528,7 +530,7 @@ export async function writeRestored(store: NoteStore, r: Pick<NoteRestore, "note
       blocked.add(key);
       continue;
     }
-    have.set(key, await store.add({ ref: n.ref, scope: n.scope, precommitment: n.precommitment, state: "UNSPENT", leaf: n.leaf }));
+    have.set(key, await store.add({ ref: n.ref, scope: n.scope, precommitment: n.precommitment, state: "UNSPENT", leaf: n.leaf, ...(n.landed === undefined ? {} : { landed: n.landed }) }));
   }
   const now = new Map((await store.list()).map((n) => [refKey(n.ref), n]));
   for (const n of r.notes) {
@@ -545,7 +547,7 @@ export async function writeRestored(store: NoteStore, r: Pick<NoteRestore, "note
  * checks against the note's precommitment. The one move for a note landed by another deposit than its own send: the
  * pool deposit's taken precommitment (src/pool-deposit.ts) and the restore's PLANNED index (writeRestored).
  */
-export async function landNote(store: Pick<NoteStore, "move">, n: NoteRecord, leaf: Leaf): Promise<NoteRecord> {
+export async function landNote(store: Pick<NoteStore, "move">, n: NoteRecord, leaf: Leaf, landed?: Landed): Promise<NoteRecord> {
   const incoming = n.state === "PLANNED" ? await store.move(n.id, "PLANNED", "INCOMING") : n;
-  return store.move(incoming.id, "INCOMING", "UNSPENT", { leaf });
+  return store.move(incoming.id, "INCOMING", "UNSPENT", { leaf, ...(landed === undefined ? {} : { landed }) });
 }

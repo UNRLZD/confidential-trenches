@@ -9,17 +9,20 @@ import type { Asset, QuoteRefusal } from "./model.ts";
 // minimum follows the live fees. A refusal while a list is held keeps the list (the dry and checked quotes refuse any
 // amount the live read would); with none held it is the sheet's answer (S4.6-S4.8), as before.
 //
-// Card app-faults-seen-on-124: that ask is four of a device's five 1Click calls a minute (the token list and a probe quote
-// per asset, packages/signpage/src/rules/deposit-dry.ts depositAssetsKind; the helper's share,
-// apps/helper/src/proxy/proxy.ts DEPOSIT_SHEET_CALLS), and the list lived in module memory, so every page load asked it
-// again at READY and a sheet opening asked it once more: the second load inside a minute met 429 on the token list. Now
+// Card app-faults-seen-on-124: that ask is four of the five 1Click calls a device may send in one fixed 10 s window (the
+// token list and a probe quote per asset, packages/signpage/src/rules/deposit-dry.ts depositAssetsKind; the helper's
+// share, apps/helper/src/proxy/proxy.ts DEPOSIT_SHEET_CALLS, counted per apps/helper/src/limits/limits.ts
+// LIMIT_WINDOW_MS; only 1Click's total over every device is counted over 60 s, VENDOR_WINDOW_MS), and the list lived in
+// module memory, so every page load asked it again at READY and a sheet opening asked it once more: a second ask inside
+// one 10 s window met 429 on the token list (live run of release 124: the third of ten loads in a minute). Now
 // the list is held in the tab's session store with the time it was read, and the time of the last ask: the shell's warm
 // read asks only when no list is held and nothing was asked in the last minute; a sheet opening asks only when no list
 // younger than a minute is held. So a device asks it at most once a minute, and a sheet still opens on a list. The page
 // is right without the store (blocked, full or unreadable): the list is then held in memory only, as before.
 
-/** How long a held list is fresh, and the least time between two asks: the helper counts a device's 1Click share over a
- *  minute (apps/helper/src/proxy/proxy.ts VENDOR_WINDOW_MS). */
+/** How long a held list is fresh, and the least time between two asks: longer than the 10 s window the helper counts a
+ *  device's 1Click share in (apps/helper/src/limits/limits.ts LIMIT_WINDOW_MS), so two asks never share one, and as
+ *  long as the window 1Click's own total is counted over (apps/helper/src/proxy/proxy.ts VENDOR_WINDOW_MS). */
 export const ASSETS_FRESH_MS = 60_000;
 const KEY = "ct.deposit.assets";
 

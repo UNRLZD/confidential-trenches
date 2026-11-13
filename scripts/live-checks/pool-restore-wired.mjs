@@ -39,6 +39,8 @@
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/pool-restore-wired.mjs --local [--record <file>]   SIGN_HOST from this checkout's
 //     committed build under its own _headers, nothing on the network
+//   node scripts/live-checks/pool-restore-wired.mjs --local --net [--record <file>]   the same build with the pinned
+//     hosts on the network (the live shape, read-only, the published vector)
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
 // No money; the account is the published vector's, thrown away with the profile.
 import "../net-window.mjs";
@@ -56,6 +58,12 @@ const APP_HOST = "ct-app.unrealized.trade";
 const SIGN = `https://${SIGN_HOST}`;
 const START = "/portfolio";
 export const WAIT_MS = 120_000;
+// BALANCE_MS, the bound on the first pool's balance from Continue (card restore-shows-the-balance-in-seconds): the
+// local build with the pinned hosts on the network (--local --net, 12-13 Nov 23:55Z-00:00Z, Chrome 157) showed it at
+// 4,203, 4,190 and 5,362 ms, the NEAR pool's each time. GitHub's runner is slower: release 123's live run walked every
+// pool in 66,675 ms against 23.6 to 31.2 s here (2.1 to 2.8 times), so its first balance may come near 15 s. The bound
+// is twice that: a bound the runner breaks is a red sign deploy.
+export const BALANCE_MS = 30_000;
 const PROTECT_MS = 500; // the page's activation guard (packages/signpage/src/guard.ts)
 // the NEAR operators step 5 reads deposit ids on (src/pool-restore.ts pageIdReads on mainnet), both pinned hosts
 export const NEAR_OPS = Object.freeze(["rpc.mainnet.fastnear.com", "near.drpc.org"]);
@@ -106,7 +114,15 @@ export function judge(rec) {
   const auto = restoreOps(s.auto?.state);
   say(auto.length === 1 && auto[0].stage === "done", `the sign-in on an empty store ran one restore with no tap, and it ended done (${JSON.stringify(auto)})`);
   // and within WAIT_MS of Continue (card restore-first-sign-in-under-two-minutes); a record from before it has no ms
-  if (isObj(s.auto) && "ms" in s.auto) say(Number.isFinite(s.auto.ms) && s.auto.ms >= 0 && s.auto.ms <= WAIT_MS, `it ended within ${WAIT_MS / 1000} s of Continue (${s.auto.ms === null ? "never" : `${s.auto.ms} ms`})`);
+  if (isObj(s.auto) && "ms" in s.auto) say(Number.isFinite(s.auto.ms) && s.auto.ms >= 0 && s.auto.ms <= WAIT_MS, `every pool walked ${s.auto.ms === null ? "never" : `${s.auto.ms} ms`} after Continue (within ${WAIT_MS / 1000} s)`);
+  // the first pool's balance the restored one (card restore-shows-the-balance-in-seconds): the page's first "restore:
+  // <chain> walked" line after Continue (src/pool-restore.ts, once that pool's floor has written); a record from before
+  // the card has no `walked`
+  if (Array.isArray(rec?.walked)) {
+    const b = s.balance;
+    const ms = isObj(b) && Number.isFinite(b.ms) ? b.ms : null;
+    say(ms !== null && ms >= 0 && ms <= BALANCE_MS, `the balance first showed ${ms === null ? "never" : `${ms} ms`} after Continue (${isObj(b) ? `the ${b.chain} pool's notes written` : "no pool's notes written"}; within ${BALANCE_MS / 1000} s)`);
+  }
   const a = s.asked?.answer;
   say(isObj(a) && a.ok === true && JSON.stringify(a.result) === JSON.stringify({ stage: "started" }), `restore is answered started (${JSON.stringify(a ?? null)})`);
   const stages = Array.isArray(s.asked?.stages) ? s.asked.stages : [];
@@ -178,8 +194,8 @@ async function until(f, ms = WAIT_MS) {
   }
 }
 
-export async function collect({ local }) {
-  const rec = { source: local ? "local: this checkout's committed packages/signpage build" : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, afterDone: Object.fromEntries(NEAR_OPS.map((h) => [h, 0])), stray: [], console: [], errors: [] };
+export async function collect({ local, net = false }) {
+  const rec = { source: local ? `local: this checkout's committed packages/signpage build${net ? ", the pinned hosts on the network" : ""}` : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, afterDone: Object.fromEntries(NEAR_OPS.map((h) => [h, 0])), stray: [], console: [], walked: [], errors: [] };
   // set once the run with no tap is seen done: each NEAR `query` after it is step 5 reading on
   let done = false;
   let built = null;
@@ -209,13 +225,17 @@ export async function collect({ local }) {
       if (u.host === APP_HOST) return r.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `frame-ancestors ${SIGN}` }, body: APP_PAGE });
       // the pinned pool's hosts: the live network's (the local build serves none, so they are refused there and its run
       // ends as the network leaves it)
-      if (!local && PINNED_HOSTS.includes(u.host)) return r.continue();
+      // (--net: the local build with them on the network, the live shape, as WAIT_MS and BALANCE_MS were measured)
+      if ((!local || net) && PINNED_HOSTS.includes(u.host)) return r.continue();
       if (rec.stray.length < 20) rec.stray.push({ host: u.host, path: u.pathname });
       return r.abort("blockedbyclient");
     });
     const page = await ctx.newPage();
     page.on("console", (m) => {
       if ((m.type() === "warning" || m.type() === "error") && rec.console.length < 50) rec.console.push(`${m.type()}: ${m.text()}`.slice(0, 600));
+      // each pool's floor written (src/pool-restore.ts): its chain and when
+      const w = m.type() === "info" ? /^restore: (solana|near|base|robinhood) walked$/.exec(m.text()) : null;
+      if (w && rec.walked.length < 10) rec.walked.push({ chain: w[1], t: Date.now() });
     });
     page.on("response", (res) => {
       if (res.request().isNavigationRequest() && res.frame() === page.mainFrame() && rec.connect === null) rec.connect = connectHosts(res.headers()["content-security-policy"] ?? "");
@@ -250,6 +270,9 @@ export async function collect({ local }) {
     });
     // its time from Continue to the state that shows it ended (to the state poll's 100 ms), or null when it never did
     rec.steps.auto = { state: ended ? { ops: restoreOps(ended) } : { ops: restoreOps(await state()) }, ms: ended ? Date.now() - t1 : null };
+    // the first pool's notes written, from Continue (to the console event's arrival)
+    const first = rec.walked.find((x) => x.t >= t1);
+    rec.steps.balance = first ? { chain: first.chain, ms: first.t - t1 } : null;
     done = restoreOps(ended).some((o) => o.stage === "done");
     // 4. asked: the answer, then its progress to the end
     const id = await send("restore");
@@ -279,7 +302,7 @@ const isMain = (() => {
 if (isMain) {
   try {
     const i = process.argv.indexOf("--record");
-    const rec = await collect({ local: process.argv.includes("--local") });
+    const rec = await collect({ local: process.argv.includes("--local"), net: process.argv.includes("--net") });
     if (i > 0) writeFileSync(process.argv[i + 1], `${JSON.stringify(rec, null, 1)}\n`);
     const r = judge(rec);
     for (const l of r.lines) console.log(l);

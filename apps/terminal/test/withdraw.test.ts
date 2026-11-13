@@ -19,6 +19,13 @@ test("every kit withdraw stage has its S12 state: Sending, Processing, Sent, Ref
   assert.deepEqual(STAGE_VIEW, want);
 });
 
+test("a stage this build doesn't know (a newer signing page's) is drawn as Sending, never undefined (a black page)", () => {
+  const ops = [wd("w9", "in_transit")];
+  const w = observe(EMPTY, ops, 0);
+  const next = [wd("w9", "paused" as WithdrawStage)];
+  assert.equal(current(w, next, 1000)?.view, "S12.11");
+});
+
 test("nothing to show: no state yet, no withdrawal, or only other kinds", () => {
   assert.equal(current(run([[null, NOW]]), null, NOW), null);
   assert.equal(current(run([[[], NOW]]), [], NOW), null);

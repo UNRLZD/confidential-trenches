@@ -3,7 +3,7 @@ import type { Chain, HeldBar, HeldMarket, PoolChain, SignpageClientSnapshot, Sig
 import { createContext, useContext, useEffect, useState } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
 import { useFilled } from "./fills.ts";
-import { heldData, heldRefs } from "./held.ts";
+import { heldData, heldRefs, marketRefs } from "./held.ts";
 import { balanceOf, heldOf, NO_DATA, portfolio } from "./model.ts";
 import type { PortfolioData, Row } from "./model.ts";
 
@@ -53,13 +53,14 @@ const HISTORY_MS = 600_000;
  *  their cadence while the screen is open; the helper is sent the token list only. */
 function useHeldReads(state: SignpageState | null): { markets: HeldMarket[]; history: ReadonlyMap<string, readonly HeldBar[]> } {
   const refs = heldRefs(state);
-  const key = refs.map((r) => heldKey(r.chain, r.token)).join(",");
+  const named = marketRefs(state);
+  const key = `${refs.map((r) => heldKey(r.chain, r.token)).join(",")}|${named.map((r) => heldKey(r.chain, r.token)).join(",")}`;
   const [markets, setMarkets] = useState<HeldMarket[]>([]);
   const [history, setHistory] = useState<ReadonlyMap<string, readonly HeldBar[]>>(new Map());
   useEffect(() => {
-    if (refs.length === 0) return;
+    if (named.length === 0) return;
     let live = true;
-    const prices = () => void readHeldMarket(HELPER, refs).then((m) => live && setMarkets(m));
+    const prices = () => void readHeldMarket(HELPER, named).then((m) => live && setMarkets(m));
     const bars = () => void Promise.all(refs.map(async (r) => [heldKey(r.chain, r.token), await readHeldHistory(HELPER, r)] as const)).then((h) => live && setHistory(new Map(h)));
     prices();
     bars();

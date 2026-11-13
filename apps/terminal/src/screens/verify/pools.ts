@@ -48,8 +48,12 @@ export function poolExplorers(chain: PoolChain, address: string): PoolExplorer[]
 // ------------------------------------------------------------------------------------------------ the reads
 /** One JSON-RPC call to a URL; a status other than 200, a body that is not JSON or no answer in time throws. */
 export type PoolRpc = (url: string, method: string, params: unknown[], signal?: AbortSignal) => Promise<unknown>;
-/** One call's bound: Solana's pair reads under it alone; an EVM read is cut sooner by the walk (EVM_READ_CALL_MS, 4 s). */
+/** One call's bound, and a Solana call's on the walk (its accounts answer is about 106 KB; 1.3-1.7 s from the Mac, 12
+ *  Nov); an EVM read is cut sooner by the walk (EVM_READ_CALL_MS, 4 s). */
 export const POOL_READ_MS = 10_000;
+/** Solana's walk: each call cut at POOL_READ_MS, the whole read inside two of them, so a refusing or hanging operator
+ *  still leaves time to read the spare. */
+const SOLANA_WALK = { callMs: POOL_READ_MS, budgetMs: 2 * POOL_READ_MS } as const;
 export function poolRpc(fetchFn: typeof fetch = fetch): PoolRpc {
   return async (url, method, params, signal) => {
     const res = await fetchFn(url, {
@@ -63,7 +67,6 @@ export function poolRpc(fetchFn: typeof fetch = fetch): PoolRpc {
     return await res.json();
   };
 }
-const failed = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
 
 export const SOLANA_READS = ["accounts"] as const;
 export const EVM_READS = ["block", "code", "owner", "implementation", "admin", "beacon"] as const;
@@ -90,10 +93,10 @@ const headOf = (a: unknown): number | null => {
 const WALKS = new Map<string, EvmTwoOperators<string>>();
 /** Tests only: every walk forgotten, so a test starts with no operator resting from another test's reads. */
 export const forgetPoolWalks = (): void => WALKS.clear();
-const walkOf = (urls: readonly string[]): EvmTwoOperators<string> => {
+const walkOf = (urls: readonly string[], opts?: { callMs: number; budgetMs: number }): EvmTwoOperators<string> => {
   const key = urls.join(" ");
   let w = WALKS.get(key);
-  if (w === undefined) WALKS.set(key, (w = evmTwoOperators(urls.map((url) => ({ url, rpc: url })))));
+  if (w === undefined) WALKS.set(key, (w = evmTwoOperators(urls.map((url) => ({ url, rpc: url })), opts)));
   return w;
 };
 /** One JSON-RPC answer as a seat's answer: its result, or, on the owner read alone (`revertOk`), the chain's own revert
@@ -121,17 +124,6 @@ const answered = (a: unknown, revertOk = false): unknown => {
 export const HEAD_APART_S = 30;
 const BLOCK_S: Readonly<Record<string, number>> = { base: 0.2, robinhood: 0.1 };
 export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): Promise<PoolReads> {
-  const ask = (url: string, method: string, params: unknown[]) => rpc(url, method, params, signal).catch(failed);
-  if (p.chain === "solana") {
-    const pin = p.pin as SolanaPoolPin;
-    const one = async (url: string): Promise<PoolRpcReads> => ({
-      name: url,
-      answers: { accounts: await ask(url, "getMultipleAccounts", [[pin.program, pin.programdata], { encoding: "base64", commitment: "finalized" }]) },
-    });
-    const [a, b] = await Promise.all(p.rpcs.slice(0, 2).map(one));
-    return { chain: p.chain, height: null, rpcs: [a!, b!] };
-  }
-  const pin = p.pin as EvmPoolPin;
   const asked: string[] = [];
   const call = (url: string, method: string, params: unknown[], sig: AbortSignal) => {
     if (!asked.includes(url)) asked.push(url);
@@ -141,6 +133,26 @@ export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): 
   const fail = (m: string, cause: unknown): never => {
     throw Object.assign(new Error(m, { cause }), { asked: asked.slice(-2) });
   };
+  // Solana: the two accounts at finalized on two operators of its list, a side walking past an operator that fails the
+  // read (an HTTP status, an error object, not two accounts) to the spare (card verify-row-survives-one-provider)
+  if (p.chain === "solana") {
+    const sp = p.pin as SolanaPoolPin;
+    const two = await walkOf(p.rpcs, SOLANA_WALK)
+      .read(
+        "accounts",
+        async (url, sig) => {
+          const a = answered(await call(url, "getMultipleAccounts", [[sp.program, sp.programdata], { encoding: "base64", commitment: "finalized" }], sig));
+          const value = ((a as { result?: { value?: unknown } }).result ?? {}).value;
+          if (!Array.isArray(value) || value.length !== 2) throw new Error("not two accounts");
+          return { name: url, answers: { accounts: a } } as PoolRpcReads;
+        },
+        () => true,
+        signal,
+      )
+      .catch((e: unknown) => fail(`Verify read the pool on no two of ${p.rpcs.map((u) => new URL(u).host).join(", ")}`, e));
+    return { chain: p.chain, height: null, rpcs: [two[0].value, two[1].value] };
+  }
+  const pin = p.pin as EvmPoolPin;
   const apart = Math.ceil(HEAD_APART_S / (BLOCK_S[p.chain] ?? 1));
   const headRead = (urls: readonly string[]) =>
     walkOf(urls).read(

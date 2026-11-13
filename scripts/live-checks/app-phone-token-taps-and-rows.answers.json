@@ -3,22 +3,22 @@
   "url": "https://ct-app.unrealized.trade",
   "network": "mainnet",
   "source": "bar10, the build inside the stand-in shell, answers at once",
-  "at": "2026-11-10T07:44:22.397Z",
-  "browser": "157.0.8103.38",
+  "at": "2026-11-12T16:32:33.597Z",
+  "browser": "157.0.8103.51",
   "headers": {
    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "integrityPolicy": "blocked-destinations=(script)"
   },
   "scripts": [
    {
-    "src": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
-    "integrity": "sha384-p06ooJ/hDzX492FO7/LzI+7IO7MlaBIHTgMRU6wlGsvGsVd3UumSVv6av1TUD6Sp",
-    "served": "sha384-p06ooJ/hDzX492FO7/LzI+7IO7MlaBIHTgMRU6wlGsvGsVd3UumSVv6av1TUD6Sp"
+    "src": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
+    "integrity": "sha384-PYA9qbfDG/EaFrBjC58m8fs5Y6KceoFaamceYJ8zP3F0vrOtkBVzHDQEbU+b46Ka",
+    "served": "sha384-PYA9qbfDG/EaFrBjC58m8fs5Y6KceoFaamceYJ8zP3F0vrOtkBVzHDQEbU+b46Ka"
    }
   ],
   "loadedScripts": [
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
     "frame": "https://ct-app.unrealized.trade/",
     "app": true
    },
@@ -28,7 +28,17 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
+    "frame": "https://ct-app.unrealized.trade/token/solana/Huge111111111111111111111111111111111111111",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/token/solana/Huge111111111111111111111111111111111111111",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
     "frame": "https://ct-app.unrealized.trade/discover",
     "app": true
    },
@@ -38,7 +48,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
     "frame": "https://ct-app.unrealized.trade/portfolio",
     "app": true
    },
@@ -48,7 +58,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
     "frame": "https://ct-app.unrealized.trade/orders",
     "app": true
    },
@@ -58,7 +68,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
     "frame": "https://ct-app.unrealized.trade/profile",
     "app": true
    },
@@ -68,7 +78,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
     "frame": "https://ct-app.unrealized.trade/verify",
     "app": true
    },
@@ -78,7 +88,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
     "frame": "https://ct-app.unrealized.trade/privacy",
     "app": true
    },
@@ -88,7 +98,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-DEWWWaej.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-Bc-2xHEj.js",
     "frame": "https://ct-app.unrealized.trade/terms",
     "app": true
    },
@@ -112,7 +122,7 @@
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 2186
+     "ms": 2202
     },
     "cls": 0,
     "shiftCount": 0,
@@ -120,6 +130,38 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 16,
+    "tape": {
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
+    },
+    "shot": "phone-token.png"
+   },
+   {
+    "width": "phone",
+    "path": "/token/<first listed>",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/token/solana/Huge111111111111111111111111111111111111111",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2456
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "href": "/token/solana/Huge111111111111111111111111111111111111111",
+    "list": 0,
     "tape": {
      "marks": 8,
      "rows": 12,
@@ -129,7 +171,7 @@
       12
      ]
     },
-    "shot": "phone-token.png"
+    "shot": "phone-token-page.png"
    },
    {
     "width": "phone",
@@ -144,7 +186,7 @@
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 2172
+     "ms": 2363
     },
     "cls": 0,
     "shiftCount": 0,
@@ -152,6 +194,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -173,7 +216,7 @@
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 2205
+     "ms": 2169
     },
     "cls": 0,
     "shiftCount": 0,
@@ -181,6 +224,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -202,7 +246,7 @@
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 2169
+     "ms": 2096
     },
     "cls": 0,
     "shiftCount": 0,
@@ -210,6 +254,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -231,7 +276,7 @@
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 2135
+     "ms": 2115
     },
     "cls": 0,
     "shiftCount": 0,
@@ -239,6 +284,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -264,12 +310,26 @@
       "solana": "ok",
       "base": "ok",
       "robinhood": "ok"
+     },
+     "poolRpcs": {
+      "solana": [
+       "solana-rpc.publicnode.com",
+       "solana.api.pocket.network"
+      ],
+      "base": [
+       "mainnet.base.org",
+       "base-rpc.publicnode.com"
+      ],
+      "robinhood": [
+       "rpc.mainnet.chain.robinhood.com",
+       "robinhood.drpc.org"
+      ]
      }
     },
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 2107
+     "ms": 2130
     },
     "cls": 0,
     "shiftCount": 0,
@@ -277,14 +337,12 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 16,
     "tape": {
-     "marks": 8,
-     "rows": 12,
-     "pushed": 4,
-     "markPx": [
-      12,
-      12
-     ]
+     "marks": 0,
+     "rows": 0,
+     "pushed": 0,
+     "markPx": null
     },
     "shot": "phone-verify.png"
    },
@@ -301,7 +359,7 @@
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 2220
+     "ms": 2261
     },
     "cls": 0,
     "shiftCount": 0,
@@ -309,6 +367,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -330,7 +389,7 @@
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 2126
+     "ms": 2111
     },
     "cls": 0,
     "shiftCount": 0,
@@ -338,6 +397,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -358,8 +418,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500040",
-     "ms": 2253
+     "block": "223500053",
+     "ms": 2183
     },
     "cls": 0,
     "shiftCount": 0,
@@ -367,6 +427,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 8,
      "rows": 12,
@@ -380,6 +441,40 @@
    },
    {
     "width": "desktop",
+    "path": "/token/<first listed>",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/token/solana/Huge111111111111111111111111111111111111111",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500057",
+     "ms": 2154
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "href": "/token/solana/Huge111111111111111111111111111111111111111",
+    "list": 0,
+    "tape": {
+     "marks": 8,
+     "rows": 12,
+     "pushed": 4,
+     "markPx": [
+      12,
+      12
+     ]
+    },
+    "shot": "desktop-token-page.png"
+   },
+   {
+    "width": "desktop",
     "path": "/discover",
     "expect": "discover",
     "framed": true,
@@ -390,8 +485,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500044",
-     "ms": 2162
+     "block": "223500061",
+     "ms": 2228
     },
     "cls": 0,
     "shiftCount": 0,
@@ -399,6 +494,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -419,8 +515,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500048",
-     "ms": 2202
+     "block": "223500065",
+     "ms": 2122
     },
     "cls": 0,
     "shiftCount": 0,
@@ -428,6 +524,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -448,8 +545,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500052",
-     "ms": 2117
+     "block": "223500069",
+     "ms": 2092
     },
     "cls": 0,
     "shiftCount": 0,
@@ -457,6 +554,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -477,8 +575,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500056",
-     "ms": 2098
+     "block": "223500073",
+     "ms": 2100
     },
     "cls": 0,
     "shiftCount": 0,
@@ -486,6 +584,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -511,12 +610,26 @@
       "solana": "ok",
       "base": "ok",
       "robinhood": "ok"
+     },
+     "poolRpcs": {
+      "solana": [
+       "solana-rpc.publicnode.com",
+       "solana.api.pocket.network"
+      ],
+      "base": [
+       "mainnet.base.org",
+       "base-rpc.publicnode.com"
+      ],
+      "robinhood": [
+       "rpc.mainnet.chain.robinhood.com",
+       "robinhood.drpc.org"
+      ]
      }
     },
     "footer": {
      "conn": "on",
-     "block": "223500060",
-     "ms": 2132
+     "block": "223500076",
+     "ms": 2121
     },
     "cls": 0,
     "shiftCount": 0,
@@ -524,6 +637,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 8,
      "rows": 12,
@@ -547,8 +661,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500063",
-     "ms": 2124
+     "block": "223500080",
+     "ms": 2096
     },
     "cls": 0,
     "shiftCount": 0,
@@ -556,6 +670,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -576,8 +691,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500067",
-     "ms": 2121
+     "block": "223500084",
+     "ms": 2097
     },
     "cls": 0,
     "shiftCount": 0,
@@ -585,6 +700,7 @@
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
+    "list": 0,
     "tape": {
      "marks": 0,
      "rows": 0,
@@ -632,7 +748,7 @@
     "footer": {
      "conn": "wait",
      "block": "",
-     "ms": 3898
+     "ms": 3913
     }
    },
    {
@@ -677,8 +793,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500076",
-     "ms": 4419
+     "block": "223500093",
+     "ms": 4366
     }
    }
   ],
@@ -813,7 +929,7 @@
      },
      {
       "at": 3008,
-      "value": 0.000059263303574976726,
+      "value": 5.9263303574976726e-05,
       "input": false,
       "sources": [
        "button.tm 288,311 14x14 -> 288,339 14x14",
@@ -831,7 +947,7 @@
      },
      {
       "at": 3408,
-      "value": 0.000059263303574976726,
+      "value": 5.9263303574976726e-05,
       "input": false,
       "sources": [
        "button.tm 288,311 14x14 -> 288,339 14x14",
@@ -1009,7 +1125,7 @@
      },
      {
       "at": 1531,
-      "value": 0.000059263303574976726,
+      "value": 5.9263303574976726e-05,
       "input": false,
       "sources": [
        "button.tm 288,311 14x14 -> 288,339 14x14",
@@ -1027,7 +1143,7 @@
      },
      {
       "at": 1931,
-      "value": 0.000059263303574976726,
+      "value": 5.9263303574976726e-05,
       "input": false,
       "sources": [
        "button.tm 288,311 14x14 -> 288,339 14x14",
@@ -1045,7 +1161,7 @@
      },
      {
       "at": 2314,
-      "value": 0.000059263303574976726,
+      "value": 5.9263303574976726e-05,
       "input": false,
       "sources": [
        "button.tm 288,311 14x14 -> 288,339 14x14",
@@ -1159,7 +1275,7 @@
      },
      {
       "at": 3170,
-      "value": 0.0000075231481481481475,
+      "value": 7.5231481481481475e-06,
       "input": false,
       "sources": [
        "button.tm 1001,178 14x14 -> 1001,205 14x14",
@@ -1350,7 +1466,7 @@
      },
      {
       "at": 1683,
-      "value": 0.000008101851851851852,
+      "value": 8.101851851851852e-06,
       "input": false,
       "sources": [
        "button.tm 993,178 14x14 -> 993,205 14x14",
@@ -1371,7 +1487,7 @@
      },
      {
       "at": 2097,
-      "value": 0.000008101851851851852,
+      "value": 8.101851851851852e-06,
       "input": false,
       "sources": [
        "button.tm 993,178 14x14 -> 993,205 14x14",
@@ -1495,7 +1611,7 @@
      },
      {
       "at": 1745,
-      "value": 0.000059263303574976726,
+      "value": 5.9263303574976726e-05,
       "input": false,
       "sources": [
        "button.tm 288,311 14x14 -> 288,339 14x14",
@@ -1513,7 +1629,7 @@
      },
      {
       "at": 2145,
-      "value": 0.000059263303574976726,
+      "value": 5.9263303574976726e-05,
       "input": false,
       "sources": [
        "button.tm 288,311 14x14 -> 288,339 14x14",
@@ -1531,7 +1647,7 @@
      },
      {
       "at": 2545,
-      "value": 0.000059263303574976726,
+      "value": 5.9263303574976726e-05,
       "input": false,
       "sources": [
        "button.tm 288,311 14x14 -> 288,339 14x14",
@@ -1599,7 +1715,7 @@
      },
      {
       "at": 1858,
-      "value": 0.000008101851851851852,
+      "value": 8.101851851851852e-06,
       "input": false,
       "sources": [
        "button.tm 993,178 14x14 -> 993,205 14x14",
@@ -1620,7 +1736,7 @@
      },
      {
       "at": 2224,
-      "value": 0.000008101851851851852,
+      "value": 8.101851851851852e-06,
       "input": false,
       "sources": [
        "button.tm 993,178 14x14 -> 993,205 14x14",

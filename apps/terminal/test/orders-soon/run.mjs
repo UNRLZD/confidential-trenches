@@ -108,6 +108,19 @@ const READ_PLACE = ([place, scope]) => {
   };
 };
 
+/** The Orders route's `Coming soon` against the page's screen, the part of main.screen in the window (card
+ *  app-faults-seen-on-124: at 1440 it sat in the top third of an empty page, held there by a 60vh box). */
+const CENTRE = () => {
+  const box = (e) => e?.getBoundingClientRect() ?? null;
+  const s = box(document.querySelector('main[data-route="orders"]'));
+  const e = box([...document.querySelectorAll('main[data-route="orders"] [data-testid="orders-soon"]')].find((x) => x.getClientRects().length > 0));
+  if (!s || !e) return null;
+  const [top, bottom] = [Math.max(0, s.top), Math.min(innerHeight, s.bottom)];
+  return { dx: Math.round(e.left + e.width / 2 - (s.left + s.width / 2)), dy: Math.round(e.top + e.height / 2 - (top + bottom) / 2) };
+};
+/** Centred in the screen, within 2 px across and 8 px down (the footer's and the phone bar's rounding). */
+const centred = (tag, c) => check(c !== null && Math.abs(c.dx) <= 2 && Math.abs(c.dy) <= 8, `${tag}: Coming soon ${c ? `${c.dx} px across and ${c.dy} px down from the screen's centre` : "not drawn"}, want centred`);
+
 /** The checks on one place's read. `count` is how many of the place the width draws. */
 function judge(tag, r, { count = 1 } = {}) {
   check(r.texts.length === count && r.texts.every((t) => t === SOON), `${tag}: reads ${JSON.stringify(r.texts)}, want ${count} x ${JSON.stringify(SOON)}`);
@@ -257,6 +270,7 @@ try {
       }
       await f.waitForSelector('main[data-route="orders"] [data-testid="orders-soon"]', { timeout: 8_000 }).catch(() => {});
       judge(tag, await f.evaluate(READ_PLACE, ["orders", 'main[data-route="orders"]']));
+      centred(tag, await f.evaluate(CENTRE));
       await shot(p.page, `${w.name}-orders-${kind === "tap" ? "signed-out" : "signed-in"}`);
       await done(tag, p);
     }
@@ -270,6 +284,7 @@ try {
       await f.locator('[data-control="seg-orders"]').filter({ visible: true }).first().click({ timeout: 8_000 }).catch(() => {});
       await f.waitForSelector('main[data-route="orders"] [data-testid="orders-soon"]', { timeout: 8_000 }).catch(() => {});
       judge(tag, await f.evaluate(READ_PLACE, ["orders", 'main[data-route="orders"]']));
+      centred(tag, await f.evaluate(CENTRE));
       await shot(p.page, "390-orders-from-portfolio");
     } else check(false, `${tag}: no terminal frame`);
     await done(tag, p);
