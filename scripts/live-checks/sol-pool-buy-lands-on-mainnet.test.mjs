@@ -50,6 +50,12 @@ test("facts read the minified shapes: the buy's pick, the sell's budget and the 
   // the sale's budget without the preview priced on mainnet, or the other way: no
   assert.equal(facts("", js.replace("f.sizes,e.cluster===`mainnet`)", "f.sizes,!1)")).sellBudget, false);
   assert.equal(facts("", js.replace("?R-pe:0n", "?1n:0n")).sellBudget, false);
+  // card every-lamport-can-move: the preview shows poolSellPays' network, a partial sell's the fee plus its priority (the
+  // build's own spelling); without that priority, or the full sell's network alone: no
+  const pays = js.replace("x={network:ik(Qy+g.priority,_)}", "return{out:S(i,D),minOut:S(a,D),priority:h,network:xm+h};x={network:Qj(C.network,w)}");
+  assert.equal(facts("", pays).sellBudget, true);
+  assert.equal(facts("", pays.replace("network:xm+h}", "network:xm}")).sellBudget, false);
+  assert.equal(facts("", pays.replace("network:Qj(C.network,w)", "network:Qj(xm,w)")).sellBudget, false);
   // card buy-spends-several-pieces: the tip by the set's size, the kit's rule; one piece's is the one held
   const byRule = "var bc=1000n,xc=100000n;function Tm(e,t){if(!Number.isSafeInteger(t)||t<1||t>4)throw Error(`pieces: 1 to 4`);return e===`devnet`?0n:t===1?xc:bc}let v=t=>Tm(e.cluster,t),y=new Map;";
   assert.equal(facts("", byRule).buyTip, "100000");

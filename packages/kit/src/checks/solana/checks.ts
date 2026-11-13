@@ -1204,7 +1204,11 @@ export type SolanaHeld =
 export type SolanaClaim = { program: string; uva: string; mint: string; from: string; to: string; amount: bigint; open: boolean; unwrap: boolean; fromAmount: bigint; toAmount: bigint; prefund: bigint };
 /** `keep[].cashback`: the account stays open only for cashback a claim could not take this time (card sol-w-sweep: the
  *  wallet then keeps what that claim needs later, and nothing more). */
-export type SolanaTeardownPlan = { close: SolanaHeld[]; claim: SolanaClaim[]; keep: { address: string; why: string; cashback?: true }[] };
+// `tokens`: a kept account holding tokens that are not a stranger's the token keeps from burning (any account not on the
+// sell's burn list, the wallet's own coin's among them). The plan does not know which coin is the wallet's own: the
+// caller does, and only tokens on its own coin's account keep the wallet's lamports for their sale (the signing page's
+// keepOf, review P1-2 of 1d3b96d9c); tokens anywhere else are kept as any kept account is
+export type SolanaTeardownPlan = { close: SolanaHeld[]; claim: SolanaClaim[]; keep: { address: string; why: string; cashback?: true; tokens?: true }[] };
 /** The accounts a claim under `program` moves between: the volume account's and the wallet's, of the claim's mint. */
 export function solanaCashbackAccounts(wallet: string, program: string): { uva: string; mint: string; from: string; to: string } {
   const mint = program === SOLANA_PUMP_AMM_PROGRAM ? SOLANA_SOL_MINT : SOLANA_PUMP_STABLE_MINT;
@@ -1326,7 +1330,7 @@ export function solanaTeardownPlan(wallet: string, given: Readonly<Record<string
     const other = exts.find((t) => t !== EXT_IMMUTABLE_OWNER);
     const burns = !native && amount > 0n && burn.includes(address) && other === undefined && ![...cash.values()].some((c) => c.to === address);
     if (state !== 1) plan.keep.push({ address, why: state === 2 ? "frozen" : `state ${state}` });
-    else if (!native && amount > 0n && !burns) plan.keep.push({ address, why: `holds ${amount} of ${mint}${burn.includes(address) && other !== undefined ? ` (no burn: Token-2022 extension ${other})` : ""}` });
+    else if (!native && amount > 0n && !burns) plan.keep.push({ address, why: `holds ${amount} of ${mint}${burn.includes(address) && other !== undefined ? ` (no burn: Token-2022 extension ${other})` : ""}`, ...(burn.includes(address) && other !== undefined ? {} : { tokens: true as const }) });
     else if (closeAuth !== null && closeAuth !== wallet) plan.keep.push({ address, why: `close authority ${closeAuth}` });
     else if (confidential) plan.keep.push({ address, why: "confidential balance" });
     else plan.close.push({ kind: "token", address, program: a.owner, mint, native, harvest: harvest && a.owner === SOLANA_TOKEN_2022_PROGRAM, lamports: a.lamports, ...(burns ? { burn: amount } : {}) });

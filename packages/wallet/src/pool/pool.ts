@@ -40,7 +40,8 @@
 // Nothing here holds a secret: W's secret key never reaches a pool, only its address and public key.
 import { VAULT_FIELD_P, VaultTree, type VaultSnarkjsProof, type VaultWithdrawSignals } from "@blindfill/kit";
 import { CHAINS, type Chain } from "../derive/index.ts";
-import type { Ladder } from "./ladder.ts";
+import { chunkOf, type Ladder } from "./ladder.ts";
+import { checkPieceRule, pieceChunk, type PieceRule } from "./pieces.ts";
 
 /** A pool's two trees, holding every leaf it has, and its newest roots, read on two RPCs. */
 export type PoolTrees = { stateTree: VaultTree; labelTree: VaultTree; stateRoot: bigint; labelRoot: bigint };
@@ -145,6 +146,9 @@ export interface Pool<R = unknown> {
   readonly scope: bigint;
   /** The chunk sizes, in the pool's asset. */
   readonly ladder: Ladder;
+  /** The pool's piece rule (./pieces.ts, card every-lamport-can-move): each note's chunk is pieceChunk's, never one that
+   *  leaves a change no step can move. Absent: the ladder's own chunk (./ladder.ts chunkOf). */
+  readonly pieces?: PieceRule;
   /** The most notes one buy pays one W from (card buy-spends-several-pieces); absent or 1: each proof pays its own
    *  note's W. */
   readonly piecesMax?: number;
@@ -312,6 +316,12 @@ export function checkPool(p: Pool): void {
   if (p.epochMs <= TAKE_SLACK_MS) throw new Error(`pool ${p.id}: epochMs is at most the take slack (${TAKE_SLACK_MS} ms)`);
   for (const f of ["now", "trees", "bind"] as const) if (typeof p[f] !== "function") throw new Error(`pool ${p.id}: ${f} is not a function`);
   if (p.piecesMax !== undefined && (!Number.isInteger(p.piecesMax) || p.piecesMax < 1)) throw new Error(`pool ${p.id}: piecesMax is an integer at least 1`);
+  if (p.pieces !== undefined && (checkPieceRule(p.pieces), p.pieces.ladder !== p.ladder)) throw new Error(`pool ${p.id}: the piece rule's ladder is the pool's`);
+}
+
+/** The chunk a proof of a note of `value` withdraws from this pool: its piece rule's, else its ladder's; null: none. */
+export function poolChunkOf(p: Pick<Pool, "ladder" | "pieces">, value: bigint): bigint | null {
+  return p.pieces !== undefined ? pieceChunk(p.pieces, value) : chunkOf(p.ladder, value);
 }
 
 /** Refuses a binding the queue cannot hold a note under: a context not below p, a fee cap at or above the chunk. */

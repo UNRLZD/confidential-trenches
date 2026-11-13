@@ -40,7 +40,9 @@ export function facts(index, js) {
   // cashback)?lamports-need:0n,budget=solanaSellBudget(null,solanaSellPriority(room))`); the preview priced on mainnet
   // (`poolSellPays(..., sizes, c===mainnet)`) with network the fee plus its priority
   const sellBuilds = new RegExp(`${ID}\\.cluster===\`mainnet\`&&${ID}\\(${ID}\\.kind,${ID}\\.cashback\\)\\?${ID}-${ID}:0n,${ID}=${ID}\\(null,${ID}\\(${ID}\\)\\)`).test(js);
-  const previewPriced = new RegExp(`${ID}\\.sizes,${ID}\\.cluster===\`mainnet\`\\)`).test(js) && new RegExp(`network:${ID}\\(${ID}\\+${ID}\\.priority,`).test(js);
+  // since card every-lamport-can-move the preview shows poolSellPays' own network (`network: poolUnits(pays.network,
+  // sol)`), a partial sell's the fee plus its priority (`priority: p, network: FEE + p`)
+  const previewPriced = new RegExp(`${ID}\\.sizes,${ID}\\.cluster===\`mainnet\`\\)`).test(js) && (new RegExp(`network:${ID}\\(${ID}\\+${ID}\\.priority,`).test(js) || (new RegExp(`network:${ID}\\(${ID}\\.network,`).test(js) && new RegExp(`priority:(${ID}),network:${ID}\\+\\1\\}`).test(js)));
   // a partial sell's keep: the next sell's need plus the priority on mainnet (`kept=keeps&&c===mainnet?PRIORITY:0n`)
   const kept = new RegExp(`${ID}=${ID}&&${ID}\\.cluster===\`mainnet\`\\?(${ID}):0n[,;]`).exec(js);
   return { index, sha384: sha384(js), buyTip: buy ? valueOf(js, buy[1]) : null, sellBudget: sellBuilds && previewPriced, sellPriority: kept ? valueOf(js, kept[1]) : null };

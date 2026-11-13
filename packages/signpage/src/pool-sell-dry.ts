@@ -46,25 +46,28 @@
 // - Solana only here. Base and Robinhood answer not_allowed until the page sells there (card signpage-evm-pool-sell),
 //   whose handler answers the same shape: amounts in whole units of the pool's asset, the platform fee in basis points.
 // - The answer (poolSellPays): `out`, what a sale at the best venue's expected out (its fees taken, before slippage)
-//   pays into the user's notes as the sale's own rule prices it (solanaSellReserve), on a full sale with the sweep's
-//   note after it; `min_out`, the same at the user's slippage floor (the floor the sale signs, solanaSellFloor);
-//   `network`, the sale's one signature fee (SOLANA_POOL_SELL_FEE) and on mainnet its priority fee as the sale pays it
-//   (pool-sell.ts solanaSellPriority: up to SOLANA_POOL_SELL_PRIORITY from what W holds beyond the sale's need, none on
-//   a form with no room for it), inside both already; `fee_bps` 0: a Solana pool sale is the venue's sell and the deposit back, nothing else
-//   (rules/pool.ts checkSolanaSell).
+//   pays into the user's notes as the sale's own rule prices it (solanaSellReserve); a full sale's is its one note, W's
+//   sweep after the teardown (card every-lamport-can-move); `min_out`, the same at the user's slippage floor (the floor
+//   the sale signs, solanaSellFloor); `network`, the sale's one signature fee (SOLANA_POOL_SELL_FEE) and on mainnet its
+//   priority fee as the sale pays it (pool-sell.ts solanaSellPriority: up to SOLANA_POOL_SELL_PRIORITY from what W holds
+//   beyond the sale's need, none on a form with no room for it), and on a full sale also the teardown frame's fee, the
+//   sweep's fee, its deposit rents and the rest it pays away under the grid, at its bound; inside both already;
+//   `fee_bps` 0: a Solana pool sale is the venue's sell and the deposit back, nothing else (rules/pool.ts
+//   checkSolanaSell).
 import { SOLANA_LAMPORTS_PER_SIGNATURE, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, solanaVolumeAccumulator, solanaVolumeClaimable } from "../../kit/src/checks/solana/checks.ts";
 import type { ErrorCode, PoolSellDry } from "../../kit/src/signpage/messages.ts";
 import { solanaParseAccountsAnswer } from "../../kit/src/trade/solana/pool.ts";
 import { readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaRentMin, solanaSellFloor, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
-import { SOLANA_POOL_PAGE_ENTRY, SOLANA_POOL_PAGE_HEADER, solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
+import { SOLANA_POOL_PAGE_ENTRY, SOLANA_POOL_PAGE_HEADER } from "../../kit/src/trade/solana/pool-deposit.ts";
+import { SOL_GRID, SOL_NOTE_FLOOR } from "../../wallet/src/pool/pieces.ts";
 import { SolanaRpcTransportError, solanaWrappedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { TRADE_HOLD_MAX_MS } from "../../wallet/src/throttle.ts";
 import type { KindContext, Running } from "./api.ts";
 import { keptTokenDecimals, type PoolRpc, type TokenDecimalsKept } from "./pool-kinds.ts";
-import { poolSellReference, poolSellUnits, sizesOf as poolTreeSizes, SOLANA_POOL_SELL_PRIORITY, solanaSellBudgetFits, solanaSellReserve, wHeldNow, type WHeld } from "./pool-sell.ts";
+import { poolSellReference, poolSellUnits, sizesOf as poolTreeSizes, SOLANA_POOL_SELL_PRIORITY, solanaSellBudgetFits, wHeldNow, type WHeld } from "./pool-sell.ts";
 import { keptListed, type Position } from "./positions.ts";
-import { checkPoolRequest, POOL_ASSET_DECIMALS_OF, poolTokenAddress, poolUnits, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSellAfterFull, SOLANA_SWEEP_OWED_MAX, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type PoolChain } from "./rules/pool.ts";
+import { checkPoolRequest, POOL_ASSET_DECIMALS_OF, poolTokenAddress, poolUnits, solanaDepositRents, SOLANA_SWEEP_OWED_MAX, solanaSweepKeep, type PoolAsk, type PoolChain } from "./rules/pool.ts";
 
 /** The longest a trade counts as running with no end seen: the lanes' own hold (throttle.ts TRADE_HOLD_MAX_MS). */
 export const TRADE_LIVE_MAX_MS = TRADE_HOLD_MAX_MS;
@@ -248,20 +251,18 @@ async function readOne(rpcs: readonly [SolanaRpc, SolanaRpc], keys: readonly str
  * - The deposit's rents: the mark's, and on each tree one entry's growth (a page there holds its rent at its length at
  *   least) or a new page's opening at a page's end or within the kit's window of it; what the sale makes: the venue's
  *   cashback accounts as if both are to be made (the coin's flag, `cashback`, unknown: the most).
- * - A full sale of one W (`full`): the sale's own reserve and its path (W's keep for the sweep, solanaSellAfterFull at
- *   W's owed claims, or rent(0) when its note would land under the sweep's floor), and on the sweep's path what the
- *   sweep then pays in: W's keep and the token account's rent back, less the teardown's and the sweep's fees, the
- *   sweep's own deposit rents (the trees one entry on) and what W keeps for its owed claims. The coin's slippage share
- *   goes in with the sweep. The costs here are the sale's at most, so where they give the rent(0) path the sale may
- *   still take the sweep's: the lower of the two; W's claims unread: the lowest over each count. A sale the rule
- *   refuses at every count: its refusal.
+ * - A full sale of one W (`full`): no deposit in the sale (card every-lamport-can-move); the one note is W's sweep:
+ *   W's lamports and the sale in, the token account's rent back, less the sale's fee and what it makes, one teardown
+ *   frame's fee, the sweep's fee and deposit rents, what W keeps for its owed claims and the rest the sweep pays away
+ *   under the grid at its bound (SOL_GRID - 1); under SOL_NOTE_FLOOR, none. W's claims unread: the lowest over each
+ *   count. Its Fee (`network`) counts those fees, rents and that rest.
  * - A partial sale: the expected out less the reserve (never under 0), W's keep for its next sale held back. On a
  *   partial sale the note gets min_out now and the rest when W's last sale sweeps it (card partial-sell-pays-all-into-cash
  *   pays it all into Cash at the sale), so `out` is the expected amount, not today's first note.
- * - More than one W: the plan's legs are not known here, so each W's reserve at the larger of a partial and a full
- *   sale's keep, at 0 at least, is summed.
+ * - More than one W: the plan's legs are not known here, so each W's reserve at the larger of a partial sale's keep and
+ *   a full sale's costs, at 0 at least, is summed.
  */
-export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap", wallets: readonly DryWallet[], full: boolean, e: bigint, minOut: bigint, cashback?: boolean, sizes: Sizes | null = null, mainnet = false): { out: bigint; minOut: bigint; priority: bigint } | { refused: "not_funded" | "quote_check_failed" } {
+export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap", wallets: readonly DryWallet[], full: boolean, e: bigint, minOut: bigint, cashback?: boolean, sizes: Sizes | null = null, mainnet = false): { out: bigint; minOut: bigint; priority: bigint; network: bigint } | { refused: "not_funded" | "quote_check_failed" } {
   const cb = cashback ?? true;
   const made = solanaPoolSellNeed({ kind: venue, cashback: cb }, rent) - solanaPoolSellNeed({ kind: venue, cashback: cb }, rent, { ammVolume: true, ammVolumeAta: true });
   // on mainnet each W's sale pays its priority (pool-sell.ts solanaSellPriority) for what W holds beyond the sale's need
@@ -291,51 +292,41 @@ export function poolSellPays(rent: SolanaRent, venue: "pump-curve" | "pumpswap",
   const owed = (w: DryWallet): number => (w.claim === undefined ? SOLANA_SWEEP_OWED_MAX : w.claim.filter((c, i) => c || (cb && i === venueClaim)).length);
   const keepPart = (cashback === undefined ? [false, true] : [cashback]).map((c) => solanaPoolBuySellNeed({ kind: venue, cashback: c }, rent)).reduce((x, y) => (x > y ? x : y)) + (mainnet ? SOLANA_POOL_SELL_PRIORITY : 0n);
   const net = (x: bigint, r: bigint): bigint => (x - r > 0n ? x - r : 0n);
+  // a full sale's costs out of W's lamports and the sale (card every-lamport-can-move): the sale carries no deposit, so its
+  // one note is W's sweep after the teardown: W's lamports and the sale in, the token account's rent back (rent(165)),
+  // less the sale's fee and what it makes, one teardown frame's fee (every frame closes an account worth more than its
+  // fee, so each later frame pays for itself), the sweep's fee, the sweep's deposit rents and what W keeps for its owed
+  // claims; and the rest under the grid, which the sweep pays to the pinned relayer's account in one System transfer in
+  // the same transaction (review P3-1; P1-1 of 1d3b96d9c), counted in no note: a cost of the sale, in its fee. That rest is known only after the sale (the sale's own proceeds
+  // land to the lamport), so it is counted at its bound, SOL_GRID - 1: the number is the least the note can be.
+  const restBound = SOL_GRID - 1n;
+  const sweepFees = 2n * SOLANA_LAMPORTS_PER_SIGNATURE + rents + restBound;
+  const fullCost = (w: DryWallet, o: number): bigint => feeOf(w) + made + sweepFees + solanaSweepKeep(rent, o) - solanaRentMin(rent, 165);
   if (wallets.length === 1 && full) {
     const w = wallets[0]!;
-    const fee = feeOf(w);
-    const r0 = solanaRentMin(rent, 0);
-    const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     // W's claims unread: each count they can be, the lowest pay-in
     const counts = w.claim === undefined ? [0, 1, SOLANA_SWEEP_OWED_MAX] : [owed(w)];
-    const at = (m: bigint, x: bigint): bigint | { refused: "not_funded" | "quote_check_failed" } => {
-      let low: bigint | null = null;
-      let refusal: { refused: "not_funded" | "quote_check_failed" } | null = null;
-      for (const o of counts) {
-        const after = solanaSellAfterFull(rent, o);
-        const p = { fee, made, rents, after, lamports: w.lamports, minOut: m, keeps: false, noteFloor: solanaPoolNoteFloor(rent) };
-        const r = solanaSellReserve({ ...p, swept: after - r0, base: r0, floor });
-        if ("refused" in r) {
-          refusal ??= r;
-          continue;
-        }
-        // the sweep's path: the sale's note and the sweep's, everything over the reserve (W's keep and the token account's
-        // rent back, less the teardown's first frame and the sweep's fee, the sweep's deposit rents with the trees one
-        // entry on and what W keeps for its owed claims)
-        const sweep = after + solanaRentMin(rent, 165) - 2n * SOLANA_LAMPORTS_PER_SIGNATURE - rentsAt(sizes && { stateSize: sizes.stateSize + 1, labelSize: sizes.labelSize + 1 }) - solanaSweepKeep(rent, o);
-        const swept = net(x, fee + made + rents + after - w.lamports) + (sweep > 0n ? sweep : 0n);
-        // the rent(0) path (the note alone) here: the sale's own costs are at most these, so it may still take the sweep's
-        const own = solanaSellReserve(p);
-        const v = !("refused" in own) && own.value >= floor ? swept : r.value < swept ? r.value : swept;
-        if (low === null || v < low) low = v;
-      }
-      return low ?? refusal!;
-    };
-    const out = at(minOut, e);
-    const floorOut = at(minOut, minOut);
-    if (typeof out !== "bigint") return out;
-    if (typeof floorOut !== "bigint") return floorOut;
-    return { out, minOut: floorOut, priority };
+    // what the sweep's note is at least, for a sale of `x`: under the floor, none (W keeps its lamports)
+    const at = (x: bigint): bigint => counts.reduce((low: bigint | null, o) => {
+      const v = net(x + w.lamports, fullCost(w, o));
+      const note = v < SOL_NOTE_FLOOR ? 0n : v;
+      return low === null || note < low ? note : low;
+    }, null)!;
+    // the Fee: the sale's fee, the teardown frame's and the sweep's, the sweep's rents (locked in the pool for good) and
+    // the paid-away rest at its bound
+    return { out: at(e), minOut: at(minOut), priority, network: feeOf(w) + sweepFees };
   }
   const one = (w: DryWallet, keep: bigint): bigint => {
     const r = feeOf(w) + made + rents + keep - w.lamports;
     return r > 0n ? r : 0n;
   };
+  // more than one W: each W's reserve at the larger of a partial sale's keep and a full sale's costs, at 0 at least
   const reserve = wallets.length === 1 ? one(wallets[0]!, keepPart) : wallets.reduce((t, w) => {
-    const k = solanaSellAfterFull(rent, owed(w));
-    return t + one(w, k > keepPart ? k : keepPart);
+    const k = fullCost(w, owed(w)) - w.lamports;
+    const r = one(w, keepPart);
+    return t + (k > r ? k : r);
   }, 0n);
-  return { out: net(e, reserve), minOut: net(minOut, reserve), priority };
+  return { out: net(e, reserve), minOut: net(minOut, reserve), priority, network: SOLANA_POOL_SELL_FEE + priority };
 }
 
 const holding = (d: PoolSellDryDeps, token: unknown): Position | undefined => d.positions()?.find((p) => p.chain === "solana" && p.token === token);
@@ -508,7 +499,7 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   const pays = poolSellPays(rent, venue, wallets, wallets.length === 1 && units === total, e, solanaSellFloor(e, ask.slippageBps), quoted.best.cashback, read.sizes, d.cluster === "mainnet");
   if ("refused" in pays) return { error: pays.refused };
   const sol = POOL_ASSET_DECIMALS_OF.solana;
-  return { result: { out: poolUnits(pays.out, sol), min_out: poolUnits(pays.minOut, sol), network: poolUnits(SOLANA_POOL_SELL_FEE + pays.priority, sol), fee_bps: 0 } };
+  return { result: { out: poolUnits(pays.out, sol), min_out: poolUnits(pays.minOut, sol), network: poolUnits(pays.network, sol), fee_bps: 0 } };
 }
 
 /** The kind for ApiHost.kinds: answered as a read that runs (Running), so `state`, nav and an open kind never wait for

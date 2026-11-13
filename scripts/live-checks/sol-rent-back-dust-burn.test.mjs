@@ -2,7 +2,8 @@
 // (sol-rent-back-dust-burn.answers.json). good: this card's SIGN_HOST build, a stranger's balance on W's token account
 // after its full sell burned, closed and swept: PASS. bad: card/sol-w-sweep ca2d252a's build, before this card: FAIL.
 // liveBefore: SIGN_HOST before this card's deploy: FAIL. beforeFix: b9fc0c5b's build, before the review of bf467ae7's
-// fold: FAIL on the stranger's-balance rule alone. Planted on the good one: another /app.js, no pin, each mark
+// fold: FAIL on the stranger's-balance rule, and (as every build before card every-lamport-can-move's review P3-4,
+// which sends nothing when the owed record cannot be written) on the record's mark. Planted on the good one: another /app.js, no pin, each mark
 // taken away: each FAIL; and the good build's lines with one rule changed: each FAIL on that rule's mark alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -27,20 +28,21 @@ for (const k of ["bad", "liveBefore"]) {
 }
 
 // The review of bf467ae7's fold: the build before it (b9fc0c5b's committed bundle) held a balance its full sell left as
-// W's own and read the sell at confirmed after W's accounts: FAIL on that rule's mark alone
-test("recorded answer beforeFix: FAIL on the stranger's-balance rule alone", () => {
+// W's own and read the sell at confirmed after W's accounts: FAIL on that rule's mark, and on the record's write (P3-4)
+test("recorded answer beforeFix: FAIL on the stranger's-balance rule and the record's write", () => {
   const v = judge(ANSWERS.beforeFix);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, [ALL[1]]);
+  assert.deepEqual(v.lines, [ALL[0], ALL[1]]);
 });
 
 // Review of fcd67b72, P2: the rule's "never landed" (review F3 of b38cd8c2) is held through the function the rule calls
-// and the one that gives it its slots. Each recorded from a real build of a planted pool-sell.ts: FAIL on that rule alone.
+// and the one that gives it its slots. Each recorded from a real build of a planted pool-sell.ts: FAIL on that rule, and
+// on the record's write (P3-4).
 for (const k of ["plantedSlot", "plantedHeight", "plantedPastAt"]) {
-  test(`recorded answer ${k}: FAIL on the stranger's-balance rule alone`, () => {
+  test(`recorded answer ${k}: FAIL on the stranger's-balance rule and the record's write`, () => {
     const v = judge(ANSWERS[k]);
     assert.equal(v.ok, false);
-    assert.deepEqual(v.lines, [ALL[1]]);
+    assert.deepEqual(v.lines, [ALL[0], ALL[1]]);
   });
 }
 
@@ -56,7 +58,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 const JS = [
   "async function WR(e,t){try{let n=await Promise.all(e.map(async e=>{let n=await e(`getEpochInfo`,[{commitment:`finalized`}]);return AR(n?.blockHeight)>t?AR(n?.absoluteSlot):null}));return n[0]!==null&&n[1]!==null?[n[0],n[1]]:null}catch{return null}}",
   "async function kR(e,t,n){let r=await WR(e,n);if(r===null)return!1;try{let n=await Promise.all(e.map(async(e,n)=>{let i=await e(`getSignatureStatuses`,[[t],{searchTransactionHistory:!0}]);return AR(i?.context?.slot)>=r[n]&&Array.isArray(i?.value)&&i.value.length===1&&i.value[0]===null}));return n[0]===!0&&n[1]===!0}catch{return!1}}",
-  "Se.sell={...t?.sell,[l]:{tx:F.encode(ve),last:M.lastHeight}},await e.owed?.put(Se).catch(()=>{})}await e.signed?.(",
+  "Se.sell={...t?.sell,[l]:{tx:F.encode(ve),last:M.lastHeight}},await e.owed?.put(Se)}await e.signed?.(",
   "r=async e=>{let n=t.sell?.[e];if(n===void 0)return`no`;let r=F.decode(n.tx);if(r.length<65||r[0]!==1)throw Error(`the owed record's sell is not one signed transaction`);let i=await YH(s,e=>NR(e,I.encode(r.subarray(1,65)),r,`finalized`));if(i.every(e=>e.got===`failed`))return`no`;if(i.every(e=>e.got===`none`))return await kR(s,I.encode(r.subarray(1,65)),n.last)?`no`:`unsure`;if(!i.every(e=>e.got===`ok`))throw Error(`the sell reads ${i.map(e=>e.got).join(`/`)}`);let[a,o]=i.map(t=>yU(t.meta,c.address,e));if(a===null||o===null||a!==o)throw Error(`the sell's meta does not say plainly what W's account held after it`);return`yes`},a=async e=>{let i=new Map;for(let e of t.mints)t.sell?.[e.mint]!==void 0&&i.set(e.mint,await r(e.mint).catch(e=>({fault:e})));let a=await YH(s,e=>ZH(e,[c.address,...n]))",
   "async function NR(e,t,n,r=`confirmed`){let i=await e(`getTransaction`,[t,{encoding:`base64`,commitment:r,",
   "function yU(e,t,n){let r=e?.postTokenBalances;if(!Array.isArray(r))return null;let i=null;for(let e of r){let r=e;if(typeof r!=`object`||!r)return null;if(r.mint!==n||r.owner!==t)continue;let a=r.uiTokenAmount?.amount;if(typeof a!=`string`||!/^(0|[1-9][0-9]{0,77})$/.test(a))return null;i=(i??0n)+BigInt(a)}return i}",
@@ -78,6 +80,12 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs o
       "the sell not recorded",
       "Se.sell={...t?.sell,[l]:{tx:F.encode(ve),last:M.lastHeight}},",
       "",
+      0
+    ],
+    [
+      "a record that cannot be written let go: the sale sent with none (card every-lamport-can-move, review P3-4)",
+      "await e.owed?.put(Se)}",
+      "await e.owed?.put(Se).catch(()=>{})}",
       0
     ],
     [
