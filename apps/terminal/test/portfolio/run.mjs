@@ -69,6 +69,8 @@ const STATES = [
   ["cash-one", "S10.3", ["390", "1440"], false],
   ["cash-four", "S10.3", ["390", "1440"], false],
   ["cash-moving", "S10.3", ["390", "1440"], false],
+  // card pool-balance-counts-the-remainder: each pool's balance and Cash count the money still at its U_X
+  ["pools-remainder", "S10.3", ["390", "1440"], false],
   // card portfolio-shows-pool-trades: the owner's two round trips from the device's own records
   ["pooltrades", "S10.10", ["1440"], false],
   ["pooltrades-stats", "S10.9", ["390"], true],
@@ -89,6 +91,8 @@ const CASH = {
   "cash-vault": ["$73.18", [["near", "NEAR$73.18", "7318", false]]],
   "cash-one": ["$448.18", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$375.00", "37500", false]]],
   "cash-four": ["$1,498.18", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$375.00", "37500", false], ["base", "Base$750.00", "75000", false], ["robinhood", "Robinhood$300.00", "30000", false]]],
+  // 2.5125 SOL at $150 = $376.87; 0.252 ETH and 0.1003 ETH at $3,000 = $756.00 and $300.90
+  "pools-remainder": ["$1,506.95", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$376.87", "37687", false], ["base", "Base$756.00", "75600", false], ["robinhood", "Robinhood$300.90", "30090", false]]],
   "cash-moving": ["$1,198.18", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$375.00", "37500", false], ["base", "Base$750.00", "75000", false], ["robinhood", "RobinhoodProcessing$0.00", "0", true]]],
 };
 // item 7 (card app-faults-seen-on-122): each fixture's Positions tile and its parts as drawn, [tile, Coins, Reserve];
@@ -103,6 +107,8 @@ const POOLS = {
   pools: ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "1.25M SOL", ""], ["Base", "0.25 ETH", ""], ["Robinhood", "0 ETH", ""]]],
   "pools-noready": ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "12.5 SOL", ""], ["Base", "0.001 ETH", ""]]],
   "pools-empty": ["empty"],
+  // card pool-balance-counts-the-remainder: the notes and the money at U_X, one balance a chain
+  "pools-remainder": ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "2.5125 SOL", ""], ["Base", "0.252 ETH", ""], ["Robinhood", "0.1003 ETH", ""]]],
 };
 
 async function build() {

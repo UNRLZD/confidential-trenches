@@ -479,8 +479,8 @@ export function tradeBook(ops: readonly Operation[], positions: readonly { chain
 /**
  * Money between its source and a side of Cash (card portfolio-one-balance): the stages at which a deposit's money has
  * been sent and is on neither side. The rule, from the kit's stages:
- * - Cash counts the kit's two totals and nothing else: vault_balance (the vault's notes) and each pool's balance (its
- *   notes, read back at finalized). An op's own amount never joins Cash: a deposit's amount_usd is what those totals
+ * - Cash counts the kit's totals and nothing else: vault_balance (the vault's notes) and each pool's balance (its
+ *   notes, read back at finalized, and its deposit wallets' money, waitingAt). An op's own amount never joins Cash: a deposit's amount_usd is what those totals
  *   already hold once it is done, and a trade's is its ask, so adding it would count the note twice.
  * - So a note is counted on the side whose total holds it, once: a vault deposit's note from "done" (vault_balance), a
  *   pool deposit's from "in_pool" (state.pools), never before, and never on the side it left.
@@ -525,7 +525,8 @@ function cashParts(s: SignpageState, now: number): { cash: bigint; parts: CashPa
       add(p.chain, c);
       continue;
     }
-    const units = baseUnits(p.balance, POOL_ASSET_DECIMALS[p.asset]) ?? 0n;
+    // the pool's notes and the money still at its deposit wallets (waitingAt): the pool's one balance, as its row draws it
+    const units = (baseUnits(p.balance, POOL_ASSET_DECIMALS[p.asset]) ?? 0n) + waitingAt(s.deposit_wallets, p.chain, p.asset);
     const price = statePoolPrice(s.pools, p.chain, now);
     // a pool with nothing is $0 at any price; one with something and no fresh price has no dollar figure: none is made up
     add(p.chain, units === 0n ? 0n : price ? unitsToCents(units, price) : null);
@@ -704,8 +705,22 @@ export function amount(base: bigint, d: number): string {
   return show(base, 1_000_000_000n * one, 2, "B");
 }
 
-/** One chain's pool in its own asset: the private balance from the device's own notes. Base units of the asset,
- *  decimals from the kit's table only. */
+/**
+ * Money still at a pool's deposit wallets (card pool-balance-counts-the-remainder): the sum of state.deposit_wallets on
+ * `chain` in `asset` (the kit's SignpageState: a deposit wallet of this seed with a balance not yet moved into its
+ * chain's pool, a remainder or dust included), base units. Pool chains only: the vault's NEAR deposit wallet is no
+ * pool's. A pool's one balance is its notes plus this, so nothing sent ever looks missing; the page sends a wallet's
+ * money on one side at a time (carried, it leaves deposit_wallets as it joins the notes), so none counts twice.
+ */
+export function waitingAt(wallets: SignpageState["deposit_wallets"], chain: Chain, asset: PoolAsset): bigint {
+  if (!(POOL_CHAINS as readonly Chain[]).includes(chain)) return 0n;
+  let sum = 0n;
+  for (const w of wallets ?? []) if (w.chain === chain && w.asset === asset) sum += baseUnits(w.amount, POOL_ASSET_DECIMALS[asset]) ?? 0n;
+  return sum;
+}
+
+/** One chain's pool in its own asset: the private balance from the device's own notes and the money still at its
+ *  deposit wallets (waitingAt). Base units of the asset, decimals from the kit's table only. */
 export interface PoolRow {
   chain: Chain;
   asset: PoolAsset;
@@ -729,7 +744,7 @@ export function pools(s: SignpageState, offline = false): Pools {
   const vault: PoolRow = { chain: "near", asset: "USDC", decimals: POOL_ASSET_DECIMALS.USDC, balance: baseUnits(s.vault_balance, POOL_ASSET_DECIMALS.USDC) ?? 0n };
   const rows = [vault, ...s.pools.map((p): PoolRow => {
     const decimals = POOL_ASSET_DECIMALS[p.asset];
-    return { chain: p.chain, asset: p.asset, decimals, balance: baseUnits(p.balance, decimals) ?? 0n };
+    return { chain: p.chain, asset: p.asset, decimals, balance: (baseUnits(p.balance, decimals) ?? 0n) + waitingAt(s.deposit_wallets, p.chain, p.asset) };
   })];
   return { view: rows.some((r) => r.balance > 0n) ? "rows" : "empty", rows };
 }

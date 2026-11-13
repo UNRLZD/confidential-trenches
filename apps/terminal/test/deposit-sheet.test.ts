@@ -132,9 +132,10 @@ test("BAR-11: the counter from the kit's first sight of the send; the countdown 
   assert.equal(countdown(DEADLINE, Date.parse(DEADLINE) + 1), "00:00:00");
 });
 
-test("WORDS: every word carries its source; the only drafts are card deposit-to-pool's, on its picks page", () => {
+test("WORDS: every word carries its source; the only drafts are the three send rules, for the owner's copy pass", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0, k);
-  assert.deepEqual([...DRAFTS], [], "To was kept (owner 8 Nov 07:55Z)");
+  // To was kept (owner 8 Nov 07:55Z); card pool-balance-counts-the-remainder's send rules are the CO's placeholders
+  assert.deepEqual([...DRAFTS], ["sendOnlySolana", "sendOnlyBase", "sendOnlyRobinhood"]);
   for (const k of ["asset", "chain", "amount", "expiresIn", "expired", "getAddress", "copy", "retry"] as const) assert.equal(WORDS[k].draft, false, k);
 });
 
