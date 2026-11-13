@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { kitReach } from "./kit-reach.mjs";
 
@@ -26,6 +26,14 @@ function tree(files, forceAdd = []) {
   // the workspace link pnpm makes for the kit package
   mkdirSync(join(dir, "node_modules/@blindfill"), { recursive: true });
   symlinkSync(join(dir, "packages/kit"), join(dir, "node_modules/@blindfill/kit"));
+  // the exit tool's own npm dependencies, linked in its node_modules as pnpm links them: exit-imports-must-resolve
+  // holds every import of packages/exit/ to one that resolves
+  const exitPkg = files["packages/exit/package.json"];
+  for (const dep of Object.keys(exitPkg ? JSON.parse(exitPkg).dependencies ?? {} : {})) {
+    if (dep.startsWith("@blindfill/")) continue;
+    mkdirSync(dirname(join(dir, "packages/exit/node_modules", dep)), { recursive: true });
+    symlinkSync(realpathSync(join(ROOT, "packages/exit/node_modules", dep)), join(dir, "packages/exit/node_modules", dep));
+  }
   execFileSync("git", ["init", "-q"], { cwd: dir });
   if (forceAdd.length) execFileSync("git", ["add", "-f", "--", ...forceAdd], { cwd: dir });
   return dir;
@@ -672,6 +680,27 @@ test("packages/exit and packages/signpage reach the kit's ./core and pass", () =
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The exit tool's own npm imports (its signer's curve, its prover's snarkjs) resolve through its package.json, as the
+// repo's install links them; a package its package.json does not name stays unresolved and refused.
+test("packages/exit's own npm dependencies resolve and pass; a package it does not name is refused", () => {
+  const dir = tree({ ...ownPackages(), ...TERMINAL_MAIN, "packages/exit/src/extra.ts": 'import { ed25519 } from "@noble/curves/ed25519.js";\nimport { groth16 } from "snarkjs";\nexport const e = [ed25519.getPublicKey, groth16];\n' });
+  try {
+    const r = check(dir);
+    assert.equal(r.rc, 0, r.out);
+    assert.ok(targets(dir, "packages/exit/src/extra.ts").every((t) => !t.unresolved));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const bad = tree({ ...ownPackages(), ...TERMINAL_MAIN, "packages/exit/src/extra.ts": 'import nacl from "tweetnacl";\nexport const n = nacl;\n' });
+  try {
+    const r = check(bad);
+    assert.notEqual(r.rc, 0, r.out);
+    assert.match(r.out, /error exit-imports-must-resolve: packages\/exit\/src\/extra\.ts → tweetnacl/, r.out);
+  } finally {
+    rmSync(bad, { recursive: true, force: true });
   }
 });
 
