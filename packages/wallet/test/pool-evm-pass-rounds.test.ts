@@ -3,7 +3,8 @@
 // (lrb run) read ready 25.85 s = seen 5.4 s + pass 15.9 s + prove 4.5 s. Here every host (the pool pair, the fee list and
 // the helper's GET /v1/pool/fee) answers in 900 ms, and the test counts the sequential rounds from the pass's start to
 // the prover's call: a call's round is one past the highest round any call finished before it started. At most 3, and
-// the wall time inside 3 such rounds plus slack (a lag's sleep is time with no call, so it counts there).
+// no wait asked of the sync's or the pool's sleep (a lag's wait is time with no call, so the rounds cannot see it). The
+// time itself is the live check's and the mainnet copy's, never this test's (scripts/ci/no-wall-clock-asserts.mjs).
 // The RPCs are a mock chain (blocks every 2 s, the pool's logs, its views at each block), as pool-evm-reads-once's.
 // Test leaves and the all-zero test seed only, never money.
 import assert from "node:assert/strict";
@@ -69,7 +70,7 @@ function viewsOf(c: Chain, n: number) {
 
 /** The pass's clock of rounds: a call's round is one past the highest round finished before it started. */
 function rounds() {
-  const r = { on: false, done: 0, calls: 0, log: [] as string[] };
+  const r = { on: false, done: 0, calls: 0, waits: 0, log: [] as string[] };
   const slow = async <T>(what: string, f: () => Promise<T>): Promise<T> => {
     if (!r.on) return f();
     const mine = r.done + 1;
@@ -82,7 +83,18 @@ function rounds() {
       if (mine > r.done) r.done = mine;
     }
   };
-  return { r, slow };
+  /** The sync's and the pool's sleep: each wait the pass asks is counted, then waited for real. */
+  const nap = (ms: number, signal?: AbortSignal): Promise<void> => {
+    if (r.on) {
+      r.waits++;
+      r.log.push(`wait ${ms} ms`);
+    }
+    return new Promise((ok) => {
+      const t = setTimeout(ok, ms);
+      signal?.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });
+    });
+  };
+  return { r, slow, nap };
 }
 
 function rpc(c: Chain, url: string, slow: ReturnType<typeof rounds>["slow"]): EvmRpc {
@@ -153,7 +165,7 @@ async function landed(others: number) {
   }
 }
 async function on(others: number, ns: Awaited<ReturnType<typeof openNoteStore>>, opened: (q: ReturnType<typeof openProofQueue>) => void, shut: () => Promise<void>) {
-  const { r, slow } = rounds();
+  const { r, slow, nap } = rounds();
   let n = await ns.planDeposit(SCOPE, (ref) => noteSecrets(SEED, ref).precommitment);
   const label = vaultLabelOf(keccak_256, SCOPE, 99n);
   const commitment = noteCommitment(VALUE, label, n.precommitment);
@@ -171,10 +183,10 @@ async function on(others: number, ns: Awaited<ReturnType<typeof openNoteStore>>,
   const feeRpcs = [rpc(c, "https://c.example", slow), rpc(c, "https://d.example", slow)];
   // the sync's clock: real time, moved on 2 s between the setup and the pass (the landing's memo is old by then)
   let skew = 0;
-  const sync = evmTreeSync({ rpcs, pin: PIN, clock: () => performance.now() + skew });
+  const sync = evmTreeSync({ rpcs, pin: PIN, clock: () => performance.now() + skew, sleep: nap });
   const relayFee = (e: bigint): Promise<EvmFeeAnswer> =>
     slow("helper GET /v1/pool/fee", async () => ({ chain: "evm", network: "base", pool: POOL, fee_recipient: FEE_TO, epoch_ms: Number(EVM_EPOCH_MS), epoch_start_ms: Number(e), block: q(90), fee: FEE.toString(), step: "0" }));
-  const pool = evmPool({ pin: PIN, rpcs, feeRpcs, sync, relayFee, epochFee: () => FEE });
+  const pool = evmPool({ pin: PIN, rpcs, feeRpcs, sync, relayFee, epochFee: () => FEE, sleep: nap });
   const start = ts(91) * 1000n - (ts(91) * 1000n % EVM_EPOCH_MS);
   assert.equal(start, ts(90) * 1000n, "block 90 is the period's first block");
   // the turn: the page's hold reads the period's first block and its fee
@@ -186,11 +198,10 @@ async function on(others: number, ns: Awaited<ReturnType<typeof openNoteStore>>,
   assert.equal(round.events.length, others + 1);
   n = await ns.move(n.id, "PLANNED", "INCOMING");
   n = await ns.move(n.id, "INCOMING", "UNSPENT", { leaf: { value: VALUE, label, commitment, leafIndex: BigInt(others) } });
-  // the prover's call: its round and its time
-  const at: { round?: number; ms?: number } = {};
-  let t0 = 0;
+  // the prover's call: its round and the waits asked before it
+  const at: { round?: number; waits?: number } = {};
   const sp = signalsProver();
-  const prover: VaultProver = { load: sp.load, prove: async (circuit, input) => (at.round ??= r.done, (at.ms ??= performance.now() - t0), sp.prove(circuit, input)) };
+  const prover: VaultProver = { load: sp.load, prove: async (circuit, input) => (at.round ??= r.done, (at.waits ??= r.waits), sp.prove(circuit, input)) };
   const queue = openProofQueue({ seed64: SEED, notes: ns, pool, provers: [prover], hardwareConcurrency: 4 });
   opened(queue);
   // the pass, a block after the landing's round and past its memo
@@ -199,7 +210,6 @@ async function on(others: number, ns: Awaited<ReturnType<typeof openNoteStore>>,
   return {
     async pass() {
       r.on = true;
-      t0 = performance.now();
       // the chain moves on as Base does, a block every 2 s, while the pass reads
       const tick = setInterval(() => void c.head++, 2_000);
       try {
@@ -220,9 +230,9 @@ test("card evm-pass-in-two-seconds: a landing's pass reaches the prover in at mo
       const out = await l.pass();
       assert.ok(l.at.round !== undefined, `${others} leaves: the prover is called: ${JSON.stringify(out.failed)}`);
       const tail = `\n${l.r.log.join("\n")}`;
-      t.diagnostic(`${others} leaves: the prover is called after ${l.at.round} rounds, ${l.r.calls} calls, ${Math.round(l.at.ms!)} ms into the pass`);
-      assert.ok(l.at.round <= 3, `${others} leaves: the prover is called after ${l.at.round} rounds (${l.r.calls} calls, ${Math.round(l.at.ms!)} ms):${tail}`);
-      assert.ok(l.at.ms! < 3 * ANSWER_MS + 600, `${others} leaves: the prover is called ${Math.round(l.at.ms!)} ms into the pass:${tail}`);
+      t.diagnostic(`${others} leaves: the prover is called after ${l.at.round} rounds, ${l.r.calls} calls, ${l.at.waits} waits`);
+      assert.ok(l.at.round <= 3, `${others} leaves: the prover is called after ${l.at.round} rounds (${l.r.calls} calls):${tail}`);
+      assert.equal(l.at.waits, 0, `${others} leaves: the pass waited before the prover:${tail}`);
       assert.deepEqual(out.failed, [], `${others} leaves: the pass failed: ${JSON.stringify(out.failed)}`);
       assert.deepEqual(out.made, [l.noteId], `${others} leaves: the landed note's proof is made`);
     } finally {
