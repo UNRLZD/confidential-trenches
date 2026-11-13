@@ -29,7 +29,10 @@ import { checkPoolTo } from "./address.ts";
 export type OnwardChain = "solana" | "base";
 /** Where the form sends Cash: a NEAR account, or an address on an onward chain. */
 export type WithdrawChain = "near" | OnwardChain;
-export const WITHDRAW_CHAINS: readonly WithdrawChain[] = Object.freeze(["near", "solana", "base"]);
+// NEAR only for now: a part 1Click refunds lands under V_{l,j} inside intents.near, and Solana and Base join this list
+// with the carry that brings it back to Cash (cards v-binds-into-the-vault, onward-refund-comes-back), never before:
+// no send may leave money the app cannot move.
+export const WITHDRAW_CHAINS: readonly WithdrawChain[] = Object.freeze(["near"]);
 
 /** NEAR's USDC on 1Click: the vault's token, what every part leaves the vault in. */
 export const ONWARD_ORIGIN = `nep141:${NEAR_NETWORKS.mainnet.usdc}`;

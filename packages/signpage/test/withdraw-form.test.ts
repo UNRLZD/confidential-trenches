@@ -445,32 +445,22 @@ test("the tap hands over nothing when the notes changed since the plan was drawn
 
 // Part B (card cash-withdraws-everything-to-any-chain): where Cash goes, NEAR first; on SIGN_HOST's build also Solana and
 // Base, each with an address there, the plan the same
-test("a chain pick above To: NEAR picked first; on Solana a Solana address passes and a NEAR account is refused; the hand-off names the chain", async () => {
+test("Cash goes out to NEAR alone for now: one chain, the chain row hidden, the hand-off names no other chain", async () => {
+  // Solana and Base join with the carry of a refunded part back to Cash (cards v-binds-into-the-vault and
+  // onward-refund-comes-back); until then no send may leave money under V that the app cannot move
   const f = drawn();
   const picks = f.form.findAll((e) => e.dataset.action === "chain");
-  assert.deepEqual(picks.map((b) => [b.dataset.chain, b.textContent, b.getAttribute("aria-pressed")]), [
-    ["near", "NEAR", "true"],
-    ["solana", "Solana", "false"],
-    ["base", "Base", "false"],
-  ]);
+  assert.deepEqual(picks.map((b) => [b.dataset.chain, b.textContent, b.getAttribute("aria-pressed")]), [["near", "NEAR", "true"]]);
+  assert.equal(f.form.find((e) => e.dataset.row === "chains")!.hidden, true);
   assert.equal(f.form.dataset.chain, "near");
-  picks[1]!.fire("click");
-  assert.equal(f.form.dataset.chain, "solana");
-  assert.deepEqual(picks.map((b) => b.getAttribute("aria-pressed")), ["false", "true", "false"]);
-  f.type("to", "alice.near");
+  f.type("to", "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
   f.type("amount", "5");
   await settle();
-  assert.equal(f.form.dataset.state, "refused");
-  assert.equal(f.form.find((e) => e.tag === "p" && e.dataset.for === "to")!.dataset.refusal, "not-account");
-  f.type("to", "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
+  assert.equal(f.form.dataset.state, "refused", "a Solana address is no NEAR account");
+  f.type("to", "alice.near");
   await settle();
-  assert.equal(f.form.dataset.state, "ready");
   await f.tap();
-  assert.deepEqual(f.handed, [{ recipient: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", amount: 5_000_000n, parts: oneNote(5_000_000n), chain: "solana" }]);
-  // back to NEAR: the Solana address is not a NEAR account
-  picks[0]!.fire("click");
-  await settle();
-  assert.equal(f.form.dataset.state, "refused");
+  assert.deepEqual(f.handed, [{ recipient: "alice.near", amount: 5_000_000n, parts: oneNote(5_000_000n) }]);
 });
 
 test("the chain is checked again at the tap: a pick changed since the check hands over nothing", async () => {

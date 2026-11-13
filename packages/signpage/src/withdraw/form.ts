@@ -14,8 +14,9 @@
 //   drawn under the form (data-steps, one line each with its amount and its state), and the run stops at the first
 //   that does not leave the vault, the rest still in Cash.
 // - Where it goes (Part B, ./onward.ts): a row of chains above To, NEAR first and picked; on SIGN_HOST's build (mainnet,
-//   where 1Click pays out) also Solana and Base, each by its name. On NEAR To is a NEAR account (./checks.ts); on
-//   another chain an address there (onwardTo), and each withdrawal goes through its own checked 1Click quote.
+//   where 1Click pays out) also each other chain of WITHDRAW_CHAINS, by its name; with NEAR alone (for now) the row is
+//   hidden. On NEAR To is a NEAR account (./checks.ts); on another chain an address there (onwardTo), and each
+//   withdrawal goes through its own checked 1Click quote.
 // - The notes and the fee bound are read when the form opens and again at every Withdraw tap. A read that cannot
 //   answer is "unread": the field shows S12.10's Busy · Retry, a tap reads what is unread and checks again, and nothing
 //   goes on meanwhile.
@@ -233,6 +234,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     form.dataset.chain = chain;
   };
   chains.append(...picks);
+  chains.hidden = picks.length < 2; // one chain: nothing to pick
   drawChains();
   form.append(notice, chains, to.label, to.line, amount.label, canRow, amount.line, go, steps);
 
