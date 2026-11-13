@@ -125,13 +125,13 @@ abstract contract SellV4ForkBase is SellBase {
     console.log(_rpc, 'sell, v4 hooked pool to WETH (one type-4 transaction, W authorized in it, depth 0) gas:', _g);
     (,, uint256 _value, uint256 _pre) = _deposited(vm.getRecordedLogs());
     console.log('sold', _amount, 'for wei', _quoted);
-    assertEq(_value, _quoted - FEE, 'the leaf holds the quote at the pinned block less the fee');
+    assertEq(_value, _rungOf(_quoted - FEE), 'the leaf holds the largest rung of the quote at the pinned block less the fee');
     assertEq(_pre, PRE);
-    assertEq(address(pool).balance, _poolBefore + _quoted - FEE);
+    assertEq(address(pool).balance, _poolBefore + _value);
     assertEq(SENDER.balance, FEE, 'the helper is paid the fee');
     assertEq(IERC20Balance(_token).balanceOf(W), 0, 'W sold every token');
     assertEq(IAllowanceFork(_token).allowance(W, _pm), 0, 'no approval was given');
-    assertEq(W.balance, 0, 'W keeps no ether');
+    assertEq(W.balance, _quoted - FEE - _value, 'W keeps the rest in ether');
     assertEq(IERC20Balance(_weth).balanceOf(W), 0, 'nor WETH');
     assertEq(SellDelegate(payable(W)).nonce(), 1);
   }

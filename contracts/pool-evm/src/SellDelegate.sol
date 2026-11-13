@@ -32,7 +32,8 @@ interface IPoolDeposit {
  *         the whole approval (the approval ends at 0), refuses unless W's balance of the token fell by exactly the
  *         amount (on v4 too, card evm-selldelegate-exact-debit), unwraps the WETH the sale paid W, refuses an ETH gain
  *         under minOut, pays the fee the sender names (at most W's fee cap) to the fee recipient W signed, and
- *         deposits the rest into the pool with W's precommitment. A sell whose target is the chain's v4 PoolManager (card evm-sell-v4) goes through it
+ *         deposits the largest rung of the 1-2-5 ladder (from 0.001 ETH) at or under the rest into the pool with W's
+ *         precommitment, keeping what is left on W (none under the least rung: then the whole rest stays on W). A sell whose target is the chain's v4 PoolManager (card evm-sell-v4) goes through it
  *         directly instead, as v4-periphery's V4Router does: W unlocks the PoolManager, which calls W's
  *         unlockCallback; that swaps exactly the amount along the signed route (abi.encode(PathKey[]), ending in the
  *         native asset or WETH), settles the token with a transfer from W (no approval at all) and takes the whole
@@ -86,6 +87,9 @@ contract SellDelegate {
   bytes32 internal constant SELL_TYPEHASH = keccak256(
     'Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)'
   );
+  /// @notice The ladder's least rung, 0.001 ETH (10 x the pool's MIN_DEPOSIT, src/PrivacyPool.sol): a sale deposits the
+  ///         largest 1-2-5 rung of it at or under its ETH less the fee, and none under it
+  uint256 internal constant LEAST_RUNG = 0.001 ether;
   /// @notice secp256k1's n / 2: a signature with a higher s is the other form of a lower one (EIP-2)
   uint256 internal constant HALF_N = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0;
 
@@ -117,6 +121,21 @@ contract SellDelegate {
     POOL_MANAGER = _poolManager;
   }
 
+  /**
+   * @notice The largest rung of the pools' 1-2-5 ladder at or under `_x`, or 0 under the least rung: d x 10^k x
+   *         LEAST_RUNG, d in {1, 2, 5}, k >= 0 (the wallet's src/pool/ladder.ts with EVM_LADDER)
+   * @param _x The ETH the sale holds for the pool, in wei
+   * @return _rung The deposit, a rung, or 0
+   */
+  function _rungAtOrUnder(uint256 _x) internal pure returns (uint256 _rung) {
+    if (_x < LEAST_RUNG) return 0;
+    uint256 _p = LEAST_RUNG;
+    while (_p <= _x / 10) _p *= 10;
+    if (_x / 5 >= _p) return 5 * _p;
+    if (_x / 2 >= _p) return 2 * _p;
+    return _p;
+  }
+
   /// @notice A sale may pay W in ETH, and WETH's unwrap does
   receive() external payable {}
 
@@ -129,11 +148,12 @@ contract SellDelegate {
   }
 
   /**
-   * @notice Runs one sell W signed and deposits its ETH, less the fee, into the pool
+   * @notice Runs one sell W signed and deposits the largest rung of its ETH, less the fee, into the pool; the rest,
+   *         and the whole of it under the least rung, stays on W
    * @param _sell The sell
    * @param _fee What the sender takes from the sale's ETH, at most _sell.feeCap, paid to _sell.feeRecipient
    * @param _signature W's EIP-712 signature of _sell, 65 bytes
-   * @return _commitment The pool's new commitment
+   * @return _commitment The pool's new commitment, or 0 when the sale deposited nothing (under the least rung)
    */
   function sell(
     Sell calldata _sell,
@@ -193,7 +213,10 @@ contract SellDelegate {
       (bool _sent,) = _sell.feeRecipient.call{value: _fee}('');
       if (!_sent) revert FailedToSendNativeAsset();
     }
-    _commitment = IPoolDeposit(_sell.pool).deposit{value: _gained - _fee}(_gained - _fee, _sell.precommitment);
+    // a deposit is public in value, so it is one standard size (card pool-amounts-are-standard-sizes-evm): the largest
+    // rung at or under the ETH less the fee, none under the least rung; the rest stays on W, the user's own ether
+    uint256 _rung = _rungAtOrUnder(_gained - _fee);
+    if (_rung != 0) _commitment = IPoolDeposit(_sell.pool).deposit{value: _rung}(_rung, _sell.precommitment);
 
     _setGuard(false);
   }

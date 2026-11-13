@@ -64,28 +64,28 @@
       ]
     },
     "SellDelegate": {
-      "length": 9201,
-      "masked": "0x810d3089ca939782b128e76d84c43f321ff126b76dd1dce140c5dc9782f48bf0",
+      "length": 9412,
+      "masked": "0x62a1ea937fc0a462860f3bb76c8633bd39a0de9fa8f03815fc8bf0cb68a818b5",
       "immutables": [
         [
           301,
           1100,
           2509,
           2679,
-          3681,
-          6129
+          3690,
+          6138
         ],
         [
           169,
           1409,
           1629,
-          3284,
-          3913,
-          4571,
-          4664,
-          4703,
-          4926,
-          6003
+          3293,
+          3922,
+          4580,
+          4673,
+          4712,
+          4935,
+          6012
         ]
       ],
       "sell": "0x0c2cb9ca"
@@ -203,6 +203,39 @@
       "at": {
         "base-sepolia": "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
         "robinhood-testnet": "0xe5e948414a89c23e73d76cd740dacdd9364c25d5"
+      }
+    },
+    "SellDelegate.mainnet-1": {
+      "contract": "SellDelegate",
+      "note": "The mainnets' first sell delegate (card pool-evm-deploy-mainnet, the owner's pastes of 7 Nov: contracts/pool-evm/deployments/base.json and robinhood.json), which deposits the whole of a sale's ETH less the fee; frozen at its two mainnet addresses when card pool-amounts-are-standard-sizes-evm moved the build on (a sale deposits the largest rung of it)",
+      "length": 9201,
+      "masked": "0x810d3089ca939782b128e76d84c43f321ff126b76dd1dce140c5dc9782f48bf0",
+      "immutables": [
+        [
+          301,
+          1100,
+          2509,
+          2679,
+          3681,
+          6129
+        ],
+        [
+          169,
+          1409,
+          1629,
+          3284,
+          3913,
+          4571,
+          4664,
+          4703,
+          4926,
+          6003
+        ]
+      ],
+      "sell": "0x0c2cb9ca",
+      "at": {
+        "base": "0xe3223113781f527188f634615ad9a3ca0aa20a4d",
+        "robinhood": "0xf79962b094991354270fe7866f0f590ef0c9b0cf"
       }
     }
   }
