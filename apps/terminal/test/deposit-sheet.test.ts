@@ -134,7 +134,8 @@ test("BAR-11: the counter from the kit's first sight of the send; the countdown 
 
 test("WORDS: every word carries its source; the only drafts are the three send rules, for the owner's copy pass", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0, k);
-  // To was kept (owner 8 Nov 07:55Z); card pool-balance-counts-the-remainder's send rules are the CO's placeholders
+  // To was kept (owner 8 Nov 07:55Z); card pool-balance-counts-the-remainder's send rules are placeholders for the
+  // owner's copy pass
   assert.deepEqual([...DRAFTS], ["sendOnlySolana", "sendOnlyBase", "sendOnlyRobinhood"]);
   for (const k of ["asset", "chain", "amount", "expiresIn", "expired", "getAddress", "copy", "retry"] as const) assert.equal(WORDS[k].draft, false, k);
 });

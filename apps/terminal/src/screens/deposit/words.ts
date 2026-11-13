@@ -61,11 +61,11 @@ export const WORDS = {
   // Portfolio's per-chain pool rows (src/screens/portfolio/words.ts balance)
   balance: ok("Balance", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain (src/screens/portfolio/words.ts balance; approved on Verify, owner 2 Nov 06:08Z), drawn on the deposit sheet's in-the-pool state"),
   // ready ("Ready"), pending ("Pending"): 13 Nov 07:53Z: removed, the app names no proof
-  // card pool-balance-counts-the-remainder: each pool's one-line send rule under its own-coin address, the CO's
-  // placeholders for the owner's copy pass (drafts until picked)
-  sendOnlySolana: draft("Send only SOL on Solana.", "card pool-balance-counts-the-remainder (CO brief 13 Nov 10:50Z): placeholder for the owner's copy pass"),
-  sendOnlyBase: draft("Send only ETH on Base.", "card pool-balance-counts-the-remainder (CO brief 13 Nov 10:50Z): placeholder for the owner's copy pass"),
-  sendOnlyRobinhood: draft("Send only ETH on Robinhood.", "card pool-balance-counts-the-remainder (CO brief 13 Nov 10:50Z): placeholder for the owner's copy pass"),
+  // card pool-balance-counts-the-remainder: each pool's one-line send rule under its own-coin address, each a
+  // placeholder for the owner's copy pass (drafts until picked)
+  sendOnlySolana: draft("Send only SOL on Solana.", "placeholder for the owner's copy pass, card pool-balance-counts-the-remainder, 13 Nov 10:50Z"),
+  sendOnlyBase: draft("Send only ETH on Base.", "placeholder for the owner's copy pass, card pool-balance-counts-the-remainder, 13 Nov 10:50Z"),
+  sendOnlyRobinhood: draft("Send only ETH on Robinhood.", "placeholder for the owner's copy pass, card pool-balance-counts-the-remainder, 13 Nov 10:50Z"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
