@@ -141,11 +141,13 @@ export type PoolSellHost = {
 /** One wallet's sale in a sell (card pool-sell-share-across-wallets): W's address, the token's base units it sells (a
  *  decimal string, as an answer carries it), its transaction's signature once W signed (null: it ended before signing),
  *  and how it ended: its stage, or the refusal before it signed. */
-export type PoolSellLeg = { wallet: string; amount: string; tx: string | null; stage: TradeStage | null; error?: PoolSellError; cause?: string };
+export type PoolSellLeg = { wallet: string; amount: string; tx: string | null; stage: TradeStage | null; error?: PoolSellError; cause?: string; rule?: string };
 type PoolSellError = "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_built" | "failed" | "down";
 /** A sell's answer: its stage over every wallet's sale (filled when each filled, part_filled when some did), each sale's
  *  transaction in `txs`, and every sale in `legs`; or a refusal, nothing signed. */
-export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[]; legs?: readonly PoolSellLeg[] } | { error: PoolSellError };
+/** A refusal's `rule` (refusal-rule.ts): the fixed word naming the rule or kit code that refused it, the page's own,
+ *  never posted to the app. */
+export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[]; legs?: readonly PoolSellLeg[] } | { error: PoolSellError; rule?: string };
 
 /** Verdict reads a sell gets, a second apart: past a blockhash's life (~60 to 90 s) and a finalization. */
 export const POOL_SELL_READS = 120;

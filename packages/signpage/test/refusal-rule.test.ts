@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { EvmQuoteError } from "../../kit/src/checks/evm/quote.ts";
 import { EvmBuyTapRefused } from "../../kit/src/trade/evm/buy-tap.ts";
 import { EvmPoolBuyError } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { EvmPoolSellError } from "../../kit/src/trade/evm/sell-unpinned.ts";
 import { KIT_CODE_WORDS, POOL_RULE_WORDS, refusalRule } from "../src/refusal-rule.ts";
 import { PoolRuleRefused } from "../src/rules/pool.ts";
 
@@ -34,6 +35,7 @@ test("a refusal names its rule, the kit's code, or the tap's last refusal's; any
   assert.equal(refusalRule(new PoolRuleRefused("deadline_past")), "deadline_past");
   assert.equal(refusalRule(new EvmQuoteError("stale_quote", "the quote's block is more than 30 s old")), "stale_quote");
   assert.equal(refusalRule(new EvmPoolBuyError("not_pinned", "the adapter is not base's pinned uniswap-v3 adapter")), "not_pinned");
+  assert.equal(refusalRule(new EvmPoolSellError("bad_deadline", "the deadline is not seconds within the window past now")), "bad_deadline");
   assert.equal(refusalRule(new EvmBuyTapRefused("quote_check_failed", new EvmQuoteError("no_quote", "x"))), "no_quote");
   assert.equal(refusalRule(new EvmBuyTapRefused("quote_check_failed", null)), "other");
   // a tap refusal inside a tap refusal is not read through
@@ -48,5 +50,6 @@ test("no address, amount or message rides in the word, whatever the error carrie
     assert.equal(refusalRule(Object.assign(new EvmQuoteError("no_quote", v), { code: v })), "other", v);
     assert.equal(refusalRule({ name: "PoolRuleRefused", rule: v }), "other", v);
     assert.equal(refusalRule({ name: "EvmPoolBuyError", code: v }), "other", v);
+    assert.equal(refusalRule({ name: "EvmPoolSellError", code: v }), "other", v);
   }
 });

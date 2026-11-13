@@ -6,6 +6,7 @@
 import type { EvmQuoteErrorCode } from "../../kit/src/checks/evm/quote.ts";
 import { EvmBuyTapRefused } from "../../kit/src/trade/evm/buy-tap.ts";
 import type { EvmPoolBuyErrorCode } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import type { EvmPoolSellErrorCode } from "../../kit/src/trade/evm/sell-unpinned.ts";
 
 /** Every rule word the device's rules refuse with (rules/pool.ts refuse, PoolRuleRefused): the test reads them from the
  *  source, so a rule added there is added here. */
@@ -31,21 +32,26 @@ const BUILD_CODES = [
   "weth_after_first", "middle_not_listed", "token_mismatch", "not_built", "bad_route", "bad_amount", "bad_key",
   "not_deployed", "not_pinned",
 ] as const satisfies readonly EvmPoolBuyErrorCode[];
+const SELL_CODES = [
+  "bad_target", "token_mismatch", "middle_not_listed", "bad_route", "bad_amount", "bad_fee", "bad_deadline", "not_built",
+  "bad_key", "not_deployed", "not_pinned", "release_in_flight",
+] as const satisfies readonly EvmPoolSellErrorCode[];
 // each kit code is on its list: a code the kit adds fails the page's typecheck here until it is listed
 const whole = <T extends string, L extends readonly T[]>(_: L & ([Exclude<T, L[number]>] extends [never] ? unknown : never)): true => true;
 whole<EvmQuoteErrorCode, typeof QUOTE_CODES>(QUOTE_CODES);
 whole<EvmPoolBuyErrorCode, typeof BUILD_CODES>(BUILD_CODES);
+whole<EvmPoolSellErrorCode, typeof SELL_CODES>(SELL_CODES);
 
-/** The kit's quote and build codes (EvmQuoteError, EvmPoolBuyError), each a fixed word. */
-export const KIT_CODE_WORDS: ReadonlySet<string> = new Set<string>([...QUOTE_CODES, ...BUILD_CODES]);
+/** The kit's quote, buy and sell codes (EvmQuoteError, EvmPoolBuyError, EvmPoolSellError), each a fixed word. */
+export const KIT_CODE_WORDS: ReadonlySet<string> = new Set<string>([...QUOTE_CODES, ...BUILD_CODES, ...SELL_CODES]);
 
 /** The fixed word naming why `e` refused: a device rule's (PoolRuleRefused.rule), else the kit's code (EvmQuoteError,
- *  EvmPoolBuyError; through an EvmBuyTapRefused, its last refusal's), else "other". */
+ *  EvmPoolBuyError, EvmPoolSellError; through an EvmBuyTapRefused, its last refusal's), else "other". */
 export function refusalRule(e: unknown, depth = 0): string {
   const o = e as { name?: unknown; rule?: unknown; code?: unknown; last?: unknown } | null;
   if (o === null || typeof o !== "object") return "other";
   if (o.name === "PoolRuleRefused") return typeof o.rule === "string" && POOL_RULE_WORDS.has(o.rule) ? o.rule : "other";
-  if (o.name === "EvmQuoteError" || o.name === "EvmPoolBuyError") return typeof o.code === "string" && KIT_CODE_WORDS.has(o.code) ? o.code : "other";
+  if (o.name === "EvmQuoteError" || o.name === "EvmPoolBuyError" || o.name === "EvmPoolSellError") return typeof o.code === "string" && KIT_CODE_WORDS.has(o.code) ? o.code : "other";
   if (e instanceof EvmBuyTapRefused && depth === 0 && e.last !== null && e.last !== undefined) return refusalRule(e.last, 1);
   return "other";
 }

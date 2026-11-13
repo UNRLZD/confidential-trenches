@@ -328,7 +328,7 @@ test("a W whose buy record holds no route, or no block, is refused not_allowed: 
 test("a token whose decimals() changed since its buy (6 at the quote's block, the ask's units made with 18) is refused before W signs", async () => {
   const x = await world();
   x.c.decimalsAtBlock = 6n;
-  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "quote_check_failed", rule: "decimals" });
   assert.equal(x.posts.length, 0);
   assert.deepEqual(await openOf(x), []);
   assert.notEqual((await returnNote(x.store))?.state, "INCOMING");
@@ -1145,7 +1145,7 @@ test("a sale quote read again at W's signature that fails: nothing signed, recor
   let calls = 0;
   const quote = x.h.quote;
   x.h.quote = (req) => (calls++, quote(req));
-  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { error: "quote_check_failed", rule: "stale_quote" });
   assert.deepEqual([asked.length, calls], [1, 2], "the quote was read again");
   assert.equal(x.posts.length, 0);
   assert.deepEqual(await openOf(x), []);

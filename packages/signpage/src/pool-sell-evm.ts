@@ -83,6 +83,7 @@ import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS, EVM_POSITION_C
 import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
 import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
+import { refusalRule } from "./refusal-rule.ts";
 import { TRADE_HELPER } from "./trade.ts";
 import { shuffled } from "./positions-evm.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -125,14 +126,18 @@ const word = (v: bigint): string => v.toString(16).padStart(64, "0");
 type Code = "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down";
 class Refused extends Error {
   readonly code: Code;
-  constructor(code: Code) {
+  readonly rule: string | undefined;
+  constructor(code: Code, rule?: string) {
     super(code);
     this.code = code;
+    this.rule = rule;
   }
 }
-const no = (code: Code = "failed"): never => {
-  throw new Refused(code);
+const no = (code: Code = "failed", rule?: string): never => {
+  throw new Refused(code, rule);
 };
+// a refusal's answer with its rule word (refusal-rule.ts), the page's own: the app is posted the code alone
+const refusedAs = (code: Code, rule: string | undefined): { error: Code; rule?: string } => (rule === undefined ? { error: code } : { error: code, rule });
 
 /** What a sell run needs from the page. */
 export type EvmSellHost = {
@@ -369,7 +374,7 @@ async function legQuote(h: Pick<EvmSellHost, "quote" | "rpcs">, ask: PoolAsk, re
   const q = await h.quote(req);
   const at = hexQ(q.block.number);
   const reads = await Promise.all(h.rpcs.map((rpc) => rpc("eth_call", [{ to: req.token, data: ERC20_DECIMALS }, at])));
-  if (tokenDecimalsOf(ask.chain, reads as [unknown, unknown]) !== ask.decimals) return no("quote_check_failed");
+  if (tokenDecimalsOf(ask.chain, reads as [unknown, unknown]) !== ask.decimals) return no("quote_check_failed", "decimals");
   return q;
 }
 
@@ -456,7 +461,7 @@ type Watch = { open: EvmOpenSell; stops: [bigint | null, bigint | null]; hint: s
 /** One leg of one sell: signed, recorded, sent, read back. The tap waits on the send at most EVM_SELL_SEND_TAP_MS (a
  *  busy helper's waits and the second signature run on past it, kept by the page) and on the read-back at most
  *  EVM_SELL_SETTLE_MS; then it answers "sent" and the rest runs on. */
-async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sent(): void }): Promise<{ stage: TradeStage; txs: TxRef[] } | { error: Code }> {
+async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sent(): void }): Promise<{ stage: TradeStage; txs: TxRef[] } | { error: Code; rule?: string }> {
   const hold = h.hold ?? (<T,>(f: () => Promise<T>) => f());
   const clock = clockOf(h);
   const wait = waitOf(h);
@@ -622,10 +627,10 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
   } catch (e) {
     if (posted) return { stage: "sent", txs: [] };
     if (e instanceof EvmNotFinalError) throw e;
-    if (e instanceof Refused) return { error: e.code };
-    if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
+    if (e instanceof Refused) return refusedAs(e.code, e.rule);
+    if (e instanceof PoolRuleRefused) return refusedAs("quote_check_failed", refusalRule(e));
     const name = (e as { name?: unknown })?.name;
-    if (name === "EvmQuoteError" || name === "EvmPoolSellError") return { error: (e as { code?: unknown }).code === "release_in_flight" ? "down" : "quote_check_failed" };
+    if (name === "EvmQuoteError" || name === "EvmPoolSellError") return refusedAs((e as { code?: unknown }).code === "release_in_flight" ? "down" : "quote_check_failed", refusalRule(e));
     if (unanswered(e)) return { error: "down" };
     return { error: "failed" };
   } finally {
@@ -805,7 +810,7 @@ export async function runEvmPoolSell(host: EvmSellHost, ask: PoolAsk): Promise<P
   try {
     plan = await patient(h, () => planEvmSell(h, ask));
   } catch (e) {
-    if (e instanceof Refused) return { error: e.code };
+    if (e instanceof Refused) return refusedAs(e.code, e.rule);
     return { error: unanswered(e) ? "down" : "failed" };
   }
   const legs: PoolSellLeg[] = plan.legs.map((l) => ({ wallet: l.w.w, amount: l.units.toString(), tx: null, stage: null }));
@@ -824,7 +829,7 @@ export async function runEvmPoolSell(host: EvmSellHost, ask: PoolAsk): Promise<P
       })
       .then((a) => {
         open();
-        legs[i] = "error" in a ? { ...legs[i]!, error: a.error } : { ...legs[i]!, tx: a.txs.at(-1)?.hash ?? null, stage: a.stage };
+        legs[i] = "error" in a ? { ...legs[i]!, error: a.error, ...("rule" in a && a.rule !== undefined ? { rule: a.rule } : {}) } : { ...legs[i]!, tx: a.txs.at(-1)?.hash ?? null, stage: a.stage };
         return a;
       });
   });
@@ -1012,7 +1017,7 @@ export function poolSellEvmKind(host: () => EvmSellHost & { end?(): void }, lock
           },
           ask,
         );
-        if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
+        if (!answer) answer = "error" in a ? ("rule" in a && a.rule !== undefined ? { error: a.error, rule: a.rule } : { error: a.error }) : { result: a };
         if ("stage" in a) ctx?.progress(a.stage);
       } finally {
         h.end?.();
