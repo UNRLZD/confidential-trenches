@@ -3160,6 +3160,34 @@ test("W2d blocks left for later are read before the answer once the scan provide
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_070), chain(now, 1, 5_000_070)], NOW, both)), below);
 });
 
+test("W2g a gap that starts more than maxLag blocks before the scan provider's head is asked beside the quote's first round, never only after its agreed block is found", async () => {
+  // the sweep's row on the deferral's bound: with the later read of W2e in place, a quote that left an old gap for later
+  // still reads it before the answer, but a round later (a cold quote's cost); the two providers' answers wait here for
+  // that gap's request, or a second
+  const token = "0x00000000000000000000000000000000000ee903";
+  const pools = [seeded(token)];
+  const req = { ...warmReq(token), route: seededRoute(token) };
+  const logs = [{ key: seeded(token).key, at: 4_100_000 }];
+  assert.equal((await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs)))).accepted, true);
+  let asked = () => {};
+  const gapAsked = new Promise<string>((r) => {
+    asked = () => r("gap asked");
+    setTimeout(() => r("a second passed"), 1000);
+  });
+  const scan = scanner(5_000_100, logs);
+  const watched: EvmRpc = (calls, signal) => {
+    if (getLogsOf(calls).some((f) => Number(f.fromBlock) <= 5_000_050)) asked();
+    return scan(calls, signal);
+  };
+  const held = (rpc: EvmRpc): EvmRpc => async (calls, signal) => {
+    await gapAsked;
+    return rpc(calls, signal);
+  };
+  const v = await verdict(evmPoolBuyQuoteWith(req, [held(chain(pools, 0, 5_000_100)), held(chain(pools, 1, 5_000_100))], NOW, watched));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.equal(await gapAsked, "gap asked");
+});
+
 test("W2e a gap left for later that starts more than maxLag blocks before the agreed block is read before the answer: a pool made at its first block holds the quote", async () => {
   // review of 98a87843b, PROBE-1a: the kept scan to 5,000,000, the scan provider's head 5,000,049 (within maxLag 50: its
   // gap left for later), the agreed block 5,000,099 (50 past the scan head: no catch-up), a better pool at 5,000,001,

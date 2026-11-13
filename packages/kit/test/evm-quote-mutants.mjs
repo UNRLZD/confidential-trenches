@@ -371,7 +371,7 @@ export const MUTANTS = [
   [QUOTE, "  return {\n    pools: new Map(each.map((e) => [e.c, e.pools])),\n", "  commit();\n  return {\n    pools: new Map(each.map((e) => [e.c, e.pools])),\n", R, "S2b "],
   // card evm-buy-and-sell-on-mainnet: the blocks within maxLag of a kept scan read beside the quote, not before it
   [QUOTE, "    if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "    if (e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],
-  [QUOTE, "    if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "    if (e.pools.length > 0 && e.gaps.length > 0) {", R, "W2 "],
+  [QUOTE, "    if (e.pools.length > 0 && e.gaps.length > 0 && e.gaps.every(([a]) => a > head - lag)) {", "    if (e.pools.length > 0 && e.gaps.length > 0) {", R, "W2g "],
   [QUOTE, "      e.later = e.gaps;\n      e.gaps = [];\n", "", R, "W2c "],
   [QUOTE, "    for (const e of each) for (const [x, y] of e.later.splice(0)) jobsOf([e], x, y);\n", "", R, "W2d "],
   [QUOTE, "    await settle(js.map(run));\n    commit();\n", "    await settle(js.map(run));\n", R, "W2b "],
