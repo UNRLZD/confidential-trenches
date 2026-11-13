@@ -191,7 +191,7 @@ test("tap_max from the kit's rules: solanaTapSpendOf (the worst venue, the proof
   const atMin = solanaPoolBuyMaxSpend({ withdrawnValue: LAMPORTS / 10n, relayFee: fee }, SOLANA_POOL_WORST_BUY_VENUE, SOLANA_JITO_TIP_MIN, rent);
   assert.equal(atMin, 91_383_880n);
   assert.notEqual(funds(atMin, SOL_TIP_CAP), null);
-  assert.equal(out[1]!.tap_max, "0.001", "an EVM tap asks for the whole chunk");
+  assert.equal(out[1]!.tap_max, "0.00099", "an EVM tap spends the chunk less its relay fee (card buy-any-amount-on-every-chain)");
   // a Solana proof whose request names no tip cap, or a bad one, is refused
   assert.throws(() => poolBalances([s], [S], [proof(S, s, LAMPORTS / 10n, undefined, fee)]), /tip cap/);
   assert.throws(() => poolBalances([s], [S], [{ ...sp, binding: { feeCap: fee, request: { tipCap: -1n } } }]), /tip cap/);
@@ -423,4 +423,15 @@ test("solanaTapSpendOf at the tap's own tip (card max-is-what-you-hold-after-a-t
   assert.equal(solanaTapSpendOf(rent)(pieces), at - 900_000n);
   // a tip over a piece's cap: the tag 3 refuses it, so no spend
   assert.equal(solanaTapSpendOf(rent, SOLANA_POOL_WORST_BUY_VENUE, () => SOL_TIP_CAP + 1n)(pieces), 0n);
+});
+
+test("card buy-any-amount-on-every-chain: an EVM chain's tap_max is every ready note's spend (its chunk less its relay fee), summed across the notes' Ws, as the page's plan spends them all in one tap", () => {
+  const B = evmBalancePool("b", "base", 22n, evmTapSpendOf);
+  const fee = 6n * 10n ** 13n;
+  const two = note(22n, "HELD", (2n * WEI) / 1000n);
+  const one1 = note(22n, "HELD", WEI / 1000n);
+  // a sell's return note made before the ladder: any size is spent whole
+  const odd = note(22n, "HELD", 1_880_000_000_000_000n);
+  const out = poolBalances([two, one1, odd], [B], [proof(B, two, (2n * WEI) / 1000n, undefined, fee), proof(B, one1, WEI / 1000n, undefined, fee), proof(B, odd, 1_880_000_000_000_000n, undefined, fee)]);
+  assert.deepEqual(out, [{ chain: "base", asset: "ETH", balance: "0.00488", ready: "0.00488", tap_max: "0.0047" }]);
 });
