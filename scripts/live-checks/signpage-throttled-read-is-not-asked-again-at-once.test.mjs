@@ -9,7 +9,8 @@
 // broken in place FAILs, by its name. The rule and the gate re-cut from card signpage-throttled-provider-has-a-spare's
 // build (its doubling kept until the quiet time, an answer clearing only the doubt), their names kept. Every piece re-cut
 // from card wallets-found-in-one-read's build: the route's 30 s in doubt the bound (held, the gate's doubtMs, its start
-// again after the quiet time), the host's pass turn in the round's turn, the route's own gate beside the host's lane,
+// again after the quiet time), the host's pass turn in the round's turn (its kind, a pass's unless its reader names a
+// trade's, since card evm-quote-rides-out-a-one-block-answer), the route's own gate beside the host's lane,
 // and no bound from the list's start; with card pool-sell-legs-side-by-side merged, the refusal past a bound the kit's
 // transport fault, and the list's no-bound one name for both its ways of reading.
 import assert from "node:assert/strict";
@@ -88,7 +89,10 @@ test("planted in the bundle's excerpt: each rule broken in place FAILs", () => {
     "the doubt's length on the wall clock": [at(/doubtMs\(\)\{return this\.#[\w$]+\?this\.#[\w$]+\(\)-/), (s) => s.replace(/\?this\.#[\w$]+\(\)-$/, "?Date.now()-"), "gate"],
     "no bound on the route in doubt": [at(/\|\|[\w$]+\.doubtMs\(\)\+[\w$]+>3e4/), () => "", "held"],
     "a doubt bound of 60 s": [at(/\.doubtMs\(\)\+[\w$]+>3e4/), (s) => s.replace("3e4", "6e4"), "held"],
-    "no host pass turn in the round's turn": [at(/,[\w$]+&&await [\w$]+\.turn\(`pass`,/), () => ",(0,", "turn"],
+    "no host pass turn in the round's turn": [at(/,[\w$]+&&await [\w$]+\.turn\([\w$]+,/), () => ",(0,", "turn"],
+    // card evm-quote-rides-out-a-one-block-answer: the host's turn is the round's kind, a pass's unless its reader names one
+    "every round at a trade's turn": [at(/,[\w$]+=`pass`\)\{let /), (s) => s.replace("`pass`", "`trade`"), "turn"],
+    "the round's turn not its kind": [at(/&&await [\w$]+\.turn\([\w$]+,/), (s) => s.replace(/\.turn\([\w$]+,$/, ".turn(`trade`,"), "turn"],
     "the gate on the wall clock": [at(/\(\(\)=>performance\.now\(\)\)/), () => "Date.now", "gate"],
     "left() past the longest wait": [at(/left\(\)\{return Math\.min\(/), () => "left(){return (", "gate"],
     "a stopped waiter keeps the turn": [at(/catch\(([\w$]+)\)\{throw [\w$]+\(\),\1\}/), (s) => s.replace(/throw [\w$]+\(\),/, "throw "), "gate"],
