@@ -98,10 +98,44 @@ Error.prepareStackTrace = (err, frames) => {
   if (!String(frames[0] ?? "").includes("internal/deps/undici")) keep({ at: Date.now() - t0, thrown: `${err?.name}: ${String(err?.message).slice(0, 300)}`, frames: frames.slice(0, 5).map(String) });
   return `${err?.name}: ${err?.message}\n${frames.map((f) => `    at ${f}`).join("\n")}`;
 };
+// every request the page sends a pool host, by host and time (the windows around the landing, the ready step)
+const hostSends = [];
+// card evm-first-proof-inside-ten-seconds: the first leaf's proof ready inside READY_MS of its block, and each pool host
+// sent at most HOST_WINDOW_BOUND requests in any 10 s window around the landing (the helper's per-device window on Base
+// and Robinhood: 30 per 10 s)
+const READY_MS = 10_000;
+const HOST_WINDOW_BOUND = 30;
+/** A request body's method (an eth_call's selector beside it), each of a batch. */
+const methodsOf = (body) => {
+  try {
+    const b = JSON.parse(String(body));
+    return (Array.isArray(b) ? b : [b]).map((x) => ({ m: x?.method === "eth_call" ? `eth_call ${String(x.params?.[0]?.data ?? "").slice(0, 10)}` : String(x?.method), from: x?.method === "eth_getLogs" ? x.params?.[0]?.fromBlock : undefined }));
+  } catch {
+    return [{ m: "?" }];
+  }
+};
+/** Per host, the most requests in any HOST_WINDOW_MS (10 s) window that overlaps [from, to], with its start (ms after
+ *  `zero`) and its requests by method. */
+const windowMax = (from, to, zero) => {
+  const out = {};
+  for (const h of new Set(hostSends.map((x) => x.host))) {
+    const xs = hostSends.filter((x) => x.host === h && x.at > from - 10_000 && x.at < to + 10_000).sort((a, b) => a.at - b.at);
+    let best = { n: 0, i: 0, j: -1 };
+    for (let i = 0, j = 0; j < xs.length; j++) {
+      while (xs[j].at - xs[i].at >= 10_000) i++;
+      if (j - i + 1 > best.n) best = { n: j - i + 1, i, j };
+    }
+    const by = {};
+    for (const x of xs.slice(best.i, best.j + 1)) by[x.m] = (by[x.m] ?? 0) + 1;
+    out[h] = { n: best.n, fromMs: best.n === 0 ? null : xs[best.i].at - zero, by };
+  }
+  return out;
+};
 globalThis.fetch = async (input, init) => {
   const u = new URL(String(input instanceof Request ? input.url : input));
   if (u.origin === ANVIL || (route.local !== null && u.origin === route.local)) return realFetch(input, init);
   if (route.fork.has(u.host)) {
+    for (const { m, from } of methodsOf(init?.body)) hostSends.push({ host: u.host, at: Date.now(), m, from });
     if (typeof init?.body === "string" && init.body.includes("eth_sendRawTransaction")) {
       if (losing) {
         sent.dropped++;
@@ -423,7 +457,9 @@ await guard("under the least rung", async () => {
 // the quote's deadline already past: the carry step reads the follow's end (in_pool read on past the deadline, as the
 // page ends a follow), which a future deadline would hold open past the run; no other step reads the deadline
 const f = { chain: CHAIN, s: scope.toString(), i: ux.index, u: ux.evm, refund_id: ux.id, address: "0x" + "00".repeat(20), deadline_ms: Date.now() - 1_000, origin: "nep141:base.omft.near", min_out: floor.toString() };
-const evmRoute = evmQuoteRoute({ network: "mainnet", pool: (c) => t.evmPoolOf(c), wallet: (c) => pageEvmWalletRpc(c), notes: () => readNotes(A.w) });
+// when the page is first asked for the pool (the warm read of its history starts then: pool-testnet.ts evmWarm)
+let poolOfFirstMs = null;
+const evmRoute = evmQuoteRoute({ network: "mainnet", pool: (c) => ((poolOfFirstMs ??= Date.now()), t.evmPoolOf(c)), wallet: (c) => pageEvmWalletRpc(c), notes: () => readNotes(A.w) });
 const depositFromUx = (g, amount, signal) => depositToEnd((p, ctx) => t.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx), g.chain, 18, amount, signal);
 const noRefund = Object.assign(async () => "none", { settle: async () => true });
 const d = evmRoute.deps(CHAIN, depositFromUx, () => noRefund);
@@ -441,11 +477,11 @@ const deps = {
   stage: async (s) => void (stages.push(s), (stageAt[s] ??= Date.now()), log("follow stage", { stage: s }), pushRead()),
   txs: async (x) => void carried.push(...x),
   signal: follows.signal,
-  // the page's own pace once the follow shows in_pool (15 s doubling to 60 s, pool-deposit-follow.ts): the 1 s cap only before,
-  // to read the under-floor rounds and the carry fast. Kept to 1 s after in_pool it repeated the end's receipt reads (each
-  // waits for the deposit's block to be final) every second on the pool's two hosts, ahead of the proof queue's reads
-  // there, which the page itself never does (the 03:16Z run: the queue's first round waited 25 s for its turn)
-  sleep: (ms, sg) => (rounds++, new Promise((r) => { const k = setTimeout(r, stages.includes("in_pool") ? ms : Math.min(ms, 1_000)); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
+  // the page's own pace (pool-deposit-follow.ts: 2 s while 1Click's word is SUCCESS, as played here, then 15 s doubling to
+  // 60 s once in_pool). A 1 s cap before in_pool (card evm-first-proof-inside-ten-seconds) read the floor's fee oracle
+  // and pool every second on the pool's two hosts, twice the page's own rate, so the window before the landing held
+  // reads the page never makes
+  sleep: (ms, sg) => (rounds++, new Promise((r) => { const k = setTimeout(r, ms); sg.addEventListener("abort", () => (clearTimeout(k), r()), { once: true }); })),
 };
 await anvil("anvil_setBalance", [ux.evm, hex(floor - 1n)]);
 const beforeUnder = sends();
@@ -526,15 +562,24 @@ const carryAt = Date.now();
 const balanceBefore = await balanceOf(A.w);
 await anvil("anvil_setBalance", [ux.evm, hex(floor)]);
 let shownMs = null;
-let finalizedAt = null;
+// the page's ready proofs watched from the carry on, every 100 ms (its queue's own view: no request), so the first
+// leaf's is timed when it is made, not when the carry's wait below ends
+const readyAt = new Map();
+let watching = true;
+const watch = (async () => {
+  while (watching) {
+    const { ready } = await t.readyWith(async () => null).catch(() => ({ ready: [] }));
+    for (const p of ready ?? []) if (!readyAt.has(p.noteId)) readyAt.set(p.noteId, { at: Date.now(), p });
+    await sleep(100);
+  }
+})();
+// the deposit's block is left to the chain's own pace (the ticker's block every 2 s; finalized 2 x slots blocks back),
+// as on Base and Robinhood, whose blocks go on while a block waits to be final. A finalize here (card
+// evm-first-proof-inside-ten-seconds) held the miner up to 2 x slots + 1 s for the clock at the send: no block past the
+// deposit's for 11 s, which no chain does, so the landing's pass met no newer block for its cut
 for (let k = 0; k < 240 && shownMs === null; k++) {
   await sleep(500);
   if ((await balanceOf(A.w)) >= balanceBefore + EVM_LADDER.min) shownMs = Date.now() - carryAt;
-  // the deposit sent: its block made final, as on the chain after its lag
-  else if (finalizedAt === null && (await mine(A.w)).some((n) => n.state === "INCOMING" && (n.evmSends ?? []).length > 0)) {
-    await finalize();
-    finalizedAt = Date.now() - carryAt;
-  }
 }
 
 // the first leaf's first minute: the page's state shows a ready proof for it (read, no tap), then a withdraw tapped
@@ -571,12 +616,20 @@ await guard("first leaf: a ready proof inside its first minute", async () => {
   let reads = 0;
   while (found === null && depAtMs !== null && depNote !== undefined && Date.now() < depAtMs + 50_000) {
     reads++;
-    const { ready } = await t.readyWith(async () => null);
-    found = (ready ?? []).find((p) => p.noteId === depNote.id) ?? null;
-    if (found === null) await sleep(500);
+    found = readyAt.get(depNote.id)?.p ?? null;
+    if (found === null) await sleep(100);
   }
-  const at = Date.now();
-  step("first leaf: a ready proof inside its first minute", { ...first, reads, pushReads, readyMsAfterDeposit: found === null ? null : at - depAtMs, root: found?.root ?? null, proofEpochStartMs: found?.epochStartMs ?? null, deadlineMs: found?.deadlineMs ?? null }, found !== null && sizeBefore === 0 && sizeAtDep === 1 && at - depAtMs < EPOCH && found.root === "newest" && found.epochStartMs === BigInt(epochOf(depAtMs)));
+  watching = false;
+  await watch;
+  const at = found === null ? Date.now() : readyAt.get(depNote.id).at;
+  const windows = depAtMs === null ? null : windowMax(depAtMs - 10_000, at, depAtMs);
+  const deployPages = depAtMs === null ? null : hostSends.filter((x) => x.m === "eth_getLogs" && x.from !== undefined && BigInt(x.from) === PIN.fromBlock && x.at > depAtMs - 10_000 && x.at <= at).length;
+  step("first leaf: a ready proof inside its first minute", { ...first, reads, pushReads, hostWindowMax: windows, deployPages, poolOfFirstMs: poolOfFirstMs === null || depAtMs === null ? null : poolOfFirstMs - depAtMs, readyMsAfterDeposit: found === null ? null : at - depAtMs, root: found?.root ?? null, proofEpochStartMs: found?.epochStartMs ?? null, deadlineMs: found?.deadlineMs ?? null }, found !== null && sizeBefore === 0 && sizeAtDep === 1 && at - depAtMs < EPOCH && found.root === "newest" && found.epochStartMs === BigInt(epochOf(depAtMs)));
+  // card evm-first-proof-inside-ten-seconds: the proof ready inside READY_MS of the deposit's block, every pool host sent
+  // at most HOST_WINDOW_BOUND requests (each of a batch counted) in any 10 s window from 10 s before that block to the
+  // proof, and no log read from the pool's deploy block among them
+  const most = windows === null ? null : Math.max(0, ...Object.values(windows).map((w) => w.n));
+  step("first leaf: ready inside 10 s, each pool host inside its window", { readyMsAfterDeposit: found === null ? null : at - depAtMs, readyBoundMs: READY_MS, hostWindowMost: most, hostWindowBound: HOST_WINDOW_BOUND, deployPages }, found !== null && at - depAtMs <= READY_MS && most !== null && most <= HOST_WINDOW_BOUND && deployPages === 0);
 });
 await guard("withdraw: the first leaf, tapped inside its first minute", async () => {
   const AMOUNT = "0.0001";
@@ -641,7 +694,7 @@ if (ended === null) follows.abort();
 const uxNotes = (await mine(A.w)).filter((n) => n.ref.kind === "deposit" && n.ref.i === ux.index);
 for (const n of uxNotes) for (const s of n.evmSends ?? []) txHashes.set(s.hash, "carry: U_X deposit");
 for (const x of carried) txHashes.set(x.hash, "carry: U_X deposit");
-step("carry", { shownMs, finalizedAt, inPoolMs, followEnd: ended, stages: [...stages], txs: carried, sent: sends() - beforeUnder, balance: await balanceOf(A.w), notes: await statesOf(A.w), uxLeft: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) }, shownMs !== null && ended === "in_pool" && carried.length === 1);
+step("carry", { shownMs, inPoolMs, followEnd: ended, stages: [...stages], txs: carried, sent: sends() - beforeUnder, balance: await balanceOf(A.w), notes: await statesOf(A.w), uxLeft: BigInt(await anvil("eth_getBalance", [ux.evm, "latest"])) }, shownMs !== null && ended === "in_pool" && carried.length === 1);
 
 // 5. the restore's U_X read: the pool's own pair, never the helper
 await guard("restore reads U_X", async () => {
