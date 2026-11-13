@@ -21,6 +21,7 @@
 // limit, carded apart). The bind's helper fee answer is not read here: this card's end state is the device's own read. A seat that
 // gives no answer (a 429, a timeout) is named; an answer that is wrong (a chain id, a refused origin) fails.
 // After: app sign
+// Bundle: out EVM RPC reads on the kit's read lists
 //   node scripts/live-checks/device-evm-fee-read-walks-operators.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 import "../net-window.mjs";

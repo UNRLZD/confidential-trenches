@@ -16,6 +16,7 @@
 //   - the browser fetched /prover-thread.js and no other worker script; no CSP or Trusted Types violation but the two
 //     the planted workers make.
 // After: sign --browser webkit
+// Bundle: out a browser
 //   node scripts/live-checks/signpage-prover-threads.mjs [--base <https url>] [--browser webkit|chromium] [--proofs <n>] [--record <file>]
 //     --base: a build's own address (a Pages preview) read as SIGN_HOST is, its own origin in place of SIGN_HOST's
 //   node scripts/live-checks/signpage-prover-threads.mjs --harness [--site <dir>] [...]

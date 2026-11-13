@@ -53,6 +53,7 @@
 // After: sign --engine chromium --live --width desktop
 // After: sign --engine firefox --live --width phone
 // After: sign --engine firefox --live --width desktop
+// Bundle: out a browser (its harness run is in test-browser: SIGN_HOST from this tree's build, Chromium at phone width; its Firefox and desktop runs are the live host's, Firefox's build is not on that runner)
 //   node scripts/live-checks/signpage-shell.mjs --engine webkit|chromium|firefox [--width phone|desktop] [--site <dir>] [--record <file>]
 //     at 390 x 844 (phone, the iPhone case) or 1440 x 900 (desktop, the default); the record names the width and the
 //     top window's own width as read
@@ -227,10 +228,13 @@ export function judge(rec) {
   say(signedOut(result(st.first?.id)), `the first state answer is exactly the signed-out state (${show(result(st.first?.id))})`);
 
   // the words' screen has a field typed into: the frame leaves the document (packages/signpage/src/shell.ts seal); the
-  // passkey screen has none: the sheet keeps the frame under it (0 frames on a build before that card)
+  // passkey screen has none: the sheet keeps the frame under it (0 frames on a build before that card). The answer is
+  // posted before the frame leaves (src/api.ts `then`), but a frame taken out may go before it reads it ("may reach the
+  // app before it leaves; nothing waits on it", src/shell.ts): with the frame out, no answer at all is that race, never a
+  // fault; an answer that came must be pending (card ci-stops-costing-reruns)
   const opened = (s, label, frames) =>
-    say(pending(s?.openId) && s?.layer?.layerHidden === false && frames.includes(s?.layer?.frames),
-      `signin.open ${label}: answered pending, the layer opens${frames.includes(1) ? "" : " and the frame leaves the document"} (${answer(s?.openId) ? JSON.stringify(answer(s.openId).data.ok ? result(s.openId) : answer(s.openId).data.error) : "no answer"}, layer ${s?.layer?.layerHidden === false ? "open" : "closed"}, ${s?.layer?.frames ?? "?"} frames)`);
+    say((pending(s?.openId) || (!frames.includes(1) && s?.layer?.frames === 0 && !answer(s?.openId))) && s?.layer?.layerHidden === false && frames.includes(s?.layer?.frames),
+      `signin.open ${label}: answered pending${frames.includes(1) ? "," : ", or not at all once the frame left first;"} the layer opens${frames.includes(1) ? "" : " and the frame leaves the document"} (${answer(s?.openId) ? JSON.stringify(answer(s.openId).data.ok ? result(s.openId) : answer(s.openId).data.error) : "no answer"}, layer ${s?.layer?.layerHidden === false ? "open" : "closed"}, ${s?.layer?.frames ?? "?"} frames)`);
   const signedOutEvent = (s, label, want) => {
     if (reloads) {
       // the top window is a new document begun after the sign out, and its new frame posts ready and answers exactly

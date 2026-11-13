@@ -18,6 +18,8 @@
 // test/withdraw-form.test.ts and test/pool-withdraw-form.test.ts.
 // After: app --host app
 // After: sign --host sign
+// Bundle: child sign --local --host sign
+// Bundle: child app --local --host app
 //   node scripts/live-checks/words-nov8-final.mjs [--host sign|app] [--record <file>]
 //     the deployed hosts (both unless --host names one): SIGN_HOST https://confidential.unrealized.trade/ and
 //     APP_HOST https://ct-app.unrealized.trade/

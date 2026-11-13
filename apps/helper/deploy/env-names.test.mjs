@@ -21,7 +21,7 @@ import { createRpc, keyedPaces } from "../src/rpc/rpc.ts";
 import { coingeckoPace, createKeyed } from "../src/data/coingecko.ts";
 import { providerHolds } from "../src/limits/limits.ts";
 import { bindSenderFromEnv } from "../src/bind/env.ts";
-import { tokenWatchesFromEnv } from "../src/token-status/status.ts";
+import { pairNames, tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
 import { evmSwapsFromEnv, sendersFromEnv, solanaTokenFromEnv, solanaTradesFromEnv } from "../src/server.ts";
@@ -77,6 +77,8 @@ export const ENV_READERS = {
   coingeckoPace: (env) => coingeckoPace(new Proxy(env, { get: (t, k) => (t[k], k === "COINGECKO_API_KEY" ? "CG-plantedTESTkey0123456789abcdef" : k === "COINGECKO_CALLS_PER_MIN" ? "300" : t[k]) })),
   createKeyed: (env) => createKeyed(env, providerHolds(Date.now, {})),
   tokenWatchesFromEnv,
+  // card near-pair-on-keyed-providers: /v1/health's X-Helper-Near-Pair, the agreement pair's names
+  pairNames,
   feeQuoterFromEnv,
   withdrawSenderFromEnv: (env) => withdrawSenderFromEnv(env, noFee),
   bindSenderFromEnv: (env) => bindSenderFromEnv(env),

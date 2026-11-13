@@ -24,6 +24,7 @@
 // over each tree's packages/signpage/index.html and public/app.js (this file reaches no package code: the import check
 // holds it).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/pool-deposit-follow.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
@@ -64,7 +65,13 @@ const FLOOR_WIRE = (u) =>
     `[,;]${esc(u)}=async\\((${N}),(${N})(?:,${N})?\\)=>\\{if\\(\\1!==${Q}solana${Q}\\)return ${N}\\.floor\\(\\1\\);` +
       `let (${N})=${N}\\(\\);return \\3!==null&&${N}!==void 0\\?${N}\\(\\3,${N}\\.program,\\2(?:,${N})?\\):null\\}`,
   );
-const FOLLOW_INST = (f) => new RegExp(`[,;]${esc(f)}=${N}\\?null:${N}\\(\\{store:\\(\\)=>${N}\\(\\),decimals:${N}=>${N}\\[${N}\\[${N}\\]\\],deps:\\((${N}),(${N})\\)=>(${N})\\(\\1,\\2\\)\\}\\)`);
+// (card deposit-takes-each-pools-own-coin, delta review P2-b: an ended op's U_X read again on a restore's paced reads,
+// after a drawn wait)
+const FOLLOW_INST = (f) =>
+  new RegExp(
+    `[,;]${esc(f)}=${N}\\?null:${N}\\(\\{store:\\(\\)=>${N}\\(\\),decimals:${N}=>${N}\\[${N}\\[${N}\\]\\],deps:\\((${N}),(${N})\\)=>(${N})\\(\\1,\\2\\),` +
+      `again:(${N})=>${N}\\(\\4,\\3\\(\\{chain:\\4,s:${Q}${Q},i:0,u:${Q}${Q},refund_id:${Q}${Q},address:${Q}${Q},deadline_ms:0,origin:${Q}${Q},min_out:${Q}${Q}\\},${N}\\),[^]{0,120}?\\),againWait:(${N})=>${N}\\(\\5\\)\\}\\)`,
+  );
 // (card evm-deposit-route-mainnet: Base's and Robinhood's deps go first, its own check's mark; the deposit from U_X and
 // the refund mover are one function each, shared by every chain)
 const FOLLOW_DEPS = (d) =>
@@ -90,20 +97,25 @@ const READS =
 const LOOP = new RegExp(
   // the carry (card evm-deposit-route-mainnet review P1): the largest ask the reading pays, deposited; filled or
   // part_filled counts as landed only with no note of U_X's still landing (review), and a carry U_X cannot pay with its
-  // fee, before any rung is in, shows short (re-read P3-2)
-  `(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\((${N})\\.ladder,\\2,\\3\\.perRung,\\3\\.keep\\);if\\(\\4===0n\\)return!1;let\\{end:(${N}),txs:${N}\\}=await \\5\\.deposit\\((${N}),\\4,\\5\\.signal\\),(${N})=\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&!await (${N})\\(\\);` +
-    `return \\8&&\\((${N})=!0,await (${N})\\(${Q}in_pool${Q}\\)\\),\\6===${Q}not_funded${Q}&&!\\10&&await \\11\\(${Q}short${Q}\\),` +
-    // the round: a landed note of U_X's counts only with none landing and once this quote's own SUCCESS is read (re-read
-    // P2-1); the lower balance; the costs only once it holds a rung; at or over the floor, the carry; else, landed, no
-    // in_pool and no end while a note of U_X's is landing
-    `[^]{0,700}?let (${N})=await \\9\\(\\);!\\10&&!\\12&&(${N})&&\\5\\.noted!==void 0&&await \\5\\.noted\\(\\7\\)&&\\(\\10=!0\\);` +
-    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\14<\\15\\?\\14:\\15,` +
+  // fee, before any rung is in, shows short (re-read P3-2). Card deposit-takes-each-pools-own-coin: a deposit that filled
+  // marks the round fast, and a plain send's carry shows in_pool only once its own money was seen (review P3-a)
+  `(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\((${N})\\.ladder,\\2,\\3\\.perRung,\\3\\.keep\\);if\\(\\4===0n\\)return!1;let\\{end:(${N}),txs:${N}\\}=await \\5\\.deposit\\((${N}),\\4,\\5\\.signal\\);` +
+    `\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&\\((${N})=!0\\);let (${N})=\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&!await (${N})\\(\\);` +
+    `return \\9&&\\(!(${N})\\|\\|(${N})\\)&&\\((${N})=!0,await (${N})\\(${Q}in_pool${Q}\\)\\),\\6===${Q}not_funded${Q}&&!\\13&&await \\14\\(${Q}short${Q}\\),` +
+    // the round: a note of U_X's landing reads fast; a landed note of U_X's counts only with none landing and once this
+    // quote's own SUCCESS is read (re-read P2-1), or, on a plain send (card deposit-takes-each-pools-own-coin: no 1Click
+    // quote, U_X itself its address), once the chain showed its own money at U_X: over its base, lowered to what U_X
+    // reads, in_transit before its carry, written first; the lower balance; the costs only once it holds a rung; at or
+    // over the floor, the carry; else, landed, no in_pool and no end while a note of U_X's is landing
+    `[^]{0,700}?let (${N})=await \\10\\(\\);\\15&&\\((${N})=!0\\),!\\13&&!\\15&&\\12&&\\5\\.noted!==void 0&&await \\5\\.noted\\(\\7\\)&&\\(\\13=!0\\);` +
+    `let\\[(${N}),(${N})\\]=await \\5\\.balances\\(\\7\\),(${N})=\\17<\\18\\?\\17:\\18;\\11&&\\19<(${N})&&\\(\\20=\\19\\);` +
     // a cost read held while the balance stays under its floor, at most 15 s and never across a clock set back (card
     // evm-first-proof-inside-ten-seconds); a carry only on costs read in its round
-    `(${N})=\\(\\5\\.now\\?\\?Date\\.now\\)\\(\\),(${N})=(${N}),(${N})=\\18!==null&&\\18\\.low===\\16&&\\17>=\\18\\.at&&\\17-\\18\\.at<15e3\\?\\18:null,` +
-    `(${N})=\\16>=\\5\\.ladder\\.min\\?\\20\\?\\.c\\?\\?${N}\\(await \\5\\.costs\\(\\7\\)\\):null;if\\(\\19=\\21!==null&&\\16<\\21\\.floor\\?\\20\\?\\?\\{low:\\16,at:\\17,c:\\21\\}:null,\\21!==null&&\\16>=\\21\\.floor\\)await \\1\\(\\16,\\21\\)&&\\((${N})=!0\\);` +
-    `else if\\(\\10\\)\\{if\\(!\\12&&(${N})!==${Q}in_pool${Q}&&await \\11\\(${Q}in_pool${Q}\\),!\\12&&await \\5\\.past\\(\\7\\)\\)` +
-    `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\13=!0\\),`,
+    `let (${N})=\\(\\5\\.now\\?\\?Date\\.now\\)\\(\\),(${N})=(${N}),(${N})=\\22!==null&&\\22\\.low===\\19&&\\21>=\\22\\.at&&\\21-\\22\\.at<15e3\\?\\22:null,` +
+    `(${N})=\\19>=\\5\\.ladder\\.min\\?\\24\\?\\.c\\?\\?await ${N}\\(\\):null;if\\(\\23=\\25!==null&&\\19<\\25\\.floor\\?\\24\\?\\?\\{low:\\19,at:\\21,c:\\25\\}:null,\\25!==null&&\\19>=\\25\\.floor\\)` +
+    `\\11&&!\\13&&\\19>\\20&&\\(await \\14\\(${Q}in_transit${Q}\\),\\12=!0\\),await \\1\\(\\19,\\25\\)&&\\(\\16=!0\\),\\8&&\\(\\16=!0\\);` +
+    `else if\\(\\13\\)\\{if\\(!\\15&&(${N})!==${Q}in_pool${Q}&&await \\14\\(${Q}in_pool${Q}\\),!\\15&&await \\5\\.past\\(\\7\\)\\)` +
+    `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\12=!0\\),`,
 );
 // pool-deposit.ts runPoolDeposit's fixed source (review H1): U_{s,i}'s own deposit note or its next arrival, a U the
 // store never planned refused, and the newest-used-or-planned fallback skipped; pool-testnet.ts depositFrom: the request

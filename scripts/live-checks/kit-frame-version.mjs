@@ -56,6 +56,7 @@
 // The recorded answers are facts() over packages/signpage/scripts/build-app.mjs bundle(pkg) of each tree (mainnet, as
 // SIGN_HOST serves; this file reaches no package code: the import check holds it).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/kit-frame-version.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

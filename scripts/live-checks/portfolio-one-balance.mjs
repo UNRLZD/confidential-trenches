@@ -13,6 +13,7 @@
 //     Base $30.00, Robinhood $0.00 marked moving (Processing), in that order.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
 // After: app
+// Bundle: out a browser
 //   node scripts/live-checks/portfolio-one-balance.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/portfolio-one-balance.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

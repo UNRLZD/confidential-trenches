@@ -14,6 +14,7 @@
 // A screenshot of the signed-out "/" (its header) and of /verify opened directly is kept at both widths, and one of
 // every link's page.
 // After: app
+// Bundle: out a browser
 //   node scripts/live-checks/app-no-blank-pages.mjs [--shots <dir>] [--record <file>]
 //     the deployed hosts: APP_HOST as it is served, signed out
 //   node scripts/live-checks/app-no-blank-pages.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

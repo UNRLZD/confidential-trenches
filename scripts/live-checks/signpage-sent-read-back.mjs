@@ -20,6 +20,7 @@
 // The recorded testnet answers are facts() over packages/signpage/scripts/build-app.mjs bundle(pkg, { network:
 // "testnet" }) of each tree (this file reaches no package code: the import check holds it).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/signpage-sent-read-back.mjs [--base <url>] [--record <file>] [--answer <file>]
 //   (--base: a build's own address, a Pages preview say; SIGN_HOST when absent)
 // PASS exit 0, FAIL exit 1, error exit 2.

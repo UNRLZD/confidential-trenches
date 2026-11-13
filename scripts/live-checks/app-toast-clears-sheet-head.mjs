@@ -8,6 +8,7 @@
 // The geometry itself (the toast's box does not meet the head row's at 360, 390 and 430) is the terminal's own browser
 // run: apps/terminal/test/trade-sheet/run.mjs.
 // After: app
+// Bundle: child app --root apps/terminal/dist
 //   node scripts/live-checks/app-toast-clears-sheet-head.mjs [--url <url>] [--record <file>]
 //   node scripts/live-checks/app-toast-clears-sheet-head.mjs --root <dir> [--record <file>]   the same read on a local
 //     build (apps/terminal/dist, built first) read from disk

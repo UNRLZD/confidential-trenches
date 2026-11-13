@@ -12,6 +12,7 @@
 // token, New, the slim rail's expand, CLS 0, signed in and out) is the terminal's own browser run,
 // apps/terminal/test/token-rail/run.mjs, and the data store apps/terminal/test/token-rail.test.ts.
 // After: app
+// Bundle: out the helper's lists answer
 //   node scripts/live-checks/app-token-rail.mjs [--url <url>] [--helper <url>] [--record <file>]
 //   node scripts/live-checks/app-token-rail.mjs --root <dir> [...]   the page read from a local build
 //     (apps/terminal/dist, built first) on disk; the helper is still read live

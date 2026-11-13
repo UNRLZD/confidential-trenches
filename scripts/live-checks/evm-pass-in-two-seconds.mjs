@@ -16,6 +16,7 @@
 //   - newest (evmTreeSync trees): a newest read takes the last round when its anchor is at or past the caller's now;
 //   - depth (evmTreeSync depthAt): the depth at a block the last round found at its height is that round's, no read.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/evm-pass-in-two-seconds.mjs [--local] [--record <file>]
 //   PASS exit 0, FAIL 1, error 2. --local judges this tree's SIGN_HOST build (signBuilt) in SIGN_HOST's place; --record
 //   writes what the run read, which evm-pass-in-two-seconds.test.mjs replays. Reads only.

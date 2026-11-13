@@ -36,6 +36,7 @@
 //   - ux_wired: the restore host's U_X reads are built from the follows' own deps (the very function their `deps` calls),
 //     keyed by the pool's chain.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/wallet-restore-reads-ux.mjs [--local] [--with <url>] [--record <file>] [--answer <file>]
 // --local judges this tree's committed build (packages/signpage/index.html and public/app.js) in SIGN_HOST's place, the
 // providers still asked live; --with asks <url> in the second provider's place (a recorded bad answer). PASS exit 0,
@@ -90,12 +91,15 @@ const UX_READ = new RegExp(
     `\\[(${N}),\\[(${N}),(${N})\\]\\]=await Promise\\.all\\(\\[${N}\\(\\2,\\3\\),(${N})\\.balances\\(\\{u:\\4\\}\\)\\]\\);if\\(\\6===${Q}money${Q}&&(${N})\\.set\\(\\3,\\2\\),\\7!==\\8\\)throw Error\\(${Q}its U_X reads [^${Q}]*${Q}\\);` +
     `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},\\1,await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
 );
+// (card deposit-takes-each-pools-own-coin, delta review r3 P2-1: what each read leaves at U_X is written as its op's
+// left, `L`: 0 before a deposit is sent, the last read when what is left is under one deposit's floor)
 const UX_CARRY = new RegExp(
-  `async function (${N})\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=null;for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\7!==\\8\\)return\\{why:${Q}reads [^${Q}]*${Q},retry:\\6===null\\};` +
-    `if\\(\\6!==null&&\\7>=\\6\\)return\\{why:${Q}holds [^${Q}]*after a deposit from it filled: read again${Q},retry:!1\\};if\\(\\7<\\2\\.ladder\\.min\\)return null;let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\7<\\9\\.floor\\)return null;` +
-    `let (${N})=${N}\\(\\2\\.ladder,\\7,\\9\\.perRung,\\9\\.keep\\);if\\(\\10===0n\\)return null;if\\(!\\4\\)return\\{why:${Q}holds \\$\\{String\\(\\7\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q},retry:!1\\};` +
-    `\\5\\.throwIfAborted\\(\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\10,\\5\\);` +
-    `if\\(\\11!==${Q}filled${Q}&&\\11!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\7\\}\\}`,
+  `async function (${N})\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=null,(${N})=async (${N})=>\\(await \\2\\.leftAt\\?\\.\\(\\3,\\8\\)\\.catch\\(\\(\\)=>\\{\\}\\),null\\);` +
+    `for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\9!==\\10\\)return\\{why:${Q}reads [^${Q}]*${Q},retry:\\6===null\\};` +
+    `if\\(\\6!==null&&\\9>=\\6\\)return\\{why:${Q}holds [^${Q}]*after a deposit from it filled: read again${Q},retry:!1\\};if\\(\\9<\\2\\.ladder\\.min\\)return \\7\\(\\9\\);let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\9<\\11\\.floor\\)return \\7\\(\\9\\);` +
+    `let (${N})=${N}\\(\\2\\.ladder,\\9,\\11\\.perRung,\\11\\.keep\\);if\\(\\12===0n\\)return \\7\\(\\9\\);if\\(!\\4\\)return\\{why:${Q}holds \\$\\{String\\(\\9\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q},retry:!1\\};` +
+    `\\5\\.throwIfAborted\\(\\),await \\7\\(0n\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\12,\\5\\);` +
+    `if\\(\\13!==${Q}filled${Q}&&\\13!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\9\\}\\}`,
 );
 // the carry's call site, bound to the reader's held map (`held`), the scope's U_X reads (`ux`) and the carry's own name:
 // `noted(scope)` read once per scope with a U_X held, and the carry handed whether U_{s,i}'s own index is among them
@@ -184,8 +188,13 @@ const FOLLOW_READER = (f) => new RegExp(`function ${esc(f)}\\((${N})\\)\\{let ($
 // the restore host's ux, bound to the host itself (its signedIn and written before it, its ended after), so a copy of
 // the ux line alone elsewhere is not the restore's
 // (and on Base and Robinhood the page's own pool pair, evmPoolOf: card evm-deposit-on-mainnet)
-const UX_WIRED = (c) => new RegExp(`written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),(?:firstPass:${N}=>${N}\\?\\.firstPass\\(${N}\\)\\?\\?Promise\\.resolve\\(\\),)?ux:(${N})=>${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program,void 0,(${N})=>${N}\\?\\.evmPoolOf\\(\\3\\)\\?\\?null\\),ended:`);
-const UX_ANY = (c) => new RegExp(`ux:(${N})=>${esc(c)}\\(`);
+// (delta review r3 P2-1: with the follows' leftAt, so what the restore reads U_X holds is its op's left)
+const UX_WIRED = (c) =>
+  new RegExp(
+    `written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),(?:firstPass:${N}=>${N}\\?\\.firstPass\\(${N}\\)\\?\\?Promise\\.resolve\\(\\),)?ux:(${N})=>\\{let (${N})=${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program,void 0,(${N})=>${N}\\?\\.evmPoolOf\\(\\4\\)\\?\\?null\\);` +
+      `return \\2===null\\?null:\\{\\.\\.\\.\\2,leftAt:async\\((${N}),(${N})\\)=>void await ${N}\\?\\.left\\(\\5\\.chain,\\5\\.u,\\6\\)\\}\\},ended:`,
+  );
+const UX_ANY = (c) => new RegExp(`ux:(${N})=>\\{let ${N}=${esc(c)}\\(`);
 // each marker's own words, once in the whole bundle, so no second copy of it rides beside the real one
 const WORDS = Object.freeze({
   ux_read: /throw Error\(`no deposit index for its U_X`\)/,
@@ -223,7 +232,7 @@ export function bundleFacts(index, js) {
     ux_carry: !!read && !!carry && once(UX_NOTED(read[11], read[9], carry[1]), js) && once(WORDS.ux_carry, js),
     id_held: !!held && !!head && held[7] === head.groups.H && once(LET_GO(head.groups.lg), js) && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
     ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[17]), js) && once(EVM_FOLLOW_READER(pair[14]), js) && once(WORDS.ux_pair, js),
-    ux_wired: !!wired && once(FOLLOW_DEPS(wired[2]), js),
+    ux_wired: !!wired && once(FOLLOW_DEPS(wired[3]), js),
   };
 }
 /** This tree's SIGN_HOST build, made from its sources (signBuilt: never committed): its index.html and public/app.js. */
@@ -365,4 +374,10 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
     process.exit(2);
   }
+}
+
+/** How scripts/ci/bundle-checks.mjs runs this check on a build (its `// Bundle: read` line): `f` answers from the build
+ *  folders as the host would; `dirs` names them (card ci-stops-costing-reruns, moved from bundle-checks.mjs). */
+export async function bundle(f) {
+  return judgeBundle(await readBundle(f));
 }

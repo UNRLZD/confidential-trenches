@@ -21,6 +21,7 @@
 // or of a hidden frame is judged by its own host's checks (app-shell, signpage-*).
 // A screenshot of every width is kept.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-discover-live.mjs [--url <page>] [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --url is the page to open (default APP_HOST/discover); --build serves that terminal build at APP_HOST's name inside

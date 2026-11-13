@@ -10,6 +10,7 @@
 // least one label, no label cut at either edge. Portfolio's faults of the same walk need an account, so they are held
 // by the portfolio suite (apps/terminal/test/portfolio/run.mjs), not here.
 // After: app
+// Bundle: out a browser and the helper's chart bars (its --harness run is in test-browser)
 //   node scripts/live-checks/app-faults-seen-on-126.mjs [--shots <dir>] [--record <file>]
 //     the deployed SIGN_HOST, APP_HOST and helper as served, as a signed-out visitor
 //   node scripts/live-checks/app-faults-seen-on-126.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
