@@ -26,6 +26,12 @@ test("Export of a wallet the kit does not name opens nothing (another chain, ano
   ] as const) assert.deepEqual(tapOf(a, held), { to: "none" }, a.kind);
 });
 
+test("a row's Sell opens its token's page (its sell box sells it); a chain with no token page opens nothing", () => {
+  assert.deepEqual(tapOf({ kind: "sell", chain: "solana", token: "So1Mint", part: "box" }, held), { to: "token", href: "/token/solana/So1Mint" });
+  assert.deepEqual(tapOf({ kind: "sell", chain: "base", token: "0xAbC", part: "box" }, held), { to: "token", href: "/token/base/0xAbC" });
+  assert.deepEqual(tapOf({ kind: "sell", chain: "moon" as never, token: "T", part: "box" }, held), { to: "none" });
+});
+
 test("a pool row's Withdraw opens SIGN_HOST's pool withdraw with its chain only: never an address or an amount", () => {
   for (const chain of ["solana", "base", "robinhood"] as const) {
     const t = tapOf({ kind: "pool-withdraw", chain }, held);

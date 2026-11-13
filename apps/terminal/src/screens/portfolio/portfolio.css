@@ -124,7 +124,8 @@
 .pt td .s2 { font: 12px var(--font-num); color: var(--text-3); margin-top: 3px; }
 .pt td .s2.ui { font-family: var(--font-ui); }
 .pt td .s2.gain { color: var(--acc); } .pt td .s2.loss { color: var(--sell); }
-.pt .tok { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.pt .tok { display: flex; align-items: center; gap: 12px; min-width: 0; color: inherit; text-decoration: none; }
+.pt a.tok:hover .sy { text-decoration: underline; text-underline-offset: 3px; }
 .pt .tok .sy { font: 600 14px var(--font-ui); display: flex; align-items: center; gap: 6px; }
 .pt .xs { display: inline-flex; gap: 4px; }
 .pf .xt { height: 20px; padding: 0 7px; border-radius: 5px; font-size: 11px; display: inline-flex; align-items: center; }
@@ -324,7 +325,10 @@
 /* desktop: the header row is fixed (the positions bar needs its 9 rows), so Where it is gives its dot strips' height
    to the pool rows; the phone keeps them (placement on the owner's picks page) */
 .pfd .eqbrk .pvtstrip { display: none; }
-.pfd .eqbrk { gap: 6px; }
+.pfd .eqbrk { gap: 4px; }
+/* four pools (NEAR's vault row first, card app-faults-seen-on-122) fit the fixed panel at 1440 x 900 with no scroll: the
+   rows 4px apart and the block 2px under the tiles (the signed-in walk of release 124, 12 Nov: Robinhood, the 4th, was cut off the bottom) */
+.pfd .pools:not(.wls) { row-gap: 4px; margin-top: 2px; }
 
 /* Wallets (card app-export-every-wallet): each wallet with money and no position, in the pools' grid, its Export key icon */
 .pools.wls { margin-top: 10px; }

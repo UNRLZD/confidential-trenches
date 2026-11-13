@@ -10,7 +10,7 @@
 //   - Account (the phone's tab) and Portfolio, signed out: the main draws Sign in, and a tap on it opens the sign-in
 //     sheet (S2.1);
 //   - /verify opened at its own address, and from the footer's pill: the Verify panel over the Trenches page (the
-//     token page drawn behind it, with text), never over an empty page.
+//     token page drawn behind it, or under the phone width the Trenches list, with text), never over an empty page.
 // A screenshot of the signed-out "/" (its header) and of /verify opened directly is kept at both widths, and one of
 // every link's page.
 // After: app
@@ -98,7 +98,10 @@ const READ_MAIN = () => {
   if (!main) return null;
   const outside = [...main.children].filter((c) => !c.matches(".vfy"));
   const text = outside.map((c) => (c.innerText ?? "").trim()).join("").length;
-  const token = outside.find((c) => c.matches("[data-token-page]"))?.dataset.tokenPage ?? null;
+  // the Trenches page: the token page, or under the phone width the Trenches list (owner 12 Nov "Phone home: Trenches list")
+  const page = outside.find((c) => c.matches("[data-token-page]"))?.dataset.tokenPage;
+  const list = outside.find((c) => c.matches('[data-testid="phone-trenches"]'))?.dataset.state;
+  const token = page ?? (list ? `list, ${list}` : null);
   return { path: location.pathname, route: main.dataset.route, text, panel: !!main.querySelector(".vfy"), token, signedOut: !!main.querySelector("[data-signed-out] button") };
 };
 // the header the width shows: the desktop bar's or the phone header's state

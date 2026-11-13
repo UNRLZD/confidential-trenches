@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { tokenHref } from "../../routes/routes.ts";
-import type { MarketSnapshot } from "./fields.ts";
+import type { MarketRow, MarketSnapshot } from "./fields.ts";
+import { busy, scrolling, useArrivals } from "../token/arrivals.ts";
 import { COLUMNS, columnRows, listAge, rowView } from "./model.ts";
 import type { ColumnKey, Level, RowView, Win } from "./model.ts";
 import { ageLine, WORDS } from "./words.ts";
@@ -12,7 +13,7 @@ import { padRing } from "../market/pads.ts";
 import { pickData, useDiscoverData } from "./data.ts";
 import { usePick } from "../../shell/chain-pick.ts";
 import { ColSearch, Dock, Ic, PadChip, PauseIcon, Presets, QuickBuyField, T } from "./Toolbar.tsx";
-import { matches, narrowed, padEntries, pendingNew, QB_DEFAULT, qbAmount, readView, viewRows } from "./view.ts";
+import { matches, narrowed, padEntries, QB_DEFAULT, qbAmount, readView, viewRows } from "./view.ts";
 import type { View } from "./view.ts";
 import { filterOn, filterRows, readFilters } from "./filters.ts";
 import type { ColFilter, Filters } from "./filters.ts";
@@ -26,6 +27,12 @@ import { FilterPanel } from "./FilterPanel.tsx";
 // Pause, and the Quick buy amount. Each column's filter panel (card app-discover-filter-panel, filters.ts and
 // FilterPanel.tsx): the funnel in the column head on the desktop, the funnel at the end of the chips on the phone. Not here
 // yet, each on its own card: the row's quick buy, Following, the watchlist and the stale pill.
+// The live list's motion, as the UNRLZD terminal's Discover (owner 12 Nov: "when there are changes, new token pop up on
+// the trenches list or discover list"; apps/terminal/src/screens/discover and mobile/discover there): a row that enters
+// the top of a desktop column is lit once (the rail's arrival cue, ../token/arrivals.ts); on the phone the newest row drops
+// in; ages count every second; a read that lands while the user scrolls or has a finger on the list waits (up to 5 s)
+// until the list is still; each desktop column has its own Pause (on its hover; order held, values live, "Paused · N
+// new"), as the phone's; the first rows fade in from the skeleton, which pulses.
 
 export type DiscoverData = { status: "loading" } | { status: "error" } | { status: "ready"; snapshot: MarketSnapshot };
 
@@ -38,6 +45,11 @@ const ARC: Record<ColumnKey, [number, number, string]> = {
   graduating: [0.75, 1, "var(--blue)"],
 };
 const SKELETON_ROWS = 9;
+const keyOf = (r: MarketRow): string => `${r.chain}:${r.token}`;
+/** A read that lands while the list is in use waits for it to be still, at most this long (UNRLZD feed/store.ts HOLD_MAX_MS). */
+const HOLD_MAX_MS = 5000;
+/** How often a waiting read checks again (UNRLZD: applied at most every 250 ms). */
+const HOLD_STEP_MS = 250;
 
 /** A word, marked when it is still the owner's draft; `age` fills the list's age line (ageLine). */
 function W({ id, age }: { id: WordId; age?: string }) {
@@ -107,8 +119,8 @@ function HoldersIcon() {
 /** R5 TokenRow (desktop): the whole row is a link to the token's page (S5.2; `href` is /token/<chain>/<id>). */
 function Row({ v, win, href }: { v: RowView; win: Win; href: string }) {
   return (
-    <div data-token={v.token} role="listitem">
-      <Link className="dsc-row" to={href}>
+    <div data-token={v.token} data-key={`${v.chain}:${v.token}`} role="listitem">
+      <Link className="dsc-row" to={href} data-bg={v.fresh ? "fresh" : undefined}>
         <span className="dsc-ringw">
           <Ring v={v} size={68} stroke={3.5} av={50} />
           <span className="dsc-rpill" data-curve={v.stage.curve}>{v.stage.pill === "POOL" ? WORDS.pool.text : v.stage.pill}</span>
@@ -152,8 +164,8 @@ function PhoneRow({ v, href }: { v: RowView; href: string }) {
   const lit = v.stage.fill <= 0 ? 0 : Math.max(1, Math.round(v.stage.fill * 40));
   const tier = v.stage.fill > 0.85 ? "high" : v.stage.fill > 0.5 ? "mid" : "low";
   return (
-    <div data-token={v.token} role="listitem">
-      <Link className="dsc-prow" to={href}>
+    <div data-token={v.token} data-key={`${v.chain}:${v.token}`} role="listitem">
+      <Link className="dsc-prow" to={href} data-bg={v.fresh ? "fresh" : undefined}>
         <Ring v={v} size={52} stroke={3} av={40} />
         <span className="dsc-pinfo">
           <span className="dsc-l1">
@@ -191,7 +203,53 @@ function Skeleton({ phone }: { phone: boolean }) {
   );
 }
 
-function Body({ data, k, win, phone, nowMs, onRetry, view, filter, q }: { data: DiscoverData; k: ColumnKey; win: Win; phone: boolean; nowMs: number; onRetry: () => void; view: View; filter: ColFilter; q: string }) {
+/** A column's rows as drawn live: the toolbar's view, its filters and its search; null until the lists are read. */
+function liveRows(data: DiscoverData, k: ColumnKey, view: View, filter: ColFilter, nowMs: number, q: string): MarketRow[] | null {
+  if (data.status !== "ready") return null;
+  return filterRows(viewRows(columnRows(data.snapshot, k), view), filter, nowMs).filter((r) => matches(r, q));
+}
+
+/** While paused: how many tokens the live list has that the held order does not (UNRLZD "Paused · N new"). */
+const pendingOf = (live: readonly MarketRow[] | null, frozen: readonly string[] | undefined): number => {
+  if (!live || !frozen) return 0;
+  const had = new Set(frozen);
+  return live.filter((r) => !had.has(keyOf(r))).length;
+};
+
+/** The drawn rows of one list, and its motion: the desktop's arrival cue (glow, and a nudge unless the pointer is on the
+ *  column), the phone's drop-in of a new first row (UNRLZD mobile/discover/Discover.tsx: only when the first token
+ *  changes on the same tab, not paused, not the first draw). The rows are fixed slots keyed by place (BAR-10 CLS 0). */
+function Rows({ rows, phone, win, nowMs, paused, resetKey }: { rows: readonly MarketRow[]; phone: boolean; win: Win; nowMs: number; paused: boolean; resetKey: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const hovered = useRef(false);
+  useArrivals(phone || paused ? [] : rows.map(keyOf), {
+    find: (key) => box.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"] > .dsc-row`) ?? null,
+    calm: () => hovered.current,
+    resetKey,
+    cls: "dsc-arrive",
+  });
+  const top = rows[0] ? `${resetKey}|${keyOf(rows[0])}` : null;
+  const prevTop = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const p = prevTop.current;
+    prevTop.current = top;
+    if (!phone || paused || p === null || top === null || p === top || !p.startsWith(`${resetKey}|`) || scrolling()) return;
+    const el = box.current?.firstElementChild as HTMLElement | null;
+    if (!el) return;
+    el.classList.remove("dsc-drop");
+    void el.offsetWidth;
+    el.classList.add("dsc-drop");
+    const t = setTimeout(() => el.classList.remove("dsc-drop"), 520);
+    return () => clearTimeout(t);
+  }, [top]);
+  return (
+    <div ref={box} className="dsc-rows" role="list" data-state="S5.2" data-paused={paused} onMouseEnter={() => (hovered.current = true)} onMouseLeave={() => (hovered.current = false)}>
+      {rows.map((r, i) => (phone ? <PhoneRow key={i} v={rowView(r, win, nowMs)} href={tokenHref(r.chain, r.token)} /> : <Row key={i} v={rowView(r, win, nowMs)} win={win} href={tokenHref(r.chain, r.token)} />))}
+    </div>
+  );
+}
+
+function Body({ data, k, win, phone, nowMs, onRetry, view, filter, q, frozen, last }: { data: DiscoverData; k: ColumnKey; win: Win; phone: boolean; nowMs: number; onRetry: () => void; view: View; filter: ColFilter; q: string; frozen?: readonly string[]; last: Map<string, MarketRow> }) {
   if (data.status === "loading")
     return (
       <div className="dsc-rows" role="list" aria-busy="true" aria-label={WORDS.loading.text} data-state="S5.1">
@@ -227,12 +285,57 @@ function Body({ data, k, win, phone, nowMs, onRetry, view, filter, q }: { data: 
       </div>
     );
   // the rows are fixed slots, keyed by their place: a refresh that adds, drops or reorders tokens redraws each slot in
-  // place with its new token, so no drawn row slides (a row keyed by its token moved a slot each time one ranked above it)
-  return (
-    <div className="dsc-rows" role="list" data-state="S5.2">
-      {rows.map((r, i) => (phone ? <PhoneRow key={i} v={rowView(r, win, nowMs)} href={tokenHref(r.chain, r.token)} /> : <Row key={i} v={rowView(r, win, nowMs)} win={win} href={tokenHref(r.chain, r.token)} />))}
-    </div>
-  );
+  // place with its new token, so no drawn row slides (a row keyed by its token moved a slot each time one ranked above it).
+  // Paused, the order is the one drawn when Pause was pressed, each row with its newest values (UNRLZD: values stay live)
+  for (const r of all) last.set(keyOf(r), r);
+  const shown = frozen ? frozen.flatMap((key) => last.get(key) ?? []) : rows;
+  return <Rows rows={shown} phone={phone} win={win} nowMs={nowMs} paused={!!frozen} resetKey={`${k}|${JSON.stringify(view)}|${JSON.stringify(filter)}|${q}`} />;
+}
+
+/** The clock ages are drawn against: the given one (`givenMs`, the read's), moved on every second by the time since it
+ *  was given, held while the user scrolls (UNRLZD: a 500 ms clock on the desktop, 1 s on the phone, paused while
+ *  scrolling; an age's text moves once a second at most). Never the wall clock: the caller's clock stays the source. */
+function useClock(givenMs: number): number {
+  const [tick, setTick] = useState({ givenMs, elapsed: 0 });
+  useEffect(() => {
+    const start = performance.now();
+    setTick({ givenMs, elapsed: 0 });
+    const id = setInterval(() => {
+      if (!scrolling()) setTick({ givenMs, elapsed: Math.floor(performance.now() - start) });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [givenMs]);
+  return tick.givenMs === givenMs ? givenMs + tick.elapsed : givenMs;
+}
+
+/** The lists as drawn: a read lands at once, unless the user is scrolling or has a finger on a list; then it waits until
+ *  the list is still, at most HOLD_MAX_MS (UNRLZD feed/store.ts and mobile/discover/steady.ts). A change of state (the
+ *  first lists, an error, a retry) is drawn at once. */
+export function useSteady(data: DiscoverData): DiscoverData {
+  const [shown, setShown] = useState(data);
+  const since = useRef<number | null>(null);
+  useEffect(() => {
+    if (data === shown) return;
+    if (data.status !== "ready" || shown.status !== "ready") {
+      since.current = null;
+      setShown(data);
+      return;
+    }
+    let t = 0;
+    const tryApply = () => {
+      const now = performance.now();
+      since.current ??= now;
+      if (!busy() || now - since.current >= HOLD_MAX_MS) {
+        since.current = null;
+        setShown(data);
+        return;
+      }
+      t = window.setTimeout(tryApply, HOLD_STEP_MS);
+    };
+    tryApply();
+    return () => clearTimeout(t);
+  }, [data, shown]);
+  return shown;
 }
 
 /** The tokens a column keeps under the toolbar's view and its filters (its head's count and the panel's), or null. */
@@ -276,7 +379,8 @@ function FunnelButton({ on, dot, label, testid, phone, onClick }: { on: boolean;
 }
 
 /** S5. `nowMs` is the clock ages are drawn against; `onRetry` asks the caller to read again. */
-export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: number; onRetry: () => void }) {
+export function Discover({ data, nowMs: readMs, onRetry }: { data: DiscoverData; nowMs: number; onRetry: () => void }) {
+  const nowMs = useClock(readMs);
   const [tab, setTab] = useState<ColumnKey>("new");
   const tabWin = COLUMNS.find((c) => c.key === tab)!.win;
   const [view, setView] = useKept<View>("ct.discover.view", readView);
@@ -291,14 +395,24 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
   const snap = data.status === "ready" ? data.snapshot : null;
   // each column's search: open with its text, or closed (absent)
   const [search, setSearch] = useState<Partial<Record<ColumnKey, string>>>({});
-  // Pause (the phone): the list holds the read it showed when paused; Resume draws the live one again
-  const [held, setHeld] = useState<DiscoverData | null>(null);
-  const phoneData = held ?? data;
-  const pending = held?.status === "ready" && data.status === "ready" ? pendingNew(data.snapshot, held.snapshot, tab) : 0;
+  // Pause, per list (each desktop column's, the phone's tab): the order drawn when pressed holds, each row's values stay
+  // live, the pill counts the tokens the live list has over it; Resume draws the live list again (UNRLZD)
+  const [frozen, setFrozen] = useState<Partial<Record<ColumnKey, string[]>>>({});
+  const last = useRef(new Map<string, MarketRow>()).current;
+  const pauseCol = (k: ColumnKey) =>
+    setFrozen((f) => {
+      const n = { ...f };
+      if (n[k]) delete n[k];
+      else n[k] = (liveRows(data, k, view, filters[k], nowMs, search[k] ?? "") ?? []).map(keyOf);
+      return n;
+    });
+  const held = frozen[tab] !== undefined;
+  const phoneData = data;
+  const pending = pendingOf(liveRows(data, tab, view, filters[tab], nowMs, ""), frozen[tab]);
   const entries = data.status === "ready" ? padEntries(data.snapshot) : [];
   // a list the helper served from an older read says how old it is (card app-list-age); a fresh one says nothing
   const age = data.status === "ready" ? listAge(data.snapshot.as_of_ms, nowMs) : null;
-  const togglePause = () => setHeld((h) => (h ? null : data));
+  const togglePause = () => pauseCol(tab);
   return (
     <section className="dsc" data-discover={data.status} data-narrowed={narrowed(view)}>
       <div className="dsc-bar" data-testid="discover-toolbar">
@@ -322,8 +436,8 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
         <span className="dsc-desk dsc-qbw">
           <QuickBuyField amount={amount} onAmount={setAmount} />
         </span>
-        <button type="button" className="dsc-mpause" data-on={held !== null} aria-pressed={held !== null} data-testid="m-pause" onClick={togglePause}>
-          <PauseIcon on={held !== null} />
+        <button type="button" className="dsc-mpause" data-on={held} aria-pressed={held} data-testid="m-pause" onClick={togglePause}>
+          <PauseIcon on={held} />
           <T id={held ? "resume" : "pause"} />
         </button>
       </div>
@@ -340,6 +454,20 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
                     <span className="dsc-ht" id={`dsc-h-${c.key}`}><W id={TITLE[c.key]} /></span>
                     <span className="dsc-count">{countOf(keptOf(data, c.key, view, filters[c.key], nowMs))}</span>
                     <span className="dsc-grow" />
+                    {frozen[c.key] ? (
+                      <button type="button" className="dsc-cpause" data-on="true" title={`${WORDS.resume.text} ${title}`} data-testid={`col-paused-${c.key}`} onClick={() => pauseCol(c.key)}>
+                        <Ic k="pause" />
+                        {(() => {
+                          const n = pendingOf(liveRows(data, c.key, view, filters[c.key], nowMs, q ?? ""), frozen[c.key]);
+                          return n > 0 ? WORDS.pausedNew.text.replace("{n}", String(n)) : WORDS.paused.text;
+                        })()}
+                      </button>
+                    ) : (
+                      <button type="button" className="dsc-cpause" title={`${WORDS.pause.text} ${title}`} data-testid={`col-pause-${c.key}`} onClick={() => pauseCol(c.key)}>
+                        <Ic k="pause" />
+                        <W id="pause" />
+                      </button>
+                    )}
                     <button type="button" className="dsc-hb" aria-label={`${WORDS.search.text} ${title}`} data-testid={`col-search-${c.key}`} onClick={() => setSearch((s) => ({ ...s, [c.key]: "" }))}>
                       <Ic k="search" size={14} />
                     </button>
@@ -363,7 +491,7 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
                   </>
                 )}
               </div>
-              <Body data={data} k={c.key} win={c.win} phone={false} nowMs={nowMs} onRetry={onRetry} view={view} filter={filters[c.key]} q={q ?? ""} />
+              <Body data={data} k={c.key} win={c.win} phone={false} nowMs={nowMs} onRetry={onRetry} view={view} filter={filters[c.key]} q={q ?? ""} frozen={frozen[c.key]} last={last} />
               {panel === c.key && (
                 <FilterPanel col={c.key} title={title} snapshot={snap} filter={filters[c.key]} onFilter={setFilter(c.key)} count={keptOf(data, c.key, view, filters[c.key], nowMs)} onClose={closePanel} />
               )}
@@ -372,6 +500,7 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
         })}
       </div>
       <div className="dsc-phone">
+        <div className="dsc-stick">
         <div className="dsc-tabs" role="tablist">
           {COLUMNS.map((c) => (
             <button key={c.key} type="button" role="tab" aria-selected={tab === c.key} className="dsc-tab" data-tab={c.key} onClick={() => setTab(c.key)}>
@@ -394,7 +523,8 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
             </button>
           </div>
         )}
-        <Body data={phoneData} k={tab} win={tabWin} phone nowMs={nowMs} onRetry={onRetry} view={view} filter={filters[tab]} q="" />
+        </div>
+        <Body data={phoneData} k={tab} win={tabWin} phone nowMs={nowMs} onRetry={onRetry} view={view} filter={filters[tab]} q="" frozen={frozen[tab]} last={last} />
         <Dock amount={amount} onAmount={setAmount} />
         {sheet && (
           <>
@@ -409,7 +539,8 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
 
 /** The Discover route: the screen on the helper's lists of every chain (data.ts), on the shell's chain filter. */
 export function DiscoverRoute() {
-  const { data, nowMs, retry } = useDiscoverData();
+  const { data: read, nowMs, retry } = useDiscoverData();
+  const data = useSteady(read);
   const pick = usePick();
   const shown = useMemo(() => pickData(data, pick), [data, pick]);
   return <Discover data={shown} nowMs={nowMs} onRetry={retry} />;
