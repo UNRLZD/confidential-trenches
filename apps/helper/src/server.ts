@@ -44,6 +44,7 @@ import { dayFiles } from "./limits/day-spend.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
 import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
+import { RECORD_BODY_MAX } from "./bind/record.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
 import { INTENTS_BODY_MAX } from "./intents/carry.ts";
 import { statusesOf, tokenWatchesFromEnv, type TokenWatch, type TokenWatches } from "./token-status/status.ts";
@@ -82,10 +83,10 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 const ONECLICK_STATUS = "oneclick/v0/status";
 /** The proxy path whose live answers are POST /v1/intents's quote records (card helper-id-intents, intents/records.ts). */
 const ONECLICK_QUOTE = "oneclick/v0/quote";
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
 const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL, POOL_SOLANA_PIECES] = MOUNTED.relay;
-const [BIND] = MOUNTED.delegate;
+const [BIND, BIND_RECORD] = MOUNTED.delegate;
 const [INTENTS] = MOUNTED.intents;
 /** POST /v1/withdraw's body limit (the kit's HELPER_V1_PATHS row: 8 KB). */
 export const WITHDRAW_BODY_MAX = 8_192;
@@ -161,6 +162,16 @@ export const UPSTREAM_ROUTE_MAX = 120;
 /** Requests one client makes per limit window to GET /v1/logo (its own window: a Discover screen asks for every
  *  row's logo at once, and the browser keeps each a day); a miss fetches at most once per token (src/data/logo.ts). */
 export const LOGO_RATE_MAX = 600;
+/** Requests one client makes per limit window to POST /v1/bind/record, its own window apart from every other route's,
+ *  so a restore never spends a device's /v1/bind share nor the reverse (card near-holdings-restore) [design: a restore
+ *  of 100 wallets is two requests of at most 64; 4 per 10 s leaves one retry each]. */
+export const RECORD_RATE_MAX = 4;
+/** Requests every client together makes to POST /v1/bind/record per limit window: each reads the vault's spends list
+ *  once on the network's two NEAR providers, the reads the trade carry makes too [design: 20 per 10 s, ten devices'
+ *  100-wallet restores in one window, at most about 2 requests a second on the providers the carry shares]. */
+export const RECORD_TOTAL_MAX = 20;
+/** The reason RECORD_TOTAL_MAX names in the refusal log: every client's requests together past the route's total. */
+const ROUTE_TOTAL = "route total";
 const METHODS: readonly string[] = HELPER_CORS.allowMethods;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -281,6 +292,9 @@ export function handler(
   const rpcRate = clientWindow(UPSTREAM_ROUTE_MAX, now);
   const proxyRate = clientWindow(UPSTREAM_ROUTE_MAX, now);
   const logoRate = clientWindow(LOGO_RATE_MAX, now);
+  const recordRate = clientWindow(RECORD_RATE_MAX, now);
+  // the route's total: one window every client draws from, keyed by one name for all
+  const recordTotal = clientWindow(RECORD_TOTAL_MAX, now);
   return (req: IncomingMessage, res: ServerResponse): void => {
     const base: Headers = {
       [HELPER_COMMIT_HEADER]: commit,
@@ -334,7 +348,7 @@ export function handler(
         return send(400, { error: "bad_request" }, cors(req));
       }
       route = routeOf(path);
-      // every route but the pool, RPC and proxy routes (which have their own windows below) counts in the client's window
+      // every route but the pool, RPC, proxy and record routes (which have their own windows below) counts in the client's window
       if (path.startsWith(LOGO_PREFIX)) {
         const wait = logoRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
@@ -357,7 +371,7 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, undefined, cors(req))));
         return;
       }
-      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_SOLANA_PIECES && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL) {
+      if (!path.startsWith(PROXY_PREFIX) && !path.startsWith(RPC_PREFIX) && path !== POOL_FEE && path !== POOL_SOLANA_SEND && path !== POOL_SOLANA_PIECES && path !== POOL_EVM_SEND && path !== POOL_EVM_SELL && path !== BIND_RECORD) {
         const wait = apiRate.take(clientOf(req));
         if (wait > 0) return reply(throttled(wait, undefined, CLIENT_WINDOW));
       }
@@ -537,6 +551,33 @@ export function handler(
             const t0 = now();
             if (!(await heldWithin(senders, HELPER_BIND_ANSWER_MS))) return SENDERS_LATE;
             const a = await bindAnswerWithin(bind.carry(body), BIND_LATE, HELPER_BIND_ANSWER_MS - (now() - t0));
+            return { status: a.status, headers: upstreamWait(a), body: JSON.stringify(a.body) };
+          })
+          .then(reply)
+          .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
+        return;
+      }
+      if (path === BIND_RECORD) {
+        // card near-holdings-restore (bind/record.ts): its own window per client, then the route's total; the body
+        // names the wallets, never the path, so W reaches no log or header of the request
+        if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "POST, OPTIONS" });
+        const mine = recordRate.take(clientOf(req));
+        if (mine > 0) return reply(throttled(mine, undefined, CLIENT_WINDOW));
+        const all = recordTotal.take("all");
+        if (all > 0) return reply(throttled(all, undefined, ROUTE_TOTAL));
+        void readBody(req, RECORD_BODY_MAX)
+          .then(async (text) => {
+            if (text === undefined) return { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) };
+            let body: unknown;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            }
+            if (bind.record === undefined) return { status: 400, body: JSON.stringify({ error: { code: "bad_shape" } }) };
+            // the trade store is the senders' holder's, as /v1/bind's is: waited for within the bind's bound
+            if (!(await heldWithin(senders, HELPER_BIND_ANSWER_MS))) return SENDERS_LATE;
+            const a = await bind.record(body);
             return { status: a.status, headers: upstreamWait(a), body: JSON.stringify(a.body) };
           })
           .then(reply)

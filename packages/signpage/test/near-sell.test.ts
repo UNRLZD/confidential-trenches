@@ -503,6 +503,77 @@ test("P3-3 a quote whose floor is under the vault's 1 USDC minimum: amount_too_l
   assert.equal(chain.token, HELD);
 });
 
+test("2(b) a sale the vault would refuse (its proceeds under 1 USDC) with 2.5 USDC on W: nothing signed for a swap, W's USDC moved into the vault, the coin kept as a position, the sell ends amount_too_low", async () => {
+  const { deps, ev, chain } = world({ venueOut: 1_000_000n, pays: 1_000_000n, usdc: 2_500_000n });
+  const kept: bigint[] = [];
+  deps.kept = (h) => void kept.push(h);
+  assert.deepEqual(await run(deps), { error: "amount_too_low" });
+  assert.ok(!names(ev).includes("sign"), "no swap signed");
+  assert.ok(names(ev).includes("move"), "W's USDC moved");
+  assert.equal(chain.usdc, 0n, "W's USDC in the vault");
+  assert.deepEqual(kept, [HELD], "the coin kept");
+  assert.equal(chain.token, HELD);
+});
+
+test("P3-N a tap on a coin that quotes about nothing (its floor at the slippage 0) with 2.5 USDC on W: refused amount_too_low, nothing signed, W's USDC in the vault, the coin kept", async () => {
+  for (const venueOut of [0n, 1n]) {
+    const { deps, ev, chain } = world({ venueOut, pays: 0n, usdc: 2_500_000n });
+    const kept: bigint[] = [];
+    deps.kept = (h) => void kept.push(h);
+    assert.deepEqual(await run(deps), { error: "amount_too_low" }, `venueOut ${venueOut}`);
+    assert.ok(!names(ev).includes("sign"), "no swap signed");
+    assert.equal(chain.usdc, 0n, "W's USDC in the vault");
+    assert.deepEqual(kept, [HELD], "the coin kept");
+  }
+});
+
+test("2(a) the way home (home): W's USDC moved, nothing sold whatever W holds; a coin still on W after the move is kept; W empty after it ends filled", async () => {
+  {
+    const { deps, ev, chain } = world({ usdc: 2_500_000n });
+    deps.home = true;
+    const kept: bigint[] = [];
+    deps.kept = (h) => void kept.push(h);
+    assert.deepEqual(await run(deps), { error: "coin_kept" });
+    assert.ok(!names(ev).includes("sign") && !names(ev).includes("quote"), "nothing sold");
+    assert.equal(chain.usdc, 0n);
+    assert.deepEqual(kept, [HELD]);
+  }
+  {
+    const { deps, chain } = world({ token: 0n, usdc: 2_500_000n });
+    deps.home = true;
+    const a = await run(deps);
+    assert.ok(a !== null && "result" in a && a.result.stage === "filled", JSON.stringify(a, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+    assert.equal(chain.usdc, 0n);
+  }
+});
+
+test("2(a) the way home whose W holds USDC of the least deposit again after its move (a stranger's sent in at once): the coin is not kept yet and the run is not over, that USDC is moved first", async () => {
+  const { deps, chain, stops } = world({ usdc: 2_500_000n });
+  deps.home = true;
+  const kept: bigint[] = [];
+  deps.kept = (h) => void kept.push(h);
+  // the USDC lands once the move is in the vault, after the run's last USDC read of its moves: the done step's own read of
+  // W's coin, then of its USDC, sees it
+  let moved = false;
+  let landed = false;
+  const log = deps.log;
+  deps.log = (step, line) => ((moved ||= step === "move" && line === "in the vault"), log(step, line));
+  for (const k of ["held", "readWallet"] as const) {
+    const read = deps[k] as ((x: { side: string }) => Promise<{ held: bigint }>) | undefined;
+    if (read === undefined) continue;
+    (deps as Record<string, unknown>)[k] = async (x: { side: string }) => {
+      if (moved && !landed && x.side === "sell") (landed = true), (chain.usdc += 2_000_000n);
+      return read(x);
+    };
+  }
+  const a = await run(deps);
+  assert.ok(landed, "the USDC landed before the done read");
+  assert.notDeepEqual(a, { error: "coin_kept" });
+  assert.deepEqual(kept, [], "never kept while 1 USDC or more is on W");
+  assert.ok(stops.every((x) => x[1] !== "coin_kept"), JSON.stringify(stops));
+  assert.deepEqual(stops.at(-1)?.slice(0, 2), ["done", "not_empty"], "not over: the next run moves that USDC first");
+});
+
 test("USDC under the least deposit left in W after a sale whose notes landed (a fee's dust): filled; with none landed and the token gone: part_filled, never an answer read as nothing sold", async () => {
   {
     const { deps } = world({ token: 0n, usdc: 999_999n, note: { state: "UNSPENT", amount: 2_000_000n } });
