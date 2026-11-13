@@ -111,8 +111,8 @@ export const SOLANA_POOL_CU_LIMIT_MAX = 1_400_000;
 export const SOLANA_POOL_TX_FEE_MAX = SOLANA_LAMPORTS_PER_SIGNATURE + (BigInt(SOLANA_POOL_CU_LIMIT_MAX) * SOLANA_CU_PRICE_MAX) / 1_000_000n;
 /** The most priority fee a mainnet pool sale may pay, lamports (src/pool-sell.ts solanaSellBudget prices it at most this,
  *  and the preview counts it, pool-sell-dry.ts): its limit times its price, rounded up as the runtime charges it. The rule
- *  holds it on its own (checkSolanaSell, card round-trip-costs-less review P2-2), so no price an RPC answers, and no
- *  builder bug, signs a sale that pays more than the preview showed. */
+ *  holds it on its own (checkSolanaSell, card round-trip-costs-less review P2-2), so no builder bug signs a sale that
+ *  pays more than the preview showed. */
 export const SOLANA_POOL_SELL_PRIORITY = 100_000n;
 /** The most rent per byte the sell's reserve cap allows (the rule refuses a rate over it): 3,480 lamports a byte-year
  *  exempt at 2 years, 6,960 a byte. The Rent sysvar read 5,080 a byte on mainnet and devnet alike (review 3 of
@@ -661,7 +661,7 @@ export function checkSolanaSell(
   const d = decode(wire, reads);
   if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
   const n = head(d.ixs);
-  // the sale's priority fee, never over the most a sale may pay (the preview's bound), whatever price was read
+  // the sale's priority fee, never over the most a sale may pay (the preview's bound), whatever the builder priced
   const priority = priorityOf(d.ixs, n);
   if (priority > SOLANA_POOL_SELL_PRIORITY) return refuse("priority");
   const body = d.ixs.slice(n);

@@ -220,9 +220,6 @@ export const HELPER_RPC_METHODS = {
     "getFeeForMessage",
     "getBlockTime",
     "getEpochInfo",
-    // the price a mainnet pool sale asks per compute unit (signpage pool-sell.ts solanaSellPrice, card
-    // round-trip-costs-less): the fees landed lately on the accounts the sale writes, a read whose params pass unchanged
-    "getRecentPrioritizationFees",
     // a found W's sweep (signpage pool-sell.ts foundQuiet, card buy-spends-several-pieces): the finalized height of the
     // block W's latest transaction is in. The helper forwards it only as a header read (apps/helper/src/rpc/rpc.ts
     // blockHeaderAllowed: transactionDetails none, no rewards, finalized), never a block's transactions

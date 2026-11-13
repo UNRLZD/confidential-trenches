@@ -109,31 +109,6 @@ export function cuPriceOf(accountKeys, instructions, decode) {
   return null;
 }
 
-/** The plants of the sale's fee read (card round-trip-costs-less), each the copy's answer to getRecentPrioritizationFees
- *  on both of the page's names: "fees-busy" a busy history (FEES_BUSY micro-lamports in each of 150 slots), "fees-fail"
- *  a JSON-RPC error on the second name (as a helper on the build before the method was allowed refuses it). */
-export const FEE_PLANTS = Object.freeze(["fees-busy", "fees-fail"]);
-export const FEES_BUSY = 5_000_000;
-/** The planted answer to one getRecentPrioritizationFees request, or null to pass it to the copy. */
-export function feePlantAnswer(plant, id, second, slot = 1) {
-  if (plant === "fees-busy") return { jsonrpc: "2.0", id, result: Array.from({ length: 150 }, (_, i) => ({ slot: Math.max(0, slot - i), prioritizationFee: FEES_BUSY })) };
-  if (plant === "fees-fail" && second) return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
-  return null;
-}
-/** The sale's priority as the copy's transaction pays it, against what the plant asks (card round-trip-costs-less):
- *  the pump sale (step sell, pump's curve or PumpSwap among its programs) filled; with no plant, at most 2 lamports (the price
- *  floor of 1 micro-lamport at a limit of 2,000,000 at most); planted, the cap of 100,000 less at most one lamport. */
-export function feeRunVerdict(plant, records, pumps = ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"]) {
-  // the first sell step that runs pump's curve or PumpSwap (a graduated coin's) is the sale; its teardown comes after
-  const sale = records.find((r) => r.step === "sell" && r.found && pumps.some((p) => (r.programs ?? []).includes(p)));
-  if (!sale) return { ok: false, why: "no pump sale read back" };
-  if (!sale.ok) return { ok: false, why: "the sale failed", sale: sale.signature };
-  if (sale.priority === undefined || sale.priority === null) return { ok: false, why: "the sale set no compute unit price" };
-  const p = BigInt(sale.priority);
-  const ok = plant === "" ? p >= 1n && p <= 2n : FEE_PLANTS.includes(plant) ? p >= 99_999n && p <= 100_000n : false;
-  return { ok, priority: String(p), cuPrice: sale.cuPrice, cuLimit: sale.cuLimit, why: ok ? "as planned" : `priority ${p} is not the ${plant === "" ? "floor's" : "cap's"}` };
-}
-
 /** A transaction's price and the priority it pays (the limit times the price, rounded up), as decimal strings. */
 const priorityOf = (limit, price) => (price === null ? {} : { cuPrice: String(price), ...(limit === null ? {} : { priority: String((BigInt(limit) * price + 999_999n) / 1_000_000n) }) });
 

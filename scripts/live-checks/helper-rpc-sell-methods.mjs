@@ -63,7 +63,6 @@ export const PARAMS = {
   getFeeForMessage: [MESSAGE.toString("base64"), { commitment: "processed" }],
   getBlockTime: [1],
   getEpochInfo: [{ commitment: "confirmed" }],
-  getRecentPrioritizationFees: [[CLOCK]], // the sale's writable accounts in packages/signpage/src/pool-sell.ts; one address here
   getProgramAccounts: (program) => [program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }],
 };
 

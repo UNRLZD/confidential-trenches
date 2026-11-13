@@ -38,10 +38,8 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
-import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, FOUND_CLOSE_MAX, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellPrice, solanaSellReserve, SOLANA_POOL_SELL_PRICE_FLOOR, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type OwedRentBacks, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_GAP_MS, POOL_RENT_BACK_MS, POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS, spaceOpen, type RentBackSpacing, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_AGREE_WAIT_MS, POOL_SELL_WAIT_MS, buyMints, FOUND_CLOSE_MAX, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, forgetPageLoad, solanaSellAfterFull, solanaSellBudget, solanaSellBudgetFits, solanaSellReserve, SOLANA_POOL_SELL_PRIORITY, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type OwedRentBacks, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
-import { lanedRpc } from "../src/page-rpc.ts";
-import { resetHostLanes } from "../../wallet/src/throttle.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
 import { tradeLock, type TradeStore } from "../src/trade.ts";
@@ -140,9 +138,6 @@ type Plant = {
   cluster?: "mainnet" | "devnet";
   /** the units each simulation answers it used (none when not given) */
   units?: number;
-  /** each RPC's getRecentPrioritizationFees answer: a list of micro-lamport prices (one a slot), any other answer as
-   *  given, or an Error thrown, or "never": no answer, ever (no fixture when not given: a read that fails) */
-  fees?: readonly [unknown, unknown];
   /** the recorded venue the sell goes to (pump's curve when not given) */
   venue?: Venue;
   /** W's lamports (ENOUGH when not given) */
@@ -785,13 +780,6 @@ function chain(plant: Plant = {}) {
           }
           return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err, ...(t.post && !plant.noPostBalances ? { postTokenBalances: p === 1 && plant.postDiffers ? t.post.map((e) => ({ ...(e as object), uiTokenAmount: { amount: "9", decimals: 6 } })) : t.post } : {}) } } : null;
         }
-        case "getRecentPrioritizationFees": {
-          const f = plant.fees?.[p];
-          if (f === undefined) throw new Error(`no fixture for ${method}`);
-          if (f instanceof Error) throw f;
-          if (f === "never") return new Promise(() => {});
-          return Array.isArray(f) ? f.map((x, i) => ({ slot: VF[v].slot - i, prioritizationFee: x })) : f;
-        }
         case "getSignaturesForAddress": {
           // W's own history only, newest first, at most the limit asked: its latest one, or each one after `until`
           assert.equal(params[0], W.address);
@@ -839,7 +827,7 @@ const wallet = (amount: bigint, frozen = false, mint = MINT): BuyWallet => ({
 });
 type World = { c: ReturnType<typeof chain>; ns: NoteStore; store: WalletStore; host: PoolSellHost; seeds: Uint8Array[]; sent: string[]; owed: Map<string, OwedRentBack>; kept: Map<string, KeptSell>; told: RentBackTold[] };
 async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, false, VF[plant.venue ?? "pump"].mint)]): Promise<World> {
-  // a fresh page: no W's next sale held to the cap by an earlier test's not_landed
+  // a fresh page: no leftover pass of an earlier test's load
   forgetPageLoad();
   const c = chain(plant);
   const { store, ns } = await notes();
@@ -1038,217 +1026,18 @@ test("a mainnet sell carries a compute unit limit sized from its simulation and 
   assert.equal(solanaSellBudget(90_000, 0n), null);
 });
 
-// card round-trip-costs-less c: the sale's price per compute unit from what landed lately on its own accounts, the
-// higher of both RPCs' 75th percentile (getRecentPrioritizationFees over the sale's writable accounts; review P3-1 of
-// 4f9217972: the lower let one provider's empty list or zeros price the sale at the floor), at least
-// SOLANA_POOL_SELL_PRICE_FLOOR and never more than SOLANA_POOL_SELL_PRIORITY in all; a read that fails, is not a list of
-// prices or is an empty list: the cap, the form before
-test("round-trip-costs-less c: the sale's price is the higher of both RPCs' 75th percentile of recent fees on its own accounts, at least 1, an empty list no read, the priority at most the cap", async () => {
-  const ok = (fees: number[]) => fees.map((x, i) => ({ slot: 400 - i, prioritizationFee: x }));
-  const at = (a: unknown, b: unknown) => [async () => a, async () => b] as unknown as readonly [SolanaRpc, SolanaRpc];
-  // p75: the value three quarters up the sorted list (the 3rd of 4, the 75th of 100)
-  assert.equal(await solanaSellPrice(at(ok([40, 10, 30, 20]), ok([40, 10, 30, 20])), ["x"]), 30n);
-  assert.equal(await solanaSellPrice(at(ok(Array.from({ length: 100 }, (_, i) => i + 1)), ok(Array.from({ length: 100 }, (_, i) => i + 1))), ["x"]), 75n);
-  // the higher of the two: one RPC's low word never lowers it
-  assert.equal(await solanaSellPrice(at(ok([5_000, 5_000, 5_000, 5_000]), ok([900, 900, 900, 900])), ["x"]), 5_000n);
-  assert.equal(await solanaSellPrice(at(ok([900, 900, 900, 900]), ok([5_000, 5_000, 5_000, 5_000])), ["x"]), 5_000n);
-  // review P3-1's cases: one provider's zeros, or its empty list, beside a busy market: the busy price, or no read
-  const BUSY = ok(Array.from({ length: 150 }, () => 500_000));
-  assert.equal(await solanaSellPrice(at(ok(Array.from({ length: 150 }, () => 0)), BUSY), ["x"]), 500_000n);
-  assert.equal(await solanaSellPrice(at(BUSY, ok(Array.from({ length: 150 }, () => 0))), ["x"]), 500_000n);
-  assert.equal(await solanaSellPrice(at([], BUSY), ["x"]), null);
-  assert.equal(await solanaSellPrice(at(BUSY, []), ["x"]), null);
-  // the floor: a quiet market on both (p75 0, the traders tip instead)
-  assert.equal(SOLANA_POOL_SELL_PRICE_FLOOR, 1n);
-  assert.equal(await solanaSellPrice(at(ok([0, 0, 0, 53_580]), ok([0, 0, 0, 0])), ["x"]), 1n);
-  assert.equal(await solanaSellPrice(at([], []), ["x"]), null);
-  // a hostile or broken answer: no price read (the sale pays the cap, the form before)
-  for (const bad of [null, {}, "1", [], [{ slot: 1 }], [{ slot: 1, prioritizationFee: -1 }], [{ slot: 1, prioritizationFee: 1.5 }], [{ slot: 1, prioritizationFee: "7" }], [{ slot: 1, prioritizationFee: 2 ** 60 }]]) {
-    assert.equal(await solanaSellPrice(at(bad, ok([1, 1])), ["x"]), null, JSON.stringify(bad));
-    assert.equal(await solanaSellPrice(at(ok([1, 1]), bad), ["x"]), null, JSON.stringify(bad));
-  }
-  assert.equal(await solanaSellPrice([async () => ok([1]), async () => { throw new Error("offline"); }] as unknown as readonly [SolanaRpc, SolanaRpc], ["x"]), null);
-  // the budget at that price: the priority is the price's, under the cap; a price over the cap's fit: the cap
-  assert.deepEqual(solanaSellBudget(87_102, SOLANA_POOL_SELL_PRIORITY, 1n), { limit: 104_523, price: 1n, priority: 1n });
-  assert.deepEqual(solanaSellBudget(87_102, SOLANA_POOL_SELL_PRIORITY, 500n), { limit: 104_523, price: 500n, priority: 53n });
-  assert.deepEqual(solanaSellBudget(87_102, SOLANA_POOL_SELL_PRIORITY, 10n ** 12n), solanaSellBudget(87_102, SOLANA_POOL_SELL_PRIORITY));
-  assert.equal(solanaSellBudget(87_102, 0n, 1n), null);
-});
-
-// review P2-2 of 4f9217972: the band the tests above skipped, a price read between what the cap buys and the rule's
-// head cap (1,000,000 a unit), where only solanaSellBudget's bound holds the sale to its cap (the rule refuses past it too,
-// rules-pool.test.ts P2-2)
-test("round-trip-costs-less P2-2: a price read anywhere from 1 to 1,000,000 a unit never makes the sale pay over its cap", () => {
-  for (const units of [1, 90_000, 200_000, 500_000, 1_000_000, 1_400_000]) {
-    for (const cap of [1n, 777n, 50_000n, SOLANA_POOL_SELL_PRIORITY]) {
-      const atCap = solanaSellBudget(units, cap);
-      // a cap that buys no price at this limit: no budget, whatever was read
-      if (atCap === null) {
-        assert.equal(solanaSellBudget(units, cap, 1n), null);
-        continue;
-      }
-      for (const want of [1n, 2n, atCap.price - 1n, atCap.price, atCap.price + 1n, 950_000n, 999_999n, 1_000_000n]) {
-        if (want < 1n) continue;
-        const b = solanaSellBudget(units, cap, want)!;
-        assert.ok(b.priority <= cap, `units ${units} cap ${cap} want ${want}: priority ${b.priority}`);
-        assert.equal(b.price, want < atCap.price ? want : atCap.price, `units ${units} cap ${cap} want ${want}`);
-      }
-    }
-  }
-});
-
-test("round-trip-costs-less c: a mainnet sale prices its compute from the fees both RPCs read on its writable accounts, so a quiet market's sale pays 1 lamport of priority, not 100,000", async () => {
-  const quiet = [0, 0, 0, 0, 0, 0, 0, 12];
-  const w = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet] });
-  const a = await runPoolSell(w.host, ASK);
-  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a, (_, v) => (typeof v === "bigint" ? String(v) : v)));
-  assert.deepEqual(budgetOf(w, a), { limit: 108_000, price: 1n, priority: 1n });
-  // the deposit back takes all but that 1 lamport of the devnet sale's value
-  const m = solanaDecodeMessage(sentWire(w, a).subarray(65));
-  const dep = m.instructions.at(-1)!;
-  assert.equal(new DataView(dep.data.buffer, dep.data.byteOffset + 1, 8).getBigUint64(0, true), FULL - 1n);
-  // asked on both RPCs with the sale's writable accounts, none of them a signer, and before the first simulation answers
-  const asks = w.c.calls.filter((c) => c.method === "getRecentPrioritizationFees");
-  assert.deepEqual(asks.map((c) => c.p).sort(), [0, 1]);
-  const sell = m.instructions.find((x) => m.staticKeys[x.programIndex] === SOLANA_PUMP_PROGRAM)!;
-  const writable = [...new Set(sell.accounts.filter((k) => k >= m.requiredSignatures && k < m.staticKeys.length - m.readonlyUnsigned).map((k) => m.staticKeys[k]!))];
-  for (const c of asks) assert.deepEqual([...(c.params[0] as string[])].sort(), writable.sort());
-  assert.ok(!(asks[0]!.params[0] as string[]).includes(W.address), "W, the signer, is not named");
-  assert.ok(w.c.calls.findIndex((c) => c.method === "getRecentPrioritizationFees") < w.c.calls.findIndex((c) => c.method === "simulateTransaction"), "read beside the first simulation, never after it");
-  // a busy market: the higher RPC's p75 (review P3-1), capped by the priority's 100,000 in all
-  const busy = await world({ cluster: "mainnet", units: 90_000, fees: [[700, 700, 700, 700], [400, 400, 400, 400]] });
-  const b = await runPoolSell(busy.host, ASK);
-  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
-  assert.deepEqual(budgetOf(busy, b), { limit: 108_000, price: 700n, priority: 76n });
-  const hot = await world({ cluster: "mainnet", units: 90_000, fees: [[9e6, 9e6, 9e6, 9e6], [9e6, 9e6, 9e6, 9e6]] });
-  const c = await runPoolSell(hot.host, ASK);
-  assert.equal("stage" in c && c.stage, "filled", JSON.stringify(c));
-  assert.equal(budgetOf(hot, c)?.priority, SOLANA_POOL_SELL_PRIORITY);
-  // a read that fails on either RPC: the cap, as before this card. The page on this build beside a helper on the build
-  // before it, whose /v1/rpc/solana refuses the method (400 method_not_allowed: a deploy of one of them rolled back)
-  // pays the cap and sends
-  // review P2-1: a read not answered by the time the first simulation is (here: never) is not waited for: the cap
-  for (const fees of [[quiet, new Error("offline")], [{ junk: 1 }, quiet], [quiet, new Error("HTTP 400 method_not_allowed")], [quiet, "never"], ["never", "never"], [quiet, []]] as const) {
-    const f = await world({ cluster: "mainnet", units: 90_000, fees });
-    const d = await runPoolSell(f.host, ASK);
-    assert.equal("stage" in d && d.stage, "filled", JSON.stringify(d));
-    assert.equal(budgetOf(f, d)?.priority, SOLANA_POOL_SELL_PRIORITY);
-  }
-  // every form that carries the budget names its writable accounts to the read: at most 64, the set the helper's test
-  // passes unchanged (apps/helper/src/rpc/rpc.test.ts WRITES)
-  for (const [venue, cashback] of [["pump", false], ["pump", true], ["pumpswap", false]] as const) {
-    const f = await world({ cluster: "mainnet", units: 90_000, venue, cashback, fees: [quiet, quiet] }, [wallet(AMOUNT, false, VF[venue].mint)]);
-    const g = await runPoolSell(f.host, { ...ASK, token: VF[venue].mint });
-    assert.equal("stage" in g && g.stage, "filled", `${venue} ${cashback}: ${JSON.stringify(g)}`);
-    const sizes = f.c.calls.filter((x) => x.method === "getRecentPrioritizationFees").map((x) => (x.params[0] as string[]).length);
-    assert.equal(sizes.length, 2, `${venue} ${cashback}`);
-    assert.ok(sizes.every((n) => n > 0 && n <= 64), `${venue} ${cashback}: ${sizes}`);
-  }
-  // devnet: no compute budget and no read
-  const dv = await world({ units: 90_000, fees: [quiet, quiet] });
-  const e = await runPoolSell(dv.host, ASK);
-  assert.equal("stage" in e && e.stage, "filled", JSON.stringify(e));
-  assert.equal(budgetOf(dv, e), null);
-  assert.ok(!dv.c.calls.some((x) => x.method === "getRecentPrioritizationFees"));
-});
-
-// review P3-1 of 4f9217972: a sale that did not land makes that W's next sale pay the cap, with no fee read, until one
-// lands; then the price is read again
-test("round-trip-costs-less P3-1: after a not_landed sale the next sale of that W pays the cap with no fee read, and after one lands the read prices it again", async () => {
-  const quiet = [0, 0, 0, 0, 0, 0, 0, 12];
-  // three pages of the same W, made first (each world is a fresh page: it forgets the caps), then sold in turn
-  const next = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet] });
-  const after = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet] });
-  const lost = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet], lands: false });
-  const reads = (w: World) => w.c.calls.filter((c) => c.method === "getRecentPrioritizationFees").length;
-  const a = await runPoolSell(lost.host, ASK);
-  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
-  // the send that never landed: its own bytes, as sent
-  const sentBytes = base64.decode(lost.c.calls.filter((c) => c.method === "sendTransaction").at(-1)!.params[0] as string);
-  const lm = solanaDecodeMessage(sentBytes.subarray(65));
-  const lostPrice = lm.instructions.filter((x) => lm.staticKeys[x.programIndex] === SOLANA_COMPUTE_BUDGET_PROGRAM)[1]!.data;
-  assert.equal(new DataView(lostPrice.buffer, lostPrice.byteOffset, 9).getBigUint64(1, true), 1n, "the first try at the price read");
-  assert.equal(reads(lost), 2);
-  const b = await runPoolSell(next.host, ASK);
-  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
-  assert.equal(budgetOf(next, b)?.priority, SOLANA_POOL_SELL_PRIORITY, "the next try at the cap");
-  assert.equal(reads(next), 0, "no fee read for it");
-  // that one landed: W's next sale reads the price again
-  const c = await runPoolSell(after.host, ASK);
-  assert.equal("stage" in c && c.stage, "filled", JSON.stringify(c));
-  assert.equal(budgetOf(after, c)?.priority, 1n);
-  assert.equal(reads(after), 2);
-});
-
-// the cap after a sale not landed is held until W's sale ends: a refused one ends it as a filled one does
-test("round-trip-costs-less P3-1: a refused sale after a not_landed one clears the cap by itself: W's next sale reads the price again", async () => {
-  const quiet = [0, 0, 0, 0, 0, 0, 0, 12];
-  const lost = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet], lands: false });
-  const refused = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet], frontRun: true });
-  const after = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet] });
-  const reads = (w: World) => w.c.calls.filter((c) => c.method === "getRecentPrioritizationFees").length;
-  const a = await runPoolSell(lost.host, ASK);
-  assert.equal("stage" in a && a.stage, "not_landed", JSON.stringify(a));
-  const b = await runPoolSell(refused.host, ASK);
-  assert.equal("stage" in b && b.stage, "refused", JSON.stringify(b));
-  assert.equal(reads(refused), 0, "the refused sale was held to the cap");
-  const c = await runPoolSell(after.host, ASK);
-  assert.equal("stage" in c && c.stage, "filled", JSON.stringify(c));
-  assert.equal(reads(after), 2, "the price read again");
-  assert.equal(budgetOf(after, c)?.priority, 1n);
-});
-
-// review 2 P3-a of c0dd55d02: the fee read is never waited for, so one that never answers adds no time to the sale (the
-// "never" cases above hold the cap and the fill only, which a sale waiting a bounded time for the read also passes):
-// the never-answered sale runs with setTimeout frozen (mock timers), so a sale that waited a timer for the read would
-// never end and the test's own timeout fails it, and it asks the host for the same waits as the sale whose read answers
-test("round-trip-costs-less P3-a: a fee read that never answers adds no wait to the sale: it waits no timer and asks the waits of one whose read answers", { timeout: 30_000 }, async (t) => {
-  const quiet = [0, 0, 0, 0, 0, 0, 0, 12];
-  const waitsOf = (w: World, waits: number[]): PoolSellHost => ({ ...w.host, wait: async (ms: number) => void waits.push(ms) });
-  const answered = await world({ cluster: "mainnet", units: 90_000, fees: [quiet, quiet] });
-  const asked: number[] = [];
-  const a = await runPoolSell(waitsOf(answered, asked), ASK);
-  const never = await world({ cluster: "mainnet", units: 90_000, fees: ["never", "never"] });
-  const neverAsked: number[] = [];
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let b: Awaited<ReturnType<typeof runPoolSell>>;
-  try {
-    b = await runPoolSell(waitsOf(never, neverAsked), ASK);
-  } finally {
-    t.mock.timers.reset();
-  }
-  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
-  assert.equal(budgetOf(never, b)?.priority, SOLANA_POOL_SELL_PRIORITY, "no price: the cap");
-  assert.deepEqual(neverAsked, asked, "the same waits asked of the host");
-});
-
-// review P2-1 of 4f9217972: the fee read is aborted once the sale is sized; nothing of it is left running past then (on
-// a page RPC its request's signal fires before the send, and no fee request goes out after it)
-test("round-trip-costs-less P2-1: the sale's fee read still open at sizing is aborted there, before the send, and none goes out after", async () => {
-  resetHostLanes();
+// card round-trip-costs-less: the sale reads no fee price. Both RPCs would answer a quiet market (p75 0) if asked; the
+// sale asks neither and pays the cap, SOLANA_POOL_SELL_PRIORITY, at the limit its simulation sizes, as before the card
+test("round-trip-costs-less: a mainnet sale reads no fee price and pays main's priority", async () => {
   const w = await world({ cluster: "mainnet", units: 90_000 });
-  const order: string[] = [];
-  const hang = (i: number) => (_u: string, init?: RequestInit): Promise<Response> =>
-    new Promise((_, reject) => {
-      order.push(`fee ${i} asked`);
-      init?.signal?.addEventListener("abort", () => {
-        order.push(`fee ${i} aborted`);
-        reject(init.signal!.reason);
-      });
-    });
-  const rpcs = w.c.rpcs.map((rpc, i) => {
-    const page = lanedRpc(`https://fee-abort-${i}.example/rpc`, { fetch: hang(i), retry: { deadlineMs: 2_000, backoffMs: 2_000 } });
-    return Object.assign((m: string, p: readonly unknown[]) => (m === "sendTransaction" && order.push("send"), rpc(m, p)), { url: page.url });
-  }) as unknown as typeof w.c.rpcs;
+  const asked: number[] = [];
+  const rpcs = w.c.rpcs.map((rpc, p) => (async (m: string, q: readonly unknown[]) => (m === "getRecentPrioritizationFees" ? (asked.push(p), [0, 0, 0, 12].map((x, i) => ({ slot: 400 - i, prioritizationFee: x }))) : rpc(m, q)))) as unknown as typeof w.c.rpcs;
   const a = await runPoolSell({ ...w.host, rpcs }, ASK);
-  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-  assert.equal(budgetOf(w, a)?.priority, SOLANA_POOL_SELL_PRIORITY, "no price in by sizing: the cap");
-  const send = order.indexOf("send");
-  assert.ok(send > 0, order.join(", "));
-  assert.deepEqual(order.slice(0, send).sort(), ["fee 0 aborted", "fee 0 asked", "fee 1 aborted", "fee 1 asked"], order.join(", "));
-  assert.equal(order.slice(send).filter((x) => x.startsWith("fee")).length, 0, order.join(", "));
-  resetHostLanes();
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  assert.deepEqual(asked, [], "no fee read on either RPC");
+  assert.ok(!w.c.calls.some((c) => c.method === "getRecentPrioritizationFees"));
+  assert.deepEqual(budgetOf(w, a), solanaSellBudget(90_000));
+  assert.deepEqual(budgetOf(w, a), { limit: 108_000, price: 925_925n, priority: SOLANA_POOL_SELL_PRIORITY });
 });
 
 // the review of 6d76212d: the priority is never a reason to refuse. A sell that could be sent without it is sent: W pays

@@ -32,27 +32,9 @@ const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     signal?.addEventListener("abort", off, { once: true });
   });
 
-/** A read a trade can do without (card round-trip-costs-less, review P2-1 of 4f9217972: a sale's fee read), on a page
- *  RPC's host: sent only when the host is open now, counted in its budget (HostLane count), asked once with no retry
- *  within the page's bound, and its outcome never reported to the lane, so its throttle pauses no reader and nothing
- *  waits on it; `signal` aborts it (the sale stops waiting for it once its first simulation answers). A host not open
- *  now: refused at once, nothing sent. */
-export type OptionalRead = (method: string, params: readonly unknown[], signal: AbortSignal) => Promise<unknown>;
-/** A page RPC, with its optional read. */
-export type PageRpc = SolanaRpc & { readonly optional?: OptionalRead };
-/** Each page RPC's optional read by its url (a paced or wrapped provider carries the url, as SEATS reads it): a trade's
- *  RPC first, a seat over its first member's. */
-const OPTIONAL = new Map<string, OptionalRead>();
-/** `rpc`'s optional read (OptionalRead), or none (the read is not made). A provider with no url (a test's) is asked as
- *  itself. */
-export function optionalRead(rpc: SolanaRpc): OptionalRead | undefined {
-  if (rpc.url === undefined) return (method, params) => rpc(method, params);
-  return OPTIONAL.get(rpc.url);
-}
-
 /** `url` as a page RPC on its host's lane (the header): `kind` its turn, `retry` its bound, `init` and `fetch` the kit
  *  client's own, `signal` ends a wait for the turn or the pause at once. */
-export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRetry; init?: RequestInit; fetch?: SolanaFetch; signal?: AbortSignal; spare?: boolean } = {}): PageRpc {
+export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRetry; init?: RequestInit; fetch?: SolanaFetch; signal?: AbortSignal; spare?: boolean } = {}): SolanaRpc {
   const kind = o.kind ?? "trade";
   const retry = o.retry ?? SOLANA_RPC_RETRY;
   const href = solanaJsonRpc(url).url!;
@@ -111,15 +93,7 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
     lane.took(kind);
     return go(method, params);
   };
-  const optional: OptionalRead = (method, params, signal) => {
-    if (signal.aborted || !lane.open(kind)) return Promise.reject(new SolanaRpcTransportError("http_429", "an optional read is sent only while its host is open", 0, lane.host));
-    lane.count();
-    const doFetch = o.fetch ?? globalThis.fetch;
-    const fetch: SolanaFetch = (u, init) => doFetch(u, { ...init, signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal });
-    return solanaJsonRpc(url, { ...(o.init ? { init: o.init } : {}), fetch, retry: { deadlineMs: retry.deadlineMs, backoffMs: retry.deadlineMs } })(method, params);
-  };
-  if (kind === "trade" && !OPTIONAL.has(href)) OPTIONAL.set(href, optional);
-  return Object.assign(rpc, { url: href, optional });
+  return Object.assign(rpc, { url: href });
 }
 
 /** The hosts each seat reads (seatRpc), by the seat's url: a trade holds every one of them (src/pool-testnet.ts). */
@@ -142,7 +116,7 @@ export const seatHosts = (r: { readonly url?: string } | undefined): readonly st
  * An answer, any answer, is the read's: a member that answers differently from the helper fails the check, and the seat
  * never asks another member for a better one. The helper is never a member.
  */
-export function seatRpc(urls: readonly string[], kind: ReadKind = "trade", retry: SolanaRpcRetry = SOLANA_RPC_RETRY): PageRpc {
+export function seatRpc(urls: readonly string[], kind: ReadKind = "trade", retry: SolanaRpcRetry = SOLANA_RPC_RETRY): SolanaRpc {
   if (urls.length === 0) throw new Error("a seat needs a provider");
   const members = urls.map((u) => ({ lane: hostLane(u), fast: lanedRpc(u, { kind, retry, spare: true }), last: lanedRpc(u, { kind, retry }) }));
   const href = members[0]!.last.url!;
@@ -163,13 +137,7 @@ export function seatRpc(urls: readonly string[], kind: ReadKind = "trade", retry
       return read(method, params, new Set([...tried, i]));
     });
   };
-  // an optional read (OptionalRead): the first member whose host is open now, one member only, never failed over
-  const optional: OptionalRead = (method, params, signal) => {
-    const m = members.find((x) => x.lane.open(kind));
-    return m === undefined ? Promise.reject(new SolanaRpcTransportError("http_429", "an optional read is sent only while its host is open", 0, members[0]!.lane.host)) : m.last.optional!(method, params, signal);
-  };
-  if (kind === "trade") OPTIONAL.set(href, optional);
-  return Object.assign((method: string, params: readonly unknown[]) => read(method, params, new Set()), { url: href, optional });
+  return Object.assign((method: string, params: readonly unknown[]) => read(method, params, new Set()), { url: href });
 }
 
 /** A provider the device reaches directly. */
