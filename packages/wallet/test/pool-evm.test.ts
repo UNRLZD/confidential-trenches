@@ -19,7 +19,7 @@ import { SOL_LADDER } from "../src/pool/solana.ts";
 import { evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import {
   EvmLagError, EVM_LAG_WAIT_MS, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
-  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
+  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, EVM_NEWEST_REUSE_MS, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHeld, type EvmSyncHold,
 } from "../src/pool/evm.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
@@ -218,6 +218,12 @@ const noWait = { sleep: async () => {} };
 /** A pool's sync pair and its fee pair (evmPool takes both, card evm-buy-hookdata-fee fold 4 LOW-1): here one pair. */
 const pairs = (rpcs: readonly [EvmRpc, EvmRpc]) => ({ rpcs, feeRpcs: rpcs });
 const sync = (rpcs: [EvmRpc, EvmRpc], sleep: () => Promise<void> = async () => {}) => evmTreeSync({ rpcs, pin: PIN, sleep });
+/** card evm-first-proof-inside-ten-seconds: a sync's clock on which each read of the newest block comes a whole
+ *  EVM_NEWEST_REUSE_MS after the last, so it is read again: for a test whose chain moves between two reads in no time */
+const stale = () => {
+  let t = 0;
+  return () => (t += EVM_NEWEST_REUSE_MS);
+};
 /** ms just past block n's time: the cut that keeps every leaf up to block n */
 const after = (n: number): bigint => (T0 + 2n * BigInt(n)) * 1000n + 1n;
 
@@ -288,7 +294,7 @@ test("trees after a long paging read the root times at a fresh block, the anchor
   const log: string[] = [];
   const moves: Over = { stateKeep: 5, getLogs: () => void (c.head += 20), log };
   const got = [];
-  for (const b of [after(12), after(20), after(70)]) got.push(await sync(pair(c, c, moves, { stateKeep: 5, getLogs: () => void (c.head += 20) })).trees(b));
+  for (const b of [after(12), after(20), after(70)]) got.push(await evmTreeSync({ rpcs: pair(c, c, moves, { stateKeep: 5, getLogs: () => void (c.head += 20) }), pin: PIN, ...noWait, clock: stale() }).trees(b));
   for (let i = 0; i < want.length; i++) {
     assert.equal(got[i]!.stateRoot, want[i]!.stateRoot, `cut ${i}: the state root`);
     assert.equal(got[i]!.labelRoot, want[i]!.labelRoot, `cut ${i}: the label root`);
@@ -316,7 +322,7 @@ test("trees: a newest block on a fork that lacks the anchor is a retry, never th
   const onB = (h: string) => Array.from({ length: 10 }, (_, i) => 96 + i).some((n) => B.hashOf(n) === h);
   let flipped = false, bLeft = 0;
   const seat = (url: string): EvmRpc => {
-    const a = rpc(A, { url, getLogs: () => void (!flipped && ((flipped = true), (bLeft = 4))) }), b = rpc(B, { url });
+    const a = rpc(A, { url, getLogs: () => void (!flipped && ((flipped = true), (bLeft = 2))) }), b = rpc(B, { url });
     return Object.assign(async (m: string, p: readonly unknown[]) => {
       if (m === "eth_getBlockByNumber" && bLeft > 0) return (bLeft--, b(m, p));
       if (m === "eth_call" && onB((p[1] as { blockHash: string }).blockHash)) return b(m, p);
@@ -324,7 +330,7 @@ test("trees: a newest block on a fork that lacks the anchor is a retry, never th
     }, { url });
   };
   const waits: number[] = [];
-  const t = await evmTreeSync({ rpcs: [seat("https://a.example"), seat("https://b.example")], pin: PIN, sleep: async (ms: number) => void waits.push(ms) }).trees(after(96));
+  const t = await evmTreeSync({ rpcs: [seat("https://a.example"), seat("https://b.example")], pin: PIN, sleep: async (ms: number) => void waits.push(ms), clock: stale() }).trees(after(96));
   assert.ok(flipped, "the fork was named");
   assert.equal(t.stateTree.size, 3, "chain A's cut, never fork B's");
   assert.ok(waits.includes(EVM_LAG_WAIT_MS), "a retry");
@@ -336,7 +342,7 @@ test("trees: a newest block below the anchor, or an anchor one seat alone no lon
     const c = chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }], 100, 90);
     let low = false, pages = 0;
     const waits: number[] = [];
-    const t = await evmTreeSync({ rpcs: pair(c, c, { getLogs: () => void (pages++ === 0 && (low = true)) }, { latest: () => (low ? ((low = false), 95) : c.head) }), pin: PIN, sleep: async (ms: number) => void waits.push(ms) }).trees(after(20));
+    const t = await evmTreeSync({ rpcs: pair(c, c, { getLogs: () => void (pages++ === 0 && (low = true)) }, { latest: () => (low ? ((low = false), 95) : c.head) }), pin: PIN, sleep: async (ms: number) => void waits.push(ms), clock: stale() }).trees(after(20));
     assert.equal(t.stateTree.size, 4);
     assert.ok(waits.includes(EVM_LAG_WAIT_MS), "below the anchor: a retry");
   }
@@ -345,7 +351,7 @@ test("trees: a newest block below the anchor, or an anchor one seat alone no lon
     const c = chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }], 100, 90);
     let flip = false, pages = 0;
     const waits: number[] = [];
-    const t = await evmTreeSync({ rpcs: pair(c, c, { getLogs: () => void (pages++ === 0 && ((flip = true), (c.head += 5))) }, { hashOf: (n) => (flip && n === 100 ? h32("b alone 100") : c.hashOf(n)) }), pin: PIN, sleep: async (ms: number) => void waits.push(ms) }).trees(after(20));
+    const t = await evmTreeSync({ rpcs: pair(c, c, { getLogs: () => void (pages++ === 0 && ((flip = true), (c.head += 5))) }, { hashOf: (n) => (flip && n === 100 ? h32("b alone 100") : c.hashOf(n)) }), pin: PIN, sleep: async (ms: number) => void waits.push(ms), clock: stale() }).trees(after(20));
     assert.equal(t.stateTree.size, 4);
     assert.ok(waits.includes(EVM_LAG_WAIT_MS), "one seat's anchor moved: a retry");
   }
@@ -368,6 +374,7 @@ test("trees: the anchor read again after the times on both seats: one seat's oth
     rpcs: [a, b],
     pin: PIN,
     sleep: async (ms: number) => void waits.push(ms),
+    clock: stale(),
   }).trees(after(20));
   assert.ok(timed && !flip, "seat b named its other block 100 after the times");
   assert.equal(t.stateTree.size, 4);
@@ -427,9 +434,10 @@ test("a lagging RPC is a retry, then the answer; one that stays behind is refuse
   const t = await evmTreeSync({ rpcs: pair(c, c, {}, behind), pin: PIN, sleep }).trees(after(25));
   assert.equal(t.stateTree.size, 4);
   assert.deepEqual(waits, [2000, 2000]);
-  // RPC b does not know the anchor block for its first read
+  // RPC b, its finalized one block past a's, does not know the agreed block 90 for its first read by number (the lower
+  // RPC's tag answer is that block, so only the higher one is read by number)
   waits.length = 0;
-  const t2 = await evmTreeSync({ rpcs: pair(c, c, {}, { unknown: (n, k) => n === 90 && k === 0 }), pin: PIN, sleep }).trees(after(25));
+  const t2 = await evmTreeSync({ rpcs: pair(c, c, {}, { finalized: () => 91, unknown: (n, k) => n === 90 && k === 0 }), pin: PIN, sleep }).trees(after(25));
   assert.equal(t2.stateRoot, t.stateRoot);
   assert.deepEqual(waits, [2000]);
   // never catches up: refused after EVM_LAG_TRIES reads, with no answer
@@ -448,10 +456,11 @@ test("two RPCs whose latest blocks differ: the read binds to the lower one, one 
     assert.ok(!l.some((x) => x.startsWith("eth_call") && x.includes(c.hashOf(100))), "never at RPC a's own latest");
   }
   assert.equal(t.stateTree.size, 4);
-  // the two RPCs' latest blocks at one height are two blocks: a retry, then the agreed one
+  // the two RPCs' latest blocks at one height are two blocks: a retry, then the agreed one (one read of block 100 on
+  // RPC b per agreed read: its tag answer, no read by number)
   const waits: number[] = [];
   let calls = 0;
-  const fork = { hashOf: (n: number) => (n === 100 && calls++ < 2 ? h32("other 100") : c.hashOf(n)) };
+  const fork = { hashOf: (n: number) => (n === 100 && calls++ < 1 ? h32("other 100") : c.hashOf(n)) };
   assert.equal((await evmTreeSync({ rpcs: pair(c, c, {}, fork), pin: PIN, sleep: async (ms) => void waits.push(ms) }).trees(after(25))).stateTree.size, 4);
   assert.deepEqual(waits, [2000]);
   await assert.rejects(sync(pair(c, c, {}, { hashOf: (n) => (n === 90 ? h32("other 90") : c.hashOf(n)) })).trees(after(25)), /hold different blocks at 90/);
@@ -508,19 +517,22 @@ test("the cache never advances past finalized: each read starts past the finaliz
   const c = C3();
   const la: string[] = [];
   let fin = 50;
-  const s = sync(pair(c, c, { log: la, finalized: () => fin }, { finalized: () => fin }));
+  const s = evmTreeSync({ rpcs: pair(c, c, { log: la, finalized: () => fin }, { finalized: () => fin }), pin: PIN, ...noWait, clock: stale() });
   await s.trees(after(25));
+  // the finalized block moves on with the head (a round on the same head is the last one again)
   fin = 90;
+  c.head = 101;
   la.length = 0;
   await s.trees(after(25));
   assert.deepEqual(la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]), ["0x33"]);
-  // a leaf past the finalized 90 is in every read (the newest agreed block is 100), and never cached: the next read
-  // starts at 91 again, in an epoch read and a deposit's own note's read alike
+  // a leaf past the finalized 90 is in every read (up to the newest agreed block), and never cached: the next round
+  // (on a new head) starts at 91 again, in an epoch read and a deposit's own note's read alike
   c.events.push({ block: 95, kind: "dep", leaf: 1234n, label: 4321n });
   for (const opts of [{ newest: true }, undefined]) {
+    c.head++;
     la.length = 0;
     assert.equal((await s.trees(after(96), undefined, opts)).stateTree.size, 5);
-    assert.deepEqual(la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1)), [["0x5b", "0x64"]]);
+    assert.deepEqual(la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)","toBlock":"(0x[0-9a-f]+)"/)!.slice(1)), [["0x5b", q(c.head)]]);
   }
 });
 
@@ -1030,13 +1042,16 @@ test("a held fee is not taken once the depth at its block moved: refused, then r
   const c = { ...CB(), head: 31 };
   const log: string[] = [];
   const seen: unknown[] = [];
-  const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: freshOnly(c, 100, log), relayFee: async () => answer({ fee: "40000000000000" }), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined });
+  const rpcs = pair(c, c);
+  const sync = evmTreeSync({ rpcs, pin: PIN, sleep: async () => undefined, clock: stale() });
+  const p = evmPool({ pin: PIN, rpcs, feeRpcs: freshOnly(c, 100, log), sync, relayFee: async () => answer({ fee: "40000000000000" }), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined });
   await p.holdFee(EPOCH);
   const held = feeCalls(log);
   // two leaves at blocks 25 and 26 (past the finalized 20, below the period's first block 30): 5 leaves at block 30,
   // depth 3 now by the logs, where the held read's state gave 3 leaves (depth 2): never the held fee at another depth
   c.events.push({ block: 25, kind: "wd", leaf: 4242n }, { block: 26, kind: "wd", leaf: 4243n });
   c.events.sort((x, y) => x.block - y.block);
+  c.head = 32;
   await assert.rejects(p.bind(bindArgs()), /the tree depth at block 30: 2 by the pool's size there on two operators, 3 by its logs/);
   // the held read dropped: the next bind reads the block's state again, at depth 3
   await p.bind(bindArgs());
@@ -1074,7 +1089,7 @@ test("a tail reorged between two reads: the second read sees the new leaves, and
   const A = 1234n, B = 5678n;
   c.events.push({ block: 95, kind: "dep", leaf: A, label: 4321n });
   const la: string[] = [];
-  const s = sync(pair(c, c, { log: la }, {}));
+  const s = evmTreeSync({ rpcs: pair(c, c, { log: la }, {}), pin: PIN, ...noWait, clock: stale() });
   const one = await s.trees(after(96));
   assert.equal(one.stateRoot, new VaultTree([...c.events.map((e) => e.leaf)]).root);
   // a reorg from block 93: A is gone, B lands at 96
@@ -1087,8 +1102,9 @@ test("a tail reorged between two reads: the second read sees the new leaves, and
   assert.equal(two.stateRoot, want.root);
   assert.equal(two.stateTree.size, 5);
   assert.deepEqual(la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]), ["0x5b"], "the tail is read again from 91");
-  // the reorged blocks become final: the cache takes B, never A
+  // the reorged blocks become final (the head moved on): the cache takes B, never A
   c.finalized = 100;
+  c.head = 101;
   la.length = 0;
   assert.equal((await s.trees(after(97))).stateRoot, want.root);
   c.head = 110;
@@ -1171,7 +1187,7 @@ test("one RPC behind what is already cached (its finalized and latest below it) 
   c.events.push({ block: 88, kind: "dep", leaf: 1234n, label: 4321n });
   let finB = 90, latB = (_: number) => 100;
   const waits: number[] = [];
-  const s = evmTreeSync({ rpcs: pair(c, c, {}, { finalized: () => finB, latest: (k) => latB(k) }), pin: PIN, sleep: async (ms) => void waits.push(ms) });
+  const s = evmTreeSync({ rpcs: pair(c, c, {}, { finalized: () => finB, latest: (k) => latB(k) }), pin: PIN, sleep: async (ms) => void waits.push(ms), clock: stale() });
   assert.equal((await s.trees(after(89))).stateTree.size, 5); // the cache is at 90, the leaf at 88 in it
   // RPC b's finalized stays at 80; its latest is 85 for one read, the next round's anchor (by a flag, not a call count:
   // trees() reads latest again for its root times, card evm-device-reads-need-no-old-state)
@@ -1187,10 +1203,12 @@ test("the cache never goes down: a finalized block below it leaves it where it i
   c.events.push({ block: 85, kind: "dep", leaf: 1234n, label: 4321n });
   let finB = 90;
   const la: string[] = [];
-  const s = sync(pair(c, c, { log: la }, { finalized: () => finB }));
+  const s = evmTreeSync({ rpcs: pair(c, c, { log: la }, { finalized: () => finB }), pin: PIN, ...noWait, clock: stale() });
   await s.trees(after(86));
   finB = 80;
+  // each round on a new head (a round on the same head is the last one again)
   for (let i = 0; i < 2; i++) {
+    c.head++;
     la.length = 0;
     assert.equal((await s.trees(after(86))).stateTree.size, 5);
     assert.deepEqual(la.filter((x) => x.startsWith("eth_getLogs")).map((x) => x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]), ["0x5b"], `read ${i}: from 91`);
@@ -1239,7 +1257,11 @@ const fakeLatest = (number: number, ts: bigint) => () => ({ number: q(number), h
 
 test("F2a now is the newest block both RPCs agree on, never a time one RPC alone gives", async () => {
   const c = C3(); // block 100's time is T0 + 200 s
-  assert.equal(await evmNow(pair(c, c, {}, { latestBlock: fakeLatest(100, T0) })), (T0 + 200n) * 1000n);
+  // card evm-first-proof-inside-ten-seconds: two latest answers of one height are compared as they are (no read by
+  // number), so one RPC's other block there is a lag, never its time
+  await assert.rejects(evmNow(pair(c, c, {}, { latestBlock: fakeLatest(100, T0) })), (e) => e instanceof EvmLagError && /hold different blocks at 100/.test(e.message));
+  // a fake block above the other's: the other's block read on it by number, so its own header is the time
+  assert.equal(await evmNow(pair(c, c, { latest: () => 99 }, { latestBlock: fakeLatest(100, T0) })), (T0 + 198n) * 1000n);
 });
 
 test("F2b bind refuses a deadline the chain has passed, whatever one RPC says the time is", async () => {
@@ -1287,7 +1309,7 @@ test("F3b a provider's cap shrinks the page (its real words, thousands separator
   const c2 = chain([...deps(PP, [10, 12, 15])], 3000, 2990);
   let capped = true;
   const l2: string[] = [];
-  const s2 = sync(pair(c2, c2, { log: l2, getLogs: ({ from, to }) => { if (capped && to - from + 1 > 100) throw new Error("RPC error -32614: eth_getLogs is limited to a 100 range"); } }, {}));
+  const s2 = evmTreeSync({ rpcs: pair(c2, c2, { log: l2, getLogs: ({ from, to }) => { if (capped && to - from + 1 > 100) throw new Error("RPC error -32614: eth_getLogs is limited to a 100 range"); } }, {}), pin: PIN, ...noWait, clock: stale() });
   await s2.trees(after(20));
   c2.head = 6000; c2.finalized = 5990;
   capped = false;
@@ -1682,8 +1704,9 @@ test("X2 a block that is gone at the anchor's height when a mismatch is checked 
   const c = C3();
   const off = { view: (n: string, v: bigint) => (n === "currentTreeSize" ? v + 1n : v) };
   const waits: number[] = [];
-  // RPC b's third read by number (refuse()'s re-read of block 100) answers null
-  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, off, { ...off, unknown: (n, k) => n === 100 && k === 2 }), pin: PIN, sleep: async (ms) => void waits.push(ms) }).trees(after(25)), /the state tree from the logs/);
+  // RPC b's first read by number (refuse()'s re-read of block 100: the agreed blocks' tag answers are one block on
+  // both, read by number on neither) answers null
+  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, off, { ...off, unknown: (n, k) => n === 100 && k === 0 }), pin: PIN, sleep: async (ms) => void waits.push(ms) }).trees(after(25)), /the state tree from the logs/);
   assert.deepEqual(waits, [2000]);
 });
 
@@ -1807,7 +1830,8 @@ for (const text of ["query exceeds max results 20000, retry with the range 52898
 test("R2 the pool's now() retries a moment's fork at the newest height like every other agreed read", async () => {
   const c = C3();
   let calls = 0;
-  const fork = { hashOf: (n: number) => (n === 100 && calls++ < 2 ? h32("other 100") : c.hashOf(n)) };
+  // one read of block 100 on RPC b per agreed read: its tag answer, no read by number
+  const fork = { hashOf: (n: number) => (n === 100 && calls++ < 1 ? h32("other 100") : c.hashOf(n)) };
   const waits: number[] = [];
   const p = evmPool({ pin: PIN, ...pairs(pair(c, c, {}, fork)), relayFee: async () => answer(), epochFee: () => 0n, sleep: async (ms) => void waits.push(ms) });
   assert.equal(await p.now(), (T0 + 200n) * 1000n);
@@ -1946,9 +1970,12 @@ const START = (T0 + 2n * 41n) * 1000n - 1000n; // between block 40 and 41 of C3
 const bindOn = (rpcs: [EvmRpc, EvmRpc], feeRpcs: [EvmRpc, EvmRpc], sleep: (ms: number) => Promise<void>) =>
   evmPool({ pin: PIN, rpcs, feeRpcs, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep }).bind(bindArgs());
 const syncOn = (rpcs: [EvmRpc, EvmRpc], sleep: (ms: number) => Promise<void>) => evmTreeSync({ rpcs, pin: PIN, sleep });
+/** An RPC whose latest block is the one before its own head's (100): block 99. */
+const behind = (r: EvmRpc): EvmRpc => Object.assign(async (m: string, p: readonly unknown[]) => (m === "eth_getBlockByNumber" && p[0] === "latest" ? r(m, [q(99), false]) : r(m, p)), { url: r.url });
 const READS: Read[] = [
   { name: "evmAgreedBlock's tag read (the pool's now)", side: 1, hit: byNumber("latest"), what: /^rpc 1 latest block: /, run: (r, s) => evmNow(r, undefined, s) },
-  { name: "evmAgreedBlock's read by number (the pool's now)", side: 1, hit: byNumber(q(100)), what: /^rpc 1 block 100: /, run: (r, s) => evmNow(r, undefined, s) },
+  // rpc 0's latest a block behind: only the higher, rpc 1, is read by number (card evm-first-proof-inside-ten-seconds)
+  { name: "evmAgreedBlock's read by number (the pool's now)", side: 1, hit: byNumber(q(99)), what: /^rpc 1 block 99: /, run: (r, s) => evmNow([behind(r[0]), r[1]], undefined, s) },
   { name: "evmLatestHigh (bind's send margin)", side: 1, hit: byNumber("latest"), what: /^rpc 1 latest block: /, run: (r, s) => evmLatestHigh(r, undefined, s) },
   { name: "the tree sync's eth_chainId", side: 1, hit: (m) => m === "eth_chainId", what: /^rpc 1 eth_chainId: /, run: (r, s) => syncOn(r, s).trees(after(25)) },
   { name: "the tree sync's finalized anchor", side: 1, hit: byNumber("finalized"), what: /^rpc 1 finalized block: /, run: (r, s) => syncOn(r, s).trees(after(25)) },
@@ -2052,11 +2079,12 @@ test("bind's chain fee view on the fee pair: a 429 then an answer passes; a time
 test("the tree sync's reorg check (a mismatch: is the newest anchor's block still its hash?) survives a 429 and fails by name past the bound", async () => {
   // both RPCs say one more leaf than the logs make: a mismatch, refused once the anchor's block 100 reads unmoved
   const lie = { view: (name: string, v: bigint) => (name === "currentTreeSize" ? v + 1n : v) };
-  // rpc 1's first read of block 100 is the agreed block's own; every later one is the check's
-  for (const [faults, want, reads] of [[[HTTP_429], /^PoolReadError: the state tree from the logs \(4 leaves\) is not the pool's/, 3], [Array(100).fill(HTTP_429), /^EvmUnansweredError: rpc 1 block 100: no answer in 4 tries/, 1 + EVM_POOL_READ_TRIES]] as const) {
+  // every read of block 100 by number on rpc 1 is the check's (both latest answers are block 100: the agreed block is
+  // read by number on neither, card evm-first-proof-inside-ten-seconds)
+  for (const [faults, want, reads] of [[[HTTP_429], /^PoolReadError: the state tree from the logs \(4 leaves\) is not the pool's/, 2], [Array(100).fill(HTTP_429), /^EvmUnansweredError: rpc 1 block 100: no answer in 4 tries/, EVM_POOL_READ_TRIES]] as const) {
     const rpcs = pair(c3, c3, lie, lie);
     let seen = 0;
-    rpcs[1] = flaky(rpcs[1], (m, p) => byNumber(q(100))(m, p, 0) && seen++ >= 1, [...faults]);
+    rpcs[1] = flaky(rpcs[1], (m, p) => byNumber(q(100))(m, p, 0) && (seen++, true), [...faults]);
     await assert.rejects(syncOn(rpcs, async () => {}).trees(after(25)), want);
     assert.equal(seen, reads);
   }
@@ -3053,7 +3081,7 @@ test("review of 7eb8cfb9, P3-4: the hold's record is rewritten with new leaves o
   let writes = 0;
   const counted: EvmSyncHold = { ...box, write: async (x) => (writes++, box.write(x)) };
   const move = (n: number) => ((c.head += n), (c.finalized += n));
-  const s = evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait });
+  const s = evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait, clock: stale() });
   await s.events();
   assert.equal(writes, 1);
   // 1,000 blocks on, no new leaf: no write
@@ -3206,7 +3234,7 @@ test("card evm-deposit-on-mainnet: a pass's fresh sync after the pool's first de
     const hold: EvmSyncHold = { read: async () => h as never, write: async (v) => void (h = v), drop: async () => void (h = null) };
     // the pool before its first deposit: the page's sync holds its blocks up to the finalized anchor, with no leaf
     const c = longChain([], 800_000);
-    const page = evmTreeSync({ rpcs: pair(c, c, { chainId }, { chainId }), pin, held: hold, ...noWait });
+    const page = evmTreeSync({ rpcs: pair(c, c, { chainId }, { chainId }), pin, held: hold, ...noWait, clock: stale() });
     assert.equal((await page.events()).events.length, 0);
     assert.equal((h as EvmSyncHeld).to, 799_990n);
     assert.equal((h as EvmSyncHeld).events.length, 0);
