@@ -142,9 +142,14 @@ export async function copyNet({ log, phase = () => "" }) {
       log(`helper: ${line}`);
     } else if (process.env.COPY_ONECLICK === "1" && url.pathname === "/v1/proxy/oneclick/v0/quote" && method === "POST") {
       const up = await native("https://1click.chaindefuser.com/v0/quote", { method: "POST", headers: { "content-type": "application/json" }, body: String(init.body) });
-      r = new Response(await up.arrayBuffer(), { status: up.status, headers: { "content-type": "application/json" } });
-      quotes.push({ phase: phase(), status: up.status });
-      log(`copy helper: 1Click quote passed through: HTTP ${up.status}`);
+      const bytes = await up.arrayBuffer();
+      r = new Response(bytes, { status: up.status, headers: { "content-type": "application/json" } });
+      // the quote's amounts, as 1Click answered them, for the record (the device check reads them again)
+      let q = null;
+      try { q = JSON.parse(new TextDecoder().decode(bytes))?.quote ?? null; } catch {}
+      const amounts = q === null ? null : { amountIn: q.amountIn, amountInUsd: q.amountInUsd, amountOut: q.amountOut, minAmountOut: q.minAmountOut, withdrawFee: q.withdrawFee, depositAddress: q.depositAddress };
+      quotes.push({ phase: phase(), status: up.status, amounts });
+      log(`copy helper: 1Click quote passed through: HTTP ${up.status} ${JSON.stringify(amounts)}`);
     } else {
       r = json(404, { error: { code: "not_found" } });
       log(`copy helper: ${method} ${url.pathname} is not served on the copy (404)`);
