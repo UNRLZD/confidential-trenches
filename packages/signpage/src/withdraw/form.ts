@@ -56,7 +56,10 @@ export const WITHDRAW_WORDS = {
 } as const;
 
 /** The keys of WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
-export const WITHDRAW_DRAFT: ReadonlySet<string> = new Set(["to", "amount", "min", "unmatched", "step-waiting", "step-sending", "step-sent", "step-back", "step-stopped"]);
+export const WITHDRAW_DRAFT: ReadonlySet<string> = new Set(["to", "amount", "min", "unmatched"]);
+/** The Cash run's step words (card cash-withdraws-everything-to-any-chain), all new: each drawn with data-draft-copy until
+ *  the owner picks it. A set of their own, so the vault form's set stays the one the 8 Nov picks left. */
+export const STEP_DRAFT: ReadonlySet<string> = new Set(["step-waiting", "step-sending", "step-sent", "step-back", "step-stopped"]);
 
 /** Sets data-draft-copy on an element drawing `key` when `key` is in `drafts`, and takes it off otherwise. */
 export function markDraft(el: HTMLElement, key: string, drafts: ReadonlySet<string>): void {
@@ -304,7 +307,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     if (!word) return;
     const key = stepWord(kind);
     word.textContent = WITHDRAW_WORDS[key];
-    markDraft(word, key, WITHDRAW_DRAFT);
+    markDraft(word, key, STEP_DRAFT);
   };
 
   // the tap: the note value and the fee bound read again, both fields checked again; only the same answer goes on

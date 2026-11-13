@@ -197,12 +197,11 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
     if (quote.relayFee > drawnFee) return { kind: "fee", fee: quote.relayFee };
     const [trees, ns] = await Promise.all([sync(), blockNs()]);
     const notes = await page.notes();
-    let amount = w.amount;
     if (whole) {
       const held = (await notes.list()).find((x) => x.id === note);
       const all = held?.leaf === undefined ? null : held.leaf.value - quote.relayFee;
       if (all === null || all < w.amount) throw new Error("whole: the note does not cover the amount and its fee");
-      amount = all;
+      w = { recipient: w.recipient, amount: all };
     }
     const seed = await page.seed64();
     let going: Promise<RelayOutcome>;
@@ -222,7 +221,7 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
         network,
         rpcs,
         priceRpcs,
-        amount,
+        amount: w.amount,
         to: w.recipient,
         deadlineMs: withdrawDeadlineMs(ns),
         blockTimestampNanosec: ns,
