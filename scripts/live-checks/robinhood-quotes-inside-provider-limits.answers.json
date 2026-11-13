@@ -1757,5 +1757,854 @@
    }
   },
   "from": "95977bbbe, the Mac"
+ },
+ "step2_after": {
+  "readAt": "2026-11-13T23:37:28.055Z",
+  "quotes": {
+   "readAt": "2026-11-13T23:40:25.487Z",
+   "chains": {
+    "robinhood": {
+     "index": {
+      "ms": 48082,
+      "served": true,
+      "covers": 113739733,
+      "pools": 42151,
+      "error": null,
+      "limited": [
+       0,
+       0
+      ],
+      "hosts": {
+       "rpc.mainnet.chain.robinhood.com": {
+        "requests": 21,
+        "calls": 41,
+        "s429": 0
+       },
+       "ct-api.unrealized.trade": {
+        "requests": 21,
+        "calls": 41,
+        "s429": 0
+       }
+      }
+     },
+     "rows": [
+      {
+       "coin": "0x000de658153f47f23e92973c8eb1e89762703676",
+       "symbol": "FOBO",
+       "liq_usd": "1715859.0038",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 8539,
+         "quotes": 2,
+         "ok": false,
+         "code": "too_many_pools",
+         "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 6,
+           "calls": 15,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 42,
+           "calls": 92,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 37,
+           "calls": 87,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 6576,
+         "quotes": 2,
+         "ok": false,
+         "code": "too_many_pools",
+         "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 6,
+           "calls": 16,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 34,
+           "calls": 80,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 38,
+           "calls": 84,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 9841,
+         "quotes": 2,
+         "ok": false,
+         "code": "too_many_pools",
+         "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 7,
+           "calls": 19,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 27,
+           "calls": 67,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 35,
+           "calls": 80,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 19,
+           "calls": 37,
+           "s429": 0
+          },
+          "rpc-robinhood.globalstake.io": {
+           "requests": 2,
+           "calls": 4,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 8152,
+         "quotes": 2,
+         "ok": false,
+         "code": "too_many_pools",
+         "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 7,
+           "calls": 19,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 37,
+           "calls": 82,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 35,
+           "calls": 80,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 2,
+           "calls": 3,
+           "s429": 0
+          }
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+       "symbol": "CASHCAT",
+       "liq_usd": "863043.621",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 10932,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x020bfc650a365f8bb26819deaabf3e21291018b4"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 12,
+           "calls": 36,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 42,
+           "calls": 87,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 40,
+           "calls": 85,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 2,
+           "calls": 6,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 3146,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x020bfc650a365f8bb26819deaabf3e21291018b4"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 4,
+           "calls": 12,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 13,
+           "calls": 31,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 12,
+           "calls": 30,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 2,
+           "calls": 6,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 3032,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x020bfc650a365f8bb26819deaabf3e21291018b4"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 3,
+           "calls": 8,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 13,
+           "calls": 31,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 15,
+           "calls": 33,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 4,
+           "calls": 12,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 2854,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x020bfc650a365f8bb26819deaabf3e21291018b4"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 3,
+           "calls": 8,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 13,
+           "calls": 31,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 11,
+           "calls": 29,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0
+          },
+          "rpc-robinhood.globalstake.io": {
+           "requests": 2,
+           "calls": 6,
+           "s429": 0
+          }
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+       "symbol": "HOOKR",
+       "liq_usd": "834976.6502",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 7693,
+         "quotes": 2,
+         "ok": false,
+         "code": "native_first",
+         "message": "native_first: robinhood's WETH is behind an upgradeable proxy and a native route quotes at least as much",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 12,
+           "calls": 38,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 31,
+           "calls": 57,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 35,
+           "calls": 61,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 5508,
+         "quotes": 2,
+         "ok": false,
+         "code": "native_first",
+         "message": "native_first: robinhood's WETH is behind an upgradeable proxy and a native route quotes at least as much",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 8,
+           "calls": 23,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 28,
+           "calls": 52,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 31,
+           "calls": 55,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 1,
+           "calls": 3,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 5653,
+         "quotes": 2,
+         "ok": false,
+         "code": "native_first",
+         "message": "native_first: robinhood's WETH is behind an upgradeable proxy and a native route quotes at least as much",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 8,
+           "calls": 23,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 28,
+           "calls": 52,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 31,
+           "calls": 55,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 5430,
+         "quotes": 2,
+         "ok": false,
+         "code": "native_first",
+         "message": "native_first: robinhood's WETH is behind an upgradeable proxy and a native route quotes at least as much",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 8,
+           "calls": 23,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 28,
+           "calls": 52,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 30,
+           "calls": 54,
+           "s429": 0
+          }
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0xf2915d1e3c1b0c769d0c756ec43f1c1f6c99cd03",
+       "symbol": "ARROW",
+       "liq_usd": "802410.5016",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 1325,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0xf2915d1e3c1b0c769d0c756ec43f1c1f6c99cd03"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 2,
+           "calls": 4,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 3,
+           "calls": 5,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 2,
+           "calls": 4,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 1191,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0xf2915d1e3c1b0c769d0c756ec43f1c1f6c99cd03"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 2,
+           "calls": 4,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 3,
+           "calls": 5,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 4,
+           "calls": 6,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 1259,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0xf2915d1e3c1b0c769d0c756ec43f1c1f6c99cd03"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 2,
+           "calls": 4,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 2,
+           "calls": 4,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 2,
+           "calls": 4,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 1221,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0xf2915d1e3c1b0c769d0c756ec43f1c1f6c99cd03"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 2,
+           "calls": 4,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 3,
+           "calls": 5,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 4,
+           "calls": 6,
+           "s429": 0
+          }
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+       "symbol": "ORBIO",
+       "liq_usd": "635120.3521",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 11919,
+         "quotes": 3,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+            "fee": 3000,
+            "tickSpacing": 60,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           },
+           {
+            "currency": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+            "fee": 50002,
+            "tickSpacing": 500,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 13,
+           "calls": 38,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 55,
+           "calls": 124,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 61,
+           "calls": 130,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 3071,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+            "fee": 3000,
+            "tickSpacing": 60,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           },
+           {
+            "currency": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+            "fee": 50002,
+            "tickSpacing": 500,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 3,
+           "calls": 8,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 15,
+           "calls": 35,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 16,
+           "calls": 36,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 1,
+           "calls": 3,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 7003,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 11,
+           "calls": 34,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 31,
+           "calls": 64,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 27,
+           "calls": 60,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 2909,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 3,
+           "calls": 8,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 15,
+           "calls": 32,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 17,
+           "calls": 34,
+           "s429": 0
+          }
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+       "symbol": "FRONG",
+       "liq_usd": "377403.8408",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 7123,
+         "quotes": 2,
+         "ok": false,
+         "code": "too_many_pools",
+         "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 7,
+           "calls": 19,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 29,
+           "calls": 67,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 32,
+           "calls": 70,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 4790,
+         "quotes": 2,
+         "ok": false,
+         "code": "too_many_pools",
+         "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 6,
+           "calls": 16,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 24,
+           "calls": 61,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 26,
+           "calls": 63,
+           "s429": 0
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 1,
+           "calls": 3,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 4997,
+         "quotes": 2,
+         "ok": false,
+         "code": "too_many_pools",
+         "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 7,
+           "calls": 19,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 26,
+           "calls": 63,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 23,
+           "calls": 60,
+           "s429": 0
+          }
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 4924,
+         "quotes": 2,
+         "ok": false,
+         "code": "too_many_pools",
+         "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 7,
+           "calls": 19,
+           "s429": 0
+          },
+          "robinhood.drpc.org": {
+           "requests": 23,
+           "calls": 60,
+           "s429": 0
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 25,
+           "calls": 62,
+           "s429": 0
+          }
+         }
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  "from": "9a2b934bb, the Mac"
  }
 }

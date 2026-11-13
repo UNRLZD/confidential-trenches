@@ -4,7 +4,10 @@
 // - bad_live_before: the check run on the base 4fecb0326 (each currency's scan gap one request): FAIL, 279 answers of
 //   429 over 24 taps, up to 128 posts a warm tap to rpc.mainnet.chain.robinhood.com (4 its pace takes in 2 s);
 // - partial_after: the same on 95977bbbe (the gaps grouped): FAIL, 21 answers of 429, up to 46 posts a warm tap, warm
-//   taps 2.7-9.5 s.
+//   taps 2.7-9.5 s;
+// - step2_after: the same on step 2 (each quote's later gaps read once a kind, Robinhood's own RPC out of the quote
+//   list), 2026-11-14 23:4xZ (the helper's top rows moved: ARROW for PONS): FAIL, 0 answers of 429, up to 11 posts a warm
+//   tap to rpc.mainnet.chain.robinhood.com, warm taps 2.9-9.8 s.
 // No recorded run passes yet (the card is partial). The judge's pass is held by a plant on partial_after whose warm
 // taps are put inside the bound and the pace, and each other plant fails on its own line.
 import assert from "node:assert/strict";
@@ -61,6 +64,15 @@ test("the recorded run after the fix still fails, with under a tenth of the run 
   assert.equal(v.verdict, "FAIL");
   assert.ok(s429(A.partial_after) * 10 < s429(A.bad_live_before), `${s429(A.partial_after)} of ${s429(A.bad_live_before)}`);
   for (const l of bad(v)) assert.match(l, /warm taps end within|stay inside each provider's pace|ends in a quote or a true named refusal|answers of 429/, l);
+});
+
+test("the recorded run after step 2 has no answer of 429 and asks Robinhood's own RPC 11 posts a warm tap at most; it fails on the warm bound, the pace and the refusals alone", () => {
+  const v = judge(A.step2_after);
+  assert.equal(v.verdict, "FAIL");
+  assert.equal(s429(A.step2_after), 0);
+  const posts = A.step2_after.quotes.chains.robinhood.rows.flatMap((r) => r.runs.filter((u) => u.kind === "warm").map((u) => u.hosts["rpc.mainnet.chain.robinhood.com"]?.requests ?? 0));
+  assert.ok(Math.max(...posts) <= 11, posts.join(","));
+  for (const l of bad(v)) assert.match(l, /warm taps end within|stay inside each provider's pace|ends in a quote or a true named refusal/, l);
 });
 
 test("a run whose warm taps are inside the bound and the pace passes; each plant on it fails on its own line", () => {
