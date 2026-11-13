@@ -2,8 +2,9 @@
 // (balances-per-chain.answers.json), each read by balances-per-chain.mjs collect() in headless Chromium: the terminal on
 // APP_HOST's real name inside the stand-in shell that answers `state` with three pools.
 //   good:     card screens-never-say-proof's terminal build, recorded 13 Nov (--harness): every pool a row at both widths,
-//             in its own asset, one Balance column header and no Ready or Pending anywhere in the block, though the
-//             answer sends a ready for one pool: PASS;
+//             in its own asset with its value in dollars or a dash, no column header (card
+//             portfolio-moves-money-between-chains, re-recorded on its build) and no Ready or Pending anywhere in the
+//             block, though the answer sends a ready for one pool: PASS;
 //   main:     main's build 4c1826a75 before that card (--harness --build), which still draws Ready and Pending columns
 //             and a data-ready and data-pending mark on each row: FAIL (13 Nov 07:53Z: removed, the app names no proof);
 //   deployed: APP_HOST as served on 3 Nov before this card and app-portfolio-mount deploy: /portfolio draws no pool
@@ -71,7 +72,7 @@ test("planted: a SOL balance drawn as dollars: FAIL", () => {
     rec.runs.find((y) => y.width === "phone").rows.find((y) => y.chain === "solana").text[1] = "$12.50";
   });
   assert.equal(r.ok, false);
-  assert.ok(bad(r).some((l) => /solana drawn .*no dollar figure/.test(l)), bad(r).join("\n"));
+  assert.ok(bad(r).some((l) => /solana drawn \["\$12\.50".*no dollar figure/.test(l)), bad(r).join("\n"));
 });
 
 test("planted: the wrong asset on a row: FAIL", () => {
@@ -85,17 +86,19 @@ test("main's build before the card: Ready and Pending columns and marks on each 
   const r = judge(ANSWERS.main);
   assert.equal(r.ok, false);
   for (const w of ["phone", "desktop"]) {
-    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w} /portfolio: the column headers are ["Balance","Ready","Pending"], want one, Balance`)), r.lines.join("\n"));
+    assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w} /portfolio: the column headers are ["Balance","Ready","Pending"], want none`)), r.lines.join("\n"));
     assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w} /portfolio: the block says "Ready"`)), r.lines.join("\n"));
     assert.ok(bad(r).some((l) => l.startsWith(`BAD ${w} /portfolio: solana row marks ["data-ready","data-pending"]`)), r.lines.join("\n"));
   }
-  // what main got right stays right: the rows, their assets and balances
-  assert.ok(!bad(r).some((l) => /balance \d+ base units|drawn \[/.test(l)), bad(r).join("\n"));
+  // what main got right stays right: the rows, their assets and balances; the cell after the balance held its Ready
+  // figure, where a row's value now goes (card portfolio-moves-money-between-chains), so that cell is what fails
+  assert.ok(!bad(r).some((l) => /balance \d+ base units/.test(l)), bad(r).join("\n"));
+  assert.ok(bad(r).filter((l) => / drawn \[/.test(l)).every((l) => /drawn \["[0-9.]+ (SOL|ETH)","[0-9.]+"/.test(l)), bad(r).join("\n"));
 });
 
-test("good: one Balance header, no text of Ready or Pending, no mark on a row, and the answer still sends a ready", () => {
+test("good: no column header, no text of Ready or Pending, no mark on a row, and the answer still sends a ready", () => {
   for (const x of ANSWERS.good.runs) {
-    assert.deepEqual(x.headers, ["Balance"], x.width);
+    assert.deepEqual(x.headers, [], x.width);
     assert.doesNotMatch(x.blockText, /ready|pending/i, x.width);
     assert.ok(x.rows.every((y) => y.marks.length === 0), x.width);
   }
@@ -105,7 +108,7 @@ test("good: one Balance header, no text of Ready or Pending, no mark on a row, a
 test("planted: a Ready or Pending header, text of either, or a data-ready mark on a row: FAIL", () => {
   const head = mut((rec) => void (rec.runs[0].headers = ["Balance", "Ready", "Pending"]));
   assert.ok(bad(head).some((l) => /the column headers are \["Balance","Ready","Pending"\]/.test(l)), bad(head).join("\n"));
-  assert.equal(mut((rec) => void (rec.runs[1].headers = [])).ok, false);
+  assert.equal(mut((rec) => void (rec.runs[1].headers = ["Balance"])).ok, false);
   assert.equal(mut((rec) => void delete rec.runs[1].headers).ok, false);
   const text = mut((rec) => void (rec.runs[1].blockText += " Pending —"));
   assert.ok(bad(text).some((l) => /the block says "Pending"/.test(l)), bad(text).join("\n"));

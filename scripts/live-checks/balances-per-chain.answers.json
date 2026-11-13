@@ -1,8 +1,8 @@
 {
   "good": {
-    "at": "2026-11-13T08:33:36.175Z",
+    "at": "2026-11-13T20:33:08.645Z",
     "browser": "157.0.8103.51",
-    "source": "harness, terminal build apps/terminal/dist",
+    "source": "harness, terminal build apps/terminal/dist (card portfolio-moves-money-between-chains, its build merged with main f7f20cdaf)",
     "answer": {
       "release": "check-shell",
       "api": 1,
@@ -49,6 +49,7 @@
             "text": [
               "NEAR",
               "0 USDC",
+              "$0.00",
               ""
             ]
           },
@@ -60,6 +61,7 @@
             "text": [
               "Solana",
               "12.5 SOL",
+              "\u2014",
               ""
             ]
           },
@@ -71,6 +73,7 @@
             "text": [
               "Base",
               "0.25 ETH",
+              "\u2014",
               ""
             ]
           },
@@ -82,20 +85,19 @@
             "text": [
               "Robinhood",
               "0 ETH",
+              "$0.00",
               ""
             ]
           }
         ],
         "violations": [],
         "errors": [],
-        "headers": [
-          "Balance"
-        ],
-        "blockText": "Private balanceBalanceNEAR0 USDCSolana12.5 SOLBase0.25 ETHRobinhood0 ETH",
+        "headers": [],
+        "blockText": "Private balance$0.00NEAR0 USDC$0.00Solana12.5 SOL\u2014Base0.25 ETH\u2014Robinhood0 ETH$0.00",
         "footer": {
           "conn": "wait",
           "block": "",
-          "ms": 182
+          "ms": 176
         }
       },
       {
@@ -111,6 +113,7 @@
             "text": [
               "NEAR",
               "0 USDC",
+              "$0.00",
               ""
             ]
           },
@@ -122,6 +125,7 @@
             "text": [
               "Solana",
               "12.5 SOL",
+              "\u2014",
               ""
             ]
           },
@@ -133,6 +137,7 @@
             "text": [
               "Base",
               "0.25 ETH",
+              "\u2014",
               ""
             ]
           },
@@ -144,20 +149,19 @@
             "text": [
               "Robinhood",
               "0 ETH",
+              "$0.00",
               ""
             ]
           }
         ],
         "violations": [],
         "errors": [],
-        "headers": [
-          "Balance"
-        ],
-        "blockText": "Private balanceBalanceNEAR0 USDCSolana12.5 SOLBase0.25 ETHRobinhood0 ETH",
+        "headers": [],
+        "blockText": "Private balance$0.00NEAR0 USDC$0.00Solana12.5 SOL\u2014Base0.25 ETH\u2014Robinhood0 ETH$0.00",
         "footer": {
           "conn": "on",
           "block": "223500001",
-          "ms": 177
+          "ms": 146
         }
       }
     ]
