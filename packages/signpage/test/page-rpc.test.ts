@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaPacedRpc, solanaSameProvider, type SolanaFetch } from "../../kit/src/trade/solana/send.ts";
 import { lanedRpc, pageHelperRpc, pageHelperRpcStopped, pageRpc, seatHosts } from "../src/page-rpc.ts";
-import { pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs, pageSolanaSettleRpcs, pageSolanaTokenRpcs, SOLANA_TOKEN_SEAT, SOLANA_TOKEN_SEAT_LIMIT, testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { closeHostLanes, hostLane, PROBE_HELD_MAX_MS, resetHostLanes, TRADE_TURN_MAX_MS } from "../../wallet/src/throttle.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
@@ -44,6 +44,44 @@ test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): 
     for (const chain of ["base", "robinhood"] as const)
       assert.deepEqual(deps.rpcs(chain)!.map((r) => (r as unknown as { url: string }).url), pageEvmPoolRpcs(chain)!.slice(0, 2).map((r) => (r as unknown as { url: string }).url));
   });
+});
+
+// A found W's token accounts on mainnet (card found-wallet-sweep-reads-on-a-pair-that-answers): the public seat
+// answers no getTokenAccountsByOwner (publicnode -32602, Pocket -32010), so these reads go to SOLANA_TOKEN_SEAT, device-direct
+// and paced at its limit, and the helper's /v1/rpc/solana, another company's; the sell host hands the rent back that pair.
+test("the mainnet build's found W token-account pair: SOLANA_TOKEN_SEAT then the helper's route, no member of the public seat, the seat one call each 1.25 s, and the sell host's rent back reads on it", async () => {
+  await withThrottledOnce(async (seen) => {
+    const [a, b] = pageSolanaTokenRpcs("pass");
+    assert.equal((a as unknown as { url: string }).url, `${SOLANA_TOKEN_SEAT}/`);
+    assert.equal((b as unknown as { url: string }).url, `${TRADE_HELPER}/v1/rpc/solana`);
+    for (const r of [a, b]) assert.ok(!SOLANA_PUBLIC_SEAT.some((u) => (r as unknown as { url: string }).url.startsWith(u)), "never the public seat");
+    assert.deepEqual(SOLANA_TOKEN_SEAT_LIMIT, { windowMs: 1_250, total: 1, perMethod: 1 });
+    // both read through a 429 once
+    assert.equal(await a("getSlot", []), 42);
+    assert.equal(await b("getSlot", []), 42);
+    assert.equal(seen.get(SOLANA_TOKEN_SEAT), 2);
+  });
+  // the seat's calls start a window apart, however many are asked at once
+  const real = globalThis.fetch;
+  const starts: number[] = [];
+  resetHostLanes();
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    if (String(u) === SOLANA_TOKEN_SEAT) starts.push(performance.now());
+    const id = (JSON.parse(String(init?.body)) as { id: string }).id;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: [] } }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const [seat] = pageSolanaTokenRpcs("trade");
+    await Promise.all([0, 1, 2].map(() => seat("getTokenAccountsByOwner", [W, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "base64" }])));
+  } finally {
+    globalThis.fetch = real;
+    resetHostLanes();
+  }
+  assert.equal(starts.length, 3);
+  for (let i = 1; i < 3; i++) assert.ok(starts[i]! - starts[i - 1]! >= 1_200, `call ${i} started ${Math.round(starts[i]! - starts[i - 1]!)} ms after the one before`);
+  const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
+  assert.equal(src.split("tokenRpcs: tokenRpcs(),").length, 2, "the sell host hands its rent backs the token pair, once");
+  assert.match(src, /const tokenRpcs = \(kind: ReadKind = "trade"\): readonly \[SolanaRpc, SolanaRpc\] => over\.tokenRpcs \?\? over\.rpcs \?\? pageSolanaTokenRpcs\(kind\);/);
 });
 
 // The page's Solana reads and sends (pool buy, sell, deposit, withdraw, restore and the trade path) each go to both of
