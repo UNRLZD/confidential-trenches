@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolFee, evmPoolGas, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator, SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaSameProvider, VaultTree } from "@blindfill/kit";
 import { evmPoolSender } from "../../../apps/helper/src/pool/evm.ts";
 import { evmAddress } from "../src/derive/index.ts";
-import { checkPool, PassFail, TAKE_SLACK_MS } from "../src/pool/pool.ts";
+import { checkPool, TAKE_SLACK_MS } from "../src/pool/pool.ts";
 import { SOL_LADDER } from "../src/pool/solana.ts";
 import { evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import {
@@ -564,22 +564,6 @@ test("bind: the pool's context of W's request, its fee the device's own from the
   assert.equal(b.feeCap, 3n * 10n ** 13n);
   assert.deepEqual(b.request, { processooor: POOL, relay: { recipient: W, feeRecipient: FEE_TO, feeCap: 3n * 10n ** 13n, deadlineMs: EPOCH + EVM_LIFE_MS, refundPrecommitment: 5n, salt: PP.relayed.request.salt } });
   assert.equal(b.context, evmPoolContextOf(b.request, p.scope));
-});
-
-// card buy-spends-several-pieces: the pass's line names a bind whose read of the pool's time got no answer "network",
-// never the fee_refused a refusal reads as
-test("bind: the pool's time read that fails is network (PassFail); a fee answer it refuses stays untagged", async () => {
-  const c = CB();
-  const [r0, r1] = pair(c, c);
-  const dead = Object.assign(async (m: string, q: readonly unknown[]) => {
-    if (m === "eth_getBlockByNumber" && (q as unknown[])[0] === "latest") throw new Error("HTTP 429");
-    return r0(m as never, q as never);
-  }, { url: (r0 as { url?: string }).url }) as unknown as EvmRpc;
-  const p = evmPool({ pin: PIN, ...pairs([dead, r1]), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), ...noWait });
-  const e = await p.bind(bindArgs()).then(() => assert.fail("bound"), (x: unknown) => x);
-  assert.ok(e instanceof PassFail && e.reason === "network", `not network: ${String(e)}`);
-  const refused = await poolOf(CB(), () => answer({ fee: "1" })).bind(bindArgs()).then(() => assert.fail("bound"), (x: unknown) => x);
-  assert.ok(!(refused instanceof PassFail), `a refusal tagged: ${String(refused)}`);
 });
 
 test("L1 bind's fee takes the chain fee read at the epoch's first block's hash on both RPCs: the L1 fee bound and the operator fee of G(depth), refused when the RPCs differ", async () => {

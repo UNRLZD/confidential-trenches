@@ -262,25 +262,23 @@ const EPOCH = 1_800_000_120_000n;
 const args = (over: { deadlineMs?: bigint } = {}) => ({ chunk: CHUNK, wallet: { address: W, publicKey: unhex(R.w) }, refundPrecommitment: 1n, epochStartMs: EPOCH, deadlineMs: EPOCH + SOL_LIFE_MS, ...over });
 
 // card buy-spends-several-pieces: a proof pass's line names a throttle "network" and a refusal "fee_refused", so a walk
-// tells them apart; the bind tags its own reads that got no answer (the pool's time, the cost reads' transport faults)
-test("bind: a read of its own that got no answer is network (PassFail); the fee answer's refusal stays an untagged error", async () => {
+// tells them apart; the bind's reads that got no answer keep the kit's SolanaRpcTransportError, which the queue reads
+test("bind: a read of its own that got no answer throws the kit's SolanaRpcTransportError; the fee answer's refusal another error", async () => {
   const failing = (method: string): [SolanaRpc, SolanaRpc] =>
     pair(nowChain(), nowChain()).map((r) => (async (m: string, q: readonly unknown[]) => {
       if (m === method) throw new SolanaRpcTransportError("http_429", "HTTP 429", 3, "a.example");
       return r(m, q);
     })) as [SolanaRpc, SolanaRpc];
-  const reasonOf = async (run: Promise<unknown>) => {
-    const e = await run.then(() => assert.fail("bound"), (x: unknown) => x);
-    return e instanceof PassFail ? e.reason : `untagged: ${String(e)}`;
-  };
-  // the pool's time (solanaNow's first read), then the cost reads' fee price
-  assert.equal(await reasonOf(poolWith(failing("getBlockTime")).bind(args())), "network");
-  assert.equal(await reasonOf(poolWith(failing("getFeeForMessage")).bind(args())), "network");
+  const nameOf = async (run: Promise<unknown>) => run.then(() => assert.fail("bound"), (x: unknown) => (x as Error).name);
+  // the pool's time (solanaNow's block time read), then the cost reads' fee price
+  assert.equal(await nameOf(poolWith(failing("getBlockTime")).bind(args())), "SolanaRpcTransportError");
+  assert.equal(await nameOf(poolWith(failing("getFeeForMessage")).bind(args())), "SolanaRpcTransportError");
   // the helper's fee read tagged by its caller passes through as it is
   const tagged = solanaPool({ pin: PIN, rpcs: pair(nowChain(), nowChain()), relayFee: async () => Promise.reject(new PassFail("network", new Error("pool fee: HTTP 429"))), lagWait: async () => {} });
-  assert.equal(await reasonOf(tagged.bind(args())), "network");
-  // a fee answer that is not the epoch's is a refusal: untagged, the queue's fee_refused
-  assert.match(await reasonOf(poolWith(pair(nowChain(), nowChain()), (e) => feeAnswer(e, "1400000")).bind(args())), /^untagged: .*not the epoch's fee/);
+  const e = await tagged.bind(args()).catch((x: unknown) => x);
+  assert.ok(e instanceof PassFail && e.reason === "network");
+  // a fee answer that is not the epoch's is a refusal
+  await assert.rejects(poolWith(pair(nowChain(), nowChain()), (e) => feeAnswer(e, "1400000")).bind(args()), (x: unknown) => (x as Error).name === "Error" && /not the epoch's fee/.test((x as Error).message));
 });
 
 test("bind: the program's context over W, the pinned fee payer, the epoch fee as the cap, the tip cap and the grid deadline", async () => {

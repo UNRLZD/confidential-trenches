@@ -46,7 +46,7 @@ import { base58, base64 } from "@scure/base";
 import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import { POOL_TESTNET } from "./network.ts";
 import type { Ladder } from "./ladder.ts";
-import { failAs, PassFail, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** SOL's ladder: one = 0.001 SOL (the program's MIN_DEPOSIT), from 0.01 SOL [design: the owner's $2 floor, OD:268, in kind]. */
 export const SOL_LADDER: Ladder = Object.freeze({ one: 1_000_000n, min: 10_000_000n });
@@ -578,17 +578,13 @@ export function solanaPool(a: SolanaPoolArgs): Pool<SolanaReleaseRequest> {
       // tip); a cap per request would mark one user
       if (tipCap !== SOL_TIP_CAP && tipCap !== 0n) throw new Error("tipCap: SOL_TIP_CAP for a buy or 0 for a withdraw");
       if (typeof epochStartMs !== "bigint" || epochStartMs % SOL_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
-      // the bind's reads that do not answer (a throttle, a 5xx, no connection: the kit's SolanaRpcTransportError, the
-      // helper's fee read's own tag) are "network", never the fee_refused the queue names a refusal by
-      const nowMs = await solanaNow(a.rpcs, signal).catch(failAs("network"));
+      const nowMs = await solanaNow(a.rpcs, signal);
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + SOL_LIFE_MS || deadlineMs <= nowMs + SOL_SEND_MARGIN_MS)
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
       const f = await a.relayFee(epochStartMs, signal);
       if (f?.chain !== "solana" || f.program !== program || f.pool !== pool || f.fee_payer !== feePayer) throw new Error("relayFee: not this pool's or this fee payer's answer");
       if (f.epoch_ms !== Number(SOL_EPOCH_MS) || f.epoch_start_ms !== Number(epochStartMs) || f.step !== SOL_FEE_STEP.toString()) throw new Error("relayFee: not this epoch's, or not on the step");
-      const { rent, fee } = await feeOf(epochStartMs, signal).catch((e: unknown) => {
-        throw (e as { name?: unknown } | null)?.name === "SolanaRpcTransportError" ? new PassFail("network", e) : e;
-      });
+      const { rent, fee } = await feeOf(epochStartMs, signal);
       if (typeof f.fee !== "string" || f.fee !== fee.toString()) throw new Error(`relayFee: the helper's ${String(f.fee)} is not the epoch's fee ${fee}`);
       if (fee * 10_000n > chunk * MAX_RELAY_FEE_BPS) throw new Error("chunk: under the program's backstop at this fee");
       if (chunk - fee - tipCap < solanaRentMin(rent, 0)) throw new Error("chunk: W would end under rent(0) at this fee and the tip cap");

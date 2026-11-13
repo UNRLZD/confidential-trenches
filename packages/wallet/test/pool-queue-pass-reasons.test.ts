@@ -66,6 +66,20 @@ test("a bind whose own read got no answer (tagged by the pool): network, never f
   }
 });
 
+test("a bind whose read got no answer, its own error kept (a Solana transport fault, an EVM read unanswered): network", async () => {
+  for (const name of ["SolanaRpcTransportError", "EvmUnansweredError", "EvmOperatorsUnanswered"]) {
+    const { pool, q } = await open();
+    try {
+      pool.bind = async () => {
+        throw Object.assign(new Error("HTTP 429 (http_429, 4 tries at a.example)"), { name });
+      };
+      assert.deepEqual(reasons(await q.refresh()), ["network"], name);
+    } finally {
+      await q.close();
+    }
+  }
+});
+
 test("a fresh hold the store refuses (another tab holds the note): held_elsewhere", async () => {
   const { v, q } = await open();
   try {

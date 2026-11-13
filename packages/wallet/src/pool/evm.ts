@@ -81,7 +81,7 @@ import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChai
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { POOL_TESTNET } from "./network.ts";
-import { failAs, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
+import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
 export type EvmRpc = SolanaRpc;
@@ -2051,8 +2051,7 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
       if (typeof refundPrecommitment !== "bigint" || refundPrecommitment < 0n || refundPrecommitment >= VAULT_FIELD_P) throw new Error("refundPrecommitment: not a field element");
       if (typeof epochStartMs !== "bigint" || epochStartMs <= 0n || epochStartMs % EVM_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
       // the higher of the two latest times: one RPC's lie can only make this refuse
-      // the pool's time, as the queue's own read of it: a failure is "network", never fee_refused
-      const nowMs = await evmLatestHigh(rpcs, signal, sleep).catch(failAs("network"));
+      const nowMs = await evmLatestHigh(rpcs, signal, sleep);
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + EVM_LIFE_MS || deadlineMs > U64 || deadlineMs <= nowMs + EVM_SEND_MARGIN_MS)
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
       // the device's own fee: the epoch's first block and the tree depth there, each read on both RPCs, and the chain

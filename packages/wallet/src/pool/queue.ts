@@ -94,6 +94,10 @@ export type ProofQueueArgs<R> = {
 
 /** What one pass did: the notes it proved, the notes whose proof was made again, and each failure. */
 export { PassFail, type PassReason } from "./pool.ts";
+// a bind's read that got no answer keeps its own error (callers read its class: a throttle's wait, an EVM read's
+// EvmUnansweredError), so the pass names it by that class: "network", never the fee_refused of a refusal
+const UNANSWERED = new Set(["SolanaRpcTransportError", "EvmUnansweredError", "EvmOperatorsUnanswered"]);
+const bindFail = (e: unknown): never => failAs(UNANSWERED.has(String((e as { name?: unknown } | null)?.name)) ? "network" : "fee_refused")(e);
 /** `small`: the pool's UNSPENT landed notes below its smallest rung, never proved (none: absent). */
 export type QueuePass = { made: string[]; remade: string[]; failed: { noteId: string; error: string; reason?: PassReason }[]; small?: number };
 const NOTHING = (): QueuePass => ({ made: [], remade: [], failed: [] });
@@ -275,7 +279,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     w.secretKey.fill(0);
     const deadlineMs = epochStartMs + pool.lifeMs;
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
-    const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs }, signal).catch(failAs("fee_refused"));
+    const binding = await pool.bind({ chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs }, signal).catch(bindFail);
     try {
       checkBinding(pool as Pool, binding, chunk);
     } catch (e) {
