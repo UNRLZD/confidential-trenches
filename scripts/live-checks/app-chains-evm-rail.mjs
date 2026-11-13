@@ -10,6 +10,7 @@
 //     when it is listed.
 // A screenshot of each state is kept.
 // After: app
+// Bundle: out a browser and the helper
 //   node scripts/live-checks/app-chains-evm-rail.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the

@@ -8,6 +8,7 @@
 // its no-answer, never a wrong answer. A no-answer while the quote is made, or on either get_return read, is
 // INCONCLUSIVE (exit 3), never PASS.
 // After: app
+// Bundle: out mainnet NEAR RPC reads of the Rhea pool and get_return on the two providers, never the build
 //   node scripts/live-checks/near-view-rhea.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
 import "../net-window.mjs";

@@ -24,6 +24,7 @@
 // pool-deposit-address.test.ts); the recorded answers are facts() over each tree's packages/signpage/index.html and
 // public/app.js (this file reaches no package code: the import check holds it).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/pool-deposit-address.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

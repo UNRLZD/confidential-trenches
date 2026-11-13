@@ -26,6 +26,7 @@
 // test/pool-testnet.test.ts, test/rules-pool.test.ts), and that the served files are that commit's build is
 // signpage-release's. The money it saves is the card's run record (round-trip-costs-less.md), written with the real run.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/round-trip-costs-less.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

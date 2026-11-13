@@ -17,6 +17,7 @@
 // pool-withdraw-paste.test.ts, and drawn in Chrome under the page's policy by test/pool-withdraw-screens/run.mjs.
 // The recorded answers are facts() over packages/signpage/scripts/build-app.mjs builds (mainnet, as SIGN_HOST serves).
 // After: app sign
+// Bundle: read app
 //   node scripts/live-checks/withdraw-form-shows-what-you-can-send.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

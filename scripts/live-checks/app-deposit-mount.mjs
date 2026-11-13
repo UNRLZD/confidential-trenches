@@ -20,6 +20,7 @@
 //     screen the one row Deposited $73.18.
 // A screenshot of the quote, the address and the deposited state is kept per width and scheme.
 // After: app
+// Bundle: out a browser (its --harness run is in test-browser)
 //   node scripts/live-checks/app-deposit-mount.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served), framed by the stand-in shell
 //   node scripts/live-checks/app-deposit-mount.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]

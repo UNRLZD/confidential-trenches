@@ -22,6 +22,7 @@
 // And SIGN_HOST (https://confidential.unrealized.trade/), where the device syncs, must answer 200 with a connect-src that
 // names every seat's origin: a seat its policy refuses is no seat.
 // After: sign
+// Bundle: out mainnet Base and Robinhood RPC reads of the pool's logs on each chain's two seats, and SIGN_HOST's response headers (connect-src), never the build
 //   node scripts/live-checks/evm-pool-lists-mainnet.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes every answer read as the good run of evm-pool-lists-mainnet.answers.json, and a real bad run: Base on

@@ -13,6 +13,7 @@
 // kit-deposit-assets-dry's own (its collect: SIGN_HOST top-level framing a probe APP_HOST, the real helper, nothing of
 // anyone's named). A page before this card lists the USDC rows alone.
 // After: sign
+// Bundle: out a browser, the helper's 1Click answers and each pool's mainnet RPC reads (its run is kit-deposit-assets-dry's collect)
 //   node scripts/live-checks/deposit-takes-each-pools-own-coin.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/deposit-takes-each-pools-own-coin.mjs --local [<build dir>] [--record <file>]
 //     SIGN_HOST answered from a build dir (index.html and public/ as deploy.mjs builds them), with no dir the build of

@@ -11,6 +11,7 @@
 //     four presets drawn.
 // A screenshot of every load is kept. Signs nothing and moves nothing: the page is read signed out.
 // After: app
+// Bundle: out a browser and the helper (its test holds its bundle marks to the build's own writing)
 //   node scripts/live-checks/app-near-trading.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute "tap",

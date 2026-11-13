@@ -10,6 +10,7 @@
 // It runs check-signpage (packages/signpage/scripts/check-signpage.mjs, over HTTPS) through signpage-release's run(),
 // which holds the list's origin to SIGN_HOST's real name.
 // After: sign
+// Bundle: out the newest committed release list against what the host serves (the sign deploy refuses a build that list does not name)
 //   node scripts/live-checks/signpage-release-at-deploy.mjs [--release release-<N>] [--record <file> | --answer <file>]
 //     SIGN_HOST against the newest committed release list, or against release-<N> as if it were the newest; --record
 //     writes what the run read (check-signpage's record: sizes, hashes and headers, no bodies), --answer judges such a

@@ -23,6 +23,7 @@
 // publicnode.com refused it), Base 0 of 5 (packages/signpage/src/pool-testnet.ts EVM_TURN_PASS_MS; the bound is held by
 // test/pool-testnet-evm-queue.test.ts "a fresh load has no proof until the turn").
 // After: sign
+// Bundle: out EVM RPC reads on the kit's read lists
 //   node scripts/live-checks/evm-device-reads-need-no-old-state.mjs [--record <file>] [--answer <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 import "../net-window.mjs";

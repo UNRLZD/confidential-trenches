@@ -15,6 +15,7 @@
 // A provider that gives no answer is named and the check INCONCLUSIVE; a wrong answer (another chain, no block, two
 // blocks at one height on every try, an old newest block) fails.
 // After: sign
+// Bundle: out EVM RPC reads of the page's two mainnet pool RPCs beside its build
 //   node scripts/live-checks/evm-money-shows-and-spends-at-once.mjs [--record <file>] [--answer <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 import "../net-window.mjs";

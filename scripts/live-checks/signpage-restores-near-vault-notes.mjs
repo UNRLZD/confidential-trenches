@@ -9,6 +9,7 @@
 // gate's scripts/live-checks/<key>.mjs is that check; its recorded runs are pool-restore-wired.answers.json, replayed
 // by signpage-restores-near-vault-notes.test.mjs.
 // After: sign
+// Bundle: out a browser (it runs pool-restore-wired)
 //   node scripts/live-checks/signpage-restores-near-vault-notes.mjs   the deployed SIGN_HOST
 //     (confidential.unrealized.trade), as pool-restore-wired.mjs reads it
 // It is in the signing page's list (packages/signpage/scripts/deploy.test.mjs holds every signpage-* check there), so

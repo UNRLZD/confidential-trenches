@@ -13,6 +13,7 @@
 // The recorded answers: facts() over this card's committed SIGN_HOST build (packages/signpage/index.html and
 // public/app.js), and SIGN_HOST as served before the card's deploy (read 7 Nov).
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/wallet-near-prepay-taken.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

@@ -21,6 +21,7 @@
 // the quote and the guard), at the commit before the card (bad, the quote dropping the routes on both paths) and at
 // the card's first fix (bad_partial, the skip kept, the sim still at the keep-min value), and planted bundles.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/evm-sell-unfunded-sim-keeps-route.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";

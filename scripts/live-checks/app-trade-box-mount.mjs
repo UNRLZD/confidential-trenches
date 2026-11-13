@@ -13,6 +13,7 @@
 //     window, and its button opens the sign-in sheet over it.
 // A screenshot of every load and step is kept.
 // After: app
+// Bundle: out a browser
 //   node scripts/live-checks/app-trade-box-mount.mjs [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell, signed out (app-in-shell.mjs harnessRoute

@@ -13,6 +13,7 @@
 //     above the device's cap, or names another relayer, fails it: the form would show the fee unread and hand off nothing.
 // The testnet withdrawal itself (the hand-off from the testnet build's form to settled) is a money run, not this check.
 // After: sign
+// Bundle: out the page's CSP header, and the testnet fee read on the release helper and RPCs
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs [--record <file>]
 //   node scripts/live-checks/signpage-withdraw-handoff.mjs --local [--record <file>]
 //     the same with this tree's committed build (index.html, public/app.js, public/_headers) in place of SIGN_HOST's;
