@@ -40,6 +40,8 @@ const UPSTREAM = BOOK.upstream;
 const HOSTS = {};
 /** Each chain's next upstream in turn. */
 const turn = {};
+/** The upstream hosts that answered 403 this run. */
+const REFUSED = new Set();
 /** A provider's answer that it holds no state for the block asked. */
 const STATELESS = /missing trie node|header not found|state.*(not available|pruned)|historical state|unknown block|block not found|usage limit|rate limit|too many requests|exceeded|upgrade/i;
 /** An upstream read slower than this is printed. */
@@ -112,7 +114,11 @@ export async function answer(book, chain, req, record) {
   const all = [UPSTREAM[chain]].flat();
   const wide = all.filter((u) => !/drpc\.org|1rpc\.io|mainnet\.base\.org/.test(u));
   // and a block by number: mainnet.base.org and base.drpc.org answered 429 to most of a copy run's (13 Nov 06:4xZ)
-  const list = (req.method === "eth_getLogs" || req.method === "eth_getBlockByNumber") && wide.length > 0 ? wide : all;
+  const fit = (req.method === "eth_getLogs" || req.method === "eth_getBlockByNumber") && wide.length > 0 ? wide : all;
+  // and none that answered 403 this run while another is left: it refused this machine (robinhood-rpc.publicnode.com
+  // answered 403 to 711 of a Robinhood copy run's reads from the heavy box, 13 Nov 09:1xZ, each try a backoff)
+  const open = fit.filter((u) => !REFUSED.has(new URL(u).host));
+  const list = open.length > 0 ? open : fit;
   const first = (turn[chain] = ((turn[chain] ?? -1) + 1) % list.length);
   let got;
   for (let i = 0; i < 5 && !got; i++) {
@@ -127,6 +133,7 @@ export async function answer(book, chain, req, record) {
         else got = j;
       } else {
         outcome = `http ${res.status}`;
+        if (res.status === 403) REFUSED.add(new URL(url).host);
         // a 429 is waited out as the provider names it (Retry-After), never pushed
         if (res.status === 429) await new Promise((r) => setTimeout(r, 1000 * Math.min(30, Number(res.headers.get("retry-after")) || 2 ** (i + 1))));
       }

@@ -141,17 +141,34 @@ const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test
 // FORK_FORCE_REFUSE=1: the buy's own send (the helper's sender, the first raw transaction it sends) lands while the
 // token's code reverts on any call, so the pool's swap call fails inside the pool (buySwap's balanceOf) and the pool pays
 // W the chunk less the fee (Withdrawn); the code is put back once anvil has mined it (automine), so no other read sees it
+// The sender sends the same bytes to both its sides at once (evm.ts sendBoth), so every send of that first transaction
+// waits for the one code swap: run 11 (13 Nov 08:54Z) armed it on one side while the other's send was mined with the
+// token's own code, and the buy filled
 const sideRpc = async (method, params) => {
-  if (!(force.armed && method.startsWith("eth_sendRawTransaction"))) return anvil(method, params);
-  force.armed = false;
-  const code = await anvil("eth_getCode", [TOKEN, "latest"]);
-  await anvil("anvil_setCode", [TOKEN, "0x5f5ffd"]);
+  if (!method.startsWith("eth_sendRawTransaction") || !(force.armed || force.swap)) return anvil(method, params);
+  if (force.armed) {
+    force.armed = false;
+    force.swap = (async () => {
+      const code = await anvil("eth_getCode", [TOKEN, "latest"]);
+      const before = BigInt(await anvil("eth_blockNumber", []));
+      await anvil("anvil_setCode", [TOKEN, "0x5f5ffd"]);
+      return { code, before };
+    })();
+  }
+  const swap = force.swap;
+  const { code, before } = await swap;
   try {
     return await anvil(method, params);
   } finally {
-    await anvil("anvil_setCode", [TOKEN, code]);
-    force.at = Date.now();
-    log("forced refusal", { method, tokenCodeBytes: (code.length - 2) / 2 });
+    if (force.swap === swap) {
+      force.swap = null;
+      // anvil answers the send before it mines it (run 13, 13 Nov 09:11Z: the code was back in time and the buy
+      // filled): the code stays swapped until a block past the send's start is mined, up to 10 s
+      for (let i = 0; i < 50 && BigInt(await anvil("eth_blockNumber", [])) <= before; i++) await sleep(200);
+      await anvil("anvil_setCode", [TOKEN, code]);
+      force.at = Date.now();
+      log("forced refusal", { method, tokenCodeBytes: (code.length - 2) / 2 });
+    }
   }
 };
 // the sender holds the key it is given (apps/helper/src/pool/evm.ts cfg.senderKey, as the helper's own fresh unhex):
@@ -278,7 +295,9 @@ log("epoch", { start: new Date(nextEpoch).toISOString(), waitedMs: epochWaitMs }
 const proveAt = Date.now();
 await t.stateRead();
 let ready = [];
-for (let i = 0; i < 120 && ready.length === 0; i++) {
+// up to 10 min: every read the queue's state read makes through anvil is a slot the copy fetches from the public
+// upstreams first (run 14, 13 Nov 09:06Z: on a Robinhood copy no proof yet at 4 min, where Base's took 176-206 s)
+for (let i = 0; i < 300 && ready.length === 0; i++) {
   await sleep(2_000);
   ready = ((await t.readyWith(async () => null)).ready ?? []).filter((p) => p.wallet.chain === "evm");
   if (ready.length === 0 && i % 10 === 9) await t.stateRead();
