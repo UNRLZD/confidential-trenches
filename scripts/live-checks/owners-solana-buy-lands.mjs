@@ -27,12 +27,10 @@ const KEY = "owners-solana-buy-lands";
 export const SIGN = "https://confidential.unrealized.trade";
 export const HELPER = "https://ct-api.unrealized.trade";
 const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
-/** The mainnet pool, from its deploy record (contracts/pool-solana/deployments/mainnet.json). */
-export const mainnetPool = () => {
-  const r = JSON.parse(readFileSync(new URL("../../contracts/pool-solana/deployments/mainnet.json", import.meta.url), "utf8"));
-  if (r?.cluster !== "mainnet" || !B58.test(r?.pool ?? "")) throw new Error("contracts/pool-solana/deployments/mainnet.json names no mainnet pool");
-  return r.pool;
-};
+/** The mainnet pool, as contracts/pool-solana/deployments/mainnet.json records it (a live check reads no file under
+ *  contracts/, check:imports). */
+export const MAINNET_POOL = "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8";
+export const mainnetPool = () => MAINNET_POOL;
 const ID = "[A-Za-z_$][\\w$]*";
 const DEC = /^(0|[1-9]\d*)$/;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
