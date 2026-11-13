@@ -82,6 +82,7 @@ test("the queue's pass reads its trees on the pool's pass sync, the settle's: a 
           return Promise.reject(new Error("no trees here"));
         },
         depthAt: async () => Promise.reject(new Error("no depth here")),
+        now: async () => 1_800_000_000_000n,
       }),
     } as never);
     await t.stateRead();
