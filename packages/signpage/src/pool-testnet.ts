@@ -269,6 +269,14 @@ export const pageEvmPoolRpcs = (chain: "base" | "robinhood", kind: ReadKind = "t
   const urls = pageEvmPoolUrls(chain);
   return urls.length < 2 ? null : urls.map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
 };
+/** An EVM chain's pool pin and pair for a read that names no account (card deposit-takes-each-pools-own-coin: the
+ *  pool's floor deposit.assets lists its coin at, frame and top-level page alike): the network's pin and its pool list
+ *  (pageEvmPoolRpcs, "pass" reads) as one pair; null with no pin or fewer than two. */
+export const pageEvmFloorPool = (chain: "base" | "robinhood"): { pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc] } | null => {
+  const pin = EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain];
+  const r = pageEvmPoolRpcs(chain, "pass");
+  return pin === undefined || r === null ? null : { pin, rpcs: evmPair(r) as unknown as readonly [EvmRpc, EvmRpc] };
+};
 /** Each EVM chain's fee list, the RPCs an EVM proof's bind reads the chain fee on at the epoch's first block, two
  *  operators of it agreeing (../../wallet/src/pool/evm.ts EvmPoolArgs feeRpcs, the kit's evmTwoOperators; card
  *  device-evm-fee-read-walks-operators): the kit's evmReadProvidersOf(evmPoolVenues()[network]), copied as

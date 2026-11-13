@@ -54,6 +54,9 @@ import { HELPER_SOLANA_BLOCK_HEADER } from "@blindfill/kit";
 import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_CLIENTS, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
+import { companyOf, isKeyless, keyTag, operatorOf, providerName } from "./operator.ts";
+// re-exported: the names other modules import from here (operator.ts is the leaf the token watch imports alone)
+export { companyOf, operatorOf, providerName };
 
 export const RPC_ANSWER_MAX = 4 * 1024 * 1024; // a getMultipleAccounts of 100 accounts or an eth_getLogs page fits
 export const RPC_TIMEOUT_MS = 10_000; // NEAR send_tx waits for execution; the server's request timeout is 15 s
@@ -518,7 +521,7 @@ export function readUpstreams(env: Record<string, string | undefined>): Record<R
       if ((u.protocol !== "https:" && u.protocol !== "http:") || u.hash !== "" || /\s/.test(set)) throw new Error(`${name} must be an http(s) URL with no fragment`);
       const secrets = [set, u.href, u.username, u.password, ...u.searchParams.values(), ...u.pathname.split("/").filter((s) => s.length >= 16)];
       // the same URL under two names is one provider: asked once, at its first place
-      const keyless = u.username === "" && u.password === "" && [...u.searchParams.values()].every((v) => v === "") && u.pathname.split("/").every((s) => s.length < 16);
+      const keyless = isKeyless(u);
       if (!keyed.some((k) => k.url === set)) keyed.push({ env: name, url: set, host: u.host, forms: forms(secrets.filter((s) => s.length >= 8)), keyless });
     }
     const first = keyed[0];
@@ -1320,33 +1323,6 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   return { handle, background, backgroundThrottled, slot, pacer, keyed: keyedHealth, probe, policyOf };
 }
 
-/**
- * A keyed URL's company as /v1/health names it: its host's last two labels (quiknode.pro, drpc.org, fastnear.com,
- * helius-rpc.com), an IP address or a one-label host as it is. Not the whole host: /v1/health answers 1 KB at most (the
- * kit's HELPER_V1_PATHS row), and twelve QuickNode endpoint names (about 45 characters each) would pass it; the company
- * is what one key per company needs to show.
- */
-export function companyOf(host: string): string {
-  const h = host.replace(/:\d+$/, "");
-  if (/^[\d.]+$/.test(h) || h.startsWith("[")) return h;
-  return h.split(".").slice(-2).join(".");
-}
-/** Each company's other domain, folded into the one companyOf names for it: dRPC's keyed endpoints are lb.drpc.live
- *  (drpc.org/docs/gettingstarted/firstrequest), its keyless ones *.drpc.org; Grove is Pocket Network Inc. renamed, so its
- *  *.rpc.grove.city portal is Pocket's, as the kit's EVM operator map counts it (packages/kit/src/trade/evm/rpc-operator.ts). */
-const SAME_COMPANY: Readonly<Record<string, string>> = { "drpc.live": "drpc.org", "grove.city": "pocket.network" };
-/** The company that runs a provider URL (companyOf, its other domains folded in): two answers "agree" only from two of
- *  these (review M1 of 424dce1e: dRPC's key 1 and key 2 are one operator answering twice). */
-export function operatorOf(url: string): string {
-  const c = companyOf(new URL(url).host);
-  return SAME_COMPANY[c] ?? c;
-}
-/** A keyed name's key of several at one company, as /v1/health names it (" key2" for a chain's _DRPC_2), else none: each
- *  is its own account, so the live check counts each as its own keyed provider. */
-const keyTag = (name: string): string => {
-  const n = /_DRPC_([1-9])$/.exec(name)?.[1];
-  return n === undefined ? "" : ` key${n}`;
-};
 /** The chains whose keyed lists /v1/health names (card rpc-keyed-lists): mainnet's four. */
 export const KEYED_CHAINS = ["solana", "base", "robinhood", "near"] as const;
 export type KeyedChain = (typeof KEYED_CHAINS)[number];

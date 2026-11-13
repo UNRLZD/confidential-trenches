@@ -1,0 +1,105 @@
+{
+ "_note": "good: this card's helper in-process (record-good, card near-pair-on-keyed-providers), made-up keyed FastNear and dRPC URLs whose sends were forwarded to the same companies' free mainnet endpoints, 13 Nov 14:4xZ: PASS. bad_429: the good run with fee call 2 answered as helper live run 43432500633 read it, 'BAD fee: 429 rate_limited (want 200)' (the helper's throttled() status, body and Retry-After, limits.ts): FAIL. bad_pre_card: the deployed helper (f7921e8f) read live 13 Nov 14:37Z with --record, its four fee calls 200 but no X-Helper-Near-Pair and the pair on the free endpoints: FAIL.",
+ "good": {
+  "base": "in-process",
+  "health": {
+   "status": 200,
+   "pair": "fastnear.com, drpc.live",
+   "body": "{\"ok\":true,\"commit\":\"0000000000000000000000000000000000000000\",\"release\":null,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"public\"},\"rpc\":{\"solana\":[],\"base\":[],\"robinhood\":[],\"near\":[\"fastnear.com unread\",\"drpc.live unread\"]},\"bind\":{}}"
+  },
+  "fees": [
+   {
+    "at": 1794580753023,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"178969\",\"gp\":\"100000000\",\"px\":\"3.565250979725\",\"g_w\":\"92505000000000\",\"valid_until_block\":224377137}"
+   },
+   {
+    "at": 1794580756439,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"178969\",\"gp\":\"100000000\",\"px\":\"3.565250979725\",\"g_w\":\"92505000000000\",\"valid_until_block\":224377144}"
+   },
+   {
+    "at": 1794580759273,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"178969\",\"gp\":\"100000000\",\"px\":\"3.565250979725\",\"g_w\":\"92505000000000\",\"valid_until_block\":224377148}"
+   },
+   {
+    "at": 1794580762439,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"178969\",\"gp\":\"100000000\",\"px\":\"3.565250979725\",\"g_w\":\"92505000000000\",\"valid_until_block\":224377153}"
+   }
+  ]
+ },
+ "bad_429": {
+  "base": "in-process",
+  "health": {
+   "status": 200,
+   "pair": "fastnear.com, drpc.live",
+   "body": "{\"ok\":true,\"commit\":\"0000000000000000000000000000000000000000\",\"release\":null,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"public\"},\"rpc\":{\"solana\":[],\"base\":[],\"robinhood\":[],\"near\":[\"fastnear.com unread\",\"drpc.live unread\"]},\"bind\":{}}"
+  },
+  "fees": [
+   {
+    "at": 1794580753023,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"178969\",\"gp\":\"100000000\",\"px\":\"3.565250979725\",\"g_w\":\"92505000000000\",\"valid_until_block\":224377137}"
+   },
+   {
+    "at": 1794580756439,
+    "status": 429,
+    "retry_after": "10",
+    "body": "{\"error\":{\"code\":\"rate_limited\"}}"
+   },
+   {
+    "at": 1794580759273,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"178969\",\"gp\":\"100000000\",\"px\":\"3.565250979725\",\"g_w\":\"92505000000000\",\"valid_until_block\":224377148}"
+   },
+   {
+    "at": 1794580762439,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"178969\",\"gp\":\"100000000\",\"px\":\"3.565250979725\",\"g_w\":\"92505000000000\",\"valid_until_block\":224377153}"
+   }
+  ]
+ },
+ "bad_pre_card": {
+  "base": "https://ct-api.unrealized.trade",
+  "health": {
+   "status": 200,
+   "pair": null,
+   "body": "{\"ok\":true,\"commit\":\"f7921e8fcd30c8a92d5c7582e821b5c24b718a2a\",\"release\":133,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+  },
+  "fees": [
+   {
+    "at": 1794580636206,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"179202\",\"gp\":\"100000000\",\"px\":\"3.569889836523\",\"g_w\":\"92505000000000\",\"valid_until_block\":224376929}"
+   },
+   {
+    "at": 1794580638677,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"179202\",\"gp\":\"100000000\",\"px\":\"3.569889836523\",\"g_w\":\"92505000000000\",\"valid_until_block\":224376934}"
+   },
+   {
+    "at": 1794580641103,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"179202\",\"gp\":\"100000000\",\"px\":\"3.569889836523\",\"g_w\":\"92505000000000\",\"valid_until_block\":224376938}"
+   },
+   {
+    "at": 1794580643564,
+    "status": 200,
+    "retry_after": null,
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"179202\",\"gp\":\"100000000\",\"px\":\"3.569889836523\",\"g_w\":\"92505000000000\",\"valid_until_block\":224376942}"
+   }
+  ]
+ }
+}

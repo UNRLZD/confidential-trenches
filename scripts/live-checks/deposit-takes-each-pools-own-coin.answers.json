@@ -1,0 +1,709 @@
+{
+ "_note": "Card deposit-takes-each-pools-own-coin. good: this card's signing page (packages/signpage built at the card branch, b420b177b plus the Min rounded up to six decimals, served by Playwright as SIGN_HOST under its own _headers; the real helper and the pools' mainnet RPCs) read 2026-11-13T09:59:27.318Z: deposit.assets lists the three USDC rows, then SOL on solana 0.013587, ETH on base 0.001022 and ETH on robinhood 0.001053, each the pool's floor read then rounded up to six decimals, max_usd 1000; the page asked 1Click about no pool coin: PASS. bad: main 6de76338d's signing page, built the same way, read 2026-11-13T09:28:08.802Z: the USDC rows alone: FAIL.",
+ "good": {
+  "source": "local, SIGN_HOST answered from packages/signpage's build (index.html and public/ copied)",
+  "at": "2026-11-13T09:59:27.318Z",
+  "browser": "157.0.8103.51",
+  "signUrl": "https://confidential.unrealized.trade/",
+  "ready": true,
+  "ids": {
+   "assets": "6513d3c6-62ec-4485-b1b4-69651f47651e",
+   "dry": "aaab49e3-30fb-490b-8d4f-2a1be9e09579"
+  },
+  "asked": {
+   "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+   "amount": "25"
+  },
+  "log": [
+   {
+    "t": 49.5,
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "type": "ready",
+     "release": "unreleased",
+     "api": 1
+    }
+   },
+   {
+    "t": 3128.800000011921,
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "6513d3c6-62ec-4485-b1b4-69651f47651e",
+     "ok": true,
+     "result": {
+      "assets": [
+       {
+        "origin_asset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "chain": "near",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.016003",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+        "chain": "solana",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.016104",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "chain": "base",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.016104",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:sol.omft.near",
+        "chain": "solana",
+        "symbol": "SOL",
+        "decimals": 9,
+        "min": "0.013587",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:base.omft.near",
+        "chain": "base",
+        "symbol": "ETH",
+        "decimals": 18,
+        "min": "0.001022",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:hood.omft.near",
+        "chain": "robinhood",
+        "symbol": "ETH",
+        "decimals": 18,
+        "min": "0.001053",
+        "max_usd": "1000"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "t": 3827.5999999940395,
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "aaab49e3-30fb-490b-8d4f-2a1be9e09579",
+     "ok": true,
+     "result": {
+      "amount_out_usd": "24.992693",
+      "min_amount_out_usd": "24.742766",
+      "fee_usd": "0.007307",
+      "time_estimate_s": 20
+     }
+    }
+   }
+  ],
+  "helper": [
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/tokens",
+    "method": "POST",
+    "body": null,
+    "status": 200
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T10:29:20.933Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T10:29:20.934Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T10:29:20.934Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "dry",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T10:29:23.239Z"
+    },
+    "status": 201
+   }
+  ],
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-CLGTr7ESmMWZIVST1VcM3iPXpdGE4m3hnVTg1O9UA47LeQeOoZrPj5PgceMotGDD\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "appJs": {
+   "status": 200,
+   "sha384": "sha384-CLGTr7ESmMWZIVST1VcM3iPXpdGE4m3hnVTg1O9UA47LeQeOoZrPj5PgceMotGDD"
+  },
+  "errors": [],
+  "oneclick": {
+   "tokens": [
+    {
+     "assetId": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "near"
+    },
+    {
+     "assetId": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "eth"
+    },
+    {
+     "assetId": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "arb"
+    },
+    {
+     "assetId": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "base"
+    },
+    {
+     "assetId": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "sol"
+    },
+    {
+     "assetId": "nep141:gnosis-0x2a22f9c3b484c3629090feed35f17ff8f88f76f0.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "gnosis"
+    },
+    {
+     "assetId": "nep141:pol-0x3c499c542cef5e3811e1192ce70d8cc03d5c3359.omdep.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "pol"
+    },
+    {
+     "assetId": "nep141:bnb-0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d.omdep.near",
+     "symbol": "USDC",
+     "decimals": 18,
+     "blockchain": "bsc"
+    },
+    {
+     "assetId": "nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "aptos"
+    },
+    {
+     "assetId": "nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "op"
+    },
+    {
+     "assetId": "nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omdep.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "avax"
+    },
+    {
+     "assetId": "nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "sui"
+    },
+    {
+     "assetId": "nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu",
+     "symbol": "USDC",
+     "decimals": 7,
+     "blockchain": "stellar"
+    },
+    {
+     "assetId": "nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "monad"
+    },
+    {
+     "assetId": "nep245:v2_1.omni.hot.tg:196_2dK9kLNR7Ekq7su8FxNGiUW3djTw",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "xlayer"
+    },
+    {
+     "assetId": "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054",
+     "symbol": "USDC",
+     "decimals": 8,
+     "blockchain": "hypercore"
+    },
+    {
+     "assetId": "1cs_v1:hypercore:erc20:0xb88339CB7199b77E23DB6E890353E22632Ba630f",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "hypercore"
+    }
+   ],
+   "quoteRequest": {
+    "dry": true,
+    "swapType": "EXACT_INPUT",
+    "slippageTolerance": 100,
+    "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+    "depositType": "ORIGIN_CHAIN",
+    "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "amount": "25000000",
+    "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+    "refundType": "INTENTS",
+    "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+    "recipientType": "DESTINATION_CHAIN",
+    "deadline": "2026-11-13T10:29:26.552Z"
+   },
+   "quote": {
+    "status": 201,
+    "body": {
+     "quote": {
+      "amountIn": "25000000",
+      "amountInFormatted": "25.0",
+      "amountInUsd": "24.988575000000",
+      "minAmountIn": "25000000",
+      "amountOut": "24992693",
+      "amountOutFormatted": "24.992693",
+      "amountOutUsd": "24.981271339299",
+      "minAmountOut": "24742766",
+      "timeEstimate": 20,
+      "refundFee": "0",
+      "withdrawFee": "4378"
+     },
+     "quoteRequest": {
+      "dry": true,
+      "depositMode": "SIMPLE",
+      "swapType": "EXACT_INPUT",
+      "slippageTolerance": 100,
+      "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+      "depositType": "ORIGIN_CHAIN",
+      "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "amount": "25000000",
+      "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+      "refundType": "INTENTS",
+      "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+      "recipientType": "DESTINATION_CHAIN",
+      "deadline": "2026-11-13T10:29:26.552Z",
+      "confidentiality": "public",
+      "quoteWaitingTimeMs": 0,
+      "insured": false,
+      "appFees": [
+       {
+        "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+        "fee": 1
+       }
+      ]
+     },
+     "timestamp": "2026-11-13T09:59:26.676Z",
+     "correlationId": "0aeaa8c3-7d96-478e-bca2-6cb8d97c0b96"
+    }
+   }
+  }
+ },
+ "bad": {
+  "source": "local, SIGN_HOST answered from sign-main",
+  "at": "2026-11-13T09:28:08.802Z",
+  "browser": "157.0.8103.51",
+  "signUrl": "https://confidential.unrealized.trade/",
+  "ready": true,
+  "ids": {
+   "assets": "4f428e1a-86b0-4de8-8067-e5cc3ed058df",
+   "dry": "f6fe3d78-2cb1-4f47-b710-0571c893014f"
+  },
+  "asked": {
+   "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+   "amount": "25"
+  },
+  "log": [
+   {
+    "t": 49.20000001788139,
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "type": "ready",
+     "release": "unreleased",
+     "api": 1
+    }
+   },
+   {
+    "t": 2267.100000023842,
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "4f428e1a-86b0-4de8-8067-e5cc3ed058df",
+     "ok": true,
+     "result": {
+      "assets": [
+       {
+        "origin_asset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "chain": "near",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.016028",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+        "chain": "solana",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.016129",
+        "max_usd": "1000"
+       },
+       {
+        "origin_asset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "chain": "base",
+        "symbol": "USDC",
+        "decimals": 6,
+        "min": "1.016129",
+        "max_usd": "1000"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "t": 2919.2000000178814,
+    "origin": "https://confidential.unrealized.trade",
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "f6fe3d78-2cb1-4f47-b710-0571c893014f",
+     "ok": true,
+     "result": {
+      "amount_out_usd": "24.990548",
+      "min_amount_out_usd": "24.740642",
+      "fee_usd": "0.009452",
+      "time_estimate_s": 20
+     }
+    }
+   }
+  ],
+  "helper": [
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/tokens",
+    "method": "POST",
+    "body": null,
+    "status": 200
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T09:58:03.833Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T09:58:03.833Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "assets",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T09:58:03.833Z"
+    },
+    "status": 201
+   },
+   {
+    "phase": "dry",
+    "url": "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote",
+    "method": "POST",
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-13T09:58:04.597Z"
+    },
+    "status": 201
+   }
+  ],
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-O9RDtuS7IvPd+o8N13T+YPTfBg3BUL+4TbRyld4KKP/T0E4Jrx20KMFcXRJDIqj+\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "appJs": {
+   "status": 200,
+   "sha384": "sha384-O9RDtuS7IvPd+o8N13T+YPTfBg3BUL+4TbRyld4KKP/T0E4Jrx20KMFcXRJDIqj+"
+  },
+  "errors": [],
+  "oneclick": {
+   "tokens": [
+    {
+     "assetId": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "near"
+    },
+    {
+     "assetId": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "eth"
+    },
+    {
+     "assetId": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "arb"
+    },
+    {
+     "assetId": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "base"
+    },
+    {
+     "assetId": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "sol"
+    },
+    {
+     "assetId": "nep141:gnosis-0x2a22f9c3b484c3629090feed35f17ff8f88f76f0.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "gnosis"
+    },
+    {
+     "assetId": "nep141:pol-0x3c499c542cef5e3811e1192ce70d8cc03d5c3359.omdep.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "pol"
+    },
+    {
+     "assetId": "nep141:bnb-0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d.omdep.near",
+     "symbol": "USDC",
+     "decimals": 18,
+     "blockchain": "bsc"
+    },
+    {
+     "assetId": "nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "aptos"
+    },
+    {
+     "assetId": "nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "op"
+    },
+    {
+     "assetId": "nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omdep.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "avax"
+    },
+    {
+     "assetId": "nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "sui"
+    },
+    {
+     "assetId": "nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu",
+     "symbol": "USDC",
+     "decimals": 7,
+     "blockchain": "stellar"
+    },
+    {
+     "assetId": "nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "monad"
+    },
+    {
+     "assetId": "nep245:v2_1.omni.hot.tg:196_2dK9kLNR7Ekq7su8FxNGiUW3djTw",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "xlayer"
+    },
+    {
+     "assetId": "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054",
+     "symbol": "USDC",
+     "decimals": 8,
+     "blockchain": "hypercore"
+    },
+    {
+     "assetId": "1cs_v1:hypercore:erc20:0xb88339CB7199b77E23DB6E890353E22632Ba630f",
+     "symbol": "USDC",
+     "decimals": 6,
+     "blockchain": "hypercore"
+    }
+   ],
+   "quoteRequest": {
+    "dry": true,
+    "swapType": "EXACT_INPUT",
+    "slippageTolerance": 100,
+    "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+    "depositType": "ORIGIN_CHAIN",
+    "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "amount": "25000000",
+    "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+    "refundType": "INTENTS",
+    "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+    "recipientType": "DESTINATION_CHAIN",
+    "deadline": "2026-11-13T09:58:07.964Z"
+   },
+   "quote": {
+    "status": 201,
+    "body": {
+     "quote": {
+      "amountIn": "25000000",
+      "amountInFormatted": "25.0",
+      "amountInUsd": "24.987925000000",
+      "minAmountIn": "25000000",
+      "amountOut": "24991419",
+      "amountOutFormatted": "24.991419",
+      "amountOutUsd": "24.979348144623",
+      "minAmountOut": "24741504",
+      "timeEstimate": 20,
+      "refundFee": "0",
+      "withdrawFee": "4403"
+     },
+     "quoteRequest": {
+      "dry": true,
+      "depositMode": "SIMPLE",
+      "swapType": "EXACT_INPUT",
+      "slippageTolerance": 100,
+      "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+      "depositType": "ORIGIN_CHAIN",
+      "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "amount": "25000000",
+      "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+      "refundType": "INTENTS",
+      "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+      "recipientType": "DESTINATION_CHAIN",
+      "deadline": "2026-11-13T09:58:07.964Z",
+      "confidentiality": "public",
+      "quoteWaitingTimeMs": 0,
+      "insured": false,
+      "appFees": [
+       {
+        "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+        "fee": 1
+       }
+      ]
+     },
+     "timestamp": "2026-11-13T09:28:08.084Z",
+     "correlationId": "4b03aa9d-791d-4179-a27c-b8c25a50a8b8"
+    }
+   }
+  }
+ }
+}

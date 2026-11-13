@@ -74,6 +74,9 @@ export const BASE_USDC = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913
 export const ASSETS = { [NEAR_USDC]: "near", [SOL_USDC]: "solana", [BASE_USDC]: "base" };
 /** What 1Click calls each chain the answer names. */
 export const ONECLICK_CHAIN = { near: "near", solana: "sol", base: "base" };
+/** Each pool's own coin deposit.assets lists after the USDC rows (card deposit-takes-each-pools-own-coin, judged by
+ *  scripts/live-checks/deposit-takes-each-pools-own-coin.mjs): SOL on Solana, ETH on Base and Robinhood. */
+export const POOL_COIN_IDS = Object.freeze(["nep141:sol.omft.near", "nep141:base.omft.near", "nep141:hood.omft.near"]);
 export const CODES = ["below_min", "above_max", "not_available", "busy", "down", "quote_check_failed", "not_allowed"];
 export const READY_MS = 5_000;
 /** deposit.assets reads /v0/tokens and quotes three assets through the helper; deposit.dry quotes one. */
@@ -183,7 +186,8 @@ export function judge(a) {
         if (probeNoQuote(id)) liquidity(`deposit.assets does not list ${id}, whose probe 1Click answered 400 No liquidity available`);
         else bad(`deposit.assets does not list ${id}`);
       }
-      for (const id of seen) if (!Object.hasOwn(ASSETS, id)) bad(`deposit.assets lists ${show(id)}, not one of the kit's three USDC assets`);
+      // each pool's own coin (card deposit-takes-each-pools-own-coin) is that card's check's to judge
+      for (const id of seen) if (!Object.hasOwn(ASSETS, id) && !POOL_COIN_IDS.includes(id)) bad(`deposit.assets lists ${show(id)}, not one of the kit's three USDC assets or a pool's own coin`);
       if (new Set(seen).size !== seen.length) bad("deposit.assets lists an asset twice");
       for (const x of list) {
         const id = x?.origin_asset;
