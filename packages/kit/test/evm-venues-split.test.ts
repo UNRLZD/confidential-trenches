@@ -8,8 +8,10 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/evm/buy-unpinned.ts";
 
-/** sha256 of JSON.stringify(evmPoolVenues()) at d893f5e6, the list before the split (6,087 characters). */
-const BEFORE = "2cb76c75239c8379adabdcc0b23026fe28b53c7ea1b62a42f17b264f26f57fda";
+/** sha256 of JSON.stringify(evmPoolVenues()): the list before the split (d893f5e6) with one entry moved since, Robinhood's
+ *  index (card signpage-evm-reads-draw-no-refusal: Robinhood's own and the helper's keyed route, 500,000-block spans,
+ *  one batch of at most 10 at once; 6,087 characters before it). */
+const BEFORE = "1fa5ec575f701ae516cf86e065e0d011377829e5b203e2c6962ad064c198db8b";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
@@ -18,7 +20,7 @@ test("the two halves together are the venue list before the split, entry for ent
   assert.deepEqual(Object.keys(evmTestnetVenues()), ["base-sepolia", "robinhood-testnet"]);
   assert.deepEqual({ ...all }, { ...evmMainnetVenues(), ...evmTestnetVenues() });
   const json = JSON.stringify(all);
-  assert.equal(json.length, 6_087);
+  assert.equal(json.length, 6_124);
   assert.equal(createHash("sha256").update(json).digest("hex"), BEFORE);
 });
 
