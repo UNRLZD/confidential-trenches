@@ -20,7 +20,7 @@ const SOL = solanaBalancePool("sol:p", 11n);
 const note = (id: string, label: bigint, value: bigint): NoteRecord => ({ id, ref: { kind: "deposit", s: 11n, i: Number(label) }, scope: 11n, precommitment: label, state: "HELD", attempt: `a-${id}`, deadlineMs: 1n, leaf: { value, label, commitment: label, leafIndex: label } });
 const notes = [note("own", 1n, 5_547_107n), note("ret", 2n, 3_502_518n), note("big", 3n, 12_000_000n)];
 const chunks = [5_547_107n, 3_502_518n, 5_000_000n];
-const ready: BalanceProof[] = notes.map((n, i) => ({ noteId: n.id, attempt: n.attempt!, poolId: SOL.id, chunk: chunks[i]!, wallet: { l: 1n, j: 0, address: "W" }, binding: { feeCap: FEE, request: { tipCap: SOL_TIP_CAP } } }));
+const ready: BalanceProof[] = notes.map((n, i) => ({ noteId: n.id, attempt: n.attempt!, poolId: SOL.id, chunk: chunks[i]!, wallet: { l: 1n, j: 0, address: "W" }, binding: { feeCap: FEE, request: { tipCap: SOL_TIP_CAP } }, ...(i === 0 ? { own: true as const } : {}) }));
 const pair = (): readonly [SolanaRpc, SolanaRpc] => [replay(fx.pump, 0), replay(fx.pump, 1)];
 
 test("state.pools' Max counts the 0.007 change the tap carries: four pieces, 21,049,625 less four relay fees, the tip and W's worst-venue keep", () => {

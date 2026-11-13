@@ -2036,6 +2036,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         void settleReserved().catch(() => {});
       },
       seed64: page.seed64,
+      // a buy that spends its change in the same tap (card buy-spends-its-change-in-the-same-tap): the notes' values, and a
+      // first round's change (the note its settle wrote, parent the released note) proved to that round's W
+      carry: {
+        values: async (ids) => {
+          notes ??= await openNoteStore(await page.store());
+          const want = new Set(ids);
+          return new Map((await notes.list()).flatMap((n) => (want.has(n.id) && n.leaf !== undefined ? [[n.id, n.leaf.value] as const] : [])));
+        },
+        prove: async (parentId, to) => {
+          notes ??= await openNoteStore(await page.store());
+          const c = (await notes.list()).find((n) => n.parent === parentId);
+          if (c === undefined) throw new Error(`no change written for note ${parentId}`);
+          return (await q()).proveFor(c.id, to, solanaStop.signal);
+        },
+      },
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
