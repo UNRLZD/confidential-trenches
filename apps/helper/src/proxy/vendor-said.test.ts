@@ -405,6 +405,8 @@ test("P3-2: %XX is decoded until unchanged, 3 rounds at most, and an encoded run
   // four rounds: what is left is an encoded run, and no piece of U is in the line
   assert.equal(safeMessage(`recipient ${pct(DU, 4)} is not valid`, values), "recipient <encoded> is not valid");
   assert.equal(safeMessage(`recipient ${pct(DU, 4)} is not valid`, []), "recipient <encoded> is not valid");
+  // three %XX in a row are an encoded run, two are not: a UTF-8 character of three bytes, left as written by the decode
+  assert.equal(safeMessage("id %E3%81%82 and %C3%A9", []), "id <encoded> and %C3%A9");
 });
 
 test("P3-4: replacements never grow the message a later pass searches past VENDOR_MESSAGE_READ", async () => {

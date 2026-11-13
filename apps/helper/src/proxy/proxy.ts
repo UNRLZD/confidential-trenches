@@ -311,7 +311,7 @@ const decodedAscii = (s: string): string => s.replace(/%([0-9A-Fa-f]{2})/g, (x, 
 export function safeMessage(m: string, values: readonly string[] | null): string {
   if (values === null) return "(withheld: the request held too many values)";
   let s = m;
-  let cut = s.length > VENDOR_MESSAGE_READ;
+  const cut = s.length > VENDOR_MESSAGE_READ;
   if (cut) s = cutToRead(s);
   // marks that hide a word from a search, stripped (never a space, which would split it)
   s = s.replace(/\p{Default_Ignorable_Code_Point}/gu, "");
@@ -324,14 +324,14 @@ export function safeMessage(m: string, values: readonly string[] | null): string
   for (const v of values) {
     s = valueReplaced(s, v);
     // "<request field>" is longer than a short value: the next search stays within VENDOR_MESSAGE_READ
-    if (s.length > VENDOR_MESSAGE_READ) (s = cutToRead(s)), (cut = true);
+    if (s.length > VENDOR_MESSAGE_READ) s = cutToRead(s);
   }
-  // a value whose start ends the cut message: its first characters, cut from the rest (a number's only where no digit
-  // stands before it, as valueReplaced)
+  // a value whose start ends the read's cut: its first characters, cut from the rest. A cut ends at whitespace, so only a
+  // value holding one is found here; a cut after the value pass leaves none (each value was there whole, and replaced)
   if (cut)
     for (const v of values)
       for (let p = Math.max(0, s.length - VALUE_HEAD); p <= s.length - 3; p++)
-        if (!(DIGITS.test(v) && digitAt(s, p - 1)) && v.startsWith(s.slice(p))) {
+        if (v.startsWith(s.slice(p))) {
           s = `${s.slice(0, p)}<request field>`;
           break;
         }
