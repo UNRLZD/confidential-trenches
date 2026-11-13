@@ -67,7 +67,7 @@ import { startApi, type KindContext } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
-import { cashMover, withCash, type CashToPoolDeps } from "./cash-to-pool.ts";
+import { cashMover, poolMoveKinds, withCash, type CashToPoolDeps, type MoveFollow } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -327,6 +327,10 @@ else {
         return op !== undefined && poolFollowEnded(op as Parameters<typeof poolFollowEnded>[0]);
       },
       now: () => Date.now(),
+      // the move op (kind "move", src/state.ts opOf): its stages from the hand-off, then from the quote's follow op
+      put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
+      follow: async (id) => (await (await open()).get("ops", id).catch(() => undefined)) as MoveFollow | undefined,
+      signal,
     });
     cashMoverOf = { signal, m };
     return m;
@@ -559,6 +563,8 @@ else {
       "pool.sell.dry": (params) => poolSellDry(params),
       // with_cash (card one-balance-buys-on-every-chain): a tap's most with Cash moved first, on Solana
       "pool.buy.dry": (params) => dryWithCash(params),
+      // a move between Cash and a pool (card one-balance-buys-on-every-chain): the same mover a buy's shortfall takes
+      ...(prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null ? poolMoveKinds(cashMoverNow) : {}),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
     })),

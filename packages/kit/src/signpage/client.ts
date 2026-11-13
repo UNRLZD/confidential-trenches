@@ -102,11 +102,15 @@ export const SIGNPAGE_TIMEOUT_MS = {
   "pool.sell.dry": 10_000,
   // Max for the coin on screen (card max-is-priced-for-the-coin): the coin's venue read on two providers
   "pool.buy.dry": 10_000,
+  // a move (card one-balance-buys-on-every-chain): answered once it left, after the rail's quote round trip, as
+  // pool.address's; its dry is the device's own reads and the relayer's fee
+  "pool.move": 15_000,
+  "pool.move.dry": 10_000,
 } as const satisfies Record<SignpageKind, number | null>;
 deepFreeze(SIGNPAGE_TIMEOUT_MS);
 
 /** After one of these times out, the client asks `state` again (a new `state` request); the kind itself is never re-sent. */
-const REASK_STATE: ReadonlySet<SignpageKind> = new Set(["deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return", "pool.deposit", "pool.buy", "pool.sell"]);
+const REASK_STATE: ReadonlySet<SignpageKind> = new Set(["deposit.confirm", "arm", "buy", "hop", "orders.set", "orders.cancel", "return", "pool.deposit", "pool.buy", "pool.sell", "pool.move"]);
 
 /** The hidden iframe's attributes (app.md §2.1 item 2; AX-06, app.md:1386). */
 export const SIGNPAGE_IFRAME_ATTRIBUTES = {

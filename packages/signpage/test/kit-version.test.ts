@@ -833,6 +833,8 @@ test("hello kit 1.12 against this page, every kind: each answer and event is wha
     const p = everyKind();
     p.send(hello(kit));
     for (const k of SIGNPAGE_KINDS) {
+      // a kind added after kit-v1.12 (pool.move, pool.move.dry): such an app never asks it
+      if (kit === "1.12" && !Object.hasOwn(V112.SIGNPAGE_RESULT_SCHEMAS, k)) continue;
       const id = crypto.randomUUID();
       p.send({ v: 1, id, type: k, ...FIXTURES[k].params });
       await p.api.idle();
@@ -841,7 +843,7 @@ test("hello kit 1.12 against this page, every kind: each answer and event is wha
       const want = k === "state" ? FULL : p.isOpen(k) && kit !== "1.12" ? { ...FIXTURES[k].result, closes: true } : FIXTURES[k].result;
       assert.deepEqual(a.result, want, `${kit} ${k}`);
       const schema = kit === "1.12" ? V112 : NOW;
-      assert.ok(schema.signpageAnswerOkSchema(a) && schema.SIGNPAGE_RESULT_SCHEMAS[k](a.result), `kit-v${kit}'s schema reads ${k}'s answer`);
+      assert.ok(schema.signpageAnswerOkSchema(a) && (schema.SIGNPAGE_RESULT_SCHEMAS as Record<string, (v: unknown) => boolean>)[k]!(a.result), `kit-v${kit}'s schema reads ${k}'s answer`);
     }
     const ev = p.posted.filter((m) => !("ok" in (m as object)) && (m as { type?: string }).type !== "ready");
     assert.deepEqual(ev, [{ v: 1, type: "progress", id: (ev[0] as { id: string }).id, stage: "waiting" }], `${kit}: the one progress event as it is`);
@@ -1108,4 +1110,42 @@ test("hello kit 1.14: the state answer and every state event as they are, the cl
   assert.ok(reads(V114, ev[0], "state"));
   p.api.closed("open-1");
   assert.equal(p.posted.filter((m) => (m as { type?: string }).type === "closed").length, 1);
+});
+
+// kit 1.15 (card one-balance-buys-on-every-chain, pool.move): state.ops may carry a move op (kind "move"), which no kit
+// before 1.15 has a kind for: every level below the current one is sent the state with each move op left out (kit-v1.5
+// to kit-v1.14 would drop it themselves, kit-v1.4 refuses the whole state for it; none is ever sent one). The buy's
+// route event { move: "cash", op } goes to the current level only, as { move: "cash" } did. Red at 8b620897f: the move
+// op went to kit-v1.14 and every level down to kit-v1.5 as it is.
+const MOVE_OP = { id: "mv1", kind: "move" as const, from: "near" as const, to: "solana" as const, stage: "in_transit" as const, txs: tx, amount: "25.5", out: "0.31", created_ms: 5 };
+test("a move op: sent to the kit's own version, whose schema reads it; left out for kit-v1.14 and every level below, the rest of the state as each level has it", async () => {
+  const WITH = { ...FULL, ops: [...FULL.ops, MOVE_OP] } as SignpageState;
+  assert.ok(NOW.SIGNPAGE_RESULT_SCHEMAS.state(WITH), "the kit's own schema reads the move op");
+  assert.deepEqual(resultFor(kitLevel(SIGNPAGE_KIT_VERSION), "state", WITH), WITH);
+  for (const kit of ["1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5", "1.4"]) {
+    assert.deepEqual(resultFor(kitLevel(kit), "state", WITH), resultFor(kitLevel(kit), "state", FULL), kit);
+  }
+  // the planted case: kit-v1.14's own reader drops the op it has no kind for
+  assert.equal(V114.signpageReadableOps(WITH) === WITH, false);
+  for (const [kit, want] of [["1.14", FULL], [SIGNPAGE_KIT_VERSION, WITH]] as const) {
+    const p = page();
+    p.set(WITH);
+    p.send(hello(kit));
+    const id = await p.ask();
+    assert.deepEqual(p.answer(id).result, want, kit);
+    // and every state event after it
+    p.set({ ...WITH, vault_balance: "81" });
+    await p.api.idle();
+    const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
+    assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...want, vault_balance: "81" } }], `${kit}: the state event`);
+  }
+});
+
+test("the route event { move: \"cash\", op }: told with its op to a kit 1.15 app, whose schema reads it; never to kit-v1.14 or below", async () => {
+  const move = { move: "cash", op: "cash/solana/1000" };
+  const now = await routesTo(SIGNPAGE_KIT_VERSION, [move]);
+  assert.deepEqual(now, [{ v: 1, type: "progress", move: "cash", op: "cash/solana/1000" }]);
+  assert.ok(NOW.signpageProgressRouteSchema({ ...now[0], id: "x" }));
+  for (const kit of ["1.14", "1.13", "1.5"]) assert.deepEqual(await routesTo(kit, [move]), [], kit);
+  assert.deepEqual(await routesTo(null, [move]), []);
 });

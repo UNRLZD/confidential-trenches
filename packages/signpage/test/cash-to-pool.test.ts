@@ -37,7 +37,7 @@ function mover(o: { cash?: bigint; quote?: (usdc: bigint) => CashQuote | { error
 
 test("cashMover.need: Cash pays the quote's deposit address for the shortfall plus the least rung and 3%, at the device's price", async () => {
   const t = mover({});
-  assert.equal(await t.m.need("solana", 300_000_000n), true);
+  assert.equal(await t.m.need("solana", 300_000_000n), "cash/solana/1000", "the move op's id");
   // 0.3 SOL + 0.01 SOL at 80 USD = 24.8 USD, 3% over = 25.544 USD
   assert.deepEqual(t.quoted.map((q) => [q.chain, q.usdc, q.rail, q.id]), [["solana", 25_544_000n, "1click", "cash/solana/1000/1click"]]);
   assert.deepEqual(t.paid, [{ recipient: ADDRESS, amount: 25_544_000n, fee: 50_000n }]);
@@ -46,7 +46,7 @@ test("cashMover.need: Cash pays the quote's deposit address for the shortfall pl
 test("cashMover.need: a second need for a shortfall already on its way joins it; a larger one moves only what is left", async () => {
   const t = mover({});
   await t.m.need("solana", 300_000_000n);
-  assert.equal(await t.m.need("solana", 300_000_000n), true, "the tap after the typing");
+  assert.equal(await t.m.need("solana", 300_000_000n), "cash/solana/1000", "the tap after the typing: the move on its way, by its op");
   assert.equal(t.paid.length, 1, "never moved twice");
   await t.m.need("solana", 400_000_000n);
   assert.equal(t.paid.length, 2);
@@ -67,7 +67,7 @@ test("cashMover.need: a move whose follow op ended (landed in the pool) or that 
 test("cashMover.need: no price, Cash short of the amount and its fee, or a refused quote: false, nothing withdrawn", async () => {
   for (const [name, o] of [["no price", { price: null }], ["Cash short", { cash: 25_593_999n }], ["refused", { quote: () => ({ error: "above_max" }) }]] as const) {
     const t = mover(o as never);
-    assert.equal(await t.m.need("solana", 300_000_000n), false, name);
+    assert.equal(await t.m.need("solana", 300_000_000n), null, name);
     assert.deepEqual(t.paid, [], name);
   }
 });
@@ -80,7 +80,7 @@ test("cashMover.need: a quote that is not a NEAR implicit account, not the USDC 
     { address: ADDRESS, amountIn: 25_544_000n, minOut: 299_999_999n },
   ]) {
     const t = mover({ quote: () => q });
-    assert.equal(await t.m.need("solana", 300_000_000n), false, JSON.stringify(q, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
+    assert.equal(await t.m.need("solana", 300_000_000n), null, JSON.stringify(q, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
     assert.deepEqual(t.paid, []);
   }
 });
@@ -92,7 +92,7 @@ function tap(o: { taps: bigint[]; moving: boolean }, _calls: Calls): CashToPoolD
   let t = 0, clock = 0;
   return {
     tapMax: async () => o.taps[Math.min(t++, o.taps.length - 1)]!,
-    need: async () => o.moving,
+    need: async () => (o.moving ? "cash/solana/7" : null),
     wait: async (ms) => void (clock += ms),
     now: () => clock,
   };
@@ -122,7 +122,7 @@ test("cashFirst: a buy above one tap while Cash moves waits for it, tells the ap
   const a = await run(cashFirst(innerOf(calls), () => tap({ taps: [100_000_000n, 100_000_000n, 100_000_000n, 400_000_000n], moving: true }, calls))(ask(400_000_000n), c));
   assert.deepEqual(a, { result: { stage: "filled", txs: [] } });
   assert.deepEqual(calls.inner, [400_000_000n]);
-  assert.deepEqual(c.routes, [{ move: "cash" }]);
+  assert.deepEqual(c.routes, [{ move: "cash", op: "cash/solana/7" }], "the route event names the move's op");
 });
 
 test("cashFirst: with nothing on its way the pool buy answers at once; a move that never lands is waited CASH_MOVE_WAIT_MS at most", async () => {

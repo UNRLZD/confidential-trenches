@@ -181,8 +181,16 @@ export const MUTANTS = [
   ["kit", '  return level !== "current" && Object.hasOwn(e, "move") ? null : e;', '  return level !== "current" && Object.hasOwn(e, "out") ? null : e;'],
   ["kit", '  return level !== "current" && Object.hasOwn(e, "move") ? null : e;', '  return Object.hasOwn(e, "move") ? null : e;'],
   ["api", 'if (!("stage" in msg)) return level !== "1.4" ? routeFor(level, msg) : null;', 'if (!("stage" in msg)) return level !== "1.4" ? msg : null;'],
-  ["api", ' : own("move") ? { move: (r as { move: "cash" }).move } : null;', " : null;"],
-  ["api", ' : own("move") ? { move: (r as { move: "cash" }).move } : null;', ' : own("move") ? { move: "cash" } : null;'],
+  ["api", ' : own("move") ? { move: (r as { move: "cash" }).move, ...(own("op") ? { op: (r as { op: string }).op } : {}) } : null;', " : null;"],
+  ["api", ' : own("move") ? { move: (r as { move: "cash" }).move, ...(own("op") ? { op: (r as { op: string }).op } : {}) } : null;', ' : own("move") ? { move: "cash" } : null;'],
+  // card one-balance-buys-on-every-chain (pool.move): the buy's route event told with no op, or a move op sent to
+  // kit-v1.14 or below, in the state answer or a state event
+  ["api", ', ...(own("op") ? { op: (r as { op: string }).op } : {}) }', " }"],
+  ["kit", 'const all = level === "current" ? sent : noMoves(sent);', "const all = sent;"],
+  ["kit", 'const all = level === "current" ? sent : noMoves(sent);', "const all = noMoves(sent);"],
+  ["kit", 'const given = level !== "current" && kind === "state" ? noMoves(all as SignpageState) : all;', "const given = all;"],
+  ["kit", 'ops: s.ops.filter((o) => o.kind !== "move")', "ops: s.ops"],
+  ["kit", 's.ops.some((o) => o.kind === "move") ?', "false ?"],
   // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
   ["api", "if (kit !== null) return void ((level = kitLevel(kit)), (hello = true));", "if (kit !== null) return;"],
   // card signing-layer-says-when-it-closes (review P3-2): the closed notice sent with no hello since the last ready

@@ -7,7 +7,7 @@
 import { base58 } from "@scure/base";
 import { CHAINS, type Chain } from "../orders/record.ts";
 import {
-  DEPOSIT_HELD_STAGES, DEPOSIT_HOLDS, DEPOSIT_REFUNDED_STAGES, DEPOSIT_STAGES, POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS,
+  DEPOSIT_HELD_STAGES, DEPOSIT_HOLDS, DEPOSIT_REFUNDED_STAGES, DEPOSIT_STAGES, MOVE_STAGES, MOVE_STEPS, POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS,
   POOL_DEPOSIT_REFUNDED_STAGES, POOL_DEPOSIT_STAGES, SIGNPAGE_KINDS, TRADE_CHAINS,
 } from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
@@ -255,6 +255,18 @@ const positionFits: SignpageSchema = (v) => {
   return p.decimals === undefined || unitsAt(p.amount, p.decimals) !== null;
 };
 
+/** A move's op (messages.ts Operation kind "move"; card one-balance-buys-on-every-chain): two trade chains that differ,
+ *  one of MoveStage's stages, `amount` at no more fraction digits than `from`'s asset has and `out` than `to`'s, and
+ *  created_ms; nothing else. */
+const moveOpFields = obj({ id: str, kind: lit("move"), from: tradeChain, to: tradeChain, stage: oneOf(MOVE_STAGES), txs }, { amount: dec, out: dec, created_ms: uint });
+const moveOp: SignpageSchema = (v) => {
+  if (!moveOpFields(v)) return false;
+  const m = v as { from: Chain; to: Chain; amount?: string; out?: string };
+  if (m.from === m.to) return false;
+  if (m.amount !== undefined && unitsAt(m.amount, POOL_ASSET_DECIMALS[POOL_CHAIN_ASSET[m.from]]) === null) return false;
+  return m.out === undefined || unitsAt(m.out, POOL_ASSET_DECIMALS[POOL_CHAIN_ASSET[m.to]]) !== null;
+};
+
 /** One op of state.ops, told apart by its kind. */
 const stateOp = by("kind", {
   deposit: depositOp,
@@ -265,6 +277,7 @@ const stateOp = by("kind", {
   return: op(lit("return"), RETURN),
   restore: op(lit("restore"), RESTORE),
   pool_deposit: poolDepositOp,
+  move: (v) => moveOp(v),
 });
 
 const state = obj(
@@ -345,6 +358,12 @@ const poolAddress: SignpageSchema = (v) => {
 const poolAddressParams: SignpageSchema = (v) =>
   obj({ chain: poolChain })(v) || obj({ chain: poolChain, origin_asset: str, amount: dec })(v);
 
+/** pool.move.dry's answer (messages.ts PoolMoveDry): out, fee and at least one step of the five, each on a trade chain. */
+const poolMoveDry = obj({ out: dec, fee: dec, steps: arr(obj({ step: oneOf(MOVE_STEPS), chain: tradeChain }), 1) });
+/** pool.move's params: two trade chains that differ and an amount. */
+const poolMoveFields = obj({ from: tradeChain, to: tradeChain, amount: dec });
+const poolMove: SignpageSchema = (v) => poolMoveFields(v) && (v as { from: unknown }).from !== (v as { to: unknown }).to;
+
 /** The result of each kind, as SignpageResults names it. */
 export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.quote": obj({
@@ -380,6 +399,8 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "pool.address": poolAddress,
   "pool.sell.dry": poolSellDry,
   "pool.buy.dry": obj({ tap_max: dec }, { with_cash: dec, pieces: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SOLANA_POOL_BUY_PIECES_MAX, cost: dec, out: dec }),
+  "pool.move": obj({ stage: oneOf(MOVE_STAGES), txs }),
+  "pool.move.dry": poolMoveDry,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 
@@ -423,6 +444,8 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "pool.address": poolAddressParams,
   "pool.sell.dry": poolSellDryParams,
   "pool.buy.dry": obj({ chain: poolChain, token: str }, { amount: dec }),
+  "pool.move": poolMove,
+  "pool.move.dry": poolMove,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_PARAM_SCHEMAS);
 
@@ -470,13 +493,13 @@ const routeWallet = obj({ ...routeHead, wallet: (v) => solAddress(v) || nearImpl
 const routeVenue = obj({ ...routeHead, venue: str, pool: (v) => solAddress(v) || rheaPool(v) });
 const routeOut = obj({ ...routeHead, out: routeOutAmount });
 const routeTx = obj({ ...routeHead, tx: solSignature });
-const routeMove = obj({ ...routeHead, move: lit("cash") });
+const routeMove = obj({ ...routeHead, move: lit("cash") }, { op: str });
 export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v) || routeVenue(v) || routeOut(v) || routeTx(v) || routeMove(v);
 
 /** An answer's envelope; the result inside is checked against its kind's schema by the client. */
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
 export const signpageAnswerErrorSchema = obj({ v: lit(1), id: str, ok: lit(false), error: obj({ code: errorCode }) });
 
-/** True when `kind` is one of the twenty-six. */
+/** True when `kind` is one of the twenty-eight. */
 export const signpageIsKind = (kind: unknown): kind is SignpageKind =>
   typeof kind === "string" && (SIGNPAGE_KINDS as readonly string[]).includes(kind);
