@@ -310,3 +310,27 @@ test("planted on the good answer, each sign out's kept piece fails its line: a s
     }
   }
 });
+
+// card signing-layer-says-when-it-closes (kit 1.13): every open kind answers { pending: true, closes: true } to this
+// probe's hello. closes: this tree's build on the harness (13 Nov, Chrome 156, --harness --record): PASS. Planted on it:
+// an open answered closes false, closes not true, another key, or not pending: FAIL on that step's line.
+test("the run on release 128's answers passes, and an open answered closes false, closes not true or with another key fails", () => {
+  const rec = answers.closes;
+  const r = judge(rec);
+  assert.equal(r.pass, true, r.lines.join("\n"));
+  assert.equal(rec.mode, "harness");
+  const opens = [["prf", "signin"], ["prf", "backup"], ["prf", "signout"], ["noPrf", "signout"], ["wallet"], ["twoTabs", "backup"]];
+  const at = (o, p) => p.reduce((x, k) => x?.[k], o);
+  for (const p of opens) assert.deepEqual(at(rec, p).answer.result, { pending: true, closes: true }, p.join("."));
+  for (const result of [{ pending: true, closes: false }, { pending: true, closes: "true" }, { pending: true, closes: true, extra: 1 }, { pending: true, extra: 1 }, { closes: true }]) {
+    for (const p of opens) {
+      const c = structuredClone(rec);
+      at(c, p).answer.result = result;
+      const j = judge(c);
+      assert.equal(j.pass, false, `${p.join(".")} ${JSON.stringify(result)}\n${j.lines.join("\n")}`);
+    }
+  }
+  const c = structuredClone(rec);
+  for (const p of opens) at(c, p).answer.result = { pending: true };
+  assert.equal(judge(c).pass, true, "the answer before kit 1.13 still passes");
+});

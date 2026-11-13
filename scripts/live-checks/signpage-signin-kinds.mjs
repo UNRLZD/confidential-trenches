@@ -221,7 +221,13 @@ export function judge(rec, era = SIGN_OUT_NOW) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const p = rec.prf ?? {};
-  const pending = (a) => a?.ok === true && a?.result?.pending === true;
+  // an open kind's ok answer, exactly: { pending: true }, or since card signing-layer-says-when-it-closes (kit 1.13, the
+  // version this probe's hello names) { pending: true, closes: true }; closes false or any other key is no pending
+  // answer (signpage-shell.mjs holds the same rule)
+  const pending = (a) => {
+    const k = a?.ok === true && a.result !== null && typeof a.result === "object" ? Object.keys(a.result).sort().join() : null;
+    return a?.ok === true && a.result.pending === true && (k === "pending" || (k === "closes,pending" && a.result.closes === true));
+  };
   const refusedNA = (a) => a?.ok === false && a?.error?.code === "not_allowed";
   const inLayer = (x, state) => x?.state === state && x?.layer === "shown" && x?.top === true;
   const backToApp = (x, state) => x?.state === state && x?.layer === "hidden" && x?.frame === true;
