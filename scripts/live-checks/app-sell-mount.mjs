@@ -6,7 +6,8 @@
 // cost, wallets and the mint's decimals), since no check can sign a real account in. Headless Chromium opens that
 // token's own page, /token/solana/<DJT> (never /, which draws the live Trending column's top, another token, on the
 // deployed app), at 1440 x 900 (the box in the right column; the switch's Sell) and 390 x 844 (dpr 2; the phone bar's
-// Sell opens the trade sheet), double-taps 25%, then taps 100%, and reads:
+// Sell opens the trade sheet), picks 25% and double-taps Sell, then picks 100% and taps Sell (a percent only picks the
+// share, card sell-box-works-like-the-buy-box), and reads:
 //   - the page draws the held token (its data-token is DJT's mint);
 //   - the switch's Sell is on, and Sell draws the sell side (sell-box), ready (S8.29), `1K DJT held`;
 //   - the double tap asks the shell for exactly one pool.sell, on solana, of the token, for a share of 2,500 basis points
@@ -158,12 +159,15 @@ async function runOne(browser, w, shots, route) {
     run.before = before.box;
     await page.screenshot({ path: path.join(shots, `${w.name}-sell.png`) });
     if (run.before) {
-      await f.locator(`${scope} [data-testid="sell-box"] [data-pct="2500"]`).dblclick({ timeout: 5_000 }).catch(() => {});
+      // a percent only picks the share (card sell-box-works-like-the-buy-box): 25%, then a double tap on Sell
+      await f.locator(`${scope} [data-testid="sell-box"] [data-pct="2500"]`).click({ timeout: 5_000 }).catch(() => {});
+      await f.locator(`${scope} [data-testid="sell-box"] [data-testid="sell-cta"]`).dblclick({ timeout: 5_000 }).catch(() => {});
       await f.waitForFunction((s) => { const st = document.querySelector(`${s} [data-testid="sell-box"]`)?.getAttribute("data-state"); return !!st && st !== "S8.29"; }, scope, { timeout: 8_000 }).catch(() => {});
       await page.waitForTimeout(300);
       run.after = (await f.evaluate(BOX, w.isMobile)).box;
       // the refused sell sold nothing: 100% asks the whole position
       await f.locator(`${scope} [data-testid="sell-box"] [data-pct="10000"]`).click({ timeout: 5_000 }).catch(() => {});
+      await f.locator(`${scope} [data-testid="sell-box"] [data-testid="sell-cta"]`).click({ timeout: 5_000 }).catch(() => {});
       await page.waitForFunction(() => (window.__ctShellAsked ?? []).filter((m) => m.type === "pool.sell").length >= 2, null, { timeout: 5_000 }).catch(() => {});
       await page.waitForTimeout(300);
     }
