@@ -40,3 +40,26 @@ test("a refusal naming the kit's best route asks it once; one through a hook the
   await assert.rejects(tap(async (r) => (seen.push(JSON.stringify(r.route)), Promise.reject(new EvmQuoteError("no_quote", "x", { amountOut: 1n, route: hooked }))), spam(5)), EvmBuyTapRefused);
   assert.ok(!seen.includes(JSON.stringify(hooked)) && seen.length <= 2, seen.join("\n"));
 });
+
+test("a reference quoted again and refused for a better one is followed inside the bound; past it the kit's refusal is the tap's", async () => {
+  // AERO and GOOGLc on Base, CRCL on Robinhood (2026-11-13): the pools moved between the two quotes and the reference
+  // itself was refused below_reference or native_first, which the tap gave up on
+  const tier = (fee: number) => ({ venue: "uniswap-v3" as const, tokens: ["0x0bd7d308f8e1639fab988df18a8011f41eacad73", TOKEN], fees: [fee] });
+  evmBuyTapReset();
+  const asked: string[] = [];
+  const q = await tap(async (r) => {
+    asked.push(JSON.stringify(r.route));
+    if (asked.length === 1) return Promise.reject(new EvmQuoteError("below_reference", "x", { amountOut: 2n, route: tier(500) }));
+    if (asked.length === 2) return Promise.reject(new EvmQuoteError("native_first", "y", { amountOut: 3n, route: tier(10_000) }));
+    return { route: r.route } as unknown as EvmPoolBuyQuote;
+  }, spam(1));
+  assert.deepEqual(q.route, tier(10_000));
+  assert.equal(asked.length, 3);
+  evmBuyTapReset();
+  let n = 0;
+  await assert.rejects(
+    tap(async () => (n++, Promise.reject(new EvmQuoteError("below_reference", "z", { amountOut: BigInt(n), route: tier(100 + n) }))), spam(1)),
+    (e) => e instanceof EvmQuoteError && e.code === "below_reference",
+  );
+  assert.equal(n, EVM_BUY_TAP_QUOTES);
+});

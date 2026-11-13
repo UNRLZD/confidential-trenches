@@ -93,16 +93,33 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   const tries = [shapes[0]!, ...shapes.slice(1).filter((r) => r.venue === "uniswap-v3").slice(0, 1)];
   let refused = false;
   let lastErr: unknown = null;
-  for (const route of tries) {
-    try {
-      return await ask(route);
-    } catch (e) {
-      const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
-      if (typeof err?.code === "string" && REQUOTE.has(err.code) && err.reference && takes(err.reference.route)) return ask(err.reference.route);
-      if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
-      if (err?.code !== "no_quote") refused = true;
-      lastErr = e;
+  // every kit quote of the tap counts, a followed reference's too: a reference quoted again can itself be refused for
+  // a better one (the pools moved between the two quotes: AERO and GOOGLc below_reference, CRCL native_first on real
+  // mainnet, 2026-11-13), which is followed while the bound lasts, each route once
+  let left = EVM_BUY_TAP_QUOTES;
+  const asked = new Set<string>();
+  for (const first of tries) {
+    let route: EvmRoute | null = first;
+    let followed = false;
+    while (route !== null && left > 0 && !asked.has(JSON.stringify(route))) {
+      left--;
+      asked.add(JSON.stringify(route));
+      try {
+        return await ask(route);
+      } catch (e) {
+        const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
+        if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
+        const next = typeof err?.code === "string" && REQUOTE.has(err.code) && err.reference && takes(err.reference.route) ? err.reference.route : null;
+        // the kit's own best route refused for another reason than a better one: its name is the tap's
+        if (next === null && followed) throw e;
+        if (next === null && err?.code !== "no_quote") refused = true;
+        lastErr = e;
+        route = next;
+        followed = next !== null;
+      }
     }
+    // a reference still left when the bound ran out: the kit's last refusal names it
+    if (route !== null && left === 0 && lastErr !== null) throw lastErr;
   }
   // a kept route that quotes no more is asked first no more
   LAST_ROUTE.delete(known);
