@@ -112,7 +112,10 @@ const HOST_WINDOW_BOUND = 80;
 const methodsOf = (body) => {
   try {
     const b = JSON.parse(String(body));
-    return (Array.isArray(b) ? b : [b]).map((x) => ({ m: x?.method === "eth_call" ? `eth_call ${String(x.params?.[0]?.data ?? "").slice(0, 10)}` : String(x?.method), from: x?.method === "eth_getLogs" ? x.params?.[0]?.fromBlock : undefined }));
+    // CT_TRACE=1: each request's block too (a block read's height or tag, a call's block, a log page's range), so a
+    // landing's record shows which read was the search, the anchors or the fee
+    const at = (x) => (process.env.CT_TRACE !== "1" ? undefined : x?.method === "eth_getLogs" ? `${x.params?.[0]?.fromBlock}-${x.params?.[0]?.toBlock}` : JSON.stringify(x?.method === "eth_call" ? (x.params?.[1]?.blockHash ?? x.params?.[1])?.slice?.(0, 12) : x?.params?.[0]));
+    return (Array.isArray(b) ? b : [b]).map((x) => ({ m: x?.method === "eth_call" ? `eth_call ${String(x.params?.[0]?.data ?? "").slice(0, 10)}` : String(x?.method), from: x?.method === "eth_getLogs" ? x.params?.[0]?.fromBlock : undefined, p: at(x) }));
   } catch {
     return [{ m: "?" }];
   }
@@ -192,7 +195,7 @@ globalThis.fetch = async (input, init) => {
   if (route.fork.has(u.host)) {
     const batch = ++batches;
     const ms = methodsOf(init?.body);
-    for (const { m, from } of ms) hostSends.push({ host: u.host, at: Date.now(), m, from, batch });
+    for (const { m, from, p } of ms) hostSends.push({ host: u.host, at: Date.now(), m, from, batch, ...(p === undefined ? {} : { p }) });
     const wait = delayOf(u.host, ms);
     if (wait > 0) await sleep(wait);
     const kept = STATE_KEPT_MS.get(u.host);
@@ -741,7 +744,7 @@ await guard("first leaf: a ready proof inside its first minute", async () => {
   // batches
   const landingTrace = process.env.CT_TRACE === "1" ? tracing.map((x) => ({ ...x, msAfterDeposit: depAtMs === null ? null : x.at + t0 - depAtMs })) : undefined;
   if (process.env.CT_TRACE === "1") tracing = null;
-  const sentInWindow = depAtMs === null ? [] : hostSends.filter((x) => x.at >= depAtMs - 10_000 && x.at <= at).map((x) => ({ host: x.host, ms: x.at - depAtMs, batch: x.batch, m: x.m }));
+  const sentInWindow = depAtMs === null ? [] : hostSends.filter((x) => x.at >= depAtMs - 10_000 && x.at <= at).map((x) => ({ host: x.host, ms: x.at - depAtMs, batch: x.batch, m: x.m, ...(x.p === undefined ? {} : { p: x.p }) }));
   step("first leaf: ready inside 10 s, each pool host inside its window", { readyMsAfterDeposit: found === null ? null : at - depAtMs, depositIntoPeriodMs: depAtMs === null ? null : depAtMs - epochOf(depAtMs), stateRefusedInWindow: refusedOld, stateRefusedRun: stateRefused.length, sentInWindow, ...(landingTrace ? { landingTrace } : {}), readyBoundMs: READY_MS, hostWindowMost: most, hostWindowBound: HOST_WINDOW_BOUND, deployPages }, found !== null && at - depAtMs <= READY_MS && most !== null && most <= HOST_WINDOW_BOUND && deployPages === 0);
 });
 // the held-note copy measures the landing beside a held note; the withdraw steps below are the first leaf's
