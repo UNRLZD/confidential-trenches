@@ -191,6 +191,10 @@ export const EVM_POOL_READ_TRIES = 4;
 export const EVM_POOL_READ_WAIT_MS = EVM_POOL_READ_BOUND_MS - BigInt(EVM_POOL_READ_TRIES) * EVM_READ_TRY_MS;
 export const EVM_LAG_TRIES = 5;
 export const EVM_LAG_WAIT_MS = 2_000;
+/** How far below the newest block a period's first-block search reads first (evmEpochBlock): the chain's own pace
+ *  over this many blocks guesses the next step, a baseline a run of equal block times does not upset (Robinhood
+ *  Chain about 9.4 blocks a second with up to 16 on one second; Base 5 a second, mainnet.base.org 13 Nov 11:32Z). */
+export const EVM_EPOCH_PROBE_BLOCKS = 256n;
 
 const enc = new TextEncoder();
 const U64 = (1n << 64n) - 1n;
@@ -1571,17 +1575,23 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     last = null;
     // a finalized anchor at or below what is held (a pool just deployed, or an RPC's finalized behind another's) is
     // consistent: the cache stays where it is and the tail is read from past it
-    const fin = await anchorAt(EVM_POOL_TAG, signal);
+    // card evm-landing-reads-batched: the finalized anchor and the pool's views at the newest anchor all at once, each
+    // on both RPCs (one round trip, where one after another they took five: about 1.3 s a round at a keyless
+    // provider's 250 ms, a Robinhood mainnet copy of 13 Nov 09:58Z). The views first among the reads: a pruning node
+    // keeps only recent state. A refusal of any is the round's, as when they were read in turn
+    const [fin, scoped, root, size, labelRoot, labelSize] = await Promise.all([
+      anchorAt(EVM_POOL_TAG, signal),
+      checked ? null : agreed(VIEWS.SCOPE, anchor.hash, "SCOPE()", signal),
+      agreed(VIEWS.currentRoot, anchor.hash, "currentRoot()", signal),
+      agreed(VIEWS.currentTreeSize, anchor.hash, "currentTreeSize()", signal),
+      agreed(VIEWS.currentLabelRoot, anchor.hash, "currentLabelRoot()", signal),
+      agreed(VIEWS.currentLabelTreeSize, anchor.hash, "currentLabelTreeSize()", signal),
+    ]);
     // a newest anchor below what is held is behind a block already final, or the pool's deploy block: a retry, never
     // the views check, where a held leaf above the anchor would read as a lie
     if (anchor.number < heldTo) return lag(`the newest agreed block ${anchor.number} is below the ${heldTo} already read`);
     if (anchor.number < fin.number) return lag(`the newest agreed block ${anchor.number} is below the ${EVM_POOL_TAG} ${fin.number}`);
-    // the views first: a pruning node keeps only recent state
-    if (!checked && (await agreed(VIEWS.SCOPE, anchor.hash, "SCOPE()", signal)) !== scope) throw new Error(`SCOPE(): not the scope of ${pool} on ${a.pin.network}`);
-    const root = await agreed(VIEWS.currentRoot, anchor.hash, "currentRoot()", signal);
-    const size = await agreed(VIEWS.currentTreeSize, anchor.hash, "currentTreeSize()", signal);
-    const labelRoot = await agreed(VIEWS.currentLabelRoot, anchor.hash, "currentLabelRoot()", signal);
-    const labelSize = await agreed(VIEWS.currentLabelTreeSize, anchor.hash, "currentLabelTreeSize()", signal);
+    if (scoped !== null && scoped !== scope) throw new Error(`SCOPE(): not the scope of ${pool} on ${a.pin.network}`);
     // a held part the pool's views do not prove: dropped, its record cleared, and the pool read from its deploy block
     const dropHeld = async (): Promise<void> => {
       const bad = heldTo;
@@ -1939,6 +1949,15 @@ export async function evmLatestHigh(rpcs: readonly [EvmRpc, EvmRpc], signal?: Ab
  * below the newest block both RPCs agree on, then it and the block before it read on both RPCs, one hash each. RPC 0's
  * block at a height it searched holding another hash now is a reorg under the search, and the two RPCs holding two
  * blocks there a moment's fork: both a retry. One hash with two times or two base fees is refused.
+ * The search (card evm-landing-reads-batched): each step reads a guessed height and the block below it at once, so the
+ * step that guesses the first block ends the search. The first step reads EVM_EPOCH_PROBE_BLOCKS below the newest
+ * block; while no block before the start is known, each next step goes where the chain's pace from the newest block
+ * puts the start, and at least 16 blocks below, twice that the step after (a gallop); once one is known, the guess is the
+ * height the pace between the two blocks either side puts at the start, and a guess that does not halve the span is
+ * followed by a halving. From a whole-minute start 1 s to 10 min back, with the newest block at any place in its second,
+ * RPC 0 reads in at most 8 rounds at Base's 5 blocks a second and 11 on Robinhood's runs of 9 to 16, the check
+ * included, where doubling then halving took 13 (a Robinhood mainnet copy of 13 Nov 09:58Z, 3.3 s at its 250 ms
+ * answers); the check on both RPCs reads its two blocks at once.
  */
 export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartMs: bigint, signal?: AbortSignal, sleep: Sleep = wait): Promise<EvmBlock> {
   checkEvmRpcs(rpcs);
@@ -1951,25 +1970,61 @@ export async function evmEpochBlock(rpcs: readonly [EvmRpc, EvmRpc], epochStartM
   let hi = await evmAgreedBlock(rpcs, EVM_NEWEST_TAG, signal, sleep);
   if (!after(hi)) return lag(`the ${EVM_NEWEST_TAG} block ${hi.number} is before ${epochStartMs}`);
   let lo: EvmBlock | null = null;
-  for (let step = 1n; hi.number > 0n; step *= 2n) {
+  // the newest block: the pace's far point while no block before the start is known
+  const head = hi;
+  const ms = (b: EvmBlock) => b.timestamp * 1000n;
+  // the span a step left, so a guess that did not halve it is followed by a halving (the search always ends)
+  let halve = false;
+  let span: bigint | null = null;
+  // how far below hi a step past the first reaches at least, doubled each step that finds no block before the start
+  let back = 16n;
+  for (let steps = 0; lo === null || hi.number - lo.number > 1n; steps++) {
     signal?.throwIfAborted();
-    const b = await at(hi.number > step ? hi.number - step : 0n);
-    if (!after(b)) {
-      lo = b;
+    if (steps >= 64) throw new Error(`no first block of ${epochStartMs} in 64 steps`);
+    if (hi.number === 0n) break;
+    let g: bigint;
+    if (lo !== null && (halve || ms(hi) === ms(lo))) g = (lo.number + hi.number) / 2n;
+    // the first height the pace between the two blocks either side puts at or after the start. A period starts on a
+    // whole minute, so it shares its second with a run of blocks; with hi on that second the pace would name hi itself
+    // at every step, so it aims half a second below (each block taken as its second's middle)
+    else if (lo !== null) {
+      const aim = ms(hi) === epochStartMs ? epochStartMs - 500n : epochStartMs;
+      g = lo.number + ((aim - ms(lo)) * (hi.number - lo.number) + ms(hi) - ms(lo) - 1n) / (ms(hi) - ms(lo));
+    }
+    else if (steps === 0) g = hi.number > EVM_EPOCH_PROBE_BLOCKS ? hi.number - EVM_EPOCH_PROBE_BLOCKS : 0n;
+    else {
+      g = hi.number > back ? hi.number - back : 0n;
+      // the head's pace down to hi, where it reaches further below than the gallop
+      if (ms(head) > ms(hi)) {
+        const paced = hi.number - ((ms(hi) - epochStartMs) * (head.number - hi.number)) / (ms(head) - ms(hi));
+        if (paced < g) g = paced;
+      }
+      back *= 2n;
+    }
+    const least = lo === null ? 0n : lo.number + 1n;
+    if (g < least) g = least;
+    if (g > hi.number) g = hi.number;
+    const [b, under] = await Promise.all([at(g), g > 0n ? at(g - 1n) : Promise.resolve(null)]);
+    if (after(b) && under !== null && !after(under)) {
+      hi = b;
+      lo = under;
       break;
     }
-    hi = b;
+    if (after(b)) {
+      hi = under !== null && after(under) ? under : b;
+      if (under === null) break;
+    } else lo = b;
+    const now = lo === null ? null : hi.number - lo.number;
+    halve = !halve && span !== null && now !== null && now * 2n > span;
+    if (now !== null) span = now;
   }
   if (lo === null) throw new Error(`no block before ${epochStartMs}`);
-  while (hi.number - lo.number > 1n) {
-    signal?.throwIfAborted();
-    const mid = await at((lo.number + hi.number) / 2n);
-    if (after(mid)) hi = mid;
-    else lo = mid;
-  }
-  // both blocks on both RPCs, one hash each: the first block is after the start and the one before it is not
-  for (const want of [hi, lo]) {
-    const [x, y] = await both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(want.number), `rpc ${k} block ${want.number}`, sig, sleep), signal);
+  // both blocks on both RPCs, one hash each, all four reads at once: the first block is after the start and the one
+  // before it is not
+  const wants = [hi, lo];
+  const reads = await Promise.all(wants.map((want) => both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(want.number), `rpc ${k} block ${want.number}`, sig, sleep), signal)));
+  for (const [i, want] of wants.entries()) {
+    const [x, y] = reads[i]!;
     if (x === null || y === null) return lag(`rpc ${x === null ? 0 : 1} does not know block ${want.number} yet`);
     if (x.hash !== want.hash) return lag(`block ${want.number} moved under the search (a reorg)`);
     if (y.hash !== want.hash) return lag(`the two RPCs hold different blocks at ${want.number}`);
@@ -2080,7 +2135,7 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   // P3-6); one that fails is dropped, so the next asks again. It has its own stop, fired when its last waiting caller
   // stops (delta review of 4b070771, P2: a page signed out asks no fee host after); a caller joining later keeps it
   // alive, and a read every caller left is dropped, never kept for the next.
-  type HeldFee = { hash: string; read: Promise<{ depth: number | null; chainFee: bigint }>; done: boolean; waiting: number; stop: AbortController };
+  type HeldFee = { hash: string; block: EvmBlock; read: Promise<{ depth: number | null; chainFee: bigint }>; done: boolean; waiting: number; stop: AbortController };
   if (a.feeHold !== undefined && (a.feeHold.network !== a.pin.network || a.feeHold.pool !== pool)) throw new Error("feeHold: another pin's");
   const heldFees = (a.feeHold?.fees as Map<bigint, HeldFee> | undefined) ?? new Map<bigint, HeldFee>();
   /** h's answer for one caller: its stop ends its wait, and the last waiting caller's stop ends the read. */
@@ -2109,15 +2164,25 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
       h.read.then((v) => void (end() && res(v)), (e: unknown) => void (end() && rej(e)));
     });
   };
+  // a held period's first block, while both RPCs still hold it at its height (one read on each, at once): its time and
+  // its parent's are part of it, so it is still the period's first block, and the search is not made again; null when
+  // none is held or either RPC holds another block there (a reorg), and the search runs as for a new period
+  const heldBlock = async (epochStartMs: bigint, signal?: AbortSignal): Promise<EvmBlock | null> => {
+    const h = heldFees.get(epochStartMs);
+    if (h === undefined) return null;
+    const n = h.block.number;
+    const [x, y] = await both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(n), `rpc ${k} block ${n}`, sig, sleep), signal);
+    return x?.hash === h.hash && y?.hash === h.hash ? h.block : null;
+  };
   const feeAt = (epochStartMs: bigint, signal?: AbortSignal) =>
     evmRetryLag(async () => {
-      const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
+      const block = (await heldBlock(epochStartMs, signal)) ?? (await evmEpochBlock(rpcs, epochStartMs, signal, sleep));
       let h = heldFees.get(epochStartMs);
       if (h === undefined || h.hash !== block.hash) {
         // the period's fee state read while its block is fresh, straight after the block (review of 7fbf2af3, P2-2);
         // held by the block's hash (a reorg that replaced the block is another block)
         const stop = new AbortController();
-        const held: HeldFee = { hash: block.hash, read: evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, stop.signal, sleep), done: false, waiting: 0, stop };
+        const held: HeldFee = { hash: block.hash, block, read: evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, stop.signal, sleep), done: false, waiting: 0, stop };
         held.read.then(() => void (held.done = true), () => void (heldFees.get(epochStartMs) === held && heldFees.delete(epochStartMs)));
         heldFees.set(epochStartMs, (h = held));
         const newest = [...heldFees.keys()].reduce((x, y) => (y > x ? y : x));
