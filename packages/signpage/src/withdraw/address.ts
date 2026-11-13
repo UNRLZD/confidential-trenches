@@ -26,10 +26,10 @@ export function eip55(address: string): string {
 const ENDS = /^[\p{White_Space}\p{Cf}]+|[\p{White_Space}\p{Cf}]+$/gu;
 /** The invisible joiners a copy can leave inside an address: zero-width space, non-joiner and joiner, word joiner,
  *  byte-order mark, soft hyphen. They separate nothing a person sees. */
-const JOINERS = /[​‌‍⁠﻿­]/gu;
+const JOINERS = /[\u200B\u200C\u200D\u2060\uFEFF\u00AD]/gu;
 /** The direction controls (Arabic letter mark, LRM and RLM, the embeddings and overrides, the isolates): a field holding
  *  one can show other characters, or another order, than it holds. */
-const DIRECTION = /[؜‎‏‪-‮⁦-⁩]/u;
+const DIRECTION = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
 /** A typed or pasted To with what a copy carries taken out (ENDS, then JOINERS); null when it holds a direction control. */
 export const toCleaned = (raw: string): string | null => (DIRECTION.test(raw) ? null : raw.replace(ENDS, "").replace(JOINERS, ""));

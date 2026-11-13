@@ -35,7 +35,7 @@ test("the request: NEAR's USDC in, exactly the part, the chain's USDC out to the
 });
 
 test("the typed address per chain: Solana base58 keys, Base EIP-55 addresses; anything else is none", () => {
-  assert.equal(onwardTo("solana", ` ${SOL_TO}​ `), SOL_TO);
+  assert.equal(onwardTo("solana", ` ${SOL_TO}\u200B `), SOL_TO);
   assert.equal(onwardTo("solana", "11111111111111111111111111111111"), null, "the System program");
   assert.equal(onwardTo("solana", BASE_TO), null);
   assert.equal(onwardTo("base", BASE_TO.toLowerCase()), BASE_TO, "all lower case: checksummed");
