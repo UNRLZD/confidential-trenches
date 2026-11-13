@@ -38,7 +38,7 @@ const JS = [
   "if(h===null)return{result:{tap_max:f}};let g=(await c)?.pools.filter(e=>e.venue===`pump-curve`||e.venue===`pumpswap`).sort((e,t)=>e.expectedOut>t.expectedOut?-1:1)[0],_=g!==void 0&&u.decimals!==void 0&&g.expectedOut>0n?hU(g.expectedOut,u.decimals):void 0;return{result:{tap_max:f,pieces:h.length,cost:YU(h.reduce((e,t)=>e+t.binding.feeCap,n(h.length))),..._===void 0?{}:{out:_}}}};",
   "if(i.data.length<82)throw Error(`the mint is shorter than a mint`);let s=i.data[44],c=Tf(t);return{kind:e,mint:t,decimals:s,tokenProgram:i.owner};return{kind:e,mint:t,decimals:s,tokenProgram:i.owner}",
   "return i(13,0)?`current`:i(1,13)?`1.13`:i(1,12)?`1.12`:`1.4`}",
-  "o_=(e,t)=>{if(e!==`pool.buy.dry`||typeof t!=`object`||!t)return t;let{out:n,...r}=t;return r};function f_(e,t,n){if(e===`current`)return n;let r=o_(t,n);if(e===`1.13`)return r;let i=c_(t,r)}",
+  "o_=(e,t)=>{if(typeof t!=`object`||!t||e!==`pool.buy.dry`)return t;let{out:n,...r}=t;return r};function f_(e,t,n){if(e===`current`)return n;let r=o_(t,n);if(e===`1.13`)return r;let i=c_(t,r)}",
   "x=`1.14`",
 ].join("");
 const INDEX = (js) => `<script type="module" src="/app.js" integrity="${facts("", js).sha384}"></script>`;

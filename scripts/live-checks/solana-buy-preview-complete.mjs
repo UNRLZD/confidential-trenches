@@ -46,7 +46,7 @@ const DECIMALS = new RegExp(`if\\((${N})\\.data\\.length<82\\)throw Error\\(\`th
 /** kit-v1.13's level in the version chain. */
 const LEVEL = new RegExp(`${N}\\(1,13\\)\\?\`1\\.13\`:${N}\\(1,12\\)\\?\`1\\.12\``);
 /** The strip of a dry buy's out (group: its function). */
-const STRIP = new RegExp(`(${N})=\\((${N}),(${N})\\)=>\\{if\\(\\2!==\`pool\\.buy\\.dry\`\\|\\|typeof \\3!=\`object\`\\|\\|!\\3\\)return \\3;let\\{out:${N},\\.\\.\\.(${N})\\}=\\3;return \\4\\}`);
+const STRIP = new RegExp(`(${N})=\\((${N}),(${N})\\)=>\\{if\\(typeof \\3!=\`object\`\\|\\|!\\3\\|\\|\\2!==\`pool\\.buy\\.dry\`\\)return \\3;let\\{out:${N},\\.\\.\\.(${N})\\}=\\3;return \\4\\}`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the marks read from it. */
 export function facts(index, js) {

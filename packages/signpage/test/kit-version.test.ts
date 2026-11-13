@@ -975,3 +975,17 @@ test("a kit-v1.13 app still gets the closed notice for its open (card signing-la
     assert.equal(p.posted.filter((m) => (m as { type?: string }).type === "closed").length, n, kit);
   }
 });
+
+test("hello kit 1.13: the state answer and every state event as they are (each pool entry's making, each position's decimals and asset_held kept), and kit-v1.13's own schema reads both", async () => {
+  // the state carries no out, so kit-v1.13 reads it whole; an event goes through stateFor, the answer through resultFor
+  const p = page();
+  p.send(hello("1.13"));
+  const id = await p.ask();
+  assert.deepEqual(p.answer(id).result, FULL);
+  assert.ok(reads(V113, p.answer(id), "state"));
+  p.set({ ...FULL, vault_balance: "78" });
+  await p.api.idle();
+  const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
+  assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "78" } }]);
+  assert.ok(reads(V113, ev[0], "state"));
+});

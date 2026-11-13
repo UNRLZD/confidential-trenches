@@ -24,7 +24,10 @@
 // tx plants are the merged build with their one cut, judged at 1.8; badLiveHoldings is SIGN_HOST re-read at 14:44Z.
 // Card signing-layer-says-when-it-closes (kit 1.13) re-recorded good from its build, kept the kit 1.12 good as good112
 // (judged at 1.12 with that era's plants), and added badClosesKept, badCloseKinds, badNoV112Level, badKit112 and
-// badState112Stripped, each its build with the one cut the answers' note names: each FAIL at 1.13.
+// badState112Stripped, each its build with the one cut the answers' note names: each FAIL at 1.13. Card
+// solana-buy-preview-complete (kit 1.14) re-recorded good from its build, kept the kit 1.13 good as good113 (judged at
+// 1.13 with that era's plants), and added badOutKept, badNoV113Level, badKit113 and badState113Stripped, each its build
+// with the one cut the answers' note names: each FAIL at 1.14.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
@@ -88,6 +91,15 @@ const LEVELS113_LINE = (l) => `BAD the page's levels below the current one are $
 const CLOSES_LINE = "BAD an open kind's answer sent below the current level keeps closes, which kit-v1.12 refuses the whole answer for";
 const KINDS_LINE = (k) => `BAD the closes strip reads the kinds ${JSON.stringify(k)}, not the open kinds ${JSON.stringify(OPEN_KINDS)}`;
 const STATE112_LINE = "BAD kit-v1.12 is not sent the state in full: it loses a field it reads";
+// card solana-buy-preview-complete: the records cut at kit 1.13 (good113, badClosesKept, badCloseKinds, badNoV112Level,
+// badKit112, badState112Stripped) are judged at the version and levels they were cut at (V113); this card's good build
+// and its plants at 1.14 (judgeNow)
+const V113 = { kit: "1.13", levels: ["1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"] };
+const judge113 = (a) => judgeNow(a, V113);
+const KIT114_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not kit-v1.14: a kit-v1.14 app's dry buy's out has no level of its own`;
+const LEVELS114_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.13","1.12","1.11","1.10","1.9","1.8","1.7","1.6","1.5"]: an older kit's app is sent what it cannot read`;
+const OUT_LINE = "BAD pool.buy.dry's answer sent below the current level keeps its out, which kit-v1.13 refuses the whole answer for";
+const STATE113_LINE = "BAD kit-v1.13 is not sent the state in full: it loses a field it reads";
 const LEVELS18_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.7","1.6","1.5"]: an older kit's app is sent what it cannot read`;
 const DECIMALS_LINE = "BAD the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for";
 const RESULT17_LINE = "BAD kit-v1.7's answers do not go through its own level: its deposit.confirm is sent with no facts";
@@ -246,7 +258,7 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   const f = facts("", js);
   assert.deepEqual(f.maps, [MAP]);
   assert.deepEqual(f.keys, [V1_4_KEYS]);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
   assert.equal(f.hello.decimals, null, "a 1.7-era shaper strips no decimals");
   assert.equal(f.hello.kit, "1.7");
   // review P3 2: the filter and the kit-v1.6 answer branch read only on the functions the shaper calls
@@ -302,7 +314,7 @@ test("facts() reads the hello's path with the kit-v1.5 level (card held-move-for
   ].join(";");
   const js = `var pl=Object.freeze({${pairs}}),b=new Set([${V1_4_KEYS.map((k) => `\`${k}\``).join(",")}]);${path}`;
   const f = facts("", js);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
   assert.deepEqual(f.hello.progressMap, MAP);
   // card pool-deposit-stages: release-94's shape reads kit 1.6, kit-v1.5's level alone, no pool filter: FAIL now
   assert.deepEqual([f.hello.kit, f.hello.levels, f.hello.poolOps], ["1.6", ["1.5"], null]);
@@ -527,22 +539,20 @@ test("buy-spends-several-pieces: facts() reads no making strip from a shaper who
 
 // ------------------------------------------------------------------------------------------------ card signing-layer-says-when-it-closes
 test("signing-layer-says-when-it-closes: the good build reads kit 1.13 in full, kit-v1.12 to kit-v1.5 below it, each open kind's answer with no closes there and kit-v1.12 its own level on that, and kit-v1.12 sent the state in full", () => {
-  assert.equal(KIT, "1.13");
-  assert.deepEqual(LEVELS, ["1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"]);
-  const g = ANSWERS.good;
+  const g = ANSWERS.good113;
   assert.equal(g.hello.kit, "1.13");
-  assert.deepEqual(g.hello.levels, LEVELS);
+  assert.deepEqual(g.hello.levels, V113.levels);
   assert.match(g.hello.closes, /\{if\(([\w$]+)===`current`\)return ([\w$]+);let ([\w$]+)=[\w$]+\([\w$]+,\2\);if\(\1===`1\.12`\)return \3;let ([\w$]+)=[\w$]+\([\w$]+,\3\);if\(\1===`1\.11`\|\|/);
   assert.equal(g.hello.dry, g.hello.closes, "the dry strip is read on the answer with no closes");
   assert.deepEqual(g.hello.closeKinds, OPEN_KINDS);
   assert.match(g.hello.state112, /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`\|\|\1===`1\.12`\)return \2;/);
   assert.equal(g.hello.making, g.hello.state112, "kit-v1.11's level still strips making below kit-v1.12");
-  assert.deepEqual(judgeNow(g).lines, []);
+  assert.deepEqual(judge113(g).lines, [], "the 1.13 build at its own era");
   assert.deepEqual(judge112(ANSWERS.good112).lines, [], "the 1.12 build at its own era");
 });
 
 test("signing-layer-says-when-it-closes: recorded bad answers: the kit 1.12 build (good112) at 1.13, and badClosesKept, badCloseKinds, badNoV112Level, badKit112 and badState112Stripped cut from this card's build: each FAIL, named", () => {
-  assert.deepEqual(judgeNow(ANSWERS.good112).lines, [KIT113_LINE("1.12"), LEVELS113_LINE(["1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"]), CLOSES_LINE, STATE112_LINE]);
+  assert.deepEqual(judge113(ANSWERS.good112).lines, [KIT113_LINE("1.12"), LEVELS113_LINE(["1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"]), CLOSES_LINE, STATE112_LINE]);
   const cuts = [
     ["badClosesKept", CLOSES_LINE],
     ["badCloseKinds", KINDS_LINE(["withdraw.open", "signin.open", "backup.open", "export.open", "pool.withdraw"])],
@@ -551,18 +561,18 @@ test("signing-layer-says-when-it-closes: recorded bad answers: the kit 1.12 buil
     ["badState112Stripped", STATE112_LINE],
   ];
   for (const [k, line] of cuts) {
-    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
-    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good.maps, k);
-    assert.deepEqual(judgeNow(ANSWERS[k]).lines, [line], k);
+    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good113.sha384, k);
+    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good113.maps, k);
+    assert.deepEqual(judge113(ANSWERS[k]).lines, [line], k);
   }
   assert.equal(typeof ANSWERS.badClosesKept.hello.dry, "string", "the answer shaper is still read: only the strip keeps closes");
   assert.equal(typeof ANSWERS.badState112Stripped.hello.making, "string", "the state shaper is still read: only kit-v1.12's full state is cut");
-  const g = ANSWERS.good;
-  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, closes: null } }).lines, [CLOSES_LINE]);
-  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, closeKinds: null } }).lines, [KINDS_LINE(null)]);
-  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, closeKinds: [...OPEN_KINDS, "deposit.confirm"] } }).lines, [KINDS_LINE([...OPEN_KINDS, "deposit.confirm"])]);
-  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, state112: null } }).lines, [STATE112_LINE]);
-  for (const v of ["1.12", "1.14", null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT113_LINE(v ?? "?")], `kit ${v}`);
+  const g = ANSWERS.good113;
+  assert.deepEqual(judge113({ ...g, hello: { ...g.hello, closes: null } }).lines, [CLOSES_LINE]);
+  assert.deepEqual(judge113({ ...g, hello: { ...g.hello, closeKinds: null } }).lines, [KINDS_LINE(null)]);
+  assert.deepEqual(judge113({ ...g, hello: { ...g.hello, closeKinds: [...OPEN_KINDS, "deposit.confirm"] } }).lines, [KINDS_LINE([...OPEN_KINDS, "deposit.confirm"])]);
+  assert.deepEqual(judge113({ ...g, hello: { ...g.hello, state112: null } }).lines, [STATE112_LINE]);
+  for (const v of ["1.12", "1.14", null]) assert.deepEqual(judge113({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT113_LINE(v ?? "?")], `kit ${v}`);
 });
 
 test("signing-layer-says-when-it-closes: facts() reads no closes strip from a shaper whose strip keeps it, reads another key or kind list, that has no kit-v1.12 level, or builds a lower level on the given answer", () => {
@@ -586,4 +596,63 @@ test("signing-layer-says-when-it-closes: facts() reads no closes strip from a sh
   assert.equal(h(M, S, R.replace("let i=Dl(t,r);", "let i=Dl(t,n);")).closes, null, "the dry strip built on the given answer");
   assert.equal(h(M, S.replace("if(e===`current`||e===`1.12`)return t;", "if(e===`current`)return t;")).state112, null, "kit-v1.12 sent the stripped state");
   assert.equal(h(M, S.replace("if(e===`current`||e===`1.12`)return t;", "if(e===`current`||e===`1.11`)return t;")).state112, null, "another level sent the state in full");
+});
+
+// ------------------------------------------------------------------------------------------------ card solana-buy-preview-complete
+test("solana-buy-preview-complete: the good build reads kit 1.14 in full, kit-v1.13 to kit-v1.5 below it, each pool.buy.dry answer with no out there and kit-v1.13 its own level on that, the closes strip built on what it returns, and kit-v1.13 sent the state in full", () => {
+  assert.equal(KIT, "1.14");
+  assert.deepEqual(LEVELS, ["1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"]);
+  const g = ANSWERS.good;
+  assert.equal(g.hello.kit, "1.14");
+  assert.deepEqual(g.hello.levels, LEVELS);
+  assert.match(g.hello.out, /\{if\(([\w$]+)===`current`\)return ([\w$]+);let ([\w$]+)=[\w$]+\([\w$]+,\2\);if\(\1===`1\.13`\)return \3;let ([\w$]+)=[\w$]+\([\w$]+,\3\);if\(\1===`1\.12`\)return \4;/);
+  assert.equal(g.hello.closes, g.hello.out, "the closes strip is read on the answer with no out");
+  assert.equal(g.hello.dry, g.hello.out, "the dry strip is read on the answer with no closes");
+  assert.match(g.hello.state113, /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`\|\|\1===`1\.13`\|\|\1===`1\.12`\)return \2;/);
+  assert.equal(g.hello.state112, g.hello.state113, "kit-v1.12 is still sent the state in full");
+  assert.deepEqual(judgeNow(g).lines, []);
+  assert.deepEqual(judge113(ANSWERS.good113).lines, [], "the 1.13 build at its own era");
+});
+
+test("solana-buy-preview-complete: recorded bad answers: the kit 1.13 build (good113) at 1.14, and badOutKept, badNoV113Level, badKit113 and badState113Stripped cut from this card's build: each FAIL, named", () => {
+  const below = ["1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
+  assert.deepEqual(judgeNow(ANSWERS.good113).lines, [KIT114_LINE("1.13"), LEVELS114_LINE(below), OUT_LINE, STATE113_LINE]);
+  const cuts = [
+    ["badOutKept", OUT_LINE],
+    ["badNoV113Level", LEVELS114_LINE(below)],
+    ["badKit113", KIT114_LINE("1.13")],
+    ["badState113Stripped", STATE113_LINE],
+  ];
+  for (const [k, line] of cuts) {
+    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
+    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good.maps, k);
+    assert.deepEqual(judgeNow(ANSWERS[k]).lines, [line], k);
+  }
+  assert.equal(typeof ANSWERS.badOutKept.hello.closes, "string", "the answer shaper is still read: only the strip keeps out");
+  assert.equal(typeof ANSWERS.badState113Stripped.hello.state112, "string", "the state shaper is still read: only kit-v1.13's full state is cut");
+  const g = ANSWERS.good;
+  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, out: null } }).lines, [OUT_LINE]);
+  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, state113: null } }).lines, [STATE113_LINE]);
+  for (const v of ["1.13", "1.15", null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT114_LINE(v ?? "?")], `kit ${v}`);
+});
+
+test("solana-buy-preview-complete: facts() reads no out strip from a shaper whose strip keeps it, reads another key or kind, that has no kit-v1.13 level, or builds the closes strip on the given answer; and no kit-v1.13 full state from a state shaper that strips it", () => {
+  const S = "function S(e,t){if(e===`current`||e===`1.13`||e===`1.12`)return t;let n=Ml(t);if(e===`1.11`)return n;let r=Vl(n);if(e===`1.10`)return r;if(e===`1.9`)return{...r,ops:r.ops.map(Hl)};let i={...r,ops:r.ops.map(Ul)};if(e===`1.8`)return i;let a=Bl(i);if(e===`1.7`)return a;if(e===`1.6`)return{...a,ops:zl(a.ops)};if(e===`1.5`)return{...a,ops:zl(a.ops).map(e=>e)};return a}";
+  const R = "function R(e,t,n){if(e===`current`)return n;let r=Ol(t,n);if(e===`1.13`)return r;let i=Cl(t,r);if(e===`1.12`)return i;let a=Dl(t,i);if(e===`1.11`||e===`1.10`||e===`1.9`||e===`1.8`||e===`1.7`||e===`1.6`)return t===`state`?S(e,a):a;return a}";
+  const K = "var Is=[`withdraw.open`,`signin.open`,`backup.open`,`export.open`,`signout`,`pool.withdraw`];";
+  const M = "var Ml=e=>e.pools===void 0?e:{...e,pools:e.pools.map(({making:e,...t})=>t)},Ol=(e,t)=>{if(typeof t!=`object`||!t||e!==`pool.buy.dry`)return t;let{out:n,...r}=t;return r},Dl=(e,t)=>{if(e!==`pool.buy.dry`||typeof t!=`object`||!t)return t;let{pieces:n,cost:r,...i}=t;return i},Cl=(e,t)=>{if(!Is.includes(e)||typeof t!=`object`||!t)return t;let{closes:n,...r}=t;return r},Vl=e=>({...e,positions:e.positions.map(({asset_held:e,...t})=>t)});";
+  const P = "var zl=e=>e.filter(e=>e.kind!==`pool_deposit`),Bl=e=>({...e,positions:e.positions.map(({decimals:e,...t})=>t)});";
+  const SH = "function sh(e){let r=`1.4`,i=(e,t)=>{if(`ok`in e)return e.ok&&t!==void 0?{...e,result:R(r,t,e.result)}:e;if(e.type===`state`)return{...e,state:S(r,e.state)};},c=async i=>{let c=zc(i);if(c!==null)return void(r=Bc(c));}}";
+  const HELLO = "function zc(e){return t.length!==3||n.v!==1||n.type!==`hello`||!Object.hasOwn(n,`kit`)||typeof n.kit!=`string`?null:n.kit}function Bc(e){let t=Rc.exec(e);if(!t)return`1.4`;let[n,r]=[1,9],i=(e,t)=>n>e;return i(Lc[0],Lc[1])?`current`:`1.4`}";
+  const h = (m = M, s = S, r = R) => facts("", `${P}${K}${m}${HELLO}${s}${r}${SH}`).hello;
+  for (const x of ["out", "state113", "closes", "state112", "making", "held", "dry", "result111"]) assert.equal(typeof h()[x], "string", x);
+  assert.equal(h(M.replace("let{out:n,...r}=t;return r}", "let{out:n,...r}=t;return t}")).out, null, "the strip returns the answer as it is");
+  assert.equal(h(M.replace("let{out:n,", "let{pending:n,")).out, null, "the strip takes another key");
+  assert.equal(h(M.replace("e!==`pool.buy.dry`)return t;let{out:", "e!==`pool.buy`)return t;let{out:")).out, null, "the strip reads another kind");
+  assert.equal(h(M, S, R.replace("let r=Ol(t,n);", "let r=Ml(t,n);")).out, null, "another function in its place");
+  assert.equal(h(M, S, R.replace("if(e===`1.13`)return r;", "")).out, null, "no kit-v1.13 level");
+  assert.equal(h(M, S, R.replace("if(e===`1.13`)return r;", "if(e===`1.13`)return n;")).out, null, "kit-v1.13 sent the given answer");
+  assert.equal(h(M, S, R.replace("let i=Cl(t,r);", "let i=Cl(t,n);")).closes, null, "the closes strip built on the given answer");
+  assert.equal(h(M, S.replace("if(e===`current`||e===`1.13`||e===`1.12`)return t;", "if(e===`current`||e===`1.12`)return t;")).state113, null, "kit-v1.13 sent the stripped state");
+  assert.equal(h(M, S.replace("if(e===`current`||e===`1.13`||e===`1.12`)return t;", "if(e===`current`||e===`1.11`||e===`1.12`)return t;")).state113, null, "another level sent the state in full");
 });

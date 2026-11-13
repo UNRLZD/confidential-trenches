@@ -157,7 +157,7 @@ const noDecimals = (s: SignpageState): SignpageState => ({ ...s, positions: s.po
 const noMaking = (s: SignpageState): SignpageState => (s.pools === undefined ? s : { ...s, pools: s.pools.map(({ making: _m, ...p }) => p) });
 /** pool.buy.dry's answer with no out (card solana-buy-preview-complete): kit-v1.13 and before refuse one. */
 const dryOutFor = (kind: SignpageKind, result: unknown): unknown => {
-  if (kind !== "pool.buy.dry" || typeof result !== "object" || result === null) return result;
+  if (typeof result !== "object" || result === null || kind !== "pool.buy.dry") return result;
   const { out: _o, ...rest } = result as Record<string, unknown>;
   return rest;
 };
