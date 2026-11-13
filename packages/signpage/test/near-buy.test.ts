@@ -646,6 +646,27 @@ test("a tap's W pick passes over a W holding only a stranger's dust (under its r
   assert.equal((await recOf(v, "b1")).sell, undefined, "the dust W1 is not taken");
 });
 
+test("a live buy that landed under its floor (floor 1000, fill 900, 900 on W): a position that a tap sells, never passed over as dust", async () => {
+  const v = await world([5_000_000n]);
+  const { page } = pageOf(v);
+  const w1 = (await paid(page, v, "b1")).w;
+  await v.w.put("quotes", `${NEAR_BUY_KEY}b1`, { ...(await recOf(v, "b1")), stage: "sent", code: "received_below_floor", swap: { floor: "1000", before: "0" }, fill: { out: "900", decimals: 18 } });
+  page.readWallet = async (a) => ({ account: a.wallet, height: 1, blockHash: "b", nonce: 1n, held: a.side === "sell" ? 900n : 0n, registered: true, storageMin: 0n, lostfound: 0n });
+  assert.equal((await nearPositions(page)).length, 1, "a position");
+  const d = sellDepsOf(page, null, "s1", 100);
+  const got = await d.wallet(TOKEN);
+  assert.equal(got?.id, w1.id, "the tap takes W");
+  assert.equal(got?.coinMin, 900n, "its coin counts from what it received");
+  d.release();
+  // the sell run on it reads the coin as held (it goes on to the quote), never ends not_funded
+  const lines: string[] = [];
+  page.log = (l) => void lines.push(l);
+  const run = nearSellKind(page)({ token: TOKEN, slippageBps: 100 }, { id: "s2" } as never);
+  if ("running" in run) await run.after.catch(() => {});
+  assert.ok(lines.includes("near sell read: token held"), lines.join(" | "));
+  assert.ok(!lines.some((l) => l.includes("not_funded")), lines.join(" | "));
+});
+
 test("D5b: a sell that ends part_filled (the token sold, under the least deposit left in W) is recorded part_filled, a sale done: never refused, never taken again", async () => {
   const v = await world([5_000_000n]);
   const { page } = pageOf(v);
