@@ -9,8 +9,8 @@
 // - Which Ws: the ones the pool's SPENT and RESERVED notes paid (../../wallet/src/pool/buy-wallets.ts spentNotesOf),
 //   derived by the finder's own derive (derivedBuyWallets, with no read of any W), under the seed's shared lock with the
 //   seed zeroed at once; only their addresses are kept. A W that has a "read, no buy" mark or a final "trades read"
-//   mark (below), or a buy running on this page, is not read; one with a buy record this device's own buy wrote gets
-//   no record from the read (it has one), only its trades.
+//   mark (below), or a buy running on this page, is not read; one with a buy record this device's own buy wrote is read
+//   once for its trades (it keeps its record), then not again.
 // - What: each W's buy from its own transaction (buy-wallets.ts solanaBuyReader: W signs it, the pinned pool's tag 3
 //   names W, one mint rises in W's accounts), on the finder's paced route (the helper's keyed route on mainnet) with a
 //   gate of its own, one W at a time in a random order, each call on the host's pass turn (the reader's lane, as the
@@ -47,9 +47,9 @@
 //   the SOL in and out, the USD at each trade's own block) are src/trade-fill.ts's from the same transactions, as for
 //   any record that lacks them. An op is written only where no op of the store names its signature (this device's own
 //   ops win), so a rerun adds nothing twice.
-// - Which Ws: every W (since card closed-positions-show-every-trade, one with a buy record of this device's own too: a run
-//   that ended "sent" on a page closed before its follow wrote no op) but one a buy on this page is still running for,
-//   with no final "trades read" mark
+// - Which Ws: every W with no buy record of this device's own (none, or a `rebuilt` one), and one with such a record
+//   until its trades were read once (card closed-positions-show-every-trade: a run that ended "sent" on a page closed
+//   before its follow wrote no op), but one a buy on this page is still running for, with no final "trades read" mark
 //   (TRADES_READ_KEY true): a W whose sale in full was read, every answer up to it its signature's own, gets the mark
 //   and is not read again (review of 776d40528, P3-2: never when that sale's answer was not its own, so its op is never
 //   lost), with a sale op or without one (review of f73ee1c82, P3-b: a signed sale in full trade-fill.ts cannot read
@@ -112,14 +112,17 @@ const fromOf = (v: unknown): SolanaTradesFrom | null => {
   return typeof r.after === "string" && typeof r.mint === "string" && typeof r.program === "string" ? { after: r.after, mint: r.mint, program: r.program } : null;
 };
 
-/** The Ws not to read (SolBuyRecordsDeps.done): those with a "read, no buy" mark or a final "trades read" mark. A W
- *  with a buy record of this device's own is read too (card closed-positions-show-every-trade): a buy whose run ended
- *  "sent" and whose page closed before its follow ended it wrote its record before the send and no op, so only this
+/** The Ws not to read (SolBuyRecordsDeps.done): those with a "read, no buy" mark or a final "trades read" mark, and
+ *  those with a buy record of this device's own (`buyKey`'s, not `rebuilt`) once their trades were read at all (any
+ *  "trades read" mark). Before that such a W is read once (card closed-positions-show-every-trade): a buy whose run
+ *  ended "sent" on a page closed before its follow ended it wrote its record before the send and no op, so only this
  *  read gives its trades; an op is written only where none names its signature, so this device's own ops still win. */
-export async function tradesDone(st: Pick<TradesStore, "get">): Promise<ReadonlySet<string>> {
-  const final = Object.entries(recordOf(await st.get("meta", TRADES_READ_KEY))).flatMap(([a, v]) => (v === true ? [a] : []));
+export async function tradesDone(st: Pick<TradesStore, "get">, buyKey: string): Promise<ReadonlySet<string>> {
+  const read = recordOf(await st.get("meta", TRADES_READ_KEY));
+  const own = Object.entries(recordOf(await st.get("meta", buyKey))).flatMap(([a, r]) => (recordOf(r).rebuilt !== true && Object.hasOwn(read, a) ? [a] : []));
+  const final = Object.entries(read).flatMap(([a, v]) => (v === true ? [a] : []));
   const none = Object.entries(recordOf(await st.get("meta", BUY_NONE_KEY))).flatMap(([a, v]) => (v === BUY_NONE_MARK ? [a] : []));
-  return new Set([...none, ...final]);
+  return new Set([...own, ...none, ...final]);
 }
 
 /** Where each W still holding is read on from (its "trades read" cursor; see the top). */
@@ -160,8 +163,9 @@ export async function writeTradeOps(st: TradesStore, w: string, buy: SolanaBuy):
 export type SolBuyRecordsDeps = {
   /** The addresses of the Ws the pool's SPENT and RESERVED notes paid (see the top); nothing is read for them. */
   wallets(signal: AbortSignal): Promise<readonly string[]>;
-  /** The Ws not to read: those with a "read, no buy" mark (BUY_NONE_KEY) or a final "trades read" mark
-   *  (TRADES_READ_KEY), and the page's own running buys' (tradesDone; pool-testnet.ts). */
+  /** The Ws not to read: those with a "read, no buy" mark (BUY_NONE_KEY), a final "trades read" mark
+   *  (TRADES_READ_KEY), a buy record of this device's own with any "trades read" mark, and the page's own running
+   *  buys' (tradesDone; pool-testnet.ts). */
   done(): Promise<ReadonlySet<string>>;
   /** Writes W's rebuilt buy record only when W has none, or its "read, no buy" mark; whether it wrote a buy record. */
   write(address: string, buy: SolanaBuy | "none"): Promise<boolean>;

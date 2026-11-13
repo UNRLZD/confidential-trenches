@@ -2429,7 +2429,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     // a rebuilt record is read again for W's trades until its final "trades read" mark (sol-buy-records.ts, card
     // closed-positions-after-a-restore): a device restored before that card has the records and none of the trades
-    done: async () => new Set([...(await tradesDone(await page.store())), ...runningBuys]),
+    done: async () => new Set([...(await tradesDone(await page.store(), BUY_MINTS_KEY)), ...runningBuys]),
     from: async () => tradesFrom(await page.store()),
     // through the store only while it is open (page.held): another tab's sign out never lands a write in a store made
     // afresh (review of 42a99f81, d)
@@ -2551,8 +2551,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         positions.refresh();
       }
     };
-    const into = routeInto(facts, ctx.route);
-    r = buy(ask, { ...ctx, progress, route: (x) => (into(x), !done && facts.wallet !== undefined && runningBuys.add(facts.wallet), "out" in x && out()) });
+    // W, once told, is this page's running buy's until its records are written (runningBuys)
+    const into = routeInto(facts, (x) => {
+      if (!done && facts.wallet !== undefined) runningBuys.add(facts.wallet);
+      ctx.route?.(x);
+    });
+    r = buy(ask, { ...ctx, progress, route: (x) => (into(x), "out" in x && out()) });
     const run = r;
     if ("after" in run)
       void run.after.then(() => {
