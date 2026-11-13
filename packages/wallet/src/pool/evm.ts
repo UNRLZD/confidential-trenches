@@ -2020,6 +2020,10 @@ export type EvmPoolArgs = {
    *  made is never read again by the other; with none, a sync of its own on `rpcs`, `held` and `history`. The pool's
    *  time is the sync's too (card evm-first-proof-inside-ten-seconds), so a pass's trees read its own newest block. */
   sync?: Pick<EvmTreeSync, "trees" | "depthAt" | "now">;
+  /** The period fee hold (evmFeeHold) this pool shares with another pool of the same pin (card
+   *  evm-first-proof-inside-ten-seconds): a read either made at a period's first block is the other's too; with none,
+   *  one of its own. */
+  feeHold?: EvmFeeHold;
   /** GET /v1/pool/fee?pool=&epoch= on the helper: its answer, refused unless every field is this pool's and its fee
    * the device's own. */
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
@@ -2041,6 +2045,13 @@ export type EvmPoolOf = Pool<EvmPoolRequest> & {
    */
   holdFee(epochStartMs: bigint, signal?: AbortSignal): Promise<void>;
 };
+
+/** A period fee hold for one pin's pools (EvmPoolArgs feeHold; card evm-first-proof-inside-ten-seconds): the page's pass
+ *  pool holds each period's fee at the turn on its own hosts, and the pool a landing's pass binds on, on the deposit's
+ *  pair, binds on that read instead of reading the period's first block again, by then too old for a keyless operator.
+ *  What is held is what two operators of the fee list agreed on at the block's hash, whichever pool read it. */
+export type EvmFeeHold = { readonly network: EvmNetwork; readonly pool: string; readonly fees: Map<bigint, unknown> };
+export const evmFeeHold = (pin: EvmPoolPin): EvmFeeHold => ({ network: pin.network, pool: lower(pin.pool), fees: new Map() });
 
 export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   const rpcs = evmPair(a.rpcs);
@@ -2070,7 +2081,8 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   // stops (delta review of 4b070771, P2: a page signed out asks no fee host after); a caller joining later keeps it
   // alive, and a read every caller left is dropped, never kept for the next.
   type HeldFee = { hash: string; read: Promise<{ depth: number | null; chainFee: bigint }>; done: boolean; waiting: number; stop: AbortController };
-  const heldFees = new Map<bigint, HeldFee>();
+  if (a.feeHold !== undefined && (a.feeHold.network !== a.pin.network || a.feeHold.pool !== pool)) throw new Error("feeHold: another pin's");
+  const heldFees = (a.feeHold?.fees as Map<bigint, HeldFee> | undefined) ?? new Map<bigint, HeldFee>();
   /** h's answer for one caller: its stop ends its wait, and the last waiting caller's stop ends the read. */
   const joinFee = (epochStartMs: bigint, h: HeldFee, signal?: AbortSignal): Promise<{ depth: number | null; chainFee: bigint }> => {
     if (h.done) return h.read;

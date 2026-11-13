@@ -311,7 +311,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       // the costs' reads only once U_X holds at least the least rung (review L2): none while it holds nothing
       const t = (deps.now ?? Date.now)();
       const was = under as Under | null;
-      const keep = was !== null && was.low === low && t - was.at < POOL_FOLLOW_COSTS_MS ? was : null;
+      const keep = was !== null && was.low === low && t >= was.at && t - was.at < POOL_FOLLOW_COSTS_MS ? was : null;
       const c: Under["c"] | null = low >= deps.ladder.min ? (keep?.c ?? gated(await deps.costs(f))) : null;
       under = c !== null && low < c.floor ? (keep ?? { low, at: t, c }) : null;
       if (c !== null && low >= c.floor) {

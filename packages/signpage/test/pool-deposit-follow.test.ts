@@ -1320,3 +1320,36 @@ test("card evm-first-proof-inside-ten-seconds: a balance that moves inside POOL_
   assert.equal(deposits[0]?.at, 6_000);
   assert.equal(deposits[0]?.amount, askOf(SOL_LADDER, more, PER + 5n, KEEP));
 });
+
+// review of evm-first-proof-inside-ten-seconds, items 6 and 7: the costs are held only under the floor (a round over it
+// carries, and every carry reads its own round's costs), and never across a clock that stepped back (the device's clock
+// set back an hour held the first read's fee an hour)
+test("card evm-first-proof-inside-ten-seconds: over the floor at an unchanged balance, every round reads its own costs", async () => {
+  const more = FLOOR + 5_000_000n;
+  const w = world(Array.from({ length: 3 }, () => ({ bal: [more, more] as const, status: "SUCCESS" })));
+  const c = clocked(w);
+  w.deps.costs = async () => (c.reads.push({ at: c.at(), low: more }), { floor: FLOOR, perRung: PER, keep: KEEP });
+  const deposits: number[] = [];
+  w.deps.deposit = async () => (deposits.push(c.at()), { end: "filled", txs: [] });
+  await followPoolQuote(F, w.deps);
+  assert.ok(deposits.length >= 2, `carried ${deposits.length} times`);
+  for (const at of deposits) assert.ok(c.reads.some((r) => r.at === at), `the carry at ${at} ms read its own round's costs: reads at ${c.reads.map((r) => r.at).join(", ")}`);
+});
+
+test("card evm-first-proof-inside-ten-seconds: a clock that steps back ends the hold: the next round reads the costs again", async () => {
+  const under = FLOOR - 1n;
+  const w = world(Array.from({ length: 4 }, () => ({ bal: [under, under] as const, status: "SUCCESS" })));
+  const c = clocked(w);
+  let back = 0;
+  w.deps.now = () => c.at() - back;
+  w.deps.costs = async () => {
+    c.reads.push({ at: c.at(), low: under });
+    // the device's clock set back an hour right after the first read
+    back = 3_600_000;
+    return { floor: FLOOR, perRung: PER, keep: KEEP };
+  };
+  w.deps.deposit = async () => ({ end: "filled", txs: [] });
+  await followPoolQuote(F, w.deps);
+  assert.ok(c.reads.length >= 2, `cost reads at ${c.reads.map((r) => r.at).join(", ")}: the round after the step read again`);
+  assert.ok(c.reads[1]!.at <= 2_000, `the second read at ${c.reads[1]!.at} ms, the round right after the step`);
+});

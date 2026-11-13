@@ -173,7 +173,7 @@ function twoSyncs(w: WalletStore, pass: () => Promise<unknown>, o: { waitMs?: nu
     depositKinds: { solana: () => () => ({ error: "not_allowed" }), evm: (host: () => Round) => () => (hosts.push(host), { error: "not_allowed" }) },
   } as never);
   t.flow(ASK as never, CTX);
-  return { t, calls, round: () => hosts[0]!().round!() };
+  return { t, calls, round: (signal?: AbortSignal) => hosts[0]!().round!(signal) };
 }
 test("the deposit's round waits for the pool's history read the page started, then reads on its own sync (its hold): it never reads beside it", async () => {
   const { w } = await wallet();
@@ -225,4 +225,68 @@ test("a history read that fails is asked again once; after a second failure the 
   done({ fin: {}, anchor: {}, events: [] });
   await r;
   assert.deepEqual(s2.calls, ["pass:events", "pass:events", "deposit:events"]);
+});
+
+// review of evm-first-proof-inside-ten-seconds, items 4, 5 and 7: the deposit kind asks its round with no signal (a note's
+// try and its verdict, src/pool-deposit-evm.ts), so the wait ends at the page's reads' stop as it was at the call; a sign
+// out (or the round's own signal) tapped during the wait ends the round at once, its reason thrown, and no read is asked
+// after it; the wait leaves no listener on the signal, and a round after the read holds waits on nothing.
+test("a sign out during the wait ends the round at once: thrown, no read after the tap, none asked again", async () => {
+  const { w } = await wallet();
+  const s = twoSyncs(w, () => new Promise(() => {}));
+  s.t.evmPoolOf("base");
+  await until(() => s.calls.includes("pass:events"));
+  const r = s.round();
+  await new Promise((x) => setTimeout(x, 30));
+  const t0 = Date.now();
+  (s.t as unknown as { signingOut: () => void }).signingOut();
+  const got = await Promise.race([r.then(() => "read", () => "thrown"), new Promise((x) => setTimeout(() => x("still waiting"), 1_000))]);
+  assert.equal(got, "thrown", "the round ends at the sign out");
+  assert.ok(Date.now() - t0 < 500, `ended ${Date.now() - t0} ms after the tap`);
+  await new Promise((x) => setTimeout(x, 50));
+  assert.deepEqual(s.calls, ["pass:events"], "no read after the tap, the history read not asked again");
+});
+
+test("the round's own signal ends the wait the same way; the wait leaves no listener, and once the read holds a round waits on nothing", async () => {
+  const { w } = await wallet();
+  const s = twoSyncs(w, () => new Promise(() => {}));
+  s.t.evmPoolOf("base");
+  await until(() => s.calls.includes("pass:events"));
+  const c = new AbortController();
+  const p = s.round(c.signal);
+  await new Promise((x) => setTimeout(x, 30));
+  c.abort(new Error("stopped"));
+  await assert.rejects(p, /stopped/);
+  assert.deepEqual(s.calls, ["pass:events"], "no read after the round's signal");
+
+  const { w: w2 } = await wallet();
+  let done: (v: unknown) => void = () => {};
+  const s2 = twoSyncs(w2, () => new Promise((x) => (done = x)));
+  s2.t.evmPoolOf("base");
+  await until(() => s2.calls.includes("pass:events"));
+  const c2 = new AbortController();
+  let live = 0, added = 0;
+  const add = c2.signal.addEventListener.bind(c2.signal), rem = c2.signal.removeEventListener.bind(c2.signal);
+  c2.signal.addEventListener = ((t: string, f: never, o?: never) => (t === "abort" && (live++, added++), add(t, f, o))) as never;
+  c2.signal.removeEventListener = ((t: string, f: never, o?: never) => (t === "abort" && live--, rem(t, f, o))) as never;
+  const p2 = s2.round(c2.signal);
+  await until(() => added > 0);
+  done({ fin: {}, anchor: {}, events: [] });
+  await p2;
+  assert.equal(live, 0, "the wait's abort listener removed");
+  const before = added;
+  await s2.round(c2.signal);
+  assert.equal(added, before, "a round after the read holds waits on nothing");
+  assert.deepEqual(s2.calls, ["pass:events", "deposit:events", "deposit:events"]);
+});
+
+// review of evm-first-proof-inside-ten-seconds, item 1: every wallet pool the page makes of an EVM pin (the queue's pass
+// pool, the landing pass's pool on the deposit's pair, a withdraw's) binds on the chain's one period fee hold, so a pass
+// in a held period reads no period fee again (the wallet's pool-evm.test.ts: two pools of one pin on one hold read it once)
+test("every wallet pool the page makes binds on the chain's one fee hold", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
+  const made = src.split("walletEvmPool({").slice(1);
+  assert.equal(made.length, 3, "the pass pool, the landing's pool and a withdraw's");
+  for (const [i, body] of made.entries()) assert.match(body.slice(0, 600), /\n\s+feeHold: evmFeeHoldOf\(e\.pin\),\n/, `pool ${i + 1} on the fee hold`);
 });

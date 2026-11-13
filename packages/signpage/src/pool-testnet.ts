@@ -70,7 +70,7 @@ import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, READS_
 import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
-import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmFeeHold, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmFeeHold, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleOpen, evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import type { LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { spendOwner } from "./pool-spend.ts";
@@ -931,6 +931,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     positions.clear();
     for (const c of evmPositionsCaches.values()) c?.clear();
     evmHolds.clear();
+    evmWarms.clear();
+    evmWarmed.clear();
+    evmWarmFails.clear();
+    evmFeeHolds.clear();
     evmShownGen.clear();
     evmRearmed.clear();
     // the decimals this account's buys read: never the next account's
@@ -1011,7 +1015,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const sync = p === undefined || r === null || pair === null ? null : evmSyncOf(p, pair, r);
       const passList = over.evmRpcs || r === null ? r : (pageEvmPoolRpcs(chain, "pass") ?? r);
       const passRpcs = passList === null || passList === r ? pair : evmPair(passList);
-      evmPools.set(chain, p === undefined || r === null || pair === null || sync === null || passList === null || passRpcs === null ? null : { pin: p, list: r, rpcs: pair, passList, passRpcs, sync, passSync: passList === r ? sync : evmSyncOf(p, passRpcs, passList), round: over.evmRound ? over.evmRound(p, pair, r) : ((one) => async (signal?: AbortSignal) => (await evmWarmWait(chain, signal), one(signal)))(roundOf(sync)), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
+      evmPools.set(chain, p === undefined || r === null || pair === null || sync === null || passList === null || passRpcs === null ? null : { pin: p, list: r, rpcs: pair, passList, passRpcs, sync, passSync: passList === r ? sync : evmSyncOf(p, passRpcs, passList), round: over.evmRound ? over.evmRound(p, pair, r) : ((one) => async (signal?: AbortSignal) => {
+              const stop = signal ?? evmStop.signal;
+              await evmWarmWait(chain, stop);
+              stop.throwIfAborted();
+              return one(signal);
+            })(roundOf(sync)), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
     }
     return evmPools.get(chain)!;
   };
@@ -1020,6 +1029,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // seed; the pool is the wallet's evmPool over the chain's pool list (its seats the deposit's pair), the page's hold
   // and sources, the kit's fee pair, the helper's GET /v1/pool/fee and the kit's epoch fee rule. Closed at sign out.
   const evmQueues = new Map<"base" | "robinhood", Promise<OpenQueue>>();
+  // card evm-first-proof-inside-ten-seconds: each chain's one period fee hold, for every wallet pool the page makes of its
+  // pin (the queue's pass pool, the landing pass's pool on the deposit's pair, a withdraw's): a bind on any of them
+  // binds on the fee the turn's pass held, never on the period's first block read again past what a keyless operator
+  // keeps (a landing or a withdraw 30 s into a period waited out its bind's lag retries)
+  const evmFeeHolds = new Map<string, EvmFeeHold>();
+  const evmFeeHoldOf = (pin: EvmPoolPin): EvmFeeHold => {
+    const k = `${pin.network}:${pin.pool.toLowerCase()}`;
+    let h = evmFeeHolds.get(k);
+    if (h === undefined) evmFeeHolds.set(k, (h = evmFeeHold(pin)));
+    return h;
+  };
   const openEvmQueue = async (chain: "base" | "robinhood"): Promise<OpenQueue> => {
     const e = evmPool(chain);
     if (e === null) throw new Error(`no ${chain} pool on this page's network`);
@@ -1034,6 +1054,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           pin: e.pin,
           rpcs: e.passRpcs,
           feeRpcs: pageEvmFeeRpcs(chain, "pass"),
+          feeHold: evmFeeHoldOf(e.pin),
           held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
           history: [...e.passList, ...pageEvmHistory(e.pin)],
           // card evm-deposit-on-mainnet: the trees and depths on the pool's pass sync, the settle's, so the two keep one
@@ -1058,6 +1079,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               pin: e.pin,
               rpcs: e.rpcs,
               feeRpcs: pageEvmFeeRpcs(chain),
+              feeHold: evmFeeHoldOf(e.pin),
               held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
               history: [...e.list, ...pageEvmHistory(e.pin)],
               ...(typeof (e.sync as Partial<EvmTreeSync>).trees === "function" ? { sync: e.sync as EvmTreeSync } : {}),
@@ -1127,6 +1149,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // each chain's read, in flight or done (true); one that fails (false) is let go, so the next ask reads again, and
   // counted (evmWarmFails: the failures since the last read that held)
   const evmWarms = new Map<"base" | "robinhood", Promise<boolean>>();
+  const evmWarmed = new Set<"base" | "robinhood">();
   const evmWarmFails = new Map<"base" | "robinhood", number>();
   const evmWarm = (chain: "base" | "robinhood"): Promise<boolean> | null => {
     const e = evmPool(chain);
@@ -1134,8 +1157,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     let w = evmWarms.get(chain);
     if (w === undefined) {
       const read: Promise<boolean> = e.passSync.events(evmStop.signal).then(
-        () => (evmWarmFails.delete(chain), true),
-        () => (evmWarms.get(chain) === read && evmWarms.delete(chain), evmWarmFails.set(chain, (evmWarmFails.get(chain) ?? 0) + 1), false),
+        // an answer after a sign out (its reads stopped, these maps cleared) is not this session's: neither counted nor kept
+        () => (evmWarms.get(chain) === read && (evmWarmFails.delete(chain), evmWarmed.add(chain)), true),
+        () => (evmWarms.get(chain) === read && (evmWarms.delete(chain), evmWarmFails.set(chain, (evmWarmFails.get(chain) ?? 0) + 1)), false),
       );
       evmWarms.set(chain, (w = read));
     }
@@ -1143,23 +1167,29 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   // the deposit's round waits for that read (its hold then read by the round's own sync, at its first round), at most
   // EVM_WARM_WAIT_MS from the round's start; a read that fails is asked again once. After a second failure in a row
-  // (any ask's), or the bound, the round reads as it did before (the pool from its deploy block on the deposit's own pair), so a deposit never
-  // waits on it longer. None when the deposit's sync is the pass sync (one list): its rounds already queue behind it
+  // (any ask's), or the bound, the round reads as it did before (the pool from its deploy block on the deposit's own
+  // pair), so a deposit never waits on it longer. None when the deposit's sync is the pass sync (one list): its rounds
+  // already queue behind it. The wait ends at `stop` (the round's signal, else the page's reads' stop as it was at the
+  // call), and once it has fired no read is asked again: a sign out tapped meanwhile ends the round (its reason thrown,
+  // never a pool read after the tap)
   const evmWarmWaitMs = over.evmWarmWaitMs ?? EVM_WARM_WAIT_MS;
-  const evmWarmWait = async (chain: "base" | "robinhood", signal?: AbortSignal): Promise<void> => {
+  const evmWarmWait = async (chain: "base" | "robinhood", stop: AbortSignal): Promise<void> => {
     const e = evmPool(chain);
-    if (e === null || e.passSync === e.sync) return;
+    if (e === null || e.passSync === e.sync || evmWarmed.has(chain)) return;
     const by = Date.now() + evmWarmWaitMs;
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 3 && !stop.aborted; k++) {
       const w = evmWarms.get(chain) ?? ((evmWarmFails.get(chain) ?? 0) < 2 ? evmWarm(chain) : null);
       const left = by - Date.now();
-      if (w === null || left <= 0 || signal?.aborted) return;
+      if (w === null || left <= 0) return;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const stop = new Promise<"stop">((r) => {
-        timer = setTimeout(() => r("stop"), left);
-        signal?.addEventListener("abort", () => r("stop"), { once: true });
+      let off = (): void => {};
+      const ended = new Promise<"ended">((r) => {
+        timer = setTimeout(() => r("ended"), left);
+        const f = (): void => r("ended");
+        stop.addEventListener("abort", f, { once: true });
+        off = () => stop.removeEventListener("abort", f);
       });
-      const got = await Promise.race([w, stop]).finally(() => clearTimeout(timer));
+      const got = await Promise.race([w, ended]).finally(() => (clearTimeout(timer), off()));
       if (got !== false) return;
     }
   };
@@ -2674,6 +2704,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         pin: e.pin,
         rpcs: e.list,
         feeRpcs: pageEvmFeeRpcs(chain),
+        feeHold: evmFeeHoldOf(e.pin),
         held: pageEvmHold(e.pin, () => (page.held ? page.held() : page.store())),
         history: [...e.list, ...pageEvmHistory(e.pin)],
         relayFee: (ep, sg) => evmPoolRelayFee(e.pin.pool, ep, sg, over.fetch),

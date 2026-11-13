@@ -833,6 +833,35 @@ test("the period's fee read at the turn is held: a bind later in the period asks
   }
 });
 
+// card evm-first-proof-inside-ten-seconds: the page's pass pool holds the period's fee at the turn, and the pool its landing's
+// pass binds on (the deposit's own pair) shares that hold (evmFeeHold): a landing 30 s into the period binds on the held
+// read and asks the fee list nothing, where on a hold of its own it met only operators that dropped that block's state
+test("two pools of one pin on one fee hold: a bind on the second, late in the period, binds on the first's turn read and reads no chain fee", async () => {
+  const { evmFeeHold } = await import("../src/pool/evm.ts");
+  for (const shared of [true, false]) {
+    const c = { ...CB(), head: 31 };
+    const log: string[] = [];
+    const hold = evmFeeHold(PIN);
+    const mk = (seen: unknown[]) => evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: freshOnly(c, 2, log), ...(shared ? { feeHold: hold } : {}), relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    const passPool = mk([]);
+    const seen: unknown[] = [];
+    const landingPool = mk(seen);
+    await passPool.holdFee(EPOCH);
+    const held = feeCalls(log);
+    // 30 s on: the period's first block is past every fee seat's state
+    c.head = 45;
+    if (shared) {
+      const b = await landingPool.bind(bindArgs());
+      assert.equal(feeCalls(log), held, "no chain fee read: the turn's read held for both");
+      assert.deepEqual(seen, [{ block: 30n, baseFeePerGas: 1_000_030n, depth: 2, chainFee: 7_917n }]);
+      assert.equal(b.feeCap, 3n * 10n ** 13n);
+    } else await assert.rejects(landingPool.bind(bindArgs()), (e: unknown) => e instanceof EvmLagError, "a hold of its own: the old block's state is gone");
+  }
+  // a hold is one pin's: another pool's refused
+  const other = evmFeeHold({ ...PIN, pool: "0x00000000000000000000000000000000000f0012" });
+  assert.throws(() => evmPool({ pin: PIN, rpcs: pair(CB(), CB()), feeRpcs: freshOnly(CB(), 2, []), feeHold: other, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined }), /feeHold: another pin/);
+});
+
 test("a held fee is used only at its own block's hash, never the helper's word, and only for this period and the one before", async () => {
   const c = { ...CB(), head: 31 };
   const log: string[] = [];

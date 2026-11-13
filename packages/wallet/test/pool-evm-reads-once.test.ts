@@ -271,3 +271,34 @@ test("(d) a different block at one height: a lag at the newest tag, refused at t
   await assert.rejects(evmAgreedBlock(late(100), "latest"), (e) => e instanceof EvmLagError && /hold different blocks at 100/.test(e.message));
   await assert.rejects(evmAgreedBlock(late(90), "finalized"), (e) => e instanceof PoolReadError && /hold different blocks at 90/.test(e.message));
 });
+
+// review of evm-first-proof-inside-ten-seconds, item 7: evmAgreedBlock's two reads (both tags, then the higher RPC's block
+// by number) are one agreed read on the pair's seats, so a provider that answered one seat's tag never sits on the other
+// seat while the read by number runs. Here seat 0's provider a answers the tag, is out at the read by number and seat 0
+// moves to c; a call on seat 1 meanwhile whose provider b is out must not take a (it answered seat 0 in this read).
+test("evmAgreedBlock is one agreed read: a provider that answered seat 0's tag is never seat 1's while the read by number runs", async () => {
+  const blk = (n: number) => ({ number: q(n), hash: h32(`block ${n}`), timestamp: q(T0 + BigInt(n) * 2n) });
+  const out = () => new Error("HTTP 410");
+  let cAsked: () => void = () => {};
+  const asked = new Promise<void>((r) => (cAsked = r));
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  let bTag = false;
+  const mk = (url: string, f: (m: string, p: readonly unknown[]) => Promise<unknown>): EvmRpc => Object.assign(f, { url });
+  const a = mk("https://a.example", async (m, p) => (m === "eth_getBlockByNumber" && p[0] === "latest" ? blk(101) : Promise.reject(out())));
+  const b = mk("https://b.example", async (m, p) => (m === "eth_getBlockByNumber" && p[0] === "latest" && !bTag ? ((bTag = true), blk(100)) : Promise.reject(out())));
+  const c = mk("https://c.example", async (m, p) => {
+    assert.deepEqual([m, p[0]], ["eth_getBlockByNumber", q(100)]);
+    cAsked();
+    await held;
+    return blk(100);
+  });
+  const pair = evm.evmPair([a, b, c]);
+  const got = evmAgreedBlock(pair, "latest", undefined, async () => {});
+  await asked;
+  assert.equal(pair[0].url, "https://c.example", "seat 0 moved off a for the read by number");
+  await assert.rejects(pair[1]("eth_chainId", []), /HTTP 410/);
+  assert.equal(pair[1].url, "https://b.example", "seat 1 never on a, which answered seat 0's tag in this read");
+  release();
+  assert.equal((await got).number, 100n);
+});
