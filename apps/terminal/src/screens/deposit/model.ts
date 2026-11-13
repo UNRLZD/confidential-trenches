@@ -132,17 +132,13 @@ function poolDecimal(v: bigint, d: number): string {
   return f ? `${s.slice(0, s.length - d)}.${f}` : s.slice(0, s.length - d);
 }
 
-/** What `chain`'s pool holds ready to buy (state.pools' ready: chunks with a proof made) and what is still being proved,
- *  in its own asset, as Portfolio reads them (portfolio/model.ts pools); null when the page reports no such pool. */
-export function poolReady(pools: SignpageState["pools"], chain: PoolChain): { asset: PoolAsset; ready: string | null; pending: string | null } | null {
+/** What `chain`'s pool holds, in its own asset, as Portfolio's row for the chain reads it (portfolio/model.ts pools);
+ *  null when the page reports no such pool. */
+export function poolBalance(pools: SignpageState["pools"], chain: PoolChain): { asset: PoolAsset; balance: string } | null {
   const p = pools?.find((x) => x.chain === chain);
   if (!p) return null;
   const d = POOL_ASSET_DECIMALS[p.asset];
-  const balance = poolUnits(p.balance, d) ?? 0n;
-  const r = p.ready === undefined ? null : poolUnits(p.ready, d);
-  const ready = r === null ? null : r > balance ? balance : r;
-  const pending = balance - (ready ?? 0n);
-  return { asset: p.asset, ready: ready === null || ready === 0n ? null : poolDecimal(ready, d), pending: pending === 0n ? null : poolDecimal(pending, d) };
+  return { asset: p.asset, balance: poolDecimal(poolUnits(p.balance, d) ?? 0n, d) };
 }
 
 /** A dry quote: the quote lines of S4.3, no address (the kit's deposit.dry answer, DepositDry). */

@@ -29,12 +29,12 @@ import {
   poolBuyAsk,
   poolView,
   presetsOf,
-  proofStatus,
   tradeBal,
   presetOn,
   progress,
   READY,
   setMatches,
+  spendSoon,
   tap,
   unavailable,
   withCoinTap,
@@ -255,8 +255,6 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     };
   }, [coinKey, amount, kit.request !== null]);
   const fee = onPool ? feeShown(feeRead, coinKey, amount, price) : null;
-  // the proof's state reads state.pools alone: it draws with no price
-  const proof = onPool ? proofStatus(pools, chain) : "none";
   // Bal: the vault path's money (Cash less the SOL and ETH pools, useOffPool) on a chain with no pool, the pool's on a
   // chain with one; one number for the amount gate. Signed out there is none to show: the signing page sends a state
   // with a zero one, which is not "$0" of anyone's
@@ -266,6 +264,9 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const balance = signedOut ? null : path === "near" ? nearCash : tradeBal(onPool, pool, cash).cents;
   const maxText = path === "vault" ? kit.maxBuy(chain) : null;
   const max = onPool ? (pool?.tapMax ?? null) : path === "near" ? balance : maxText === null ? null : parseUsd(maxText);
+  // money on the chain's pool that a tap cannot spend yet but will (the seconds after a load or a fresh deposit): the
+  // balance shows, Max does not, and Buy takes the busy look of a tap in flight until the amount arrives
+  const coming = onPool && !signedOut && spendSoon(pools, chain, max);
   const askable = (c: Cents | null) => c !== null && (!onPool || poolBuyAsk(pools, chain, token, c, price, slippageBps).ok);
   const running = busy(phase);
   // the pool cannot buy this token yet (Unavailable): Buy and the presets stay off on this token's page
@@ -372,7 +373,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, path, onPool, price, proof, balance, max, fee, feeShown: coinKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, path, onPool, price, balance, max, coming, fee, feeShown: coinKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -402,7 +403,7 @@ export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
 
 /** The box drawn from a trade state; any number of views of one state draw the same trade. */
 export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean }) {
-  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, path, onPool, price, proof, balance, max, fee, feeShown, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
+  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, path, onPool, price, balance, max, coming, fee, feeShown, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   const [tab, setTab] = useState<OrderTab>("market");
@@ -503,12 +504,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
           <EndLine phase={phase} side="buy" part={kit.part?.(phase.id) ?? null} />
         ) : (
           <>
-            {proof !== "none" && (
-              <span className="trb-proof" data-proof={proof} data-testid="trade-proof">
-                <W id={proof === "ready" ? "proofReady" : "proofMaking"} />
-              </span>
-            )}
-            {max !== null && path !== "near" && (
+            {max !== null && !coming && path !== "near" && (
               <span>
                 <W id="max" /> {fmtUsd(max)}
               </span>
@@ -520,9 +516,10 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
         type="button"
         className="trb-cta"
         data-tone="buy"
-        data-kind={signedOut ? "setup" : running ? "live" : "trade"}
-        disabled={!signedOut && !canBuy && !running}
-        aria-disabled={running || undefined}
+        data-kind={signedOut ? "setup" : running || coming ? "live" : "trade"}
+        disabled={!signedOut && !canBuy && !running && !coming}
+        aria-disabled={running || coming || undefined}
+        aria-busy={(!running && coming) || undefined}
         data-testid="trade-cta"
         onClick={() => (signedOut ? openSignin(true) : amount !== null && buy(amount))}
       >
