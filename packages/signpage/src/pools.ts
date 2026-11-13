@@ -115,8 +115,7 @@ export type PoolBuyDryDeps = {
   /** True while a trade runs on the page or holds a host of the pair: the preview waits for no trade. */
   trading(): boolean;
   /** Tests only: one tip for every set; else the tip a pool.buy on this page pays for a set of k pieces (src/pool-buy.ts,
-   *  the kit's solanaPoolBuyTip: SOLANA_POOL_JITO_TIP for one piece on mainnet, SOLANA_JITO_TIP_MIN for several, none on
-   *  devnet). */
+   *  the kit's solanaPoolBuyTip: SOLANA_POOL_JITO_TIP on mainnet for any count of pieces, none on devnet). */
   tip?: bigint;
   /** The page's clock, ms (performance.now): a kept venue's age. */
   now?(): number;

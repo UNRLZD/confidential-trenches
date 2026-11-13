@@ -55,6 +55,10 @@ test("facts read the minified shapes: the buy's pick, the sell's budget and the 
   assert.equal(facts("", byRule).buyTip, "100000");
   assert.equal(facts("", byRule.replace("t===1?xc:bc", "t===1?bc:xc")).buyTip, "1000");
   assert.equal(facts("", byRule.replace("let v=t=>Tm(e.cluster,t)", "let v=t=>Tm(`mainnet`,t)")).buyTip, null);
+  // card owners-solana-buy-lands: one tip for every set on mainnet
+  const oneTip = byRule.replace("t===1?xc:bc}", "xc}");
+  assert.equal(facts("", oneTip).buyTip, "100000");
+  assert.equal(facts("", oneTip.replace("0n:xc}", "0n:bc}")).buyTip, "1000");
   const none = facts("", "let v=e.cluster===`mainnet`?Sd:0n,y=new Map;var Sd=1000n;");
   assert.deepEqual([none.buyTip, none.sellBudget, none.sellPriority], ["1000", false, null]);
 });
