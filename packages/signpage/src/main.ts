@@ -73,6 +73,7 @@ import { cashMover, poolMoveKinds, withCash, withCashNote, type CashToPoolDeps, 
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
+import { storedTails, wTailWallets } from "./w-tails.ts";
 import { depositToEnd, depositWalletsOf, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, poolFollowEnded, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
 import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
@@ -602,7 +603,11 @@ else {
         // and each U_X a follow left money at (card deposit-takes-each-pools-own-coin): the ops read after those notes, from
         // the store alone, so a carry the pools count is never listed too (pool-deposit-follow.ts depositWalletsOf)
         const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open, both?.landed, both?.making).then(async (p) =>
-          !p.signed_in || PAGE_POOLS.length === 0 ? p : withDepositWallets(p, depositWalletsOf(await pageOps().catch(() => []), (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c])),
+          !p.signed_in || PAGE_POOLS.length === 0 ? p : withDepositWallets(p, [
+            ...depositWalletsOf(await pageOps().catch(() => []), (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c]),
+            // and each W's tail under the least standard size (src/w-tails.ts): the user's money kept on W, counted too
+            ...wTailWallets(await pageTails().catch(() => []), (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c]),
+          ]),
         );
         prices.refresh((pooled.pools ?? []).map((p) => p.chain));
         // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
@@ -1230,6 +1235,10 @@ async function pageNotes(): Promise<NoteRecord[]> {
 async function pageOps(): Promise<unknown[]> {
   const st = await open();
   return Promise.all((await st.keys("ops")).map((k) => st.get("ops", k).catch(() => undefined)));
+}
+// the W tail records, read only (state.deposit_wallets: src/w-tails.ts)
+async function pageTails(): Promise<unknown[]> {
+  return storedTails(await open());
 }
 // pageNotes for the queue's readyWith: its failure kept as a value, so the turn ends and the state's withPools throws it
 // in its own catch

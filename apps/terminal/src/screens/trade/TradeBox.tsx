@@ -40,6 +40,7 @@ import {
   spendSoon,
   tap,
   unavailable,
+  waitingCents,
   withCoinTap,
 } from "./model.ts";
 import type { Cents, Phase } from "./model.ts";
@@ -278,7 +279,9 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // NEAR, Cash's NEAR part, the money a NEAR buy spends. One number for the amount gate. Signed out there is none to
   // show: the signing page sends a state with a zero one, which is not "$0" of anyone's
   const cash = useOffPool(snapshot);
-  const balance = signedOut ? null : path === "near" ? nearCash : tradeBal(onPool, pool, cash, cashMovesTo(chain) ? nearCash : 0n).cents;
+  // and what the chain's deposit wallets still hold (a U_X's leftover, a W's tail), as Portfolio counts it
+  const waiting = onPool && pool !== null ? waitingCents(snapshot.state?.deposit_wallets, chain, pool.asset, price) : 0n;
+  const balance = signedOut ? null : path === "near" ? nearCash : tradeBal(onPool, pool, cash, cashMovesTo(chain) ? nearCash : 0n, waiting).cents;
   const maxText = path === "vault" ? kit.maxBuy(chain) : null;
   const max = onPool ? (cashMax(pools, chain, withCash, price) ?? pool?.tapMax ?? null) : path === "near" ? balance : maxText === null ? null : parseUsd(maxText);
   // money on the chain's pool that a tap cannot spend yet but will (the seconds after a load or a fresh deposit): the

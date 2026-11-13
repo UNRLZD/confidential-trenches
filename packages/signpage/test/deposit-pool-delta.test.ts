@@ -247,7 +247,7 @@ test("P3-b: on Solana, one RPC lagging at 0 is no expired plain send: the higher
 });
 
 // ------------------------------------- state.deposit_wallets: what a follow left at U_X, listed until a carry takes it
-test("deposit_wallets: a U_X remainder is listed; a top-up reopens its op (none listed while followed); the carry's end lists only what is left", async () => {
+test("deposit_wallets: a U_X remainder is listed; a top-up reopens its op (while followed, never more than the remainder, none once the carry starts: card one-balance-buys-on-every-chain counts a remainder before its op ends); the carry's end lists only what is left", async () => {
   const depositWalletsOf = m.depositWalletsOf as (ops: readonly unknown[], d: (c: string) => number, a: (c: string) => string) => { chain: string; address: string; asset: string; amount: string }[];
   assert.equal(typeof depositWalletsOf, "function", "the page lists no deposit wallet");
   const { withDepositWallets } = (await import("../src/pools.ts")) as Record<string, any>;
@@ -283,17 +283,23 @@ test("deposit_wallets: a U_X remainder is listed; a top-up reopens its op (none 
   assert.equal(withDepositWallets(signedOutState(), list(rows)).deposit_wallets, undefined, "signed out: none");
   // a top-up of one floor lands at U_X; the next landing's settle reopens the op: while it is followed, none is listed
   bal += FLOOR;
-  let seenWhileFollowed: unknown[] | null = null;
+  const seenWhileFollowed: { amount: string }[][] = [];
   const before = store.update;
   store.update = async (s, k, change) => {
     const r = await before(s, k, change);
     const v = rows.get(k) as { final?: true };
-    if (v.final !== true && seenWhileFollowed === null) seenWhileFollowed = list(rows);
+    if (v.final !== true) seenWhileFollowed.push(list(rows));
     return r;
   };
+  const deposit = carried.length;
   await host.settle();
   await host.idle();
-  assert.deepEqual(seenWhileFollowed, [], "a U_X followed again is listed nowhere but its op");
+  // never the top-up counted at U_X beside the note it becomes: at most the remainder before the carry, none from the
+  // carry's start (its 0) until the carry's own end
+  assert.ok(seenWhileFollowed.length > 0);
+  for (const seen of seenWhileFollowed) assert.ok(seen.every((x) => x.amount === "0.010650239" || BigInt(Math.round(Number(x.amount) * 1e9)) <= KEEP + PER), JSON.stringify(seen));
+  assert.ok(seenWhileFollowed.some((seen) => seen.length === 0), "none listed once the carry starts");
+  assert.equal(carried.length, deposit + 1);
   // its end: both carried as one 0.02 rung; what is left (under one deposit's cost over the rent, still over 0) listed
   assert.deepEqual(carried, [SOL_LADDER.min, 20_000_000n]);
   const left = 10_650_239n + FLOOR - 20_000_000n - PER;
