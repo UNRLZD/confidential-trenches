@@ -4,6 +4,7 @@
 // page then reports (card app-pool-withdraw). Each
 // Export opens SIGN_HOST's key export for its own wallet, one the kit's moneyWallets names (card app-export-every-wallet).
 import { moneyWallets } from "@blindfill/kit";
+import { useNavigate } from "react-router";
 import { useDepositSheet } from "../screens/deposit/source.tsx";
 import { Portfolio } from "../screens/portfolio/Portfolio.tsx";
 import type { PortfolioAction } from "../screens/portfolio/source.tsx";
@@ -18,6 +19,7 @@ export function PortfolioMount() {
   const { hop } = useReturnHop();
   const deposit = useDepositSheet();
   const openWithdraw = useWithdrawOpen();
+  const navigate = useNavigate();
   const onAction = (a: PortfolioAction) => {
     const held = snapshot.state ? moneyWallets(snapshot.state) : [];
     const m = tapOf(a, (chain, address) => held.some((w) => w.chain === chain && w.address === address));
@@ -25,6 +27,7 @@ export function PortfolioMount() {
     if (m.to === "deposit") deposit.setOpen(true);
     else if (m.to === "withdraw") void openWithdraw(view("withdraw"), () => hop("withdraw.open", {}, view("withdraw")));
     else if (m.to === "pool.withdraw") void hop("pool.withdraw", m.params, view(`pool-withdraw-${m.params.chain}`));
+    else if (m.to === "token") void navigate(m.href);
     else if (m.to === "export") void hop("export.open", { chain: m.chain, address: m.address }, view(`export-${m.chain}-${m.address}`));
   };
   return <Portfolio onAction={onAction} />;

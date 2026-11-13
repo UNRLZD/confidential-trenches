@@ -153,7 +153,7 @@ test("without the chain's EVM pin, a landed note of that pool opens no queue and
   assert.equal(prover.log.length, 0);
 });
 
-test("a state read settles the EVM pool's RESERVED notes on the chain's sync: held while its release can land, spent with its change once final, freed past the deadline", async () => {
+test("a state read settles the EVM pool's RESERVED notes on the chain's sync: spent with its change once the newest agreed block holds its release, held while it can land, freed past the deadline", async () => {
   const deadlineMs = 1_800_000_210_000n;
   const reserve = async (ns: NoteStore) => {
     const n = await landed(ns);
@@ -163,7 +163,8 @@ test("a state read settles the EVM pool's RESERVED notes on the chain's sync: he
   };
   const deposit = ev(10n, { kind: "deposit", state: noteCommitment(RUNG, L0, P(D0)), label: L0, value: RUNG, precommitment: P(D0) });
   const release = ev(20n, { kind: "buy", state: noteCommitment(RUNG - 4n * 10n ** 14n, L0, P(C0)), value: 4n * 10n ** 14n, nullifier: noteSecrets(SEED64, D0).nullifierHash });
-  const run = async (round: { fin: { number: bigint; timestamp: bigint }; events: EvmPoolEvent[] }) => {
+  // `at`: the time of the newest agreed block (40), which settles; `fin`: the finalized block, which only marks landings
+  const run = async (round: { fin: { number: bigint; timestamp: bigint }; at: bigint; events: EvmPoolEvent[] }) => {
     const { w, ns } = await wallet();
     const id = await reserve(ns);
     let reads = 0;
@@ -171,27 +172,29 @@ test("a state read settles the EVM pool's RESERVED notes on the chain's sync: he
       prover: { vault: signalsProver(), stop: () => {} },
       evmPin: (c) => (c === "base" ? PIN : undefined),
       evmRpcs: unread,
-      evmSync: () => ({ events: async () => (reads++, { ...round, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, fin: { ...round.fin, hash: "", baseFeePerGas: null } }) }),
+      evmSync: () => ({ events: async () => (reads++, { ...round, anchor: { number: 40n, hash: "", timestamp: round.at, baseFeePerGas: null }, fin: { ...round.fin, hash: "", baseFeePerGas: null } }) }),
       evmQueuePool: () => fakeEvmPool(),
     });
     await t.stateRead();
     return { ns, id, reads, list: await ns.list() };
   };
-  // the release in a block above the finalized anchor: held
-  const tail = await run({ fin: { number: 15n, timestamp: 1_800_000_100n }, events: [deposit, release] });
+  // the release in a block above the finalized one, at or under the newest agreed block: SPENT at once, its change
+  // marked with the release's block (card evm-money-shows-and-spends-at-once)
+  const tail = await run({ fin: { number: 15n, timestamp: 1_800_000_100n }, at: 1_800_000_100n, events: [deposit, release] });
   assert.equal(tail.reads, 1);
-  assert.equal((await tail.ns.get(tail.id))!.state, "RESERVED");
+  assert.equal((await tail.ns.get(tail.id))!.state, "SPENT");
+  assert.equal((await tail.ns.landings()).get(tail.list.find((n) => refKey(n.ref) === refKey(C0))!.id), 20n);
   // final: SPENT, with its change note at the release's leaf
-  const spent = await run({ fin: { number: 30n, timestamp: 1_800_000_300n }, events: [deposit, release] });
+  const spent = await run({ fin: { number: 30n, timestamp: 1_800_000_300n }, at: 1_800_000_300n, events: [deposit, release] });
   assert.equal((await spent.ns.get(spent.id))!.state, "SPENT");
   const change = spent.list.find((n) => refKey(n.ref) === refKey(C0));
   assert.equal(change?.parent, spent.id);
   assert.equal(change?.leaf?.leafIndex, 1n);
-  // no release, the final block's time past the deadline: freed
-  const freed = await run({ fin: { number: 30n, timestamp: 1_800_000_211n }, events: [deposit] });
+  // no release, the newest agreed block's time past the deadline: freed
+  const freed = await run({ fin: { number: 30n, timestamp: 1_800_000_100n }, at: 1_800_000_211n, events: [deposit] });
   assert.ok(["UNSPENT", "HELD"].includes((await freed.ns.get(freed.id))!.state), "freed, and proved again by a queue that is open");
-  // no release, the final block's time at the deadline: held
-  const at = await run({ fin: { number: 30n, timestamp: 1_800_000_210n }, events: [deposit] });
+  // no release, the newest agreed block's time at the deadline: held
+  const at = await run({ fin: { number: 30n, timestamp: 1_800_000_100n }, at: 1_800_000_210n, events: [deposit] });
   assert.equal((await at.ns.get(at.id))!.state, "RESERVED");
 });
 
@@ -207,7 +210,7 @@ async function reserved(ns: NoteStore): Promise<string> {
 }
 const DEPOSIT = ev(10n, { kind: "deposit", state: noteCommitment(RUNG, L0, P(D0)), label: L0, value: RUNG, precommitment: P(D0) });
 /** A round past the deadline with no release: the note it settles is freed. */
-const FREEING = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, events: [DEPOSIT] };
+const FREEING = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 1_800_000_300n, baseFeePerGas: null }, events: [DEPOSIT] };
 /** A sync whose rounds wait until `go()` (or their signal's abort): `started` counts the rounds begun. */
 function slowSync() {
   let started = 0;
@@ -838,10 +841,14 @@ test("a sign out right after a turn fires or a state read begins stops it, and o
   assert.deepEqual([holds, trees], before, "the turn stopped before its reads");
   // a pass running (begun before the turn), the turn waiting on it, a sign out meanwhile: no pass after it ends
   await t.stateRead();
+  // that read's own pass ends first (the read now waits on its settle as well, so the pass may be in by its end)
+  await new Promise((r) => setTimeout(r, 30));
+  const base = trees;
   gate = new Promise<void>((r) => (free = r));
   o.now = 1_800_000_183_500;
   const running = t.stateRead();
-  for (let i = 0; i < 50 && trees === before[1]; i++) await new Promise((r) => setTimeout(r, 10));
+  for (let i = 0; i < 50 && trees === base; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(trees, base + 1, "the running pass is in");
   const busy = trees;
   const turn2 = tt.set.at(-1)!.f() as Promise<void>;
   await new Promise((r) => setTimeout(r, 30));
@@ -1195,4 +1202,57 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
   const open = (await ns.list()).find((x) => refKey(x.ref) === refKey(ret));
   assert.equal(open?.state, "INCOMING");
   await t.signedOut();
+});
+
+// card sign-out-stops-the-pages-reads: another tab's sign out reaches this page as signedOut alone (main.ts, the store's
+// "signout" event: no signingOut, which only this tab's Sign out calls). It stops the EVM reads this tab's sign out stops:
+// the turn pass's hold, its reads on a real EVM pool over counting RPCs, holds one read open at the sign out; once that
+// read answers, no call to the pool's or the fee list's RPCs starts.
+test("card sign-out-stops-the-pages-reads: another tab's sign out (signedOut alone) stops the turn pass's hold in flight: no EVM RPC call starts after it", { timeout: 20_000 }, async () => {
+  const { w, ns } = await wallet();
+  const asked: string[] = [];
+  const c = emptyChain(asked);
+  // every call counted as it starts; the first newest-block read after `gated` is set waits for `free`
+  const calls: string[] = [];
+  let gated = false;
+  let hit = false;
+  let free!: () => void;
+  const gate = new Promise<void>((r) => (free = r));
+  const counted = (r: EvmRpc): EvmRpc =>
+    Object.assign(async (method: string, params: readonly unknown[]) => {
+      calls.push(`${r.url} ${method}`);
+      if (gated && !hit && method === "eth_getBlockByNumber" && params[0] === "latest") {
+        hit = true;
+        await gate;
+      }
+      return r(method, params);
+    }, { url: r.url });
+  const pair = [counted(c.pair[0]), counted(c.pair[1])] as const;
+  const fees = c.fees.map(counted);
+  let signedIn = true;
+  const o = { now: 1_800_000_010_000 };
+  const tt = turnTimers(o);
+  const t = testnetPool(page(w, () => signedIn), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (x) => (x === "base" ? PIN : undefined),
+    evmRpcs: () => [...pair],
+    evmSync: () => ({ events: async () => assert.fail("no RESERVED note") }),
+    evmQueuePool: () => walletEvmPool({ pin: PIN, rpcs: pair, feeRpcs: fees, relayFee: async () => assert.fail("no bind: the pool holds no leaf"), epochFee: evmEpochFee, sleep: async () => {} }) as Pool<unknown>,
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  // the turn armed with no note (no pass); a note lands; the turn's pass opens the queue and holds the period's fee
+  await t.stateRead();
+  await landed(ns);
+  gated = true;
+  o.now = 1_800_000_063_500;
+  const turn = tt.set.at(-1)!.f() as Promise<void>;
+  while (!hit) await new Promise((r) => setTimeout(r, 1));
+  // another tab signed out: the seed is gone, and main.ts calls signedOut alone
+  signedIn = false;
+  await t.signedOut();
+  const atSignOut = calls.length;
+  free();
+  await turn;
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual(calls.slice(atSignOut), [], "no EVM RPC call after another tab's sign out");
 });

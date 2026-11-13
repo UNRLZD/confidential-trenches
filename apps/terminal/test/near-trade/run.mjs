@@ -7,7 +7,7 @@
 // 1440 x 900 (dpr 1; the right column), the terminal's dark scheme:
 //   - ready: Bal is Cash ($40), the path is NEAR's, no Max line and no proof label, $10 and $25 on, $50 and $100 off
 //     (over Cash), the button "Buy RHEA" on;
-//   - no Cash: Bal $0, every preset and the button off, a tap sends nothing;
+//   - no Cash: $0 available, every preset and the button off, a tap sends nothing;
 //   - sending: a $10 preset sends exactly pool.buy { chain near, token, amount "10.00", slippage_bps 1000 }, never the
 //     vault's buy kind, and the box draws Sending (S8.9), then Slow past 5 s (S8.11), the amount locked;
 //   - refused: Failed with Retry (not_allowed), and "Price check failed" for quote_check_failed (S8.20);
@@ -179,7 +179,7 @@ try {
       const box = await boxOf(tag, f, w);
       n++;
       check((await box.getAttribute("data-path")) === "near", `${tag}: the path is ${await box.getAttribute("data-path")}, not near`);
-      check((await text(box, '[data-testid="trade-balance"]')) === "Bal $40", `${tag}: Bal reads ${await text(box, '[data-testid="trade-balance"]')}`);
+      check((await text(box, '[data-testid="trade-balance"]')) === "$40 available", `${tag}: the balance reads ${await text(box, '[data-testid="trade-balance"]')}, not "$40 available" (UNRLZD parity, owner 12 Nov)`);
       check((await text(box, '[data-testid="trade-max"]')) === "", `${tag}: the line above the button reads ${JSON.stringify(await text(box, '[data-testid="trade-max"]'))}, not empty`);
       check((await box.locator('[data-testid="trade-proof"]').count()) === 0, `${tag}: a proof label on NEAR`);
       check(JSON.stringify(await presetsOn(box)) === JSON.stringify(["$10:on", "$25:on", "$50:off", "$100:off"]), `${tag}: the presets are ${JSON.stringify(await presetsOn(box))}`);
@@ -202,7 +202,7 @@ try {
       const { ctx, page, f, errors, dialogs } = await open(browser, routes.noCash, w, AT);
       const box = await boxOf(tag, f, w);
       n++;
-      check((await text(box, '[data-testid="trade-balance"]')) === "Bal $0", `${tag}: Bal reads ${await text(box, '[data-testid="trade-balance"]')}`);
+      check((await text(box, '[data-testid="trade-balance"]')) === "$0 available", `${tag}: the balance reads ${await text(box, '[data-testid="trade-balance"]')}, not "$0 available"`);
       check((await presetsOn(box)).every((p) => p.endsWith(":off")), `${tag}: a preset is on with no Cash: ${JSON.stringify(await presetsOn(box))}`);
       await box.locator(".trb-input").fill("10");
       check(!(await box.locator('[data-testid="trade-cta"]').isEnabled()), `${tag}: the button is on with no Cash`);

@@ -700,7 +700,8 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
     const now = (await h.open().catch(() => ({}) as Record<string, EvmOpenSell>))[x.open.note];
     if (now !== undefined && now.deadline !== x.open.deadline) return { lost: true };
     const txs: TxRef[] = [{ chain: h.chain, hash: v.deposit.tx }];
-    // the note lands from the pool's round once its block is final (a later round's, on a load, when not yet)
+    // the note lands from the pool's round at its block, the record kept until that block is final (a later load's
+    // follow drops it then, or ends it not_landed when a reorg took the deposit out for good)
     await land(h, x.open).catch(() => {});
     if (x.mine !== undefined && x.mine.length > 0) {
       const inputs = await Promise.all(h.rpcs.map((rpc) => rpc("eth_getTransactionByHash", [v.deposit.tx]).then((t) => (t as { input?: unknown } | null)?.input, () => undefined)));
@@ -712,8 +713,11 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
   return null;
 }
 
-/** The open sale's note from the pool's round: written UNSPENT once a final block holds the deposit naming it (the
- *  wallet's evmNextNote taken, written by evmClaimTaken), and the record dropped then. */
+/** The open sale's note from the pool's round: written UNSPENT once the round's newest agreed block holds the deposit
+ *  naming it (the wallet's evmNextNote taken, written by evmClaimTaken, `landed` while that block is above the round's
+ *  finalized one), and the record dropped only once that block is final: a deposit a reorg backs out and never includes
+ *  again is then still the open record's, whose follow at a later load ends it not_landed and puts the note back PLANNED.
+ *  True when the record is dropped. */
 async function land(h: EvmSellHost, o: EvmOpenSell): Promise<boolean> {
   const round = await h.round();
   const store = await h.notes();
@@ -723,17 +727,20 @@ async function land(h: EvmSellHost, o: EvmOpenSell): Promise<boolean> {
   const first: NoteRef | null = n.ref.kind === "return" ? n.ref : n.ref.kind === "second" && n.ref.id.id === "R" ? { kind: "return", c: n.ref.id.c, l: n.ref.id.l, j: n.ref.id.j } : null;
   if (first === null) return false;
   const seed = await h.seed64();
+  let final: boolean;
   try {
     const walk = evmNextNote(seed, h.scope, round.events, first, round.fin.number);
     const mine = walk.taken.find((t) => t.precommitment === n.precommitment);
     if (mine === undefined) return false;
-    // with it, every final one of the chain no other open sale holds (a pending take a sale wrote INCOMING); each open
+    final = mine.landed === undefined;
+    // with it, every one of the chain the round holds that no other open sale holds (a pending take a sale wrote INCOMING); each open
     // sale's own lands in its own run
     const others = new Set(Object.values(await h.open()).filter((x) => x?.note !== o.note).map((x) => String(x?.precommitment)));
     await evmClaimTaken(store, walk.taken.filter((t) => t === mine || !others.has(t.precommitment.toString())));
   } finally {
     seed.fill(0);
   }
+  if (!final) return false;
   await h.unrecord(o.note, o.deadline);
   return true;
 }
@@ -742,7 +749,8 @@ async function land(h: EvmSellHost, o: EvmOpenSell): Promise<boolean> {
  * The load's follow of open sales (a page closed between the record and the send, or after the send): each open record
  * of this chain no run of this page follows is read as the run reads it, from its own block, to an end (filled or taken
  * lands the note from the round, not_landed puts it back PLANNED), the record dropped at the end. A filled sale whose
- * block is not final yet keeps its record, and the next load lands it. Never awaited by a tap.
+ * block is not final yet has its note landed and keeps its record, and a later load drops it once the block is final.
+ * Never awaited by a tap.
  */
 export async function followEvmSells(h: EvmSellHost): Promise<void> {
   const live = (): boolean => h.signal?.aborted !== true;

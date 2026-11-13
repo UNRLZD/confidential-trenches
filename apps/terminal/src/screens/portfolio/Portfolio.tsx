@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
+import { TOKEN_CHAINS, tokenHref } from "../../routes/routes.ts";
 import { POOL_ASSET_DECIMALS } from "@blindfill/kit";
 import { useReturnHop } from "../../shell/ReturnHop.tsx";
 import { HopLine } from "../signin/HopLine.tsx";
@@ -567,13 +568,20 @@ function Selling({ r }: { r: Row }) {
   return r.selling.stage === "sending" ? <W id="sending" /> : <><W id="landing" /> <span className="live num">{(r.selling.ms / 1000).toFixed(1)}s</span></>;
 }
 
+/** The row's token: a link to its page where the chain has one (UNRLZD's portfolio row opens the token). */
+function TokCell({ r }: { r: Row }) {
+  const body = <><Avatar symbol={r.symbol} size={34} chain={r.chain} logo={{ chain: r.chain, token: r.token, icon: true }} /><div className="ell"><div className="sy">{r.symbol}<MarkTag r={r} /></div><div className="s2 ui ell">{r.name}</div></div></>;
+  const chain = TOKEN_CHAINS.find((c) => c === r.chain);
+  return chain ? <Link className="tok" to={tokenHref(chain, r.token)} data-control="open-token">{body}</Link> : <div className="tok">{body}</div>;
+}
+
 function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "more" | "export" | null; setMenu(m: "more" | "export" | null): void; act(a: PortfolioAction): void }) {
   const at = { chain: r.chain, token: r.token };
   const one = r.addresses.length === 1 ? r.addresses[0]! : null;
   return (
     <tr className={menu || r.selling ? "hov" : ""} data-pos={r.key}>
       <td className="l">
-        <div className="tok"><Avatar symbol={r.symbol} size={34} /><div className="ell"><div className="sy">{r.symbol}<MarkTag r={r} /></div><div className="s2 ui ell">{r.name}</div></div></div>
+        <TokCell r={r} />
       </td>
       <td>{r.bought === null ? DASH : usd(r.bought)}</td>
       <td>{r.sold ? usd(r.sold) : DASH}</td>
@@ -639,7 +647,7 @@ function assetAmount(s: string): string {
 function ClosedTr({ c }: { c: ClosedRow }) {
   return (
     <tr data-closed={c.key}>
-      <td className="l"><div className="tok"><Avatar symbol={c.symbol} size={34} /><div className="ell"><div className="sy">{c.symbol}</div><div className="s2 ui ell">{c.name}</div></div></div></td>
+      <td className="l"><div className="tok"><Avatar symbol={c.symbol} size={34} chain={c.chain} logo={{ chain: c.chain, token: c.token, icon: true }} /><div className="ell"><div className="sy">{c.symbol}</div><div className="s2 ui ell">{c.name}</div></div></div></td>
       <td>{c.bought === null ? DASH : usd(c.bought)}</td>
       <td>{c.sold === null ? DASH : usd(c.sold)}</td>
       <td>0</td>
@@ -719,7 +727,7 @@ function AllocMap({ items, inline = false }: { items: { r: Row; v: number }[]; i
         return (
           <div className={`at${inline ? " inl" : ""}`} key={r.key} data-alloc={r.key} style={{ left: `${x}%`, top: `${y}%`, width: `calc(${w}% - 4px)`, height: `calc(${h}% - 4px)`, background: bg }}>
             <div className="row-flex">
-              {big && <Avatar symbol={r.symbol} size={32} />}
+              {big && <Avatar symbol={r.symbol} size={32} logo={{ chain: r.chain, token: r.token, icon: true }} />}
               {w > 13 && <span className="as ell">{r.symbol}</span>}
               {inline && big && <span className="av3 num">{usd(r.value!)}</span>}
             </div>
@@ -812,7 +820,7 @@ function DotLine({ pts }: { pts: [number, bigint][] }) {
 function PhoneRow({ r, onOpen, act }: { r: Row; onOpen(): void; act(a: PortfolioAction): void }) {
   return (
     <div className="mpr" data-pos={r.key} role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen()}>
-      <Avatar symbol={r.symbol} size={44} />
+      <Avatar symbol={r.symbol} size={44} chain={r.chain} logo={{ chain: r.chain, token: r.token, icon: true }} />
       <div className="mn">
         <div className="sy">{r.symbol}{r.exit && <span className="t3"><Ic name="target" size={12} /></span>}<MarkTag r={r} /></div>
         <div className="h num">{units(r.units)}</div>
@@ -838,7 +846,7 @@ function PhoneClosed({ c }: { c: ClosedRow }) {
   const tone = c.realizedX === null ? null : signOf(c.realizedX);
   return (
     <div className="mpr mpc" data-closed={c.key}>
-      <Avatar symbol={c.symbol} size={44} />
+      <Avatar symbol={c.symbol} size={44} chain={c.chain} logo={{ chain: c.chain, token: c.token, icon: true }} />
       <div className="mn">
         <div className="sy">{c.symbol}</div>
         <div className="h num">{held(c.heldMs)}</div>
@@ -861,7 +869,7 @@ function Sheet({ r, close, act }: { r: Row; close(): void; act(a: PortfolioActio
       <div className="msheet" role="dialog" aria-label={r.symbol} data-sheet="position">
         <div className="grab"><i /></div>
         <div className="shb">
-          <div className="shh"><Avatar symbol={r.symbol} size={44} /><div className="grow"><div className="sy">{r.symbol}</div><div className="h num">{units(r.units)} · {r.value === null ? "—" : usd(r.value)}</div></div><span className={`cpill num ${r.pnlSign === null || r.pnlSign === 0n ? "" : r.pnlSign > 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span></div>
+          <div className="shh"><Avatar symbol={r.symbol} size={44} chain={r.chain} logo={{ chain: r.chain, token: r.token, icon: true }} /><div className="grow"><div className="sy">{r.symbol}</div><div className="h num">{units(r.units)} · {r.value === null ? "—" : usd(r.value)}</div></div><span className={`cpill num ${r.pnlSign === null || r.pnlSign === 0n ? "" : r.pnlSign > 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span></div>
           <div className="sheetgrid">
             {(["25", "50", "100"] as const).map((p) => <button type="button" key={p} className="num" data-control={`sheet-sell-${p}`} onClick={() => go({ kind: "sell", ...at, part: p })}>{p}%</button>)}
             <button type="button" className="n" data-control="sheet-initials" onClick={() => go({ kind: "sell", ...at, part: "initials" })}><W id="initials" /></button>

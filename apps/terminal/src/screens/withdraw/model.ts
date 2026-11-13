@@ -68,7 +68,9 @@ export function current(w: Watch, ops: readonly Operation[] | null | undefined, 
   for (const [id, since] of w.seen) {
     const op = ws.find((o) => o.id === id);
     if (!op || w.closed.includes(id)) continue;
-    const view = STAGE_VIEW[op.stage];
+    // a stage this build doesn't know (a newer signing page's) is drawn as under way, never as nothing or a crash: the
+    // close stays, and the next known stage draws its own state
+    const view: WithdrawView = STAGE_VIEW[op.stage] ?? "S12.11";
     return { op, view, counter: view === "S12.12" ? Math.max(0, Math.floor((now - since) / 1000)) : null };
   }
   return null;

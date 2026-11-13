@@ -530,7 +530,9 @@ test("a build of this tree whose step 5 end loses a list or retries a seed gone 
     assert.ok(hit, `${marker} found in the build`);
     const planted = hit[0].replace(from, to);
     assert.notEqual(planted, hit[0], `${marker}: ${from} planted`);
-    return js.replace(hit[0], planted);
+    // a function, so a `$$` in the span (a minified name: keptIdReader is `$$` in some builds) is not read as a
+    // replacement pattern and the plant changes only its own marker
+    return js.replace(hit[0], () => planted);
   };
   const cases = [
     ["ids_end", /if\([\w$]+ instanceof [\w$]+\|\|[\w$]+\.aborted\)throw [\w$]+;/, ""],

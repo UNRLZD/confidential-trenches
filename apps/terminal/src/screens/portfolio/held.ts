@@ -16,6 +16,21 @@ export function heldRefs(state: SignpageState | null): HeldRef[] {
   return [...seen.values()].sort((a, b) => (a.chain === b.chain ? (a.token < b.token ? -1 : a.token > b.token ? 1 : 0) : a.chain < b.chain ? -1 : 1));
 }
 
+/** The tokens whose symbol, name and price the market read asks for: the open positions and every token the device
+ *  traded (its filled buys and sells), so a closed round trip draws its coin's name, not the address's first six
+ *  characters (the signed-in walk of release 124, 12 Nov: Closed listed "78GaXF"). The same batched call per chain; the price
+ *  history stays the open positions' (heldRefs). */
+export function marketRefs(state: SignpageState | null): HeldRef[] {
+  const seen = new Map<string, HeldRef>();
+  for (const r of heldRefs(state)) seen.set(heldKey(r.chain, r.token), r);
+  for (const o of state?.ops ?? []) {
+    if ((o.kind !== "buy" && o.kind !== "sell") || o.chain === undefined || o.token === undefined) continue;
+    const k = heldKey(o.chain, o.token);
+    if (!seen.has(k)) seen.set(k, { chain: o.chain, token: o.token });
+  }
+  return [...seen.values()].sort((a, b) => (a.chain === b.chain ? (a.token < b.token ? -1 : a.token > b.token ? 1 : 0) : a.chain < b.chain ? -1 : 1));
+}
+
 /** PortfolioData from the held reads: the market of each token the read names, and the value line ending at the total. */
 export function heldData(snap: SignpageClientSnapshot, markets: readonly HeldMarket[], history: ReadonlyMap<string, readonly HeldBar[]>, now: number): PortfolioData {
   const byKey = new Map<string, TokenMarket>();

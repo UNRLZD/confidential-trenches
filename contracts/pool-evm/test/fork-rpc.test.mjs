@@ -53,9 +53,12 @@ test("a recorded answer is served from the book with the hash resolved, and an u
   assert.match(miss.error.message, /not recorded for base/);
 });
 
-test("an upstream that never answers is tried twice, each try bounded, then the read is named as failed", async (t) => {
+test("an upstream that never answers is tried 5 times, each try bounded, then the read is named as failed", async (t) => {
   const real = globalThis.fetch;
   t.after(() => (globalThis.fetch = real));
+  // the waits between tries (500 ms doubling) at once here; each try's bound is AbortSignal.timeout's own clock
+  const later = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (fn, ms, ...a) => later(fn, ms >= 500 ? 0 : ms, ...a));
   let calls = 0;
   globalThis.fetch = (_url, init) => {
     calls++;
@@ -63,7 +66,7 @@ test("an upstream that never answers is tried twice, each try bounded, then the 
     return new Promise((_ok, no) => init.signal.addEventListener("abort", () => no(init.signal.reason)));
   };
   const at = Date.now();
-  await assert.rejects(answer({ base: {} }, "base", byHash(H("e"), 9), true), /did not answer eth_getStorageAt .* in 2 tries of 0\.05 s/);
-  assert.equal(calls, 2);
+  await assert.rejects(answer({ base: {} }, "base", byHash(H("e"), 9), true), /did not answer eth_getStorageAt .* in 5 tries of 0\.05 s/);
+  assert.equal(calls, 5);
   assert.ok(Date.now() - at < 5_000, "bounded, not held");
 });

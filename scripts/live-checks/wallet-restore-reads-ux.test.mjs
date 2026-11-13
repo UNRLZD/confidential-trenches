@@ -172,6 +172,10 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   const tok = / ([\w$]+)=([\w$]+)\[([\w$]+)\]\.usdc;async function/;
   assert.equal(f(`${js.replace(tok, " $1=__nets[$3].usdc;async function")};var __nets=0;`).id_held, false, "the token read from another table");
   assert.equal(f(`${js};var __dead=0,${tok.exec(js)[1]}=0;`).id_held, false, "the token given a second value");
+  // a class field of the token's name is a property, not a second value; a write in a class's method still is one
+  assert.equal(f(`${js};var __c=class extends Object{h0=1;${tok.exec(js)[1]}=-2;}`).id_held, true, "a class field of the token's name");
+  assert.equal(f(`${js};var __c=class{m(){${tok.exec(js)[1]}=0}}`).id_held, false, "the token given a second value in a class's method");
+  assert.equal(f(`${js};var __c=class{h0=1;m(){};${tok.exec(js)[1]}=0}`).id_held, false, "a field after a method is not in the leading list");
   // review P2: a dead same-shaped copy beside a broken real one, and the U_X reader not handed to the id read
   const read = /,([\w$]+)=async\(([\w$]+),([\w$]+)\)=>\{if\(\3===void 0\)throw Error\(`no deposit index for its U_X`\);[^]*?`money`\)\}/.exec(js)[0];
   const carry = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+)=null;for\(;;\)\{[^]*?\6=[\w$]+\}\}/.exec(js)[0];
