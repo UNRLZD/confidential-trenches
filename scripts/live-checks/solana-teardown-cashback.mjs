@@ -48,7 +48,8 @@ export const MARKS = Object.freeze({
   // card sol-w-sweep, the review of c1fd2d20 (2a): the record is dropped only when both RPCs read W empty, so an owed
   // end (and every other) keeps it
   // since card round-trip-costs-less an empty W is listed empty as its record goes
-  "an owed rent back keeps its record": /\{try\{if\(([\w$]+)===`nothing`\)return await (?:Promise\.resolve\([\w$]+\.owed\?\.markEmpty\?\.\([\w$]+\.address\)\)\.catch\(\(\)=>\{\}\),await )?[\w$]+\.owed\?\.drop\(/,
+  // since card pool-amounts-are-standard-sizes W's tail record (meta w-tail/sol/<W>) is written or deleted first
+  "an owed rent back keeps its record": /\{try\{if\((?:[\w$]+===`floor`&&[^;]{0,600}?\.untail\?\.\([\w$]+\.address\)\)\.catch\(\(\)=>\{\}\),)?([\w$]+)===`nothing`\)return await (?:Promise\.resolve\([\w$]+\.owed\?\.markEmpty\?\.\([\w$]+\.address\)\)\.catch\(\(\)=>\{\}\),await )?[\w$]+\.owed\?\.drop\(/,
   "the claim paid in full in the simulation": new RegExp(`if\\((${I})!==(${I})\\.fromAmount-\\2\\.amount&&${I}\\.push\\(\`\\$\\{${I}\\}: \\$\\{\\2\\.from\\} holds \\$\\{\\1\\?\\?\`nothing read\`\\} after the claim \\(want \\$\\{\\2\\.fromAmount-\\2\\.amount\\}\\)\`\\)`),
 });
 
