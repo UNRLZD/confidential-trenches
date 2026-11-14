@@ -1355,7 +1355,9 @@ test("planted (review P3-3): a mainnet pin on each chain is read on MAINNET_POOL
     if (p.chain !== "evm") continue;
     const chain = p.pin.network as "base" | "robinhood";
     assert.ok(p.rpcs !== null, `${chain}: read by the page`);
-    assert.deepEqual(p.rpcs().map((r) => r.url), MAINNET_POOL_RPCS[chain].map((u) => new URL(u).href), `${chain}: the kit's pool list`);
+    // the kit's pool list first, then the page's members that page no logs and, on Base, the helper's keyed-only route
+    // (card move-sends-or-says-why: a list whose seats give no answer walks on to two operators still)
+    assert.deepEqual(p.rpcs().slice(0, MAINNET_POOL_RPCS[chain].length).map((r) => r.url), MAINNET_POOL_RPCS[chain].map((u) => new URL(u).href), `${chain}: the kit's pool list`);
   }
 });
 

@@ -313,6 +313,31 @@ test("(card move-sends-or-says-why) publicnode and Pocket both give no answer: t
     }
 });
 
+// Card move-sends-or-says-why (142): Base's pool pair was exactly publicnode and Pocket, so a page where both give no
+// answer at all (the owner's Firefox) could not read Base: no balance, no restore, no Move's Base reads. Its list now
+// walks on to mainnet.base.org (every read but eth_getLogs) and the helper's keyed-only route: two operators still.
+test("(card move-sends-or-says-why) Base with publicnode and Pocket both giving no answer: the pool pair and the trade deps read on mainnet.base.org and the helper's keyed route, and no eth_getLogs goes to mainnet.base.org", async () => {
+  const { evmPair } = await import("../../wallet/src/pool/evm.ts");
+  const silent = new Set(["base-rpc.publicnode.com", "base.api.pocket.network"]);
+  const want = ["mainnet.base.org", new URL(TRADE_HELPER).host];
+  for (const down of ["throw", "stall"] as const) {
+    await onSeat((host) => (silent.has(host) ? { status: 0, down } : { status: 200 }), async (log) => {
+      const list = pageEvmPoolRpcs("base")!;
+      assert.ok(list.length >= 4, `the Base list walks past publicnode and Pocket: ${list.map((r) => (r as unknown as { url: string }).url).join(", ")}`);
+      for (const [name, pair] of [["evmPair(pageEvmPoolRpcs)", evmPair(list)], ["testnetPoolDeps().rpcs", testnetPoolDeps().rpcs("base")!]] as const) {
+        log.length = 0;
+        const got = await Promise.all([0, 1].map((k) => (pair as unknown as ((m: string, p: unknown[]) => Promise<unknown>)[])[k]!("eth_blockNumber", [])));
+        assert.deepEqual([...got].sort(), [...want].sort(), `${name} ${down}: each seat answers, one on each operator`);
+      }
+      // a log page on the pair: never asked of mainnet.base.org (it answers every one 429), so its host is never paused
+      log.length = 0;
+      const pair = evmPair(pageEvmPoolRpcs("base")!);
+      await Promise.allSettled([0, 1].map((k) => (pair as unknown as ((m: string, p: unknown[]) => Promise<unknown>)[])[k]!("eth_getLogs", [{ fromBlock: "0x1", toBlock: "0x10", address: "0x" + "11".repeat(20) }])));
+      assert.ok(!log.some((r) => r.host === "mainnet.base.org" && r.method === "eth_getLogs"), `${down}: no eth_getLogs to mainnet.base.org`);
+    });
+  }
+});
+
 // The review of 507431c0, item 5: with no member open, the seat asks the member whose host opens first.
 test("a public seat with every member paused asks the one whose pause ends first", async () => {
   await onSeat(() => ({ status: 200 }), async (log) => {

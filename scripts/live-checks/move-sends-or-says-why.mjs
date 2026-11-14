@@ -5,7 +5,8 @@
 //   - a move out of a pool is written leaving with its send-by, MOVE_SEND_MS (5 min) from the tap (`sendBy`);
 //   - the run's claim refuses to send once the move ended or passed its send-by (`claim`);
 //   - the follow ends a move nothing claimed by its send-by failed, not_sent (`expiry`);
-//   - both pool runs, Solana's and the EVM pools', claim right before a note is RESERVED to leave (`runs`: 2).
+//   - both pool runs, Solana's and the EVM pools', claim right before a note is RESERVED to leave (`runs`: 2; 3 from
+//     release 142, whose Cash withdraw request claims the same way, wallet withdraw/request.ts).
 // So a Move sends or shows failed in bounded time, never Processing for good. What each does for which records and
 // clocks is held by packages/signpage/test/move-sends-or-says-why.test.ts.
 // The recorded answers are facts() over this card's build (packages/signpage/scripts/build-app.mjs --out, mainnet), its
@@ -50,7 +51,7 @@ export function judge(a) {
   if (a?.sendBy !== true) bad("a move out of a pool is not written with a 5 min send-by before its quote: nothing bounds it");
   if (a?.claim !== true) bad("the run's claim does not refuse a move that ended or passed its send-by: a move shown failed could still send");
   if (a?.expiry !== true) bad("the follow does not end an unclaimed move failed at its send-by: Processing for good");
-  if (a?.runs !== 2) bad(`${Number.isInteger(a?.runs) ? a.runs : "no"} of the 2 pool runs claim before a release leaves`);
+  if (!Number.isInteger(a?.runs) || a.runs < 2) bad(`${Number.isInteger(a?.runs) ? a.runs : "no"} of the 2 pool runs claim before a release leaves`);
   return { ok: lines.length === 0, lines };
 }
 

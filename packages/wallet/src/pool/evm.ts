@@ -491,6 +491,10 @@ export const EVM_SPARE_REST_MS = 60_000;
  * A pair passed in again (evmPool's to evmTreeSync, the restore's) is that pair, so its reads bind its own seats. Read live: the kit's Base list seats blastapi second, which
  * caps a getLogs at 10 blocks (evm-transfer-rpc-spares), and sepolia.base.org answers HTTP 413 "eth_getLogs is limited
  * to a 200 range" (6 Nov 18:51Z), where publicnode takes 50,000 and Pocket 100,000.
+ * A provider marked `logs: false` (EvmRpc's own field; card move-sends-or-says-why: mainnet.base.org, which answers every
+ * eth_getLogs 429 -32011 "request limit reached", read 6 Nov and 14 Nov 13:16Z) is a member for every other read and is
+ * never asked an eth_getLogs: a seat on it walks on for that call, and with none free the call is refused there, so the
+ * read goes to the sync's sources (evmTreeSync) and the provider is never rested for a page it was never fit for.
  */
 export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   if (!Array.isArray(list) || list.length < 2 || list.some((r) => typeof r !== "function")) throw new Error(`${what}: two or more`);
@@ -519,6 +523,8 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   // the narrow provider each seat last took for want of a wider one (cheapest): a seat leaves it for any wider one
   const narrowed: (number | null)[] = [null, null];
   const free = (k: number, i: number) => i !== at[1 - k] && !sides[1 - k]!.has(i) && open[1 - k]![i] === 0;
+  // a member that pages no logs (its `logs: false`)
+  const logless = (i: number): boolean => (list[i] as { logs?: unknown }).logs === false;
   const rested = (i: number) => restUntil[i]! <= Date.now();
   // each provider's eth_getLogs cap as its last refusal named it (null: none known), the widest span it answered, and
   // how long its last call took (ms: a page's cost there)
@@ -586,6 +592,14 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
       for (;;) {
         const i = at[k]!;
         if (asked.has(i)) throw asked.get(i);
+        // a member that pages no logs is never asked one: the seat walks on for this call, or the call is refused here
+        if (method === "eth_getLogs" && logless(i)) {
+          asked.set(i, new Error(`${(list[i] as { url?: string }).url ?? "this provider"} pages no logs`));
+          const n = next(k, span, asked);
+          if (n === null) throw asked.get(i);
+          at[k] = n;
+          continue;
+        }
         open[k]![i]!++;
         const t0 = Date.now();
         let r: unknown;
@@ -1599,7 +1613,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   for (const r of [...(a.history ?? []), ...a.rpcs]) {
     if (typeof r !== "function") throw new Error("history: providers");
     const op = evmSourceOperator(r);
-    if (!SEATS.has(r) && op !== null && !sources.some((s) => s.op === op)) sources.push({ rpc: r, op });
+    // nor one that pages no logs (evmPair's `logs: false`): asked a page it answers a throttle, which pauses its host
+    if (!SEATS.has(r) && op !== null && (r as { logs?: unknown }).logs !== false && !sources.some((s) => s.op === op)) sources.push({ rpc: r, op });
   }
   // each source's logs from a round's first block up to its finalized anchor, by operator: a later round's read of that
   // source starts past them

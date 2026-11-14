@@ -281,12 +281,31 @@ export const MAINNET_POOL_RPCS: Readonly<Record<"base" | "robinhood", readonly s
   base: /* @__PURE__ */ Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"]),
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://rpc-robinhood.globalstake.io"]),
 });
+/** Each mainnet EVM chain's members after its pool list that page no logs (the wallet's evmPair `logs: false`; card
+ *  move-sends-or-says-why): seats for every other read, so a page whose list gives no answer at all (the owner's
+ *  Firefox, 14 Nov: publicnode and Pocket) still reads on two operators. Kept apart from the kit's pool list, whose every
+ *  member pages the pool's logs (its live check evm-pool-lists-mainnet reads them, the helper's start check and the
+ *  kit's sell quote use it). mainnet.base.org answers every eth_getLogs 429 -32011 "request limit reached" (kit
+ *  buy-unpinned.ts Base venue; again 14 Nov 13:16Z with the page's Origin) and eth_blockNumber 200 with the page's origin
+ *  allowed (12:41Z, 13:04Z). */
+export const MAINNET_POOL_LOGLESS: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
+  base: /* @__PURE__ */ Object.freeze(["https://mainnet.base.org"]),
+  robinhood: /* @__PURE__ */ Object.freeze([]),
+});
 /** An EVM chain's pool list as the page reads it: the testnet pair in the testnet build, MAINNET_POOL_RPCS on mainnet. */
 export const pageEvmPoolUrls = (chain: "base" | "robinhood"): readonly string[] => (POOL_TESTNET ? TESTNET_RPCS[chain] : MAINNET_POOL_RPCS[chain]);
-/** The pool list as RPCs (pageRpc each, testnetRpc on the testnet build), or null with fewer than two. */
+/** The pool list as RPCs (pageRpc each, testnetRpc on the testnet build), or null with fewer than two. On mainnet Base
+ *  the helper's keyed-only route last (card move-sends-or-says-why): a page whose publicnode and Pocket give no answer at
+ *  all (the owner's Firefox, 14 Nov) still reads on two operators, mainnet.base.org and the helper's keyed providers,
+ *  never the helper's public fallback (which is mainnet.base.org itself), and the pair's logs come from the sync's
+ *  sources (pageEvmHistory). */
 export const pageEvmPoolRpcs = (chain: "base" | "robinhood", kind: ReadKind = "trade"): readonly EvmRpc[] | null => {
   const urls = pageEvmPoolUrls(chain);
-  return urls.length < 2 ? null : urls.map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
+  if (urls.length < 2) return null;
+  const list = urls.map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
+  if (POOL_TESTNET) return list;
+  const spares = MAINNET_POOL_LOGLESS[chain].map((u) => Object.assign(testnetRpc(u, SOLANA_RPC_RETRY, kind), { logs: false }));
+  return chain === "base" ? [...list, ...spares, evmHelperKeyedRpc(TRADE_HELPER, chain)] : [...list, ...spares];
 };
 /** An EVM chain's pool pin and pair for a read that names no account (card deposit-takes-each-pools-own-coin: the
  *  pool's floor deposit.assets lists its coin at, frame and top-level page alike): the network's pin and its pool list
@@ -613,7 +632,7 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"], stop?: PoolKindsDe
         ? (pageSolanaRpcs() as unknown as readonly [PoolRpc, PoolRpc])
         : POOL_TESTNET
           ? (TESTNET_RPCS[chain].map((u) => testnetRpc(u) as PoolRpc) as unknown as readonly [PoolRpc, PoolRpc])
-          : ((pageEvmPoolRpcs(chain)?.slice(0, 2) as unknown as readonly [PoolRpc, PoolRpc] | undefined) ?? null),
+          : ((((l) => (l === null ? undefined : evmPair(l)))(pageEvmPoolRpcs(chain)) as unknown as readonly [PoolRpc, PoolRpc] | undefined) ?? null),
     // the tokens' decimals kept this session: the sell's read and both buys' own (card sell-first-read-waits-out-a-throttle)
     decimals: PAGE_TOKEN_DECIMALS,
     ...(flow ? { flow } : {}),
