@@ -4,7 +4,10 @@
 // 64 px or less (PNG) or kept as served (SVG) in ./logos. The design folder's files are never used.
 // Ids are spelled as the helper serves them: Solana rows carry Jupiter's `launchpad` field as is (apps/helper/src/data/
 // solana/lists.ts); Base and Robinhood rows carry the factory table's pad (FACTORIES in apps/helper/src/data/evm/
-// lists.ts, card market-data-evm-lists). An id with no row here, or null, draws no launchpad badge: never the raw id.
+// lists.ts, card market-data-evm-lists); NEAR rows carry the UNRLZD engine's pad id as the helper reads it (apps/helper/
+// src/data/near/engine.ts), its NEAR pads' logos fetched 2026-11-14 from the source on their line, the same files the
+// UNRLZD terminal's launchpad registry cites (apps/terminal/public/launchpads/manifest.json there). An id with no row
+// here, or null, draws no launchpad badge: never the raw id.
 
 export type Pad = { name: string; logo: string; src: string };
 export type ChainMark = { name: string; logo: string; src: string; /** Padding inside the round badge, 0-0.5 of its size. */ inset: number };
@@ -36,10 +39,18 @@ export const PADS: Readonly<Record<string, Pad>> = {
   pons: { name: "Pons", logo: at("pons.png"), src: "https://ponsfamily.com/favicon.png" },
   bags: { name: "Bags", logo: at("bags.png"), src: BAGS },
   torch: { name: "Torch", logo: at("torch.png"), src: "https://torchpad.fun/brand/TorchMark-400.png (the site's apple-touch-icon)" },
+  // NEAR (the engine's ids)
+  hoot: { name: "Hoot", logo: at("hoot.png"), src: "https://justhoot.fun/logo.png (128 px, cut to 64)" },
+  nearlytrade: { name: "Nearly.trade", logo: at("nearlytrade.svg"), src: "https://nearly.trade/favicon.svg" },
+  qlyphs: { name: "Qlyphs", logo: at("qlyphs.svg"), src: "https://qlyphs.com/icon.svg" },
+  memecooking: { name: "meme.cooking", logo: at("memecooking.png"), src: "https://meme.cooking/assets/apple-touch-icon.png (180 px, cut to 64)" },
+  nearpaid: { name: "NearPaid", logo: at("nearpaid.png"), src: "https://nearpaid.com/apple-touch-icon.png (180 px, cut to 64)" },
 };
 
-/** Pads the factory table names whose own brand files could not be found or cited: they draw no badge until they can. */
-export const NO_LOGO: readonly string[] = ["spawn"];
+/** Pads the lists name whose own brand files could not be found or cited: they draw no badge until they can. GayPad
+ *  (factory gaypad.j1-racing.near) and token0 (token0.near) have no site of their own: gaypad.xyz is a parked lander
+ *  and gaypad.fun answers "Offline" (read 14 Nov 06:3xZ), token0 has none (the UNRLZD registry's research). */
+export const NO_LOGO: readonly string[] = ["spawn", "gaypad", "token0"];
 
 const ROBINHOOD: ChainMark = { name: "Robinhood", logo: at("robinhood.png"), src: "https://robinhood.com/us/en/rh_favicon_120.png", inset: 0 };
 
@@ -87,6 +98,13 @@ export const PAD_RING: Readonly<Record<string, RingColor | "neutral">> = {
   flaunch: { l: 0.7, c: 0.22, h: 349 }, // 0.70 0.24 349
   virtuals: { l: 0.63, c: 0.1, h: 192 }, // 0.63 0.09 192
   torch: { l: 0.78, c: 0.22, h: 148 }, // 0.80 0.16 148
+  // NEAR: each from the UNRLZD terminal's value for the same logo (components/viz/padColors.ts), moved by the least
+  // step that clears every rule here
+  hoot: { l: 0.66, c: 0.14, h: 67 }, // 0.71 0.17 50
+  qlyphs: { l: 0.66, c: 0.21, h: 9 }, // 0.63 0.25 30
+  nearlytrade: { l: 0.57, c: 0.11, h: 159 }, // 0.59 0.10 169
+  memecooking: { l: 0.58, c: 0.18, h: 139 }, // 0.56 0.17 140
+  nearpaid: { l: 0.88, c: 0.1, h: 211 }, // 0.88 0.10 211
   "bags.fun": "neutral", // white on black
   bags: "neutral", // white on black
   doppler: "neutral", // white on black
