@@ -45,9 +45,10 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
  *  alone (groups: id, hello flag, level, post); from kit 1.14 (card solana-buy-preview-complete) at the current level
  *  or kit-v1.13's, the two that read it, as NOTICE_1_14 (its groups the same, in the same order); from kit 1.15 (card
  *  one-balance-buys-on-every-chain) kit-v1.14's level too, from kit 1.16 (card move-sends-what-it-shows) kit-v1.15's,
- *  and from kit 1.17 (card buy-any-amount-on-every-chain) kit-v1.16's, each in the same expression. */
+ *  from kit 1.17 (card buy-any-amount-on-every-chain) kit-v1.16's, and from kit 1.18 (card move-sends-or-says-why)
+ *  kit-v1.17's, each in the same expression. */
 const NOTICE = /closed:([\w$]+)=>\{([\w$]+)&&([\w$]+)===`current`&&([\w$]+)\(\{v:1,type:`closed`,id:\1\}\)\}/;
-const NOTICE_1_14 = /closed:([\w$]+)=>\{!([\w$]+)\|\|([\w$]+)!==`current`(?:(?:(?:&&\3!==`1\.16`)?&&\3!==`1\.15`)?&&\3!==`1\.14`)?&&\3!==`1\.13`\|\|([\w$]+)\(\{v:1,type:`closed`,id:\1\}\)\}/;
+const NOTICE_1_14 = /closed:([\w$]+)=>\{!([\w$]+)\|\|([\w$]+)!==`current`(?:(?:(?:(?:&&\3!==`1\.17`)?&&\3!==`1\.16`)?&&\3!==`1\.15`)?&&\3!==`1\.14`)?&&\3!==`1\.13`\|\|([\w$]+)\(\{v:1,type:`closed`,id:\1\}\)\}/;
 const esc = (v) => v.replace(/\$/g, "\\$");
 /** The shell's open: the id recorded to tell, over the frame it opened over, unless done, shown or to tell already
  *  (groups: id, done, shown, to tell, frame). */
