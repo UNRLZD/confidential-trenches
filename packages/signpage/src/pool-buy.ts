@@ -99,6 +99,7 @@
 import { base58, base64 } from "@scure/base";
 import {
   buildSolanaPoolBuyOnTables,
+  readSolanaDlmmBuyVenue,
   readSolanaPoolBuyVenue,
   readSolanaRent,
   solanaEncodePoolRelease,
@@ -109,6 +110,7 @@ import {
   solanaPoolPage,
   solanaPoolPriorityBudget,
   solanaPoolTag2Accounts,
+  solanaPoolVenueAddress,
   SOLANA_POOL_BUY_CU,
   SOLANA_POOL_BUY_PIECES_MAX,
   SolanaPoolBuyError,
@@ -451,7 +453,7 @@ export function releaseOf(r: ReadyProof<SolanaReleaseRequest>, pin: SolanaPoolPi
  *  venue's pin is not a non-empty list of addresses (refused, never read past). */
 const pinnedTables = (h: PoolBuyHost): (readonly [SolanaPoolBuyVenue["kind"], string])[] | null => {
   const out: (readonly [SolanaPoolBuyVenue["kind"], string])[] = [];
-  for (const v of ["pump-curve", "pumpswap"] as const) {
+  for (const v of ["pump-curve", "pumpswap", "dlmm"] as const) {
     if (!Object.hasOwn(h.tables, v)) continue;
     const list: unknown = h.tables[v];
     if (!Array.isArray(list) || list.length === 0 || !list.every((a) => typeof a === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a))) return null;
@@ -882,11 +884,11 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // round 1: the pool account's two tree sizes and the reference (the quote's age counts from it, so it is read
       // again each round), with the rent on the first
       const [sizes, ref] = await Promise.all([treeSizes(h, pool, wait), pageReference(h.rpcs, { side: "buy", token, amount: ask.amount }), round === 0 ? rentRead.then((x) => void ((rent = x), (feeCap = solanaPoolFee(x)))) : null]);
-      const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+      const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap" || p.venue === "dlmm").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
       if (!ref || !best) return no("quote_check_failed");
       // the venue's own tables: a venue the page pins none for is refused as soon as the reference names it, before its
       // own accounts are read and before the pick, so no note is claimed
-      const kind = best.venue as "pump-curve" | "pumpswap";
+      const kind = best.venue;
       const ownRead = tableReads.get(kind);
       if (ownRead === undefined) return no("venue_not_pinned");
       const own = await ownRead;
@@ -911,7 +913,8 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       // read is in, in this round beside the venue and the blockhash: a proof only the take's clock lists is looked up
       // too (review P3-2 of b57f4eb28), and the round never waits for the early read first (review P2-1 of 92ae9ded1)
       const lookups: Promise<void>[] = [lookUp(await h.ready(), true), h.ready(early).then((l) => lookUp(l, false))];
-      const venueRead: Promise<SolanaPoolBuyVenue> = readSolanaPoolBuyVenue(h.rpcs, kind, token, ...(h.pick ? [h.pick] : []));
+      // a DLMM coin: the pair the reference priced, read for this buy (card solana-buy-reaches-raydium-and-meteora)
+      const venueRead: Promise<SolanaPoolBuyVenue> = kind === "dlmm" ? readSolanaDlmmBuyVenue(h.rpcs, token, best.address, "buy") : readSolanaPoolBuyVenue(h.rpcs, kind, token, ...(h.pick ? [h.pick] : []));
       // the slot is read before some of its round's reads end (the venue's a microtask on, a root page past the first
       // after the page before it): when the round ends over POOL_BUY_SLOT_STALE_MS after the slot was answered, the
       // blockhash and slot are read again, so a slow or lying provider costs a round, never the quote's age bound
@@ -1056,7 +1059,7 @@ async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Pr
       key = null;
       // the route as bound, told once the take holds the note (sendAndSettle): W, then the venue the check passed and its
       // pool (the curve's account or the AMM pool's)
-      const bound: readonly BuyRoute[] = [{ wallet: w.address }, { venue: venue.kind, pool: venue.kind === "pump-curve" ? venue.curve : venue.pool }];
+      const bound: readonly BuyRoute[] = [{ wallet: w.address }, { venue: venue.kind, pool: solanaPoolVenueAddress(venue) }];
       // a buy of several pieces: its owed record before the take, so a page that closes from here on leaves W found
       // (resumePieces); none written, nothing taken or sent
       if (before.length > 0) {

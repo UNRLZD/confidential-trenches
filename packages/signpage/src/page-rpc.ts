@@ -18,6 +18,7 @@
 //   SOLANA_RPC_WINDOW_RETRY), whatever the host answers; a seat (seatRpc) adds its next member's own once a member
 //   faults.
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
+import { readSolanaDlmmPairs } from "../../kit/src/trade/solana/dlmm.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { HostPaused, gateSignal, hostLane } from "../../wallet/src/throttle.ts";
@@ -179,8 +180,48 @@ export const pageHelperRpcStopped = (origin: string, signal: AbortSignal, kind: 
  * READ_TIMEOUT_MS in kit pool.ts, met while the page's lane held it for a paused host: the review of 507431c0, P2) is a
  * failed read too: a null resting on it is that provider's no answer, a timeout fault, never "no reference pool".
  */
-export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<SolanaReference | null> {
+export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest, pairsOf: DlmmPairsOf | null = pageDlmmPairs): Promise<SolanaReference | null> {
   if (solanaSameProvider(rpcs[0], rpcs[1])) throw new Error("the two providers are the same provider: a reference must never rest on one provider's word");
+  // the coin's DLMM pairs (card solana-buy-reaches-raydium-and-meteora), found beside the pump venues' read: a coin with
+  // none costs no wait; one with some is read again with them, every venue judged on the same reads' rules
+  if (req.dlmmPairs === undefined && pairsOf !== null) {
+    const found = pairsOf(req.token).catch(() => [] as readonly string[]);
+    const pump = readReference(rpcs, req);
+    const pairs = await found;
+    if (pairs.length === 0) return pump;
+    pump.catch(() => {});
+    return readReference(rpcs, { ...req, dlmmPairs: pairs });
+  }
+  return readReference(rpcs, req);
+}
+
+/** Finds a coin's Meteora DLMM SOL pairs for a reference (the kit's readSolanaDlmmPairs on the page's pairs). */
+export type DlmmPairsOf = (token: string) => Promise<readonly string[]>;
+/** The page's finder, set once at start on mainnet (pool-testnet.ts); none: a reference reads the pump venues alone. */
+let pageDlmmPairs: DlmmPairsOf | null = null;
+export const setPageDlmmPairs = (f: DlmmPairsOf | null): void => void (pageDlmmPairs = f);
+/** How many coins' pairs a finder keeps, and how long: a pair made since is found on the next read a minute on. */
+export const DLMM_PAIRS_KEPT = 256;
+export const DLMM_PAIRS_KEEP_MS = 60_000;
+/**
+ * A finder that keeps each coin's pairs DLMM_PAIRS_KEEP_MS: the kit's readSolanaDlmmPairs, scanning on `scan` (two
+ * providers that answer getProgramAccounts) and ranking past 8 pairs on `read`. A read that fails is kept for nothing,
+ * so the next reference asks again; one read at a time per coin.
+ */
+export function keptDlmmPairs(scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now: () => number = () => performance.now()): DlmmPairsOf {
+  const kept = new Map<string, { at: number; pairs: Promise<readonly string[]> }>();
+  return (token) => {
+    const k = kept.get(token);
+    if (k !== undefined && now() - k.at < DLMM_PAIRS_KEEP_MS) return k.pairs;
+    if (kept.size >= DLMM_PAIRS_KEPT) kept.clear();
+    const pairs = readSolanaDlmmPairs(scan(), read(), token);
+    kept.set(token, { at: now(), pairs });
+    pairs.catch(() => kept.get(token)?.pairs === pairs && kept.delete(token));
+    return pairs;
+  };
+}
+
+async function readReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<SolanaReference | null> {
   let fault: SolanaRpcTransportError | null = null;
   // the calls still in flight, by the provider's host
   const inFlight = new Map<string, number>();
