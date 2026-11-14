@@ -68,7 +68,8 @@ export const SIGN_WORDS = [
  *  imports it, this check reads it in the script and wants it final. */
 export const NOT_SHIPPED = ["positions.toPool"];
 export const VAULT_DRAFT_KEYS = ["to", "amount", "min", "unmatched"];
-export const POOL_DRAFT_KEYS = ["to", "amount"];
+// To and Amount, and the Chain picker's Chain and Not available (card pool-withdraws-to-any-chain), drafts all
+export const POOL_DRAFT_KEYS = ["to", "amount", "chain", "not-available"];
 
 const Q = "[\"'`]";
 const ID = "[\\w$]+";

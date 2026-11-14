@@ -110,7 +110,8 @@ test("words-nov8-final: no draft mark is written for a kept word, in any of the 
   assert.deepEqual(marks("../src/withdraw/pool-form.ts"), []);
   assert.deepEqual(marks("../src/withdraw/form.ts").map((l) => l.trim()), ["if (drafts.has(key)) el.dataset.draftCopy = key;"]);
   assert.deepEqual([...form.WITHDRAW_DRAFT].sort(), ["amount", "min", "to", "unmatched"]);
-  assert.deepEqual([...pool.POOL_DRAFT].sort(), ["amount", "to"]);
+  // To and Amount, and the Chain picker's two new words (card pool-withdraws-to-any-chain), drafts for the owner's pick
+  assert.deepEqual([...pool.POOL_DRAFT].sort(), ["amount", "chain", "not-available", "to"]);
   for (const [id, , key] of NOV8_ROWS) {
     assert.ok(!form.WITHDRAW_DRAFT.has(key) || key === "min", `${id}: ${key} is marked a draft`);
     assert.ok(!pool.POOL_DRAFT.has(key), `${id}: ${key} is marked a draft`);

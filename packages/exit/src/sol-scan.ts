@@ -36,6 +36,16 @@ export async function exitSolScan(a: ExitSolScanArgs): Promise<ExitSolScan> {
   return solScanAtGap(a, RESTORE_GAP);
 }
 
+/**
+ * exitSolScan from a seed64 the caller made (the exit command's, ./cli.ts withSeed64), on the release's two RPCs on
+ * `cluster` unless given: the same restore, at the release's RESTORE_GAP. The seed stays the caller's: never zeroed here.
+ */
+export async function exitSolScanSeed(seed64: Uint8Array, cluster: ExitSolCluster, rpcs?: readonly [SolanaRpc, SolanaRpc]): Promise<ExitSolScan> {
+  const { program, rpcs: pair, lister } = exitSolReads(cluster, rpcs ? { rpcs } : {});
+  const r = await solanaRestoreNotes({ seed64, program, rpcs: pair, lister, gap: RESTORE_GAP });
+  return { ...r, cluster, program, pool: solanaPoolOf(program).pool };
+}
+
 /** Tests only: exitSolScan at a gap of the test's. The exit tool calls exitSolScan. */
 export async function solScanAtGap(a: ExitSolScanArgs, gap: number): Promise<ExitSolScan> {
   const { program, rpcs, lister } = exitSolReads(a.cluster, { ...(a.rpcs ? { rpcs: a.rpcs } : {}), ...(a.lister ? { lister: a.lister } : {}), ...(a.fetchFn ? { fetchFn: a.fetchFn } : {}) });

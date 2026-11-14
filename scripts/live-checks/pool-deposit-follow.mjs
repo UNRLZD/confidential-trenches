@@ -101,7 +101,9 @@ const LOOP = new RegExp(
   // marks the round fast, and a plain send's carry shows in_pool only once its own money was seen (review P3-a)
   `(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\((${N})\\.ladder,\\2,\\3\\.perRung,\\3\\.keep\\);if\\(\\4===0n\\)return!1;let\\{end:(${N}),txs:${N}\\}=await \\5\\.deposit\\((${N}),\\4,\\5\\.signal\\);` +
     `\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&\\((${N})=!0\\);let (${N})=\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&!await (${N})\\(\\);` +
-    `return \\9&&\\(!(${N})\\|\\|(${N})\\)&&\\((${N})=!0,await (${N})\\(${Q}in_pool${Q}\\)\\),\\6===${Q}not_funded${Q}&&!\\13&&await \\14\\(${Q}short${Q}\\),` +
+    `return \\9&&\\(!(${N})\\|\\|(${N})\\)&&\\((${N})=!0,await (${N})\\(${Q}in_pool${Q}\\)\\),\\6===${Q}not_funded${Q}&&!\\13&&` +
+    // (card leftovers-carry-to-cash: what U_X holds written as the op's left when it shows short)
+    `(?:await \\14\\(${Q}short${Q}\\)|\\(await \\14\\(${Q}short${Q}\\),await \\5\\.holds\\?\\.\\(${N}\\)\\)),` +
     // the round: a note of U_X's landing reads fast; a landed note of U_X's counts only with none landing and once this
     // quote's own SUCCESS is read (re-read P2-1), or, on a plain send (card deposit-takes-each-pools-own-coin: no 1Click
     // quote, U_X itself its address), once the chain showed its own money at U_X: over its base, lowered to what U_X
@@ -113,8 +115,11 @@ const LOOP = new RegExp(
     // evm-first-proof-inside-ten-seconds); a carry only on costs read in its round
     `let (${N})=\\(\\5\\.now\\?\\?Date\\.now\\)\\(\\),(${N})=(${N}),(${N})=\\22!==null&&\\22\\.low===\\19&&\\21>=\\22\\.at&&\\21-\\22\\.at<15e3\\?\\22:null,` +
     `(${N})=\\19>=\\5\\.ladder\\.min\\?\\24\\?\\.c\\?\\?await ${N}\\(\\):null;if\\(\\23=\\25!==null&&\\19<\\25\\.floor\\?\\24\\?\\?\\{low:\\19,at:\\21,c:\\25\\}:null,\\25!==null&&\\19>=\\25\\.floor\\)` +
-    `\\11&&!\\13&&\\19>\\20&&\\(await \\14\\(${Q}in_transit${Q}\\),\\12=!0\\),await \\1\\(\\19,\\25\\)&&\\(\\16=!0\\),\\8&&\\(\\16=!0\\);` +
-    `else if\\(\\13\\)\\{if\\(!\\15&&(${N})!==${Q}in_pool${Q}&&await \\14\\(${Q}in_pool${Q}\\),!\\15&&await \\5\\.past\\(\\7\\)\\)` +
+    // (card one-balance-buys-on-every-chain: U_X's leftover written 0 before a carry, so a carry's money never counts twice)
+    `(?:await \\5\\.holds\\?\\.\\(0n\\),)?\\11&&!\\13&&\\19>\\20&&\\(await \\14\\(${Q}in_transit${Q}\\),\\12=!0\\),await \\1\\(\\19,\\25\\)&&\\(\\16=!0\\),\\8&&\\(\\16=!0\\);` +
+    `else if\\(\\13\\)\\{if\\(!\\15&&(${N})!==${Q}in_pool${Q}&&await \\14\\(${Q}in_pool${Q}\\),` +
+    // (card one-balance-buys-on-every-chain: what U_X holds written each in_pool round with no note of U_X's landing)
+    `(?:\\15\\|\\|await \\5\\.holds\\?\\.\\(\\19\\),)?!\\15&&await \\5\\.past\\(\\7\\)\\)` +
     `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\12=!0\\),`,
 );
 // pool-deposit.ts runPoolDeposit's fixed source (review H1): U_{s,i}'s own deposit note or its next arrival, a U the

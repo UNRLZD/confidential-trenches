@@ -1,0 +1,121 @@
+{
+  "about": "Card pool-withdraws-to-any-chain: real 1Click quotes of SOL (nep141:sol.omft.near) into NEAR USDC (nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1), EXACT_INPUT, slippageTolerance 100, appFees fee 20; amounts only. copy: the two live quotes of the Solana pool exit on the mainnet copy, priced at the copy SOL/USD PoolStatePrice (copy7 refused at S 15, copy8 paid). dry: 12 keyless dry quotes read 2026-11-13T21:27Z, each priced at Coinbase SOL-USD spot read just before it.",
+  "copy": [
+    {
+      "run": "copy7",
+      "at": "2026-11-13T21:09:41.415Z",
+      "price": "79.58334845",
+      "amountIn": "8695000",
+      "amountOut": "684454",
+      "minAmountOut": "677609",
+      "withdrawFee": "4390"
+    },
+    {
+      "run": "copy8",
+      "at": "2026-11-13T21:13:20.056Z",
+      "price": "79.54381690",
+      "amountIn": "8695000",
+      "amountOut": "684788",
+      "minAmountOut": "677940",
+      "withdrawFee": "4390"
+    }
+  ],
+  "dry": [
+    {
+      "at": "2026-11-13T21:27:17.200Z",
+      "price": "79.16",
+      "amountIn": "8695000",
+      "amountOut": "681715",
+      "minAmountOut": "674897",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:18.120Z",
+      "price": "79.16",
+      "amountIn": "100000000",
+      "amountOut": "7896489",
+      "minAmountOut": "7817524",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:18.983Z",
+      "price": "79.16",
+      "amountIn": "1000000000",
+      "amountOut": "79017170",
+      "minAmountOut": "78226998",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:19.957Z",
+      "price": "79.16",
+      "amountIn": "8695000",
+      "amountOut": "681715",
+      "minAmountOut": "674897",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:21.044Z",
+      "price": "79.16",
+      "amountIn": "100000000",
+      "amountOut": "7893258",
+      "minAmountOut": "7814325",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:22.054Z",
+      "price": "79.205",
+      "amountIn": "1000000000",
+      "amountOut": "78998817",
+      "minAmountOut": "78208828",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:23.152Z",
+      "price": "79.205",
+      "amountIn": "8695000",
+      "amountOut": "681456",
+      "minAmountOut": "674641",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:24.056Z",
+      "price": "79.205",
+      "amountIn": "100000000",
+      "amountOut": "7894477",
+      "minAmountOut": "7815532",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:25.200Z",
+      "price": "79.16",
+      "amountIn": "1000000000",
+      "amountOut": "78965745",
+      "minAmountOut": "78176087",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:26.331Z",
+      "price": "79.205",
+      "amountIn": "8695000",
+      "amountOut": "681629",
+      "minAmountOut": "674812",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:27.192Z",
+      "price": "79.205",
+      "amountIn": "100000000",
+      "amountOut": "7896335",
+      "minAmountOut": "7817371",
+      "withdrawFee": "4403"
+    },
+    {
+      "at": "2026-11-13T21:27:28.346Z",
+      "price": "79.205",
+      "amountIn": "1000000000",
+      "amountOut": "79000577",
+      "minAmountOut": "78210571",
+      "withdrawFee": "4403"
+    }
+  ]
+}

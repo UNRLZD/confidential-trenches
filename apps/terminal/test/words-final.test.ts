@@ -41,7 +41,7 @@ const PICKS = ["owner 2 Nov 06:08Z, all approved", "owner 1 Nov 16:45Z, keep", "
 // wallets heading were kept on 8 Nov (words-nov8.json, below). Verify's pool words (card verify-pools, on the owner's
 // next picks page). The deposit sheet's three send rules (card pool-balance-counts-the-remainder, placeholders for the
 // owner's copy pass).
-const STILL_DRAFT: Record<string, string[]> = { deposit: ["sendOnlyBase", "sendOnlyRobinhood", "sendOnlySolana"], discover: [], portfolio: ["more"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "net5m", "sells5m", "vol5m"], verify: ["authority", "blockscout", "hoodscan", "owner", "pools", "proxy", "solanaExplorer"], withdraw: [] };
+const STILL_DRAFT: Record<string, string[]> = { deposit: ["sendOnlyBase", "sendOnlyRobinhood", "sendOnlySolana"], discover: [], portfolio: ["from", "intents", "more"], signin: [], token: ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "net5m", "sells5m", "vol5m"], verify: ["authority", "blockscout", "hoodscan", "owner", "pools", "proxy", "solanaExplorer"], withdraw: [] };
 
 test("the list: 104 words on these screens, each once, each with a pick", () => {
   assert.equal(ROWS.length, 104);

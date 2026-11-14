@@ -149,28 +149,29 @@ test("the amount: a decimal in USDC, at most 6 places, to base units", () => {
     assert.equal(parseAmount(bad), null, JSON.stringify(bad));
 });
 
-test("the amount is refused above what one note can pay with its fee, and at or below the fee", () => {
+test("the amount is refused above what the notes can pay with a fee each, and at or below the fee", () => {
   const fee = 120_000n; // 0.12 USDC
-  const available = 10_000_000n; // the largest unspent note: 10 USDC
-  assert.deepEqual(checkAmount("abc", { available, fee }), { ok: false, code: "amount" });
-  assert.deepEqual(checkAmount("0", { available, fee }), { ok: false, code: "min", min: fee + 1n });
-  assert.deepEqual(checkAmount("0.12", { available, fee }), { ok: false, code: "min", min: fee + 1n });
-  assert.deepEqual(checkAmount("0.120001", { available, fee }), { ok: true, amount: 120_001n });
-  // amount + fee must fit in the note: 9.88 fits exactly, one base unit more does not
-  assert.deepEqual(checkAmount("9.88", { available, fee }), { ok: true, amount: 9_880_000n });
-  // above it: what can be sent, the note less the fee (card withdraw-form-shows-what-you-can-send)
-  assert.deepEqual(checkAmount("9.880001", { available, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
-  assert.deepEqual(checkAmount("10", { available, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
-  assert.deepEqual(checkAmount("1000000", { available, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
+  const notes = [{ id: "a", value: 10_000_000n }]; // one unspent note: 10 USDC
+  const one = (amount: bigint, chunk = amount + fee) => ({ ok: true, amount, parts: [{ noteId: "a", part: amount, chunk }] });
+  assert.deepEqual(checkAmount("abc", { notes, fee }), { ok: false, code: "amount" });
+  assert.deepEqual(checkAmount("0", { notes, fee }), { ok: false, code: "min", min: fee + 1n });
+  assert.deepEqual(checkAmount("0.12", { notes, fee }), { ok: false, code: "min", min: fee + 1n });
+  assert.deepEqual(checkAmount("0.120001", { notes, fee }), one(120_001n));
+  // amount + fee must fit in the note: 9.88 is the note whole, one base unit more is not
+  assert.deepEqual(checkAmount("9.88", { notes, fee }), one(9_880_000n));
+  // above it: what can be sent, the notes less a fee each (card withdraw-form-shows-what-you-can-send)
+  assert.deepEqual(checkAmount("9.880001", { notes, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
+  assert.deepEqual(checkAmount("10", { notes, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
+  assert.deepEqual(checkAmount("1000000", { notes, fee }), { ok: false, code: "insufficient", below: 9_880_000n });
   // no note at all: every amount is insufficient, with or without a fee read
-  assert.deepEqual(checkAmount("5", { available: 0n, fee: null }), { ok: false, code: "insufficient" });
+  assert.deepEqual(checkAmount("5", { notes: [], fee: null }), { ok: false, code: "insufficient" });
   // the fee not read yet: an amount the notes could hold waits for it, never passes
-  assert.deepEqual(checkAmount("5", { available, fee: null }), { ok: false, code: "unread" });
+  assert.deepEqual(checkAmount("5", { notes, fee: null }), { ok: false, code: "unread" });
   // ...and one above the note waits too while some can be sent (review of 3e8422132, P3): never Insufficient unread
-  assert.deepEqual(checkAmount("50", { available, fee: null }), { ok: false, code: "unread" });
+  assert.deepEqual(checkAmount("50", { notes, fee: null }), { ok: false, code: "unread" });
   // the notes not read: never insufficient on a read that did not happen, and never passed
-  assert.deepEqual(checkAmount("5", { available: null, fee }), { ok: false, code: "unread" });
-  assert.deepEqual(checkAmount("0.1", { available: null, fee }), { ok: false, code: "min", min: fee + 1n });
+  assert.deepEqual(checkAmount("5", { notes: null, fee }), { ok: false, code: "unread" });
+  assert.deepEqual(checkAmount("0.1", { notes: null, fee }), { ok: false, code: "min", min: fee + 1n });
 });
 
 test("withdrawable: the largest UNSPENT note of the vault's scope, as the withdraw request picks one", () => {

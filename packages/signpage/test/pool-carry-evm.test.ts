@@ -366,12 +366,15 @@ test("dust: W at or under the pool's least deposit is ended empty; over it but u
   const { ns, ws } = await stores();
   await refused(ch, ns);
   assert.deepEqual(await carryEvmOwed(hostOf(ch, ns, ws)), [{ w: W, end: "empty" }]);
+  // what W keeps is a tail record (card leftovers-carry-to-cash): counted, carried to Cash once worth one Cash deposit
+  assert.deepEqual(await ws.get("meta", `w-tail/base/${W}`), { chain: "base", address: W, l: LABEL.toString(), j: 0, amount: EVM_POOL_MIN_DEPOSIT.toString() });
   const hi = chain();
   hi.c.baseFee = 10n ** 12n;
   const b = await stores();
   await refused(hi, b.ns);
   assert.deepEqual(await carryEvmOwed(hostOf(hi, b.ns, b.ws)), [{ w: W, end: "high_fee" }]);
   assert.equal(await b.ws.get("meta", EVM_CARRY_DONE_KEY), undefined);
+  assert.equal(await b.ws.get("meta", `w-tail/base/${W}`), undefined);
   const sim = chain();
   sim.c.simFail = [false, true];
   const c = await stores();
@@ -574,6 +577,8 @@ test("a W still holding the least deposit or more after its carry landed is carr
   ch.c.balance = [10n ** 12n, 10n ** 12n];
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "landed" }]);
   assert.deepEqual(await ws.get("meta", EVM_CARRY_DONE_KEY), { [W]: { chain: "base", end: "carried" } });
+  // the dust the carry left is W's tail (card leftovers-carry-to-cash); a high_fee or unread W writes none
+  assert.deepEqual(await ws.get("meta", `w-tail/base/${W}`), { chain: "base", address: W, l: LABEL.toString(), j: 0, amount: (10n ** 12n).toString() });
 });
 
 test("the ends that stop a W for good come from final reads: a withdraw above the final block waits; empty at latest but more at the final block waits", async () => {

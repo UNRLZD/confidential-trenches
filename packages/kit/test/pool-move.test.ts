@@ -44,6 +44,18 @@ test("pool.move.dry's answer: out, fee and steps of the five; a step outside the
   assert.equal(R["pool.move.dry"]!({ ...good, route: "x" }), false, "an extra field");
 });
 
+test("pool.move.dry's answer (kit 1.16, card move-sends-what-it-shows): a priced answer with max; an amount the move cannot send with max and the nearest amounts, no out", () => {
+  const steps = [{ step: "pool_out", chain: "solana" }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }];
+  assert.equal(R["pool.move.dry"]!({ out: "2.25", fee: "0.001305", steps, max: "0.03739" }), true);
+  assert.equal(R["pool.move.dry"]!({ max: "0.03739", steps }), true, "max alone: the amount is over it");
+  assert.equal(R["pool.move.dry"]!({ max: "0.03739", steps, below: "0.02", above: "0.025" }), true);
+  assert.equal(R["pool.move.dry"]!({ max: "0.03739", steps, min: "0.0545" }), true);
+  assert.equal(R["pool.move.dry"]!({ max: "-1", steps }), false, "max is a decimal");
+  assert.equal(R["pool.move.dry"]!({ steps, min: "0.0545" }), false, "an answer with no out names max");
+  assert.equal(R["pool.move.dry"]!({ out: "2.25", fee: "0.001305", steps, min: "0.0545" }), false, "a priced answer names no min");
+  assert.equal(R["pool.move.dry"]!({ max: "0.03739", steps: [] }), false, "steps are required");
+});
+
 const MOVE_OP = { id: "m1", kind: "move", from: "near", to: "solana", stage: "in_transit", txs: [{ chain: "near", hash: "h" }], amount: "25.5", out: "0.31", created_ms: 1 };
 
 test("a move op in state.ops is read; one with a stage outside MoveStage, or from === to, is dropped and the rest kept", () => {

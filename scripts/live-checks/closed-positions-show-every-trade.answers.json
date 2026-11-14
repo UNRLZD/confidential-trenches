@@ -1,0 +1,46 @@
+{
+ "good": {
+  "at": "2026-11-13T22:36:20.447Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-5u+0tbnrHrOXl1fRgXejFV617AMm+Oz6N2BnGtwFQNsS1qy8jJkhl8rVfQWYoQxG",
+     "sha384": "sha384-5u+0tbnrHrOXl1fRgXejFV617AMm+Oz6N2BnGtwFQNsS1qy8jJkhl8rVfQWYoQxG",
+     "found": [
+      "a plain release is read past, and is no buy only once old",
+      "a no-buy mark counts only at this read's value",
+      "an EVM trade's op is keyed by its chain and transaction",
+      "the op names the units, the ETH at 18 decimals and its USD",
+      "a filled buy writes it",
+      "a filled sale writes it",
+      "the trades' read skips the wallets a buy on this page runs for",
+      "a wallet with this device's own buy record is skipped only once its trades were read",
+      "a restore's pool events give each spend's transaction, fee and amount bought",
+      "a restore writes each EVM sale's op from its deposit back",
+      "the restore runs it once the notes are written"
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "at": "2026-11-13T22:36:20.481Z",
+  "sign": {
+   "source": "https://confidential.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/app.js",
+     "status": 200,
+     "integrity": "sha384-N94bSrg2/Y73SjFl2fSvgA9chUzJY3tJrKsN4iLid2iF3idcXsRgb3U47IyY3gVp",
+     "sha384": "sha384-N94bSrg2/Y73SjFl2fSvgA9chUzJY3tJrKsN4iLid2iF3idcXsRgb3U47IyY3gVp",
+     "found": []
+    }
+   ]
+  }
+ }
+}

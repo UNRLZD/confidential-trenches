@@ -316,3 +316,15 @@ test("a new account refuses the A.8 test entropy and any single repeated byte; r
   // restore from the A.8 words still works (the WU-03 tests above use SEED)
   assert.equal(hex(d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)))), hex(SEED));
 });
+
+// The words' first Solana account (card exit-with-only-the-words): SLIP-10 ed25519 at m/44'/501'/0'/0', the address a
+// standard Solana wallet shows for the BIP-39 test words; the exit tool's fee wallet F (packages/exit/src/sol-out.ts)
+test("solFirstAccount: m/44'/501'/0'/0' of the words, by SLIP-10, the address pinned", () => {
+  const seed = d.wordsToSeed64("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about");
+  const a = d.solFirstAccount(seed);
+  assert.equal(d.SOL_FIRST_ACCOUNT_PATH, "m/44'/501'/0'/0'");
+  assert.equal(a.address, "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk");
+  const leaf = d.slip10Ed25519(seed, [44, 501, 0, 0].map((x) => x + 0x80000000));
+  assert.deepEqual(a.secretKey, leaf.key);
+  assert.equal(a.secretKey.length, 32);
+});

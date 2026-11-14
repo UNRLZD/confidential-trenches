@@ -358,8 +358,10 @@ const poolAddress: SignpageSchema = (v) => {
 const poolAddressParams: SignpageSchema = (v) =>
   obj({ chain: poolChain })(v) || obj({ chain: poolChain, origin_asset: str, amount: dec })(v);
 
-/** pool.move.dry's answer (messages.ts PoolMoveDry): out, fee and at least one step of the five, each on a trade chain. */
-const poolMoveDry = obj({ out: dec, fee: dec, steps: arr(obj({ step: oneOf(MOVE_STEPS), chain: tradeChain }), 1) });
+/** pool.move.dry's answer (messages.ts PoolMoveDry): out, fee and at least one step of the five, each on a trade chain,
+ *  and max (kit 1.16); or, for an amount the move cannot send, max and the steps, with min, below and above. */
+const moveSteps = arr(obj({ step: oneOf(MOVE_STEPS), chain: tradeChain }), 1);
+const poolMoveDry: SignpageSchema = (v) => obj({ out: dec, fee: dec, steps: moveSteps }, { max: dec })(v) || obj({ max: dec, steps: moveSteps }, { min: dec, below: dec, above: dec })(v);
 /** pool.move's params: two trade chains that differ and an amount. */
 const poolMoveFields = obj({ from: tradeChain, to: tradeChain, amount: dec });
 const poolMove: SignpageSchema = (v) => poolMoveFields(v) && (v as { from: unknown }).from !== (v as { to: unknown }).to;

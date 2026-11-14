@@ -190,7 +190,7 @@ export interface SignpageParams {
    * not_allowed elsewhere, and on an EVM chain from a page with no Cash to move. Its refusals: not_allowed, not_funded (signed
    * out or no proof ready), quote_check_failed (no venue the two providers agree on) and busy (a trade runs).
    * `amount` (kit 1.12, card buy-spends-several-pieces): a spend in whole SOL; the answer then also says how many pieces
-   * a pool.buy of it spends now and what it costs for good (PoolBuyDry pieces and cost). On Base and Robinhood (kit 1.16,
+   * a pool.buy of it spends now and what it costs for good (PoolBuyDry pieces and cost). On Base and Robinhood (kit 1.17,
    * card buy-any-amount-on-every-chain) a spend in whole ETH; the answer then also says what a pool.buy of it spends in
    * swaps when that is less (PoolBuyDry buys). An amount that is not a decimal of the chain's asset: not_allowed.
    */
@@ -282,10 +282,26 @@ export const MOVE_STEPS: readonly MoveStep[] = Object.freeze(["vault_out", "pool
  * top of `amount`, in whole units of `from`'s asset; `steps`, its legs in order. Numbers and chains only. Display only:
  * no request takes them.
  */
-export interface PoolMoveDry {
+export type PoolMoveDry = PoolMovePriced | PoolMoveLimits;
+/** A move the page would run: `out`, `fee` and `steps` as above, and `max` (kit 1.16, card move-sends-what-it-shows):
+ *  the most this move can send now, in whole units of `from`'s asset (a pool's: each note's largest part after its fees;
+ *  Cash's: its largest withdrawal less the withdraw fee). */
+export interface PoolMovePriced {
   out: string;
   fee: string;
   steps: readonly { step: MoveStep; chain: TradeChain }[];
+  max?: string;
+}
+/** An amount the move cannot send (kit 1.16, card move-sends-what-it-shows): no `out`, so nothing would move; `max` as
+ *  above, and, each in whole units of `from`'s asset, the nearest amounts the move sends exactly (`below`, `above`), or
+ *  the least that clears every floor on its route (`min`: one withdrawal's least part, the destination pool's deposit
+ *  floor). */
+export interface PoolMoveLimits {
+  max: string;
+  steps: readonly { step: MoveStep; chain: TradeChain }[];
+  min?: string;
+  below?: string;
+  above?: string;
 }
 
 /**
@@ -308,7 +324,7 @@ export const MOVE_STAGES: readonly MoveStage[] = Object.freeze(["leaving", "in_t
  *  that quote is not read. `with_cash` (kit 1.15, card one-balance-buys-on-every-chain): the most one tap spends with its shortfall
  *  moved from Cash first (src/cash-to-pool.ts), in the same whole units: tap_max plus what the largest Cash note buys of
  *  the pool's coin less the move's costs (the relayer's fee and the quote's margin); absent with no Cash to move. `buys`
- *  (kit 1.16, card buy-any-amount-on-every-chain): on Base and Robinhood, with the ask's `amount` at most tap_max, what a
+ *  (kit 1.17, card buy-any-amount-on-every-chain): on Base and Robinhood, with the ask's `amount` at most tap_max, what a
  *  pool.buy of it spends in swaps, in the same whole units: the tap plans whole notes, and an amount no plan carries
  *  exactly (within one buy's bound under a sum of the notes' spends) is bought at the largest amount under it one
  *  carries; sent only when it is below `amount`, absent when the buy spends the amount itself or nothing is planned.
@@ -427,7 +443,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.16";
+export const SIGNPAGE_KIT_VERSION = "1.17";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every

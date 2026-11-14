@@ -155,6 +155,12 @@ test("the withdraw sites on planted bundles, in the minified shape of this build
     assert.notEqual(s, js, k);
     assert.equal(sites(s)[k], false, k);
   }
+  // the run's guard in the minifier's other shape (a body that declares a binding: card robinhood-note-spendable's
+  // `let i=null;try{i=await p.tap(),...`): read the same, and folded the same way reads false
+  const ret = js.replace(`if(!(!Ot||!r(e.chain)||(e.chain===${Q}solana${Q}?n===void 0:A(e.chain)===null))){}`, `if(!Ot||!r(e.chain)||(e.chain===${Q}solana${Q}?n===void 0:A(e.chain)===null))return;let i=null`);
+  assert.notEqual(ret, js);
+  assert.equal(sites(ret).run, true, "the guard as an early return");
+  assert.equal(sites(ret.replace("if(!Ot||!r(e.chain)||", `if(!Ot||e.chain!==${Q}solana${Q}||!r(e.chain)||`)).run, false, "the early return refused for every chain but Solana");
   assert.equal(sites(js.replace("r=e=>F(e,t.withdrawBuilt)", "r=e=>!0")).host, false, "a wayOut that is not the rule");
   assert.equal(sites(js + ";var K2=(n,i)=>{if(!r(n))return null;let a=A(n);if(a===null)return null;let o=t.evmQueuePool?.(n)??0;return o};").host, false, "a second host beside it");
 });

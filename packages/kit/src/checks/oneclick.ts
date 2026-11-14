@@ -46,8 +46,13 @@ export const ONECLICK_USDC_ASSETS: readonly string[] = Object.freeze([
   "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
 ]);
 
-// S, the spread cap on every floor: 15 bps, twice the widest gap read (D52).
+// S, the spread cap on a USDC-to-USDC floor: 15 bps, twice the widest gap read (D52).
 export const ONECLICK_SPREAD_CAP_BPS = 15;
+// S on any other pair, priced by the device's own reads: 50 bps (card pool-withdraws-to-any-chain). Live SOL to NEAR
+// USDC quotes read 2026-11-13T21:09-21:11Z paid 15 to 45 bps under the device's price with 1Click's fee 20 in that, so
+// a cap of 15 refused a fair share of them (a 0.0087 SOL exit 662 units short); with F 20 a priced quote may sit up to
+// 0.70% under the device's own price, never more.
+export const ONECLICK_PRICED_SPREAD_CAP_BPS = 50;
 // The vault takes no deposit under MIN_DEPOSIT, 1 USDC (vault paper V@93b827c:62), so a quote into it is refused below.
 export const ONECLICK_VAULT_MIN_OUT = 1_000_000n;
 // A live quote's signed `deadline` replaces the request's in the signed bytes (the SDK spreads the quote over the
@@ -230,7 +235,7 @@ export interface OneClickFloorInput {
 }
 
 // The device's own floors in destination base units (§2.8 deposit quote row at research faacb62); every rounding
-// raises the floor (scaled amounts up, cuts down). USDC to USDC:
+// raises the floor (scaled amounts up, cuts down). S is 15 bps on USDC to USDC and 50 on any other pair. USDC to USDC:
 //   amountOut ≥ amountIn − withdrawFee − ⌊amountIn × (F + S) / 10,000⌋, minAmountOut ≥ that × (1 − slippage).
 // Any other pair: minAmountOut ≥ ⌈amountIn × p_in / p_out × (1 − (F + S) / 10,000)⌉ × (1 − slippage) − withdrawFee,
 // with p_in the lower of the origin's two reads and p_out the higher of the destination's (amountOut ≥ the same).
@@ -239,10 +244,11 @@ export interface OneClickFloorInput {
 export function oneClickFloors(x: OneClickFloorInput): { amountOut: bigint; minAmountOut: bigint } {
   if (!Number.isInteger(x.slippageBps) || x.slippageBps < 0 || x.slippageBps >= 10_000)
     fail("request", `slippageTolerance ${show(x.slippageBps)} is not in 0..9999 bps`);
-  if (!Number.isInteger(x.feeBps) || x.feeBps < 0 || x.feeBps + ONECLICK_SPREAD_CAP_BPS >= 10_000) fail("request", `fee ${show(x.feeBps)}`);
+  const cap = x.pricing === "usdc" ? ONECLICK_SPREAD_CAP_BPS : ONECLICK_PRICED_SPREAD_CAP_BPS;
+  if (!Number.isInteger(x.feeBps) || x.feeBps < 0 || x.feeBps + cap >= 10_000) fail("request", `fee ${show(x.feeBps)}`);
   for (const d of [x.decimalsIn, x.decimalsOut]) if (!Number.isInteger(d) || d < 0 || d > 36) fail("request", `decimals ${show(d)}`);
   const keep = BigInt(10_000 - x.slippageBps);
-  const fs = BigInt(x.feeBps + ONECLICK_SPREAD_CAP_BPS);
+  const fs = BigInt(x.feeBps + cap);
   let amountOut: bigint, minAmountOut: bigint;
   if (x.pricing === "usdc") {
     const inOut = ceilDiv(x.amountIn * pow10(x.decimalsOut), pow10(x.decimalsIn));

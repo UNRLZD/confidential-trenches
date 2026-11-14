@@ -59,7 +59,7 @@ import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { checkBinding, PoolNoLeafError, type Pool, type PoolTrees, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { changeMoves, isReleaseSize, releaseSizesUpTo, type PieceRule } from "../../wallet/src/pool/pieces.ts";
+import { changeMoves, isReleaseSize, pieceChunk, releaseSizesUpTo, type PieceRule } from "../../wallet/src/pool/pieces.ts";
 import { solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { blockhashOf, pastOnBoth, readBack, releaseOf, rootIndex, sendAndSettle, treeSizes, type PoolBuyHost } from "./pool-buy.ts";
 import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana, SOLANA_RESERVED_KEYS, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk, type WithdrawCosts } from "./rules/pool.ts";
@@ -97,9 +97,10 @@ function gridOf(c: WithdrawCosts): { g: bigint; floor: bigint } {
 /** The notes a plan may draw on, largest first, each with its choices: runs [lo, hi] of parts (part = chunk - fee - W's
  *  fee) of step g, a point when lo = hi. With no piece rule: all of it (`cap`), or a part in [minPart, cap - floor] (any
  *  chunk). With the pool's piece rule (card every-lamport-can-move): a chunk of one of the list's sizes
- *  (../../wallet/src/pool/pieces.ts isReleaseSize) that leaves 0 or at least the floor, or the whole note once when it
- *  is off the grid or under the floor (made before the rule: main's planner left 3,000,000 and 4,000,000 notes; review
- *  P3-2 of 00d6bef00). `top`: the note's largest part. */
+ *  (../../wallet/src/pool/pieces.ts isReleaseSize: a rung, card pool-amounts-are-standard-sizes) that leaves 0 or at
+ *  least the floor; the whole note when it is a rung, or once when no rung of it leaves a change that moves (pieceChunk:
+ *  a note made before the rule), or under the floor (main's planner left 3,000,000 and 4,000,000 notes; review P3-2 of
+ *  00d6bef00). `top`: the note's largest part. */
 type Choice = { id: string; runs: [bigint, bigint][]; top: bigint };
 function choicesOf(notes: readonly WithdrawSource[], c: WithdrawCosts): Choice[] {
   const { floor } = gridOf(c);
@@ -114,7 +115,7 @@ function choicesOf(notes: readonly WithdrawSource[], c: WithdrawCosts): Choice[]
         if (cap >= c.minPart) runs.push([cap, cap]);
         if (cap - floor >= c.minPart) runs.push([c.minPart, cap - floor]);
       } else {
-        if (cap >= c.minPart && (isReleaseSize(r, n.value) || n.value % r.grid !== 0n || n.value < r.floor)) runs.push([cap, cap]);
+        if (cap >= c.minPart && (pieceChunk(r, n.value) === n.value || n.value < r.floor)) runs.push([cap, cap]);
         for (const size of n.value - floor >= r.floor ? releaseSizesUpTo(r, n.value - floor) : []) if (size - k >= c.minPart) runs.push([size - k, size - k]);
       }
       return { id: n.id, runs, top: runs.reduce((t, [, hi]) => (hi > t ? hi : t), 0n) };
@@ -277,6 +278,11 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
   keepOut?(noteIds: readonly string[], spanMs: bigint): Promise<void>;
   /** The op's stage, its txs so far, the onward send still owed and what reached To, by onward signature. */
   stage?(stage: WithdrawStage, txs: TxRef[], pending: PendingOnward | null, arrived: Arrivals): void;
+  /** A payout to another chain (card pool-withdraws-to-any-chain): the deposit address of a 1Click quote checked on the
+   *  device (../../kit/src/checks/oneclick-exit.ts), asked with `refundTo`, the run's first W (already public in this
+   *  withdraw: it sends to that address), so a refund names nothing the withdraw does not. Called once, after the plan
+   *  and before any note moves; the address it answers is the run's To, checked as any To is. */
+  exit?(refundTo: string): Promise<string>;
 };
 
 /** A part's onward send still owed: its note (W is the note's own W_{sol, label, j}, derived on the device; the op
@@ -444,6 +450,8 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
       }
       return out;
     });
+    // another chain: To is the checked quote's deposit address on this chain, its refund the first W
+    if (h.exit) to = await h.exit(spends[0]!.w);
     if (toRefused(to, h.pin, pool, spends.map((x) => x.w))) stop("to");
     await checkTo(h, to);
     // from here to the run's end no queue in any tab takes a planned note (each part refreshes the record's deadline)

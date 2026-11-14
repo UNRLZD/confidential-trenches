@@ -5,8 +5,8 @@
 // FAIL on the rules it moved (the empty listing while a note is RESERVED, the counted passes, the held W, every rent
 // back's claim, the listing) and on the sale's stamp, the trade lock and the load's start. Planted on the good one:
 // another /app.js, no pin, each mark taken away: each FAIL; and the good build's lines (round-trip-costs-less.excerpt.txt,
-// cut from its public/app.js; since card every-lamport-can-move that card's build) with one rule changed: each FAIL on
-// that rule's mark alone.
+// cut from its public/app.js; since card every-lamport-can-move that card's build; the no-buy mark's read as card
+// closed-positions-show-every-trade's build has it) with one rule changed: each FAIL on that rule's mark alone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -39,6 +39,12 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.deepEqual(judge({ ...g, index: "<html></html>" }).lines, ["BAD SIGN_HOST's index.html pins no /app.js"]);
   for (const [i, k] of Object.keys(MARKS).entries()) assert.deepEqual(judge({ ...g, carries: { ...g.carries, [k]: false } }).lines, [ALL[i]]);
   assert.equal(judge(null).ok, false);
+});
+
+test("recorded answer liveBefore (SIGN_HOST before card pool-amounts-are-standard-sizes, its leftover listed at what a ride adds): FAIL on the leftover listing alone", () => {
+  const v = judge(ANSWERS.liveBefore);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [`BAD the served bundle has no ${Object.keys(MARKS)[9]}`]);
 });
 
 const JS = readFileSync(new URL("./round-trip-costs-less.excerpt.txt", import.meta.url), "utf8");
@@ -77,7 +83,8 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["let n=t===qY?null:Xe.preempt(),", "let n=Xe.preempt(),", 5],
     // the no-buy mark
     ["T2=`owed/buy-sol-none`", "T2=`owed/buy-sol`", 6],
-    ["buyNone:async t=>Object.hasOwn(nt(await(await e.store()).get(`meta`,T2)),t)", "buyNone:async t=>!1", 6],
+    ["buyNone:async t=>Mk(await(await e.store()).get(`meta`,T2),t)", "buyNone:async t=>!1", 6],
+    ["Mk=(e,t)=>nt(e)[t]===2,", "Mk=(e,t)=>Object.hasOwn(nt(e),t),", 6],
     // the sell rule: the priority cap, rounded up, a limit's absence 1,400,000; the fee a sale names, full or partial
     ["if(LA(d.ixs,f)>100000n)return X(`priority`);", "", 7],
     [">100000n)return X(`priority`)", ">1000000n)return X(`priority`)", 7],
@@ -111,7 +118,7 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     ["if((t.buy||e!==void 0)&&f===p&&t.read?.(f),", "if(", 9],
     ["if((t.buy||e!==void 0)&&f===p", "if(t.buy&&f===p", 9],
     ["if((t.buy||S!==void 0)&&t.read?.(v),", "if(", 9],
-    ["P<w&&L>0n&&(t.buy||S!==void 0)&&t.read?.(L),", "", 9],
+    ["R<D&&B>0n&&(t.buy||T!==void 0)&&t.read?.(B),", "", 9],
     ["await t.swept?.(D.one.signature,D.value),", "", 9],
     ["m=n===`sent`?i.sweep:i.lamports!==void 0&&n!==`gave_up`?void 0:l", "m=n===`sent`?i.sweep:i.lamports!==void 0?void 0:l", 9],
     ["m=n===`sent`?i.sweep:", "m=n===`sent`?void 0:", 9],
@@ -158,20 +165,25 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
 
 // Card every-lamport-can-move: its build spells the sell rule's fee bound in the one check of the sale's own reads (with
 // the full flag and a full sell's reserve of 0), and a W whose pass ended under the floor is listed at what it adds once
-// moved (restAdds, pick (a)), unlisted when that is 0. The excerpt is that build's: each rule changed FAILs on
-// its mark alone.
+// moved (restAdds, pick (a)), unlisted when that is 0. The excerpt is that build's, with card
+// pool-amounts-are-standard-sizes's build's two lines appended (the leftover listed at its rest, restAdds): each rule
+// changed FAILs on its mark alone.
 test("every-lamport-can-move's spellings carry the fee bound and the owed listing; each changed FAILs on its mark", () => {
   const LAMPORT = JS;
   for (const [from, to, i] of [
     ["||_.fee>105000n||", "||", 7],
     ["_.fee>105000n||", "_.fee>1005000n||", 7],
     ["typeof _.fee!=`bigint`||", "", 7],
-    ["P<w&&L===0n&&t.unlisted?.(),", "", 9],
-    ["t.read?.(L)", "t.read?.(M)", 9],
-    ["t.read?.(L)", "t.read?.(v)", 9],
-    ["L=NY(M,Nm(l),w)", "L=M", 9],
-    ["if(r>=n)return r;", "", 9],
-    ["return i>=1000000n?i-i%BC:0n}", "return i>0n?i:0n}", 9],
+    // card pool-amounts-are-standard-sizes: the leftover listed at its rest, the sweep's rung kept rent-exempt
+    ["R<D&&B===0n&&t.unlisted?.(),", "", 9],
+    ["t.read?.(B)", "t.read?.(F)", 9],
+    ["t.read?.(B)", "t.read?.(b)", 9],
+    ["B=vQ(F,D,L)", "B=F", 9],
+    ["B=vQ(F,D,L)", "B=vQ(F,D)", 9],
+    ["let r=sF(e,n).value;", "let r=sF(e).value;", 9],
+    ["return r>=t?r:e>0n?e:0n}", "return e>0n?e:0n}", 9],
+    ["e>0n?e:0n}", "0n}", 9],
+    ["{value:R}=sF(F,L)", "{value:R}=sF(F,0n)", 9],
     ["p=i.unlisted===!0?void 0:", "p=", 9],
     ["n===`floor`?i.lamports?.toString():", "n===`floor`?void 0:", 9],
   ]) {

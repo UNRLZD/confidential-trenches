@@ -189,6 +189,10 @@ export interface PoolFollowDeps extends PoolUxReads {
   stage(s: PoolFollowStage): Promise<void>;
   /** At the end, before it returns (review P2-a): U_X's lower balance on the end read and keep + perRung as last read. */
   left?(low: bigint, cost: bigint): Promise<void>;
+  /** Before the end (card one-balance-buys-on-every-chain): what U_X holds under one deposit's floor each round the op
+   *  shows in_pool, written as the op's `left` so the balance counts it at once; 0 before any carry from U_X, so the
+   *  money a carry turns into a note is never counted twice. */
+  holds?(low: bigint): Promise<void>;
   /** Txs read landed, added to the op's txs (each once). */
   txs?(t: TxRef[]): Promise<void>;
   /** The device's clock (Date.now unless given): the end's tx read is bounded by the quote's deadline and the margin. */
@@ -266,7 +270,10 @@ export function depositWalletsOf(ops: readonly unknown[], decimals: (chain: Pool
   }
   const out: { chain: PoolChain; address: string; asset: PoolAsset; amount: string }[] = [];
   for (const v of newest.values()) {
-    if (!poolFollowEnded(v) || v.follow.left === undefined || !/^[0-9]{1,78}$/.test(v.follow.left)) continue;
+    // an in_pool op's left, ended or still read on to its deadline (its follow writes what U_X holds each round, 0 before a
+    // carry: card one-balance-buys-on-every-chain)
+    // and a short deposit's (card leftovers-carry-to-cash: written each round it shows short)
+    if ((v.stage !== "in_pool" && v.stage !== "short") || v.follow.left === undefined || !/^[0-9]{1,78}$/.test(v.follow.left)) continue;
     const units = BigInt(v.follow.left);
     if (units === 0n) continue;
     const d = decimals(v.follow.chain);
@@ -381,7 +388,12 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     // U_X holds over the quote's own floor but cannot pay a rung and its fee now (fees rose since the quote): the
     // existing short stage, so the screen tells it (re-read P3-2), until a top-up to U_X or lower fees let it go; never
     // once a rung of this follow is in the pool
-    if (end === "not_funded" && !landed) await show("short");
+    // what U_X holds is written as the op's left (card leftovers-carry-to-cash): a short deposit's money is counted and
+    // carried to Cash while no top-up comes
+    if (end === "not_funded" && !landed) {
+      await show("short");
+      await deps.holds?.(low);
+    }
     // its txs as both RPCs read them; a read that fails leaves them to the read before the end
     await carryTxs(txs).catch(() => {});
     return went;
@@ -429,6 +441,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       const c: Under["c"] | null = low >= deps.ladder.min ? (keep?.c ?? (await costsNow())) : null;
       under = c !== null && low < c.floor ? (keep ?? { low, at: t, c }) : null;
       if (c !== null && low >= c.floor) {
+        await deps.holds?.(0n);
         if (plain && !landed && low > base) {
           await show("in_transit");
           paid = true;
@@ -439,6 +452,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         // nothing left under U_X to carry: read on to the quote's deadline, so a late send is carried too; while a note of
         // U_X's is still landing, nothing more (no in_pool, no end): its landing, or what it leaves in U_X, comes first
         if (!opened && shown !== "in_pool") await show("in_pool");
+        if (!opened) await deps.holds?.(low);
         if (!opened && (await deps.past(f))) {
           const e = await emptyOnChain();
           if (e.went) fast = true;
@@ -468,6 +482,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         // a plain send asks 1Click nothing: money under one deposit's floor at U_X, with nothing of U_X's landing, is short
         if (plain && low > base && !opened) {
           await show("short");
+          await deps.holds?.(low);
           paid = true;
         }
         const st = plain ? null : await deps.status(f, deps.signal);
@@ -694,7 +709,12 @@ export function poolFollows(h: PoolFollowHost) {
       // what the end left at U_X and one deposit's cost, written with `final` in the same write (review P2-a)
       let endLeft: { left: string; cost: string } | null = null;
       const left = async (low: bigint, cost: bigint) => void (endLeft = { left: low.toString(), cost: cost.toString() });
-      const end = await followPoolQuote(g, { ...d, stage, txs, left, signal }, now.stage);
+      // what U_X holds each round before the end, written as the op's left when it differs (none written for a 0 with none)
+      const holds = async (low: bigint) => {
+        const l = low.toString();
+        await ops.update("ops", id, (v) => (isPoolOp(v) && v.follow.left !== l && !(low === 0n && v.follow.left === undefined) ? { ...v, follow: { ...v.follow, left: l } } : undefined));
+      };
+      const end = await followPoolQuote(g, { ...d, stage, txs, left, holds, signal }, now.stage);
       // the follow returns past its deadline only at in_pool; a signal's return leaves the op to the next landing
       if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...withStage(v, "in_pool", (h.now ?? Date.now)()), final: true, ...(endLeft === null ? {} : { follow: { ...v.follow, ...endLeft } }) } : undefined));
     };

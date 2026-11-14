@@ -44,6 +44,8 @@ export const PATHS = [
   "packages/kit/test/vault-settle-cli.mjs",
   // exit_out.rs: the exit tool's CLI, the tool's own src/ and the wallet's moves it reaches through the kit's ./core
   "packages/exit/test/out-cli.ts",
+  // exit_words.rs: the exit command's sandbox run (packages/exit/test/exit-cli.ts, runCli and the NEAR chain)
+  "packages/exit/test/exit-cli.ts",
   "packages/exit/src/",
   "packages/exit/package.json",
   "packages/wallet/src/",
@@ -100,7 +102,7 @@ export function matches(file, paths = PATHS) {
 export const SHARDS = [
   ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16", "exit_out"],
-  ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12"],
+  ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12", "exit_words"],
   ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
   ["p02"],
 ];

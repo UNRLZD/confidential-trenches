@@ -18,12 +18,20 @@ test("recorded good answer: this card's SIGN_HOST build: PASS", () => {
   assert.deepEqual(v.lines, []);
 });
 
-test("recorded answer partOne (part 1's build, a0bd91187, before pool.move): FAIL, poolMove and toCash named", () => {
-  assert.deepEqual(judge(ANSWERS.partOne).lines, [`BAD ${SAYS.poolMove}`, `BAD ${SAYS.toCash}`]);
+test("recorded answer partOne (part 1's build, a0bd91187, before pool.move): FAIL, poolMove, toCash, poolToPool and leftCounted named", () => {
+  assert.deepEqual(judge(ANSWERS.partOne).lines, [`BAD ${SAYS.poolMove}`, `BAD ${SAYS.toCash}`, `BAD ${SAYS.poolToPool}`, `BAD ${SAYS.leftCounted}`]);
 });
 
-test("recorded answer beforeToCash (8235063eb's build, Cash to every pool, no way back): FAIL, toCash alone named", () => {
-  assert.deepEqual(judge(ANSWERS.beforeToCash).lines, [`BAD ${SAYS.toCash}`]);
+test("recorded answer beforeToCash (8235063eb's build, Cash to every pool, no way back): FAIL, toCash, poolToPool and leftCounted named", () => {
+  assert.deepEqual(judge(ANSWERS.beforeToCash).lines, [`BAD ${SAYS.toCash}`, `BAD ${SAYS.poolToPool}`, `BAD ${SAYS.leftCounted}`]);
+});
+
+test("recorded answer beforePoolToPool (e0e5034a9's build, Cash to every pool and back, no pool to pool): FAIL, poolToPool and leftCounted named", () => {
+  assert.deepEqual(judge(ANSWERS.beforePoolToPool).lines, [`BAD ${SAYS.poolToPool}`, `BAD ${SAYS.leftCounted}`]);
+});
+
+test("recorded answer beforeLeft (bad9ed47d's build, pool.move every way, no leftover counted): FAIL, leftCounted alone named", () => {
+  assert.deepEqual(judge(ANSWERS.beforeLeft).lines, [`BAD ${SAYS.leftCounted}`]);
 });
 
 test("recorded answer liveBefore (SIGN_HOST before this card): FAIL, every mark named", () => {
@@ -55,6 +63,13 @@ const JS = [
   'var QG=e=>[{step:`pool_out`,chain:e},{step:`intents`,chain:`near`},{step:`vault_in`,chain:`near`}];',
   "({solana:`nep141:sol.omft.near`,base:`nep141:base.omft.near`,robinhood:`nep141:hood.omft.near`});",
   'function Uz(e){return{"pool.move":(t,n)=>{let r=Hz(t);if(`error`in r)return r;return r},"pool.move.dry":t=>{let n=Hz(t);return n}}}',
+  "i={result:{out:JG(s.out,LG[a]),fee:r,steps:[...QG(n),...zz(a)]}};",
+  "if(`error`in(r===null||i===null||r<=i?{error:`not_allowed`}:await e.onward.move(c,r-i,`${t}/on`).catch(()=>({error:`failed`}))))return n(t,{...s,stage:`failed`});",
+  "if(d=E!==null&&g<E.floor?T??{low:g,at:C,c:E}:null,E!==null&&g>=E.floor)await t.holds?.(0n),o&&!a&&g>c&&(await i(`in_transit`),s=!0);",
+  "let m=async e=>{let n=e.toString();await t.update(`ops`,r,t=>DY(t)&&t.follow.left!==n&&(e!==0n||t.follow.left!==void 0)?{...t,follow:{...t.follow,left:n}}:void 0)};await vY(l,{...c,stage:u,txs:d,left:p,holds:m,signal:s},o.stage);",
+  "for(let e of r.values()){if(e.stage!==`in_pool`||e.follow.left===void 0||!/^[0-9]{1,78}$/.test(e.follow.left))continue}",
+  ",ho=`w-tail/`;",
+  "async function iY(e){let t=(await e.keys(`meta`)).filter(e=>e.startsWith(ho));return Promise.all(t.map(t=>e.get(`meta`,t).catch(()=>void 0)))}",
 ].join("");
 const INDEX = (js) => `<script type="module" src="/app.js" integrity="${facts("", js).sha384}"></script>`;
 
@@ -88,12 +103,24 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     ["poolMove", JS.replace("{step:`pool_in`,chain:e}", "{step:`pool_in`,chain:`base`}")],
     // no way back to Cash, a route that skips the vault, or a pool coin it never quotes
     ["toCash", JS.replace("{step:`vault_in`,chain:`near`}", "{step:`pool_in`,chain:`near`}")],
-    ["toCash", JS.replace("{step:`pool_out`,chain:e},", "")],
+    // (with no pool_out step there is no way out of a pool at all, so no pool to pool either)
+    [["toCash", "poolToPool"], JS.replace("{step:`pool_out`,chain:e},", "")],
     ["toCash", JS.replace("`nep141:hood.omft.near`", "`x`")],
+    // no pool-to-pool dry of six steps, its legs the other way round, or no onward move from Cash under <op>/on
+    ["poolToPool", JS.replace("steps:[...QG(n),...zz(a)]", "steps:[...QG(n)]")],
+    ["poolToPool", JS.replace("steps:[...QG(n),...zz(a)]", "steps:[...zz(a),...QG(n)]")],
+    ["poolToPool", JS.replace("e.onward.move(c,r-i,`${t}/on`)", "e.onward.move(c,r-i,`${t}`)")],
+    ["poolToPool", JS.replace("e.onward.move(c,r-i,`${t}/on`)", "e.onward.move(c,r,`${t}/on`)")],
+    // no 0 before a carry (its money counted twice), a 0 never written over a held left, only an ended op's left
+    // listed, or the tails read under another prefix
+    ["leftCounted", JS.replace("await t.holds?.(0n),", "")],
+    ["leftCounted", JS.replace("&&(e!==0n||t.follow.left!==void 0)", "&&e!==0n")],
+    ["leftCounted", JS.replace("e.stage!==`in_pool`||", "e.final!==!0||")],
+    ["leftCounted", JS.replace(",ho=`w-tail/`;", ",ho=`owed/`;")],
   ];
   for (const [mark, js] of cuts) {
     assert.notEqual(js, JS, `${mark}: the cut changed nothing`);
-    assert.deepEqual(judge(facts(INDEX(js), js)).lines, [`BAD ${SAYS[mark]}`], `${mark}: ${js.slice(0, 80)}`);
+    assert.deepEqual(judge(facts(INDEX(js), js)).lines, [mark].flat().map((m) => `BAD ${SAYS[m]}`), `${mark}: ${js.slice(0, 80)}`);
   }
 });
 

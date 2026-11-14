@@ -62,7 +62,7 @@
 //   balance), the token and the pool's logs over a block range; the sale's own transaction when the helper names one.
 //   Nothing here logs.
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
+import type { PoolStatePrice, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { evmPoolSellQuote, evmSellRevertedPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolSellQuote, type EvmPoolSellQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { evmBuyRouteOf, evmPoolVenues, venuePins, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSell, type EvmPoolSell, type EvmPoolSellFields } from "../../kit/src/trade/evm/sell.ts";
@@ -72,14 +72,14 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { EvmLagError, EvmUnansweredError, EVM_SEND_MARGIN_MS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
-import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
+import { evmClaimTaken, evmNextNote, EvmNotFinalError, type EvmRestoredReturn, type EvmRestoredSpend } from "../../wallet/src/pool/evm-restore.ts";
 import { evmSellSent } from "../../wallet/src/pool/evm-releases.ts";
 import { evmSellBan, evmSellBanned } from "../../wallet/src/pool/evm-sell-bans.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { checkEvmAuthorization, checkEvmSell, checkEvmSellSim, PoolRuleRefused, signEvmAuthorization, signEvmSell, signEvmSellSim, tokenDecimalsOf, type PoolAsk, type PoolContext } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldataRead, evmSellSelector, evmDepositedRead, evmHeadNumber, evmSellCalldata, evmSellSend, evmSellVerdict, type EvmDepositedRead, type EvmSellAuthorization, type EvmSellVerdict } from "./evm-send.ts";
-import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS, EVM_POSITION_COSTS_KEY, type EvmHolding } from "./pool-buy-evm.ts";
+import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS, EVM_POSITION_COSTS_KEY, evmTradeKey, evmTradeOp, writeEvmTradeOp, type EvmHolding, type EvmTradeOp } from "./pool-buy-evm.ts";
 import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
 import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
@@ -94,7 +94,9 @@ type Chain = "base" | "robinhood";
 export const EVM_OPEN_SELLS_KEY = "owed/sell-evm";
 /** One open sale (decimal strings): written before its bytes leave, its deadline raised before a second signature
  *  leaves, dropped at its end. */
-export type EvmOpenSell = { note: string; chain: Chain; w: string; token: string; amount: string; precommitment: string; nonce: string; deadline: string; from: string; least: string; tx?: string };
+/** `decimals` (card closed-positions-show-every-trade): the token's, as the request named them, for the sale's trade op;
+ *  absent from a record written before it (the op then names no units). */
+export type EvmOpenSell = { note: string; chain: Chain; w: string; token: string; amount: string; precommitment: string; nonce: string; deadline: string; from: string; least: string; tx?: string; decimals?: number };
 
 /** A Sell's life, s: under the kit's EVM_POOL_SELL_DEADLINE_MAX_S (600), past the helper's send margin (60 s) with room
  *  for the busy waits. */
@@ -193,6 +195,10 @@ export type EvmSellHost = {
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
   /** The sale's Deposited, the same on both RPCs (evmSellVerdict), and its block: the page's positions read at no lower one. */
   deposited?(o: EvmOpenSell, block: bigint): void;
+  /** A filled sale read back (the tap's run or a load's follow): its trade op written (pool-buy-evm.ts writeEvmTradeOp). */
+  traded?(op: EvmTradeOp): Promise<void>;
+  /** The chain's pool asset's USD price as the page read it (src/pool-price.ts), for the op's USD; null: none. */
+  price?(): PoolStatePrice | null;
   signal?: AbortSignal;
   /** The session's sign out, aborted at its tap: it ends a wait between the reads' attempts (read-waits.ts waitUnless). */
   stop?: AbortSignal;
@@ -505,6 +511,7 @@ async function sellLeg(h: EvmSellHost, ask: PoolAsk, w: EvmSellWallet, on: { sen
         w: w.w,
         token: lower(ask.token!),
         amount: s.built.amount.toString(),
+        decimals: ask.decimals,
         precommitment: leg.note.precommitment.toString(),
         nonce: s.built.nonce.toString(),
         deadline: s.built.deadline.toString(),
@@ -723,6 +730,11 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       // both read and neither carries one of them; a read that fails tells nothing, and the fill stands
       if (inputs.every((i) => typeof i === "string") && !inputs.some((i) => x.mine!.some((m) => lower(i as string).includes(m)))) return { lost: true };
     }
+    // the trade's op: the token units W sold, and what the sale put back into the pool, what came out of the venue
+    if (v.end === "filled") {
+      const dec = Number.isSafeInteger(x.open.decimals) ? x.open.decimals! : null;
+      await h.traded?.(evmTradeOp("sell", h.chain, v.deposit.tx, x.open.token, BigInt(x.open.amount), dec, v.deposit.value, h.price?.() ?? null, Number(clock()))).catch(() => {});
+    }
     return { stage: v.end === "filled" ? "filled" : "refused", txs };
   }
   return null;
@@ -933,6 +945,65 @@ export async function restoreEvmHoldings(a: { chain: Chain; testnet: boolean; pi
   return out;
 }
 
+// ---------- a restored device's trades (card closed-positions-show-every-trade) ----------
+// A device restored from the 12 words, or signed in again (a sign out deletes the store), had its EVM notes back and
+// none of its Base or Robinhood trade ops, so Portfolio's closed positions, its calendar and How you trade lacked them.
+// They come from the pool's own events the restore already read on its two RPCs (no read names W or a transaction):
+// - a buy: W's Bought (the restore's spend with a token): its transaction, the token W received (_out) and the ETH into
+//   the venue (_value less _fee), as the device that bought writes them (pool-buy-evm.ts traded);
+// - a sale: each deposit back under the buy's (l, j) after it (the return note and its second arrivals,
+//   ../../wallet/src/pool/evm-restore.ts returns): its transaction and the ETH it brought home, as the device that sold
+//   writes them (watch's filled: deposit.tx, deposit.value), with no units (the pool's events do not tell them): the
+//   trade book closes the round trip once nothing of the token is held (apps/terminal portfolio model.ts tradeBook).
+// - Each at its block's time and the token's decimals, read on `read`: the helper's route on mainnet (a W's other
+//   reads go there too, ../../wallet/src/pool/buy-wallets.ts evmHelperRpc), so no block of one device's is named to
+//   a provider the page reaches itself. No USD: the page's price now is not the trade's (a dash, never a guess).
+// - Keyed as the device that traded keys its own (evmTradeKey: chain and transaction) and written only where none is,
+//   so that device's own op, with its USD, stays and none is written twice. A read that fails leaves that op out; the
+//   next restore writes it.
+/** The trade ops of a restore's spends and deposits back (see above); returns how many it wrote. */
+export async function restoreEvmTrades(a: { chain: Chain; read: EvmRpc; store: Pick<WalletStore, "update">; spends: readonly EvmRestoredSpend[]; returns: readonly EvmRestoredReturn[]; signal?: AbortSignal }): Promise<number> {
+  const times = new Map<bigint, Promise<number>>();
+  const timeOf = (block: bigint): Promise<number> => {
+    let t = times.get(block);
+    if (t === undefined) {
+      t = (async () => {
+        const b = (await a.read("eth_getBlockByNumber", [hexQ(block), false])) as { number?: unknown; timestamp?: unknown } | null;
+        if (typeof b?.number !== "string" || BigInt(b.number) !== block || typeof b.timestamp !== "string") throw new Error("restore: not the block");
+        return Number(BigInt(b.timestamp)) * 1000;
+      })();
+      times.set(block, t);
+    }
+    return t;
+  };
+  let wrote = 0;
+  const put = async (op: EvmTradeOp): Promise<void> => {
+    let w = false;
+    await a.store.update("ops", evmTradeKey(op.chain, op.txs[0]!.hash), (v) => (v === undefined ? ((w = true), op) : undefined));
+    if (w) wrote++;
+  };
+  for (const s of a.spends) {
+    if (s.token === null || s.tx === null || s.fee === null || s.out === null || s.fee > s.withdrawn) continue;
+    a.signal?.throwIfAborted();
+    try {
+      const decimals = await keptTokenDecimals(a.chain, s.token, [a.read, a.read] as unknown as readonly [PoolRpc, PoolRpc], a.signal ? { signal: a.signal } : {});
+      await put(evmTradeOp("buy", a.chain, s.tx, s.token, s.out, decimals, s.withdrawn - s.fee, null, await timeOf(s.block)));
+    } catch {
+      continue;
+    }
+    for (const r of a.returns) {
+      if (r.l !== s.l || r.j !== s.j || r.tx === null || r.block < s.block) continue;
+      a.signal?.throwIfAborted();
+      try {
+        await put(evmTradeOp("sell", a.chain, r.tx, s.token, null, null, r.value, null, await timeOf(r.block)));
+      } catch {
+        /* the next restore writes it */
+      }
+    }
+  }
+  return wrote;
+}
+
 /** What the page gives an EVM sell (src/pool-testnet.ts). */
 export type EvmSellPage = {
   following?: Set<string>;
@@ -949,6 +1020,8 @@ export type EvmSellPage = {
   /** The session's sign out, aborted at its tap (EvmSellHost.stop). */
   stop?: AbortSignal;
   stopped?(): boolean;
+  /** The chain's pool asset's USD price as the page read it (src/pool-price.ts), for a trade op's USD; null: none. */
+  price?(chain: Chain): PoolStatePrice | null;
 };
 
 const recordsOf = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? { ...(v as Record<string, unknown>) } : {});
@@ -973,6 +1046,9 @@ export function evmSellHost(chain: Chain, pin: EvmPoolPin, scope: bigint, rpcs: 
     reverted: evmSellRevertedPools,
     send: (body) => evmSellSend(TRADE_HELPER, body, page.fetch, page.signal),
     open: async () => recordsOf(await (await page.held()).get("meta", EVM_OPEN_SELLS_KEY)) as Record<string, EvmOpenSell>,
+    price: () => page.price?.(chain) ?? null,
+    // into the store while it is open
+    traded: async (op) => writeEvmTradeOp(await page.held(), op),
     record: async (o) => void (await (await page.held()).update("meta", EVM_OPEN_SELLS_KEY, (v) => ({ ...recordsOf(v), [o.note]: o }))),
     unrecord: async (note, deadline) =>
       void (await (await page.held()).update("meta", EVM_OPEN_SELLS_KEY, (v) => {
