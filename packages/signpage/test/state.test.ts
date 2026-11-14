@@ -460,3 +460,24 @@ test("kit-portfolio-reads: each op detail its record holds reaches the app, on e
   assert.deepEqual(s.ops, [opOf(id, sell)]);
   assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(s), true);
 });
+
+// card move-sends-or-says-why (kit 1.18): a move that failed before it sent keeps why on its record (cash-to-pool.ts
+// MoveOpRecord.error: "not_sent", "down", "quote_check_failed" or a quote's refusal code), and the page sends it as the
+// op's `code`, the buy and sell ops' field, so the app reads one field across kinds. Copied only when the op still fits
+// the kit's schema with it: a code outside ErrorCode costs that field, never the op. Red before this card: the move op
+// carried no code.
+test("move-sends-or-says-why: a failed move's error reaches the app as its op's code; none without one; a bad one costs that field only", () => {
+  const id = "mv-1";
+  const failed = { kind: "move", from: "near", to: "solana", stage: "failed", txs: [], amount: "25.5", created_ms: 7 };
+  const want = { id, kind: "move", from: "near", to: "solana", stage: "failed", txs: [], amount: "25.5", created_ms: 7 };
+  for (const error of ["not_sent", "down", "quote_check_failed", "below_min"]) {
+    const op = opOf(id, { ...failed, error });
+    assert.deepEqual(op, { ...want, code: error }, error);
+    assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [op!])), true, `${error}: the kit's client takes it`);
+  }
+  assert.deepEqual(opOf(id, failed), want, "no error: no code");
+  // a code outside ErrorCode (kit schema.ts errorCode): left out, the op and its other fields sent
+  for (const bad of ["", "Not Sent", "x".repeat(65), 5, null, { code: "not_sent" }]) assert.deepEqual(opOf(id, { ...failed, error: bad }), want, JSON.stringify(bad));
+  // a record's own `code` is never copied: the move's refusal is its error
+  assert.deepEqual(opOf(id, { ...failed, code: "not_sent" }), want, "a stray code field");
+});

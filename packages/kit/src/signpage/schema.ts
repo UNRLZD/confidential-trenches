@@ -256,9 +256,9 @@ const positionFits: SignpageSchema = (v) => {
 };
 
 /** A move's op (messages.ts Operation kind "move"; card one-balance-buys-on-every-chain): two trade chains that differ,
- *  one of MoveStage's stages, `amount` at no more fraction digits than `from`'s asset has and `out` than `to`'s, and
- *  created_ms; nothing else. */
-const moveOpFields = obj({ id: str, kind: lit("move"), from: tradeChain, to: tradeChain, stage: oneOf(MOVE_STAGES), txs }, { amount: dec, out: dec, created_ms: uint });
+ *  one of MoveStage's stages, `amount` at no more fraction digits than `from`'s asset has and `out` than `to`'s,
+ *  created_ms, and `code` (kit 1.18, card move-sends-or-says-why) as a buy's; nothing else. */
+const moveOpFields = obj({ id: str, kind: lit("move"), from: tradeChain, to: tradeChain, stage: oneOf(MOVE_STAGES), txs }, { amount: dec, out: dec, created_ms: uint, code: errorCode });
 const moveOp: SignpageSchema = (v) => {
   if (!moveOpFields(v)) return false;
   const m = v as { from: Chain; to: Chain; amount?: string; out?: string };

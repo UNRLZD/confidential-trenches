@@ -68,6 +68,23 @@ test("a move op in state.ops is read; one with a stage outside MoveStage, or fro
   }
 });
 
+// card move-sends-or-says-why (kit 1.18): a move op may carry `code`, why it failed before it sent, with the same name and
+// check as the buy and sell ops' code (schema.ts errorCode), so the app reads one field across kinds. Red before this
+// card: the move op's fields had no code, so the kit dropped a failed move that said why.
+test("a move op with a code is read, as a buy's is; one whose code is outside ErrorCode is dropped and the rest kept", () => {
+  const failed = { ...MOVE_OP, id: "m2", stage: "failed", txs: [], code: "not_sent" };
+  for (const code of ["not_sent", "down", "quote_check_failed", "below_min"]) {
+    const good = { ...STATE, ops: [{ ...failed, code }] };
+    assert.equal(signpageReadableOps(good), good, code);
+    assert.equal(R.state!(good), true, code);
+  }
+  assert.equal(R.state!({ ...STATE, ops: [{ id: "b1", kind: "buy", stage: "refused", txs: [], code: "not_sent" }, failed] }), true, "one field across kinds");
+  for (const code of ["", "Not Sent", "x".repeat(65), 5, null]) {
+    const s = signpageReadableOps({ ...STATE, ops: [{ ...failed, code }, MOVE_OP] }) as { ops: unknown[] };
+    assert.deepEqual(s.ops, [MOVE_OP], JSON.stringify(code));
+  }
+});
+
 test("the buy's route event { move: 'cash', op } is read; an op that is not a string is refused", () => {
   assert.equal(signpageProgressRouteSchema({ v: 1, type: "progress", id: "r1", move: "cash", op: "cash/solana/1" }), true);
   assert.equal(signpageProgressRouteSchema({ v: 1, type: "progress", id: "r1", move: "cash", op: 1 }), false);
