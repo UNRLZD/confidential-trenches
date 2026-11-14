@@ -1,10 +1,10 @@
 // The app's Withdraw form (card withdraw-address-in-the-app, owner 14 Nov 12:22Z picked A): the amount and the address
 // typed in the app, the Withdraw on only for an address of the place's chain and an amount the place holds, and the tap's
-// request one SIGN_HOST's schema takes (packages/kit/src/signpage/schema.ts), so the signing page draws its Confirm.
+// request exactly the four shapes the kit's schema is held to take (packages/kit/test/withdraw-given.test.ts: withdraw.open
+// with to and amount or max, pool.withdraw with the chain and to and amount or max), so the signing page draws its Confirm.
 //   node --test apps/terminal/test/withdraw-form.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SIGNPAGE_PARAM_SCHEMAS } from "../../../packages/kit/src/signpage/schema.ts";
 import type { WithdrawPlace } from "../src/screens/withdraw/target.ts";
 import { addressFits, checkWithdraw, units, withdrawHop } from "../src/screens/withdraw/withdraw-form.ts";
 
@@ -38,17 +38,12 @@ test("an amount above zero, no finer than the asset, at most what the place hold
   assert.equal(checkWithdraw({ ...SOL, balance: "0" }, "", SOL_KEY, true).amount, "bad", "Max of nothing");
 });
 
-test("the tap's request: the place's kind with the address and the amount, or Max; SIGN_HOST's schema takes each", () => {
-  const P = SIGNPAGE_PARAM_SCHEMAS as Record<string, (v: unknown) => boolean>;
-  const RK = { return_key: "withdraw" };
+test("the tap's request: the place's kind with the address and the amount, or Max, in the kit test's shapes", () => {
   const cases = [
     [withdrawHop(CASH, " 12.5 ", " alice.near ", false), { kind: "withdraw.open", params: { to: "alice.near", amount: "12.5" } }],
     [withdrawHop(CASH, "", "alice.near", true), { kind: "withdraw.open", params: { to: "alice.near", max: true } }],
     [withdrawHop(SOL, "0.05", SOL_KEY, false), { kind: "pool.withdraw", params: { chain: "solana", to: SOL_KEY, amount: "0.05" } }],
     [withdrawHop(BASE, "", EVM, true), { kind: "pool.withdraw", params: { chain: "base", to: EVM, max: true } }],
   ] as const;
-  for (const [got, want] of cases) {
-    assert.deepEqual(got, want);
-    assert.equal(P[got.kind]!({ ...got.params, ...RK }), true, JSON.stringify(got));
-  }
+  for (const [got, want] of cases) assert.deepEqual(got, want);
 });

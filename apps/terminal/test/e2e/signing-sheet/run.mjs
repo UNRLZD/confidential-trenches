@@ -10,9 +10,14 @@
 //   signout  the account's Sign out: the sign-out screen
 //   choose   the app's sign-in sheet, the wallet way: New account or I already have one
 //   existing I already have one: Use passkey or Recovery code; Cancel back
-//   withdraw the account's Withdraw: the withdraw form
-//   poolwithdraw  pool.withdraw as the portfolio's pool row sends it (PortfolioMount.tsx), posted from the app's own
-//            document: the pool withdraw form (the harness holds no pool balance to draw the row)
+//   withdraw withdraw.open with no address, posted from the app's own document: the typed Cash withdraw form (the
+//            account's Withdraw opens the app's own Withdraw sheet since card withdraw-address-in-the-app, owner 14 Nov
+//            12:22Z picked A, so the typed form is reached by its message, as SIGN_HOST still takes it)
+//   poolwithdraw  pool.withdraw with no address, as before, posted from the app's own document: the pool withdraw form
+//            (the harness holds no pool balance to draw the row)
+//   withdrawconfirm / poolwithdrawconfirm  the same two messages with what the app's Withdraw sheet took (to and an
+//            amount): SIGN_HOST's Confirm sheet, no field to type into, so the frame stays, dimmed and inert, and the
+//            close goes back to the same app document (frame-cover.ts: neither confirm state is SEALED)
 //   thief    both withdraw forms again, opened from an app that takes the keyboard's focus every 5 ms from before the
 //            open and reads every key, paste and text input it gets; the user taps To, types and pastes. The rule: the
 //            app reads nothing (0 keys, no paste), To holds it all and has the focus, the frame out of the page
@@ -55,12 +60,13 @@ export const WIDTHS = [
 export const TYPED = new Set(["words", "withdraw", "poolwithdraw", "backup", "backup2"]);
 // the closing controls a tap closes by: each is tapped twice, the second tap where the first was, as a double tap
 const TAPPED = new Set(["x", "scrim", "saved", "cancel"]);
-export const VIEWS = ["signin", "words", "choose", "existing", "backup", "backup2", "signout", "withdraw", "poolwithdraw"];
+export const VIEWS = ["signin", "words", "choose", "existing", "backup", "backup2", "signout", "withdraw", "poolwithdraw", "withdrawconfirm", "poolwithdrawconfirm"];
 const ROUTE = "/discover";
 const GUARD_MS = 600; // past SIGN_HOST's 500 ms activation guard (packages/signpage/src/guard.ts)
 const WAIT_MS = 15_000;
 const KEYS = "abcdefgh";
 const PASTE = "PQR";
+const SOL_TO = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"; // a Solana key, as typed in the app's Withdraw sheet
 /** The withdraw forms the thief step opens again. */
 export const THIEF = ["withdraw", "poolwithdraw"];
 
@@ -333,6 +339,34 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
     addEventListener("pointerdown", (e) => void (e.isTrusted && (window.__appTaps += 1)), true);
   }, REAL.app);
   const countAppTaps = () => app.locator(":root").evaluate(() => void (window.__appTaps = 0)).catch(() => {});
+  // a message from the app's own document to SIGN_HOST, as the app's hop sends it
+  // SIGN_HOST's answer to it (or "none" within 2 s), for a refusal's code in the error
+  const post = (msg) =>
+    app.locator(":root").evaluate(
+      (m) =>
+        new Promise((done) => {
+          const id = crypto.randomUUID();
+          const t = setTimeout(() => done("none"), 2000);
+          addEventListener("message", (e) => {
+            if (e.data?.id !== id) return;
+            clearTimeout(t);
+            done(JSON.stringify(e.data));
+          });
+          window.parent.postMessage({ v: 1, id, ...m }, "*");
+        }),
+      msg,
+    );
+  // posted until the sheet shows `state`: SIGN_HOST refuses an open while it is still settling a close (pages/open.ts
+  // takes: only from signed-in), and a refused open draws nothing, so the post again is the app's tap again
+  const openBy = async (msg, state) => {
+    const shown = top(`#screen:not([hidden]) #signin[data-signin="${state}"]`);
+    let said = "";
+    for (let i = 0; i < 10; i++) {
+      said = await post(msg);
+      if (await shown.waitFor({ timeout: 750 }).then(() => true, () => false)) return;
+    }
+    throw new Error(`${msg.type} never showed ${state}: SIGN_HOST answered ${said}, data-signin ${await top("#signin").getAttribute("data-signin").catch(() => "?")}`);
+  };
   const account = async (control) => {
     if (w.name === "390") {
       if (!(await vis(`.amenu [data-control="${control}"]`).isVisible().catch(() => false))) await tap(vis('a[href="/profile"]'));
@@ -411,21 +445,33 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
     await look("signout", m);
     await closed("signout", "x");
 
-    // withdraw: the account's Withdraw, Esc back
-    // the mark before the tap: a sealed screen takes the frame out in the open's own task
+    // withdraw: withdraw.open with no address from the app's own document (the typed form), Esc back
+    // the mark before the post: a sealed screen takes the frame out in the open's own task
     m = await newMark();
-    await account("acct-withdraw");
-    await top('#screen:not([hidden]) #signin[data-signin="withdraw"]').waitFor({ timeout: WAIT_MS });
+    await openBy({ type: "withdraw.open", return_key: "withdraw" }, "withdraw");
     await look("withdraw", m);
     await closed("withdraw", "esc");
 
     // poolwithdraw: pool.withdraw from the app's own document, as the portfolio's pool row sends it; the x back
     await page.waitForTimeout(400);
     m = await newMark();
-    await app.locator(":root").evaluate(() => window.parent.postMessage({ v: 1, id: crypto.randomUUID(), type: "pool.withdraw", chain: "solana", return_key: "portfolio" }, "*"));
-    await top('#screen:not([hidden]) #signin[data-signin="pool-withdraw"]').waitFor({ timeout: WAIT_MS });
+    await openBy({ type: "pool.withdraw", chain: "solana", return_key: "withdraw" }, "pool-withdraw");
     await look("poolwithdraw", m);
     await closed("poolwithdraw", "x");
+
+    // withdrawconfirm / poolwithdrawconfirm: what the app's Withdraw sheet took, the Confirm sheet over the kept frame
+    for (const [name, state, msg, by] of [
+      ["withdrawconfirm", "withdraw-confirm", { type: "withdraw.open", to: "alice.near", amount: "1", return_key: "withdraw" }, "esc"],
+      ["poolwithdrawconfirm", "pool-withdraw-confirm", { type: "pool.withdraw", chain: "solana", to: SOL_TO, amount: "0.001", return_key: "withdraw" }, "x"],
+    ]) {
+      await page.waitForTimeout(400);
+      m = await newMark();
+      await openBy(msg, state);
+      const typed = await top("#signin input:not([hidden]), #signin textarea, #signin select").count();
+      if (typed !== 0) throw new Error(`${name}: ${typed} field(s) to type into on the Confirm sheet`);
+      await look(name, m);
+      await closed(name, by);
+    }
 
     // thief: each withdraw form opened again from an app that takes the focus every 5 ms from before the open
     out.thief = {};
@@ -438,10 +484,8 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
         setInterval(() => (window.focus(), document.querySelector("input, button, a")?.focus()), 5);
       });
       leaked.length = 0;
-      if (name === "withdraw") await account("acct-withdraw");
-      else await app.locator(":root").evaluate(() => window.parent.postMessage({ v: 1, id: crypto.randomUUID(), type: "pool.withdraw", chain: "solana", return_key: "portfolio" }, "*"));
-      const state = name === "withdraw" ? "withdraw" : "pool-withdraw";
-      await top(`#screen:not([hidden]) #signin[data-signin="${state}"]`).waitFor({ timeout: WAIT_MS });
+      if (name === "withdraw") await openBy({ type: "withdraw.open", return_key: "withdraw" }, "withdraw");
+      else await openBy({ type: "pool.withdraw", chain: "solana", return_key: "withdraw" }, "pool-withdraw");
       await page.waitForTimeout(GUARD_MS);
       await tap(top('#signin input[data-input="to"]'));
       await page.keyboard.type(KEYS, { delay: 30 });

@@ -465,12 +465,11 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     }
     await loaded;
     // Max is an intent (card withdraw-max-means-all): after every read the box holds the live Max
-    const can = funds === null ? 0n : poolSendable(funds);
-    if (maxIntent && can > 0n) amount.input.value = formatUnits(can, decimals);
+    if (maxIntent && funds !== null && poolSendable(funds) > 0n) amount.input.value = formatUnits(poolSendable(funds), decimals);
     const e = evaluatePool(chain, to.input.value, amount.input.value, deps.keys, funds, dest);
     // given Max and nothing the pool can send: Insufficient (Busy · Retry while the funds are unread), never a Confirm
     // left waiting on an amount
-    const v: PoolFormView = given && "max" in given && !(can > 0n)
+    const v: PoolFormView = given && "max" in given && !(funds !== null && poolSendable(funds) > 0n)
       ? { state: "refused", address: e.address, amount: { ok: false, code: funds === null ? "unread" : "insufficient" }, ready: null }
       : e;
     if (at !== seq) return null;

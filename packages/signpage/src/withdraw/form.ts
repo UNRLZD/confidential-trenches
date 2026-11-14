@@ -280,6 +280,16 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   let view: FormView = { state: "empty", address: null, amount: null, ready: null };
   // Max tapped and no amount typed since: the box means everything (card withdraw-max-means-all)
   let maxIntent = false;
+  // given Max and nothing Cash can send: Insufficient (Busy · Retry while a read is unread), never a Confirm left
+  // waiting on an amount; typed, or given an amount, evaluates as is
+  const evaluateHere: typeof evaluate =
+    given && "max" in given
+      ? async (t, a, c) => {
+          const e = await evaluate(t, a, c);
+          if (c.notes !== null && c.fee !== null && cashSendable(c.notes, c.fee) > 0n) return e;
+          return { state: "refused", address: e.address, amount: { ok: false, code: c.notes === null || c.fee === null ? "unread" : "insufficient" }, ready: null };
+        }
+      : evaluate;
   // the fee bound the drawn view was checked at
   let viewFee: bigint | null = null;
   const draw = (v: FormView): void => {
@@ -330,12 +340,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     // Max is an intent (card withdraw-max-means-all): after every read the box holds the live Max
     const can = ctx.notes === null || ctx.fee === null ? 0n : cashSendable(ctx.notes, ctx.fee);
     if (maxIntent && can > 0n) amount.input.value = formatUnits(can);
-    const e = await evaluate(to.input.value, amount.input.value, { network: deps.network, rpcs: deps.rpcs, ...ctx, chain });
-    // given Max and nothing Cash can send: Insufficient (Busy · Retry while a read is unread), never a Confirm left
-    // waiting on an amount
-    const v: FormView = given && "max" in given && !(can > 0n)
-      ? { state: "refused", address: e.address, amount: { ok: false, code: ctx.notes === null || ctx.fee === null ? "unread" : "insufficient" }, ready: null }
-      : e;
+    const v = await evaluateHere(to.input.value, amount.input.value, { network: deps.network, rpcs: deps.rpcs, ...ctx, chain });
     if (at !== seq) return null; // a newer keystroke or check: this answer is stale
     draw(v);
     return v;
