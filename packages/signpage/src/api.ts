@@ -89,6 +89,12 @@ export interface ApiHost {
    */
   parent: PostTarget;
   /**
+   * The app's origin: the only origin read from and the only targetOrigin posted to, read on each. APP_ORIGIN when unset
+   * (the terminal); an outside app's own origin in SIGN_HOST's /connect popup once allowed (src/outside.ts, card
+   * signpage-answers-outside-apps).
+   */
+  origin?: string;
+  /**
    * Adds the page's message listener. `data` must be what the browser's structured clone made (MessageEvent.data):
    * plain values that read the same every time. A Proxy or getter whose value changes between reads would pass the
    * checks and then be read as something else.
@@ -256,6 +262,8 @@ function hostAnswer(host: ApiHost, m: Record<string, unknown>, ctx: KindContext)
  * to the wallet store before it signs (wallet.md §7 item 4), with that card.
  */
 export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void; closed(id: string): void } {
+  // read on every post and message: the shell's popup binds its origin at the user's Allow
+  const appOrigin = (): string => host.origin ?? APP_ORIGIN;
   // answer null: a Running kind's id whose answer is not posted yet; `held` keeps its progress events until it is
   const answered = new Map<string, { sha: string; kind: SignpageKind; answer: SignpageAnswer | null }>();
   const held = new Map<string, Stage[]>();
@@ -277,7 +285,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   };
   const post = (msg: SignpageAnswer | ReadyEvent | StateEvent | ProgressEvent | ProgressRouteEvent | ClosedEvent, kind?: SignpageKind) => {
     const out = shaped(msg, kind);
-    if (out !== null) host.parent.postMessage(out, APP_ORIGIN);
+    if (out !== null) host.parent.postMessage(out, appOrigin());
   };
   const clock = host.now ?? Date.now;
   // the JSON of the last state sent, as the app's kit reads it; null until the first `state` answer
@@ -386,7 +394,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
       .catch(() => {});
   });
   host.listen((e) => {
-    if (e.origin !== APP_ORIGIN || e.source !== host.parent) return;
+    if (e.origin !== appOrigin() || e.source !== host.parent) return;
     const data = e.data;
     const at = clock();
     queue = queue.then(() => handle(data, at)).catch(() => {});

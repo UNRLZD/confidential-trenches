@@ -4,7 +4,7 @@
 // block agreement, the first-hop native rule, the v3 doubled read, the pinned launchpad pools and a lagging node. N1 and N2 are
 // the review of 9a8265b's: N1 on a modelled chain whose PoolManager holds the token's pools (chain() below). Each test states what the device must do.
 import { mock, test } from "node:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { codeAnswer, codeResult } from "./evm-quote-gas-fx.ts";
 import { onTestClock } from "./test-clock.ts";
@@ -3333,14 +3333,23 @@ test("W2f a gap read later keeps what a newer quote kept meanwhile: the next quo
 // pace's bucket within the warm bound (evm-buy-and-sell-on-mainnet.mjs WARM_MAX_MS, 2 s): the currencies with the same
 // blocks left share each request, as the scan's own gaps do.
 const RH_SCAN = "https://rpc.mainnet.chain.robinhood.com";
+// the helper's limits, found up from this file: the mutant sweep (evm-quote-mutants.mjs) runs a copy of this file one
+// folder deeper in the kit, where a fixed ../../../ named a file that is not there and failed every test of the copy
+const LIMITS = (() => {
+  for (let at = new URL("../", import.meta.url); at.pathname !== "/"; at = new URL("../", at)) {
+    const f = new URL("apps/helper/src/limits/limits.ts", at);
+    if (existsSync(f)) return f;
+  }
+  throw new Error("apps/helper/src/limits/limits.ts is not above this file");
+})();
 const rhPace = (() => {
-  const src = readFileSync(new URL("../../../apps/helper/src/limits/limits.ts", import.meta.url), "utf8");
+  const src = readFileSync(LIMITS, "utf8");
   const m = new RegExp(`"${RH_SCAN.replace(/[./]/g, "\\$&")}": \\{ perS: ([\\d.]+), burst: (\\d+), unit: "post" \\}`).exec(src);
   assert.ok(m, "limits.ts paces the Robinhood scan provider by the post");
   return { perS: Number(m[1]), burst: Number(m[2]) };
 })();
 test("card robinhood-quotes-inside-provider-limits: a Robinhood quote asks a provider whose pace its rounds pass only after every other (Robinhood's own, 1 post a second, took FRONG's 35 to 38 posts a tap)", () => {
-  const src = readFileSync(new URL("../../../apps/helper/src/limits/limits.ts", import.meta.url), "utf8");
+  const src = readFileSync(LIMITS, "utf8");
   const listed = builder.evmPoolVenues().robinhood.providers!;
   // a warm quote's round is about 3 batches of 3 calls on each side, several rounds a second
   const slow = listed.filter((u) => {
@@ -3497,6 +3506,67 @@ test("W6 a warm quote puts no hook's override into a read before its own reads f
   const v = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(gone, 0, 5_000_000, seen), chain(gone, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logs)));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   assert.deepEqual(seen.flatMap((o) => o.replaces), [], "no override for a pool the PoolManager does not hold");
+});
+
+// card evm-quote-fast-from-asia: a warm buy with a held head sends its first round of reads at that block beside its
+// scan; its answers count only where the scan agrees that block and hands it the pools the round read, else the quote
+// runs again, its scan first. Before it the scan's two trips came before any read.
+test("W7 a warm buy with a held head sends its first round of reads beside its scan, never after it, and decides as the quote that waits for its scan", async () => {
+  const token = "0x000000000000000000000000000000000fa57a01";
+  const { pools, logs } = warmCase(token, xAt(0x3cf0));
+  const plain = pools.filter((p) => p.key.hooks !== UNPINNED);
+  const rpcs = [chain(plain, 0), chain(plain, 1)];
+  const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
+  const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), rpcs, NOW, scanner(5_000_000, logs), watch, () => 0));
+  assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+  // the scan answers each request 50 ms late: the first read must be out before its first answer
+  const order: string[] = [];
+  const scan = scanner(5_000_000, logs);
+  const slow: EvmRpc = async (calls) => {
+    await pause(50);
+    const out = await scan(calls);
+    order.push("scan answered");
+    return out;
+  };
+  const seen = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    if (calls.some((c) => c.method === "eth_call")) order.push("read sent");
+    return rpc(calls);
+  };
+  const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [seen(rpcs[0]!), seen(rpcs[1]!)], NOW, slow, watch, () => 0));
+  assert.deepEqual(v2, v1);
+  assert.equal(order[0], "read sent", order.join(" -> "));
+});
+
+test("W8 a warm buy whose scan finds a pool its kept pools lack uses nothing of the round it sent beside the scan: it runs again and is held to that pool, as the quote that waits is", async () => {
+  // a coin with no pool kept but the user's route's (a standard shape), so its blocks since the last scan are read
+  // before the answer; a better pool made in them
+  const token = "0x000000000000000000000000000000000fa57a02";
+  const req = { ...warmReq(token), route: seededRoute(token) };
+  const pools = [seeded(token)];
+  const rpcs = [chain(pools, 0), chain(pools, 1)];
+  const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
+  const v1 = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(5_000_000, []), watch, () => 0));
+  assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+  const better: ModelPool = { key: keyOf(token, NATIVE, 9000, 9, NATIVE), give: (a) => a };
+  const now = [...pools, better];
+  const asked: [number, number][] = [];
+  const v2 = await verdict(evmPoolBuyQuoteWith(req, [chain(now, 0, 5_000_010), chain(now, 1, 5_000_010)], NOW, scanner(5_000_010, [{ key: better.key, at: 5_000_005 }], asked), watch, () => 0));
+  assert.ok(asked.some(([a, b]) => a <= 5_000_005 && b >= 5_000_005), JSON.stringify(asked));
+  assert.deepEqual(v2, below);
+});
+
+test("W9 a warm buy whose held head the scan finds more than maxLag behind uses nothing of the round it sent at that head: it is read at the block agreed again", async () => {
+  const token = "0x000000000000000000000000000000000fa57a03";
+  const { pools, logs } = warmCase(token, xAt(0x3cf8));
+  const plain = pools.filter((p) => p.key.hooks !== UNPINNED);
+  const rpcs = [chain(plain, 0), chain(plain, 1)];
+  const watch = quoteMod.evmHeadWatch(rpcs, 50n, () => NOW, false, () => 0);
+  const v1 = await verdict(evmPoolBuyQuoteWith(warmReq(token), rpcs, NOW, scanner(5_000_000, logs), watch, () => 0));
+  assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
+  // a hundred blocks on, past Base's maxLag of 50, while the watch still holds block 5,000,000 as fresh
+  const v2 = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(plain, 0, 5_000_100), chain(plain, 1, 5_000_100)], NOW, scanner(5_000_100, logs), watch, () => 0));
+  assert.equal(v2.accepted, true, String((v2 as { code?: string }).code));
+  assert.equal((v2 as { block: bigint }).block, 5_000_100n);
 });
 
 // ------------------------------------------------------------------ the providers (card evm-quote-warm-round)

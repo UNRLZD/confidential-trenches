@@ -10,6 +10,9 @@
 //   through the same checks as typed ones, at open and again at the tap, and only the user's Confirm here sends. With no
 //   field typed into, the screen is not sealed (../frame-cover.ts): the app's frame stays under it, inert, its messages
 //   dropped while it shows (../shell.ts), so the app cannot change what is drawn, and comes back as it was, no reload.
+//   Its `dest` (card cash-withdraw-in-app-to-any-chain) is the chain picked in the app: the form sends on it as on a
+//   picked chain (To an address there, each part through its onward quote) when it is one this form reaches, and
+//   otherwise refuses it on its own line ("Solana · Not available", the pool form's word), never sending on NEAR.
 //
 // - States (data-state on the form): empty (both fields blank), typing (a field filled, nothing refused, not yet
 //   ready, a check waiting or reading), refused (a field refused: data-refusal on that field's line names the code),
@@ -38,6 +41,7 @@
 // - A word the owner has not picked is drawn with data-draft-copy naming its key in WITHDRAW_WORDS (WITHDRAW_DRAFT
 //   lists them); the rest were kept as drafted (owner 8 Nov 07:55Z) and carry no mark.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
+import type { ExitChain } from "../../../kit/src/checks/oneclick-exit.ts";
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
 import type { WithdrawPart, WithdrawSource } from "../pool-withdraw.ts";
 import { POOL_CHAIN_MARK } from "./chain-mark.ts";
@@ -67,6 +71,7 @@ export const WITHDRAW_WORDS = {
   "step-sent": "Sent", // new, the same: a withdrawal that left the vault for the typed account; the owner picks
   "step-back": "Back in Cash", // new, the same: a withdrawal that did not leave (expired, refunded, a fee that rose); the owner picks
   "step-stopped": "Stopped", // new, the same: a withdrawal that ended any other way; the owner picks
+  "not-available": "Not available", // the pool form's draft (pool-form.ts POOL_WITHDRAW_WORDS), for a given dest this form does not reach
 } as const;
 
 /** The keys of WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
@@ -74,6 +79,9 @@ export const WITHDRAW_DRAFT: ReadonlySet<string> = new Set(["to", "amount", "min
 /** The Cash run's step words (card cash-withdraws-everything-to-any-chain), all new: each drawn with data-draft-copy until
  *  the owner picks it. A set of their own, so the vault form's set stays the one the 8 Nov picks left. */
 export const STEP_DRAFT: ReadonlySet<string> = new Set(["step-waiting", "step-sending", "step-sent", "step-back", "step-stopped"]);
+/** The given dest's refusal (card cash-withdraw-in-app-to-any-chain): the pool form's draft word, drawn with
+ *  data-draft-copy until the owner picks it; a set of its own, as the steps', for the same reason. */
+export const DEST_DRAFT: ReadonlySet<string> = new Set(["not-available"]);
 
 /** Sets data-draft-copy on an element drawing `key` when `key` is in `drafts`, and takes it off otherwise. */
 export function markDraft(el: HTMLElement, key: string, drafts: ReadonlySet<string>): void {
@@ -111,11 +119,15 @@ export interface WithdrawFormDeps {
   /** How many vault withdrawals the page's last settle pass left "unmatched" (./handoff.ts withdrawSettle: a spend of
    *  the note whose change is not this device's, the note kept RESERVED); read at open and at every tap's reads. */
   unmatched?: () => number;
+  /** The chains this form sends Cash to on mainnet (absent: WITHDRAW_CHAINS, the kit's CASH_WITHDRAW_DESTS); NEAR alone
+   *  on any other network. */
+  chains?: readonly WithdrawChain[];
 }
 
 export type FormState = "empty" | "typing" | "refused" | "ready";
-/** What the app's Withdraw sheet took (the kit's WithdrawGiven with `to`): the account and an amount, or Max. */
-export type GivenWithdraw = Readonly<{ to: string; amount: string } | { to: string; max: true }>;
+/** What the app's Withdraw sheet took (the kit's WithdrawGiven with `to`): the account and an amount, or Max, and the
+ *  chain it arrives on (`dest`; absent, NEAR). */
+export type GivenWithdraw = Readonly<({ to: string; amount: string } | { to: string; max: true }) & { dest?: ExitChain }>;
 export interface FormView {
   state: FormState;
   /** null while the field is blank. */
@@ -224,12 +236,15 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   steps.dataset.steps = "cash-withdraw";
   steps.hidden = true;
   Object.assign(steps.style, { margin: "0", paddingLeft: "20px", fontVariantNumeric: "tabular-nums" });
-  // where it goes: NEAR, and on the build 1Click pays out on, each onward chain
-  let chain: WithdrawChain = "near";
+  // where it goes: NEAR, and on the build 1Click pays out on, each onward chain; given, the app's dest when reached
+  const reach: readonly WithdrawChain[] = deps.network === "mainnet" ? (deps.chains ?? WITHDRAW_CHAINS) : ["near"];
+  const givenDest: ExitChain = given?.dest ?? "near";
+  const destReached = (reach as readonly string[]).includes(givenDest);
+  let chain: WithdrawChain = given && destReached ? (givenDest as WithdrawChain) : "near";
   const chains = doc.createElement("div");
   chains.dataset.row = "chains";
   Object.assign(chains.style, { display: "flex", flexWrap: "wrap", gap: "8px" });
-  const picks = (deps.network === "mainnet" ? WITHDRAW_CHAINS : (["near"] as const)).map((c) => {
+  const picks = reach.map((c) => {
     const b = doc.createElement("button");
     b.type = "button";
     b.dataset.action = "chain";
@@ -250,12 +265,24 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   };
   chains.append(...picks);
   chains.hidden = picks.length < 2 || given !== undefined; // one chain, or the app's sheet picked it: nothing to pick
+  // the row's inline display would draw it over `hidden` (a NEAR pill on every Cash Confirm): none while hidden
+  chains.style.display = chains.hidden ? "none" : "flex";
   drawChains();
   // the amount the tap sends, drawn once both fields pass: the box keeps what was typed (card withdraw-max-means-all)
   const shown = doc.createElement("dl");
   shown.dataset.lines = "cash-withdraw";
   shown.hidden = true;
-  form.append(notice, chains, to.label, to.line, amount.label, canRow, amount.line, shown, go, steps);
+  // given a dest this form does not reach: refused on its own line, never sent on NEAR in its place
+  const destLine = doc.createElement("p");
+  destLine.dataset.for = "dest";
+  destLine.hidden = true;
+  if (given && !destReached) {
+    destLine.hidden = false;
+    destLine.dataset.refusal = "not-available";
+    markDraft(destLine, "not-available", DEST_DRAFT);
+    destLine.textContent = `${givenDest === "near" ? "NEAR" : POOL_CHAIN_MARK[givenDest].name} · ${WITHDRAW_WORDS["not-available"]}`;
+  }
+  form.append(notice, chains, destLine, to.label, to.line, amount.label, canRow, amount.line, shown, go, steps);
 
   // read at open, and again on Retry while either is unread; one that cannot be read stays null (unread)
   let ctx: { notes: readonly WithdrawSource[] | null; fee: bigint | null } = { notes: null, fee: null };
@@ -282,7 +309,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   let maxIntent = false;
   // given Max and nothing Cash can send: Insufficient (Busy · Retry while a read is unread), never a Confirm left
   // waiting on an amount; typed, or given an amount, evaluates as is
-  const evaluateHere: typeof evaluate =
+  const evaluateMax: typeof evaluate =
     given && "max" in given
       ? async (t, a, c) => {
           const e = await evaluate(t, a, c);
@@ -290,6 +317,14 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
           return { state: "refused", address: e.address, amount: { ok: false, code: c.notes === null || c.fee === null ? "unread" : "insufficient" }, ready: null };
         }
       : evaluate;
+  // a given dest not reached: refused whole; To is not checked (no NEAR read of another chain's address, no second
+  // refusal under the dest line), the amount is
+  const evaluateHere: typeof evaluate = given && !destReached
+    ? async (_t, a, c) => {
+        const e = await evaluateMax("", a, c);
+        return { state: "refused", address: null, amount: e.amount, ready: null };
+      }
+    : evaluateMax;
   // the fee bound the drawn view was checked at
   let viewFee: bigint | null = null;
   const draw = (v: FormView): void => {

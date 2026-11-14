@@ -56,16 +56,19 @@ const CONFIG = ["_headers", "_redirects", "_routes.json", "_worker.js"];
 const hash = (alg, bytes, enc) => createHash(alg).update(bytes).digest(enc);
 export const digests = (bytes) => ({ bytes: bytes.length, sha256: hash("sha256", bytes, "hex"), sha384: `sha384-${hash("sha384", bytes, "base64")}` });
 
-/** A _headers file's rules in file order: [{ path, headers: [[name lower case, value]] }]. */
+/** A _headers file's rules in file order: [{ path, headers: [[name lower case, value]], removes: [name lower case] }]
+ *  (a `! Name` line detaches a header, card signpage-answers-outside-apps' /connect). */
 export function parseRules(text) {
   const rules = [];
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
-    if (!/^\s/.test(line)) rules.push({ path: line.trim(), headers: [] });
+    if (!/^\s/.test(line)) rules.push({ path: line.trim(), headers: [], removes: [] });
     else {
       const kv = /^\s+([^:\s!]+):\s*(.*)$/.exec(line);
-      if (!kv || !rules.length) throw new Error(`_headers line cannot be read: ${JSON.stringify(line)}`);
-      rules.at(-1).headers.push([kv[1].toLowerCase(), kv[2].trim()]);
+      const rm = /^\s+!\s*([^:\s!]+)\s*$/.exec(line);
+      if ((!kv && !rm) || !rules.length) throw new Error(`_headers line cannot be read: ${JSON.stringify(line)}`);
+      if (rm) rules.at(-1).removes.push(rm[1].toLowerCase());
+      else rules.at(-1).headers.push([kv[1].toLowerCase(), kv[2].trim()]);
     }
   }
   return rules;
@@ -77,10 +80,15 @@ export function matches(pattern, path) {
   return new RegExp(`^${re}$`).test(path);
 }
 
-/** The headers `path` is served with: every matching rule in file order, one header's values joined with ", " as Pages joins them. */
+/** The headers `path` is served with: every matching rule in file order, one header's values joined with ", " as Pages
+ *  joins them; a rule's `! Name` first detaches what the rules before it set, then its own headers are added. */
 export function headersFor(rules, path) {
   const out = {};
-  for (const r of rules) if (matches(r.path, path)) for (const [k, v] of r.headers) out[k] = k in out ? `${out[k]}, ${v}` : v;
+  for (const r of rules) {
+    if (!matches(r.path, path)) continue;
+    for (const k of r.removes ?? []) delete out[k];
+    for (const [k, v] of r.headers) out[k] = k in out ? `${out[k]}, ${v}` : v;
+  }
   return out;
 }
 
@@ -311,6 +319,7 @@ export const RELEASED = Object.freeze({
   "release-138": "0b2a669736ffd4a0a336af793baf0a76c015656e00a9372bbe4b27924630fe06",
   "release-142": "f3d34ed55449f86dced1b5c1dc8a0e513c1189618db4c4733c35a5e4ebf17fe9",
   "release-143": "471b5370a78212b995682e805eab2d5b7907ee2f76c0b559c2a71739aba935db",
+  "release-144": "43b31e8af389a84bb0d21f44d25b1086f9d642eccff469e38f80f46625177827",
 });
 
 const tagsIn = (dir) => readdirSync(dir).map((f) => /^(release-[1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean);
