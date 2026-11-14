@@ -19,11 +19,28 @@
   .wtx { min-height: 44px; padding: 0 4px; }
 }
 
-/* The pick of where to withdraw from (WithdrawPick.tsx, card withdraw-form-shows-what-you-can-send): one row per place
-   that holds money, its chain's mark (search.css .srch-cm), its name and its balance, as the portfolio's pool rows. */
-.wpk-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 12px; border: 1px solid var(--border-panel); border-radius: 10px; background: transparent; color: var(--text-1); font: 400 14px var(--font-ui); cursor: pointer; }
-.wpk-row + .wpk-row { margin-top: 8px; }
-.wpk-row:hover:not(:disabled) { background: rgba(255,255,255,.04); }
-.wpk-row:disabled { opacity: .5; cursor: default; }
-.wpk-row .ell { flex: 1 1 auto; text-align: left; }
-.wpk-row .t3 { color: var(--text-3); }
+/* The app's Withdraw form (WithdrawForm.tsx, card withdraw-address-in-the-app), in the deposit sheet's body: the places
+   as the deposit's tiles (deposit.css .dtiles), the Amount as its .damt, Max on the .lim row, the Address as a field of
+   the same box with the address in the number face (it is read character by character). */
+.wform { display: flex; flex-direction: column; gap: 12px; }
+.wform .dtiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wform .damt .v::placeholder { color: var(--text-3); }
+.wmax { font: 12px var(--font-ui); color: var(--text-3); min-height: 24px; display: inline-flex; align-items: center; gap: 4px; border-radius: 6px; }
+.wmax .num { color: var(--text-2); }
+.wmax:hover:not(:disabled), .wmax.on { color: var(--text-1); }
+.wmax.on .num { color: var(--text-1); }
+.waddr { border-radius: 12px; border: 1px solid var(--border-panel); background: var(--bg-drawer); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.waddr.bad, .wform .damt.bad { border-color: var(--sell); }
+.waddr .lb { font: 500 13px var(--font-ui); color: var(--text-3); height: 18px; display: flex; align-items: center; }
+.waddr input { font: 15px/1.4 var(--font-num); color: var(--text-1); background: none; border: 0; padding: 0; outline: none; width: 100%; min-width: 0; letter-spacing: 0.01em; text-overflow: ellipsis; }
+.wform .damt:focus-within, .waddr:focus-within { border-color: var(--border-strong); }
+.wform .damt.bad:focus-within, .waddr.bad:focus-within { border-color: var(--sell); }
+.wform .hopline { margin-top: -2px; }
+
+@media (max-width: 767.98px) {
+  .wmax { min-height: 44px; font-size: 13px; }
+  .waddr input { font-size: 16px; } /* 16 px: no zoom on focus on the phone */
+}
+
+/* card withdraw-in-app-to-any-chain: a tile's tap draws no tinted box over it (the browser's tap highlight); its on state is the answer */
+.wform .dtiles button { -webkit-tap-highlight-color: transparent; }

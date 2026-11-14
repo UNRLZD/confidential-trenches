@@ -339,7 +339,9 @@ test("a listed token our reads find no pool of: its candles are GeckoTerminal's 
   assert.ok(c.candles.length > 0, "GeckoTerminal's bars");
   assert.ok(gtUrls.some((u) => u.includes(`/pools/0x${"ab".repeat(32)}/ohlcv/`)), "of the top pool GeckoTerminal names");
   const tape = JSON.parse((await s.trades(token, 10)).body);
-  assert.deepEqual([tape.trades, tape.src], [[], "chain"], "the tape is ours alone: empty, never a vendor's");
+  // card solana-trades-show-on-every-token: its tape is the top pool's trades; this fake answers bars for that read, no
+  // trades list, so the tape is empty and filling (the page reads again)
+  assert.deepEqual([tape.trades, tape.src, tape.filling], [[], "chain", true], "no trades list read: empty and filling");
   const quiet = open(chain, clock, { pools: new Map(), fetch: ((u: string, i: RequestInit) => ((gtUp = false), fetch(u, i))) as never, gecko: geckoBudget(() => clock.t) });
   const e = await quiet.candles(`0x${"35".repeat(20)}`, "1m", null, 60);
   // card market-reads-hold-under-load: its pool not read, the chart is unread (503, the page reads again), never 200 empty
@@ -564,4 +566,43 @@ test("fold 8: a book's trader lookups start once its first logs are read, alongs
   const txs = seq.filter((x) => x.startsWith("tx "));
   assert.equal(new Set(txs).size, txs.length, "no sender is asked twice");
   assert.ok(JSON.parse(a.body).trades.every((t: { trader: string | null }) => t.trader !== null), "every trade has its trader");
+});
+
+test("card solana-trades-show-on-every-token: a listed token our reads find no pool of (Base SOGNI on an Aerodrome USDT pool, recorded) answers its top pool's trades for the token, newest first, src geckoterminal, never an empty tape; held TAPE_FRESH_MS", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { geckoBudget } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const { TAPE_FRESH_MS } = await import("../solana/token.ts");
+  const R = JSON.parse(readFileSync(new URL("./fixtures/gt-pool-trades-sogni-base.json", import.meta.url), "utf8")) as { coin: string; pool: string; trades: (Record<string, unknown> & { id: string; legs: { from: [string, string]; to: [string, string] } })[] };
+  const answer = { data: R.trades.map(({ id, legs, ...a }) => ({ id, type: "trade", attributes: { ...a, from_token_address: legs.from[0], from_token_amount: legs.from[1], to_token_address: legs.to[0], to_token_amount: legs.to[1] } })) };
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const clock = { t: Date.parse("2026-11-14T17:30:00Z") };
+  const gtUrls: string[] = [];
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    gtUrls.push(url);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: R.pool } }] }), { status: 200 });
+    if (url.includes(`/pools/${R.pool}/trades?token=${R.coin}`)) return new Response(JSON.stringify(answer), { status: 200 });
+    return new Response("{}", { status: 404 });
+  };
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: geckoBudget(() => clock.t) });
+  const a = await s.trades(R.coin, 50);
+  assert.equal(a.status, 200, a.body);
+  const j = JSON.parse(a.body) as { trades: { t_ms: number; side: string; amt: string; usd: string; trader: string | null; tx: string }[]; src: string; as_of_ms: number; filling?: boolean };
+  assert.equal(j.src, "geckoterminal");
+  assert.equal(j.as_of_ms, clock.t);
+  assert.equal(j.filling, undefined);
+  assert.equal(j.trades.length, 6);
+  const first = R.trades[0]!;
+  assert.deepEqual(j.trades[0], { t_ms: Date.parse(first.block_timestamp as string), side: "s", usd: j.trades[0]!.usd, amt: first.legs.from[1].replace(/0+$/, "").replace(/\.$/, ""), trader: (first.tx_from_address as string).toLowerCase(), tx: (first.tx_hash as string).toLowerCase() });
+  assert.match(j.trades[0]!.usd, /^\d+(\.\d{1,18})?$/);
+  assert.ok(j.trades.slice(1).every((r) => r.side === "b"), "the recorded buys");
+  assert.ok(j.trades.every((r, i) => i === 0 || r.t_ms <= j.trades[i - 1]!.t_ms));
+  assert.equal((JSON.parse((await s.trades(R.coin, 2)).body) as { trades: unknown[] }).trades.length, 2);
+  const calls = gtUrls.length;
+  clock.t += TAPE_FRESH_MS - 1;
+  await s.trades(R.coin, 50);
+  assert.equal(gtUrls.length, calls, "held while fresh");
+  s.stop();
 });

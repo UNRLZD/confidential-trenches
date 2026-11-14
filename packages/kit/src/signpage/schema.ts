@@ -418,6 +418,18 @@ const poolSell: SignpageSchema = (v) => poolSellBase(v) && Object.hasOwn(v as ob
 const poolSellDryBase = obj({ chain: poolChain, token: str, slippage_bps: bps(0) }, { amount: dec, share_bps: bps(1) });
 const poolSellDryParams: SignpageSchema = (v) => poolSellDryBase(v) && Object.hasOwn(v as object, "amount") !== Object.hasOwn(v as object, "share_bps");
 
+/** WithdrawGiven (messages.ts, card withdraw-address-in-the-app): no `to` and neither amount nor max (the typed form), or
+ *  `to` with exactly one of them. A `from_id` (the held deposit's way out, its account typed there) takes none. */
+const withdrawGiven = (v: unknown): boolean => {
+  const has = (k: string): boolean => Object.hasOwn(v as object, k);
+  return has("to") ? has("amount") !== has("max") && !has("from_id") : !has("amount") && !has("max");
+};
+const withdrawOpenBase = obj({ return_key: returnKey }, { from_id: str, to: str, amount: dec, max: lit(true) });
+const withdrawOpenParams: SignpageSchema = (v) => withdrawOpenBase(v) && withdrawGiven(v);
+// dest: an ExitChain (../checks/oneclick-exit.ts), the chain the money arrives on through 1Click; only with `to`
+const poolWithdrawBase = obj({ return_key: returnKey, chain: poolChain }, { to: str, amount: dec, max: lit(true), dest: oneOf(["solana", "base", "robinhood", "near"]) });
+const poolWithdrawParams: SignpageSchema = (v) => poolWithdrawBase(v) && withdrawGiven(v) && (!Object.hasOwn(v as object, "dest") || Object.hasOwn(v as object, "to"));
+
 /** The params of each kind, as SignpageParams names them: exactly its allowed fields (W §2.8 rows; APU-02). */
 export const SIGNPAGE_PARAM_SCHEMAS = {
   "deposit.quote": obj({ origin_asset: str, amount: dec }),
@@ -428,7 +440,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "orders.set": obj({ chain, token: str, slippage_bps: bps(0) }, { tp: exit, sl: exit }),
   "orders.cancel": obj({ order_ids: arr(str, 1) }),
   return: obj({ chain, wallet: str }),
-  "withdraw.open": obj({ return_key: returnKey }, { from_id: str }),
+  "withdraw.open": withdrawOpenParams,
   "signin.open": obj({ return_key: returnKey, way }),
   "backup.open": obj({ return_key: returnKey }),
   "export.open": obj({ return_key: returnKey, chain, address: str }),
@@ -440,7 +452,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "pool.deposit": obj({ chain: poolChain, amount: dec }),
   "pool.buy": obj({ chain: tradeChain, token: str, amount: dec, slippage_bps: bps(0) }),
   "pool.sell": poolSell,
-  "pool.withdraw": obj({ return_key: returnKey, chain: poolChain }),
+  "pool.withdraw": poolWithdrawParams,
   "deposit.assets": obj({}),
   "deposit.dry": obj({ origin_asset: str, amount: dec }),
   "pool.address": poolAddressParams,

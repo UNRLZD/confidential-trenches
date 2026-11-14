@@ -8,9 +8,9 @@
 //   - the To field's cleaning of what a paste carries, its three patterns as written (CLEAN): whitespace and invisible
 //     characters off the two ends, the invisible joiners out anywhere, a direction control refused anywhere; and not the
 //     earlier whole-field pattern (GLUE), which took whitespace out inside too and so glued a row's pieces into one key.
-// And on APP_HOST (https://ct-app.unrealized.trade): the scripts its page names carry the Withdraw pick
-// (apps/terminal/src/screens/withdraw/WithdrawPick.tsx, data-sheet withdraw-pick), through which every Withdraw opens
-// the form of the place that holds the money (the owner's run, release 120: Portfolio's Withdraw opened the NEAR vault's
+// And on APP_HOST (https://ct-app.unrealized.trade): the scripts its page names carry the app's own Withdraw (since card
+// withdraw-address-in-the-app: apps/terminal/src/screens/withdraw/WithdrawForm.tsx, its Withdraw control withdraw-go;
+// before it, the pick, data-sheet withdraw-pick), through which every Withdraw opens on the place that holds the money (the owner's run, release 120: Portfolio's Withdraw opened the NEAR vault's
 // form for money in the Solana pool). Which form opens for which state is held by apps/terminal/test/withdraw-target.test.ts.
 // What the screen does with them (the value is the largest the amount check accepts, a tap fills it, a paste's address
 // passes, the press hands over only what was drawn) is held by packages/signpage/test/pool-withdraw-sendable.test.ts and
@@ -28,8 +28,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "withdraw-form-shows-what-you-can-send";
 export const SIGN = "https://confidential.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
-/** The Withdraw pick's mark in the app's scripts. */
-export const PICK = "withdraw-pick";
+/** The app's Withdraw mark in its scripts (WithdrawForm.tsx WITHDRAW_GO, card withdraw-address-in-the-app). */
+export const PICK = "withdraw-go";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 

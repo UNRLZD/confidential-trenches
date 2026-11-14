@@ -1181,7 +1181,9 @@ for (const chain of ["base", "robinhood"] as const) {
       const a = await keyedOnly(r, chain, TRANSFERS());
       assert.equal(a.status, 503, a.body);
       assert.deepEqual(JSON.parse(a.body), { error: { code: "upstream" } });
-      assert.deepEqual(asked, [KO_KEYED], "only the keyed URL");
+      // card helper-pool-logs-outside-the-caller-budget: a numbered log range is checked against the finalized head,
+      // which the helper reads on the same keyed URL (rpc.ts finalized), so that URL is asked twice, still alone
+      assert.deepEqual([...new Set(asked)], [KO_KEYED], "only the keyed URL");
     });
   }
   test(`card evm-pool-leaves-any-source: ${chain} ?keyed=only with no keyed URL configured: 503 upstream and nothing is fetched`, async () => {

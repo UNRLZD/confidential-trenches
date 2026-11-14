@@ -634,3 +634,57 @@ test("card helper-live-run-green-after-122: a token none of whose newest transac
   for (let i = 0; i < 100 && olderOpen > 0; i++) await settle();
   t.stop();
 });
+
+// card solana-trades-show-on-every-token: NEARKAT (6UtY9iTZ..., a Raydium CPMM token, 29k USD a day) and BONK answered
+// {"trades":[],"src":"chain"} on the deployed helper (main 204ee6b8a, 14 Nov 17:21Z): the chain tape decodes the pump.fun
+// curve and PumpSwap only, and the helper's log read "no trade of a venue read" for every such token open
+const NK = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-pool-trades-nearkat.json"), "utf8")) as { mint: string; signature: string; tx: { slot: number } };
+const POOL_ROWS = [
+  { t_ms: Date.parse("2026-11-14T17:22:05Z"), side: "s", usd: "427.037807197591623106", amt: "648306.777831", trader: "EiSEokSBEa9iHSN3gEUKbyCriKMkzqUfr5nLazkkHZki", tx: NK.signature },
+];
+function nearkat(tape?: () => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>) {
+  const fetchFn = rpcFetch({ sigs: () => [{ signature: NK.signature, slot: NK.tx.slot, err: null }], txs: { [NK.signature]: NK.tx }, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 });
+  return createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === NK.mint, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, coldWait: () => settle(), ...(tape === undefined ? {} : { tape }) });
+}
+
+test("card solana-trades-show-on-every-token: a listed token on a venue the chain tape does not decode (Raydium CPMM, recorded) is served its top pool's trades, never an empty tape", async () => {
+  let asked = 0;
+  const t = nearkat(async () => (asked++, { status: 200, body: JSON.stringify(POOL_ROWS), src: "geckoterminal", asOfMs: TS * 1000 - 5_000 }));
+  const a = await t.trades(NK.mint, 50);
+  assert.equal(a.status, 200, a.body);
+  const j = JSON.parse(a.body) as { trades: unknown[]; src: string; as_of_ms: number; filling?: boolean };
+  assert.deepEqual(j.trades, POOL_ROWS, "the pool's trades, not the chain's empty tape");
+  assert.equal(j.src, "geckoterminal");
+  assert.equal(j.as_of_ms, TS * 1000 - 5_000, "dated by the pool read");
+  assert.equal(j.filling, undefined);
+  assert.equal(a.src, "geckoterminal");
+  assert.ok(asked > 0);
+  // the limit holds on the pool's rows too
+  assert.equal((JSON.parse((await t.trades(NK.mint, 1)).body) as { trades: unknown[] }).trades.length, 1);
+  t.stop();
+});
+
+test("card solana-trades-show-on-every-token: the pool's trades refused or down, an undecoded token's tape answers empty with filling (the page reads again), and a token with chain rows never asks the pool", async () => {
+  for (const tape of [async () => ({ status: 429, body: "{}" }), async () => Promise.reject(new Error("down"))]) {
+    const t = nearkat(tape);
+    const a = await t.trades(NK.mint, 50);
+    assert.equal(a.status, 200);
+    const j = JSON.parse(a.body) as { trades: unknown[]; src: string; filling?: boolean };
+    assert.deepEqual(j.trades, []);
+    assert.equal(j.filling, true);
+    assert.equal(j.src, "chain");
+    t.stop();
+  }
+  let asked = 0;
+  const t = createSolanaTrades({ fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: BUY.result.slot }, { [MINT]: 6 }), now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: (o) => ((pumpOn = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape: async () => (asked++, { status: 200, body: "[]" }) });
+  await t.trades(MINT, 50);
+  pumpOn!.note(MINT, { sig: BUY.signature, slot: BUY.result.slot, err: false, logs: BUY.result.meta.logMessages });
+  await settle();
+  const rows = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[]; src: string }).trades;
+  assert.deepEqual(rows.map((r) => r.tx), [BUY.signature]);
+  asked = 0;
+  await t.trades(MINT, 50);
+  assert.equal(asked, 0, "a pump.fun token with chain rows is served the chain's tape, no pool read");
+  t.stop();
+});
+let pumpOn: SourceEvents | null = null;

@@ -138,10 +138,11 @@ export const TESTNET_CONNECT = Object.freeze(["https://base-sepolia-rpc.publicno
 export function signHeadersFor(network, text) {
   if (!NETWORKS.includes(network)) throw new Error("network: mainnet or testnet");
   if (network === "mainnet") return text;
-  const at = " https://robinhood.daybreak-rpc.network ";
-  const parts = text.split(at);
-  if (parts.length !== 2) throw new Error("_headers: the Robinhood mainnet providers are not in connect-src exactly once");
-  return parts.join(` https://robinhood.daybreak-rpc.network ${TESTNET_CONNECT.join(" ")} `);
+  // the Robinhood list's last origin, then the next source or the directive's end (connect-src's last source since card
+  // first-sign-in-reads-fast-on-live moved bloXroute's Base origin into the kit's venue origins)
+  const at = / https:\/\/robinhood\.daybreak-rpc\.network(?=[ ;])/g;
+  if ((text.match(at) ?? []).length !== 1) throw new Error("_headers: the Robinhood mainnet providers are not in connect-src exactly once");
+  return text.replace(at, ` https://robinhood.daybreak-rpc.network ${TESTNET_CONNECT.join(" ")}`);
 }
 
 /** The networks a build is for (card signpage-pool-flow): SIGN_HOST's, and the testnet build's (Solana devnet, Base

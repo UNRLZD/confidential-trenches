@@ -29,7 +29,7 @@ import * as restoreKind from "../src/pool-restore.ts";
 import { idsUndone, lanesOf, pagePools, POOL_CHAIN_UNREAD, poolRestore, RESTORE_BEAT_MS, RESTORE_LOCK, type PoolRestoreHost, type RestorePool, type Step5End } from "../src/pool-restore.ts";
 import { WALLET_OWED_PREFIX, WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { evmPoolProvidersOf, evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { MAINNET_POOL_RPCS, pageEvmPoolUrls } from "../src/pool-testnet.ts";
+import { MAINNET_POOL_RPCS, pageEvmPoolRpcs, pageEvmPoolUrls } from "../src/pool-testnet.ts";
 import { RESTORE_GAP, walkEnd, writeRestored, type SeedUse } from "../../wallet/src/notes/restore.ts";
 import { base58, hex } from "@scure/base";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -1344,6 +1344,33 @@ test("the page's mainnet EVM pool lists are the kit's pool lists, on both chains
   }
 });
 
+// card first-sign-in-reads-fast-on-live: a sign-in walks Base when both seats have paged the pool's whole life, so the
+// slower seat is the walk's bound. Read 14 Nov 16:06-16:15Z from this Mac, the pool's filter (its address, its three
+// topics) from its deploy block 54,325,671 to the head, 4 pages in flight, Origin SIGN_HOST: base-rpc.publicnode.com
+// 62 calls at 50,000 blocks in 5.1 s; base.rpc.blxrbdn.com 31-34 calls at 100,000 in 7.5-9.5 s (CORS *, its pruned
+// history starts at block 52,500,000, under the pool's deploy block, read again 16:17Z); base.api.pocket.network 232
+// calls in 25.8 s, its backends "max 10001 blocks". The live runs at release 138 walked Base 16.3-17.3 s after Solana
+// with Pocket seated (43580687640, 43585047289). Pocket stays the list's spare.
+// card first-sign-in-reads-fast-on-live: Robinhood has no keyless provider that pages the pool's life fast from a page:
+// read 14 Nov 16:06-16:42Z with SIGN_HOST's Origin, its own RPC walked it in 4.6 s (59 calls), GlobalStake in 28-42 s
+// (one 800,000-block page past 15 s), Pocket's backends refused past 10,001 blocks, robinhood-rpc.publicnode.com 403
+// "Archive requests require a personal token", robinhood.drpc.org 10,000 and 429, robinhood.rpc.pinax.network
+// "Access-Control-Allow-Origin: *,*" and 429, daybreak 2,000, rpc-robinhood.blockmachine.io the newest 5,000 blocks,
+// robinhood.rpc.blxrbdn.com 403; the helper's keyed-only route walked it in 1.3 s, 8 calls of 800,000 blocks. A box
+// run of the check at acd56da46 walked Robinhood 15.9-112.7 s after Solana with Pocket seated. So the second seat is the
+// helper's keyed-only route (its keyed providers alone, one operator "helper"), as Base's last member; the pair is two
+// operators that must agree byte for byte, never the helper alone. Pocket and GlobalStake stay the spares.
+test("Robinhood's two pool seats are its own RPC, read device-direct, and the helper's keyed-only route", () => {
+  const urls = pageEvmPoolRpcs("robinhood")!.map((r) => String((r as unknown as { url: string }).url).replace(/\/$/, ""));
+  assert.deepEqual(urls.slice(0, 2), ["https://rpc.mainnet.chain.robinhood.com", "https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only"]);
+  assert.deepEqual(urls.slice(2), ["https://robinhood.api.pocket.network", "https://rpc-robinhood.globalstake.io"]);
+});
+
+test("Base's two pool seats each page the pool's logs 50,000 blocks a call or more; Pocket's narrow backends are a spare", () => {
+  const host = (u: string) => new URL(u).host;
+  assert.deepEqual(MAINNET_POOL_RPCS.base.map(host), ["base-rpc.publicnode.com", "base.rpc.blxrbdn.com", "base.api.pocket.network"]);
+});
+
 // review P3-3 of evm-pool-lists-mainnet: with a mainnet pin planted on each chain (EVM_POOLS is empty today, so
 // pagePools() skips EVM on mainnet), the restore's pool reads on MAINNET_POOL_RPCS, end to end through pagePools
 test("planted (review P3-3): a mainnet pin on each chain is read on MAINNET_POOL_RPCS, seats first, through pagePools", () => {
@@ -1356,8 +1383,11 @@ test("planted (review P3-3): a mainnet pin on each chain is read on MAINNET_POOL
     const chain = p.pin.network as "base" | "robinhood";
     assert.ok(p.rpcs !== null, `${chain}: read by the page`);
     // the kit's pool list first, then the page's members that page no logs and, on Base, the helper's keyed-only route
-    // (card move-sends-or-says-why: a list whose seats give no answer walks on to two operators still)
-    assert.deepEqual(p.rpcs().slice(0, MAINNET_POOL_RPCS[chain].length).map((r) => r.url), MAINNET_POOL_RPCS[chain].map((u) => new URL(u).href), `${chain}: the kit's pool list`);
+    // (card move-sends-or-says-why: a list whose seats give no answer walks on to two operators still); on Robinhood the
+    // keyed-only route is the second seat, right after its own RPC (card first-sign-in-robinhood-keyed-seat)
+    const list = MAINNET_POOL_RPCS[chain].map((u) => new URL(u).href);
+    const seated = chain === "robinhood" ? [list[0], "https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only", ...list.slice(1)] : list;
+    assert.deepEqual(p.rpcs().slice(0, seated.length).map((r) => r.url), seated, `${chain}: the kit's pool list`);
   }
 });
 

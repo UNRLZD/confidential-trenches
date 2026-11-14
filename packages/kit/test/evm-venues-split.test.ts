@@ -18,8 +18,11 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  taken out hashes to the pin before it, 7e26e86db0c698f5677abf45ed712803b3552c7d47f1e757fe940ae41075fcbb, so
  *  nothing else moved. Then each mainnet's sellDelegate moved to SellDelegate v2 (card evm-pool-amounts-are-standard-sizes,
  *  same length): the list with the first set's two delegates put back hashes to the pin before it,
- *  6a80dd95709b43dcba99f0c30e4c7309c311260056c98f2efc12b9b36841d417, so nothing else moved. */
-const BEFORE = "654639cf7943e0a05961477f2ace244a03375ecc9dc96fb244f6392411b9ab1f";
+ *  6a80dd95709b43dcba99f0c30e4c7309c311260056c98f2efc12b9b36841d417, so nothing else moved. Then one entry added on
+ *  Base, its poolProviders second seat base.rpc.blxrbdn.com, Pocket after it (card first-sign-in-reads-fast-on-live,
+ *  measured 2026-11-14 16:06-16:17Z; 6,585 characters before it): the list with that one entry taken out hashes to the
+ *  pin before it, 654639cf7943e0a05961477f2ace244a03375ecc9dc96fb244f6392411b9ab1f, so nothing else moved. */
+const BEFORE = "e50afe03bdf2d0f151b32bda6f2a8bf1550ce7dd5a6edc807152dca6d6fdeab7";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
@@ -28,7 +31,7 @@ test("the two halves together are the venue list before the split, entry for ent
   assert.deepEqual(Object.keys(evmTestnetVenues()), ["base-sepolia", "robinhood-testnet"]);
   assert.deepEqual({ ...all }, { ...evmMainnetVenues(), ...evmTestnetVenues() });
   const json = JSON.stringify(all);
-  assert.equal(json.length, 6_585);
+  assert.equal(json.length, 6_616);
   assert.equal(createHash("sha256").update(json).digest("hex"), BEFORE);
 });
 

@@ -99,6 +99,9 @@ const BASE_DEPLOY = 54_325_671;
 const BASE_READ: Record<string, { widest: number; oldest: number }> = {
   "base-rpc.publicnode.com": { widest: 50_000, oldest: 51_018_473 },
   "base.api.pocket.network": { widest: 10_000, oldest: 54_055_001 },
+  // card first-sign-in-reads-fast-on-live, 14 Nov 16:06-16:17Z: 100,000 a page ("query exceeds max block range 100000"
+  // at 200,000), "4444: pruned history unavailable ... earliest available 52500000"
+  "base.rpc.blxrbdn.com": { widest: 100_000, oldest: 52_500_000 },
   "rpc.sentio.xyz": { widest: 1_000, oldest: 35_064_001 },
   "base.gateway.tenderly.co": { widest: 1_000, oldest: 35_064_001 },
   "base-mainnet.public.blastapi.io": { widest: 10, oldest: 54_055_158 },

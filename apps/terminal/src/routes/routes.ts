@@ -5,8 +5,11 @@ import type { MarketChain } from "../screens/discover/fields.ts";
 export type RouteId = "token" | "discover" | "portfolio" | "orders" | "profile" | "verify" | "privacy" | "terms";
 
 /** A token's own page: /token/<chain>/<id>. Public and permanent (a shared link, the shell's address): the chain is the
- *  helper's own chain id (06b), the id the token's id in that chain's form. "/" draws the top Trending token. */
+ *  helper's own chain id (06b), the id the token's id in that chain's form. "/" draws OPEN_TOKEN on All, a chain pick's top Trending token on a pick. */
 export const TOKEN_ROUTE = "/token/:chain/:id";
+
+/** The token "/" opens on All, a fresh open with no token in the address (owner 14 Nov 17:20Z): NEARKAT, a Solana mint. */
+export const OPEN_TOKEN = { chain: "solana", id: "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr" } as const satisfies { chain: MarketChain; id: string };
 
 export const ROUTES: readonly { id: RouteId; path: string }[] = [
   { id: "token", path: "/" },

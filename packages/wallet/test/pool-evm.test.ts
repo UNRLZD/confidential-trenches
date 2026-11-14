@@ -1596,7 +1596,7 @@ test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs t
   assert.ok(own!.every((s) => s <= 800_000) && own!.filter((s) => s > 100_000).length <= 2 + Math.ceil(own!.length / EVM_LOG_CEILING_PAGES), `own: ${own}`);
 });
 
-test("card evm-pool-lists-mainnet: the kit's Base mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (PublicNode's 50,000; Pocket's 10,001 and its 500 backend), blastapi's 10 blocks never a seat", async () => {
+test("card evm-pool-lists-mainnet: the kit's Base mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (PublicNode's 50,000; bloXroute's 100,000 since card first-sign-in-reads-fast-on-live), Pocket's 10,001 a spare, blastapi's 10 blocks never a seat", async () => {
   const list = evmPoolProvidersOf(evmPoolVenues().base) ?? assert.fail("base: the kit pins no pool list");
   const c = longChain([...deps(PP, [10, 1_200_000, 1_990_000])], 2_000_000);
   const logs = list.map((): string[] => []);
@@ -1605,6 +1605,10 @@ test("card evm-pool-lists-mainnet: the kit's Base mainnet pool list syncs the po
   const caps: Record<string, (p: { from: number; to: number }) => void> = {
     "https://base-rpc.publicnode.com": ({ from, to }) => {
       if (to - from + 1 > 50_000) throw new Error("RPC error -32701: exceed maximum block range: 50000");
+    },
+    // bloXroute's words read 2026-11-14 16:15Z on the pool's filter from its deploy block, 200,000 blocks asked
+    "https://base.rpc.blxrbdn.com": ({ from, to }) => {
+      if (to - from + 1 > 100_000) throw new Error("RPC error -32602: query exceeds max block range 100000");
     },
     "https://base.api.pocket.network": ({ from, to }) => {
       const k = ++pocketCalls;
@@ -1632,19 +1636,24 @@ test("card evm-pool-lists-mainnet: the kit's Base mainnet pool list syncs the po
   assert.equal(r.events.length, 3);
   const sizes = logs.map(pageSizes);
   const at = (u: string) => sizes[list.indexOf(u)] ?? [];
-  assert.deepEqual(list.slice(0, 2), ["https://base-rpc.publicnode.com", "https://base.api.pocket.network"]);
+  assert.deepEqual(list.slice(0, 2), ["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"]);
   assert.notEqual(evmRpcOperator(list[0]!), evmRpcOperator(list[1]!));
-  const own = at("https://base-rpc.publicnode.com"), pocket = at("https://base.api.pocket.network");
-  assert.ok(own.length > 0 && pocket.length > 0, "both seats read the pool's logs");
+  const own = at("https://base-rpc.publicnode.com"), blx = at("https://base.rpc.blxrbdn.com");
+  assert.ok(own.length > 0 && blx.length > 0, "both seats read the pool's logs");
+  // Pocket's backends (max 10,001) are the list's spare since card first-sign-in-reads-fast-on-live: asked once, when
+  // PublicNode's first page of 100,000 is refused at its 50,000 (the cap walk's free spare), refused there in turn, and
+  // never a seat
+  assert.ok(at("https://base.api.pocket.network").length <= 1, `pocket: ${at("https://base.api.pocket.network")}`);
   assert.deepEqual(at("https://base-mainnet.public.blastapi.io"), [], "blastapi's 10 blocks never seated");
-  // no spare today: Tenderly's refusal names no span, so a seat Pocket's cap walks off pages there at 781 blocks (2,576
-  // pages for these 2M blocks, measured on this harness with Tenderly third), and Sentio's is an HTTP 429, which rests it;
-  // one the kit adds is asked only for a seat out
-  assert.deepEqual(sizes.slice(2).map((x) => x.length), sizes.slice(2).map(() => 0), "a spare is asked only for a seat out");
-  // each seat at its cap: 2M blocks in about 2M/50,000 and 2M/10,000 pages, a few refusals over
+  // Tenderly's refusal names no span, so a seat a cap walks off pages there at 781 blocks (2,576 pages for these 2M
+  // blocks, measured on this harness with Tenderly third), and Sentio's is an HTTP 429, which rests it; a spare is asked
+  // only for a seat out
+  assert.deepEqual(sizes.slice(3).map((x) => x.length), sizes.slice(3).map(() => 0), "a spare is asked only for a seat out");
+  // each seat at its cap: 2M blocks in about 2M/50,000 and 2M/100,000 pages, a few refusals over (Pocket's seat paged
+  // them in about 2M/10,000 before the card)
   assert.ok(own.length <= Math.ceil(2_000_000 / 50_000) + 10, `publicnode: ${own.length} pages`);
-  assert.ok(pocket.length <= Math.ceil(2_000_000 / 10_000) + 60, `pocket: ${pocket.length} pages`);
-  assert.ok(Math.min(...pocket) >= 5_000, `pocket: ${pocket}`);
+  assert.ok(blx.length <= Math.ceil(2_000_000 / 100_000) + 10, `bloXroute: ${blx.length} pages`);
+  assert.ok(Math.min(...blx) >= 50_000, `bloXroute: ${blx}`);
 });
 
 test("card evm-pool-sync-wide-pages: a 13M-block span on two providers with caps 50,000 and 100,000 takes at most ceil(span/cap)+10 pages each", async () => {

@@ -61,6 +61,11 @@ export const GT_CHART_WAIT_MS = 2 * GT_PAGE_WAIT_MS;
  *  changes: kept an hour, as the EVM chains keep theirs (../evm/swaps.ts GT_FRESH_MS) (card app-console-429). */
 export const HISTORY_FRESH_MS = 3_600_000;
 export const POOL_FRESH_MS = 600_000;
+/** A pool-trades tape read (tape below) is fresh this long: a page's tape polls share one read, about 6 a minute per
+ *  open token, inside the chart's budget. */
+export const TAPE_FRESH_MS = 10_000;
+/** The tape's rows: trades.ts TRADES_MAX. */
+export const TAPE_MAX = 50;
 /** L-05: GeckoTerminal's public API, as measured (../gecko.ts GT_LIMIT_PER_MIN); the server shares one budget with the
  *  EVM lists, which yield to the token page. */
 export const GT_PER_MIN = GT_LIMIT_PER_MIN;
@@ -409,6 +414,50 @@ export function toCandles(answer: unknown, tf: Tf, limit: number, nowMs: number)
     out.push([t as number, vals[0]!, vals[1]!, vals[2]!, vals[3]!, vol]);
   }
   return out.sort((a, b) => a[0] - b[0]).slice(-limit);
+}
+
+/** A tape row as GET /v1/market/trades serves it (trades.ts): newest first, amounts as decimal text. */
+export type TapeRow = { t_ms: number; side: "b" | "s"; usd: string; amt: string; trader: string | null; tx: string };
+const SIG = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+/** A chain's rules for a pool trade's ids: its transaction id and an address, each as the tape serves it, or null. */
+export type TapeIds = { tx: (v: unknown) => string | null; address: (v: unknown) => string | null };
+const SOLANA_IDS: TapeIds = { tx: (v) => (typeof v === "string" && SIG.test(v) ? v : null), address: (v) => (typeof v === "string" ? address(v) : null) };
+const UTC_S = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+/** A decimal text > 0 (at most 40 whole digits), cut to 18 places; null otherwise. */
+function decText(v: unknown): string | null {
+  if (typeof v !== "string" || !/^\d{1,40}(\.\d{1,200})?$/.test(v)) return null;
+  const [w, f = ""] = v.split(".") as [string, string?];
+  const frac = f.slice(0, 18).replace(/0+$/, "");
+  const whole = w.replace(/^0+(?=\d)/, "");
+  return whole === "0" && frac === "" ? null : frac === "" ? whole : `${whole}.${frac}`;
+}
+/** GeckoTerminal's pool trades answer (/networks/solana/pools/{pool}/trades) as `mint`'s tape rows, newest first, at
+ *  most `limit`; null when it is not a list (card solana-trades-show-on-every-token). The read asks `token=<mint>`, so
+ *  `kind` is `mint`'s side (read 14 Nov 17:2xZ: NEARKAT's tx My1mjXoq is kind sell, and the pool's NEARKAT vault rose
+ *  628,857 in it, while its from/to legs read 3ZLek to NEARKAT); the amount is the leg whose address is `mint`. A row
+ *  with no leg of `mint`, another kind, or a value out of shape is dropped. `ids`: the chain's transaction id and
+ *  address rules, Solana's by default; an EVM chain's (../evm/swaps.ts) passes EVM_IDS. */
+export function toTape(answer: unknown, mint: string, limit: number, nowMs: number, ids: TapeIds = SOLANA_IDS): TapeRow[] | null {
+  const list = obj(answer).data;
+  if (!Array.isArray(list)) return null;
+  const out: { r: TapeRow; block: number }[] = [];
+  for (const raw of list.slice(0, 1_000)) {
+    const a = obj(obj(raw).attributes);
+    if (a.kind !== "buy" && a.kind !== "sell") continue;
+    const buy = a.kind === "buy";
+    const to = ids.address(a.to_token_address);
+    const from = ids.address(a.from_token_address);
+    const leg = to === mint ? a.to_token_amount : from === mint ? a.from_token_amount : undefined;
+    if (leg === undefined || to === from) continue;
+    const amt = decText(leg);
+    const usd = decText(a.volume_in_usd);
+    const ts = typeof a.block_timestamp === "string" && UTC_S.test(a.block_timestamp) ? Date.parse(a.block_timestamp) : NaN;
+    const tx = ids.tx(a.tx_hash);
+    if (amt === null || usd === null || tx === null || !Number.isFinite(ts) || ts > nowMs + 60_000 || !Number.isSafeInteger(a.block_number)) continue;
+    out.push({ r: { t_ms: ts, side: buy ? "b" : "s", usd, amt, trader: ids.address(a.tx_from_address), tx }, block: a.block_number as number });
+  }
+  // newest first; the answer's own order within a block (a stable sort)
+  return out.sort((x, y) => y.block - x.block).slice(0, limit).map((x) => x.r);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1108,6 +1157,29 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return { status: 200, body: JSON.stringify(candles), src, asOfMs: at };
   });
 
+  // the tape of a token whose venue the chain tape does not decode (trades.ts reads the pump.fun curve and PumpSwap
+  // only): the top pool's newest trades, the chart's pool and sources (card solana-trades-show-on-every-token: every
+  // Raydium, Meteora, Orca or other launchpad token's tape was empty). A re-read of a held tape is a refresh: refused by
+  // the budget, the held tape is served, dated by its read
+  const tapes = cached(
+    TAPE_FRESH_MS,
+    now,
+    async (mint, client, held) => {
+      const p = await pools.get(mint, client);
+      if (p.status !== 200) {
+        if (p.status === 404) return NOT_FOUND;
+        if (p.status === 429) throw new Throttled(p.retryAfterS ?? 1, p.why);
+        throw new Upstream();
+      }
+      const ok = (j: unknown) => toTape(j, mint, TAPE_MAX, now()) !== null;
+      const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/trades?token=${mint}`, held === true ? "refresh" : "pages", "sol trades", ok, undefined, client);
+      const rows = a === null ? [] : toTape(a, mint, TAPE_MAX, now());
+      if (rows === null) throw new Upstream();
+      return { status: 200, body: JSON.stringify(rows), src, asOfMs: now() };
+    },
+    { keepHeld: true },
+  );
+
   const mintKey = (k: string) => address(k) !== null;
   const isPool = (b: string) => address(b) !== null;
 
@@ -1257,6 +1329,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     },
     /** 06b Holders (20 rows, merged per owner), or Jupiter's fallback. */
     holders: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : holders.get(mint, client)),
+    /** The top pool's newest trades as tape rows (a JSON array of TapeRow, newest first, at most TAPE_MAX), its source
+     *  in `src`: the tape of a token whose venue the chain tape does not decode (trades.ts). */
+    tape: (mint: string, client?: string): Promise<DataAnswer> => (address(mint) === null ? Promise.resolve(NOT_FOUND) : tapes.get(mint, client)),
     /** 06b Candles: up to `limit` bars of `tf` ending before `to` (unix seconds) when it is set. */
     async candles(mint: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
       if (address(mint) === null || !Object.hasOwn(TF, tf)) return NOT_FOUND;

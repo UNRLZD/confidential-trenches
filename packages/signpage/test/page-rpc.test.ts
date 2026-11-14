@@ -318,7 +318,8 @@ test("(card move-sends-or-says-why) publicnode and Pocket both give no answer: t
 // walks on to mainnet.base.org (every read but eth_getLogs) and the helper's keyed-only route: two operators still.
 test("(card move-sends-or-says-why) Base with publicnode and Pocket both giving no answer: the pool pair and the trade deps read on mainnet.base.org and the helper's keyed route, and no eth_getLogs goes to mainnet.base.org", async () => {
   const { evmPair } = await import("../../wallet/src/pool/evm.ts");
-  const silent = new Set(["base-rpc.publicnode.com", "base.api.pocket.network"]);
+  // and bloXroute, the pool list's second seat since card first-sign-in-reads-fast-on-live: the whole list silent
+  const silent = new Set(["base-rpc.publicnode.com", "base.rpc.blxrbdn.com", "base.api.pocket.network"]);
   const want = ["mainnet.base.org", new URL(TRADE_HELPER).host];
   for (const down of ["throw", "stall"] as const) {
     await onSeat((host) => (silent.has(host) ? { status: 0, down } : { status: 200 }), async (log) => {

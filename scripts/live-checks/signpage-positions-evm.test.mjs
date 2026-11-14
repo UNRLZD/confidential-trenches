@@ -5,14 +5,15 @@
 // SIGN_HOST as it served before the card (no join): FAIL. Made from the good run: W still holding the token on one RPC, a reverted sell, a sell to another
 // address, a Bought for another W, the sell in another block on one RPC, a sell before the buy, a page with no join, a
 // mainnet page with no EVM pass, a bundle that is not the pinned one: each FAIL; an RPC with
-// no answer: INCONCLUSIVE, never a pass.
+// no answer: INCONCLUSIVE, never a pass. JOIN counts the state read's EVM join in the bare form before card
+// move-sends-or-says-why (T1) and in T1's bounded form, and none when the join or base or robinhood is gone.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { RETRY } from "./provider-answer.mjs";
-import { judge, read, runOf, SIGN } from "./signpage-positions-evm.mjs";
+import { judge, pageFacts, read, runOf, SIGN } from "./signpage-positions-evm.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 RETRY.ms = 0;
@@ -75,4 +76,28 @@ test("made from the good run: each broken fact FAILs, and no answer is INCONCLUS
   }
   const silent = { ...g, reads: g.reads.map((x) => (x.method === "eth_call" && x.rpc.includes("publicnode") ? { ...x, answer: { noAnswer: "HTTP 429" } } : x)) };
   assert.equal((await run(silent)).verdict, "INCONCLUSIVE");
+});
+
+// JOIN on the state read as each build minified it: before card move-sends-or-says-why (T1) each read bare; since T1
+// each bounded by STATE_READ_MS (src/pool-testnet.ts `within(positions.read(), ...)`), as release 142 serves it.
+const PRE_T1 = "positions:async()=>{let[e,...t]=await Promise.all([c.read(),...[`base`,`robinhood`].map(e=>Wt(e)?.read()??Promise.resolve([]))]);";
+const PRE_T1_GUARD = "positions:async()=>{let e=et,n=Ut,[r,...i]=await Promise.all([Bt.read(),...[`base`,`robinhood`].map(e=>Wt(e)?.read()??Promise.resolve([]))]);";
+const T1 = "positions:async()=>{let e=et,n=Ut,[r,...i]=await Promise.all([Tz(Bt.read(),r5,`solana's positions`).catch(()=>null),...[`base`,`robinhood`].map(e=>Tz(Wt(e)?.read()??Promise.resolve([]),r5,`${e}'s positions`).catch(()=>[]))]);";
+const joins = (js) => pageFacts("", js).marks.join;
+
+test("JOIN: the bare reads before T1 and T1's bounded reads each count once", () => {
+  for (const [name, js] of Object.entries({ PRE_T1, PRE_T1_GUARD, T1 })) assert.equal(joins(js), 1, name);
+});
+
+test("JOIN: a build with the EVM join gone, or base or robinhood dropped from the map, counts none", () => {
+  const cases = {
+    "Solana's read alone (T1)": "positions:async()=>{let e=et,n=Ut,[r]=await Promise.all([Tz(Bt.read(),r5,`solana's positions`).catch(()=>null)]);",
+    "no Promise.all (T1)": "positions:async()=>{let r=await Tz(Bt.read(),r5,`solana's positions`).catch(()=>null);",
+    "base dropped (T1)": T1.replace("`base`,", ""),
+    "robinhood dropped (T1)": T1.replace(",`robinhood`", ""),
+    "base dropped (pre-T1)": PRE_T1.replace("`base`,", ""),
+    "robinhood dropped (pre-T1)": PRE_T1.replace(",`robinhood`", ""),
+    "another chain's name in the bound (T1)": T1.replace("`solana's positions`", "`base's positions`"),
+  };
+  for (const [name, js] of Object.entries(cases)) assert.equal(joins(js), 0, name);
 });

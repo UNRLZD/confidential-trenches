@@ -35,7 +35,10 @@ test("the recorded good run passes: each pool's trees from the sources alone, tw
 test("the recorded bad run fails: two operators agree on a leaf the pool does not hold, its tree not the pool's", async () => {
   const r = await run(A.bad.log, A.bad.chains);
   assert.equal(r.verdict, "FAIL");
-  assert.match(r.lines[0], /^FAIL base: .*no two sources of two operators gave the same logs making the pool's trees .*the state tree from the logs \(1 leaves\) is not the pool's/);
+  // one leaf past the pool's own (its good run's state size): Base's pool held none at the first record and one at the
+  // re-record for card first-sign-in-reads-fast-on-live (bloXroute in its list)
+  const held = Number(/state size (\d+)/.exec((await run(A.good.log, A.good.chains)).lines[0])[1]);
+  assert.match(r.lines[0], new RegExp(`^FAIL base: .*no two sources of two operators gave the same logs making the pool's trees .*the state tree from the logs \\(${held + 1} leaves\\) is not the pool's`));
   assert.match(r.lines[1], /^PASS robinhood: /);
 });
 

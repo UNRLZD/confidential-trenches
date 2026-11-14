@@ -20,7 +20,21 @@ import { CSP, judge, read } from "./app-host-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-host-gate.answers.json"), "utf8"));
-const GOOD = ANSWERS.good;
+// card first-sign-in-reads-fast-on-live: the recorded good answer is the page as served before Base's second pool seat
+// (base.rpc.blxrbdn.com in the kit's venue origins), so until the next deploy is recorded the good answer is that one
+// with its connect-src the committed _headers' (the policy's); the recorded one must fail on that directive alone
+const RECORDED = ANSWERS.good;
+const COMMITTED_CONNECT = /^\/\*\n(?: {2}[^\n]*\n)*? {2}Content-Security-Policy: ([^\n]*)/m
+  .exec(readFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), "utf8"))[1]
+  .split(";")
+  .map((d) => d.trim())
+  .find((d) => d.startsWith("connect-src "));
+const withConnect = (a, c) => {
+  const csp = a.headers["content-security-policy"];
+  const old = csp.split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
+  return { ...a, headers: { ...a.headers, "content-security-policy": csp.replace(old, c) } };
+};
+const GOOD = withConnect(RECORDED, COMMITTED_CONNECT);
 const SIGN = "https://confidential.unrealized.trade";
 
 const withCsp = (from, to) => {
@@ -34,6 +48,9 @@ const replay = (a) => async () => ({ status: a.status, headers: new Headers(a.he
 
 test("recorded good answer: every header equals the policy: PASS", async () => {
   const r = judge(await read("https://ct-app.unrealized.trade/", replay(GOOD)));
+  const before = judge(await read("https://ct-app.unrealized.trade/", replay(RECORDED)));
+  assert.deepEqual(before.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(":")[0]), ["BAD CSP connect-src"]);
+  assert.ok(!RECORDED.headers["content-security-policy"].includes(" https://base.rpc.blxrbdn.com https://rpc.sentio.xyz"));
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.includes(`ok  CSP frame-ancestors is exactly ${SIGN}`));
   assert.ok(r.lines.includes(`ok  CSP frame-src: "'none'"`));

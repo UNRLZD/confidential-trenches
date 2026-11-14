@@ -354,6 +354,9 @@ export function createSolanaTrades(deps: {
   rpcs?: readonly string[];
   wsUrl?: string;
   source?: (on: SourceEvents) => Source;
+  /** The token's top pool's newest trades (token.ts tape: a JSON array of tape rows, newest first), served while this
+   *  tape holds no row: a token whose venue is not decoded here. */
+  tape?: (mint: string) => Promise<DataAnswer>;
   /** Bars before our first, GeckoTerminal's (token.ts candles), or none. */
   history?: (mint: string, tf: string, to: number | null, limit: number, client?: string) => Promise<DataAnswer>;
   /** A quote coin's USD price per whole coin as decimal text (its Discover or Jupiter row), or null. */
@@ -833,6 +836,21 @@ export function createSolanaTrades(deps: {
       const e = await open(mint);
       if (!("mint" in e)) return e;
       const rows = e.book === null ? [] : e.book.tape(limit);
+      // a token with no trade of a venue this tape decodes (Raydium, Meteora, Orca, the other launchpads: every token
+      // not on the pump.fun curve or PumpSwap) is served its top pool's trades (token.ts tape), never an empty tape for a
+      // token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0 rows, src chain, while
+      // their pools traded); refused or down, the chain's answer with `filling`, so the page reads again
+      if (rows.length === 0 && deps.tape !== undefined) {
+        const v = await deps.tape(mint).catch(() => null);
+        if (v !== null && v.status === 200) {
+          const got = (JSON.parse(v.body) as unknown[]).slice(0, limit);
+          const src = v.src ?? "geckoterminal";
+          const at = v.asOfMs ?? now();
+          return { status: 200, body: JSON.stringify({ trades: got, src, as_of_ms: at }), src, asOfMs: at };
+        }
+        const at = e.readAt ?? now();
+        return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+      }
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));
       // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first

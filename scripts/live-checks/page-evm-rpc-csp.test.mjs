@@ -50,7 +50,11 @@ test("the kit's EVM venues: Base, Robinhood and both testnets, every provider an
 });
 
 test("recorded good answer: APP_HOST's served connect-src names every kit EVM provider, SIGN_HOST's committed one the mainnets': PASS", async () => {
-  const a = { app: await read(ANSWERS.good.app.url, replay(ANSWERS.good.app)), sign: shipped().sign };
+  // APP_HOST's recorded good answer predates Base's second pool seat (card first-sign-in-reads-fast-on-live), so it is
+  // its committed _headers too until the next app deploy is recorded; the recorded one must fail naming that origin
+  const a = { app: shipped().app, sign: shipped().sign };
+  const recorded = await read(ANSWERS.good.app.url, replay(ANSWERS.good.app));
+  assert.deepEqual(bads(judge({ app: recorded }, evmOrigins(), ["app"])), ["BAD app: connect-src names every kit EVM provider: lacks https://base.rpc.blxrbdn.com"]);
   const r = judge(a);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.includes(`ok  app: connect-src names every kit EVM provider (${evmOrigins().length})`));
@@ -61,7 +65,8 @@ test("recorded good answer: APP_HOST's served connect-src names every kit EVM pr
 
 test("recorded: SIGN_HOST as served before card evm-pools-on-mainnet names the six testnet providers: FAIL, naming them", async () => {
   const sign = await read(ANSWERS.good.sign.url, replay(ANSWERS.good.sign));
-  assert.deepEqual(bads(judge({ sign }, evmOrigins(), ["sign"])), [`BAD sign: connect-src names no testnet-only EVM provider: names ${TESTNET_ONLY.join(" ")}`]);
+  // and, recorded before card first-sign-in-reads-fast-on-live, without Base's second pool seat
+  assert.deepEqual(bads(judge({ sign }, evmOrigins(), ["sign"])), ["BAD sign: connect-src names every kit EVM provider: lacks https://base.rpc.blxrbdn.com", `BAD sign: connect-src names no testnet-only EVM provider: names ${TESTNET_ONLY.join(" ")}`]);
 });
 
 test("recorded bad answer: the live hosts before the card name no EVM provider: FAIL on both pages", () => {

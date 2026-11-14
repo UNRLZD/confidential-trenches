@@ -1001,3 +1001,63 @@ test("card app-faults-seen-on-122: the ahead lane's bars read of a graduated coi
   assert.equal(g.urls.length, spent + 1, "one call");
   assert.ok(g.urls.at(-1)!.includes(`/pools/${SWAP_POOL}/ohlcv/`), `the bars were read from ${g.urls.at(-1)}`);
 });
+
+// ---- the pool tape (card solana-trades-show-on-every-token) ---------------------------------------------------
+
+/** The recorded NEARKAT pool trades as GeckoTerminal answers them (the fixture keeps each row's legs apart). */
+function geckoTrades(): { mint: string; pool: string; signature: string; answer: { data: unknown[] } } {
+  const o = JSON.parse(readFileSync(new URL("./fixtures/sol-pool-trades-nearkat.json", import.meta.url), "utf8")) as { mint: string; pool: string; signature: string; trades: (Record<string, unknown> & { id: string; legs: { from: [string, string]; to: [string, string] } })[] };
+  const data = o.trades.map(({ id, legs, ...a }) => ({ id, type: "trade", attributes: { ...a, from_token_address: legs.from[0], from_token_amount: legs.from[1], to_token_address: legs.to[0], to_token_amount: legs.to[1] } }));
+  return { mint: o.mint, pool: o.pool, signature: o.signature, answer: { data } };
+}
+
+test("toTape: the recorded pool trades as the mint's tape, newest first, the side the answer's kind for the mint, the amount the mint's leg; a hostile row is dropped", async () => {
+  const { toTape } = await import("./token.ts");
+  const g = geckoTrades();
+  const now = Date.parse("2026-11-14T17:25:00Z");
+  const rows = toTape(g.answer, g.mint, 50, now)!;
+  assert.equal(rows.length, 8);
+  // My1mjXoq: kind sell, and the pool's NEARKAT vault rose 628,857 in the transaction (read on mainnet)
+  assert.deepEqual(rows[0], { t_ms: Date.parse("2026-11-14T17:22:05Z"), side: "s", usd: "427.037807197591623106", amt: "648306.777831", trader: "EiSEokSBEa9iHSN3gEUKbyCriKMkzqUfr5nLazkkHZki", tx: g.signature });
+  assert.equal(rows[1]!.side, "b");
+  assert.equal(rows[1]!.amt, "71415.746499", "a buy's amount is still the mint's leg");
+  assert.ok(rows.every((r, i) => i === 0 || r.t_ms <= rows[i - 1]!.t_ms));
+  assert.equal(toTape(g.answer, g.mint, 3, now)!.length, 3);
+  const a0 = (g.answer.data[0] as { attributes: Record<string, unknown> }).attributes;
+  const bad = (over: Record<string, unknown>) => toTape({ data: [{ attributes: { ...a0, ...over } }] }, g.mint, 50, now)!.length;
+  assert.equal(bad({}), 1);
+  assert.equal(bad({ kind: "swap" }), 0);
+  assert.equal(bad({ to_token_address: "So11111111111111111111111111111111111111112" }), 0, "no leg is the mint");
+  assert.equal(bad({ tx_hash: "not a signature" }), 0);
+  assert.equal(bad({ block_timestamp: "2026-11-14T18:22:05Z" }), 0, "an hour ahead of now");
+  assert.equal(bad({ to_token_amount: "-1" }), 0);
+  assert.equal(bad({ volume_in_usd: 427 }), 0);
+  assert.equal(bad({ block_number: "1" }), 0);
+  assert.equal(toTape({ data: [{ attributes: { ...a0, tx_from_address: "x" } }] }, g.mint, 50, now)![0]!.trader, null);
+  assert.equal(toTape({ data: "x" }, g.mint, 50, now), null);
+  assert.equal(toTape(null, g.mint, 50, now), null);
+});
+
+test("tape: the token's top pool on GeckoTerminal, then its trades for the mint, held for TAPE_FRESH_MS", async () => {
+  const { TAPE_FRESH_MS } = await import("./token.ts");
+  const g = geckoTrades();
+  let now = Date.parse("2026-11-14T17:25:00Z");
+  const urls: string[] = [];
+  const fetchFn = async (url: string) => {
+    urls.push(url);
+    if (url.endsWith(`/networks/solana/tokens/${g.mint}`)) return new Response(JSON.stringify({ data: { relationships: { top_pools: { data: [{ id: `solana_${g.pool}`, type: "pool" }] } } } }), { status: 200 });
+    if (url.includes(`/networks/solana/pools/${g.pool}/trades`)) return new Response(JSON.stringify(g.answer), { status: 200 });
+    return new Response("{}", { status: 404 });
+  };
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: fetchFn });
+  const a = await (t as unknown as { tape(m: string): Promise<{ status: number; body: string; src?: string }> }).tape(g.mint);
+  assert.equal(a.status, 200, a.body);
+  assert.equal(a.src, "geckoterminal");
+  const rows = JSON.parse(a.body) as { tx: string }[];
+  assert.equal(rows.length, 8);
+  assert.equal(rows[0]!.tx, g.signature);
+  assert.deepEqual(urls, [`https://api.geckoterminal.com/api/v2/networks/solana/tokens/${g.mint}`, `https://api.geckoterminal.com/api/v2/networks/solana/pools/${g.pool}/trades?token=${g.mint}`]);
+  now += TAPE_FRESH_MS - 1;
+  await (t as unknown as { tape(m: string): Promise<unknown> }).tape(g.mint);
+  assert.equal(urls.length, 2, "held while fresh");
+});

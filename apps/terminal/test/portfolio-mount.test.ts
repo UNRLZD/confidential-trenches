@@ -32,12 +32,8 @@ test("a row's Sell opens its token's page (its sell box sells it); a chain with 
   assert.deepEqual(tapOf({ kind: "sell", chain: "moon" as never, token: "T", part: "box" }, held), { to: "none" });
 });
 
-test("a pool row's Withdraw opens SIGN_HOST's pool withdraw with its chain only: never an address or an amount", () => {
-  for (const chain of ["solana", "base", "robinhood"] as const) {
-    const t = tapOf({ kind: "pool-withdraw", chain }, held);
-    assert.deepEqual(t, { to: "pool.withdraw", params: { chain } }, chain);
-    if (t.to === "pool.withdraw") assert.deepEqual(Object.keys(t.params), ["chain"], chain);
-  }
+test("a pool row's Withdraw opens the app's own Withdraw on that pool (card withdraw-in-app-to-any-chain): never SIGN_HOST's own pool form", () => {
+  for (const chain of ["solana", "base", "robinhood"] as const) assert.deepEqual(tapOf({ kind: "pool-withdraw", chain }, held), { to: "withdraw", from: chain }, chain);
   // a chain with no pool opens nothing
   assert.deepEqual(tapOf({ kind: "pool-withdraw", chain: "near" } as never, held), { to: "none" });
 });
