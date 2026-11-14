@@ -13,7 +13,7 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  one batch of at most 10 at once; 6,087 characters before it), and two entries added on Robinhood and one on Base:
  *  Robinhood's quoteLast (card robinhood-quotes-inside-provider-limits; 6,124 characters before it) and each mainnet's
  *  in-flight pin per quote provider (the same card; 6,180 characters before them). */
-const BEFORE = "2db3588667c98e264494d0151aab8a3855c9a32b52d9ec8328dd2b23e22472e2";
+const BEFORE = "7e26e86db0c698f5677abf45ed712803b3552c7d47f1e757fe940ae41075fcbb";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();

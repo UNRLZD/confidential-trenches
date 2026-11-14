@@ -66,7 +66,8 @@ export type EvmPoolVenue = {
    *  robinhood-quotes-inside-provider-limits). */
   readonly quoteLast?: readonly string[];
   /** Of `providers`, the requests (posts) a quote sends each at once (quote.ts gated), each measured live and kept within
-   *  the pace the helper's limits record for that host where they name it; one not pinned takes the scan's `parallel`
+   *  the pace the helper's limits record for that host where they name it, in calls (a quote's post carries up to 3);
+   *  one not pinned takes the scan's `parallel`
    *  (card robinhood-quotes-inside-provider-limits). */
   readonly inflight?: Readonly<Record<string, number>>;
   /** The two providers every read at a past block goes to (card evm-quote-warm-round fold 8): the chain fee and the
@@ -236,10 +237,10 @@ export const evmMainnetVenues = () =>
       // Each provider's posts at once (card robinhood-quotes-inside-provider-limits): 5 bursts of 2, 4, 6 and 8 posts at
       // once, 1.5 s apart, each post a batch of 3 eth_call PoolManager extsload(bytes32[]) of 110 slots at latest (22 KB,
       // a quote's request), from the Mac 2026-11-14 05:10-05:11Z: every post of all four served at 8, none refused (429
-      // or a rate-limit error). publicnode 6, the "6 at once" the helper's PROVIDER_PACE records for it (apps/helper/src/
-      // limits/limits.ts); mainnet.base.org 8, under its 20; blastapi and Pocket's Base endpoint 8 (the helper names
-      // neither: the measurement alone)
-      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 6, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
+      // or a rate-limit error). publicnode 2: the helper's PROVIDER_PACE (apps/helper/src/limits/limits.ts) holds it to 6
+      // calls at once and a quote's post carries up to 3; mainnet.base.org 8, under its 20; blastapi and Pocket's Base
+      // endpoint 8 (the helper names neither: the measurement alone)
+      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 2, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
       // 6 reads a call: aggregate3 shares one call's gas, and 64 of a 100 ETH buy's exact-out reads (8 of them 8.4-9.4M gas
       // each) needed 77.3M, past base-rpc.publicnode.com's 50M eth_call cap (3/3 refused "out of gas: gas required exceeds:
       // 50000000"; at 6 a call 30/30 answered; review of 2c02f7df, Base block 54,810,601). 24,000 bytes a request:
@@ -407,12 +408,13 @@ export const evmMainnetVenues = () =>
       // Each provider's posts at once (card robinhood-quotes-inside-provider-limits): 5 bursts of 2, 4, 6 and 8 posts at
       // once, 1.5 s apart, each post a batch of 3 eth_call PoolManager extsload(bytes32[]) of 300 slots at latest (58 KB,
       // a USDG quote's average request), from the Mac 2026-11-14 05:10-05:11Z. robinhood.drpc.org served every post at
-      // 6 and refused one of 40 at 8 (HTTP 429): 6, under the helper's "15 at once" (PROVIDER_PACE); the chain's own
+      // 6 and refused one of 40 at 8 (HTTP 429): 5, the helper's 15 calls at once (PROVIDER_PACE) at up to 3 calls a
+      // post; the chain's own
       // served every post at 8 and the helper's pace records 2 at once for it (a fourth quick read refused 429): 2.
       // publicnode, blxrbdn and globalstake served every post at 8, none refused, and the helper names none of them: 8,
       // the measurement alone. One limit of 2 for every provider (the scan's) held a cold USDG quote's 173 posts in the
       // queue: 12.2 s, against 7.0 s at 6 (05:0xZ the same day)
-      inflight: bare<Record<string, number>>({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 6, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8, "https://rpc-robinhood.globalstake.io": 8 }),
+      inflight: bare<Record<string, number>>({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 5, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8, "https://rpc-robinhood.globalstake.io": 8 }),
       // 64 reads a call (card evm-buy-quote-in-window): a cold WETH-USDG quote's 2,303 reads at 6 a call were 128 batches,
       // which ran past the 10-13 s that three of these five keep a block's state. Its exact-out reads cost about 100,000
       // gas each, about 6.4M a call against the 50M caps; all five answered 3 calls of 64 alike (review of 2c02f7df) and
