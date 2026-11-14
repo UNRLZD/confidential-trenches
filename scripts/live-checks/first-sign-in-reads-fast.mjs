@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Live check of card first-sign-in-reads-fast: the first-ever restore on a new device reads the Base and Robinhood
+// Live check of card first-sign-in-reads-fast: the first restore on a new device reads the Base and Robinhood
 // pools about as fast as Solana's. It signs SIGN_HOST (https://confidential.unrealized.trade) in with the published vector's 12 words on an empty store, as
 // pool-restore-wired.mjs does (its collect(), the same fresh profile, the same pinned hosts), and reads the page's own
 // "restore: <chain> walked" line for each pool (src/pool-restore.ts, once that pool's notes are written). It signs in
 // RUNS (3) times, each on a fresh profile, prints each run's gaps, and fails when Base's or Robinhood's median walk is
 // more than GAP_MS after Solana's (a run where it never walks counts as slower than any), when Solana does not walk in
-// every run, or on any run's error. The median, not each run (the CO, 14 Nov 05:30Z): one sign-in walked Robinhood
+// every run, or on any run's error. The median, not each run (14 Nov 05:30Z): one sign-in walked Robinhood
 // 38.3 s after Solana in a box run at af9aed433 (05:26Z) where the two others walked it at 7.7 and 9.2 s, so one slow
 // draw of a provider's backends would undo a sign deploy; the target is the p50.
 // The pools' reads start side by side at Continue and each walk takes the page's one turn as its reads end, so a pool
@@ -36,7 +36,7 @@ const KEY = "first-sign-in-reads-fast";
 export const EVM_CHAINS = Object.freeze(["base", "robinhood"]);
 /** The most Base's or Robinhood's median walk may come after Solana's (ms): the header's measure. */
 export const GAP_MS = 12_000;
-/** Sign-ins a verdict takes, each on a fresh profile: the median of three is judged (the CO, 14 Nov 05:30Z: one
+/** Sign-ins a verdict takes, each on a fresh profile: the median of three is judged (14 Nov 05:30Z: one
  *  sign-in near 10.5 s against a 12 s bound fails on one slow Pocket draw, and the target is the p50). */
 export const RUNS = 3;
 

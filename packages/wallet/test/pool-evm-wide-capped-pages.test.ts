@@ -1,5 +1,5 @@
 // Card first-sign-in-reads-fast: a cold restore's pool read on a provider held at its own range cap above the narrow
-// line keeps several pages in flight there, so the first-ever restore on a new device is not one capped page after
+// line keeps several pages in flight there, so the first restore on a new device is not one capped page after
 // another over the pool's whole history. Read 14 Nov 03:4xZ from this Mac (evmTreeSync + evmLatestHigh on the page's
 // mainnet lists, every call timed): the Robinhood pool's 5,455,222 blocks from its deploy block 108,420,674 to the
 // head 113,875,896 took 22.0 s, of which rpc.mainnet.chain.robinhood.com's 100,000-block cap paged 55 pages one after
