@@ -27,8 +27,8 @@ export { ONECLICK_SIGNING_KEYS };
 // the five live wNEAR quotes of the G1 runs, fixture "live", and D52's 60 keyless USDC answers at fee 1). The keyless 25
 // bps shows in neither the entry nor the amount (100 USDC from Solana: amountOut 99,986,032 both ways), so both paths
 // pin the same fees. A same-asset quote (origin = destination) answers appFees [] with no fee (D52; fixture "same").
-// A stablecoin route is one between two of ONECLICK_USDC_ASSETS; any other pair, a same-asset multichain one included,
-// is held to 20, so a 1 bp entry on a route not listed here is refused (fails closed) until the route joins the list.
+// A stablecoin route is one between two of ONECLICK_USDC_ASSETS; any other pair, a same-asset multichain one included
+// unless ONECLICK_SAME_COIN_ROUTES lists it, is held to 20, so a 1 bp entry on a route not listed is refused (fails closed).
 const ONECLICK_COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd";
 // A confidential quote (card move-one-confidential-swap; request `confidentiality` "advanced": the OpenAPI of the quote,
 // docs.intents.aurora.dev llms-full.txt read 2026-11-14 03:35Z, "`basic` / `advanced` - the swap is settled on
@@ -45,8 +45,8 @@ const ONECLICK_COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881
 // Amounts, recipient, refund and deposit address stay signed.
 const ONECLICK_CONFIDENTIAL_COLLECTOR = "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805";
 /** 1Click's fee on a stablecoin route, one between two of ONECLICK_USDC_ASSETS, per path (it was one fee per path before
- *  card oneclick-partner-fee-live); the deposit's routes are all here. A stablecoin or same-asset route outside that list
- *  is held to ONECLICK_PAIR_FEE_BPS, so it must join the list before it ships, or its 1 bp quotes are refused. */
+ *  card oneclick-partner-fee-live), and on each route ONECLICK_SAME_COIN_ROUTES lists. A stablecoin or same-asset route
+ *  in neither is held to ONECLICK_PAIR_FEE_BPS, so it must join one before it ships, or its 1 bp quotes are refused. */
 export const ONECLICK_FEE_BPS = Object.freeze({ keyless: 1, partner: 1 } as const);
 /** The fee on any other pair, per path. */
 export const ONECLICK_PAIR_FEE_BPS = Object.freeze({ keyless: 20, partner: 20 } as const);
@@ -58,6 +58,26 @@ export const ONECLICK_USDC_ASSETS: readonly string[] = Object.freeze([
   "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
   "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
   "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+]);
+
+// One coin from another chain (card same-coin-deposits-across-chains-quote): the routes, each [origin, destination] one
+// way, outside ONECLICK_USDC_ASSETS's pairs that 1Click charges ONECLICK_FEE_BPS on. 1Click's fee table names "same-asset
+// multichain routes" 1 bp, but which routes it counts so is its own: dry quotes through the helper's partner key
+// 2026-11-14 06:58-07:02Z (packages/kit/test/fixtures/oneclick-same-coin.json, public and "advanced" alike) answered 1
+// on ETH from Ethereum, Arbitrum, Optimism, NEAR's bridge and Aptos into Base ETH, and 20 from Scroll, Robinhood and
+// Miden; 20 into Robinhood ETH from every chain, Base included, and from Robinhood into Base; 1 on USDC from 10 chains
+// into NEAR USDC and 20 from Aptos, Monad and X Layer. So no rule by symbol holds, and a route is pinned only as read.
+// Listed: the routes from Ethereum and Arbitrum into the places money lands (Base ETH, Cash's NEAR USDC). Every other
+// pair stays at ONECLICK_PAIR_FEE_BPS, so a 1 bp entry on a route not read here is refused (fails closed) until it joins.
+// What this lets through: on a listed route only an entry of exactly 1Click's collector at fee 1, where 20 was required
+// before; a fee 20 entry on it is now refused. The fee entry is unsigned (D4), but the floors are the device's own from
+// the pinned F (oneClickFloors), so a lower F raises the least the signed amounts must deliver (by 19 bps of the amount
+// against F 20): an entry rewritten from 20 to 1 asks more of the quote, never less.
+export const ONECLICK_SAME_COIN_ROUTES: readonly (readonly [string, string])[] = Object.freeze([
+  Object.freeze(["nep141:eth.omft.near", "nep141:base.omft.near"] as const),
+  Object.freeze(["nep141:arb.omft.near", "nep141:base.omft.near"] as const),
+  Object.freeze(["nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near", "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"] as const),
+  Object.freeze(["nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near", "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"] as const),
 ]);
 
 // S, the spread cap on a USDC-to-USDC floor: 15 bps, twice the widest gap read (D52).
@@ -284,7 +304,8 @@ export function oneClickFloors(x: OneClickFloorInput): { amountOut: bigint; minA
 }
 
 /** F, 1Click's fee in bps on a quote from `originAsset` to `destinationAsset` on `path`, from the device's own request:
- *  0 on the same asset, ONECLICK_FEE_BPS between two of the release's USDC assets, ONECLICK_PAIR_FEE_BPS otherwise.
+ *  0 on the same asset, ONECLICK_FEE_BPS between two of the release's USDC assets and on a same-coin route read at 1 bp
+ *  (ONECLICK_SAME_COIN_ROUTES), ONECLICK_PAIR_FEE_BPS otherwise.
  *  A path is read only as an own key of both tables (card oneclick-fee-path-own-key): freezing a table does not stop
  *  `table[path]` from reading Object.prototype, so a path outside keyless and partner is refused by name, on every
  *  route, same-asset included, even when a polluted page's prototype names a fee for it. */
@@ -292,7 +313,8 @@ export function oneClickFeeBps(path: OneClickPath, originAsset: string, destinat
   if (typeof path !== "string" || !Object.hasOwn(ONECLICK_FEE_BPS, path) || !Object.hasOwn(ONECLICK_PAIR_FEE_BPS, path))
     fail("request", `no such 1Click path ${typeof path === "string" ? show(path) : `(a ${path === null ? "null" : typeof path})`}`);
   if (originAsset === destinationAsset) return 0;
-  const stable = ONECLICK_USDC_ASSETS.includes(originAsset) && ONECLICK_USDC_ASSETS.includes(destinationAsset);
+  const stable = (ONECLICK_USDC_ASSETS.includes(originAsset) && ONECLICK_USDC_ASSETS.includes(destinationAsset)) ||
+    ONECLICK_SAME_COIN_ROUTES.some(([o, d]) => o === originAsset && d === destinationAsset);
   return stable ? ONECLICK_FEE_BPS[path] : ONECLICK_PAIR_FEE_BPS[path];
 }
 

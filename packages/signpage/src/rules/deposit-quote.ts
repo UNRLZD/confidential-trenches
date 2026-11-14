@@ -29,7 +29,7 @@
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../../kit/src/checks/oneclick.ts";
 import type { DepositRefusal, SignpageResults } from "../../../kit/src/signpage/messages.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
-import { askDepositQuoteAgain, depositQuoteRequest } from "../../../wallet/src/deposit/quote.ts";
+import { askDepositQuoteAgain, depositQuoteRequest, type OriginRefund } from "../../../wallet/src/deposit/quote.ts";
 import { backupFirst } from "../../../wallet/src/store/index.ts";
 import { checkDepositQuote, DepositRuleRefused, type DepositQuoteContext } from "./deposit.ts";
 import { DEPOSIT_ANSWERED, DEPOSIT_QUOTE_PATH, belowDepositBound, shortOnlyOfMinimum } from "./deposit-dry.ts";
@@ -59,6 +59,9 @@ export interface DepositQuoteKindContext {
    *  held to 1Click's keyless tell (`hidden`, src/pool-deposit-address.ts oneClickHidden); with no tell, no quote. */
   confidential?: true;
   hidden?(address: string, signal?: AbortSignal): Promise<"hidden" | "public" | "down">;
+  /** A pool coin a device wallet pays (card refunds-land-on-the-devices-own-wallet: pool to Cash, a leftover's carry):
+   *  the device's own derived address on that coin's chain, where a failed swap's refund lands (ORIGIN_CHAIN). */
+  refund?: OriginRefund;
 }
 
 export type DepositQuoteKindAnswer =
@@ -129,7 +132,7 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   const now = ctx.now ?? Date.now;
   let request;
   try {
-    request = depositQuoteRequest(ctx.depositId, origin, amount, now(), ctx.confidential === true);
+    request = depositQuoteRequest(ctx.depositId, origin, amount, now(), ctx.confidential === true, ctx.refund);
   } catch {
     return no("not_allowed");
   }
@@ -149,7 +152,7 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   let checked;
   const check = { path: DEPOSIT_QUOTE_PATH, pricing, decimalsIn, decimalsOut: USDC_DECIMALS, now: now() } as const;
   try {
-    checked = checkDepositQuote(request, reply.body, { seed: ctx.seed, depositId: ctx.depositId, check, ...(ctx.confidential === true ? { confidential: true as const } : {}) });
+    checked = checkDepositQuote(request, reply.body, { seed: ctx.seed, depositId: ctx.depositId, check, ...(ctx.confidential === true ? { confidential: true as const } : {}), ...(ctx.refund === undefined ? {} : { refund: ctx.refund }) });
   } catch (e) {
     // the rule's own refusals are of the request; the kit's (OneClickQuoteError) and anything else are of the answer,
     // but an answer short of the vault's least deposit alone, which says the amount is below the minimum

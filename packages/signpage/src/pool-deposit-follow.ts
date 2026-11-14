@@ -70,6 +70,9 @@ export interface PoolFollowRecord {
   /** U_X (base58 on Solana, EIP-55 on EVM) and U_{s,i}'s 64-hex id, where a refund lands. */
   u: string;
   refund_id: string;
+  /** A Move from another pool (card refunds-land-on-the-devices-own-wallet): the address on the origin coin's chain the
+   *  quote refunds to (ORIGIN_CHAIN), U_{s,i}'s own key there; absent, the refund is INTENTS under refund_id. */
+  refund_to?: string;
   /** The quote's signed deposit address, deadline and origin, and its min out in the pool coin's base units. */
   address: string;
   deadline_ms: number;
@@ -590,7 +593,7 @@ export function resumeOf(op: PoolDepositOp): PoolDepositOp {
 /** One follower per op across tabs: POOL_FOLLOW_LOCK/<op id>, held while it is followed. */
 export const POOL_FOLLOW_LOCK = "ct-wallet/pool-follow/";
 
-const FOLLOW_KEYS = ["chain", "s", "i", "u", "refund_id", "address", "deadline_ms", "origin", "min_out"] as const;
+const FOLLOW_KEYS = ["chain", "s", "i", "u", "refund_id", "refund_to", "address", "deadline_ms", "origin", "min_out"] as const;
 const isPoolOp = (v: unknown): v is PoolDepositOp =>
   typeof v === "object" && v !== null && (v as PoolDepositOp).kind === "pool_deposit" && typeof (v as PoolDepositOp).follow === "object" && (v as PoolDepositOp).follow !== null;
 /** A pool op's follow ended: in_pool read on past its quote's deadline. Every other op is followed again at each landing. */
@@ -771,12 +774,12 @@ export function poolFollows(h: PoolFollowHost) {
      * pool.address checked `quote` under request `id` for U_X (`u`): the op is written and followed. Throws when it
      * cannot be written, so no address goes out that nothing follows.
      */
-    async quoted(id: string, chain: PoolChain, quote: { deposit_address: string; origin_asset: string; min_amount_out: string; deadline: string }, u: { scope: bigint; index: number; wallet: string; refundId: string }): Promise<void> {
+    async quoted(id: string, chain: PoolChain, quote: { deposit_address: string; origin_asset: string; min_amount_out: string; deadline: string }, u: { scope: bigint; index: number; wallet: string; refundId: string; refund_to?: string }): Promise<void> {
       const deadline = Date.parse(quote.deadline);
       if (!Number.isSafeInteger(deadline)) throw new Error("the quote's deadline is not a time");
       const minOut = baseUnits(quote.min_amount_out, h.decimals(chain));
       if (minOut === null) throw new Error("the quote's min_amount_out is not an amount of the pool's coin");
-      const f: PoolFollowRecord = { chain, s: u.scope.toString(), i: u.index, u: u.wallet, refund_id: u.refundId, address: quote.deposit_address, deadline_ms: deadline, origin: quote.origin_asset, min_out: minOut.toString() };
+      const f: PoolFollowRecord = { chain, s: u.scope.toString(), i: u.index, u: u.wallet, refund_id: u.refundId, address: quote.deposit_address, deadline_ms: deadline, origin: quote.origin_asset, min_out: minOut.toString(), ...(u.refund_to === undefined ? {} : { refund_to: u.refund_to }) };
       const ops = await h.store();
       // a plain send's base, read before its address goes out (review P2-c): one read after it, at a later start, would
       // count a send that landed meanwhile as what U_X held before. A read that fails throws, so the address is refused
@@ -1153,7 +1156,7 @@ function isPoolDepositTx(t: unknown, sig: string, u: string, program: string): b
 export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc]; program: string; deposit: PoolFollowDeps["deposit"]; refund?: PoolFollowDeps["refund"]; fetch?: typeof fetch; sleep?: PoolFollowDeps["sleep"] }): Omit<PoolFollowDeps, "stage" | "signal" | "txs"> {
   const both = <T,>(f: (r: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(o.rpcs[0]), f(o.rpcs[1])]);
   return {
-    status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_id),
+    status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_to ?? f.refund_id),
     balances: (f) => both(async (r) => lamports(await r("getBalance", [f.u, { commitment: "finalized" }]))),
     costs: async (f) => {
       const { fee, rent } = await readSolanaPoolCosts(o.rpcs, o.program, f.u);
@@ -1237,7 +1240,7 @@ export function evmPoolFollowDeps(o: { rpcs: readonly [EvmRpc, EvmRpc]; pin: Evm
   const both = <T,>(f: (r: EvmRpc, k: number) => Promise<T>): Promise<[T, T]> => Promise.all([f(o.rpcs[0], 0), f(o.rpcs[1], 1)]);
   const balanceOn = async (r: EvmRpc, u: string, what: string) => evmQuantity(await r("eth_getBalance", [u, "latest"]), what);
   return {
-    status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_id),
+    status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_to ?? f.refund_id),
     balances: async (f) => {
       if (o.wallet === undefined) return both((r, k) => balanceOn(r, f.u, `rpc ${k} U_X balance`));
       const b = await balanceOn(o.wallet, f.u, "U_X balance");

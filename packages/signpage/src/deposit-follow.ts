@@ -238,12 +238,12 @@ export function depositFollows(h: FollowHost) {
      * deposit.quote checked `result` under request `id`, for U_{scope,index} (`u.u`, the deposit record's id): the op is
      * written and followed. Throws when the op cannot be written, so no address goes out that nothing follows.
      */
-    async quoted(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string }): Promise<void> {
+    async quoted(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string; refund_to?: string }): Promise<void> {
       const deadline = Date.parse(result.deadline);
       if (!Number.isSafeInteger(deadline)) throw new Error("the quote's deadline is not a time");
       const minOut = usdcUnits(result.min_amount_out);
       if (minOut === null) throw new Error("the quote's min_amount_out is not a USDC amount");
-      const f: FollowRecord = { network: h.network(), s: u.scope.toString(), i: u.index, u: u.u, address: result.deposit_address, deadline_ms: deadline, origin: result.origin_asset, min_out: minOut.toString() };
+      const f: FollowRecord = { network: h.network(), s: u.scope.toString(), i: u.index, u: u.u, address: result.deposit_address, deadline_ms: deadline, origin: result.origin_asset, min_out: minOut.toString(), ...(u.refund_to === undefined ? {} : { refund_to: u.refund_to }) };
       const ops = await h.store();
       // a retry of the same request (the same id) keeps the op it made
       await ops.update("ops", id, (v) => (v === undefined ? { kind: "deposit", stage: "quote_checked", txs: [], created_ms: (h.now ?? Date.now)(), follow: f } : undefined));

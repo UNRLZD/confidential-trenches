@@ -23,6 +23,7 @@ import type { Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
 import { depositQuoteKind, type DepositQuoteKindContext } from "./rules/deposit-quote.ts";
 import { depositAssetsKind, depositDryKind, type DepositReadAnswer, type DepositReadContext } from "./rules/deposit-dry.ts";
 import type { Status } from "./state.ts";
+import { poolCoinChain, type OriginRefund, type PoolDepositChain } from "../../wallet/src/deposit/quote.ts";
 
 /** The public records the kind reads: the status and the deposit record; null when no seed is stored. */
 export interface DepositPublic {
@@ -50,7 +51,14 @@ export interface DepositWireDeps {
    * deposit record the rule checked it under, never a fresh read. A throw answers "down", so no address goes out
    * that nothing follows.
    */
-  checked(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string }): Promise<void>;
+  checked(id: string, result: SignpageResults["deposit.quote"], u: { scope: bigint; index: number; u: string; refund_to?: string }): Promise<void>;
+  /**
+   * A host whose quotes a device wallet pays (card refunds-land-on-the-devices-own-wallet: pool to Cash, a leftover's
+   * carry): U_{scope,index}'s own address on `chain`, derived on the device (base58 of the id's key on Solana, U^evm on
+   * Base and Robinhood). A pool coin's quote then refunds ORIGIN_CHAIN there, never INTENTS. None (the app's deposit
+   * sheet: an outside wallet's money): INTENTS under U. A throw answers down, nothing sent.
+   */
+  refund?(chain: PoolDepositChain, scope: bigint, index: number, id: string): Promise<string>;
 }
 
 type Usable = { status: Status; deposit: DepositRecord };
@@ -82,12 +90,20 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       const before = usable(await deps.read(scope), scope);
       if (stopped()) return void (out = { error: "not_allowed" });
       if (!before) return;
+      // a pool coin a device wallet pays: its refund back on its own chain, at U's own address there
+      const coin = deps.refund === undefined ? null : poolCoinChain(params.origin_asset);
+      let refund: OriginRefund | undefined;
+      if (coin !== null) {
+        refund = { chain: coin, to: await deps.refund!(coin, scope, before.deposit.index, before.deposit.id) };
+        if (stopped()) return void (out = { error: "not_allowed" });
+      }
       const got = await depositQuoteKind(params, {
         seed: before.status,
         depositId: before.deposit.id,
         priced: deps.priced,
         ...(deps.confidential === true ? { confidential: true as const } : {}),
         ...(deps.hidden === undefined ? {} : { hidden: deps.hidden }),
+        ...(refund === undefined ? {} : { refund }),
         fetch: deps.fetch,
         now: deps.now,
         signal: stop,
@@ -99,7 +115,7 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
       if (!now || !same(now.deposit, before.deposit)) return;
       // no request id, no follow: no address goes out
       if (ctx === undefined) return;
-      await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id });
+      await deps.checked(ctx.id, got.result, { scope, index: before.deposit.index, u: before.deposit.id, ...(refund === undefined ? {} : { refund_to: refund.to }) });
       if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: got.result };
     })().catch(() => {

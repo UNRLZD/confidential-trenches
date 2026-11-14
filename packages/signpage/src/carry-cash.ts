@@ -10,7 +10,11 @@ import type { PoolChain } from "../../kit/src/signpage/messages.ts";
  *  key derived before anything is signed. */
 export type CarrySource =
   | { chain: PoolChain; kind: "ux"; address: string; s: string; i: number }
-  | { chain: PoolChain; kind: "w"; address: string; l: string; j: number };
+  | { chain: PoolChain; kind: "w"; address: string; l: string; j: number }
+  // a failed swap's refund (card refunds-land-on-the-devices-own-wallet): U_{s,i}'s own address on a quote's origin
+  // chain, keyed as a U_X is (base58 of U_{s,i} on Solana, U^evm_{s,i} on Base and Robinhood); `deadline_ms` the quote's
+  // signed deadline, past which (and REFUND_WATCH_MS more) an empty one is let go
+  | { chain: PoolChain; kind: "refund"; address: string; s: string; i: number; deadline_ms: number };
 
 /** One signed send, recorded before it leaves (an EVM send's nonce; a Solana send's blockhash's last valid height). */
 export type CarrySend = { hash: string; value: string; sentMs: string; nonce?: string; lastValid?: string };

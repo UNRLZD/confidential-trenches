@@ -187,7 +187,8 @@ test("main.ts runs the carry after the moves resume, one tab's pass at a time, s
   assert.match(main, /\.then\(\(\) => resumeMoves\?\.\(\)\)\s*\.catch\(\(\) => \{\}\)\s*(?:\/\/[^\n]*\n\s*)?\.then\(\(\) => void carryLoop\?\.\(\)\.catch\(\(\) => \{\}\)\)/);
   assert.match(main, /locks\.request\("ct-carry-cash", \{ ifAvailable: true \}/);
   assert.match(main, /const signal = withdrawWait\.signal;\s*const sol = /);
-  assert.match(main, /sources: async \(\) => leftoverSources\(await pageOps\(\)\.catch\(\(\) => \[\]\), await pageTails\(\)\.catch\(\(\) => \[\]\)\)/);
+  // and each refund address a quote recorded (card refunds-land-on-the-devices-own-wallet)
+  assert.match(main, /sources: async \(\) => leftoverSources\(await pageOps\(\)\.catch\(\(\) => \[\]\), await pageTails\(\)\.catch\(\(\) => \[\]\), await storedRefunds\(await open\(\)\)\.catch\(\(\) => \[\]\)\)/);
   // the wait between passes never holds a process open: main.ts booted in a test (held-lock.test.ts) exits (it hung at
   // 6f2c48fae)
   // a sender on every pool chain: Solana's, and Base's and Robinhood's on the chain's own pool pair
