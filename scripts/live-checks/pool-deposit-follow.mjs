@@ -101,7 +101,9 @@ const LOOP = new RegExp(
   // marks the round fast, and a plain send's carry shows in_pool only once its own money was seen (review P3-a)
   `(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=${N}\\((${N})\\.ladder,\\2,\\3\\.perRung,\\3\\.keep\\);if\\(\\4===0n\\)return!1;let\\{end:(${N}),txs:${N}\\}=await \\5\\.deposit\\((${N}),\\4,\\5\\.signal\\);` +
     `\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&\\((${N})=!0\\);let (${N})=\\(\\6===${Q}filled${Q}\\|\\|\\6===${Q}part_filled${Q}\\)&&!await (${N})\\(\\);` +
-    `return \\9&&\\(!(${N})\\|\\|(${N})\\)&&\\((${N})=!0,await (${N})\\(${Q}in_pool${Q}\\)\\),\\6===${Q}not_funded${Q}&&!\\13&&await \\14\\(${Q}short${Q}\\),` +
+    `return \\9&&\\(!(${N})\\|\\|(${N})\\)&&\\((${N})=!0,await (${N})\\(${Q}in_pool${Q}\\)\\),\\6===${Q}not_funded${Q}&&!\\13&&` +
+    // (card leftovers-carry-to-cash: what U_X holds written as the op's left when it shows short)
+    `(?:await \\14\\(${Q}short${Q}\\)|\\(await \\14\\(${Q}short${Q}\\),await \\5\\.holds\\?\\.\\(${N}\\)\\)),` +
     // the round: a note of U_X's landing reads fast; a landed note of U_X's counts only with none landing and once this
     // quote's own SUCCESS is read (re-read P2-1), or, on a plain send (card deposit-takes-each-pools-own-coin: no 1Click
     // quote, U_X itself its address), once the chain showed its own money at U_X: over its base, lowered to what U_X
