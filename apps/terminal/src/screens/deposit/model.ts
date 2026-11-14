@@ -5,6 +5,7 @@
 // sheet draws is the one inside the quote SIGN_HOST checked (W:667, CH-028, CH-033).
 import { POOL_ASSET_DECIMALS, POOL_CHAINS } from "@blindfill/kit";
 import { waitingAt } from "../portfolio/model.ts";
+import { withoutMoveLegs } from "../portfolio/move.ts";
 import type { Chain, DepositAsset, DepositFacts, DepositStage, Operation, PoolAsset, PoolChain, PoolDepositFacts, PoolDepositStage, SignpageResults, SignpageState } from "@blindfill/kit";
 
 /**
@@ -435,7 +436,8 @@ const POOL_RECENT_WORD: Record<PoolDepositStage, RecentRow["word"]> = {
  *  shows the USD credited: the pool_deposit op carries no amount. */
 export function recentRows(ops: readonly Operation[] | undefined): RecentRow[] {
   const rows: RecentRow[] = [];
-  for (const op of [...(ops ?? [])].reverse()) {
+  // a Move's deposit leg is the Move's, never a Recent row (card move-shows-one-swap)
+  for (const op of withoutMoveLegs(ops ?? []).reverse()) {
     if (op.kind === "pool_deposit") {
       rows.push({ id: op.id, word: POOL_RECENT_WORD[op.stage], pool: op.chain });
       if (rows.length === 3) break;

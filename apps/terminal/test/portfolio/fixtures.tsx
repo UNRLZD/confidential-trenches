@@ -16,7 +16,7 @@ import { PortfolioSourceProvider, useHeldReads } from "../../src/screens/portfol
 import type { PortfolioSource } from "../../src/screens/portfolio/source.tsx";
 import { MoveSourceProvider } from "../../src/screens/portfolio/move-source.tsx";
 import type { MoveSource } from "../../src/screens/portfolio/move-source.tsx";
-import { routeSteps } from "../../src/screens/portfolio/move.ts";
+import type { MoveChain, MoveStep } from "../../src/screens/portfolio/move.ts";
 import { SigninSheet } from "../../src/screens/signin/SigninSheet.tsx";
 import { SigninSheetProvider, SigninSourceProvider } from "../../src/screens/signin/source.tsx";
 import type { SigninSource } from "../../src/screens/signin/source.tsx";
@@ -208,6 +208,20 @@ export const FIXTURES: Record<string, Fx> = {
   // a price that reads zero is no read: KINU's value is the dash, never $0.00 (owner 10 Nov 18:12Z)
   zeroprice: { data: { market: (c, t) => (t === "KINU" ? { ...MARKET.get(`${c}:${t}`)!, price: "0" } : MARKET.get(`${c}:${t}`) ?? null) } },
   "activity-empty": { state: { ops: [] }, ui: act() },
+  // card move-shows-one-swap: a Move is one Activity row (Move, from-chain to to-chain, the amount, its stage, its time),
+  // its legs none: a running one with its pool release (`<id>/out`), one from Cash done, one failed
+  "move-activity": {
+    state: {
+      ops: [
+        ...STATE.ops,
+        { id: "mv-run", kind: "move", from: "solana", to: "base", stage: "in_transit", txs: [], amount: "0.08", created_ms: NOW - 30_000 },
+        { id: "mv-run/out", kind: "withdraw", stage: "in_transit", txs: [], created_ms: NOW - 29_000, amount_usd: "43.69" },
+        { id: "mv-cash", kind: "move", from: "near", to: "solana", stage: "done", txs: [], amount: "12.5", created_ms: NOW - 90_000 },
+        { id: "mv-fail", kind: "move", from: "base", to: "robinhood", stage: "failed", txs: [], amount: "0.01", created_ms: NOW - 150_000 },
+      ],
+    },
+    ui: act(),
+  },
   restored: {
     state: { ops: [{ id: "rs", kind: "restore", stage: "done", txs: [] }, ...STATE.ops.filter((o) => o.kind === "buy" || o.kind === "sell")] },
     ui: act(),
@@ -254,7 +268,8 @@ export const FIXTURES: Record<string, Fx> = {
   "move-sheet-xy": { move: true, state: { pools: FOUR }, ui: { move: { from: "solana", to: "base", amount: "0.5", id: null, refused: null } } },
   "move-over": { move: true, state: { pools: FOUR }, ui: { move: { from: "solana", to: "base", amount: "9", id: null, refused: null } } },
   "move-refused": { move: "not_allowed", state: { pools: FOUR }, ui: { move: { from: "base", to: "robinhood", amount: "0.1", id: null, refused: null } } },
-  "move-running": { move: true, state: { pools: FOUR, ops: [{ id: "m1", kind: "move", from: "solana", to: "base", stage: "in_vault", txs: [], amount: "0.5" } as unknown as Operation] }, ui: { move: { from: "solana", to: "base", amount: "0.5", id: "m1", refused: null } } },
+  // a pool to a pool is one swap (card move-shows-one-swap): it runs in transit on NEAR Intents, never in the NEAR vault
+  "move-running": { move: true, state: { pools: FOUR, ops: [{ id: "m1", kind: "move", from: "solana", to: "base", stage: "in_transit", txs: [], amount: "0.5" } as unknown as Operation] }, ui: { move: { from: "solana", to: "base", amount: "0.5", id: "m1", refused: null } } },
   // card move-sends-what-it-shows: Max is the page's (2.4979 of the 2.5 SOL its plan sends), an amount to Base under
   // its floor names Min, and an amount the plan cannot send names the nearest it can
   "move-max": { move: true, limits: true, state: { pools: FOUR }, ui: { move: { from: "solana", to: "near", amount: "", id: null, refused: null } } },
@@ -268,6 +283,8 @@ declare global {
     __calls: unknown[];
     /** card withdraw-max-means-all: when set, every dry from now answers this max (a fee or balance re-read moved it) */
     __moveMax?: string;
+    /** card move-shows-one-swap: when set, every dry from now answers these steps */
+    __moveSteps?: MoveStep[];
   }
 }
 window.__calls = [];
@@ -282,12 +299,21 @@ const src: PortfolioSource = { snapshot, data: fx.live ? heldData(snapshot, POOL
  *  the steps; every ask and start is recorded in window.__calls. */
 const MOVE_MAX: Record<string, string> = { near: "73.13", solana: "2.4979", base: "0.2499", robinhood: "0.0999" };
 const DRY_OUT: Record<string, string> = { near: "71.92", solana: "0.4791", base: "0.0241", robinhood: "0.0241" };
+/** The signing page's steps for each pair (packages/signpage/src/cash-to-pool.ts:359-363, release 136 on): a pool to a
+ *  pool one confidential swap. Written out here, not the app's routeSteps, so the sheet is tested against the page. */
+const pageSteps = (from: MoveChain, to: MoveChain): MoveStep[] =>
+  window.__moveSteps ??
+  (from === "near"
+    ? [{ step: "vault_out", chain: "near" }, { step: "intents", chain: to }, { step: "pool_in", chain: to }]
+    : to === "near"
+      ? [{ step: "pool_out", chain: from }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }]
+      : [{ step: "pool_out", chain: from }, { step: "intents", chain: to }, { step: "pool_in", chain: to }]);
 const moveSrc: MoveSource = {
   ships: true,
   dry: async (p) => {
     window.__calls.push({ kind: "move.dry", ...p });
     if (typeof fx.move === "string") return { kind: "refused", code: fx.move };
-    const steps = routeSteps(p.from, p.to)!;
+    const steps = pageSteps(p.from, p.to);
     if (fx.limits) {
       const max = window.__moveMax ?? MOVE_MAX[p.from]!;
       const x = Number(p.amount);
@@ -296,7 +322,7 @@ const moveSrc: MoveSource = {
       if (p.amount === "0.3") return { kind: "limits", value: { max, steps, below: "0.25", above: "0.35" } };
       return { kind: "ok", value: { out: DRY_OUT[p.to]!, fee: "0.0021", steps, max, time_estimate_s: 38 } };
     }
-    return { kind: "ok", value: { out: DRY_OUT[p.to]!, fee: p.from === "near" ? "0.42" : p.from === "solana" ? "0.0021" : "0.00004", steps: routeSteps(p.from, p.to)!, time_estimate_s: p.from === "near" || p.to === "near" ? 38 : 76 } };
+    return { kind: "ok", value: { out: DRY_OUT[p.to]!, fee: p.from === "near" ? "0.42" : p.from === "solana" ? "0.0021" : "0.00004", steps: pageSteps(p.from, p.to), time_estimate_s: p.from === "near" || p.to === "near" ? 38 : 76 } };
   },
   start: (p) => {
     window.__calls.push({ kind: "move", ...p });

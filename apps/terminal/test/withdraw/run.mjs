@@ -47,6 +47,7 @@ const STATES = [
   ["stopped", "stopped", 0],
   ["stopped-down", "stopped", 0],
   ["old", null, 0],
+  ["move", null, 4],
 ];
 const SOLSCAN = "https://solscan.io/tx/5xYq2kPZbE7rN4cT8wLm1vDh3sFj6gUa9oRiKeXtBnWpQz2cM7yHd4LfVs8JaGu1";
 const NEARBLOCKS = "https://nearblocks.io/txns/9QxkTn3d2bYpW8LhF4cVzR7mKe1sJ6uA5gN0oPiHqXyD";
@@ -109,9 +110,9 @@ try {
       const tag = `${f} @${w.name}`;
       const { ctx, page, external } = await open(browser, w, f, run);
       if (want === null) {
-        // the old one: give the page its second state, then nothing may be drawn
+        // the old one, or a Move's own release: give the page its second state, then nothing may be drawn
         await page.clock.runFor(1000);
-        check((await page.locator(".wdr").count()) === 0, `${tag}: an old finished withdrawal drawn`);
+        check((await page.locator(".wdr").count()) === 0, `${tag}: ${f === "move" ? "a Move's release" : "an old finished withdrawal"} drawn`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `none-${f}-${w.name}.png`) });
         await ctx.close();
         continue;

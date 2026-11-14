@@ -9,13 +9,15 @@ import { W } from "./W.tsx";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import { WORDS as TRADE } from "../trade/words.ts";
+import { chainOf } from "../market/pads.ts";
 
 // Activity (S14; 09-design-brief S14): what this browser did, newest first, under day headers (Today, Yesterday, then
 // the date), with the type chips (CN-28's labels), the min size and the token search (CN-103), a tap-only tx link per
 // row and the row opened in place to its receipt. The list is local: the kit's ops joined with their local facts
 // (model.ts activity). After a restore (the kit's restore op done) the list says older history is not restorable.
 
-const KIND: Record<ActKind, WordId> = { buy: "kBuy", sell: "kSell", deposit: "kDeposit", withdraw: "kWithdraw", export: "kExport" };
+// a Move's row and chip take the Move sheet's own word (card move-shows-one-swap)
+const KIND: Record<ActKind, WordId> = { buy: "kBuy", sell: "kSell", deposit: "kDeposit", withdraw: "kWithdraw", move: "move", export: "kExport" };
 const FINAL = new Set(["done", "sent", "filled", "part_filled", "refused", "not_landed", "refunded", "stopped", "held", "halted", "key_exported"]);
 
 export interface ActUi {
@@ -85,8 +87,9 @@ const hhmm = (t: number, tzMin: number) => new Date(t + tzMin * 60_000).toISOStr
 function Row({ r, d, src, tzMin, open, onOpen }: { r: ActRow; d: PortfolioData; src: PortfolioSource; tzMin: number; open: boolean; onOpen(): void }) {
   const m = r.chain && r.token ? d.market(r.chain, r.token) : null;
   const link = txLink(r.txs);
-  const ic = r.kind === "buy" ? <span className="aic g"><Ic name="arrowUp" size={13} /></span> : r.kind === "sell" ? <span className="aic r"><Ic name="arrowDown" size={13} /></span> : r.kind === "export" ? <span className="aic"><Ic name="key" size={13} /></span> : <span className="aic"><Ic name={r.kind === "deposit" ? "deposit" : "arrowUp"} size={13} /></span>;
-  const pending = !FINAL.has(r.stage);
+  const ic = r.kind === "buy" ? <span className="aic g"><Ic name="arrowUp" size={13} /></span> : r.kind === "sell" ? <span className="aic r"><Ic name="arrowDown" size={13} /></span> : r.kind === "export" ? <span className="aic"><Ic name="key" size={13} /></span> : r.kind === "move" ? <span className="aic"><Ic name="move" size={13} /></span> : <span className="aic"><Ic name={r.kind === "deposit" ? "deposit" : "arrowUp"} size={13} /></span>;
+  // a failed row draws Transaction failed, never Processing (a Move's failed stage is no trade's)
+  const pending = !FINAL.has(r.stage) && !r.failed;
   return (
     <div className={`arow2 ${open ? "open" : ""}`} data-row={r.id} data-kind={r.kind}>
       <div className="ai" role="button" tabIndex={0} aria-expanded={open} onClick={onOpen} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen()}>
@@ -94,6 +97,7 @@ function Row({ r, d, src, tzMin, open, onOpen }: { r: ActRow; d: PortfolioData; 
         <div className="grow">
           <div className="aw">
             {r.kind === "export" ? <W id="keyExported" /> : <W id={KIND[r.kind]} />} {m && <span>{m.symbol}</span>}
+            {r.move && <span data-move-route>{chainOf(r.move.from)?.name ?? r.move.from} → {chainOf(r.move.to)?.name ?? r.move.to}</span>}
             {pending && <span className="tag blue"><W id="processing" /></span>}
             {r.stage === "refunded" && <span className="tag warn"><W id="refunded" /></span>}
             {r.failed && (
@@ -107,6 +111,7 @@ function Row({ r, d, src, tzMin, open, onOpen }: { r: ActRow; d: PortfolioData; 
         <div className="avl">
           {r.usd !== null ? <span className={r.kind === "sell" ? "gain" : ""}>{usdC(r.usd)}</span> : <span className="t3">{"—"}</span>}
           {r.units && <div className="t3">{units(r.units)}</div>}
+          {r.move?.amount && <div className="t3" data-move-amount>{units(r.move.amount)} {r.move.asset}</div>}
         </div>
         {r.kind === "export" ? (
           <button type="button" className="abtn" data-control="view-key" onClick={(e) => (e.stopPropagation(), src.act({ kind: "view-key", id: r.id }))}><W id="viewKey" /></button>
