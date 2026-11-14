@@ -74,6 +74,20 @@ test("recorded good answer goodKit117 (card buy-any-amount-on-every-chain's buil
   for (const [k, l, m, n] of [["1.17", "1.15", "1.14", "1.13"], ["1.16", "1.14", "1.14", "1.13"], ["1.16", "1.15", "1.12", "1.13"], ["1.16", "1.15", "1.14", "1.12"]]) assert.equal(facts(g.index, js(k, l, m, n)).notice, null, `${k} ${l} ${m} ${n}`);
 });
 
+test("recorded good answer goodKit118 (card move-sends-or-says-why's build, kit 1.18): the notice at the current level, kit-v1.17's, kit-v1.16's, kit-v1.15's, kit-v1.14's or kit-v1.13's, the six that read it: PASS; that build with kit-v1.12 in kit-v1.17's place (badKit118NoticeLevel): FAIL", () => {
+  const g = ANSWERS.goodKit118;
+  assert.deepEqual(judge(g).lines, []);
+  assert.match(g.notice, /!==`current`&&[\w$]+!==`1\.17`&&[\w$]+!==`1\.16`&&[\w$]+!==`1\.15`&&[\w$]+!==`1\.14`&&[\w$]+!==`1\.13`\|\|/);
+  assert.notEqual(g.sha384, ANSWERS.goodKit117.sha384, "another build");
+  const bad = ANSWERS.badKit118NoticeLevel;
+  assert.notEqual(bad.sha384, g.sha384, "its own build");
+  assert.deepEqual(judge(bad).lines, [NOTICE]);
+  // the 1.18 shape with any other levels is no notice a kit-v1.13 to kit-v1.17 app reads
+  const js = (j, k, l, m, n) => `closed:e=>{!i||r!==\`current\`&&r!==\`${j}\`&&r!==\`${k}\`&&r!==\`${l}\`&&r!==\`${m}\`&&r!==\`${n}\`||o({v:1,type:\`closed\`,id:e})}`;
+  assert.notEqual(facts(g.index, js("1.17", "1.16", "1.15", "1.14", "1.13")).notice, null);
+  for (const [j, k, l, m, n] of [["1.18", "1.16", "1.15", "1.14", "1.13"], ["1.12", "1.16", "1.15", "1.14", "1.13"], ["1.17", "1.15", "1.15", "1.14", "1.13"], ["1.17", "1.16", "1.15", "1.14", "1.12"]]) assert.equal(facts(g.index, js(j, k, l, m, n)).notice, null, `${j} ${k} ${l} ${m} ${n}`);
+});
+
 for (const [k, lines] of [
   ["bad", [NOTICE, TIMER, OPEN, CLOSE, TOLD, RUN, OPENS(0, 2)]],
   ["badBeforeReview", [NOTICE, TIMER, CLOSE, TOLD, RUN]],

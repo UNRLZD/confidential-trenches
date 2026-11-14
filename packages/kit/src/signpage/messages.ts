@@ -443,7 +443,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.17";
+export const SIGNPAGE_KIT_VERSION = "1.18";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -633,6 +633,8 @@ export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
  * deposit's op id is its pool.address request's id (card pool-deposit-stages), `chain` the pool's. A move's op id is its
  * pool.move request's id, or the id a buy's route event names (card one-balance-buys-on-every-chain): `amount` what
  * left `from`, in its asset's whole units, and `out` the least that arrives on `to`, in its asset's, each once known.
+ * A move's `code` (kit 1.18, card move-sends-or-says-why): on a failed move, why it failed before it sent (its
+ * record's refusal: "not_sent", "down", "quote_check_failed" or the quote's own code), the buy and sell ops' field.
  */
 export type Operation = (
   | ({ readonly id: string; readonly kind: "deposit"; readonly stage: DepositStage; readonly txs: readonly TxRef[] } & DepositFacts)
@@ -642,7 +644,7 @@ export type Operation = (
   | { readonly id: string; readonly kind: "hop"; readonly stage: HopStage; readonly txs: readonly TxRef[] }
   | { readonly id: string; readonly kind: "return"; readonly stage: ReturnStage; readonly txs: readonly TxRef[] }
   | { readonly id: string; readonly kind: "restore"; readonly stage: RestoreStage; readonly txs: readonly TxRef[] }
-  | { readonly id: string; readonly kind: "move"; readonly from: TradeChain; readonly to: TradeChain; readonly stage: MoveStage; readonly txs: readonly TxRef[]; readonly amount?: string; readonly out?: string }
+  | { readonly id: string; readonly kind: "move"; readonly from: TradeChain; readonly to: TradeChain; readonly stage: MoveStage; readonly txs: readonly TxRef[]; readonly amount?: string; readonly out?: string; readonly code?: ErrorCode }
 ) & OpDetail;
 
 /**
