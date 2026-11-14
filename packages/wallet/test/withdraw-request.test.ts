@@ -166,6 +166,28 @@ test("WU-06: a failed RESERVED write stops the request: nothing is handed back a
   assert.equal((await v.ns.get(v.notes[1]!.id))?.state, "UNSPENT");
 });
 
+// Card move-sends-or-says-why (142): a Move out of Cash hands its claim on its send-by to the request; it is awaited once
+// the proof is made, right before the note goes RESERVED. A claim refused (the move passed its send-by unclaimed, or
+// ended) frees the note UNSPENT and hands nothing back; a claim given lets RESERVED follow it. Red at 9be5d5ab1: the
+// request took no claim and wrote RESERVED anyway.
+test("(card move-sends-or-says-why) a move's claim is awaited after the proof and before RESERVED; refused, the note is freed and nothing is handed back", async () => {
+  const v = await vaultWith();
+  const log: string[] = [];
+  v.failPut.on = (rec) => {
+    const st = (rec as { state?: string }).state;
+    if (st === "HELD" || st === "RESERVED") log.push(`write ${st}`);
+    return false;
+  };
+  const r = await withdrawRequest({ ...argsFor(v, signalsProver(log)), claim: async () => void log.push("claim") });
+  assert.deepEqual(log, ["write HELD", "load withdraw", "prove withdraw", "claim", "write RESERVED"]);
+  assert.equal((await v.ns.get(r.noteId))?.state, "RESERVED");
+  const w = await vaultWith();
+  const p = signalsProver();
+  await assert.rejects(withdrawRequest({ ...argsFor(w, p), claim: async () => Promise.reject(new Error("the move may no longer send")) }), /no longer send/);
+  assert.deepEqual(p.log, ["load withdraw", "prove withdraw"], "the claim comes after the proof");
+  assert.deepEqual((await w.ns.list()).map((n) => n.state), ["UNSPENT", "UNSPENT", "UNSPENT"], "no note left HELD or RESERVED");
+});
+
 test("a proof that fails frees the note, and the failure reaches the caller", async () => {
   const v = await vaultWith();
   const broken: VaultProver = { load: async () => {}, prove: async () => Promise.reject(new Error("the prover died")) };
