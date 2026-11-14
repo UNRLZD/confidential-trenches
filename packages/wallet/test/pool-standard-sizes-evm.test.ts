@@ -40,6 +40,10 @@ const drain = (v: bigint): { chunks: bigint[]; left: bigint } => {
   return { chunks, left: x };
 };
 
+test("the pool carries the piece rule: the 0.0001 ETH grid (MIN_DEPOSIT), the 0.001 ETH floor and least rung, an older note from 0.0001 ETH whole", () => {
+  assert.deepEqual((POOL as { pieces?: unknown }).pieces, { grid: 10n ** 14n, floor: E15, ladder: EVM_LADDER, least: 10n ** 14n });
+});
+
 test("the sale's 1,880,137,434,291,065 wei note on Robinhood moves to its last wei: released whole once, never a rung that strands the rest", () => {
   assert.deepEqual(drain(1_880_137_434_291_065n), { chunks: [1_880_137_434_291_065n], left: 0n });
 });
