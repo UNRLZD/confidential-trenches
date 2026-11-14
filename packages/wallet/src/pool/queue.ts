@@ -78,6 +78,7 @@ import { changeIndex, freshWallet } from "../derive/index.ts";
 import { noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { heldBy, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import type { ProofKeep } from "./kept-proofs.ts";
+import type { ProverGate } from "./prover-gate.ts";
 import { checkLadder } from "./ladder.ts";
 import { checkBinding, checkPool, cutOrEmpty, poolChunkOf, failAs, NEWEST_GRACE_MS, PassFail, NOW_REUSE_MS, TAKE_SLACK_MS, type ChainNow, type PassReason, type Pool, type PoolTrees, type ReadyProof } from "./pool.ts";
 
@@ -109,6 +110,10 @@ export type ProofQueueArgs<R> = {
   monotonic?: () => number;
   /** Where the ready proofs are kept across a reload or a hand-over (./kept-proofs.ts keptProofs); none: memory only. */
   kept?: ProofKeep<R>;
+  /** One prover shared with other pools' queues (./prover-gate.ts proverGate): Max's set, a newest-root proof and
+   *  proveFor ask it as "max", the other notes' own proofs as "rest", and a pass holds the gate until its last "max"
+   *  proof is made, so every pool's Max goes first. None: provers. */
+  ranked?: ProverGate;
 };
 
 /** What one pass did: the notes it proved, the notes whose proof was made again, and each failure. */
@@ -522,16 +527,16 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     // of that room (the primary's own among them) is let go, its note still HELD by its tier 1 proof if it has one; one
     // to another W or of an earlier epoch is made again, kept ready meanwhile.
     const t2: Todo[] = [];
-    let pid: string | undefined;
+    // the primary, Max's own note, in every pool (a pool with no tier 2: Max is its own proof alone)
+    const set = new Map<string, NoteRecord>();
+    for (const r of ready.values()) {
+      const n = byId.get(r.noteId);
+      if (n !== undefined) set.set(n.id, n);
+    }
+    for (const t of t1) set.set(t.n.id, t.n);
+    const p = [...set.values()].sort(byChunk)[0];
+    const pid: string | undefined = p?.id;
     if (altRoom > 0) {
-      const set = new Map<string, NoteRecord>();
-      for (const r of ready.values()) {
-        const n = byId.get(r.noteId);
-        if (n !== undefined) set.set(n.id, n);
-      }
-      for (const t of t1) set.set(t.n.id, t.n);
-      const p = [...set.values()].sort(byChunk)[0];
-      pid = p?.id;
       let to: To | undefined;
       let kept: NoteRecord[] = [];
       if (p !== undefined) {
@@ -575,16 +580,24 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       if (inSet(x) !== inSet(y)) return inSet(x) ? -1 : 1;
       return byChunk(x.n, y.n);
     });
-    const todo: Todo[] = [...t1.filter((t) => raises(t) && t.n.id === pid), ...t2.filter(raises), ...remakes, ...t1.filter((t) => raises(t) && t.n.id !== pid)];
+    const order: Todo[] = [...t1.filter((t) => raises(t) && t.n.id === pid), ...t2.filter(raises), ...remakes, ...t1.filter((t) => raises(t) && t.n.id !== pid)];
+    // on a shared prover (card balance-shows-fast): this pass's "max" proofs (Max's set, fresh money on the newest root)
+    // first, in the order above, the gate held until the last of them is made, then the rest
+    const isMax = (t: Todo): boolean => inSet(t) || t.root === "newest";
+    const todo: Todo[] = a.ranked === undefined ? order : [...order.filter(isMax), ...order.filter((t) => !isMax(t))];
+    const maxes = a.ranked === undefined ? 0 : todo.filter(isMax).length;
+    const release = maxes > 0 ? a.ranked!.hold() : () => {};
     let k = 0;
     const lane = async (prover: VaultProver): Promise<void> => {
       for (let t = todo[k++]; t !== undefined; t = todo[k++]) {
+        if (k > maxes) release();
         if (closed || signal?.aborted) return;
         // a tier 2 proof pays the primary's W: none while the primary has no ready proof of its own (it failed)
         if (t.to !== undefined && (pid === undefined || !ready.has(pid))) continue;
         inFlight.set(t.n.id, { dropped: false });
         try {
-          await prove(t.n, prover, t.trees, t.root, start, t.prev, t.to ?? null, signal);
+          // Max's set and fresh money first on a shared prover (card balance-shows-fast); the rest after every pool's
+          await prove(t.n, a.ranked?.prover(isMax(t) ? "max" : "rest") ?? prover, t.trees, t.root, start, t.prev, t.to ?? null, signal);
           (t.prev !== undefined ? out.remade : out.made).push(t.n.id);
           void persist();
         } catch (e) {
@@ -595,7 +608,11 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         }
       }
     };
-    await Promise.all(provers.map(lane));
+    try {
+      await Promise.all(provers.map(lane));
+    } finally {
+      release();
+    }
     return out;
   }
 
@@ -732,7 +749,7 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
         carried.add(noteId);
         inFlight.set(noteId, { dropped: false });
         try {
-          await prove(n, provers[0]!, trees, "newest", epochOf(nowMs), undefined, to, signal);
+          await prove(n, a.ranked?.prover("max") ?? provers[0]!, trees, "newest", epochOf(nowMs), undefined, to, signal);
         } catch (e) {
           carried.delete(noteId);
           throw e;

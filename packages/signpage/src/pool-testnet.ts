@@ -57,6 +57,7 @@ import { openNoteStore, readNotes, readReservedMarks, type NoteRecord, type Note
 import { chainNow, failAs, type Pool, type ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { openProofQueue, PassFail, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { keptProofs } from "../../wallet/src/pool/kept-proofs.ts";
+import { proverGate } from "../../wallet/src/pool/prover-gate.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { proofFront, type ProofFront } from "./proof-front.ts";
@@ -943,6 +944,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     solanaStop = new AbortController();
   };
   const prover = over.prover ?? proverHost();
+  // every pool's queue on the one prover, each pool's Max set before any other note's proof (card balance-shows-fast)
+  const gate = proverGate(prover.vault);
   // the device's one proving tab (card robinhood-note-spendable): every pool's queue opens only while this tab holds it,
   // and all close, their notes freed, when it loses it, so a note one tab proved is never stuck HELD out of the tab in use
   const front: ProofFront =
@@ -989,7 +992,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
       warmProver();
       // the ready proofs kept in the wallet store (card balance-shows-fast): a reload or a hand-over adopts them, no prover run
-      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes, kept: keptProofs(await page.store(), pool.id) }), notes, poolId: pool.id };
+      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes, kept: keptProofs(await page.store(), pool.id), ranked: gate }), notes, poolId: pool.id };
     } catch (e) {
       notes.close();
       throw e;
@@ -1304,7 +1307,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       } : undefined;
       warmProver();
       // the ready proofs kept in the wallet store (card balance-shows-fast): a reload or a hand-over adopts them, no prover run
-      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes, kept: keptProofs(await page.store(), pool.id) }), notes, poolId: pool.id, ...(hold ? { hold } : {}), ...(tradePool !== null ? { landing } : {}) };
+      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes, kept: keptProofs(await page.store(), pool.id), ranked: gate }), notes, poolId: pool.id, ...(hold ? { hold } : {}), ...(tradePool !== null ? { landing } : {}) };
     } catch (err) {
       notes.close();
       throw err;
