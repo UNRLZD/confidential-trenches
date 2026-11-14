@@ -164,6 +164,13 @@ test("A1: a tag 3 inner instruction invoking a program off the kit's list is ref
   assert.deepEqual(calls, []);
 });
 
+test("a tag 3 inner instruction invoking Meteora DLMM (a DLMM coin's buy) is carried, named in the message or loaded from a table", async () => {
+  const DLMM = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"; // by its address: main's list had no DLMM
+  assert.equal(verdict(wire({ inner: DLMM })), "ok");
+  const on = [DLMM, TO];
+  assert.equal(code(await sender({ tablesA: { [TABLE]: tableData(on) } }).carry(body(wire({ inner: DLMM, table: on })))), "ok");
+});
+
 test("M362 (1): a tag 3 inner step invoking Token-2022 (a transfer that runs the mint's hook) is refused before any read (inner_program)", async () => {
   assert.equal(verdict(wire({ inner: SOLANA_TOKEN_2022_PROGRAM })), "inner_program");
   const calls: Calls = [];
