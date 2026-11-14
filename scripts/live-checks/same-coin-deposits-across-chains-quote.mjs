@@ -16,6 +16,9 @@
 // A kit that pins a fee for a same-coin route other than 1Click charges fails here, on either side: a route 1Click
 // moves to 20 (every such deposit would be refused quote_check_failed) and a neighbour 1Click moves to 1.
 // After: sign
+// Bundle: read sign
+// (scripts/ci/bundle-checks.mjs runs `bundle`, the SIGN_HOST half alone, on a pull request's own build: the 1Click half
+// reads past the build.)
 //   node scripts/live-checks/same-coin-deposits-across-chains-quote.mjs [--record <file>]
 //   node scripts/live-checks/same-coin-deposits-across-chains-quote.mjs --answer <file>     judge a record, no network
 // --record writes what the run read with 1Click's signature left out of each body (an "ed25519:" signature has a NEAR
@@ -72,14 +75,36 @@ export function quoteRequest([origin, dest], mode, now) {
   };
 }
 
-/** Reads SIGN_HOST and every route's dry quote in both modes; returns the record judge() reads. */
-export async function read(fetchFn = fetch, now = Date.now, pause = (ms) => new Promise((r) => setTimeout(r, ms))) {
+/** SIGN_HOST's facts, read with `fetchFn`. */
+async function readSign(fetchFn) {
   const get = async (p) => {
     const r = await fetchFn(`${SIGN}${p}`, { redirect: "error", signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (r.status !== 200) throw new Error(`${SIGN}${p}: HTTP ${r.status}`);
     return r.text();
   };
-  const sign = facts(await get("/"), await get("/app.js"));
+  return facts(await get("/"), await get("/app.js"));
+}
+
+/** The SIGN_HOST half's BAD lines (none when it holds) and its ok line. */
+function signLines(s) {
+  const bad = [];
+  if (!s?.pin) bad.push("SIGN_HOST's index.html pins no /app.js");
+  else if (s.pin !== s.sha384) bad.push("SIGN_HOST's served /app.js is not the one index.html pins");
+  const carried = Array.isArray(s?.routes) ? s.routes : [];
+  const missing = ONECLICK_SAME_COIN_ROUTES.map(routeName).filter((r) => !carried.includes(r));
+  if (missing.length) bad.push(`SIGN_HOST's /app.js lacks the kit's same-coin route${missing.length > 1 ? "s" : ""} ${missing.join(", ")}: its device refuses that deposit's quote (quote_check_failed)`);
+  return { bad, ok: `ok  SIGN_HOST's /app.js carries all ${carried.length} same-coin routes, frozen` };
+}
+
+/** The bundle checks' run (scripts/ci/bundle-checks.mjs): the SIGN_HOST half alone, on the build `fetchFn` serves. */
+export async function bundle(fetchFn) {
+  const { bad, ok } = signLines(await readSign(fetchFn));
+  return { ok: bad.length === 0, lines: bad.length ? bad.map((l) => `BAD ${l}`) : [ok] };
+}
+
+/** Reads SIGN_HOST and every route's dry quote in both modes; returns the record judge() reads. */
+export async function read(fetchFn = fetch, now = Date.now, pause = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  const sign = await readSign(fetchFn);
   const quotes = [];
   for (const route of ROUTES) for (const mode of MODES) {
     const request = quoteRequest(route, mode, now());
@@ -122,13 +147,9 @@ export function judge(rec) {
   const vendor = [];
   let ok = true;
   const bad = (m) => { ok = false; lines.push(`BAD ${m}`); };
-  const s = rec?.sign;
-  if (!s?.pin) bad("SIGN_HOST's index.html pins no /app.js");
-  else if (s.pin !== s.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
-  const carried = Array.isArray(s?.routes) ? s.routes : [];
-  const missing = ONECLICK_SAME_COIN_ROUTES.map(routeName).filter((r) => !carried.includes(r));
-  if (missing.length) bad(`SIGN_HOST's /app.js lacks the kit's same-coin route${missing.length > 1 ? "s" : ""} ${missing.join(", ")}: its device refuses that deposit's quote (quote_check_failed)`);
-  else lines.push(`ok  SIGN_HOST's /app.js carries all ${carried.length} same-coin routes, frozen`);
+  const sl = signLines(rec?.sign);
+  for (const l of sl.bad) bad(l);
+  if (!sl.bad.length) lines.push(sl.ok);
   const quotes = Array.isArray(rec?.quotes) ? rec.quotes : [];
   for (const route of ROUTES) for (const mode of MODES) {
     const name = `${routeName(route)} ${mode}`;

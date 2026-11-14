@@ -42,7 +42,7 @@ export const ONECLICK_SIGNING_KEYS = Object.freeze([...PINNED, ${JSON.stringify(
     return { format: "module", source, shortCircuit: true };
   },
 });
-const { COLLECTOR, EXIT, MODES, NEIGHBOURS, ROUTES, facts, judge, read, routeName, unsigned } = await import("./same-coin-deposits-across-chains-quote.mjs");
+const { COLLECTOR, EXIT, MODES, NEIGHBOURS, ROUTES, bundle, facts, judge, read, routeName, unsigned } = await import("./same-coin-deposits-across-chains-quote.mjs");
 const { ONECLICK_SAME_COIN_ROUTES, ONECLICK_SIGNING_KEYS, oneClickFeeBps } = await import("../../packages/kit/src/index.ts");
 assert.ok(ONECLICK_SIGNING_KEYS.includes(HARNESS_KEY) && Object.isFrozen(ONECLICK_SIGNING_KEYS));
 const u = (x) => (x ? x : undefined);
@@ -167,4 +167,20 @@ test("read asks SIGN_HOST and every route in both modes through the helper, dry,
   assert.ok(quotes.every((a) => a.url === "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote" && a.body.dry === true));
   assert.equal(quotes.filter((a) => a.body.confidentiality === "advanced").length, ROUTES.length);
   assert.doesNotMatch(JSON.stringify(unsigned(rec)), /ed25519:/);
+});
+test("bundle: the SIGN_HOST half alone, on a build that carries every route frozen PASS, one route short FAIL; it asks nothing else", async () => {
+  const routes = ONECLICK_SAME_COIN_ROUTES.map(([o, d]) => `Object.freeze([\`${o}\`,\`${d}\`])`);
+  const serve = (js) => {
+    const index = `<script type="module" src="/app.js" integrity="sha384-${createHash("sha384").update(js).digest("base64")}"></script>`;
+    return async (url) => {
+      if (url === "https://confidential.unrealized.trade/app.js") return new Response(js);
+      if (url === "https://confidential.unrealized.trade/") return new Response(index);
+      throw new Error(`${url}: not this build`);
+    };
+  };
+  const all = await bundle(serve(`a=Object.freeze([${routes.join(",")}])`));
+  assert.equal(all.ok, true, all.lines.join("\n"));
+  const short = await bundle(serve(`a=Object.freeze([${routes.slice(1).join(",")}])`));
+  assert.equal(short.ok, false);
+  assert.match(short.lines.join("\n"), new RegExp(`lacks the kit's same-coin route ${ETH_BASE}`));
 });
