@@ -250,6 +250,25 @@ const SEATS_DOWN = new Map<string, number>();
 export function seatsUp(): void {
   SEATS_DOWN.clear();
 }
+/** Whether the seat `url` is taken for down now (its reads go to its spare). */
+export const seatIsDown = (url: string): boolean => (SEATS_DOWN.get(url) ?? -Infinity) > performance.now();
+/**
+ * One read on the seat `url`, else on its spare: straight to the spare while the seat is down; a seat read that fails
+ * as seatDown says takes the seat down SEAT_DOWN_MS (or as long as a busy seat names, up to SEAT_DOWN_MAX_MS: the
+ * helper's day cap) and asks the spare. Any other failure, or the caller's own abort, is thrown as it is. The NEAR
+ * trade's seat (nearSeatRpc) and the vault hand-off's seat (signpage withdraw/handoff.ts) share the down time.
+ */
+export async function viaSeat<T>(url: string, seat: () => Promise<T>, spare: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (seatIsDown(url)) return spare();
+  try {
+    return await seat();
+  } catch (e) {
+    if (signal?.aborted || !seatDown(e)) throw e;
+    const named = isBusy(e) ? Math.min(SEAT_DOWN_MAX_MS, e.retryAfterMs ?? 0) : 0;
+    SEATS_DOWN.set(url, performance.now() + Math.max(SEAT_DOWN_MS, named));
+    return spare();
+  }
+}
 /**
  * The page's FastNEAR seat on `network` (card near-quote-under-the-pace): the helper's POST /v1/rpc/near?keyed=only,
  * FastNEAR's key at PACE.seat, a 429 waited out as pacedNearRpc does; past that, or with the helper down or slow
@@ -265,18 +284,8 @@ export function nearSeatRpc(network: NearNetwork, fetchFn: typeof fetch = (...a)
   if (net.seat === null) return spare;
   const url = net.seat;
   const seat = pacedNearRpc(url, fetchFn);
-  const down = () => (SEATS_DOWN.get(url) ?? -Infinity) > performance.now();
-  const or = async (read: () => Promise<unknown>, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => {
-    try {
-      return await read();
-    } catch (e) {
-      if (signal?.aborted || !seatDown(e)) throw e;
-      // down SEAT_DOWN_MS, or as long as a busy seat names up to SEAT_DOWN_MAX_MS (the helper's day cap)
-      const named = isBusy(e) ? Math.min(SEAT_DOWN_MAX_MS, e.retryAfterMs ?? 0) : 0;
-      SEATS_DOWN.set(url, performance.now() + Math.max(SEAT_DOWN_MS, named));
-      return spare.query(params, signal);
-    }
-  };
+  const down = () => seatIsDown(url);
+  const or = (read: () => Promise<unknown>, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> => viaSeat(url, read, () => spare.query(params, signal), signal);
   const rpc: NearRpc = {
     name: url,
     query: (params, signal) => (down() ? spare.query(params, signal) : or(() => seat.query(params, signal), params, signal)),
