@@ -37,9 +37,10 @@ test("the mainnet build's pool RPCs (src/pool-testnet.ts on SIGN_HOST's build): 
   await withThrottledOnce(async (seen) => {
     const deps = testnetPoolDeps();
     for (const r of deps.rpcs("solana")!) assert.equal(await (r as unknown as (m: string, p: unknown[]) => Promise<unknown>)("getSlot", []), 42);
-    // the public seat: provider A's 429 sends the read to its spare at once, the spare (the last) asked again once
+    // the public seat: provider A's 429 sends the read to its spare at once, the next one's too, the last asked again once
     assert.equal(seen.get(SOLANA_PROVIDER_A), 1);
-    assert.equal(seen.get(SOLANA_PUBLIC_SEAT[1]!), 2);
+    assert.equal(seen.get(SOLANA_PUBLIC_SEAT[1]!), 1);
+    assert.equal(seen.get(SOLANA_PUBLIC_SEAT.at(-1)!), 2);
     assert.equal(seen.get(`${TRADE_HELPER}/v1/rpc/solana`), 2);
     for (const chain of ["base", "robinhood"] as const)
       assert.deepEqual(deps.rpcs(chain)!.map((r) => (r as unknown as { url: string }).url), pageEvmPoolRpcs(chain)!.slice(0, 2).map((r) => (r as unknown as { url: string }).url));
@@ -54,7 +55,9 @@ test("the mainnet build's found W token-account pair: SOLANA_TOKEN_SEAT then the
     const [a, b] = pageSolanaTokenRpcs("pass");
     assert.equal((a as unknown as { url: string }).url, `${SOLANA_TOKEN_SEAT}/`);
     assert.equal((b as unknown as { url: string }).url, `${TRADE_HELPER}/v1/rpc/solana`);
-    for (const r of [a, b]) assert.ok(!SOLANA_PUBLIC_SEAT.some((u) => (r as unknown as { url: string }).url.startsWith(u)), "never the public seat");
+    // never the seat's members that refuse these reads (publicnode and Pocket), nor a seat that may fail over to them
+    for (const r of [a, b]) assert.ok(![SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT[1]!].some((u) => (r as unknown as { url: string }).url.startsWith(u)), "never publicnode or Pocket");
+    for (const r of [a, b]) assert.deepEqual(seatHosts(r), [(r as unknown as { url: string }).url], "one provider each, no seat");
     assert.deepEqual(SOLANA_TOKEN_SEAT_LIMIT, { windowMs: 1_250, total: 1, perMethod: 1 });
     // both read through a 429 once
     assert.equal(await a("getSlot", []), 42);
@@ -162,7 +165,8 @@ test("the page's trade path (src/trade.ts releaseTradeDeps): both providers read
     const d = releaseTradeDeps();
     for (const p of d.providers) assert.equal(await p("getSlot", []), 42);
     assert.equal(seen.get(SOLANA_PROVIDER_A), 1);
-    assert.equal(seen.get(SOLANA_PUBLIC_SEAT[1]!), 2);
+    assert.equal(seen.get(SOLANA_PUBLIC_SEAT[1]!), 1);
+    assert.equal(seen.get(SOLANA_PUBLIC_SEAT.at(-1)!), 2);
     assert.equal(seen.get(`${TRADE_HELPER}/v1/rpc/solana`), 2);
   });
 });
@@ -283,6 +287,32 @@ test("a public seat whose first provider has no connection, or stalls to the rea
   }
 });
 
+// Card move-sends-or-says-why (142): the owner's Firefox page read "CORS request did not succeed" from publicnode and
+// Pocket, no answer at all, so the Move's reads had one provider left, the helper, and the device signs on none alone.
+// With both silent at the network level, every read of the page's Solana pairs answers from the seat's next member,
+// device-direct, inside the read's bound, and the helper stays the pair's other provider.
+test("(card move-sends-or-says-why) publicnode and Pocket both give no answer: the seat reads on its next device-direct member, the helper still the pair's second", async () => {
+  assert.ok(SOLANA_PUBLIC_SEAT.length >= 3, `the seat has a member past publicnode and Pocket: ${SOLANA_PUBLIC_SEAT.join(", ")}`);
+  const NEXT_HOST = new URL(SOLANA_PUBLIC_SEAT[2]!).host;
+  const silent = new Set([A_HOST, SPARE_HOST]);
+  for (const down of ["throw", "stall"] as const)
+    for (const [name, make] of [["pageSolanaRpcs", () => pageSolanaRpcs("trade")], ["pageSolanaSettleRpcs", () => pageSolanaSettleRpcs("pass")], ["releaseTradeDeps", () => releaseTradeDeps().providers]] as const) {
+      await onSeat((host) => (silent.has(host) ? { status: 0, down } : { status: 200 }), async (log) => {
+        const pair = make();
+        assert.equal(pair.length, 2, `${name}: a pair`);
+        assert.ok(!seatHosts(pair[0]).some((u) => u.startsWith(TRADE_HELPER)), `${name}: the helper is no member of the seat`);
+        assert.ok(seatHosts(pair[1])[0]!.startsWith(TRADE_HELPER), `${name}: the helper is the pair's second`);
+        const t0 = performance.now();
+        assert.equal(await pair[0]("getAccountInfo", [W, { encoding: "base64" }]), NEXT_HOST, `${name} ${down}`);
+        assert.deepEqual(log.map((r) => r.host), [A_HOST, SPARE_HOST, NEXT_HOST], `${name} ${down}: publicnode once, Pocket once, then the next member`);
+        assert.ok(new Set(log.map((r) => r.params)).size === 1, "one request, one wallet in it, on each");
+        // a dropped connection fails over at once, a stall at each member's try's bound (3.5 s each)
+        const ms = performance.now() - t0;
+        assert.ok(down === "throw" ? ms < 200 : ms >= 6_900 && ms < 7_400, `${name} ${down}: answered at ${Math.round(ms)} ms`);
+      });
+    }
+});
+
 // The review of 507431c0, item 5: with no member open, the seat asks the member whose host opens first.
 test("a public seat with every member paused asks the one whose pause ends first", async () => {
   await onSeat(() => ({ status: 200 }), async (log) => {
@@ -291,6 +321,8 @@ test("a public seat with every member paused asks the one whose pause ends first
     const sp = hostLane(SPARE);
     a.throttled(a.gate.epoch(), 3_000);
     sp.throttled(sp.gate.epoch(), null);
+    // every member past the spare paused longest (card move-sends-or-says-why: the seat's third)
+    for (const u of SOLANA_PUBLIC_SEAT.slice(2)) hostLane(u).throttled(hostLane(u).gate.epoch(), 5_000);
     assert.ok(sp.gate.left() < a.gate.left());
     const t0 = performance.now();
     assert.equal(await pair[0]("getSlot", []), SPARE_HOST);
@@ -305,6 +337,7 @@ test("a public seat with every member paused asks the one whose pause ends first
     const sp = hostLane(SPARE);
     a.throttled(a.gate.epoch(), null);
     sp.throttled(sp.gate.epoch(), 3_000);
+    for (const u of SOLANA_PUBLIC_SEAT.slice(2)) hostLane(u).throttled(hostLane(u).gate.epoch(), 5_000);
     assert.equal(await pair[0]("getSlot", []), A_HOST);
     assert.deepEqual(log.map((r) => r.host), [A_HOST]);
   });
