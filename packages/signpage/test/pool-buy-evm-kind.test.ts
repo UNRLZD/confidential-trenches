@@ -73,7 +73,8 @@ function readyOf(relay = relayOf(), id = "n1", attempt = "a1"): ReadyProof<EvmPo
     publicSignals: ["11", NULLIFIER.toString(), CHUNK.toString(), "13", "14", "15", "16", context.toString()],
   };
 }
-const ASK: PoolAsk = { kind: "pool.buy", chain: "base", token: TOKEN, amount: CHUNK, slippageBps: 100, decimals: 18 };
+// card buy-any-amount-on-every-chain: an ask is the ETH that goes into the swap, the chunk less its fee
+const ASK: PoolAsk = { kind: "pool.buy", chain: "base", token: TOKEN, amount: CHUNK - FEE, slippageBps: 100, decimals: 18 };
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const topic = (s: string) => "0x" + hex(keccak_256(new TextEncoder().encode(s)));
@@ -210,7 +211,8 @@ test("kind: a run that ends with an error answers it, never sent", async () => {
   const r = poolBuyEvmKind(() => h, locks)(ASK, ctx) as { running: true; after: Promise<unknown>; answer(): unknown };
   assert.equal(r.running, true);
   await within(r.after, "the answer");
-  assert.deepEqual(r.answer(), { error: "not_funded" });
+  // no proof makes the ask: the plan's refusal names its rule (card buy-any-amount-on-every-chain)
+  assert.deepEqual(r.answer(), { error: "not_funded", rule: "amount" });
   assert.deepEqual(stages, [], "no stage for an error");
   assert.equal(h.ends, 1);
 });

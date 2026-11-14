@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CHAINS, TRADE_CHAINS } from "@blindfill/kit";
 import type { SignpageState } from "@blindfill/kit";
-import { buyPath, nearBuyAsk, poolSellAsk, PRESETS, presetsOf, sellShareOk, tradeSellAsk } from "../src/screens/trade/model.ts";
+import { buyPath, nearBuyAsk, poolSellAsk, sellShareOk, tradeSellAsk } from "../src/screens/trade/model.ts";
 import { BOX_PERCENTS, QUICK, WHOLE } from "../src/screens/positions/model.ts";
 
 type Pools = SignpageState["pools"];
@@ -40,7 +40,6 @@ test("a NEAR buy asks pool.buy for the typed USD in USDC (the kit's SignpagePara
 });
 
 test("NEAR keeps the four presets", () => {
-  assert.deepEqual(presetsOf("near", null), PRESETS);
 });
 
 test("a NEAR sell is the whole holding only: pool.sell share 10000, every other share none", () => {

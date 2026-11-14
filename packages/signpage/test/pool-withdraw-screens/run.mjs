@@ -1,8 +1,8 @@
 // node packages/signpage/test/pool-withdraw-screens/run.mjs [--shots <dir>]: the pool withdraw screen's states at 390 and
 // 1440 wide, on Solana and on Base, in the sheet it opens in over the app (src/sheet.ts), in headless Chrome under SIGN_HOST's own content security policy (public/_headers,
 // the /* rule), card withdraw-form-shows-what-you-can-send: empty, typing (a half address, before the idle check),
-// refused To (Invalid address), refused amount (0.1 SOL against a 0.05 SOL deposit: the line names what can be sent,
-// Try 0.048695 SOL), both refused, and
+// refused To (Invalid address), an amount over what can be sent (0.1 SOL against a 0.05 SOL deposit: what can be sent,
+// 0.048695 SOL, drawn and offered, card withdraw-max-means-all), an amount under the least part (Min), both refused, and
 // ready by a tap on what can be sent, then the press. The page is test/pool-withdraw-screens/entry.ts, bundled by Vite as
 // the page's own build bundles src/main.ts, served with no network; the page's clock is the test's, so each state is the
 // one named. For each state it checks the form's data-state and lines, Withdraw offered and drawn as the paper button
@@ -42,16 +42,17 @@ try {
 const SOL_TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
 const EVM_TO = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
 const CHAIN = {
-  solana: { to: SOL_TO, name: "Solana", symbol: "SOL", can: "0.048695 SOL", chip: "Max 0.048695 SOL", over: "0.1", sendable: "48695000", maxFee: "1305000" },
-  base: { to: EVM_TO, name: "Base", symbol: "ETH", can: "0.009979 ETH", chip: "Max 0.009979 ETH", over: "0.02", sendable: "9979000000000000", maxFee: "21000000000000" },
+  solana: { to: SOL_TO, name: "Solana", symbol: "SOL", can: "0.048695 SOL", chip: "Max 0.048695 SOL", over: "0.1", under: "0.001", min: "Min 0.00189088 SOL", sendable: "48695000", maxFee: "1305000" },
+  base: { to: EVM_TO, name: "Base", symbol: "ETH", can: "0.009979 ETH", chip: "Max 0.009979 ETH", over: "0.02", under: "0.00001", min: "Min 0.0001 ETH", sendable: "9979000000000000", maxFee: "21000000000000" },
 };
 const states = (c) => [
   // name, To, Amount, tap what can be sent, what the screen must show
   ["empty", "", "", false, { state: "empty" }],
   ["typing", c.to.slice(0, 22), "", false, { state: "typing", now: true }],
   ["refused-to", c.to.slice(0, 22), "", false, { state: "refused", to: ["address", "Invalid address"] }],
-  ["refused-amount", c.to, c.over, false, { state: "refused", amount: ["insufficient", `Try ${c.can}`] }],
-  ["refused-both", c.to.slice(0, 22), c.over, false, { state: "refused", to: ["address", "Invalid address"], amount: ["insufficient", `Try ${c.can}`] }],
+  ["over-amount", c.to, c.over, false, { state: "ready", over: true }],
+  ["refused-amount", c.to, c.under, false, { state: "refused", amount: ["min", c.min] }],
+  ["refused-both", c.to.slice(0, 22), c.under, false, { state: "refused", to: ["address", "Invalid address"], amount: ["min", c.min] }],
   ["ready", ` ${c.to}\u200b`, "", true, { state: "ready", lines: { to: c.to } }],
 ];
 
@@ -107,7 +108,7 @@ for (const chain of ["solana", "base"]) {
         };
       });
       const lineOk = (k) => (want[k] ? got[k]?.[0] === want[k][0] && got[k]?.[1] === want[k][1] : got[k] === null);
-      const shownOk = want.lines ? got.shown.to === want.lines.to && got.amountValue === c.can.split(" ")[0] : Object.keys(got.shown).length === 0;
+      const shownOk = want.over ? got.shown.amount === c.can && got.amountValue === c.over : want.lines ? got.shown.to === want.lines.to && got.amountValue === c.can.split(" ")[0] : Object.keys(got.shown).length === 0;
       const drawnOk = got.mark === chain && got.loaded && got.name === c.name && got.symbol === c.symbol && got.can === c.chip && got.canValue === c.sendable
         && (width > 400 || got.canH >= 44) && got.canW >= 44 && !got.wide;
       const ok = got.state === want.state && lineOk("to") && lineOk("amount") && shownOk && drawnOk && got.go === (want.state !== "ready") && got.goPaper === (want.state === "ready");

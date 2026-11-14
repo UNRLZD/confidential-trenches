@@ -28,8 +28,9 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 const ID = "[\\w$]+";
 // carriesOf: the carried piece's id, the parent's with #change
 const CARRY = new RegExp(`noteId:\`\\$\\{${ID}\\.noteId\\}#change\``);
-// proveFor's refusal of a note it cannot prove
-const PROVE = /proveFor: note \$\{[\w$]+\} is not an UNSPENT landed note of this pool with a listed piece/;
+// proveFor's refusal of a note it cannot prove (card balance-shows-fast: a change a pass already gave its own proof is
+// proved too, its piece held beside that proof)
+const PROVE = /proveFor: note \$\{[\w$]+\} is not a landed note of this pool with a listed piece, UNSPENT or held by its own proof alone/;
 // the host's carry.prove: the change its settle wrote, found by its parent
 const ROUND = /no change written for note \$\{[\w$]+\}/;
 

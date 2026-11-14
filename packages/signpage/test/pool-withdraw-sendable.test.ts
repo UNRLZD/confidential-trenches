@@ -177,7 +177,9 @@ test("the tap fills the amount with what can be sent: ready, never Insufficient 
   }
 });
 
-test("the press after a tap: a note spent since hands nothing over, and the figure drawn is the new one", async () => {
+// card withdraw-max-means-all: Max is everything, so a note spent since the tap sends what is left, at a fee no higher
+// than the one drawn (one part fewer)
+test("the press after a tap: a note spent since sends the live Max, and the figure drawn is the new one", async () => {
   let funds = TWO;
   const f = drawn("solana", async () => funds);
   f.type("to", TO);
@@ -187,8 +189,7 @@ test("the press after a tap: a note spent since hands nothing over, and the figu
   assert.equal(f.form.dataset.state, "ready");
   funds = { ...TWO, notes: [TWO.notes[1]!] };
   await f.press();
-  assert.deepEqual(f.handed, []);
-  assert.equal(f.form.dataset.state, "refused");
+  assert.deepEqual(f.handed.map((r) => r.amount), [poolSendable(funds)]);
   assert.equal(f.can.textContent, `Max ${formatUnits(poolSendable(funds), 9)} SOL`);
 });
 
@@ -207,17 +208,17 @@ test("no new word: every text the screen draws is a kept word, a chain name, a s
 
 // ---------- above what can be sent (the owner's run, release 120: 0.5 typed against ~0.03 SOL drew a bare refusal) ----------
 
-test("an amount above what can be sent: the line names what can be sent (Try 0.048695 SOL), the nearest-amounts words; Insufficient only when nothing can be sent", async () => {
+// card withdraw-max-means-all: above what can be sent is what can be sent, shown before the press; no Try
+test("an amount above what can be sent: what can be sent (0.048695 SOL) is drawn and sent; Insufficient only when nothing can be sent", async () => {
   assert.deepEqual(checkPoolAmount("solana", "0.5", ONE), { ok: false, code: "insufficient", below: poolSendable(ONE) });
   const f = drawn("solana", async () => ONE);
   f.type("to", TO);
   f.type("amount", "0.5");
   await settle();
   const line = f.form.find((e) => e.dataset.for === "amount")!;
-  assert.equal(f.form.dataset.state, "refused");
-  assert.equal(line.dataset.refusal, "insufficient");
-  assert.equal(line.textContent, `${POOL_WITHDRAW_WORDS.try}0.048695 SOL`);
-  assert.equal(line.dataset.draftCopy, undefined, "Try was kept (owner 8 Nov 07:55Z)");
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(line.hidden, true);
+  assert.equal(f.form.find((e) => e.dataset.line === "amount")!.textContent, "0.048695 SOL");
   // nothing sendable: no amount to name
   const none = drawn("base", async () => ({ ...ONE, notes: [] }));
   none.type("amount", "0.5");
