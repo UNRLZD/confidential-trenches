@@ -1,0 +1,90 @@
+{
+  "_note": "Real runs of scripts/live-checks/evm-pool-index-from-the-first-pool.mjs --chain robinhood --record, 2026-11-14, each provider's head and the named pool's slot0 read live through provider-answer.mjs on rpc.mainnet.chain.robinhood.com and robinhood.drpc.org. good (08:37:08Z): the helper's own handler serving a whole Robinhood backfill made on this machine from rpc.mainnet.chain.robinhood.com (08:12-08:26Z, 1,145,455 pools). badPartial (08:37:09Z): the same handler serving a backfill stopped after six spans (blocks 0-6,999,999), complete false. badNotServed (08:37:11Z): the deployed helper before this card, /v1/market/pools 404.",
+  "good": {
+    "chain": "robinhood",
+    "reads": {
+      "answer": {
+        "status": 200,
+        "text": "{\"chainId\":4663,\"poolManager\":\"0x8366a39cc670b4001a1121b8f6a443a643e40951\",\"complete\":true,\"through\":112121956,\"pools\":[{\"id\":\"0x555061cebc5f016ad3df52690c7caade3f90bee72d3ec00479ff8318feb355fe\",\"key\":{\"currency0\":\"0x5fc5360d0400a0fd4f2af552add042d716f1d168\",\"currency1\":\"0xb4c8b1f18f67d4f25a51f5ead97dc95a79f2507b\",\"fee\":900000,\"tickSpacing\":9000,\"hooks\":\"0x0000000000000000000000000000000000000000\"}},{\"id\":\"0x7d527182d13d1bcdc4be889c2c52489a5fe94263cb427991dc80104dc1150e47\",\"key\":{\"currency0\":\"0x0000000000000000000000000000000000000000\",\"currency1\":\"0xb4c8b1f18f67d4f25a51f5ead97dc95a79f2507b\",\"fee\":0,\"tickSpacing\":1,\"hooks\":\"0x0000000000000000000000000000000000000000\"}},{\"id\":\"0xc785e2765b44d130767b51a0b6eddb8306b5618a704799d7a876f59f29e1eba9\",\"key\":{\"currency0\":\"0x5fc5360d0400a0fd4f2af552add042d716f1d168\",\"currency1\":\"0xb4c8b1f18f67d4f25a51f5ead97dc95a79f2507b\",\"fee\":801000,\"tickSpacing\":8010,\"hooks\":\"0x0000000000000000000000000000000000000000\"}}]}"
+      },
+      "providers": [
+        {
+          "url": "https://rpc.mainnet.chain.robinhood.com",
+          "head": {
+            "result": "0x6cbffc1"
+          },
+          "slot": {
+            "result": "0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde"
+          }
+        },
+        {
+          "url": "https://robinhood.drpc.org",
+          "head": {
+            "result": "0x6cbffc4"
+          },
+          "slot": {
+            "result": "0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde"
+          }
+        }
+      ]
+    }
+  },
+  "badPartial": {
+    "chain": "robinhood",
+    "reads": {
+      "answer": {
+        "status": 200,
+        "text": "{\"chainId\":4663,\"poolManager\":\"0x8366a39cc670b4001a1121b8f6a443a643e40951\",\"complete\":false,\"through\":6999999,\"pools\":[]}"
+      },
+      "providers": [
+        {
+          "url": "https://rpc.mainnet.chain.robinhood.com",
+          "head": {
+            "result": "0x6cbffc6"
+          },
+          "slot": {
+            "result": "0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde"
+          }
+        },
+        {
+          "url": "https://robinhood.drpc.org",
+          "head": {
+            "result": "0x6cbffc9"
+          },
+          "slot": {
+            "result": "0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde"
+          }
+        }
+      ]
+    }
+  },
+  "badNotServed": {
+    "chain": "robinhood",
+    "reads": {
+      "answer": {
+        "status": 404,
+        "text": "{\"error\":\"not_found\"}"
+      },
+      "providers": [
+        {
+          "url": "https://rpc.mainnet.chain.robinhood.com",
+          "head": {
+            "result": "0x6cbffcb"
+          },
+          "slot": {
+            "result": "0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde"
+          }
+        },
+        {
+          "url": "https://robinhood.drpc.org",
+          "head": {
+            "result": "0x6cbffd8"
+          },
+          "slot": {
+            "result": "0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde"
+          }
+        }
+      ]
+    }
+  }
+}
