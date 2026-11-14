@@ -55,9 +55,11 @@ const COSTS = (c) =>
 const QUOTE_FLOOR = new RegExp(
   `\\(typeof (${N})\\.floor!=${Q}bigint${Q}\\|\\|\\1\\.floor<${N}\\[\\1\\.chain\\]\\)&&(${N})\\(${Q}floor${Q}\\)[\\s\\S]{0,1400}?let (${N})=${N}\\(${N},${N},\\{\\.\\.\\.\\1\\.check,intoVault:!1\\}\\);return \\3\\.minAmountOut<\\1\\.floor&&\\2\\(${Q}floor${Q}\\),\\3\\}`,
 );
-// main.ts: pool.address with the price, the floor read and the follow's quoted.
+// main.ts: pool.address with the price, the floor read and the follow's quoted (card move-one-confidential-swap: and
+// the confidential mode with the keyless tell, asked with the page's fetch and the request's stop, before the stop).
 const WIRED = new RegExp(
-  `"pool\\.address":${N}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:(${N}),checked:\\((${N}),(${N}),(${N}),(${N})\\)=>(${N})\\.quoted\\(\\2,\\3,\\4,\\5\\),stop:${N}\\}\\)`,
+  `"pool\\.address":${N}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:(${N}),checked:\\((${N}),(${N}),(${N}),(${N})\\)=>(${N})\\.quoted\\(\\2,\\3,\\4,\\5\\),` +
+    `confidential:!0,hidden:\\((${N}),(${N})\\)=>${N}\\(\\7,fetch,\\8\\),stop:${N}\\}\\)`,
 );
 // (card evm-deposit-route-mainnet: Base's and Robinhood's floor goes first, its own check's mark; Solana's as before)
 const FLOOR_WIRE = (u) =>
@@ -168,7 +170,7 @@ export function facts(index, js) {
 export const WHY = {
   floor: "a pool quote is not refused floor under the rung (0.01 SOL) plus the worst-case deposit cost plus U_X's rent floor, on its min out after the kit's check",
   floorRead: "the floor is not read at quote time from the fee on both RPCs (the higher) and the rent",
-  wired: "pool.address is not handed the floor read and the follow's quoted, or the follow's deps do not run pool.deposit on Solana with the refund mover",
+  wired: "pool.address is not handed the floor read, the follow's quoted and the confidential mode with its keyless tell, or the follow's deps do not run pool.deposit on Solana with the refund mover",
   chainFirst: "the follow does not read U_X's balance at finalized on both RPCs (the lower counting), deposit only at or over the floor, count only filled or part_filled with no note of U_X's landing, show short on a carry it cannot pay, count a landed note only after this quote's own SUCCESS, or read the status with the op's refund id",
   fromUX: "the follow's deposit does not run from U_X alone (its own deposit note or next arrival, never the newest used or the planned U, and only a U whose address is the op's U_X), the kind does not hand the run its fixed source, or the page's depositFrom does not check the request by the pool rule first",
   refundCarry: "a refund's move is not held to X's own coin, to U_X, refunding to U_{s,i}, with min out at least the floor, or its key is not the op's own refund id",
