@@ -7,7 +7,8 @@
 //     evmTapSpendOf), summed across the chain's sets on Base and Robinhood (poolBalances' tapMax), so Max is every
 //     ready note's spend, not the largest one;
 //   - evm_rest: the plan's rest is bought by its note's own W through the pinned adapter (the rule's
-//     buy(address,address,uint256,bytes) call, src/rules/pool.ts evmAdapterBuyData) and kept in W's rest record
+//     buy(address,address,uint256,bytes) call, written as its selector 0x3924db66 by src/rules/pool.ts
+//     evmAdapterBuyData) and kept in W's rest record
 //     (src/pool-buy-evm-rest.ts EVM_WBUY_KEY "owed/wbuy-evm"), so an amount that is not a whole note buys;
 //   - sol_max: Solana's Max is every ready note's spend, one buy leg a set (src/pool-buy.ts, the page's legs).
 // What each does is held by the card's tests (packages/signpage/test/pool-buy-evm.test.ts's legs and rest leg,
@@ -33,8 +34,8 @@ const Q = "[`\"']";
 const EVM_SPEND = /([\w$]+)\.chunk>\1\.feeCap\?\1\.chunk-\1\.feeCap:0n/;
 // poolBalances: the sets' spends summed on Base and Robinhood
 const EVM_SUM = new RegExp(`${Q}base${Q}\\|\\|[\\w$]+\\.chain===?${Q}robinhood${Q}\\)?[^;]{0,40}\\.tapMax\\+=`);
-// W's own buy of the rest and its record
-const EVM_REST = [/buy\(address,address,uint256,bytes\)/, /owed\/wbuy-evm/];
+// W's own buy of the rest (the adapter buy's selector, keccak of buy(address,address,uint256,bytes)) and its record
+const EVM_REST = [new RegExp(`${Q}0x3924db66${Q}`), /owed\/wbuy-evm/];
 // Solana: Max is the sum of the legs' spends (poolBalances on solanaTapLegs), and a tap no single set pays runs those
 // legs (src/pool-buy.ts poolBuyKind: a split run answers its legs)
 const SOL_MAX = [/[\w$]+\([\w$]+,[\w$]+\)\.reduce\(\(([\w$]+),([\w$]+)\)=>\1\+\2\.spend,0n\)/, new RegExp(`\\{split:(?:!0|true)\\}\\);if\\(${Q}legs${Q}in [\\w$]+\\)`)];

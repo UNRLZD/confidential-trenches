@@ -47,6 +47,10 @@ export const POOLS_FORK_BLOCKS = Object.freeze({ base: forkBlock("POOLS_FORK_BLO
  *  a Robinhood pass asks about 600 of each of its three wide hosts (run 34, 13 Nov: 568 eth_getLogs and 561 full blocks,
  *  each a key the book did not hold, stopped at 400 each). */
 export const UPSTREAM_CAP = 1_000;
+/** The same bound for a keyed archive (FORK_RPC_ARCHIVE_<CHAIN>), the run's one upstream for its chain: a cold buy's
+ *  quote on a fork asks it for every slot it reads (the Robinhood fork buy of 14 Nov 03:50Z: 994 answered and stopped at
+ *  the public cap before the tap's quote had its pools), so its own bound, still one that stops a run that loops. */
+export const ARCHIVE_CAP = 20_000;
 const SENT = new Map();
 const bookArg = process.argv.indexOf("--book");
 const BOOK = BOOKS[bookArg > 0 && process.argv.indexOf("--") > bookArg ? process.argv[bookArg + 1] : "forge"];
@@ -55,7 +59,20 @@ if (!BOOK) throw new Error("fork-rpc: --book is forge or pools");
 const FILE = process.env.FORK_RPC_BOOK_FILE ? path.resolve(process.env.FORK_RPC_BOOK_FILE) : path.join(path.dirname(fileURLToPath(import.meta.url)), BOOK.file);
 const PORT = Number(process.env.FORK_RPC_PORT ?? 47545);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`fork-rpc: FORK_RPC_PORT ${process.env.FORK_RPC_PORT} is no port`);
-const UPSTREAM = BOOK.upstream;
+// FORK_RPC_ARCHIVE_<CHAIN> (BASE, ROBINHOOD): an archive provider's URL, key and all, that chain's one upstream this run.
+// Robinhood's public providers keep about 5 min of state ("no state: historical state ..."), and a buy's quote asks the
+// fork for hundreds of cold slots, one at a time, so a fork past those minutes answers nothing; an archive answers every
+// block. The URL is read only here: every line this file prints names a host, never a path or a query.
+const archiveOf = (c) => {
+  const v = process.env[`FORK_RPC_ARCHIVE_${c.toUpperCase()}`];
+  if (v === undefined || v === "") return undefined;
+  if (!/^https:\/\/[^/\s]+\/\S*$/.test(v)) throw new Error(`fork-rpc: FORK_RPC_ARCHIVE_${c.toUpperCase()} is no https URL`);
+  return v;
+};
+const UPSTREAM = BOOK.upstream && Object.fromEntries(Object.entries(BOOK.upstream).map(([c, u]) => [c, archiveOf(c) ?? u]));
+const ARCHIVES = new Set(Object.keys(BOOK.upstream ?? {}).map(archiveOf).filter((u) => u !== undefined));
+// read: no child of this run (anvil, the run's scripts) is handed the URL
+for (const c of ["BASE", "ROBINHOOD"]) delete process.env[`FORK_RPC_ARCHIVE_${c}`];
 // each upstream host's tries this run (no path, no key)
 const HOSTS = {};
 /** Each chain's next upstream in turn. */
@@ -140,12 +157,13 @@ export async function answer(book, chain, req, record) {
   const open = fit.filter((u) => !REFUSED.has(new URL(u).host));
   const list = open.length > 0 ? open : fit;
   const sent = (u) => SENT.get(new URL(u).host) ?? 0;
-  if (list.every((u) => sent(u) >= UPSTREAM_CAP)) throw new Error(`fork-rpc: ${UPSTREAM_CAP} upstream requests, stopped (${key}): ${list.map((u) => new URL(u).host).join(", ")} each at the cap`);
+  const capOf = (u) => (ARCHIVES.has(u) ? ARCHIVE_CAP : UPSTREAM_CAP);
+  if (list.every((u) => sent(u) >= capOf(u))) throw new Error(`fork-rpc: ${Math.max(...list.map(capOf))} upstream requests, stopped (${key}): ${list.map((u) => new URL(u).host).join(", ")} each at the cap`);
   const first = (turn[chain] = ((turn[chain] ?? -1) + 1) % list.length);
   let got;
   for (let i = 0; i < 5 && !got; i++) {
     // the next host with room: one at the cap is asked nothing more
-    const url = [...Array(list.length).keys()].map((k) => list[(first + i + k) % list.length]).find((u) => sent(u) < UPSTREAM_CAP);
+    const url = [...Array(list.length).keys()].map((k) => list[(first + i + k) % list.length]).find((u) => sent(u) < capOf(u));
     if (url === undefined) break;
     SENT.set(new URL(url).host, sent(url) + 1);
     console.error(`fork-rpc: upstream ${new URL(url).host} ${sent(url)} ${chain}: ${key.slice(0, 160)}`);

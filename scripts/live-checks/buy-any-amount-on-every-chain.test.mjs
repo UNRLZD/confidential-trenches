@@ -50,7 +50,8 @@ test("facts() reads each mark from the minified code as the build writes it, and
   // as the build writes poolBalances' two sums and the page's split run
   const sum = "if(r.chain===`base`||r.chain===`robinhood`){for(let e of f)t.tapMax+=bz(e.own,e.others,d);continue}let p=Sz(f,d).reduce((e,t)=>e+t.spend,0n);p>t.tapMax&&(t.tapMax=p)";
   const split = "route:e=>r?.route?.(e)},n,i,{split:!0});if(`legs`in d){let t=d.legs}";
-  const rest = "`buy(address,address,uint256,bytes)`;var Y=`owed/wbuy-evm`";
+  // as the build writes evmAdapterBuyData: the adapter buy's selector, keccak of buy(address,address,uint256,bytes)
+  const rest = "return`0x3924db66`+rF(BigInt(e))+rF(BigInt(t));var Y=`owed/wbuy-evm`";
   const all = facts(index, `${spend}${sum};${split};${rest}`);
   assert.deepEqual([all.evm_max, all.evm_rest, all.sol_max], [true, true, true]);
   const none = facts(index, "var Ez=e=>e.reduce((e,t)=>t.chunk>e?t.chunk:e,0n);i>t.tapMax&&(t.tapMax=i);route:e=>r?.route?.(e)},n,i)");
