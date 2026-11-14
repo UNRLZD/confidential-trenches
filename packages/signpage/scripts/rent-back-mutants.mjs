@@ -20,11 +20,13 @@ const TB = "test/pool-buy.test.ts";
 const TESTNET = `${W}/src/pool-testnet.ts`;
 const SPACING = `${W}/src/device-spacing.ts`;
 const TT = "test/pool-testnet.test.ts";
-// The full-sale tests that read the sweep's own transaction (its deposit, then the rest under the grid as one System
-// transfer to the pool's account): each fails in under a second when that transfer is missing or goes to W, while
-// with it gone 16 other sale tests wait out their 20 s each and the file passes the 180 s cap with no count (the
-// SURVIVED of L1 and L1b at be21a2a0d); those two mutants run these tests alone
+// The full-sale tests that read the sweep's own transaction (card pool-amounts-are-standard-sizes: the largest rung of
+// W's rest, the deposit alone, the rest on W): each fails in under a second when the sweep's note is off the rung, while
+// with a sweep the rule refuses 16 other sale tests wait out their 20 s each and the file passes the 180 s cap with no
+// count (the SURVIVED of L1 and L1b at be21a2a0d); the L2 mutant runs these tests alone
 const FULL_SALE = "^(every lamport can move: a full sell on|a full sell on (pump|pumpswap): W's token account)";
+// the rent back's record test whose second load leaves a rest whose rung would leave W short of rent(0) (the stay)
+const STAY = "^a rent back owed is recorded before the sell's send";
 // [name, file, the test that kills it, from, to, and a name pattern the run takes, those tests alone]; from an array
 // of [from, to] pairs plants each one (a rule held twice,
 // as what W read as is: the pass's end names it W's own state, and the record keeps it only on those ends)
@@ -174,17 +176,13 @@ export const M = [
   ["c19 a pass that gives up drops the sweep's signature", SELL, T, " && e !== \"gave_up\" ? undefined : lastSweep", " ? undefined : lastSweep"],
   ["c20 an owed W under the floor whose rest adds nothing still listed", SELL, T, "      if (value < floor && adds === 0n) x.unlisted?.();\n", "      if (value < floor && owed === 0 && adds === 0n) x.unlisted?.();\n"],
   ["c20b an unlisted owed end keeps its last amount", SELL, T, "kept.unlisted === true ? undefined : ", ""],
-  // card every-lamport-can-move: the sweep's note on the grid, the rest under it paid as the sweep's priority
-  // review P3-1: the rest under the grid as one System transfer to the pool's account, in the sweep's transaction
-  ["lamport L1 the sweep's rest left on W", SELL, T, "const pay = under === 0n ? [] : [poolTransferIx(w.address, x.pool, under)];", "const pay: never[] = [];", FULL_SALE],
-  ["lamport L1b the sweep's rest sent to W", SELL, T, "[poolTransferIx(w.address, x.pool, under)]", "[poolTransferIx(w.address, w.address, under)]", FULL_SALE],
-  // card every-lamport-can-move T3: the ride (one spare piece released to W, then the sweep), on the passes that carry it
-  ["lamport T3a the ride left out", SELL, T, "if (value < floor && owed === 0 && adds > 0n && x.ride === true && !rode && h.ride !== undefined) return", "if (false) return"],
-  // the ride pays for itself: a rest no ride moves at a gain gets no ride and is not listed
-  ["lamport T3i a ride that cannot gain", SELL, T, "owed === 0 && adds > 0n && x.ride === true", "owed === 0 && x.ride === true"],
-  ["lamport T3j a W that cannot gain still listed", SELL, T, "      if (value < floor && adds === 0n) x.unlisted?.();\n", ""],
+  // card pool-amounts-are-standard-sizes: the sweep's note the largest rung of W's rest that leaves W 0 or rent-exempt,
+  // the rest on W (never paid away); a W under the floor listed at its rest. The ride (card every-lamport-can-move T3)
+  // never runs now, so its mutants T3a, T3d, T3h and T3i are gone with its code
+  ["lamport L1 the sweep's rung leaving W short of rent", SELL, T, "      const { value } = solanaSweepOf(rest, stay);\n", "      const { value } = solanaSweepOf(rest);\n", STAY],
+  ["lamport T3j a W with nothing on it still listed", SELL, T, "      if (value < floor && adds === 0n) x.unlisted?.();\n", ""],
   ["lamport T3k a W under the floor listed at its lamports", SELL, T, "(x.buy || since !== undefined)) x.read?.(adds);", "(x.buy || since !== undefined)) x.read?.(lamports);"],
-  ["lamport T3l a ride's gain without the relay fee", SELL, T, "  const lift = rest - fee;", "  const lift = rest;"],
+  ["lamport T3l a rest under the floor not listed", SELL, T, "  return rest > 0n ? rest : 0n;", "  return 0n;"],
   // review P2-1 of T1+T2: a kept account counts as an owed claim, its close's fee left on W, the rest swept
   ["lamport P21a a kept account holds the whole sale", SELL, T, "  if (owed > SOLANA_SWEEP_OWED_MAX || keep.some((k) => k.tokens === true)) return null;", "  if (owed > SOLANA_SWEEP_OWED_MAX || keep.length > owed) return null;"],
   ["lamport P21c W's sellable tokens swept around", SELL, T, "  if (owed > SOLANA_SWEEP_OWED_MAX || keep.some((k) => k.tokens === true)) return null;", "  if (owed > SOLANA_SWEEP_OWED_MAX) return null;"],
@@ -192,12 +190,10 @@ export const M = [
   ["lamport P21b a kept account's fee not left on W", SELL, T, "solanaDepositRents(rent, sizes, held) - solanaSweepKeep(rent, owed, kept);", "solanaDepositRents(rent, sizes, held) - solanaSweepKeep(rent, owed);"],
   ["lamport T3b a ride chunk off the list", WITHDRAW, T, [["for (const chunk of releaseSizesUpTo(r, n.value).reverse()) {\n      if (!isReleaseSize(r, chunk) || !changeMoves", "for (const chunk of Array.from({ length: Number(n.value / r.grid) }, (_, k) => BigInt(k + 1) * r.grid)) {\n      if (!changeMoves"]]],
   ["lamport T3c a ride chunk whose change cannot move", WITHDRAW, T, "if (!isReleaseSize(r, chunk) || !changeMoves(r, n.value - chunk) || !fits(chunk)) continue;", "if (!isReleaseSize(r, chunk) || !fits(chunk)) continue;"],
-  ["lamport T3d the sale's rent back with no ride", SELL, T, "sale: true, ride: true, ", "sale: true, "],
   ["lamport T3e a load's pass rides", SELL, T, "...(opts.ride === true ? { ride: true as const } : {})", "ride: true as const"],
   ["lamport T3f a W at the floor not passed again for a tap's ride", SELL, T, "const floored = opts.ride === true && o.floor === true;", "const floored = false;"],
   ["lamport T3g the floor end not marked", SELL, T, ', ...(e === "floor" ? { floor: true as const } : {})', ""],
-  ["lamport T3h no spare piece told as a plain floor end", SELL, T, "kept on W; no spare piece in the pool lifts it`", "kept on W`"],
-  ["lamport L2 the sweep's note at the exact rest", SELL, T, "      const { value, under } = solanaSweepOf(rest);\n", "      const { under } = solanaSweepOf(rest);\n      const value = rest;\n"],
+  ["lamport L2 the sweep's note at the exact rest", SELL, T, "      const { value } = solanaSweepOf(rest, stay);\n", "      const value = rest;\n", FULL_SALE],
   ["c21 a sent sweep's record at W's lamports, not the note's value", SELL, T, "    if (x.buy || x.bare === true) lamports = v;\n", ""],
   ["c22 a W read empty listed empty while its note is RESERVED", SELL, T, "if (await settledSpent(address)) await Promise.resolve(h.owed.markEmpty", "await Promise.resolve(h.owed.markEmpty"],
   ["c23 a held W passed", SELL, T, "      if (first && quiet(first)) {", "      if (false) {"],

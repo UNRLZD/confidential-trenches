@@ -6,8 +6,9 @@
 //   (packages/signpage/scripts/build-app.mjs folds __SIGN_NETWORK__, ../../../wallet/src/pool/network.ts reads it).
 //   Every read and the hand-off use that network's release pair only (any other pair is refused before a read), and the vault and the relayer are that network's
 //   release values (NEAR_NETWORKS, RELEASE_WITHDRAW_RELAYER), never an argument: one network per build.
-// - available: the largest UNSPENT note of the network's vault scope in this device's note store (./checks.ts
-//   withdrawable). No vault named on the network: no note can be in it, 0.
+// - cash: the UNSPENT notes of the network's vault scope in this device's note store (./checks.ts cashNotes), which the
+//   form plans the amount over, one withdrawal per note; available: the largest of them (./checks.ts withdrawable), what
+//   one withdrawal carries. No vault named on the network: no note can be in it, none.
 // - fee: the release relayer's quote (GET /v1/withdraw/fee, askWithdrawFee: its answer checked against the release's
 //   relayer, byte for byte), refused when above the device's own fee_max (../../../wallet/src/withdraw/feemax.ts, LD5 on
 //   the device's own reads), taken at the largest register_deposit any A can need (the token's storage minimum,
@@ -25,6 +26,13 @@
 //   the spend row on the pair paid to the typed account, refunded, or paid elsewhere). The seed is zeroed once the
 //   request is made and the relay has taken its one derivation; the wait ends on sign out or at HANDOFF_WAIT_MAX_MS.
 //   Nothing is signed or sent after the relay, so a page that dies after it leaves nothing to send again.
+// - cashWithdrawRun (card cash-withdraws-everything-to-any-chain): the form's plan, one hand-off per note in order, each
+//   naming its note and paying the fee the form drew (`exact`: at or above the relayer's quote now, never above the
+//   device's fee_max), so every part is exactly as planned and a note planned whole leaves no change. To NEAR the vault
+//   pays the typed account; to another chain (./onward.ts) each part first gets its own checked 1Click quote, its refund
+//   under V_{l,j} of the change note the part makes, and the vault pays that quote's deposit address. The run stops at
+//   the first part that does not leave the vault (a fee that rose, a quote refused, expired, refunded, unmatched,
+//   elsewhere, a throw): its note and the parts after it stay in Cash, and the form draws them again.
 // - withdrawSettle, on every load: the RESERVED notes a closed page left are followed to settled from their stored
 //   request (landed, expired, or SPENT on a spend whose change is not the device's); a HELD one no live tab holds the
 //   note store frees when it opens.
@@ -36,7 +44,8 @@ import { vaultSync, vaultSyncStart } from "../../../kit/src/vault/sync.ts";
 import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule } from "../../../kit/src/near/networks.ts";
 import { readTokenStorageMin, typedRegisterDepositOf } from "../../../wallet/src/arming/accounts.ts";
 import { arrivalOf, type ArrivalOutcome, withdrawArrival } from "../../../wallet/src/withdraw/arrival.ts";
-import { changeIndex } from "../../../wallet/src/derive/index.ts";
+import { changeIndex, refundId } from "../../../wallet/src/derive/index.ts";
+import { askDepositQuoteAgain } from "../../../wallet/src/deposit/quote.ts";
 import { readNotes, type NoteRecord, type NoteStore } from "../../../wallet/src/notes/store.ts";
 import { POOL_TESTNET } from "../../../wallet/src/pool/network.ts";
 import { readWithdrawFeeMax } from "../../../wallet/src/withdraw/feemax.ts";
@@ -44,8 +53,9 @@ import { pacedNearRpc } from "../../../wallet/src/pace.ts";
 import { askWithdrawFee, RELEASE_WITHDRAW_RELAYER, type RelayDeps, type RelayOutcome, relayRpc, type RelayRpc, relayWithdraw } from "../../../wallet/src/withdraw/relay.ts";
 import { WITHDRAW_DEADLINE_MAX_MS, withdrawDeadlineMs, withdrawRequest, type WithdrawRequest } from "../../../wallet/src/withdraw/request.ts";
 import type { WalletStore } from "../../../wallet/src/store/index.ts";
-import { vaultScope, withdrawable } from "./checks.ts";
-import type { CheckedWithdraw, WithdrawFormDeps } from "./form.ts";
+import { cashNotes, vaultScope, withdrawable } from "./checks.ts";
+import type { CheckedCashWithdraw, CheckedWithdraw, StepReport, WithdrawFormDeps } from "./form.ts";
+import { checkOnwardQuote, isOnward, onwardQuoteRequest, onwardTo } from "./onward.ts";
 
 /** The network this build of the page runs on: the build's, mainnet unless it is the testnet build. */
 export const PAGE_NETWORK: NearNetwork = POOL_TESTNET ? "testnet" : "mainnet";
@@ -141,13 +151,15 @@ const waitSignal = (page: HandoffPage, over: HandoffOver): AbortSignal => {
 export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): WithdrawFormDeps {
   const n = netOf(over);
   const { network, net, rpcs, priceRpcs, relayer, scope, fetchFn } = n;
+  const cash = async () => (scope === null ? [] : cashNotes(await readNotes(await page.store()), scope));
   const available = async (): Promise<bigint> => (scope === null ? 0n : withdrawable(await readNotes(await page.store()), scope));
-  const handoff = withdrawHandoff(page, over);
+  const handoff = cashWithdrawRun(page, over);
   return {
     ...(handoff === null ? {} : { handoff }),
     network,
     // each read at its provider's one pace (card wallet-id-reader-paced, review P3-5)
     rpcs: over.rpcs ?? [pacedNearRpc(net.fastnear[0]), pacedNearRpc(net.drpc)],
+    cash,
     available,
     async fee() {
       ownPair(n);
@@ -171,7 +183,7 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
  * (relayWithdraw takes its one derivation before its first await, relay.ts); the relay's wait ends on sign out or at
  * HANDOFF_WAIT_MAX_MS, its note left RESERVED with its request for the settle pass (withdrawSettle).
  */
-export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedWithdraw, drawnFee: bigint, note?: string) => Promise<HandoffEnd>) | null {
+export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedWithdraw, drawnFee: bigint, note?: string, exact?: boolean) => Promise<HandoffEnd>) | null {
   const n = netOf(over);
   const { network, net, rpcs, priceRpcs, relayer, scope, fetchFn } = n;
   if (net.vault === null || scope === null || relayer === null) return null;
@@ -179,8 +191,10 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
   const sync = over.sync ?? (async () => treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] })));
   const blockNs = over.blockNs ?? (() => lowerFinalTime(rpcs));
   const relay = over.relay ?? relayWithdraw;
-  // `note`: the note the caller picked (the NEAR buy's, withdrawRequest's `note`); none: the request's own pick
-  return async (w, drawnFee, note) => {
+  // `note`: the note the caller picked (the NEAR buy's, withdrawRequest's `note`); none: the request's own pick.
+  // `exact`: the request pays the drawn fee (at or above the quote, the relayer takes any fee at or above its fee_min),
+  // so a part planned at that fee withdraws exactly what the plan says; else the quote's fee
+  return async (w, drawnFee, note, exact = false) => {
     if (typeof drawnFee !== "bigint") throw new Error("drawnFee: not a bigint");
     ownPair(n);
     const quote = await askWithdrawFee({ token: net.usdc, relayer, amount: w.amount, fetchFn });
@@ -201,7 +215,7 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
         ...trees,
         registerDepositOf: typedRegisterDepositOf(network, rpcs),
         feeRecipient: quote.feeRecipient,
-        relayFee: quote.relayFee,
+        relayFee: exact ? drawnFee : quote.relayFee,
         network,
         rpcs,
         priceRpcs,
@@ -220,6 +234,62 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
     const kind = await arrivedOf(o, w.recipient, n, over, signal);
     return o.kind === "landed" && typeof o.tx === "string" ? { kind, tx: o.tx } : { kind };
   };
+}
+
+/**
+ * The form's run (card cash-withdraws-everything-to-any-chain): the plan's parts in order, one withdrawHandoff each,
+ * naming its note at the drawn fee (`exact`). To another chain (w.chain, ./onward.ts) each part's 1Click quote is asked
+ * and checked first, its refund under V_{l,j} of the change note the part makes, and the vault pays its deposit address.
+ * `step` hears each part start ("sending") and end (its kind, "failed" when it threw). It stops at the first part that
+ * does not leave the vault and gives that end; a sign out stops it before the next part. Null where withdrawHandoff is.
+ */
+export function cashWithdrawRun(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedCashWithdraw, drawnFee: bigint, step?: StepReport) => Promise<HandoffEnd>) | null {
+  const one = withdrawHandoff(page, over);
+  if (one === null) return null;
+  const fetchFn = over.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
+  return async (w, drawnFee, step) => {
+    if (!Array.isArray(w.parts) || w.parts.length === 0) throw new Error("parts: no withdrawal planned");
+    if (w.parts.reduce((t, p) => t + p.part, 0n) !== w.amount) throw new Error("parts: not the amount");
+    const chain = w.chain ?? "near";
+    if (chain !== "near" && (!isOnward(chain) || onwardTo(chain, w.recipient) !== w.recipient)) throw new Error("recipient: not an address on the chain");
+    let end: HandoffEnd | null = null;
+    for (const [i, p] of w.parts.entries()) {
+      if (page.signal?.aborted) throw new Error("signed out: the rest stays in Cash");
+      step?.(i, "sending");
+      try {
+        let to = w.recipient;
+        if (isOnward(chain)) {
+          const req = onwardQuoteRequest(chain, w.recipient, await refundIdOf(page, p.noteId), p.part, Date.now());
+          const reply = await askDepositQuoteAgain(req, fetchFn, undefined, undefined, page.signal);
+          if (reply.status !== 200) throw new Error(`onward quote: HTTP ${reply.status}`);
+          to = checkOnwardQuote(req, reply.body, { chain, to: w.recipient, refundId: req.refundTo, amount: p.part }).depositAddress;
+        }
+        end = await one({ recipient: to, amount: p.part }, drawnFee, p.noteId, true);
+      } catch (e) {
+        step?.(i, "failed");
+        throw e;
+      }
+      step?.(i, end.kind);
+      if (end.kind !== "arrived" && end.kind !== "landed") return end;
+    }
+    return end!;
+  };
+}
+
+/** V_{l,j}: the refund id of the change note a withdrawal of note `id` makes (l its label, j its change index), derived
+ *  from the words with the seed zeroed after; its key is zeroed at once, only its id is used. */
+async function refundIdOf(page: HandoffPage, id: string): Promise<string> {
+  const n = (await (await page.notes()).list()).find((x) => x.id === id);
+  if (n?.leaf === undefined) throw new Error("note: not in the store");
+  const j = n.ref.kind === "change" ? changeIndex({ kind: "change", j: n.ref.j }) : changeIndex({ kind: "deposit" });
+  const seed = await page.seed64();
+  try {
+    const v = refundId(seed, n.leaf.label, j);
+    v.secretKey.fill(0);
+    return v.id;
+  } finally {
+    seed.fill(0);
+  }
 }
 
 /** What one settle pass did, by note id. */

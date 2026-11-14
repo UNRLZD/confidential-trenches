@@ -165,7 +165,7 @@ export const MUTANTS = [
   // card one-balance-buys-on-every-chain: a dry buy's with_cash or a { move: "cash" } route event sent to kit-v1.14 or
   // below, whose schema refuses the whole answer or the event for it, kit-v1.14 read at another level or in part, a key
   // of that name taken from another kind, kit-v1.14 told no closed notice, or the move event told to no one
-  ["kit", "  const cashless = dryCashFor(kind, planned);\n", "  const cashless = planned;\n"],
+  ["kit", "  const cashless = dryCashFor(kind, maxless);\n", "  const cashless = maxless;\n"],
   ["kit", '  if (level === "1.14") return cashless;\n', ""],
   ["kit", '  if (level === "1.14") return cashless;\n', '  if (level === "1.14") return given;\n'],
   ["kit", "  const { with_cash: _w, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
@@ -180,19 +180,26 @@ export const MUTANTS = [
   ["kit", '  return level !== "current" && level !== "1.15" && Object.hasOwn(e, "move") ? null : e;', '  return level !== "current" && level !== "1.15" && level !== "1.14" && Object.hasOwn(e, "move") ? null : e;'],
   ["kit", '  return level !== "current" && level !== "1.15" && Object.hasOwn(e, "move") ? null : e;', '  return level !== "current" && level !== "1.15" && Object.hasOwn(e, "out") ? null : e;'],
   ["kit", '  return level !== "current" && level !== "1.15" && Object.hasOwn(e, "move") ? null : e;', '  return level !== "1.15" && Object.hasOwn(e, "move") ? null : e;'],
+  ["kit", '  return level !== "current" && level !== "1.15" && Object.hasOwn(e, "move") ? null : e;', '  return Object.hasOwn(e, "move") ? null : e;'],
   ["api", 'if (!("stage" in msg)) return level !== "1.4" ? routeFor(level, msg) : null;', 'if (!("stage" in msg)) return level !== "1.4" ? msg : null;'],
   ["api", ' : own("move") ? { move: (r as { move: "cash" }).move, ...(own("op") ? { op: (r as { op: string }).op } : {}) } : null;', " : null;"],
   ["api", ' : own("move") ? { move: (r as { move: "cash" }).move, ...(own("op") ? { op: (r as { op: string }).op } : {}) } : null;', ' : own("move") ? { move: "cash" } : null;'],
   // card one-balance-buys-on-every-chain (pool.move): the buy's route event told with no op
   ["api", ', ...(own("op") ? { op: (r as { op: string }).op } : {}) }', " }"],
   // card buy-any-amount-on-every-chain: a dry buy's buys sent to kit-v1.15 or below, whose schema refuses the whole
-  // answer for it, kit-v1.15 read at another level or in part, a key of that name taken from another kind, or kit-v1.15
-  // sent the state stripped, told no closed notice or no move event
-  ["kit", "  const planned = dryBuysFor(kind, given);\n", "  const planned = given;\n"],
-  ["kit", '  if (level === "1.15") return planned;\n', ""],
-  ["kit", '  if (level === "1.15") return planned;\n', '  if (level === "1.15") return given;\n'],
+  // answer for it, or a key of that name taken from another kind
+  ["kit", "  const maxless = moveMaxFor(kind, dryBuysFor(kind, given));\n", "  const maxless = moveMaxFor(kind, given);\n"],
   ["kit", "  const { buys: _b, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
   ["kit", 'if (result === null || kind !== "pool.buy.dry" || typeof', 'if (result === null || typeof'],
+  // card move-sends-what-it-shows: a dry move's max sent to kit-v1.15 or below, whose schema refuses the whole answer
+  // for it, kit-v1.15 read at another level or in part (the state, the move event or the closed notice taken from it),
+  // or a key of that name taken from another kind or from the answer for an amount the move cannot send
+  ["kit", "  const maxless = moveMaxFor(kind, dryBuysFor(kind, given));\n", "  const maxless = dryBuysFor(kind, given);\n"],
+  ["kit", '  if (level === "1.15") return maxless;\n', ""],
+  ["kit", '  if (level === "1.15") return maxless;\n', '  if (level === "1.15") return dryBuysFor(kind, given);\n'],
+  ["kit", "  const { max: _m, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
+  ["kit", 'kind !== "pool.move.dry" || !Object.hasOwn(result, "out")) return result;', '!Object.hasOwn(result, "out")) return result;'],
+  ["kit", 'kind !== "pool.move.dry" || !Object.hasOwn(result, "out")) return result;', 'kind !== "pool.move.dry") return result;'],
   ["kit", 'from(1, 15) ? "1.15" : ', ""],
   ["kit", 'from(1, 15) ? "1.15" : ', 'from(1, 15) ? "current" : '],
   ["kit", 'from(1, 15) ? "1.15" : ', 'from(1, 14) ? "1.15" : '],

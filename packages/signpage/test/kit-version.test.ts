@@ -380,7 +380,7 @@ test("in the shell's order (hello, a 1.5 answer, the next document's ready, a st
 test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.15's", async () => {
   const [major, minor] = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];
   assert.equal(`${major}.${minor - 1}`, "1.15", "raising the version again adds its level here");
-  // kit-v1.15's, kit-v1.14's, kit-v1.13's and kit-v1.12's state is the whole state (their levels take a dry buy's buys,
+  // kit-v1.15's, kit-v1.14's, kit-v1.13's and kit-v1.12's state is the whole state (their levels take a dry move's max and a dry buy's buys,
   // a dry buy's with_cash and a move route event, a dry buy's out, and an open's closes, alone)
   for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL], [`${major}.${minor - 2}`, FULL], [`${major}.${minor - 3}`, FULL], [`${major}.${minor - 4}`, FULL], [`${major}.${minor - 5}`, FULL_V1_11], [`${major}.${minor - 6}`, FULL_V1_10], [`${major}.${minor - 7}`, FULL_V1_9], [`${major}.${minor - 8}`, FULL_V1_8], [`${major}.${minor - 9}`, FULL_V1_7], [`${major}.${minor - 10}`, FULL_V1_6], [`${major}.${minor - 11}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
     const p = page();
@@ -1139,20 +1139,21 @@ test("the route event { move: \"cash\", op }: told with its op to a kit 1.15 app
   assert.deepEqual(await routesTo(null, [move]), []);
 });
 
-// kit 1.16 (card buy-any-amount-on-every-chain): pool.buy.dry's answer on Base and Robinhood carries `buys` (what the
-// tap spends in swaps for the ask's amount, when below it), a key kit-v1.15's schema refuses the whole answer for.
-// kit-v1.15's schema is this card's base at fc76ebd16 (at kit 1.15: packages/kit/test/fixtures/kit-v1.15/, each file
-// pinned by its SHA-256 below and compared with that commit byte for byte where the clone has it). Red before this
-// change: the kit version was 1.15, so a kit-v1.15 client read at the current level was sent `buys` as it was.
+// kit 1.16 (card move-sends-what-it-shows): pool.move.dry's priced answer carries `max` (the most the move can send),
+// a key kit-v1.15's schema refuses the whole answer for, and an amount the move cannot send is answered with `max` and
+// the nearest amounts it can (no `out`), a shape no kit before 1.16 reads. kit-v1.15's schema is 83af19e2d's (at kit
+// 1.15, this card's base: packages/kit/test/fixtures/kit-v1.15/, each file pinned by its SHA-256 below and compared
+// with that commit byte for byte where the clone has it). Red before this card: the kit version was 1.15 and the page
+// had no 1.15 level and no max to strip.
 import * as V115 from "../../kit/test/fixtures/kit-v1.15/signpage/schema.ts";
-const V115_COMMIT = "fc76ebd16";
+const V115_COMMIT = "83af19e2d";
 const V115_FILES = {
   "signpage/schema.ts": "1886cec68915c29c6b79fe9e2a731d728bc83c4c061d872765dea585ef8d253f",
   "signpage/messages.ts": "42120634239e3cefb4a718920019528df86bbd6164ec01ea0f26fd2202aed5ec",
   "orders/record.ts": "1499cd86f07143d7205e1e86ffd3f37ae25f65e64c83b2c7fd70235a5a5def8d",
   "freeze.ts": "28118f50d643c20f7604c945eaf4d5fc1b2a6e4246a5193d814b2fdfde75e4d0",
 };
-test("the kit-v1.15 files here are fc76ebd16's, at kit 1.15: each file's SHA-256 pinned, and byte for byte that commit's where the clone has it", (t) => {
+test("the kit-v1.15 files here are 83af19e2d's at kit 1.15: each file's SHA-256 pinned, and byte for byte that commit's where the clone has it", (t) => {
   const file = (f: string) => readFileSync(new URL(`../../kit/test/fixtures/kit-v1.15/${f}`, import.meta.url));
   for (const [f, sha] of Object.entries(V115_FILES)) assert.equal(createHash("sha256").update(file(f)).digest("hex"), sha, f);
   const shim = readFileSync(new URL("../../kit/test/fixtures/kit-v1.15/trade/solana/pool-buy.ts", import.meta.url), "utf8");
@@ -1206,17 +1207,61 @@ test("hello kit 1.15 and 1.16 against this page: pool.buy.dry's answer with buys
   }
 });
 
-test("hello kit 1.15: the state answer and every state event as they are, the closed notice told, and kit-v1.15's own schema reads the state", async () => {
+const MOVE_STEPS_TO_CASH = [{ step: "pool_out", chain: "solana" }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }];
+const DRY_MOVE = { out: "2.25", fee: "0.001305", steps: MOVE_STEPS_TO_CASH, max: "0.03739" };
+const DRY_MOVE_LIMITS = { max: "0.03739", steps: MOVE_STEPS_TO_CASH, below: "0.02", above: "0.025" };
+test("pool.move.dry's max: kept for the kit's own version, left out for kit-v1.15 and every level below, and each kit's own schema reads what it is sent", () => {
+  assert.deepEqual(resultFor(kitLevel(SIGNPAGE_KIT_VERSION), "pool.move.dry", DRY_MOVE), DRY_MOVE);
+  assert.ok(NOW.SIGNPAGE_RESULT_SCHEMAS["pool.move.dry"](DRY_MOVE));
+  const { max: _m, ...plain } = DRY_MOVE;
+  for (const kit of ["1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5", "1.4"]) assert.deepEqual(resultFor(kitLevel(kit), "pool.move.dry", DRY_MOVE), plain, kit);
+  assert.ok(V115.SIGNPAGE_RESULT_SCHEMAS["pool.move.dry"](plain));
+  // the planted case: kit-v1.15's schema refuses a dry move that carries max, whole (its out and fee with it)
+  assert.equal(V115.SIGNPAGE_RESULT_SCHEMAS["pool.move.dry"](DRY_MOVE), false);
+  // the answer for an amount the move cannot send is sent as it is: the kit's own schema reads it, kit-v1.15's refuses
+  // it, as it refused the refusal the page sent it for that amount before
+  assert.ok(NOW.SIGNPAGE_RESULT_SCHEMAS["pool.move.dry"](DRY_MOVE_LIMITS));
+  for (const kit of [SIGNPAGE_KIT_VERSION, "1.15", "1.14"]) assert.deepEqual(resultFor(kitLevel(kit), "pool.move.dry", DRY_MOVE_LIMITS), DRY_MOVE_LIMITS, kit);
+  assert.equal(V115.SIGNPAGE_RESULT_SCHEMAS["pool.move.dry"](DRY_MOVE_LIMITS), false);
+  // another kind keeps a key named max, its out beside it: only the dry move's is taken
+  const buy = { tap_max: "0.04", max: "1", out: "2" };
+  assert.deepEqual(resultFor(kitLevel("1.15"), "pool.buy.dry", buy), buy);
+  // kit-v1.15 reads a dry buy's with_cash, out, pieces and cost: its level takes the max alone
+  assert.deepEqual(resultFor(kitLevel("1.15"), "pool.buy.dry", DRY_CASH), DRY_CASH);
+  assert.ok(V115.SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](DRY_CASH));
+});
+
+test("hello kit 1.15 against this page: the state and every state event as they are, the closed notice and the move event told, and kit-v1.15's own schema reads them", async () => {
   const p = page();
   p.send(hello("1.15"));
   const id = await p.ask();
   assert.deepEqual(p.answer(id).result, FULL);
   assert.ok(reads(V115, p.answer(id), "state"));
-  p.set({ ...FULL, vault_balance: "80" });
+  p.set({ ...FULL, vault_balance: "78" });
   await p.api.idle();
   const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
-  assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "80" } }]);
+  assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "78" } }]);
   assert.ok(reads(V115, ev[0], "state"));
   p.api.closed("open-1");
   assert.equal(p.posted.filter((m) => (m as { type?: string }).type === "closed").length, 1);
+  const move = { move: "cash", op: "cash/solana/1000" };
+  const told = await routesTo("1.15", [move]);
+  assert.deepEqual(told, [{ v: 1, type: "progress", move: "cash", op: "cash/solana/1000" }]);
+  assert.ok(V115.signpageProgressRouteSchema({ ...told[0], id: "x" }));
+});
+
+test("hello kit 1.15 and 1.16 against this page: pool.move.dry's max left out for kit-v1.15, kept for 1.16, each read by its kit's own schema", async () => {
+  for (const [kit, schema, want] of [["1.15", V115, (({ max: _m, ...r }) => r)(DRY_MOVE)], [SIGNPAGE_KIT_VERSION, NOW, DRY_MOVE]] as const) {
+    const posted: unknown[] = [];
+    const parent = { postMessage: (m: unknown, to: string) => void (to === APP_ORIGIN && posted.push(structuredClone(m))) };
+    let listener: ((e: IncomingMessage) => void) | null = null;
+    const api = startApi({ parent, listen: (fn) => (listener = fn), state: () => FULL, kinds: { "pool.move.dry": () => ({ result: DRY_MOVE }) } as unknown as ApiHost["kinds"] });
+    listener!({ origin: APP_ORIGIN, source: parent, data: hello(kit) });
+    const id = crypto.randomUUID();
+    listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "pool.move.dry", from: "solana", to: "near", amount: "0.03" } });
+    await api.idle();
+    const a = posted.find((m) => (m as { id?: string }).id === id) as { ok: boolean; result: unknown };
+    assert.deepEqual(a?.result, want, kit);
+    assert.ok(schema.signpageAnswerOkSchema(a) && schema.SIGNPAGE_RESULT_SCHEMAS["pool.move.dry"](a.result), `kit-v${kit}'s schema reads it`);
+  }
 });

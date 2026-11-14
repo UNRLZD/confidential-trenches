@@ -122,16 +122,29 @@ export function judge(run) {
   return { ok: verdict === "PASS", verdict, lines };
 }
 
-/** The quotes part of a run (see the header), real mainnet reads only: { chains: { base, robinhood } }. */
-export async function readQuotes(fetchFn = fetch) {
+/** The quotes part of a run (see the header), real mainnet reads only: { chains: { base, robinhood } }. `chains` the
+ *  chains read, `coins` each chain's coins quoted beside the helper's top rows (card
+ *  robinhood-quotes-inside-provider-limits: FRONG, the owner's). Each tap's hosts: its posts (requests), the JSON-RPC
+ *  calls in them and the answers of 429. */
+export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "robinhood"], coins = {} } = {}) {
   const counts = {};
   const real = globalThis.fetch;
   const counted = async (url, init) => {
     const host = new URL(typeof url === "string" ? url : url.url).host;
-    const c = (counts[host] ??= { requests: 0, s429: 0 });
+    const c = (counts[host] ??= { requests: 0, calls: 0, s429: 0, logs: 0, s429Logs: 0 });
     c.requests++;
+    let logs = false;
+    try {
+      const b = JSON.parse(typeof init?.body === "string" ? init.body : "null");
+      c.calls += Array.isArray(b) ? b.length : b === null ? 0 : 1;
+      logs = (Array.isArray(b) ? b : [b]).some((x) => x?.method === "eth_getLogs");
+    } catch {
+      c.calls++;
+    }
+    if (logs) c.logs++;
     const r = await fetchFn(url, init);
     if (r.status === 429) c.s429++;
+    if (r.status === 429 && logs) c.s429Logs++;
     return r;
   };
   globalThis.fetch = counted;
@@ -142,7 +155,7 @@ export async function readQuotes(fetchFn = fetch) {
   };
   try {
     const chains = {};
-    for (const chain of ["base", "robinhood"]) {
+    for (const chain of which) {
       take();
       const t = performance.now();
       const { sync, served } = await evmPoolIndexRefresh(chain, null, counted);
@@ -153,6 +166,7 @@ export async function readQuotes(fetchFn = fetch) {
       const seen = new Map();
       for (const v of Object.values(lists)) for (const x of Array.isArray(v) ? v : []) if (typeof x?.token === "string" && !seen.has(x.token)) seen.set(x.token, x);
       const top = [...seen.values()].sort((a, b) => Number(b.liq_usd ?? 0) - Number(a.liq_usd ?? 0)).slice(0, QUOTE_ROWS);
+      for (const [token, symbol] of Object.entries(coins[chain] ?? {})) if (!top.some((x) => x.token.toLowerCase() === token.toLowerCase())) top.push({ token, symbol, liq_usd: seen.get(token)?.liq_usd ?? null });
       const rows = [];
       for (const x of top) {
         const runs = [];

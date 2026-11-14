@@ -88,7 +88,8 @@ const WITHDRAW_HOST = (w) => new RegExp(`[,;{ ](${N})=\\((${N}),${N}\\)=>\\{if\\
 const WITHDRAW_SITES = (w, host, pool) => ({
   flow: new RegExp(`(${N})\\.kind===${Q}pool\\.withdraw${Q}&&${esc(w)}\\(\\1\\.chain\\)&&(${N})\\.openWithdraw&&${esc(pool)}\\(\\1\\.chain\\)!==null\\?\\2\\.openWithdraw\\(\\1\\.chain,${N}\\)`),
   deps: new RegExp(`[,;{ ]${N}=\\((${N}),${N}\\)=>\\{let (${N})=${esc(w)}\\(\\1\\)\\?${esc(pool)}\\(\\1\\):null;return\\{chain:\\1,keys:\\{pool:\\2\\?\\.pin\\.pool`),
-  run: new RegExp(`if\\(!\\(!${N}\\|\\|!${esc(w)}\\((${N})\\.chain\\)\\|\\|\\(\\1\\.chain===${Q}solana${Q}\\?${N}===void 0:${esc(pool)}\\(\\1\\.chain\\)===null\\)\\)\\)`),
+  // the run's guard as the minifier writes it: `if(!(G)){...}`, or `if(G)return;...` when the body declares a binding
+  run: new RegExp(`if\\((?:!\\()?!${N}\\|\\|!${esc(w)}\\((${N})\\.chain\\)\\|\\|\\(\\1\\.chain===${Q}solana${Q}\\?${N}===void 0:${esc(pool)}\\(\\1\\.chain\\)===null\\)\\)(?:\\)|return[;}])`),
   owed: new RegExp(`if\\((${N})===${Q}base${Q}\\|\\|\\1===${Q}robinhood${Q}\\)\\{let ${N}=${esc(host)}\\(\\1,${N}\\)`),
 });
 /** The EVM withdraw's sites, each found once and bound: { host, flow, deps, run, owed }, every one false without the rule. */

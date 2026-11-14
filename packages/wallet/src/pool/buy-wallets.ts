@@ -765,16 +765,20 @@ export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): 
 //   exactly one mint other than wrapped SOL rises in W's token accounts. That mint, and the token program of W's account
 //   of it, are the record (pool-sell.ts buyMints' { mint, program }). A stranger's send is not signed by W, so it is never
 //   a buy; anything else read is no record.
-// - W's oldest successful transactions are read in order until the pinned pool's own release naming W (tag 2 or 3, W
-//   its recipient and a signer, landed): that release spends the one note that pays W, so it is W's buy or W has none.
-//   W is named before it only after a buy of its failed on chain (the note stays unspent and the retry pays the same W),
-//   so a few sends may come first: SOL_BUY_TXS of them are read.
+// - W's oldest successful transactions are read in order until the pinned pool's tag 3 naming W (W its recipient and a
+//   signer, landed): W's buy. A buy of several pieces (card owners-solana-buy-lands) pays W by plain releases (tag 2)
+//   first, each its own transaction, so a tag 2 is read past (card closed-positions-show-every-trade: 33SLRx then
+//   55LqP9 on mainnet, 13 Nov 18:05Z). W is named before them only after a buy of its failed on chain (the note stays
+//   unspent and the retry pays the same W), so a few sends may come first: SOL_BUY_TXS of them are read, the pool's
+//   releases naming W not counted.
 // - At most SOL_BUY_PAGES pages of W's signatures and SOL_BUY_TXS of its oldest successful transactions: a history past
 //   them (a W flooded with sends), one the route no longer returns (a signature listed with no transaction), or one
 //   with no pool release among those read (a shortened list included) is no answer (null), and W stays on the finder's
 //   path as before; it is read again at a later page load (sol-buy-records.ts). Never a guess.
-// - "none" only when the pool's release naming W was read and it is a plain release (tag 2, no tag 3): final, as the
-//   note is spent, so that W is never read again (review of ae2cfe28, P2: four sends before a buy are never "none").
+// - "none" only when a plain release naming W was read with no tag 3 after it, and then either W signed a transaction
+//   of its own (W moved on: its pieces swept back), or nothing of W's came after it and it is older than
+//   SOL_RELEASE_FINAL_MS (its tag 3 can no longer land): final, so that W is never read again (review of ae2cfe28, P2:
+//   four sends before a buy are never "none"). A release younger than that with nothing after it is no answer (null).
 //   A landed tag 3 always ran its venue buy (contracts/pool-solana/src/buy.rs: a failing inner call fails the whole
 //   transaction), so a tag 3 whose buy this reader cannot read (balances it cannot parse) is no answer (null), never
 //   "none" (review of 0430db23, P2).
@@ -818,6 +822,10 @@ export const SOL_BUY_PAGE = 1_000;
 /** The most of W's oldest successful transactions read for its buy: its release, after the sends a failed buy of W's
  *  can draw before its retry lands. */
 export const SOL_BUY_TXS = 8;
+/** A plain release naming W with nothing of W's after it is read as no buy only once it is this old (ms): a buy of
+ *  several pieces sends its tag 3 right after its pieces, within its blockhash's life (about a minute and a half), so
+ *  past this its tag 3 can no longer land; well over it, for a device clock that runs ahead. */
+export const SOL_RELEASE_FINAL_MS = 600_000;
 /** The most of W's transactions after its buy read for its trades (see above): its sales up to the one in full. */
 export const SOL_TRADE_TXS = 8;
 /** The pool's release and its release-and-buy (the kit's SOLANA_POOL_TAG_RELEASE, SOLANA_POOL_TAG_RELEASE_AND_BUY). */
@@ -964,19 +972,31 @@ export function solanaBuyReader(rpc: SolanaRpc, pool: string, o: ReaderOpts = {}
         if (landed.some((x) => x.signature === from.after)) return done(null);
         return done({ mint: from.mint, program: from.program, after: from.after, ...(await trades(-1, from.mint, [])) });
       }
-      const oldest = landed.slice(0, SOL_BUY_TXS);
-      for (const [at, { signature }] of oldest.entries()) {
+      // the newest plain release read (its block time, s), and how many other transactions were read
+      let released: number | null = null;
+      let others = 0;
+      for (const [at, { signature }] of landed.entries()) {
+        if (others >= SOL_BUY_TXS) return done(null);
         const tx = await txOf(signature);
         // a signature listed whose transaction the route no longer returns: W's history is past it
         if (tx === null) return done(null);
         const buy = solanaBuyIn(tx, w, pool);
         if (buy !== null) return done({ ...buy, ...(await trades(at, buy.mint, [{ signature, tx }])) });
-        // the pool's plain release naming W: W's note is spent with no buy, it has none for good; a tag 3 whose buy was
-        // not read: no answer
-        if (releaseIn(tx, w, pool)) return done(solanaReleaseIn(tx, w, pool) ? "none" : null);
+        // a plain release naming W (tag 2): a piece of a buy of several, whose tag 3 comes after it, or W's note spent
+        // with no buy; read on
+        if (solanaReleaseIn(tx, w, pool)) {
+          released = (tx as { blockTime: number }).blockTime;
+          continue;
+        }
+        // a tag 3 whose buy was not read: no answer
+        if (releaseIn(tx, w, pool)) return done(null);
+        // W's own transaction after a plain release with no tag 3 between: W moved on with no buy, none for good
+        if (released !== null && solanaSignedBy(tx, w)) return done("none");
+        others++;
       }
-      // no release of W's among those read (none yet, past the bound, or a list cut short): no answer
-      return done(null);
+      // a plain release and nothing of W's after it: none once its buy can no longer land (SOL_RELEASE_FINAL_MS), else
+      // no answer (its tag 3 may still come); no release read (none yet, or a list cut short): no answer
+      return done(released !== null && Date.now() - released * 1000 > SOL_RELEASE_FINAL_MS ? "none" : null);
     },
   };
 }

@@ -132,7 +132,10 @@ import { vaultScope } from "./withdraw/checks.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { evmRestoreNotes } from "../../wallet/src/pool/evm-restore.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPoolScopeOf, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
-import { restoreEvmHoldings, type EvmBuySpend } from "./pool-sell-evm.ts";
+import { restoreEvmHoldings, restoreEvmTrades, type EvmBuySpend } from "./pool-sell-evm.ts";
+import type { EvmRestoredReturn, EvmRestoredSpend } from "../../wallet/src/pool/evm-restore.ts";
+import { evmHelperRpc } from "../../wallet/src/pool/buy-wallets.ts";
+import { TRADE_HELPER } from "./trade.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { solanaRestoreNotes, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
@@ -785,6 +788,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // each pool on its own: one that fails leaves the others' notes found
         const label = (p: RestorePool): string => (p.chain === "near" ? "near vault" : p.chain === "solana" ? "solana" : p.pin.network);
         const evmHoldingsOwed: { chain: "base" | "robinhood"; pin: EvmPoolPin; list: readonly EvmRpc[]; buys: EvmBuySpend[] }[] = [];
+        // each EVM pool's buys and deposits back, for their trade ops once the notes are written (card
+        // closed-positions-show-every-trade, pool-sell-evm.ts restoreEvmTrades)
+        const evmTradesOwed: { chain: "base" | "robinhood"; list: readonly EvmRpc[]; spends: readonly EvmRestoredSpend[]; returns: readonly EvmRestoredReturn[] }[] = [];
         // card closed-positions-after-a-restore: every pool's reads go side by side, but each walk (RESTORE_LANES lanes
         // of RESTORE_GAP indices on the page's one thread, the run's whole cost) takes the page's turn, one pool after
         // another in the order their reads end, so the first pool's notes are written one walk in, never after every
@@ -874,6 +880,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           const buys = POOL_TESTNET ? r.spends.flatMap((x) => (x.token === null ? [] : [{ w: x.w, token: x.token, block: x.block, blockHash: x.blockHash, logIndex: x.logIndex }])) : [];
           const chain = chainOf(p);
           if (POOL_TESTNET && buys.length > 0 && chain !== "solana") evmHoldingsOwed.push({ chain, pin: p.pin, list: p.rpcs(), buys });
+          if (chain !== "solana" && r.spends.some((x) => x.token !== null)) evmTradesOwed.push({ chain, list: p.rpcs(), spends: r.spends, returns: r.returns ?? [] });
           return r.notes;
         });
         const walked: Walked[] = [];
@@ -920,6 +927,14 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           // positions again (card signpage-positions-evm)
           const wrote = await letGo(restoreEvmHoldings({ chain: o.chain, testnet: POOL_TESTNET, pin: o.pin, rpcs: evmPair(o.list), store: await (h.held ? h.held() : h.store()), spends: o.buys, signal }).catch((): string[] => []), signal);
           if (wrote.length > 0) h.holdingsWritten?.(o.chain);
+        }
+        // the trade ops of each EVM buy and its sales, from the events the walk read (pool-sell-evm.ts restoreEvmTrades):
+        // the block times and decimals on the helper's route on mainnet, the pool's own RPC on the testnet build
+        for (const o of evmTradesOwed) {
+          signal.throwIfAborted();
+          const read = POOL_TESTNET ? o.list[0]! : (evmHelperRpc(TRADE_HELPER, o.chain) as unknown as EvmRpc);
+          const wrote = await letGo(restoreEvmTrades({ chain: o.chain, read, store: await (h.held ? h.held() : h.store()), spends: o.spends, returns: o.returns, signal }).catch(() => 0), signal);
+          if (wrote > 0) h.holdingsWritten?.(o.chain);
         }
         // step 5 is owed from here until a try reads every id (the marker, the pools' scopes alone)
         const idPools = pools.filter((p) => p.chain !== "near");

@@ -30,9 +30,12 @@
 // it is sent each answer with with_cash left out and no move event (every level below it too). A move op (kind "move",
 // pool.move's), a kind no kit before 1.15 has, is sent as it is: kit-v1.5 and later drop an op they cannot read and keep
 // the rest of the state (kit schema.ts signpageReadableOps), and kit-v1.4's path leaves it out (opV1_4). A client that
-// names kit-v1.15 reads everything but a pool.buy.dry answer's buys (card buy-any-amount-on-every-chain), a key its schema
-// refuses the whole answer for: it is sent each answer with buys left out (every level below it too), the move event and
-// every closed notice. A client at SIGNPAGE_KIT_VERSION or above gets every message as it is. A change
+// names kit-v1.15 reads everything but a pool.move.dry answer's max and the answer for an amount the move cannot send
+// (card move-sends-what-it-shows), which its schema refuses the whole answer for: it is sent each priced answer with max
+// left out (every level below it too), and the other answer as it is, which its kit reads as a refused dry, as it read
+// the refusal the page sent it before. It is sent each pool.buy.dry answer with buys left out too (card
+// buy-any-amount-on-every-chain). A client at
+// SIGNPAGE_KIT_VERSION or above gets every message as it is. A change
 // to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
@@ -44,7 +47,7 @@ import type { DepositStage, Operation, ProgressRouteEvent, SignpageKind, Signpag
  *  kit-v1.9's (no op pool_amount), kit-v1.10's (no position asset_held; none at the levels below either), kit-v1.11's
  *  (no pool making, no dry buy pieces and cost; none at the levels below either), kit-v1.12's (no open closes; none at
  *  the levels below either), kit-v1.13's (no dry buy out; none at the levels below either), kit-v1.14's (no dry buy
- *  with_cash, no move route event; none at the levels below either), kit-v1.15's (no dry buy buys; none at the levels
+ *  with_cash, no move route event; none at the levels below either), kit-v1.15's (no dry move max, no dry buy buys; none at the levels
  *  below either), or everything (kit-v1.16 and above). */
 export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "1.8" | "1.9" | "1.10" | "1.11" | "1.12" | "1.13" | "1.14" | "1.15" | "current";
 /** A client that posts no hello. */
@@ -169,6 +172,12 @@ const dryBuysFor = (kind: SignpageKind, result: unknown): unknown => {
   const { buys: _b, ...rest } = result as Record<string, unknown>;
   return rest;
 };
+/** pool.move.dry's priced answer with no max (card move-sends-what-it-shows): kit-v1.15 and before refuse one. */
+const moveMaxFor = (kind: SignpageKind, result: unknown): unknown => {
+  if (result === null || typeof result !== "object" || kind !== "pool.move.dry" || !Object.hasOwn(result, "out")) return result;
+  const { max: _m, ...rest } = result as Record<string, unknown>;
+  return rest;
+};
 /** pool.buy.dry's answer with no with_cash (card one-balance-buys-on-every-chain): kit-v1.14 and before refuse one. */
 const dryCashFor = (kind: SignpageKind, result: unknown): unknown => {
   if (result === null || typeof result !== "object" || kind !== "pool.buy.dry") return result;
@@ -267,9 +276,9 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
  */
 export function resultFor(level: KitLevel, kind: SignpageKind, given: unknown): unknown {
   if (level === "current") return given;
-  const planned = dryBuysFor(kind, given);
-  if (level === "1.15") return planned;
-  const cashless = dryCashFor(kind, planned);
+  const maxless = moveMaxFor(kind, dryBuysFor(kind, given));
+  if (level === "1.15") return maxless;
+  const cashless = dryCashFor(kind, maxless);
   if (level === "1.14") return cashless;
   const plain = dryOutFor(kind, cashless);
   if (level === "1.13") return plain;

@@ -1,0 +1,27 @@
+{
+ "_note": "good: this card's mainnet build (node packages/signpage/scripts/build-app.mjs on branch card/robinhood-note-spendable), its index and its app.js facts: the proving lock named and asked with steal and ifAvailable, and the queues lock named. bad: SIGN_HOST read 2026-11-13T22:31Z, before this card: no proving lock, so a note one tab proved stays HELD out of the tab in use. bad_tap: the mainnet build of this card's first commit d638031c: the proving lock with no queues lock, so a buy tapped in a tab without the front is refused and a window switch mid-buy refuses it.",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bARVDNLzN7pROVFW4hxXL5WsvDv97/30qgp2Nw9P5mqBiTMBDhrXdIsfzNyBDMhM\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-bARVDNLzN7pROVFW4hxXL5WsvDv97/30qgp2Nw9P5mqBiTMBDhrXdIsfzNyBDMhM",
+  "lock": true,
+  "steal": true,
+  "ifAvailable": true,
+  "queues": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-N94bSrg2/Y73SjFl2fSvgA9chUzJY3tJrKsN4iLid2iF3idcXsRgb3U47IyY3gVp\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-N94bSrg2/Y73SjFl2fSvgA9chUzJY3tJrKsN4iLid2iF3idcXsRgb3U47IyY3gVp",
+  "lock": false,
+  "steal": false,
+  "ifAvailable": true,
+  "queues": false
+ },
+ "bad_tap": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-HrZCSfPxuwh/eb7kCpKFzRcIM7u+8IeKst5q62R5HDWjC8d7i2Zg/rtsLj0h+hxC\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-HrZCSfPxuwh/eb7kCpKFzRcIM7u+8IeKst5q62R5HDWjC8d7i2Zg/rtsLj0h+hxC",
+  "lock": true,
+  "steal": true,
+  "ifAvailable": true,
+  "queues": false
+ }
+}

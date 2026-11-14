@@ -142,6 +142,8 @@ export type EvmWithdrawHost = {
   stage?(stage: WithdrawStage, txs: TxRef[], pending: EvmPendingOnward | null, arrived: Arrivals, held?: EvmHeldOnW): void;
   now?(): bigint;
   wait?(ms: number): Promise<void>;
+  /** A payout to another chain: the Solana run's exit (src/pool-withdraw.ts PoolWithdrawHost exit). */
+  exit?(refundTo: string): Promise<string>;
 };
 
 /** `cause`: why a run or one of its parts ended on a throw, in public words only (pool-sell.ts legCause), for the op's
@@ -544,6 +546,9 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
       return out;
     });
     const ws = await wsOf(plan0!);
+    // another chain (card pool-withdraws-to-any-chain): To is the checked quote's deposit address on this chain, its
+    // refund the first W, which must stay the run's first W (no re-plan below)
+    if (h.exit) to = await h.exit(ws[0]!);
     if (evmToRefused(to, h.pin, ws)) stop("to");
     // To read on both RPCs before any note moves: a To with code is run from the first part's W, or refused
     const costs = await evmWithdrawCosts(h, { to, from: ws[0]!, value: plan0![0]!.part }, first.fee);
@@ -553,6 +558,7 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     // with code is run again from the first W and part of the plan that runs; a send that needs more gas from there than
     // the plan was priced at stops before any note moves (review of cb287f4f5 P3-2)
     if (plan !== plan0) {
+      if (h.exit) stop("plan");
       const ws1 = await wsOf(plan!);
       if (evmToRefused(to, h.pin, ws1)) stop("to");
       if (costs.toHasCode && (await evmWithdrawCosts(h, { to, from: ws1[0]!, value: plan![0]!.part }, first.fee)).gas > costs.gas) stop("gas");

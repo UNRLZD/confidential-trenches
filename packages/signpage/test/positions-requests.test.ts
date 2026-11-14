@@ -26,7 +26,7 @@ import { SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM } from "../../kit/src/c
 import { POSITION_COSTS_KEY, type Position } from "../src/positions.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
 import { poolSellKind } from "../src/pool-sell.ts";
-import { BUY_NONE_KEY, solBuyRecords } from "../src/sol-buy-records.ts";
+import { BUY_NONE_KEY, BUY_NONE_MARK, solBuyRecords } from "../src/sol-buy-records.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16))); // the published all-zero entropy vector (a8.json)
@@ -502,7 +502,7 @@ test("a restored device: each W's buy record back from its own buy on the helper
   await until(() => asked("s0buy") && asked("s1buy") && asked("s2drop") && asked("s3rel"));
   await until(async () => (await w.get("meta", BUY_NONE_KEY)) !== undefined);
   assert.deepEqual(await records(), { [Ws[0]!]: { mint: BOUGHT, program: SOLANA_TOKEN_PROGRAM, rebuilt: true } }, "W0's record back, marked rebuilt; W1's read failed and W2 has no buy: none");
-  assert.deepEqual(await w.get("meta", BUY_NONE_KEY), { [Ws[3]!]: true }, "W3 read for good with no buy; W2's one send and W1's failed read get no mark");
+  assert.deepEqual(await w.get("meta", BUY_NONE_KEY), { [Ws[3]!]: BUY_NONE_MARK }, "W3 read for good with no buy; W2's one send and W1's failed read get no mark");
   // W2 no answer: read once this page load, a later state read's run included; W1's failed read is read again
   await tp.settle();
   await until(() => sentSigs.filter((x) => x === `${phase} s1buy`).length === 2);

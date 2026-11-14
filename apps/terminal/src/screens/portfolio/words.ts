@@ -108,6 +108,26 @@ export const WORDS = {
   // the Positions tile's two parts (card app-faults-seen-on-122): drawn only there and on Allocation's Reserve tile
   coins: ok("Coins", "owner 12 Nov 16:17:50Z, picks page LXQtQC9kZJmGNQxpQGGmow (picks/r123), owner-decisions row \"What sits behind the withdraw form, and where Portfolio shows the SOL an open buy holds\": \"Coins\" for the coins part (over \"Tokens\")"),
   reserve: ok("Reserve", "owner 12 Nov 16:17:50Z, picks page LXQtQC9kZJmGNQxpQGGmow (picks/r123), owner-decisions row \"What sits behind the withdraw form, and where Portfolio shows the SOL an open buy holds\": \"Reserve\" for the SOL held (over \"Refund\", \"Held\")"),
+  // card portfolio-moves-money-between-chains: Private balance's Move and its sheet. Move is the owner's own word; every
+  // other word is one the deposit sheet already carries with the owner's OK (src/screens/deposit/words.ts), but From
+  move: ok("Move", "owner 13 Nov 19:39Z, typed: \"make these balance to be moveable between chains within portfolio\" (card portfolio-moves-money-between-chains: \"Move\" is the owner's own word)"),
+  intents: draft("NEAR Intents", "card portfolio-moves-money-between-chains: the move flow's leg between chains, NEAR Intents' own name (lite paper v2 §3)"),
+  from: draft("From", "card portfolio-moves-money-between-chains: the label over the chain the money leaves, beside To"),
+  to: ok("To", "owner 8 Nov 07:55Z, kept (src/screens/deposit/words.ts to): the label over where the money goes"),
+  amount: ok("Amount", "CN-06, owner round 16 (src/screens/deposit/words.ts amount)"),
+  max: ok("Max", "owner 2 Nov 06:08Z, all approved (src/screens/deposit/words.ts max)"),
+  youGet: ok("You get, about", "owner 2 Nov 06:08Z, all approved (src/screens/deposit/words.ts youGet)"),
+  fees: ok("Fees", "owner 2 Nov 06:08Z, all approved (src/screens/deposit/words.ts fees)"),
+  arrives: ok("Arrives", "owner 2 Nov 06:08Z, all approved (src/screens/deposit/words.ts arrives)"),
+  done: ok("Done", "owner 2 Nov 06:08Z, all approved (src/screens/deposit/words.ts done)"),
+  busy: ok("Busy", "owner 2 Nov 06:08Z, all approved (src/screens/deposit/words.ts busy)"),
+  retry: ok("Retry", "owner-words-pass (src/screens/deposit/words.ts retry)"),
+  notAvailable: ok("Not available", "owner 1 Nov 16:45Z, Keep the drafts (src/screens/deposit/words.ts notAvailable)"),
+  quoteRefused: ok("Quote refused", "owner 2 Nov 06:08Z, all approved (src/screens/deposit/words.ts quoteRefused)"),
+  // card move-sends-what-it-shows: an amount the move cannot send names what it can, in words the owner already OK'd
+  min: ok("Min", "src/screens/deposit/words.ts min (R5 app.js:632 lim); the signing page's pool withdraw \"Min 0.00189 SOL\", owner 8 Nov 07:55Z, kept"),
+  try: ok("Try", "owner 8 Nov 07:55Z, kept: the signing page's pool withdraw \"Try 0.5 or 0.6 SOL\" (packages/signpage/src/withdraw/pool-form.ts try)"),
+  or: ok("or", "owner 8 Nov 07:55Z, kept: the signing page's pool withdraw \"Try 0.5 or 0.6 SOL\" (packages/signpage/src/withdraw/pool-form.ts or)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

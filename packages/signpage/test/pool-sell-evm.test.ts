@@ -28,7 +28,10 @@ import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts"
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
 import { EVM_OPEN_SELLS_KEY, EVM_SELL_DEADLINE_S, evmBuyRouteRead, evmSellPlanQuote, evmSellAnswer, followEvmSells, planEvmSell, poolSellEvmKind, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
 import { POOL_TRADE_LOCK } from "../src/trade.ts";
-import type { PoolAsk } from "../src/rules/pool.ts";
+import { opOf } from "../src/state.ts";
+import { poolUnits, type PoolAsk } from "../src/rules/pool.ts";
+import type { Operation } from "../../kit/src/signpage/messages.ts";
+import { tradeBook } from "../../../apps/terminal/src/screens/portfolio/model.ts";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { READ_WAIT_TOTAL_MS } from "../src/read-waits.ts";
@@ -257,6 +260,40 @@ test("a sale: the device's quote, checked and signed, the record and the note IN
   assert.equal(n?.state, "UNSPENT");
   assert.equal(n?.leaf?.value, s.minOut - s.fee);
   assert.deepEqual(await openOf(x), [], "the record dropped once the note landed");
+});
+
+// Card closed-positions-show-every-trade: a Base or Robinhood sale wrote no op, so Portfolio's closed positions never
+// showed a coin sold in full there (CASHCAT on Robinhood, 13 Nov 21:06Z, 0x6de337ed). Its filled end now gives the
+// trade's op: the units W sold and what the sale put back into the pool, priced at the page's own price; with the buy's
+// op, the app's trade book closes the round trip.
+test("filled: the sale's trade op, its units and the ETH back, and with the buy's op one closed position", async () => {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      x.land(s.minOut - s.fee);
+      return "0x" + "d1".repeat(32);
+    },
+  });
+  const ops: Record<string, unknown>[] = [];
+  // 3,000 USD an ETH
+  const price = { price: "300000000000", expo: -8, published_s: 1, read_ms: 1 };
+  const a = await runEvmPoolSell({ ...x.h, traded: async (op: Record<string, unknown>) => void ops.push(op), price: () => price } as EvmSellHost, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: "0x" + "d1".repeat(32) }] });
+  assert.equal(ops.length, 1, "one trade op for the filled sale");
+  const s = sellOf(x.posts[0]!.data);
+  const back = s.minOut - s.fee;
+  const { created_ms, ...rest } = ops[0]!;
+  assert.ok(Number.isSafeInteger(created_ms), "its time");
+  assert.deepEqual(rest, { kind: "sell", stage: "filled", txs: [{ chain: "base", hash: "0x" + "d1".repeat(32) }], chain: "base", token: TOKEN.toLowerCase(), units: "1", pool_amount: poolUnits(back, 18), amount_usd: poolUnits(back * 300_000_000_000n, 26) });
+  // the state sends it whole: every field passes the kit's op schema (src/state.ts opOf)
+  assert.deepEqual(opOf("trade/base/0xd1", ops[0]), { id: "trade/base/0xd1", ...ops[0]! });
+  // the buy's op, as its filled end writes it (pool-buy-evm.test.ts), then this sale: one round trip, closed
+  const buy = { id: "trade/base/0xb1", kind: "buy", stage: "filled", txs: [{ chain: "base", hash: "0x" + "b1".repeat(32) }], created_ms: (created_ms as number) - 60_000, chain: "base", token: TOKEN.toLowerCase(), units: "1", pool_amount: "0.002", amount_usd: "6" };
+  const book = tradeBook([buy, { id: "trade/base/0xd1", ...ops[0]! }] as unknown as Operation[], []);
+  assert.equal(book.closed.length, 1, "the coin sold in full is a closed position");
+  assert.deepEqual([book.closed[0]!.bought, book.closed[0]!.sold, book.closed[0]!.bought_asset, book.closed[0]!.sold_asset], ["6", rest.amount_usd, "0.002", poolUnits(back, 18)]);
+  assert.equal(book.open.size, 0);
 });
 
 test("the calldata is byte for byte the encoding the pool's testnet run sends (testnet-run-lib.mjs sellData)", async () => {

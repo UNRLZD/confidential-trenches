@@ -57,41 +57,39 @@ const tied = (main, more) => ({
 
 /** Each rule's mark in the bundle, by what it holds. */
 export const MARKS = Object.freeze({
-  "the piece rule's 0.001 SOL grid, 0.005 SOL floor, four finishing sizes and 2,950,240 least finish, held by the Solana pool with its piece ladder": tied(
-    re(R`(?<g>${I})=1000000n,(?<f>${I})=5000000n,(?<h>${I})=4n,(?<z>${I})=2950240n;`),
-    (g) => [R`(?<l>${I})=Object\.freeze\(\{one:1000000n,min:5000000n\}\),(?<p>${I})=Object\.freeze\(\{grid:${esc(g.g)},floor:${esc(g.f)},ladder:\k<l>,least:${esc(g.z)}\}\)[^]*?pieces:\k<p>`, R`Array\.from\(\{length:Number\(${esc(g.h)}\)\}`],
+  // card pool-amounts-are-standard-sizes: no finishing sizes; every size that enters or leaves the pool is a rung
+  "the piece rule's 0.001 SOL grid, 0.005 SOL floor and 2,950,240 least, held by the Solana pool with its piece ladder": tied(
+    re(R`(?<g>${I})=1000000n,(?<f>${I})=5000000n,(?<z>${I})=2950240n;`),
+    (g) => [R`(?<l>${I})=Object\.freeze\(\{one:1000000n,min:5000000n\}\),(?<p>${I})=Object\.freeze\(\{grid:${esc(g.g)},floor:${esc(g.f)},ladder:\k<l>,least:${esc(g.z)}\}\)[^]*?pieces:\k<p>`],
   ),
-  "the closed list: a release size is a rung or the floor plus one to four grid steps": re(
-    R`function (?<w>${I})\((${I})\)\{return Array\.from\(\{length:Number\(${I}\)\},\((${I}),(${I})\)=>\2\.floor\+BigInt\(\4\+1\)\*\2\.grid\)\}function (${I})\((${I}),(${I})\)\{return typeof \7==` + "`bigint`" + R`&&\(${I}\(\6\.ladder,\7\)\|\|\k<w>\(\6\)\.includes\(\7\)\)\}`,
+  "a release size is a rung, and the sizes a release may take are the rungs alone": re(
+    R`function ${I}\((${I}),(${I})\)\{return typeof \2==` + "`bigint`" + R`&&${I}\(\1\.ladder,\2\)\}function ${I}\((${I}),(${I})\)\{return (${I})\(\3\.ladder,\4\)\}`,
   ),
-  "a note's chunk: the largest rung leaving 0 or the floor, else the note on the list or off the grid; under the floor the note itself down to the least": re(
-    R`if\((${I})<(${I})\.floor\)return \1>=\2\.least\?\1:null;for\(let (${I}) of ${I}\(\2\.ladder,\1\)\)\{let (${I})=\1-\3;if\(\4===0n\|\|\4>=\2\.floor\)return \3\}return ${I}\(\2,\1\)\|\|\1%\2\.grid!==0n\?\1:null\}`,
+  "a note's chunk: the largest rung leaving 0 or the floor, else (a note made before the rule) the note itself, once; under the floor the note itself down to the least": re(
+    R`if\((${I})<(${I})\.floor\)return \1>=\2\.least\?\1:null;for\(let (${I}) of ${I}\(\2\.ladder,\1\)\)\{let (${I})=\1-\3;if\(\4===0n\|\|\4>=\2\.floor\)return \3\}return \1\}`,
   ),
   "the proof queue's chunk is the pool's piece rule's whenever the pool has one": re(R`function ${I}\((${I}),(${I})\)\{return \1\.pieces===void 0\?${I}\(\1\.ladder,\2\):${I}\(\1\.pieces,\2\)\}`),
-  "a withdraw part takes a whole note only on the list, off the grid or under the floor, else a size of the list leaving at least the floor": re(
-    R`(?<a>${I})>=(?<c>${I})\.minPart&&\(${I}\((?<p>${I}),(?<n>${I})\.value\)\|\|\k<n>\.value%\k<p>\.grid!==0n\|\|\k<n>\.value<\k<p>\.floor\)&&(?<o>${I})\.push\(\[\k<a>,\k<a>\]\);for\(let (?<x>${I}) of \k<n>\.value-(?<f>${I})>=\k<p>\.floor\?${I}\(\k<p>,\k<n>\.value-\k<f>\):\[\]\)\k<x>-(?<k>${I})>=\k<c>\.minPart&&\k<o>\.push\(\[\k<x>-\k<k>,\k<x>-\k<k>\]\)`,
+  "a withdraw part takes a whole note only when it is the note's own chunk or under the floor, else a rung leaving at least the floor": re(
+    R`(?<a>${I})>=(?<c>${I})\.minPart&&\((?<ch>${I})\((?<p>${I}),(?<n>${I})\.value\)===\k<n>\.value\|\|\k<n>\.value<\k<p>\.floor\)&&(?<o>${I})\.push\(\[\k<a>,\k<a>\]\);for\(let (?<x>${I}) of \k<n>\.value-(?<f>${I})>=\k<p>\.floor\?${I}\(\k<p>,\k<n>\.value-\k<f>\):\[\]\)\k<x>-(?<k>${I})>=\k<c>\.minPart&&\k<o>\.push\(\[\k<x>-\k<k>,\k<x>-\k<k>\]\)`,
   ),
   "a full sell carries no deposit (its one note is the sweep) and the rule refuses one by name": re(
     R`if\((${I})\.full&&(${I})\.program===(${I})\.program\)return ${I}\(` + "`deposit_full`" + R`\);let (${I})=${I}\|\|\1\.full,`,
   ),
   "a full sell is built bare and checked as full: no reserve": re(R`if\(!${I}\)\{let\{wire:(${I})\}=${I}\(${I},0n\);return ${I}\(\1,[^;]*?,0n,\{full:!0,fee:${I},rent:${I}\}\),\{wire:\1,value:0n\}\}`),
-  "a partial sell's deposit back is the note on the 0.001 SOL grid, none under 0.005 SOL": tied(
+  "a partial sell's deposit back is the rules' note, a rung, none under 0.005 SOL": tied(
     re(R`return (${I})===(?<n>${I})\(${I}-${I}\)\?\(${I}\(${I}\),\{chain:` + "`solana`"),
-    (g) => [R`function ${esc(g.n)}\((${I})\)\{if\(typeof \1!=` + "`bigint`" + R`\|\|\1<=0n\)return 0n;let (${I})=\1-\1%(1000000n|${I})\;return \2<(5000000n|${I})\?0n:\2\}`],
+    (g) => [R`function ${esc(g.n)}\((${I})\)\{return typeof \1!=` + "`bigint`" + R`\|\|\1<=0n\?0n:${I}\((${I}),\1\)\.note\}`],
   ),
-  // review P1-1 of 1d3b96d9c: the rest under the grid goes to the pin's fee payer (the relayer's account), not the pool's
-  "the sweep's note: down to the grid, the rest under it one System transfer from W to the pin's fee payer in the same transaction, none at 0, no compute budget": tied(
-    re(R`function (?<s>${I})\((${I})\)\{let (${I})=${I}\(\2\);return \3===0n\?\{value:0n,under:0n\}:\{value:\3,under:\2-\3\}\}`),
-    (g) => [
-      R`\{value:(${I}),under:(${I})\}=${esc(g.s)}\((${I})\)[^]{0,1200}?(${I})=\2===0n\?\[\]:\[${I}\((${I})\.address,(${I})\.solana\.feePayer,\2\)\],\{message:${I}\}=${I}\(\5\.address,\[${I}\([^\]]*?,\1\),\.\.\.\4\],`,
-      R`(${I})=\((${I}),(${I}),(${I})\)=>\{let (${I})=new Uint8Array\(12\),(${I})=new DataView\(\5\.buffer\);return \6\.setUint32\(0,2,!0\),\6\.setBigUint64\(4,\4,!0\),\{program:${I},accounts:\[\{key:\2,signer:!0,writable:!0\},\{key:\3,signer:!1,writable:!0\}\],data:\5\}\}`,
-    ],
+  // card pool-amounts-are-standard-sizes: the sweep's note a rung, its deposit alone; W's rest under it kept and listed
+  "the sweep's note: the largest rung whose remainder is 0 or at least what W keeps, its deposit alone, no transfer, no compute budget": tied(
+    re(R`function (?<s>${I})\((${I}),(${I})=0n\)\{if\(typeof \2!=` + "`bigint`" + R`\|\|\2<=0n\)return\{value:0n,under:0n\};for\(let (${I})=\2;;\)\{let (${I})=${I}\(\4\);if\(\5===0n\)return\{value:0n,under:0n\};let (${I})=\2-\5;if\(\6===0n\|\|\6>=\3\)return\{value:\5,under:\6\};\4=\5-1n\}\}`),
+    (g) => [R`\{value:(${I})\}=${esc(g.s)}\((${I}),(${I})\),[^]{0,1600}?\{message:${I}\}=${I}\((${I})\.address,\[${I}\([^\]]*?,\1\)\],${I}\.blockhash,\[\]\)`],
   ),
-  "the sweep's rule: the deposit alone or then one System transfer from W to an account of the pin's of under 0.001 SOL, its value on the grid and at least 0.005 SOL, W's lamports to the lamport": re(
-    R`if\((${I})\.ixs\.length!==1&&\1\.ixs\.length!==2\)return ${I}\(` + "`instructions`" + R`\);let (${I})=${I}\(\1\.ixs\[0\],(${I}),[^;]*;if\(\1\.ixs\.length===2\)\{let (${I})=\1\.ixs\[1\];if\(\4\.program!==` + "`11111111111111111111111111111111`" + R`\|\|\4\.data\.length!==12\|\|[^;]*?getUint32\(0,!0\)!==2\)return ${I}\(` + "`transfer`" + R`\);if\(\4\.accounts\.length!==2\|\|!(${I})\(\4\.accounts\[0\],(${I})\.wallet,!0,!0\)\|\|!\5\(\4\.accounts\[1\],\3\.${I},!1,!0\)\)return ${I}\(` + "`transfer_to`" + R`\);if\((${I})=${I}\(\4\.data,4\),\7===0n\|\|\7>=1000000n\)return ${I}\(` + "`transfer_amount`" + R`\)\}[^]{0,400}?\2\+5000n\+\7\+${I}\([^)]*\)\+${I}\([^)]*\)===${I}\?\2%1000000n!=0n\|\|\2<5000000n\|\|`,
+  "the sweep's rule: the deposit alone, its value the sweep's note of W's lamports to the lamport, a rung and at least 0.005 SOL": re(
+    R`if\((${I})\.ixs\.length!==1\)return (${I})\(` + "`instructions`" + R`\);let (${I})=${I}\(\1\.ixs\[0\],${I},${I}\.wallet,${I}\.precommitment,${I}\);if\([^;]*?\)return \2\(` + "`sweep_reads`" + R`\);let (${I})=${I}\(${I},${I},${I}\);return \3===${I}\(${I}-5000n-${I}\(${I},${I},${I}\)-\4,${I}\(${I},\4\)\)\.value\?!${I}\(${I},\3\)\|\|\3<1000000n\|\|`,
   ),
-  "a pass that carries the ride, with no claim owed, W's rest under the floor and a gain once moved, rides before it ends at the floor": re(
-    R`(${I})<(${I})&&(${I})===0&&(${I})>0n&&(${I})\.ride===!0&&!${I}&&(${I})\.ride!==void 0\)return\{end:` + "`ride`" + R`,rest:${I},lamports:${I},steady:${I}<\2\};if\(\1<\2\)return\{end:\3>0\?` + "`owed`:`floor`",
+  "W's rest under the floor is kept on W and listed at what it adds once moved, no ride: the floor end straight after the note's read": re(
+    R`if\((${I})<(${I})&&(${I})===0n&&${I}\.unlisted\?\.\(\),\1<\2&&\3>0n&&[^;]{0,60}?${I}\.read\?\.\(\3\),\1<\2\)return\{end:${I}>0\?` + "`owed`:`floor`",
   ),
   "the ride's piece: the least size of the closed list whose change still moves and that lifts W's rest to a note": re(
     R`function ${I}\((${I}),(${I}),(${I})\)\{let (${I})=null;for\(let (${I}) of \2\)for\(let (${I}) of ${I}\(\1,\5\.value\)\.reverse\(\)\)if\(${I}\(\1,\6\)&&${I}\(\1,\5\.value-\6\)&&\3\(\6\)\)\{\(\4===null\|\|\6<\4\.chunk\|\|\6===\4\.chunk&&\5\.value<\4\.value\)&&\(\4=\{noteId:\5\.id,chunk:\6,value:\5\.value\}\);break\}`,
@@ -122,11 +120,6 @@ export const MARKS = Object.freeze({
       R`e\.state===` + "`INCOMING`" + R`&&e\.ref\.kind===` + "`deposit`" + R`[^]{0,200}?\.state===` + "`UNSPENT`" + R`\)&&${esc(g.bk)}\(\)`,
       R`${I}\(${I}\.stage,${I}\.txs,${I}\.pending,${I}\.arrived\),${esc(g.bk)}\(\)`,
     ],
-  ),
-  // review P1-1 of 1d3b96d9c: the sweep's rule takes the transfer only to the pin's fee payer (the pin the deposit is
-  // checked against); the rest of the rule is the mark above
-  "the sweep's rule takes the rest's transfer only to the pin's fee payer": re(
-    R`let ${I}=${I}\((${I})\.ixs\[0\],(${I}),[^;]*;if\(\1\.ixs\.length===2\)\{let (${I})=\1\.ixs\[1\];[^]{0,200}?if\(\3\.accounts\.length!==2\|\|!(${I})\(\3\.accounts\[0\],${I}\.wallet,!0,!0\)\|\|!\4\(\3\.accounts\[1\],\2\.feePayer,!1,!0\)\)return ${I}\(` + "`transfer_to`" + R`\)`,
   ),
   // review P1-2 of 1d3b96d9c: tokens keep W whole only on W's own coins' accounts (every account of a found W's)
   "the sweep goes on around kept accounts but never around tokens on W's own coins' accounts, a found W's all": tied(

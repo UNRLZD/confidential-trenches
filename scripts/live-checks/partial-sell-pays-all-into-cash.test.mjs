@@ -1,6 +1,7 @@
 // node --test scripts/live-checks/partial-sell-pays-all-into-cash.test.mjs: the live check replays its recorded answers
 // (partial-sell-pays-all-into-cash.answers.json). good: this card's build: PASS. bad: SIGN_HOST as served before this
-// card (main 22cc5238a's line): FAIL, every mark named. Planted on the good one: another /app.js, no pin, each mark taken
+// card (main 22cc5238a's line): FAIL, every mark named. liveBefore: SIGN_HOST before card
+// pool-amounts-are-standard-sizes (its keep sweep's note on the grid, off the ladder): FAIL on that rule alone. Planted on the good one: another /app.js, no pin, each mark taken
 // away: each FAIL; and the good build's lines (partial-sell-pays-all-into-cash.excerpt.txt, cut from its app.js) with
 // one rule changed: each FAIL on that rule's mark alone.
 import assert from "node:assert/strict";
@@ -23,6 +24,12 @@ test("recorded bad answer (SIGN_HOST before this card): FAIL, every mark named",
   assert.deepEqual(v.lines, ALL);
 });
 
+test("recorded answer liveBefore (SIGN_HOST before card pool-amounts-are-standard-sizes, the keep sweep's note on the grid): FAIL on the keep sweep's rule alone", () => {
+  const v = judge(ANSWERS.liveBefore);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [ALL[2]]);
+});
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -38,15 +45,16 @@ test("the good build's lines carry every mark; each with its rule changed FAILs 
     // a partial fill runs no keep sweep (the bug): the rent back only on a full sell, on one verdict path
     ["t===`filled`&&(n.back=ge?Je:Ye)", "t===`filled`&&!ge&&(n.back=Ye)", 0],
     // the keep sweep keeps nothing for W's next sale, or sweeps under the floor, or is checked with no hold
-    ["-pj(i,f,y.held)-t.keep,", "-pj(i,f,y.held),", 1],
+    ["-aF(i,f,y.held)-t.keep,", "-aF(i,f,y.held),", 1],
     ["if(x<S)return a(`floor`", "if(x<0n)return a(`floor`", 1],
     ["y.held,t.keep);", "y.held,0n);", 1],
-    // the keep sweep's rule: a transfer beside the deposit, W left under its hold or a whole grid step over it, a note
-    // off the grid or under the floor
-    ["if(c.ixs.length!==1)return X(`instructions`);let l=", "let l=", 2],
-    ["return u<o||u>=o+1000000n?", "return u>=o+1000000n?", 2],
-    ["u>=o+1000000n?X(`keep_amount`)", "u>=o+1000000000n?X(`keep_amount`)", 2],
-    ["X(`keep_amount`):l%1000000n!=0n||l<5000000n||", "X(`keep_amount`):l%1000000n!=0n||l<1000000n||", 2],
+    // the keep sweep's rule (card pool-amounts-are-standard-sizes): a transfer beside the deposit, a smaller rung than
+    // the largest, no hold, a value off the ladder, the note a grid note again
+    ["if(c.ixs.length!==1)return $(`instructions`);let l=", "let l=", 2],
+    ["l===JP(r-5000n-aF(i,n,a)-o)?", "l<=JP(r-5000n-aF(i,n,a)-o)?", 2],
+    ["l===JP(r-5000n-aF(i,n,a)-o)?", "l===JP(r-5000n-aF(i,n,a))?", 2],
+    ["!jD(qP,l)||", "", 2],
+    ["let n=t<e.floor?0n:wD(e.ladder,t)[0]??0n;", "let n=t<e.floor?0n:t-t%e.grid;", 2],
     // the preview counts the deposit back alone, the sweep's note left out
     ["return{out:o+c(i),minOut:o+c(a)", "return{out:o,minOut:o", 3],
   ];

@@ -581,8 +581,19 @@ export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: 
  * (Totals.offPool, from the same totals as balanceOf, never a second sum; card portfolio-one-balance); on a chain whose
  * pool the signing page reports, that pool's balance in USD (poolView), its part of Cash, null while it cannot be priced,
  * plus `moves`: the Cash a buy there moves into the pool first (card one-balance-buys-on-every-chain: Cash's NEAR part on
- * a chain cashMovesTo names; 0 elsewhere), null while it is not read. One number for the amount gate (amountOk) either way.
+ * a chain cashMovesTo names; 0 elsewhere), null while it is not read, and `waiting`: what the chain's deposit wallets
+ * still hold (waitingCents), null while it cannot be priced. One number for the amount gate (amountOk) either way.
  */
-export function tradeBal(onPool: boolean, pool: PoolView | null, cash: Cents | null, moves: Cents | null = 0n): { from: "cash" | "pool"; cents: Cents | null } {
-  return onPool ? { from: "pool", cents: pool === null || moves === null ? null : pool.balance + moves } : { from: "cash", cents: cash };
+export function tradeBal(onPool: boolean, pool: PoolView | null, cash: Cents | null, moves: Cents | null = 0n, waiting: Cents | null = 0n): { from: "cash" | "pool"; cents: Cents | null } {
+  return onPool ? { from: "pool", cents: pool === null || moves === null || waiting === null ? null : pool.balance + moves + waiting } : { from: "cash", cents: cash };
+}
+
+/** What a pool chain's deposit wallets still hold (state.deposit_wallets: a U_X's leftover, a W's tail; the sum
+ *  Portfolio's waitingAt makes, kept here so the two models import nothing of each other's) in USD at the device's
+ *  price, rounded down; null with no price (card one-balance-buys-on-every-chain: nothing the device holds is left out
+ *  of Bal). */
+export function waitingCents(wallets: SignpageState["deposit_wallets"], chain: Chain, asset: PoolAsset, price: PoolPrice | null): Cents | null {
+  let u = 0n;
+  if (isPoolChain(chain)) for (const w of wallets ?? []) if (w.chain === chain && w.asset === asset) u += decimalToUnits(w.amount, POOL_ASSET_DECIMALS[asset]) ?? 0n;
+  return u === 0n ? 0n : price === null ? null : unitsToCents(u, price);
 }

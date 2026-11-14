@@ -72,6 +72,8 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor", "solanaSweepKeep", "SOLANA_SWEEP_OWED_MAX",
     // card every-lamport-can-move: the grid note, the sale's note floor and the sweep's split, pure
     "solanaNoteOf", "solanaSellNoteFloor", "solanaSweepOf",
+    // card pool-amounts-are-standard-sizes: what a sweep's rung leaves W at least, a number, pure
+    "solanaSweepStay",
     "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "EVM_PRECOMPILE_TOP", "evmOnwardCodeGas", "checkEvmDeposit", "checkEvmCarry", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P", "EVM_DEPOSIT_GAS_PER_LEVEL", "evmDepositHeadroom",
     "TOKEN_DECIMALS_MAX", // a number: the decimals bound the rule and the EVM buy's load follow read (card signpage-evm-pool-buy)
     "SOLANA_POOL_SELL_PRIORITY", // a number: the most priority a Solana sell pays (card round-trip-costs-less)
@@ -80,6 +82,8 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     // signEvmBuy and signEvmOnwardSend); W's change is signed by signEvmDeposit, held to its evmNextNote pick
     "planEvmBuy", "evmBuyMax", "checkEvmWBuy", "checkEvmChange", "checkEvmRestRelease", "evmAdapterBuyData", "EVM_WBUY_GAS_MAX", "signEvmWBuy",
     "checkSolanaCarry", // a buy's first round of tag 2s, checked (card buy-spends-its-change-in-the-same-tap): signs nothing
+    "checkSolanaCashCarry", // a leftover's one System transfer to Cash, checked (card leftovers-carry-to-cash): signs nothing
+    "checkEvmCashCarry", // a leftover's one plain EVM transfer to Cash, checked (card leftovers-carry-to-cash): signs nothing
   ],
 };
 /** What each file may do, and only that: `define` (a signer file: it calls its own signers with no pick), `calls`
@@ -101,6 +105,11 @@ export const EXEMPT: Readonly<Record<string, Exempt>> = {
   // the helper (a server file, never on the page): its sender key signs its own relay sends (signEvmTx, signEvmTx4),
   // and it checks a sell's signature against the Sell digest (evmSellDigest reads SELL_TYPE); it signs no sell
   "apps/helper/src/pool/evm.ts": { curve: ["signEvmTx", "signEvmTx4"], sellType: ["SELL_TYPE"] },
+  // the exit tool's EVM release and sends with the words alone (card exit-evm-pools-with-the-words): W's Withdraw
+  // signature of a release paying W itself, as rules/pool.ts signEvmWithdraw; and one type 2 send, G's only the pool's
+  // withdraw call at value 0, W's only a plain send with no data (evm-exit.ts evmExitSignSend), so neither signs a pool
+  // deposit or a sell; test/pool-evm-exit.test.ts
+  "packages/wallet/src/pool/evm-exit.ts": { curve: ["evmExitWithdrawSignature", "evmExitSignSend"] },
 };
 /** The wallet's note pick, and the name it is exported by. */
 export const NEXT_NOTE = { file: "packages/wallet/src/pool/evm-restore.ts", name: "evmNextNote" };

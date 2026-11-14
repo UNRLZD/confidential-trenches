@@ -108,11 +108,11 @@ export function inside(file: string, roots: string[]): boolean {
  */
 export function tapAmountOf(
   available: bigint, fee: bigint,
-  form: { checkAmount: (typed: unknown, a: { available: bigint | null; fee: bigint | null }) => { ok: boolean; amount?: bigint; code?: string }; formatUnits: (u: bigint) => string },
+  form: { checkAmount: (typed: unknown, a: { notes: readonly { id: string; value: bigint }[] | null; fee: bigint | null }) => { ok: boolean; amount?: bigint; code?: string }; formatUnits: (u: bigint) => string },
 ): bigint {
   const amount = available - fee;
   if (amount <= 0n) throw new Error(`the note ${available} does not cover the fee ${fee}`);
-  const c = form.checkAmount(form.formatUnits(amount), { available, fee });
+  const c = form.checkAmount(form.formatUnits(amount), { notes: [{ id: "note", value: available }], fee });
   if (!c.ok || c.amount !== amount) throw new Error(`the form refuses ${amount}: ${c.code ?? "another amount"}`);
   return amount;
 }

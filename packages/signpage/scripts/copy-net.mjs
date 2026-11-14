@@ -16,6 +16,9 @@
 // - FLOW_COPY's plant "mayhem-drop": every account read of a curve answers it with its Mayhem byte cleared, so the page
 //   builds a Mayhem coin's buy with the plain fee recipient in place of the Mayhem one (the chain's own state is
 //   unchanged and refuses it);
+// - COPY_ONECLICK=1 (card pool-withdraws-to-any-chain, a withdraw to another chain): the helper's 1Click quote proxy
+//   (POST /v1/proxy/oneclick/v0/quote) answers 1Click's own live answer, the body passed to 1Click's public quote
+//   endpoint keyless as the helper passes it (it adds only its key); a quote moves no money. Every quote is logged;
 // - every failed simulation's last log lines are kept (simFails), so a refusal carries the program's own log.
 import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
@@ -55,6 +58,7 @@ export async function copyNet({ log, phase = () => "" }) {
     return { ...acc, data: [d.toString("base64"), "base64"] };
   };
   let helper = null;
+  const quotes = [];
   globalThis.fetch = async (u, init) => {
     const url = new URL(String(u));
     if (url.host === helperHost) return helper(url, init);
@@ -136,6 +140,16 @@ export async function copyNet({ log, phase = () => "" }) {
       const line = poolSendLine({ chain: "solana", net: sender.cluster, route: pieces ? "pieces" : "send", status: a.status, body: a.body, ms: performance.now() - began, note: a.note });
       sendLines.push({ phase: phase(), line });
       log(`helper: ${line}`);
+    } else if (process.env.COPY_ONECLICK === "1" && url.pathname === "/v1/proxy/oneclick/v0/quote" && method === "POST") {
+      const up = await native("https://1click.chaindefuser.com/v0/quote", { method: "POST", headers: { "content-type": "application/json" }, body: String(init.body) });
+      const bytes = await up.arrayBuffer();
+      r = new Response(bytes, { status: up.status, headers: { "content-type": "application/json" } });
+      // the quote's amounts, as 1Click answered them, for the record (the device check reads them again)
+      let q = null;
+      try { q = JSON.parse(new TextDecoder().decode(bytes))?.quote ?? null; } catch {}
+      const amounts = q === null ? null : { amountIn: q.amountIn, amountInUsd: q.amountInUsd, amountOut: q.amountOut, minAmountOut: q.minAmountOut, withdrawFee: q.withdrawFee, depositAddress: q.depositAddress };
+      quotes.push({ phase: phase(), status: up.status, amounts });
+      log(`copy helper: 1Click quote passed through: HTTP ${up.status} ${JSON.stringify(amounts)}`);
     } else {
       r = json(404, { error: { code: "not_found" } });
       log(`copy helper: ${method} ${url.pathname} is not served on the copy (404)`);
@@ -143,7 +157,7 @@ export async function copyNet({ log, phase = () => "" }) {
     return r;
   };
   log(`copy: the mainnet build on ${COPY.rpcs.join(" and ")}; pool ${sender.pool}; fee payer ${PIN.feePayer}; fee ${fee}; engine stand-in ${engine}`);
-  return { rpcs, pin: PIN, holdings: (r) => solanaHoldingsAt(COPY.rpcs[0]), simFails, sent, planted, fee, sendLines, engine, engineCalls };
+  return { rpcs, pin: PIN, holdings: (r) => solanaHoldingsAt(COPY.rpcs[0]), simFails, sent, planted, fee, sendLines, engine, engineCalls, quotes };
 }
 
 /** Funds `to` with `lamports` by the copy's own airdrop, read back finalized (the page reads a deposit's source there). */

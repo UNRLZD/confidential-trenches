@@ -44,11 +44,11 @@ const refuses = (name, files, want, links) => {
 test("the tree's sign sites are SIGN_SITES, each with a proof test that exists; the copy reads the same", () => {
   const tree = readTrees(ROOT);
   assert.deepEqual(check(tree, SIGN_SITES, exists), []);
-  assert.equal(Object.keys(SIGN_SITES).length, 21);
+  assert.equal(Object.keys(SIGN_SITES).length, 25);
   assert.deepEqual(census(tree).sites, Object.fromEntries(Object.entries(SIGN_SITES).map(([k, v]) => [k, v.n])));
   assert.ok(Object.keys(tree).some((f) => f.startsWith("packages/exit/src/")));
   assert.deepEqual(plant({}), []);
-  assert.equal(execFileSync(process.execPath, [path.join(ROOT, "scripts/ci/sign-sites.mjs"), ROOT], { encoding: "utf8" }).trim(), "sign-sites: OK (21 sign sites, each with its proof test)");
+  assert.equal(execFileSync(process.execPath, [path.join(ROOT, "scripts/ci/sign-sites.mjs"), ROOT], { encoding: "utf8" }).trim(), "sign-sites: OK (25 sign sites, each with its proof test)");
 });
 
 const W = "packages/wallet/src";
@@ -171,6 +171,31 @@ test("planted: the other run-time and by-name forms fail; the trees' own uses pa
   // Function type, a property named eval: none refused
   const fine = 'import { createRequire } from "node:module";\nimport { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";\nexport const p = createRequire(import.meta.url).resolve("snarkjs");\nexport const k = (o: object) => Reflect.ownKeys(o);\nexport type F = Function;\nexport const o = { eval: 1, Function: 2 };\nexport const c = solanaCompileV0;\n';
   assert.deepEqual(plant({ "packages/signpage/src/g.ts": fine }), []);
+});
+
+const SO = "packages/exit/src/sol-out.ts";
+const SOL_OUT = readFileSync(path.join(ROOT, SO), "utf8");
+const PV = "packages/exit/src/prover.ts";
+const PROVER = readFileSync(path.join(ROOT, PV), "utf8");
+
+test("planted: the exit tool's signers and prover are its listed sites and plain imports; any other shape fails", () => {
+  const ONWARD = "    sig = ed25519.sign(message, signer.secretKey);";
+  const RELEASE = "          sigs = [ed25519.sign(message, fk.secretKey), ed25519.sign(message, wk.secretKey)];";
+  const SNARK = '  const snarkjs = await import("snarkjs");';
+  assert.ok(SOL_OUT.includes(ONWARD) && SOL_OUT.includes(RELEASE) && PROVER.includes(SNARK));
+  const cases = {
+    "a third signature in the release": [{ [SO]: SOL_OUT.replace(RELEASE, `${RELEASE}\n          void ed25519.sign(message, fk.secretKey);`) }, /sol-out\.ts:solExitWith: 3 sign members, SIGN_SITES says 2/],
+    "the onward signed in a new helper": [{ [SO]: SOL_OUT.replace(ONWARD, "    sig = edAny(message, signer.secretKey);").replace("// ---------- reads on both RPCs ----------", "const edAny = (m: Uint8Array, k: Uint8Array) => ed25519.sign(m, k);\n// ---------- reads on both RPCs ----------") }, /sol-out\.ts:edAny: a sign site with no entry/],
+    "the onward signed by node:crypto": [{ [SO]: SOL_OUT.replace(ONWARD, "    sig = new Uint8Array(nodeSign(null, message, signer.secretKey as never));").replace('import { ed25519 } from "@noble/curves/ed25519.js";', 'import { ed25519 } from "@noble/curves/ed25519.js";\nimport { sign as nodeSign } from "node:crypto";') }, /sol-out\.ts:\d+: node:crypto's sign imported/],
+    "the prover's snarkjs by createRequire": [{ [PV]: `import { createRequire } from "node:module";\n${PROVER.replace(SNARK, '  const snarkjs = createRequire(import.meta.url)("snarkjs");')}` }, /prover\.ts:\d+: createRequire other than createRequire\(x\)\.resolve/],
+    "the prover's snarkjs by a built name": [{ [PV]: PROVER.replace(SNARK, '  const snarkjs = await import("snark" + "js");') }, /prover\.ts:\d+: import\(\) of a module that is not a plain string/],
+    "a module beside node:readline": [{ [`${E}/x.ts`]: 'import { execFileSync } from "node:child_process";\nexport const x = execFileSync;\n' }, /x\.ts:1: an import of node:child_process, not an allowed module/],
+  };
+  for (const [name, [files, want]] of Object.entries(cases)) refuses(name, files, want);
+  // the tree as it is: both sites listed with their proof test, the plain import of snarkjs and node:readline pass
+  assert.equal(SIGN_SITES[`${SO}:solExitWith`].n, 2);
+  assert.equal(SIGN_SITES[`${SO}:sendOnward`].test, "packages/exit/test/sol-out.test.ts");
+  assert.deepEqual(plant({}), []);
 });
 
 const ETH = "../../../node_modules/.pnpm/ethers@6.13.5/node_modules/ethers/lib.commonjs/index.js";

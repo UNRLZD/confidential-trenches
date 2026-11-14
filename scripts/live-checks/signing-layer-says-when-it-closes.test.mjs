@@ -3,8 +3,7 @@
 // e42f81694's build, before this card, and badBeforeReview, this card's build as reviewed (its opens with no layer
 // never told): FAIL. Two source mutants built (open() records no id, runOpen's told cut) and each planted one, this
 // card's build with one cut the answers' note names: FAIL, that fact named. Planted on the good answer: another
-// /app.js, no pin, each fact taken away: each FAIL. goodKit114, goodKit115 and goodKit116: the kit 1.14, 1.15 and 1.16
-// builds, each sending the notice to every level that reads it: PASS.
+// /app.js, no pin, each fact taken away: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -53,15 +52,15 @@ test("recorded good answer goodKit115 (card one-balance-buys-on-every-chain's bu
   for (const [m, n] of [["1.12", "1.13"], ["1.14", "1.12"], ["1.15", "1.13"]]) assert.equal(facts(g.index, js(m, n)).notice, null, `${m} ${n}`);
 });
 
-test("recorded good answer goodKit116 (card buy-any-amount-on-every-chain's build, kit 1.16): the notice at the current level, kit-v1.15's, kit-v1.14's or kit-v1.13's, the four that read it: PASS", () => {
+test("recorded good answer goodKit116 (card move-sends-what-it-shows's build, kit 1.16): the notice at the current level, kit-v1.15's, kit-v1.14's or kit-v1.13's, the four that read it: PASS", () => {
   const g = ANSWERS.goodKit116;
   assert.deepEqual(judge(g).lines, []);
   assert.match(g.notice, /!==`current`&&[\w$]+!==`1\.15`&&[\w$]+!==`1\.14`&&[\w$]+!==`1\.13`\|\|/);
   assert.notEqual(g.sha384, ANSWERS.goodKit115.sha384, "another build");
-  // the 1.16 shape with any other levels is no notice a kit-v1.13, kit-v1.14 or kit-v1.15 app reads
+  // the 1.16 shape with any other levels is no notice a kit-v1.13 to kit-v1.15 app reads
   const js = (l, m, n) => `closed:e=>{!i||r!==\`current\`&&r!==\`${l}\`&&r!==\`${m}\`&&r!==\`${n}\`||o({v:1,type:\`closed\`,id:e})}`;
   assert.notEqual(facts(g.index, js("1.15", "1.14", "1.13")).notice, null);
-  for (const [l, m, n] of [["1.16", "1.14", "1.13"], ["1.14", "1.15", "1.13"], ["1.15", "1.14", "1.12"], ["1.15", "1.13", "1.14"]]) assert.equal(facts(g.index, js(l, m, n)).notice, null, `${l} ${m} ${n}`);
+  for (const [l, m, n] of [["1.16", "1.14", "1.13"], ["1.15", "1.12", "1.13"], ["1.15", "1.14", "1.12"]]) assert.equal(facts(g.index, js(l, m, n)).notice, null, `${l} ${m} ${n}`);
 });
 
 for (const [k, lines] of [

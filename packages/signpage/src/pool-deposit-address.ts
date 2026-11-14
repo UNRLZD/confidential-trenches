@@ -57,6 +57,12 @@ export interface PoolQuotePricing {
   pricing: Exclude<OneClickPricing, "usdc">;
 }
 
+/** The page's price of a pool coin (src/pool-price.ts) as the decimal the kit's 1Click check reads. */
+export function usdOf(p: Pick<PoolStatePrice, "price" | "expo">): string {
+  const d = -p.expo, digits = p.price.padStart(d + 1, "0");
+  return d === 0 ? digits : `${digits.slice(0, digits.length - d)}.${digits.slice(digits.length - d)}`;
+}
+
 /** A quote's price reads from the page's own price for X's pool (src/pool-price.ts `get`, null once past the kit's
  *  bound): USDC in at 1 USD on both reads, X's coin at that price on both; X's own coin on X (`chain` given: a plain
  *  send, isPlainSend) in and out at that price; any other origin, or no price, none (no quote is asked). */
@@ -64,8 +70,7 @@ export function poolQuotePricing(p: PoolStatePrice | null, origin: string, chain
   if (p === null) return null;
   const plain = chain !== undefined && isPlainSend(chain, origin);
   if (!plain && !ONECLICK_USDC_ASSETS.includes(origin)) return null;
-  const d = -p.expo, digits = p.price.padStart(d + 1, "0");
-  const usd = d === 0 ? digits : `${digits.slice(0, digits.length - d)}.${digits.slice(digits.length - d)}`;
+  const usd = usdOf(p);
   return plain
     ? { decimalsIn: POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]], pricing: { in: [usd, usd], out: [usd, usd] } }
     : { decimalsIn: USDC_DECIMALS, pricing: { in: ["1", "1"], out: [usd, usd] } };

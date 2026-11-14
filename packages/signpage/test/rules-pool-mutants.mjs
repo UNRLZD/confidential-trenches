@@ -31,7 +31,7 @@ const NEXT = "Solana deposit: each tree's next page";
 const P22 = "round-trip-costs-less P2-2: a Solana sale paying more priority";
 const P3B = "round-trip-costs-less P3-b: a partial Solana sale's fee is held";
 const SWEEP = "the sweep's rule: W the only signer";
-const SWG = "Solana sweep, P3-1: the grid note and its rest as one transfer";
+const SWG = "Solana sweep, standard sizes: the largest rung of W's rest passes";
 const NOTE = "solanaNoteOf is noteOf at SOL_PIECES";
 const FLOORT = "Solana sell: a deposit back under the sale's note floor";
 const WD = "Solana withdraw: another pool program";
@@ -110,25 +110,22 @@ export const MUTANTS = [
   ['if (x.accounts.length !== 8 && !(six && x.accounts.length === 6)) return refuse("deposit_accounts");', "", NEXT],
   ['if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads) !== ask.amount)', "if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads, true) !== ask.amount)", NEXT],
   ["const back = depositOf(last, pin, ctx.wallet, ctx.precommitment, reads, true);", "const back = depositOf(last, pin, ctx.wallet, ctx.precommitment, reads);", SELL],
-  ["const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);", "const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads, true);", SWEEP, SELLT],
-  // card every-lamport-can-move, review P3-1: the deposit, then at most one System transfer of the rest under the grid
-  // from W to the pinned pool's account; no compute budget; the equation exact with the transfer in it
-  ['if (d.ixs.length !== 1 && d.ixs.length !== 2) return refuse("instructions");', "", SWG],
-  ['if (d.ixs.length !== 1 && d.ixs.length !== 2) return refuse("instructions");', 'if (d.ixs.length > 3) return refuse("instructions");', SWG],
-  ["if (t.program !== SOLANA_SYSTEM_PROGRAM || t.data.length !== 12 || new DataView(", "if (t.data.length !== 12 || new DataView(", SWG],
-  ["!== 2) return refuse(\"transfer\");", "!== 2 && false) return refuse(\"transfer\");", SWG],
-  ["|| !same(t.accounts[1], pin.pool, false, true)) return refuse(\"transfer_to\");", ") return refuse(\"transfer_to\");", SWG],
-  ["!same(t.accounts[0], ctx.wallet, true, true) || !same(t.accounts[1], pin.pool, false, true)", "!same(t.accounts[1], pin.pool, false, true)", SWG],
-  ['if (under === 0n || under >= SOL_GRID) return refuse("transfer_amount");', 'if (under === 0n) return refuse("transfer_amount");', SWG],
-  ['if (under === 0n || under >= SOL_GRID) return refuse("transfer_amount");', 'if (under === 0n || under > SOL_GRID) return refuse("transfer_amount");', SWG],
-  ['if (under === 0n || under >= SOL_GRID) return refuse("transfer_amount");', 'if (under >= SOL_GRID) return refuse("transfer_amount");', SWG],
-  ["value + SOLANA_LAMPORTS_PER_SIGNATURE + under + solanaDepositRents", "value + SOLANA_LAMPORTS_PER_SIGNATURE + solanaDepositRents", SWG],
-  ["if (value % SOL_GRID !== 0n || value < SOL_NOTE_FLOOR || ", "if (", SWG],
-  ["if (value % SOL_GRID !== 0n || ", "if (", SWG],
-  [" || value < SOL_NOTE_FLOOR || value < SOLANA_POOL_MIN_DEPOSIT", " || value < SOLANA_POOL_MIN_DEPOSIT", SWG],
-  // the note a step makes: down to the grid, none under the floor
-  ["  const note = amount - (amount % SOL_GRID);\n  return note < SOL_NOTE_FLOOR ? 0n : note;", "  const note = amount - (amount % SOL_GRID);\n  return note;", NOTE],
-  ["  const note = amount - (amount % SOL_GRID);\n  return note < SOL_NOTE_FLOOR ? 0n : note;", "  const note = amount;\n  return note < SOL_NOTE_FLOOR ? 0n : note;", NOTE],
+  ["never paid away)\n  if (d.ixs.length !== 1) return refuse(\"instructions\");\n  const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);", "never paid away)\n  if (d.ixs.length !== 1) return refuse(\"instructions\");\n  const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads, true);", SWEEP, SELLT],
+  // card pool-amounts-are-standard-sizes: the sweep is the deposit alone (the rest stays on W, never paid away: a
+  // transfer of it is refused); its value exactly the largest rung of W's rest that leaves W at 0 or rent-exempt
+  ['never paid away)\n  if (d.ixs.length !== 1) return refuse("instructions");\n', "never paid away)\n", SWG],
+  ['never paid away)\n  if (d.ixs.length !== 1) return refuse("instructions");\n', 'never paid away)\n  if (d.ixs.length > 2) return refuse("instructions");\n', SWG],
+  ["const rest = lamports - SOLANA_LAMPORTS_PER_SIGNATURE - solanaDepositRents(rent, reads, held) - keep;", "const rest = lamports - solanaDepositRents(rent, reads, held) - keep;", SWG],
+  ["const rest = lamports - SOLANA_LAMPORTS_PER_SIGNATURE - solanaDepositRents(rent, reads, held) - keep;", "const rest = lamports - SOLANA_LAMPORTS_PER_SIGNATURE - keep;", SWG],
+  ['if (value !== solanaSweepOf(rest, solanaSweepStay(rent, keep)).value) return refuse("sweep_amount");', "", SWG],
+  ["if (value !== solanaSweepOf(rest, solanaSweepStay(rent, keep)).value)", "if (value !== solanaSweepOf(rest).value)", SWG],
+  ["if (value !== solanaSweepOf(rest, solanaSweepStay(rent, keep)).value)", "if (value > rest)", SWG],
+  ["    if (under === 0n || under >= stay) return { value: note, under };", "    return { value: note, under };", SWG],
+  // the keep sweep after a partial sale: exactly the largest rung of what W holds above its hold
+  ['solanaDepositRents(rent, reads, held) - hold)) return refuse("keep_amount");', 'solanaDepositRents(rent, reads, held) - hold) && false) return refuse("keep_amount");', "Solana sell and keep sweep, standard sizes"],
+  // the note a step makes: the largest rung at or under it, none under the floor
+  ["  return noteOf(SOL_RULE, amount).note;", "  return amount - (amount % SOL_GRID);", NOTE],
+  ["  return noteOf(SOL_RULE, amount).note;", "  return amount;", NOTE],
   ['if (x.accounts.length === 8 && !same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)) return refuse("state_page");', "", NEXT],
   ['if (x.accounts.length === 8 && !same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");', "", NEXT],
   ["same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)", "same(nextState, solanaPoolNextPage(pin.program, 0, reads.labelSize), false, true)", NEXT],
@@ -149,7 +146,7 @@ export const MUTANTS = [
   ['if (!Array.isArray(reads.toExecutable) || reads.toExecutable.length !== 2 || reads.toExecutable.some((x) => x !== false)) return refuse("to");', "", ONTO],
   ["p[0] >= 0n && p[0] === p[1] ? p[0]", "p[0] >= 0n ? p[0]", ONR],
   ['// W alone signs and pays: no fee payer of ours, nobody else\'s key\n  if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");', "", ONW],
-  ['if (d.ixs.length !== 1) return refuse("instructions");', "", ONW],
+  ['nothing beside it\n  if (d.ixs.length !== 1) return refuse("instructions");', "nothing beside it\n", ONW],
   ['u64le(Uint8Array.of(...t.data.subarray(0, 4), 0, 0, 0, 0), 0) !== 2n) return refuse("transfer");', 'false) return refuse("transfer");', ONW],
   ['!same(t.accounts[1], to, false, true)) return refuse("transfer_to");', 'false) return refuse("transfer_to");', ONW],
   ["if (amount === 0n || amount + fee !== balance)", "if (amount === 0n || amount + fee > balance)", ONW],
@@ -189,10 +186,11 @@ export const MUTANTS = [
   // a full sell carries no deposit (card every-lamport-can-move)
   ['if (p.full && last.program === pin.program) return refuse("deposit_full");', "", SELL],
   // card sol-sell-deposit-back-floor: the deposit back's floor, at the rent read, refused by name; under it the venue's
-  // sell alone, drawn with no deposit, to W (card every-lamport-can-move: the piece floor, the kit's up to the grid)
+  // sell alone, drawn with no deposit, to W (card every-lamport-can-move: the piece floor, the kit's up to a rung since card pool-amounts-are-standard-sizes)
   ["const kept = minOut - reserve < solanaSellNoteFloor(rent);", "const kept = minOut - reserve < SOLANA_POOL_MIN_DEPOSIT;", SELL],
-  ["  return up > SOL_NOTE_FLOOR ? up : SOL_NOTE_FLOOR;", "  return f;", FLOORT],
-  ["  return up > SOL_NOTE_FLOOR ? up : SOL_NOTE_FLOOR;", "  return up;", FLOORT],
+  // card pool-amounts-are-standard-sizes: the floor rounded up to a rung, never under the piece floor
+  ["  while (r < f) r = releaseSizesUpTo(SOL_RULE, r * 3n)[0]!;", "  while (r < f) r += SOL_GRID;", FLOORT],
+  ["  while (r < f) r = releaseSizesUpTo(SOL_RULE, r * 3n)[0]!;", "  r = ((f + SOL_GRID - 1n) / SOL_GRID) * SOL_GRID;", FLOORT],
   ['if (kept && last.program === pin.program) return refuse("deposit_floor");', "", SELL],
   ["const sell = bare ? body : body.slice(0, -1);", "const sell = body.slice(0, -1);", SELL],
   ['  if (rent === undefined || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");\n', "", SELL],
