@@ -15,6 +15,7 @@ import { useDepositSource, useNow } from "./source.tsx";
 import { useWithdrawOpen } from "../withdraw/WithdrawPick.tsx";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
+import { REPO_ISSUES_URL } from "../../shell/repo.tsx";
 import "./deposit.css";
 
 // The deposit sheet S4 (app.md FR-P7 to FR-P11, branch D FR-D1 to FR-D3; R5 design/proto/assets/app.js P.deposit at
@@ -328,7 +329,17 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
           </div>
           {body}
         </div>
-        <div className="dfoot">{foot}</div>
+        <div className="dfoot">
+          {/* the risk line (words.ts notice) over every state's action: drawn in one place for the sheet's life, so a
+              state change never moves the body (BAR-11) */}
+          <p className="dnote" data-control="deposit-notice">
+            <span>
+              <W id="notice" />{" "}
+              <a href={REPO_ISSUES_URL} target="_blank" rel="noopener noreferrer"><W id="feedback" /></a>
+            </span>
+          </p>
+          {foot}
+        </div>
       </aside>
     </div>
   );

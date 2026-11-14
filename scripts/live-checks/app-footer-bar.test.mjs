@@ -14,14 +14,17 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ROUTES as APP_ROUTES } from "../../apps/terminal/src/routes/routes.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
-import { judge, NEAR_RPCS, NEAR_SLACK, ROUTES } from "./app-footer-bar.mjs";
+import { judge, NEAR_RPCS, NEAR_SLACK, OUTSIDE, ROUTES } from "./app-footer-bar.mjs";
 import { nearChain } from "./app-in-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-footer-bar.answers.json"), "utf8"));
+// The 8 Nov read predates the footer's links out (owner 14 Nov): the good record is that read with the repo, X, Docs and
+// Telegram as the app draws them (Footer.tsx: target _blank, rel noopener noreferrer).
+const GOOD = { ...ANSWERS.good, outside: OUTSIDE.map((href) => ({ href, target: "_blank", rel: "noopener noreferrer" })) };
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const mut = (f) => {
-  const rec = structuredClone(ANSWERS.good);
+  const rec = structuredClone(GOOD);
   f(rec);
   return judge(rec);
 };
@@ -31,7 +34,7 @@ const fails = (r, re) => {
 };
 
 test("recorded good answer: Stable, the block moving with NEAR's, Terms, Privacy and Verify, no price signed out: PASS", () => {
-  const r = judge(ANSWERS.good);
+  const r = judge(GOOD);
   assert.equal(r.ok, true, r.lines.join("\n"));
   const [a, b] = ANSWERS.good.reads;
   assert.ok(b.block > a.block);
@@ -73,6 +76,14 @@ test("planted: Offline, a missing round trip, the connection not drawn: FAIL", (
 
 test("planted: a price drawn signed out: FAIL", () => {
   fails(mut((r) => (r.reads[0].ticks = ["SOL $106.83"])), /prices drawn signed out/);
+});
+
+test("the links out (owner 14 Nov): exactly the repo, X, Docs and Telegram, each in a new tab with no opener; missing, added or same-tab FAIL", () => {
+  const out = (hrefs) => hrefs.map((href) => ({ href, target: "_blank", rel: "noopener noreferrer" }));
+  fails(mut((r) => (r.outside = [])), /the footer's links out of the app: none/);
+  fails(mut((r) => (r.outside = out(OUTSIDE.slice(0, 1)))), /the footer's links out of the app/);
+  fails(mut((r) => (r.outside = [...out(OUTSIDE.slice(0, 3)), { href: OUTSIDE[3], target: null, rel: null }])), /opens without a new tab and no opener/);
+  fails(mut((r) => (r.outside = out([...OUTSIDE, "https://x.com/unrlzd"]))), /the footer's links out of the app/);
 });
 
 test("planted: a link to a page the app has not, a link missing or added: FAIL", () => {

@@ -6,7 +6,8 @@
 //   - each read: the connection Stable with its round trip in ms, and a block number;
 //   - the block moved between the two reads, and each is within NEAR_SLACK of NEAR's final block this check reads
 //     itself on a public RPC at the same moment, so the footer draws the chain's block, never a made-up or static one;
-//   - the footer's links are exactly Terms, Privacy and Verify, each a route the app has;
+//   - the footer's links are exactly Terms, Privacy and Verify, each a route the app has, and out of the app exactly
+//     the repo, X, Docs and Telegram (OUTSIDE, the owner's asks of 14 Nov), each opening in a new tab with no opener;
 //   - no price is drawn: signed out the signing page reads none, so a price there would be one the app did not read.
 // A screenshot of the page and of the footer at each read is kept.
 // After: app
@@ -34,6 +35,13 @@ export const SIGN_HOST = "https://confidential.unrealized.trade";
 /** The mainnet pair the footer reads (apps/terminal/src/screens/verify/release.ts); the check's own read is on the first. */
 export const NEAR_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 export const LINKS = ["/terms", "/privacy", "/verify"];
+/** The footer's one link out of the app: the repo, bottom right (owner ask 14 Nov ~06:00Z). */
+export const OUTSIDE = [
+  "https://github.com/UNRLZD/confidential-trenches",
+  "https://x.com/UNRLZDtrade",
+  "https://docs.unrealized.trade",
+  "https://t.me/UNRLZDtrade",
+];
 /** The routes the app has (apps/terminal/src/routes/routes.ts). */
 export const ROUTES = ["/", "/discover", "/portfolio", "/orders", "/profile", "/verify", "/privacy", "/terms"];
 /** The footer reads every 3 s; two reads this far apart are at least two footer reads apart. */
@@ -75,6 +83,11 @@ export function judge(rec) {
   say(same, `the footer's links: ${links.join(" ") || "none"}${same ? "" : ` (not ${LINKS.join(" ")})`}`);
   const gone = links.filter((l) => !ROUTES.includes(l));
   say(gone.length === 0, gone.length ? `links to pages the app does not have: ${gone.join(" ")}` : "every link is a route the app has");
+  const out = rec.outside ?? [];
+  const outSame = out.length === OUTSIDE.length && OUTSIDE.every((h, i) => out[i]?.href === h);
+  say(outSame, `the footer's links out of the app: ${out.map((o) => o.href).join(" ") || "none"}${outSame ? "" : ` (not ${OUTSIDE.join(" ")})`}`);
+  const sameTab = out.filter((o) => !(o.target === "_blank" && /\bnoopener\b/.test(o.rel ?? "")));
+  say(sameTab.length === 0, sameTab.length ? `a link out of the app opens without a new tab and no opener: ${sameTab.map((o) => o.href).join(" ")}` : "each link out of the app opens a new tab with no opener");
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -94,7 +107,8 @@ const READ_FOOTER = () => {
     health: h?.textContent?.trim() ?? null,
     ms: ms ? Number(ms[1]) : null,
     ticks: [...ft.querySelectorAll("[data-tick]")].map((t) => t.textContent.trim()),
-    links: [...ft.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")),
+    links: [...ft.querySelectorAll("a[href]")].map((a) => a.getAttribute("href")).filter((h) => !/^https:\/\//.test(h)),
+    outside: [...ft.querySelectorAll('a[href^="https://"]')].map((a) => ({ href: a.getAttribute("href"), target: a.getAttribute("target"), rel: a.getAttribute("rel") })),
   };
 };
 
@@ -144,11 +158,17 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
       if (i) await page.waitForTimeout(READ_GAP_MS);
       const [r, n] = await Promise.all([f.evaluate(READ_FOOTER), near()]);
       rec.reads.push({ ...(r ?? {}), near: n, at: Date.now() });
-      if (i === 0) rec.links = r?.links ?? [];
+      if (i === 0) {
+        rec.links = r?.links ?? [];
+        rec.outside = r?.outside ?? [];
+      }
       await page.screenshot({ path: path.join(shots, `desktop-1440-read${i + 1}.png`) });
       await f.locator("footer.ft").screenshot({ path: path.join(shots, `desktop-1440-footer-read${i + 1}.png`) }).catch(() => {});
     }
-    for (const r of rec.reads) delete r.links;
+    for (const r of rec.reads) {
+      delete r.links;
+      delete r.outside;
+    }
     return rec;
   } finally {
     await browser.close();

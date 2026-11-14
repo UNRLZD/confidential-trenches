@@ -8,8 +8,9 @@
 //   SOL/USD and Chainlink's ETH/USD, each on two RPCs of two providers that agree), within their feed's bound
 //   (trade/model.ts statePoolPrice, the one rule the trade box prices with). Signed out the page reads none, so none
 //   is drawn. R5's other coins (ZEC, BNB, XRP, DOGE, TRX, SUI) and its 24 h changes have no source the app reads.
-// - the links: Terms, Privacy and the Verify pill, each a route the app has (routes/routes.ts). R5's Risks, Help, X,
-//   Docs and Telegram have no page and are not drawn.
+// - the links: Terms, Privacy and the Verify pill, each a route the app has (routes/routes.ts), then at the right end
+//   the public repository and the main product's X, Docs and Telegram (shell/repo.tsx, owner ask 14 Nov). R5's Risks
+//   and Help have no page and are not drawn.
 import type { NearNetwork, SignpageState } from "@blindfill/kit";
 import { statePoolPrice } from "../screens/trade/model.ts";
 import { VERIFY_RELEASES } from "../screens/verify/release.ts";
@@ -35,6 +36,11 @@ export const FOOTER_WORDS = {
   block: ok("Block", "owner 2 Nov 06:08Z, all approved (Verify's Block); design-lock-r5 app.js:381 (Block 220,948,200)"),
   terms: ok("Terms", "shipped (card app-shell); design-lock-r5 app.js:381"),
   privacy: ok("Privacy", "shipped (card app-shell); design-lock-r5 app.js:381"),
+  github: ok("GitHub", "owner 14 Nov 09:05:57Z, words page picks (https://claude.ai/artifact/WZMM7eSuntvTFEqr6aAwAw): footer A"),
+  // the main product's other links (owner 09:05Z: "A + others link like the main product"): icons, the name on hover
+  x: ok("X", "the main UNRLZD product's footer labels (UNRLZD terminal SiteFooter.tsx FOOTER_SOCIALS, owner 2026-10-15)"),
+  docs: ok("Docs", "the main UNRLZD product's footer labels (UNRLZD terminal SiteFooter.tsx FOOTER_SOCIALS, owner 2026-10-15)"),
+  telegram: ok("Telegram", "the main UNRLZD product's footer labels (UNRLZD terminal SiteFooter.tsx FOOTER_SOCIALS, owner 2026-10-15)"),
 } as const satisfies Record<string, Word>;
 
 /** The footer's page links, in R5's order; the Verify pill names the panel (verify/words.ts title). */
