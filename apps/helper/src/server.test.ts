@@ -406,7 +406,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const keyed = createKeyed\(process\.env, holds\);/);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held, near\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held, near, poolIndexes \?\? undefined\);/);
   // card helper-near-lists-and-token: chain=near's reads mounted, its lists warmed at the start; card
   // every-cell-shows-a-value: the engine's reads first, Rhea's the fallback, both warmed
   assert.match(main, /const near = engineFirst\(\{ lists: nearLists, token: createNearToken\(nearLists\), trades: createNearTrades\(nearLists\) \}, createEngineNear\(\)\);\n    nearLists\.warm\(\);\n    near\.warm\(\);/);
