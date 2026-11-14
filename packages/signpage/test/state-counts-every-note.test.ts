@@ -81,5 +81,6 @@ test("card portfolio-counts-every-note: main.ts reads the state's notes with the
   const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   assert.match(src, /async function stateNotes\(\): Promise<NoteRecord\[\]> \{\n\s+return readNotes\(await open\(\), \(key, e\) =>/);
   assert.match(src, /const notesOrError = \(\): Promise<\{ v: NoteRecord\[\] \} \| \{ e: unknown \}> => stateNotes\(\)/);
+  assert.match(src, /both\.value\.v\) : stateNotes;/);
   assert.match(src, /async function pageNotes\(\): Promise<NoteRecord\[\]> \{\n\s+return readNotes\(await open\(\)\);/);
 });

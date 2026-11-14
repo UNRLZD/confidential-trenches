@@ -726,14 +726,32 @@ function parentOf(child: NoteRef, scope: bigint, all: NoteRecord[]): NoteRecord 
  * SPENT, in memory only, as settle would write it, so a page killed between the two writes never counts the money
  * twice. A dead tab's HELD note is read as it is: HELD and UNSPENT both count in a balance, and only the note store frees.
  * A HELD note's live second attempt is read with it (NoteRecord.second).
+ * `refused` (card portfolio-counts-every-note, the signing page's state totals only): a record that will not open or
+ * that checkRecord refuses is left out and named to it by its key, never the whole read's failure, so one such record
+ * never zeroes every other note's total (the owner's Portfolio read NEAR 0 and Base 0, 14 Nov). A parent it names still
+ * reads SPENT, so its money is never counted twice. Without it, as the note store's own reads: any such record refuses
+ * the read, so no spend, withdraw or Move acts on part of the store.
  */
-export async function readNotes(store: Pick<WalletStore, "get" | "keys">): Promise<NoteRecord[]> {
+export async function readNotes(store: Pick<WalletStore, "get" | "keys">, refused?: (key: string, e: unknown) => void): Promise<NoteRecord[]> {
   const all: NoteRecord[] = [];
+  const named = new Set<string>();
   for (const k of await store.keys("notes")) {
-    const r = await store.get("notes", k);
-    if (r !== undefined) all.push(checkRecord(k, r)); // a key gone since keys(): a sign out mid-read
+    if (refused === undefined) {
+      const r = await store.get("notes", k);
+      if (r !== undefined) all.push(checkRecord(k, r)); // a key gone since keys(): a sign out mid-read
+      continue;
+    }
+    let r: unknown;
+    try {
+      r = await store.get("notes", k);
+      if (r !== undefined) all.push(checkRecord(k, r));
+    } catch (e) {
+      const p = (r as { parent?: unknown } | null | undefined)?.parent;
+      if (typeof p === "string") named.add(p);
+      refused(k, e);
+    }
   }
-  const parents = new Set(all.flatMap((n) => (n.parent === undefined ? [] : [n.parent])));
+  const parents = new Set([...named, ...all.flatMap((n) => (n.parent === undefined ? [] : [n.parent]))]);
   const rows = secondsOf(await store.get("meta", HELD_SECONDS_KEY));
   return withSeconds(
     all.map((n) => {
