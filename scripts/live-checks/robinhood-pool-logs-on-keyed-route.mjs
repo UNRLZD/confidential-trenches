@@ -13,7 +13,9 @@
 // evm.ts's mainnet pin), both up to one head block read on Robinhood's own RPC:
 //   - the route answers a JSON-RPC result list, not an error (the helper's 503 {"error":{"code":"upstream"}} is one);
 //   - Robinhood's own RPC answers the same request with a result list, and the two lists are the same logs (each log's
-//     JSON, keys sorted);
+//     JSON, keys sorted; sameLogs): every field the same, but a blockTimestamp of 0x0 or none on one side is no time
+//     (Robinhood's own RPC logs 0x0 on every log, apps/helper/src/data/evm/swaps.ts Log), and where both give one the
+//     two are the same;
 //   - the route's Server-Timing names the keyed name that answered (rpc;desc="<NAME>"), never "none".
 // Every read goes through provider-answer.mjs's rpcAnswer, the route's with no Origin (the helper answers it so, read 13
 // Nov 16:3xZ): with the page's Origin a 5xx is a passing fault, so the route's upstream would never be judged. A no-answer
@@ -51,6 +53,27 @@ export async function read(base = BASE, fetchFn = fetch) {
 }
 
 const sorted = (v) => (Array.isArray(v) ? v.map(sorted) : v !== null && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted(v[k])])) : v);
+/** A provider's blockTimestamp that names no time: 0x0, or none. */
+const noTime = (v) => v === undefined || v === null || /^0x0+$/i.test(v);
+const show = (v) => (v === undefined ? "none" : JSON.stringify(v).slice(0, 80));
+/** The first way two log lists differ, or null when they are the same logs: in the same order, every field the same
+ *  (keys in any order) but a blockTimestamp one side does not give (noTime); where both give one, the same. */
+export function logsDiffer(route, own) {
+  if (route.length !== own.length) return `${route.length} log(s) on the route, ${own.length} on Robinhood's own`;
+  for (let i = 0; i < route.length; i++) {
+    const [r, o] = [route[i], own[i]];
+    const obj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+    if (!obj(r) || !obj(o)) {
+      if (JSON.stringify(sorted(r)) !== JSON.stringify(sorted(o))) return `log ${i}: ${show(r)} on the route, ${show(o)} on Robinhood's own`;
+      continue;
+    }
+    for (const k of [...new Set([...Object.keys(r), ...Object.keys(o)])].sort()) {
+      if (k === "blockTimestamp" && (noTime(r[k]) || noTime(o[k]))) continue;
+      if (JSON.stringify(sorted(r[k])) !== JSON.stringify(sorted(o[k]))) return `log ${i} ${k}: ${show(r[k])} on the route, ${show(o[k])} on Robinhood's own`;
+    }
+  }
+  return null;
+}
 const said = (a) => (a?.noAnswer !== undefined ? `no answer (${a.noAnswer})` : a?.error !== undefined ? `error ${JSON.stringify(a.error).slice(0, 120)}` : Array.isArray(a?.result) ? `${a.result.length} log(s)` : `no log list (${JSON.stringify(a?.result).slice(0, 60)})`);
 
 /** The check on one recorded run: PASS, FAIL, or INCONCLUSIVE when a side gave no answer and nothing else failed. */
@@ -67,7 +90,10 @@ export function judge({ spans }) {
     say(rOk || (r?.noAnswer !== undefined ? null : false), `${s.name} (${blocks} blocks): the keyed route answers ${said(r)}`);
     const oOk = Array.isArray(o?.result);
     say(oOk || (o?.noAnswer !== undefined ? null : false), `${s.name}: Robinhood's own RPC answers ${said(o)}`);
-    if (rOk && oOk) say(JSON.stringify(sorted(r.result)) === JSON.stringify(sorted(o.result)), `${s.name}: the same logs on both`);
+    if (rOk && oOk) {
+      const d = logsDiffer(r.result, o.result);
+      say(d === null, `${s.name}: the same logs on both${d === null ? "" : `: ${d}`}`);
+    }
     if (rOk) {
       const desc = /\brpc;dur=\d+;desc="([A-Z0-9_]+)"/.exec(r.kept?.["server-timing"] ?? "")?.[1];
       say(desc !== undefined && desc !== "none", `${s.name}: answered by ${desc ?? "no keyed name"} (Server-Timing)`);
