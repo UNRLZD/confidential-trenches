@@ -38,7 +38,7 @@ import { Resolver } from "node:dns/promises";
 import { Agent, request } from "node:https";
 import { HELPER_LOGO_MAX_BYTES, HELPER_LOGO_TYPES, type HelperLogoType } from "@blindfill/kit";
 
-export const LOGO_CHAINS = ["solana", "base", "robinhood"] as const;
+export const LOGO_CHAINS = ["solana", "base", "robinhood", "near"] as const;
 export type LogoChain = (typeof LOGO_CHAINS)[number];
 export const URL_MAX = 2_048;
 export const REDIRECTS_MAX = 3;

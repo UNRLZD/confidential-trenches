@@ -33,6 +33,8 @@ import { createHeld, parseHeld, type Held } from "./data/held.ts";
 import { createNearLists } from "./data/near/lists.ts";
 import { createNearToken, type NearMarket } from "./data/near/token.ts";
 import { createNearTrades } from "./data/near/trades.ts";
+import { createEngineNear, engineFirst } from "./data/near/engine.ts";
+import { nearAccount } from "./data/near/views.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { coingeckoPace, createKeyed, type Keyed } from "./data/coingecko.ts";
@@ -395,7 +397,7 @@ export function handler(
         // or one the checks refused, answers 204 with no body, so the app draws its own and the browser logs no failed
         // load (a 404 is one); a path that names no chain's token answers 404
         const [chain, token, ...rest] = path.slice(LOGO_PREFIX.length).split("/");
-        const id = chain === "solana" ? solanaAddress(token) : chain === "base" || chain === "robinhood" ? (token !== undefined && /^0x[0-9a-f]{40}$/.test(token) ? token : null) : null;
+        const id = chain === "solana" ? solanaAddress(token) : chain === "base" || chain === "robinhood" ? (token !== undefined && /^0x[0-9a-f]{40}$/.test(token) ? token : null) : chain === "near" ? nearAccount(token) : null;
         const none = { ...cors(req), "Cache-Control": `public, max-age=${LOGO_NONE_MS / 1000}` };
         if (rest.length > 0 || id === null || id !== token) return send(404, undefined, none);
         void logos
@@ -1283,10 +1285,12 @@ if (import.meta.main) {
     const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
     const held = heldFrom(token, evmLists);
-    // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence
+    // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence; card
+    // every-cell-shows-a-value: the unrealized.trade engine's reads first, Rhea's whenever the engine has no good answer
     const nearLists = createNearLists();
-    const near: NearMarket = { lists: nearLists, token: createNearToken(nearLists), trades: createNearTrades(nearLists) };
+    const near = engineFirst({ lists: nearLists, token: createNearToken(nearLists), trades: createNearTrades(nearLists) }, createEngineNear());
     nearLists.warm();
+    near.warm();
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();
