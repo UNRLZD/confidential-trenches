@@ -3166,15 +3166,36 @@ async function routeSetOf(a: {
     (xPools.get(c) ?? []).some((p) => can(p, x)) ||
     [...vias].some(([x2, fs]) => fs.some((via) => via.other === c && (xPools.get(x2) ?? []).some((p) => can(p, ubOf(via, x)))));
   // each held market of c not yet quoted, from the native asset or WETH at the user's amount (a buy, where it can give
-  // Q), or from c at the most of c the sell's part of a route into c gives (a sell; none where no such part fills)
-  const quoteMarkets = (cs: readonly string[], into: Read[]) => {
+  // Q), or from c at the most of c the sell's part of a route into c gives (a sell; none where no such part fills).
+  // `priceOf`: a buy's X whose held markets the prune left out still has one of them quoted, to learn whether X has a
+  // market that fills (card frong-quotes-through-its-pools): one left out is not one that does not fill, and only an X
+  // with no market that fills goes one level further (the markets it did quote, behind hooks that bound nothing, may
+  // all fail). On Robinhood FOBO's held pools with USDG could not give Q from any of USDG's 14 held markets, so none was
+  // quoted, USDG went one level further, its pools with 1,872 other currencies passed EVM_QUOTE_MAX_OTHER and every
+  // FOBO tap refused too_many_pools (2026-11-14 02:1xZ); FRONG's taps refused the same way (2026-11-13 23:1xZ-23:5xZ)
+  // while its pools with USDG, of its four other currencies the one paired with more than 1,024 (3,256 in the device's
+  // index), held
+  const quoteMarkets = (cs: readonly string[], into: Read[], priceOf = false) => {
     for (const c of cs) {
       const leg = a.sell ? legOf(c) : null;
       if (a.sell && leg === null) continue;
-      for (const mk of (markets.get(c) ?? []).filter(holds)) {
-        if (marketQuote.has(mk) || !needs(c, ubOf(mk, amountIn))) continue;
+      const hs = (markets.get(c) ?? []).filter(holds);
+      let left: [Found, bigint, boolean] | null = null;
+      for (const mk of hs) {
+        const ub = ubOf(mk, amountIn);
+        if (marketQuote.has(mk)) continue;
+        if (!needs(c, ub)) {
+          // a market left out has a bound (one with none can always give Q); one with no hook first, whose bound is the
+          // pool's own (a hook replaced by one that does nothing may leave a pool whose real price its hook makes: of
+          // USDG's markets for FOBO the largest bound was such a pool's, 2,198,245 against the standard 0.01% pool's
+          // 1,867,080, and its quote did not fill)
+          const plain = mk.key.hooks === NATIVE;
+          if (ub !== null && (left === null || (plain && !left[2]) || (plain === left[2] && ub > left[1]))) left = [mk, ub, plain];
+          continue;
+        }
         marketQuote.set(mk, leg === null ? quoteOf(into, routeOfKey(mk.key, c), [mk.key]) : quoteOf(into, routeOfKey(mk.key, c), [mk.key], c, leg.amount));
       }
+      if (priceOf && !a.sell && left !== null) marketQuote.set(left[0], quoteOf(into, routeOfKey(left[0].key, c), [left[0].key]));
     }
   };
   // c's market whose quote counts for the most of c at the user's amount; the first in order on a tie
@@ -3188,7 +3209,7 @@ async function routeSetOf(a: {
     return b;
   };
   const third: Read[] = [];
-  quoteMarkets(xs, third);
+  quoteMarkets(xs, third, true);
   await round(third);
   const fourth: Read[] = [];
   const further: string[] = [];
