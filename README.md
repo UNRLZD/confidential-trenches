@@ -191,7 +191,7 @@ Medians round to the nearest 0.1 s. A p95 always rounds up.
   <img alt="How Blindfill and Confidential Trenches fit together: apps call @blindfill/kit; your device holds the keys, notes, prover, quote checks and signed orders; helpers hold no money keys; the vault on NEAR has no key; NEAR Intents moves money between the vault, any wallet, any address and fresh wallets on any chain it reaches; the exit tool needs only the 12 words." src="assets/architecture-light.svg" width="640">
 </picture>
 
-Every box and arrow is explained in [docs/architecture.md](docs/architecture.md), and every party's view in [docs/security.md](docs/security.md).
+Every box and arrow is explained in [docs/architecture.md](docs/architecture.md), and every party's view in [docs/security.md](docs/security.md). The diagram shows the NEAR vault path. Blindfill v2, live on mainnet, adds a pool with no keys on each chain you trade on, so a buy settles in one transaction on its own chain: see the [v2 lite paper](docs/litepaper.md).
 
 ## How this differs
 

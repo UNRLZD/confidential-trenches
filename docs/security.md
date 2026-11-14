@@ -78,6 +78,18 @@ Privacy Pools has a postman who approves each deposit from outside. We removed t
 
 The code is a port of Privacy Pools v1, which is audited and open source. That audit belongs to Privacy Pools, so our port gets its own review.
 
+## The pools on Solana, Base and Robinhood Chain
+
+Blindfill v2 adds a pool on each chain you trade on ([lite paper](litepaper.md)). Each follows the vault's rules: it approves every deposit itself, pays only the wallet a proof names, and nobody can change it.
+
+| Pool | Mainnet address | Why nobody can change it |
+|---|---|---|
+| Solana | `EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF` | The program's upgrade authority is empty, read with `getAccountInfo` on its program data account on 14 Nov 2026. Solana lets nobody set one back. |
+| Base | `0xaa080e74ec99cf5c684548c77ca145edfcf899cf` | The contract has no owner, role, upgrade path or pause in its source ([contracts/pool-evm/src/](../contracts/pool-evm/src/)). |
+| Robinhood Chain | `0x9306359433127c4f3be426f6faeb00a3c41f66db` | The same contract as Base. |
+
+Each pool has its own crowd. A new chain's pool starts empty, so its cover is thin until deposits grow, and timing and amount can hint the same way as on the vault.
+
 ## What is not hidden
 
 ### Timing and amount can hint

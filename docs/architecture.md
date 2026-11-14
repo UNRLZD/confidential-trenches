@@ -2,13 +2,29 @@
 
 Blindfill is the engine: a vault on NEAR that nobody holds a key to, wallets whose keys exist only on your device, orders signed ahead of time, and an open kit that any app can call. Confidential Trenches is the flagship and experimental version of the UNRLZD terminal, built on that engine. Our terminal reaches Blindfill through the kit's one public entry and nowhere else, and CI fails the build the moment a file reaches past it.
 
-Technical words are explained where they first show up. Where a part is built to do something, that's the design; the one piece you can run against live NEAR today is the read-only check at the end of [Security](security.md).
+Technical words are explained where they first show up. The app runs on mainnet today, and anyone can run the read-only check at the end of [Security](security.md) against live NEAR.
 
 ## The system on one page
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/architecture-dark.svg"><img alt="Apps call the kit's one public entry. Your device holds the 12 words, keys, notes, the prover and the signed orders. Helpers carry messages and hold no money keys. The vault on NEAR has no key and pays only what a proof names. NEAR Intents moves money between the vault, fresh wallets and any address." src="../assets/architecture-light.svg" width="100%"></picture>
 
 Solid green lines are money. Dashed blue lines are signed messages: requests that a key has already approved, which anyone can carry and nobody can change. Read it top to bottom.
+
+The diagram shows the NEAR vault path, the first design. Blindfill v2, which runs on mainnet today, adds a pool on each chain you trade on, described next and in full in the [v2 lite paper](litepaper.md).
+
+### v2: a pool on every chain you trade on
+
+Crossing from the NEAR vault to a fresh wallet on another chain took 43.3 s and left a public trail, so v2 puts the private crowd where the coins are. Each trading chain has a pool with the same proof design and the same rule as the vault: no admin, no upgrade, no pause.
+
+| Pool | Mainnet address | What makes it keyless |
+|---|---|---|
+| Solana | `EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF` | The program has no upgrade authority (read on chain, 14 Nov 2026) |
+| Base | `0xaa080e74ec99cf5c684548c77ca145edfcf899cf` | The contract's source has no owner, role, upgrade or pause |
+| Robinhood Chain | `0x9306359433127c4f3be426f6faeb00a3c41f66db` | The same contract as Base |
+
+A buy is proved on your device before you tap, naming a fresh wallet but no token. At the tap the fresh wallet signs one transaction: the pool checks the proof, pays the wallet, and the wallet buys. A sell puts the money back into the pool as a new note, on Base and Robinhood Chain through EIP-7702 in one transaction. The NEAR vault stays the USDC home and NEAR's own pool, and NEAR Intents still carries every dollar that changes chain. The deploy records are in [contracts/pool-solana/deployments/](../contracts/pool-solana/deployments/) and [contracts/pool-evm/deployments/](../contracts/pool-evm/deployments/).
+
+Blindfill is designed for any chain NEAR Intents reaches. Because of the hackathon's time, this build integrates four chains: Solana, Base, Robinhood Chain and NEAR.
 
 ## The parts
 
@@ -73,6 +89,8 @@ Our order sender holds the signed bytes and sends one when its price is hit. The
 - On NEAR the exit is a delegate action with an expiry block height of its own, so it isn't cut off at the usual 14 hours.
 
 Someone inside the helper can send an exit early, and it still fills at your price or better, into your own wallet, because price and destination sit inside the signature. Until it fills, an exit exists on no chain.
+
+In this build the app's order screens show Coming soon.
 
 ### The exit tool
 
