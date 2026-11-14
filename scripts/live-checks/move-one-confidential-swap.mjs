@@ -14,6 +14,7 @@
 // What the Move does with those (one quote into the destination pool, the source pool's run pays it, the pool follow
 // carries it in) is held by packages/signpage/test/pool-to-cash.test.ts and pool-deposit-address.test.ts.
 // After: sign
+// Bundle: out it reads the helper's dry quotes and 1Click's keyless status, past the build
 //   node scripts/live-checks/move-one-confidential-swap.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
