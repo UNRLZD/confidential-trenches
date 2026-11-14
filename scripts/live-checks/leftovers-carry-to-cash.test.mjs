@@ -16,6 +16,10 @@ test("recorded good answer: this card's SIGN_HOST build: PASS", () => {
   assert.deepEqual(v.lines, []);
 });
 
+test("recorded answer beforeCode (c78632792, before the deposit address code check): FAIL, evmRule alone named", () => {
+  assert.deepEqual(judge(ANSWERS.beforeCode).lines, [`BAD ${SAYS.evmRule}`]);
+});
+
 test("recorded answer solanaOnly (2cff382f6, release 133: the Solana carry alone): FAIL, the four EVM marks named", () => {
   assert.deepEqual(judge(ANSWERS.solanaOnly).lines, ["evmRule", "evmRecord", "evmTail", "evmWired"].map((k) => `BAD ${SAYS[k]}`));
 });
@@ -51,6 +55,8 @@ const JS = [
   "let v=await a(async e=>{for(let t of c)if(await e(`eth_getTransactionByHash`,[t])!==null)return!0;return!1});return v[0]||v[1]?`pending`:(await a(async e=>[SZ(await e(`eth_getTransactionCount`,[n,`latest`])),SZ(await e(`eth_getTransactionCount`,[n,`pending`]))])).every(e=>e[0]===u&&e[1]===u)?`dead`:`pending`};",
   "m===`withdraw`||m===`other`||m===`empty`||m===`landed`){if(g!==null&&g>0n){let t={chain:XJ(e.chain),address:f.w,l:f.l.toString(),j:f.j,amount:g.toString()};await a.update(`meta`,ZJ(e.chain,f.w),()=>t)}}",
   "YJ=Object.freeze({solana:`sol`,base:`base`,robinhood:`robinhood`});",
+  "if(typeof t.to!=`string`||!NN.test(t.to)||BigInt(t.to)<YP||FN(t.to)===FN(i)||$P(n?.toHasCode,e=>typeof e==`boolean`))return $(`to`);",
+  "S=await a(async e=>{let t=await e(`eth_getCode`,[_,v.tag]);if(typeof t!=`string`||!/^0x([0-9a-fA-F]{2})*$/.test(t))throw Error(`not code`);return t!==`0x`});",
   "a={sender:e=>e===`solana`?t:r(e)};",
   "r=e=>{if(!n.has(e)){let t=F7?.evmPoolOf(e)??null;n.set(e,t===null?null:OZ({chain:e,network:t.pin.network,rpcs:t.rpcs,seed64:()=>E9()}))}};",
 ].join("");
@@ -85,6 +91,9 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     // Base's gas not held, or Robinhood's estimate unbounded
     ["evmRule", JS.replace("if(l!==21000n)return $(`gas_estimate`)", "")],
     ["evmRule", JS.replace("l>100000n", "l>1000000000n")],
+    // a deposit address with code taken, or its code never read
+    ["evmRule", JS.replace("||$P(n?.toHasCode,e=>typeof e==`boolean`))return $(`to`)", ")return $(`to`)")],
+    ["evmRule", JS.replace("return t!==`0x`});", "return!1});")],
     // the send written after it leaves, without its nonce, or an unsent send never quoted again
     ["evmRecord", JS.replace("await f({...d,sends:[...d.sends,{hash:bZ(H(D)),value:g.toString(),sentMs:String(e.now?.()??Date.now()),nonce:v.nonce.toString()}]}),await Promise.allSettled(t.map(e=>e(`eth_sendRawTransaction`,[bZ(D)])))", "await Promise.allSettled(t.map(e=>e(`eth_sendRawTransaction`,[bZ(D)]))),await f({...d,sends:[...d.sends,{hash:bZ(H(D)),value:g.toString(),sentMs:String(e.now?.()??Date.now()),nonce:v.nonce.toString()}]})")],
     ["evmRecord", JS.replace(",nonce:v.nonce.toString()}", "}")],
