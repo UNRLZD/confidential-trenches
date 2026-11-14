@@ -970,15 +970,18 @@ function checkRelay(proof: EvmPoolProofBinding, relay: EvmRelayData, pins: Retur
 
 /** One ready proof a buy may spend: its note, its chunk (the whole note) and the relay fee its binding caps (paid from it). */
 export type EvmBuyPiece = { readonly noteId: string; readonly chunk: bigint; readonly fee: bigint };
-/** A buy's plan: `whole`, the pieces each spent whole by a pool.buy (spend chunk less fee); `rest`, the piece released
- *  to its W, which buys exactly `spend` itself (null when the whole pieces make the amount); `bound`, the most W's own
- *  buy may cost (its gas and L1 fee bound) that the plan kept beside `spend`. */
-export type EvmBuyPlan = { readonly amount: bigint; readonly whole: readonly EvmBuyPiece[]; readonly rest: { readonly piece: EvmBuyPiece; readonly spend: bigint } | null; readonly bound: bigint };
+/** A buy's plan: `asked`, the ask's amount; `amount`, what the plan spends in swaps, the ask's own or, when no plan
+ *  carries it exactly, the largest under it one does (never more); `whole`, the pieces each spent whole by a pool.buy
+ *  (spend chunk less fee); `rest`, the piece released to its W, which buys exactly `spend` itself (null when the whole
+ *  pieces make the amount); `bound`, the most W's own buy may cost (its gas and L1 fee bound) that the plan kept beside
+ *  `spend`. */
+export type EvmBuyPlan = { readonly amount: bigint; readonly asked: bigint; readonly whole: readonly EvmBuyPiece[]; readonly rest: { readonly piece: EvmBuyPiece; readonly spend: bigint } | null; readonly bound: bigint };
 const PLANNED = new WeakSet<EvmBuyPlan>();
 
 /** The plan of an EVM pool.buy of ask.amount over `pieces` (the ready proofs of the ask's chain), with `bound` the most
- *  W's own buy may cost. Refused "amount" when no plan makes the amount exactly: over every piece's spend, or within
- *  one buy's bound under it (the rest's W could not pay its own buy). */
+ *  W's own buy may cost. An amount no plan carries exactly (within one buy's bound under a sum of spends, where the
+ *  rest's W could not pay its own buy) is planned at the largest amount under it one carries (card
+ *  buy-any-amount-on-every-chain: no refusal). Refused "amount" only over every piece's spend, or with nothing to buy. */
 export function planEvmBuy(ask: PoolAsk, pieces: readonly EvmBuyPiece[], bound: bigint): EvmBuyPlan {
   if (ask.kind !== "pool.buy" || ask.chain === "solana") return refuse("kind");
   const x = ask.amount;
@@ -1027,11 +1030,31 @@ export function planEvmBuy(ask: PoolAsk, pieces: readonly EvmBuyPiece[], bound: 
         break;
       }
     }
-    // over every piece's spend less one buy's bound: no W could pay its own buy beside the rest
-    if (carrier === undefined) return refuse("amount");
-    rest = Object.freeze({ piece: carrier, spend: rem });
+    if (carrier !== undefined) rest = Object.freeze({ piece: carrier, spend: rem });
+    else {
+      // within one buy's bound under a sum of spends (Max less one relay fee and Max, say): no W pays its own buy beside
+      // that rest, so the plan is the largest amount under the ask that one does carry: the whole pieces, and on each
+      // piece in turn (the smallest spend first) as much of what they leave as its W pays beside its own buy
+      if (x > evmBuyMax(list)) return refuse("amount");
+      let best = fill(order);
+      let most = x - best.rem;
+      let carried: EvmBuyPlan["rest"] = null;
+      for (const c of [...order].sort(bySpend)) {
+        const f = fill(order.filter((p) => p !== c));
+        const r = f.rem < spend(c) - bound ? f.rem : spend(c) - bound;
+        if (r > 0n && x - f.rem + r > most) {
+          best = f;
+          most = x - f.rem + r;
+          carried = Object.freeze({ piece: c, spend: r });
+        }
+      }
+      if (most <= 0n) return refuse("amount");
+      const plan: EvmBuyPlan = Object.freeze({ amount: most, asked: x, whole: Object.freeze(best.whole), rest: carried, bound });
+      PLANNED.add(plan);
+      return plan;
+    }
   }
-  const plan: EvmBuyPlan = Object.freeze({ amount: x, whole: Object.freeze(whole), rest, bound });
+  const plan: EvmBuyPlan = Object.freeze({ amount: x, asked: x, whole: Object.freeze(whole), rest, bound });
   PLANNED.add(plan);
   return plan;
 }
@@ -1049,7 +1072,7 @@ export function evmBuyMax(pieces: readonly EvmBuyPiece[]): bigint {
 export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, agreed: { token: string; amountIn: bigint; amountOut: bigint }, plan: EvmBuyPlan, testnet = false): PoolDraw {
   if (ask.kind !== "pool.buy") return refuse("kind");
   // only the device's own plan of this very amount
-  if (!PLANNED.has(plan) || plan.amount !== ask.amount) return refuse("plan");
+  if (!PLANNED.has(plan) || plan.asked !== ask.amount || plan.amount > plan.asked) return refuse("plan");
   // only a buy built from the device's own quote: never a server's route, hook data or min out
   if (!evmIsQuotedBuy(built)) return refuse("not_quoted");
   const proof = snapProof(given);
@@ -1094,7 +1117,7 @@ export function checkEvmWithdraw(pool: string, given: EvmPoolProofBinding, relay
  *  for this very ask) names as its rest, at that piece's own fee; signed by signEvmWithdraw. */
 export function checkEvmRestRelease(pool: string, given: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, plan: EvmBuyPlan, testnet = false): PoolDraw {
   if (ask.kind !== "pool.buy") return refuse("kind");
-  if (!PLANNED.has(plan) || plan.amount !== ask.amount || plan.rest === null) return refuse("plan");
+  if (!PLANNED.has(plan) || plan.asked !== ask.amount || plan.amount > plan.asked || plan.rest === null) return refuse("plan");
   const proof = snapProof(given);
   const chain = evmChainOf(ask, testnet);
   const pins = evmPins(ctx, chain);
@@ -1629,7 +1652,7 @@ const WBUY_CHECKED = new WeakMap<object, OnwardRead>();
  *  RPCs, the fee caps, and the value with its fee bound within plan.bound and W's balance on each RPC's reading. */
 export function checkEvmWBuy(tx: EvmOnwardSend, built: EvmPoolBuy, ask: PoolAsk, ctx: PoolContext, reads: EvmWBuyReads, quote: { token: string; amountIn: bigint; amountOut: bigint }, plan: EvmBuyPlan, testnet = false): PoolDraw {
   if (ask.kind !== "pool.buy") return refuse("kind");
-  if (!PLANNED.has(plan) || plan.amount !== ask.amount || plan.rest === null) return refuse("plan");
+  if (!PLANNED.has(plan) || plan.asked !== ask.amount || plan.amount > plan.asked || plan.rest === null) return refuse("plan");
   const part = plan.rest.spend;
   if (!evmIsQuotedBuy(built)) return refuse("not_quoted");
   const chain = evmChainOf(ask, testnet);

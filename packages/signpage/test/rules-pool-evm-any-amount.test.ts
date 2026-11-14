@@ -95,10 +95,17 @@ test("planEvmBuy: any amount up to every note's spend is one plan of whole notes
   // a note made before the ladder (a carried balance) stays spendable whole
   const odd: EvmBuyPiece = { noteId: "c", chunk: 1_234_567_890_123_456n, fee: FEE };
   assert.deepEqual(planEvmBuy(askOf(odd.chunk - FEE), [odd], BOUND).whole, [odd]);
-  // over Max, or within one W buy's bound under it (the rest's W could not pay its own buy): no plan makes it exactly
+  // over Max: more than the notes hold, refused
   assert.throws(() => planEvmBuy(askOf(max + 1n), [TWO, ONE], BOUND), refusedAs("amount"));
-  assert.throws(() => planEvmBuy(askOf(max - 1n), [TWO, ONE], BOUND), refusedAs("amount"));
-  assert.equal(ruleOf(() => planEvmBuy(askOf(max - BOUND), [TWO, ONE], BOUND)), "passed");
+  // within one W buy's bound under Max (the rest's W could not pay its own buy beside it): no refusal, the largest
+  // amount under the ask a plan carries, Max less the bound, the 0.002 note whole and the 0.001 note's W the rest
+  // (red at d46f2d488: refused amount)
+  for (const a of [max - 1n, max - BOUND + 1n]) {
+    const b = planEvmBuy(askOf(a), [TWO, ONE], BOUND);
+    assert.deepEqual([b.asked, b.amount, b.whole, b.rest], [a, max - BOUND, [TWO], { piece: ONE, spend: ONE.chunk - FEE - BOUND }]);
+  }
+  const exact = planEvmBuy(askOf(max - BOUND), [TWO, ONE], BOUND);
+  assert.deepEqual([exact.asked, exact.amount], [max - BOUND, max - BOUND]);
   // a piece twice, a fee at or over its chunk, nothing to buy, a Solana ask
   assert.throws(() => planEvmBuy(askOf(x), [ONE, ONE], BOUND), refusedAs("pieces"));
   assert.throws(() => planEvmBuy(askOf(x), [{ ...ONE, fee: ONE.chunk }], BOUND), refusedAs("pieces"));
@@ -228,7 +235,7 @@ test("checkEvmChange: W's change goes back as the largest rung its balance pays 
   assert.equal(ruleOf(() => checkEvmChange(depTx(milli(5n)), { ...ctx(milli(5n)), chain: "solana" as never }, depReads(held))), "chain");
 });
 
-test("planEvmBuy: when no piece the whole ones leave can carry the rest, one they took carries it instead (spends 5, 2 and 2, bound 0.1, an ask of 6.95: both 2s whole and 2.95 on the 5's W); only an ask within one buy's bound under every spend is refused", () => {
+test("planEvmBuy: when no piece the whole ones leave can carry the rest, one they took carries it instead (spends 5, 2 and 2, bound 0.1, an ask of 6.95: both 2s whole and 2.95 on the 5's W); an ask within one buy's bound under a sum of spends is planned at the most a plan carries under it", () => {
   const u = 10n ** 14n;
   const pieces = [
     { noteId: "five", chunk: 50n * u + u, fee: u },
@@ -240,7 +247,12 @@ test("planEvmBuy: when no piece the whole ones leave can carry the rest, one the
   assert.deepEqual(plan.whole.map((p) => p.noteId), ["two-a", "two-b"]);
   assert.equal(plan.rest?.piece.noteId, "five");
   assert.equal(plan.rest?.spend, 29n * u + u / 2n);
-  // every spend is 9.0: an ask over 8.9 (the bound 0.1 under it) and under 9.0 has no W to pay its own buy
-  assert.throws(() => planEvmBuy({ ...ask, amount: 89n * u + 1n }, pieces, u), /amount/);
+  // every spend is 9.0: an ask over 8.9 (the bound 0.1 under it) and under 9.0 has no W to pay its own buy, so the plan
+  // is 8.9, the most one carries under it (red at d46f2d488: refused amount): the 5 and one 2 whole, 1.9 on the other 2's W
+  const band = planEvmBuy({ ...ask, amount: 89n * u + 1n }, pieces, u);
+  assert.deepEqual([band.asked, band.amount, band.whole.map((p) => p.noteId), band.rest?.piece.noteId, band.rest?.spend], [89n * u + 1n, 89n * u, ["five", "two-b"], "two-a", 19n * u]);
   assert.equal(planEvmBuy({ ...ask, amount: 90n * u }, pieces, u).rest, null, "Max: every piece whole");
+  // a band under a smaller sum: spends 2 and 2, bound 0.1, an ask of 3.95 is planned at 3.9
+  const two = planEvmBuy({ ...ask, amount: 39n * u + u / 2n }, pieces.slice(1), u);
+  assert.deepEqual([two.amount, two.whole.map((p) => p.noteId), two.rest?.spend], [39n * u, ["two-b"], 19n * u]);
 });
