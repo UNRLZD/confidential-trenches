@@ -976,8 +976,8 @@ test("every proof outlasts its quote's window: after the tries the hand-off ends
   const { c, over, prover } = windowWorld({ slowProofs: [150] });
   const h = await handoffOf(v, page(v, prover), over(v));
   const end = await h({ recipient: "ab".repeat(32), amount: 1_000_000n }, RELAY_FEE + 10_000n);
-  assert.deepEqual(c.answers, [], "nothing sent");
-  assert.equal(end.kind, "fee");
   const [n] = await v.ns.list();
   assert.equal(n!.state, "UNSPENT", "Cash holds the whole note again");
+  assert.deepEqual(c.answers, [], "nothing sent");
+  assert.equal(end.kind, "fee");
 });
