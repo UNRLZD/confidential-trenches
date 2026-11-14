@@ -29,7 +29,7 @@ RPCs 150+ slots after the nonce advanced, with W's lamports unchanged; every tx 
   2,296,160, two pool reserves 1,488,440 each, the orchestrator's own reads capped at each account's rent).
   Unexplained: 0. W, M and the nonce account end at 0; the run's words file was removed.
 - **Read back:** the lead re-read all 17 txs at finalized on both RPCs at 10:16Z (slot, fee and err the same on both
-  and as recorded), the twin's null status and transaction, and the balances. The CO re-read the same at 10:19Z.
+  and as recorded), the twin's null status and transaction, and the balances. The team lead re-read the same at 10:19Z.
 - **OnFinality's day budget** (its x-ratelimit-remaining-day header): 994 at 10:10:10Z, 882 at 10:16:14Z.
 
 Two runs earlier that day stopped before setup and are kept as they were:
@@ -117,7 +117,7 @@ The hand-off box job g1pe-handoff (code b2ee59d, <build box>, 10:22:48-11:27:43Z
   - H1, H23 and H24: stale find texts, fixed at 2f31543, re-run in g1pe-tip.
   - CS1: TIMEOUT, its root cause fixed at 35031bd, re-run in g1pe-tip.
   - DL1: survived, equivalent under an honest device (above).
-- Solana tier 2, not reached: the job was stopped while tier 2 ran its baseline (11:27:36Z, the CO's call), so no tier-2 mutant
+- Solana tier 2, not reached: the job was stopped while tier 2 ran its baseline (11:27:36Z, the team lead's call), so no tier-2 mutant
   ran. All 84 go to card g1pe-mutants-full: AC1 AC2 AC3 AC4 AC5 AC6 AC8 AC9 AC10 AC11 AC12 AF1 AF2 BL1 BL2 BL3 BL4
   BL5 BL6 BL7 CL1 CL2 CL3 CL4 CL5 CL6 CL7 CS1 CS2 CS3 CS4 CS5 CS6 CS7 CS8 DV1 DV2 FN9 FN10 FN11 LJ10 LJ11 LJ12 LJ13
   LJ14 LJ15 LJ16 NC1 NM1 RS23 RS23b RS24 RS24b RS25 RS26 RZ1 RZ2 RZ3 RZ4 RZ5 RZ6 RZ7 RZ8 RZ9 RZ10 RZ11 RZ12 RZ13 RZ14
@@ -206,8 +206,8 @@ letting a send fail and pay the fee (F20). Our reading, not in the paper: the se
 until the pair's nonce has advanced. Otherwise, in a fall, the remainder stop can land first and leave the 100 % SL
 short of tokens, and that SL then fails and burns the pair.
 
-**Local copy of devnet: passed** (`runs/local/2026-10-26T15-46-35-972Z.json`, code 5d49e4c, 15:46-15:49Z on the PC box,
-`HEAVY_REMOTE=1 scripts/heavy.sh local-proof4 -- ... node local-run.mjs`, local-run rc 0):
+**Local copy of devnet: passed** (`runs/local/2026-10-26T15-46-35-972Z.json`, code 5d49e4c, 15:46-15:49Z on the build box,
+`BUILD_QUEUE=1 scripts/the build queue local-proof4 -- ... node local-run.mjs`, local-run rc 0):
 - **Validator:** solana-test-validator 4.3.2 at http://127.0.0.1:8899, genesis
   Hs6FLq8Gsm4uSbxUks97e3WYN5j9JiQpzmoiVgWnzQWk (not mainnet-beta's, testnet's or devnet's). It runs devnet's
   SwapsVeCi..., cloned: the programdata's program bytes have sha256 a86de91ddb85c872... (403,120 bytes) here and on
@@ -369,7 +369,7 @@ that reply quoted 5.4 % less SOL. The refusal holds: `size/exit.mjs` refuses to 
 - `report.mjs` prints the table below from the fixtures.
 - The 15 `size/fixtures/jup-*.json` files are committed (e741109). gitleaks `generic-api-key` flags 45 `"ammKey"`
   values in their `routePlan`. All 45 are 32-byte base58 pool addresses that the same reply's swap instruction names,
-  so they are public, not secrets; the CO marked them by fingerprint (research .gitleaksignore at e31180e, M192 (6)).
+  so they are public, not secrets; the team lead marked them by fingerprint (research .gitleaksignore at e31180e, M192 (6)).
 
 **Sizes** (exit = with the CU limit; "as returned" = without it, always 8 bytes less):
 

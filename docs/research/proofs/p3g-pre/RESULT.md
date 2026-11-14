@@ -274,7 +274,7 @@ access to Intel PCS; the sandbox step downloads near-sandbox 2.13.4 on first use
 ```sh
 cd proofs/p3g-pre
 (cd vectors && shasum -a 256 -c ../vectors.sha256)                      # 17 x OK
-H="~/Downloads/NEAR trading terminal/scripts/heavy.sh"
+H="~/Downloads/NEAR trading terminal/scripts/the build queue"
 "$H" pg -- tools/build-all.sh                                           # prep (native), contract (wasm), sandbox runner
 P="$PWD"
 prep/target/release/p3g-prep tdx-tcb "$P/vectors/go-tdx-guest/cos-113-tdx-quote.dat" "$P/results/cos-113-collateral.json" > results/tcb-check-cos113.txt   # Q2, live Intel PCS

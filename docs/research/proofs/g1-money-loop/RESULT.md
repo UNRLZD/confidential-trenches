@@ -160,7 +160,7 @@ prints every wallet on two RPCs and that leg's way back:
 (the owner's paste: `sh live.sh`; results go here)
 
 Two live runs (`runs/2026-10-26T07-25-51-056Z-live.json`, `runs/2026-10-26T09-53-43-559Z-live.json`, kept on the
-owner's Mac, not in git) carried legs 1-4 to arrival and stopped at base-to-near: the Base node refused the send before
+team's Mac, not in git) carried legs 1-4 to arrival and stopped at base-to-near: the Base node refused the send before
 broadcast ("insufficient funds for gas * price + value: have 6598043834936277 want 6598044273500489"). Nothing was
 sent. Both hop arrivals sit on the Base wallet (6,598,043,834,936,277 wei at 19:49Z on both Base RPCs).
 

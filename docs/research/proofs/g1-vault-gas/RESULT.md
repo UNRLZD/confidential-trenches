@@ -186,7 +186,7 @@ codegen-units 1, panic abort, overflow-checks, strip, then cargo-near's `wasm-op
 
 - **Proven equal:** `trim_equals_new_circom` checks the ark, mds and rounds against `get_poseidon_parameters` for t=3
   and t=4, plus 20 hashes per width. The circomlib vectors pass in both builds.
-- **This is a test contract, not the vault:** these bytes set no vault size. CO call: the trim build is the vault's
+- **This is a test contract, not the vault:** these bytes set no vault size. team lead call: the trim build is the vault's
   stack, and the paper edit is on vault-followup.
 - **Measured build:** every number above and in §6 was measured on trim e58f314b (160,033 B, built from c4b13ef), except the coordinate + q row of §2 (1f9bdf5d) and the §1 rows 14-15 block (trimpay 47d9ec99, its baseline trim 1f9bdf5d).
   - The lint commit (848f9e0) changed 25 data-section bytes (panic line numbers); the code is identical
@@ -208,7 +208,7 @@ codegen-units 1, panic abort, overflow-checks, strip, then cargo-near's `wasm-op
 
 **The deployed build.** Every testnet number here (and in §1-§4 where testnet is named) is from the trim build
 **e58f314b, 160,033 B, built from c4b13ef**: the `wasm` record of both runs' txs.json, and the code hash read back
-below. CO call: cite the deployed build, no redeploy. It differs from the trim build at HEAD (1f9bdf5d, 160,057 B) in
+below. team lead call: cite the deployed build, no redeploy. It differs from the trim build at HEAD (1f9bdf5d, 160,057 B) in
 two behaviours, read in `contract/src/lib.rs` at each sha (the rest of the diff is rustfmt layout):
 - `MAX_RELAY_FEE_BPS` is 1,000 at c4b13ef (l.59) and 5,000 at HEAD (l.61, paper 6fcfa94 2.2);
 - a proof coordinate >= q is refused as `InvalidProof` at c4b13ef (`coord()`, l.371-377) and as `InvalidProofEncoding`
@@ -292,21 +292,21 @@ and `--testnet` has not been run with this code.
 
 ## 7. How to re-run
 
-Every step that builds the pinned wasm (`contract/build.sh`) runs on the box, `HEAVY_REMOTE=1`: build.sh refuses a
+Every step that builds the pinned wasm (`contract/build.sh`) runs on the box, `BUILD_QUEUE=1`: build.sh refuses a
 non-Linux host (card vault-followup).
 
-- Prover and vectors: `scripts/heavy.sh <label> -- proofs/g1-vault-gas/prover/run.sh`. 10 node tests; the PP v1.3.0
+- Prover and vectors: `scripts/the build queue <label> -- proofs/g1-vault-gas/prover/run.sh`. 10 node tests; the PP v1.3.0
   files are fetched by sha256 (wasm 36cda227…, zkey 2a893b42…, vkey 666bd098…).
-- Contract, unit tests and the sandbox (88 cases): `HEAVY_REMOTE=1 scripts/heavy.sh <label> --
+- Contract, unit tests and the sandbox (88 cases): `BUILD_QUEUE=1 scripts/the build queue <label> --
   proofs/g1-vault-gas/tools/run.sh`. Then `node proofs/g1-vault-gas/tools/gas-compare.mjs <run A> <run B>`.
-- Payouts against the real USDC wasm: `HEAVY_REMOTE=1 scripts/heavy.sh <label> --
+- Payouts against the real USDC wasm: `BUILD_QUEUE=1 scripts/the build queue <label> --
   proofs/g1-vault-gas/sandbox/payouts.sh run trimpay` (`run trim` is the red; `lint` lints the feature).
-- A deposit as U's own call, USDC halted and not (§3.1): `HEAVY_REMOTE=1 scripts/heavy.sh <label> --
+- A deposit as U's own call, USDC halted and not (§3.1): `BUILD_QUEUE=1 scripts/the build queue <label> --
   proofs/g1-vault-gas/sandbox/deposit-halt.sh run` (`run --plant-no-halt` and `base` are the reds; `lint`).
-- Lint: `HEAVY_REMOTE=1 scripts/heavy.sh <label> -- sh -c 'proofs/g1-vault-gas/contract/build.sh &&
+- Lint: `BUILD_QUEUE=1 scripts/the build queue <label> -- sh -c 'proofs/g1-vault-gas/contract/build.sh &&
   proofs/g1-vault-gas/tools/lint.sh'`. Besides rustfmt and clippy it runs the testnet node tests and fails when a
   count of them stated here differs from the runner's (`testnet/result-counts.mjs`).
-- Testnet tooling: `proofs/g1-vault-gas/testnet/` (`HEAVY_REMOTE=1 scripts/heavy.sh <label> --
+- Testnet tooling: `proofs/g1-vault-gas/testnet/` (`BUILD_QUEUE=1 scripts/the build queue <label> --
   proofs/g1-vault-gas/testnet/rehearse.sh [version]` against a local near-sandbox, sandbox mode, no Keychain; `node --test
   'test/*.test.mjs'`, 53 tests; the real Keychain one is skipped unless `G1VG_REAL_KEYCHAIN=1` is set on a Mac, as it
   writes and deletes a throwaway item in the login Keychain; `readback.mjs <txs.json>`).

@@ -14,7 +14,7 @@ round trips filled): float mode passed (buy p95 3.1 s, sell p95 3.1 s); self mod
 | Token | `boar` `0x0cbf291Ba052174879d90bf781dF1A5F2BC5Bb07` (Clanker v4, Uniswap v4 pool, launched 2026-09-26). Use `--token` for any other |
 | Size | 0.0006 ETH per buy (~$1.44 at $2,407) |
 
-## 0. Live result (mainnet, run by Claude under plan §11.11)
+## 0. Live result (mainnet, run by AI under plan §11.11)
 
 Record `results/2026-10-19T23-38-52-673Z-live.json` (log `results/live-20-1792452463.log`). Token `boar`, 0.0006 ETH a buy,
 a fresh ghost each run, sim on, send + 100 ms receipt poll on `mainnet.base.org`, from this Mac (Vietnam).
@@ -222,7 +222,7 @@ Dry mode never signs with a real key. Txs are signed with a random throwaway key
 
 `--live` records each step for each run: quote, sim, sign, send, incl, conf, canon.
 
-## 6. Live run (run on 2026-10-19 by Claude under plan §11.11; results in §0)
+## 6. Live run (run on 2026-10-19 by AI under plan §11.11; results in §0)
 
 **Funding.** Fund the float `0x02151d84EF543e4EcEF117a1a17A7Eaa9b424f52` on Base with **0.004 ETH (~$10)** from P1's Base out-leg.
 - The run checks the balance first.
@@ -258,7 +258,7 @@ cd ~/Downloads/confidential-trenches/proofs/p4-speed/base && node run.mjs --swee
 7. **Flashblock pre-confirmation reorgs** are "rare" per the docs. A product UI should show "filled" on pre-confirmation and settle on `canon`.
 8. `--send sync` (`eth_sendRawTransactionSync`) is wired but **unverified**: it is not in the Base docs read. The default is send + poll.
 
-## 8. A never-bought Clanker v4 token: can a buyer exit? (2026-10-20 02:45Z, run by Claude under plan §11.11)
+## 8. A never-bought Clanker v4 token: can a buyer exit? (2026-10-20 02:45Z, run by AI under plan §11.11)
 
 Why: the coverage paper (Q4) saw Relay sell quotes of about -99.9% on 5 of 7 fresh Clanker v4 tokens, four of them
 returning the identical 0.000000977653702068 ETH, and called the sell side doubtful.

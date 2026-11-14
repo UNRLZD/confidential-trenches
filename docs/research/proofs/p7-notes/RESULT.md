@@ -104,7 +104,7 @@ JS: our extra check costs **6.4 ms per note** (p50, n = 60) on this Mac.
 cd proofs/p7-notes
 git clone --depth 1 --branch v0.18.2 https://github.com/cashubtc/cdk .build/cdk
 # protoc 36.2 for osx-aarch_64 unzipped into .build/protoc
-cd .build/cdk && "$HOME/Downloads/NEAR trading terminal/scripts/heavy.sh" p7-notes -- env RUSTUP_TOOLCHAIN=1.97.1 \
+cd .build/cdk && "$HOME/Downloads/NEAR trading terminal/scripts/the build queue" p7-notes -- env RUSTUP_TOOLCHAIN=1.97.1 \
   PROTOC="$PWD/../protoc/bin/protoc" cargo build --release --locked -p cdk-mintd --no-default-features --features fakewallet,sqlite
 mkdir -p ../bin && cp target/release/cdk-mintd ../bin/ && cd ../..
 npm ci

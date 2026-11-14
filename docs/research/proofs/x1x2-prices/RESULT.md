@@ -1,7 +1,7 @@
 # X1 and X2 from a free, read-only price sample (paper 10 G2 row 18)
 
 Sampled 2026-10-20 11:23:36Z to 13:01:12Z. History read 11:39:04Z. Keyless reads only: no key, no wallet, no transaction.
-Script: `sample.mjs` (Node 24, no dependencies). Not CPU-heavy, so it ran without `heavy.sh`.
+Script: `sample.mjs` (Node 24, no dependencies). Not CPU-heavy, so it ran without `the build queue`.
 
 **Proposal.** X1 = 150 bps (1.5%) on all three chains. X2 = 90 s, measured as NEAR block time minus the source's own
 price time. In the live sample neither value refused a single buy. Over 14 days of on-chain minute prices, X1 = 150 bps

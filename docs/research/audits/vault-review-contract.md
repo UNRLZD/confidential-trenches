@@ -1,6 +1,6 @@
-# Vault contract review: fresh Opus reviewer (card vault-review-opus-contract)
+# Vault contract review: fresh AI reviewer (card vault-review-contract)
 
-Reviewer: a fresh Opus agent that wrote none of the vault. Read only: no code changed and nothing committed in the
+Reviewer: a fresh AI agent that wrote none of the vault. Read only: no code changed and nothing committed in the
 public repo. Written 2026-11-06, 04:02Z to 05:30Z.
 
 - **Code reviewed:** `contracts/vault/src/*.rs` at public main `85f232fdbad22e594af8f41b181b51c2b522d103`, 6,351 lines,
@@ -50,7 +50,7 @@ padding, the full tree, a reused nullifier) are still there, as the paper says, 
 
 ### Status (card vault-review-fixes-1, vault lead, 6 Nov)
 
-- R-01: fixed by eb111b66 on branch card/vault-review-fixes-1: `storage_prepay` (`src/prepay.rs` `precommitment_arg`) and the deposit message (`src/deposit.rs` `deposit_message`, row 2) refuse precommitment 0 with `InvalidPrecommitment`; a refused `ft_on_transfer` panics, so the token's resolve refunds the whole amount. Tests: `prepay::tests::precommitment_zero_is_refused`, `deposit::tests::precommitment_zero_is_refused`, sandbox `deposit_msg precommitment_zero_is_refused_{mock,usdc}` (red at 4a6f1499, green at the branch head). Not fixed, for the CO: the kit's `vaultStoragePrepay` and `vaultDepositMessage` still build P = 0 (`packages/kit/test/vault-messages.test.ts:121` asserts it); the vault now refuses it, so nothing is locked, but the device could refuse it first.
+- R-01: fixed by eb111b66 on branch card/vault-review-fixes-1: `storage_prepay` (`src/prepay.rs` `precommitment_arg`) and the deposit message (`src/deposit.rs` `deposit_message`, row 2) refuse precommitment 0 with `InvalidPrecommitment`; a refused `ft_on_transfer` panics, so the token's resolve refunds the whole amount. Tests: `prepay::tests::precommitment_zero_is_refused`, `deposit::tests::precommitment_zero_is_refused`, sandbox `deposit_msg precommitment_zero_is_refused_{mock,usdc}` (red at 4a6f1499, green at the branch head). Not fixed, for the team lead: the kit's `vaultStoragePrepay` and `vaultDepositMessage` still build P = 0 (`packages/kit/test/vault-messages.test.ts:121` asserts it); the vault now refuses it, so nothing is locked, but the device could refuse it first.
 - R-02: documented residual, not fixed. A keyless vault has no second source of truth and no retry path without a setter. Named in paper 2.5.4 "What is left" and VT-S17 (`tests/s17.rs`, updated by this card to the one-receipt payout). Same as A-03. Its size grows with A-01's fix: 9,000,000 stranded with no note in VT-S17 at head, against 1,600,000 at 4a6f1499 (F-4: paper 2.5.4 and the judge sheet need the new figure).
 - R-03: not this card: card vault-review-fixes-kit (the kit's page size for `spends`).
 - R-04: documented residual, not fixed: the caller's cost, about 0.00125 N, named in paper 2.5.2 and 2.5.4 and VT-S08 (`tests/settle.rs`). Since A-01's fix a failed payout returns the whole attachment (`register_deposit` + 1 yocto per transfer) to the vault as the runtime's refund, which `tests/settle.rs` step 1 now reads (`REGISTER + 2` from `system`). Same as A-02.
@@ -60,7 +60,7 @@ padding, the full tree, a reused nullifier) are still there, as the paper says, 
 
 ## Proof runs
 
-Every run went through `scripts/heavy.sh` on the Mac queue (`HEAVY_REMOTE=0`, since the scratch copy is not a git
+Every run went through `scripts/the build queue` on the laptop queue (`BUILD_QUEUE=0`, since the scratch copy is not a git
 checkout), with `cargo +1.96.0 ... --locked`.
 
 - **R-03.** `<local path>` built the release wasm of main with cargo-near (231,294 B, sha256
@@ -164,4 +164,4 @@ PP checks with no line in the vault (2.7's second table):
 | V2.2 encoding, Groth16 verify, key generator | `src/verifier.rs`, `src/verifier_keys.rs` (generated, sha256-pinned to the `.vkey`; `tests/vkey.rs` fails on drift) | Encoding matches the host's (LE, Fq2 c0 then c1); real-proof, bit-flip, +q and off-curve tests in `tests/groth16.rs:157-269` |
 | V2.3 shared vectors | `src/context.rs:139-209` against `packages/kit/test/vectors/vault-v1.json` (8 scope, 10 label, 32 context) | Byte for byte, both sides |
 | V2.4-V2.6 prover worker, phone timing, input builder | Device side, not in the contract | Out of this review's scope |
-| V3.7 outside-eyes review | This report (the Opus half; the second model family is a separate card) | Done; findings above, each with its status |
+| V3.7 outside-eyes review | This report (the AI half; the second model family is a separate card) | Done; findings above, each with its status |

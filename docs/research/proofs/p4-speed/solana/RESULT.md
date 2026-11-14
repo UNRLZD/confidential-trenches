@@ -15,7 +15,7 @@ re-read finalized on a second provider. Dry (21:55Z) passed all four shapes befo
 The hackathon is kept fully apart from UNRLZD: no UNRLZD key, wallet or file is used. The float is funded only by P1's
 Solana out-leg or by the owner.
 
-## Live results (mainnet, run by Claude under plan §11.11, 2026-10-19 23:32Z – 10-20 00:10Z)
+## Live results (mainnet, run by AI under plan §11.11, 2026-10-19 23:32Z – 10-20 00:10Z)
 
 **All three records together** (p50/p95 nearest rank; a failed trade counts as infinitely slow):
 

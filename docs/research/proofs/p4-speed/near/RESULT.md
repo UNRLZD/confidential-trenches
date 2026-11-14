@@ -133,7 +133,7 @@ The dry-run formula (`--dry`) gives a lower bound: final 5.3–5.9 s.
 
 The ghost's balance is final one block before the tx's last receipt (the "balance seen at final" column), which is ~0.5–1 s earlier.
 
-## 5. Live run (run on 2026-10-19 by Claude under plan §11.11; results in §7)
+## 5. Live run (run on 2026-10-19 by AI under plan §11.11; results in §7)
 
 **Funding.** Fund the float `87ea8fb0343f98d7ef9bd08bcd4e241c8b15821b46a91788b24c5f3ea12a6b6c` with **2.5 NEAR**, from the hackathon funder `951a5eab7965eb95c3aae56d5da9535c21b9fa70da1105b93f4bc220703bfb33` (not yet funded) or from P1's NEAR out-leg.
 - The run checks for ~1.7 N up front.
@@ -169,7 +169,7 @@ cd ~/Downloads/confidential-trenches/proofs/p4-speed/near && node run.mjs --swee
 6. **Intear sees the trader.** `--route intear` sends `trader_account_id` (the float or ghost) to a third party. The default `direct` route uses only RPC views.
 7. **Mainnet Rhea code** is cited by wasm strings plus 1.9.18 source. The live code hash is 1.9.20, whose source was not read.
 
-## 7. Mainnet live attempts (run by Claude under plan §11.11, 2026-10-19 23:16Z–00:08Z)
+## 7. Mainnet live attempts (run by AI under plan §11.11, 2026-10-19 23:16Z–00:08Z)
 
 | Attempt | RPCs (reads / sends) | Result | Record |
 |---|---|---|---|
@@ -204,7 +204,7 @@ cd ~/Downloads/confidential-trenches/proofs/p4-speed/near && node run.mjs --swee
 ghost is closed or empty; the float keeps 0.01 N; the rest went back to the funder `951a5eab…` (sweeps `85wHj3Bk…`,
 `ZagWgrc4…`, `5BTewCfT…`). Net cost of all three attempts and the sweeps: **~0.104 N (~$0.52)**.
 
-## 8. Self mode on mainnet (2026-10-20 00:50Z-01:27Z, run by Claude under plan §11.11)
+## 8. Self mode on mainnet (2026-10-20 00:50Z-01:27Z, run by AI under plan §11.11)
 
 Reads on dRPC (`near.drpc.org`). Sends and tx-status waits on DeltaRPC (`nearinner.deltarpc.com`, free, no key). Token,
 pool and size as above. A fresh ghost each run, pre-funded off the clock by the float, deleted at teardown.
@@ -235,7 +235,7 @@ funding transfers burnt 0.000835 N each. All 42 ghosts were deleted with their N
 2026-10-20 01:32Z)**; all NEAR P4 runs: ~0.770 N (~$3.72).
 
 
-## 9. Rhea DCL from an unregistered ghost (2026-10-20 02:17Z, run by Claude under plan §11.11)
+## 9. Rhea DCL from an unregistered ghost (2026-10-20 02:17Z, run by AI under plan §11.11)
 
 The question (coverage paper Q1): can a fresh ghost swap on Rhea DCL (`dclv2.ref-labs.near`, `get_metadata.version`
 2.3.15) without the 0.5 N DCL registration? UNRLZD fact D5 had it only from a sandbox on 2.3.13.

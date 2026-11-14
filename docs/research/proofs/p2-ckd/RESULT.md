@@ -8,7 +8,7 @@ TypeScript client and checked with the BLS pairing equation against domain 2's l
 same contract and path gave the same secret, with a fresh app key each time. All 42 recorded txs were re-checked on a second RPC
 (`check-records.ts`, rpc.testnet.near.org: "all records match the chain").
 
-**Mainnet: PASS** (2026-10-19 23:04-23:08 UTC, run by Claude under the owner's overnight OK, plan §11.11). Two CKD
+**Mainnet: PASS** (2026-10-19 23:04-23:08 UTC, run by AI under the owner's overnight OK, plan §11.11). Two CKD
 responses from `v1.signer` to a fresh test contract, both decrypted and pairing-checked against domain 2's live key, same
 secret both times (fingerprint `a50759ee25098fba`). Every tx re-checked on near.drpc.org (`check-records.ts`: "all records
 match the chain"). **Mainnet latency has a long tail:** 7.4 s and 96.8 s (165 blocks) in the passing run, 2.8 s in run 1,

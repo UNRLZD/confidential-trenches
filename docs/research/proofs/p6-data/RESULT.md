@@ -495,7 +495,7 @@ and for each launch asks the UNRLZD engine (`/api/token/{id}/candles?tf=1m|1s`) 
 - (Superseded by the 10 h watch below.) n = 3 is thin, so the cell stays NOT PROVEN, not PASS: it shows the path works for a token that trades in its first
   minute, not how often a NEAR launch has a candle in 2 min. Launch rate observed: 3 in 150 min (run 3 §12: 1 in 120 min).
 
-**The 10 h watch (CO, 2026-10-20 21:27:16Z to 2026-10-21 07:27:16Z, final comparisons to 07:34:19Z).** The same script
+**The 10 h watch (team lead, 2026-10-20 21:27:16Z to 2026-10-21 07:27:16Z, final comparisons to 07:34:19Z).** The same script
 with `--minutes 600`, run with `nice -n 10` beside the heavy slots (log `results/run5-near-run.log`). Record:
 `results/run4-near-2026-10-20T21-27-16-551Z.json`; numbers from `run4-analyze.mjs --near` on it (`near` in
 `results/run4-analysis.json`; the Robinhood and Base `crossCheck` blocks are kept from the 2026-10-20 `--verify` run,
@@ -579,7 +579,7 @@ tokens tried, and one live value.
   "Just a moment...") to 245 consecutive calls from 19:13:59Z to 19:17:37Z, then recovered by itself. My loop retried
   without backoff during it (88 to 90 calls a minute against about 30 normal), which may have made it last longer. Cause
   not proven. Product fix: back off and fail over to a second RPC on 403 (thirdweb answered `--verify`).
-- Deviation from the heavy-job rule: the pollers ran directly with `nice -n 10`, not through `scripts/heavy.sh`, because
+- Deviation from the heavy-job rule: the pollers ran directly with `nice -n 10`, not through `scripts/the build queue`, because
   its slots were held by other jobs for the whole window and a 2 h watch cannot queue behind them. One Node process each.
 
 ### 13.8 Assumptions and what stays NOT PROVEN
@@ -604,7 +604,7 @@ tokens tried, and one live value.
 
 ## 14. Run 5 (2026-10-21): the data design brief v2.0.1 draws and §6.1 does not serve
 
-Asked by CO: for items (a) to (h) below, on each chain, can we serve it, from where, at what cost, under what terms, how
+Asked by team lead: for items (a) to (h) below, on each chain, can we serve it, from where, at what cost, under what terms, how
 fresh. Read-only and keyless: no sign-up, no key, no vendor contact. Live measurements 14:34Z to 15:09Z on 2026-10-21; every
 vendor page was read the same day (WebFetch, 14:45Z to 15:00Z). Scripts: `proofs/p6-data/run5/*.mjs` (`lib.mjs` is the one
 HTTP helper: at most 1 request per second per host). Raw outputs: `proofs/p6-data/results/run5/` (`requests.jsonl` has every
@@ -824,7 +824,7 @@ users all on tapes. The holders list is a 5 KB GET (50 rows x 100 bytes, C) refr
 
 | Source | Clause (URL) | Effect |
 |---|---|---|
-| Jupiter | license §3.2(d): "share ... any content obtained through the API ... to any third party" ([license](https://developers.jup.ag/docs/legal/sdk-api-license-agreement.md), read §10); plans page says nothing on display rights ([plans](https://developers.jup.ag/docs/portal/plans.md)) | blocker for lists, `stats5m`, audit fields as a re-served feed; §10 item 1's reading (display to our own users) stays CO's call. Paid: Developer $25 (10 req/s), Launch $100 (50), Pro $500 (150); a redistribution right is not on the page (D) |
+| Jupiter | license §3.2(d): "share ... any content obtained through the API ... to any third party" ([license](https://developers.jup.ag/docs/legal/sdk-api-license-agreement.md), read §10); plans page says nothing on display rights ([plans](https://developers.jup.ag/docs/portal/plans.md)) | blocker for lists, `stats5m`, audit fields as a re-served feed; §10 item 1's reading (display to our own users) stays team lead's call. Paid: Developer $25 (10 req/s), Launch $100 (50), Pro $500 (150); a redistribution right is not on the page (D) |
 | DexScreener | API terms §2: "making the API Services, or any portion thereof, available for third parties" ([terms](https://docs.dexscreener.com/api/api-terms-and-conditions.md)) | blocker as §7 item 2 |
 | CoinGecko API and GeckoTerminal | 4.1.6: "re-distribute or syndicate access to the CoinGecko API"; 6.1: "We do not encourage caching or storage of Data."; 4.4: attribute ownership, "Powered by CoinGecko" (fetch of [api_terms](https://www.coingecko.com/en/api_terms), 14:50Z; quotes as the fetch tool returned them) | the page read for the first time this run (§11 had a 403). GeckoTerminal is not named in it: whether the public on-chain API is "the CoinGecko API" is U. Charging for a product that incorporates the API is allowed (4.1.6) |
 | GoPlus | "Powered by GoPlus Security"; "You may not share your API Key with any third party" ([old agreement, 2022-11-17](https://docs.gopluslabs.io/reference/api-license-agreement)) | page marked Old; keyless works; current terms U |
@@ -842,7 +842,7 @@ p95 7.8 s, max 8.5 s. These include my poll gap (up to about 6 s), so they are u
 the lag itself. A first attempt used a wrong filter and counted old trades (p50 769 s); it is kept as
 `near-tape-lag-INVALID-first-try.json`. Sample: 26 trades on 3 tokens in one 5-minute window.
 
-### 14.7 (h) Watchlist privacy: facts for CO, no decision
+### 14.7 (h) Watchlist privacy: facts for team lead, no decision
 
 Question: a watchlist of up to 50 tokens outside the open lists, read through the existing `GET /v1/pub/md/token/{chain}/{token}`,
 one GET each, in TLS that ends in our enclave (6b §3.1, §6.1; ND-4; T12 allows one token).
@@ -866,7 +866,7 @@ What each party sees, per §3.1 and the privacy matrix (05, L4, L9, L10), with w
   sees NEAR lookups. A fresh 50-token watch of rare tokens is a small set in the provider's view; batching
   (DexScreener 30 a call, Jupiter 100 a call, §5) hides it among others' cold tokens. Per-token calls on GeckoTerminal (about 10 a
   minute) cannot carry 50.
-- **Load, for CO's sizing (C).** One GET per token per refresh: 50 GETs every 60 s is 0.83 requests/s a user, 4,167/s for 5,000
+- **Load, for team lead's sizing (C).** One GET per token per refresh: 50 GETs every 60 s is 0.83 requests/s a user, 4,167/s for 5,000
   users who all hold 50; at 5 s (the `token` cacheability) it is 50,000/s. A batch path would be 83/s at 60 s. At the engine
   proxy's 4.4 KB that is 18 MB/s at 4,167 requests/s (the `TokenPage` size is U). 06b §6.6 chose the safe default: no standing read.
 
@@ -886,13 +886,13 @@ No change to a money rule, the enclave's signed records or the trade path. Every
    "locker" }], total?, src, as_of_ms }`. Cache 60 s.
 5. `Candles.tf` gains `1s` (NEAR only; a chain that does not serve it answers 404, as an unserved `tf` does today).
 6. The 6b §6.1 sources table gains per-chain rows for the above, as in 14.1 and 14.3. The `TokenPage` is unchanged.
-7. Watchlist: no new path. If CO wants live values for off-list tokens, the smallest form is one batch GET
+7. Watchlist: no new path. If team lead wants live values for off-list tokens, the smallest form is one batch GET
    `GET /v1/pub/md/tokens?chain=...&ids=<≤50>` returning `Row[]`, cache 5 s; it exposes the set once per request instead of 50
-   times. This is a fact for CO, not a proposal.
+   times. This is a fact for team lead, not a proposal.
 
 ### 14.9 Build size, the data side of paper 10's L2 lane (my estimate)
 
-One lane-day = one Opus agent working a day, as paper 10 counts L3's "about 5 lane-days". Estimates, not measured.
+One lane-day = one AI agent working a day, as paper 10 counts L3's "about 5 lane-days". Estimates, not measured.
 
 | Part | Lane-days |
 |---|---|
@@ -923,20 +923,20 @@ One lane-day = one Opus agent working a day, as paper 10 counts L3's "about 5 la
 
 Assumptions: the two-list, 100-row and 50-row sizes are the brief's; "one lane-day" as above; absent `sellVolume` means zero sells;
 tx `from` is the trader; stablecoin-quoted pools only for own USD volume. I did not read secrets or any key file, made no
-transaction and signed up nowhere. I did not contact a vendor. Deviations: the heavy-job rule (`scripts/heavy.sh`) was not used
+transaction and signed up nowhere. I did not contact a vendor. Deviations: the heavy-job rule (`scripts/the build queue`) was not used
 (each job was one single-threaded Node process at one request a second per host, a few minutes long); the one Blockscout request
 with a changed agent string (14.5); the 281-request 403 loop (14.2).
 
 ## 15. Run 6 (2026-10-21): a live Solana trades tape from free websockets, decoded from logs alone
 
-Question from CO: can we serve a live Solana trades tape (last 50 trades of one token, then each new trade within about
+Question from team lead: can we serve a live Solana trades tape (last 50 trades of one token, then each new trade within about
 2 s) for free, from free keyless websockets (`logsSubscribe`), decoding trades from the logs ourselves, with no
 `getTransaction` per trade? Live runs 15:27Z to 16:47Z on 2026-10-21, keyless, read-only. Scripts:
 `proofs/p6-data/run6/*.mjs` (`lib6.mjs`: the HTTP gate, at most 1 request per 1.1 s per host, a host stopped at its first
 429/403; the IDL-driven event decoder; the log walker). Raw outputs: `proofs/p6-data/results/run6/` (`requests.jsonl` every
 script HTTP request, `request-audit.json` totals: 1,568 requests, at most 10 in any 10 s per host). Local clock: `sntp
 time.apple.com` +0.093 s ± 0.110 s (15:33Z). Every Node job was one single-threaded process run one at a time (event loop
-p99 delay 12 to 15 ms in each tape run), so `scripts/heavy.sh` was not needed and not used.
+p99 delay 12 to 15 ms in each tape run), so `scripts/the build queue` was not needed and not used.
 
 Tags: **M** measured here. **D** read in the named doc on 2026-10-21. **C** my arithmetic. **U** unknown.
 
@@ -1162,7 +1162,7 @@ One upstream subscription per open token, fanned out by our server:
 
 ## 16. Run 7 (2026-10-21): curve progress per launchpad, Graduating lists, fixtures and logos
 
-Question from CO: Discover needs New, Trending, Hot and Graduating on every chain, with a launchpad logo tag on each
+Question from team lead: Discover needs New, Trending, Hot and Graduating on every chain, with a launchpad logo tag on each
 row. Graduating needs each token's bonding-curve % (brief 09 §12 item 4: "not measured in P6"). For each launchpad: the
 read that gives curve % and the graduated event, the formula with a citation, one live read of a real token; how a server
 builds the Graduating list and what it costs at 5,000 users; 10-12 real fixture rows per chain; the launchpads' logos.
@@ -1171,7 +1171,7 @@ the gate, at most 1 request per 1.1 s per host, 7 s for GeckoTerminal; a hard ca
 call; a host stopped at its first 429, 403, challenge or JSON-RPC rate error; run 4's user agent). Raw outputs:
 `proofs/p6-data/results/run7/` (`requests.jsonl` every HTTP request; `request-audit.json`: 128 requests on 34 hosts, at
 most 1 in any 1 s and 10 in any 10 s per host, plus two websocket sessions on mainnet-beta, 60 s and 180 s). Every Node
-job was one light single-threaded process, run one at a time, so `scripts/heavy.sh` was not needed and not used.
+job was one light single-threaded process, run one at a time, so `scripts/the build queue` was not needed and not used.
 Fixtures: `results/run7/fixtures.json`. Sources and docs read: `results/run7/docs/`, `results/run6/idl/`,
 `results/run6/venue-src/`.
 
@@ -1443,7 +1443,7 @@ coverage of fresh tokens is U.
 
 - Rule break: GoPlus answered its limit in the body (code 4029) with HTTP 200. My loop checked only the HTTP status, so
   12 more calls went out after the first 4029, at 1.1 s spacing, before the loop's cap ended it. `lib7.mjs` now treats body
-  code 4029 as a refusal. Recommend a lessons-file line for CO (this lane may touch only `proofs/p6-data/`): "GoPlus says
+  code 4029 as a refusal. Recommend a lessons-file line for team lead (this lane may touch only `proofs/p6-data/`): "GoPlus says
   'limit' as HTTP 200 + body code 4029; treat it as a 429."
 - Refusals, each recorded and not retried: `base-rpc.publicnode.com` 403 "Archive requests require a personal token" on the
   24 h Virtuals `eth_getLogs` (the host was stopped; the query was not sent elsewhere; P3's saved log was used);

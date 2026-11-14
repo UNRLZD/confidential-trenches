@@ -1,6 +1,6 @@
 # Test money: the lanes' mainnet dev wallets (card test-wallets-funding)
 
-Status 2026-11-02 09:37Z (M4's $8 principal folded in at 09:13Z; the Opus review of e0d5832 folded in at 09:36Z): wallets made, `fund.sh --dry` and `sweep.sh --dry` ran with real quotes on every leg; nothing
+Status 2026-11-02 09:37Z (M4's $8 principal folded in at 09:13Z; the AI review of e0d5832 folded in at 09:36Z): wallets made, `fund.sh --dry` and `sweep.sh --dry` ran with real quotes on every leg; nothing
 signed or sent. The owner's paste funds all nine funded wallets once the funder is topped up.
 
 ## The wallets and what each holds
@@ -25,11 +25,11 @@ buy, proofs/p4-speed/near/RESULT.md:35-43). Keys: Keychain `ct-testmoney-<chain>
 | M5 | Solana | `4nqkKeovDXJ2oLd8A5XQqFzw4iG4kqKvBWzHGtULcJ8k` | $5.89 | principal 5.00 + price loss 0.65 + gas 0.06 + margin 0.1775 |
 | | | | **$132.28** | §2.6's $124.28 + M4's $8: lanes 34.04 + 52.69 + 27.17 + 12.49 + 5.89; $78 principal comes back on the sweep |
 
-**Named change on §2.6: principal M4 $8** (the CO's call, received 2026-11-02 by 09:13Z, on this card). §2.6 gives M4 $0 principal, which left each
+**Named change on §2.6: principal M4 $8** (the team lead's call, received 2026-11-02 by 09:13Z, on this card). §2.6 gives M4 $0 principal, which left each
 M4 wallet at $0.89-1.59, below the $2 a test order fire trades: a $2 order fire needs a $2 position. So each of
 M4's four wallets (Solana, Base, Robinhood, NEAR) holds $2 more, swept back like every principal. It is one line
 in `plan.mjs` (`CHANGES`, with this reason); `split()` compares each lane to §2.6 plus its named changes, with the
-same half-cent rule, so dropping the change or a wallet's $2 is refused (tests). The CO updates markets.md §2.6.
+same half-cent rule, so dropping the change or a wallet's $2 is refused (tests). The team lead updates markets.md §2.6.
 
 How the split is made (test-money.py's model, ported to integer micro-dollars):
 
@@ -103,7 +103,7 @@ loss 0.26-0.35% each. The NEAR wallets go back by a Transfer of their free balan
 **The first live sweep is a canary: `sh scripts/testmoney/sweep.sh --lane M5`** (one Solana wallet, $5.89 planned),
 read back on two RPCs, before the other lanes.
 
-## The review fold (Opus review of e0d5832, FIX; folded 09:36Z)
+## The review fold (AI review of e0d5832, FIX; folded 09:36Z)
 
 1. A rerun after a stop paid finished legs again. Now each wallet is read on both RPCs first (the re-check fold below moves the default to 10%): at 97% of its dollars it
    is "held, skipped", below that it gets the difference; a live run refuses while a 1Click deposit in the last
@@ -151,7 +151,7 @@ read back on two RPCs, before the other lanes.
 - The review's four untracked dry records (runs/2026-11-02T09-16-28-326Z, 09-17-01-699Z, 09-40-42-675Z,
   09-41-06-019Z) are left untouched.
 
-## The re-check fold 3 (round-3 Opus re-check of dfbacec, FIX small; folded 10:17Z)
+## The re-check fold 3 (round-3 AI re-check of dfbacec, FIX small; folded 10:17Z)
 
 A. Tests now pin the "never paid" rule: a deposit counts as never paid only when both NEAR RPCs answer and both read
    no account at its 64-hex address. One RPC seeing the account (0 / 5), an account read that throws, one RPC answer

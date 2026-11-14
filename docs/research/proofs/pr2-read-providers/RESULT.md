@@ -103,7 +103,7 @@ reader carries more or 06c §1.3's scale path fires.
   top-holder percentage but **no rows**, so a Helius failure shows the count and percentage with the 20 rows as `—`.
 - **Not baked: `datapi.jup.ag/v1/holders`.** It returns 100 owner rows that matched the RPC-derived owners on settled
   tokens (M), but it is undocumented (D: absent from Jupiter's docs index), its limit and terms are U, and it lagged on
-  a seconds-old token (2 rows against 11 on chain, M). An owner or CO call whether to use it as a third source.
+  a seconds-old token (2 rows against 11 on chain, M). An owner or team lead call whether to use it as a third source.
 - No second free RPC answers this method, so "any two agree" (06c §1.3) cannot hold for Solana holder rows on free
   plans (M). A keyed free plan elsewhere (dRPC, Ankr) was not measured: we hold no key for them.
 

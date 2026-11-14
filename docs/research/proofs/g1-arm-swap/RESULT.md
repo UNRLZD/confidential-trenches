@@ -52,7 +52,7 @@ the 15 minute timeout hits. Each status has exactly one answer:
 | a status outside the enum | **started, proof incomplete**, naming the status (it counts as beyond waiting, so it never gives "no") |
 | no status ever read | **started, proof incomplete** |
 
-A refund counts as "started", not "no": 1Click can refund only a credit it registered. This is the CO's settled call
+A refund counts as "started", not "no": 1Click can refund only a credit it registered. This is the team lead's settled call
 (merge note M285 (4)).
 
 The leg passes only on a yes. On any other answer the record shows the status seen, the time of each status, whether and
@@ -228,16 +228,16 @@ rc 0. The record is `runs/2026-10-27T00-12-18-766Z-dry-run1.json`, gitignored.
 
 ## Tests
 
-The suite, on the PC through `scripts/heavy.sh`, from the worktree of `card/g1-arm-swap` at 27dbe43, 2026-10-27 00:12Z. The box
+The suite, on the PC through `scripts/the build queue`, from the worktree of `card/g1-arm-swap` at 27dbe43, 2026-10-27 00:12Z. The box
 syncs the tree without `node_modules`, so the command installs both folders first:
 
-    HEAVY_REMOTE=1 scripts/heavy.sh arm-swap-r3 -- sh -c '(cd proofs/g1-money-loop && npm ci --ignore-scripts --no-audit --no-fund) && (cd proofs/g1-arm-swap && npm ci --ignore-scripts --no-audit --no-fund) && node --test "proofs/g1-arm-swap/*.test.mjs" && node --test "proofs/g1-money-loop/*.test.mjs"'
+    BUILD_QUEUE=1 scripts/the build queue arm-swap-r3 -- sh -c '(cd proofs/g1-money-loop && npm ci --ignore-scripts --no-audit --no-fund) && (cd proofs/g1-arm-swap && npm ci --ignore-scripts --no-audit --no-fund) && node --test "proofs/g1-arm-swap/*.test.mjs" && node --test "proofs/g1-money-loop/*.test.mjs"'
 
 - g1-arm-swap: 194 tests, 193 pass, 0 fail, 1 skipped (`intent.live.test.mjs`, which runs with `ARM_LIVE_READS=1`; the lead ran it on the Mac at 939e89d, pass; it is unchanged);
 - g1-money-loop (main's, imported, not changed here): 276 / 276;
 - "done on <build box> in 34 s: exit 0".
 - card arm-swap-p3s at 4e157a8, 2026-10-31 17:02Z, the same command: g1-arm-swap 196 tests, 195 pass, 0 fail, 1 skipped; g1-money-loop 277 / 277; "done on <build box> in 376 s: exit 0".
-- card arm-swap-run-marker at 5c028df, 2026-10-31 17:46Z, on this Mac's heavy.sh queue (HEAVY_REMOTE=0; the box was
+- card arm-swap-run-marker at 5c028df, 2026-10-31 17:46Z, on this Mac's the build queue queue (BUILD_QUEUE=0; the box was
   busy with UNRLZD), the same tests: g1-arm-swap 206 tests, 205 pass, 0 fail, 1 skipped; g1-money-loop 277 / 277; exit 0.
 
 | File | Tests | Red before |
@@ -273,7 +273,7 @@ every invocation of `--run 1`. Of that:
 ## Results: paste 3, 2026-11-01
 
 Source: the owner's live record `proofs/g1-arm-swap/runs/2026-11-01T03-43-49-835Z-live-run1.json` (started 03:43:49Z, `--run 1`,
-`mode: live`; kept out of git). Field names below are the record's. The CO's own re-reads at about 04:19Z are marked "CO read".
+`mode: live`; kept out of git). Field names below are the record's. The team lead's own re-reads at about 04:19Z are marked "team review read".
 
 ### RM-03: yes (credit alone)
 
@@ -302,18 +302,18 @@ So the credit alone started the swap. Nothing else was needed.
 
 ### Every transaction
 
-NEAR rows: the record's `txs` list. The CO read all six at about 04:19Z on two RPCs each. NEAR: rpc.mainnet.near.org and
+NEAR rows: the record's `txs` list. The team review read all six at about 04:19Z on two RPCs each. NEAR: rpc.mainnet.near.org and
 near.drpc.org. Solana: api.mainnet-beta.solana.com and solana-rpc.publicnode.com. All six are FINAL (NEAR) or finalized
 (Solana), status ok. A is the arm account `386aeb32...ed233ef8`, F the funder `951a5eab...0703bfb33`.
 
 | # | Name | Hash or signature | Signer | Nonce, height | Read-back |
 |---|---|---|---|---|---|
-| 1 | A's cancel of its open arm call | `DFKY5VDHkxdvQkrRdppZ3y3qXgg5qFJ5vnkWa63AM6Mw` | A | 222476436000001, 222515334 | `readBackOk` true; CO read FINAL, ok |
-| 2 | F tops A up (0.091 NEAR, `drawn` topA) | `7Y34e1rhvw2vbZdKXpdHs6AvMqHNBRQDQqYZphUQX4k9` | F | 220714460000019, 222515341 | `readBackOk` true; CO read FINAL, ok |
-| 3 | A's arm call (to the USDC contract) | `74zdEExZgcayHmvPzT587W4fz5SQAaPx4WvcL2xFE8XN` | A | 222476436000002, 222515356 | leg `back`: FINAL, 0 failed receipts, on two RPCs; CO read FINAL, ok |
-| 4 | W to K | `yL6dDLVSDu1J9jyeFMTYgurAyHNg8RDUZgiEBiVAmDr4KjTaUKWwaBw3EnC6E9ncYamzf1rA95fRauszFDmkSod` | W | Solana, 20777610 lamports | log: read back on two Solana RPCs; CO read finalized, ok |
-| 5 | A's storage_unregister | `9XXiZAdtPCnn4itNs2ADsZaoGqYL4aW2GznX3gm96avM` | A | 222476436000003, 222516853 | `readBackOk` true; CO read FINAL, ok |
-| 6 | A deletes itself into F | `Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM` | A | 222476436000004, 222516863 | `readBackOk` false in the record; CO read FINAL, SuccessValue (see "The stop") |
+| 1 | A's cancel of its open arm call | `DFKY5VDHkxdvQkrRdppZ3y3qXgg5qFJ5vnkWa63AM6Mw` | A | 222476436000001, 222515334 | `readBackOk` true; team review read FINAL, ok |
+| 2 | F tops A up (0.091 NEAR, `drawn` topA) | `7Y34e1rhvw2vbZdKXpdHs6AvMqHNBRQDQqYZphUQX4k9` | F | 220714460000019, 222515341 | `readBackOk` true; team review read FINAL, ok |
+| 3 | A's arm call (to the USDC contract) | `74zdEExZgcayHmvPzT587W4fz5SQAaPx4WvcL2xFE8XN` | A | 222476436000002, 222515356 | leg `back`: FINAL, 0 failed receipts, on two RPCs; team review read FINAL, ok |
+| 4 | W to K | `yL6dDLVSDu1J9jyeFMTYgurAyHNg8RDUZgiEBiVAmDr4KjTaUKWwaBw3EnC6E9ncYamzf1rA95fRauszFDmkSod` | W | Solana, 20777610 lamports | log: read back on two Solana RPCs; team review read finalized, ok |
+| 5 | A's storage_unregister | `9XXiZAdtPCnn4itNs2ADsZaoGqYL4aW2GznX3gm96avM` | A | 222476436000003, 222516853 | `readBackOk` true; team review read FINAL, ok |
+| 6 | A deletes itself into F | `Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM` | A | 222476436000004, 222516863 | `readBackOk` false in the record; team review read FINAL, SuccessValue (see "The stop") |
 
 W to K moved 20777610 lamports. The arrival was 20782610, so the 5000 lamports difference is the Solana fee.
 
@@ -338,7 +338,7 @@ Also from the log:
 The record's `stopped` field: leg `sweep`, "A deletes itself into F: tx `Dw1nbvYGcjXs3HocsCxxz1GXr6wH8QNUkQV5FxffJPrM` not
 confirmed on two RPCs", with "not ok" on free.rpc.fastnear.com and on near.drpc.org.
 
-The CO read at about 04:19Z shows the sweep finished:
+The team review read at about 04:19Z shows the sweep finished:
 
 - The tx is FINAL with `SuccessValue`.
 - Its only action is `DeleteAccount`, and the beneficiary is F.

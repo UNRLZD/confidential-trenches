@@ -61,7 +61,7 @@ On mainnet's wasm and state in near-sandbox 2.13.4, every check passed (69 of 69
 - **Run 2: PASS, 69 of 69 checks.** 2026-10-23 01:24:51-01:26:06Z, H = 221,170,792. Files: `results/sandbox-2026-10-23T01-24-51-994Z.json`, `sandbox-checks-…jsonl`, `sandbox-txs-…jsonl`.
 - **Run 1: 62 of 63 checks.** 01:22:53Z, H = 221,170,590. The one failure was in the harness, not in Plach. A panicking view comes back as `{error}` with no `result`, and the helper read `result`. Run 1's tx log shows the same "Contract is paused" refusal on chain. After the fix, run 2 checked that the view itself answers "Contract is paused". Both runs are kept.
 
-**Where it ran.** Both runs went through `scripts/heavy.sh pr4-plach -- proofs/pr4-plach/run.sh`. The PC box did not answer ("<build box> does not answer"), so both ran in the Mac's slot-2.
+**Where it ran.** Both runs went through `scripts/the build queue pr4-plach -- proofs/pr4-plach/run.sh`. The build box did not answer ("<build box> does not answer"), so both ran in the Mac's slot-2.
 
 Pools: 136 = jelly-1 (launch v1, 10.63 N real). 273 = quant (LaunchV2 with four fee receivers, 4.25 N real). Each G is a
 fresh 64-hex implicit account.
@@ -93,7 +93,7 @@ fresh 64-hex implicit account.
 | Token registration (N-3) | 10 Tgas | 9.4-9.6 Tgas |
 | A failed buy | 100 Tgas | 18-35 Tgas |
 
-## 3. What a v1 Plach route needs (for CO and the build lane)
+## 3. What a v1 Plach route needs (for team lead and the build lane)
 
 **Shapes**, all signed by G:
 
@@ -141,13 +141,13 @@ fresh 64-hex implicit account.
 - `adapters/near/` is L2's, and L2's slack is ≈ 0.45.
 - `harness/au-near/` is L1e's, and L1e's slack is ≈ 0.7.
 
-The NEAR adapter is not on M1's path; it goes to M2 at I2, Nov 5 22:00Z. CO has three ways to place the work:
+The NEAR adapter is not on M1's path; it goes to M2 at I2, Nov 5 22:00Z. team lead has three ways to place the work:
 
 - **Split by lane.** L1e takes the AU cases (0.5), and the ≈ 1.85 for the adapter and the quote goes to a lane with ≥ 1.85 slack. None has that by §4.2: L6 has ≈ 1.8 by M222 (≈ 1.05 by its rows), L3 ≈ 1.5, L1c ≈ 1.4.
 - **New lane.** A new short lane takes `adapters/near/plach/` from Nov 2.
 - **Land later.** Plach lands in I3 (Nov 6 22:00Z) instead of I2.
 
-`[value needed: CO, the lane]`.
+`[value needed: team lead, the lane]`.
 
 ## 5. Open
 
@@ -163,6 +163,6 @@ The NEAR adapter is not on M1's path; it goes to M2 at I2, Nov 5 22:00Z. CO has 
 - **Mainnet reads.**
   - `facts.mjs` reads step 1's facts and writes `results/facts.json` and `facts-rpc.jsonl`.
   - `plach-only.mjs` runs the Rhea check and writes `results/plach-only.json`.
-- **Sandbox.** `sandbox.mjs` and `run.sh` run it: from the repo root, `scripts/heavy.sh pr4-plach -- proofs/pr4-plach/run.sh`. Each run writes `results/run-*.txt`, `state-manifest-*.json`, `sandbox-*.json`, `sandbox-checks-*.jsonl`, `sandbox-txs-*.jsonl` and `fetch-rpc.jsonl`.
+- **Sandbox.** `sandbox.mjs` and `run.sh` run it: from the repo root, `scripts/the build queue pr4-plach -- proofs/pr4-plach/run.sh`. Each run writes `results/run-*.txt`, `state-manifest-*.json`, `sandbox-*.json`, `sandbox-checks-*.jsonl`, `sandbox-txs-*.jsonl` and `fetch-rpc.jsonl`.
 - **GitHub.** `results/github-repo.json` holds the GitHub repo read.
 - **Not committed.** The fetched engine state (2.5 MB) and the wasm. The manifest records their hashes, sizes and record counts.

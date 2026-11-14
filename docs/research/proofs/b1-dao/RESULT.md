@@ -5,7 +5,7 @@ pulled forward). Nothing was sent on mainnet: every mainnet call below is a view
 calls to the real mainnet factory and DAO code in a local near-sandbox: **35 of 35 checks PASS**. Tags: R read
 (vendor source or a mainnet view), M measured (sandbox), D decided here (technical call), A assumed.
 
-Files: `dao.mjs` (the paste: `create` on device A, `vote` on device B; `--dry` / `--live`), `check.mjs` (CO's
+Files: `dao.mjs` (the paste: `create` on device A, `vote` on device B; `--dry` / `--live`), `check.mjs` (team lead's
 read-back on two providers), `lib.mjs` (pinned values, policy, RPC client, signing), `PASTE.md` (the owner's lines),
 `test/unit.test.mjs` (8 tests, no network), `test/sandbox.mjs` + `test/run-sandbox.sh` (the sandbox test),
 `test/fixture-abi.json` (the on-chain ABI subset), `results/mainnet-reads-2026-10-22.json`,
@@ -30,7 +30,7 @@ Device B, one paste (or the two near-cli-rs lines device A's run prints):
 cd ~/Downloads/confidential-trenches && node proofs/b1-dao/dao.mjs vote --live --dao <DAO_NAME>.sputnik-dao.near --member <B> --key <B_KEY_FILE>
 ```
 
-CO after: `node proofs/b1-dao/check.mjs --dao <DAO_NAME>.sputnik-dao.near --member-a <A> --member-b <B>` (exit 0 =
+team lead after: `node proofs/b1-dao/check.mjs --dao <DAO_NAME>.sputnik-dao.near --member-a <A> --member-b <B>` (exit 0 =
 PASS). `npm ci --prefix proofs/b1-dao` is needed once per machine (done on this Mac).
 
 ## 2. What each value is read from
@@ -74,8 +74,8 @@ blocks 221128858-221129397) gave the same values.
 
 ## 4. Sandbox test (M)
 
-`HEAVY_REMOTE=1 scripts/heavy.sh b1-dao -- proofs/b1-dao/test/run-sandbox.sh`: the PC box refused SSH on four
-tries, 18:49Z-18:58Z ("Connection reset by peer"; heavy-remote: `<build box> does not answer`), so it ran with `HEAVY_REMOTE=0` in this
+`BUILD_QUEUE=1 scripts/the build queue b1-dao -- proofs/b1-dao/test/run-sandbox.sh`: the build box refused SSH on four
+tries, 18:49Z-18:58Z ("Connection reset by peer"; heavy-remote: `<build box> does not answer`), so it ran with `BUILD_QUEUE=0` in this
 Mac's queue (slot 1), last run 18:58:53Z-18:59:13Z (two earlier runs the same), near-sandbox 2.13.4 (Darwin-arm64), node v24.22.1:
 
 - The mainnet factory wasm deployed to `sputnik-dao.near`, `store` made the DAO wasm a global contract (returned
@@ -93,13 +93,13 @@ Mac's queue (slot 1), last run 18:58:53Z-18:59:13Z (two earlier runs the same), 
 ## 5. ASSUMED or open
 
 1. **A: device B can run `act_proposal`**: this repo with node, or near-cli-rs. A phone
-   wallet cannot, unless a DAO web app supports it; none was checked. CO asks which device B is at O50.
+   wallet cannot, unless a DAO web app supports it; none was checked. team lead asks which device B is at O50.
 2. **A: each member has a full-access key as a near-cli JSON file on its own device.** A wallet-only account needs
-   its key exported, or each device makes a fresh account for its seat. CO settles this at O50.
+   its key exported, or each device makes a fresh account for its seat. team lead settles this at O50.
 3. A: the near-cli-rs fallback lines (`npx near-cli-rs@0.30.1 … sign-with-seed-phrase`) use the shape UNRLZD ran on
    mainnet 2026-10-06 (`docs/contracts/dao-auto-update-off.md`); not re-run here. A Ledger seat on near-cli-rs is not checked.
 4. Fees are sandbox-measured; the mainnet create fee from the reference tx (0.0078 N) agrees.
-5. The factory owner can change the default DAO code before Oct 25: `dao.mjs` then stops in its checks, and CO
+5. The factory owner can change the default DAO code before Oct 25: `dao.mjs` then stops in its checks, and team lead
    re-pins `lib.mjs` from a fresh read.
 6. Risks for the O50 page, not changed here: in a 2-of-2 a lost device ends the group (no member change without both,
    and auto_update off removes the factory route); `Finalize` (vendor default) lets one member re-run an approved

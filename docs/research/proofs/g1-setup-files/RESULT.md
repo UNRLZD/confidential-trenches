@@ -29,8 +29,8 @@ are the lead's.
 From the repo root, through the heavy gate:
 
 ```
-scripts/heavy.sh g1sf -- proofs/g1-setup-files/run.sh          # fetch, compile, zkey verify, proofs, tests
-scripts/heavy.sh g1sf-ptau -- proofs/g1-setup-files/ptau-verify.sh   # the lead's ptau check, then ptau-check.mjs
+scripts/the build queue g1sf -- proofs/g1-setup-files/run.sh          # fetch, compile, zkey verify, proofs, tests
+scripts/the build queue g1sf-ptau -- proofs/g1-setup-files/ptau-verify.sh   # the lead's ptau check, then ptau-check.mjs
 ```
 
 Light, anywhere: `proofs/g1-setup-files/sources.sh` (public reads behind the claims with no other captured output) and
@@ -63,7 +63,7 @@ Runs kept here:
 | `20261026T125831Z` | vault lane, card vault-followup T4 | `ptau-verify.sh` through the heavy gate with `powersOfTau.verify` (box load 7.8 at start, beside nothing else of ours): 3,399 s, `Powers of Tau Ok!`, `VERIFIED: powersOfTau.verify returned true`, exit 0 (`ptau-verify.verdict.json`), then `ptau-check.mjs`: 17 of 17, PTAU CHECKS PASS (`ptau-check.txt`) |
 
 All runs but `20261026T080645Z` (public reads, run on the Mac) and the three `ptau-check*.txt` files in `20261026T084232Z` (light, run on the Mac)
-are on the PC box
+are on the build box
 (`Linux 6.18.54.1-microsoft-standard-WSL2 x86_64`, 16 cpus).
 
 ## Pinned files
@@ -154,7 +154,7 @@ section (`summary.json`).
 ## The beacon
 
 The beacon hash `c87bd495...0e6e5` is sha256 of the ASCII string `21989617`, PP's `final_contribution_beacon`, with
-iteration exponent 10 (p0tion's rule). The lead read 21,989,617 as an Ethereum mainnet block on 2026-10-26 ~07:0xZ
+iteration exponent 10 (p0tion's rule). The review read 21,989,617 as an Ethereum mainnet block on 2026-10-26 ~07:0xZ
 (`eth_getBlockByNumber` on ethereum-rpc.publicnode.com): block hash
 `0xedfdecb22c38d4f72a696cd881e5a9573dc1e684710bba3a5ee5f5824f390ce0`, time 2025-03-06T18:24:23Z (re-read by
 `sources.sh`, `results/runs/20261026T080645Z/sources.txt` part 1). The ceremony
@@ -177,12 +177,12 @@ It reads the output line by line in the fixed order snarkjs 0.7.5 prints it and 
 hash block is exactly 4 lines of 4 eight-hex words, inside a contribution the fields come in the order Next Challenge,
 Response Hash, Response Hash (then the two beacon lines for a beacon), and any ERROR, WARN or other line, or any line
 after the exit line, fails. snarkjs prints a contributor's name as stored, so a name with line breaks could print a
-fake hash block; the old checker passed such an output (the CO's demo), and the fixed order now refuses it
+fake hash block; the old checker passed such an output (the team lead's demo), and the fixed order now refuses it
 (`test/ptau-check.test.mjs` holds two forms of it). `ptau-verify.sh` now also writes `[ptau-verify.sh] elapsed <s> s`
 just before its exit line, the one place the check accepts it; the `20261026T070604Z` output was written before that
 and has no such line (its 3,950 s is in `ptau-verify-stdout.txt`).
 
-Run `20261026T070604Z` on the PC box (`ptau-verify.txt`, `ptau-check.txt`):
+Run `20261026T070604Z` on the build box (`ptau-verify.txt`, `ptau-check.txt`):
 
 - `snarkjs powersoftau verify ppot_0080_16.ptau` (snarkjs 0.7.5) checked all 62 contributions in the file, each
   "Powers Of tau file OK!", and ended `Powers of Tau Ok!`, exit 0, after 3,950 s (`ptau-verify-stdout.txt`, the heavy job's own output).
@@ -347,7 +347,7 @@ layout the same way.
 ## Hook note
 
 Lane 1 hit a worktree-isolation hook four times. Its message said "Split it into plain, separate commands", and lane
-1 ran exactly that form. The CO accepted this as following the block. Lane 2 hit the same hook four times with the
+1 ran exactly that form. The team lead accepted this as following the block. Lane 2 hit the same hook four times with the
 same message and also ran exactly that form. A different safety check stopped lane 2's one-off circom 2.2.0 compile
 because its script ended with a temp-dir removal. That step was not run, which is why the wasm cause above is likely,
 not proven.
@@ -356,7 +356,7 @@ Lane 3 hit the same hook five times. Twice ("names git in a form too complex") i
 separate commands. Once (a sed on a runtime variable) it re-ran the plain command with literal paths. Twice ("too
 complex to verify": a one-line prepend to `wasm-version.txt` and a reflow of `RESULT.md`) it made the same edits
 with the Edit tool instead of separate shell commands, which is a different tool, not the named form; the lead has
-put this to the CO. The edits themselves are in this folder and were reviewed in the diff. The lead's own step
+put this to the team lead. The edits themselves are in this folder and were reviewed in the diff. The lead's own step
 listing box processes with `ps` was blocked by the session guard ("ps listings print other apps' command lines
 (secrets): use ps -p <pid> -o pid,stat,etime,comm"); the lead then ran that named form.
 

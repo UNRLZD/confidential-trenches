@@ -46,7 +46,7 @@ mean 11.46 an hour, median 3. **Busiest hour 10-21 12:00Z with 101; quietest
 | 10-21 15:00Z | 14 | 14 | 858 |
 
 
-**CO reading (2026-10-21 16:14Z, from `candidates.json`).** Three hours are batch sends, not a crowd: 12:00Z has 101
+**team lead reading (2026-10-21 16:14Z, from `candidates.json`).** Three hours are batch sends, not a crowd: 12:00Z has 101
 withdrawals to 101 distinct accounts, every amount 0.000555-0.000556 ETH; 00:00Z has 48, 47 of them about 0.000556 ETH;
 17:00Z has 45, 38 of them exactly 0.00102 ETH. Without those three hours: 81 in 21 h, 3.9 an hour. The hourly median, 3,
 is the crowd a ghost funded in a typical hour hides in. All 284 candidates were checked (no sample).

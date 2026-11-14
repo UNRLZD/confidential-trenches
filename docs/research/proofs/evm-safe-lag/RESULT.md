@@ -1,6 +1,6 @@
 # EVM `safe` and `finalized` lag (Base, Robinhood)
 
-Run by CO on 2026-10-21 from 05:16:54Z (from `date -u`) for 15 samples, 20 s apart (about 5 min). The reads are keyless: `eth_getBlockByNumber` for
+Run by team lead on 2026-10-21 from 05:16:54Z (from `date -u`) for 15 samples, 20 s apart (about 5 min). The reads are keyless: `eth_getBlockByNumber` for
 `latest`, `safe` and `finalized` on two public providers per chain. The lag is the block timestamp of `latest` minus that of
 `safe` (or `finalized`). The raw rows are in `results/2026-10-21T05-17Z.txt`. Reproduce: `node lag.mjs 15 20000`.
 
@@ -28,7 +28,7 @@ inside this range.
 | Robinhood | rpc.mainnet.chain.robinhood.com | 419 / 631 / 862 | 800 / 1,014 / 1,233 |
 | Robinhood | robinhood-rpc.publicnode.com | 398 / 610 / 829 | 782 / 993 / 1,210 |
 
-Robinhood's longest two-provider `safe` lag (the slower provider at each minute; CO, 15:45Z) is **862 s**, so X24 by
+Robinhood's longest two-provider `safe` lag (the slower provider at each minute; team lead, 15:45Z) is **862 s**, so X24 by
 its rule (04 X24: that lag + 43 s + 1 min, rounded up to the minute) is 965 s → **17 min** (was 16 min from the
 5-minute sample's 821 s). Base's publicnode had one outlier of 2,002 s `safe` and 6,580 s `finalized`; Base's other
 provider stayed at ≤ 74 s `safe`.

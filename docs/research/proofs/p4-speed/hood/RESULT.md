@@ -88,7 +88,7 @@ Recommendation: B. It spends no NEAR from the funder and P4 Base has already pas
 wants the Base float kept. Neither route is scripted here: B needs a small Relay cross-chain send from the Base float
 (Relay `quote/v2` with origin 8453 and destination 4663, one `deposit` step), and A needs the owner's 1Click paste.
 
-Then (Claude, after funding and the OK):
+Then (AI, after funding and the OK):
 
 ```sh
 cd ~/Downloads/confidential-trenches/proofs/p4-speed/hood && node run.mjs --dry && node run.mjs --live --runs 20 2>&1 | tee results/live-$(date +%s).log
@@ -324,7 +324,7 @@ part of that change was not ours:
 ## 9. FP-1b: gaps, same-nonce replacement and underpriced sends (2026-10-20 18:15-18:16Z, owner OK fp1b-1)
 
 Script `fp1b.mjs` (dry by default; `--live` sends). Every tx is a 0-value transfer from the float to itself, so only
-gas moves. CO reviewed the live path before the run: one key (the float), `to` = the float, value 0, chain id 4663,
+gas moves. team lead reviewed the live path before the run: one key (the float), `to` = the float, value 0, chain id 4663,
 a hard budget of 8 sends, a fee cap, and a clean-up send if a nonce is left open. The dry run
 (`results/fp1b-2026-10-20T18-14-48-160Z-dry.json`) priced the worst case at 8 txs = $0.07 against the $0.50 cap.
 Live record: `results/fp1b-2026-10-20T18-15-15-974Z-live.json`. Sends went to the official RPC; every read was made

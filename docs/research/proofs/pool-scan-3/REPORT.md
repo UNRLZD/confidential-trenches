@@ -5,8 +5,8 @@ ledger's attack classes, on the pool code at a6ee435c (EVM pool, SellDelegate, a
 Result: 0 High, 0 Medium, 1 Low (reproduced in forge), 6 candidates rejected from source. validate-findings.cjs PASS
 (7 findings), validate-coverage-ledger.cjs PASS (28 units: 19 covered, 9 candidate).
 
-Departures from the skill: one agent ran every phase (no independent verifier agents); forge ran through heavy.sh on
-the Mac queue (`--offline`, the published Hardhat mnemonic as dummy keys), not the skill's empty sandbox; the Solana
+Departures from the skill: one agent ran every phase (no independent verifier agents); forge ran through the build queue on
+the laptop queue (`--offline`, the published Hardhat mnemonic as dummy keys), not the skill's empty sandbox; the Solana
 SVM tests did not run (no cargo-build-sbf build in time).
 
 ## L-1 (Low): a copied pending precommitment blocks a deposit or a whole signed sell
@@ -70,7 +70,7 @@ this program, filters pool and owned accounts, passes no signer but W, no invoke
 pages grow 72 bytes per insert; withdrawn at most deposited - spent; Clock and Rent from syscalls; coordinates below q,
 signals below p, solana-bn254 3.2.1 converts pairing inputs with Validate::Yes, IC has 9 points.
 
-## The scan's two questions outside its scope, answered by the CO from the code (20:59Z)
+## The scan's two questions outside its scope, answered by the team lead from the code (20:59Z)
 
 1. The kit signs W's EIP-7702 authorization with the chain's own id, never 0:
    packages/kit/src/trade/evm/sell-unpinned.ts:441-446 (`chainId = venueOf(chain).chainId`, M363 (4)).
@@ -85,6 +85,6 @@ beyond the two answers above, the helper, the deploy scripts beyond a skim; Robi
 chains' Uniswap deployments; independent verification of this scan (a second reader should re-run Scan3.t.sol and
 spot-check the ledger). Still due: the delta scan at the final sha.
 
-## Delta at the final sha (CO, 2026-11-05T21:25Z)
+## Delta at the final sha (team lead, 2026-11-05T21:25Z)
 
 pool-review-3 final sha 35428427 (code last changed 1c481616). `git diff --name-only a6ee435c 35428427 -- contracts/pool-evm/src contracts/pool-solana/src` lists 0 files; Cargo.toml and Cargo.lock unchanged; contracts/pool-evm/foundry.toml adds only an [invariant] section (runs 256, depth 64) for test/Invariant.t.sol, no compiler setting. The scanned source is byte for byte the final source, so this scan stands for 35428427. Changed since a6ee435c, all test or tooling: Invariant.t.sol (new), Sell.t.sol (L-2 standing tests from Scan3.t.sol), kit-sells.json and testnet-run fixtures, mutants.mjs, the Slither job (slither/requirements.txt, triage.json).

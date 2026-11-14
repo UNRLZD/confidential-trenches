@@ -61,6 +61,6 @@ Before writing the product, each open design question got a measured run: a cont
 
 | File | What it is |
 |---|---|
-| [vault-review-opus-contract.md](audits/vault-review-opus-contract.md) | Review of the vault contract by a separate AI reviewer (Claude Opus) that wrote none of it |
-| [vault-review-opus-async.md](audits/vault-review-opus-async.md) | Review of the vault against NEAR's async rules (cross-contract calls and callbacks) |
+| [vault-review-contract.md](audits/vault-review-contract.md) | Review of the vault contract by a separate AI reviewer that wrote none of it |
+| [vault-review-async.md](audits/vault-review-async.md) | Review of the vault against NEAR's async rules (cross-contract calls and callbacks) |
 | [scan-final-46b16ca4.md](audits/scan-final-46b16ca4.md) | Pre-audit security scan of the contracts at commit 46b16ca4 |

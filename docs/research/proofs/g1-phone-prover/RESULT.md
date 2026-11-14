@@ -3,7 +3,7 @@
 **Status.** The page, the serving, the desktop baseline and the owner's phone run are done. The owner's phone visit
 ran on 2026-10-26 15:47-15:48Z; its 10 posts are committed in `results/phone/` and re-verified 10/10
 (`results/runs/20261026T174252Z-phone-verify/verify.txt`). The owner accepted the run at 16:00Z with its one CSP
-violation, which came from the page being opened inside an in-app browser (the CO's record; that page did not yet show
+violation, which came from the page being opened inside an in-app browser (the team lead's record; that page did not yet show
 or post a violation's details, which it now does: "The page and CSP violations" below).
 
 **Answer.** In the real setup (snarkjs 0.7.5, one same-origin worker, single thread, vault.md 2.14's policy) a
@@ -48,7 +48,7 @@ re-verified on the Mac (`verify.mjs`, the "verified" column).
 | same | same | same | commitment | 5 | 383 | 380 | 384 | 901,233 B, 3 ms | 5/5, 0 hidden | same |
 | Box (not the desktop baseline): x86_64, 16 cores, Linux (WSL2) | headless Chromium 153.0.8010.12 | 2.14 exact | withdraw | 5 | 4,643 | 4,620 | 4,725 | 17,793,015 B, 48 ms | 5/5, 0 hidden | `20261026T113710Z` |
 | same | same | same | commitment | 5 | 324 | 309 | 319 | 901,233 B, 5 ms | 5/5, 0 hidden | same |
-| Owner's iPhone, iOS 26.6.1, 4 cores reported | WebKit 26.6.1 (Mobile Safari user agent), opened inside an in-app browser (CO's record, M273) | 2.14 exact, over HTTPS (the funnel), 1 CSP violation, `style-src-elem`, from the in-app browser (CO's record, M273; the posts carry no violation data) | withdraw | 5 | 8,492 | 8,344 | 8,426 | 17,793,015 B, 30,234 ms | 5/5, 0 hidden | `results/phone/`, `20261026T174252Z-phone-verify` |
+| Owner's iPhone, iOS 26.6.1, 4 cores reported | WebKit 26.6.1 (Mobile Safari user agent), opened inside an in-app browser (team lead's record, M273) | 2.14 exact, over HTTPS (the funnel), 1 CSP violation, `style-src-elem`, from the in-app browser (team lead's record, M273; the posts carry no violation data) | withdraw | 5 | 8,492 | 8,344 | 8,426 | 17,793,015 B, 30,234 ms | 5/5, 0 hidden | `results/phone/`, `20261026T174252Z-phone-verify` |
 | same | same | same | commitment | 5 | 609 | 600 | 616 | 901,233 B, 13,007 ms | 5/5, 0 hidden | same |
 
 - **The phone next to the desktop baseline.** Withdraw warm p50: phone 8,344 ms, desktop Chrome 4,694 ms (phone
@@ -80,7 +80,7 @@ re-verified on the Mac (`verify.mjs`, the "verified" column).
   max 5,460; commitment p50 301 ms) agrees with these numbers. It is superseded because it carries no hidden flags.
 - The zkey fetch is from 127.0.0.1 (desktop) and says nothing about a phone network; the phone row's fetch is over
   the funnel.
-- Box: `run.sh` through `scripts/heavy.sh` on the PC box, `browser.mjs bench`. It shows the same single-thread
+- Box: `run.sh` through `scripts/the build queue` on the build box, `browser.mjs bench`. It shows the same single-thread
   withdraw time as desktop Chrome on a different CPU.
 
 ## Proofs side by side (card proof-pool-time)
@@ -116,7 +116,7 @@ memory is about 175 MB per warmed worker and does not grow with k" (run `results
   fields (`poolErrors`: job below k, slot below P, rounds = ceil(k/P), wall time at least the job's wait plus its
   proof) and prints pool results in their own table (`poolTable`), never in the single-proof table.
 
-The desktop series: `scripts/heavy.sh g1pp-pool -- proofs/g1-phone-prover/pool-run.sh 3` with `HEAVY_REMOTE=1`. The
+The desktop series: `scripts/the build queue g1pp-pool -- proofs/g1-phone-prover/pool-run.sh 3` with `BUILD_QUEUE=1`. The
 box gave a slot at once. Box: Intel i5-14600K, 16 cpus reported (`hardwareConcurrency` 16, so P = 15), 24 GB,
 Linux (WSL2), headless Chromium 153.0.8010.12, the policy exact (upgrade-insecure-requests kept). Three reps per k.
 Each pool size ran in its own fresh browser. The tables are from `pool.txt` (harness) and `run.txt` (verify.mjs):
@@ -192,7 +192,7 @@ on the Mac (`mac-verify.txt`).
 
 ## The page and CSP violations
 
-The owner's run had one CSP violation, from the in-app browser the page was opened in (the CO's record, M273), and the
+The owner's run had one CSP violation, from the in-app browser the page was opened in (the team lead's record, M273), and the
 page then showed only its count and directive. Now (`page/page.js`, `recordViolation`) the page shows every violation
 on its own line with where it happened (page or worker), its directive, its blocked URI, its source file:line and its
 sample, and every result posted after it carries `violations` and `violationCount` (the true count).
@@ -373,7 +373,7 @@ compares the fixture with git line by line.
        workers (does not make one proof faster). The published multi-thread numbers are for a smaller circuit
        (vault.md l.794-797 "is for Semaphore-32 with snarkjs multi-thread"), so the cut on ours is not measured.
    - The vault lead's recommendation: a wait at the tap for the user's withdraw (the PP baseline, the typed amount
-     kept), proofs made ahead for armings only. The wait is user-facing friction, so the CO may take it to the owner.
+     kept), proofs made ahead for armings only. The wait is user-facing friction, so the team lead may take it to the owner.
 3. **When a proof made ahead may be made.** The kit always proves against the newest roots (vault.md l.145-146 "The
    kit always proves against the newest roots, since an old root tells watchers the note existed by then"; again in
    the privacy table, l.844 "The kit proves against the newest roots"). `stateRoot` is public signal 3. A proof made the moment a note's leaf lands binds the root right after that leaf: a withdrawal sent with
@@ -459,7 +459,7 @@ compares the fixture with git line by line.
     `results/phone-<UTC stamp>/` (ignored), so in that checkout git shows the committed files as deleted until
     that visit's own posts are committed.
   - serve.sh is unchanged.
-- **The visit:** the CO runs `cd ~/Downloads/confidential-trenches/proofs/g1-phone-prover && bash phone.sh` (research
+- **The visit:** the team lead runs `cd ~/Downloads/confidential-trenches/proofs/g1-phone-prover && bash phone.sh` (research
   main, after this card merges), unattended from a non-interactive shell: no prompt, no `read`, nothing waits on a
   key (`test/phone.test.mjs`, stdin from /dev/null). It must run only after the owner's trade run is off: while
   main's own serve.sh holds the funnel on 443, serve.sh refuses a second one, as it should. The owner only opens
@@ -549,7 +549,7 @@ compares the fixture with git line by line.
 | `20261026T112849Z` | box | `run.sh` at a218647 (the fix round): CSP CHECKS PASS, 10/10 re-verified |
 | `20261026T113710Z` | box | `run.sh` at the merged card (c74cfb1): CSP CHECKS PASS, bench 10/10 re-verified, tests 55 pass, 0 fail, 1 skipped (the Safari launch test is macOS only) |
 | `20261026T120000Z-read2-fixes` | Mac | the second outside read's fixes: verify red/green (Jacobian and negated copies), phone.sh link red/green, all prover tests 58/58, the three evidence runs re-verified together (ALL 30) |
-| `20261026T121253Z-trade-mac` | Mac | the whole g1-phone-trade suite at f447719 through the Mac queue: 329/330, the 5 Linux-only `hosting-serve.test.js` tests green; the one failure is `review-n6-nested-encoding.test.js` "not confirmed within 90 s" while other jobs held the Mac at load 8-32 (this card does not touch that file; it passed on the box in 0.6 s); alone in the queue it passes 6/6 in 0.57 s (`n6-alone-mac.txt`) |
+| `20261026T121253Z-trade-mac` | Mac | the whole g1-phone-trade suite at f447719 through the laptop queue: 329/330, the 5 Linux-only `hosting-serve.test.js` tests green; the one failure is `review-n6-nested-encoding.test.js` "not confirmed within 90 s" while other jobs held the Mac at load 8-32 (this card does not touch that file; it passed on the box in 0.6 s); alone in the queue it passes 6/6 in 0.57 s (`n6-alone-mac.txt`) |
 | `20261026T115724Z` | box | `mount-run.sh 5` at f447719: the `/prover/` mount on the fixed page, MOUNT E2E PASS, 10 posts 201, ALL 10 RESULTS VERIFIED (again on the Mac from `posted/`), prover tests 57 + 1 skipped (macOS only); its exit 1 is the 5 Linux-only `hosting-serve.test.js` failures (BSD `date -j`, serve.sh:161), green on the Mac in `20261026T121253Z-trade-mac` |
 | `20261026T113310Z-desktop-chrome` | Mac | desktop Chrome on the fixed page, before the switches: 9 of 10 hidden (kept as the record) |
 | `20261026T113558Z-desktop-chrome` | Mac | desktop Chrome 156, 5 per circuit, 0 hidden, 10/10 re-verified |

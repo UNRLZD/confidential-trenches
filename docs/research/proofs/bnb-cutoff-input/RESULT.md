@@ -1,7 +1,7 @@
 # BNB cut-off rule: input (M12 for BNB Chain so far, and 1Click now)
 
 Written by prep lane PR1 on 2026-10-22 at 19:10Z (from `date -u`), for merge note M190 (12) ("a BNB cut-off rule").
-This folder holds only the input; CO writes the rule. Nothing here started, stopped or changed the running count.
+This folder holds only the input; team lead writes the rule. Nothing here started, stopped or changed the running count.
 
 **Read: in the first 15 finished hours, 48 confidential withdrawals to BNB Chain (mean 3.2 an hour, median 3; busiest
 07:00Z with 11). None since 11:38Z: the last six finished hours (12:00Z-17:00Z) have 0, in both directions, while the
@@ -49,10 +49,10 @@ Two keyless dry quotes, the shapes of `proofs/bnb-recheck/recheck.mjs` at $100, 
 `GET /v0/tokens` still lists the same 10 `bsc` assets. History of the refill form (`proofs/bnb-recheck`): CLOSED Oct 20
 16:04Z, Oct 20 17:48Z, Oct 21 04:51Z; OPEN Oct 22 03:14Z (16 of 24); refused again at 19:08Z (this read).
 
-## 3. What CO may want in the rule (facts only)
+## 3. What team lead may want in the rule (facts only)
 
 - When open, BNB's withdrawal crowd is about Robinhood's median (3 an hour) without its batch hours.
 - The refill form opened some time after Oct 21 04:51Z (closed then) and quoted at Oct 22 03:14Z; withdrawals flowed
   until 11:38Z; the form was refused at 19:08Z. So 1Click's BNB state can flip within a day, and one daily read can
   miss a close.
-- The 24 h count will finish with at least 6 zero hours in it. If CO wants the count of an open day, this run is not one.
+- The 24 h count will finish with at least 6 zero hours in it. If team lead wants the count of an open day, this run is not one.

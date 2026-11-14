@@ -194,11 +194,11 @@ view calls and gas from transactions.
 
 | Job | Where | Why / result |
 |---|---|---|
-| Two toolchain probes | PC box | Answered, but user `ct` had no Rust ("no cargo / no rustup / no rustc"), no OpenSSL headers, no pkg-config, and "sudo: a password is required" |
-| Contract builds 1-3, full run 1 (started 10:40:17Z, slot 2) | This Mac's queue (`HEAVY_REMOTE=0`) | Chosen because the box had no Rust: its probe printed "sh: 1: cargo: not found". Builds 1-2 failed to compile. Build 2 rebuilt unchanged source, because my edit script aborted and the build was not chained to it. Build 3 waited for a slot held by `release-a876d1408-e2e-terminal`, then ran in slot 2. Run 1 stopped on a bug in my own micro check |
-| `tools/box-setup.sh` (10:49:05Z, 46 s) | PC box | Installed rustup + rustc 1.96.0 + wasm32 and the cargo-near 0.22.0 release binary (sha256 `9429064e…7d1a` checked) in `ct`'s home. No sudo |
-| Full runs 2-3 | PC box | Run 2: the runner's copied lockfile conflicted. Run 3: openssl-sys found no OpenSSL. near-jsonrpc-client 0.22.0 always takes native-tls, so the runner now builds OpenSSL from source |
-| Probe 3, then full run 4 (10:53:10Z-11:15:12Z, exit 0) | PC box | Every number in this file |
+| Two toolchain probes | build box | Answered, but user `ct` had no Rust ("no cargo / no rustup / no rustc"), no OpenSSL headers, no pkg-config, and "sudo: a password is required" |
+| Contract builds 1-3, full run 1 (started 10:40:17Z, slot 2) | This Mac's queue (`BUILD_QUEUE=0`) | Chosen because the box had no Rust: its probe printed "sh: 1: cargo: not found". Builds 1-2 failed to compile. Build 2 rebuilt unchanged source, because my edit script aborted and the build was not chained to it. Build 3 waited for a slot held by `release-a876d1408-e2e-terminal`, then ran in slot 2. Run 1 stopped on a bug in my own micro check |
+| `tools/box-setup.sh` (10:49:05Z, 46 s) | build box | Installed rustup + rustc 1.96.0 + wasm32 and the cargo-near 0.22.0 release binary (sha256 `9429064e…7d1a` checked) in `ct`'s home. No sudo |
+| Full runs 2-3 | build box | Run 2: the runner's copied lockfile conflicted. Run 3: openssl-sys found no OpenSSL. near-jsonrpc-client 0.22.0 always takes native-tls, so the runner now builds OpenSSL from source |
+| Probe 3, then full run 4 (10:53:10Z-11:15:12Z, exit 0) | build box | Every number in this file |
 
 The cdk-mintd mint (`tools/cdk-notes.ts`) ran on the Mac outside the queue. It is a light local process, and the
 binary is macOS-only.
@@ -206,8 +206,8 @@ binary is macOS-only.
 ## 6. Rerun
 
 ```sh
-HEAVY_REMOTE=1 scripts/heavy.sh v2-gas -- proofs/v2-note-gas/tools/box-setup.sh   # once per box account
-HEAVY_REMOTE=1 scripts/heavy.sh v2-gas -- proofs/v2-note-gas/tools/run.sh         # builds + 194 checks + gas, ~22 min
+BUILD_QUEUE=1 scripts/the build queue v2-gas -- proofs/v2-note-gas/tools/box-setup.sh   # once per box account
+BUILD_QUEUE=1 scripts/the build queue v2-gas -- proofs/v2-note-gas/tools/run.sh         # builds + 194 checks + gas, ~22 min
 node proofs/v2-note-gas/tools/cdk-notes.ts <work dir outside the repo>            # Mac, only to remake the cdk notes
 ```
 

@@ -1,6 +1,6 @@
 # O35: the keyed 1Click run (FP-3 and MS-14)
 
-Status 2026-10-21 21:37Z: **done, run by CO** with the partner key from `~/.confidential-trenches/env` (loaded only into
+Status 2026-10-21 21:37Z: **done, run by team lead** with the partner key from `~/.confidential-trenches/env` (loaded only into
 the child shell; the key is redacted from every output; gitleaks rc 0 on each record). No money moved: dry quotes and
 status reads only. Records: `results/2026-10-21-fp3.json` (FP-3 alone, 21:25:17Z) and `results/2026-10-21.json`
 (the full run, 21:25:38Z to 21:36Z). Tags: M measured, D docs.
@@ -36,7 +36,7 @@ status reads only. Records: `results/2026-10-21-fp3.json` (FP-3 alone, 21:25:17Z
 - The beta's load (cap X5, demo traffic) is far under 1 call a second, so 20 a second is more than 20× it. The trigger
   "any 429 at under 2× the current rate" (paper 10 risk row, P11 §3.13) has not fired.
 - At 5k, FD-S-03's ≈ 664 calls a second is about 33× the measured bucket. That is a scale-path item with its number,
-  not a beta blocker (CO decides the client pacing in the next merge note).
+  not a beta blocker (team lead decides the client pacing in the next merge note).
 
 ## Unknown
 

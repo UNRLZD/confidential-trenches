@@ -1,6 +1,6 @@
 # BNB daily re-check (1Click)
 
-Status 2026-10-22 03:15Z: **BNB Chain OPENED on 1Click: 16 of 24 dry quotes answered** (the refill and return forms at every size; chain-to-chain only from $1,000). Oct 20 and Oct 21: 0 of 24. CO's keyed confidential dry quotes agree (all four forms at $0.10). Decision in merge note M161: BNB joins if the Oct 23 read is OPEN again and the 24 h M12 count (`proofs/m12-bsc`) is done.
+Status 2026-10-22 03:15Z: **BNB Chain OPENED on 1Click: 16 of 24 dry quotes answered** (the refill and return forms at every size; chain-to-chain only from $1,000). Oct 20 and Oct 21: 0 of 24. team lead's keyed confidential dry quotes agree (all four forms at $0.10). Decision in merge note M161: BNB joins if the Oct 23 read is OPEN again and the 24 h M12 count (`proofs/m12-bsc`) is done.
 
 Earlier, 2026-10-20 16:05Z: **run 1 done. BNB Chain is CLOSED on 1Click: 0 of 24 dry quotes answered.** The coordinator
 runs it once a day until Oct 31 (chains research §5 item 5).

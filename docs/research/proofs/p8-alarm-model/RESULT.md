@@ -27,7 +27,7 @@ together with lane NE's readings. Line numbers below are at d111469.
     is M147's set, PR-04's v1.38 set (see "M147").
   - The same with `gpull,fateoracle,x24long` added is M151's set, the one this round runs for PR-04 (see "M151").
   - `FIX=...,sealed` puts back the papers at f645c4a: `tx.final` on Base and Robinhood at 1 anchor (see "M143").
-  - `FIX=...,pullonly` puts back CO's first correction to M147 (1): `landpull` counts coming pulls only, not a coming
+  - `FIX=...,pullonly` puts back team lead's first correction to M147 (1): `landpull` counts coming pulls only, not a coming
     full return (see "M147").
   - `FOCUS=1` runs a sweep of G's key alone, and `RIF=1` a sweep from M145's state (returns in flight above L).
 - `mutants.ts` (115 lines) is the mutation run, outside PR-04: rule mutations (a fault in the current rules) and
@@ -38,7 +38,7 @@ together with lane NE's readings. Line numbers below are at d111469.
 ## Runs
 
 Each run had 100,000 sequences of 1-60 actions (`size: 'max'`, 29.8 actions on average) and went through
-`scripts/heavy.sh`. In all, 500,000 sequences and 14.88 M actions, each sweep taking 25-27 s. Each failing property
+`scripts/the build queue`. In all, 500,000 sequences and 14.88 M actions, each sweep taking 25-27 s. Each failing property
 was then shrunk by a second fast-check pass over the same generator, and by hand to drop the one trailing no-op
 action fast-check left.
 
@@ -160,7 +160,7 @@ at anchors 1-2.
   trigger is a landing at the omnibus, but a level read at each anchor at E).
 - **Fix:** cnv.1 at the omnibus is a level condition read at every anchor, as at E.
 
-## Fix 3 variant: `finalnative` (CO, after 7378733)
+## Fix 3 variant: `finalnative` (team lead, after 7378733)
 
 Fix 3 makes every tx on G hold G's key until `tx.final`, so a sell right after a record-end pull waits for that
 finality. On Solana that is ≈ 6.8 s, against the click → filled ≤ 2 s KPI.
@@ -182,7 +182,7 @@ P1-P5 and P7-P10 are unchanged: the papers' counts at both seeds match the runs 
 
 ### The runs
 
-Two kinds of run were made, each through `scripts/heavy.sh`:
+Two kinds of run were made, each through `scripts/the build queue`:
 - **Main:** seeds 20261021 and 4, 200,000 sequences and 5.95 M actions per column.
 - **Focus** (`FOCUS=1`): seed 20261021, 100,000 sequences and 2.0 M actions. It drives sells, fires, exports and buys
   on four ghosts, with leg outcomes weighted to landings and reorgs.
@@ -246,7 +246,7 @@ The added wait is landing on two providers → `tx.final`, from the 6c facts at 
 | Robinhood | an L2 block on two providers, 0.1 s blocks (6c l. 638-642); its time is not measured (09 l. 150) | + ≈ 0.1 s (one block) | 0 | the same, off the click path |
 | NEAR | `final` p50 ≈ 5.0 s vs the `optimistic` fill p50 ≈ 3.8 s (P4-NEAR l. 4-5; 6c l. 861) | + ≈ 1.2 s p50 | 0 | the same, off the click path |
 
-## M138 (CO, after R10 at 2fb7299)
+## M138 (team lead, after R10 at 2fb7299)
 
 Sources: the papers at 2fb7299 and merge note M138 (docs/spec/11-merge-notes.md at 7e0a894). Line numbers in this
 section are at 2fb7299. Amounts are in cents.
@@ -283,7 +283,7 @@ section are at 2fb7299. Amounts are in cents.
 
 ### The runs
 
-Each run had 100,000 sequences and went through `scripts/heavy.sh`, 14 runs and 1.4 M sequences in all:
+Each run had 100,000 sequences and went through `scripts/the build queue`, 14 runs and 1.4 M sequences in all:
 - main sweeps: 2.98 M actions (seed 20261021) and 2.97 M (seed 4);
 - focus sweeps: 2.00 M actions per seed.
 
@@ -341,7 +341,7 @@ Shrunk sequences (hand-minimised, each replayed under both sets; it fails with t
 3. **No gap was found in the reorg rule** for the emptying tx. A re-land with another outcome is reversed and re-run
    (l. 994-996). The tokens that come back on a POSITION ghost can be sold again, and that sell nets the owed credit.
 
-## M140 (CO, after R11 at f4a5676)
+## M140 (team lead, after R11 at f4a5676)
 
 Sources: the papers at f4a5676, merge note M140 (docs/spec/11-merge-notes.md at f5444dc), and R11's report and case 1.
 Line numbers in this section are at f4a5676. Amounts are in cents.
@@ -388,7 +388,7 @@ Line numbers in this section are at f4a5676. Amounts are in cents.
 
 ### The runs
 
-Each run had 100,000 sequences and went through `scripts/heavy.sh`: 16 sweeps (1.6 M sequences) and the mutation
+Each run had 100,000 sequences and went through `scripts/the build queue`: 16 sweeps (1.6 M sequences) and the mutation
 run. Main sweeps had 2.98 M actions at seed 20261021 and 2.97 M at seed 4; focus sweeps had 2.00 M at each seed.
 - **Papers** (f4a5676): `FIX=perwait,live,finalnative,onepull,level,endfinal,boundf`.
 - **M140**: `FIX=nochain,live,finalnative,onepull,level,endfinal,endbuy,boundf`.
@@ -490,7 +490,7 @@ No check is left that no mutation can fail.
    before its leg exists.
 4. **Not modelled:** buy.13 (HELD), buy.18 (NEAR's registration-only case) and fees on buys.
 
-## M143 (CO, after R12 at f645c4a)
+## M143 (team lead, after R12 at f645c4a)
 
 Sources: merge note M143 (docs/spec/11-merge-notes.md at 5541b19), R12's report with its scratch model of the two
 late reorgs, and proofs/evm-safe-lag (3b37d0f). Line numbers in this section are at f645c4a. Amounts are in cents.
@@ -568,7 +568,7 @@ late reorgs, and proofs/evm-safe-lag (3b37d0f). Line numbers in this section are
      6), so that row is gone from `mutants.ts`.
 
 5. **P1 drops the owner-call exemption** (M143 (7)). P1 still passes in all six sweeps of the set, so there is no
-   sequence for CO to decide on.
+   sequence for team lead to decide on.
 
 6. **The stream regression alternates the Solana and NEAR ghosts** (2 and 11). Its sells' pulls must be sent at once.
    On Base and Robinhood the next pull on a ghost now waits for the last one's `safe`, so it would not be on the way.
@@ -579,7 +579,7 @@ late reorgs, and proofs/evm-safe-lag (3b37d0f). Line numbers in this section are
 
 ### The runs
 
-Each run had 100,000 sequences and went through `scripts/heavy.sh`: 12 sweeps (1.2 M sequences) and the mutation run.
+Each run had 100,000 sequences and went through `scripts/the build queue`: 12 sweeps (1.2 M sequences) and the mutation run.
 - **The set** is `FIX=nochain,live,finalnative,onepull,level,endfinal,endbuy,boundf`, with `tx.final` per chain.
 - **The papers at f645c4a** are the same set with `sealed`.
 - Seed 143 is new. Main sweeps had 2.98 M actions (seed 20261021), 2.97 M (4) and 2.97 M (143); focus sweeps had
@@ -679,7 +679,7 @@ The regressions, each replayed under the rule a fix replaced:
      F of 300 is sent although Available is 200.
    - The F lands first and leaves 100, and the W then finds 100 for its 200.
    - Every other leg is sized by Available. refill.2 alone can spend USDC that Reserved holds for an open W, F or `u`
-     while returns in flight exceed L. The rules are unchanged here; CO decides (one reading: refill.2 also needs
+     while returns in flight exceed L. The rules are unchanged here; team lead decides (one reading: refill.2 also needs
      Available ≥ amount).
 6. **M144 (ed3dbf0, the owner's OD-f1-2) changes nothing here.** It adds a display level, `tx.marked`, at the sealed
    block on Base and Robinhood, and no rule waits for it. `tx.final`, which every money rule reads, stays M143 (1)'s, as
@@ -722,7 +722,7 @@ The regressions, each replayed under the rule a fix replaced:
     differences from M143 (buy.25's refund reversal, the reorg rule's ghost.9 token read) are not flags of their own.
 18. **The owner's capital call** is never On the way, so the gap never counts it. P1 no longer exempts it.
 
-## M145 (CO, after MC's refill case at 525bc78)
+## M145 (team lead, after MC's refill case at 525bc78)
 
 Source: merge note M145 (docs/spec/11-merge-notes.md at 6f7f189), which takes the finding in "M143" above. Amounts are in
 cents.
@@ -756,7 +756,7 @@ cents.
 
 ### The runs
 
-Each run had 100,000 sequences and went through `scripts/heavy.sh`: 12 sweeps (1.2 M sequences) and the mutation run.
+Each run had 100,000 sequences and went through `scripts/the build queue`: 12 sweeps (1.2 M sequences) and the mutation run.
 
 | Run | Seed | Actions | Notices | Result |
 |---|---|---|---|---|
@@ -824,7 +824,7 @@ The regressions, each replayed under the rule a fix replaced:
 3. **Returns in flight** are the pulls and full returns that have landed and not yet arrived (`deb`), valued at the
    read's price, as for the drill's bound.
 
-## M147 (CO, after R13 at a977374)
+## M147 (team lead, after R13 at a977374)
 
 Sources: merge note M147 (docs/spec/11-merge-notes.md at 6b089f0), R13's report and its scratch cases basepage.ts,
 relandpull.ts and p2fate.ts, and lane NJ's papers (6e4ab00: 06a v1.38, 6c v1.23), which say what the model now does.
@@ -837,7 +837,7 @@ Five flags, one per item of M147 that changes the model. The set adds all five:
 Two changes are the chains' own behaviour and hold in every run, with or without the flags: NEAR's nonce rule (2) and a
 reorg after 1Click's report (4).
 
-1. **`landpull`** (M147 (1) as CO corrected and extended it during this round, now M149 (1), which replaces M147 (1)'s
+1. **`landpull`** (M147 (1) as team lead corrected and extended it during this round, now M149 (1), which replaces M147 (1)'s
    first three sentences). M147 (1) said "from its open (ret.1)"; lane NJ showed that ret.1 opens the pull only at the
    record's end, after every tx the record landed on G is `tx.final`, so "from its open" misses R13's case, where the
    buy's wait for `safe` comes before the open. The rule modelled is M149 (1)'s: when a record's last tx on G has landed
@@ -856,12 +856,12 @@ reorg after 1Click's report (4).
      (ret.13 (d)); a sell on G cancels it and pulls at its own end (ret.13 (a)); a full return cancels it (ret.13 (b)).
      Partial sells, fires and partial exports are atomic (reading 8): landed and final at once, so their pull opens at
      their landing and waits only for signer rule 3.
-   - **Full returns** (CO's extension, same flag). Under `endfinal` and `endbuy` the full return a record's end opens
+   - **Full returns** (team lead's extension, same flag). Under `endfinal` and `endbuy` the full return a record's end opens
      also waits for that record's tx to be `tx.final`: ghost.12's after a full sell or export, buyEnd's (ghost.9,
      ghost.15) after a buy's revert. From the landing of the emptying tx or of the reverting buy, while G's state lets
      that end open it, the T or B leg stands for it. It is the same leg once ghost.12 or buyEnd opens it (`of`), unsigned
      or its unwrap live. A reverted buy re-landed as a fill ends it (its record now opens a pull, which counts as a coming
-     pull). `pullonly` puts back CO's first correction (coming pulls only), to show the extension is needed.
+     pull). `pullonly` puts back team lead's first correction (coming pulls only), to show the extension is needed.
    - **The wind-down trigger** (06a v1.39 l. 1636). In wind-down a coming leg's destination is E (ret.5). The
      trigger's gap is the alert's gap at E, so it counts sent R' (On the way) and a coming record-end leg's R' from its
      record's landing. The trigger's own sum is its R' returns not yet sent (ghost.18's), and never a record-end full
@@ -874,7 +874,7 @@ reorg after 1Click's report (4).
      every waiting payout, oldest first. Its On the way is M149's in every run, coming pulls and full returns included
      whatever `landpull` and `pullonly` say, so without them the oracle sees the false page that the alarm makes. A
      coming full return's fate is that of the full return its record's end opened.
-   - **M149's addendum, checked against the model** (CO, this round; the papers will state it). Line numbers are
+   - **M149's addendum, checked against the model** (team lead, this round; the papers will state it). Line numbers are
      model.ts's at this commit.
      - (a) The landing read holds the landed tx's effect. A partial sell's or fire's proceeds are on G (l. 292-293)
        before its end's ret.1 reads pullable (l. 296, 263, 266); a buy's fill has debited G (l. 330) before BUY-40's
@@ -927,7 +927,7 @@ reorg after 1Click's report (4).
      reorg, re-land as a fill, then a partial sell of 100. Under the set: L 1,600 after the re-land and after the sell,
      150 recorded against P, of which the sell nets 100 (50 left). The old `take`: L 1,450 after the re-land, 1,550
      after the sell, nothing recorded.
-   - **P4 and P12 with that amount.** Both pass in all nine runs of the set, so there is no sequence for CO to decide.
+   - **P4 and P12 with that amount.** Both pass in all nine runs of the set, so there is no sequence for team lead to decide.
      solv.1's B and L leave the amount recorded against P out (I1 has no such term), and the model's ledger does too,
      so P4 compares like with like; P12 reads legs and balances, which the amount does not move. P4's rule row
      (`bnowrap`) and both of P12's (`payres`, `refillbal`) still fail under the set (see the mutation table).
@@ -971,7 +971,7 @@ reorg after 1Click's report (4).
 
 ### The runs
 
-Each run had 100,000 sequences and went through `scripts/heavy.sh`: 18 sweeps (1.8 M sequences) and the mutation run.
+Each run had 100,000 sequences and went through `scripts/the build queue`: 18 sweeps (1.8 M sequences) and the mutation run.
 "M145's set" here is the current model without M147's five flags: the chain truths of (2) and (4) hold in it too, so its
 notice counts differ a little from M145's runs. The set's 9 sweeps and the mutation run are on the final code: ret.1's
 read while 1Click is down, and the trigger as 06a v1.39 l. 1636 reads it (item 1). They match, count for count and
@@ -1026,7 +1026,7 @@ trigger gap without coming legs; its correction). M145's set's 9 sweeps are from
 | P2 | rule | `nootw`: the gap leaves out the money On the way | 725 | 59 | 1,279 |  | `wind ; wd(a=20) ; tick(n=3) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; leg(i=0,o=land,fee=0)` → funds_wait open while covered for 3 anchors at 4 |
 | P2 | pre-fix | `perwait` for `nochain` (the papers at f4a5676) | 162 | 0 | 368 |  | `image ; tick(n=14) ; wd(a=346) ; tick(n=4) ; leg(i=0,o=land,fee=0) ; wd(a=355) ; tick(n=5,m=0) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; leg(i=0,o=land,fee=0)` → funds_wait open while covered for 3 anchors at 24 |
 | P2 | pre-fix | no `landpull`: a coming record-end leg counts only from its broadcast (the papers before M147) | 5 | 0 | 0 |  | `buy(g=10) ; wd(a=401) ; leg(i=0,o=land,fee=0) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; tick(n=1)` → funds_wait open while covered for 3 anchors at 4 |
-| P2 | pre-fix | `pullonly`: coming pulls only, not a coming full return (CO's first correction to M147 (1)) | 5 | 0 | 0 |  | `buy(g=10) ; wd(a=401) ; leg(i=0,o=failed,fee=0) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; tick(n=1)` → funds_wait open while covered for 3 anchors at 4 |
+| P2 | pre-fix | `pullonly`: coming pulls only, not a coming full return (team lead's first correction to M147 (1)) | 5 | 0 | 0 |  | `buy(g=10) ; wd(a=401) ; leg(i=0,o=failed,fee=0) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; tick(n=1)` → funds_wait open while covered for 3 anchors at 4 |
 | P3 | rule | `noquote`: the anchor does not re-quote waiting payouts | 1,322 | 0 | 101 | P1 401, P10 141 | `wd(a=20) ; wd(a=145) ; tick(n=2) ; wd(a=236) ; tick(n=18) ; leg(i=0,o=expire,fee=0) ; tick(n=1) ; exp(g=0,full=false)` → anchor 21: a wait of 236 sits with Available 255 |
 | P4 | rule | `bnowrap`: solv.1's B leaves out G's wrapped native | 25,799 | 45,296 | 17,997 |  | `sell(g=1,full=false,wrap=true,p=20) ; tick(n=1) ; price(c=0,pct=0)` → anchor 1: B 2960.00 vs ledger 2980.00 − mover 0.00 |
 | P5 | pre-fix | no `live`: pay.3 signs from the anchor's values | 17 | 0 | 504 | P12 45 | `call ; leg(i=0,o=success,fee=0) ; image ; tick(n=1) ; sell(g=0,full=false,wrap=false,p=20) ; sweep ; tick(n=1)` → P5 t=1: payout 18800 > live omnibus USDC − L − D = 18780.00 |
@@ -1083,7 +1083,7 @@ four pre-fix rows and one rule row, and six fixed cases; the count stays M145's.
 
 ### What the model shows about M147's text
 
-1. **CO's question, plainly.** basePage pages under the papers before M147: a notice at anchor 2, and P2 fails
+1. **team lead's question, plainly.** basePage pages under the papers before M147: a notice at anchor 2, and P2 fails
    (`funds_wait` open while covered for 3 anchors at 4). Under `landpull` it does not page, and no check fails. hoodFull
    pages with coming pulls only (`pullonly`) and without `landpull`: a notice at anchor 12, and P2 fails at 14. Under the
    full rule it does not page, and the payout is paid at anchor 30. **P1 and P2 pass in all nine runs of the set**, at
@@ -1100,7 +1100,7 @@ four pre-fix rows and one rule row, and six fixed cases; the count stays M145's.
    Counted from its record's landing in both (M147 (1)), the page is false when that pull arrives in time.
 5. **M143's finding 4 is withdrawn.** It said M143 (5) agreed with the model's `take`, which lowered L at a re-landed
    revert. M147 (3) leaves L unchanged and records the debit against P (relandOwe).
-6. **No finding against M147's or M149's text.** Every check passes under the set. M149 (1)-(3) and CO's addendum
+6. **No finding against M147's or M149's text.** Every check passes under the set. M149 (1)-(3) and team lead's addendum
    match the model after two changes this round (the trigger's own sum, ret.1's read while 1Click is down; item 1),
    and the one other model fix (item 6, ret.1 after a refused export key) was the model's omission: the papers already had
    that row.
@@ -1170,14 +1170,14 @@ The full list as of M147; items 1-18 carry M143's list forward, with M147's chan
     before the send (a full return's G debited by a landing between), the gap counts more than it will carry; the fuzz
     found no case where that kept a page back (P1).
 25. **A full return opened other than at a record's end** (the return image, the wind-down trigger, ret.14's fresh one
-    after `dead`) counts from its send only, as before M147; CO's rule names record ends. Under `sealed`, a T reorged
+    after `dead`) counts from its send only, as before M147; team lead's rule names record ends. Under `sealed`, a T reorged
     after the rules' `tx.final` stands again for a full return that its end already opened, so that money can count
     twice; `sealed` is a pre-fix put-back only.
 
-## M151 (CO, after R14 at 4f0dab6)
+## M151 (team lead, after R14 at 4f0dab6)
 
 Sources: merge note M151 (docs/spec/11-merge-notes.md at dd1bad8, with 2436ceb's change to (1)), R14's report, and
-CO's two decisions during this round. The first is now M152 (02816b8): `x24long` is 32 anchors, and lane NM's reading
+team lead's two decisions during this round. The first is now M152 (02816b8): `x24long` is 32 anchors, and lane NM's reading
 stands (06a v1.41 §4.16 l. 1534-1548, §8.22 row 7 (a), at eb51ed7). The second is option (c) on MC's P11 case (a note in
 the next merge note): no buy is signed on a POSITION G (ghost.6 takes only a WARM ghost, 06a l. 1108; "Nothing else
 picks a POSITION ghost", §4.16 l. 1499). Model line numbers are model.ts's at this commit. Amounts are in cents.
@@ -1202,7 +1202,7 @@ is atomic (1), and ret.1 runs at a full sell's end and at a failed sell's end (5
      leg(i=0,o=land,fee=0) ; tick(n=2) ; buy(g=1,pos=true) ; leg(i=0,o=reorg,fee=0) ; leg(i=0,o=dead,fee=0) ;
      leg(i=0,o=land,fee=0) ; tick(n=1)` → P11 t=5: Base ghost 3 is RETURNING with 2 token lots. The first buy's fill is
      reorged and `dead`, ghost.15 sends G home while the second buy is live, and its fill then lands. No paper row covers
-     that state, because the papers never make it: CO's option (c) removed the buy on a POSITION G from the model. The
+     that state, because the papers never make it: team lead's option (c) removed the buy on a POSITION G from the model. The
      fixed case for R14's reverse order went with it; pullReorg (below) takes the over-count side on a path the papers
      allow.
 2. **`gpull`** (M151 (1) with 2436ceb, and NM's reading, M152 (2)). G's coming partial pull (`gComing`, l. 185-204):
@@ -1286,7 +1286,7 @@ Each passes under the set and fails without each flag it names (props.ts's main 
 
 ### The runs
 
-Each run had 100,000 sequences and went through `scripts/heavy.sh`: 18 sweeps (1.8 M sequences) and the mutation run, all
+Each run had 100,000 sequences and went through `scripts/the build queue`: 18 sweeps (1.8 M sequences) and the mutation run, all
 on this commit's code. "M147's set" here is the set without M151's three flags. No trade is atomic in it too, and both
 model fixes hold in it (items 1 and 5), so its notice counts differ from M147's runs. The generators are M147's (the
 action counts match).
@@ -1327,7 +1327,7 @@ action counts match).
 | P2 | rule | `nootw`: the gap leaves out the money On the way | 1,130 | 46 | 1,009 |  | `wind ; wd(a=20) ; tick(n=3) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; leg(i=0,o=land,fee=0)` → funds_wait open while covered for 3 anchors at 4 |
 | P2 | pre-fix | `perwait` for `nochain` (the papers at f4a5676) | 207 | 0 | 215 |  | `sell(g=5,full=false,wrap=false,p=20) ; leg(i=0,o=land,fee=0) ; wd(a=401) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; sell(g=0,full=false,wrap=false,p=20)` → funds_wait open while covered for 3 anchors at 4 |
 | P2 | pre-fix | no `landpull`: a coming record-end leg counts only from its broadcast (the papers before M147) | 15 | 0 | 0 |  | `sell(g=5,full=false,wrap=false,p=20) ; leg(i=0,o=land,fee=0) ; wd(a=401) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; sell(g=0,full=false,wrap=false,p=20)` → funds_wait open while covered for 3 anchors at 4 |
-| P2 | pre-fix | `pullonly`: coming pulls only, not a coming full return (CO's first correction to M147 (1)) | 10 | 0 | 0 |  | `sell(g=5,full=true,wrap=false,p=20) ; leg(i=0,o=land,fee=0) ; wd(a=401) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; sell(g=0,full=false,wrap=false,p=20)` → funds_wait open while covered for 3 anchors at 4 |
+| P2 | pre-fix | `pullonly`: coming pulls only, not a coming full return (team lead's first correction to M147 (1)) | 10 | 0 | 0 |  | `sell(g=5,full=true,wrap=false,p=20) ; leg(i=0,o=land,fee=0) ; wd(a=401) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; sell(g=0,full=false,wrap=false,p=20)` → funds_wait open while covered for 3 anchors at 4 |
 | P3 | rule | `noquote`: the anchor does not re-quote waiting payouts | 1,253 | 0 | 60 | P10 128, P1 310 | `sell(g=0,full=false,wrap=false,p=20) ; dep(c=0,a=5) ; exp(g=1,full=false) ; wd(a=401) ; dep(c=0,a=5) ; leg(i=7,o=land,fee=0) ; buy(g=0) ; dep(c=0,a=5) ; tick(n=1) ; wd(a=20) ; tick(n=19) ; leg(i=11,o=expire,fee=0) ; tick(n=1) ; leg(i=0,o=land,fee=0)` → anchor 21: a wait of 20 sits with Available 405 |
 | P4 | rule | `bnowrap`: solv.1's B leaves out G's wrapped native | 5,633 | 16,494 | 1,368 |  | `sell(g=1,full=false,wrap=true,p=20) ; leg(i=0,o=land,fee=0) ; tick(n=1) ; price(c=0,pct=0)` → anchor 1: B 2960.00 vs ledger 2980.00 − mover 0.00 |
 | P5 | pre-fix | no `live`: pay.3 signs from the anchor's values | 9 | 0 | 339 | P12 10 | `exp(g=0,full=false) ; sell(g=1,full=false,wrap=false,p=20) ; image ; wd(a=20) ; dep(c=0,a=5) ; call ; leg(i=12,o=success,fee=0) ; tick(n=1) ; dep(c=0,a=5) ; sweep ; tick(n=1)` → P5 t=1: payout 18794 > live omnibus USDC − L − D = 18789.90 |
@@ -1403,7 +1403,7 @@ mutation on a case (`nospend`) and two oracle rows, and no fuzz row; the count s
    record's false page outlasts P2's slack: P2 fails under the fate oracle and passes under the old one (the oracle
    rows). R14 was right that the old oracle's P2 could not see it.
 3. **The papers never make a buy on a POSITION G.** That was the round's one stop (item 1): M151's model half had read
-   one from R14's reverse-order example, and its P11 case has no paper row because the state cannot happen. CO took
+   one from R14's reverse-order example, and its P11 case has no paper row because the state cannot happen. team lead took
    option (c), and a note in the next merge note will say so. M151 (1)'s subtraction stays for what can be signed on a
    POSITION G and not yet landed: a sell's, fire's or export's fee cap, and a buy record's own Base approve (buy.21) fee
    cap after its fill; in the model, a reorged pull's, full return's or buy's amount (reading 17).
@@ -1439,9 +1439,9 @@ The list in "M147" stands, with these changes:
     follows ret.1 (M158 (4)): such a pull blocks a new one until that tx ends, `tx.final` again or A4 `dead` (06a l.
     1219), even after it lands again.
 
-## Round 7: M158 (CO, after MC round 6 at 5e1a478)
+## Round 7: M158 (team lead, after MC round 6 at 5e1a478)
 
-Sources: merge note M158 (docs/spec/11-merge-notes.md at a1d11f8) and CO's round-7 brief. Model line numbers are
+Sources: merge note M158 (docs/spec/11-merge-notes.md at a1d11f8) and team lead's round-7 brief. Model line numbers are
 model.ts's at this commit. The set is round 6's (M151's).
 
 ### What changed
@@ -1463,7 +1463,7 @@ model.ts's at this commit. The set is round 6's (M151's).
    end at 5 opens the $1 pull, which signs at once and arrives at 5.5, as before. Under the set it still passes, and it
    still fails without `gpull` (a notice at 4) and under `nospend` (an over-count at 3).
 
-### Finding for CO: P8 counted open pulls by the round-6 op on G
+### Finding for team lead: P8 counted open pulls by the round-6 op on G
 
 With (1) in the model and P8 unchanged, P8 fails on a path the papers allow. The round-6 P6b case, replayed under the
 set: `sell(g=0,full=false,wrap=false,p=20) ; leg(i=0,o=land,fee=0) ; tick(n=2) ; leg(i=0,o=land,fee=0) ;
@@ -1478,7 +1478,7 @@ not in the rule. The `nopenop` row (ret.1 opens a pull while one is open) still 
 
 ### The runs
 
-Each sweep had 100,000 sequences at seeds 20261021, 4 and 143 (round 6's), through `scripts/heavy.sh`: `FIX=<set> node
+Each sweep had 100,000 sequences at seeds 20261021, 4 and 143 (round 6's), through `scripts/the build queue`: `FIX=<set> node
 props.ts 100000 <seed>`, with `FOCUS=1` or `RIF=1` for those generators. "M147's set" is the set without `gpull`,
 `fateoracle` and `x24long`. Action counts match round 6 in every run. Notices are round 6 → round 7.
 
@@ -1505,7 +1505,7 @@ props.ts 100000 <seed>`, with `FOCUS=1` or `RIF=1` for those generators. "M147's
 
 ### Mutation run (`mutants.ts`, seed 777, 20,000 sequences per generator per row)
 
-CO's round-6 re-run used this seed and size, so the two compare row by row. It ran in two chunks of checks (`node
+team lead's round-6 re-run used this seed and size, so the two compare row by row. It ran in two chunks of checks (`node
 mutants.ts 20000 777 P1,P2,P3,P4,P5,P6a,P6b,P6c,NF` and `node mutants.ts 20000 777 P7,P8,P9,P10,P11,P12,<the cases>,oracle`),
 which is the same as one run: each row runs alone.
 
@@ -1516,7 +1516,7 @@ which is the same as one run: each row runs alone.
 | P2 | rule | `nootw`: the gap leaves out the money On the way | 225 | 6 | 192 |  | `wind ; wd(a=20) ; leg(i=0,o=land,fee=0) ; tick(n=3) ; tick(n=1,m=0) ; exp(g=0,full=false)` → funds_wait open while covered for 3 anchors at 4 |
 | P2 | pre-fix | `perwait` for `nochain` (the papers at f4a5676) | 32 | 0 | 44 |  | `image ; wd(a=320) ; tick(n=12) ; wd(a=81) ; tick(n=23) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0)` → funds_wait open while covered for 3 anchors at 36 |
 | P2 | pre-fix | no `landpull`: a coming record-end leg counts only from its broadcast (the papers before M147) | 3 | 0 | 0 |  | `buy(g=2) ; leg(i=0,o=land,fee=0) ; wd(a=401) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; down` → funds_wait open while covered for 3 anchors at 4 |
-| P2 | pre-fix | `pullonly`: coming pulls only, not a coming full return (CO's first correction to M147 (1)) | 3 | 0 | 0 |  | `buy(g=2) ; leg(i=0,o=failed,fee=0) ; wd(a=401) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; down` → funds_wait open while covered for 3 anchors at 4 |
+| P2 | pre-fix | `pullonly`: coming pulls only, not a coming full return (team lead's first correction to M147 (1)) | 3 | 0 | 0 |  | `buy(g=2) ; leg(i=0,o=failed,fee=0) ; wd(a=401) ; tick(n=6) ; leg(i=0,o=land,fee=0) ; tick(n=1,m=0) ; down` → funds_wait open while covered for 3 anchors at 4 |
 | P3 | rule | `noquote`: the anchor does not re-quote waiting payouts | 254 | 0 | 7 | P1 59, P10 22 | `wd(a=230) ; wd(a=171) ; tick(n=9) ; tick(n=11) ; leg(i=0,o=expire,fee=0) ; tick(n=1) ; sell(g=0,full=false,wrap=false,p=20)` → anchor 21: a wait of 171 sits with Available 400 |
 | P4 | rule | `bnowrap`: solv.1's B leaves out G's wrapped native | 1,082 | 3,220 | 308 |  | `sell(g=1,full=false,wrap=true,p=20) ; leg(i=0,o=land,fee=0) ; tick(n=1) ; sell(g=0,full=false,wrap=false,p=20)` → anchor 1: B 2960.00 vs ledger 2980.00 − mover 0.00 |
 | P5 | pre-fix | no `live`: pay.3 signs from the anchor's values | 2 | 0 | 52 | P12 2 | `call ; leg(i=0,o=success,fee=0) ; tick(n=1) ; dep(c=0,a=5) ; image ; sweep ; refill(c=0)` → P5 t=1: payout 18800 > live omnibus USDC − L − D = 18794.95 |
@@ -1542,9 +1542,9 @@ which is the same as one run: each row runs alone.
 | P12 | pre-fix | no `refillcash`: refill.2 as written before M145 | 0 | 0 | 302 |  | `RIF_STATE ; wd(a=101) ; refill(c=0) ; tick(n=1)` → P12 t=28: omni USDC: open legs W 101 + F 300 > balance 400: a W, F or u that lands last finds it short |
 
 - **28 of 29 fuzz rows are caught**, and every fixed case and both oracle rows behave as they must. The one row the
-  fuzz does not find is the pre-fix no-`refinal` row, as in CO's seed-777 run (round 6 at seed 20261021: focus 1 of
+  fuzz does not find is the pre-fix no-`refinal` row, as in team lead's seed-777 run (round 6 at seed 20261021: focus 1 of
   100,000). **Its sure catch is relandPull**, which fails P11 without `refinal` in every run (below).
-- Against CO's seed-777 run no row changed status. Against round 6's own run (seed 20261021, 100,000) only no-`refinal`
+- Against team lead's seed-777 run no row changed status. Against round 6's own run (seed 20261021, 100,000) only no-`refinal`
   did, from 1 focus hit to none, which is the seed. The rule rows still fail each of P1, P2, P3, P4, P6a, P6c, NF, P7,
   P8, P9, P10, P11 and P12: **13 of 15 checks can fail under the set**. P5 and P6b fail only under pre-fix rows (P6b's
   row: 0 main, 5 focus, 2 RIF).
@@ -1576,7 +1576,7 @@ The rule under test (which legs the alarm counts, and from when) no longer enter
 the old oracle credited only the rule's own On the way set, so a coming leg the rule forgot was forgotten by the oracle
 too. The old oracle runs without `fateoracle` and in mutants.ts's oracle rows (see "M151"). Its money is:
 - Available USDC at the paying account;
-- the legs On the way at that read (M147's set as CO corrected and extended it: a leg from its send, and a coming
+- the legs On the way at that read (M147's set as team lead corrected and extended it: a leg from its send, and a coming
   record-end pull or full return from its record's landing, whatever `landpull` and `pullonly` say) whose USDC really
   reaches that account by that payout's deadline. Their fate takes the place of the alarm's X24 exit. A coming full
   return stands as its full sell's, export's or reverted buy's tx until the record's end opens it, and its fate is that
@@ -1608,7 +1608,7 @@ start. That was the alarm's own clock under `perwait`, so P2 could not see R11's
 ## Readings picked (where the text is ambiguous, the reading safest for money)
 
 1. **Time.** Anchors are integer times (X9 = 30 s), and events fall between them. X24 = 20 anchors (10 min), or 32
-   under `x24long` (16 min: M151 (4) as CO corrected it). The pending period is 2 completed anchors, and every anchor
+   under `x24long` (16 min: M151 (4) as team lead corrected it). The pending period is 2 completed anchors, and every anchor
    counts (06a v1.40 l. 1595-1598, M135 (2)). X7 = X8 = $0.10 on every chain (04 X7, X8; Solana's lamport floor folded
    in). G's floor is one number for X23 + chainReserve + locked rent (ret.1, v1.40 l. 1219; §4.18 item 3, l. 1701).
 2. **Moved legs.** A leg that moves to `SUCCESS` between an anchor's two status reads lands after the balance read. It

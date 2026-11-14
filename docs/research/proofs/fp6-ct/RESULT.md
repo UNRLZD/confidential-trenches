@@ -13,7 +13,7 @@ Nothing in the zone was changed and no certificate was requested. This proof ans
    (`include_subdomains=true`) are limited to 10 an hour. P11 F15's "100 queries an hour" applies only to
    single-hostname queries (D2, M3). 08 §7.3 and P11 §1.3 item 12 ("every 60 s ... subdomains included") need a
    change. The watcher here polls the single drill host every 60 s and the whole zone every 450 s, at least 400 s
-   (`ct-watch.mjs`). For production, CO has two options. One: poll APP_HOST and REQ_HOST as single hostnames every
+   (`ct-watch.mjs`). For production, team lead has two options. One: poll APP_HOST and REQ_HOST as single hostnames every
    72 s or more (2 × 50 an hour is the plan's 100), plus the zone every 6 min or more. Two: a paid plan. Either way
    IN28's bound is Cert Spotter's delay (FP-6 measures it) plus the poll period.
 2. **Let's Encrypt allows 5 certificates per exact name per 7 days** (D3). The drill uses 3, and before any change it
@@ -82,7 +82,7 @@ first-run checks.
 - `drill.sh`: the drill and `--plan`. `PASTE.md`: the owner's one paste, its run time, what is permanent and what is cleaned up.
 - `expected.json`: from today's `results/zone-before.json`. The drill builds its own from a fresh snapshot.
 - `.gcloud/`: gcloud's scratch config (gitignored). The drill deletes its access-token file on exit.
-- Not installed here: lego (the paste's first step). heavy.sh was not needed: every job was a light network read.
+- Not installed here: lego (the paste's first step). the build queue was not needed: every job was a light network read.
 
 ## 6. Unknown
 
@@ -101,7 +101,7 @@ first-run checks.
 
 ## 7. The drill (2026-10-22, the first DR20): PASS
 
-Run by the owner's paste from 09:51:51Z to 10:24:13Z; written up by CO at 16:00Z from `results/drill-2026-10-22.json`
+Run by the owner's paste from 09:51:51Z to 10:24:13Z; written up by team lead at 16:00Z from `results/drill-2026-10-22.json`
 and `results/drill-20261022T0951Z/` (M). Three certificates for `ctwatch-test.confidential.unrealized.trade`, 0 retries,
 no stop; the zone after equals the zone before; the certificate keys were deleted.
 

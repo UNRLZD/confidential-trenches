@@ -9,7 +9,7 @@ panics, a plain `mt_transfer` lands uncounted. R's sweep burns 9.26 Tgas, the ca
 unshield (`CONFIDENTIAL_INTENTS → INTENTS`, recipient R) is offered: dry keyed quote HTTP 201, fee $0, eta 10 s.
 `live.sh`, `run.mjs` and `contract/wasm/v6_pay.wasm` are unchanged.
 
-**Scope change (CO, 2026-10-22 ~18:50Z).** The vault no longer verifies 1Click quotes: no vendor key or vendor API
+**Scope change (team lead, 2026-10-22 ~18:50Z).** The vault no longer verifies 1Click quotes: no vendor key or vendor API
 format lives in the immutable vault. The vault pays its ONE fixed recipient R by a plain transfer inside
 `intents.near`, under the VB rate limit; R (the enclave's account) then shields R → float through 1Click. This is
 path B1 of `docs/research/vault-custody.md` (§4) with E = R. The first contract written for the old brief (a
@@ -60,8 +60,8 @@ returns: nothing (a failed receipt means nothing moved)     omit: approval (refu
 Checks 1-22 below are the pull. The record `results/sandbox-run.json` is now the 20:05:55-20:06:29Z run, which adds
 §7's intake checks 23-30 (30/30). Checks 1-22 gave the same results and gas as at 19:29Z.
 
-`HEAVY_REMOTE=0 scripts/heavy.sh v6-pull -- proofs/v6-shield/tools/run-sandbox.sh` (the PC box `<build box>` reset SSH
-at 18:58Z, `heavy.sh` exit 69, so the Mac slot queue ran it as `heavy.sh` documents). near-workspaces 0.23.0,
+`BUILD_QUEUE=0 scripts/the build queue v6-pull -- proofs/v6-shield/tools/run-sandbox.sh` (the build box `<build box>` reset SSH
+at 18:58Z, `the build queue` exit 69, so the Mac slot queue ran it as `the build queue` documents). near-workspaces 0.23.0,
 near-sandbox 2.13.4 (protocol 86, as mainnet), rustc 1.96.0, cargo-near 0.22.0, Darwin arm64. The two mainnet wasms are fetched by `view_code` at block 221,129,079 (FastNEAR archival) and must
 match the pinned code hashes; they are patched in under their real ids (`intents.near`, the USDC account) and
 initialised fresh (`intents.near` `new` with fee 0; USDC `init` with sandbox roles). The test contract
@@ -152,7 +152,7 @@ What it does (`run.mjs --live`; each step is skipped when the chain shows it don
   never looks at NEAR access keys (E3), so this changes nothing in the call; keyless is proven by E5 and §2.
 - A rerun after a stop resumes from the chain state; a rerun after a finished run sends nothing (vault gone, float
   credited). If a stop comes after the shield's `submit-intent`, wait for 1Click's status before rerunning.
-- After the paste, CO: `node proofs/v6-shield/verify.mjs proofs/v6-shield/runs/<run>-live.json` reads every NEAR tx on
+- After the paste, team lead: `node proofs/v6-shield/verify.mjs proofs/v6-shield/runs/<run>-live.json` reads every NEAR tx on
   rpc.mainnet.near.org and FastNEAR (archival when old) and checks the pay receipt: predecessor = vault, `mt_transfer`,
   deposit 1, receiver_id = R, `SuccessValue`.
 
@@ -252,7 +252,7 @@ crate so that `contract/wasm/v6_pay.wasm`, whose sha256 `run.mjs` pins, stays by
 - `intake/` the intake stand-in (§7: `mt_on_transfer`, `received`); `wasm/v6_intake.wasm` the build the sandbox ran.
 - `sandbox/` the runner; `tools/run-sandbox.sh` builds both contracts and the runner and runs it.
 - `tools/quote-unshield.mjs` the one dry, keyed float → R quote (§7).
-- `run.mjs` (`--dry` default, `--live`), `live.sh` (the paste), `verify.mjs` (CO's two-provider check; tried on the
+- `run.mjs` (`--dry` default, `--live`), `live.sh` (the paste), `verify.mjs` (team lead's two-provider check; tried on the
   E5 precedent tx: both providers `SuccessValue`, pay shape ok), `tools/txtest.mjs` + `tools/run-txtest.sh` (the tx
   builder on a local node).
 - `runs/` run records (no keys, no tokens); `results/` the sandbox record.

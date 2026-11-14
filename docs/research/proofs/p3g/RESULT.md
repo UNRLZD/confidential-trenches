@@ -45,7 +45,7 @@ Tags: **M** = measured here (commands in "Rerun"). **D** = a vendor's own docs o
    - (2) `mintt`'s keyset `01ae7231…229fa1fe` and all 32 keys equal P7's local run.
    - (3) P7's client did a round trip from the Mac on both mints.
    - (4) After the restart both keysets are unchanged, earlier notes keep their states, and a new deposit works.
-6. **CO M162 (§6).**
+6. **team lead M162 (§6).**
    - Q1: the AK certificate's subject is `L=us-east4-a, O=Google Compute Engine, OU=trenches-enclave-e0ff2c,
      CN=7627989056050441480`.
    - The instance-identity extension (OID 1.3.6.1.4.1.11129.2.1.21) is present: zone us-east4-a, project number
@@ -54,7 +54,7 @@ Tags: **M** = measured here (commands in "Rerun"). **D** = a vendor's own docs o
    - Step 1 checks it (E37), and its gas is measured with that check.
    - Q2: a `tpm` boot has **no sealed vendor blob or config channel**. Without KMS, dstack refuses an encrypted env. The
      only unmeasured input is the shared disk's `.user-config`, which the app must authenticate itself. Citations in §6.
-7. **CO R15a (§7).**
+7. **team lead R15a (§7).**
    - (1) PCR14 holds exactly dstack's 10 runtime events (app-id, compose-hash, instance-id, key-provider, …). Its
      compose-hash payload equals RTMR3's compose-hash event in the same boot's TDX quote, and equals the repo's
      app-compose sha256 `7c81cb60…fe81`.
@@ -295,7 +295,7 @@ Tags: **M** = measured here (commands in "Rerun"). **D** = a vendor's own docs o
    earlier notes' states held, and a new 500 deposit worked (`results/roundtrip-c3-{mint,mintt}-boot2.json`,
    `keys-compare.json`).
 
-## 6. CO M162 reads
+## 6. team lead M162 reads
 
 **Q1. Our VM's AK certificate (M).**
 
@@ -334,7 +334,7 @@ vendor blob.
 - I: a confidential config must come in after attestation, like S, or be signed and checked by the app. The host can
   swap `.user-config` freely.
 
-## 7. CO R15a reads
+## 7. team lead R15a reads
 
 **1. PCR14 in the running app (M; `results/tcg-eventlog-c3-boot{1,2}.{bin,json}`).**
 
@@ -384,7 +384,7 @@ vendor blob.
 - The OID 1.3.6.1.4.1.11129.2.1.21 extension is present, and its project number equals the project's (840692695115).
 
 **3. Step 1's gas with the project check (M).** The testnet `register_tpm` already checks it, at 132.32 TGas total and
-0.52 TGas for the GCE identity parse and compare. CO need not add a cost.
+0.52 TGas for the GCE identity parse and compare. team lead need not add a cost.
 
 ## Spend and resources left
 
@@ -423,7 +423,7 @@ From `proofs/p3g`. Spending steps are marked; each one logs itself to `results/s
 0.25 VM-hours.
 
 ```sh
-H="~/Downloads/NEAR trading terminal/scripts/heavy.sh"
+H="~/Downloads/NEAR trading terminal/scripts/the build queue"
 # 0. Downloads (vendor-dl/, untrusted, sha256-checked): dstack tag v0.6.1 source and the OS release asset
 git -C vendor-dl/dstack-src-v0.6.1 rev-parse HEAD                     # 7f143148cc49f4a09799958835d310e050137cb3
 shasum -a 256 vendor-dl/os-v0.6.1/dstack-0.6.1-uki.tar.gz             # 42ce3692…5fa8 = image-hashes.txt

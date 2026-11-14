@@ -55,7 +55,7 @@ No High or Medium finding in any of the three contracts. There are three Lows (L
 - **Proof:** a test. `hunt_inserts_past_the_next_page_fail_a_release_until_rebuilt`, in
   `wt/contracts/pool-solana/svm-tests/tests/hunt.rs`.
   - hunt.rs is a scratch copy of the svm `release.rs` tests with two tests added; the repo's own tests are untouched.
-  - The Solana hunter ran it on the box through heavy.sh, on the pool program built with `cargo-build-sbf --locked`.
+  - The Solana hunter ran it on the box through the build queue, on the pool program built with `cargo-build-sbf --locked`.
   - The log at `scratchpad/hunt-pool-sol.log` (lines 349-354) reads:
     - `HUNT stale release after the stranger's inserts: Some(22)`;
     - `HUNT rebuilt release landed: change leaf at 2048`;
@@ -233,7 +233,7 @@ verifiers/WithdrawalVerifier.sol, and the RelayData and Buy structs in interface
 ## NEAR vault (contracts/vault/src): checked and sound
 
 These are from the vault hunter's report. I re-read the lines marked (re-read). The hunter ran the vault's unit tests
-for ragequit, settle, payout, field, verifier and withdraw through heavy.sh: 60 passed, 0 failed (771 s, on the box).
+for ragequit, settle, payout, field, verifier and withdraw through the build queue: 60 passed, 0 failed (771 s, on the box).
 
 - **Public-signal binding.**
   - `ContextFields` binds processor (the vault), recipient, `register_deposit`, `fee_recipient`, the exact `relay_fee`,
@@ -345,7 +345,7 @@ From the Solana hunter's report. I re-read state.rs:266-342 and buy.rs:95-245, a
   say the rest is fine.
 - **Slither on this Mac.** Not run, per the brief. Its result above is CI's run on GitHub's runner at this sha.
 - **Forge, locally.** I did not re-run the EVM forge suite: the worktree's forge-std submodule is empty, and CI
-  already ran it at this sha (288 passed). The vault unit tests and the Solana probe ran on the box through heavy.sh.
+  already ran it at this sha (288 passed). The vault unit tests and the Solana probe ran on the box through the build queue.
 - **No test for L-V1 or I-V3.** Both need a near-sandbox run on the real USDC wasm, which did not fit the window.
 - **Solana: what was not run.** Only the hunter's two new tests ran, not the full svm suite (CI ran it at this
   sha). The solana-bn254 syscall internals (the curve and subgroup checks) rely on review 3's read.

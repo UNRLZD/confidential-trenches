@@ -38,8 +38,8 @@ program-id → label map). The key-named hits were each read in their code with 
 - `HKDF_INFO_STRONG_KEY` (1, `proofs/p2-ckd/client/ckd.ts:23`): an HKDF info label. `DEFAULT_TOKEN`, `KEYCAT`,
   `token`: EVM token addresses. `key: "…"` in `build-fixtures.mjs` and the capture logs: fixture job names.
 
-`.gitleaksignore` (666 entries, marked by CO 2026-10-20) matches none of these 5,184 (checked in both the commit and
-the commit-less fingerprint forms); its entries cover other files. Marking these hits is CO's call under the owner's
+`.gitleaksignore` (666 entries, marked by team lead 2026-10-20) matches none of these 5,184 (checked in both the commit and
+the commit-less fingerprint forms); its entries cover other files. Marking these hits is team lead's call under the owner's
 standing rule for provably public hits; this lane did not edit `.gitleaksignore`.
 
 ## Every hit: file, commit, rule

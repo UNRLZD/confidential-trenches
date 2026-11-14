@@ -1,6 +1,6 @@
 # EN1A: how a handover moves both hosts to the new CVM (paper 10 §7 row 61)
 
-Lane EN1A (prep), 2026-10-22 20:54Z to 21:30Z (`date -u` reads). Paper 10 §7 row 61 asks CO for "EN1's address-move
+Lane EN1A (prep), 2026-10-22 20:54Z to 21:30Z (`date -u` reads). Paper 10 §7 row 61 asks team lead for "EN1's address-move
 choice", due Oct 24. This folder holds the evidence and a recommendation. **No paper was edited**: §7 lists the edits
 the choice needs.
 
@@ -186,7 +186,7 @@ H6.
 | C19 / the exit CLI | One address for the whole deployment: posted once, right during every handover | A new address each boot: a C19 tx per boot by the new N after the switch. Until it lands, V13 names the sealed old VM |
 | Egress | Both VMs lose egress at the move (§3.3). Hence the move goes after the release anchor is final and after B16 (§5) | Unaffected: each VM keeps its own address |
 | Zone outage holding the old VM | The detach may be impossible (F15, I). Break-glass = (b) for that boot | Unaffected |
-| Operator's power | Can move the address to any VM in us-east4 with no DNS change (§4.2) | Can point the A records anywhere (CO runs the DNS ops script) |
+| Operator's power | Can move the address to any VM in us-east4 with no DNS change (§4.2) | Can point the A records anywhere (team lead runs the DNS ops script) |
 | Cost (F13) | One static at $0.005/h attached (running or stopped) ≈ $3.65/month. Unattached only for the seconds of a move ($0.011/h) | One static per VM, ≈ the same. Two attached during each overlap, ≈ $0.01 more per handover. Plus 7 C19 txs (10 TGas each). Both are under $1 apart |
 
 ### 4.2 The operator's power under (a)
@@ -237,7 +237,7 @@ with `/v1/pub/tls` (WB1's check) (§7, 08 §7.3).
 **Boot 1** (the bootstrap, EN2, Nov 2 ~13:00Z):
 - Reserve the regional static address in us-east4 once, in the mainnet project.
 - Create the bootstrap VM with `--address=<STATIC_IPV4>`.
-- CO's DNS ops script writes the A records on both hosts with B1's EN3 (paper 10 §3.3 Nov 2). The address never
+- team lead's DNS ops script writes the A records on both hosts with B1's EN3 (paper 10 §3.3 Nov 2). The address never
   changes after this.
 - The bootstrap issues no certificate (06a §3.1: "The bootstrap has no store B and gets none").
 
@@ -289,7 +289,7 @@ Who runs it:
   are in F10.
 - It belongs in `scripts/deploy/`'s EN2 builder with its project guard (paper 10 §1.1, L5). It becomes a "move" step
   next to `create`.
-- CO's DNS ops script no longer runs at a handover.
+- team lead's DNS ops script no longer runs at a handover.
 
 ## 6. Edge cases
 
@@ -303,7 +303,7 @@ Who runs it:
 | E6 | A maintenance event mid-handover | TDX VMs do not live-migrate. A maintenance stops them, and every stop counts one vTPM try (F8; P3G-F).<br>• Old VM: E2.<br>• New VM before H6c: its ephemeral IP is released at the stop (F6). If it restarts, read its new ephemeral IP again before H6b.<br>• New VM after H6c: it keeps the address (M).<br>Read `upcomingMaintenance` on the old VM before NI4 and on the new VM at H6b. C3 VMs get at least 7 days' notice of scheduled maintenance but may get none for an emergency (F9) |
 | E7 | Clients during the gap | New connections hang on SYN retries; they are not refused (M). A browser connect started in the gap succeeds on the SYN retry after the add (I: TCP backoff of 1, 2, 4, 8 s).<br>A request on a kept-alive connection gets a RST in one round trip (M). The 06b client should retry once on a fresh connection after a network error. Retrying with the same `id` is safe: 06a §3.3 "Same `id`, other digest → `replay_conflict`", and a repeat returns the stored state. Requests that reached the old VM after H2 got `not_serving` and never ran.<br>Market-data SSE: a server heartbeat every ≤ 15 s, with a client reconnect after two missed beats, covers the one sample that ended by keepalive rather than RST (I). Whether Chrome itself retries a POST after a RST on a reused connection: UNKNOWN; the app's retry covers it |
 | E8 | The new VM's own outbound connections at H6c | Every pooled outbound connection (NEAR RPCs, B2, 1Click, Intel PCS) dies when its external IP changes (M, §3.3). With undici's 300 s defaults (F17) a request on a dead connection outlives X10 = 90 s and the new writer loses its lease. **Rule:** every outbound call in the core has a timeout well under X10 (≤ 15 s) and retries on a fresh connection, and a NEAR send is looked up by hash before it is resent. The cut lasts ~8-10 s (M) |
-| E9 | The address cannot be detached (the old VM's zone is down, F15) | Break-glass (b) for this boot. Two ways to get the new address:<br>• promote the new VM's ephemeral IP to static: `gcloud compute addresses create <NAME> --addresses=<EPHEMERAL_IP> --region us-east4` ("promote existing ephemeral external IP addresses", F1 page intro);<br>• or reserve a new static and attach it.<br>Then CO's DNS ops script writes `expected.json` first, then both A records (TTL 60 s), and the active N re-posts C19. The old address is released only after the zone recovers and the old VM is deleted, and its records are removed the same day (WB1's existing rule) |
+| E9 | The address cannot be detached (the old VM's zone is down, F15) | Break-glass (b) for this boot. Two ways to get the new address:<br>• promote the new VM's ephemeral IP to static: `gcloud compute addresses create <NAME> --addresses=<EPHEMERAL_IP> --region us-east4` ("promote existing ephemeral external IP addresses", F1 page intro);<br>• or reserve a new static and attach it.<br>Then team lead's DNS ops script writes `expected.json` first, then both A records (TTL 60 s), and the active N re-posts C19. The old address is released only after the zone recovers and the old VM is deleted, and its records are removed the same day (WB1's existing rule) |
 | E10 | Both hosts | One address serves APP_HOST and REQ_HOST: a NIC has one external IPv4 (F1), and 06a §3.8 row 1 already puts both on one CVM. Each host keeps its own certificate with no shared name, so browsers do not coalesce them, even on one IP (06a §3.8 row 1). Both move in the one move |
 | E11 | The exit CLI's endpoint (C19, V13) | Under (a), V13 names the right address across every boot, so the CLI sees what a browser sees: `not_serving` or the ~12 s gap during a handover, then the new VM.<br>C19 needs posting **once**, by boot 2's N (the first serving N) after B16. The value must come from a pinned input, not from the VM's current access config: boots 3+ still hold their ephemeral IP at B16. Options for 06a: the reserved IPv4 in the sealed blob (its hash is on chain) or in the measured compose. Re-post only at E9.<br>A dead-man restart runs in another project, which cannot hold our address, so it posts its own IPv4 (06a §2.7, unchanged) |
 | E12 | Losing the address | A released static address is gone for good, and another customer may receive it. Only the owner's account holds Owner in the mainnet project. Scripts delete addresses only by an `en1a-`/test name. Never run `addresses delete` on the production address. I found no deletion protection for addresses in the pages read (UNKNOWN) |
@@ -346,20 +346,20 @@ Other lanes were editing these files during this lane, so find each site by its 
 | Line | Where | Edit |
 |---|---|---|
 | 390 | §1.1 `ops/` | "what changes at a new CVM `[EN1: …]`" → nothing changes at a new CVM; the records change only at a break-glass. The move itself goes in `scripts/deploy/` (L5's EN2 builder) |
-| 559-561 | §3.2 | "CO's DNS ops script makes the DNS step at H2 … `[EN1: …]` (CO's IP-move choice, §7 row 61)" → "the operator moves the reserved address to the new CVM at H6, after B16; DNS is unchanged (EN1A)" |
+| 559-561 | §3.2 | "team lead's DNS ops script makes the DNS step at H2 … `[EN1: …]` (team lead's IP-move choice, §7 row 61)" → "the operator moves the reserved address to the new CVM at H6, after B16; DNS is unchanged (EN1A)" |
 | 631 | §3.3 Nov 2 | Unchanged (boot 1's A records), plus "boot 1 is created on the static address" |
-| 648 | §3.3 Nov 3 | "at H2 CO's DNS ops script makes the DNS step on both hosts" → "boot 2 is created on the address after its detach from boot 1 (E1)"; the CAA sentence stays |
-| 665, 699, 712, 721, 730, 736 | §3.3 Nov 4-10 | "the DNS step at H2 by CO's DNS ops script" → "the address move at H6 (08 WB1)" |
+| 648 | §3.3 Nov 3 | "at H2 team lead's DNS ops script makes the DNS step on both hosts" → "boot 2 is created on the address after its detach from boot 1 (E1)"; the CAA sentence stays |
+| 665, 699, 712, 721, 730, 736 | §3.3 Nov 4-10 | "the DNS step at H2 by team lead's DNS ops script" → "the address move at H6 (08 WB1)" |
 | 935, 957, 967, 969, 971, 977, 983 | §5 (O5, O13, O15, O17, O23, O29) | "the DNS step … at H2" → "the address move at H6". O13's A records stay |
 | 1099 | §7 row 8 | Marker → "EN1A, `proofs/en1-address-move`" |
-| 1136 | §7 row 32 | "the switch … are CO's DNS ops script" → "the address move" |
+| 1136 | §7 row 32 | "the switch … are team lead's DNS ops script" → "the address move" |
 | 1157 | §7 row 61 | Done: (a) at H6, this folder, the commit |
 | 1186 | §8 "DNS changes per CVM" | 0 per CVM; the risk becomes "address stuck (E9)" and "outbound timeouts (E8)" |
 | 1240 | §9 item 9 | Closed by (a) |
 | 1253 | §9 item 22 | "The DNS edit at H2" → "the address move at H6" |
 | 36, 38, 40 | Header notes | History; no edit |
 
-**Outside the three papers (for CO):**
+**Outside the three papers (for team lead):**
 - 06b: the OHTTP client retries once on a fresh connection after a network error with the same `id` (E7). The
   market-data SSE gets a heartbeat with a client watchdog.
 - 07: a test of E8, where the core survives its external IP changing mid-anchor, and a handover drill that times

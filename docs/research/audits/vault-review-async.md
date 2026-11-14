@@ -1,4 +1,4 @@
-# Vault review: NEAR's async rules (card vault-review-opus-async)
+# Vault review: NEAR's async rules (card vault-review-async)
 
 - Code: `UNRLZD/confidential-trenches` at `a7e7300eb7e988dd87a4b4112152c6dc12a08bc4`, `contracts/vault` and
   `packages/kit/src/vault`, taken with `git archive` into the reviewer's scratch folder.
@@ -12,10 +12,10 @@
   set); near-sdk 5.29.1 `env.rs` l.2163-2175 (`promise_result_checked`).
 - Paper: `docs/plan1/vault.md` 2.5.1-2.5.7 (V:280-520, so 2.5 V:402-473 in full), the M2 row (V:1089), VT-S01 to
   VT-S20 (V:1137-1156) and the V3 rows (V:1211-1225).
-- When: 2026-11-06, 05:06Z to 05:35Z. Reviewer: a fresh Opus agent that wrote none of this code.
+- When: 2026-11-06, 05:06Z to 05:35Z. Reviewer: a fresh AI agent that wrote none of this code.
 - Scope: every receipt the vault makes or causes, its callback, gas, storage, reentrancy across receipts, NEP-141
   order and refunds, the refund path and `in_flight` spends. The contract review
-  (`vault-review-opus-contract.md`) was opened only after the findings table below was written.
+  (`vault-review-contract.md`) was opened only after the findings table below was written.
 
 ## Every receipt the vault makes or causes
 
@@ -50,10 +50,10 @@ Severity counts: Critical 0, High 0, Medium 0, Low 1, Info 6.
 
 - A-01: fixed by 0d52db30 on branch card/vault-review-fixes-1. `src/promise.rs` `pay_then_on_payout` makes ONE receipt to TOKEN with `[storage_deposit when register_deposit > 0, ft_transfer(recipient, to_recipient), ft_transfer(fee_recipient, fee) when fee > 0]`, each action its own static gas and weight 1, each `ft_transfer` 1 yocto; `promise_and` is no longer imported (`tests/s01.rs` PROMISES is six). `on_payout` reads exactly one result (`promise::payout_result`): Failed returns the whole withdrawn amount as the refund note and the relayer keeps no fee, as PP's relay. Tests: `payout::tests::vt_u06_a_relayed_payout_is_all_or_none`, `promise::tests::relayed_withdrawal_with_registration_and_fee_is_one_receipt`, `withdraw::tests::a_landed_call_makes_its_payouts_then_on_payout`, sandbox `payouts one_part_fails_{mock,usdc}_{recipient,fee}` (both the recipient and the fee recipient unregistered: delivered 0 to both, refund_pending 2,000,000), and `settle`, `s17`, `relayer_withdraw` re-asserted. Readers: the kit (`packages/kit/src/vault/sync.ts:308`), the wallet's restore (`packages/wallet/src/notes/restore.ts:303-309`) and the helper read `refund_value` from the `spends` view; none derives "withdrawn minus fee", so none changed. The `payout` event and the kit's frozen types are unchanged; `VAULT_ON_PAYOUT.results` in `packages/kit/src/vault/shapes.ts:274` still names two results ("recipient part", "fee part") and is now stale text (no code reads it; changing it moves the kit-freeze-vault live check).
 - A-02: documented residual, not fixed: paper V:372-376, the 2.5.4 table (V:461), VT-S08, `src/prepay.rs` l.5-7. Same as R-04.
-- A-03: documented residual, not fixed: paper V:466-474, VT-S17 (`tests/s17.rs`); no retry path can exist in a keyless vault. Same as R-02. Larger since A-01 (F-4, for paper 2.5.4 "What is left" and the judge sheet, CO): a failed payout now returns the whole withdrawn value to a refund note, so VT-S17's stranded-with-no-note amount at head is 9,000,000 (s17 at 0d52db30: "stranded with no note 9000000"), against 1,600,000 at 4a6f1499.
+- A-03: documented residual, not fixed: paper V:466-474, VT-S17 (`tests/s17.rs`); no retry path can exist in a keyless vault. Same as R-02. Larger since A-01 (F-4, for paper 2.5.4 "What is left" and the judge sheet, team lead): a failed payout now returns the whole withdrawn value to a refund note, so VT-S17's stranded-with-no-note amount at head is 9,000,000 (s17 at 0d52db30: "stranded with no note 9000000"), against 1,600,000 at 4a6f1499.
 - A-04: fixed by 0d52db30 (with A-01), then changed by 78e0d0c1 after the independent review (F-3). `on_payout` takes its amounts from the spend record only (`outcome(s.withdrawn, ran)`). It keeps the two arguments of the kit's frozen `VAULT_ON_PAYOUT`/`VaultOnPayoutArgs` (`packages/kit/src/vault/shapes.ts:269-276`, named by the kit-freeze-vault live check), never reads them and never panics on them: 0d52db30's `PayoutMismatch` refusal is gone, since a callback that panics strands the spend in_flight. Test: `payout::tests::on_payout_takes_the_amounts_from_the_record_whatever_its_arguments`, 7 argument pairs (this review's scratch case first) x landed/failed, each settling from the record. It fails at 0d52db30 with `PayoutMismatch` and passes at d91072ec.
 - A-01 follow-ups (independent review): F-1, at d91072ec. The withdraw relayer (`apps/helper/src/withdraw/send.ts` check 7b) signs nothing while its fee account is unregistered or blocklisted on the token. It reads both at check 7's block and again in the queue before signing; either one failing answers 503 `relayer_low` and logs "relayer fee account not ready". Live check `scripts/live-checks/vault-review-fixes-1.mjs`; `tests/relayer_withdraw.rs` step 3 expects the refusal. F-6, at 78e0d0c1: `scripts/live-checks/vault-skeleton.mjs` allows six promise imports. `promise_and` passes only for the two vaults deployed before one-receipt payouts (`DEPLOYED_BEFORE_ONE_RECEIPT`, by full sha256 and account together), which are keyless and can never change, so no entry is ever added. F-7, at 78e0d0c1: `tests/settle.rs` step 1 also reads 0 NEAR back from the token; USDC's storage_deposit refund is dropped with the failed batch (nearcore runtime `set_error` clears `new_receipts`).
-- F-5, for the judge sheet (CO): a failed payout receipt still shows the `ft_transfer` event log of any action that ran before the one that failed. The state is rolled back, but the log stays in the outcome, so a reader must take a payout's result from the vault's `spends` view, never from token logs.
+- F-5, for the judge sheet (team lead): a failed payout receipt still shows the `ft_transfer` event log of any action that ran before the one that failed. The state is rolled back, but the log stays in the outcome, so a reader must take a payout's result from the vault's `spends` view, never from token logs.
 - A-05: documented residual: `tests/s17.rs` l.16-23; every reader takes status from the views, never from logs; unreachable on withdraw at the 100 Tgas margin.
 - A-06: documented residual, a trust assumption on the token, not a vault bug: the token's key holder can already move any balance. Paper 2.8; relayer code-hash watch VT-S16 (d). Same as R-05.
 - A-07: documented residual: paper V:264-322 (cases 1-3), VT-S14, VT-S16 (b); the kit never deposits through intents.near.
@@ -85,7 +85,7 @@ Severity counts: Critical 0, High 0, Medium 0, Low 1, Info 6.
 
 ## Cross-check with the contract review
 
-Read once, after the table above was written (`vault-review-opus-contract.md`, code 85f232f; the vault's `src/` is
+Read once, after the table above was written (`vault-review-contract.md`, code 85f232f; the vault's `src/` is
 the same 6,351 lines at a7e7300e).
 
 - Mine also in that review: A-02 (R-04, R-06), A-03 (R-02), A-06 (R-05 (a)).
@@ -105,10 +105,10 @@ plus one file, `contracts/vault/src/review_async.rs`, and the line `#[cfg(test)]
 Below, `<scratch>` is
 `<local path>`.
 
-1. Unit tests (mocked chain), 05:26Z, through the Mac queue:
+1. Unit tests (mocked chain), 05:26Z, through the laptop queue:
 
    ```
-   HEAVY_REMOTE=0 <research repo>/scripts/heavy.sh vault-review-async-unit -- \
+   BUILD_QUEUE=0 <research repo>/scripts/the build queue vault-review-async-unit -- \
      bash -c "cd <scratch>/work/contracts/vault && CARGO_TARGET_DIR=<scratch>/target \
        cargo +1.96.0 test --locked --lib -- review_async vt_u06 relayed_withdrawal --nocapture"
    ```
@@ -128,13 +128,13 @@ Below, `<scratch>` is
    (`receipt_indices` empty); only the callback waits for both.
 
 2. The team's own sandbox case on the real USDC wasm, as A-01's on-chain proof, 05:26:53Z to 05:29:24Z, through the
-   Mac queue (the harness built the release vault from the scratch copy at 231,294 B, sha256
+   laptop queue (the harness built the release vault from the scratch copy at 231,294 B, sha256
    `7f7e1cd7b20a6f77a6223f3ba90360eb72e7987c94bb72b38156e4cfa8456f0c`, the same bytes the contract review built from
    main 85f232f, so the scratch line in `lib.rs` changed nothing in the wasm; USDC is the pinned
    `b98ccd53…cfe6`, code hash `DVJx7F3d…`):
 
    ```
-   HEAVY_REMOTE=0 <research repo>/scripts/heavy.sh vault-review-async-sandbox -- \
+   BUILD_QUEUE=0 <research repo>/scripts/the build queue vault-review-async-sandbox -- \
      bash -c "cd <scratch>/work && CARGO_TARGET_DIR=<scratch>/target \
        contracts/vault/tests/harness/run.sh --test payouts one_part_fails_usdc_recipient"
    ```

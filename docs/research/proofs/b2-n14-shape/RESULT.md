@@ -26,7 +26,7 @@ but it races the original rather than replacing it, and it costs more than 06c a
    since protocol 85. Before the refund, the signer pays about **0.0076 N**, because the receipt's gas is bought at
    `min_gas_purchase_price` 1e9 yN/gas. The surplus is then refunded (§2 rows 8-9).
 
-**What the adapter needs (input for CO; 06c is not edited by this lane):**
+**What the adapter needs (input for team lead; 06c is not edited by this lane):**
 - (a) After R is sent, look up **both** hashes on two providers. A is `dead` when R is final on both. A has `landed`
   when A is found, even after R was sent; R's `InvalidNonce`, or R not found, means look for A. 06c's A4 (b) rule
   covers the silent loser: the key's nonce at `final` is ≥ n while neither provider has the tx.
@@ -35,7 +35,7 @@ but it races the original rather than replacing it, and it costs more than 06c a
 - (c) Cost bound for N-14: **0.000835 N** final and **0.0076 N** upfront. A cheaper shape with the same effect is a tx
   with **no actions**, G → G, at the same nonce. Both the runtime and the RPC accept it, it lands, and A is then
   `InvalidNonce` (T4). It costs **0.2161 Tgas = 0.0000216119 N** (39× less) and about **0.000119 N** upfront. The
-  choice of shape is CO's.
+  choice of shape is team lead's.
 
 ## 1. What mainnet runs (keyless reads, 2026-10-22)
 
@@ -74,9 +74,9 @@ NEAR docs (`near/docs` at `4200100094696005fdffcd4c179952326451b6b7`):
 gets G, the 64-hex implicit account of a fresh key k0, with 100 N, and `bob.near`. k0 then adds k1 (FullAccess) and
 kf (a function-call key on `bob.near`) to G in one tx, the N-1 shape. A = `Transfer(0.01 N)` G → `bob.near` on k1,
 the stored original. R = N-14 = `Transfer(1 yocto)` G → G on the same key and nonce. Every key is made in the run,
-held in memory and gone at the end. Command: `HEAVY_REMOTE=0 scripts/heavy.sh b2-n14 -- proofs/b2-n14-shape/run.sh`.
-The PC box was tried first (`HEAVY_REMOTE=1`, 19:09:18Z) and refused: `<build box> does not answer`. ssh reached the
-host over Tailscale but got `Connection reset by peer` on port 22. The run took slot 2 of the Mac queue, 19:12:57Z to
+held in memory and gone at the end. Command: `BUILD_QUEUE=0 scripts/the build queue b2-n14 -- proofs/b2-n14-shape/run.sh`.
+The build box was tried first (`BUILD_QUEUE=1`, 19:09:18Z) and refused: `<build box> does not answer`. ssh reached the
+host over Tailscale but got `Connection reset by peer` on port 22. The run took slot 2 of the laptop queue, 19:12:57Z to
 19:13:18Z, on Darwin arm64 with node v24.22.1. Records: `results/run-2026-10-22T19-12-57Z.txt` (the output) and
 `results/sandbox-2026-10-22T19-12-57-372Z.json` (every answer). Sandbox block time was about 129 ms and its
 `transaction_validity_period` 100, which no case depends on.
@@ -102,5 +102,5 @@ upfront figures are computed from row 9 and were not read from the sandbox.
 
 ```
 cd proofs/b2-n14-shape && npm ci            # near-api-js 7.3.1, as proofs/b1-dao
-HEAVY_REMOTE=1 scripts/heavy.sh b2-n14 -- proofs/b2-n14-shape/run.sh     # from the repo root; HEAVY_REMOTE=0 for the Mac
+BUILD_QUEUE=1 scripts/the build queue b2-n14 -- proofs/b2-n14-shape/run.sh     # from the repo root; BUILD_QUEUE=0 for the Mac
 ```
