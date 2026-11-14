@@ -66,7 +66,7 @@ export function contractRisk(answer: unknown, token: string, asOfMs: number): Co
     honeypot: flag(r.is_honeypot),
     tax: buy === null || sell === null ? null : { buy_bps: buy, sell_bps: sell },
     mint_auth: flag(r.is_mintable),
-    // the EVM's freeze: the owner can pause every transfer or blacklist an address
+    // the EVM's freeze: the contract's admin can pause every transfer or blacklist an address
     freeze_auth: paused === true || blacklist === true ? true : paused === false && blacklist === false ? false : null,
     dev_bps: frac(r.creator_percent),
     holders,
