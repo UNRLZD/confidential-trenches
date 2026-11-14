@@ -98,7 +98,9 @@ test("code dispatching both sells, or neither, fails on the selector line", asyn
 // it passing on this record; a frozen build at the address that names no sell is refused, never given a guess
 test("a moved kit pin, or a rebuild that freezes this build at its address, still passes; a frozen build naming no sell fails", async () => {
   const later = (sell) => {
-    const frozen = { ...BUILD.contracts.SellDelegate, contract: "SellDelegate", note: "a test's freeze", sell, at: Object.fromEntries(CHAINS.map((c) => [c, del(c)])) };
+    // this record's build: frozen at its address since card pool-amounts-are-standard-sizes-evm rebuilt the delegate
+    const own = BUILD.frozen["SellDelegate.review3"] ?? BUILD.contracts.SellDelegate;
+    const frozen = { ...own, contract: "SellDelegate", note: "a test's freeze", sell, at: Object.fromEntries(CHAINS.map((c) => [c, del(c)])) };
     return { ...BUILD, contracts: { ...BUILD.contracts, SellDelegate: { ...BUILD.contracts.SellDelegate, masked: "0x" + "12".repeat(32), sell: "0x12345678" } }, frozen: { ...BUILD.frozen, "SellDelegate.review3": frozen } };
   };
   for (const chain of CHAINS) {
