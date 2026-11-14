@@ -53,7 +53,8 @@ export const HELPER = "https://ct-api.unrealized.trade";
 export const CHAINS = Object.freeze([
   {
     name: "base",
-    list: ["https://base-rpc.publicnode.com", "https://base.api.pocket.network"],
+    // bloXroute's is Base's second seat since card first-sign-in-reads-fast-on-live, Pocket its spare
+    list: ["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com", "https://base.api.pocket.network"],
     helper: `${HELPER}/v1/rpc/base?keyed=only`,
     pool: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
     from: 54325671,

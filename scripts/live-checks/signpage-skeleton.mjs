@@ -40,15 +40,16 @@ const SOLANA = "https://solana-rpc.publicnode.com https://solana.api.pocket.netw
 const EVM = evmOrigins(venuesOf(SIGN_CHAINS)).join(" ");
 // the signing page's deep public pool sources the kit's venue origins (EVM above) leave out (card evm-pool-sync-holds:
 // the kit's EVM_POOL_HISTORY, which the page reads as MAINNET_POOL_HISTORY; Tenderly's is in EVM already);
-// signpage-skeleton.test.mjs holds this to exactly those origins
-export const POOL_HISTORY = "https://base.rpc.blxrbdn.com";
+// signpage-skeleton.test.mjs holds this to exactly those origins. None since card first-sign-in-reads-fast-on-live:
+// bloXroute's Base origin is the Base pool list's second seat, so EVM names it
+export const POOL_HISTORY = "";
 
 // the wallet paper's block (wallet.md 2.7) with HELPER_HOST, RPC_A, RPC_B, RPC_C and APP_HOST put in, plus font-src 'self'
 export const CSP = [
   ["default-src", "'none'"],
   ["script-src", "'self' 'wasm-unsafe-eval'"],
   ["worker-src", "'self'"],
-  ["connect-src", `'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS} ${SOLANA} ${EVM} ${POOL_HISTORY}`],
+  ["connect-src", [`'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS} ${SOLANA} ${EVM}`, POOL_HISTORY].filter(Boolean).join(" ")],
   ["style-src", "'self'"],
   ["img-src", "'self' data:"],
   ["font-src", "'self'"], // app.md finding 1 (l.1085): the top-level SIGN_HOST screens draw in the brand fonts

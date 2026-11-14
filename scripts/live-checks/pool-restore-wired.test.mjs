@@ -90,7 +90,8 @@ test("recorded live run on release 119: PASS with the EVM pools' hosts; an EVM h
   };
   // card restore-check-names-fee-hosts: the fee list's hosts (mainnet.base.org, robinhood.drpc.org) are the page's own
   // since a restore holds the EVM period fee (live135 below); the quote list's and any third host still fail
-  for (const h of ["base-mainnet.public.blastapi.io", "base.rpc.blxrbdn.com", "evil.example", "api.mainnet-beta.solana.com"]) {
+  // (base.rpc.blxrbdn.com is Base's second pool seat since card first-sign-in-reads-fast-on-live: pinned, no stray)
+  for (const h of ["base-mainnet.public.blastapi.io", "robinhood.rpc.blxrbdn.com", "evil.example", "api.mainnet-beta.solana.com"]) {
     if (h !== "evil.example") assert.ok(ANSWERS.live119.connect.includes(h), `${h} is in the served connect-src`);
     fails(x((rec) => (rec.hosts[h] = 1)), new RegExp(`^BAD every request goes to .*stray: ${h.replaceAll(".", "\\.")}\\)$`));
   }

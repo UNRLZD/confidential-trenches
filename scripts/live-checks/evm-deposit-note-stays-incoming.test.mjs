@@ -24,7 +24,7 @@ test("the recorded good run passes: every state read of the path answered on bot
   const r = await run(A.good);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
   assert.match(r.lines[0], /^the bundle file:app\.js \([0-9a-f]{16}, \d+ bytes\): no state read at an old block's tag; it names every seat \(4\)$/);
-  assert.match(r.lines[1], /^base \(base-rpc\.publicnode\.com, base\.api\.pocket\.network\): newest agreed block \d+; .* all answered$/);
+  assert.match(r.lines[1], /^base \(base-rpc\.publicnode\.com, base\.rpc\.blxrbdn\.com\): newest agreed block \d+; .* all answered$/);
   assert.match(r.lines[2], /^robinhood \(rpc\.mainnet\.chain\.robinhood\.com, robinhood\.api\.pocket\.network\): newest agreed block \d+; .* all answered$/);
 });
 
@@ -128,7 +128,8 @@ test("the bundle half alone: a pinned bundle naming every seat and no old state 
 });
 
 // Release 116's sign live run 43024665974 (job 130536379256): "FAIL base.api.pocket.network: block 56057255: not a block",
-// a seat that answered null for a block below both seats' latest (a backend behind the one that answered "latest").
+// a seat that answered null for a block below both seats' latest (a backend behind the one that answered "latest"). Base's
+// second seat, planted here, is bloXroute's since card first-sign-in-reads-fast-on-live.
 const POCKET = A.good.pairs[0].seats[1];
 const byNumber = (e, seat = POCKET) => e.url === seat && e.method === "eth_getBlockByNumber" && /^0x/.test(e.params[0]);
 test("planted: a seat that does not know the newest agreed block yet is read again, and still behind on the last read is INCONCLUSIVE naming it", async () => {
@@ -143,7 +144,7 @@ test("planted: a seat that does not know the newest agreed block yet is read aga
   const behind = await run({ ...A.good, log: always }, { sleep: async (ms) => void waited.push(ms) });
   assert.equal(behind.verdict, "INCONCLUSIVE", behind.lines.join("\n"));
   assert.equal(waited.length, 4);
-  assert.match(behind.lines.at(-1), /^base\.api\.pocket\.network: block \d+: not known yet, on 5 reads 2000 ms apart$/);
+  assert.match(behind.lines.at(-1), /^base\.rpc\.blxrbdn\.com: block \d+: not known yet, on 5 reads 2000 ms apart$/);
 });
 test("planted: a seat behind the final block, or answering a state read at the newest block with the words of a block not held, is INCONCLUSIVE; a pruned state still fails", async () => {
   const low = A.good.log.filter((e) => byNumber(e)).at(-1);
@@ -160,5 +161,5 @@ test("planted: a seat that knows the block and answers it wrong still fails", as
   const first = A.good.log.find((e) => byNumber(e));
   const r = await run({ ...A.good, log: A.good.log.map((e) => (e === first ? { ...e, result: { number: e.result.number } } : e)) });
   assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
-  assert.match(r.lines.at(-1), /^base\.api\.pocket\.network: block \d+: not a block$/);
+  assert.match(r.lines.at(-1), /^base\.rpc\.blxrbdn\.com: block \d+: not a block$/);
 });

@@ -1,0 +1,145 @@
+{
+ "note": "bad_before: the deployed helper at 204ee6b8a (the commit before this card), read 2026-11-14T17:19:25.569Z from the markets lead Mac with Origin SIGN_HOST: the head and every page answered, each second ask sent to ROBINHOOD_RPC_URL again with no cache hit: FAIL. good: made from bad_before, each second ask naming the hit as this card helper does (rpc.ts timingOf): PASS; the deployed good run is recorded after the helper deploy.",
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-14T17:19:25.569Z",
+  "head": {
+   "result": {
+    "number": "0x6d03c38"
+   },
+   "kept": {
+    "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+    "server-timing": "rpc-wait;dur=0, rpc;dur=48;desc=\"ROBINHOOD_RPC_URL\"",
+    "retry-after": null
+   },
+   "status": 200,
+   "acao": "https://confidential.unrealized.trade",
+   "ms": 918
+  },
+  "reads": [
+   {
+    "page": 0,
+    "ask": 0,
+    "result": [],
+    "kept": {
+     "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=105;desc=\"ROBINHOOD_RPC_URL\"",
+     "retry-after": null
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ms": 376
+   },
+   {
+    "page": 0,
+    "ask": 1,
+    "result": [],
+    "kept": {
+     "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+     "server-timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
+     "retry-after": null
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ms": 40
+   },
+   {
+    "page": 1,
+    "ask": 0,
+    "result": [],
+    "kept": {
+     "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=106;desc=\"ROBINHOOD_RPC_URL\"",
+     "retry-after": null
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ms": 367
+   },
+   {
+    "page": 1,
+    "ask": 1,
+    "result": [],
+    "kept": {
+     "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+     "server-timing": "rpc-cache;desc=\"hit\", rpc-wait;dur=0, rpc;dur=0;desc=\"none\"",
+     "retry-after": null
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ms": 40
+   }
+  ]
+ },
+ "bad_before": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-14T17:19:25.569Z",
+  "head": {
+   "result": {
+    "number": "0x6d03c38"
+   },
+   "kept": {
+    "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+    "server-timing": "rpc-wait;dur=0, rpc;dur=48;desc=\"ROBINHOOD_RPC_URL\"",
+    "retry-after": null
+   },
+   "status": 200,
+   "acao": "https://confidential.unrealized.trade",
+   "ms": 918
+  },
+  "reads": [
+   {
+    "page": 0,
+    "ask": 0,
+    "result": [],
+    "kept": {
+     "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=105;desc=\"ROBINHOOD_RPC_URL\"",
+     "retry-after": null
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ms": 376
+   },
+   {
+    "page": 0,
+    "ask": 1,
+    "result": [],
+    "kept": {
+     "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=121;desc=\"ROBINHOOD_RPC_URL\"",
+     "retry-after": null
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ms": 895
+   },
+   {
+    "page": 1,
+    "ask": 0,
+    "result": [],
+    "kept": {
+     "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=106;desc=\"ROBINHOOD_RPC_URL\"",
+     "retry-after": null
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ms": 367
+   },
+   {
+    "page": 1,
+    "ask": 1,
+    "result": [],
+    "kept": {
+     "x-helper-commit": "204ee6b8ab62dfccd44da260e163ca609667cc24",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=153;desc=\"ROBINHOOD_RPC_URL\"",
+     "retry-after": null
+    },
+    "status": 200,
+    "acao": "https://confidential.unrealized.trade",
+    "ms": 415
+   }
+  ]
+ }
+}

@@ -6,13 +6,10 @@
 // ui-parity-with-unrlzd, TokenPage.tsx's PHONE_MEDIA rule, so the phone's load reads the list, not a token page):
 //   - the served JS: every script APP_HOST answered the frame holds no fixture id or name ("fixture", any case: the old
 //     GlowFixtureCurve ids, the fixture source tag);
-//   - the page: main[data-route="token"] draws the page ready, and its data-token is the top of the Trending column
-//     (Discover's own order, columnRows in apps/terminal/src/screens/discover/model.ts) of every chain's lists answers
-//     the page itself read at HELPER_HOST (GET /v1/market/lists?chain=<chain> for Solana, Base, Robinhood and NEAR, merged as
-//     the app merges them, those that answered 200: card app-chains-evm-rail, / on the chain filter's default, All);
-//     the page read each chain's lists;
-//   - the token read: the page read GET /v1/market/token on that top's own chain for that same token, 200, and its row
-//     is that token;
+//   - the page: main[data-route="token"] draws the page ready, and its data-token is NEARKAT (Solana mint
+//     6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr, card nearkat-opens-first: / on the chain filter's default, All);
+//     the page (its rail) read each chain's lists at HELPER_HOST (GET /v1/market/lists?chain=<chain>);
+//   - the token read: the page read GET /v1/market/token on Solana for NEARKAT, 200, and its row is NEARKAT;
 //   - at the phone's width, in place of the page and the token read: the Trenches list (PhoneTrenches.tsx,
 //     [data-testid="phone-trenches"]) is ready on its Trending chip, and its first row's data-key (<chain>:<id>) is that
 //     same top, never a fixture. Its lists are the last answer of each chain before the read, as the list redraws on
@@ -40,12 +37,14 @@ export const CHAINS = ["solana", "base", "robinhood", "near"];
 export const LISTS_URL = (chain) => `${HELPER_HOST}/v1/market/lists?chain=${chain}`;
 export const TOKEN_URL = (chain, mint) => `${HELPER_HOST}/v1/market/token?chain=${chain}&token=${encodeURIComponent(mint)}`;
 export const FIXTURE = /fixture/i;
+/** What / opens on All off the phone (card nearkat-opens-first, apps/terminal/src/routes/routes.ts OPEN_TOKEN): NEARKAT. */
+export const OPEN = { chain: "solana", mint: "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr" };
 export const LOADS = [
   { name: "desktop", path: "/", home: "page", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", path: "/", home: "list", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "desktop", path: "/?fx=curve", home: "page", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
-/** What a recorded load's / draws: "list" (the phone's Trenches list) or "page" (the top token's page). */
+/** What a recorded load's / draws: "list" (the phone's Trenches list) or "page" (NEARKAT's page). */
 const homeOf = (l) => LOADS.find((w) => w.name === l.width && w.path === l.path)?.home ?? "page";
 const READ_MS = 25_000;
 
@@ -86,18 +85,18 @@ export function judge(rec) {
     else if (l.state !== "ready") bad.push(`state ${l.state ?? "none"}, not ready`);
     if (unread.length) bad.push(`the page read no lists of ${unread.join(", ")}`);
     if (lists.length && !lists.some((x) => x.status === 200)) bad.push(`lists status ${lists.map((x) => `${x.chain} ${x.status}`).join(", ")}`);
-    else if (lists.length && !top) bad.push("the lists' Trending column is empty");
     if (typeof l.shown === "string" && FIXTURE.test(l.shown)) bad.push(`data-token ${l.shown} is a fixture`);
-    if (top && l.shown !== top.mint) bad.push(`data-token ${l.shown ?? "none"}, the lists' top Trending token is ${top.chain}/${top.mint}`);
+    // / on All opens NEARKAT off the phone (card nearkat-opens-first); the lists above are the rail's read
+    if (l.shown !== OPEN.mint) bad.push(`data-token ${l.shown ?? "none"}, / on All opens NEARKAT ${OPEN.chain}/${OPEN.mint}`);
     if (!l.token) bad.push("the page read no token answer");
-    else if (top) {
+    else {
       const at = `${l.token.url}?chain=${l.token.chain}&token=${encodeURIComponent(l.token.mint)}`;
-      if (at !== TOKEN_URL(top.chain, top.mint) || l.token.params !== 2) bad.push(`token read at ${at} (${l.token.params} params), not ${TOKEN_URL(top.chain, top.mint)}`);
+      if (at !== TOKEN_URL(OPEN.chain, OPEN.mint) || l.token.params !== 2) bad.push(`token read at ${at} (${l.token.params} params), not ${TOKEN_URL(OPEN.chain, OPEN.mint)}`);
       if (l.token.status !== 200) bad.push(`token status ${l.token.status}`);
-      if (l.token.rowMint !== top.mint) bad.push(`token row ${l.token.rowMint ?? "none"}`);
+      if (l.token.rowMint !== OPEN.mint) bad.push(`token row ${l.token.rowMint ?? "none"}`);
     }
     if (!l.shot) bad.push("no screenshot");
-    say(bad.length === 0, `${tag}: ${bad.length ? bad.join("; ") : `ready, data-token ${top.chain}/${l.shown} (${l.symbol}) = the top of Trending in every chain's lists it read (${lists.map((x) => `${x.chain} ${x.status}`).join(", ")}), its token read 200 for that token on ${top.chain}`}`);
+    say(bad.length === 0, `${tag}: ${bad.length ? bad.join("; ") : `ready, data-token ${OPEN.chain}/${l.shown} (${l.symbol}) = NEARKAT, / on All's token, the rail reading every chain's lists (${lists.map((x) => `${x.chain} ${x.status}`).join(", ")}), its token read 200 for that token on ${OPEN.chain}`}`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }

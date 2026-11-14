@@ -229,3 +229,45 @@ test("TOKEN_URL: the helper's token read for a Solana mint, the mint encoded", (
   assert.equal(source.TOKEN_URL!(TOP), `https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=${TOP}`);
   assert.equal(source.TOKEN_URL!("a&b=c"), "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=a%26b%3Dc");
 });
+
+// ---------------------------------------------------------------------------------------------- what / opens (card nearkat-opens-first)
+const NEARKAT = "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr";
+/** What / reads on a pick: the app's own home read (loadHome), else the old rule (the top Trending token) it replaces. */
+const home = (fetchFn: typeof fetch, pick: Parameters<typeof source.loadTopToken>[1]) => {
+  const s = source as typeof source & { loadHome?: typeof source.loadTopToken };
+  return (s.loadHome ?? source.loadTopToken)(fetchFn, pick, allListsReader());
+};
+
+test("/ on All (a fresh open) opens NEARKAT on Solana, read by its mint alone", async () => {
+  const row = { ...token.answer.row, token: NEARKAT, symbol: "NEARKAT", name: "NearKat" };
+  // the helper answers each token read with that token's row: NEARKAT's, or the recorded top's
+  const nk = helper({ token: { ...token.answer, row } });
+  const top = helper();
+  const calls: string[] = [];
+  const fetchFn: typeof fetch = (input, init) => {
+    calls.push(String(input));
+    return (new URL(String(input)).searchParams.get("token") === NEARKAT ? nk : top).fetchFn(input, init);
+  };
+  const d = await home(fetchFn, "all");
+  assert.equal(d.status === "ready" && d.row.token, NEARKAT, `/ opened ${d.status === "ready" ? `${d.row.symbol} ${d.row.token}` : d.status}, not NEARKAT`);
+  assert.equal(d.status === "ready" && d.row.symbol, "NEARKAT");
+  assert.deepEqual(calls, [source.TOKEN_URL(NEARKAT, "solana")], "one token read, no lists read");
+});
+
+test("/ on a chain pick keeps that chain's top Trending token (NEARKAT is All's opener only)", async () => {
+  for (const c of ["base", "robinhood"] as const) {
+    const top = columnRows(EVM[c].lists as unknown as MarketSnapshot, "trending")[0]!;
+    const { fetchFn } = helper({ evm: true });
+    const d = await home(fetchFn, c);
+    assert.equal(d.status === "ready" && d.row.token, top.token, c);
+  }
+  const { fetchFn } = helper();
+  const d = await home(fetchFn, "solana");
+  assert.equal(d.status === "ready" && d.row.token, TOP, "solana: Solana's own top");
+});
+
+test("/ on All: NEARKAT's failed read is the error state and a 404 the empty state, never another token", async () => {
+  assert.deepEqual(await home(helper({ tokenStatus: 503 }).fetchFn, "all"), { status: "error" });
+  assert.deepEqual(await home(helper({ tokenStatus: 404 }).fetchFn, "all"), { status: "empty" });
+  assert.deepEqual(await home(helper().fetchFn, "all"), { status: "error" }, "a row for another mint");
+});

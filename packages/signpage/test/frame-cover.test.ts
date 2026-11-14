@@ -11,7 +11,8 @@ const src = (p: string): string => readFileSync(new URL(`../src/${p}`, import.me
 const main = src("main.ts");
 
 // the screens with no field and no 12 words: buttons and lines only
-const KEPT = ["loading", "signed-out", "signed-in", "no-prf", "cancelled", "unsupported", "error", "choose", "existing", "signout"];
+// and the two withdraw confirms (card withdraw-address-in-the-app): the given forms draw To and Amount as text, no field
+const KEPT = ["loading", "signed-out", "signed-in", "no-prf", "cancelled", "unsupported", "error", "choose", "existing", "signout", "withdraw-confirm", "pool-withdraw-confirm"];
 
 test("every screen of main.ts is placed: sealed or kept, none left out", () => {
   const union = /type State =([^;]*);/.exec(main)?.[1];
@@ -37,4 +38,16 @@ test("main.ts seals by this set alone: the open and each screen drawn on a shown
   assert.ok(!/const TYPED\b/.test(main), "no set of its own");
   assert.match(main, /shell\?\.open\(SEALED\.has\(/);
   assert.match(main, /function show\([^)]*\): void \{\s*(\/\/[^\n]*\n\s*)*if \(SEALED\.has\(state\)\) shell\?\.seal\(\);/, "the seal is show()'s first step");
+});
+
+// card withdraw-address-in-the-app (owner 14 Nov 12:22Z picked A): the address and amount typed in the app's sheet are
+// drawn on SIGN_HOST as a confirm with no field (test/withdraw-form.test.ts and test/pool-withdraw-form.test.ts hold that
+// the given forms draw no input, select or textarea), so the app's frame stays under it: kept, never sealed.
+test("kept: the two withdraw confirms, each drawn by its form with the given, never the typed form", () => {
+  for (const s of ["withdraw-confirm", "pool-withdraw-confirm"]) assert.ok(!SEALED.has(s), s);
+  assert.match(main, /state === "withdraw-confirm" && withdrawGiven\) \{[\s\S]{0,300}?drawWithdrawForm\([^\n]*withdrawGiven\)\)/);
+  assert.match(main, /state === "pool-withdraw-confirm" && given \? given : undefined/);
+  // the typed form only without a given: withdraw.open with to shows the confirm, pool.withdraw with to its confirm
+  assert.match(main, /show\(withdrawGiven \? "withdraw-confirm" : "withdraw"\)/);
+  assert.match(main, /show\(given \? "pool-withdraw-confirm" : "pool-withdraw"\)/);
 });

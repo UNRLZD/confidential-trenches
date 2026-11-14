@@ -11,8 +11,9 @@ import { usd as usdCents } from "../signin/model.ts";
 import { addressHeading, ADDRESS_STATES, chainsOf, countdown, destAsset, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, ownCoin, parseAmount, formHeld, pickAsset, poolAskAgainIn, poolQuote, poolBalance, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
 import type { Answer, Asset, Dest, DryQuote, PoolOpen, QuoteRefusal, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
-import { useDepositSource, useNow } from "./source.tsx";
-import { useWithdrawOpen } from "../withdraw/WithdrawPick.tsx";
+import { useDepositSheet, useDepositSource, useNow } from "./source.tsx";
+import { useWithdrawForm, WithdrawBody, WithdrawGo } from "../withdraw/WithdrawForm.tsx";
+import "../withdraw/withdraw.css";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import { REPO_ISSUES_URL } from "../../shell/repo.tsx";
@@ -47,7 +48,8 @@ const COPIED_MS = 1500;
 
 export function DepositSheet({ onClose }: { onClose(): void }) {
   const src = useDepositSource();
-  const openWithdraw = useWithdrawOpen();
+  const sheet = useDepositSheet();
+  const withdrawing = sheet.mode === "withdraw";
   // Escape closes it, as the sign-in sheet does (UNRLZD's sheets and drawers close on Escape)
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -166,6 +168,8 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   }
 
   const view = { route: ROUTES.find((r) => r.path === pathname)?.id ?? "discover", sheet: SHEET_ID, fields: { amount } };
+  // the Withdraw segment (card withdraw-address-in-the-app): its own form in this sheet, switched in place
+  const wf = useWithdrawForm({ state, from: sheet.from, hop: src.hop as never, locked: src.locked, moneyOn: src.moneyOn, view: { route: view.route, sheet: SHEET_ID }, close: onClose });
   // the vault deposit's facts (a pool deposit has no held id and no USD amount: model.ts PoolDepositStatus)
   const vault = status && !("pool" in status) ? status : null;
   const heldId = vault?.held_id ?? "";
@@ -310,7 +314,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   }
 
   return (
-    <div className="dep" data-sheet={SHEET_ID} data-state={s} data-dest={dest}>
+    <div className="dep" data-sheet={SHEET_ID} data-state={s} data-dest={dest} data-mode={sheet.mode}>
       <div className="dep-scrim" onClick={onClose} />
       <aside className="dep-box" aria-labelledby="dep-seg-on">
         <div className="grab"><i /></div>
@@ -322,12 +326,12 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
         </div>
         <div className="dbody">
           <div className="dseg">
-            <button type="button" className="on" id="dep-seg-on"><W id="deposit" /></button>
-            <button type="button" disabled={!src.moneyOn || src.locked !== null} data-control="deposit-withdraw" onClick={() => void openWithdraw({ ...view, control: "deposit-withdraw" }, () => src.hop("withdraw.open", {}, { ...view, control: "deposit-withdraw" }))}>
+            <button type="button" className={withdrawing ? undefined : "on"} id={withdrawing ? undefined : "dep-seg-on"} aria-pressed={!withdrawing} data-control="deposit-deposit" onClick={() => sheet.setMode("deposit")}><W id="deposit" /></button>
+            <button type="button" className={withdrawing ? "on" : undefined} id={withdrawing ? "dep-seg-on" : undefined} aria-pressed={withdrawing} disabled={!withdrawing && !signedIn} data-control="deposit-withdraw" onClick={() => sheet.setMode("withdraw")}>
               <W id="withdraw" />
             </button>
           </div>
-          {body}
+          {withdrawing ? <WithdrawBody f={wf} locked={src.locked !== null} /> : body}
         </div>
         <div className="dfoot">
           {/* the risk line (words.ts notice) over every state's action: drawn in one place for the sheet's life, so a
@@ -338,7 +342,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
               <a href={REPO_ISSUES_URL} target="_blank" rel="noopener noreferrer"><W id="feedback" /></a>
             </span>
           </p>
-          {foot}
+          {withdrawing ? <WithdrawGo f={wf} /> : foot}
         </div>
       </aside>
     </div>

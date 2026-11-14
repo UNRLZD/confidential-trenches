@@ -54,7 +54,9 @@ const TOKENS = Object.fromEntries(
 /** Discover's Trending order of a snapshot's rows, as the rail and / take it. */
 const trendingOf = (snaps) => columnRows({ chain: "all", as_of_ms: 0, lists: Object.fromEntries(["new", "trending", "trending_5m", "trending_1h", "graduating"].map((k) => [k, snaps.flatMap((x) => x.lists[k] ?? [])])) }, "trending");
 /** / on All: the top of every chain's Trending column; on Base: Base's top. */
-const TOP_ALL = trendingOf(Object.values(LISTS))[0];
+const TOP_ALL = (({ chain, token }) => ({ chain, id: token }))(trendingOf(Object.values(LISTS))[0]);
+/** / on All at 1440 (card nearkat-opens-first): NEARKAT, answered by the harness's recorded read of it. */
+const OPEN_TOKEN = { chain: "solana", id: "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr" };
 const TOP_BASE = trendingOf([LISTS.base])[0];
 
 const fails = [];
@@ -252,7 +254,9 @@ try {
       return ok ? h.evaluate(() => ({ token: document.querySelector("[data-token-page]")?.getAttribute("data-token") ?? null, badges: [...document.querySelectorAll("main [data-token-page] .tok-cb")].filter((b) => b.getClientRects().length && !b.closest(".tkr-row")).map((b) => b.getAttribute("data-chain")) })) : null;
     };
     let top = await topOf();
-    check(top?.token === TOP_ALL.token, `${tag} / on All: data-token ${top?.token ?? "none"}, not every chain's top Trending ${TOP_ALL.chain}/${TOP_ALL.token}`);
+    // on All the desktop's / opens NEARKAT (card nearkat-opens-first); the phone's Trenches list keeps Trending's top first
+    const allWant = phone ? TOP_ALL : OPEN_TOKEN;
+    check(top?.token === allWant.id, `${tag} / on All: data-token ${top?.token ?? "none"}, not ${phone ? "every chain's top Trending" : "NEARKAT"} ${allWant.chain}/${allWant.id}`);
     await shot(page, `top-all-${w.name}`);
     if (h) {
       await pick(h, page, phone, "base");

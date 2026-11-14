@@ -9,6 +9,7 @@
 
 import type { Chain, OrderTrigger } from "../orders/record.ts";
 import { deepFreeze } from "../freeze.ts";
+import type { ExitChain } from "../checks/oneclick-exit.ts";
 
 /**
  * The twenty-eight request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
@@ -83,6 +84,16 @@ interface Open {
   return_key: ReturnKey;
 }
 
+/**
+ * What the app's Withdraw sheet took (card withdraw-address-in-the-app): where to (`to`, as typed) and how much, a
+ * decimal `amount` in the token's units or `max`, everything the place can send. All or none: none opens the typed
+ * form. SIGN_HOST never trusts it: it checks both by its own rules and draws them whole for the user's Confirm.
+ */
+export type WithdrawGiven =
+  | { to?: never; amount?: never; max?: never }
+  | { to: string; amount: string; max?: never }
+  | { to: string; max: true; amount?: never };
+
 /** The params of each kind, spread into the request envelope next to v, id and type. */
 export interface SignpageParams {
   /**
@@ -116,8 +127,13 @@ export interface SignpageParams {
   "orders.cancel": { order_ids: string[] };
   /** Send what a fresh wallet holds back to the vault. */
   return: { chain: Chain; wallet: string };
-  /** Open the withdraw form; with `from_id`, the move out of a one-time id or an arming account. The address is typed there. */
-  "withdraw.open": Open & { from_id?: string };
+  /**
+   * Open the withdraw form; with `from_id`, the move out of a one-time id or an arming account, whose account is typed
+   * there. With `to` (card withdraw-address-in-the-app, owner 14 Nov 12:22Z), the address and the amount (or `max`: all
+   * Cash can send) were typed in the app's own Withdraw sheet: SIGN_HOST checks both itself and shows them on a confirm
+   * sheet over the app, kept and inert, and only the user's Confirm there sends. Without either, the typed form.
+   */
+  "withdraw.open": Open & WithdrawGiven & { from_id?: string };
   /** Open the sign-in for one way in. */
   "signin.open": Open & { way: SigninWay };
   /** Open the backup screen. */
@@ -151,8 +167,10 @@ export interface SignpageParams {
    * wallet answers every wallet's transaction in `txs`, and part_filled when some of them did not fill.
    */
   "pool.sell": { chain: TradeChain; token: string; slippage_bps: number } & ({ amount: string; share_bps?: never } | { share_bps: number; amount?: never });
-  /** Open SIGN_HOST's withdraw screen for the chain's pool. The address is typed there, never sent by the app. */
-  "pool.withdraw": Open & { chain: PoolChain };
+  /** Open SIGN_HOST's withdraw screen for the chain's pool: with `to`, its confirm sheet for the address and amount the
+   *  app's Withdraw sheet took (as withdraw.open's) and `dest`, the chain the money arrives on when not the pool's own
+   *  (through 1Click; only with `to`), else the typed form. */
+  "pool.withdraw": Open & { chain: PoolChain; dest?: ExitChain } & WithdrawGiven;
   /** The assets the device can quote a deposit from, each with its minimum and the most one deposit takes. Signs nothing
    *  and needs no sign-in. */
   "deposit.assets": Record<never, never>;

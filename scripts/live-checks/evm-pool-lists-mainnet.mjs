@@ -26,10 +26,12 @@
 //   node scripts/live-checks/evm-pool-lists-mainnet.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes every answer read as the good run of evm-pool-lists-mainnet.answers.json, and a real bad run: Base on
-// the pair its sync had before (its quote list's first two, publicnode and blastapi).
+// the pair its sync had before (its quote list's first two, publicnode and blastapi). --sign-headers <file> judges that
+// _headers file's /* policy in place of SIGN_HOST's served one (a seat change recorded before its sign deploy, card
+// first-sign-in-reads-fast-on-live: the committed packages/signpage/public/_headers is the good answer until then).
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../../packages/kit/src/index.ts";
@@ -122,6 +124,9 @@ export function judgePage(page, kits) {
   return lacks.length ? { ok: false, line: `SIGN_HOST's connect-src lacks ${lacks.join(" ")}` } : { ok: true, line: `SIGN_HOST's connect-src names every seat (${seats.length})` };
 }
 
+/** The policy a _headers file's /* rule sets on the page (its first Content-Security-Policy line), null when none. */
+export const cspOfHeaders = (t) => /^\/\*\n(?: {2}[^\n]*\n)*? {2}Content-Security-Policy: ([^\n]*)/m.exec(t)?.[1] ?? null;
+
 /** Both chains and SIGN_HOST's policy: { verdict, ok, lines }: FAIL on any wrong answer, else INCONCLUSIVE when a chain
  *  had a seat answer nothing, else PASS. `kits`: each chain's (kitList) unless a test names others. */
 export async function check(transport, kits = { base: kitList("base"), robinhood: kitList("robinhood") }, page) {
@@ -147,7 +152,9 @@ async function main(argv) {
   const at = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);
   const record = at("--record");
   const kits = { base: kitList("base"), robinhood: kitList("robinhood") };
-  const page = await read(SIGN_HOST);
+  const headers = at("--sign-headers");
+  const served = await read(SIGN_HOST);
+  const page = headers === undefined ? served : { ...served, csp: cspOfHeaders(readFileSync(headers, "utf8")) };
   const rec = recorder();
   const r = await check(rec.transport, kits, page);
   for (const l of r.lines) console.log(`${r.verdict} ${l}`);

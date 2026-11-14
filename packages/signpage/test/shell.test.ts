@@ -534,6 +534,35 @@ test("reload waits for a running trade to settle (the review's reload finding): 
   assert.equal(d.calls.reload, 1);
 });
 
+// card withdraw-address-in-the-app: the confirm sheet for an address typed in the app is an untyped open (no field to
+// type into), so the frame stays; the app cannot change the address it shows: another withdraw.open or pool.withdraw
+// with another `to`, sent while the sheet shows, reaches no handler.
+test("the given withdraw's confirm sheet keeps the frame; a withdraw.open or pool.withdraw with another address sent under it reaches no handler, and no reload", async () => {
+  const d = fakeDom();
+  const opened: unknown[] = [];
+  let sh: ReturnType<typeof mountShell> | null = null;
+  const handler = (p: Record<string, unknown>) => (opened.push(p.to), { result: { pending: true as const }, then: () => sh!.open(false) });
+  sh = mountShell(d.doc, { state: () => signedOutState(), kinds: { "withdraw.open": handler, "pool.withdraw": handler } });
+  const f = d.frames()[0]!;
+  f.fire("load");
+  await until(() => d.posted.length === 1, "ready");
+  const first = { v: 1, id: crypto.randomUUID(), type: "withdraw.open", return_key: "withdraw", to: "alice.near", amount: "5" };
+  d.send(first, f.contentWindow);
+  assert.deepEqual(await answerTo(d, first.id), { v: 1, id: first.id, ok: true, result: { pending: true } });
+  await until(() => !sh!.layer.hidden, "the confirm sheet shows");
+  assert.deepEqual(d.frames(), [f], "the frame stays in the page under the confirm sheet");
+  assert.equal(f.inert, true);
+  const before = d.posted.length;
+  d.send({ v: 1, id: crypto.randomUUID(), type: "withdraw.open", return_key: "withdraw", to: "mallory.near", amount: "5" }, f.contentWindow);
+  d.send({ v: 1, id: crypto.randomUUID(), type: "pool.withdraw", return_key: "withdraw", chain: "solana", to: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", amount: "1" }, f.contentWindow);
+  await quiet();
+  assert.deepEqual(opened, ["alice.near"], "only the first, sent before the sheet showed, reached a handler");
+  assert.equal(d.posted.length, before, "no answer while the sheet shows");
+  assert.deepEqual(d.calls, { replace: [], reload: 0, assign: 0 }, "no reload");
+  sh.close();
+  assert.deepEqual(d.frames(), [f], "the app comes back as it was, no new frame");
+});
+
 test("a kind the host answers (signin.open): its answer goes to the frame before its then() opens the layer", async () => {
   const d = fakeDom();
   let sh: ReturnType<typeof mountShell> | null = null;

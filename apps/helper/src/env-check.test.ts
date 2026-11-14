@@ -298,6 +298,8 @@ test("evm-pool-sync-holds: a keyed Base or Robinhood URL whose operator runs tha
     ["BASE_RPC_URL_QUICKNODE", `https://x.base.api.pocket.network/${KEY}`, "pocket.network", "base"],
     ["ROBINHOOD_RPC_URL_DRPC_1", `https://robinhood.rpc.grove.city/v1/${KEY}`, "pocket.network", "robinhood"],
     ["ROBINHOOD_RPC_URL", `https://user:${KEY}@rpc.mainnet.chain.robinhood.com/?k=${KEY}`, "robinhood.com", "robinhood"],
+    // Base's pool list's second seat since card first-sign-in-reads-fast-on-live (a history source before it)
+    ["BASE_RPC_URL", `https://base.rpc.blxrbdn.com/${KEY}`, "blxrbdn.com", "base"],
   ] as const) {
     const m = why({ [name]: url });
     assert.equal(m, `${name}: its operator ${op} runs the device's ${chain} pool list`, url);
@@ -306,7 +308,6 @@ test("evm-pool-sync-holds: a keyed Base or Robinhood URL whose operator runs tha
   // review P3-2: the history list's operators (the kit's EVM_POOL_HISTORY) are the device's sources too: a keyed URL of
   // one is that operator counted twice, refused the same way, naming the variable only
   for (const [name, url, op] of [
-    ["BASE_RPC_URL", `https://base.rpc.blxrbdn.com/${KEY}`, "blxrbdn.com"],
     ["BASE_RPC_URL_QUICKNODE", `https://base.gateway.tenderly.co/${KEY}`, "tenderly.co"],
   ] as const) {
     const m = why({ [name]: url });

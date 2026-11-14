@@ -32,7 +32,25 @@ const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-skeleton.answe
 // every answer recorded before card signing-views-open-over-the-app predates its Permissions-Policy (picture-in-picture
 // and fullscreen denied): it fails that line too, and on nothing else that card changed
 const PRE_PP = (rec) => `BAD permissions-policy: "${rec.headers["permissions-policy"]}", want "${HEADERS["permissions-policy"]}"`;
+// card first-sign-in-reads-fast-on-live: the answer recorded before Base's second pool seat (base.rpc.blxrbdn.com in the
+// kit's venue origins) is kept as beforeBaseSeat, and good is that answer with its connect-src the committed _headers'
+// (the policy's) until the next deploy is recorded, so every reader of good (this test, packages/signpage/scripts/
+// frame.e2e.mjs) holds the committed policy; beforeBaseSeat must fail on that directive alone
+const RECORDED = ANSWERS.beforeBaseSeat;
+const COMMITTED_CONNECT = /^\/\*\n(?: {2}[^\n]*\n)*? {2}Content-Security-Policy: ([^\n]*)/m
+  .exec(readFileSync(path.join(HERE, "../../packages/signpage/public/_headers"), "utf8"))[1]
+  .split(";")
+  .map((d) => d.trim())
+  .find((d) => d.startsWith("connect-src "));
+const withConnect = (a, c) => {
+  const csp = a.headers["content-security-policy"];
+  const old = csp.split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
+  return { ...a, headers: { ...a.headers, "content-security-policy": csp.replace(old, c) } };
+};
 const GOOD = ANSWERS.good;
+test("good is beforeBaseSeat with the committed _headers' connect-src, and nothing else changed", () => {
+  assert.deepEqual(GOOD, withConnect(RECORDED, COMMITTED_CONNECT));
+});
 // every answer recorded before card restore-shows-the-balance-in-seconds names prover-worker alone in trusted-types
 const PRE_TT = 'BAD CSP trusted-types: "prover-worker", want "prover-worker walk-worker"';
 const APP = "https://ct-app.unrealized.trade";
@@ -50,6 +68,9 @@ const replay = (a) => async () => ({ status: a.status, headers: new Headers(a.he
 
 test("recorded good answer: every header equals the policy: PASS", async () => {
   const r = judge(await read(undefined, replay(GOOD)));
+  const before = judge(await read(undefined, replay(RECORDED)));
+  assert.deepEqual(before.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(":")[0]), ["BAD CSP connect-src"]);
+  assert.ok(!RECORDED.headers["content-security-policy"].includes(" https://base.rpc.blxrbdn.com https://rpc.sentio.xyz"));
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.includes(`ok  CSP frame-ancestors: "'none'"`));
   assert.ok(r.lines.includes(`ok  CSP frame-src: "${APP}"`));
@@ -150,11 +171,11 @@ test("recorded bad answer: the good build before card evm-pool-sync-holds (no Ba
 test("card evm-pool-sync-holds: every origin of the kit's EVM_POOL_HISTORY is in the pinned connect-src, and POOL_HISTORY is exactly those the kit's venue origins leave out", async () => {
   const { EVM_POOL_HISTORY } = await import("../../packages/kit/src/index.ts");
   const history = [...new Set(Object.values(EVM_POOL_HISTORY).flat().map((u) => new URL(u).origin))];
-  assert.ok(history.length >= 2, `the kit's history origins: ${history.join(" ")}`);
+  assert.ok(history.length >= 1, `the kit's history origins: ${history.join(" ")}`);
   const pinned = CSP.find(([k]) => k === "connect-src")[1].split(" ");
   for (const o of history) assert.equal(pinned.filter((x) => x === o).length, 1, `${o} once in the pinned connect-src`);
   const venues = evmOrigins(venuesOf(SIGN_CHAINS));
-  assert.deepEqual(POOL_HISTORY.split(" "), history.filter((o) => !venues.includes(o)));
+  assert.deepEqual(POOL_HISTORY === "" ? [] : POOL_HISTORY.split(" "), history.filter((o) => !venues.includes(o)));
 });
 
 test("recorded bad answer: the good build before card wallet-restore-reads-ux (no Pocket Solana gateway in connect-src): FAIL on connect-src alone", () => {

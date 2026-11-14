@@ -9,15 +9,16 @@
 // the terminal's frame inside the shell, and each shot is the whole window. Per shot: the token route drew the page in
 // its state, no horizontal scroll, no text under 11 px in the page, the design's tiles (Liquidity reads In curve on the
 // curve token, a Tax tile), on desktop the strip clear of the trade column with no tile cut, on the phone the back, star
-// and share row, the page's data-token is the helper's top Trending token (an `?fx=` in the address bar picks
-// nothing), Retry reads the lists again, and on the phone the bottom bar sits above the tab bar and the last tile
+// and share row, the page's data-token is the state's token (an `?fx=` in the address bar picks
+// nothing), Retry reads the token again (the phone's list states: the lists), and on the phone the bottom bar sits above the tab bar and the last tile
 // scrolls clear of it and the tile row scrolls sideways inside itself with every tile in reach (the page never does). Requests to any other host are
 // refused and listed. Draft words drawn are listed.
 // The lower panel and About (card app-token-lower-panel): the tabs in R5's order, Trades the tape's rows (or No data),
 // Holders the helper's holder rows with the read's count and top share, or Jupiter's count and top share and No data
 // for the rows; About's window tiles and flow bar in the trade column (the desktop) and the trade sheet (the phone).
 // On the phone / is the Trenches list (owner 12 Nov): the token states open it and tap its first row, as a trader does;
-// the lists states (loading, empty, error) are the list's own, Retry included.
+// the lists states (loading, empty, error) are the list's own, Retry included. Off the phone (card nearkat-opens-first)
+// a token state opens /token/solana/<id>, and a lists state opens /, whose NEARKAT read answers that state.
 // --signed-out runs the same states in the shell signed out.
 //   node apps/terminal/test/token-page/run.mjs [--shots <dir>] [--only <id,id>] [--signed-out]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -127,6 +128,9 @@ function candles(p, tf) {
 
 /** A fixture as the helper sends it now: its age kept, read at the run's clock; the route reads Solana only, so the
  *  edges token (a NEAR id, the longest text) is answered as a Solana row. */
+/** What / opens on All off the phone (card nearkat-opens-first, routes.ts OPEN_TOKEN). */
+const OPEN = "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr";
+
 function live(key) {
   const shift = Math.floor((Date.now() - FIXTURE_NOW_MS) / 1000);
   const r = TOKENS[key];
@@ -148,6 +152,13 @@ function helperAnswer(s, url, calls) {
   }
   if (url.pathname === "/v1/market/token") {
     calls.tokens++;
+    if (!s.top) {
+      // a lists state off the phone: / on All reads NEARKAT alone (card nearkat-opens-first), so its read answers the
+      // state: never ending (loading), not known (empty) or failed (error)
+      if (url.searchParams.get("token") !== OPEN) return json(404, { error: "unknown token" });
+      if (s.lists === "hang") return "hang";
+      return s.lists === "empty" ? json(404, { error: "unknown token" }) : json(s.lists, { error: "unavailable" });
+    }
     if (typeof s.token === "number") return json(s.token, { error: "unavailable" });
     const row = live(s.top);
     if (url.searchParams.get("token") !== row.token) return json(404, { error: "unknown token" });
@@ -270,7 +281,10 @@ async function openAt(browser, route, w, s, calls) {
   page.on("pageerror", (e) => errors.push(String(e)));
   const consoles = [];
   page.on("console", (m) => m.type() === "error" && consoles.push(`${m.text()} (${m.location()?.url?.split("?")[0] ?? ""})`));
-  await page.goto(`${APP_HOST}/${s.query ?? ""}`, { waitUntil: "load" });
+  // off the phone a token state opens the token's own address, /token/solana/<id> (/ on All opens NEARKAT, card
+  // nearkat-opens-first); the phone taps its Trenches list's first row to the same address; a lists state opens /
+  const at = !w.isMobile && s.top ? `token/solana/${TOKENS[s.top].token}` : "";
+  await page.goto(`${APP_HOST}/${at}${s.query ?? ""}`, { waitUntil: "load" });
   let f = null;
   for (const until = Date.now() + 8_000; !f && Date.now() < until; ) {
     f = page.frames().find((x) => x !== page.mainFrame() && x.url().startsWith(`${APP_HOST}/`)) ?? null;
@@ -627,8 +641,9 @@ try {
         const back = await f.locator(sel).waitFor({ timeout: 5_000 }).then(() => true, () => false);
         check(back, `${tag}: Retry lost the page`);
         const read = calls.chains.slice(before).sort().join(",");
-        if (phone && !s.lists) {
-          // the phone's token page is a row's tap away (/token/<chain>/<id>): Retry reads that token again, not the lists
+        if (!phone || !s.lists) {
+          // the token page at /token/<chain>/<id> (the phone's a row's tap away), or / on All off the phone (NEARKAT):
+          // Retry reads that token again, not the lists
           check(read === "" && calls.tokens - tokensBefore === 1, `${tag}: Retry read the lists of [${read}] and the token ${calls.tokens - tokensBefore} time(s), not the token once`);
         } else {
           // one read of the lists: each chain's once

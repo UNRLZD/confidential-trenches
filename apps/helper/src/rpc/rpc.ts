@@ -50,7 +50,7 @@
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
 import { AsyncLocalStorage } from "node:async_hooks";
-import { HELPER_SOLANA_BLOCK_HEADER } from "@blindfill/kit";
+import { evmPoolVenues, HELPER_SOLANA_BLOCK_HEADER } from "@blindfill/kit";
 import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_CLIENTS, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
@@ -130,6 +130,58 @@ export const HOLD_WAIT_MS = 1_500;
 export const WALK_MS = 12_000;
 /** The least time left for a walk's next send to start. [design: a quarter second, about one provider's answer.] */
 const WALK_SEND_MIN_MS = 250;
+/**
+ * Finalized logs outside the caller's share (card helper-pool-logs-outside-the-caller-budget). A fresh sign-in reads each
+ * EVM pool's whole deposit history on the keyed-only route, its second seat, page by page from the pool's deploy block:
+ * the same pages for every device (packages/wallet/src/pool/evm.ts, EVM_POOL_LOG_PAGE_BLOCKS doubling to
+ * EVM_POOL_LOG_PAGE_MAX_BLOCKS). Those logs never change once their blocks are finalized, so on that route an eth_getLogs
+ * alone in its request, its fromBlock and toBlock block numbers and toBlock at or below the chain's finalized head as the
+ * helper reads it (never as the caller says), is kept by its exact params and answered again from here with the caller's
+ * id, drawing nothing of the caller's share (RPC_PAGE_NEED) or the chain's total: on the vault lead's run (af4fc86da, 14
+ * Nov) the pool's 8 pages took 1.3 s alone and 16-31 s inside a sign-in's other reads on the same share. A first ask
+ * draws as every read does; a tag ("latest", "finalized") or a range past the head is never kept. Every answer kept is a
+ * provider's well-formed 200 with a result list and no key in it (callList); the page still takes a log only on both of
+ * its seats' same logs, so a kept answer can stall a sign-in, never steer one.
+ * The bound: LOG_CACHE_ENTRIES answers and LOG_CACHE_BYTES of params and answers together, the least recently used out
+ * first, each kept LOG_CACHE_MS at most (a provider's wrong answer would otherwise stall every sign-in that reads that
+ * page until the helper restarts). [design: 1,024 entries: a pool's life is 8 pages at 800,000 blocks; 32 MiB: an
+ * RPC_ANSWER_MAX page is 4 MiB, so eight of the largest fit; 1 h: sign-ins an hour apart share the walk.]
+ */
+export const LOG_CACHE_ENTRIES = 1_024;
+export const LOG_CACHE_BYTES = 32 * 1024 * 1024;
+export const LOG_CACHE_MS = 60 * 60 * 1000;
+/** The helper reads a chain's finalized head (eth_getBlockByNumber "finalized" on the keyed list, on the chain's total,
+ *  no caller's share) at most once this often, and only for a page that ends past the head it holds. [design: 10 s: the
+ *  page's tail reads past the head on every round; Robinhood's finalized block lags its head 155 s or more.] */
+export const FINAL_HEAD_MS = 10_000;
+/** A block number as an EVM node writes it: 0x, lowercase or uppercase hex, no leading zero, at most 64 bits. */
+const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
+/**
+ * A cold walk too (the first sign-in after a helper restart, the cache empty): a first ask of a finalized page of the
+ * chain's own pool's logs (its address alone, the kit's pin, evmPoolVenues) draws on the chain's total under its own
+ * name for the caller, POOL_LOGS_CLIENT and the caller's address, so it never spends the caller's share (RPC_PAGE_NEED)
+ * and the caller's other reads never spend it. That allowance is the chain's page share again, 30 per 10 s on Base and
+ * Robinhood: one cold walk of Robinhood's pool is 10 pages on 14 Nov 17:08Z (100,000, 200,000, 400,000 blocks, then
+ * 800,000, from block 108,420,674 to the finalized head 114,302,775, the last clipped), about one page more for each day
+ * of the pool's life (a block every 100 ms), so it fits three times over and stays inside one window until the pool is
+ * about 20 days old, past which a walk goes on in the next window after the 429's wait. Base's is 3 pages. The risk it
+ * opens, bounded: one caller can spend 30 paid-key calls per 10 s more than before, only on finalized pages of the
+ * pool's own logs, each one filling the cache so asking it again costs nothing; every one still draws on the chain's
+ * total, so callers together never pass the providers' plan.
+ */
+export const POOL_LOGS_CLIENT = "pool-logs";
+/** A request the finalized-logs cache may keep (LOG_CACHE_ENTRIES): one eth_getLogs, one filter with numbers for both ends
+ *  and no blockHash; its key (the chain and the exact params as sent), its toBlock, and whether its address is the
+ *  chain's pool (`pool`, the kit's pin, lowercase), alone. Anything else: null. */
+function finalLogsOf(chain: RpcChain, r: Record<string, unknown>, pool: string | undefined): { key: string; to: bigint; pool: boolean } | null {
+  if (!EVM_CHAINS.has(chain) || r.method !== "eth_getLogs" || !Array.isArray(r.params) || r.params.length !== 1) return null;
+  const f = r.params[0];
+  if (!isPlain(f) || Object.hasOwn(f, "blockHash") || typeof f.fromBlock !== "string" || typeof f.toBlock !== "string") return null;
+  if (!BLOCK_NUMBER.test(f.fromBlock) || !BLOCK_NUMBER.test(f.toBlock)) return null;
+  const from = BigInt(f.fromBlock);
+  const to = BigInt(f.toBlock);
+  return from > to ? null : { key: `${chain} ${JSON.stringify(r.params)}`, to, pool: pool !== undefined && typeof f.address === "string" && f.address.toLowerCase() === pool };
+}
 /** A send's timeout with `left` ms of its walk's time left: RPC_TIMEOUT_MS at most, whole ms (AbortSignal.timeout refuses
  *  a fraction, and the clock is a monotonic one in fractional ms). */
 const sendMs = (left: number): number => Math.max(1, Math.floor(Math.min(RPC_TIMEOUT_MS, left)));
@@ -469,11 +521,13 @@ type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timi
  *  and pace's wait before a send (rpc-wait); `keyedMs`, a keyed Solana provider's time before the read fell back
  *  (rpc-keyed); `last`, the last send, the one that answered when the read did: its time and its provider's environment
  *  NAME (rpc), never its URL, host or key. */
-type Trace = { waitMs: number; keyedMs?: number; last?: { name: string; ms: number } };
+type Trace = { waitMs: number; keyedMs?: number; last?: { name: string; ms: number }; cached?: true };
 const traces = new AsyncLocalStorage<Trace>();
-/** A trace as Server-Timing entries: rpc-keyed when the read fell back, then rpc-wait and rpc always ("none": no send). */
+/** A trace as Server-Timing entries: rpc-keyed when the read fell back, rpc-cache when the finalized-logs cache answered
+ *  it (LOG_CACHE_ENTRIES), then rpc-wait and rpc always ("none": no send). */
 const timingOf = (t: Trace): string[] => [
   ...(t.keyedMs === undefined ? [] : [`rpc-keyed;dur=${Math.round(t.keyedMs)};desc="fell back"`]),
+  ...(t.cached === undefined ? [] : ['rpc-cache;desc="hit"']),
   `rpc-wait;dur=${Math.round(t.waitMs)}`,
   `rpc;dur=${Math.round(t.last?.ms ?? 0)};desc="${t.last?.name ?? "none"}"`,
 ];
@@ -797,6 +851,72 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (limitsOf(c).perMethod !== undefined) for (const m of methods) draws.push([`${c} ${m}`, 1]);
     return draws;
   };
+  // card helper-pool-logs-outside-the-caller-budget: the finalized-logs cache (LOG_CACHE_ENTRIES), least recently used
+  // first in the Map's order, each entry its result as JSON text, its size and when it was kept
+  const logCache = new Map<string, { result: string; bytes: number; at: number }>();
+  let logCacheBytes = 0;
+  const logCacheDrop = (k: string): void => {
+    const e = logCache.get(k);
+    if (e === undefined) return;
+    logCache.delete(k);
+    logCacheBytes -= e.bytes;
+  };
+  const logCacheGet = (k: string): string | undefined => {
+    const e = logCache.get(k);
+    if (e === undefined) return undefined;
+    if (now() - e.at >= LOG_CACHE_MS) {
+      logCacheDrop(k);
+      return undefined;
+    }
+    logCache.delete(k);
+    logCache.set(k, e);
+    return e.result;
+  };
+  /** Keeps a provider's answer to `k` when it is a 200 holding a result list (never an error, a cap or a refusal). */
+  const logCachePut = (k: string, a: Answer): void => {
+    if (a.status !== 200) return;
+    let answer: unknown;
+    try {
+      answer = parse(a.body);
+    } catch {
+      return;
+    }
+    if (!isPlain(answer) || Object.hasOwn(answer, "error") || !Array.isArray(answer.result)) return;
+    const result = JSON.stringify(answer.result);
+    const bytes = Buffer.byteLength(k) + Buffer.byteLength(result);
+    if (bytes > LOG_CACHE_BYTES) return;
+    logCacheDrop(k);
+    while (logCache.size >= LOG_CACHE_ENTRIES || logCacheBytes + bytes > LOG_CACHE_BYTES) logCacheDrop(logCache.keys().next().value as string);
+    logCache.set(k, { result, bytes, at: now() });
+    logCacheBytes += bytes;
+  };
+  /** The chain's own pool, as the kit pins it (lowercase), for POOL_LOGS_CLIENT; undefined off the EVM chains. */
+  const poolOf = (c: RpcChain): string | undefined => (EVM_CHAINS.has(c) ? (evmPoolVenues() as Readonly<Record<string, { pool?: string } | undefined>>)[c]?.pool?.toLowerCase() : undefined);
+  // each EVM chain's finalized head as the helper last read it (0n: none yet), when, and the read in flight
+  const finalHeads = new Map<RpcChain, { n: bigint; at: number; reading?: Promise<void> }>();
+  /** Whether block `to` is finalized on `c`, by the helper's own read of the head on `providers` (the chain's keyed
+   *  URLs): read again only when `to` is past the head held and FINAL_HEAD_MS has passed since the last read, one read at
+   *  a time, outside the caller's trace and share (the chain's total, as the helper's own reads). A head only rises. */
+  const finalized = async (c: RpcChain, to: bigint, providers: readonly string[]): Promise<boolean> => {
+    let h = finalHeads.get(c);
+    if (h === undefined) finalHeads.set(c, (h = { n: 0n, at: -Infinity }));
+    if (to <= h.n) return true;
+    if (h.reading === undefined && now() - h.at >= FINAL_HEAD_MS) {
+      const head = h;
+      head.at = now();
+      head.reading = traces.exit(async () => {
+        const forward = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["finalized", false] });
+        const a = await callList(c, providers, forward, ["eth_getBlockByNumber"], undefined, false, now() + WALK_MS);
+        if (a.status !== 200) return;
+        const n = (JSON.parse(a.body) as { result?: { number?: unknown } | null }).result?.number;
+        if (typeof n === "string" && BLOCK_NUMBER.test(n) && BigInt(n) > head.n) head.n = BigInt(n);
+      })
+        .catch(() => undefined)
+        .finally(() => (head.reading = undefined));
+    }
+    await h.reading;
+    return to <= h.n;
+  };
 
   async function readAnswer(r: Response): Promise<string | undefined> {
     if (Number(r.headers.get("content-length") ?? "0") > RPC_ANSWER_MAX) return undefined;
@@ -880,6 +1000,25 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (keyedOnly) {
       const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT)).map((k) => k.url);
       if (own.length === 0) return UPSTREAM();
+      // card helper-pool-logs-outside-the-caller-budget: a finalized page of logs kept before is answered here, drawing
+      // nothing; a first ask draws as any read, and is kept once its toBlock reads finalized (LOG_CACHE_ENTRIES)
+      const logs = Array.isArray(out) ? null : finalLogsOf(c, out as Record<string, unknown>, poolOf(c));
+      if (logs !== null) {
+        const id = (out as { id: unknown }).id;
+        const kept = logCacheGet(logs.key);
+        if (kept !== undefined) {
+          const t = traces.getStore();
+          if (t !== undefined) t.cached = true;
+          return { status: 200, body: `{"jsonrpc":"2.0","id":${JSON.stringify(id)},"result":${kept}}` };
+        }
+        // finalized by the head held, else by a read of it (one at a time, FINAL_HEAD_MS apart): a pool page's first
+        // ask then draws on its own allowance (POOL_LOGS_CLIENT), any other on the caller's share as before
+        const final = await finalized(c, logs.to, own);
+        const who = final && logs.pool && client !== undefined ? `${POOL_LOGS_CLIENT} ${client}` : client;
+        const a = await callList(c, own, forward, methods, who, reserved, by);
+        if (final) logCachePut(logs.key, a);
+        return a;
+      }
       if (c !== "near" || client === undefined) return callList(c, own, forward, methods, client, reserved, by);
       // the seat's day (review P3-3 of 997ce7a7f): looked at first, so a read past it costs no share; taken only once the
       // share admits the read (a share refusal spends none of it); given back when the walk answers its own 429 or 503 (no

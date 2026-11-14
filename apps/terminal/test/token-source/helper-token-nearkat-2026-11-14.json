@@ -1,0 +1,168 @@
+{
+  "read": "GET /v1/market/token?chain=solana at HELPER_HOST for the mint 6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr, NEARKAT, at 2026-11-14T17:26Z (card nearkat-opens-first: the token / opens on All), HTTP 200. The row is kept as a field list and its values, as helper-token-2026-11-03.json is",
+  "fields": [
+    "chain",
+    "token",
+    "symbol",
+    "name",
+    "icon",
+    "venue",
+    "label",
+    "created_s",
+    "price_usd",
+    "mc_usd",
+    "vol_24h_usd",
+    "chg_5m_bps",
+    "chg_1h_bps",
+    "chg_24h_bps",
+    "liq_usd",
+    "holders",
+    "top10_bps",
+    "src",
+    "as_of_ms",
+    "creator",
+    "creator_sold_bps",
+    "dev_bps",
+    "snipers_bps",
+    "mint_auth",
+    "freeze_auth",
+    "vol_5m_usd",
+    "buys_5m",
+    "sells_5m",
+    "net_5m_usd",
+    "risk_src",
+    "launchpad",
+    "curve_bps",
+    "vol_1h_usd",
+    "chg_4h_bps",
+    "buys_24h",
+    "sells_24h",
+    "buys_1h",
+    "sells_1h"
+  ],
+  "row": [
+    "solana",
+    "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr",
+    "NEARKAT",
+    "NearKat",
+    true,
+    null,
+    null,
+    1788741259,
+    "0.000696704842335",
+    "688709.940637",
+    "29748.2453467",
+    548,
+    517,
+    -1680,
+    "59261.4901764",
+    7662,
+    1943,
+    "jupiter",
+    1794677219329,
+    "ApWMt5Xnvz71nxsEVipGnobd7aAQ4MKGV3Vu8MSWNeX4",
+    null,
+    54,
+    null,
+    false,
+    false,
+    "428.899464395",
+    1,
+    1,
+    "-427.510964636",
+    "jupiter",
+    "stonkfun",
+    10000,
+    "948.480873311",
+    null,
+    172,
+    112,
+    5,
+    5
+  ],
+  "rest": {
+    "decimals": 6,
+    "pool": "G19cwhvY4teiUm3jgjrDX5RfzfCnSXe1s5upRXVmTQki",
+    "risk": {
+      "mint_auth": {
+        "v": false,
+        "src": "chain",
+        "as_of_ms": 1794677219328
+      },
+      "freeze_auth": {
+        "v": false,
+        "src": "chain",
+        "as_of_ms": 1794677219328
+      },
+      "lp": {
+        "v": null,
+        "src": "none",
+        "as_of_ms": 1794677219328
+      },
+      "top10_bps": {
+        "v": 1943,
+        "src": "chain",
+        "as_of_ms": 1794677219501
+      },
+      "dev_bps": {
+        "v": 54,
+        "src": "jupiter",
+        "as_of_ms": 1794677219329
+      },
+      "snipers_bps": {
+        "v": null,
+        "src": "none",
+        "as_of_ms": 1794677219328
+      },
+      "holders": {
+        "v": 7662,
+        "src": "jupiter",
+        "as_of_ms": 1794677219329
+      },
+      "liq_usd": {
+        "v": "59261.4901764",
+        "src": "jupiter",
+        "as_of_ms": 1794677219329
+      },
+      "age_s": {
+        "v": 5935960,
+        "src": "jupiter",
+        "as_of_ms": 1794677219329
+      },
+      "tax": {
+        "v": {
+          "buy_bps": 300,
+          "sell_bps": 300
+        },
+        "src": "chain",
+        "as_of_ms": 1794677219328
+      },
+      "honeypot": {
+        "v": null,
+        "src": "none",
+        "as_of_ms": 1794677219328
+      },
+      "insiders_bps": {
+        "v": null,
+        "src": "none",
+        "as_of_ms": 1794677219328
+      },
+      "bundlers_bps": {
+        "v": null,
+        "src": "none",
+        "as_of_ms": 1794677219328
+      },
+      "fresh_bps": {
+        "v": null,
+        "src": "none",
+        "as_of_ms": 1794677219328
+      }
+    },
+    "route": "unknown",
+    "filling": false,
+    "links": {
+      "site": "https://nearkat.xyz/",
+      "x": "https://x.com/NearKatSol"
+    }
+  }
+}

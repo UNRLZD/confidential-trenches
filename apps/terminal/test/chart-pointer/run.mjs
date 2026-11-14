@@ -86,7 +86,8 @@ function answer(u, st) {
     const top = [{ ...r, vol_1h_usd: r.vol_1h_usd ?? "1000" }];
     return json(200, { chain: "solana", as_of_ms: Date.now(), lists: { new: [], trending: top, trending_5m: [], trending_1h: top, graduating: [] } });
   }
-  if (u.pathname === "/v1/market/token") return json(200, { row: r, decimals: 6, pool: null, risk: {}, route: "ok" });
+  // the row named as the token asked: / on All off the phone opens NEARKAT (card nearkat-opens-first), the phone a list row
+  if (u.pathname === "/v1/market/token") return json(200, { row: { ...r, token: u.searchParams.get("token") ?? r.token }, decimals: 6, pool: null, risk: {}, route: "ok" });
   if (u.pathname === "/v1/market/candles") {
     if (u.searchParams.get("tf") !== "15m") return json(200, { tf: u.searchParams.get("tf"), candles: [], src: "chain", as_of_ms: Date.now() }, { "x-helper-source": "chain", "access-control-expose-headers": "X-Helper-Source" });
     let b = bars(base, st.late);

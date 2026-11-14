@@ -278,7 +278,7 @@ export const resetPageEvmHolds = (): void => EVM_HOLDS.clear();
  *  test/pool-restore.test.ts holds each equal to the kit's. Its seats page the pool's logs from its deploy block, never
  *  the quote list's 10-block blastapi; SIGN_HOST's connect-src allows each (scripts/live-checks/page-evm-rpc-csp.mjs). */
 export const MAINNET_POOL_RPCS: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
-  base: /* @__PURE__ */ Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"]),
+  base: /* @__PURE__ */ Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com", "https://base.api.pocket.network"]),
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://rpc-robinhood.globalstake.io"]),
 });
 /** Each mainnet EVM chain's members after its pool list that page no logs (the wallet's evmPair `logs: false`; card
@@ -305,7 +305,12 @@ export const pageEvmPoolRpcs = (chain: "base" | "robinhood", kind: ReadKind = "t
   const list = urls.map((u) => testnetRpc(u, SOLANA_RPC_RETRY, kind));
   if (POOL_TESTNET) return list;
   const spares = MAINNET_POOL_LOGLESS[chain].map((u) => Object.assign(testnetRpc(u, SOLANA_RPC_RETRY, kind), { logs: false }));
-  return chain === "base" ? [...list, ...spares, evmHelperKeyedRpc(TRADE_HELPER, chain)] : [...list, ...spares];
+  // Robinhood's second seat is the helper's keyed-only route (card first-sign-in-reads-fast-on-live): no keyless
+  // provider pages the pool's life fast from a page (Pocket's backends 10,001 blocks, GlobalStake 28-42 s, read 14 Nov
+  // 16:06-16:42Z), where the route walked it in 1.3 s; its own RPC, device-direct, is the other operator, and every log
+  // stands only on both seats' same bytes. Pocket and GlobalStake stay its spares.
+  if (chain === "robinhood") return [list[0]!, evmHelperKeyedRpc(TRADE_HELPER, chain), ...list.slice(1), ...spares];
+  return [...list, ...spares, evmHelperKeyedRpc(TRADE_HELPER, chain)];
 };
 /** An EVM chain's pool pin and pair for a read that names no account (card deposit-takes-each-pools-own-coin: the
  *  pool's floor deposit.assets lists its coin at, frame and top-level page alike): the network's pin and its pool list

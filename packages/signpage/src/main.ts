@@ -104,7 +104,7 @@ import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
-import { drawWithdrawForm } from "./withdraw/form.ts";
+import { drawWithdrawForm, type GivenWithdraw } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
 import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
@@ -113,7 +113,7 @@ import { nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearB
 import { rheaPoolsKept } from "./near-pools.ts";
 import { nearSeatRpc, pacedNearRpc, seatsUp } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
-import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
+import { drawPoolWithdrawForm, type GivenPoolWithdraw } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
@@ -126,7 +126,10 @@ import type { PoolChain } from "./rules/pool.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
-  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw" | "held";
+  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw" | "held"
+  // card withdraw-address-in-the-app: the two withdraw screens for an address and amount typed in the app's own sheet,
+  // drawn as a confirm with no field to type into, so not sealed (src/frame-cover.ts): the app's frame stays under them
+  | "withdraw-confirm" | "pool-withdraw-confirm";
 
 // DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801),
 // "invalid-code" (CN-41, signed, 09-design-brief.md:2335) and the six the owner picked, each with its pick on its line.
@@ -258,7 +261,22 @@ const poolFollow = !framed
     })
   : null;
 // pool.withdraw's screen (src/withdraw/pool-form.ts): the chain the app named and the request's id, the op's id in state.ops
-let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
+let poolWithdraw: { chain: PoolChain; opId: string; given: GivenPoolWithdraw | null } | null = null;
+// the vault form's given (card withdraw-address-in-the-app): set by withdraw.open with `to`, drawn by withdraw-confirm
+let withdrawGiven: GivenWithdraw | null = null;
+// the given of the pool.withdraw request being handled now (its kind's wrapper sets and clears it around the call)
+let poolGivenNow: GivenPoolWithdraw | null = null;
+// WithdrawGiven from a request's params the kit's schema passed: `to` with `amount` or `max`, or nothing
+function givenOf(p: Record<string, unknown>): GivenWithdraw | null {
+  if (typeof p.to !== "string") return null;
+  if (p.max === true) return Object.freeze({ to: p.to, max: true as const });
+  return typeof p.amount === "string" ? Object.freeze({ to: p.to, amount: p.amount }) : null;
+}
+function givenPool(p: Record<string, unknown>): GivenPoolWithdraw | null {
+  const g = givenOf(p);
+  const dest = p.dest;
+  return g === null ? null : Object.freeze({ ...g, ...(dest === "solana" || dest === "base" || dest === "robinhood" || dest === "near" ? { dest } : {}) }) as GivenPoolWithdraw;
+}
 // a move out of Cash a reload cut short (src/cash-to-pool.ts resume, card one-balance-buys-on-every-chain): set where
 // the mover is built, run at sign-in after the vault's withdrawals are settled
 let resumeMoves: (() => Promise<void>) | null = null;
@@ -589,6 +607,17 @@ else {
   poolKindMap["pool.deposit"] = deposits.kind;
   const withdraws = liveRuns(poolKindMap["pool.withdraw"]);
   poolKindMap["pool.withdraw"] = withdraws.kind;
+  // the request's given (card withdraw-address-in-the-app), checked by the kit's schema: the pool rule's ask carries the
+  // chain alone, so it is held for this call only, where the flow opens the screen (openPoolWithdraw) in the same task
+  const withdrawCounted = poolKindMap["pool.withdraw"];
+  poolKindMap["pool.withdraw"] = (p, ctx) => {
+    poolGivenNow = givenPool(p);
+    try {
+      return withdrawCounted(p, ctx);
+    } finally {
+      poolGivenNow = null;
+    }
+  };
   const dryPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : pageSolanaRpcs("pass"));
   const poolSellDry = poolSellDryKind({
     pinned: (chain) => poolDeps.pinned(chain),
@@ -762,7 +791,7 @@ else {
       signout: (_p, ctx) => openKind(ctx.id, "signout"),
       "backup.open": (_p, ctx) => openKind(ctx.id, "backup.open"),
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
-      "withdraw.open": (p, ctx) => (takesParams("withdraw.open", p) ? openKind(ctx.id, "withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
+      "withdraw.open": (p, ctx) => (takesParams("withdraw.open", p) ? openKind(ctx.id, "withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined, givenOf(p)) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       // money in from an outside wallet (card move-one-confidential-swap, 14 Nov): one confidential swap as a Move, held to
       // 1Click's keyless tell, so the paying wallet is not tied to U on chain
@@ -816,9 +845,9 @@ let openedBy: AccountKind | null = null;
 let restoreOnly = false;
 // A kind that comes while a resync reads the store waits for it and is decided on what it read: refused only by the
 // store's own state, never for coming at that moment (the app takes not_allowed as a refusal no retry changes).
-function openKind(id: string, kind: AccountKind, way?: unknown, fromId?: string): OpenAnswer | { after: Promise<void>; answer: () => OpenAnswer } | null {
-  if (resyncing) return { after: resynced(), answer: () => decide(id, kind, way, fromId) };
-  return decide(id, kind, way, fromId);
+function openKind(id: string, kind: AccountKind, way?: unknown, fromId?: string, given?: GivenWithdraw | null): OpenAnswer | { after: Promise<void>; answer: () => OpenAnswer } | null {
+  if (resyncing) return { after: resynced(), answer: () => decide(id, kind, way, fromId, given) };
+  return decide(id, kind, way, fromId, given);
 }
 async function resynced(): Promise<void> {
   while (resyncing) await resyncing;
@@ -826,7 +855,7 @@ async function resynced(): Promise<void> {
 // `closes`: the layer the open shows tells the app when it has closed (src/shell.ts); src/kit-version.ts takes it from an
 // app below the kit's own version, which reads no such notice
 type OpenAnswer = { result: { pending: true; closes: true }; then: () => void } | null;
-function decide(id: string, kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
+function decide(id: string, kind: AccountKind, way: unknown, fromId?: string, given?: GivenWithdraw | null): OpenAnswer {
   // a sheet shown already is never redrawn by the app: a kind the frame sent before it opened is refused
   if (sheetShown() || !takes(kind, root.dataset.signin, busy)) return null;
   return {
@@ -844,7 +873,9 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string): O
         else if (page === "withdraw") {
           // the form needs no seed: its entropy is zeroed at once
           seed!.entropy.fill(0);
-          show("withdraw");
+          // typed in the app's sheet: the confirm, the frame kept; else the typed form, sealed
+          withdrawGiven = given ?? null;
+          show(withdrawGiven ? "withdraw-confirm" : "withdraw");
         } else if (page === "held") {
           seed!.entropy.fill(0);
           // the held op of that id in this page's own store, never the app's word; none: back to the app
@@ -861,12 +892,14 @@ function decide(id: string, kind: AccountKind, way: unknown, fromId?: string): O
 // stages go to the op under the request's id.
 function openPoolWithdraw(chain: PoolChain, opId: string): { result: { pending: true; closes: true }; then: () => void } | null {
   if (framed || !testnet || sheetShown() || !takes("withdraw.open", root.dataset.signin, busy)) return null;
+  // read in the kind's own call (poolGivenNow), never later
+  const given = poolGivenNow;
   return {
     result: { pending: true, closes: true },
     then: () =>
       runOpen(opId, async (layer) => {
-        poolWithdraw = { chain, opId };
-        show("pool-withdraw");
+        poolWithdraw = { chain, opId, given };
+        show(given ? "pool-withdraw-confirm" : "pool-withdraw");
         layer();
       }),
   };
@@ -973,7 +1006,8 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     if (at !== shows) return;
     const parts: HTMLElement[] = [];
     if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
-      && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw" && state !== "held") {
+      && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw" && state !== "held"
+      && state !== "withdraw-confirm" && state !== "pool-withdraw-confirm") {
       const p = document.createElement("p");
       p.textContent = WORDS[state];
       parts.push(p);
@@ -997,19 +1031,21 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       parts.push(fresh);
       parts.push(button("have-one", WORDS["have-one"], () => ((restoreOnly = true), show("existing"))));
     } else if (!framed && state === "withdraw") {
-      // the withdraw form (src/withdraw/form.ts), top-level only: the address and the amount are typed here, never
-      // passed in by the app (W:927)
+      // the withdraw form (src/withdraw/form.ts), top-level only: the address and the amount typed here (W:927)
       parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step)));
+    } else if (!framed && state === "withdraw-confirm" && withdrawGiven) {
+      // the same form for what the app's sheet took (card withdraw-address-in-the-app): checked here, confirmed here
+      parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step), withdrawGiven));
     } else if (!framed && state === "held" && heldOp !== null) {
       // the held deposit's way out (src/withdraw/held.ts): the account typed here, never passed in by the app
       parts.push(drawHeldMoveOut(document, heldDeps(heldOp), button, (step) => void run(step)));
-    } else if (!framed && state === "pool-withdraw" && testnet && poolWithdraw) {
-      // the pool withdraw screen: To and the amount typed here; the press starts the run and the layer closes, its
-      // stages read back in state.ops
-      const { chain, opId } = poolWithdraw;
+    } else if (!framed && (state === "pool-withdraw" || state === "pool-withdraw-confirm") && testnet && poolWithdraw) {
+      // the pool withdraw screen: To and the amount typed here, or the app's given drawn as a confirm (card
+      // withdraw-address-in-the-app); the press starts the run and the layer closes, its stages read back in state.ops
+      const { chain, opId, given } = poolWithdraw;
       const deps = testnet.withdrawDeps(chain, opId);
       const handoff = deps.handoff;
-      parts.push(drawPoolWithdrawForm(document, handoff ? { ...deps, handoff: async (r) => (void handoff(r), (poolWithdraw = null), await cancel()) } : deps, button, (step) => void run(step)));
+      parts.push(drawPoolWithdrawForm(document, handoff ? { ...deps, handoff: async (r) => (void handoff(r), (poolWithdraw = null), await cancel()) } : deps, button, (step) => void run(step), state === "pool-withdraw-confirm" && given ? given : undefined));
     } else if (!framed && state === "existing") {
       // I already have one: Face ID (the passkey with PRF) or the typed 12 words, then restore (W:50); never a new seed
       if (typeof PublicKeyCredential !== "undefined") parts.push(button("use", WORDS.use, () => void run(() => signIn(getPasskey, false))));

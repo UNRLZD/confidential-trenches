@@ -305,9 +305,9 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
     new URL(near[0]).host,
     new URL(near[3]).host,
-    // each EVM pool's list on mainnet: Base's two, Robinhood's two seats and its spare (card first-sign-in-reads-fast),
-    // exactly, so a host the page adds fails here
-    ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_POOL_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)"\]\),\n\}\);/),
+    // each EVM pool's list on mainnet: Base's two seats and its spare (card first-sign-in-reads-fast-on-live), Robinhood's
+    // two seats and its spare (card first-sign-in-reads-fast), exactly, so a host the page adds fails here
+    ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_POOL_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)"\]\),\n\}\);/),
     // card restore-check-names-fee-hosts: each EVM pool's fee list on mainnet, four per chain (a restore holds the
     // period's fee on it: evmPoolOf marks a deposit in sight), so a fifth host the page adds fails here
     ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_EVM_FEE_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)", "([^"]+)"\]\),\n\}\);/),
@@ -414,7 +414,8 @@ test("release 119 planted: an EVM host no pin names, a pinned EVM host signed ou
   // the quote list's hosts, in the connect-src but no pin's: stray even signed in (the fee list's are pinned since card
   // restore-check-names-fee-hosts, held signed out below)
   const read = g.requests.find((x) => x.host === EVM_HOSTS[0]);
-  for (const host of ["base-mainnet.public.blastapi.io", "base.rpc.blxrbdn.com", "robinhood.rpc.blxrbdn.com"]) {
+  // (base.rpc.blxrbdn.com is Base's second pool seat since card first-sign-in-reads-fast-on-live: pinned, no stray)
+  for (const host of ["base-mainnet.public.blastapi.io", "robinhood.rpc.blxrbdn.com"]) {
     assert.ok(g.connect.includes(host), `${host} is in the served connect-src`);
     const r = clone(g);
     r.requests.push({ ...clone(read), t: st.words.t + 1, host });

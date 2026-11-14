@@ -6,16 +6,15 @@ import { TOKEN_CHAINS, tokenHref } from "./routes.ts";
 
 export type Tap =
   | { to: "deposit" }
-  | { to: "withdraw" }
-  | { to: "pool.withdraw"; params: { chain: PoolChain } }
+  | { to: "withdraw"; from?: PoolChain }
   | { to: "export"; chain: Chain; address: string }
   | { to: "token"; href: string }
   | { to: "none" };
 
 /**
- * Deposit opens the deposit sheet; Withdraw opens SIGN_HOST's withdraw (withdraw.open); a pool row's Withdraw opens
- * SIGN_HOST's pool withdraw for that chain (pool.withdraw, card app-pool-withdraw) with the chain only: the amount and
- * the address are typed on SIGN_HOST's screen, never taken or sent by the app (kit messages.ts); Export opens SIGN_HOST's key
+ * Deposit opens the deposit sheet; Withdraw opens the app's own Withdraw (card withdraw-address-in-the-app), and a pool
+ * row's Withdraw opens it on that pool (`from`, card withdraw-in-app-to-any-chain): the one form, whose To row sends the
+ * money to any chain; SIGN_HOST's own pool form is never opened from here; Export opens SIGN_HOST's key
  * export (export.open) for the one wallet its row names, by chain and address, only when `holds` says the kit's list of
  * the signing page's state (moneyWallets) names that wallet; any other address opens nothing (card
  * app-export-every-wallet). A row's Sell opens its token's page, whose sell box sells it (UNRLZD's portfolio row
@@ -25,7 +24,7 @@ export type Tap =
 export function tapOf(a: PortfolioAction, holds: (chain: Chain, address: string) => boolean): Tap {
   if (a.kind === "deposit") return { to: "deposit" };
   if (a.kind === "withdraw") return { to: "withdraw" };
-  if (a.kind === "pool-withdraw") return POOL_CHAINS.includes(a.chain) ? { to: "pool.withdraw", params: { chain: a.chain } } : { to: "none" };
+  if (a.kind === "pool-withdraw") return POOL_CHAINS.includes(a.chain) ? { to: "withdraw", from: a.chain } : { to: "none" };
   if (a.kind === "export") return holds(a.chain, a.address) ? { to: "export", chain: a.chain, address: a.address } : { to: "none" };
   if (a.kind === "sell" && a.part === "box") {
     const chain = TOKEN_CHAINS.find((c) => c === a.chain);

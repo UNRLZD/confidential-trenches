@@ -1,0 +1,151 @@
+{
+ "source": "api.geckoterminal.com /networks/base/pools/0xcc68cb8b514a2216d2eece3a0e8597ce483610eb/trades?token=<token> (SOGNI / USDT, aerodrome-base), read 2026-11-14 17:3xZ (card solana-trades-show-on-every-token), first 6 rows; each row legs.from and legs.to [address, amount] (gitleaks generic-api-key reads a *_token_address key beside a value as a key); swaps-robinhood.test.ts rebuilds the answer",
+ "coin": "0xe014d2a4da6e450f21b5050120d291e63c8940fd",
+ "pool": "0xcc68cb8b514a2216d2eece3a0e8597ce483610eb",
+ "trades": [
+  {
+   "id": "base_57434090_0x5437db0594f50de6bf76ee1d3ee604d3e95868a2fffcc2810c932c829543f5c2_205_1794677200",
+   "block_number": 57434090,
+   "block_timestamp": "2026-11-14T17:26:33Z",
+   "tx_hash": "0x5437db0594f50de6bf76ee1d3ee604d3e95868a2fffcc2810c932c829543f5c2",
+   "tx_from_address": "0x760af4fd56d232de983f03366a1ad0513022a8a3",
+   "kind": "sell",
+   "price_from_in_usd": "0.00176206414438727",
+   "price_to_in_usd": "1.00457829149387",
+   "price_from_in_currency_token": "0.000000959452959868484",
+   "price_to_in_currency_token": "0.000546998029704864",
+   "volume_in_usd": "87.1075954436133",
+   "is_anomalous": false,
+   "legs": {
+    "from": [
+     "0xe014d2a4da6e450f21b5050120d291e63c8940fd",
+     "49434.9741586189"
+    ],
+    "to": [
+     "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
+     "86.710609"
+    ]
+   }
+  },
+  {
+   "id": "base_57433852_0xfd59904bf5e1f0f5cf714801811bed185f7ca2137b1677f603e5d91c96fa0653_301_1794677183",
+   "block_number": 57433852,
+   "block_timestamp": "2026-11-14T17:25:46Z",
+   "tx_hash": "0xfd59904bf5e1f0f5cf714801811bed185f7ca2137b1677f603e5d91c96fa0653",
+   "tx_from_address": "0x203263faa98140cec5d3cd65827c95c9e249a4a5",
+   "kind": "buy",
+   "price_from_in_usd": "1.00635056511012",
+   "price_to_in_usd": "0.00177605017503218",
+   "price_from_in_currency_token": "0.000546998029704864",
+   "price_to_in_currency_token": "0.000000965365331009952",
+   "volume_in_usd": "59.6871551919636",
+   "is_anomalous": false,
+   "legs": {
+    "from": [
+     "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
+     "59.3105"
+    ],
+    "to": [
+     "0xe014d2a4da6e450f21b5050120d291e63c8940fd",
+     "33606.6829817362"
+    ]
+   }
+  },
+  {
+   "id": "base_57433654_0xadf36b56f3939cb870ef5da621d0f01c13e30f7d110490d4207b0b354fedfeec_441_1794677179",
+   "block_number": 57433654,
+   "block_timestamp": "2026-11-14T17:25:06Z",
+   "tx_hash": "0xadf36b56f3939cb870ef5da621d0f01c13e30f7d110490d4207b0b354fedfeec",
+   "tx_from_address": "0x7400fefb52f150809993626e6c05057ec0bc59ae",
+   "kind": "buy",
+   "price_from_in_usd": "1.00635056511012",
+   "price_to_in_usd": "0.00177416669326898",
+   "price_from_in_currency_token": "0.000546998029704864",
+   "price_to_in_currency_token": "0.000000964341571646988",
+   "volume_in_usd": "160.197927408184",
+   "is_anomalous": false,
+   "legs": {
+    "from": [
+     "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
+     "159.187"
+    ],
+    "to": [
+     "0xe014d2a4da6e450f21b5050120d291e63c8940fd",
+     "90294.7440147311"
+    ]
+   }
+  },
+  {
+   "id": "base_57433300_0xf32be6455e66e5ca087dc5e61e7ad0736cc25d6a26a434bad9e15054a3d85770_312_1794677202",
+   "block_number": 57433300,
+   "block_timestamp": "2026-11-14T17:23:55Z",
+   "tx_hash": "0xf32be6455e66e5ca087dc5e61e7ad0736cc25d6a26a434bad9e15054a3d85770",
+   "tx_from_address": "0x93f162e416b83b0d48b74ee0159762d6490665d2",
+   "kind": "buy",
+   "price_from_in_usd": "1.00457829149387",
+   "price_to_in_usd": "0.00176888355317159",
+   "price_from_in_currency_token": "0.000546998029704864",
+   "price_to_in_currency_token": "0.000000963166162911357",
+   "volume_in_usd": "92.2886688034396",
+   "is_anomalous": false,
+   "legs": {
+    "from": [
+     "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
+     "91.86807"
+    ],
+    "to": [
+     "0xe014d2a4da6e450f21b5050120d291e63c8940fd",
+     "52173.3997910528"
+    ]
+   }
+  },
+  {
+   "id": "base_57432632_0x05ad4ff85c04123034b79d938d12e626bf48ca7456d06d1ae1d97307a03168f1_229_1794677055",
+   "block_number": 57432632,
+   "block_timestamp": "2026-11-14T17:21:42Z",
+   "tx_hash": "0x05ad4ff85c04123034b79d938d12e626bf48ca7456d06d1ae1d97307a03168f1",
+   "tx_from_address": "0x7067a3cce19b6ab2d69cc9918f5d5c05ed7d686c",
+   "kind": "buy",
+   "price_from_in_usd": "0.998037594014705",
+   "price_to_in_usd": "0.00175607824960291",
+   "price_from_in_currency_token": "0.000548363265448759",
+   "price_to_in_currency_token": "0.000000964862254799598",
+   "volume_in_usd": "58.8961944979958",
+   "is_anomalous": false,
+   "legs": {
+    "from": [
+     "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
+     "59.012"
+    ],
+    "to": [
+     "0xe014d2a4da6e450f21b5050120d291e63c8940fd",
+     "33538.4795702091"
+    ]
+   }
+  },
+  {
+   "id": "base_57432393_0x2a8c0e04b195c42c54c8ec0171a488c1e92ec7f19e41e8fcb09dc10014ae15bd_126_1794676976",
+   "block_number": 57432393,
+   "block_timestamp": "2026-11-14T17:20:54Z",
+   "tx_hash": "0x2a8c0e04b195c42c54c8ec0171a488c1e92ec7f19e41e8fcb09dc10014ae15bd",
+   "tx_from_address": "0x7400fefb52f150809993626e6c05057ec0bc59ae",
+   "kind": "buy",
+   "price_from_in_usd": "0.995707050136547",
+   "price_to_in_usd": "0.00175042090675429",
+   "price_from_in_currency_token": "0.000548363265448759",
+   "price_to_in_currency_token": "0.000000964004949252822",
+   "volume_in_usd": "123.246627251802",
+   "is_anomalous": false,
+   "legs": {
+    "from": [
+     "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
+     "123.778"
+    ],
+    "to": [
+     "0xe014d2a4da6e450f21b5050120d291e63c8940fd",
+     "70409.7093311866"
+    ]
+   }
+  }
+ ]
+}

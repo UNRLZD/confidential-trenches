@@ -39,8 +39,10 @@ export const SIGN = "https://confidential.unrealized.trade";
 /** src/positions-evm.ts agreedBalance's refusal: only the EVM positions pass carries it. */
 export const PASS_MARK = "balanceOf: the two RPCs differ";
 /** src/pool-testnet.ts's state read, as minified: Solana's read first, then each EVM chain's,
- *  `positions:async()=>{let[e,...t]=await Promise.all([c.read(),...[`base`,`robinhood`].map(`. */
-export const JOIN = /positions:async\(\)=>\{let ?(?:[\w$]+=[\w$]+,)*\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[[\w$]+\.read\(\),\.\.\.\[[`"]base[`"],[`"]robinhood[`"]\]\.map\(/g;
+ *  `positions:async()=>{let[e,...t]=await Promise.all([c.read(),...[`base`,`robinhood`].map(`, or since card
+ *  move-sends-or-says-why (T1) each read bounded by STATE_READ_MS:
+ *  `...Promise.all([Tz(Bt.read(),r5,`solana's positions`).catch(()=>null),...[`base`,`robinhood`].map(`. */
+export const JOIN = /positions:async\(\)=>\{let ?(?:[\w$]+=[\w$]+,)*\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[(?:[\w$]+\.read\(\)|[\w$]+\([\w$]+\.read\(\),[\w$]+,`solana's positions`\)\.catch\(\(\)=>null\)),\.\.\.\[[`"]base[`"],[`"]robinhood[`"]\]\.map\(/g;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 /** What the check keeps of SIGN_HOST: its index's /app.js pin, the served bundle's sha384, and the two marks' counts. */
 export function pageFacts(index, js) {

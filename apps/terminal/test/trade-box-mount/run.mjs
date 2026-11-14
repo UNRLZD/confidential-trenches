@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The token page's trade box and safety grid, signed out (card app-trade-box-mount; S7.2 with S8.1, A2.2 and A2.3), taken
-// from the built app at its route, not a test page: apps/terminal built with its own vite config and opened at / (the
-// top Trending token, then its token read) inside the stand-in shell with the shell sending a SIGNED-OUT state (app-in-shell
+// from the built app at its route, not a test page: apps/terminal built with its own vite config and opened at the
+// recorded token's /token/solana/<mint> (the phone: / and its Trenches list's first row, that token) inside the stand-in shell with the shell sending a SIGNED-OUT state (app-in-shell
 // harnessRoute "tap"), HELPER_HOST answered from the recorded live answers (the recorded token read carries the `risk`
 // part the grid draws). At 1440 x 900 (dpr 1) and 390 x 844 (dpr 2, touch), each under a dark and a light colour scheme
 // (the terminal is dark only, as designed: the light run proves it does not turn light).
@@ -150,7 +150,9 @@ async function open(browser, route, w, scheme) {
     dialogs.push(d.message());
     void d.dismiss();
   });
-  await page.goto(`${APP_HOST}/`, { waitUntil: "load" });
+  // off the phone the recorded token's own address (/ on All opens NEARKAT, card nearkat-opens-first); the phone taps
+  // its Trenches list's first row, that same token
+  await page.goto(`${APP_HOST}/${w.isMobile ? "" : `token/solana/${ROW.token}`}`, { waitUntil: "load" });
   let f = null;
   for (const until = Date.now() + 8_000; !f && Date.now() < until; ) {
     f = page.frames().find((x) => x !== page.mainFrame() && x.url().startsWith(`${APP_HOST}/`)) ?? null;

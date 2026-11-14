@@ -78,7 +78,7 @@ import { change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, 
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
-import { isBars, KEPT_HANDOVER_MS, toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
+import { isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
@@ -436,6 +436,8 @@ export const OPEN_MAX = 40;
 /** Books read at once in a tick. */
 const READ_PARALLEL = 8;
 const POOLS_MAX = 5_000;
+/** A pool trade's ids on an EVM chain (../solana/token.ts toTape): a 32-byte hash and an address, lower case. */
+const EVM_IDS: TapeIds = { tx: (v) => (typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v) ? v.toLowerCase() : null), address: evmAddress };
 /** The bytes of GeckoTerminal answers one chain's swap reads hand the next process (data/warm.ts) [design: 2 MB, a
  *  hundred charts' last bars at about 20 KB each; the warm file's limit counts it, WARM_MAX]. */
 export const EVM_HANDOVER_MAX = 2 * 1024 * 1024;
@@ -2329,6 +2331,60 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return { status: 200, body: JSON.stringify(body), src, asOfMs: at };
   }
 
+  /** Its tape (card solana-trades-show-on-every-token, the Solana fix in every path: Base's SOGNI, 116k USD a day on an
+   *  Aerodrome USDT pool our reads do not price, answered an empty tape on main 204ee6b8a, 14 Nov 17:3xZ): its top
+   *  pool's newest trades (CoinGecko's keyed API first, else GeckoTerminal's), held TAPE_FRESH_MS, src theirs, dated by
+   *  their read; refused or failed with nothing held, the empty tape marked filling, so the page reads again. */
+  const gtTapes = new Map<string, { at: number; rows: TapeRow[]; src: ChartSrc }>();
+  async function noneTrades(token: string, limit: number): Promise<DataAnswer> {
+    const none = empty({ trades: [] });
+    if (deps.gecko === undefined) return none;
+    const held = gtTapes.get(token);
+    const serve = (h: { at: number; rows: TapeRow[]; src: ChartSrc }): DataAnswer => ({ status: 200, body: JSON.stringify({ trades: h.rows.slice(0, limit), src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at });
+    const owed = (): DataAnswer => (held !== undefined ? serve(held) : empty({ trades: [], filling: true }));
+    if (held !== undefined && now() - held.at < TAPE_FRESH_MS) return serve(held);
+    let p = gtPools.get(token);
+    if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
+      const keyedPool = await keyedPoolOf(token);
+      if (keyedPool !== undefined) p = keyedPool;
+      else if (await gtTake(p === undefined ? "pages" : "refresh", `${chain} pool`)) {
+        const got = await readPool(token);
+        if (got === null) return none;
+        if (got !== "throttled" && got !== "failed") p = got;
+      }
+    }
+    if (p === undefined) return owed();
+    if (p.id === null) return none;
+    const path = `/networks/${chain}/pools/${p.id}/trades?token=${token}`;
+    const rowsOf = (j: unknown) => toTape(j, token, TAPE_MAX, now(), EVM_IDS);
+    let src: ChartSrc = CG_SRC;
+    let j: unknown = deps.keyed == null ? undefined : await deps.keyed.read(path, (x) => rowsOf(x) !== null);
+    if (j === undefined) {
+      src = "geckoterminal";
+      j = (await gtTake(held === undefined ? "pages" : "refresh", `${chain} trades`)) ? await gtJson(path) : undefined;
+    }
+    const rows = j === undefined || j === "failed" ? null : j === null ? [] : rowsOf(j);
+    if (rows === null) return owed();
+    const h = { at: now(), rows, src };
+    if (gtTapes.size >= POOLS_MAX) gtTapes.delete(gtTapes.keys().next().value!);
+    gtTapes.set(token, h);
+    return serve(h);
+  }
+  /** One GeckoTerminal read, its call already taken: the JSON, null on a 404, undefined on a 429 (the budget told), else
+   *  "failed". */
+  async function gtJson(path: string): Promise<unknown> {
+    try {
+      const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+      if (r.status === 429) return await r.body?.cancel(), throttledUntil(deps.gecko!, r.headers.get("retry-after"), now()), undefined;
+      if (r.status === 404) return await r.body?.cancel(), null;
+      if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) return await r.body?.cancel(), "failed";
+      const text = await r.text();
+      return text.length > ANSWER_MAX ? "failed" : JSON.parse(text);
+    } catch {
+      return "failed";
+    }
+  }
+
   /** GeckoTerminal's top pool of a token, its call already taken, held in gtPools: the pool, null when GeckoTerminal
    *  names no such token, "throttled" on its 429, else "failed". */
   async function readPool(token: string): Promise<{ id: string | null; at: number } | null | "throttled" | "failed"> {
@@ -2779,7 +2835,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const trades = (held === undefined ? [] : tapeOf(held, limit)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
         return timed({ status: 200, body: JSON.stringify({ trades, filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
       }
-      if (e === "none") return timed(empty({ trades: [] }));
+      if (e === "none") return timed(await noneTrades(t, limit));
       if (!("book" in e)) return timed(e);
       const rows = tapeOf(e, limit);
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));

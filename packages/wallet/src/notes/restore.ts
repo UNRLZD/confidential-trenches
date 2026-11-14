@@ -42,11 +42,10 @@ import {
   type VaultSyncRpc,
 } from "@blindfill/kit";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { poseidon2 } from "poseidon-lite/poseidon2";
-import { poseidon3 } from "poseidon-lite/poseidon3";
 import { nearPairNetwork, nearPairRule } from "../deposit/account.ts";
 import { CHAINS, type Chain, masters, type SecondId } from "../derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "./secrets.ts";
+import { poseidon2Walk, poseidon3Walk } from "./poseidon-walk.ts";
 import { refKey, type Landed, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "./store.ts";
 
 /** Indices of one lane in a row with no note before the deposit index walk stops (wallet.md l.271-272). */
@@ -306,10 +305,12 @@ function* walkSteps(m: { nullifier: bigint; secret: bigint }, scope: bigint, lan
   let last = lane;
   let lastPrecommitment = 0n;
   for (let i = lane, misses = 0; misses < gap && i <= U32; i += RESTORE_LANES) {
-    const n = poseidon3([m.nullifier, scope, BigInt(i)]);
-    const sc = poseidon3([m.secret, scope, BigInt(i)]);
+    // poseidon-lite's hashes in their sparse form (./poseidon-walk.ts), equal on every input; a hit and the last index
+    // are checked again with poseidon-lite (noteSecrets), so a drift stops the restore
+    const n = poseidon3Walk([m.nullifier, scope, BigInt(i)]);
+    const sc = poseidon3Walk([m.secret, scope, BigInt(i)]);
     last = i;
-    lastPrecommitment = poseidon2([n, sc]);
+    lastPrecommitment = poseidon2Walk([n, sc]);
     if (has(lastPrecommitment)) {
       found.push(i);
       misses = 0;

@@ -8,9 +8,9 @@
 //     the loading state and not an empty page;
 //   - the visible header's balance equals Portfolio's visible Cash tile, to the cent, and both equal ACCOUNT's cash
 //     (CASH; design-lock-r5 S10.3 shows Cash in the header);
-//   - in dark: Withdraw, with money in the vault and the Solana pool, opens the pick of the two (card
-//     withdraw-form-shows-what-you-can-send: the vault's row, then Solana's), and Solana's row asks the shell for
-//     pool.withdraw; Export (the row's Export key icon on desktop, the position's
+//   - in dark: Withdraw, with money in the vault and the Solana pool, asks the shell for nothing and opens the app's own
+//     Withdraw (card withdraw-address-in-the-app: the deposit sheet's Withdraw segment, the vault's tile, then Solana's);
+//     Solana's tile with Max and a Solana address typed asks the shell for pool.withdraw; Export (the row's Export key icon on desktop, the position's
 //     sheet on the phone) asks for export.open; Deposit (phone) opens the deposit sheet; Sell asks the shell for nothing and opens
 //     no sheet (its screen is another card's).
 // A screenshot of each width and scheme is kept.
@@ -37,6 +37,8 @@ export const APP_HOST = "https://ct-app.unrealized.trade";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signed-in account the stand-in shell sends. */
+/** A Solana address typed in the app's Withdraw (a 32-byte key; the stand-in shell refuses the request, nothing is sent). */
+export const SOL_TO = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 export const ACCOUNT = {
   release: "harness-shell",
   api: 1,
@@ -85,8 +87,8 @@ export function judge(rec) {
     say(cash !== null && cash === r.header && cash === CASH, `${n}: the header's balance ${r.header ?? "none"}, Portfolio's Cash ${cash ?? "none"}, the account's cash ${CASH}`);
     if (r.scheme !== "dark") continue;
     const t = r.taps ?? {};
-    say(t.withdraw === "pick near solana", `${n}: Withdraw ${t.withdraw?.startsWith("pick") ? `opens the ${t.withdraw}` : `asks the shell for ${t.withdraw ?? "nothing"}`}`);
-    say(t.pick === "pool.withdraw", `${n}: the pick's Solana row asks the shell for ${t.pick ?? "nothing"}`);
+    say(t.withdraw === "sheet near solana", `${n}: Withdraw ${t.withdraw?.startsWith("sheet") ? `opens the app's Withdraw, its tiles ${t.withdraw.slice(6)}` : `asks the shell for ${t.withdraw ?? "nothing"}`}`);
+    say(t.pick === "pool.withdraw", `${n}: the app's Withdraw on Solana with Max and an address asks the shell for ${t.pick ?? "nothing"}`);
     say(t.export === "export.open", `${n}: Export asks the shell for ${t.export ?? "nothing"}`);
     if (r.width === "phone") say(t.deposit === "deposit", `${n}: Deposit opens ${t.deposit ?? "nothing"}`);
     say(t.sell === "nothing", `${n}: Sell ${t.sell === "nothing" ? "does nothing visible (its screen is another card's)" : `opens ${t.sell ?? "unread"}`}`);
@@ -157,14 +159,20 @@ async function runOne(browser, w, scheme, shots, route) {
     await page.screenshot({ path: path.join(shots, `${w.name}-${scheme}.png`) });
     if (scheme !== "dark" || run.screen !== "portfolio") return run;
     const taps = {};
-    taps.withdraw = (await tap(page, f, "[data-screen='portfolio'] [data-control='withdraw']"))[0] ?? null;
-    // money in two places: the pick, by its rows; its Solana row opens that pool's form
-    const rows = await f.locator("[data-sheet='withdraw-pick'] .wpk-row").evaluateAll((rs) => rs.map((r) => r.dataset.place));
-    if (taps.withdraw === null && rows.length) {
-      taps.withdraw = `pick ${rows.join(" ")}`;
-      taps.pick = (await tap(page, f, "[data-sheet='withdraw-pick'] .wpk-row[data-place='solana']"))[0] ?? null;
-      // this stand-in shell refuses pool.withdraw, and a refused open leaves the pick up with its line: its x closes it
-      await f.locator("[data-sheet='withdraw-pick'] .dep-x").filter({ visible: true }).first().click({ timeout: 2_000 }).catch(() => {});
+    // the sheet's own reads on opening (its asset list, the pools' deposit addresses) are no open: they are not the tap's
+    const opens = (ks) => ks.filter((k) => k !== "deposit.assets" && k !== "pool.address");
+    taps.withdraw = opens(await tap(page, f, "[data-screen='portfolio'] [data-control='withdraw']"))[0] ?? null;
+    // money in two places: the app's Withdraw, by its tiles; Solana's, with Max and a Solana address, asks for its pool
+    const tiles = await f.locator("[data-sheet='deposit'][data-mode='withdraw'] [data-form='withdraw'] [data-from]").evaluateAll((ts) => ts.map((t) => t.dataset.from));
+    if (taps.withdraw === null && tiles.length) {
+      taps.withdraw = `sheet ${tiles.join(" ")}`;
+      await f.locator("[data-form='withdraw'] [data-from='solana']").filter({ visible: true }).first().click({ timeout: 2_000 }).catch(() => {});
+      await f.locator("[data-control='withdraw-max']").filter({ visible: true }).first().click({ timeout: 2_000 }).catch(() => {});
+      await f.locator("[data-field='withdraw-address']").filter({ visible: true }).first().fill(SOL_TO, { timeout: 2_000 }).catch(() => {});
+      taps.pick = opens(await tap(page, f, "[data-control='withdraw-go']"))[0] ?? null;
+      if (shots) await page.screenshot({ path: path.join(shots, `${w.name}-withdraw.png`) });
+      // this stand-in shell refuses pool.withdraw, and a refused open leaves the sheet up with its line: its x closes it
+      await f.locator("[data-sheet='deposit'] .dep-x").filter({ visible: true }).first().click({ timeout: 2_000 }).catch(() => {});
       await page.waitForTimeout(300);
     }
     if (w.name === "desktop") {

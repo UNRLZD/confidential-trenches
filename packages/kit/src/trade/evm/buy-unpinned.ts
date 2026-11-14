@@ -161,7 +161,8 @@ export function evmReadProvidersOf(venue: EvmPoolVenue): readonly string[] | und
  *  1rpc.io/base ("earliest available 52000000", eth_getLogs "discontinued"), base.blockpi.network and rpc.ankr.com/base
  *  (a key required). Robinhood's has none: its bloXroute answers HTTP 403 to eth_getLogs. */
 export const EVM_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
-  base: /* @__PURE__ */ Object.freeze(["https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co"]),
+  // bloXroute's is Base's pool list's second seat since card first-sign-in-reads-fast-on-live, so a source there
+  base: /* @__PURE__ */ Object.freeze(["https://base.gateway.tenderly.co"]),
   robinhood: /* @__PURE__ */ Object.freeze([] as string[]),
 });
 declare const __SIGN_NETWORK__: string | undefined;
@@ -286,12 +287,16 @@ export const evmMainnetVenues = () =>
       // 429 {"code":8,"message":"public eth_getLogs is limited to 1000 blocks"}, a throttle that rests it, and Tenderly as
       // "-32602: invalid params", naming no span, so the seat Pocket's first cap walks off halves there to 781 blocks
       // (packages/wallet/test/pool-evm.test.ts, card evm-pool-lists-mainnet: 2,576 pages for 2M blocks with Tenderly
-      // third, 239 on Pocket without it). Not taken: base.rpc.blxrbdn.com (100,000 a page, honest, but "4444: pruned history
-      // unavailable ... earliest available 52500000", and no page's policy names it), mainnet.base.org (429 to every
+      // third, 239 on Pocket without it). Since card first-sign-in-reads-fast-on-live base.rpc.blxrbdn.com (bloXroute)
+      // is the second seat and Pocket the spare: read 2026-11-14 16:06-16:17Z from this Mac with SIGN_HOST's Origin (CORS
+      // *), the pool's filter from its deploy block to the head, 4 pages in flight, it paged 100,000 blocks a call (31-34
+      // calls, 7.5-9.5 s) where Pocket's backends refused past 10,001 (232 calls, 25.8 s); its pruned history starts at
+      // block 52,500,000 ("4444: pruned history unavailable ... earliest available 52500000", the same on 9 Nov), under
+      // the pool's deploy block. Not taken: mainnet.base.org (429 to every
       // read), drpc (code 35 at 10,000), blockpi (5,000 a page, "earliest available 51000000"), 1rpc and nodies (50),
       // thirdweb (1,000, then 429), zan and onfinality (429 to eth_getLogs keyless), meowrpc (no eth_getLogs), ankr (a
       // key), llamarpc 525, omniatech 521, lava 410, subquery and developer-access-mainnet.base.org (no answer).
-      poolProviders: Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"]),
+      poolProviders: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com", "https://base.api.pocket.network"]),
       // 10 s of Base's blocks: one every 200 ms since block 53556127 (2026-11-05 18:00:01Z, 2 s before; 10,000 blocks
       // to block 53603737 took 2,000 s on base-rpc.publicnode.com and base.gateway.tenderly.co, read 2026-11-05 20:38Z),
       // so 50 blocks (5 at 2 s blocks); live check base-200ms-blocks fails when Base's block time moves again

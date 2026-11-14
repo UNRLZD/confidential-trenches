@@ -28,7 +28,7 @@ const KEY = "evm-money-shows-and-spends-at-once";
 export const SIGN = "https://confidential.unrealized.trade";
 /** The page's mainnet pool pairs (packages/signpage/src/pool-testnet.ts MAINNET_POOL_RPCS). */
 export const POOL_RPCS = Object.freeze({
-  base: Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"]),
+  base: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"]),
   robinhood: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]),
 });
 const CHAIN_IDS = Object.freeze({ base: 8453, robinhood: 4663 });
