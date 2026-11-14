@@ -687,10 +687,11 @@ jobs:
       - name: the signing page's pool withdraw screen at 390 and 1440 wide, on Solana and Base
         run: node packages/signpage/test/pool-withdraw-screens/run.mjs
       # card firefox-runs-before-release: the owner's Firefox read "CORS request did not succeed" from the page's RPC hosts
-      # (14 Nov, 137 build) and every run above is Chrome. Playwright's Firefox, its system libraries from apt on a runner
-      # only (gates.sh runs this line on the test machine, which has them and no sudo)
+      # (14 Nov, 137 build) and every run above is Chrome. Playwright's Firefox and its system packages, from the cache
       - name: Playwright's Firefox
-        run: pnpm --dir apps/terminal exec playwright install firefox $([ -n "$GITHUB_ACTIONS" ] && echo --with-deps)
+        uses: ./.github/actions/playwright-engines
+        with:
+          engines: firefox
       - name: the terminal and the signing page in Firefox with Strict tracking protection, each RPC host the page reads failed in turn (restore, balance, a Move's dry run)
         run: pnpm --filter terminal build && node packages/signpage/scripts/firefox-rpc-blocked.mjs
 
