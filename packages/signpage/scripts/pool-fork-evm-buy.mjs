@@ -7,6 +7,8 @@
 // the proof's fee) when not given. An amount under that spend buys the rest by the note's own W through the pinned
 // adapter after a whole release; the run then follows W's change back into the pool as rungs (the carry pass, at each
 // state read, a block mined past finalized for its landing) and writes W's balance after it: under the least rung.
+// A token with thousands of pools (Base's USDC): FORK_WARM_BOOK=<a copy of the recorded answers> reads each recorded
+// slot into the fork before the tap, and FORK_WARM_TAPS=<n> taps again on a quote the fork's cold reads made fail.
 // (a long run: start it where a 30-minute job may run). The mainnet build: __SIGN_NETWORK__ is not set, so the pins and lists are
 // SIGN_HOST's (the wallet's EVM_POOLS, src/pool-testnet.ts MAINNET_POOL_RPCS and MAINNET_EVM_FEE_RPCS).
 // - Every request is answered on this machine: the chain's hosts the page and the kit name (the pool list, the fee
@@ -120,7 +122,10 @@ log("fork", { chain: CHAIN, chainId: Number(await anvil("eth_chainId", [])), poo
 // the helper in this process: its own handler, its EVM pool sender on the fork with the published test key
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const sideRpc = (method, params) => anvil(method, params);
-const sender = evmPoolSender({ network: CHAIN, pool: PIN.pool, senderKey: KEY, feeRecipient: PIN.feeRecipient, log: (line) => log("helper sender", { line }) }, [sideRpc, (m, p) => sideRpc(m, p)]);
+// the sender signs with the key it is given for as long as it runs (apps/helper/src/pool/evm.ts laneOf keeps it): it is
+// handed its own copy, so zeroing this one leaves it a key to sign with (zeroing the one it held signed nothing: every
+// send answered 500, "invalid private key")
+const sender = evmPoolSender({ network: CHAIN, pool: PIN.pool, senderKey: KEY.slice(), feeRecipient: PIN.feeRecipient, log: (line) => log("helper sender", { line }) }, [sideRpc, (m, p) => sideRpc(m, p)]);
 KEY.fill(0);
 await anvil("anvil_setBalance", [sender.sender, "0xde0b6b3a7640000"]);
 const rpcRoute = createRpc({ [CHAIN === "base" ? "BASE_RPC_URL" : "ROBINHOOD_RPC_URL"]: ANVIL }, { log: (line) => log("helper rpc", { line }) });
@@ -269,12 +274,77 @@ const stages = [];
 const ENDS = ["filled", "part_filled", "refused", "not_landed"];
 // the fork's clock set to the wall clock and a block mined at the tap, so the quotes' head is now (the kit refuses a head
 // over 30 s old: the proof's wait above can outlast it) and every block after it (the release, W's own buy) is too
-await anvil("anvil_setTime", [Math.floor(Date.now() / 1000)]);
-await anvil("evm_mine", []);
-log("tap head", { ageS: Math.round(Date.now() / 1000 - Number(BigInt((await anvil("eth_getBlockByNumber", ["latest", false])).timestamp))) });
-tapped = true;
-const tapAt = Date.now();
-const r = kinds["pool.buy"]({ chain: CHAIN, token: TOKEN, amount, slippage_bps: 300 }, { id: "buy", sha: "00", progress: (s) => (stages.push(s), log("progress", { stage: s, ms: Date.now() - tapAt })) });
+// FORK_WARM_TAPS (default 0): taps made again while the quote answers rpc_error or stale_quote, a provider timing out
+// on the fork's cold state or the quote outliving its 30 s head (each storage slot the quote reads is fetched from
+// upstream once, then recorded, and a new fork reads each from the recording once): a refused tap claims
+// nothing past its run and sends nothing; every warm tap is logged, and the record keeps the last tap's times
+const WARM = Number(process.env.FORK_WARM_TAPS ?? 0);
+if (!Number.isInteger(WARM) || WARM < 0 || WARM > 20) throw new Error("FORK_WARM_TAPS is 0 to 20");
+// a warm tap's read the quote gave up on can still fail minutes later (a fork call past fetch's 300 s headers bound):
+// logged and kept in the record, never the run's end
+// and Node's own fetch can throw past every caller when it sets a socket's type of service on one the fork reset
+// (setTypeOfService EINVAL, Node 24.22 undici writeH1; the request fails as any provider fault): logged and kept too,
+// any other throw still ends the run
+process.on("uncaughtException", (e) => {
+  if (e?.syscall !== "setTypeOfService") throw e;
+  log("socket fault", { error: String(e.code) });
+  record.socketFaults = (record.socketFaults ?? 0) + 1;
+});
+if (WARM > 0)
+  process.on("unhandledRejection", (e) => {
+    log("stray rejection", { error: String(e?.cause?.code ?? e?.message ?? e) });
+    record.strayRejections = (record.strayRejections ?? 0) + 1;
+  });
+// FORK_WARM_BOOK=<the fork's recorded answers> (contracts/pool-evm/test/fixtures/fork-rpc-pools.json): before the tap,
+// every account and storage slot recorded for this chain is read once on the fork, so the fork holds them in memory and
+// the quote's reads (a token's every v4 pool's state: Base's USDC has about 4,800) are not fetched one by one at the tap
+if (process.env.FORK_WARM_BOOK) {
+  const book = JSON.parse(readFileSync(process.env.FORK_WARM_BOOK, "utf8"))[CHAIN] ?? {};
+  const reads = Object.keys(book).flatMap((k) => {
+    const m = /^(eth_getStorageAt|eth_getAccountInfo) (\[.*\])$/.exec(k);
+    if (!m || "error" in (book[k] ?? {})) return [];
+    const ps = JSON.parse(m[2]);
+    return m[1] === "eth_getStorageAt" ? [["eth_getStorageAt", [ps[0], ps[1], "latest"]]] : [["eth_getCode", [ps[0], "latest"]]];
+  });
+  const at = Date.now();
+  let next = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    while (next < reads.length) {
+      const [m, ps] = reads[next++];
+      await anvil(m, ps);
+    }
+  }));
+  log("warm book", { reads: reads.length, ms: Date.now() - at });
+}
+let r;
+let tapAt;
+for (let warm = 0; ; warm++) {
+  await anvil("anvil_setTime", [Math.floor(Date.now() / 1000)]);
+  await anvil("evm_mine", []);
+  log("tap head", { ageS: Math.round(Date.now() / 1000 - Number(BigInt((await anvil("eth_getBlockByNumber", ["latest", false])).timestamp))) });
+  tapped = true;
+  tapAt = Date.now();
+  r = kinds["pool.buy"]({ chain: CHAIN, token: TOKEN, amount, slippage_bps: 300 }, { id: `buy${warm}`, sha: "00", progress: (s) => (stages.push(s), log("progress", { stage: s, ms: Date.now() - tapAt })) });
+  if ("error" in r || warm >= WARM) break;
+  await r.after;
+  const a = r.answer();
+  if (!("error" in a) || a.error !== "quote_check_failed" || (a.rule !== "rpc_error" && a.rule !== "stale_quote")) break;
+  log("warm tap", { warm, answer: a, ms: Date.now() - tapAt });
+  record.warmTaps = warm + 1;
+  await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
+  // the fork still runs the quote's calls the tap gave up on: the next tap starts once it answers again (each ask
+  // bounded at 60 s, under fetch's 300 s headers bound, 5 s apart, at most 60)
+  for (let t = 0; ; t++) {
+    try {
+      await (await realFetch(ANVIL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "eth_blockNumber", params: [] }), signal: AbortSignal.timeout(60_000) })).json();
+      break;
+    } catch {
+      if (t >= 60) throw new Error("the fork did not answer in 60 tries");
+      log("fork busy", { warm, t });
+      await sleep(5_000);
+    }
+  }
+}
 if ("error" in r) {
   // refused at the tap, before any run: the page's own answer (the mainnet build closes the EVM buy in src/pool-testnet.ts
   // evmBuy while POOL_TESTNET is false)
@@ -292,7 +362,8 @@ record.times.tapToAnswerMs = Date.now() - tapAt;
 log("tap", { amount, answer: first, ms: record.times.tapToAnswerMs });
 // the send part holds the seed's lock; the read-back runs past it and ends as progress (the tap's or a late one)
 await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
-for (let i = 0; i < 360 && !ENDS.includes(stages.at(-1)); i++) await sleep(1_000);
+// an error answer sent nothing: no stage follows it
+for (let i = 0; i < 360 && !("error" in first) && !ENDS.includes(stages.at(-1)); i++) await sleep(1_000);
 record.end = stages.at(-1) ?? null;
 record.times.tapToEndMs = Date.now() - tapAt;
 tapped = false;
