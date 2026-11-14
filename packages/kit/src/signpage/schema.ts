@@ -398,7 +398,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.dry": depositDry,
   "pool.address": poolAddress,
   "pool.sell.dry": poolSellDry,
-  "pool.buy.dry": obj({ tap_max: dec }, { with_cash: dec, pieces: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SOLANA_POOL_BUY_PIECES_MAX, cost: dec, out: dec }),
+  "pool.buy.dry": obj({ tap_max: dec }, { with_cash: dec, pieces: (v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SOLANA_POOL_BUY_PIECES_MAX, cost: dec, out: dec, buys: dec }),
   "pool.move": obj({ stage: oneOf(MOVE_STAGES), txs }),
   "pool.move.dry": poolMoveDry,
 } as const satisfies Record<SignpageKind, SignpageSchema>;

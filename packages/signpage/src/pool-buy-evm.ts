@@ -55,7 +55,7 @@
 //   token (quote, decimals), their newest block and the pool's whole release log over a block range, never W, the
 //   nullifier or a transaction hash.
 // Nothing here logs.
-import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
+import { POOL_ASSET_DECIMALS, type TradeStage, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { evmPoolBuyQuote, evmPoolIndexPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
 import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -66,7 +66,7 @@ import { EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, ty
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { checkEvmBuy, planEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type EvmBuyPlan, type PoolAsk } from "./rules/pool.ts";
+import { checkEvmBuy, planEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type EvmBuyPiece, type EvmBuyPlan, type PoolAsk } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmReleaseRead } from "./evm-send.ts";
 import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { refusalRule } from "./refusal-rule.ts";
@@ -224,6 +224,48 @@ async function quoteOf(h: EvmPoolBuyHost, network: EvmPoolChain, token: string, 
   }
 }
 
+/** The pieces an EVM buy plans over (card buy-any-amount-on-every-chain; rules/pool.ts planEvmBuy) and the bound it keeps
+ *  beside a rest, from the chain's ready proofs: those with an EVM W that no other tap holds (`claimed`), one a note (a
+ *  proof on the epoch root first, one on the newest root, a note that landed this epoch, only beside none: card
+ *  fresh-money-spendable-at-once), each with its relay fee under its chunk; the bound, one release's fee, the dearest
+ *  piece's. One path: the tap (runEvmPoolBuy) and pool.buy.dry's buys (evmDryBuys) both plan over it. */
+export function evmBuyPieces<R extends ReadyProof>(ready: readonly R[], claimed?: ReadonlySet<string>): { byNote: Map<string, R>; pieces: EvmBuyPiece[]; bound: bigint } {
+  const list = ready.filter((p) => p.wallet.chain === "evm" && !claimed?.has(p.noteId)).sort((x, y) => (x.root === y.root ? 0 : x.root === "epoch" ? -1 : 1));
+  const byNote = new Map<string, R>();
+  for (const p of list) if (!byNote.has(p.noteId)) byNote.set(p.noteId, p);
+  const pieces = [...byNote.values()].filter((p) => p.binding.feeCap < p.chunk).map((p) => ({ noteId: p.noteId, chunk: p.chunk, fee: p.binding.feeCap }));
+  return { byNote, pieces, bound: pieces.reduce((m, p) => (p.fee > m ? p.fee : m), 0n) };
+}
+
+/** ETH's decimals (the kit's POOL_ASSET_DECIMALS): every amount of a Base or Robinhood pool.buy.dry. */
+const ETH_DECIMALS = POOL_ASSET_DECIMALS.ETH;
+/** pool.buy.dry's `amount` on Base and Robinhood (kit 1.16): a decimal of ETH (at most 18 places, 30 digits whole) in
+ *  wei; null with none; undefined when it is not one (the kind answers not_allowed). */
+export function evmDryAmount(x: unknown): bigint | null | undefined {
+  if (x === undefined) return null;
+  const m = typeof x === "string" ? new RegExp(`^(0|[1-9][0-9]{0,29})(?:\\.([0-9]{1,${ETH_DECIMALS}}))?$`).exec(x) : null;
+  return m ? BigInt(m[1]!) * 10n ** BigInt(ETH_DECIMALS) + BigInt((m[2] ?? "").padEnd(ETH_DECIMALS, "0")) : undefined;
+}
+
+/** pool.buy.dry's `buys` on Base and Robinhood (kit 1.16, card buy-any-amount-on-every-chain), in whole ETH: for an ask of
+ *  `amount` wei, above 0 and at most `tapMax` (state.pools' tap_max of the chain, whole ETH), what the tap spends in
+ *  swaps: planEvmBuy over evmBuyPieces of the chain's `ready` proofs, as runEvmPoolBuy plans it. Null when that is the
+ *  amount itself, with no amount, over tapMax (a tap that moves Cash first), or when the planner refuses. Display only:
+ *  the tap plans again from its own proofs. */
+export function evmDryBuys(chain: Chain, amount: bigint | null, tapMax: string, ready: readonly ReadyProof[]): string | null {
+  const tap = evmDryAmount(tapMax);
+  if (amount === null || amount <= 0n || typeof tap !== "bigint" || amount > tap) return null;
+  const { pieces, bound } = evmBuyPieces(ready);
+  let plan: EvmBuyPlan;
+  try {
+    plan = planEvmBuy({ kind: "pool.buy", chain, token: null, amount, slippageBps: 0, decimals: 0 }, pieces, bound);
+  } catch (e) {
+    if (e instanceof PoolRuleRefused) return null;
+    throw e;
+  }
+  return plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
+}
+
 /** One pool.buy on an EVM chain: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). The plan's legs
  *  (card buy-any-amount-on-every-chain): each whole note its own pool buy, the rest W's own (src/pool-buy-evm-rest.ts);
  *  every leg quoted, checked, signed and recorded before any is taken, every take before any send, so a leg that fails
@@ -262,16 +304,11 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       const pins = venuePins(h.venues, network);
       if (pins.pool === undefined || lower(pins.pool) !== lower(h.pin.pool)) return no("not_allowed");
       // the plan (card buy-any-amount-on-every-chain): the ask is the ETH that goes into swaps, made of whole notes
-      // (rules/pool.ts planEvmBuy) over the proofs with an EVM W no other tap holds, one a note: a proof on the epoch
-      // root first, one on the newest root (a note that landed this epoch) only beside none (card
-      // fresh-money-spendable-at-once). W's own buy of a rest is bounded by one release's fee, the dearest piece's.
-      const ready = (await h.ready()).filter((p) => p.wallet.chain === "evm" && !h.claimed?.has(p.noteId)).sort((x, y) => (x.root === y.root ? 0 : x.root === "epoch" ? -1 : 1));
-      const byNote = new Map<string, Ready>();
-      for (const p of ready) if (!byNote.has(p.noteId)) byNote.set(p.noteId, p);
-      const pieces = [...byNote.values()].filter((p) => p.binding.feeCap < p.chunk).map((p) => ({ noteId: p.noteId, chunk: p.chunk, fee: p.binding.feeCap }));
+      // (rules/pool.ts planEvmBuy) over evmBuyPieces of the chain's ready proofs, as pool.buy.dry's buys reads it
+      const { byNote, pieces, bound } = evmBuyPieces(await h.ready(), h.claimed);
       let plan: EvmBuyPlan;
       try {
-        plan = planEvmBuy(ask, pieces, pieces.reduce((m, p) => (p.fee > m ? p.fee : m), 0n));
+        plan = planEvmBuy(ask, pieces, bound);
       } catch (e) {
         if (e instanceof PoolRuleRefused) return no("not_funded", refusalRule(e));
         throw e;
