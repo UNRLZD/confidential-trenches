@@ -18,6 +18,8 @@
 //   - no box names a proof (13 Nov 07:53Z: removed, the app names no proof): no proof mark, no word of proof, ready or pending;
 //   - Base (card buy-any-amount-on-every-chain): any amount up to Max is one pool.buy, as on Solana: Max's USD ($3.50)
 //     asks the whole 0.001 ETH, $3.00 asks its own ETH at the fixture's price, rounded down; over Max it is marked wrong;
+//   - the box's own reads (test/trade-pool/reads.mjs): Max once at most on its own chain; one amount read at most, the Fee
+//     on Solana, the tap's own ask's amount on Base and Robinhood; nothing on another chain;
 //   - the presets row: the four on every chain, each a quarter of the row; a preset over Max is off, and its tap sends
 //     nothing and leaves the typed amount;
 //   - no pool: the vault's buy as before (data-path vault, no proof label);
@@ -32,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
+import { readsFault } from "./reads.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -249,14 +252,13 @@ try {
           const recv = await settle(async () => norm(await page.locator('[data-testid="trade-receive"]').innerText()), RECEIVE[name]);
           check(recv === RECEIVE[name], `${tag}: You receive "${recv}", want "${RECEIVE[name]}"`);
         }
-        // the box's own reads (pool.buy.dry): this coin's Max, one a state at most, on the box's own pool chain (Base too,
-        // for its with_cash: card one-balance-buys-on-every-chain), and the Fee of the typed amount, one an amount, on
-        // Solana only; never a buy
+        // the box's own reads (pool.buy.dry, test/trade-pool/reads.mjs): this coin's Max, one a state at most, on the box's
+        // own pool chain (Base too, for its with_cash: card one-balance-buys-on-every-chain); one with an amount at most:
+        // the Fee of the typed amount on Solana, the tap's own ask's amount on Base and Robinhood (card
+        // buy-any-amount-on-every-chain, buysAskAmount); nothing on another chain; never a buy
         const reads = await page.evaluate(() => window.__reads);
-        const maxReads = reads.filter((c) => c.params.amount === undefined);
-        const feeReads = reads.filter((c) => c.params.amount !== undefined);
-        const own = name.startsWith("sol") ? "solana" : name.startsWith("base") ? "base" : null;
-        check(maxReads.length <= 1 && feeReads.length <= 1 && maxReads.every((c) => c.params.chain === own) && feeReads.every((c) => c.params.chain === "solana" && own === "solana"), `${tag}: the Max and Fee reads ${JSON.stringify(reads)}`);
+        const readFault = readsFault(name, reads, ask);
+        check(readFault === null, `${tag}: the Max and amount reads: ${readFault} ${JSON.stringify(reads)}`);
         // one tap: the ask the box's own checks passed, or nothing
         await cta.click({ force: true });
         await page.clock.runFor(100);
