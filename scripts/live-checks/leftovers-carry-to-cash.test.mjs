@@ -16,6 +16,10 @@ test("recorded good answer: this card's SIGN_HOST build: PASS", () => {
   assert.deepEqual(v.lines, []);
 });
 
+test("recorded answer solanaOnly (2cff382f6, release 133: the Solana carry alone): FAIL, the four EVM marks named", () => {
+  assert.deepEqual(judge(ANSWERS.solanaOnly).lines, ["evmRule", "evmRecord", "evmTail", "evmWired"].map((k) => `BAD ${SAYS[k]}`));
+});
+
 test("recorded answer liveBefore (SIGN_HOST before this card): FAIL, every mark named", () => {
   const v = judge(ANSWERS.liveBefore);
   assert.equal(v.ok, false);
@@ -41,6 +45,14 @@ const JS = [
   "if(eP(r.data,4)!==t.amount)return $(`amount`);if(t.amount!==t.lamports-5000n)return $(`carry_whole`);",
   "i=r?await r.request(`ct-carry-cash`,{ifAvailable:!0},async e=>e?await f():null):null;",
   "dY=e=>`owed/carry-cash-${e.chain}-${e.address}`;",
+  // Base and Robinhood, as the EVM build spells them
+  "if(m){if(l<21000n||l>100000n)return $(`gas_over_cap`);if(a.gasLimit!==l)return $(`gas_limit`)}else{if(a.gasLimit!==21000n)return $(`gas_limit`);if(l!==21000n)return $(`gas_estimate`)}",
+  "return m.fill(0),m=null,await f({...d,sends:[...d.sends,{hash:bZ(H(D)),value:g.toString(),sentMs:String(e.now?.()??Date.now()),nonce:v.nonce.toString()}]}),await Promise.allSettled(t.map(e=>e(`eth_sendRawTransaction`,[bZ(D)]))),`pending`}",
+  "let v=await a(async e=>{for(let t of c)if(await e(`eth_getTransactionByHash`,[t])!==null)return!0;return!1});return v[0]||v[1]?`pending`:(await a(async e=>[SZ(await e(`eth_getTransactionCount`,[n,`latest`])),SZ(await e(`eth_getTransactionCount`,[n,`pending`]))])).every(e=>e[0]===u&&e[1]===u)?`dead`:`pending`};",
+  "m===`withdraw`||m===`other`||m===`empty`||m===`landed`){if(g!==null&&g>0n){let t={chain:XJ(e.chain),address:f.w,l:f.l.toString(),j:f.j,amount:g.toString()};await a.update(`meta`,ZJ(e.chain,f.w),()=>t)}}",
+  "YJ=Object.freeze({solana:`sol`,base:`base`,robinhood:`robinhood`});",
+  "a={sender:e=>e===`solana`?t:r(e)};",
+  "r=e=>{if(!n.has(e)){let t=F7?.evmPoolOf(e)??null;n.set(e,t===null?null:OZ({chain:e,network:t.pin.network,rpcs:t.rpcs,seed64:()=>E9()}))}};",
 ].join("");
 const INDEX = (js) => `<script type="module" src="/app.js" integrity="${facts("", js).sha384}"></script>`;
 
@@ -70,6 +82,20 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     ["loop", JS.replace("`ct-carry-cash`", "`ct-carry`")],
     ["loop", JS.replace("{ifAvailable:!0}", "{}")],
     ["loop", JS.replace("`owed/carry-cash-${e.chain}-${e.address}`", "`carry-${e.chain}-${e.address}`")],
+    // Base's gas not held, or Robinhood's estimate unbounded
+    ["evmRule", JS.replace("if(l!==21000n)return $(`gas_estimate`)", "")],
+    ["evmRule", JS.replace("l>100000n", "l>1000000000n")],
+    // the send written after it leaves, without its nonce, or an unsent send never quoted again
+    ["evmRecord", JS.replace("await f({...d,sends:[...d.sends,{hash:bZ(H(D)),value:g.toString(),sentMs:String(e.now?.()??Date.now()),nonce:v.nonce.toString()}]}),await Promise.allSettled(t.map(e=>e(`eth_sendRawTransaction`,[bZ(D)])))", "await Promise.allSettled(t.map(e=>e(`eth_sendRawTransaction`,[bZ(D)]))),await f({...d,sends:[...d.sends,{hash:bZ(H(D)),value:g.toString(),sentMs:String(e.now?.()??Date.now()),nonce:v.nonce.toString()}]})")],
+    ["evmRecord", JS.replace(",nonce:v.nonce.toString()}", "}")],
+    ["evmRecord", JS.replace("?`dead`:`pending`};", "?`pending`:`pending`};")],
+    // no tail kept, kept under another key, or not for a carried W
+    ["evmTail", JS.replace("await a.update(`meta`,ZJ(e.chain,f.w),()=>t)", "0")],
+    ["evmTail", JS.replace("||m===`landed`){", "){")],
+    ["evmTail", JS.replace("base:`base`,", "")],
+    // EVM chains given no sender, or one on another chain's pair
+    ["evmWired", JS.replace("e===`solana`?t:r(e)", "e===`solana`?t:null")],
+    ["evmWired", JS.replace("rpcs:t.rpcs,", "rpcs:x.rpcs,")],
   ];
   for (const [mark, js] of cuts) {
     assert.notEqual(js, JS, `${mark}: the cut changed nothing`);
