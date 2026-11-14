@@ -1,0 +1,12 @@
+{
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-OurOphkM/sx19/iLAnNeRPm7q4VEQrTVXSikAnYHQVnoFjAvVPpMBY63kBUdUqMW\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-OurOphkM/sx19/iLAnNeRPm7q4VEQrTVXSikAnYHQVnoFjAvVPpMBY63kBUdUqMW",
+    "window_held": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IUXx0E+72cpi1MA6bIfym1RfG+61HJTBQxbQEMgtIduJRde0FYejbopg4aciGwsB\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-IUXx0E+72cpi1MA6bIfym1RfG+61HJTBQxbQEMgtIduJRde0FYejbopg4aciGwsB",
+    "window_held": false
+  }
+}
