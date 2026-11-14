@@ -207,9 +207,9 @@ contract HostileSellV4Test is SellV4Base {
   }
 
   /// Any amount: W pays exactly the amount, the leaf holds all the ETH (fee 0), W keeps no ETH or WETH
-  function testFuzz_wPaysExactlyTheAmountAndKeepsNoEther(uint256 _amount, bool _toWeth) public {
-    // from 0.001 of T (its proceeds clear the pool's MIN_DEPOSIT, 0.0001 ETH) to all W holds
-    _amount = bound(_amount, 1e15, AMOUNT * 10);
+  function testFuzz_wPaysExactlyTheAmountAndKeepsTheRest(uint256 _amount, bool _toWeth) public {
+    // from 0.01 of T (its proceeds clear the least rung, 0.001 ETH) to all W holds
+    _amount = bound(_amount, 1e16, AMOUNT * 10);
     PathKey[] memory _p = _deep(T, _toWeth ? WETH : address(0), address(0));
     SellDelegate.Sell memory _s = _v4Sell(T, _p, 1, 0);
     _s.amount = _amount;
@@ -222,8 +222,8 @@ contract HostileSellV4Test is SellV4Base {
     assertEq(IERC20Balance(T).balanceOf(W), AMOUNT * 10 - _amount, 'W paid exactly the amount');
     assertEq(address(pool).balance - _poolBefore, _value, 'the pool holds what the leaf says');
     assertGt(_value, 0);
-    assertEq(W.balance, 0, 'W keeps no ether');
-    assertEq(IWETH9Sell(WETH).balanceOf(W), 0, 'nor WETH');
+    assertEq(_value, _rungOf(_value + W.balance), 'the leaf is the largest rung of the sale');
+    assertEq(IWETH9Sell(WETH).balanceOf(W), 0, 'W keeps no WETH');
     assertEq(IAllowance(T).allowance(W, PM_ADDR), 0, 'no approval');
   }
 

@@ -23,6 +23,17 @@ interface VmEvm {
 /// What the sell tests share: W (the Hardhat mnemonic's account 0, a published test key, as in the buy tests), its
 /// EIP-712 Sell digest written here apart from the delegate's own encoder, and the helper that sends the sell.
 abstract contract SellBase is Signing {
+  /// The largest rung of the pools' 1-2-5 ladder from 0.001 ETH at or under `_x`, or 0 under it, walked rung by rung
+  /// apart from the delegate's own rule: what a sale of `_x` (its ETH less the fee) deposits
+  function _rungOf(uint256 _x) internal pure returns (uint256 _want) {
+    for (uint256 _r = 0.001 ether; _r <= _x; ) {
+      _want = _r;
+      uint256 _d = _r;
+      while (_d % 10 == 0) _d /= 10;
+      _r = _d == 2 ? (_r * 5) / 2 : _r * 2;
+    }
+  }
+
   uint256 internal constant N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
   bytes32 internal constant SELL_TYPEHASH = keccak256(
     'Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)'
@@ -198,6 +209,15 @@ contract MockRouter {
   }
 }
 
+/// The delegate's rung rule, called from a test (no W, no sale)
+contract RungProbe is SellDelegate {
+  constructor() SellDelegate(IWETH(address(0)), IPoolManager(address(0))) {}
+
+  function rung(uint256 _x) external pure returns (uint256) {
+    return _rungAtOrUnder(_x);
+  }
+}
+
 /// A sender that refuses ether
 contract RefusingSender {
   function send(SellDelegate _w, SellDelegate.Sell calldata _s, uint256 _fee, bytes calldata _sig) external {
@@ -215,6 +235,8 @@ contract SellTest is SellBase {
   uint256 internal constant OUT = 0.4 ether;
   uint256 internal constant FEE = 0.002 ether;
   uint256 internal constant PRE = 0x1234;
+  /// The largest rung at or under OUT - FEE (0.398 ether): what a sale of OUT deposits
+  uint256 internal constant RUNG = 0.2 ether;
 
   function setUp() public {
     _prague();
@@ -263,28 +285,88 @@ contract SellTest is SellBase {
   }
 
   /// The sell lands: the router took exactly the amount, W's WETH is unwrapped, the sender gets the fee and the pool's
-  /// new leaf is Poseidon(proceeds less the fee, label, precommitment)
-  function test_aSellLandsAndTheLeafHoldsTheProceedsLessTheFee() public {
+  /// new leaf is Poseidon(the largest rung of the proceeds less the fee, label, precommitment); W keeps the rest
+  function test_aSellLandsAndTheLeafHoldsTheLargestRung() public {
     SellDelegate.Sell memory _s = _good();
     uint256 _poolBefore = address(pool).balance;
     uint256 _root = pool.currentRoot();
     vm.recordLogs();
     uint256 _c = _send(_s, FEE, _signed(_s));
     (uint256 _ec, uint256 _label, uint256 _value, uint256 _pre) = _deposited(vm.getRecordedLogs());
-    assertEq(_value, OUT - FEE, 'the leaf holds the proceeds less the fee');
+    assertEq(_value, RUNG, 'the leaf holds the largest rung of the proceeds less the fee');
     assertEq(_pre, PRE);
     assertEq(_c, _ec);
-    assertEq(_c, PoseidonT4.hash([OUT - FEE, _label, PRE]), 'the commitment');
+    assertEq(_c, PoseidonT4.hash([RUNG, _label, PRE]), 'the commitment');
     assertTrue(pool.currentRoot() != _root, 'the leaf is in the tree');
-    assertEq(address(pool).balance, _poolBefore + OUT - FEE);
+    assertEq(address(pool).balance, _poolBefore + RUNG);
     assertEq(SENDER.balance, FEE, 'the sender is paid the fee');
     assertEq(router.seenAllowance(), AMOUNT, 'the approval was exactly the amount');
     assertEq(token.allowance(W, address(router)), 0, 'and it ends at 0');
     assertEq(token.balanceOf(W), AMOUNT * 9);
-    assertEq(W.balance, 0, 'W keeps no ether');
-    assertEq(weth.balanceOf(W), 0, 'nor WETH');
+    assertEq(W.balance, OUT - FEE - RUNG, 'W keeps the rest in ether');
+    assertEq(weth.balanceOf(W), 0, 'and no WETH');
     assertEq(_w().nonce(), 1);
     assertEq(uint256(vm.load(W, _nonceSlot())), 1, 'the nonce is at the ERC-7201 slot of W');
+  }
+
+  /// Card pool-amounts-are-standard-sizes-evm: a sale's deposit is public in value, so it is the largest rung of the
+  /// pool's 1-2-5 ladder (from 0.001 ETH, 10 x MIN_DEPOSIT) at or under the proceeds less the fee, and the rest stays on
+  /// W as the user's ether, never paid away (the Solana rule of f344853ca). 0.4 ether less 0.002: 0.2 ether into the
+  /// pool, 0.198 ether kept on W.
+  function test_aSaleDepositsTheLargestRungAndWKeepsTheRest() public {
+    SellDelegate.Sell memory _s = _good();
+    vm.recordLogs();
+    _send(_s, FEE, _signed(_s));
+    (,, uint256 _value,) = _deposited(vm.getRecordedLogs());
+    assertEq(_value, 0.2 ether, 'the deposit is the largest rung under the proceeds less the fee');
+    assertEq(W.balance, OUT - FEE - 0.2 ether, 'the rest stays on W');
+    assertEq(SENDER.balance, FEE, 'the fee as before');
+  }
+
+  /// The least rung: proceeds less the fee of exactly 0.001 ETH deposit 0.001 ETH and leave W nothing; 1 wei under it
+  /// deposits nothing, the sale still lands (W's nonce moves, the fee is paid) and W keeps the whole rest, the user's own
+  function test_underTheLeastRungTheSaleLandsAndWKeepsItAll() public {
+    SellDelegate.Sell memory _s = _good();
+    _s.data = abi.encodeCall(MockRouter.swap, (token, AMOUNT, 0.001 ether + FEE, false, W));
+    _s.minOut = 0.001 ether + FEE;
+    vm.recordLogs();
+    _send(_s, FEE, _signed(_s));
+    (,, uint256 _value,) = _deposited(vm.getRecordedLogs());
+    assertEq(_value, 0.001 ether, 'the least rung');
+    assertEq(W.balance, 0, 'nothing left');
+
+    SellDelegate.Sell memory _u = _sellOf(AMOUNT, OUT, false, 1);
+    _u.data = abi.encodeCall(MockRouter.swap, (token, AMOUNT, 0.001 ether + FEE - 1, false, W));
+    _u.minOut = 0.001 ether + FEE - 1;
+    uint256 _root = pool.currentRoot();
+    uint256 _poolBefore = address(pool).balance;
+    vm.recordLogs();
+    uint256 _c = _send(_u, FEE, _signed(_u));
+    assertEq(_c, 0, 'no commitment');
+    assertEq(pool.currentRoot(), _root, 'no leaf');
+    assertEq(address(pool).balance, _poolBefore, 'nothing into the pool');
+    assertEq(W.balance, 0.001 ether - 1, 'W keeps the whole rest');
+    assertEq(SENDER.balance, 2 * FEE, 'the fee as before');
+    assertEq(_w().nonce(), 2, 'the sale landed');
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    for (uint256 _i; _i < _logs.length; ++_i) assertTrue(_logs[_i].emitter != address(pool), 'the pool logs nothing');
+  }
+
+  /// The rule at each edge of the ladder: a rung deposits itself, one wei under it the rung below, and under 0.001 ETH
+  /// nothing
+  function test_theRungsAtTheirEdges() public {
+    RungProbe _p = new RungProbe();
+    uint256[14] memory _x = [uint256(0), 0.001 ether - 1, 0.001 ether, 0.002 ether - 1, 0.002 ether, 0.005 ether - 1, 0.005 ether, 0.01 ether - 1, 0.01 ether, 0.0199 ether, 0.05 ether, 0.398 ether, 1 ether, 1000 ether + 1];
+    uint256[14] memory _r = [uint256(0), 0, 0.001 ether, 0.001 ether, 0.002 ether, 0.002 ether, 0.005 ether, 0.005 ether, 0.01 ether, 0.01 ether, 0.05 ether, 0.2 ether, 1 ether, 1000 ether];
+    for (uint256 _i; _i < _x.length; ++_i) assertEq(_p.rung(_x[_i]), _r[_i]);
+  }
+
+  /// The rung rule against the ladder walked here apart from the delegate (1, 2, 5 x 10^k from 0.001 ETH): the
+  /// deposit is the largest rung at or under the proceeds less the fee, and 0 under 0.001 ETH, for any amount
+  function testFuzz_theDepositIsTheLargestRungAtOrUnder(uint256 _x) public {
+    _x = bound(_x, 0, 1e30);
+    RungProbe _p = new RungProbe();
+    assertEq(_p.rung(_x), _rungOf(_x));
   }
 
   /// Review round 3, L-1: anyone who sees W's signed sell before it lands sends it first with the whole fee cap. The
@@ -328,8 +410,8 @@ contract SellTest is SellBase {
     vm.recordLogs();
     _send(_s, FEE, _signed(_s));
     (,, uint256 _value,) = _deposited(vm.getRecordedLogs());
-    assertEq(_value, OUT - FEE);
-    assertEq(W.balance, 0);
+    assertEq(_value, RUNG);
+    assertEq(W.balance, OUT - FEE - RUNG);
   }
 
   /// Ether W already holds, or WETH, is not the sale's: only what the sale brings is counted against minOut
@@ -346,17 +428,18 @@ contract SellTest is SellBase {
     vm.recordLogs();
     _send(_s, 0, _signed(_s));
     (,, uint256 _value,) = _deposited(vm.getRecordedLogs());
-    assertEq(_value, OUT, 'the deposit is the sale, not what W held');
-    assertEq(W.balance, 1 ether);
+    assertEq(_value, RUNG, 'the deposit is the largest rung of the sale, not of what W held');
+    assertEq(W.balance, 1 ether + OUT - RUNG, 'W keeps what it held and the sale\'s rest');
     assertEq(weth.balanceOf(W), 1 ether);
   }
 
-  function test_aFeeOfZeroSendsTheWholeSale() public {
+  function test_aFeeOfZeroKeepsTheWholeSale() public {
     SellDelegate.Sell memory _s = _good();
     vm.recordLogs();
     _send(_s, 0, _signed(_s));
     (,, uint256 _value,) = _deposited(vm.getRecordedLogs());
-    assertEq(_value, OUT);
+    assertEq(_value, RUNG, 'the largest rung of the whole sale (0.4 ether: 0.2)');
+    assertEq(W.balance, OUT - RUNG, 'and the rest on W');
     assertEq(SENDER.balance, 0);
   }
 
@@ -536,7 +619,7 @@ contract SellTest is SellBase {
     }
     assertEq(_n, 1, 'one Paid');
     (,, uint256 _value,) = _deposited(_logs);
-    assertEq(_value, OUT - FEE, 'the rest is deposited');
+    assertEq(_value, RUNG, 'the largest rung of the rest is deposited');
     assertEq(_sink.balance, FEE, 'the sink holds the fee');
     assertEq(address(_collector).balance, 0);
     assertEq(SENDER.balance, 0, 'the sender is paid nothing directly');
@@ -707,8 +790,8 @@ contract SellTest is SellBase {
     uint256 _poolBefore = address(pool).balance;
     _send(_s, FEE, _signed(_s));
     assertEq(token.balanceOf(address(_skim)), AMOUNT, 'the target kept the tokens');
-    assertEq(W.balance, _before, 'W has no ETH from the release');
-    assertEq(address(pool).balance - _poolBefore, 0.5 ether - FEE, 'the release, less the fee, is the note');
+    assertEq(W.balance, _before + 0.5 ether - FEE - 0.2 ether, 'W keeps the release less the fee and the rung');
+    assertEq(address(pool).balance - _poolBefore, 0.2 ether, 'the largest rung of the release, less the fee, is the note');
   }
 
   // Review 181fd050 of the card, R2-3: a Bought in W's tail can land again as ETH. A replayed buy is the same proof and

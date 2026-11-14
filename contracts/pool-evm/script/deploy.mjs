@@ -27,6 +27,12 @@
 //
 //   node contracts/pool-evm/script/deploy.mjs --mainnet --chain <base|robinhood> --return <address> [--rpc <loopback> --out <file>]
 //   node contracts/pool-evm/script/deploy.mjs --mainnet --chain <base|robinhood> --sweep-kept <journal> [--return <address>]
+//   node contracts/pool-evm/script/deploy.mjs --mainnet --chain <base|robinhood> --only SellDelegate --return <address>
+//     [--sweep-kept <journal>]   a mainnet contract deployed alone (MAINNET_ALONE, card
+//     pool-amounts-are-standard-sizes-evm): the same paste and the same refusals, to its own record
+//     contracts/pool-evm/deployments/<chain>.sell-delegate-2.json (journal and lock beside it), refused once that record
+//     exists, origin/main holds it, or the kit pins a delegate other than the first set's (the build file's frozen
+//     SellDelegate.mainnet-1); its live check is that card's
 //     the owner's paste (script/mainnet-deploy.sh, card pool-evm-deploy-mainnet) and its sweep form. A mainnet run
 //     differs from a testnet run in these, each refused before a key is made: the RPC is the chain's first in
 //     pool-evm-deploy.mjs MAINNETS (or a loopback fork of it with --out, the rehearsal); the record goes to
@@ -126,6 +132,12 @@ const argsOf = (name, chain, addrs, sink) => ({
 // The fee collector (card evm-fee-collector) is deployed alone beside a testnet's set (`beside`): its constructor takes
 // only the chain's sell sender, and the testnets' sets were deployed before it existed (the mainnet sets hold it)
 export const ALONE = Object.freeze({ SellDelegate: { key: "evm-testnet-delegate-review3" }, FeeCollector: { key: "evm-fee-collector", beside: true } });
+// What a mainnet run may deploy alone (the owner's paste with --only), each to its own record beside the chain's set, the
+// one-deploy guard for that contract as <chain>.json is the set's: the sell delegate whose sale deposits a standard size
+// (card pool-amounts-are-standard-sizes-evm), <chain>.sell-delegate-2.json, read by that card's live check
+export const MAINNET_ALONE = Object.freeze({ SellDelegate: { record: "sell-delegate-2", check: "pool-amounts-are-standard-sizes-evm" } });
+/** A mainnet --only run's record: the chain's record path with the contract's record name before .json */
+export const aloneRecord = (record, only) => record.replace(/\.json$/, `.${MAINNET_ALONE[only].record}.json`);
 // Every contract the build file pins: the chain sets' (ORDER), then those deployed only beside them
 export const BUILT = Object.freeze([...ORDER, ...Object.keys(ALONE).filter((n) => !ORDER.includes(n))]);
 // The kit's file whose evmPoolVenues() holds each chain's sell sender pin; it imports no other file of the kit's, so
@@ -239,7 +251,10 @@ export const MAINNET_INIT = Object.freeze({
   PrivacyPoolSimple: { length: 10956, keccak: "0x7e8d15c9f42c8866cf0080e49757f0a13139e85ffdffdf638b7a445d5b787e6f" },
   UniswapV4Adapter: { length: 4578, keccak: "0xedc0d3a854fc280089da75b2ed4baf8e3495fdb80eed6632ddfe5421ac96b6ef" },
   UniswapV3Adapter: { length: 2269, keccak: "0x1460db6407c61d6d70d3d423a04a46a512f5df9c00978987cd9f38a267db4f05" },
-  SellDelegate: { length: 9479, keccak: "0x60ae724bd23ec2c11ee8faf40a6027b43e256e7719efe8d85646ed7079fc3132" },
+  // card pool-amounts-are-standard-sizes-evm (a sale deposits the largest rung of its ETH less the fee): read from forge
+  // build --force --root contracts/pool-evm on the build host (2026-11-14), where FeeCollector's read as below; the
+  // first sets' delegate (9,479 bytes, 0x60ae724b…3132) stays at its two mainnet addresses, frozen in the build file
+  SellDelegate: { length: 9690, keccak: "0xd49fc0c5003387dc37557cf612112180cd397134a7e2a6411c866aee0750f3f5" },
   // card evm-fee-collector: read from forge build --root contracts/pool-evm (forge 1.7.1 on the Mac, 2026-11-06), where
   // the five above read as above; each mainnet set deploys it last (card evm-mainnet-senders), and its paste is refused
   // until the kit pins that mainnet's sell sender (sinkOf)
@@ -259,11 +274,17 @@ export function initProblems(name, code) {
  */
 // The kit's EVM pool pins, read through the kit's public entry (a test passes its own).
 const kitVenues = async () => (await import(pathToFileURL(path.join(REPO, "packages/kit/src/index.ts")).href)).evmPoolVenues();
-export async function deployedElsewhere(chainName, { git = repoGit, venues = kitVenues } = {}) {
-  const file = path.relative(REPO, deploymentFile(chainName));
+export async function deployedElsewhere(chainName, { git = repoGit, venues = kitVenues, only = null, record = null } = {}) {
+  const file = path.relative(REPO, only ? record : deploymentFile(chainName));
   // main's record unread is its own refusal, never "deployed already"
   fetchMain(git, "main's record");
   if (git("cat-file", "-e", `origin/main:${file}`).status === 0) return `origin/main holds ${file}`;
+  if (only) {
+    // the kit's delegate pin past the one the build file froze at the chain's first set: a later one is deployed
+    const pin = (await venues())[chainName]?.sellDelegate?.toLowerCase();
+    const first = JSON.parse(readFileSync(BUILD_FILE, "utf8")).frozen?.["SellDelegate.mainnet-1"]?.at?.[chainName];
+    return pin && pin !== first ? `the kit pins the ${chainName} sell delegate ${pin}, not the first set's ${first}` : null;
+  }
   const pool = (await venues())[chainName]?.pool;
   return pool ? `the kit pins the ${chainName} pool ${pool}` : null;
 }
@@ -287,7 +308,7 @@ export const outflowOf = (tx, r, deployer) => {
   return fee + (r.status === "0x1" && !self ? BigInt(tx.value) : 0n);
 };
 /** The paste's sweep form for a mainnet chain's journal */
-export const sweepCommand = (chainName) => `sh contracts/pool-evm/script/mainnet-deploy.sh ${chainName} --sweep-kept`;
+export const sweepCommand = (chainName, only = null) => `sh contracts/pool-evm/script/mainnet-deploy.sh ${chainName}${only ? ` --only ${only}` : ""} --sweep-kept`;
 /**
  * Where a mainnet run's key folder lives: $XDG_STATE_HOME/pool-evm-deploy, ~/.local/state/pool-evm-deploy by default,
  * made 0700 (the Solana deploy's rule, contracts/pool-solana/scripts/deploy.mjs keysBase). A kept folder must outlast the
@@ -441,7 +462,9 @@ const lockOf = (args, io) => {
   const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
   const chainName = opt("--chain");
   if (!args.includes("--mainnet") || !Object.hasOwn(MAINNETS, chainName)) return null;
-  return journalOf(opt("--out") ?? (io.recordOf ?? deploymentFile)(chainName)) + ".lock";
+  const record = (io.recordOf ?? deploymentFile)(chainName);
+  const only = args.includes("--only") ? opt("--only") : null;
+  return journalOf(opt("--out") ?? (only && Object.hasOwn(MAINNET_ALONE, only) ? aloneRecord(record, only) : record)) + ".lock";
 };
 /**
  * One run per chain's journal at a time: the lock file is made O_EXCL with this process's pid. One held by a live
@@ -486,18 +509,20 @@ async function run(args, io = {}) {
   const kept = mainnet ? opt("--sweep-kept") ?? null : null;
   if (args.includes("--sweep-kept") && !kept) throw new Error("--sweep-kept <journal> goes with --mainnet");
   const only = args.includes("--only") ? opt("--only") : null;
-  if (only !== null && (mainnet || !(Object.hasOwn(ALONE, only) && (chain.contracts.includes(only) || ALONE[only].beside)))) throw new Error(`--only is one of ${Object.keys(ALONE).join(", ")}${mainnet ? ", on a testnet" : ""}`);
+  if (only !== null && (mainnet ? !Object.hasOwn(MAINNET_ALONE, only) : !(Object.hasOwn(ALONE, only) && (chain.contracts.includes(only) || ALONE[only].beside)))) throw new Error(`--only is one of ${Object.keys(mainnet ? MAINNET_ALONE : ALONE).join(", ")}${mainnet ? " on a mainnet" : ""}`);
+  const sweepLine = sweepCommand(chainName, mainnet ? only : null);
   const url = opt("--rpc") ?? chain.rpcs[0];
   const dryRun = isLoopback(url);
   if (mainnet && !dryRun && url !== chain.rpcs[0]) throw new Error(`--mainnet runs on ${chain.rpcs[0]} (and reads ${chain.rpcs[1]} too), or on a loopback fork with --out: not ${url}`);
-  if (mainnet && !dryRun && opt("--out")) throw new Error(`--out is for a loopback fork: a mainnet run writes its record to ${path.relative(REPO, (io.recordOf ?? deploymentFile)(chainName))}`);
-  const out = opt("--out") ?? (dryRun ? null : mainnet ? (io.recordOf ?? deploymentFile)(chainName) : only ? onlyFile(only, chainName) : deploymentFile(chainName));
+  const mainRecord = mainnet ? (only ? aloneRecord((io.recordOf ?? deploymentFile)(chainName), only) : (io.recordOf ?? deploymentFile)(chainName)) : null;
+  if (mainnet && !dryRun && opt("--out")) throw new Error(`--out is for a loopback fork: a mainnet run writes its record to ${path.relative(REPO, mainRecord)}`);
+  const out = opt("--out") ?? (dryRun ? null : mainnet ? mainRecord : only ? onlyFile(only, chainName) : deploymentFile(chainName));
   if (!out) throw new Error("a dry run (a loopback RPC) needs --out, so it never writes the real record");
   // every final check reads the chain's second RPC too (the fork's other loopback name on a dry run)
   const second = dryRun ? url.replace("127.0.0.1", "localhost") : chain.rpcs[1];
   const call = (method, params, u = url) => rpc(fetchFn, u, method, params, sleep, RPC_TRIES);
   const rel = (f) => path.relative(process.cwd(), f);
-  const liveCheck = `node scripts/live-checks/${only ? ALONE[only].key : "pool-evm-deploy"}.mjs --deployment ${rel(out)}${dryRun ? ` --rpc ${url},${second}` : ""}`;
+  const liveCheck = `node scripts/live-checks/${only ? (mainnet ? MAINNET_ALONE[only].check : ALONE[only].key) : "pool-evm-deploy"}.mjs --deployment ${rel(out)}${dryRun ? ` --rpc ${url},${second}` : ""}`;
 
   // a final read on both RPCs: `read(u)` until `ok` holds on each, re-read up to 10 times 2 s apart (the second RPC may
   // trail the first by a block or two); the last answers either way
@@ -534,19 +559,19 @@ async function run(args, io = {}) {
     if (!dryRun) (io.mainCheckout ?? mainCheckout)();
     if (existsSync(out)) {
       const j = existsSync(journalFile) ? JSON.parse(readFileSync(journalFile, "utf8")) : null;
-      const left = j?.keys?.state && j.keys.state !== "removed" ? `; its run key is still ${j.keys.state}: send its rest back: ${sweepCommand(chainName)}` : "";
-      throw new Error(`${rel(out)} exists: the pool is deployed on ${chainName}: run its live check alone: ${liveCheck}${left}`);
+      const left = j?.keys?.state && j.keys.state !== "removed" ? `; its run key is still ${j.keys.state}: send its rest back: ${sweepLine}` : "";
+      throw new Error(`${rel(out)} exists: ${only ?? "the pool"} is deployed on ${chainName}: run its live check alone: ${liveCheck}${left}`);
     }
-    const elsewhere = await (io.deployedElsewhere ?? deployedElsewhere)(chainName);
-    if (elsewhere) throw new Error(`the pool is deployed on ${chainName} already: ${elsewhere}`);
+    const elsewhere = await (io.deployedElsewhere ?? deployedElsewhere)(chainName, only ? { only, record: out } : {});
+    if (elsewhere) throw new Error(`${only ?? "the pool"} is deployed on ${chainName} already: ${elsewhere}`);
     if (existsSync(journalFile)) {
       const j = JSON.parse(readFileSync(journalFile, "utf8"));
       const keptWhy = `(${(j.keys?.why ?? []).join("; ") || "its state unknown"})`;
       if (j.keys?.state !== "removed") {
         // a stopped run whose key is kept: this run resumes with that key, to that run's return address only
         if (j.chain !== chainName) throw new Error(`${rel(journalFile)} is ${j.chain}'s, not ${chainName}'s`);
-        if (j.complete) throw new Error(`${rel(journalFile)}: a completed run's key is kept ${keptWhy}: send its rest back: ${sweepCommand(chainName)}`);
-        if (returnAddress(opt("--return")) !== j.return) throw new Error(`${rel(journalFile)}: a stopped run's key is kept ${keptWhy}; the paste resumes only to the run's return address ${j.return}, not ${opt("--return")}; or send its rest back: ${sweepCommand(chainName)}`);
+        if (j.complete) throw new Error(`${rel(journalFile)}: a completed run's key is kept ${keptWhy}: send its rest back: ${sweepLine}`);
+        if (returnAddress(opt("--return")) !== j.return) throw new Error(`${rel(journalFile)}: a stopped run's key is kept ${keptWhy}; the paste resumes only to the run's return address ${j.return}, not ${opt("--return")}; or send its rest back: ${sweepLine}`);
         j0 = j;
         resume = true;
       }
@@ -657,7 +682,7 @@ async function run(args, io = {}) {
       console.log(`deploy: run key ${deployer} (the stopped run's, kept in ${keyDir}; never printed)`);
       n0 = big(await call("eth_getTransactionCount", [deployer, "latest"]));
       const pending = big(await call("eth_getTransactionCount", [deployer, "pending"]));
-      if (pending !== n0) throw new Error(`the run key ${deployer} has ${pending - n0} transaction(s) pending: wait for them, or send its rest back: ${sweepCommand(chainName)}`);
+      if (pending !== n0) throw new Error(`the run key ${deployer} has ${pending - n0} transaction(s) pending: wait for them, or send its rest back: ${sweepLine}`);
       for (const t of j0.txs ?? []) {
         const n = t.contract;
         if (!n || t.step !== `deploy ${n}` || !names.includes(n) || reused[n] || !/^0x[0-9a-f]{40}$/.test(String(t.address))) continue;
@@ -667,17 +692,17 @@ async function run(args, io = {}) {
           // that replaced it) must show a receipt, or the run cannot tell whether the contract exists
           let seen = false;
           for (const o of (j0.txs ?? []).filter((x) => x.nonce === t.nonce && x.hash !== t.hash)) if (await call("eth_getTransactionReceipt", [o.hash])) seen = true;
-          if (!seen) throw new Error(`the stopped run's ${t.step} ${t.hash} at nonce ${t.nonce}: the nonce is spent but no journaled transaction there has a receipt on ${url}: nothing was sent; run the same paste again once the RPC has it, or send the key's rest back: ${sweepCommand(chainName)}`);
+          if (!seen) throw new Error(`the stopped run's ${t.step} ${t.hash} at nonce ${t.nonce}: the nonce is spent but no journaled transaction there has a receipt on ${url}: nothing was sent; run the same paste again once the RPC has it, or send the key's rest back: ${sweepLine}`);
         }
         if (!rc || rc.status !== "0x1" || rc.contractAddress?.toLowerCase() !== t.address) continue;
         // it landed: it is reused, or the run stops here, before any funding (deploying it again would leave a pool
         // pointing at a verifier the record does not name)
         const codes = await onBoth((u) => call("eth_getCode", [t.address, "latest"], u), (code) => isBuild(n, code));
         const bad = codes.filter(([, code]) => !isBuild(n, code)).map(([u]) => u);
-        if (bad.length) throw new Error(`the stopped run's ${n} at ${t.address} (${t.hash}) landed, but its code does not read back as the build's${n === "FeeCollector" ? ` with the sink ${sink}` : ""} on ${bad.join(" and ")}: nothing was sent; run the same paste again once both RPCs have it, or send the key's rest back: ${sweepCommand(chainName)}`);
+        if (bad.length) throw new Error(`the stopped run's ${n} at ${t.address} (${t.hash}) landed, but its code does not read back as the build's${n === "FeeCollector" ? ` with the sink ${sink}` : ""} on ${bad.join(" and ")}: nothing was sent; run the same paste again once both RPCs have it, or send the key's rest back: ${sweepLine}`);
         reused[n] = t.address;
       }
-      if (reused.PrivacyPoolSimple && !reused.WithdrawalVerifier) throw new Error(`the stopped run's pool ${reused.PrivacyPoolSimple} is reused only with its verifier, which did not read back: nothing was sent; send the key's rest back: ${sweepCommand(chainName)}`);
+      if (reused.PrivacyPoolSimple && !reused.WithdrawalVerifier) throw new Error(`the stopped run's pool ${reused.PrivacyPoolSimple} is reused only with its verifier, which did not read back: nothing was sent; send the key's rest back: ${sweepLine}`);
     } else {
       console.log(`deploy: run key ${deployer} (made in this run, never printed)`);
       if (big(await call("eth_getTransactionCount", [deployer, "pending"])) !== 0n) throw new Error(`${deployer} has sent transactions already`);
@@ -946,7 +971,7 @@ async function run(args, io = {}) {
     keyDir = mkdtempSync(path.join(keysBase0, `${chainName}-`));
     chmodSync(keyDir, 0o700);
     writeFileSync(path.join(keyDir, "key"), hex(sk) + "\n", { mode: 0o600 });
-    journalKeys = { folder: path.basename(keyDir), state: "in use", why: [], sweep: sweepCommand(chainName) };
+    journalKeys = { folder: path.basename(keyDir), state: "in use", why: [], sweep: sweepLine };
   }
   let done = false;
   try {
@@ -1132,7 +1157,7 @@ async function run(args, io = {}) {
             if (v.nonce < top) why.push(`its nonce ${v.nonce} on ${u} is below the ${top} it signed`);
             for (const a of v.made) made.add(a);
             if (out !== null && v.bal + out + DUST < askedAll) {
-              why.push(`it was asked for ${askedAll} wei in ${asked.length} transfer${asked.length === 1 ? "" : "s"} and has received ${v.bal + out} on ${u}: a transfer it asked for may still land; once it has, send it back: ${sweepCommand(chainName)}` +
+              why.push(`it was asked for ${askedAll} wei in ${asked.length} transfer${asked.length === 1 ? "" : "s"} and has received ${v.bal + out} on ${u}: a transfer it asked for may still land; once it has, send it back: ${sweepLine}` +
                 (v.bal <= DUST ? `. If an amount it asked for was never sent, nothing more will land: the key holds at most ${DUST} wei and nothing is lost` : ""));
             }
           }
@@ -1143,7 +1168,7 @@ async function run(args, io = {}) {
         if (!whole && made.size > 0) why.push(`the deploy stopped: it made ${made.size} of ${names.length || chain.contracts.length} contracts: the same paste resumes with this key and reuses them`);
         if (why.length) {
           journalKeys = { ...journalKeys, state: "kept", why };
-          console.error(`deploy: the run key ${deployer} is kept in ${keyDir}: ${why.join("; ")}. The same paste resumes with it; or send its rest back with: ${sweepCommand(chainName)}`);
+          console.error(`deploy: the run key ${deployer} is kept in ${keyDir}: ${why.join("; ")}. The same paste resumes with it; or send its rest back with: ${sweepLine}`);
         } else {
           rmSync(keyDir, { recursive: true, force: true });
           journalKeys = { ...journalKeys, state: "removed", why: [] };
