@@ -245,6 +245,7 @@ function venue(chain: EvmPoolChain, all: EvmPoolVenueList = evmPoolVenues()) {
     // and its v3 adapter: a buy's swap is run through the route's own adapter to read its gas (card evm-buy-gas-floor)
     adapterV3: isAddress(adapters[0]) ? lower(adapters[0]) : undefined,
     scan: Object.hasOwn(v, "scan") ? v.scan : undefined,
+    inflight: Object.hasOwn(v, "inflight") ? v.inflight : undefined,
     called: new Set(called.filter(isAddress).map(lower)),
   };
 }
@@ -2107,6 +2108,8 @@ export function evmRanked(urls: readonly string[], now: number = performance.now
     .map((e) => e.u);
 }
 
+/** Each provider evmProviders made, its URL: the gate takes the venue's in-flight pin for it (gated). */
+const URL_OF = new WeakMap<EvmRpc, string>();
 /** Providers from https URLs on different hosts, at least two, each timed for evmRanked. */
 export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): EvmRpc[] {
   if (!Array.isArray(urls) || urls.length < 2) return refuse("bad_request", "two provider URLs at least");
@@ -2121,7 +2124,11 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): Ev
     return h;
   });
   if (new Set(hosts).size !== hosts.length) return refuse("bad_request", "two providers are on one host");
-  return urls.map((u) => timed(u, evmJsonRpc(u, fetchFn)));
+  return urls.map((u) => {
+    const f = timed(u, evmJsonRpc(u, fetchFn));
+    URL_OF.set(f, u);
+    return f;
+  });
 }
 
 /** What every quote checks before any read, buy or sell: the device's clock, two different providers, the amount in
@@ -2135,16 +2142,19 @@ function checkAsk(nowMs: number, rpcsIn: unknown, amountIn: unknown, slippageBps
   if (!Number.isInteger(slippageBps) || (slippageBps as number) < 0 || (slippageBps as number) >= 10000) return refuse("bad_request", "the slippage is 0 to 9,999 bps");
 }
 
-/** The two providers, every request of a quote to each (its head, its block's confirmation and its reads) at most the
- *  scan provider's limit at once: on each chain one of the two providers is the scan provider's host (Base's publicnode
- *  takes 20 at once, Robinhood's own RPC answers 429 to 4). */
-function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline): readonly EvmRpc[] {
+/** The two providers, every request of a quote to each (its head, its block's confirmation and its reads) at most its
+ *  own limit at once: the venue's `inflight` pin for the provider's URL (evmProviders names it), else `parallel`, the
+ *  scan provider's limit (card robinhood-quotes-inside-provider-limits: one limit of 2 for every Robinhood provider, the
+ *  scan's, queued a cold USDG quote's 173 posts for 12 s where publicnode and dRPC each take 6 and more at once). */
+function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline, inflight?: Readonly<Record<string, number>>): readonly EvmRpc[] {
   // past the quote's deadline no request leaves the gate: the quote refuses stale_quote (card evm-buy-quote-ends-on-node)
   const past = () => {
     if (deadline !== undefined && deadline.now() > deadline.until) refuse("stale_quote", `the quote's block is more than ${EVM_QUOTE_MAX_AGE_MS / 1000} s old: no more reads are sent`);
   };
   const list = rpcsIn.map((rpc) => {
-    const g = gateOf(parallel);
+    const url = URL_OF.get(rpc);
+    const pin = url !== undefined && inflight !== undefined && Object.hasOwn(inflight, url) ? inflight[url] : undefined;
+    const g = gateOf(typeof pin === "number" && Number.isSafeInteger(pin) && pin >= 1 ? pin : parallel);
     // stalled: requests out and none answered for 4 x EVM_HEDGE_MS (agreeing moves a request queued behind them)
     let flying = 0;
     let lastAt = 0;
@@ -2209,7 +2219,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   if (route.venue === "uniswap-v4" && route.hops.some((h) => h.hookData !== "0x")) return refuse("bad_request", "a buy's hook data is the device's own: empty");
   if (!isAddress(token) || lower(token) === NATIVE) return refuse("bad_request", "the token is not an address");
   const v = venue(chain);
-  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2, { until: Infinity, now: () => nowMs + Math.max(0, mono() - start) });
+  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2, { until: Infinity, now: () => nowMs + Math.max(0, mono() - start) }, v.inflight);
   const { token: buys } = evmPoolRouteDataQuoted(chain, route);
   if (lower(buys) !== lower(token)) return refuse("token_mismatch", `the route buys ${buys}, not ${token}`);
   // the pools this device banned for the token, the sale's and the buy's alike (card evm-buy-hook-converge)
@@ -3493,7 +3503,7 @@ export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn:
   // the device's releases on their way to W, read once into a copy (card evm-sell-no-release-in-flight)
   const sent = evmSellSentOf(req.sent) ?? refuse("bad_request", "a sell quote takes `sent`, a list of the device's releases to W, each a note, a nullifier and a deadline");
   if (v.pool === undefined) return refuse("no_quoter", `${chain} pins no pool: W's releases cannot be read`);
-  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2, { until: Infinity, now: () => nowMs + Math.max(0, mono() - start) });
+  const rpcs = gated(rpcsIn, v.scan?.parallel ?? 2, { until: Infinity, now: () => nowMs + Math.max(0, mono() - start) }, v.inflight);
   const t = lower(token);
 
   const reads: Read[] = [];

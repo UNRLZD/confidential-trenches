@@ -14,9 +14,10 @@ import { callKey } from "./evm-quote-calls-record.ts";
 
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-quote-calls.json.gz", import.meta.url))).toString("utf8"));
 const POST_MS = 200;
-// The bound: the recorded quote's posts through each provider's pinned limit at POST_MS a post, with room for a slow
-// runner; one limit of 2 for every provider took 10.7 s (195 posts)
-const BOUND_MS = 5_000;
+// The bound: the recorded quote's 195 posts at POST_MS a post took 6.3 s through each provider's pinned limit and
+// 10.7 s through one limit of 2 for every provider (the replay's own work 0.9 s of each, with no wait a post), so a
+// runner twice as slow stays inside it and the one limit of 2 never does
+const BOUND_MS = 8_000;
 
 const replay = () => {
   const answers = new Map<string, unknown>(F.calls);
