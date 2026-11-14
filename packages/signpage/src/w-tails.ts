@@ -1,19 +1,22 @@
-// A W's tail (card one-balance-buys-on-every-chain; card pool-amounts-are-standard-sizes writes them): what a sale or a
-// buy leaves on its one-time wallet W under the pool's smallest rung, which no pool deposit takes. Each is one record in
-// the wallet store's "meta" under the store's WALLET_W_TAIL_PREFIX ("w-tail/") + "<chain>/<address>", written by the
-// rent back at its floor end and deleted once W reads empty or a sweep is sent:
+// A W's tail (card one-balance-buys-on-every-chain; cards pool-amounts-are-standard-sizes and -evm write them): what a
+// sale or a buy leaves on its one-time wallet W under the pool's smallest rung, which no pool deposit takes. Each is one
+// record in the wallet store's "meta" under the store's WALLET_W_TAIL_PREFIX ("w-tail/") + "<chain>/<address>", written
+// by the Solana rent back at its floor end (deleted once W reads empty or a sweep is sent), and by the Base and Robinhood
+// carry at its `carried` or `tail` end (src/pool-carry-evm.ts):
 //   { chain, address, l, j, amount }
-//   chain: "sol" (the derive path's chain name); address: W's own address; l: W's label (a decimal string, as
-//   OwedRentBack.l); j: W's index; amount: what W holds, lamports as a decimal string.
+//   chain: "sol" (the derive path's chain name), or "base" or "robinhood" (an EVM W's one address holds money on one
+//   chain only, its pool's); address: W's own address (an EVM W's lowercase); l: W's label (a decimal string, as
+//   OwedRentBack.l); j: W's index; amount: what W holds, lamports or wei as a decimal string.
 // From the store alone: nothing here reads a chain or names W in a request. Each tail is counted in the balance
-// (state.deposit_wallets, beside each U_X's leftover) and carried to Cash by pool to Cash (src/pool-to-cash.ts).
+// (state.deposit_wallets, beside each U_X's leftover) and moved with the 12 words at any time (the exit tool); no send of
+// ours reads it yet (card leftovers-carry-to-cash builds W's send to Cash).
 import type { PoolAsset, PoolChain } from "../../kit/src/signpage/messages.ts";
 import { WALLET_W_TAIL_PREFIX } from "@blindfill/wallet/store";
 
 export type WTail = { chain: PoolChain; address: string; l: string; j: number; amount: string };
 
 /** The record's chain name, the derive path's, as the pool chain. */
-const CHAINS: Readonly<Record<string, PoolChain>> = Object.freeze({ sol: "solana" });
+const CHAINS: Readonly<Record<string, PoolChain>> = Object.freeze({ sol: "solana", base: "base", robinhood: "robinhood" });
 const UNITS = /^[0-9]{1,78}$/;
 
 /** The record as stored, or null for anything that is not one exactly. */

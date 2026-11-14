@@ -92,7 +92,7 @@ import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmP
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
 import { isReleaseSize, noteOf, releaseSizesUpTo, SOL_GRID, SOL_NOTE_FLOOR, type PieceRule } from "../../../wallet/src/pool/pieces.ts";
-import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
+import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, EVM_PIECES, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
 export const POOL_KINDS = ["pool.deposit", "pool.buy", "pool.sell", "pool.withdraw"] as const;
@@ -1453,12 +1453,14 @@ export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDeposit
 export type EvmCarryContext = EvmDepositContext & { readonly chain: "base" | "robinhood" };
 
 /**
- * W's carry: the ETH a release paid the fresh wallet W with no swap (a refused buy) goes back into the pinned pool as
- * one note of the user's, by a deposit W signs and pays the gas of. Every field is held as U's deposit is
- * (checkEvmDeposit: the pinned pool and chain, deposit(value, precommitment) and nothing else, W's agreed nonce, the
- * two-RPC estimate with the tree's headroom, the fee caps), and the value is W's whole lower balance reading less the
- * send's fee bound exactly: W keeps nothing past the gas it may not use, and no value is any server's word. Signed by
- * signEvmDeposit with W's key alone (the signer holds the key to `wallet`).
+ * W's carry: the ETH a release paid the fresh wallet W with no swap (a refused buy), or a sale's rest SellDelegate left
+ * on W, goes back into the pinned pool as one note of the user's, by a deposit W signs and pays the gas of. Every field
+ * is held as U's deposit is (checkEvmDeposit: the pinned pool and chain, deposit(value, precommitment) and nothing else,
+ * W's agreed nonce, the two-RPC estimate with the tree's headroom, the fee caps), and the value is exactly the largest
+ * rung of the pool's 1-2-5 ladder (EVM_PIECES, from 0.001 ETH) at or under W's lower balance reading less the send's fee
+ * bound (card pool-amounts-are-standard-sizes-evm: a deposit is public in value, so a standard size): the rest stays on
+ * W, the user's own, for the next pass, and no value is any server's word. Signed by signEvmDeposit with W's key alone
+ * (the signer holds the key to `wallet`).
  */
 export function checkEvmCarry(tx: EvmOnwardSend, ctx: EvmCarryContext, reads: EvmDepositReads, testnet = false): PoolDraw {
   if (ctx?.chain !== "base" && ctx?.chain !== "robinhood") return refuse("chain");
@@ -1467,9 +1469,10 @@ export function checkEvmCarry(tx: EvmOnwardSend, ctx: EvmCarryContext, reads: Ev
   const ask: PoolAsk = { kind: "pool.deposit", chain: ctx.chain, token: null, amount: value, slippageBps: 0, decimals: 18 };
   const draw = checkEvmDeposit(tx, ask, ctx, reads, testnet);
   const low = reads.balance[0]! < reads.balance[1]! ? reads.balance[0]! : reads.balance[1]!;
-  if (draw.amount + draw.feeCap !== low) {
+  const rung = low > draw.feeCap ? noteOf(EVM_PIECES, low - draw.feeCap).note : 0n;
+  if (rung === 0n || draw.amount !== rung) {
     DEPOSIT_CHECKED.delete(tx);
-    return refuse("carry_whole");
+    return refuse("amount");
   }
   return draw;
 }
