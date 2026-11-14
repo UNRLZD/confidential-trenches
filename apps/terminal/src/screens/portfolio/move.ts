@@ -225,3 +225,11 @@ export function checkAmount(text: string, r: PoolRow): AmountCheck {
   if (units === null || units === 0n) return { kind: "bad" };
   return units > movable(r) ? { kind: "over", units } : { kind: "ok", units };
 }
+
+/** The approved word a Move's refusal is named by (card move-one-confidential-swap), the same on the dry and at the tap:
+ *  a read not in yet or a throttle Busy, a quote that failed the device's check Quote refused, anything else Not
+ *  available. No new sentence: each is a word of words.ts. */
+export function refusedWord(code: string): "busy" | "quoteRefused" | "notAvailable" {
+  if (code === "busy" || code === "down") return "busy";
+  return code === "quote_check_failed" ? "quoteRefused" : "notAvailable";
+}

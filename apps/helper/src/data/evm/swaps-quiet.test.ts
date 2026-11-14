@@ -3,7 +3,7 @@
 // GeckoTerminal trending Base pools had no swap in that window. A listed token whose pool is confirmed on chain but quiet
 // was "none" (findPool null), and its chart GeckoTerminal's alone, which the keyless budget refuses with a 429. Here:
 // a confirmed pool is the token's book even with no swap; a quiet book's price is the pool's own state at the agreed
-// head (a mark, ../candles.ts); PancakeSwap v3 on Base is a venue; and a book whose close is off the list's price by
+// head (a mark, ../candles.ts); PancakeSwap v3 and Uniswap v2 on Base are venues; and a book whose close is off the list's price by
 // more than SCALE_BOUND is not served. Every chain answer is planted on the recorded Base fake (test/evm-swaps/base.ts)
 // and the clock is the planted one.
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as B from "../../../test/evm-swaps/base.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN } from "../gecko.ts";
+import { fixed } from "../candles.ts";
 // one namespace, so each test fails for its own reason where an export is missing (the red run at 4589273f)
 import * as S from "./swaps.ts";
 import { BASE_VENUES, decodeSwap, parseLog, REF_POOL_ID, swapFilter, TOPIC, VENUES, type Pool } from "./swaps.ts";
@@ -302,6 +303,103 @@ test("a listed token whose list names its PancakeSwap v3 pool: confirmed by the 
   assert.equal(a.status, 200, a.body);
   const trades = JSON.parse(a.body).trades as { side: string; usd: string; amt: string; tx: string }[];
   assert.deepEqual(trades.map((x) => [x.side, x.usd, x.amt, x.tx]), [["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash]]);
+});
+
+// -- Uniswap v2 on Base ----------------------------------------------------------------------------------------------
+
+/** Read through the namespace's types, so the file loads where the venue is missing (red at 606fc443c). */
+const UNI2_TOPIC = (TOPIC as Record<string, string>).swapUni2;
+const UNI2_FACTORY = (BASE_VENUES as Record<string, unknown>).uniswapV2 as string | undefined;
+const UNI2 = JSON.parse(readFileSync(new URL("./fixtures/swaps-univ2-base.json", import.meta.url), "utf8")) as { pool: string; factory: string; asset0: string; asset1: string; block: number; reserves: string; log: Record<string, unknown> & { topics: string[]; transactionHash: string } };
+const UNI2_POOL = { venue: "v2", id: UNI2.pool, token: UNI2.asset0, tokenIs0: true, quote: { kind: "eth", decimals: 18 }, log: "univ2" } as Pool;
+
+test("Uniswap v2 on Base: the factory, its getPair and its pairs' own Swap topic, read and decoded from a real SPCX / WETH log (red at 606fc443c)", () => {
+  assert.equal(UNI2_TOPIC, hex(keccak_256(new TextEncoder().encode("Swap(address,uint256,uint256,uint256,uint256,address)"))));
+  assert.equal(UNI2.log.topics[0], UNI2_TOPIC);
+  assert.notEqual(UNI2_TOPIC, TOPIC.swap2);
+  assert.equal(UNI2_FACTORY, UNI2.factory);
+  assert.ok(VENUES.base.v2.includes(UNI2.factory));
+  assert.equal(VENUES.base.getPool[UNI2.factory], "pair");
+  assert.equal(sel("getPair(address,address)"), "0xe6a43905");
+  assert.equal(UNI2.asset1, BASE_VENUES.weth);
+  assert.deepEqual(swapFilter(UNI2_POOL, 1, 2).topics, [UNI2_TOPIC]);
+  const l = parseLog(UNI2.log)!;
+  // the pair paid out 123,989.534258606247275177 SPCX (amount0Out) for 3,577,223,829 wei of WETH (amount1In): a buy
+  assert.deepEqual(decodeSwap(UNI2_POOL, l), { kind: "swap", block: 57204626, index: 0x3c, tx: UNI2.log.transactionHash, side: "b", amt: 123_989_534_258_606_247_275_177n, quote: 3_577_223_829n });
+  // the same log is no Aerodrome v2 pool's swap, and an Aerodrome-shaped log no Uniswap v2 pair's
+  assert.equal(decodeSwap({ ...UNI2_POOL, log: undefined }, l), null);
+  assert.equal(decodeSwap(UNI2_POOL, { ...l, topics: [TOPIC.swap2, ...l.topics.slice(1)] }), null);
+  // a pair's price is its reserves alone: it has no stable() (it reverted on both providers)
+  assert.deepEqual(S.poolStateCalls(UNI2_POOL), [{ to: UNI2.pool, data: sel("getReserves()") }]);
+  const r0 = BigInt(`0x${UNI2.reserves.slice(2, 66)}`);
+  const r1 = BigInt(`0x${UNI2.reserves.slice(66, 130)}`);
+  assert.deepEqual(S.poolStateLegs(UNI2_POOL, [UNI2.reserves]), { amt: r0, quote: r1 });
+  assert.equal(S.poolStateLegs(UNI2_POOL, [word(0n)]), null, "one word is no reserves answer");
+});
+
+test("a listed token whose list names its Uniswap v2 pair: confirmed by the factory's getPair(token0, token1), its swaps read by Uniswap v2's topic, on the tape at the ETH price before it (red at 606fc443c: no trade)", async () => {
+  const chain = B.fakeChain();
+  // 200 blocks into the recording: its ETH price swaps lie before the moved log (swaps.test.ts reads ICNT so)
+  chain.st.head = B.REC.firstHead + 200;
+  const head = chain.st.head;
+  const tok = UNI2.asset0;
+  const calls = new Map<string, string>([
+    [`${tok} 0x313ce567`, word(18n)],
+    [`${UNI2.pool} 0xc45a0155`, word(BigInt(UNI2.factory))],
+    [`${UNI2.pool} 0x0dfe1681`, word(BigInt(UNI2.asset0))],
+    [`${UNI2.pool} 0xd21220a7`, word(BigInt(UNI2.asset1))],
+    [`${UNI2.factory} ${sel("getPair(address,address)")}${w(UNI2.asset0)}${w(UNI2.asset1)}`, word(BigInt(UNI2.pool))],
+  ]);
+  // the recorded log moved to 5 blocks under the head, timed as the fake times that block
+  const at = head - 5;
+  const log = { ...UNI2.log, blockNumber: `0x${at.toString(16)}`, blockTimestamp: `0x${B.timeOf(at).toString(16)}` };
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+    const mine = reqs.map((r): object | undefined => {
+      if (r.method === "eth_call") {
+        const c = r.params[0] as { to: string; data: string };
+        return { result: calls.get(`${c.to} ${c.data}`) ?? "0x" };
+      }
+      if (r.method !== "eth_getLogs") return undefined;
+      const q = r.params[0] as Filter;
+      if (q.address === tok) return { result: [] };
+      if (q.address === UNI2.pool) return { result: q.topics?.[0] === UNI2_TOPIC && inRange(q, at) ? [log] : [] };
+      return undefined;
+    });
+    const rest = reqs.filter((_, i) => mine[i] === undefined);
+    const fwd = rest.length === 0 ? [] : ((await (await chain.fetch(url, { ...init, body: JSON.stringify(rest) })).json()) as { id: number }[]);
+    const out = reqs.map((r, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: r.id, ...mine[i] } : fwd.find((x) => x.id === r.id)));
+    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const s = B.open(chain, undefined, { fetch: fetch as never, pools: new Map(), hint: async () => UNI2.pool });
+  const a = await s.trades(tok, 50);
+  s.stop();
+  assert.equal(a.status, 200, a.body);
+  const trades = JSON.parse(a.body).trades as { side: string; usd: string; amt: string; tx: string }[];
+  // the wei at the recorded ETH price in force before the log (the last of the reference pool's swaps before it)
+  const ref = B.REC.logs.ref.filter((x) => x.b < at).map(B.toLog).map((x) => S.decodeRef(x)).filter((x) => x !== null).at(-1)!;
+  assert.deepEqual(trades.map((x) => [x.side, x.usd, x.amt, x.tx]), [["b", fixed((3_577_223_829n * ref.ethUsd) / 10n ** 18n, 18), "123989.534258606247275177", UNI2.log.transactionHash]]);
+});
+
+test("a quiet Uniswap v2 WETH pair: the mark is its reserves' ratio at the ETH price of the same block, read with getReserves() alone (a pair's stable() reverts) (red at 606fc443c: 429)", async () => {
+  const POOL = `0x${"f3".repeat(20)}`;
+  const f = UNI2_FACTORY ?? UNI2.factory;
+  const calls = base();
+  calls.set(`${POOL} 0xc45a0155`, word(BigInt(f)));
+  calls.set(`${POOL} 0x0dfe1681`, word(BigInt(BASE_VENUES.weth)));
+  calls.set(`${POOL} 0xd21220a7`, word(BigInt(COIN)));
+  calls.set(`${POOL} ${sel("stable()")}`, "error");
+  calls.set(`${f} ${sel("getPair(address,address)")}${w(BASE_VENUES.weth)}${w(COIN)}`, word(BigInt(POOL)));
+  // 1 WETH against 2,500 COIN: 0.0004 ETH per COIN
+  calls.set(`${POOL} ${sel("getReserves()")}`, `${word(10n ** 18n)}${w(word(2_500n * 10n ** 18n))}${w(word(1_793_000_000n))}`);
+  calls.set(REF_CALL, word(REF_SQRT));
+  const r = rig({ calls, logs: (q) => (q.address === COIN || q.address === POOL ? [] : undefined) });
+  const s = B.open(r.chain, r.clock, { fetch: r.fetch as never, pools: new Map(), gecko: r.budget, sleep: async () => undefined, hint: async () => POOL });
+  const a = await s.candles(COIN, "1h", null, 500);
+  s.stop();
+  assert.equal(a.status, 200, a.body);
+  // 0.0004 * 3,725.2902984619140625
+  assert.deepEqual(JSON.parse(a.body).candles, [[bucket(3_600), "1.490116119384765625", "1.490116119384765625", "1.490116119384765625", "1.490116119384765625", "0"]]);
 });
 
 // -- a bar off the list's price -------------------------------------------------------------------------------------

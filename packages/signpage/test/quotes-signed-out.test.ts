@@ -40,6 +40,39 @@ test("every quote host gets the page's stop: deposit.quote, pool.address and the
   assert.match(MAIN, /const quotes = quotesStop\(\);\nconst quotesStopped = quotes\.stopped;\nconst quotesSignedOut = quotes\.signedOut;/);
 });
 
+/** Each call of `name` in main.ts, from its `({` to the matching `})`. */
+function calls(name: string): string[] {
+  const out: string[] = [];
+  for (let at = MAIN.indexOf(`${name}({`); at >= 0; at = MAIN.indexOf(`${name}({`, at + 1)) {
+    let depth = 0;
+    let i = at + name.length + 1;
+    for (; i < MAIN.length; i += 1) {
+      if (MAIN[i] === "{") depth += 1;
+      else if (MAIN[i] === "}" && --depth === 0) break;
+    }
+    out.push(MAIN.slice(at, i + 1));
+  }
+  return out;
+}
+
+// Card move-one-confidential-swap: every 1Click quote the page asks is one confidential swap, held to 1Click's keyless
+// tell, and the tell reads on the host's own signal, the page's stop (its effect: test/pool-deposit-address.test.ts and
+// test/rules-deposit-quote.test.ts). The hosts: deposit.quote and pool.address (money in from an outside wallet), the
+// Move's quote into a pool (poolMoveAddress) and into Cash (poolCoinQuote). No host is built and left unused.
+test("every 1Click quote host is confidential, and its keyless tell reads on the page's stop", () => {
+  const hosts = [...calls("depositQuoteHost"), ...calls("poolAddressHost")];
+  assert.equal(hosts.length, 4, hosts.map((h) => h.slice(0, 60)).join("\n"));
+  for (const h of hosts) {
+    assert.match(h, /\bstop: quotesStopped\b/, h.slice(0, 80));
+    assert.match(h, /\bconfidential: true\b/, h.slice(0, 80));
+    assert.match(h, /\bhidden: \(address, signal\) => oneClickHidden\(address, fetch, signal\)/, h.slice(0, 80));
+  }
+  // the tell is read nowhere else, so never off a host's stop
+  assert.equal(MAIN.split("oneClickHidden(").length - 1, 4);
+  for (const name of ["poolCoinQuote", "poolMoveAddress"]) assert.ok(MAIN.split(name).length - 1 >= 2, `${name} is used`);
+  assert.doesNotMatch(MAIN, /const poolAddress = /);
+});
+
 // Delta review P2-2: the stop stays pulled from the tap until the page is signed in again. The store's sign out waits for
 // the seed lock while the records stay readable, and the API's queue runs the next request as the one before it answers:
 // a request queued behind the tap must find the stop pulled, not a fresh one.

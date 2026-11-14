@@ -1,0 +1,213 @@
+{
+ "note": "good: build-app.mjs --out at the card's head with the network reads of 2026-11-14T04:40:46.128Z; liveBefore: SIGN_HOST as served at 2026-11-14T04:40:46.128Z, same reads",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-pNM6aITIyHSLIf+idYR+ihKit0qdA+t1cVnUTbPz4s6UdUdE/sjdSMBFJqVn6k0B\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-pNM6aITIyHSLIf+idYR+ihKit0qdA+t1cVnUTbPz4s6UdUdE/sjdSMBFJqVn6k0B",
+  "marks": [
+   "collector",
+   "mode",
+   "tell"
+  ],
+  "pairs": [
+   {
+    "pair": "solana>base",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "3175379984153767"
+   },
+   {
+    "pair": "solana>robinhood",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "3165939984153767"
+   },
+   {
+    "pair": "solana>near",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "6029041"
+   },
+   {
+    "pair": "base>solana",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "74949633"
+   },
+   {
+    "pair": "base>robinhood",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "2983392249745289"
+   },
+   {
+    "pair": "base>near",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "5676980"
+   },
+   {
+    "pair": "robinhood>solana",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "74950030"
+   },
+   {
+    "pair": "robinhood>base",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "2992832249745289"
+   },
+   {
+    "pair": "robinhood>near",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "5676980"
+   },
+   {
+    "pair": "near>solana",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "79040919"
+   },
+   {
+    "pair": "near>base",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "3152692365915872"
+   },
+   {
+    "pair": "near>robinhood",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "3143252365915872"
+   }
+  ],
+  "tell": {
+   "hidden": {
+    "status": 404,
+    "message": "Deposit address 57LxDLkS96hfigLJW45RFEBYT28kzZ8x8u28Vd14o3xU not found",
+    "state": null
+   },
+   "public": {
+    "status": 200,
+    "message": null,
+    "state": "PENDING_DEPOSIT"
+   }
+  }
+ },
+ "liveBefore": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-CouZ+HUBTRzu8of3bSxz/qY0q2m2dzPzY1yK3NUPF7Fdekp79ob2eKjU7i7ACMNd\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-CouZ+HUBTRzu8of3bSxz/qY0q2m2dzPzY1yK3NUPF7Fdekp79ob2eKjU7i7ACMNd",
+  "marks": [],
+  "pairs": [
+   {
+    "pair": "solana>base",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "3175379984153767"
+   },
+   {
+    "pair": "solana>robinhood",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "3165939984153767"
+   },
+   {
+    "pair": "solana>near",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "6029041"
+   },
+   {
+    "pair": "base>solana",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "74949633"
+   },
+   {
+    "pair": "base>robinhood",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "2983392249745289"
+   },
+   {
+    "pair": "base>near",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "5676980"
+   },
+   {
+    "pair": "robinhood>solana",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "74950030"
+   },
+   {
+    "pair": "robinhood>base",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "2992832249745289"
+   },
+   {
+    "pair": "robinhood>near",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "5676980"
+   },
+   {
+    "pair": "near>solana",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "79040919"
+   },
+   {
+    "pair": "near>base",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "3152692365915872"
+   },
+   {
+    "pair": "near>robinhood",
+    "status": 201,
+    "mode": "advanced",
+    "collector": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+    "out": "3143252365915872"
+   }
+  ],
+  "tell": {
+   "hidden": {
+    "status": 404,
+    "message": "Deposit address 57LxDLkS96hfigLJW45RFEBYT28kzZ8x8u28Vd14o3xU not found",
+    "state": null
+   },
+   "public": {
+    "status": 200,
+    "message": null,
+    "state": "PENDING_DEPOSIT"
+   }
+  }
+ }
+}

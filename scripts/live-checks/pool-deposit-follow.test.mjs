@@ -7,7 +7,10 @@
 // no pin, each mark taken away: each FAIL. Planted in the bundle's own excerpt (pool-deposit-follow.excerpt.txt, cut from
 // this build's public/app.js: the floor and its read, the quote check, the wiring, the follow's page deps, its reads and
 // loop, the fixed source and depositFrom (review H1), the pool refund rule and the mover's key open): each rule the card
-// adds taken away: the mark it rests on FAILs.
+// adds taken away: the mark it rests on FAILs. Card move-one-confidential-swap: good re-recorded from its build, the
+// excerpt's wiring line re-cut from it with its names kept (pool.address wired with the confidential mode and the keyless
+// tell, asked with the page's fetch and the request's stop); beforeConfidential, SIGN_HOST read before its deploy, FAILs
+// on wired alone, and each part of that wiring taken away FAILs on wired.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -41,6 +44,13 @@ test("recorded bad answer beforeStop: FAIL on wired alone", () => {
   assert.deepEqual(v.lines, bad("wired"));
 });
 
+// card move-one-confidential-swap: SIGN_HOST before it wires pool.address with no confidential mode or keyless tell
+test("recorded bad answer beforeConfidential: FAIL on wired alone", () => {
+  const v = judge(ANSWERS.beforeConfidential);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, bad("wired"));
+});
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -62,9 +72,14 @@ const PLANTED = [
   ["the lower of the two RPCs' fees", new RegExp(`fee:(${N})\\[0\\]>\\1\\[1\\]`), "fee:$1[0]<$1[1]", ["floorRead"]],
   ["one RPC's fee only", new RegExp(`fee:(${N})\\[0\\]>\\1\\[1\\]\\?\\1\\[0\\]:\\1\\[1\\]`), "fee:$1[0]", ["floorRead"]],
   ["pool.address handed no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["wired"]],
-  ["pool.address handed no follow", new RegExp(`=>(${N})\\.quoted\\((${N}),(${N}),(${N}),(${N})\\),stop:`), "=>void 0,stop:", ["wired"]],
+  ["pool.address handed no follow", new RegExp(`=>(${N})\\.quoted\\((${N}),(${N}),(${N}),(${N})\\),confidential:`), "=>void 0,confidential:", ["wired"]],
   // card helper-says-why-a-vendor-refused: pool.address is handed the page's stop on sign out (src/main.ts quotesStopped)
-  ["pool.address handed no stop", new RegExp(`(=>${N}\\.quoted\\(${N},${N},${N},${N}\\)),stop:${N}\\}\\)`), "$1})", ["wired"]],
+  ["pool.address handed no stop", new RegExp(`(,hidden:\\(${N},${N}\\)=>${N}\\(${N},fetch,${N}\\)),stop:${N}\\}\\)`), "$1})", ["wired"]],
+  // card move-one-confidential-swap: the confidential mode and the keyless tell, asked with the page's fetch and the stop
+  ["pool.address wired with no confidential mode", new RegExp(`(=>${N}\\.quoted\\(${N},${N},${N},${N}\\),)confidential:!0,`), "$1", ["wired"]],
+  ["pool.address wired with no keyless tell", new RegExp(`(,confidential:!0,)hidden:\\(${N},${N}\\)=>${N}\\(${N},fetch,${N}\\),`), "$1", ["wired"]],
+  ["the tell asked with no stop", new RegExp(`(,hidden:\\((${N}),${N}\\)=>${N}\\(\\2,fetch),${N}\\)`), "$1)", ["wired"]],
+  ["the tell asked through another fetch", new RegExp(`(,hidden:\\((${N}),(${N})\\)=>${N}\\(\\2,)fetch(,\\3\\))`), "$1helperFetch$4", ["wired"]],
   ["the follow depositing from index 0, not the op's own U", new RegExp(`\\{s:BigInt\\((${N})\\.s\\),i:\\1\\.i,u:\\1\\.u\\}`), "{s:BigInt($1.s),i:0,u:$1.u}", ["wired"]],
   ["the follow depositing through the kinds' handler, not depositFrom", /\.depositFrom\(/, ".flow(", ["wired"]],
   ["the follow with no refund mover", new RegExp(`,refund:(${N})\\(async (${N})=>`), ",other:$1(async $2=>", ["wired"]],

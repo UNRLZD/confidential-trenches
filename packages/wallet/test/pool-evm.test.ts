@@ -1564,7 +1564,7 @@ test("F3c no answer in time never halves the pool sync's page (card evm-pool-syn
   assert.ok(wide.length <= 20 + 4, `${wide.length} pages: ${wide}`);
 });
 
-test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (Robinhood's 100,000; Pocket's backends 50,000 and 10,001), any spare untouched", async () => {
+test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (Robinhood's 100,000; Pocket's backends 50,000 and 10,001); card first-sign-in-reads-fast: a Pocket backend's refusal under a page Pocket answered walks its seat to GlobalStake, the spare", async () => {
   const list = evmPoolProvidersOf(evmPoolVenues().robinhood) ?? assert.fail("robinhood: the kit pins no pool list");
   const c = longChain([...deps(PP, [10, 1_200_000, 1_990_000])], 2_000_000);
   const logs = list.map((): string[] => []);
@@ -1579,18 +1579,21 @@ test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs t
       if (to - from + 1 > 50_000 && k === 2) throw new Error("RPC error -32602: invalid argument 0: block range exceeds maximum 50000");
       if (to - from + 1 > 10_001 && k % 3 === 0) throw new Error("RPC error -32602: eth_getLogs block range too large (max 10001 blocks)");
     },
+    // the whole pool's life at once, read 14 Nov 05:01Z and 05:13Z (the kit's comment at the list)
+    "https://rpc-robinhood.globalstake.io": () => {},
   };
   const rpcs = list.map((url, i) => rpc(c, { url, chainId: 4663n, log: logs[i], getLogs: caps[url] ?? (() => assert.fail(`${url} asked`)) }));
   const r = await evmTreeSync({ rpcs, pin: { ...PIN, network: "robinhood" }, ...noWait }).events();
   assert.equal(r.events.length, 3);
-  // review M-1: no spare today (GlobalStake answers past the device's client); one the kit adds is asked only for a
-  // seat out
-  const [own, pocket, ...spares] = logs.map(pageSizes);
-  assert.deepEqual(list.slice(0, 2), ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]);
+  const [own, pocket, spare] = logs.map(pageSizes);
+  assert.deepEqual(list, ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://rpc-robinhood.globalstake.io"]);
   assert.ok(own!.length > 0 && pocket!.length > 0, "both seats read the pool's logs");
-  assert.deepEqual(spares.map((x) => x.length), spares.map(() => 0), "a spare is asked only for a seat out");
+  // Pocket answered its first page (100,000) and refused the next at 50,000, under it: one backend's, so the seat
+  // walked to GlobalStake and read on there, never asking Pocket again (before the card the pager asked Pocket again,
+  // then halved, 10,001 on every third call)
+  assert.equal(pocket!.length, 2, `pocket: ${pocket}`);
+  assert.ok(spare!.length > 0 && spare!.every((s) => s <= 800_000), `globalstake: ${spare}`);
   assert.ok(own!.every((s) => s <= 800_000) && own!.filter((s) => s > 100_000).length <= 2 + Math.ceil(own!.length / EVM_LOG_CEILING_PAGES), `own: ${own}`);
-  assert.ok(Math.min(...pocket!) >= 5_000, `pocket: ${pocket}`);
 });
 
 test("card evm-pool-lists-mainnet: the kit's Base mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (PublicNode's 50,000; Pocket's 10,001 and its 500 backend), blastapi's 10 blocks never a seat", async () => {
@@ -1654,8 +1657,11 @@ test("card evm-pool-sync-wide-pages: a 13M-block span on two providers with caps
   const r = await sync(pair(c, c, capA, capB)).events();
   assert.equal(r.events.length, 3);
   const a = pageSizes(la), b = pageSizes(lb);
-  assert.ok(a.length <= Math.ceil(span / 50_000) + 10, `the 50,000 cap: ${a.length} pages`);
-  assert.ok(b.length <= Math.ceil(span / 100_000) + 10, `the 100,000 cap: ${b.length} pages`);
+  // a few probes a part: a page held at its provider's cap goes EVM_POOL_LOG_PAGES_IN_FLIGHT at once (card
+  // first-sign-in-reads-fast), each part probing its own blocks past the cap the read held, as the narrow pages' parts
+  // do (the 200 cap below); 273 calls on the 50,000 cap at the card's head, against 260 pages at the cap
+  assert.ok(a.length <= Math.ceil(span / 50_000) + 10 * EVM_POOL_LOG_PAGES_IN_FLIGHT, `the 50,000 cap: ${a.length} pages`);
+  assert.ok(b.length <= Math.ceil(span / 100_000) + 10 * EVM_POOL_LOG_PAGES_IN_FLIGHT, `the 100,000 cap: ${b.length} pages`);
 });
 
 test("card helper-evm-range-cap-walk: sepolia.base.org's HTTP 413 \"limited to a 200 range\" pages the pool sync at 200 at once, never under it: 1.5M blocks in ceil(span/200) pages and a few probes", async () => {
@@ -1787,9 +1793,13 @@ test("card evm-pool-sync-wide-pages: a refusal halves only that provider's page;
   assert.deepEqual(pageSizes(l2).slice(0, 2), [25_000, 100_000], `the spare's pages: ${pageSizes(l2)}`);
   // a provider whose backends differ (Pocket's words, 6 Nov 07:44Z): a refusal of a size it answered is asked again at
   // once, never halved, up to EVM_LOG_REFUSED_AGAIN times in a row
+  // each page past the first refused at its first ask and answered at its second: the pattern every other call made
+  // while pages went one at a time, kept the same with a capped page's parts in flight at once (card
+  // first-sign-in-reads-fast), whose calls interleave
   const lp: string[] = [];
   let np = 0;
-  const lottery = { log: lp, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 100_000 || (++np > 1 && np % 2 === 0)) throw new Error("RPC error -32602: query exceeds max block range 10000"); } };
+  const asked = new Set<number>();
+  const lottery = { log: lp, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 100_000) throw new Error("RPC error -32602: query exceeds max block range 10000"); if (++np > 1 && !asked.has(from)) { asked.add(from); throw new Error("RPC error -32602: query exceeds max block range 10000"); } } };
   const r3 = await sync(pair(c, c, {}, lottery)).events();
   assert.equal(r3.events.length, 3);
   const p3 = pageSizes(lp);

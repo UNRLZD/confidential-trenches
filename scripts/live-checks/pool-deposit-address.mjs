@@ -19,7 +19,11 @@
 //     (the fee read names U_X): a sign out during any of them answers not_allowed, as a signed-out page does, with
 //     nothing after it run;
 //   - a pool quote whose min out is under its context floor is refused "floor" after the kit's check, and a context floor
-//     under the ladders' least rungs (0.01 SOL, 0.001 ETH on Base and Robinhood) is refused (review F3).
+//     under the ladders' least rungs (0.01 SOL, 0.001 ETH on Base and Robinhood) is refused (review F3);
+//   - since card move-one-confidential-swap, pool.address is wired confidential with the keyless tell (`hidden` calls
+//     the tell with the page's fetch and the request's stop), and after the quote's check it waits for the tell on the
+//     stop, checks the stop after it, and answers an address only when 1Click answered "hidden" (the tell's own body is
+//     held by that card's live check).
 // What each does is held by the card's tests (packages/signpage/test/deposit-name.test.ts and
 // pool-deposit-address.test.ts); the recorded answers are facts() over each tree's packages/signpage/index.html and
 // public/app.js (this file reaches no package code: the import check holds it).
@@ -82,7 +86,24 @@ function plainGated(js, h) {
   const t = PLAIN_FN(g[12]).exec(js)?.[3];
   return !!t && PLAIN_TABLE(t).test(js);
 }
-const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),stop:${N}\\}\\)`);
+// (card move-one-confidential-swap: the confidential pair, between the follow's quoted and the stop, is required)
+const PAIR = `confidential:!0,hidden:\\((${N}),(${N})\\)=>${N}\\(\\5,fetch,\\6\\),`;
+const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\),priced:${N},floor:${N},checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),${PAIR}stop:${N}\\}\\)`);
+// card move-one-confidential-swap: inside the host, after the quote's check, the tell on the stop, the stop checked after
+// it, an address only on "hidden"
+const TELL = (out, stop, deps, stopped) =>
+  new RegExp(
+    `if\\(${deps}\\.confidential===!0\\)\\{let (${N})=${deps}\\.hidden===void 0\\?${Q}down${Q}:await ${deps}\\.hidden\\(${N}\\.depositAddress,${stop}\\)\\.catch\\(\\(\\)=>${Q}down${Q}\\);` +
+      `if\\(${stopped}\\(\\)\\)return void\\(${out}=\\{error:${Q}not_allowed${Q}\\}\\);if\\(\\1!==${Q}hidden${Q}\\)return void\\(${out}=\\{error:\\1===${Q}public${Q}\\?${Q}quote_check_failed${Q}:${Q}down${Q}\\}\\)\\}`,
+  );
+function confidential(js, h) {
+  if (!WIRED(h).test(js)) return false;
+  const m = STOP_HEAD(h).exec(js);
+  if (!m) return false;
+  const end = js.indexOf("function ", m.index + m[0].length);
+  const body = js.slice(m.index, end < 0 ? undefined : end);
+  return (body.match(new RegExp(TELL(...m.slice(1).map(esc)).source, "g")) ?? []).length === 1;
+}
 // pool-deposit-quote.ts: the kit's check with no vault floor, then the quote's own floor (card pool-deposit-follow: the
 // least rung plus the deposit's cost, which that card's live check holds).
 // card helper-says-why-a-vendor-refused: the stop read once (the answer, the stop, the deps, the check), then each wait
@@ -140,6 +161,7 @@ export function facts(index, js) {
     sameChain: !!read && HOST(host ?? "").exec(js)?.[8] === read,
     unfollowed: !!host && WIRED(host).test(js) && GATE(host).exec(js)?.[3] === "not_allowed" && plainGated(js, host),
     stopped: !!host && stopsEachWait(js, host),
+    confidential: !!host && confidential(js, host),
     floored: !!ladders && LADDER(ladders[1], "1000000", "10000000").test(js) && LADDER(ladders[2], "100000000000000", "1000000000000000").test(js),
   };
 }
@@ -149,8 +171,10 @@ export const WHY = {
   namesEach: "the namer does not name each pool's scope with its chain (an EVM pool as Base or Robinhood), or one scope that fails stops the rest",
   namesRecord: "a pool's record is not written from its scope's planned index and one-time id, or an EVM pool's carries no EVM address (or its key is not zeroed), or a record is kept other than a pool's own on a lower index while its U_X still holds money",
   sameChain: "pool.address does not answer the asked chain's own pool from that scope's record read back (Solana: the one-time id's key; EVM: the record's address)",
-  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet (a plain send of the pool's own coin too), is not refused not_allowed before any quote is asked, or pool.address is not wired with its pools, network, read, wait, price, floor read, the follow's quoted and the page's stop",
+  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet (a plain send of the pool's own coin too), is not refused not_allowed before any quote is asked, or pool.address is not wired with its pools, network, read, wait, price, floor read, the follow's quoted, the confidential mode with its keyless tell and the page's stop",
   stopped: "pool.address does not read the page's stop once as a request arrives, check it after each wait (the namer's, both record reads, the floor read, the follow's write) and hand it to the floor read and the quote's ask, or the floor read does not hand it on to its RPC reads: a sign out during one may still send a quote or a read",
+  confidential:
+    "pool.address is not wired confidential with the keyless tell, or does not wait for the tell on the page's stop, check the stop after it and answer an address only on hidden: a Move or a deposit may be a public swap",
   floored: "a pool quote whose min out is under its floor, or whose floor is under the pool's smallest deposit (0.01 SOL; 0.001 ETH on Base and Robinhood), is not refused floor",
 };
 

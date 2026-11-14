@@ -94,6 +94,8 @@ const APP = `https://${APP_HOST}`;
 export const PINNED_HOSTS = Object.freeze([
   "ct-api.unrealized.trade", "solana-rpc.publicnode.com", "solana.api.pocket.network", "rpc.mainnet.fastnear.com", "near.drpc.org",
   "base-rpc.publicnode.com", "base.api.pocket.network", "rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network",
+  // Robinhood's pool-list spare, where a seat refused under a page its provider answered walks (card first-sign-in-reads-fast)
+  "rpc-robinhood.globalstake.io",
 ]);
 /** The hosts a CSP's connect-src names (https sources only). */
 export const connectHosts = (csp) => {

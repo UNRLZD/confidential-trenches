@@ -1353,3 +1353,16 @@ test("card evm-first-proof-inside-ten-seconds: a clock that steps back ends the 
   assert.ok(c.reads.length >= 2, `cost reads at ${c.reads.map((r) => r.at).join(", ")}: the round after the step read again`);
   assert.ok(c.reads[1]!.at <= 2_000, `the second read at ${c.reads[1]!.at} ms, the round right after the step`);
 });
+
+test("card move-one-confidential-swap: a Move's follow (another pool's coin in, a confidential address no status ever reads: 404 or unreachable) still carries the arrival into the pool once the chain shows it", async () => {
+  const M: Rec = { ...F, origin: "nep141:base.omft.near", address: "57LxDLkS96hfigLJW45RFEBYT28kzZ8x8u28Vd14o3xU" };
+  const w = world([
+    { bal: [0n, 0n], status: null },
+    { bal: [0n, 0n], status: null },
+    { bal: [FLOOR + 1_000n, FLOOR + 2_000n], status: null },
+    { bal: [0n, 0n], status: null, past: true },
+  ]);
+  assert.equal(await followPoolQuote(M, w.deps), "in_pool");
+  assert.deepEqual(w.deposits, [10_000_000n]);
+  assert.equal(w.stages.at(-1), "in_pool");
+});

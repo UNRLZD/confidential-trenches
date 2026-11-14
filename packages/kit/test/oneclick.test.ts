@@ -432,3 +432,45 @@ test("USDC to USDC keeps S 15: a quote 16 bps over the fee is refused, 15 meets 
   assert.ok(q(15n).amountOut >= f.amountOut && q(15n).minAmountOut >= f.minAmountOut);
   assert.ok(q(16n).amountOut < f.amountOut);
 });
+
+// Card move-one-confidential-swap: a confidential quote (confidentiality "advanced", fixtures/oneclick-confidential.json,
+// a real live answer through the helper's partner key, nothing ever sent to its address). 1Click names another fee
+// collector on Confidential Intents rails, and neither `confidentiality` nor appFees is in the signed message, so the
+// mode is held by the echo and the per-mode collector pin, and a request may ask "advanced" only.
+const cfx = JSON.parse(readFileSync(new URL("./fixtures/oneclick-confidential.json", import.meta.url), "utf8")) as { request: OneClickRequest; answer: Answer };
+const C_OPTS: OneClickCheckOptions = { path: "partner", pricing: { in: ["75.33", "75.33"], out: ["1891.15", "1891.15"] }, decimalsIn: 9, decimalsOut: 18, intoVault: false, now: at(cfx.answer) };
+const PUBLIC_COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd";
+
+test("a real live confidential quote verifies and passes under its own collector; its deposit address comes back", () => {
+  assert.equal(cfx.request.confidentiality, "advanced");
+  const r = checkOneClickQuote(cfx.request, clone(cfx.answer), C_OPTS);
+  assert.equal(r.depositAddress, "DSSWPKE7kdvQNGsvWnMyGWCW1TvZwe8Lu92d6J7srzUH");
+  assert.equal(r.minAmountOut, 3_146_055_070_297_126n);
+});
+
+test("a confidential answer to a public request, or a public one to a confidential request, fails the echo", () => {
+  const { confidentiality: _, ...plain } = cfx.request;
+  refused("echo", () => checkOneClickQuote(plain as OneClickRequest, clone(cfx.answer), C_OPTS));
+  // the helper asked public and rewrote the unsigned mode: the collector it left still tells (app-fees below)
+  const down = clone(cfx.answer);
+  down.quoteRequest.confidentiality = "public";
+  refused("echo", () => checkOneClickQuote(cfx.request, down, C_OPTS));
+  const gone = clone(cfx.answer);
+  delete gone.quoteRequest.confidentiality;
+  refused("echo", () => checkOneClickQuote(cfx.request, gone, C_OPTS));
+});
+
+test("each mode takes only its own collector: the public collector on a confidential quote and the confidential one on a public quote are refused", () => {
+  const a = clone(cfx.answer);
+  (a.quoteRequest.appFees as { recipient: string }[])[0]!.recipient = PUBLIC_COLLECTOR;
+  refused("app-fees", () => checkOneClickQuote(cfx.request, a, C_OPTS));
+  const live = clone(fx.live.answer);
+  (live.quoteRequest.appFees as { recipient: string }[])[0]!.recipient = (cfx.answer.quoteRequest.appFees as { recipient: string }[])[0]!.recipient;
+  refused("app-fees", () => checkOneClickQuote(LIVE_REQ, live, LIVE_OPTS));
+});
+
+test("a request asks confidentiality \"advanced\" or nothing", () => {
+  for (const c of ["basic", "public", "", "ADVANCED", 1, null]) {
+    refused("request", () => checkOneClickQuote({ ...cfx.request, confidentiality: c } as unknown as OneClickRequest, clone(cfx.answer), C_OPTS));
+  }
+});

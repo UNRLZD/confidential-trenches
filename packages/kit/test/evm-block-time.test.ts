@@ -68,8 +68,10 @@ const MAINNET_WIDEST: Record<string, number> = {
   "robinhood-rpc.publicnode.com": 100,
   "robinhood.drpc.org": 100,
   // review M-1: 0.5-6.6 s at 10,000 blocks 13M back and no answer in 15 s at 100,000, past the device's 3.5 s client
-  // (packages/wallet/src/pool/evm.ts): no page it answers in time, so not even a spare
-  "rpc-robinhood.globalstake.io": 0,
+  // (packages/wallet/src/pool/evm.ts), but 13M back is before the pool's deploy block. On the pool's own blocks (card
+  // first-sign-in-reads-fast, 14 Nov 05:01Z and 05:13Z) it answered the whole life from the deploy block at once,
+  // 5,498,193 and 5,504,334 blocks, in 353-1,228 ms: the list's spare
+  "rpc-robinhood.globalstake.io": 5_498_193,
 };
 
 test("Robinhood mainnet's pool list: every entry, seat or spare, another operator's and paging the pool's logs at the sync's full page in the device's client (never publicnode's archive refusal, dRPC's 100 blocks or GlobalStake's timeouts)", () => {

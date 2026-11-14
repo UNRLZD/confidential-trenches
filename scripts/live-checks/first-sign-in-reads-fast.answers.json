@@ -1,0 +1,20 @@
+{
+ "good":{
+  "source": "local: this checkout's committed packages/signpage build, the pinned hosts on the network (branch card/first-sign-in-reads-fast at af9aed433 with this check at three runs, box run fsirf-median)",
+  "browser": "Chrome 156.0.8078.79, sandbox on",
+  "runs": [
+   { "at": "2026-11-14T05:33:35.412Z", "walked": [{ "chain": "near", "t": 1794634424089 },{ "chain": "solana", "t": 1794634428756 },{ "chain": "robinhood", "t": 1794634431766 },{ "chain": "base", "t": 1794634434878 }], "errors": [] },
+   { "at": "2026-11-14T05:33:55.228Z", "walked": [{ "chain": "near", "t": 1794634443029 },{ "chain": "solana", "t": 1794634447722 },{ "chain": "robinhood", "t": 1794634450755 },{ "chain": "base", "t": 1794634456962 }], "errors": [] },
+   { "at": "2026-11-14T05:34:17.243Z", "walked": [{ "chain": "near", "t": 1794634465210 },{ "chain": "solana", "t": 1794634469834 },{ "chain": "base", "t": 1794634472865 },{ "chain": "robinhood", "t": 1794634476017 }], "errors": [] }
+  ]
+ },
+ "bad":{
+  "source": "live https://confidential.unrealized.trade (release 133, before this card; box run bsf-restore, 3 sign-ins)",
+  "browser": "Chrome 156.0.8078.79, sandbox on",
+  "runs": [
+   { "at": "2026-11-14T03:31:22.989Z", "walked": [{ "chain": "near", "t": 1794627092150 },{ "chain": "solana", "t": 1794627096715 },{ "chain": "robinhood", "t": 1794627113447 },{ "chain": "base", "t": 1794627116633 }], "errors": [] },
+   { "at": "2026-11-14T03:31:58.449Z", "walked": [{ "chain": "near", "t": 1794627127093 },{ "chain": "solana", "t": 1794627131492 },{ "chain": "robinhood", "t": 1794627144682 },{ "chain": "base", "t": 1794627147690 }], "errors": [] },
+   { "at": "2026-11-14T03:32:29.373Z", "walked": [{ "chain": "near", "t": 1794627157667 },{ "chain": "solana", "t": 1794627162071 },{ "chain": "base", "t": 1794627174000 },{ "chain": "robinhood", "t": 1794627176952 }], "errors": [] }
+  ]
+ }
+}
