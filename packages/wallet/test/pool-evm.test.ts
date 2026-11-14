@@ -3457,6 +3457,19 @@ test("each refusal of the EVM tree read carries its code: rpc_disagree, root_mis
   await assert.rejects(evmNow(rpcs, undefined, async () => {}), (e) => e instanceof EvmUnansweredError && coded("unanswered", /latest block: no answer/)(e));
 });
 
+// the settle's heal (evm-settle.ts) backs a landed note out when a round lacks its leaf at its index: it holds only
+// because a round is never short. events() gives the pool's whole leaf list up to its anchor or refuses, never a list
+// missing a leaf at the head, the middle or the tail, as both RPCs (a mixed backend's short page) would give it
+test("an EVM sync round holds every leaf of the pool up to its anchor, or refuses: never a short or gapped list", async () => {
+  const c = C3();
+  const whole = await sync(pair(c, c)).events();
+  assert.equal(whole.events.length, 4);
+  for (const gone of [0, 2, 3]) {
+    const drop = (l: Record<string, unknown>[]) => l.filter((_, i) => i !== gone);
+    await assert.rejects(sync(pair(c, c, { logs: drop }, { logs: drop })).events(), (e) => (e as { code?: unknown }).code === "no_agreed_logs" && /the state tree from the logs \(3 leaves\) is not the pool's/.test(String((e as Error).message)));
+  }
+});
+
 test("card evm-deposit-on-mainnet: a pass's fresh sync after the pool's first deposit reads only past the page's hold of no leaf, never from the deploy block; a hold of no leaf the pool's root does not prove is read again from it, on Base and Robinhood", async () => {
   const getLogsFrom = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
   for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
