@@ -1686,7 +1686,11 @@ test("(card move-sends-or-says-why) a note the page's queue holds whose drop nev
   let run!: Promise<{ stage: string; cause?: string }>;
   enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
-    run = runPoolWithdraw({ ...wd.host, drop: () => new Promise<void>(() => {}) }, ASK, TO, 5_000_000n, COST);
+    // the clock moves only once the run asked its drop, so the bound's timer is set first however slow the box's turns
+    let asked!: () => void;
+    const dropped = new Promise<void>((r) => (asked = r));
+    run = runPoolWithdraw({ ...wd.host, drop: () => (asked(), new Promise<void>(() => {})) }, ASK, TO, 5_000_000n, COST);
+    await dropped;
     await flushed();
     mock.timers.tick(29_999);
     assert.equal(await pending(run), "pending", "the drop waited for until 30 s");

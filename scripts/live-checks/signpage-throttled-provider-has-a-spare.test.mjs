@@ -1,5 +1,6 @@
-// Replays card signpage-throttled-provider-has-a-spare's live check on its recorded answers. Good: SIGN_HOST and both
-// public seats read from the build Mac (the answers file's `good.at`): the pinned /app.js names both, each seat allows
+// Replays card signpage-throttled-provider-has-a-spare's live check on its recorded answers (three seats since card
+// move-sends-or-says-why; bad3 plants the second spare drifted). Good: SIGN_HOST and every
+// public seat read from the build Mac (the answers file's `good.at`): the pinned /app.js names both, each seat allows
 // the page's origin, and both answer the ten stable accounts with the same bytes. Bad: that run with the spare drifted
 // (another hash) and with the spare refusing the page (403, as api.mainnet-beta answers one), both planted; each fails.
 // Quiet: that run with the spare's read answered 429, planted: INCONCLUSIVE, never a pass.
@@ -15,14 +16,15 @@ const A = JSON.parse(readFileSync(new URL("./signpage-throttled-provider-has-a-s
 // the page's source read as text, never reached (scripts/ci/kit-reach.mjs refuses a new URL into packages/)
 const SRC = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage/src/trade.ts"), "utf8");
 
-test("the seats are the page's: provider A first, its spare after it, as src/trade.ts names them", () => {
+test("the seats are the page's: provider A first, then its two spares, as src/trade.ts names them", () => {
+  assert.equal(SEATS.length, 3);
   assert.match(SRC, new RegExp(`export const SOLANA_PROVIDER_A = "${SEATS[0]}";`));
-  assert.match(SRC, new RegExp(`export const SOLANA_PUBLIC_SEAT: readonly string\\[\\] = Object\\.freeze\\(\\[SOLANA_PROVIDER_A, "${SEATS[1]}"\\]\\);`));
+  assert.match(SRC, new RegExp(`export const SOLANA_PUBLIC_SEAT: readonly string\\[\\] = Object\\.freeze\\(\\[SOLANA_PROVIDER_A, "${SEATS[1]}", "${SEATS[2]}"\\]\\);`));
   assert.equal(STABLE.length, 10, "publicnode's cap for one getMultipleAccounts");
   assert.match(PROBE.pocket, /40 getAccountInfo in 10 s, 40 answered/);
 });
 
-test("the good answer passes: both seats named, each allowing the page, the same bytes", () => {
+test("the good answer passes: every seat named, each allowing the page, the same bytes", () => {
   const v = check(A.good);
   assert.equal(v.ok, true, v.lines.join("\n"));
   assert.equal(v.verdict, "PASS");
@@ -44,4 +46,16 @@ test("the bad answers fail: a spare that drifts, and a spare that refuses the pa
   assert.equal(refused.verdict, "FAIL", "a refusal of the page is a FAIL, never a no-answer");
   assert.ok(refused.lines.some((l) => /^BAD solana\.api\.pocket\.network HTTP 403: refuses the CORS preflight/.test(l)), refused.lines.join("\n"));
   assert.ok(refused.lines.some((l) => /^BAD solana\.api\.pocket\.network HTTP 403: .* may not read its answer/.test(l)), refused.lines.join("\n"));
+});
+
+test("(card move-sends-or-says-why) the second spare is held as the first: one that drifts fails, and one the run never read cannot pass", () => {
+  const drift = check(A.bad3);
+  assert.equal(drift.verdict, "FAIL");
+  assert.ok(drift.lines.some((l) => /^BAD the seats answer different bytes: .*public\.rpc\.solanavibestation\.com 0000/.test(l)), drift.lines.join("\n"));
+  // a run from before the second spare (its two seats only): the third is not named and not read
+  const two = structuredClone(A.good);
+  delete two.seats[SEATS[2]];
+  two.app.names = SEATS.slice(0, 2);
+  assert.equal(check(two).ok, false);
+  assert.ok(check(two).lines.includes(`BAD the page's script names the seat ${SEATS[2]}`));
 });

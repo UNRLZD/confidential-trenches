@@ -86,8 +86,9 @@ export const SOLD = "owed/sold-sol";
  *  the last unless a sign out overtook it: `read:async()=>{let e=s;if(await c.ready(),e!==s)return null;return c.first(),l}`
  *  (src/positions.ts), and the page's `positions:()=>c.read()` (src/pool-testnet.ts), or since card
  *  signpage-positions-evm the same read first in the page's join of Solana's and each EVM chain's:
- *  `positions:async()=>{let[e,...t]=await Promise.all([c.read(),...`. */
-export const FIRST = /positions:\(\)=>[\w$]+\.read\(\)|positions:async\(\)=>\{let ?(?:[\w$]+=[\w$]+,)*\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[[\w$]+\.read\(\),/g;
+ *  `positions:async()=>{let[e,...t]=await Promise.all([c.read(),...`, or since card move-sends-or-says-why (T1) that
+ *  read bounded by STATE_READ_MS: `...Promise.all([VR(Vt.read(),r5,\`solana's positions\`).catch(()=>null),...`. */
+export const FIRST = /positions:\(\)=>[\w$]+\.read\(\)|positions:async\(\)=>\{let ?(?:[\w$]+=[\w$]+,)*\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[(?:[\w$]+\.read\(\),|[\w$]+\([\w$]+\.read\(\),[\w$]+,`solana's positions`\)\.catch\(\(\)=>null\),)/g;
 /** positionsCache's run calls the pass with its stop and a fed read: `e(c,{signal:g.signal,..._===null?{}:{found:_}})`;
  *  since card wallets-found-in-one-read with where it shows its rows between the two:
  *  `e(C,{signal:_.signal,shown:e=>{...},...v===null?{}:{found:v}})`. */

@@ -299,8 +299,9 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
   const want = [
     ...one("packages/signpage/src/trade.ts", /export const TRADE_HELPER = "([^"]+)"/),
     ...one("packages/signpage/src/trade.ts", /export const SOLANA_PROVIDER_A = "([^"]+)"/),
-    // the public seat: provider A and its spare (card signpage-throttled-provider-has-a-spare)
-    ...one("packages/signpage/src/trade.ts", /export const SOLANA_PUBLIC_SEAT: readonly string\[\] = Object\.freeze\(\[SOLANA_PROVIDER_A, "([^"]+)"\]\);/),
+    // the public seat: provider A and its two spares (card signpage-throttled-provider-has-a-spare; the second since card
+    // move-sends-or-says-why), exactly, so a member the seat adds fails here
+    ...one("packages/signpage/src/trade.ts", /export const SOLANA_PUBLIC_SEAT: readonly string\[\] = Object\.freeze\(\[SOLANA_PROVIDER_A, "([^"]+)", "([^"]+)"\]\);/),
     ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
     new URL(near[0]).host,
     new URL(near[3]).host,

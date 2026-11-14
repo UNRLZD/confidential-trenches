@@ -1269,7 +1269,10 @@ test("card evm-pool-amounts-are-standard-sizes: a Base or Robinhood withdraw rel
 test("(card move-sends-or-says-why) a note the page's queue holds whose drop never settles: the run stops at 30 s with its cause, nothing bound or sent", async () => {
   const world = await runWorld({ change: true, thisEpoch: true });
   const held = (await world.notes.move(world.noteId, "UNSPENT", "HELD", { deadlineMs: NOW + 400_000n, context: "1" })).attempt!;
-  world.h.drop = () => new Promise<void>(() => {});
+  // the clock moves only once the run asked its drop, so the bound's timer is set first however slow the box's turns
+  let asked!: () => void;
+  const dropped = new Promise<void>((r) => (asked = r));
+  world.h.drop = () => (asked(), new Promise<void>(() => {}));
   const flushed = async (): Promise<void> => {
     for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
   };
@@ -1278,6 +1281,7 @@ test("(card move-sends-or-says-why) a note the page's queue holds whose drop nev
   enableTimers(mock.timers, { apis: ["setTimeout"] });
   try {
     run = runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+    await dropped;
     await flushed();
     mock.timers.tick(29_999);
     assert.equal(await pending(run), "pending", "the drop waited for until 30 s");
