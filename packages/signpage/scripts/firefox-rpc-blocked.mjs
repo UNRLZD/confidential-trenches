@@ -32,6 +32,8 @@ export const OWNERS_CASE = (h) => /(^|\.)publicnode\.com$|(^|\.)pocket\.network$
  *  taps Move's go button. */
 export const moveDry = (boundS) => async ({ app, vis }) => {
   const t0 = Date.now();
+  // the restore sheet closed first (its X, SigninSheet.tsx sgn-x), as a user does once it has drawn
+  await vis(".sgn-box .sgn-x").click({ timeout: 10_000 }).catch(() => {});
   await vis('a[href="/portfolio"]').click({ timeout: 15_000 });
   await vis('[data-control="pool-move-solana"]:not([disabled])').click({ timeout: boundS * 1000 });
   await vis('[data-sheet="move"] [data-side="to"] button[data-chain="base"]').click({ timeout: 15_000 });
@@ -41,7 +43,7 @@ export const moveDry = (boundS) => async ({ app, vis }) => {
   try {
     await end.waitFor({ state: "attached", timeout: boundS * 1000 });
   } catch {
-    return { ended: false, ms: Date.now() - typed, opened: typed - t0 };
+    return { ended: false, ms: Date.now() - typed, opened: typed - t0, shown: await app.locator('[data-sheet="move"]').getAttribute("data-move-state").catch(() => null) };
   }
   const how = (await end.getAttribute("data-move-out")) !== null ? "answered" : `reason ${await end.getAttribute("data-move-dry")}`;
   return { ended: true, how, ms: Date.now() - typed, opened: typed - t0 };
