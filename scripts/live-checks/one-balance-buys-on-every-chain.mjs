@@ -61,7 +61,9 @@ const TAP = new RegExp(
 /** The tap on every pool chain (since Cash moves to Base and Robinhood too): the chain's tap read, the want (Solana's
  *  gap to one tap, an EVM chain's whole asked rung), the mover asked for it, the move op told, then the wait; and the
  *  want itself, Solana's the ask less the tap. */
-const TAP_ALL = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.tapMax\\(\\3,${N}\\):(${N})\\.amount,(${N})=\\1<\\4\\.amount\\?(${N})\\(\\1\\):null,(${N})=\\5===null\\?null:await \\2\\.need\\(\\3,\\5\\);if\\(\\7!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\7\\}\\)\\}catch\\{\\}`);
+// (card solana-buy-never-moves-cash-for-a-coin-it-cannot-buy: a tap read that throws, a Solana coin with no venue read,
+// is null and moves nothing, `.catch(()=>null)` and `\1!==null&&`; a coin whose tap reads still moves its shortfall)
+const TAP_ALL = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.tapMax\\(\\3,${N}\\)(?:\\.catch\\(\\(\\)=>null\\))?:(${N})\\.amount,(${N})=(?:\\1!==null&&)?\\1<\\4\\.amount\\?(${N})\\(\\1\\):null,(${N})=\\5===null\\?null:await \\2\\.need\\(\\3,\\5\\);if\\(\\7!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\7\\}\\)\\}catch\\{\\}`);
 const tapAll = (js) => {
   const m = TAP_ALL.exec(js);
   if (m === null) return false;
