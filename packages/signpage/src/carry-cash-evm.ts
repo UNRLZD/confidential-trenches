@@ -148,11 +148,17 @@ export function evmCashCarrySender(h: EvmCarryCashHost): CarrySender {
         if (pending[0] !== a.nonce || pending[1] !== a.nonce) return "fault";
         const maxFee = 2n * a.baseFee + tip;
         const est = await estimateOf({ from: w, to, value: qty(amount) }, a.tag);
+        // the deposit address a plain account on both (the rule refuses code, or two answers that differ)
+        const toHasCode = await both(async (rpc) => {
+          const code = await rpc("eth_getCode", [to, a.tag]);
+          if (typeof code !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(code)) throw new Error("not code");
+          return code !== "0x";
+        });
         const gasLimit = nitro ? est[0] : EVM_ONWARD_GAS;
         const l1 = await l1FeesOf(r, gasLimit, a.tag);
         if (min(a.balance[0], a.balance[1]) < amount + gasLimit * maxFee + max(l1[0], l1[1])) return "short";
         const tx: EvmOnwardSend = { type: 2, chainId: EVM_CHAIN_IDS[h.network], nonce: a.nonce, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gasLimit, to, value: amount, data: "0x", accessList: [] };
-        checkEvmCashCarry(tx, { wallet: w, to, amount, chain: h.chain, network: h.network }, { nonce: a.nonces, balance: a.balance, estimate: est, baseFee: a.baseFees, l1Fee: l1, priorityCap: tip });
+        checkEvmCashCarry(tx, { wallet: w, to, amount, chain: h.chain, network: h.network }, { nonce: a.nonces, balance: a.balance, estimate: est, baseFee: a.baseFees, l1Fee: l1, priorityCap: tip, toHasCode });
         // the very send run on both before the key is derived: a failure on either signs nothing
         const sims = await Promise.allSettled(rpcs.map((rpc) => rpc("eth_call", [{ from: w, to, value: qty(amount), gas: qty(gasLimit) }, a.tag])));
         if (!sims.every((x) => x.status === "fulfilled" && x.value === "0x")) return "fault";

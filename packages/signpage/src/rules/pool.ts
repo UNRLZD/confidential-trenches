@@ -1509,6 +1509,8 @@ export type EvmCashCarryReads = {
   readonly baseFee: readonly [bigint, bigint];
   readonly l1Fee: readonly [bigint, bigint];
   readonly priorityCap: bigint;
+  /** Whether the deposit address holds code, eth_getCode on each RPC: a 1Click deposit address is a plain account. */
+  readonly toHasCode: readonly [boolean, boolean];
 };
 /**
  * A leftover's carry to Cash on Base or Robinhood (card leftovers-carry-to-cash): one type 2 plain transfer from the
@@ -1529,6 +1531,9 @@ export function checkEvmCashCarry(tx: EvmOnwardSend, ctx: EvmCashCarryCtx, reads
   if (typeof ctx.amount !== "bigint" || ctx.amount <= 0n || ctx.amount >= U256) return refuse("carry_ctx");
   // the deposit address: an address, never the wallet itself (the money where it was), the zero address nor a precompile
   if (typeof ctx.to !== "string" || !EVM_ADDRESS.test(ctx.to) || BigInt(ctx.to) < EVM_PRECOMPILE_TOP || lower(ctx.to) === lower(from)) return refuse("to");
+  // and a plain account on both chains, read so on both RPCs: code there could run, take or refuse the money, and on
+  // Robinhood no 21,000 estimate rules it out (card leftovers-carry-to-cash)
+  if (agreed(reads?.toHasCode, (x) => typeof x === "boolean")) return refuse("to");
   const c = onwardCopy(tx);
   const uint = (x: unknown) => typeof x === "bigint" && x >= 0n && x < U256;
   // two providers' answers that differ are no read at all; the balance and the L1 fee are each one's own reading

@@ -30,7 +30,7 @@ const hashOf = (n: bigint) => "0x" + n.toString(16).padStart(64, "0");
 const H = "0x" + "ee".repeat(32);
 
 type Receipt = { transactionHash: string; status: string; blockNumber: string; blockHash: string } | null;
-function rpc(o: { balance?: [bigint, bigint]; nonces?: [bigint, bigint]; pending?: [bigint, bigint]; nonceAt?: [bigint, bigint]; estimate?: [bigint, bigint]; baseFee?: bigint; l1?: bigint; simFail?: [boolean, boolean]; receipts?: [Receipt, Receipt]; block?: bigint; fin?: bigint; byHash?: [unknown, unknown] } = {}) {
+function rpc(o: { balance?: [bigint, bigint]; nonces?: [bigint, bigint]; pending?: [bigint, bigint]; nonceAt?: [bigint, bigint]; estimate?: [bigint, bigint]; baseFee?: bigint; l1?: bigint; simFail?: [boolean, boolean]; receipts?: [Receipt, Receipt]; block?: bigint; fin?: bigint; byHash?: [unknown, unknown]; code?: [string, string] } = {}) {
   const c = { balance: [994_100_000_000_000n, 994_100_000_000_000n], nonces: [5n, 5n], estimate: [21_000n, 21_000n], baseFee: 10_000_000n, l1: 0n, simFail: [false, false], receipts: [null, null] as [Receipt, Receipt], block: 100n, fin: 90n, ...o };
   const pending = o.pending ?? c.nonces;
   const nonceAt = o.nonceAt ?? c.nonces;
@@ -64,6 +64,8 @@ function rpc(o: { balance?: [bigint, bigint]; nonces?: [bigint, bigint]; pending
         return void sent[k]!.push(p[0] as string);
       case "eth_getTransactionReceipt":
         return c.receipts[k];
+      case "eth_getCode":
+        return (o.code ?? ["0x", "0x"])[k];
       case "eth_getTransactionByHash":
         return (o.byHash ?? [null, null])[k];
     }
@@ -146,6 +148,11 @@ test("(b) a W (kind w) on Base signs with W's own key: gas 21,000, the L1 fee bo
   const s = sender(r, "base");
   const amount = await s.sendable(SRC_W);
   assert.equal(amount, 3_000_000_000_000_000n - 21_000n * (2n * 5_000_000n + CAP) - 7_000_000_000n, "the lower balance less the bound");
+  // the same send to a deposit address with code on Base: refused before W signs, nothing kept or sent
+  const rc = rpc({ baseFee: 5_000_000n, l1: 7_000_000_000n, balance: [3_000_000_000_000_000n, 3_000_000_000_100_000n], code: ["0x6080", "0x6080"] });
+  let keptCode = 0;
+  assert.equal(await sender(rc, "base").send(SRC_W, { ...OPEN(amount!), quote: "carry/base/cd" }, async () => void keptCode++), "fault");
+  assert.deepEqual([rc.sent, keptCode], [[[], []], 0]);
   assert.equal(await s.send(SRC_W, { ...OPEN(amount!), quote: "carry/base/cd" }, async () => {}), "pending");
   const d = decoded(r.sent[0]![0]!);
   assert.equal(d.signer, W.address.toLowerCase(), "W signed it");
@@ -163,6 +170,9 @@ test("(c) a balance short, nonces apart, a pending nonce ahead, a failed eth_cal
     [{ simFail: [false, true] }, SRC_UX, "fault"],
     [{}, { ...SRC_UX, address: W.address }, "fault"],
     [{}, { ...SRC_UX, i: 3 }, "fault"],
+    // the deposit address with code, on both or on one RPC: refused (card leftovers-carry-to-cash, Base and Robinhood)
+    [{ code: ["0x6080", "0x6080"] }, SRC_UX, "fault"],
+    [{ code: ["0x", "0x6080"] }, SRC_UX, "fault"],
   ];
   for (const [o, src, want] of cases) {
     const r = rpc(o);
@@ -245,12 +255,16 @@ test("(e) the rule: each field held, each refusal its word; the signer signs onl
   const value = 994_100_000_000_000n - 21_000n * maxFee;
   const tx = (o: Partial<EvmOnwardSend> = {}): EvmOnwardSend => ({ type: 2, chainId: EVM_CHAIN_IDS.base, nonce: 5n, maxPriorityFeePerGas: CAP, maxFeePerGas: maxFee, gasLimit: 21_000n, to: TO, value, data: "0x", accessList: [], ...o });
   const ctx = { wallet, to: TO, amount: value, chain: "base" as const, network: "base" as const };
-  const reads = { nonce: [5n, 5n] as const, balance: [994_100_000_000_000n, 994_200_000_000_000n] as const, estimate: [21_000n, 21_000n] as const, baseFee: [baseFee, baseFee] as const, l1Fee: [0n, 0n] as const, priorityCap: CAP };
+  const reads = { nonce: [5n, 5n] as const, balance: [994_100_000_000_000n, 994_200_000_000_000n] as const, estimate: [21_000n, 21_000n] as const, baseFee: [baseFee, baseFee] as const, l1Fee: [0n, 0n] as const, priorityCap: CAP, toHasCode: [false, false] as const };
   checkEvmCashCarry(tx(), ctx, reads);
   const refused = (rule: string) => (e: unknown) => e instanceof PoolRuleRefused && e.rule === rule;
   for (const [rule, f] of [
     ["transfer_to", () => checkEvmCashCarry(tx({ to: "0x" + "9b".repeat(20) }), ctx, reads)],
     ["to", () => checkEvmCashCarry(tx({ to: wallet }), { ...ctx, to: wallet }, reads)],
+    // a deposit address with code on both RPCs, on Base and on Robinhood; two answers apart are no read
+    ["to", () => checkEvmCashCarry(tx(), ctx, { ...reads, toHasCode: [true, true] })],
+    ["to", () => checkEvmCashCarry(tx({ chainId: EVM_CHAIN_IDS.robinhood }), { ...ctx, chain: "robinhood", network: "robinhood" }, { ...reads, toHasCode: [true, true] })],
+    ["reads", () => checkEvmCashCarry(tx(), ctx, { ...reads, toHasCode: [false, true] })],
     ["to", () => checkEvmCashCarry(tx({ to: "0x" + "00".repeat(19) + "01" }), { ...ctx, to: "0x" + "00".repeat(19) + "01" }, reads)],
     ["value", () => checkEvmCashCarry(tx({ value: value + 1n }), ctx, reads)],
     ["data", () => checkEvmCashCarry(tx({ data: "0x00" }), ctx, reads)],
