@@ -1,7 +1,9 @@
 // pool.move and pool.move.dry on the signing page (card one-balance-buys-on-every-chain): Cash to the Solana pool runs
 // through the same mover a buy's shortfall does (src/cash-to-pool.ts cashMover.move), writes one move op and moves its
 // stage from the hand-off and the pool deposit follow; every other pair is refused not_allowed, its dry too. Red at
-// 8b620897f: the page has no pool.move, no move op and no dry of it.
+// 8b620897f: the page has no pool.move, no move op and no dry of it. Card move-sends-what-it-shows: each move is held to
+// its dry, which reads the destination pool's deposit floor (here 0.001 SOL, and 0.001 ETH plus a deposit's gas), and
+// the dry names max, the most Cash sends (its balance less the withdraw fee), and answers an amount over it with max.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cashMover, poolMoveKinds, type CashMoverDeps, type CashQuote, type MoveOpRecord } from "../src/cash-to-pool.ts";
@@ -30,6 +32,7 @@ function page(o: { cash?: bigint; quote?: (usdc: bigint) => CashQuote | { error:
     cash: async () => o.cash ?? 1_000_000_000n,
     handoff: async (w, fee) => (paid.push({ recipient: w.recipient, amount: w.amount, fee }), o.end ?? { kind: "landed", tx: "NearTx1" }),
     landed: async () => false,
+    floor: async (c) => (c === "solana" ? 1_000_000n : 1_030_000_000_000_000n),
     now: () => 1_000,
     put: async (id, rec) => void puts.push({ id, rec: structuredClone(rec) }),
     follow: async (id) => (followed.push(id), follows[Math.min(f++, follows.length - 1)]),
@@ -101,7 +104,9 @@ test("pool.move: from === to, an unknown chain, a zero or malformed amount: not_
   for (const [params, code, cash] of cases) {
     for (const kind of ["pool.move", "pool.move.dry"] as const) {
       const p = page(cash === undefined ? {} : { cash });
-      assert.deepEqual(await settle(p.k[kind](params, ctx)), { error: code }, `${kind} ${JSON.stringify(params)}`);
+      // over what Cash sends: the dry answers that most, with no out (card move-sends-what-it-shows); the move is refused
+      const want = kind === "pool.move.dry" && code === "not_funded" ? { result: { max: "25.499999", steps: [{ step: "vault_out", chain: "near" }, { step: "intents", chain: "solana" }, { step: "pool_in", chain: "solana" }] } } : { error: code };
+      assert.deepEqual(await settle(p.k[kind](params, ctx)), want, `${kind} ${JSON.stringify(params)}`);
       await p.m.idle();
       assert.deepEqual(p.paid, []);
       assert.deepEqual(p.quoted, []);
@@ -126,7 +131,7 @@ test("every pair but Cash to a pool: not_allowed, its dry too (pool to Cash and 
 test("pool.move.dry near -> solana: out (the least the move takes, in SOL), fee (the withdraw fee, in USDC) and the three steps; signs, writes and sends nothing", async () => {
   const p = page();
   assert.deepEqual(await settle(p.k["pool.move.dry"]({ from: "near", to: "solana", amount: "25.544" }, ctx)), {
-    result: { out: "0.3", fee: "0.05", steps: [{ step: "vault_out", chain: "near" }, { step: "intents", chain: "solana" }, { step: "pool_in", chain: "solana" }] },
+    result: { out: "0.3", fee: "0.05", steps: [{ step: "vault_out", chain: "near" }, { step: "intents", chain: "solana" }, { step: "pool_in", chain: "solana" }], max: "999.95" },
   });
   assert.deepEqual([p.paid, p.quoted, p.puts], [[], [], []]);
   const none = page({ price: null });
@@ -148,7 +153,7 @@ test("pool.move near -> base and near -> robinhood: the quote asked for that cha
     assert.deepEqual(short.paid, []);
     const dry = page();
     assert.deepEqual(await settle(dry.k["pool.move.dry"]({ from: "near", to, amount: "25.5" }, ctx)), {
-      result: { out: "0.007252427184466019", fee: "0.05", steps: [{ step: "vault_out", chain: "near" }, { step: "intents", chain: to }, { step: "pool_in", chain: to }] },
+      result: { out: "0.007252427184466019", fee: "0.05", steps: [{ step: "vault_out", chain: "near" }, { step: "intents", chain: to }, { step: "pool_in", chain: to }], max: "999.95" },
     });
   }
 });

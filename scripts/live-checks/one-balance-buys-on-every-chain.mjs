@@ -81,7 +81,8 @@ const POOL_TO_POOL = (js) => {
   const out = new RegExp(`(?:^|[^\\w$])(${N})=${N}=>\\[\\{step:\`pool_out\``).exec(js)?.[1];
   const into = new RegExp(`(?:^|[^\\w$])(${N})=${N}=>\\[\\{step:\`vault_out\``).exec(js)?.[1];
   if (out === undefined || into === undefined) return false;
-  const six = new RegExp(`steps:\\[\\.\\.\\.${esc(out)}\\(${N}\\),\\.\\.\\.${esc(into)}\\(${N}\\)\\]`);
+  // (card move-sends-what-it-shows: or as moveDry picks a move's steps, the pool-to-Cash ones alone to Cash, else the six)
+  const six = new RegExp(`(?:steps:|\`near\`\\?${esc(out)}\\(${N}\\):)\\[\\.\\.\\.${esc(out)}\\(${N}\\),\\.\\.\\.${esc(into)}\\(${N}\\)\\]`);
   const onward = new RegExp(`\\.onward\\.move\\(${N},${N}-${N},\`\\$\\{${N}\\}/on\`\\)`);
   return six.test(js) && onward.test(js);
 };

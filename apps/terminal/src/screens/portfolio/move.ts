@@ -39,24 +39,51 @@ export const MOVE_STEPS = ["vault_out", "pool_out", "intents", "vault_in", "pool
 export type MoveStep = { step: (typeof MOVE_STEPS)[number]; chain: MoveChain };
 
 /** pool.move.dry's answer (kit 1.15): `out` the least that arrives, whole units of `to`'s asset; `fee` whole units of
- *  `from`'s asset; `steps` the route it takes. Display only: pool.move reads and checks its own quotes. */
+ *  `from`'s asset; `steps` the route it takes; `max` (kit 1.16, card move-sends-what-it-shows) the most the move can send
+ *  now, whole units of `from`'s asset. Display only: pool.move reads and checks its own quotes. */
 export interface MoveDry {
   out: string;
   fee: string;
   steps: readonly MoveStep[];
+  max?: string;
   /** The legs' quoted time in seconds, when the page sends one (Arrives); none is made up. */
   time_estimate_s?: number;
 }
 
-/** pool.move.dry's answer, field by field (kit 1.15): null for any other shape. */
+/** pool.move.dry's answer for an amount the move cannot send (kit 1.16, card move-sends-what-it-shows): no `out`, so
+ *  nothing would move; `max` the most it can send now, and the nearest amounts it sends exactly (`below`, `above`) or
+ *  the least that clears every floor on its route (`min`), each in whole units of `from`'s asset. */
+export interface MoveLimits {
+  max: string;
+  steps: readonly MoveStep[];
+  min?: string;
+  below?: string;
+  above?: string;
+}
+
+const dec = (v: unknown): v is string => typeof v === "string" && /^\d+(\.\d+)?$/.test(v);
+const stepsOf = (v: unknown): MoveStep[] | null =>
+  Array.isArray(v) && v.length >= 3 && v.every((x) => (MOVE_STEPS as readonly unknown[]).includes(x?.step) && isChain(x?.chain)) ? v.map((x) => ({ step: x.step, chain: x.chain })) : null;
+
+/** pool.move.dry's answer, field by field (kit 1.15, with kit 1.16's max): null for any other shape. */
 export function readDry(x: unknown): MoveDry | null {
   const d = x as Partial<MoveDry> | null;
-  const dec = (v: unknown) => typeof v === "string" && /^\d+(\.\d+)?$/.test(v);
-  if (!d || !dec(d.out) || !dec(d.fee) || !Array.isArray(d.steps) || d.steps.length < 3) return null;
-  if (!d.steps.every((x) => (MOVE_STEPS as readonly unknown[]).includes(x?.step) && isChain(x?.chain))) return null;
+  const steps = d ? stepsOf(d.steps) : null;
+  if (!d || !dec(d.out) || !dec(d.fee) || steps === null) return null;
+  if (d.max !== undefined && !dec(d.max)) return null;
   const t = d.time_estimate_s;
   const time = typeof t === "number" && Number.isFinite(t) && t >= 0 ? { time_estimate_s: t } : {};
-  return { out: d.out!, fee: d.fee!, steps: d.steps.map((x) => ({ step: x.step, chain: x.chain })), ...time };
+  return { out: d.out, fee: d.fee, steps, ...(d.max === undefined ? {} : { max: d.max }), ...time };
+}
+
+/** pool.move.dry's answer for an amount the move cannot send (kit 1.16), field by field: null for any other shape. */
+export function readLimits(x: unknown): MoveLimits | null {
+  const d = x as Partial<MoveLimits> & { out?: unknown } | null;
+  const steps = d ? stepsOf(d.steps) : null;
+  if (!d || d.out !== undefined || !dec(d.max) || steps === null) return null;
+  const opt = { min: d.min, below: d.below, above: d.above };
+  if (Object.values(opt).some((v) => v !== undefined && !dec(v))) return null;
+  return { max: d.max, steps, ...Object.fromEntries(Object.entries(opt).filter(([, v]) => v !== undefined)) };
 }
 
 /** A move op's stages (kit 1.15): leaving its side, in transit on a NEAR Intents leg, in the NEAR vault (pool to pool:

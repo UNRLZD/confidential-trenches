@@ -39,3 +39,24 @@ test("a To that is no address to pay, the pool as To, one RPC twice and no prove
   await assert.rejects(exitEvm("base", { ...ctx, to: EVM_POOLS.base!.pool }, { rpcs: [rpc, other], prover: PROVER }), ExitEvmRefused);
   assert.equal(reads, 2, "only the pool-To case read the chain ids");
 });
+
+// card exit-evm-base-harness-retry: the fork run (scripts/evm-fork.ts) failed twice on Base at a read right after the
+// proof, "fetch failed" on its second RPC, because it built its pair without the retry the command gives its own
+// (evm-out.ts pairOf). The command's read is now one function, exitEvmRpc, and the fork reads through it.
+test("one read for the command and the fork: exitEvmRpc reads again after a dropped connection; evm-fork.ts builds no RPC of its own", async () => {
+  const m = (await import("../src/evm-out.ts")) as Record<string, unknown>;
+  assert.equal(typeof m.exitEvmRpc, "function", "evm-out.ts exports the command's read");
+  const exitEvmRpc = m.exitEvmRpc as (url: string, fetchFn?: (u: string, i: RequestInit) => Promise<Response>) => EvmRpc;
+  let calls = 0;
+  const fetchFn = async (_u: string, i: RequestInit): Promise<Response> => {
+    calls += 1;
+    if (calls === 1) throw new TypeError("fetch failed");
+    const { id } = JSON.parse(String(i.body)) as { id: string };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: "0x2105" }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  assert.equal(await exitEvmRpc("https://a.example", fetchFn)("eth_chainId", []), "0x2105");
+  assert.equal(calls, 2, "the dropped connection was read again");
+  const fork = readFileSync(new URL("../scripts/evm-fork.ts", import.meta.url), "utf8");
+  assert.match(fork, /\bexitEvmRpc\(/, "the fork reads through the command's own read");
+  assert.doesNotMatch(fork, /\bsolanaJsonRpc\(/, "the fork builds no RPC of its own");
+});

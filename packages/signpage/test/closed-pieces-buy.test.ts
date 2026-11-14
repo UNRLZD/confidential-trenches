@@ -5,6 +5,9 @@
 // pool's plain release of one piece to W (33SLRx, tag 2), the buy (55LqP9, tag 3, PumpSwap), W's sale of all of it
 // (2tmaLQ), its token account's close (4YDmgm), its volume account's close (2zXwLp) and its deposit back (2m39tv).
 // The rebuild read stopped at the tag 2 and marked W "no buy" for good: no buy record, no trades, Closed empty.
+// And on the device that bought (its run ended "sent", the page closed before its follow ended it): W has the buy record
+// the run wrote before its send and no op; the rebuild skipped every W with a record of this device's own, so the next
+// load wrote neither the buy's op nor the sale's and Closed stayed empty there too.
 //   node --test test/closed-pieces-buy.test.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -32,8 +35,8 @@ const OWNER_W = "3RrvTxXabDkApBYNuKijcNJDMkVVkkHcG1qR3sLVEQfn";
 const realFetch = globalThis.fetch;
 after(() => void (globalThis.fetch = realFetch));
 
-for (const marked of [false, true])
-test(`a buy of several pieces and its full sale, rebuilt from the chain: one closed position, its buy and its sale${marked ? "; a device the old read marked no buy reads W again" : ""}`, { timeout: 300_000 }, () => onTestClock(async () => {
+for (const had of ["none", "marked", "own"] as const)
+test(`a buy of several pieces and its full sale, rebuilt from the chain: one closed position, its buy and its sale${had === "marked" ? "; a device the old read marked no buy reads W again" : had === "own" ? "; the device that bought, its run left at sent, gets its ops at the next load" : ""}`, { timeout: 300_000 }, () => onTestClock(async () => {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   after(() => w.close());
   await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
@@ -48,7 +51,10 @@ test(`a buy of several pieces and its full sale, rebuilt from the chain: one clo
   const W = fw.address;
   ns.close();
   // the old read's mark (`true`), left by a device that read W before this card
+  const marked = had === "marked";
   if (marked) await w.update("meta", "owed/buy-sol-none", () => ({ [W]: true }));
+  // the buy record a buy on this device writes before its send (pool-sell.ts buyMints), with no op: the run ended "sent"
+  if (had === "own") await w.update("meta", "owed/buy-sol", () => ({ [W]: { mint: MINT, program: "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA" } }));
 
   const tx = (f: string): { sig: string; tx: { blockTime: number } } => {
     const t = JSON.parse(readFileSync(new URL(`${f}.json`, DIR), "utf8").split(OWNER_W).join(W)) as { blockTime: number; transaction: { signatures: string[] } };

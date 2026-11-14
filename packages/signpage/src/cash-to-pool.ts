@@ -146,8 +146,9 @@ export type CashMoverDeps = {
   cash(): Promise<bigint>;
   /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. */
   handoff: ((w: CheckedWithdraw, drawnFee: bigint) => Promise<HandoffEnd>) | null;
-  /** The quote's floor on an EVM pool (its least rung plus one deposit's gas, read now), null with no read: a note made
-   *  for an EVM tap is quoted at the rung plus that gas. */
+  /** The quote's floor on a pool (pool.address's: on an EVM pool its least rung plus one deposit's gas, on Solana the
+   *  rung, one deposit's cost and the rent U_X keeps; read now), null with no read: a note made for an EVM tap is quoted
+   *  at the rung plus that gas, and a move's dry is held to it (bounds). */
   floor?(chain: PoolChain): Promise<bigint | null>;
   /** Whether the follow op under `id` has ended (its money in the pool, or refunded): no longer on its way. */
   landed(id: string): Promise<boolean>;
@@ -192,6 +193,13 @@ export type CashMover = {
   move(chain: PoolChain, usdc: bigint, id: string): Promise<MoveSent>;
   /** What a move of `usdc` would give: the least it takes from a quote (cashLamportsFor) and the withdraw fee. */
   dry(chain: PoolChain, usdc: bigint): Promise<Refusal | { out: bigint; fee: bigint }>;
+  /** What a move into `chain` is held to before anything moves (card move-sends-what-it-shows): the vault withdraw's fee,
+   *  the most one withdrawal of Cash carries (`cash`), and the least of `chain`'s coin a quote into its pool may bring
+   *  (`floor`: the pool's deposit floor, as pool.address checks it; null with no read). Cash is not checked here: a move
+   *  out of another pool brings its USDC first. */
+  bounds(chain: PoolChain): Promise<Refusal | { fee: bigint; cash: bigint; floor: bigint | null }>;
+  /** The least of `chain`'s coin a quote for `usdc` must bring (cashLamportsFor at the device's price); 0n with none. */
+  least(chain: PoolChain, usdc: bigint): bigint;
   ways(): number;
   coming(chain: PoolChain): bigint;
   /** After a reload (main.ts, at sign-in): each move op not yet done or failed follows its quote's follow op
@@ -323,6 +331,15 @@ export function cashMover(d: CashMoverDeps): CashMover {
       const r = await ready(chain, usdc).catch((): Refusal => ({ error: "failed" }));
       return "error" in r ? r : { out: r.least, fee: r.fee };
     },
+    bounds: async (chain) => {
+      if (d.price(chain) === null || d.handoff === null || d.rails.length === 0) return { error: "not_allowed" };
+      const [fee, cash, floor] = await Promise.all([d.fee(), d.cash(), d.floor ? d.floor(chain).catch(() => null) : Promise.resolve(null)]);
+      return { fee, cash, floor: typeof floor === "bigint" ? floor : null };
+    },
+    least: (chain, usdc) => {
+      const p = d.price(chain);
+      return p === null ? 0n : cashLamportsFor(usdc, p, chain);
+    },
     ways: () => ways.length,
     // the least of the pool's coin the moves on their way still bring (display only: a tap's most counts it)
     coming: (chain) => ways.filter((w) => w.chain === chain && d.now() - w.since <= CASH_MOVE_WAIT_MS).reduce((a, w) => a + w.lamports, 0n),
@@ -358,9 +375,77 @@ function moveAsk(params: Record<string, unknown>): Refusal | { from: "near"; to:
   return from === "near" ? { from, to: to as PoolChain, usdc: x } : { from: from as PoolChain, to: to as PoolChain | "near", units: x };
 }
 
+/** The least `x` in 1..2^128 for which `ok` holds (`ok` true from some x on, as every amount a move brings rises with what
+ *  it takes); null when even 2^128 is not enough. */
+export function leastWhere(ok: (x: bigint) => boolean): bigint | null {
+  let hi = 1n;
+  while (!ok(hi)) {
+    if (hi >= 1n << 128n) return null;
+    hi *= 2n;
+  }
+  let lo = 0n;
+  while (hi - lo > 1n) {
+    const mid = (lo + hi) / 2n;
+    if (ok(mid)) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
+/** Not a HostAnswer, whose `then` would make an async function's answer a thenable. */
+type DryAnswer = { result: PoolMoveDry } | { error: ErrorCode };
+
+/** pool.move.dry's answer (card move-sends-what-it-shows, kit 1.16): what the move of `ask` gives, with `max`, what the
+ *  move can send now; or, for an amount it cannot send, `max` and the nearest amounts it can (`below`, `above`: the
+ *  amounts its plan sends exactly) or the least that clears every floor on the way (`min`: one withdrawal's least part,
+ *  and the destination pool's deposit floor at the end of the route, as pool.address holds its quote to), each in whole
+ *  units of `from`'s asset. Nothing moves for an answer with no `out`, so no move ends with its money parked between
+ *  two legs. A floor that cannot be read now is down. */
+async function moveDry(mover: CashMover, toCash: PoolToCash | null, ask: { from: "near"; to: PoolChain; usdc: bigint } | { from: PoolChain; to: PoolChain | "near"; units: bigint }): Promise<DryAnswer> {
+  const fromD = ask.from === "near" ? USDC_DECIMALS : POOL_DECIMALS[ask.from];
+  const text = (x: bigint) => unitsText(x, fromD);
+  const limits = (steps: PoolMoveDry["steps"], max: bigint, o: { min?: bigint; below?: bigint; above?: bigint }): DryAnswer => ({
+    result: { max: text(max), steps, ...(o.min === undefined ? {} : { min: text(o.min) }), ...(o.below === undefined ? {} : { below: text(o.below) }), ...(o.above === undefined ? {} : { above: text(o.above) }) },
+  });
+  if (ask.from === "near") {
+    const to = ask.to;
+    const steps = CASH_TO_POOL_STEPS(to);
+    const b = await mover.bounds(to);
+    if ("error" in b) return b;
+    const max = b.cash > b.fee ? b.cash - b.fee : 0n;
+    if (ask.usdc > max) return limits(steps, max, {});
+    if (b.floor === null) return { error: "down" };
+    const floor = b.floor;
+    if (mover.least(to, ask.usdc) < floor) return limits(steps, max, { min: leastWhere((u) => mover.least(to, u) >= floor) ?? undefined });
+    return { result: { out: unitsText(mover.least(to, ask.usdc), POOL_DECIMALS[to]), fee: unitsText(b.fee, USDC_DECIMALS), steps, max: text(max) } };
+  }
+  const from = ask.from;
+  const to = ask.to;
+  if (toCash === null) return { error: "not_allowed" };
+  const steps = to === "near" ? POOL_TO_CASH_STEPS(from) : [...POOL_TO_CASH_STEPS(from), ...CASH_TO_POOL_STEPS(to)];
+  const r = await toCash.dry(from, ask.units);
+  if ("error" in r) return r;
+  if ("limits" in r) return limits(steps, r.limits.max, r.limits);
+  const fee = unitsText(r.fee, POOL_DECIMALS[from]);
+  if (to === "near") return { result: { out: unitsText(r.out, USDC_DECIMALS), fee, steps, max: text(r.max) } };
+  // on to pool `to`: what Cash's move of the deposit's least USDC, less the vault withdraw's fee, brings there; Cash
+  // itself is not read, the USDC comes from this move
+  const b = await mover.bounds(to);
+  if ("error" in b) return b;
+  if (b.floor === null) return { error: "down" };
+  const floor = b.floor;
+  const onward = (x: bigint): bigint => {
+    const usdc = toCash.usdcOf(from, x);
+    return usdc > b.fee ? mover.least(to, usdc - b.fee) : 0n;
+  };
+  if (onward(r.sum) < floor) return limits(steps, r.max, { min: (await toCash.least(from, (x) => onward(x) >= floor)) ?? undefined });
+  return { result: { out: unitsText(onward(r.sum), POOL_DECIMALS[to]), fee, steps, max: text(r.max) } };
+}
+
 /** pool.move and pool.move.dry (card one-balance-buys-on-every-chain): each checked here, then the mover's one move
  *  path. pool.move is answered once the move has left (leaving), its later stages in its op; its dry is refused as it
- *  is, so a dry never promises a move the page cannot run. */
+ *  is, so a dry never promises a move the page cannot run. Every move is held to its dry first (card
+ *  move-sends-what-it-shows): an amount the dry answers no `out` for is refused, before anything moves. */
 export function poolMoveKinds(mover: () => CashMover, toCash?: () => PoolToCash): {
   "pool.move": (params: Record<string, unknown>, ctx: KindContext) => HostRefusal | Running<"pool.move">;
   "pool.move.dry": (params: Record<string, unknown>, ctx: KindContext) => HostRefusal | Running<"pool.move.dry">;
@@ -371,8 +456,16 @@ export function poolMoveKinds(mover: () => CashMover, toCash?: () => PoolToCash)
       if ("error" in ask) return ask;
       if (ask.from !== "near" && toCash === undefined) return { error: "not_allowed" };
       let answer: HostAnswer<"pool.move"> | HostRefusal = { error: "failed" };
-      const after = (ask.from === "near" ? mover().move(ask.to, ask.usdc, ctx.id) : toCash!().move(ask.from, ask.units, ctx.id, ask.to))
-        .then((r) => void (answer = "error" in r ? { error: r.error } : { result: { stage: "leaving", txs: [] } }), () => void (answer = { error: "failed" }));
+      // every move held to its dry first, so none starts that the dry would not price: under a floor below_min, over
+      // what it can send not_funded, an amount its plan cannot send not_allowed
+      const run = async (): Promise<MoveSent | Refusal | { op: string }> => {
+        const dry = await moveDry(mover(), toCash === undefined ? null : toCash(), ask);
+        if ("error" in dry) return dry;
+        if (!("out" in dry.result)) return { error: dry.result.min !== undefined ? "below_min" : dry.result.below !== undefined || dry.result.above !== undefined ? "not_allowed" : "not_funded" };
+        if (ask.from === "near") return mover().move(ask.to, ask.usdc, ctx.id);
+        return toCash!().move(ask.from, ask.units, ctx.id, ask.to);
+      };
+      const after = run().then((r) => void (answer = "error" in r ? { error: r.error } : { result: { stage: "leaving", txs: [] } }), () => void (answer = { error: "failed" }));
       return { running: true, after, answer: () => answer };
     },
     "pool.move.dry": (params) => {
@@ -380,28 +473,7 @@ export function poolMoveKinds(mover: () => CashMover, toCash?: () => PoolToCash)
       if ("error" in ask) return ask;
       if (ask.from !== "near" && toCash === undefined) return { error: "not_allowed" };
       let answer: HostAnswer<"pool.move.dry"> | HostRefusal = { error: "failed" };
-      if (ask.from !== "near") {
-        const from = ask.from;
-        const to = ask.to;
-        const after = toCash!()
-          .dry(from, ask.units)
-          .then(async (r) => {
-            if ("error" in r) return void (answer = { error: r.error });
-            const fee = unitsText(r.fee, POOL_DECIMALS[from]);
-            if (to === "near") return void (answer = { result: { out: unitsText(r.out, USDC_DECIMALS), fee, steps: POOL_TO_CASH_STEPS(from) } });
-            // on to pool `to`: what Cash's move of that USDC less its withdraw fee gives there (the mover's own dry)
-            const usdcFee = await mover().dry(to, 1n).then((x) => ("error" in x ? null : x.fee), () => null);
-            const on = usdcFee === null || r.out <= usdcFee ? null : await mover().dry(to, r.out - usdcFee).catch(() => null);
-            answer = on === null || "error" in on ? { error: on === null ? "not_allowed" : on.error } : { result: { out: unitsText(on.out, POOL_DECIMALS[to]), fee, steps: [...POOL_TO_CASH_STEPS(from), ...CASH_TO_POOL_STEPS(to)] } };
-          }, () => void (answer = { error: "failed" }));
-        return { running: true, after, answer: () => answer };
-      }
-      const after = mover()
-        .dry(ask.to, ask.usdc)
-        .then(
-          (r) => void (answer = "error" in r ? { error: r.error } : { result: { out: unitsText(r.out, POOL_DECIMALS[ask.to]), fee: unitsText(r.fee, USDC_DECIMALS), steps: CASH_TO_POOL_STEPS(ask.to) } }),
-          () => void (answer = { error: "failed" }),
-        );
+      const after = moveDry(mover(), toCash === undefined ? null : toCash(), ask).then((a) => void (answer = a), () => void (answer = { error: "failed" }));
       return { running: true, after, answer: () => answer };
     },
   };

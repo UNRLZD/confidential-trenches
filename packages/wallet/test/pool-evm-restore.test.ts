@@ -239,6 +239,13 @@ test("restore of a seeded chain from the words alone: every note, each spent not
     [refKey(d0), l0, 0, W0, 4n * 10n ** 15n, 20n, TA],
     [refKey(c0), l0, 1, W1, 6n * 10n ** 15n, 40n, null],
   ]);
+  // card closed-positions-show-every-trade: each spend's transaction, fee and (a buy's) _out, and each deposit back under
+  // a spent note's (l, j), the return note and its second arrival, for a restored device's trade ops
+  assert.deepEqual(r.spends.map((s) => [s.tx, s.fee, s.out]), [[h32("pool tx 4"), 10n ** 12n, 1000n], [h32("pool tx 10"), 10n ** 12n, null]]);
+  assert.deepEqual(r.returns, [
+    { l: l0, j: 0, note: refKey(d0), tx: h32("pool tx 5"), block: 30n, value: 10n ** 15n },
+    { l: l0, j: 0, note: refKey(d0), tx: h32("pool tx 9"), block: 34n, value: 10n ** 15n },
+  ]);
   assert.deepEqual(r.elsewhere, []);
   // W0: the buy's token, a token on no list sent later, and one sent past the finalized block; not the one sent before
   // its release, nor the one it sent away. W1: an ERC-721 sent to it.

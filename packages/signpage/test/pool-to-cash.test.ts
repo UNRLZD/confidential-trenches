@@ -73,7 +73,8 @@ test("pool to Cash: a run that stopped with nothing sent fails the move; the dry
   await p.m.move("solana", 20_000_000n, "r");
   await p.m.idle();
   assert.deepEqual(p.puts.map((x) => x.rec.stage), ["leaving", "failed"]);
-  assert.deepEqual(await page().m.dry("solana", 20_000_000n), { sum: 20_000_000n, out: 1_552_000n, fee: 1_305_000n });
+  // and max, what the pool sends now: each note's largest part after its fees (card move-sends-what-it-shows)
+  assert.deepEqual(await page().m.dry("solana", 20_000_000n), { sum: 20_000_000n, out: 1_552_000n, fee: 1_305_000n, max: 37_390_000n });
   assert.equal(cashUsdcOf(10n ** 18n, { price: "300000000000", expo: -8 }, "base"), 2_910_000_000n, "1 ETH at 3,000 USD less 3%");
 });
 
@@ -99,7 +100,7 @@ test("pool.move from a pool chain to Cash goes to the pool-to-Cash path; its dry
   const dry = k["pool.move.dry"]({ from: "solana", to: "near", amount: "0.02" }, { id: "req-10", sha: "00", progress: () => {} });
   assert.ok("running" in dry);
   await dry.after;
-  assert.deepEqual(dry.answer(), { result: { out: "1.552", fee: "0.001305", steps: [{ step: "pool_out", chain: "solana" }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }] } });
+  assert.deepEqual(dry.answer(), { result: { out: "1.552", fee: "0.001305", steps: [{ step: "pool_out", chain: "solana" }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }], max: "0.03739" } });
   // more decimals than the pool's coin: refused before anything runs
   assert.deepEqual(k["pool.move"]({ from: "solana", to: "near", amount: "0.0000000001" }, { id: "x", sha: "00", progress: () => {} }), { error: "not_allowed" });
   // no pool-to-Cash path on the page: a move out of a pool is refused
@@ -189,9 +190,13 @@ test("Cash's mover resumes Cash's own moves only: a move out of a pool (its <op>
 
 test("pool.move.dry Solana to Base: what Cash's move of the deposit's least USDC less its fee gives in Base, the pool's Max fee and the six steps", async () => {
   const p = page();
-  // Cash's mover as a stub: its withdraw fee 0.05 USDC, and 1 USDC gives 1e12 wei of Base's coin less 3%
+  // Cash's mover as a stub: its withdraw fee 0.05 USDC, no Cash today (the USDC comes from this move), Base's floor 1 wei,
+  // and 1 USDC gives 1e12 wei of Base's coin less 3%
   const asked: bigint[] = [];
-  const mover = { dry: async (_to: string, usdc: bigint) => (asked.push(usdc), { out: (usdc * 970_000_000_000n) / 1_000_000n, fee: 50_000n }) } as unknown as ReturnType<typeof cashMover>;
+  const mover = {
+    bounds: async () => ({ fee: 50_000n, cash: 0n, floor: 1n }),
+    least: (_to: string, usdc: bigint) => (asked.push(usdc), (usdc * 970_000_000_000n) / 1_000_000n),
+  } as unknown as ReturnType<typeof cashMover>;
   const k = poolMoveKinds(() => mover, () => p.m);
   const dry = k["pool.move.dry"]({ from: "solana", to: "base", amount: "0.02" }, { id: "d", sha: "00", progress: () => {} });
   assert.ok("running" in dry);
