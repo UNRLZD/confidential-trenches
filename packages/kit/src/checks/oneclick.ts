@@ -34,7 +34,8 @@ const ONECLICK_COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881
 // docs.intents.aurora.dev llms-full.txt read 2026-11-14 03:35Z, "`basic` / `advanced` - the swap is settled on
 // Confidential Intents rails", no doc naming either one stronger; the quickstart asks "advanced") names another
 // collector: every basic and advanced answer read 2026-11-14 03:37-03:41Z through the helper's partner key (SOL to Base
-// ETH, fixtures/oneclick-confidential.json) carries [{recipient: 2238fd…7805, fee: 20}], a public one 5880ad…47dd.
+// ETH, fixtures/oneclick-confidential.json) carries [{recipient: 2238fd…7805, fee: 20}], a public one 5880ad…47dd; on a
+// stablecoin route the same collector at fee 1 (Solana USDC to NEAR USDC, dry, 04:13Z), as a public one's fee.
 // Keyless, a confidential quote answers 401 "User authentication is required for confidential intent quotes", so it is
 // partner only. Neither `confidentiality` nor appFees is in 1Click's signed message (the signature verifies without
 // them, signedMessage below), so the mode is held two ways the device reads: the echo of the request's mode, and the

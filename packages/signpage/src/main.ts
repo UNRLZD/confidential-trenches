@@ -622,7 +622,9 @@ else {
   };
   // where money for a pool goes (src/pool-deposit-address.ts), for a moving tap (cashMoverNow): the same host as the
   // deposit sheet's pool.address below, on the same reads, floor and follow
-  const poolAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped });
+  // money in from an outside wallet (card move-one-confidential-swap, CO 14 Nov): every 1Click quote into a pool is one
+  // confidential swap, held to 1Click's keyless tell; a plain send of the pool's own coin asks 1Click nothing
+  const poolAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped, confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal) });
   // a Move's quote into a pool (card move-one-confidential-swap): the same host, reads, floor and follow, every quote asked
   // and checked on Confidential Intents rails, and another pool's coin priced at the device's own price of each
   const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped, confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal) });
@@ -728,7 +730,9 @@ else {
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
       "withdraw.open": (p, ctx) => (takesParams("withdraw.open", p) ? openKind(ctx.id, "withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped }),
+      // money in from an outside wallet (card move-one-confidential-swap, CO 14 Nov): one confidential swap as a Move, held to
+      // 1Click's keyless tell, so the paying wallet is not tied to U on chain
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped, confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal) }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
