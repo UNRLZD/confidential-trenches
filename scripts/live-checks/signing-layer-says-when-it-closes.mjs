@@ -53,8 +53,10 @@ const esc = (v) => v.replace(/\$/g, "\\$");
 /** The shell's open: the id recorded to tell, over the frame it opened over, unless done, shown or to tell already
  *  (groups: id, done, shown, to tell, frame). */
 const OPEN = /open\([\w$]+=!1,([\w$]+)\)\{\1===void 0\|\|([\w$]+)\.has\(\1\)\|\|([\w$]+)\.some\(([\w$]+)=>\4\.id===\1\)\|\|([\w$]+)\.some\(([\w$]+)=>\6\.id===\1\)\|\|\3\.push\(\{id:\1,over:([\w$]+)\}\),/;
-/** The shell's close: the ids shown moved on to tell, then the frame woken (groups: to tell, shown, frame, wake). */
-const CLOSE = /close\(\)\{if\([\w$]+\.hidden=!0,[\w$]+=null,([\w$]+)\.push\(\.\.\.([\w$]+)\),\2=\[\],!([\w$]+)\)\{[^}]*\}([\w$]+)\(\3\)\}/;
+/** The shell's close: the ids shown moved on to tell, then the frame woken (groups: to tell, shown, frame, wake). An
+ *  outside app's popup has no frame (card signpage-answers-outside-apps): the veil waits on `!frame&&!popup` and the
+ *  wake on `frame&&wake(frame)`, the frame path's order the same. */
+const CLOSE = /close\(\)\{if\([\w$]+\.hidden=!0,[\w$]+=null,([\w$]+)\.push\(\.\.\.([\w$]+)\),\2=\[\],!([\w$]+)(?:&&![\w$]+)?\)\{[^}]*\}(?:\3&&)?([\w$]+)\(\3\)\}/;
 /** The shell's told: an open that showed no layer, to tell over this frame, the frame woken; while a layer shows, at its
  *  close (groups: id, done, shown, to tell, frame, wake). */
 const TOLD = /told\(([\w$]+)\)\{if\(!\(([\w$]+)\.has\(\1\)\|\|([\w$]+)\.some\(([\w$]+)=>\4\.id===\1\)\|\|([\w$]+)\.some\(([\w$]+)=>\6\.id===\1\)\)\)\{if\(![\w$]+\.hidden\|\|!([\w$]+)\)return void \3\.push\(\{id:\1,over:\7\}\);\5\.push\(\{id:\1,over:\7\}\),([\w$]+)\(\7\)\}\}/;

@@ -571,7 +571,7 @@ const ITEM_COMMANDS = ITEMS.map((i) => ({ dir: "packages", name: packageKey(i), 
 
 test("the packages' items: each workspace package's test script but the wallet's, and the four steps, each with a measured time", () => {
   const names = ITEMS.filter((i) => i.kind === "tests").map((i) => i.name);
-  assert.deepEqual(names.toSorted(), ["@blindfill/exit", "@blindfill/kit", "@confidential-trenches/helper", "signpage", "terminal"]);
+  assert.deepEqual(names.toSorted(), ["@blindfill/exit", "@blindfill/kit", "@confidential-trenches/helper", "blindfill-agent-example", "signpage", "terminal"]);
   assert.deepEqual(ITEMS.filter((i) => i.kind === "step").map((i) => i.name), ["typecheck", "deploy gate", "live-check replays", "bundle checks"]);
   assert.deepEqual(ITEMS.map(packageKey).filter((k) => !Object.hasOwn(PACKAGE_SECONDS, k)), [], "an item with no PACKAGE_SECONDS time: read it off the test-packages job log and add it");
   assert.deepEqual(Object.keys(PACKAGE_SECONDS).filter((k) => !ITEMS.some((i) => packageKey(i) === k)), [], "a PACKAGE_SECONDS key names no item");
@@ -663,7 +663,7 @@ const PACKAGE_PLANTED = {
   "a package part count set by hand": [/(this part's share\n {8}env:\n {10}SELECT: [^\n]*tests[^\n]*\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}/, "$1TOTAL: 3", "test-packages takes a part from strategy"],
   "one package part": [/(\n {2}test-packages:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1]", "test-packages' heaviest of 1 part(s) is planned at"],
   "a package matrix that skips a part": [/(\n {2}test-packages:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 3]", "test-packages has no matrix part"],
-  "more package parts than items": [/(\n {2}test-packages:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]", "test-packages: the packages' items are"],
+  "more package parts than items": [/(\n {2}test-packages:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]", "test-packages: the packages' items are"],
   "the live-check replays in every part": ["        if: steps.plan.outputs.replays == 'true'\n", "", "it runs in every part"],
   "the bundle checks on the wrong plan key": ["        if: steps.plan.outputs.bundle == 'true'\n", "        if: steps.plan.outputs.replays == 'true'\n", "is not gated on the plan's bundle"],
   "the deploy gate's tests in every part": ["        if: steps.plan.outputs.deploy_gate == 'true'\n", "", "is not gated on the plan's deploy_gate"],
