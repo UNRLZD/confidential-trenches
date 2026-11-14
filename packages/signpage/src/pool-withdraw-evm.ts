@@ -65,6 +65,7 @@ import { jOf } from "../../wallet/src/pool/queue.ts";
 import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
 import { legCause } from "./pool-sell.ts";
+import { within } from "./trade.ts";
 import { planPoolWithdraw, withdrawSources, type Arrivals, type PendingOnward, type WithdrawPart } from "./pool-withdraw.ts";
 import {
   checkEvmOnwardSend, checkEvmWithdraw, EVM_ONWARD_GAS, EVM_ONWARD_GAS_MAX, EVM_PRECOMPILE_TOP, evmOnwardCodeGas, PoolRuleRefused, signEvmOnwardSend, signEvmWithdraw,
@@ -650,7 +651,9 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     const free = async (): Promise<NoteRecord> => {
       let n = await notes.get(p.noteId);
       if (n?.state === "HELD") {
-        await h.drop?.(p.noteId);
+        // the queue's drop waits in the note's turn (behind a swap and a state read): bounded as the wait below, past
+        // it the part stops with nothing held by it (card move-sends-or-says-why)
+        if (h.drop) await within(h.drop(p.noteId), EVM_WITHDRAW_FREE_MS, "the proof queue's drop").catch(() => stop("drop"));
         for (let waited = 0; (n = await notes.get(p.noteId))?.state === "HELD" && waited < EVM_WITHDRAW_FREE_MS; waited += 500) await wait(500);
       }
       if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");

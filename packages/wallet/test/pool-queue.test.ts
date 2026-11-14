@@ -3,7 +3,8 @@
 // seed's deposit notes on a fixture vault, test values only, never money. The prover answers the signals Withdraw(32)
 // gives without proving (signalsProver); the kit's real proof of a pool's context is prove-e2e.test.ts's.
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { VAULT_FIELD_P, VaultTree, vaultContextInput, vaultContextOf, vaultLabelOf, type VaultProver, type VaultWithdrawal } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
@@ -694,6 +695,40 @@ test("a state read already reading the notes when a swap is ready to write: the 
   assert.deepEqual((await pass).remade, [a!.noteId]);
   assert.notEqual(q.ready()[0]!.attempt, a!.attempt, "the swap ran after the read");
   assert.equal(await stateRead(q, () => v.ns.list()), before);
+});
+
+// card move-sends-or-says-why: the signing page's push queue is one chain, so one state read that never settles stopped
+// every later push; and a read inside readyWith held the queue's view for good, so every remake's swap waited, and with
+// it every take, drop and close of that note (a withdraw's drop of the note it needs). The view is let go at 30 s
+// (queue.ts READY_WITH_MS): that readyWith rejects, and the next read, a swap and a drop run.
+test("(card move-sends-or-says-why) a state read that never answers holds the view at most 30 s: it rejects, then a read, a remake's swap and a drop run", async () => {
+  const v = await vaultWith([usd(5)]);
+  const pool = fakePool(v);
+  const q = queue(v, pool as Pool<unknown>, [signalsProver()], 2);
+  await q.refresh();
+  const [a] = q.ready();
+  const flushed = async (): Promise<void> => {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  };
+  const pending = <T>(p: Promise<T>): Promise<T | "pending"> => Promise.race([p, flushed().then(() => "pending" as const)]);
+  let stuck: Promise<string>;
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    stuck = q.readyWith(() => new Promise<never>(() => {})).then(() => "answered", (e: unknown) => String((e as Error).message));
+    await flushed();
+    mock.timers.tick(29_999);
+    assert.equal(await pending(stuck), "pending", "the read holds the view until 30 s");
+    mock.timers.tick(1);
+    assert.match(String(await pending(stuck)), /no answer in 30000 ms/, "the view let go at 30 s: that read rejects");
+  } finally {
+    resetTimers(mock.timers);
+  }
+  assert.equal((await pending(q.readyWith(async () => 7)).then((r) => (r === "pending" ? r : r.value))), 7, "the next read answers");
+  pool.t.now = START + E + 10n;
+  assert.deepEqual((await q.refresh()).remade, [a!.noteId], "the remake's swap ran");
+  assert.notEqual(q.ready()[0]!.attempt, a!.attempt);
+  assert.equal(await pending(q.drop(a!.noteId)), undefined, "the drop ran");
+  assert.equal((await state(v, a!.noteId)).state, "UNSPENT");
 });
 
 test("a full ready set (3 of 3) is made again at the boundary, on the epoch root even when a leaf landed after it", async () => {
