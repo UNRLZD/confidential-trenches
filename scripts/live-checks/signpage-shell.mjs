@@ -90,10 +90,13 @@ const APP = `https://${APP_HOST}`;
  *  U_X pair's second operator (trade.ts SOLANA_PROVIDER_A, pool-restore.ts RESTORE_UX_SOLANA), and the NEAR pair step 5
  *  reads deposit ids on (the kit's NEAR_NETWORKS.mainnet: fastnear[0] and drpc); since the Base and Robinhood pools are
  *  pinned on mainnet too (card evm-pools-on-mainnet, release 119), each EVM pool's list the page reads it on
- *  (packages/signpage/src/pool-testnet.ts MAINNET_POOL_RPCS). signpage-shell.test.mjs holds the list to those sources. */
+ *  (packages/signpage/src/pool-testnet.ts MAINNET_POOL_RPCS), and each EVM pool's fee list (MAINNET_EVM_FEE_RPCS: a
+ *  restore asks evmPoolOf, which holds the period's fee at once; card restore-check-names-fee-hosts).
+ *  signpage-shell.test.mjs holds the list to those sources. */
 export const PINNED_HOSTS = Object.freeze([
   "ct-api.unrealized.trade", "solana-rpc.publicnode.com", "solana.api.pocket.network", "rpc.mainnet.fastnear.com", "near.drpc.org",
   "base-rpc.publicnode.com", "base.api.pocket.network", "rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network",
+  "mainnet.base.org", "base.gateway.tenderly.co", "robinhood.drpc.org", "robinhood-rpc.publicnode.com",
 ]);
 /** The hosts a CSP's connect-src names (https sources only). */
 export const connectHosts = (csp) => {
