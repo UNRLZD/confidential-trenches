@@ -9,6 +9,7 @@
 
 import type { Chain, OrderTrigger } from "../orders/record.ts";
 import { deepFreeze } from "../freeze.ts";
+import type { ExitChain } from "../checks/oneclick-exit.ts";
 
 /**
  * The twenty-eight request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
@@ -167,8 +168,9 @@ export interface SignpageParams {
    */
   "pool.sell": { chain: TradeChain; token: string; slippage_bps: number } & ({ amount: string; share_bps?: never } | { share_bps: number; amount?: never });
   /** Open SIGN_HOST's withdraw screen for the chain's pool: with `to`, its confirm sheet for the address and amount the
-   *  app's Withdraw sheet took (as withdraw.open's), else the typed form. */
-  "pool.withdraw": Open & { chain: PoolChain } & WithdrawGiven;
+   *  app's Withdraw sheet took (as withdraw.open's) and `dest`, the chain the money arrives on when not the pool's own
+   *  (through 1Click; only with `to`), else the typed form. */
+  "pool.withdraw": Open & { chain: PoolChain; dest?: ExitChain } & WithdrawGiven;
   /** The assets the device can quote a deposit from, each with its minimum and the most one deposit takes. Signs nothing
    *  and needs no sign-in. */
   "deposit.assets": Record<never, never>;

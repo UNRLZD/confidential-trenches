@@ -426,8 +426,9 @@ const withdrawGiven = (v: unknown): boolean => {
 };
 const withdrawOpenBase = obj({ return_key: returnKey }, { from_id: str, to: str, amount: dec, max: lit(true) });
 const withdrawOpenParams: SignpageSchema = (v) => withdrawOpenBase(v) && withdrawGiven(v);
-const poolWithdrawBase = obj({ return_key: returnKey, chain: poolChain }, { to: str, amount: dec, max: lit(true) });
-const poolWithdrawParams: SignpageSchema = (v) => poolWithdrawBase(v) && withdrawGiven(v);
+// dest: an ExitChain (../checks/oneclick-exit.ts), the chain the money arrives on through 1Click; only with `to`
+const poolWithdrawBase = obj({ return_key: returnKey, chain: poolChain }, { to: str, amount: dec, max: lit(true), dest: oneOf(["solana", "base", "robinhood", "near"]) });
+const poolWithdrawParams: SignpageSchema = (v) => poolWithdrawBase(v) && withdrawGiven(v) && (!Object.hasOwn(v as object, "dest") || Object.hasOwn(v as object, "to"));
 
 /** The params of each kind, as SignpageParams names them: exactly its allowed fields (W §2.8 rows; APU-02). */
 export const SIGNPAGE_PARAM_SCHEMAS = {
