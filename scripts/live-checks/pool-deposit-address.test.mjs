@@ -9,6 +9,9 @@
 // at card pool-deposit-follow's build, then at card helper-says-why-a-vendor-refused's, its excerpt re-cut from that build
 // (its delta review: the page's floor, the Solana floor and its reads added as the excerpt's last three lines). The namer's line
 // re-cut from card signpage-passes-yield-to-a-trade's build (its lock-free read before nameDeposit), its name kept.
+// Card move-one-confidential-swap: good re-recorded and the excerpt re-cut whole from its build (pool.address wired
+// confidential with the keyless tell, waited on the stop, the stop checked after it);
+// beforeConfidential (SIGN_HOST read before its deploy), FAIL on unfollowed and confidential; each part of the confidential wiring and the tell taken away FAILs.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -37,19 +40,26 @@ for (const k of ["bad", "liveBefore"]) {
 
 // card helper-says-why-a-vendor-refused: pool.address is handed the page's stop and checks it after each wait; SIGN_HOST
 // before it fails on those two marks alone
-test("recorded bad answer beforeStop: FAIL on unfollowed and stopped", () => {
+test("recorded bad answer beforeStop: FAIL on unfollowed, stopped and confidential", () => {
   const v = judge(ANSWERS.beforeStop);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, bad("unfollowed", "stopped"));
+  assert.deepEqual(v.lines, bad("unfollowed", "stopped", "confidential"));
+});
+
+// card move-one-confidential-swap: SIGN_HOST before it wires pool.address with no confidential mode or keyless tell
+test("recorded bad answer beforeConfidential: FAIL on unfollowed and confidential", () => {
+  const v = judge(ANSWERS.beforeConfidential);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, bad("unfollowed", "confidential"));
 });
 
 // card deposit-takes-each-pools-own-coin: main 6de76338d's build, whose namer names no pool's chain and keeps no held
 // U_X, and whose pool.address has no plain-send test and one record read and one follow write after the quote, fails on
 // those four marks alone
-test("recorded bad answer beforePlain: FAIL on namesEach, namesRecord, unfollowed and stopped", () => {
+test("recorded bad answer beforePlain: FAIL on namesEach, namesRecord, unfollowed, stopped and confidential", () => {
   const v = judge(ANSWERS.beforePlain);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, bad("namesEach", "namesRecord", "unfollowed", "stopped"));
+  assert.deepEqual(v.lines, bad("namesEach", "namesRecord", "unfollowed", "stopped", "confidential"));
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
@@ -83,10 +93,19 @@ const PLANTED = [
   ["a Solana wallet read from the record's EVM address", new RegExp(`\\?(${N})\\.evm===void 0\\?${N}\\.encode\\(${N}\\.decode\\(${N}\\.id\\)\\):null:`), "?$1.evm:", ["sameChain"]],
   ["the first pool, not the asked chain's", new RegExp(`\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===${N}\\)`), ".pools()[0]", ["sameChain", "unfollowed"]],
   ["no follow gate", new RegExp(`(if\\()${N}===void 0\\|\\|${N}\\.checked===void 0\\|\\|`), "$1", ["unfollowed"]],
-  ["the answer starts down, not not_allowed", new RegExp(`=\\{error:\`not_allowed\`\\}((?:,${N}=${N}\\.stop\\?\\.\\(\\),${N}=\\(\\)=>${N}\\?\\.aborted===!0)?;return\\{after:\\(async\\(\\)=>\\{let ${N}=${N}\\.chain,${N}=${N}\\.pools\\(\\))`), "={error:`down`}$1", ["unfollowed", "stopped"]],
-  ["pool.address wired with no follow", new RegExp(`,checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),`), ",", ["unfollowed"]],
+  ["the answer starts down, not not_allowed", new RegExp(`=\\{error:\`not_allowed\`\\}((?:,${N}=${N}\\.stop\\?\\.\\(\\),${N}=\\(\\)=>${N}\\?\\.aborted===!0)?;return\\{after:\\(async\\(\\)=>\\{let ${N}=${N}\\.chain,${N}=${N}\\.pools\\(\\))`), "={error:`down`}$1", ["unfollowed", "stopped", "confidential"]],
+  ["pool.address wired with no follow", new RegExp(`,checked:\\((${N}),(${N}),(${N}),(${N})\\)=>${N}\\.quoted\\(\\1,\\2,\\3,\\4\\),`), ",", ["unfollowed", "confidential"]],
   // card helper-says-why-a-vendor-refused: pool.address is handed the page's stop on sign out (src/main.ts quotesStopped)
-  ["pool.address wired with no stop", new RegExp(`(=>${N}\\.quoted\\(${N},${N},${N},${N}\\)),stop:${N}\\}\\)`), "$1})", ["unfollowed"]],
+  ["pool.address wired with no stop", new RegExp(`(,hidden:\\(${N},${N}\\)=>${N}\\(${N},fetch,${N}\\)),stop:${N}\\}\\)`), "$1})", ["unfollowed", "confidential"]],
+  // card move-one-confidential-swap: the confidential mode, the keyless tell, its stop, the stop after its wait, hidden alone
+  ["pool.address wired with no confidential mode", new RegExp(`(=>${N}\\.quoted\\(${N},${N},${N},${N}\\),)confidential:!0,`), "$1", ["unfollowed", "confidential"]],
+  ["pool.address wired with no keyless tell", new RegExp(`(,confidential:!0,)hidden:\\(${N},${N}\\)=>${N}\\(${N},fetch,${N}\\),`), "$1", ["unfollowed", "confidential"]],
+  ["the tell asked with no stop in the wiring", new RegExp(`(,hidden:\\((${N}),${N}\\)=>${N}\\(\\2,fetch),${N}\\)`), "$1)", ["unfollowed", "confidential"]],
+  ["the tell asked through the page's fetch swapped out", new RegExp(`(,hidden:\\((${N}),(${N})\\)=>${N}\\(\\2,)fetch(,\\3\\))`), "$1helperFetch$4", ["unfollowed", "confidential"]],
+  ["the tell not handed the request's stop", new RegExp(`(await ${N}\\.hidden\\(${N}\\.depositAddress),${N}\\)`), "$1)", ["confidential"]],
+  ["no stop check after the tell's wait", new RegExp(`(\\.catch\\(\\(\\)=>\`down\`\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(?=if\\(${N}!==\`hidden\`\\))`), "$1", ["confidential"]],
+  ["a public answer let through", new RegExp(`if\\((${N})!==\`hidden\`\\)return void`), "if($1===`down`)return void", ["confidential"]],
+  ["the tell skipped", new RegExp(`if\\((${N})\\.confidential===!0\\)\\{let`), "if(!1){let", ["confidential"]],
   // re-review P2: the stop read once and checked after each wait, and the ask handed it
   ["no stop check after the namer's wait", new RegExp(`if\\(await (${N})\\.named\\?\\.\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);`), "await $1.named?.().catch(()=>{});", ["stopped"]],
   ["no stop check after the floor read", new RegExp(`(\\}catch\\{${N}=\\{error:\`down\`\\};return\\})if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(if\\(${N}===null\\)return;)`), "$1$2", ["stopped"]],
@@ -94,7 +113,7 @@ const PLANTED = [
   // card deposit-takes-each-pools-own-coin: the plain send's own second record read and its follow's write
   ["no stop check after a plain send's second record read", new RegExp(`(,${N}=${N}\\(await ${N}\\.read\\(${N}\\.scope\\),${N},${N}\\.scope\\);)if\\(${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(if\\(!${N}\\|\\|!${N}\\(${N},${N}\\)\\)return;)(?=if\\(await )`), "$1$2", ["stopped"]],
   ["no stop check after a plain send's follow write", new RegExp(`if\\(await (${N}\\.checked\\([^;]*?\\)),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(?=${N}=\\{result:\\{chain:${N},address:${N}\\.wallet,asset:${N},quote:${N}\\}\\};return\\})`), "await $1;", ["stopped"]],
-  ["a plain send for any origin", /Object\.hasOwn\(BE,e\)&&t===BE\[e\]/, "!0", ["unfollowed"]],
+  ["a plain send for any origin", /Object\.hasOwn\(vk,e\)&&t===vk\[e\]/, "!0", ["unfollowed"]],
   ["a plain send of another coin on Base", /base:`nep141:base\.omft\.near`,robinhood/, "base:`nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near`,robinhood", ["unfollowed"]],
   // delta review P3-5, P3-6: the stop after the follow's write, handed to the floor read and on to its RPC reads
   ["no stop check after the follow's write", new RegExp(`if\\(await (${N}\\.checked\\([^;]*?\\)),${N}\\(\\)\\)return void\\(${N}=\\{error:\`not_allowed\`\\}\\);(?=${N}=\\{result:\\{chain:${N},address:${N}\\.wallet,asset:${N},quote:${N}\\}\\}\\}\\))`), "await $1;", ["stopped"]],
@@ -106,12 +125,12 @@ const PLANTED = [
   ["no check before a fee read, whose message names U_X", new RegExp(`(\\{stateSize:0,labelSize:0\\},${N},${N}\\);)${N}\\?\\.throwIfAborted\\(\\);`), "$1", ["stopped"]],
   ["the quote's ask not handed the stop", new RegExp(`(,${N}\\.fetch,void 0,void 0),${N}\\)\\}`), "$1)}", ["stopped"]],
   // with no floor read wired, none is handed the stop either
-  ["pool.address wired with no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["unfollowed", "stopped"]],
+  ["pool.address wired with no floor read", new RegExp(`,floor:${N},checked:`), ",checked:", ["unfollowed", "stopped", "confidential"]],
   ["no floor-read gate", new RegExp(`\\|\\|${N}\\.floor===void 0\\|\\|`), "||", ["unfollowed"]],
   ["no network gate (review F2)", new RegExp(`\\|\\|${N}\\.network!==\`mainnet\`\\)return;`), ")return;", ["unfollowed"]],
   // card deposit-takes-each-pools-own-coin review P3-c: a plain send is held to mainnet as every quote is
-  ["the network gate skipped for a plain send", new RegExp(`\\|\\|(${N})\\.network!==\`mainnet\`\\)return;`), "||$1.network!==`mainnet`&&!Object.hasOwn(BE,t.chain))return;", ["unfollowed"]],
-  ["the page's network not passed (review F2)", new RegExp(`(\\{pools:${N},)network:${N},(read:)`), "$1$2", ["unfollowed"]],
+  ["the network gate skipped for a plain send", new RegExp(`\\|\\|(${N})\\.network!==\`mainnet\`\\)return;`), "||$1.network!==`mainnet`&&!Object.hasOwn(vk,t.chain))return;", ["unfollowed"]],
+  ["the page's network not passed (review F2)", new RegExp(`(\\{pools:${N},)network:${N},(read:)`), "$1$2", ["unfollowed", "confidential"]],
   ["no pool floor (review F3)", new RegExp(`return (${N})\\.minAmountOut<${N}\\.floor&&${N}\\(\`floor\`\\)`), "return $1", ["floored"]],
   ["a context floor under the rung let through (review F3)", new RegExp(`\\|\\|(${N})\\.floor<${N}\\[\\1\\.chain\\]\\)&&`), ")&&", ["floored"]],
   ["the vault's floor kept (review F3)", /intoVault:!1\}\);return/, "intoVault:!0});return", ["floored"]],

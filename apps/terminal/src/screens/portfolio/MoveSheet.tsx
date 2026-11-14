@@ -5,7 +5,7 @@ import { chainOf } from "../market/pads.ts";
 import { Ic } from "./icons.tsx";
 import { amount, baseUnits, usd } from "./model.ts";
 import type { PoolRow } from "./model.ts";
-import { checkAmount, exact, moveOp, moveRunning, nodesOf, reach, routeSteps, rowCents, stepStates } from "./move.ts";
+import { checkAmount, exact, moveOp, moveRunning, nodesOf, reach, refusedWord, routeSteps, rowCents, stepStates } from "./move.ts";
 import type { FlowNode, MoveChain, StepState } from "./move.ts";
 import type { DryAnswer, MoveSource } from "./move-source.tsx";
 import { statePoolPrice, unitsToCents } from "../trade/model.ts";
@@ -180,7 +180,7 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
       dry.code === "busy" || dry.code === "down" ? (
         <div className="dstat warn row" data-move-dry={dry.code}><span><W id="busy" /></span><button type="button" className="retry" onClick={() => setTries((t) => t + 1)}><W id="retry" /></button></div>
       ) : (
-        <div className="dstat warn" data-move-dry={dry.code}><span>{dry.code === "quote_check_failed" ? <W id="quoteRefused" /> : <W id="notAvailable" />}</span></div>
+        <div className="dstat warn" data-move-dry={dry.code}><span><W id={refusedWord(dry.code)} /></span></div>
       );
   } else {
     const got = coin(to, q?.out);
@@ -206,7 +206,7 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
 
   const total = rows.reduce((a, r) => a + (state ? rowCents(state, r, now) ?? 0n : 0n), 0n);
   let stat: ReactNode = null;
-  if (ui.refused !== null) stat = <div className="dstat warn" data-move-end="refused"><span>{ui.refused === "busy" ? <W id="busy" /> : <W id="notAvailable" />}</span></div>;
+  if (ui.refused !== null) stat = <div className="dstat warn" data-move-end="refused" data-move-code={ui.refused}><span><W id={refusedWord(ui.refused)} /></span></div>;
   else if (running) stat = <div className="dstat blue" data-move-end="running"><span><W id="processing" /></span><span className="num cnt">{`${elapsed}s`.padEnd(6, " ")}</span></div>;
   else if (op?.stage === "done") stat = <div className="dstat mvok" data-move-end="done"><span><W id="done" /></span>{op.out && to && <span className="num">{coin(to, op.out)}</span>}</div>;
   else if (op?.stage === "refunded") stat = <div className="dstat warn" data-move-end="refunded"><span><W id="refunded" /></span></div>;

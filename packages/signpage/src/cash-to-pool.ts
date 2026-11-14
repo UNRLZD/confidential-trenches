@@ -359,6 +359,8 @@ export function cashMover(d: CashMoverDeps): CashMover {
 const CASH_TO_POOL_STEPS = (x: PoolChain): PoolMoveDry["steps"] => [{ step: "vault_out", chain: "near" }, { step: "intents", chain: x }, { step: "pool_in", chain: x }];
 /** Pool X to Cash: out of X's pool, NEAR Intents to NEAR, into the vault. */
 const POOL_TO_CASH_STEPS = (x: PoolChain): PoolMoveDry["steps"] => [{ step: "pool_out", chain: x }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }];
+/** Pool X to pool Y in one confidential swap (card move-one-confidential-swap): out of X's pool, NEAR Intents to Y, into Y's pool. */
+const POOL_TO_POOL_STEPS = (x: PoolChain, y: PoolChain): PoolMoveDry["steps"] => [{ step: "pool_out", chain: x }, { step: "intents", chain: y }, { step: "pool_in", chain: y }];
 const isTrade = (c: unknown): c is TradeChain => (TRADE_CHAINS as readonly unknown[]).includes(c);
 
 /** The pair and the amount of a pool.move or pool.move.dry the page runs, or its refusal: Cash (near) to a pool, the
@@ -422,6 +424,14 @@ async function moveDry(mover: CashMover, toCash: PoolToCash | null, ask: { from:
   const from = ask.from;
   const to = ask.to;
   if (toCash === null) return { error: "not_allowed" };
+  if (to !== "near" && toCash.direct()) {
+    // one confidential swap, no vault stop: the run's sum, the least of `to`'s coin, held to `to`'s pool floor
+    const steps = POOL_TO_POOL_STEPS(from, to);
+    const r = await toCash.dry(from, ask.units, to);
+    if ("error" in r) return r;
+    if ("limits" in r) return limits(steps, r.limits.max, r.limits);
+    return { result: { out: unitsText(r.out, POOL_DECIMALS[to]), fee: unitsText(r.fee, POOL_DECIMALS[from]), steps, max: text(r.max) } };
+  }
   const steps = to === "near" ? POOL_TO_CASH_STEPS(from) : [...POOL_TO_CASH_STEPS(from), ...CASH_TO_POOL_STEPS(to)];
   const r = await toCash.dry(from, ask.units);
   if ("error" in r) return r;

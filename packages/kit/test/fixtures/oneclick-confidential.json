@@ -1,0 +1,64 @@
+{
+ "source": "POST https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote (the helper, partner key), read 2026-11-14T03:41:11.724Z: 0.08 SOL into Base ETH, confidentiality \"advanced\", live (dry false); recipient a random Base address and refund a random intents id nobody holds; nothing was ever sent to its deposit address",
+ "request": {
+  "dry": false,
+  "swapType": "EXACT_INPUT",
+  "slippageTolerance": 100,
+  "originAsset": "nep141:sol.omft.near",
+  "depositType": "ORIGIN_CHAIN",
+  "destinationAsset": "nep141:base.omft.near",
+  "amount": "80000000",
+  "refundTo": "3972a7a44f7ad471e5644c9a6158bb39d55da52f16e53c2deab665aab1b01369",
+  "refundType": "INTENTS",
+  "recipient": "0x6ce31ef7c6a3aed0a23a9592af19a31b50909a16",
+  "recipientType": "DESTINATION_CHAIN",
+  "deadline": "2026-11-14T03:51:11.723Z",
+  "confidentiality": "advanced"
+ },
+ "answer": {
+  "quote": {
+   "amountIn": "80000000",
+   "amountInFormatted": "0.08",
+   "amountInUsd": "6.026400000000",
+   "minAmountIn": "80000000",
+   "amountOut": "3177833404340532",
+   "amountOutFormatted": "0.003177833404340532",
+   "amountOutUsd": "6.009791420953",
+   "minAmountOut": "3146055070297126",
+   "timeEstimate": 22,
+   "refundFee": "0",
+   "withdrawFee": "560000000000",
+   "deadline": "2026-11-17T03:51:11.723Z",
+   "timeWhenInactive": "2026-11-17T03:51:11.723Z",
+   "depositAddress": "DSSWPKE7kdvQNGsvWnMyGWCW1TvZwe8Lu92d6J7srzUH"
+  },
+  "quoteRequest": {
+   "dry": false,
+   "depositMode": "SIMPLE",
+   "swapType": "EXACT_INPUT",
+   "slippageTolerance": 100,
+   "originAsset": "nep141:sol.omft.near",
+   "depositType": "ORIGIN_CHAIN",
+   "destinationAsset": "nep141:base.omft.near",
+   "amount": "80000000",
+   "refundTo": "3972a7a44f7ad471e5644c9a6158bb39d55da52f16e53c2deab665aab1b01369",
+   "refundType": "INTENTS",
+   "recipient": "0x6ce31ef7c6a3aed0a23a9592af19a31b50909a16",
+   "recipientType": "DESTINATION_CHAIN",
+   "deadline": "2026-11-14T03:51:11.723Z",
+   "confidentiality": "advanced",
+   "quoteWaitingTimeMs": 0,
+   "insured": false,
+   "appFees": [
+    {
+     "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+     "fee": 20,
+     "limitOrderId": null
+    }
+   ]
+  },
+  "signature": "ed25519:4UnEuwsGGconqsbuycvLEAimd4jNqatwTtYDiLgeRdzDXBsVYbXGBW8mVbzwf1KpLRuxezGv3ZrzHXnLWY8fRJki",
+  "timestamp": "2026-11-14T03:41:12.354Z",
+  "correlationId": "f5929c4d-9f22-41e8-97b7-4e3ef25a9935"
+ }
+}
