@@ -151,3 +151,139 @@ for (const out of [{ stage: "in_transit", txs: [{ chain: "solana", hash: "S" }] 
     await p.m.idle();
     assert.notEqual(p.mem.get("mv")!.stage, "failed", p.log.map((r) => r.stage).join(" "));
   });
+
+// Card move-sends-or-says-why (142): a Move out of Cash (from "near": the vault pays a 1Click deposit address) under the
+// same send-by. Its record is written leaving with send_by_ms before the quote; the vault's hand-off gets the claim,
+// awaited right before its note goes RESERVED (wallet withdraw/request.ts); past the send-by an unclaimed move ends
+// failed, not_sent, and a late claim is refused, so its note goes back UNSPENT and nothing is sent. Red at 9be5d5ab1:
+// the record came only after the quote, the hand-off had no claim, and a hand-off that never ended held leaving for good.
+import { mock } from "node:test";
+import { cashMover, type CashMoverDeps } from "../src/cash-to-pool.ts";
+import { MOVE_SEND_MS } from "../src/pool-to-cash.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
+
+const CASH_ADDRESS = "a".repeat(64);
+/** A Cash mover on a compare-and-set map, its clock the test's; `handoff` as given, its claim kept for the test. */
+function cashPage(o: { quote?: () => Promise<{ address: string; amountIn: bigint; minOut: bigint } | { error: "down" }>; handoff?: (claim: (() => Promise<void>) | undefined) => Promise<{ kind: "landed"; tx: string }> }) {
+  let clock = T0;
+  const mem = new Map<string, MoveOpRecord>();
+  const log: MoveOpRecord[] = [];
+  const paid: bigint[] = [];
+  const claims: (() => Promise<void>)[] = [];
+  const stop = new AbortController();
+  const d: CashMoverDeps = {
+    price: () => PRICE,
+    rails: ["1click"],
+    quote: async (_c, usdc) => (o.quote ? o.quote() : { address: CASH_ADDRESS, amountIn: usdc, minOut: (usdc * 10n ** 9n) / 80_000_000n }),
+    fee: async () => 50_000n,
+    cash: async () => 1_000_000_000n,
+    handoff: async (w, _fee, claim) => {
+      if (claim) claims.push(claim);
+      const r = await (o.handoff ? o.handoff(claim) : new Promise<never>(() => {}));
+      paid.push(w.amount);
+      return r;
+    },
+    landed: async () => false,
+    now: () => clock,
+    update: async (id, change) => {
+      const next = change(mem.get(id));
+      if (next === undefined) return undefined;
+      mem.set(id, structuredClone(next));
+      log.push(structuredClone(next));
+      return next;
+    },
+    follow: async () => undefined,
+    // each poll a macrotask apart (a follow with no follow op polls until the sign out), the clock 2 s on
+    wait: () => new Promise<void>((r) => setImmediate(r)).then(() => void (clock += 2_000)),
+    signal: stop.signal,
+  };
+  return { m: cashMover(d), mem, log, paid, claims, stop, at: (t: number) => void (clock = t) };
+}
+const flushed = async (): Promise<void> => {
+  for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+};
+
+test("(card move-sends-or-says-why) Cash: a hand-off that has not claimed by the send-by ends the move failed, not_sent, and its late claim is refused", BOUND, async () => {
+  const p = cashPage({});
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const sent = await p.m.move("solana", 25_500_000n, "req-c");
+    assert.ok(!("error" in sent), "the move started");
+    const rec = p.mem.get("req-c")!;
+    assert.equal(rec.stage, "leaving");
+    assert.equal(rec.send_by_ms, T0 + MOVE_SEND_MS, "a send-by from the tap");
+    assert.equal(p.claims.length, 1, "the hand-off holds the move's claim");
+    p.at(T0 + MOVE_SEND_MS);
+    mock.timers.tick(MOVE_SEND_MS);
+    await flushed();
+  } finally {
+    resetTimers(mock.timers);
+    p.stop.abort();
+  }
+  assert.deepEqual([p.mem.get("req-c")?.stage, p.mem.get("req-c")?.error], ["failed", "not_sent"]);
+  await assert.rejects(p.claims[0]!(), /no longer send/, "the late claim is refused: the note goes back, nothing sent");
+  assert.equal(p.mem.get("req-c")?.claimed_ms, undefined);
+  assert.deepEqual(p.paid, []);
+});
+
+test("(card move-sends-or-says-why) Cash: a quote that never answers leaves a record from the tap, and the move fails down at its send-by with no hand-off", BOUND, async () => {
+  const p = cashPage({ quote: () => new Promise(() => {}) });
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  let sent!: Promise<unknown>;
+  try {
+    sent = p.m.move("solana", 25_500_000n, "req-q");
+    await flushed();
+    assert.deepEqual([p.mem.get("req-q")?.stage, p.mem.get("req-q")?.send_by_ms], ["leaving", T0 + MOVE_SEND_MS], "the record before the quote");
+    p.at(T0 + MOVE_SEND_MS);
+    mock.timers.tick(MOVE_SEND_MS);
+    await flushed();
+  } finally {
+    resetTimers(mock.timers);
+    p.stop.abort();
+  }
+  assert.deepEqual(await sent, { error: "down" });
+  assert.deepEqual([p.mem.get("req-q")?.stage, p.mem.get("req-q")?.error], ["failed", "down"]);
+  assert.deepEqual([p.claims.length, p.paid], [0, []], "no hand-off asked");
+});
+
+test("(card move-sends-or-says-why) Cash: a hand-off that claims inside the send-by is never failed by it, and goes on to in_transit", BOUND, async () => {
+  let go!: () => void;
+  const landed = new Promise<void>((r) => (go = r));
+  const p = cashPage({ handoff: async (claim) => (await claim!(), await landed, { kind: "landed", tx: "NearTx1" }) });
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    await p.m.move("solana", 25_500_000n, "req-k");
+    await flushed();
+    assert.equal(p.mem.get("req-k")?.claimed_ms, T0, "claimed at the hand-off's RESERVED step");
+    p.at(T0 + MOVE_SEND_MS);
+    mock.timers.tick(MOVE_SEND_MS);
+    await flushed();
+    assert.equal(p.mem.get("req-k")?.stage, "leaving", "past the send-by a claimed move is not failed");
+    go();
+    await flushed();
+  } finally {
+    resetTimers(mock.timers);
+    p.stop.abort();
+  }
+  await p.m.idle();
+  assert.deepEqual([p.mem.get("req-k")?.stage, p.mem.get("req-k")?.claimed_ms, p.paid], ["in_transit", T0, [25_500_000n]]);
+});
+
+test("(card move-sends-or-says-why) Cash after a reload: a move left leaving with a send-by and no claim ends failed past it; one with no send-by (written before it) is followed as before", BOUND, async () => {
+  const p = cashPage({});
+  const fresh: MoveOpRecord = { kind: "move", from: "near", to: "solana", stage: "leaving", txs: [], amount: "25.5", created_ms: T0 - PAST, send_by_ms: T0 - PAST + MOVE_SEND_MS };
+  const legacy: MoveOpRecord = { kind: "move", from: "near", to: "solana", stage: "leaving", txs: [], amount: "25.5", created_ms: T0 - PAST };
+  const p2 = cashPage({});
+  for (const [q, id, rec] of [[p, "r-new", fresh], [p2, "r-old", legacy]] as const) {
+    await q.m.idle();
+    (q as typeof p).mem.set(id, structuredClone(rec));
+  }
+  p.m.resume([{ id: "r-new", rec: fresh }]);
+  p2.m.resume([{ id: "r-old", rec: legacy }]);
+  // the legacy follow polls on (its follow op absent): stopped after a few polls
+  await flushed();
+  p2.stop.abort();
+  await Promise.all([p.m.idle(), p2.m.idle()]);
+  assert.deepEqual([p.mem.get("r-new")?.stage, p.mem.get("r-new")?.error], ["failed", "not_sent"]);
+  assert.equal(p2.mem.get("r-old")?.stage, "leaving", "a move from before the send-by never failed by it");
+});

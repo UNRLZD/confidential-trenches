@@ -345,7 +345,8 @@ else {
       },
       fee: () => form.fee(),
       cash: () => form.available(),
-      handoff,
+      // the move's claim reaches the request, right before its note goes RESERVED (card move-sends-or-says-why)
+      handoff: handoff && ((w, fee, claim) => handoff(w, fee, undefined, false, claim)),
       // a pool's quote floor, the same read pool.address checks against: an EVM pool's least rung plus one deposit's gas;
       // Solana's rung, one deposit's cost and the rent U_X keeps, its fee read for a message by the pool's pinned fee
       // payer (a deposit's fee is the same for any one signer, and the read names no account of the user's)
@@ -358,6 +359,7 @@ else {
       now: () => Date.now(),
       // the move op (kind "move", src/state.ts opOf): its stages from the hand-off, then from the quote's follow op
       put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
+      update: async (id, change) => (await open()).update("ops", id, (v) => change(v as MoveOpRecord | undefined)),
       follow: async (id) => (await (await open()).get("ops", id).catch(() => undefined)) as MoveFollow | undefined,
       signal,
     });

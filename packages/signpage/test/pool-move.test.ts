@@ -56,7 +56,8 @@ test("pool.move near -> solana: one move op, leaving -> in_transit -> into_pool 
   assert.deepEqual(p.quoted, [{ usdc: 25_500_000n, id: "req-1/1click" }], "the quote's follow op beside the move op");
   assert.deepEqual(p.paid, [{ recipient: ADDRESS, amount: 25_500_000n, fee: 50_000n }]);
   assert.deepEqual(new Set(p.puts.map((x) => x.id)), new Set(["req-1"]), "one move op, under the request's id");
-  assert.deepEqual(p.puts.map((x) => x.rec.stage), ["leaving", "in_transit", "into_pool", "done"]);
+  // leaving twice: written before the quote is asked, then with the quote's out (card move-sends-or-says-why)
+  assert.deepEqual(p.puts.map((x) => x.rec.stage), ["leaving", "leaving", "in_transit", "into_pool", "done"]);
   const last = p.puts.at(-1)!.rec;
   assert.deepEqual({ ...last, created_ms: 0 }, { kind: "move", from: "near", to: "solana", stage: "done", txs: [{ chain: "near", hash: "NearTx1" }, { chain: "solana", hash: "SolTx1" }], amount: "25.5", out: "0.31875", created_ms: 0 });
   // the record reads back as a move op the kit's schema takes
@@ -67,11 +68,11 @@ test("pool.move: a refused hand-off ends the op failed; a refunded follow reads 
   const p = page({ end: { kind: "expired" } as HandoffEnd });
   await settle(p.k["pool.move"]({ from: "near", to: "solana", amount: "25.5" }, ctx));
   await p.m.idle();
-  assert.deepEqual(p.puts.map((x) => x.rec.stage), ["leaving", "failed"]);
+  assert.deepEqual(p.puts.map((x) => x.rec.stage), ["leaving", "leaving", "failed"]);
   const r = page({ follows: [{ stage: "refunded" }, { stage: "expired" }] });
   await settle(r.k["pool.move"]({ from: "near", to: "solana", amount: "25.5" }, ctx));
   await r.m.idle();
-  assert.deepEqual(r.puts.map((x) => x.rec.stage), ["leaving", "in_transit", "refunded", "failed"]);
+  assert.deepEqual(r.puts.map((x) => x.rec.stage), ["leaving", "leaving", "in_transit", "refunded", "failed"]);
 });
 
 test("pool.move: a quote that is not a NEAR implicit account, not the amount asked, or under the least withdraws nothing, its op failed with no tx", async () => {
@@ -87,7 +88,8 @@ test("pool.move: a quote that is not a NEAR implicit account, not the amount ask
     const name = JSON.stringify(q, (_k, v) => (typeof v === "bigint" ? String(v) : v));
     assert.ok(a.error !== undefined, name);
     assert.deepEqual(p.paid, [], name);
-    assert.deepEqual(p.puts.map((x) => [x.id, x.rec.stage, x.rec.txs]), [["req-1", "failed", []]], name);
+    // the record written before the quote, then failed (card move-sends-or-says-why)
+    assert.deepEqual(p.puts.map((x) => [x.id, x.rec.stage, x.rec.txs]), [["req-1", "leaving", []], ["req-1", "failed", []]], name);
   }
 });
 
@@ -147,7 +149,7 @@ test("pool.move near -> base and near -> robinhood: the quote asked for that cha
     await p.m.idle();
     assert.deepEqual(p.chains, [to]);
     assert.deepEqual(p.paid, [{ recipient: ADDRESS, amount: 25_500_000n, fee: 50_000n }]);
-    assert.deepEqual(p.puts.map((x) => [x.rec.to, x.rec.stage, x.rec.out]), [[to, "leaving", "0.007252427184466019"], [to, "in_transit", "0.007252427184466019"], [to, "done", "0.007252427184466019"]]);
+    assert.deepEqual(p.puts.map((x) => [x.rec.to, x.rec.stage, x.rec.out]), [[to, "leaving", undefined], [to, "leaving", "0.007252427184466019"], [to, "in_transit", "0.007252427184466019"], [to, "done", "0.007252427184466019"]]);
     const short = page({ quote: (usdc) => ({ address: ADDRESS, amountIn: usdc, minOut: least - 1n }) });
     assert.ok("error" in ((await settle(short.k["pool.move"]({ from: "near", to, amount: "25.5" }, ctx))) as object), to);
     assert.deepEqual(short.paid, []);

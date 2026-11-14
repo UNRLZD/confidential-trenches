@@ -45,45 +45,15 @@ import { base58 } from "@scure/base";
 import { EVM_ADDRESS } from "./rules/pool.ts";
 import type { DepositStage, ErrorCode, MoveStage, PoolChain, PoolStatePrice, TxRef } from "../../kit/src/signpage/messages.ts";
 import { checkPoolAmount, formatUnits, POOL_ASSET, poolSendable, type PoolFunds, type PoolReady } from "./withdraw/pool-form.ts";
-import { CASH_MARGIN_BPS, CASH_MOVE_POLL_MS, leastWhere, moveStageOfFollow, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { CASH_MARGIN_BPS, CASH_MOVE_POLL_MS, claimed, expired, leastWhere, MOVE_SEND_MS, moveStageOfFollow, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 
 type Refusal = { error: ErrorCode };
 
 /** Whether `a` is an address of `chain`, as a deposit address there must be: a 32-byte base58 key on Solana, a 0x
  *  address on Base and Robinhood. */
-/** How long a move out of a pool has, from its tap, to start sending its release (card move-sends-or-says-why): its
- *  quote (one 1Click round trip and its keyless tell), then a withdraw part's reads, its wait for an epoch's root (one
- *  60 s epoch and WITHDRAW_BOUNDARY_LAG_MS 30 s), its proof (6.7 s on a laptop, several times that on a phone) and its
- *  bind, about twice over; far inside the quote's 30 min deadline (DEPOSIT_QUOTE_DEADLINE_MS), so a release claimed at
- *  the last moment still lands in time. */
-export const MOVE_SEND_MS = 300_000;
-
-/** A move's send-by: its own send_by_ms, or, for a move written before this card (release 137 and earlier, no
- *  send_by_ms), its tap's time plus MOVE_SEND_MS. */
-export const sendByOf = (rec: MoveOpRecord): number => rec.send_by_ms ?? rec.created_ms + MOVE_SEND_MS;
-
-/** The claim's compare-and-set on a move record (card move-sends-or-says-why): claimed once already, or still leaving
- *  inside its send-by; never a move ended, nor one past its send-by with no claim. */
-export function claimed(rec: MoveOpRecord | undefined, now: number): MoveOpRecord | null {
-  if (rec === undefined || rec.kind !== "move" || rec.stage === "failed" || rec.stage === "done") return null;
-  if (rec.claimed_ms !== undefined) return rec;
-  if (rec.stage === "leaving" && now >= sendByOf(rec)) return null;
-  return { ...rec, claimed_ms: now };
-}
-
-/** Whether a move's pool run (its op under <id>/out) shows no release sent: no record, or one still before its send or
- *  stopped, with no tx. in_transit is written before a release leaves (pool-testnet.ts owe), so it counts as sent. */
-export const nothingSent = (out: { stage?: unknown; txs?: readonly unknown[] } | undefined): boolean =>
-  out === undefined || ((out.stage === "proving" || out.stage === "stopped") && (!Array.isArray(out.txs) || out.txs.length === 0));
-
-/** The follow's end of a move nothing sent for in time: failed only while still leaving, unclaimed and past its
- *  send-by. A move written before this card had no claim to write, so it ends only while its run (`out`) shows no
- *  release sent; one whose run sent is followed on as before. */
-export function expired(rec: MoveOpRecord | undefined, now: number, out?: { stage?: unknown; txs?: readonly unknown[] }): MoveOpRecord | null {
-  if (rec === undefined || rec.kind !== "move" || rec.stage !== "leaving" || rec.claimed_ms !== undefined || now < sendByOf(rec)) return null;
-  if (rec.send_by_ms === undefined && !nothingSent(out)) return null;
-  return { ...rec, stage: "failed", error: "not_sent" };
-}
+// the send-by and its claim (card move-sends-or-says-why) live beside MoveOpRecord in ./cash-to-pool.ts, shared with Cash's
+// own moves; named here as before
+export { MOVE_SEND_MS, sendByOf, claimed, nothingSent, expired } from "./cash-to-pool.ts";
 
 export function onPoolChain(chain: PoolChain, a: string): boolean {
   if (chain !== "solana") return EVM_ADDRESS.test(a);
