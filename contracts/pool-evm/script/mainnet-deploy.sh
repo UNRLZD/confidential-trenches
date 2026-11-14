@@ -5,6 +5,12 @@
 #   sh contracts/pool-evm/script/mainnet-deploy.sh base <your Base address: where the run's leftover ETH goes back>
 #   sh contracts/pool-evm/script/mainnet-deploy.sh robinhood <your Robinhood chain address>
 #   sh contracts/pool-evm/script/mainnet-deploy.sh <base|robinhood> --sweep-kept
+#   sh contracts/pool-evm/script/mainnet-deploy.sh base <your Base address> --only SellDelegate
+#   sh contracts/pool-evm/script/mainnet-deploy.sh robinhood <your Robinhood chain address> --only SellDelegate
+#   sh contracts/pool-evm/script/mainnet-deploy.sh <base|robinhood> --only SellDelegate --sweep-kept
+#     the sell delegate alone (card pool-amounts-are-standard-sizes-evm: a sale deposits a standard size), beside the
+#     chain's set, to its own record contracts/pool-evm/deployments/<chain>.sell-delegate-2.json, then that card's live
+#     check on it; everything below holds for it as for the set (one contract, one deploy, its own journal and key)
 #     a stopped run whose key was kept (its last line says so): sends the key's ETH back to the address that run was
 #     given, and no other, then removes the key, unless the run is unfinished and made a contract (the key stays for the
 #     resume) or a transfer it asked for may still land
@@ -42,34 +48,55 @@ set -eu
 usage() {
   echo "usage: sh contracts/pool-evm/script/mainnet-deploy.sh <base|robinhood> <your address, where the run's leftover ETH goes back>"
   echo "   or: sh contracts/pool-evm/script/mainnet-deploy.sh <base|robinhood> --sweep-kept"
+  echo "   or: sh contracts/pool-evm/script/mainnet-deploy.sh <base|robinhood> <your address> --only SellDelegate"
+  echo "   or: sh contracts/pool-evm/script/mainnet-deploy.sh <base|robinhood> --only SellDelegate --sweep-kept"
 }
 FORM=
-case "$#:${1:-}:${2:-}" in
-  2:base:--sweep-kept|2:robinhood:--sweep-kept) FORM=sweep ;;
-  2:base:-*|2:robinhood:-*) ;;
-  2:base:?*|2:robinhood:?*) FORM=deploy ;;
+ONLY=
+case "$#:${1:-}:${2:-}:${3:-}:${4:-}" in
+  2:base:--sweep-kept::|2:robinhood:--sweep-kept::) FORM=sweep ;;
+  2:base:-*::|2:robinhood:-*::) ;;
+  2:base:?*::|2:robinhood:?*::) FORM=deploy ;;
+  4:base:--only:SellDelegate:--sweep-kept|4:robinhood:--only:SellDelegate:--sweep-kept) FORM=sweep ONLY=SellDelegate ;;
+  4:base:-*:*:*|4:robinhood:-*:*:*) ;;
+  4:base:?*:--only:SellDelegate|4:robinhood:?*:--only:SellDelegate) FORM=deploy ONLY=SellDelegate ;;
 esac
 if [ -z "$FORM" ]; then
   usage
   exit 1
 fi
 CHAIN=$1
+# the record (the one-deploy guard) and its journal: the chain's set's, or the contract's own beside it
+RECORD="contracts/pool-evm/deployments/$CHAIN"
+[ -z "$ONLY" ] || RECORD="$RECORD.sell-delegate-2"
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$ROOT"
 # a caught signal: this shell waits for deploy.mjs's own cleanup (it handles INT, TERM and HUP)
 trap ':' INT TERM HUP
 if [ "$FORM" = sweep ]; then
-  node contracts/pool-evm/script/deploy.mjs --mainnet --chain "$CHAIN" --sweep-kept "contracts/pool-evm/deployments/$CHAIN.journal.json"
+  if [ -n "$ONLY" ]; then
+    node contracts/pool-evm/script/deploy.mjs --mainnet --chain "$CHAIN" --only "$ONLY" --sweep-kept "$RECORD.journal.json"
+  else
+    node contracts/pool-evm/script/deploy.mjs --mainnet --chain "$CHAIN" --sweep-kept "$RECORD.journal.json"
+  fi
   exit 0
 fi
 command -v forge >/dev/null 2>&1 || { echo "forge is not on PATH (https://getfoundry.sh): nothing was sent"; exit 1; }
 mkdir -p contracts/pool-evm/deployments
 RC=0
-node contracts/pool-evm/script/deploy.mjs --mainnet --chain "$CHAIN" --return "$2" || RC=$?
+if [ -n "$ONLY" ]; then
+  node contracts/pool-evm/script/deploy.mjs --mainnet --chain "$CHAIN" --only "$ONLY" --return "$2" || RC=$?
+else
+  node contracts/pool-evm/script/deploy.mjs --mainnet --chain "$CHAIN" --return "$2" || RC=$?
+fi
 # the record, written only by a completed run, is the one-deploy guard: a later paste for this chain is refused only
 # where it sits, so it is committed at once and every later paste runs in this folder
-if [ -e "contracts/pool-evm/deployments/$CHAIN.json" ]; then
-  echo "mainnet-deploy: the record contracts/pool-evm/deployments/$CHAIN.json in $ROOT is the one-deploy guard: commit it now, and run every later paste for $CHAIN in $ROOT"
+if [ -e "$RECORD.json" ]; then
+  echo "mainnet-deploy: the record $RECORD.json in $ROOT is the one-deploy guard: commit it now, and run every later paste for $CHAIN in $ROOT"
 fi
 [ "$RC" = 0 ] || exit "$RC"
-node scripts/live-checks/pool-evm-deploy.mjs --deployment "contracts/pool-evm/deployments/$CHAIN.json"
+if [ -n "$ONLY" ]; then
+  node scripts/live-checks/pool-amounts-are-standard-sizes-evm.mjs --deployment "$RECORD.json"
+else
+  node scripts/live-checks/pool-evm-deploy.mjs --deployment "$RECORD.json"
+fi

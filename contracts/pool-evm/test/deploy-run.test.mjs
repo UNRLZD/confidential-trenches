@@ -14,7 +14,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
 import { BUILD, CHAINS, DUST, MAINNETS, bytes, hex, keccak } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { BUILT, MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, sinkOf, addressOf, createAddress, deployedElsewhere, initProblems, main, outflowOf } from "../script/deploy.mjs";
+import { BUILT, MAINNET_INIT, MAX_FEE_CAP, ORDER, RPC_TRIES, sinkOf, addressOf, aloneRecord, createAddress, deployedElsewhere, initProblems, main, outflowOf, sweepCommand } from "../script/deploy.mjs";
 
 const OUT_DIR = new URL("../out/", import.meta.url);
 const runtime = (name) => JSON.parse(readFileSync(new URL(`${name}.sol/${name}.json`, OUT_DIR), "utf8")).deployedBytecode.object;
@@ -896,6 +896,82 @@ test("mainnet review: a pool deployed beyond this checkout (origin/main's record
   assert.match(String(r.error?.message), /the pool is deployed on base already: origin\/main holds contracts\/pool-evm\/deployments\/base\.json/);
   assert.equal(c.deployer, null, "no run key");
   assert.deepEqual(folders(m.keys), []);
+});
+
+// ---- card pool-amounts-are-standard-sizes-evm: the owner's paste deploys the sell delegate alone on a mainnet ----
+const ONLY_SD = ["--only", "SellDelegate"];
+test("mainnet --only SellDelegate: the delegate alone at nonce 0, its init code the pinned one with the chain's WETH and PoolManager, to <chain>.sell-delegate-2.json beside the set's record (which does not refuse it); the key is swept and removed; done names the card's live check", OPTS, async (t) => {
+  const m = room(t);
+  writeFileSync(m.out, "{}\n"); // the chain's set is deployed: its record is no refusal of the delegate alone
+  const out = aloneRecord(m.out, "SellDelegate");
+  assert.equal(path.basename(out), "base.sell-delegate-2.json");
+  const asked = [];
+  const c = mainnet();
+  const r = await run(t, c, { head: MAIN, args: ONLY_SD, io: { ...m.io, deployedElsewhere: async (...a) => (asked.push(a), null) }, outArg: false, out });
+  assert.equal(r.error, null, String(r.error?.message) + why(c));
+  settled(c, r);
+  const word = (a) => a.slice(2).padStart(64, "0");
+  assert.deepEqual(c.created, [init("SellDelegate") + word(BASE.weth.address) + word(BASE.poolManager.address)], "one create, the delegate's");
+  assert.equal(initProblems("SellDelegate", init("SellDelegate")), null, "its init code is MAINNET_INIT's");
+  assert.deepEqual(Object.keys(r.record.contracts), ["SellDelegate"]);
+  assert.equal(r.record.contracts.SellDelegate.address, createAddress(r.record.deployer, 0));
+  assert.deepEqual(r.record.txs.map((x) => x.step), ["deploy SellDelegate", "sweep (the run key's rest back)"]);
+  assert.deepEqual(asked, [["base", { only: "SellDelegate", record: out }]], "deployedElsewhere asked about the delegate's own record");
+  assert.equal(readFileSync(m.out, "utf8"), "{}\n", "the set's record untouched");
+  assert.deepEqual(folders(m.keys), [], "the key folder is removed");
+  assert.equal(existsSync(out.replace(/\.json$/, ".journal.json")), false, "its journal removed");
+  assert.ok(c.logs.some((l) => l === `deploy: done. Next: node scripts/live-checks/pool-amounts-are-standard-sizes-evm.mjs --deployment ${path.relative(process.cwd(), out)}`), why(c));
+});
+
+test("mainnet --only SellDelegate refusals, each before any key: another contract alone; its record there; deployed beyond this checkout; a checkout that is not main's", OPTS, async (t) => {
+  for (const only of ["FeeCollector", "UniswapV4Adapter", "PrivacyPoolSimple"]) {
+    const m = room(t);
+    const c = mainnet();
+    const r = await run(t, c, { head: MAIN, args: ["--only", only], io: m.io, outArg: false, out: m.out });
+    assert.match(String(r.error?.message), /--only is one of SellDelegate on a mainnet/, only);
+    assert.equal(c.deployer, null, "no run key");
+    assert.deepEqual(folders(m.keys), []);
+  }
+  {
+    const m = room(t);
+    const out = aloneRecord(m.out, "SellDelegate");
+    writeFileSync(out, "{}\n");
+    const c = mainnet();
+    const r = await run(t, c, { head: MAIN, args: ONLY_SD, io: m.io, outArg: false, out });
+    assert.match(String(r.error?.message), /base\.sell-delegate-2\.json exists: SellDelegate is deployed on base: run its live check alone: node scripts\/live-checks\/pool-amounts-are-standard-sizes-evm\.mjs --deployment /, why(c));
+    assert.equal(c.deployer, null, "no run key");
+  }
+  {
+    const m = room(t);
+    const c = mainnet();
+    const r = await run(t, c, { head: MAIN, args: ONLY_SD, io: { ...m.io, deployedElsewhere: async () => "the kit pins the base sell delegate 0x01" }, outArg: false, out: aloneRecord(m.out, "SellDelegate") });
+    assert.match(String(r.error?.message), /^SellDelegate is deployed on base already: the kit pins the base sell delegate 0x01/);
+    assert.equal(c.deployer, null, "no run key");
+  }
+  {
+    const m = room(t);
+    const c = mainnet();
+    const r = await run(t, c, { head: MAIN, args: ONLY_SD, io: { ...m.io, mainCheckout: () => { throw new Error("this folder is not at origin/main"); } }, outArg: false, out: aloneRecord(m.out, "SellDelegate") });
+    assert.match(String(r.error?.message), /not at origin\/main/);
+    assert.equal(c.deployer, null, "no run key");
+  }
+});
+
+test("mainnet --only SellDelegate: deployedElsewhere refuses when origin/main holds the delegate's record or the kit pins a delegate past the first set's (the build file's frozen SellDelegate.mainnet-1); the kit's pin today is that first one; the sweep line names --only", OPTS, async () => {
+  const ok = { status: 0 };
+  const no = { status: 1 };
+  const record = path.join(path.dirname(new URL(import.meta.url).pathname), "../deployments/base.sell-delegate-2.json");
+  const first = BUILD.frozen["SellDelegate.mainnet-1"].at;
+  assert.equal(await deployedElsewhere("base", { git: () => ok, only: "SellDelegate", record }), "origin/main holds contracts/pool-evm/deployments/base.sell-delegate-2.json");
+  assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok), only: "SellDelegate", record, venues: async () => ({ base: { sellDelegate: first.base } }) }), null);
+  assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok), only: "SellDelegate", record, venues: async () => ({ base: { sellDelegate: "0x0101010101010101010101010101010101010101" } }) }), `the kit pins the base sell delegate 0x0101010101010101010101010101010101010101, not the first set's ${first.base}`);
+  for (const chain of ["base", "robinhood"]) {
+    // the kit's own pin (through its entry) is still the first set's, so the paste is not refused today
+    const rec = path.join(path.dirname(record), `${chain}.sell-delegate-2.json`);
+    assert.equal(await deployedElsewhere(chain, { git: (cmd) => (cmd === "cat-file" ? no : ok), only: "SellDelegate", record: rec }), null, chain);
+  }
+  assert.equal(sweepCommand("robinhood", "SellDelegate"), "sh contracts/pool-evm/script/mainnet-deploy.sh robinhood --only SellDelegate --sweep-kept");
+  assert.equal(sweepCommand("robinhood"), "sh contracts/pool-evm/script/mainnet-deploy.sh robinhood --sweep-kept");
 });
 
 test("mainnet review: the journal and the record are written whole (a new file renamed over the old), never truncated in place", OPTS, async (t) => {

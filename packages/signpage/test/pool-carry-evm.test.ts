@@ -21,7 +21,7 @@ import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { checkEvmCarry, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmDepositReads, type EvmOnwardSend } from "../src/rules/pool.ts";
 import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS } from "../src/pool-deposit-evm.ts";
-import { EVM_BUY_SIGNATURE, EVM_WITHDRAW_SIGNATURE } from "../src/evm-send.ts";
+import { EVM_BUY_SIGNATURE, EVM_WITHDRAW_SIGNATURE, evmSellVerdict, type EvmDeposited, type EvmDepositedRead } from "../src/evm-send.ts";
 import { carryEvmOwed, EVM_CARRY_DONE_KEY, EVM_CARRY_OPEN_KEY, EVM_CARRY_WAIT_KEY, EVM_OWED_BACK_KEY, type EvmCarryHost, type EvmCarryOpen } from "../src/pool-carry-evm.ts";
 import { evmType2Hash } from "../src/evm-tx-hash.ts";
 
@@ -725,4 +725,20 @@ test("card buy-any-amount-on-every-chain: a rest W whose own buy has no end is n
   assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined, "never ended a withdraw");
   h.clock.t = Number(signBy + (REST.EVM_WBUY_CARRY_AFTER_MS as bigint)) + 1;
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "empty" }], "past the window: carried (here W holds under the least rung: its tail)");
+});
+
+// card pool-amounts-are-standard-sizes-evm: SellDelegate deposits the largest rung at or under the sale's ETH less the
+// fee, so the sale's own deposit holds the rung of the least W signed for (min out less the fee cap), not that least; a
+// deposit of the rung is the sale's (filled), one under the rung, or another depositor's, is not
+test("evmSellVerdict: a sale's deposit of the rung of its least is filled; under that rung, or not from W, it is taken", () => {
+  const W = "0x1111111111111111111111111111111111111111";
+  const P = 77n;
+  const least = 12_345_000_000_000_000n; // min out less the fee cap: the rung under it is 0.01 ETH
+  const dep = (value: bigint, depositor = W): EvmDeposited => ({ block: 9n, blockHash: "0xab", tx: "0xcd", index: 0n, depositor, commitment: 1n, label: 2n, value, precommitment: P });
+  const read = (d: EvmDeposited): EvmDepositedRead => ({ head: 10n, final: 10n, stop: null, to: 10n, ended: false, deposits: [d] }) as unknown as EvmDepositedRead;
+  const end = (d: EvmDeposited) => evmSellVerdict([read(d), read(d)], { precommitment: P, w: W, least })?.end;
+  assert.equal(end(dep(10_000_000_000_000_000n)), "filled", "the rung of the least");
+  assert.equal(end(dep(least)), "filled", "the first sets' delegate: all of it");
+  assert.equal(end(dep(10_000_000_000_000_000n - 1n)), "taken", "under the rung");
+  assert.equal(end(dep(10_000_000_000_000_000n, "0x2222222222222222222222222222222222222222")), "taken", "another depositor");
 });

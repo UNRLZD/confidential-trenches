@@ -19,7 +19,8 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vault/shapes.ts";
 import type { EvmPoolBuy } from "../../kit/src/trade/evm/buy-unpinned.ts";
-import { EVM_POOL_EVENTS, evmRelayDataBytes, type EvmRelayData, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EVM_PIECES, EVM_POOL_EVENTS, evmRelayDataBytes, type EvmRelayData, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { noteOf } from "../../wallet/src/pool/pieces.ts";
 import { laneFetch } from "../../wallet/src/throttle.ts";
 
 const enc = /* @__PURE__ */ new TextEncoder();
@@ -462,7 +463,9 @@ export async function evmDepositedRead(rpc: EvmRpc, pool: string, from: bigint, 
 }
 
 /** What this sale is, from its two RPCs' reads: the deposit naming the return note's precommitment, the same on both,
- *  is this sale's (filled) when W made it at a value of at least the least W signed for (min out less the fee cap);
+ *  is this sale's (filled) when W made it at a value of at least the rung of the least W signed for (min out less the
+ *  fee cap: SellDelegate deposits the largest rung of the 1-2-5 ladder at or under what the sale brought less the fee,
+ *  card pool-amounts-are-standard-sizes-evm; the first sets' delegate deposited all of it, at least that least);
  *  one any other depositor made took the precommitment first (taken: the sale reverts PrecommitmentAlreadyUsed and W
  *  keeps its token, SellDelegate.sol; the note is the user's own all the same). None on either, and both reads `ended`
  *  past the deadline: not_landed. Else null: read again. Two signatures of one sale share W's Sell nonce and the
@@ -475,7 +478,7 @@ export function evmSellVerdict(reads: readonly [EvmDepositedRead, EvmDepositedRe
   if (a.length !== 1 || b.length !== 1) return null;
   const x = a[0]!, y = b[0]!;
   if (x.block !== y.block || x.blockHash !== y.blockHash || x.tx !== y.tx || x.index !== y.index || x.depositor !== y.depositor || x.commitment !== y.commitment || x.label !== y.label || x.value !== y.value) return null;
-  return { end: x.depositor === lower(want.w) && x.value >= want.least ? "filled" : "taken", deposit: x };
+  return { end: x.depositor === lower(want.w) && x.value >= noteOf(EVM_PIECES, want.least).note ? "filled" : "taken", deposit: x };
 }
 
 /** A Buy read back from PrivacyPoolSimple.buy's calldata (evmBuyCalldata's layout): its adapter, data, minOut and

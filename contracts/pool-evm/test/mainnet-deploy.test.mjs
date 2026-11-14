@@ -24,7 +24,7 @@ function paste(args, { fail = null, forge = true } = {}) {
   copyFileSync(PASTE, path.join(root, "contracts/pool-evm/script/mainnet-deploy.sh"));
   const calls = path.join(dir, "calls");
   writeFileSync(calls, "");
-  writeFileSync(path.join(dir, "node"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${calls}"\ncase "$1" in ${fail ?? "__none__"}) exit 2 ;; esac\nif [ "$1" = contracts/pool-evm/script/deploy.mjs ] && [ "$5" = --return ]; then echo "{}" > "contracts/pool-evm/deployments/$4.json"; fi\nexit 0\n`);
+  writeFileSync(path.join(dir, "node"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${calls}"\ncase "$1" in ${fail ?? "__none__"}) exit 2 ;; esac\nif [ "$1" = contracts/pool-evm/script/deploy.mjs ] && [ "$5" = --return ]; then echo "{}" > "contracts/pool-evm/deployments/$4.json"; fi\nif [ "$1" = contracts/pool-evm/script/deploy.mjs ] && [ "$5" = --only ] && [ "$7" = --return ]; then echo "{}" > "contracts/pool-evm/deployments/$4.sell-delegate-2.json"; fi\nexit 0\n`);
   chmodSync(path.join(dir, "node"), 0o755);
   if (forge) writeFileSync(path.join(dir, "forge"), "#!/bin/sh\nexit 0\n"), chmodSync(path.join(dir, "forge"), 0o755);
   const r = spawnSync("sh", [path.join(root, "contracts/pool-evm/script/mainnet-deploy.sh"), ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir }, timeout: 20_000 });
@@ -33,7 +33,7 @@ function paste(args, { fail = null, forge = true } = {}) {
 
 test("the paste exists and is the one the deploy script names", () => {
   assert.ok(existsSync(PASTE), PASTE);
-  assert.match(readFileSync(path.join(HERE, "../script/deploy.mjs"), "utf8"), /sh contracts\/pool-evm\/script\/mainnet-deploy\.sh \$\{chainName\} --sweep-kept/);
+  assert.match(readFileSync(path.join(HERE, "../script/deploy.mjs"), "utf8"), /sh contracts\/pool-evm\/script\/mainnet-deploy\.sh \$\{chainName\}\$\{only \? ` --only \$\{only\}` : ""\} --sweep-kept/);
 });
 
 test("the paste's text names every contract a mainnet run deploys (MAINNETS contracts), the fee collector and its sink included", async () => {
@@ -66,6 +66,30 @@ test("the sweep form: deploy.mjs --sweep-kept with the chain's journal and no ad
   const r = paste(["robinhood", "--sweep-kept"]);
   assert.equal(r.status, 0, r.out);
   assert.deepEqual(r.calls, ["contracts/pool-evm/script/deploy.mjs --mainnet --chain robinhood --sweep-kept contracts/pool-evm/deployments/robinhood.journal.json"]);
+});
+
+// card pool-amounts-are-standard-sizes-evm: the sell delegate alone, one line per chain
+test("the delegate alone: deploy.mjs --mainnet --only SellDelegate with the chain and the return address, then that card's live check on its own record", () => {
+  for (const chain of ["base", "robinhood"]) {
+    const r = paste([chain, A, "--only", "SellDelegate"]);
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.calls, [
+      `contracts/pool-evm/script/deploy.mjs --mainnet --chain ${chain} --only SellDelegate --return ${A}`,
+      `scripts/live-checks/pool-amounts-are-standard-sizes-evm.mjs --deployment contracts/pool-evm/deployments/${chain}.sell-delegate-2.json`,
+    ]);
+    assert.ok(r.out.includes(`mainnet-deploy: the record contracts/pool-evm/deployments/${chain}.sell-delegate-2.json in ${r.root} is the one-deploy guard: commit it now, and run every later paste for ${chain} in ${r.root}`), r.out);
+  }
+  const s = paste(["base", "--only", "SellDelegate", "--sweep-kept"]);
+  assert.equal(s.status, 0, s.out);
+  assert.deepEqual(s.calls, ["contracts/pool-evm/script/deploy.mjs --mainnet --chain base --only SellDelegate --sweep-kept contracts/pool-evm/deployments/base.sell-delegate-2.journal.json"]);
+  const f = paste(["robinhood", A, "--only", "SellDelegate"], { fail: "contracts/pool-evm/script/deploy.mjs" });
+  assert.notEqual(f.status, 0, f.out);
+  assert.equal(f.calls.length, 1, "a failed deploy never reaches the live check");
+  for (const args of [["base", A, "--only", "FeeCollector"], ["base", A, "--only"], ["base", "--only", "SellDelegate", A], ["base", "--sweep-kept", "--only", "SellDelegate"], ["base", A, "SellDelegate", "--only"], ["base", "--only", "SellDelegate"]]) {
+    const b = paste(args);
+    assert.equal(b.status, 1, args.join(" ") + b.out);
+    assert.deepEqual(b.calls, [], args.join(" "));
+  }
 });
 
 test("a deploy that fails never reaches the live check, and the paste fails", () => {
