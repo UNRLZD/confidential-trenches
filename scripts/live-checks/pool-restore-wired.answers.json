@@ -465,5 +465,113 @@
    }
   ],
   "errors": []
+ },
+ "live135": {
+  "source": "live https://confidential.unrealized.trade",
+  "read": "release 135 live sign run 43573543107, job pool-restore-wired 132382889336: every value from its log lines (08:01:55Z); connect: SIGN_HOST /portfolio served connect-src, curl read 14 Nov 08:14Z",
+  "at": "2026-11-14T08:00:39.070Z",
+  "browser": "Chrome 157.0.8103.78, sandbox on",
+  "steps": {
+   "signedOut": {
+    "answer": {
+     "v": 1,
+     "id": "988142df-59db-4555-aa37-72796d341a84",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    }
+   },
+   "signedIn": {
+    "signed_in": true,
+    "way": "words"
+   },
+   "auto": {
+    "state": {
+     "ops": [
+      {
+       "id": "7d80f663-b7a3-4391-93fa-4a266817deaf",
+       "kind": "restore",
+       "stage": "done",
+       "txs": [],
+       "created_ms": 1794643242505
+      }
+     ]
+    },
+    "ms": 72258
+   },
+   "balance": {
+    "chain": "near",
+    "ms": 21891
+   },
+   "asked": {
+    "answer": {
+     "v": 1,
+     "id": "7bcc7ae1-cdad-47e5-b5e4-74f8c7961e8a",
+     "ok": true,
+     "result": {
+      "stage": "started"
+     }
+    },
+    "stages": [
+     "reading",
+     "done"
+    ]
+   }
+  },
+  "connect": [
+   "ct-api.unrealized.trade",
+   "1click.chaindefuser.com",
+   "rpc.mainnet.fastnear.com",
+   "rpc.mainnet.near.org",
+   "near.drpc.org",
+   "archival-rpc.mainnet.near.org",
+   "archival-rpc.mainnet.fastnear.com",
+   "solana-rpc.publicnode.com",
+   "solana.api.pocket.network",
+   "public.rpc.solanavibestation.com",
+   "sender.helius-rpc.com",
+   "mainnet.block-engine.jito.wtf",
+   "api.mainnet-beta.solana.com",
+   "base-rpc.publicnode.com",
+   "base-mainnet.public.blastapi.io",
+   "mainnet.base.org",
+   "base.api.pocket.network",
+   "base.gateway.tenderly.co",
+   "rpc.sentio.xyz",
+   "robinhood-rpc.publicnode.com",
+   "robinhood.drpc.org",
+   "rpc.mainnet.chain.robinhood.com",
+   "robinhood.rpc.blxrbdn.com",
+   "rpc-robinhood.globalstake.io",
+   "robinhood.api.pocket.network",
+   "robinhood.daybreak-rpc.network",
+   "base.rpc.blxrbdn.com"
+  ],
+  "hosts": {
+   "confidential.unrealized.trade": 34,
+   "ct-app.unrealized.trade": 2,
+   "ct-api.unrealized.trade": 38,
+   "rpc.mainnet.fastnear.com": 13,
+   "near.drpc.org": 13,
+   "base-rpc.publicnode.com": 169,
+   "base.api.pocket.network": 132,
+   "rpc.mainnet.chain.robinhood.com": 134,
+   "robinhood.api.pocket.network": 529,
+   "solana-rpc.publicnode.com": 16,
+   "mainnet.base.org": 1,
+   "solana.api.pocket.network": 1
+  },
+  "afterDone": {
+   "rpc.mainnet.fastnear.com": 1,
+   "near.drpc.org": 1
+  },
+  "console": [],
+  "walked": [
+   {
+    "chain": "near"
+   }
+  ],
+  "errors": []
  }
 }

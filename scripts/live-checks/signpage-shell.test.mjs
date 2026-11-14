@@ -307,10 +307,15 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     // each EVM pool's list on mainnet: Base's two, Robinhood's two seats and its spare (card first-sign-in-reads-fast),
     // exactly, so a host the page adds fails here
     ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_POOL_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)"\]\),\n\}\);/),
+    // card restore-check-names-fee-hosts: each EVM pool's fee list on mainnet, four per chain (a restore holds the
+    // period's fee on it: evmPoolOf marks a deposit in sight), so a fifth host the page adds fails here
+    ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_EVM_FEE_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)", "([^"]+)"\]\),\n\}\);/),
   ];
   assert.deepEqual([...PINNED_HOSTS].sort(), [...new Set(want)].sort());
   // the mainnet page reads each EVM pool on that list (the testnet build on its testnet pair)
   assert.match(src("packages/signpage/src/pool-testnet.ts"), /export const pageEvmPoolUrls = \(chain: "base" \| "robinhood"\): readonly string\[\] => \(POOL_TESTNET \? TESTNET_RPCS\[chain\] : MAINNET_POOL_RPCS\[chain\]\);/);
+  // and each EVM pool's fee on that list (the testnet build on its testnet pair)
+  assert.match(src("packages/signpage/src/pool-testnet.ts"), /export const pageEvmFeeRpcs = \(chain: "base" \| "robinhood", kind: ReadKind = "trade"\): readonly EvmRpc\[\] => \(POOL_TESTNET \? TESTNET_EVM_FEE_RPCS\[chain\] : MAINNET_EVM_FEE_RPCS\[chain\]\)\.map\(/);
   // the mainnet pair: the public seat (provider A, then its spare) and the helper's route, both paced, nothing else; each
   // with its read's kind (and the helper's its retry: the page's, or a settle's window)
   assert.match(src("packages/signpage/src/pool-testnet.ts"), /: \[solanaPacedRpc\(seatRpc\(SOLANA_PUBLIC_SEAT, kind\)\), solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC(?:_WINDOW)?_RETRY, kind\)\)\];/);
@@ -405,13 +410,27 @@ test("release 119 planted: an EVM host no pin names, a pinned EVM host signed ou
     noCsp.connect = noCsp.connect.filter((x) => x !== h);
     badLine(judge(noCsp), new RegExp(`not in its connect-src: ${h.replaceAll(".", "\\.")}\\)$`));
   }
-  // the fee list's and the quote list's hosts, in the connect-src but no pin's: stray even signed in
+  // the quote list's hosts, in the connect-src but no pin's: stray even signed in (the fee list's are pinned since card
+  // restore-check-names-fee-hosts, held signed out below)
   const read = g.requests.find((x) => x.host === EVM_HOSTS[0]);
-  for (const host of ["mainnet.base.org", "robinhood.drpc.org", "base-mainnet.public.blastapi.io"]) {
+  for (const host of ["base-mainnet.public.blastapi.io", "base.rpc.blxrbdn.com", "robinhood.rpc.blxrbdn.com"]) {
     assert.ok(g.connect.includes(host), `${host} is in the served connect-src`);
     const r = clone(g);
     r.requests.push({ ...clone(read), t: st.words.t + 1, host });
     badLine(judge(r), new RegExp(`^BAD no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts \\(1: ${host.replaceAll(".", "\\.")}\\)$`));
+  }
+  // card restore-check-names-fee-hosts: a fee list host signed in passes; signed out, or not in the connect-src, fails
+  for (const host of ["mainnet.base.org", "base.gateway.tenderly.co", "robinhood.drpc.org", "robinhood-rpc.publicnode.com"]) {
+    assert.ok(g.connect.includes(host), `${host} is in the served connect-src`);
+    const ok = clone(g);
+    ok.requests.push({ ...clone(read), t: st.words.t + 1, host });
+    assert.equal(judge(ok).ok, true, judge(ok).lines.join("\n"));
+    const out = clone(g);
+    out.requests.push({ ...clone(read), t: st.wordsOut.t + 1, host });
+    badLine(judge(out), /^BAD signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(1 signed out/);
+    const noCsp = clone(ok);
+    noCsp.connect = noCsp.connect.filter((x) => x !== host);
+    badLine(judge(noCsp), new RegExp(`not in its connect-src: ${host.replaceAll(".", "\\.")}\\)$`));
   }
 });
 
