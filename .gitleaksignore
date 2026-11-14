@@ -7,3 +7,6 @@
 # a public Base Sepolia token address (Circle's testnet USDC 0x036c...cf7e) under a "token" key in two tests (card signpage-evm-pool-buy), moved into a named constant in the next commit
 676892e00484ebf7c051902a1487f330a454a895:packages/signpage/test/pool-network.test.ts:generic-api-key:28
 676892e00484ebf7c051902a1487f330a454a895:packages/signpage/test/pool-testnet-evm-queue.test.ts:generic-api-key:359
+# two public token addresses (Robinhood 0xb4c8b1... and Base 0x36ede8..., read on chain; card evm-pool-index-from-the-first-pool) under a "token" key in its live check's chain table, renamed "coin" in a later commit
+b8bceee3c0d5736328cf015a1c676d8c6f81bdbf:scripts/live-checks/evm-pool-index-from-the-first-pool.mjs:generic-api-key:36
+b8bceee3c0d5736328cf015a1c676d8c6f81bdbf:scripts/live-checks/evm-pool-index-from-the-first-pool.mjs:generic-api-key:44
