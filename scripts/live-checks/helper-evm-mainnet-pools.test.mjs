@@ -33,14 +33,16 @@ test("recorded bad run: a helper started with a foreign pool address answers 404
   }
 });
 
-test("the kit's pins are the mainnet deploy records' (contracts/pool-evm/deployments/<chain>.json)", () => {
+test("the kit's pins are the mainnet deploy records' (contracts/pool-evm/deployments/<chain>.json, the sell delegate <chain>.sell-delegate-2.json)", () => {
   const pins = pinsOf();
   for (const chain of MAINNETS) {
     const rec = JSON.parse(readFileSync(path.join(HERE, `../../contracts/pool-evm/deployments/${chain}.json`), "utf8"));
     assert.equal(pins[chain].pool, rec.contracts.PrivacyPoolSimple.address.toLowerCase(), chain);
     assert.equal(pins[chain].feeCollector, rec.contracts.FeeCollector.address.toLowerCase(), chain);
     assert.equal(pins[chain].sellSender, rec.contracts.FeeCollector.sink.toLowerCase(), chain);
-    assert.equal(pins[chain].sellDelegate, rec.contracts.SellDelegate.address.toLowerCase(), chain);
+    // the sell delegate from its own record (card evm-pool-amounts-are-standard-sizes: SellDelegate v2, deployed alone)
+    const v2 = JSON.parse(readFileSync(path.join(HERE, `../../contracts/pool-evm/deployments/${chain}.sell-delegate-2.json`), "utf8"));
+    assert.equal(pins[chain].sellDelegate, v2.contracts.SellDelegate.address.toLowerCase(), chain);
     assert.equal(pins[chain].providers.length, 2, chain);
   }
 });

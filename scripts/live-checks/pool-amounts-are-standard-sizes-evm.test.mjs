@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { replayer } from "./evm-pool-pins.mjs";
-import { checkChain, V1 } from "./pool-amounts-are-standard-sizes-evm.mjs";
+import { checkChain, recordOf, V1 } from "./pool-amounts-are-standard-sizes-evm.mjs";
 import { BUILD, DUST, selector } from "./pool-evm-deploy.mjs";
 import { RETRY } from "./provider-answer.mjs";
 
@@ -51,8 +51,13 @@ const fails = (r, re) => {
 };
 const OTHER = "0x" + "ba".repeat(20);
 
-test("the kit today pins the first set's delegate on both mainnets: sales sign and land as before until a later card moves the pin", () => {
-  for (const chain of CHAINS) assert.equal(lower(evmPoolVenues()[chain].sellDelegate), v1At(chain), chain);
+test("the kit pins the owner's paste's delegate on both mainnets (card evm-pool-amounts-are-standard-sizes moved the pin), never the first set's", () => {
+  for (const chain of CHAINS) {
+    const d = JSON.parse(readFileSync(recordOf(chain), "utf8"));
+    assert.equal(d.dryRun, false, chain);
+    assert.equal(lower(evmPoolVenues()[chain].sellDelegate), lower(d.contracts.SellDelegate.address), chain);
+    assert.notEqual(lower(evmPoolVenues()[chain].sellDelegate), v1At(chain), chain);
+  }
 });
 
 test("the rehearsal's recorded answers pass on both chains, every read on both RPCs; the mainnets' today's answers pass", async () => {

@@ -1,5 +1,6 @@
-// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-07 13:3xZ for card pool-evm-deploy-mainnet,
-// the testnets and both mainnets, after the owner's pastes; before it for card pool-evm-buy-pays-revert and card
+// Replays evm-venues-pin.answers.json (a real run on the money gate's RPCs, re-recorded 2026-11-14 13:3xZ for card evm-pool-amounts-are-standard-sizes,
+// the mainnets' sell delegate SellDelegate v2 from its own record <chain>.sell-delegate-2.json; 2026-11-07 for card
+// pool-evm-deploy-mainnet, the testnets and both mainnets, after the owner's pastes; before it for card pool-evm-buy-pays-revert and card
 // evm-testnet-delegate-review3) through the live check: the recorded good answers pass on both testnets and both
 // mainnets; the kit before card pool-evm-deploy-mainnet (no mainnet pin, the records there) fails each mainnet pin; the same recording with one
 // thing changed fails: a pin's code with one byte flipped, a pin that differs between the two RPCs, a router or WETH

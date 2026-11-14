@@ -194,7 +194,11 @@ export const evmMainnetVenues = () =>
       // the record and fails on any pin that differs. Both venues have an adapter here
       pool: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
       adapters: bare({ v3: "0x1e62242773f696271b0cc3029b8672c385b7ce45", v4: "0x9d040a025689a10872f0f2f8b581135dde52ca6f" }),
-      sellDelegate: "0xe3223113781f527188f634615ad9a3ca0aa20a4d",
+      // SellDelegate v2 (card evm-pool-amounts-are-standard-sizes: a sale deposits the largest 1-2-5 rung of its ETH less
+      // the fee, W keeps the rest), the owner's paste of 14 Nov, its record contracts/pool-evm/deployments/base.sell-delegate-2.json
+      // (deploy tx 0x59604b86d37f0692f80742c29cca9cfbbd623c2981e5415b9a69e29440ca44b3, block 57349712). The first set's delegate (deployments/base.json) is never pinned for a new sale;
+      // a sale signed on it resolves as before (the page's read-back reads W's own transaction and the pool's events, no pin)
+      sellDelegate: "0x37984815725fc0dce72d051d6a8c30eee132285d",
       // the FeeCollector every Sell pays, its sink 0x2139756ab61ad861b4e25a009f092683e7454ee9 the sell sender pinned here
       feeCollector: "0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047",
       // Uniswap's QuoterV2 and V4Quoter (contracts/pool-evm/test/BuyFork.t.sol, BuyV4Fork.t.sol); eth_getCode on
@@ -385,7 +389,11 @@ export const evmMainnetVenues = () =>
       // the record and fails on any pin that differs. Both venues have an adapter here (M365 2: the v3 adapter's ROUTER() is the router above)
       pool: "0x9306359433127c4f3be426f6faeb00a3c41f66db",
       adapters: bare({ v3: "0xb29746cb12c8466089b8355ec88cab31bd04c089", v4: "0x2e31a90e0df8aa634604abbe87cb61ca6aa8d702" }),
-      sellDelegate: "0xf79962b094991354270fe7866f0f590ef0c9b0cf",
+      // SellDelegate v2 (card evm-pool-amounts-are-standard-sizes: a sale deposits the largest 1-2-5 rung of its ETH less
+      // the fee, W keeps the rest), the owner's paste of 14 Nov, its record contracts/pool-evm/deployments/robinhood.sell-delegate-2.json
+      // (deploy tx 0x4b86fcf9a54be052bafcb6d34566d23aca83f50f13eb3b3dd34f0b943c16f4f4, block 114171111). The first set's delegate (deployments/robinhood.json) is never pinned for a new sale;
+      // a sale signed on it resolves as before (the page's read-back reads W's own transaction and the pool's events, no pin)
+      sellDelegate: "0x839da08c78b4adde96192e4e482634ac71dfa306",
       // the FeeCollector every Sell pays, its sink 0x92874bbc2638f644872d911d8b72d734978e24ae the sell sender pinned here
       feeCollector: "0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7",
       // Uniswap's QuoterV2 and V4Quoter (BuyFork.t.sol, BuyV4Fork.t.sol); eth_getCode on rpc.mainnet.chain.robinhood.com

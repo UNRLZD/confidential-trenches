@@ -49,7 +49,10 @@ export async function checkMainnets({ read = (c) => recordOf(c), venues = evmPoo
       continue;
     }
     const rpcs = rpcsOf(chain);
-    const a = await deployCheck({ deployment: d, fetchFn, rpcs, venues, ...(sleep ? { sleep } : {}) });
+    // the set's own record for its read-back (recordOf's `set`: SellDelegate v2 deployed alone since, its own record and
+    // check, pool-amounts-are-standard-sizes-evm.mjs); the kit's pins against the newest delegate
+    const { set, ...pinned } = d;
+    const a = await deployCheck({ deployment: set ? { ...pinned, contracts: set } : pinned, fetchFn, rpcs, venues, ...(sleep ? { sleep } : {}) });
     for (const l of a.lines) lines.push(`${chain}: deploy ${l}`);
     say(a.ok, `the deploy record's check on ${rpcs.join(" and ")}`);
     const venue = venues[chain];
@@ -57,7 +60,7 @@ export async function checkMainnets({ read = (c) => recordOf(c), venues = evmPoo
       say(false, "the kit lists no venue for it");
       continue;
     }
-    const b = await pinCheck({ chain, venue, deployment: d, fetchFn, rpcs, sleep });
+    const b = await pinCheck({ chain, venue, deployment: pinned, fetchFn, rpcs, sleep });
     for (const l of b.lines) lines.push(`${chain}: kit pin ${l}`);
     say(b.ok, `the kit's pins are the record's on ${rpcs.join(" and ")}`);
   }
