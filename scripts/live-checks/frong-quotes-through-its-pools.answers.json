@@ -1,0 +1,155 @@
+{
+ "bad_before": {
+  "readAt": "2026-11-13T23:52:25.476Z",
+  "index": {
+   "served": true,
+   "ms": 39557
+  },
+  "buys": [
+   {
+    "kind": "cold",
+    "ms": 6823,
+    "ok": false,
+    "code": "too_many_pools",
+    "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads"
+   },
+   {
+    "kind": "warm",
+    "ms": 7718,
+    "ok": false,
+    "code": "too_many_pools",
+    "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads"
+   },
+   {
+    "kind": "warm",
+    "ms": 6003,
+    "ok": false,
+    "code": "too_many_pools",
+    "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads"
+   },
+   {
+    "kind": "warm",
+    "ms": 4824,
+    "ok": false,
+    "code": "too_many_pools",
+    "message": "too_many_pools: the token's held pools are paired with more than the 1024 other currencies a quote reads"
+   }
+  ],
+  "holder": {
+   "w": null,
+   "lines": [
+    "not read: the buys were recorded by robinhood-quotes-inside-provider-limits (its step2_after), which reads no sale"
+   ]
+  },
+  "sells": [],
+  "from": "robinhood-quotes-inside-provider-limits.answers.json step2_after (2d4e7dead, the Mac), its FRONG row"
+ },
+ "good_after": {
+  "readAt": "2026-11-14T02:33:02.354Z",
+  "index": {
+   "served": true,
+   "ms": 32020
+  },
+  "buys": [
+   {
+    "kind": "cold",
+    "ms": 9501,
+    "ok": true,
+    "route": {
+     "venue": "uniswap-v3",
+     "tokens": [
+      "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+      "0x6245e67affa44a23077f0ea7f981a8dc743a0c47"
+     ],
+     "fees": [
+      10000
+     ]
+    }
+   },
+   {
+    "kind": "warm",
+    "ms": 2247,
+    "ok": true,
+    "route": {
+     "venue": "uniswap-v3",
+     "tokens": [
+      "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+      "0x6245e67affa44a23077f0ea7f981a8dc743a0c47"
+     ],
+     "fees": [
+      10000
+     ]
+    }
+   },
+   {
+    "kind": "warm",
+    "ms": 2273,
+    "ok": true,
+    "route": {
+     "venue": "uniswap-v3",
+     "tokens": [
+      "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+      "0x6245e67affa44a23077f0ea7f981a8dc743a0c47"
+     ],
+     "fees": [
+      10000
+     ]
+    }
+   },
+   {
+    "kind": "warm",
+    "ms": 2524,
+    "ok": true,
+    "route": {
+     "venue": "uniswap-v3",
+     "tokens": [
+      "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+      "0x6245e67affa44a23077f0ea7f981a8dc743a0c47"
+     ],
+     "fees": [
+      10000
+     ]
+    }
+   }
+  ],
+  "holder": {
+   "w": "0x54428883e2a817170e4956459c87b1be96624bf5",
+   "lines": [
+    "0x54428883e2a817170e4956459c87b1be96624bf5: 290558816704801986838528 and 290558816704801986838528"
+   ]
+  },
+  "sells": [
+   {
+    "kind": "cold",
+    "ms": 7700,
+    "ok": true,
+    "route": {
+     "venue": "uniswap-v3",
+     "tokens": [
+      "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
+     ],
+     "fees": [
+      10000
+     ]
+    }
+   },
+   {
+    "kind": "warm",
+    "ms": 5280,
+    "ok": true,
+    "route": {
+     "venue": "uniswap-v3",
+     "tokens": [
+      "0x6245e67affa44a23077f0ea7f981a8dc743a0c47",
+      "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
+     ],
+     "fees": [
+      10000
+     ]
+    }
+   }
+  ],
+  "from": "card/frong-quotes-through-its-pools, the Mac"
+ }
+}

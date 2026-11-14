@@ -2482,6 +2482,42 @@ test("card evm-quote-one-round: pools that cannot beat the route are never quote
   assert.deepEqual(await quoteOn(four, t4, bestRoute(t4), scanner(5_000_000, four.slice(1).map((x, i) => ({ key: x.key, at: 4_000_001 + 49 * i })))), { accepted: false, code: "too_many_pools" });
 });
 
+// FRONG on Robinhood (0x6245e67a…, 2026-11-13 23:1xZ-23:5xZ, every tap too_many_pools; the device's own pool index,
+// 2026-11-14 02:2xZ): its route, WETH's v3 1% pool, gives about 920 FRONG for 0.00098 ETH; its pools with USDG, while
+// held, cannot give that from any of USDG's markets with the native asset or WETH, and USDG pairs with 3,256 other
+// currencies (FOBO's every tap the same way through USDG, 2026-11-14 02:1xZ). The model: the route at ten times the
+// price, the token's pool with X at the price of 1 (it cannot beat the route from X's market), X's market at the price
+// of 1, deep, and X's pools with 1,025 other currencies
+test("card frong-quotes-through-its-pools: a buy's X whose held market the prune leaves out has a market that fills, so it never goes one level further: past EVM_QUOTE_MAX_OTHER other currencies of X the token still buys through its route", async () => {
+  const n = 1_025;
+  const t = "0x00000000000000000000000000000000000daad2";
+  const x = xAt(0x2d00);
+  const p: ModelPool = { key: keyOf(t, x, 3000, 60, NATIVE), give: (a) => a };
+  const ys = Array.from({ length: n }, (_, i): ModelPool => ({ key: keyOf(x, xAt(0x4000 + i), 7000, 1, NATIVE), give: (a) => a / 1000n }));
+  const pools = [best(t), p, marketOf(x), ...ys];
+  const v = await quoteOn(pools, t, bestRoute(t), scanner(5_000_000, pools.slice(1).map((e, i) => ({ key: e.key, at: 4_000_001 + 49 * i }))));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  // beside it a market behind a hook, whose bound is larger and whose quote does not fill (USDG's for FOBO, 02:2xZ): the
+  // market with no hook is the one quoted, so X still has a market that fills
+  const t3 = "0x00000000000000000000000000000000000daad4";
+  const x3 = xAt(0x2d02);
+  const p3: ModelPool = { key: keyOf(t3, x3, 3000, 60, NATIVE), give: (a) => a };
+  const hooked: ModelPool = { key: keyOf(x3, NATIVE, 0, 1, "0x00000000000000000000000000000000000c6488"), give: () => 1_000n, state: pricedAt(2n) };
+  const ys3 = Array.from({ length: n }, (_, i): ModelPool => ({ key: keyOf(x3, xAt(0x6000 + i), 7000, 1, NATIVE), give: (a) => a / 1000n }));
+  const pools3 = [best(t3), p3, hooked, marketOf(x3), ...ys3];
+  const v3 = await quoteOn(pools3, t3, bestRoute(t3), scanner(5_000_000, pools3.slice(1).map((e, i) => ({ key: e.key, at: 4_000_001 + 49 * i }))));
+  assert.equal(v3.accepted, true, String((v3 as { code?: string }).code));
+  // X's market that does not fill (twice the user's amount gives no more): X goes one level further, as before, and
+  // past EVM_QUOTE_MAX_OTHER refuses
+  const t2 = "0x00000000000000000000000000000000000daad3";
+  const x2 = xAt(0x2d01);
+  const p2: ModelPool = { key: keyOf(t2, x2, 3000, 60, NATIVE), give: (a) => a };
+  const thin: ModelPool = { ...marketOf(x2), give: () => 1_000n };
+  const ys2 = Array.from({ length: n }, (_, i): ModelPool => ({ key: keyOf(x2, xAt(0x5000 + i), 7000, 1, NATIVE), give: (a) => a / 1000n }));
+  const pools2 = [best(t2), p2, thin, ...ys2];
+  assert.deepEqual(await quoteOn(pools2, t2, bestRoute(t2), scanner(5_000_000, pools2.slice(1).map((e, i) => ({ key: e.key, at: 4_000_001 + 49 * i })))), { accepted: false, code: "too_many_pools" });
+});
+
 
 // EVM_QUOTE_MAX_KEYS counts the scan's pools and refuses past them: the token's, X's markets and X's other pools alike
 const empties = (token: string, n: number) => Array.from({ length: n }, (_, i) => ({ key: keyOf(token, NATIVE, 1000 + i, 1, NATIVE), at: 4_000_001 + 15 * i }));
