@@ -36,13 +36,13 @@ A note is a sealed record that says "this much is mine". Only your 12 words can 
 
 ### The signing page
 
-`sign.confidential.unrealized.trade` sits on its own address. Keys are made there and stay there. Because the browser treats the two addresses as separate places, the terminal can't read the page's storage. Our terminal embeds the page out of sight and sends it requests such as "buy this" or "withdraw there". Anything that needs your full attention opens as a page of its own on this address: the passkey prompt, the screen that shows your 12 words, key export, the address for an outside withdrawal.
+`confidential.unrealized.trade` is the signing page, on its own address. Keys are made there and stay there. The terminal runs inside it, in a frame served from `ct-app.unrealized.trade`. Because the browser treats the two addresses as separate places, the terminal can't read the page's storage. It sends the page requests such as "buy this" or "withdraw there". Anything that needs your full attention opens as a page of its own on this address: the passkey prompt, the screen that shows your 12 words, key export, the address for an outside withdrawal.
 
 This is the one page that handles your keys, and the one we'd most like you to test. A release is built to come out byte for byte the same when built twice, with every file hashed and an outside check that compares what's served with the release. The exit tool below needs none of it.
 
 ### The terminal
 
-`confidential.unrealized.trade` shows the screens, the prices and the charts. It holds no key, no 12 words and no note secret. When you tap Buy, it hands a request to the signing page and waits.
+`ct-app.unrealized.trade` shows the screens, the prices and the charts. It holds no key, no 12 words and no note secret. When you tap Buy, it hands a request to the signing page and waits.
 
 ### The kit
 
@@ -50,7 +50,7 @@ This is the one page that handles your keys, and the one we'd most like you to t
 
 ### The helper
 
-`api.confidential.unrealized.trade` does five small jobs, and we've kept every key to anyone's money out of all five.
+`ct-api.unrealized.trade` does five small jobs, and we've kept every key to anyone's money out of all five.
 
 - The prices and quotes proxy keeps our vendor API keys, forwards requests and caches public data.
 - The withdrawal relayer pays the NEAR fee and storage for a withdrawal. The proof fixes the recipient, the fee recipient and the fee, so the relayer can't redirect the money or take more.
