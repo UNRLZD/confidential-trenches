@@ -7,9 +7,18 @@
 // missing chain each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
-import { EVM_LADDER } from "../../packages/wallet/src/pool/evm.ts";
+import { fileURLToPath } from "node:url";
 import { isRung, judge, MIN, ONE, POOLS } from "./evm-pool-amounts-are-standard-sizes.mjs";
+
+// The wallet's EVM_LADDER (packages/wallet/src/pool/evm.ts), read as text: a file outside packages/ reaches Blindfill
+// only through the kit's entry, and the kit does not export the ladder.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const LADDER = /export const EVM_LADDER: Ladder = Object\.freeze\(\{ one: ([0-9_]+)n, min: ([0-9_]+)n \}\)/.exec(
+  readFileSync(path.join(HERE, "../../packages/wallet/src/pool/evm.ts"), "utf8"),
+);
+const EVM_LADDER = LADDER === null ? null : { one: BigInt(LADDER[1].replaceAll("_", "")), min: BigInt(LADDER[2].replaceAll("_", "")) };
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./evm-pool-amounts-are-standard-sizes.answers.json", import.meta.url), "utf8"));
 const SALE = "0x6de337eda1b3bcecc05171709977929b7585f84a458e4933cd2d3205fb867a83";
@@ -73,6 +82,7 @@ test("planted: an event one RPC does not read, no --from, another pool, one RPC'
 });
 
 test("the ladder: the wallet's EVM_LADDER, rungs from 0.001 ETH, 1-2-5 per power of ten", () => {
+  assert.ok(EVM_LADDER, "packages/wallet/src/pool/evm.ts declares EVM_LADDER in the form this test reads");
   assert.equal(ONE, EVM_LADDER.one);
   assert.equal(MIN, EVM_LADDER.min);
   for (const x of [10n ** 15n, 2n * 10n ** 15n, 5n * 10n ** 15n, 10n ** 16n, 10n ** 18n]) assert.ok(isRung(x), String(x));
