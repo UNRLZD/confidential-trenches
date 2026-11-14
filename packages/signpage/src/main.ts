@@ -314,6 +314,9 @@ else {
   // the vault's hand-off to its deposit address, then buys once one tap spends the ask (tapDry, below: the dry read
   // with no trade gate, since the tap's own run holds it)
   // one mover per signed-in session (its signal is the sign out's): a move on its way is never counted for another
+  // the floor a Move's quote into a pool is held to (pool.address's), read for a message by the pool's pinned fee payer on
+  // Solana (a deposit's fee is the same for any one signer, and the read names no account of the user's)
+  const moveFloor = (chain: PoolChain): Promise<bigint | null> => (chain === "solana" ? (PAGE_SOL_PIN === undefined ? Promise.resolve(null) : floorFor(chain, PAGE_SOL_PIN.feePayer)) : evmRoute.floor(chain));
   let cashMoverOf: { signal: AbortSignal; m: ReturnType<typeof cashMover> } | null = null;
   const cashMoverNow = (): ReturnType<typeof cashMover> => {
     const signal = withdrawWait.signal;
@@ -342,7 +345,7 @@ else {
       // a pool's quote floor, the same read pool.address checks against: an EVM pool's least rung plus one deposit's gas;
       // Solana's rung, one deposit's cost and the rent U_X keeps, its fee read for a message by the pool's pinned fee
       // payer (a deposit's fee is the same for any one signer, and the read names no account of the user's)
-      floor: (chain) => (chain === "solana" ? (PAGE_SOL_PIN === undefined ? Promise.resolve(null) : floorFor(chain, PAGE_SOL_PIN.feePayer)) : evmRoute.floor(chain)),
+      floor: (chain) => moveFloor(chain),
       // the quote's follow op ended: its money is in the pool (or refunded), no longer on its way
       landed: async (id) => {
         const op = await (await open()).get("ops", id).catch(() => undefined);
@@ -392,7 +395,26 @@ else {
       put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
       now: () => Date.now(),
       signal,
-      // pool to pool: Cash's own move on into the other pool (the mover's move), sized by the deposit's least USDC
+      // pool to pool (card move-one-confidential-swap): one confidential swap, X's coin into Y's pool to U_Y, quoted by the
+      // Move host (checked at the device's prices, Y's floor and 1Click's keyless tell, the pool follow written under
+      // `id`), then the pool run pays its address and the pool follow carries it in; no vault stop
+      direct: {
+        quote: async (from, to, amount, id) => {
+          const dIn = POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[from]], dOut = POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[to]];
+          const r = poolMoveAddress({ chain: to, origin_asset: POOL_COIN_ASSET[from], amount: formatPoolUnits(amount, dIn) }, { id });
+          await r.after;
+          const a = r.answer();
+          if (a === null || "error" in a) return { error: a === null ? "failed" : a.error };
+          const q = a.result.quote;
+          const amountIn = q === undefined ? null : parsePoolUnits(q.amount_in, dIn);
+          const minOut = q === undefined ? null : parsePoolUnits(q.min_amount_out, dOut);
+          if (q === undefined || amountIn !== amount || minOut === null) return { error: "quote_check_failed" };
+          return { address: q.deposit_address, minOut };
+        },
+        follow: async (id) => (await (await open()).get("ops", id).catch(() => undefined)) as MoveFollow | undefined,
+        floor: (to) => moveFloor(to),
+      },
+      // moves written before one-swap Moves (with `cash`): Cash's own move on into the other pool, sized by the deposit's least USDC
       onward: { move: (to, usdc, id) => cashMoverNow().move(to, usdc, id), fee: () => withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal }).fee() },
     });
     toCashOf = { signal, m };
@@ -614,7 +636,8 @@ else {
     poolRefundMover({
       read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair(), NEAR_NETWORKS.mainnet.usdc),
       floor,
-      priced: (g) => pricedFor(g.chain, g.origin),
+      // a Move's refund (card move-one-confidential-swap) holds another pool's coin: priced as the Move host prices it
+      priced: (g) => poolMovePricing(prices.get, g.origin, g.chain) ?? pricedFor(g.chain, g.origin),
       decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
       seed64: () => openSeed64(),
       seedLock: (fn) => navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn),

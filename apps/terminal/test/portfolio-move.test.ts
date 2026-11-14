@@ -143,3 +143,14 @@ test("the move's words: Move is the owner's own; From is the one new label, a dr
   assert.equal(WORDS.from.text, "From");
   assert.ok(DRAFTS.includes("from"));
 });
+
+// Card move-one-confidential-swap: every refusal a Move can meet, on its dry or at the tap, is named on screen from the
+// approved words alone: a read not in yet or a throttle Busy (with Retry on the dry), a quote that failed the device's
+// check Quote refused, anything else Not available. The tap's refusal names a failed check the same way as the dry.
+test("refusedWord: each refusal code of a Move gets an approved word, the same on the dry and at the tap", async () => {
+  const { refusedWord } = await import("../src/screens/portfolio/move.ts");
+  for (const c of ["busy", "down"]) assert.equal(refusedWord(c), "busy");
+  assert.equal(refusedWord("quote_check_failed"), "quoteRefused");
+  for (const c of ["not_allowed", "not_available", "not_funded", "above_max", "below_min", "failed", "error", "", "anything"]) assert.equal(refusedWord(c), "notAvailable");
+  for (const id of ["busy", "quoteRefused", "notAvailable", "retry"] as const) assert.ok(WORDS[id].text.length > 0 && !DRAFTS.includes(id), id);
+});

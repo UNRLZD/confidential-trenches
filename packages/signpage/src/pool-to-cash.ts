@@ -23,12 +23,23 @@
 // stages to done. Every hop stops in the vault: no hop ties the two pools together (lite paper v2 §4). A reload resumes
 // it at its stage; the onward move starts only once (an op under `<op>/on` already written is followed, never sent again).
 // An onward move the page refuses leaves the money in Cash: the move op shows failed, the money is the user's in Cash.
+// Pool X to pool Y in one confidential swap (card move-one-confidential-swap; owner 14 Nov 03:37Z: "Move = ONE NEAR
+// Intents confidential swap, pool payout -> destination pool, no vault stop"), when the page gives `direct`: the Move's
+// pool.address host quotes X's coin into Y's pool to U_Y on Confidential Intents rails (src/pool-deposit-address.ts,
+// `confidential`: checked at the device's own price of both coins and Y's floor, 1Click's own keyless tell read, the
+// pool follow's op written under `<op>/pool` before the address goes out), the pool withdraw run pays that address
+// (`<op>/out`), and the pool follow carries what lands at U_Y into Y's pool. The follow reads U_Y's balance on Y's two
+// RPCs; 1Click's status (through the helper's key alone for a confidential address) only moves the stage shown, so a
+// Move whose status is never read still ends once the chain shows the arrival. The move op: leaving, in_transit once
+// the run sent, then the follow's stage (cash-to-pool.ts moveStageOfFollow) to done. Moves written before (with `cash`)
+// resume on the vault route below.
+// A read not in yet (a price, the pool's funds, Y's floor) answers down (Busy, Retry), never not_allowed.
 // Nothing here logs.
 import { base58 } from "@scure/base";
 import { EVM_ADDRESS } from "./rules/pool.ts";
 import type { DepositStage, ErrorCode, MoveStage, PoolChain, PoolStatePrice, TxRef } from "../../kit/src/signpage/messages.ts";
 import { checkPoolAmount, formatUnits, POOL_ASSET, poolSendable, type PoolFunds, type PoolReady } from "./withdraw/pool-form.ts";
-import { CASH_MARGIN_BPS, CASH_MOVE_POLL_MS, leastWhere, type MoveOpRecord } from "./cash-to-pool.ts";
+import { CASH_MARGIN_BPS, CASH_MOVE_POLL_MS, leastWhere, moveStageOfFollow, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 
 type Refusal = { error: ErrorCode };
 
@@ -79,6 +90,18 @@ export function cashUsdcOf(units: bigint, p: Pick<PoolStatePrice, "price" | "exp
   return e >= 0 ? (num * 10n ** BigInt(e)) / 10_000n : num / (10_000n * 10n ** BigInt(-e));
 }
 
+/** `units` of `from`'s pool coin in `to`'s, at the device's price of each, CASH_MARGIN_BPS under, rounded down: the
+ *  least a direct move is shown to bring (display only; the quote's own floor is the pool deposit rule's at the same
+ *  prices, and the pool's floor). */
+export function coinOf(units: bigint, from: PoolChain, pf: Pick<PoolStatePrice, "price" | "expo">, to: PoolChain, pt: Pick<PoolStatePrice, "price" | "expo">): bigint {
+  const a = BigInt(pf.price), b = BigInt(pt.price);
+  if (a <= 0n || b <= 0n || units <= 0n) return 0n;
+  // out = units / 10^df × a × 10^ef / (b × 10^et) × 10^dt × (10,000 − margin) / 10,000
+  const num = units * a * (10_000n - CASH_MARGIN_BPS);
+  const e = POOL_ASSET[to].decimals - POOL_ASSET[from].decimals + pf.expo - pt.expo;
+  return e >= 0 ? (num * 10n ** BigInt(e)) / (b * 10_000n) : num / (b * 10_000n * 10n ** BigInt(-e));
+}
+
 /** A move op's stage from its deposit op's (wallet deposit/follow.ts): done once bound in the vault; refunded while
  *  1Click's refund is carried on; failed once the quote expired or 1Click failed it; in_transit otherwise. */
 export function moveStageOfDeposit(stage: DepositStage): MoveStage {
@@ -108,6 +131,14 @@ export type PoolToCashDeps = {
   /** Cash's move into a pool (cashMover.move: `usdc` of Cash into `to` under op id `id`) and the vault withdraw's fee;
    *  none, and only pool to Cash is moved. */
   onward?: { move(to: PoolChain, usdc: bigint, id: string): Promise<Refusal | { op: string }>; fee(): Promise<bigint> };
+  /** Pool to pool in one confidential swap: the Move host's checked quote of `amount` of `from`'s coin into `to`'s pool
+   *  (its pool follow op written under `id`), the follow op read from the store, and `to`'s pool floor read now (null
+   *  with no read). Given, every new pool-to-pool move goes this way and none through Cash. */
+  direct?: {
+    quote(from: PoolChain, to: PoolChain, amount: bigint, id: string): Promise<{ address: string; minOut: bigint } | Refusal>;
+    follow(id: string): Promise<MoveFollow | undefined>;
+    floor(to: PoolChain): Promise<bigint | null>;
+  };
 };
 
 export type PoolToCash = {
@@ -117,7 +148,9 @@ export type PoolToCash = {
    *  (each note's largest part after its fees, the withdraw form's Max); or, for an amount the plan cannot send, `limits`:
    *  `max` and the nearest amounts it can (`below`, `above`) or one withdrawal's least part (`min`) (card
    *  move-sends-what-it-shows). */
-  dry(chain: PoolChain, amount: bigint): Promise<Refusal | { sum: bigint; out: bigint; fee: bigint; max: bigint } | { limits: { max: bigint; min?: bigint; below?: bigint; above?: bigint } }>;
+  dry(chain: PoolChain, amount: bigint, to?: PoolChain | "near"): Promise<Refusal | { sum: bigint; out: bigint; fee: bigint; max: bigint } | { limits: { max: bigint; min?: bigint; below?: bigint; above?: bigint } }>;
+  /** Whether a move from a pool to pool `to` is one confidential swap (`direct` given), not through Cash. */
+  direct(): boolean;
   /** The least USDC `amount` of `chain`'s pool coin brings (cashUsdcOf at the device's price); 0n with no price. */
   usdcOf(chain: PoolChain, amount: bigint): bigint;
   /** The least amount the plan sends exactly for which `ok` holds (`ok` true from some amount on), or the least amount
@@ -197,12 +230,72 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
       await wait(CASH_MOVE_POLL_MS);
     }
   };
+  // pool to pool in one confidential swap: the run's stages, then the pool follow's, until done or failed (or the sign out)
+  const followDirect = async (op: string, from: MoveOpRecord): Promise<void> => {
+    let cur = from;
+    const wait = d.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const set = async (stage: MoveStage, txs: readonly TxRef[]): Promise<void> => {
+      const all = merge(cur.txs, txs);
+      if (stage === cur.stage && all.length === cur.txs.length) return;
+      cur = { ...cur, stage, txs: all };
+      await put(op, cur);
+    };
+    while (!d.signal?.aborted) {
+      const out = await d.op(`${op}/out`).catch(() => undefined);
+      const f = await d.direct!.follow(`${op}/pool`).catch(() => undefined);
+      const run = typeof out?.stage === "string" ? out.stage : null;
+      const txs = [...txsOf(out), ...txsOf(f)];
+      if (cur.stage === "leaving" && run === "stopped" && txsOf(out).length === 0) return set("failed", txs);
+      const fs = typeof f?.stage === "string" ? f.stage : null;
+      if (fs !== null && fs !== "quote_checked" && fs !== "waiting") {
+        const stage = moveStageOfFollow(f!);
+        await set(stage, txs);
+        if (stage === "done" || stage === "failed") return;
+      } else if (run === "sent" || run === "stopped") await set("in_transit", txs);
+      await wait(CASH_MOVE_POLL_MS);
+    }
+  };
+  const sendDirect = async (chain: PoolChain, to: PoolChain, p: { sum: bigint; fee: bigint }, id: string): Promise<Refusal | { op: string }> => {
+    const rec: MoveOpRecord = { kind: "move", from: chain, to, stage: "leaving", txs: [], amount: formatUnits(p.sum, POOL_ASSET[chain].decimals), created_ms: d.now() };
+    const q = await d.direct!.quote(chain, to, p.sum, `${id}/pool`);
+    if ("error" in q || !d.onChain(chain, q.address)) {
+      await put(id, { ...rec, stage: "failed" });
+      return { error: "error" in q ? q.error : "quote_check_failed" };
+    }
+    const leaving: MoveOpRecord = { ...rec, out: formatUnits(q.minOut, POOL_ASSET[to].decimals) };
+    await put(id, leaving);
+    const run = d.withdraw(chain);
+    if (run === null) {
+      await put(id, { ...leaving, stage: "failed" });
+      return { error: "not_allowed" };
+    }
+    run({ chain, to: q.address, amount: p.sum, maxFee: p.fee }, `${id}/out`);
+    tracks.push(followDirect(id, leaving).catch(() => {}));
+    return { op: id };
+  };
+  const leastOf = async (chain: PoolChain, ok: (amount: bigint) => boolean, funds?: PoolFunds): Promise<bigint | null> => {
+    const fs = funds ?? (await d.funds(chain));
+    const t = leastWhere(ok);
+    if (t === null) return null;
+    // the amount the plan sends at or above t: the plan's own sum, the nearest above, or the least part
+    let x = t;
+    for (let k = 0; k < 4; k++) {
+      const c = checkPoolAmount(chain, formatUnits(x, POOL_ASSET[chain].decimals), fs);
+      if (c.ok) return c.amount;
+      if (c.code === "min" && c.min !== undefined && c.min > x) x = c.min;
+      else if (c.code === "unplannable" && c.above !== undefined) x = c.above;
+      else return x;
+    }
+    return x;
+  };
   return {
+    direct: () => d.direct !== undefined,
     move: async (chain, amount, id, to = "near") => {
       try {
         const p = await plan(chain, amount);
         if ("error" in p) return p;
-        if (to === chain || (to !== "near" && d.onward === undefined)) return { error: "not_allowed" };
+        if (to === chain || (to !== "near" && d.onward === undefined && d.direct === undefined)) return { error: "not_allowed" };
+        if (to !== "near" && d.direct !== undefined) return await sendDirect(chain, to, p, id);
         const rec: MoveOpRecord = { kind: "move", from: chain, to, stage: "leaving", txs: [], amount: formatUnits(p.sum, POOL_ASSET[chain].decimals), created_ms: d.now() };
         const q = await d.quote(chain, p.sum, `${id}/1click`);
         if ("error" in q || !d.onChain(chain, q.address)) {
@@ -225,19 +318,37 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
         return { error: "failed" };
       }
     },
-    dry: async (chain, amount) => {
+    dry: async (chain, amount, to = "near") => {
       try {
-        if (amount <= 0n || d.withdraw(chain) === null) return { error: "not_allowed" };
+        if (amount <= 0n || d.withdraw(chain) === null || to === chain) return { error: "not_allowed" };
+        const direct = to !== "near" && d.direct !== undefined ? { to, d: d.direct } : null;
+        // a price not read yet is a read not in yet: down (Busy, Retry), never not_allowed
         const pr = d.price(chain);
-        if (pr === null) return { error: "not_allowed" };
-        const funds = await d.funds(chain);
+        const pt = direct === null ? null : d.price(direct.to);
+        if (pr === null || (direct !== null && pt === null)) return { error: "down" };
+        // the pool's funds read (its notes and the relayer's fee) that fails is a read not in yet too
+        let funds: PoolFunds;
+        try {
+          funds = await d.funds(chain);
+        } catch {
+          return { error: "down" };
+        }
         const max = poolSendable(funds);
         const c = checkPoolAmount(chain, formatUnits(amount, POOL_ASSET[chain].decimals), funds);
         if (!c.ok) {
           if (c.code === "insufficient") return { limits: { max } };
           if (c.code === "min") return { limits: { max, ...(c.min === undefined ? {} : { min: c.min }) } };
           if (c.code === "unplannable") return { limits: { max, ...(c.below === undefined ? {} : { below: c.below }), ...(c.above === undefined ? {} : { above: c.above }) } };
+          if (c.code === "unread") return { error: "down" };
           return { error: "not_allowed" };
+        }
+        if (direct !== null) {
+          // one confidential swap: the least of `to`'s coin at the device's prices, held to `to`'s pool floor read now
+          const floor = await direct.d.floor(direct.to).catch(() => null);
+          if (floor === null) return { error: "down" };
+          const out = (x: bigint) => coinOf(x, chain, pr, direct.to, pt!);
+          if (out(c.amount) < floor) return { limits: { max, ...(await leastOf(chain, (x) => out(x) >= floor, funds).then((m) => (m === null ? {} : { min: m }))) } };
+          return { sum: c.amount, out: out(c.amount), fee: c.maxFee, max };
         }
         return { sum: c.amount, out: cashUsdcOf(c.amount, pr, chain), fee: c.maxFee, max };
       } catch {
@@ -248,25 +359,11 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
       const pr = d.price(chain);
       return pr === null ? 0n : cashUsdcOf(amount, pr, chain);
     },
-    least: async (chain, ok) => {
-      const funds = await d.funds(chain);
-      const t = leastWhere(ok);
-      if (t === null) return null;
-      // the amount the plan sends at or above t: the plan's own sum, the nearest above, or the least part
-      let x = t;
-      for (let k = 0; k < 4; k++) {
-        const c = checkPoolAmount(chain, formatUnits(x, POOL_ASSET[chain].decimals), funds);
-        if (c.ok) return c.amount;
-        if (c.code === "min" && c.min !== undefined && c.min > x) x = c.min;
-        else if (c.code === "unplannable" && c.above !== undefined) x = c.above;
-        else return x;
-      }
-      return x;
-    },
+    least: (chain, ok) => leastOf(chain, ok),
     resume: (moves) => {
       for (const { id, rec } of moves)
         if (rec.kind === "move" && rec.from !== "near" && rec.stage !== "done" && rec.stage !== "failed")
-          tracks.push((rec.to !== "near" && rec.stage !== "leaving" && rec.stage !== "in_transit" && rec.stage !== "refunded" ? onward(id, rec, []) : follow(id, rec)).catch(() => {}));
+          tracks.push((rec.to !== "near" && rec.cash === undefined && d.direct !== undefined ? followDirect(id, rec) : rec.to !== "near" && rec.stage !== "leaving" && rec.stage !== "in_transit" && rec.stage !== "refunded" ? onward(id, rec, []) : follow(id, rec)).catch(() => {}));
     },
     idle: async () => {
       await Promise.all(tracks);

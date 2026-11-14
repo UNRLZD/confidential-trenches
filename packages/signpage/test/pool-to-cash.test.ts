@@ -207,3 +207,123 @@ test("pool.move.dry Solana to Base: what Cash's move of the deposit's least USDC
   assert.equal(asked.at(-1), 1_552_000n - 50_000n, "Cash's move of the deposit's least USDC less the withdraw fee");
   assert.equal(a.result.out, "0.00000145694");
 });
+
+// ------------------------------------------- pool to pool in one confidential swap (card move-one-confidential-swap)
+// Owner 14 Nov 03:37Z: "Move = ONE NEAR Intents confidential swap, pool payout -> destination pool, no vault stop". With
+// `direct` the page quotes X's coin into Y's pool once (the Move host: confidential, checked at the device's prices),
+// the pool withdraw run pays that address, and the pool follow (U_Y's balance on Y's two RPCs) carries it in.
+const ETH = { price: "200000000000", expo: -8 }; // ETH at 2,000 USD
+const DIRECT_ADDR = "57LxDLkS96hfigLJW45RFEBYT28kzZ8x8u28Vd14o3xU";
+function direct(o: { quote?: { address: string; minOut: bigint } | { error: "quote_check_failed" | "down" }; ops?: Record<string, { stage: string; final?: true; txs?: { chain: "solana" | "base"; hash: string }[] }[]>; price?: (c: string) => typeof SOL | null; floor?: bigint | null } = {}) {
+  const quoted: unknown[] = [], cash: unknown[] = [], onward: unknown[] = [];
+  const runs: { ready: PoolReady; id: string }[] = [];
+  const puts: { id: string; rec: MoveOpRecord }[] = [];
+  const reads: Record<string, number> = {};
+  const read = (id: string) => {
+    const list = o.ops?.[id.slice(id.lastIndexOf("/") + 1)] ?? [];
+    const k = reads[id] ?? 0;
+    reads[id] = k + 1;
+    return list[Math.min(k, list.length - 1)];
+  };
+  const d: PoolToCashDeps = {
+    price: o.price ?? ((c) => (c === "solana" ? SOL : ETH)),
+    funds: async () => FUNDS,
+    quote: async (...a) => (cash.push(a), { address: DEPOSIT, minOut: 1_500_000n }),
+    onChain: (_c, a) => a === DIRECT_ADDR,
+    withdraw: () => (ready, id) => void runs.push({ ready, id }),
+    op: async (id) => read(id),
+    put: async (id, rec) => void puts.push({ id, rec: structuredClone(rec) }),
+    now: () => 1_000,
+    wait: async () => {},
+    onward: { move: async (...a) => (onward.push(a), { op: "x" }), fee: async () => 50_000n },
+    direct: {
+      quote: async (from, to, amount, id) => (quoted.push({ from, to, amount, id }), o.quote ?? { address: DIRECT_ADDR, minOut: 760_000_000_000_000n }),
+      follow: async (id) => read(id),
+      floor: async () => (o.floor === undefined ? 500_000_000_000_000n : o.floor),
+    },
+  };
+  return { m: poolToCash(d), quoted, cash, onward, runs, puts };
+}
+
+test("pool.move Solana to Base in one confidential swap: one quote into Base's pool under <op>/pool, the Solana pool run pays its address, no Cash quote and no vault stop; leaving, in_transit, into_pool, done", async () => {
+  const p = direct({
+    ops: {
+      out: [{ stage: "proving" }, { stage: "sent", txs: [{ chain: "solana", hash: "SolTx1" }] }],
+      pool: [{ stage: "quote_checked" }, { stage: "quote_checked" }, { stage: "in_transit" }, { stage: "in_pool" }, { stage: "in_pool", final: true, txs: [{ chain: "base", hash: "BaseTx1" }] }],
+    },
+  });
+  assert.deepEqual(await p.m.move("solana", 20_000_000n, "mv-1", "base"), { op: "mv-1" });
+  await p.m.idle();
+  assert.deepEqual(p.quoted, [{ from: "solana", to: "base", amount: 20_000_000n, id: "mv-1/pool" }]);
+  assert.deepEqual(p.cash, [], "no Cash quote");
+  assert.deepEqual(p.onward, [], "no move out of Cash");
+  assert.deepEqual(p.runs, [{ ready: { chain: "solana", to: DIRECT_ADDR, amount: 20_000_000n, maxFee: 1_305_000n }, id: "mv-1/out" }]);
+  assert.deepEqual(p.puts.map((x) => x.rec.stage), ["leaving", "in_transit", "into_pool", "done"]);
+  const last = p.puts.at(-1)!.rec;
+  assert.deepEqual({ from: last.from, to: last.to, amount: last.amount, out: last.out, cash: last.cash }, { from: "solana", to: "base", amount: "0.02", out: "0.00076", cash: undefined });
+  assert.deepEqual(last.txs, [{ chain: "solana", hash: "SolTx1" }, { chain: "base", hash: "BaseTx1" }]);
+});
+
+test("pool to pool, one swap: a refused quote or an address off the source chain starts no run; a run that stopped with nothing sent fails; an expired quote fails; a refund carried back into the pool shows refunded, then done", async () => {
+  for (const [q, code] of [[{ error: "quote_check_failed" as const }, "quote_check_failed"], [{ error: "down" as const }, "down"], [{ address: "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", minOut: 1n }, "quote_check_failed"]] as const) {
+    const p = direct({ quote: q });
+    assert.deepEqual(await p.m.move("solana", 20_000_000n, "r", "base"), { error: code });
+    assert.equal(p.runs.length, 0);
+    assert.equal(p.puts.at(-1)!.rec.stage, "failed");
+  }
+  const stopped = direct({ ops: { out: [{ stage: "stopped" }], pool: [{ stage: "quote_checked" }] } });
+  await stopped.m.move("solana", 20_000_000n, "r", "base");
+  await stopped.m.idle();
+  assert.deepEqual(stopped.puts.map((x) => x.rec.stage), ["leaving", "failed"]);
+  const expired = direct({ ops: { out: [{ stage: "sent", txs: [{ chain: "solana", hash: "S" }] }], pool: [{ stage: "quote_checked" }, { stage: "expired" }] } });
+  await expired.m.move("solana", 20_000_000n, "r", "base");
+  await expired.m.idle();
+  assert.deepEqual(expired.puts.map((x) => x.rec.stage), ["leaving", "in_transit", "failed"]);
+  const back = direct({ ops: { out: [{ stage: "sent", txs: [{ chain: "solana", hash: "S" }] }], pool: [{ stage: "refunded" }, { stage: "refund_move" }, { stage: "in_pool", final: true }] } });
+  await back.m.move("solana", 20_000_000n, "r", "base");
+  await back.m.idle();
+  assert.deepEqual(back.puts.map((x) => x.rec.stage), ["leaving", "refunded", "done"]);
+});
+
+test("pool to pool, one swap, after a reload: a move op with no cash follows its pool op on; nothing is quoted or run again", async () => {
+  const p = direct({ ops: { out: [{ stage: "sent", txs: [{ chain: "solana", hash: "S" }] }], pool: [{ stage: "in_pool", final: true, txs: [{ chain: "base", hash: "B" }] }] } });
+  p.m.resume([{ id: "mv-2", rec: { kind: "move", from: "solana", to: "base", stage: "in_transit", txs: [{ chain: "solana", hash: "S" }], amount: "0.02", out: "0.00076", created_ms: 1 } }]);
+  await p.m.idle();
+  assert.equal(p.quoted.length + p.runs.length + p.onward.length, 0);
+  assert.equal(p.puts.at(-1)!.rec.stage, "done");
+  assert.deepEqual(p.puts.at(-1)!.rec.txs, [{ chain: "solana", hash: "S" }, { chain: "base", hash: "B" }]);
+});
+
+test("pool.move.dry Solana to Base, one swap: out in Base's coin at the device's prices less 3%, the fee in SOL, three steps with no vault; under Base's pool floor the least that clears it; a read not in yet is down", async () => {
+  const kinds = (p: ReturnType<typeof direct>) => poolMoveKinds(() => cashMover({ price: () => null, rails: [], quote: async () => ({ error: "not_allowed" }), fee: async () => 0n, cash: async () => 0n, handoff: null, landed: async () => false, now: () => 0 }), () => p.m);
+  // the answer as plain data (a HostAnswer's `then` would make an async function's answer a thenable)
+  const dry = async (p: ReturnType<typeof direct>, amount: string): Promise<unknown> => {
+    const r = kinds(p)["pool.move.dry"]({ from: "solana", to: "base", amount }, { id: "d", sha: "00", progress: () => {} });
+    assert.ok("running" in r);
+    await r.after;
+    return JSON.parse(JSON.stringify(r.answer())) as unknown;
+  };
+  // 0.02 SOL at 80 USD = 1.6 USD = 0.0008 ETH at 2,000, less 3%: 0.000776
+  assert.deepEqual(await dry(direct(), "0.02"), { result: { out: "0.000776", fee: "0.001305", steps: [{ step: "pool_out", chain: "solana" }, { step: "intents", chain: "base" }, { step: "pool_in", chain: "base" }], max: "0.03739" } });
+  // Base's floor 0.001 ETH: 0.02 SOL brings 0.000776, so the least SOL that clears it, and no out
+  const low = await dry(direct({ floor: 1_000_000_000_000_000n }), "0.02") as { result: { min?: string; out?: string } };
+  assert.equal(low.result.out, undefined);
+  assert.ok(low.result.min !== undefined && Number(low.result.min) > 0.02 && Number(low.result.min) * 80 / 2000 * 0.97 >= 0.001, JSON.stringify(low));
+  // the reads not in yet: Base's price, Solana's price, Base's floor
+  assert.deepEqual(await dry(direct({ price: (c) => (c === "solana" ? SOL : null) }), "0.02"), { error: "down" });
+  assert.deepEqual(await dry(direct({ price: (c) => (c === "solana" ? null : ETH) }), "0.02"), { error: "down" });
+  assert.deepEqual(await dry(direct({ floor: null }), "0.02"), { error: "down" });
+  // and the move is held to its dry: under the floor nothing is quoted or run
+  const p = direct({ floor: 1_000_000_000_000_000n });
+  const run = kinds(p)["pool.move"]({ from: "solana", to: "base", amount: "0.02" }, { id: "m", sha: "00", progress: () => {} });
+  assert.ok("running" in run);
+  await run.after;
+  assert.deepEqual(run.answer(), { error: "below_min" });
+  assert.equal(p.quoted.length + p.runs.length, 0);
+});
+
+test("pool to Cash: a price or the pool's funds not read yet is down (Busy, Retry), never not_allowed", async () => {
+  const d0 = { price: () => null, funds: async () => FUNDS, quote: async () => ({ error: "not_allowed" as const }), onChain: () => true, withdraw: () => () => {}, op: async () => undefined, put: async () => {}, now: () => 1 };
+  assert.deepEqual(await poolToCash(d0).dry("solana", 20_000_000n), { error: "down" });
+  assert.deepEqual(await poolToCash({ ...d0, price: () => SOL, funds: async () => Promise.reject(new TypeError("fetch failed")) }).dry("solana", 20_000_000n), { error: "down" });
+});
