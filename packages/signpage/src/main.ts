@@ -173,7 +173,10 @@ let shell: Shell | null = null;
 const prover = !framed ? proverHost() : null;
 // the page's own pool price reads (src/pool-price.ts), set once they are made below: a pool buy's cost reads them
 let pagePrice: ((chain: PoolChain) => PoolStatePrice | null) | null = null;
-const testnet = !framed && prover ? testnetPool({ store: () => open(), held: () => opened(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id), price: (chain) => pagePrice?.(chain) ?? null }, { prover }) : null;
+// whether a seed is held (the frame state's signed_in), set once the frame state is made below; until then, signed out:
+// the pool flow's state read reads no pool without it (card one-balance-buys-on-every-chain)
+let pageSignedIn: (() => Promise<boolean>) | null = null;
+const testnet = !framed && prover ? testnetPool({ store: () => open(), held: () => opened(), seed64: () => openSeed64(), signedIn: () => (pageSignedIn ? pageSignedIn() : Promise.resolve(false)), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id), price: (chain) => pagePrice?.(chain) ?? null }, { prover }) : null;
 // the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
 // words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
 const restore = !framed
@@ -281,6 +284,7 @@ else {
   // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
   wakeWhenShown(document, prices);
   pagePrice = (chain) => prices.get(chain);
+  pageSignedIn = () => fs.state().then((s) => s.signed_in);
   // the Solana pool's tap spend (state.pools' tap_max, src/pools.ts withSolanaRent): the Rent sysvar, read once on the
   // pool kinds' own pair, and only while the table holds a Solana pool; its landing reads the state again
   const told = new Set<() => void>();

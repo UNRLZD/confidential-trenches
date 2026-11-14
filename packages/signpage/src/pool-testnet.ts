@@ -623,6 +623,10 @@ export type TestnetPage = {
    *  syncs' holds are read and written through it alone; tests without it give store(). */
   held?(): Promise<WalletStore>;
   seed64(): Promise<Uint8Array>;
+  /** Whether a seed is held now (the page's frame state, src/state.ts): a state read reads nothing while it says no
+   *  (card one-balance-buys-on-every-chain: the proof front, taken at load, focus and show signed in or not, ran one
+   *  and read the EVM pools with no seed). main.ts gives it always; tests without it read as signed in. */
+  signedIn?(): Promise<boolean>;
   /** pool.withdraw: the page's own screen opened for the chain and the request's op id (src/main.ts); null refuses. */
   openWithdraw?(chain: PoolChain, ctx: KindContext): HostAnswer<"pool.withdraw"> | null;
   /** The page's own USD price of a chain's pool asset (src/pool-price.ts), for a pool buy's cost; null when none is fresh. */
@@ -3070,7 +3074,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the EVM pools' open deposits, their RESERVED notes and their queues' passes run on every state read beside the
   // Solana pool's part (none pinned: only theirs): neither waits on the other, and one that fails or hangs never stops
   // the other
-  const stateRead = (): Promise<void> => {
+  const stateRead = async (): Promise<void> => {
+    // signed out, nothing: no seed, no notes and nothing to prove, so no pool is read and no turn pass armed, whoever
+    // asks (the front's take at load, focus or show, a tap's take, main.ts's state read)
+    // and a sign out while that is read (stopReads) ends it too: the reads below would take the new controller and run on
+    const outs = signOuts;
+    if (page.signedIn && (!(await page.signedIn().catch(() => false)) || signOuts !== outs)) return;
     // the tab in use takes the device's proof queues (a hidden one gives them back)
     front.want();
     armTurn();
