@@ -611,7 +611,12 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
               )}
             </div>
           </div>
-          <div className="tkp-strip">
+          {/* the strip is drawn with the token's identity, never before it: strip-fit.ts gives way from its end while the
+              symbol and its icons need the room, and only the token's own symbol and icons say how much, so a strip drawn
+              for the loading skeleton (a 120 px line, no icons) moved right by a tile once a long symbol with its icons
+              landed (mihao, 14 Nov: Holders dropped, CLS 0.0014 at 1600). Drawn with them, the fit runs before its first
+              paint and nothing drawn moves (card mihao-opens-first). */}
+          {v && <div className="tkp-strip">
             <div className="tkp-mc">
               <span className="tkp-lbl"><W id="mcLong" /></span>
               {v?.mc != null ? <span className="tkp-mcval" ref={mcRef}>{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
@@ -622,7 +627,7 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
             <Tile k="vol" label="vol24" value={s(v?.vol)} />
             <Tile k="liq" label={v?.curve.on ? "inCurve" : "liq"} value={s(v?.liq)} />
             <Tile k="holders" label="holders" value={s(v?.holders)} />
-          </div>
+          </div>}
         </header>
         <Chart c={c} />
         <LowerPanel row={r?.data.row ?? null} decimals={r?.data.decimals ?? null} tape={tape} />

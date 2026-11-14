@@ -63,7 +63,8 @@
 .tkp-strip > [data-fit="drop"] { display: none; }
 .tkp-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 6px 4px 2px; flex-wrap: nowrap; }
 /* one row (the locked design): the identity takes what the strip leaves and its text truncates, so the strip's width
-   comes only from its own tiles and it starts at the same x before and after the read (CLS 0) */
+   comes only from its own tiles; the strip is drawn with the token's identity (TokenPage.tsx), fitted before its first
+   paint, so it never moves after it (CLS 0) */
 .tkp-ident { display: flex; align-items: center; gap: 12px; flex: 1 1 0; min-width: 0; }
 .tkp-idtext { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 0; }
 /* the row's box is drawn before the token answers: the icons' slot is there empty, so nothing moves when they land */
