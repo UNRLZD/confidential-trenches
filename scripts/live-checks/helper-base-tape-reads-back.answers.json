@@ -1,0 +1,583 @@
+{
+ "_note": "Each tape's answers as the check read them (time from its first read, status, X-Helper-Commit, rows, filling, first fault; not the rows). good: a keyless helper started from data-tape-r2 (b4187333e, part C) on a Mac as --base, read 2026-11-14T06:05:57.458Z: the two new tokens' tapes said filling with no row, then ended done (their pools younger than the hour read back), the two trending_1h tapes full at 50: PASS. bad_live: the deployed helper (a6b7a3ad7, before part C) read 2026-11-14T06:04:23.682Z: the same lists' tapes, the new ones short (2 and 0 trades) and none saying filling: FAIL.",
+ "good": {
+  "base": "http://127.0.0.1:18781",
+  "readAt": "2026-11-14T06:05:57.458Z",
+  "lists": {
+   "status": 200,
+   "new": 19
+  },
+  "tapes": [
+   {
+    "address": "0xdffbb11a51d8ff2ee5ba0fe0aa408de3646fa922",
+    "answers": [
+     {
+      "t": 8003,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 0,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 11010,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 14014,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 17016,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 20018,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 23020,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 26021,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 29022,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 32024,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 35024,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 38027,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 41028,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 44030,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 47031,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 50034,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 53035,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 56044,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 59046,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 62048,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 65050,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 68052,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 71057,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 74059,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 77060,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 80061,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 83064,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 86065,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 89067,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 3,
+      "filling": false,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x37e0f54e515d4af40102115450e71b9a2c0baded",
+    "answers": [
+     {
+      "t": 8005,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 0,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 11011,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 14014,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 17016,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 20018,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 23020,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 26021,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 29022,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 32024,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 35024,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 38027,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 41028,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 44030,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 47031,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 50034,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 53035,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 56044,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 59046,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 62048,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 65050,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 68052,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 71056,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 74058,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 77060,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 80061,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 83064,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 86065,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 89067,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 92069,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 95072,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": true,
+      "fault": null
+     },
+     {
+      "t": 98073,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 5,
+      "filling": false,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+    "answers": [
+     {
+      "t": 8006,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 50,
+      "filling": false,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "answers": [
+     {
+      "t": 8006,
+      "status": 200,
+      "commit": "b4187333e0ac59ae7448367bb10ec1716d9b2d03",
+      "n": 50,
+      "filling": false,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ },
+ "bad_live": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-14T06:04:23.682Z",
+  "lists": {
+   "status": 200,
+   "new": 19
+  },
+  "tapes": [
+   {
+    "address": "0x2bbb8accb9beac4d9f71cf9bc35d19a069e7d5a4",
+    "answers": [
+     {
+      "t": 754,
+      "status": 200,
+      "commit": "a6b7a3ad7496b410117da34029be667f2e17a932",
+      "n": 2,
+      "filling": false,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x7364c9117f0f016054ebe9f6e5aa2755f3364cff",
+    "answers": [
+     {
+      "t": 613,
+      "status": 200,
+      "commit": "a6b7a3ad7496b410117da34029be667f2e17a932",
+      "n": 0,
+      "filling": false,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee",
+    "answers": [
+     {
+      "t": 1130,
+      "status": 200,
+      "commit": "a6b7a3ad7496b410117da34029be667f2e17a932",
+      "n": 50,
+      "filling": false,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "answers": [
+     {
+      "t": 1255,
+      "status": 200,
+      "commit": "a6b7a3ad7496b410117da34029be667f2e17a932",
+      "n": 50,
+      "filling": false,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ }
+}

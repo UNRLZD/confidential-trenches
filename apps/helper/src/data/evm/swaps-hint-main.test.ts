@@ -110,8 +110,10 @@ test("card helper-live-run-green-after-122: a listed token whose list names its 
   st.hold = new Promise<void>((go) => (release = go));
   const first = await s.trades(COIN, 50);
   assert.equal(first.status, 200, first.body);
-  assert.equal(JSON.parse(first.body).filling, undefined, "answered within its bound, not filling");
+  // within its bound: the hint's pool's tape (an answer past it serves what is held, none here); and, short of
+  // TRADES_MAX, filling while its older trades are read back (swaps.ts readBack, card every-cell-shows-a-value)
   assert.deepEqual(txsOf(first.body), new Set(quiet.txs), "the first open is the hint's pool's tape");
+  assert.equal(JSON.parse(first.body).filling, quiet.txs.length < 50 ? true : undefined, "filling only while read back");
   release();
   // the background search the hint left (ahead's queue) settles
   await s.ahead([]);
