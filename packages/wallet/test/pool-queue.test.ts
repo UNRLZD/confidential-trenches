@@ -727,7 +727,10 @@ test("(card move-sends-or-says-why) a state read that never answers holds the vi
   pool.t.now = START + E + 10n;
   assert.deepEqual((await q.refresh()).remade, [a!.noteId], "the remake's swap ran");
   assert.notEqual(q.ready()[0]!.attempt, a!.attempt);
-  assert.equal(await pending(q.drop(a!.noteId)), undefined, "the drop ran");
+  // the drop's store writes take more turns than `pending` waits on a loaded box (14 Nov 13:19Z, the heavy box): held to 5 s of
+  // real time instead, as long as any drop takes and far short of a view held for good
+  const late = new Promise<"pending">((r) => setTimeout(() => r("pending"), 5_000).unref());
+  assert.equal(await Promise.race([q.drop(a!.noteId), late]), undefined, "the drop ran");
   assert.equal((await state(v, a!.noteId)).state, "UNSPENT");
 });
 

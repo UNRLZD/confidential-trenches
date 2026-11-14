@@ -1695,7 +1695,9 @@ test("(card move-sends-or-says-why) a note the page's queue holds whose drop nev
   } finally {
     resetTimers(mock.timers);
   }
-  const got = await pending(run);
+  // the stop's store writes take more turns than `pending` waits on a loaded box (14 Nov 13:19Z, the heavy box): held to
+  // 5 s of real time once the clock is real again, far short of a run held for good
+  const got = await Promise.race([run, new Promise<"pending">((r) => setTimeout(() => r("pending"), 5_000).unref())]);
   assert.notEqual(got, "pending", "the run ends at 30 s");
   const end = got as { stage: string; cause?: string };
   assert.equal(end.stage, "stopped");

@@ -1242,6 +1242,13 @@ const bare = (x: World, data: Uint8Array, rest: bigint, logs: unknown[] = []) =>
   x.c.txs.set(SALE, { to: W, input: "0x" + Buffer.from(data).toString("hex") });
   x.c.receipts.set(SALE, { status: "0x1", blockNumber: hx(x.c.head), blockHash: w32(x.c.head), logs });
 };
+/** The chain moves on as the page waits (one block per wait): a follow left running ends once its reads are final. */
+const moving = (x: World) => {
+  x.h.wait = async (ms) => {
+    tick(ms);
+    x.c.head += 1n;
+  };
+};
 const tailKey = `w-tail/base/${W}`;
 const tails = (x: World) => {
   x.h.tail = async (t) => void (await x.md.update("meta", `w-tail/${t.chain}/${t.address}`, () => t));
@@ -1274,6 +1281,7 @@ test("SellDelegate v2: a hash whose transaction is not W's sale of this note, or
   });
   tails(x);
   x.h.keep = () => {};
+  moving(x);
   const a = await runEvmPoolSell(x.h, ASK);
   assert.deepEqual(a, { stage: "sent", txs: [] }, "read on, never filled on another sale's word");
   let y!: World;
@@ -1285,6 +1293,7 @@ test("SellDelegate v2: a hash whose transaction is not W's sale of this note, or
   });
   tails(y);
   y.h.keep = () => {};
+  moving(y);
   assert.deepEqual(await runEvmPoolSell(y.h, ASK), { stage: "sent", txs: [] }, "a receipt with a Deposited is the logs' to read");
 });
 
@@ -1298,6 +1307,8 @@ test("SellDelegate v2: a sale under the least rung with no hash from the helper:
     },
   });
   tails(x);
+  // the chain moves on as the page waits, so the block W's Sell nonce was read taken at goes final
+  moving(x);
   const kept: Promise<unknown>[] = [];
   const late: unknown[] = [];
   x.h.keep = (p) => void kept.push(p);
@@ -1307,6 +1318,60 @@ test("SellDelegate v2: a sale under the least rung with no hash from the helper:
   assert.deepEqual(late, [{ stage: "filled", txs: [] }]);
   assert.equal((await returnNote(x.store))?.state, "PLANNED");
   assert.deepEqual(await openOf(x), []);
+});
+
+// Robinhood is Arbitrum Nitro: its public nodes keep about 10 to 24 s of state, so a state read at "finalized" or
+// "safe" (or at an older block) is refused with -32000 "historical state ... is not available"
+// (scripts/live-checks/evm-deposit-note-stays-incoming.mjs). A seat that answers state only at the newest blocks, and
+// the chain moving on as the page waits: the no-hash sale still ends filled once W's Sell nonce is taken at a block
+// final on both RPCs, read at that block by its hash and its finality from headers (pool-deposit-evm.ts nonceFinal).
+const STATE_AT: Record<string, number> = { eth_call: 1, eth_getTransactionCount: 1, eth_getBalance: 1, eth_getCode: 1, eth_getStorageAt: 2, eth_estimateGas: 1 };
+const QUOTE_HEAD = 0x100n;
+const nitroSeat = (x: World) => {
+  const kept = 5n;
+  const refused: unknown[] = [];
+  const seat =
+    (rpc: EvmRpc): EvmRpc =>
+    async (method, params) => {
+      const at = STATE_AT[method];
+      if (at !== undefined) {
+        const tag = (params as unknown[])[at];
+        const n = typeof tag === "string" && /^0x[0-9a-f]+$/i.test(tag) ? BigInt(tag) : typeof tag === "object" && tag !== null && "blockHash" in tag ? BigInt((tag as { blockHash: string }).blockHash) : typeof tag === "object" && tag !== null && "blockNumber" in tag ? BigInt((tag as { blockNumber: string }).blockNumber) : null;
+        // 0x100: the quote fixture's head (evm-sell-quote-fx.ts), the newest block of the quote's own chain
+        if (tag === "finalized" || tag === "safe" || tag === "earliest" || (n !== null && n !== QUOTE_HEAD && x.c.head - n > kept)) {
+          refused.push(tag);
+          throw new Error("RPC error -32000: historical state 4c6aae67e883f4eb4d80c73ed82272e6c9a8e2744ba0f1d2c3b4a5968778695a is not available");
+        }
+      }
+      return rpc(method, params);
+    };
+  x.h.rpcs = [seat(x.h.rpcs[0]), seat(x.h.rpcs[1])];
+  moving(x);
+  return refused;
+};
+
+test("SellDelegate v2 on a Robinhood seat (no state at finalized or safe, nor past its newest blocks): a sale under the least rung with no hash still ends filled, never not_landed; W's Sell nonce read at the newest block both hold, its finality from headers; the note back PLANNED, the record dropped", { timeout: 20_000 }, async () => {
+  closedPageTimers();
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      bare(x, body.data, 4n * 10n ** 14n);
+      throw new EvmSendNoAnswer(null, "fault");
+    },
+  });
+  tails(x);
+  const refused = nitroSeat(x);
+  const kept: Promise<unknown>[] = [];
+  const late: unknown[] = [];
+  x.h.keep = (p) => void kept.push(p);
+  x.h.late = (a) => void late.push(a);
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { stage: "sent", txs: [] });
+  await Promise.all(kept);
+  assert.deepEqual(late, [{ stage: "filled", txs: [] }]);
+  assert.equal((await returnNote(x.store))?.state, "PLANNED");
+  assert.deepEqual(await openOf(x), []);
+  assert.deepEqual(refused, [], "no state read the seat refuses");
+  assert.ok(x.c.calls.some((c) => c.method === "eth_call" && typeof c.params[1] === "object" && (c.params[1] as { blockHash?: unknown }).blockHash !== undefined), "W's Sell nonce read at a block by its hash (EIP-1898)");
 });
 
 test("SellDelegate v2: W's tail after a sale (the ETH it left on W off the rung) is owed to leftover-carry.ts as meta w-tail/<chain>/<W>, for a sale that deposited a rung and one that deposited nothing; none for a W left empty", async () => {

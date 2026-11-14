@@ -182,7 +182,7 @@ const both = <T>(rpcs: readonly [EvmRpc, EvmRpc], f: (rpc: EvmRpc, k: number) =>
  *  refused by pruned nodes (Robinhood's keep ~10 to 24 s), so the read is made once, at the newest block, and its block
  *  is waited on until final. The pass keeps it with the note's record (NoteRecord.evmSpent), so a reload waits on the
  *  same block; the end's reads keep their own for the follow's life. Nothing of it lives in the page past either. */
-type Spent = { number: bigint; hash: string };
+export type Spent = { number: bigint; hash: string };
 /** A block header by tag or number on one RPC: its number and hash (headers are served at any age; state is not). */
 async function headerOf(rpc: EvmRpc, at: string, what: string): Promise<Spent> {
   const b = (await rpc("eth_getBlockByNumber", [at, false])) as { number?: unknown; hash?: unknown } | null;
@@ -214,6 +214,25 @@ export async function spentFinal(rpcs: readonly [EvmRpc, EvmRpc], u: string, non
   const fin = await both(rpcs, (rpc, k) => headerOf(rpc, "finalized", `rpc ${k} finalized block`));
   if (fin[0].number < blk.number || fin[1].number < blk.number) return { final: null, kept: blk };
   check();
+  const at = await both(rpcs, (rpc, k) => headerOf(rpc, qty(blk.number), `rpc ${k} block ${blk.number}`));
+  if (at[0].hash !== blk.hash || at[1].hash !== blk.hash || at[0].number !== blk.number || at[1].number !== blk.number) return { final: null, kept: undefined };
+  return { final: blk.number, kept: blk };
+}
+
+/** spentFinal's rule for W's SellDelegate Sell nonce (pool-sell-evm.ts): `read` at the newest block both RPCs hold, by
+ *  its hash (EIP-1898), past `nonce` on both keeps that block; its finality from block headers. Never a state read at
+ *  "finalized" or "safe" (Robinhood's nodes refuse it). */
+export async function nonceFinal(rpcs: readonly [EvmRpc, EvmRpc], read: (rpc: EvmRpc, blockHash: string) => Promise<bigint>, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal): Promise<{ final: bigint | null; kept: Spent | undefined }> {
+  if (kept === undefined) {
+    const b = await evmRetryLag(() => evmAgreedBlock(rpcs, "latest", signal, sleep), sleep, signal);
+    const at = await both(rpcs, (rpc) => read(rpc, b.hash));
+    if (at[0] <= nonce || at[1] <= nonce) return { final: null, kept: undefined };
+    kept = { number: b.number, hash: b.hash.toLowerCase() };
+  }
+  // spentFinal's own header reads (kept apart: pool-deposit-sent-end.mjs reads spentFinal's whole body in the bundle)
+  const blk: Spent = kept;
+  const fin = await both(rpcs, (rpc, k) => headerOf(rpc, "finalized", `rpc ${k} finalized block`));
+  if (fin[0].number < blk.number || fin[1].number < blk.number) return { final: null, kept: blk };
   const at = await both(rpcs, (rpc, k) => headerOf(rpc, qty(blk.number), `rpc ${k} block ${blk.number}`));
   if (at[0].hash !== blk.hash || at[1].hash !== blk.hash || at[0].number !== blk.number || at[1].number !== blk.number) return { final: null, kept: undefined };
   return { final: blk.number, kept: blk };
