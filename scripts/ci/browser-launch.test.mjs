@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LAUNCHER, problems, trackedFiles } from "./browser-launch.mjs";
-import { launchBrowser, launchDiskProfile } from "../browsers.mjs";
+import { FIREFOX_STRICT, launchBrowser, launchDiskProfile, refuse } from "../browsers.mjs";
 
 const file = (path, text) => ({ path, text });
 
@@ -120,4 +120,22 @@ test("the launcher refuses an arg that turns a sandbox off, and an engine it doe
     await assert.rejects(launchDiskProfile({ args: [flag] }), /weakens the sandbox/, flag);
   }
   await assert.rejects(launchBrowser("edge"), /engine edge is not one of/);
+});
+
+// card firefox-runs-before-release: Firefox may take Strict tracking protection's prefs, exactly those and only those
+test("the launcher lets Firefox take exactly the Strict tracking prefs, and refuses any other pref or engine", async () => {
+  assert.equal(refuse({ firefoxUserPrefs: { ...FIREFOX_STRICT } }, "firefox"), undefined);
+  const planted = [
+    { ...FIREFOX_STRICT, "security.sandbox.content.level": 0 }, // a pref past the set: Firefox's own sandbox
+    { ...FIREFOX_STRICT, "network.cookie.cookieBehavior": 0 }, // a pref of the set at another value
+    { "privacy.trackingprotection.enabled": true }, // part of the set
+    { ...FIREFOX_STRICT, "privacy.trackingprotection.enabled": "true" }, // the right value as a string
+  ];
+  for (const prefs of planted) {
+    assert.throws(() => refuse({ firefoxUserPrefs: prefs }, "firefox"), /launch option firefoxUserPrefs is refused/, JSON.stringify(prefs));
+    await assert.rejects(launchBrowser("firefox", { firefoxUserPrefs: prefs }), /launch option firefoxUserPrefs is refused/, JSON.stringify(prefs));
+  }
+  await assert.rejects(launchBrowser("chromium", { firefoxUserPrefs: { ...FIREFOX_STRICT } }), /launch option firefoxUserPrefs is refused/);
+  await assert.rejects(launchBrowser("webkit", { firefoxUserPrefs: { ...FIREFOX_STRICT } }), /launch option firefoxUserPrefs is refused/);
+  await assert.rejects(launchDiskProfile({ firefoxUserPrefs: { ...FIREFOX_STRICT } }), /launch option firefoxUserPrefs is refused/);
 });

@@ -381,18 +381,41 @@ async function calibrate(browser, cpu) {
   return res;
 }
 
-async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeoutS }) {
+export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeoutS, block = [], after = null }) {
   const start = Date.now();
-  const out = { engine, mode, cpu, answers: {}, app: {}, unanswered: [], workers: [], workerAsks: 0, events: [], error: null };
+  const out = { engine, mode, cpu, answers: {}, app: {}, unanswered: [], workers: [], workerAsks: 0, events: [], error: null, hosts: {}, blocked: {} };
   const evm = { base: evmChain("base", evmSpan, start), robinhood: evmChain("robinhood", evmSpan, start) };
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const rec = await attachRecorders(context);
   await context.exposeBinding("__rs", (_src, e) => out.events.push(e));
   await context.addInitScript(PROBE, { sign: REAL.sign, app: REAL.app, button: CONTINUE });
   await route(context, { mode, sites, evm, near: nearVault(), out });
+  // asked before route's answers (a later route is asked first): every chain host the page reads, counted, and each
+  // host in `block` failed as a connection that never answers (card firefox-runs-before-release: Firefox's "CORS
+  // request did not succeed", status null)
+  await context.route(
+    () => true,
+    (r) => {
+      let h;
+      try {
+        h = new URL(r.request().url()).hostname;
+      } catch {
+        return r.fallback();
+      }
+      if (h === REAL.sign || h === REAL.app) return r.fallback();
+      out.hosts[h] = (out.hosts[h] ?? 0) + 1;
+      if (block.includes(h)) {
+        out.blocked[h] = (out.blocked[h] ?? 0) + 1;
+        return r.abort("failed");
+      }
+      return r.fallback();
+    },
+  );
   const page = await context.newPage();
   const workerEvents = [];
   page.on("worker", (w) => workerEvents.push(new URL(w.url()).pathname));
+  out.lines = [];
+  page.on("console", (m) => /^(pool pass:|restore: )/.test(m.text()) && out.lines.push(`${m.text()} @${((Date.now() - start) / 1000).toFixed(1)}s`));
   if (engine === "chromium") await slowWorkers(context, page, cpu, out);
   const top = (sel) => page.locator(sel).first();
   const app = page.frameLocator("iframe#app");
@@ -414,6 +437,8 @@ async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeoutS }) 
   } catch (e) {
     out.error = String(e.message).split("\n")[0];
   }
+  // a step after the restore on the same page (card firefox-runs-before-release: a Move's dry run), its answer kept
+  if (after && out.error === null) out.after = await after({ page, app, vis }).catch((e) => ({ error: String(e.message).split("\n")[0] }));
   const tap = out.events.find((e) => e.kind === "tap")?.t ?? null;
   const at = (f) => {
     const e = out.events.find(f);
@@ -445,7 +470,7 @@ async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeoutS }) 
   return out;
 }
 
-function line(o, label) {
+export function line(o, label) {
   const ok = o.error === null && o.shownMs !== null && o.doneMs !== null && o.unanswered.length === 0;
   const w = o.engine === "chromium" ? `${o.walkWorkers} walk Worker targets (CDP auto-attach)${o.cpu > 1 ? `, the rate on each: ${o.workerRates.map((x) => (typeof x === "number" ? `${x}x` : x)).join("; ") || "-"}` : ""}` : `${o.workerEvents} walk Workers (Playwright's worker events)`;
   const n = Object.values(o.answers).reduce((s, x) => s + x, 0);
@@ -460,7 +485,7 @@ function line(o, label) {
 }
 
 // ------------------------------------------------------------------------------------------------ the launches
-const siteTable = (sites) =>
+export const siteTable = (sites) =>
   Object.fromEntries(
     Object.entries(sites).map(([host, s]) => {
       const hf = path.join(s.root, "_headers");
@@ -470,7 +495,7 @@ const siteTable = (sites) =>
 
 /** Whether `engine`'s Worker script requests reach context.route: a Worker started on a name nothing resolves
  *  (probe.ct.test, served here), so a request the route misses reaches no host at all. */
-async function workerRouted(browser) {
+export async function workerRouted(browser) {
   const context = await browser.newContext();
   let seen = false;
   await context.route("https://probe.ct.test/**", (r) => {
