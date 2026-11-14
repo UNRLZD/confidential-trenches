@@ -67,6 +67,7 @@ import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana
 export { solanaWithdrawMinPart, withdrawNoteFloor, type WithdrawCosts } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 import { legCause, type PoolRide } from "./pool-sell.ts";
+import { within } from "./trade.ts";
 // moved to pool-spend.ts (card signpage-buy-own-spend: pool-buy.ts reads them too, with no import cycle); named here still
 export { HISTORY_PAGE, HISTORY_PASS, spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 
@@ -747,7 +748,9 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     const free = async (): Promise<NoteRecord> => {
       let n = await notes.get(p.noteId);
       if (n?.state === "HELD") {
-        await h.drop?.(p.noteId);
+        // the queue's drop waits in the note's turn (behind a swap and a state read): bounded as the wait below, past
+        // it the part stops with nothing held by it (card move-sends-or-says-why)
+        if (h.drop) await within(h.drop(p.noteId), WITHDRAW_FREE_MS, "the proof queue's drop").catch(() => stop("drop"));
         for (let waited = 0; (n = await notes.get(p.noteId))?.state === "HELD" && waited < WITHDRAW_FREE_MS; waited += 500) await wait(500);
       }
       if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");

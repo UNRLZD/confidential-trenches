@@ -96,8 +96,13 @@ export const SOLANA_PROVIDER_A = "https://solana-rpc.publicnode.com";
  *  getTransaction and getBlockTime of a fresh transaction; 40 getAccountInfo in 10 s, 40 answered. Of the other keyless
  *  mainnet providers a page can reach, none answers: api.mainnet-beta and api.mainnet 403, dRPC's free plan 400, Ankr a
  *  key, OnFinality 429, solanavibestation 429 from its third read (11 of 40 in 10 s). In SIGN_HOST's connect-src; the
- *  live check scripts/live-checks/signpage-throttled-provider-has-a-spare.mjs reads both seats' bytes after each deploy. */
-export const SOLANA_PUBLIC_SEAT: readonly string[] = Object.freeze([SOLANA_PROVIDER_A, "https://solana.api.pocket.network"]);
+ *  live check scripts/live-checks/signpage-throttled-provider-has-a-spare.mjs reads both seats' bytes after each deploy.
+ *  Solana Vibe Station's keyless endpoint after them (card move-sends-or-says-why: a Firefox page whose publicnode and
+ *  Pocket gave no answer at all left the Move's reads on the helper alone, which the device never signs on): its 429s
+ *  fail over as any member's, and with none open the seat waits the first to open. Read 2026-11-14 13:04Z with the
+ *  page's Origin: getSlot 200, allow-origin *, three of three. api.mainnet-beta is no member: its preflight answers 200
+ *  but every POST from the page's Origin 403 "Access forbidden" (the same read, three of three; 200 with no Origin). */
+export const SOLANA_PUBLIC_SEAT: readonly string[] = Object.freeze([SOLANA_PROVIDER_A, "https://solana.api.pocket.network", "https://public.rpc.solanavibestation.com"]);
 
 /** The release's trade deps: provider A device-direct and provider B the helper's /v1/rpc/solana (LD1), E(A) from the
  * device's own pool reads on both, and the kit's send paths with the helper's. */

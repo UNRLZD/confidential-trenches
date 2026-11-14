@@ -38,6 +38,10 @@ export const FRONT_CHECK_MS = 1_000;
 /** How long a tab that took the front waits for the tab before it to close its queues before it takes them. */
 export const QUEUES_WAIT_MS = 30_000;
 
+/** The longest a tap waits for the front (card move-sends-or-says-why): the queues lock is taken from a tab that keeps
+ *  it QUEUES_WAIT_MS, so a tap with no front at twice that has none coming; it then rejects, its run never starts. */
+export const TAP_WAIT_MS = 2 * QUEUES_WAIT_MS;
+
 export type ProofFront = {
   /** Whether this tab holds the device's proof queues now. */
   held(): boolean;
@@ -49,7 +53,8 @@ export type ProofFront = {
    *  tap under way): the queues lock is given back once every watcher's promise has settled. */
   onChange(f: (held: boolean) => void | Promise<void>): void;
   /** A tap in this tab: takes the front (stolen from any other tab, focus or not) and resolves once this tab holds it,
-   *  with the tap's end. Until every tap's end is called, a loss closes nothing. */
+   *  with the tap's end. Until every tap's end is called, a loss closes nothing. Rejects, its tap ended, when this tab
+   *  does not hold it within TAP_WAIT_MS. */
   tap(): Promise<() => void>;
 };
 
@@ -212,7 +217,17 @@ export function proofFront(locks: Locks | null, doc: FrontDoc | null, win: Front
       poke();
       if (taps === 0 && !shown()) release();
     };
+    let late = false;
+    if (!held)
+      later(() => {
+        late = true;
+        poke();
+      }, TAP_WAIT_MS);
     while (!held) {
+      if (late) {
+        end();
+        throw new Error(`the proof front: not held in ${TAP_WAIT_MS} ms`);
+      }
       ask(true);
       await new Promise<void>((r) => pokes.add(r));
     }

@@ -2,7 +2,8 @@
 // each note's change 0 or spendable), To's refusals, the chain's costs read on two RPCs (a plain send, a To with code:
 // its estimate and margin and its run on both, refused when it reverts or the two disagree), the release's calldata
 // byte for byte the pool's testnet run's encoding, and an owed send's finish after a reload. The two RPCs are fakes.
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
@@ -1259,4 +1260,40 @@ test("card evm-pool-amounts-are-standard-sizes: a Base or Robinhood withdraw rel
       }
     }
   }
+});
+
+// card move-sends-or-says-why: the part's drop of a note this page's queue holds waits in the note's turn, behind a swap
+// and a state read; one that never settled held the run in proving with no end, so a Move on it stayed at Processing.
+// Bounded as the wait for the note after it (EVM_WITHDRAW_FREE_MS, 30 s): the part stops, nothing bound or sent, the note as the
+// queue holds it.
+test("(card move-sends-or-says-why) a note the page's queue holds whose drop never settles: the run stops at 30 s with its cause, nothing bound or sent", async () => {
+  const world = await runWorld({ change: true, thisEpoch: true });
+  const held = (await world.notes.move(world.noteId, "UNSPENT", "HELD", { deadlineMs: NOW + 400_000n, context: "1" })).attempt!;
+  world.h.drop = () => new Promise<void>(() => {});
+  const flushed = async (): Promise<void> => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+  };
+  const pending = <T>(p: Promise<T>): Promise<T | "pending"> => Promise.race([p, flushed().then(() => "pending" as const)]);
+  let run!: Promise<{ stage: string; cause?: string }>;
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    run = runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+    await flushed();
+    mock.timers.tick(29_999);
+    assert.equal(await pending(run), "pending", "the drop waited for until 30 s");
+    mock.timers.tick(1);
+    await flushed();
+  } finally {
+    resetTimers(mock.timers);
+  }
+  // the stop's store writes take more turns than `pending` waits on a loaded box (14 Nov 13:19Z, the heavy box): held to
+  // 5 s of real time once the clock is real again, far short of a run held for good
+  const got = await Promise.race([run, new Promise<"pending">((r) => setTimeout(() => r("pending"), 5_000).unref())]);
+  assert.notEqual(got, "pending", "the run ends at 30 s");
+  const end = got as { stage: string; cause?: string };
+  assert.equal(end.stage, "stopped");
+  assert.match(end.cause ?? "", /^Error drop\b/, `the part's stop and its word: ${end.cause}`);
+  assert.deepEqual([world.chain.sends, world.chain.sent.length], [0, 0], "nothing sent");
+  const n = await world.notes.get(world.noteId);
+  assert.deepEqual([n?.state, n?.attempt], ["HELD", held], "the note as the queue holds it");
 });

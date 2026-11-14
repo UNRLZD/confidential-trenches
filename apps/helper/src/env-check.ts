@@ -55,7 +55,7 @@ export function checkPoolRpcOperators(env: Record<string, string | undefined>): 
 /** The signing page's public Solana seat, every member (packages/signpage/src/trade.ts SOLANA_PUBLIC_SEAT: provider A,
  *  then its spare; card signpage-throttled-provider-has-a-spare). The helper imports no page code, so
  *  packages/signpage/test/pool-testnet.test.ts reads this file's constant and holds the two equal. */
-export const PAGE_SOLANA_PUBLIC_SEAT: readonly string[] = Object.freeze(["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"]);
+export const PAGE_SOLANA_PUBLIC_SEAT: readonly string[] = Object.freeze(["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://public.rpc.solanavibestation.com"]);
 
 /**
  * Throws when a keyed Solana URL the helper would read /v1/rpc/solana from (rpc/rpc.ts RPC_UPSTREAMS.solana keyed
