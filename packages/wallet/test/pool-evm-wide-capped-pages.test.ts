@@ -80,6 +80,17 @@ const CASES = [
     words: () => "RPC error -32701: exceed maximum block range: 50000",
     wide: "https://base.api.pocket.network",
   },
+  {
+    // the pool as it ages: no cap under the sync's widest page on either side, 20M blocks (Base at 5 blocks a second,
+    // about 46 days), one EVM_POOL_LOG_PAGE_MAX_BLOCKS page after another before the card
+    name: "an aged pool: both providers at the sync's widest page, 800,000 blocks",
+    from: 54_325_671n,
+    to: 74_325_670n,
+    cap: 800_000n,
+    capped: "https://base-rpc.publicnode.com",
+    words: () => "RPC error -32701: exceed maximum block range: 800000",
+    wide: "https://base.api.pocket.network",
+  },
 ];
 
 for (const c of CASES) {
@@ -90,7 +101,7 @@ for (const c of CASES) {
     const wide = provider(c.wide, logs, () => null, queue);
     const got = await read(capped, wide, c.from, c.to, queue);
     assert.deepEqual(got.logs.map((l) => l.block), logs.map((l) => l.block), "every log once, in order");
-    // N pages at the cap: one after another they are N rounds (red at b9361e809's base 606fc443c: 60 and 61); with
+    // N pages at the cap: one after another they are N rounds (red at 606fc443c: 58, 62 and 28); with
     // EVM_POOL_LOG_PAGES_IN_FLIGHT in flight a quarter of them, plus the first pages that find the cap and each part's
     // one probe past it
     const pages = Number((c.to - c.from + c.cap) / c.cap);

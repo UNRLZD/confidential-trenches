@@ -1009,8 +1009,9 @@ export function evmPoolLogPager(): EvmLogPager {
  * With the rules' `inFlight` and no `progress` (the seats' read; a source's read keeps its pages in order), a page at or
  * under EVM_POOL_LOG_NARROW_BLOCKS, once the seat's provider answered the last page in full, with more than
  * EVM_POOL_LOG_PART_PAGES pages a part left, splits the rest into `inFlight` parts of contiguous blocks, each read so at
- * once (spreadLogs), their logs in block order; so does a wider page held at its provider's cap (twice its size refused
- * in this read) with a page a part left; never on a seat that walks (a list with a spare, evmPair).
+ * once (spreadLogs), their logs in block order; so does a wider page that can grow no more (at the rules' max, or held
+ * at its provider's cap: twice its size refused in this read) with a page a part left; never on a seat that walks (a
+ * list with a spare, evmPair).
  */
 async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, progress?: { to: bigint; logs: E[] }, part?: LogReadState): Promise<E[]> {
   const { max, slowHalves } = pager.rules;
@@ -1048,9 +1049,10 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     const size = p.size;
     // only once the provider seated now answered this read's last page in full at this size: a seat still walking
     // (a move back to a wide provider at its first call) is never spread
-    // a wide page held at its provider's cap (the size twice refused in this read) is spread too, once a page a part is
-    // left (card first-sign-in-reads-fast): its pages can grow no more, so one after another they are the read's bound
-    const atCap = size > EVM_POOL_LOG_NARROW_BLOCKS && refused !== null && size * 2n >= refused;
+    // a wide page that can grow no more (at the rules' max, or held at its provider's cap: twice its size refused in
+    // this read) is spread too, once a page a part is left (card first-sign-in-reads-fast): one after another, its pages
+    // are the read's bound
+    const atCap = size > EVM_POOL_LOG_NARROW_BLOCKS && (size * 2n > max || (refused !== null && size * 2n >= refused));
     if (parts > 1 && lastFull === via && (size <= EVM_POOL_LOG_NARROW_BLOCKS ? to - at + 1n > size * BigInt(parts) * EVM_POOL_LOG_PART_PAGES : atCap && to - at + 1n > size * BigInt(parts))) {
       out.push(...(await spreadLogs(rpc, k, filter, decode, at, to, pager, parts, size, { refused, held, hold, lastCeiling, widest }, signal, sleep)));
       break;
