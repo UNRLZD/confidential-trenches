@@ -1,0 +1,46 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-13T20:02:31.894Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-CQzwEewq.js",
+    "status": 200,
+    "found": [
+     "data-pools-total",
+     "pool-move-",
+     "move-flow",
+     "move-go",
+     "pool.move.dry"
+    ]
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-Dx-u0tis.css",
+    "status": 200
+   }
+  ],
+  "note": "this card: apps/terminal built fresh (vite build, 13 Nov 2026) and read from disk (--root); the page's script holds Private balance's total, Move, the move sheet's flow and button, and pool.move.dry"
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/",
+  "at": "2026-11-13T20:02:32.281Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-DnSHKF_p.js",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-C9zCN1fp.css",
+    "status": 200
+   }
+  ],
+  "note": "APP_HOST as deployed before this card (main 099bfd208), read over https: its script holds none of them"
+ }
+}

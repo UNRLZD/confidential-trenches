@@ -132,3 +132,22 @@ test("planted in the excerpt: depositFrom's Solana branch with the withdraw rule
   const dropped = JS.replace(site, "!X(`solana`)?{error:`not_allowed`}:S(i,r,t)");
   assert.deepEqual(judge(pinned(dropped)).lines, bad("fromUX"), "the pin guard dropped for the rule");
 });
+
+// card one-balance-buys-on-every-chain: the follow writes what U_X holds (holds) 0 before a carry and U_X's low each
+// in_pool round, as that card's build spells it: PASS; the in_pool write made before in_pool is shown, or the low written
+// while a note of U_X's is landing: FAIL on chainFirst
+test("planted in the excerpt: the follow's holds writes as one-balance-buys-on-every-chain's build spells them: PASS; one out of its place: FAIL on chainFirst", () => {
+  const pinned = (js) => facts(INDEX.replace(/integrity="sha384-[^"]+"/, `integrity="${facts("", js).sha384}"`), js);
+  const carry = new RegExp(`(&&(${N})>=(${N})\\.floor\\))(?=${N}&&!${N}&&)`);
+  const shown = new RegExp(`(if\\(!(${N})&&${N}!==\`in_pool\`&&await (${N})\\(\`in_pool\`\\),)(!\\2&&await (${N})\\.past\\()`);
+  assert.equal((JS.match(new RegExp(carry.source, "g")) ?? []).length, 1, "the carry's site is in the build once");
+  assert.equal((JS.match(new RegExp(shown.source, "g")) ?? []).length, 1, "the in_pool site is in the build once");
+  const low = new RegExp(`let\\[(${N}),(${N})\\]=await ${N}\\.balances\\(${N}\\),(${N})=\\1<\\2\\?\\1:\\2;`).exec(JS)[3];
+  const held = JS.replace(carry, "$1await $5.holds?.(0n),".replace("$5", shown.exec(JS)[5])).replace(shown, `$1$2||await $5.holds?.(${low}),$4`);
+  assert.notEqual(held, JS);
+  assert.deepEqual(judge(pinned(held)).lines, [], "both writes in their places");
+  const early = JS.replace(shown, `if(!$2&&await $5.holds?.(${low}),$2&&$3!==\`in_pool\`&&await $3(\`in_pool\`),$4`);
+  assert.deepEqual(judge(pinned(early)).lines, bad("chainFirst"), "the low written in the in_pool show's place");
+  const landing = JS.replace(shown, `$1await $5.holds?.(${low}),$4`);
+  assert.deepEqual(judge(pinned(landing)).lines, bad("chainFirst"), "the low written while a note of U_X's is landing");
+});

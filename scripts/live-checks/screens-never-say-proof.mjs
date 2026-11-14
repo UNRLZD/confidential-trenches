@@ -11,7 +11,9 @@
 //   - the trade box: on the pool path, no proof mark, no word of proof, ready or pending; the pool's balance shown (a
 //     dollar amount above $0), no Max line, and Buy with the busy look of a tap in flight (data-kind live, aria-busy)
 //     and its label pulsing as the app's skeletons do (trb-skp), no word;
-//   - Portfolio's pool block: one column header, Balance, and no word of proof, ready or pending;
+//   - Portfolio's Private balance (card portfolio-moves-money-between-chains): its heading "Private balance" with its
+//     total, at least one chain's row, no column header (a Ready or Pending column is one), and no word of proof,
+//     ready or pending;
 //   - the deposit sheet as it opens: no word of proof, ready or pending;
 //   - the app's scripts (every script the frame loaded, and every script those name, fetched as served): none holds a
 //     removed word as a string ("Proof ready", "Making proof", "Ready", "Pending").
@@ -86,7 +88,8 @@ export function judge(rec) {
       say(b.cta?.kind === "live" && b.cta?.busy === "true" && b.cta?.pulse === "trb-skp", `${n}: Buy ${JSON.stringify(b.cta)}, want the busy look of a tap in flight (live, aria-busy) with its label's pulse (trb-skp)`);
     }
     const p = r.pools;
-    say(!!p && JSON.stringify(p.heads) === '["Balance"]' && !NAMED.test(p.text ?? ""), `${n}: Portfolio's pools ${p ? `head ${JSON.stringify(p.heads)}, ${NAMED.test(p.text ?? "") ? `say ${JSON.stringify(p.text)}` : "name no proof"}` : "not drawn"}`);
+    const pOk = !!p && p.head === "Private balance" && /^\$[\d,]+\.\d\d$/.test(p.total ?? "") && (p.rows?.length ?? 0) > 0 && JSON.stringify(p.heads) === "[]" && !NAMED.test(p.text ?? "");
+    say(pOk, `${n}: Portfolio's pools ${p ? `head ${JSON.stringify(p.heads)}, heading ${JSON.stringify(p.head ?? null)} ${JSON.stringify(p.total ?? null)}, rows ${JSON.stringify(p.rows ?? [])}, ${NAMED.test(p.text ?? "") ? `say ${JSON.stringify(p.text)}` : "name no proof"}` : "not drawn"}`);
     const d = r.deposit;
     say(d !== null && d !== undefined && !NAMED.test(d), `${n}: the deposit sheet ${d == null ? "not opened" : NAMED.test(d) ? `says ${JSON.stringify(d)}` : "names no proof"}`);
   }
@@ -113,7 +116,10 @@ const BOX = (phone) => {
 };
 const POOLS = () => {
   const b = [...document.querySelectorAll("[data-screen='portfolio'] .pools[data-pools]")].find((e) => e.getClientRects().length);
-  return b ? { heads: [...b.querySelectorAll(".plc")].map((h) => h.textContent), text: b.innerText.replace(/\s+/g, " ").trim() } : null;
+  if (!b) return null;
+  const t = (e) => e?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+  // the heading and its total, any column header drawn, each chain's row, and the block's whole text
+  return { head: t(b.querySelector(".plk")), total: t(b.querySelector("[data-pools-total]")), heads: [...b.querySelectorAll(".plc")].filter((h) => h.getClientRects().length).map((h) => h.textContent), rows: [...b.querySelectorAll("[data-pool]")].map((r) => r.getAttribute("data-pool")), text: b.innerText.replace(/\s+/g, " ").trim() };
 };
 const SHEET = () => {
   const s = [...document.querySelectorAll("[data-sheet='deposit']")].find((e) => e.getClientRects().length);

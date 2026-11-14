@@ -462,9 +462,18 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   // release's W, signs only the deposit checkEvmCarry passed, its key zeroed in a finally; test/pool-carry-evm.test.ts
   // "every key zeroed"), and where the rebuild finds the Ws its buy records lack (signpage src/pool-holdings-evm.ts
   // evmHoldings: W_{evm,l,j} of each spent note, its key zeroed at once for the address, no signer exported; card
-  // evm-buy-and-sell-on-mainnet).
+  // evm-buy-and-sell-on-mainnet). And where the exit tool's EVM release and sweep sign with the words alone (wallet
+  // src/pool/evm-exit.ts: evmExitWithdrawSignature, W_{evm,l,j}, refused unless it is the relay data's recipient, signs
+  // only the pool's Withdraw of its note; evmExitSignSend, W refused any send but a plain one to an address; each key
+  // zeroed in a finally; evmExitW zeroes it at once for the address, no signer exported; test/pool-evm-exit.test.ts;
+  // card exit-evm-pools-with-the-words). And where the exit tool's Solana release and onward send sign with the words
+  // alone (packages/exit/src/sol-out.ts: solExitWith's release, W_{sol,l,j} of the note it proves, refused unless it is
+  // the bytes' second signer, signs only the release the program's context was checked against, beside F; sendOnward,
+  // W refused unless it is the W read, signs only its one System transfer to the typed address; each key zeroed in a
+  // finally, and every other call zeroes it at once for the address; test/sol-out.test.ts (b); card
+  // exit-with-only-the-words).
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-carry-evm.ts", "packages/signpage/src/pool-found.ts", "packages/signpage/src/pool-holdings-evm.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw-evm.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/deposit/delegate.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/near/swap-delegate.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
+  assert.deepEqual(calls, ["packages/exit/src/sol-out.ts", "packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-carry-evm.ts", "packages/signpage/src/pool-found.ts", "packages/signpage/src/pool-holdings-evm.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw-evm.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/deposit/delegate.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/near/swap-delegate.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-exit.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
 });
 
 // ---------- fold 2 ----------
@@ -1419,6 +1428,28 @@ test("a W's history the reader cannot tell is no buy: none at all, a listed tran
   assert.deepEqual(g2 !== null && g2 !== "none" ? { mint: g2.mint, program: g2.program, soldOut: g2.soldOut } : g2, { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM, soldOut: false }, "a second page read");
   // then W's next transaction, which the route no longer returns: W's trades read so far, not sold out
   assert.deepEqual(l2.log.map((l) => l.method), ["getSignaturesForAddress", "getSignaturesForAddress", "getTransaction", "getTransaction"]);
+});
+
+// Card closed-positions-show-every-trade: a buy of several pieces (card owners-solana-buy-lands) pays W by plain
+// releases (tag 2, W a signer) before its own tag 3, as 33SLRx then 55LqP9 did on mainnet at 18:05Z on 13 Nov. Read at
+// the first tag 2 alone, W was "none" for good: no buy record, no trades, so a device signed in again listed neither the
+// coin nor its closed round trip.
+test("a buy of several pieces: W's plain releases before its tag 3 are read past, and the buy with its trades is W's; a release with no tag 3 is none only once W moved on or it is old", async () => {
+  const piece = (n: number) => txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [] });
+  const sale = txOf({ signers: [W], pre: [tb(4, MINT_A, W, 5_000_000n)], post: [tb(4, MINT_A, W, 0n)] });
+  // newest first: the sale, the tag 3, two pieces
+  const h = { sigs: [{ signature: "sell", err: null }, { signature: "buy", err: null }, { signature: "p2", err: null }, { signature: "p1", err: null }], txs: new Map<string, unknown>([["p1", piece(1)], ["p2", piece(2)], ["buy", buyTx()], ["sell", sale]]) };
+  const got = await solanaBuyReader(historyRpc(new Map([[W, h]])).rpc, BUY_POOL).read(W);
+  assert.ok(got !== null && got !== "none", `the buy read past the pieces, not ${JSON.stringify(got)}`);
+  assert.deepEqual({ mint: got.mint, txs: got.txs?.map((t) => t.signature), soldOut: got.soldOut }, { mint: MINT_A, txs: ["buy", "sell"], soldOut: true }, "the tag 3 is the buy, the sale after it");
+  // the pieces landed and their tag 3 not yet: no answer, read again later, never none
+  const fresh = (t: unknown) => ({ ...(t as object), blockTime: Math.floor(Date.now() / 1000) });
+  const young = { sigs: [{ signature: "p1", err: null }], txs: new Map<string, unknown>([["p1", fresh(piece(1))]]) };
+  const yr = historyRpc(new Map([[W, young]]));
+  assert.equal(await solanaBuyReader(yr.rpc, BUY_POOL).read(W), null, "a fresh release with no tag 3 yet");
+  // a release, then W's own send out of it with no buy (its pieces swept back): none, for good
+  const swept = { sigs: [{ signature: "sweep", err: null }, { signature: "p1", err: null }], txs: new Map<string, unknown>([["p1", fresh(piece(1))], ["sweep", txOf({ signers: [W] })]]) };
+  assert.equal(await solanaBuyReader(historyRpc(new Map([[W, swept]])).rpc, BUY_POOL).read(W), "none", "W moved on with no buy");
 });
 
 // Review of 42a99f81 (c): each buy read's call is a round of its gate, and its answer clears the gate's doubt, as the

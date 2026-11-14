@@ -51,33 +51,37 @@ const WIDTHS = [
 ];
 const SCHEMES = ["dark", "light"];
 // the buy states: name, query, the path, whether Buy has the busy look (money being made spendable), Bal, the line above
-// the button, whether the button is on, the request one tap sends (null: none)
+// the button, whether the button is on, the request one tap sends (null: none). Bal on a pool is the pool and Cash's NEAR
+// part (the fixture's $73.18), which a buy there moves in first (card one-balance-buys-on-every-chain)
 const BUYS = [
-  ["sol-ready", "pool=sol-ready&amt=0.16", "pool", false, "$0.93 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
-  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", false, "$0.93 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
-  ["sol-over", "pool=sol-ready&amt=0.17", "pool", false, "$0.93 available", "Max $0.16", false, null],
-  ["sol-making", "pool=sol-making&amt=0.16", "pool", true, "$0.93 available", "", false, null],
-  ["sol-load", "pool=sol-load&amt=0.16", "pool", true, "$0.93 available", "", false, null],
-  ["sol-none", "pool=sol-none&amt=0.16", "pool", false, "$0.93 available", "", false, null],
-  ["sol-empty", "pool=sol-empty", "pool", false, "$0 available", "", false, null],
-  ["base-chunk", "pool=base-ready&amt=3.50", "pool", false, "$10.50 available", "Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
-  ["base-other", "pool=base-ready&amt=3", "pool", false, "$10.50 available", "Max $3.50", false, null],
-  ["base-making", "pool=base-making&amt=3.50", "pool", true, "$10.50 available", "", false, null],
+  ["sol-ready", "pool=sol-ready&amt=0.16", "pool", false, "$74.11 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  // the pool's own part with no Cash: Bal is the pool alone, so a wrong pool number still fails
+  ["sol-nocash", "pool=sol-ready&amt=0.16&cash=0", "pool", false, "$0.93 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", false, "$74.11 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-over", "pool=sol-ready&amt=0.17", "pool", false, "$74.11 available", "Max $0.16", false, null],
+  ["sol-making", "pool=sol-making&amt=0.16", "pool", true, "$74.11 available", "", false, null],
+  ["sol-load", "pool=sol-load&amt=0.16", "pool", true, "$74.11 available", "", false, null],
+  ["sol-none", "pool=sol-none&amt=0.16", "pool", false, "$74.11 available", "", false, null],
+  ["sol-empty", "pool=sol-empty", "pool", false, "$73.18 available", "", false, null],
+  ["base-chunk", "pool=base-ready&amt=3.50", "pool", false, "$83.68 available", "Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
+  ["base-other", "pool=base-ready&amt=3", "pool", false, "$83.68 available", "Max $3.50", false, null],
+  ["base-making", "pool=base-making&amt=3.50", "pool", true, "$83.68 available", "", false, null],
   ["vault", "amt=25", "vault", false, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
-const FEE = { "sol-ready": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
+const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
 // the amount field marked wrong: over one tap, or not a whole chunk on Base; never while a proof is still making (the
 // amount is not what is wrong) or on an amount the pool can take
 // You receive on a Solana pool buy (card solana-buy-preview-complete): the dry answer's out for the typed amount (the
 // recorded curve coin's 35,294.263662 at 0.001 SOL), over the fixture's set preview, which the live source has none of
-const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH" };
-const BAD = { "sol-ready": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
+const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-nocash": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH" };
+const BAD = { "sol-ready": "false", "sol-nocash": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
 // the presets row as data-preset:disabled:text per button: the four on Solana (all over one tap's most on the pool, $100
 // over the vault's max); on Base the chunk's one button, "—" and off while no proof is ready
 const FOUR_OFF = "10.00:true:$10 25.00:true:$25 50.00:true:$50 100.00:true:$100";
 const PRESET_ROW = {
   "sol-ready": FOUR_OFF,
+  "sol-nocash": FOUR_OFF,
   "sol-feedown": FOUR_OFF,
   "sol-over": FOUR_OFF,
   "sol-making": FOUR_OFF,
@@ -230,12 +234,14 @@ try {
           const recv = await settle(async () => norm(await page.locator('[data-testid="trade-receive"]').innerText()), RECEIVE[name]);
           check(recv === RECEIVE[name], `${tag}: You receive "${recv}", want "${RECEIVE[name]}"`);
         }
-        // the box's own reads (pool.buy.dry): this coin's Max, one a state at most, and the Fee of the typed amount, one an
-        // amount; on Solana only, and never a buy
+        // the box's own reads (pool.buy.dry): this coin's Max, one a state at most, on the box's own pool chain (Base too,
+        // for its with_cash: card one-balance-buys-on-every-chain), and the Fee of the typed amount, one an amount, on
+        // Solana only; never a buy
         const reads = await page.evaluate(() => window.__reads);
         const maxReads = reads.filter((c) => c.params.amount === undefined);
         const feeReads = reads.filter((c) => c.params.amount !== undefined);
-        check(maxReads.length <= 1 && feeReads.length <= 1 && reads.every((c) => c.params.chain === "solana" && name.startsWith("sol")), `${tag}: the Max and Fee reads ${JSON.stringify(reads)}`);
+        const own = name.startsWith("sol") ? "solana" : name.startsWith("base") ? "base" : null;
+        check(maxReads.length <= 1 && feeReads.length <= 1 && maxReads.every((c) => c.params.chain === own) && feeReads.every((c) => c.params.chain === "solana" && own === "solana"), `${tag}: the Max and Fee reads ${JSON.stringify(reads)}`);
         // one tap: the ask the box's own checks passed, or nothing
         await cta.click({ force: true });
         await page.clock.runFor(100);

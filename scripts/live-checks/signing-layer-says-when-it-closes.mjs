@@ -43,9 +43,10 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 
 /** The api's notice: posted with a hello read since the last ready, at the current level alone, the type and the id
  *  alone (groups: id, hello flag, level, post); from kit 1.14 (card solana-buy-preview-complete) at the current level
- *  or kit-v1.13's, the two that read it, as NOTICE_1_14 (its groups the same, in the same order). */
+ *  or kit-v1.13's, the two that read it, as NOTICE_1_14 (its groups the same, in the same order); from kit 1.15 (card
+ *  one-balance-buys-on-every-chain) kit-v1.14's level too, in the same expression. */
 const NOTICE = /closed:([\w$]+)=>\{([\w$]+)&&([\w$]+)===`current`&&([\w$]+)\(\{v:1,type:`closed`,id:\1\}\)\}/;
-const NOTICE_1_14 = /closed:([\w$]+)=>\{!([\w$]+)\|\|([\w$]+)!==`current`&&\3!==`1\.13`\|\|([\w$]+)\(\{v:1,type:`closed`,id:\1\}\)\}/;
+const NOTICE_1_14 = /closed:([\w$]+)=>\{!([\w$]+)\|\|([\w$]+)!==`current`(?:&&\3!==`1\.14`)?&&\3!==`1\.13`\|\|([\w$]+)\(\{v:1,type:`closed`,id:\1\}\)\}/;
 const esc = (v) => v.replace(/\$/g, "\\$");
 /** The shell's open: the id recorded to tell, over the frame it opened over, unless done, shown or to tell already
  *  (groups: id, done, shown, to tell, frame). */

@@ -58,10 +58,12 @@ import { chainNow, failAs, type Pool, type ReadyProof } from "../../wallet/src/p
 import { openProofQueue, PassFail, type ProofQueue, type QueuePass } from "../../wallet/src/pool/queue.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
+import { proofFront, type ProofFront } from "./proof-front.ts";
 import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, type TradeStore } from "./trade.ts";
 import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_PIECES, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, solanaSettleSpentSet, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
+import { exitsOf, poolExit, type PoolExitDeps } from "./pool-exit.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, PoolSendRefused, poolBuyKind, resumePieces, type OwedPieces, type PiecesOwed, type PoolBuyHost } from "./pool-buy.ts";
 import { heldWs, ownWs } from "./pool-found.ts";
@@ -99,7 +101,7 @@ import { evmIndexStore, type EvmIndexStore } from "./evm-index-store.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
-import { BUY_NONE_KEY, solBuyRecords, tradesDone, tradesFrom, writeTradeOps, type TradesStore } from "./sol-buy-records.ts";
+import { BUY_NONE_KEY, BUY_NONE_MARK, buyNoneMarked, solBuyRecords, tradesDone, tradesFrom, writeTradeOps, type TradesStore } from "./sol-buy-records.ts";
 import { fillTradeOps, type FillStore } from "./trade-fill.ts";
 import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 
@@ -621,6 +623,10 @@ export type TestnetPage = {
    *  syncs' holds are read and written through it alone; tests without it give store(). */
   held?(): Promise<WalletStore>;
   seed64(): Promise<Uint8Array>;
+  /** Whether a seed is held now (the page's frame state, src/state.ts): a state read reads nothing while it says no
+   *  (card one-balance-buys-on-every-chain: the proof front, taken at load, focus and show signed in or not, ran one
+   *  and read the EVM pools with no seed). main.ts gives it always; tests without it read as signed in. */
+  signedIn?(): Promise<boolean>;
   /** pool.withdraw: the page's own screen opened for the chain and the request's op id (src/main.ts); null refuses. */
   openWithdraw?(chain: PoolChain, ctx: KindContext): HostAnswer<"pool.withdraw"> | null;
   /** The page's own USD price of a chain's pool asset (src/pool-price.ts), for a pool buy's cost; null when none is fresh. */
@@ -644,6 +650,9 @@ export type TestnetOver = {
   tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", readonly string[]>>>;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
   locks?: Pick<LockManager, "request" | "query"> | null;
+  /** The device's one proving tab (src/proof-front.ts, on this page's navigator.locks, document and window otherwise):
+   *  tests plant one per tab. */
+  front?: ProofFront;
   /** The Solana pool's pin (PAGE_SOL_PIN otherwise): tests run the page's own flow on a fake pool; null, none (a build
    *  with no Solana pin, as SIGN_HOST's until the pool deploys). */
   pin?: SolanaPoolPin | null;
@@ -933,6 +942,16 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     solanaStop = new AbortController();
   };
   const prover = over.prover ?? proverHost();
+  // the device's one proving tab (card robinhood-note-spendable): every pool's queue opens only while this tab holds it,
+  // and all close, their notes freed, when it loses it, so a note one tab proved is never stuck HELD out of the tab in use
+  const front: ProofFront =
+    over.front ??
+    proofFront(
+      over.locks === undefined ? (globalThis.navigator?.locks ?? null) : over.locks,
+      typeof document === "undefined" ? null : document,
+      typeof window === "undefined" ? null : window,
+    );
+  const notFront = (): Error => new Error("another tab of this page holds the device's proof queues");
   const solanaDepositKind = over.depositKinds?.solana ?? poolDepositKind;
   const evmDepositKind = over.depositKinds?.evm ?? poolDepositEvmKind;
 
@@ -958,6 +977,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the proof queue: opened at the first landing, closed at sign out
   let open: Promise<OpenQueue> | null = null;
   const openQueue = async (): Promise<OpenQueue> => {
+    if (!front.held()) throw notFront();
     const notes = await openNoteStore(await page.store());
     let seed64: Uint8Array | null = null;
     try {
@@ -1065,11 +1085,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     fillStop.abort();
     fillStop = new AbortController();
     fillAgain = false;
-    // every queue, Solana's and each EVM pool's: its notes freed, its seed copy zeroed, its note store closed
+    const closing = closeQueues();
+    prover.stop();
+    await closing;
+  };
+  // every queue, Solana's and each EVM pool's: its notes freed, its seed copy zeroed, its note store closed
+  const closeQueues = async (): Promise<void> => {
     const all = [open, ...evmQueues.values()];
     open = null;
     evmQueues.clear();
-    prover.stop();
     for (const p of all) {
       if (!p) continue;
       const q = await p.catch(() => null);
@@ -1080,6 +1104,36 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         q.notes.close();
       }
     }
+  };
+  // the front lost (hidden, left, or taken by the tab in use), once no tap of this tab is under way: every queue closed,
+  // its notes freed before the queues lock goes back (src/proof-front.ts), so the tab that took it proves them at its
+  // first pass; the front taken: a state read, whose passes open the queues and prove, and the app told to read again
+  front.onChange((held) => {
+    if (!held) return closeQueues().then(() => watchers.forEach((f) => f()), () => {});
+    void stateRead().then(() => watchers.forEach((f) => f()), () => {});
+  });
+  // a tap's run (a buy's, from its first read of the ready proofs to its take): the front taken at the tap, and kept
+  // until the take (or the run's end), so a window switch never closes the queue under it; a tap in a tab that did not
+  // hold the front waits for the queue to open and for its pass (`pass`), as a tap right after a load does
+  const tapRun = (pass: () => Promise<unknown>) => {
+    let tapped: Promise<() => void> | null = null;
+    let first: Promise<void> | null = null;
+    let over = false;
+    return {
+      at: (): Promise<void> =>
+        (first ??= (async () => {
+          if (over) return;
+          const cold = !front.held();
+          tapped = front.tap();
+          await tapped;
+          if (cold) await pass().catch(() => {});
+        })()),
+      end: (): void => {
+        if (over) return;
+        over = true;
+        void tapped?.then((f) => f());
+      },
+    };
   };
 
   // a deposit's own run reads as a trade, and so does the state reads' settle of the INCOMING notes (settleSolana): it
@@ -1173,6 +1227,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return h;
   };
   const openEvmQueue = async (chain: "base" | "robinhood"): Promise<OpenQueue> => {
+    if (!front.held()) throw notFront();
     const e = evmPool(chain);
     if (e === null) throw new Error(`no ${chain} pool on this page's network`);
     const notes = await openNoteStore(await page.store());
@@ -1420,6 +1475,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // pool-buy-record-never-stays-sent)
     landed: (noteId, attempt, withdrawn, block) => void markLanded(noteId, attempt, withdrawn, block).catch(() => {}),
     marks: async () => readReservedMarks(await page.store()),
+    // a filled buy's trade op priced at the page's own price (card closed-positions-show-every-trade)
+    price: (c) => page.price?.(c) ?? null,
   });
   const evmBuy = (chain: "base" | "robinhood") => {
     // first, alone: only where the build carries the chain's withdraw (poolWayOut); a swap that misses its floor leaves
@@ -1430,7 +1487,27 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // the buy holds the list's hosts from its run's start to its end: the passes' reads wait, the buy's own go first
     return (over.tradeKinds?.evmBuy ?? poolBuyEvmKind)(() => {
       const release = holdHosts(e.list.map((r) => r.url));
-      return { ...evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain)), end: release };
+      const h = evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain));
+      // the front taken at the tap's first read and kept to its take (tapRun)
+      const t = tapRun(() => evmProofs(chain));
+      return {
+        ...h,
+        ready: async () => {
+          await t.at();
+          return h.ready();
+        },
+        take: async (id: string, attempt: string, nullifier?: bigint) => {
+          try {
+            return await h.take(id, attempt, nullifier);
+          } finally {
+            t.end();
+          }
+        },
+        end: () => {
+          t.end();
+          release();
+        },
+      };
     });
   };
   // an EVM buy's or sell's run: the chain's positions read again at its end stage (both kinds post it as progress, the
@@ -1648,6 +1725,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // the session's sign out (signingOut, at its tap): it ends a wait between the sale's reads' attempts
       stop: evmStop.signal,
       stopped: ((at) => () => signOuts !== at)(signOuts),
+      // a filled sale's trade op priced at the page's own price (card closed-positions-show-every-trade)
+      price: (c) => page.price?.(c) ?? null,
     });
     // a sale's record written: its token held (evmHolds), the chain read again
     const record: typeof host.record = async (o) => {
@@ -2008,6 +2087,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         throw e;
       }
     };
+    // the front taken at the tap's first read and kept until the take is sent (the run's release) or the run ends (tapRun)
+    const t = tapRun(() => proofs());
     // the proof this run's take handed out: what a follow of its note reads (pool-buy.ts poolBuyKind follow)
     let taken: ReadyProof<SolanaReleaseRequest> | null = null;
     return {
@@ -2020,6 +2101,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       signal: solanaStop.signal,
       // none ready (a page that has landed no deposit since it loaded has run no pass): a pass starts for the next tap
       ready: async (early) => {
+        await t.at();
         const queue = await q();
         const list = early === undefined ? queue.ready() : await queue.readyAt(early);
         if (list.length === 0) void proofs();
@@ -2046,6 +2128,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       sendPieces: (pool, txs) => helperPoolSendPieces(pool, txs, over.fetch),
       // a buy of several pieces' owed record, before its take (resumePieces, on the state reads)
       piecesOwed: piecesOwedOf(page.store),
+      // a buy that spends its change in the same tap (card buy-spends-its-change-in-the-same-tap): the notes' values, and a
+      // first round's change (the note its settle wrote, parent the released note) proved to that round's W
+      carry: {
+        values: async (ids) => {
+          notes ??= await openNoteStore(await page.store());
+          const want = new Set(ids);
+          return new Map((await notes.list()).flatMap((n) => (want.has(n.id) && n.leaf !== undefined ? [[n.id, n.leaf.value] as const] : [])));
+        },
+        prove: async (parentId, to) => {
+          notes ??= await openNoteStore(await page.store());
+          const c = (await notes.list()).find((n) => n.parent === parentId);
+          if (c === undefined) throw new Error(`no change written for note ${parentId}`);
+          return (await q()).proveFor(c.id, to, solanaStop.signal);
+        },
+      },
       // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy), and kept for the session: read
       // on both RPCs with the amount, so a sell of it asks no decimals read (card sell-first-read-waits-out-a-throttle)
       outDecimals: (wallet, d, mint) => {
@@ -2077,7 +2174,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           seed64.fill(0);
         }
       },
-      release,
+      release: () => {
+        t.end();
+        release();
+      },
       // the release read landed on both RPCs: the balance counts only the note's change until the settle writes it
       // (../../wallet/src/pool/balances.ts landed), and the app reads the state again
       landed: (noteId, attempt, withdrawn) => {
@@ -2085,6 +2185,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         void markLanded(noteId, attempt, withdrawn).catch(() => {});
       },
       end: () => {
+        t.end();
         release();
         notes?.close();
         // the run's note settled now, not on the next state read: a buy that ended not landed has read its blockhash past
@@ -2431,7 +2532,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (!page.held) throw new Error("no wallet store is open");
       const st = await page.held();
       if (buy === "none") {
-        await st.update("meta", BUY_NONE_KEY, (v) => ({ ...asRecord(v), [address]: true }));
+        await st.update("meta", BUY_NONE_KEY, (v) => ({ ...asRecord(v), [address]: BUY_NONE_MARK }));
         return false;
       }
       let wrote = false;
@@ -2654,7 +2755,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       owed: owedNoted(page.store),
       bought: buyMints(page.store),
       // the restore's rebuild's "read, no buy" mark (sol-buy-records.ts), proven by the rent back before it holds W
-      buyNone: async (address) => Object.hasOwn(asRecord(await (await page.store()).get("meta", BUY_NONE_KEY)), address),
+      buyNone: async (address) => buyNoneMarked(await (await page.store()).get("meta", BUY_NONE_KEY), address),
       // a load's rent backs hold the positions' passes off only while a W of theirs is read (review of 20ba2481b, P3-8)
       preempt: () => {
         const hold = positions.preempt();
@@ -2778,6 +2879,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const stranded = await resumePieces({
       owed: piecesOwed,
       state,
+      // a note a tap of this page holds (pool.buy's claim): that tap decides its W
+      busy: (id) => claimed.has(id),
       // whose spend the buy's own note is, on both RPCs at finalized (pool-spend.ts spendOwner, as followBuys reads a
       // buy's): this buy's tag 3, another's, or not known yet; W's history read on across the state reads from piecesPlaces
       owner: async (r) => {
@@ -2962,7 +3065,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the EVM pools' open deposits, their RESERVED notes and their queues' passes run on every state read beside the
   // Solana pool's part (none pinned: only theirs): neither waits on the other, and one that fails or hangs never stops
   // the other
-  const stateRead = (): Promise<void> => {
+  const stateRead = async (): Promise<void> => {
+    // signed out, nothing: no seed, no notes and nothing to prove, so no pool is read and no turn pass armed, whoever
+    // asks (the front's take at load, focus or show, a tap's take, main.ts's state read)
+    // and a sign out while that is read (stopReads) ends it too: the reads below would take the new controller and run on
+    const outs = signOuts;
+    if (page.signedIn && (!(await page.signedIn().catch(() => false)) || signOuts !== outs)) return;
+    // the tab in use takes the device's proof queues (a hidden one gives them back)
+    front.want();
     armTurn();
     const evm = evmRead().then(() => finishOnward()).catch(() => {});
     if (scope === null) return evm;
@@ -3073,12 +3183,25 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes.close();
     }
   };
+  // a payout to another chain (card pool-withdraws-to-any-chain, src/pool-exit.ts): mainnet only, at the page's prices
+  const exitDeps: PoolExitDeps = {
+    network: POOL_TESTNET ? "testnet" : "mainnet",
+    price: (chain) => page.price?.(chain) ?? null,
+    ...(over.fetch ? { fetch: over.fetch } : {}),
+    stop: () => solanaStop.signal,
+  };
+  const exits = (chain: PoolChain) => ((x) => (x === undefined ? {} : { exits: x }))(exitsOf(exitDeps, chain));
   const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
     if (!locks || !wayOut(ready.chain) || (ready.chain === "solana" ? pin === undefined : evmPool(ready.chain) === null)) return;
     withdrawing.add(opId);
+    // the front taken at the tap and kept to the run's end (src/proof-front.ts tap): the tab that held it closes its
+    // queues first, so every note it held is free for this run's plan, and no window switch closes a queue it drops from
+    let tapped: (() => void) | null = null;
     try {
+      tapped = await front.tap();
       await (ready.chain === "solana" ? withdrawRun(ready, opId) : evmWithdrawRun(ready.chain, ready, opId));
     } finally {
+      tapped?.();
       withdrawing.delete(opId);
     }
   };
@@ -3173,7 +3296,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const ask = { kind: "pool.withdraw", chain, token: null, amount: 0n, slippageBps: 0, decimals: 18 } as const;
         // the run's planned notes out of every tab's proof queue and every other plan until it ends (as the Solana run's)
         const keepOut = async (ids: readonly string[], spanMs: bigint): Promise<void> => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()), spanMs));
-        const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep, keepOut }, { ...ask }, ready.to, ready.amount, ready.maxFee);
+        const exit = poolExit(exitDeps, ready);
+        const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep, keepOut, ...(exit ? { exit } : {}) }, { ...ask }, ready.to, ready.amount, ready.maxFee);
         write(end.stage, end.txs, end.pending, end.arrived, end.held);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
         // why a run or a part ended on a throw, on the record and the page's console (public words only: legCause), as
@@ -3196,7 +3320,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       chain,
       keys: { pool: e?.pin.pool ?? "" },
       funds: (to?: string) => (e === null ? Promise.reject(new Error("no flow for this chain")) : evmFunds(chain, to)),
-      ...(e !== null && locks ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
+      ...(e !== null && locks ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw, ...exits(chain) } : {}),
     };
   };
   const withdrawRun = async (ready: PoolReady, opId: string): Promise<void> => {
@@ -3265,6 +3389,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             marked: () => {
               for (const f of watchers) f();
             },
+            ...((exit) => (exit ? { exit } : {}))(poolExit(exitDeps, ready)),
           },
           { ...ask },
           ready.to,
@@ -3329,11 +3454,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     chain,
     keys: chain === "solana" && pin !== undefined ? { pool: solanaPoolOf(pin.program).pool, program: pin.program, feePayer: pin.feePayer } : { pool: "" },
     funds: () => (chain === "solana" && pin !== undefined ? funds() : Promise.reject(new Error("no flow for this chain"))),
-    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw } : {}),
+    ...(chain === "solana" && pin !== undefined ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw, ...exits(chain) } : {}),
   });
+  // a sell tapped here: the front taken at the tap, so the sale's return note is proved in the tab in use; the sell
+  // itself spends no proof and does not wait for it
+  const sellTapped = (): void => void front.tap().then((end) => end(), () => {});
   return {
-    flow: (ask, ctx) =>
-      ask.chain !== "solana"
+    flow: (ask, ctx) => {
+      if (ask.kind === "pool.sell") sellTapped();
+      return ask.chain !== "solana"
         ? ask.kind === "pool.deposit"
           ? (evmDeposit(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
           : ask.kind === "pool.buy"
@@ -3353,7 +3482,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               ? recordedSell(ask, ctx)
               : ask.kind === "pool.withdraw" && page.openWithdraw
                 ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
-                : { error: "not_allowed" },
+                : { error: "not_allowed" };
+    },
     depositFrom: (params, from, ctx) => {
       let ask: PoolAsk;
       try {

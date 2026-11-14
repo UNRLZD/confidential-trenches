@@ -1,29 +1,29 @@
 {
  "_note": {
-  "good": "this card's build at f9ab10a30 (reviews P1-1, P1-2 and P2-1 of 1d3b96d9c in)",
+  "good": "card pool-amounts-are-standard-sizes's build, packages/signpage/public/app.js as built locally from 06c1a9abb",
   "bad": "main fe1ad9879's build, before this card",
   "t1": "the card's T1 build at 14a602c12, before the least finish, the sale's one deposit and the ride",
-  "before1d": "the card's 1d3b96d9c build, before the review of it: the rest paid to the pool's account, tokens on any account keep W whole, the ride taken at the tap's next read"
+  "before1d": "the card's 1d3b96d9c build, before the review of it: the rest paid to the pool's account, tokens on any account keep W whole, the ride taken at the tap's next read",
+  "liveBefore": "SIGN_HOST as served at 2026-11-13T21:20Z, before card pool-amounts-are-standard-sizes"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-stOrRmkRyS7AOqxsHuiz8/shZNC1YBn+4Wm4f2XZoAY1+086++Yk5ECr5hgF2GNP\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-stOrRmkRyS7AOqxsHuiz8/shZNC1YBn+4Wm4f2XZoAY1+086++Yk5ECr5hgF2GNP",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-t+vGT9Lx27OCS5Lul7xdav4ukXFcSLFM8w2I/U54UgxKf2Y7d7KOOqL6RV/Tkl2u\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-t+vGT9Lx27OCS5Lul7xdav4ukXFcSLFM8w2I/U54UgxKf2Y7d7KOOqL6RV/Tkl2u",
   "carries": {
-   "the piece rule's 0.001 SOL grid, 0.005 SOL floor, four finishing sizes and 2,950,240 least finish, held by the Solana pool with its piece ladder": true,
-   "the closed list: a release size is a rung or the floor plus one to four grid steps": true,
-   "a note's chunk: the largest rung leaving 0 or the floor, else the note on the list or off the grid; under the floor the note itself down to the least": true,
+   "the piece rule's 0.001 SOL grid, 0.005 SOL floor and 2,950,240 least, held by the Solana pool with its piece ladder": true,
+   "a release size is a rung, and the sizes a release may take are the rungs alone": true,
+   "a note's chunk: the largest rung leaving 0 or the floor, else (a note made before the rule) the note itself, once; under the floor the note itself down to the least": true,
    "the proof queue's chunk is the pool's piece rule's whenever the pool has one": true,
-   "a withdraw part takes a whole note only on the list, off the grid or under the floor, else a size of the list leaving at least the floor": true,
+   "a withdraw part takes a whole note only when it is the note's own chunk or under the floor, else a rung leaving at least the floor": true,
    "a full sell carries no deposit (its one note is the sweep) and the rule refuses one by name": true,
    "a full sell is built bare and checked as full: no reserve": true,
-   "a partial sell's deposit back is the note on the 0.001 SOL grid, none under 0.005 SOL": true,
-   "the sweep's note: down to the grid, the rest under it one System transfer from W to the pin's fee payer in the same transaction, none at 0, no compute budget": true,
-   "the sweep's rule: the deposit alone or then one System transfer from W to an account of the pin's of under 0.001 SOL, its value on the grid and at least 0.005 SOL, W's lamports to the lamport": true,
-   "a pass that carries the ride, with no claim owed, W's rest under the floor and a gain once moved, rides before it ends at the floor": true,
+   "a partial sell's deposit back is the rules' note, a rung, none under 0.005 SOL": true,
+   "the sweep's note: the largest rung whose remainder is 0 or at least what W keeps, its deposit alone, no transfer, no compute budget": true,
+   "the sweep's rule: the deposit alone, its value the sweep's note of W's lamports to the lamport, a rung and at least 0.005 SOL": true,
+   "W's rest under the floor is kept on W and listed at what it adds once moved, no ride: the floor end straight after the note's read": true,
    "the ride's piece: the least size of the closed list whose change still moves and that lifts W's rest to a note": true,
    "a tap's ride is taken once it is due: the backs run that takes it rides, it is let go only when that run held nothing, and only it passes again a W that ended at the floor": true,
    "a tap's ride is booked at a time drawn 10 to 60 minutes after it from the device's random source, kept on the device and read back capped at 60 minutes: a withdraw's end and a deposit's landed note book it": true,
-   "the sweep's rule takes the rest's transfer only to the pin's fee payer": true,
    "the sweep goes on around kept accounts but never around tokens on W's own coins' accounts, a found W's all": true
   }
  },
@@ -91,6 +91,27 @@
    "a tap's ride is booked at a time drawn 10 to 60 minutes after it from the device's random source, kept on the device and read back capped at 60 minutes: a withdraw's end and a deposit's landed note book it": false,
    "the sweep's rule takes the rest's transfer only to the pin's fee payer": false,
    "the sweep goes on around kept accounts but never around tokens on W's own coins' accounts, a found W's all": false
+  }
+ },
+ "liveBefore": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ZFe+Tuco9V0gMoeAq3pGbTr9OVAWP4zGQiqqJUeWF8FZUKFxRmGZF5p33bD9KVtx",
+  "carries": {
+   "the piece rule's 0.001 SOL grid, 0.005 SOL floor and 2,950,240 least, held by the Solana pool with its piece ladder": false,
+   "a release size is a rung, and the sizes a release may take are the rungs alone": false,
+   "a note's chunk: the largest rung leaving 0 or the floor, else (a note made before the rule) the note itself, once; under the floor the note itself down to the least": false,
+   "the proof queue's chunk is the pool's piece rule's whenever the pool has one": true,
+   "a withdraw part takes a whole note only when it is the note's own chunk or under the floor, else a rung leaving at least the floor": false,
+   "a full sell carries no deposit (its one note is the sweep) and the rule refuses one by name": true,
+   "a full sell is built bare and checked as full: no reserve": true,
+   "a partial sell's deposit back is the rules' note, a rung, none under 0.005 SOL": false,
+   "the sweep's note: the largest rung whose remainder is 0 or at least what W keeps, its deposit alone, no transfer, no compute budget": false,
+   "the sweep's rule: the deposit alone, its value the sweep's note of W's lamports to the lamport, a rung and at least 0.005 SOL": false,
+   "W's rest under the floor is kept on W and listed at what it adds once moved, no ride: the floor end straight after the note's read": false,
+   "the ride's piece: the least size of the closed list whose change still moves and that lifts W's rest to a note": true,
+   "a tap's ride is taken once it is due: the backs run that takes it rides, it is let go only when that run held nothing, and only it passes again a W that ended at the floor": true,
+   "a tap's ride is booked at a time drawn 10 to 60 minutes after it from the device's random source, kept on the device and read back capped at 60 minutes: a withdraw's end and a deposit's landed note book it": true,
+   "the sweep goes on around kept accounts but never around tokens on W's own coins' accounts, a found W's all": true
   }
  }
 }

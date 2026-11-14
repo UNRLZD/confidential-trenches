@@ -59,8 +59,8 @@ export const MUTANTS = [
   ["kit", "!V1_4_OP_STAGES[op.kind].includes(op.stage)) return null;", "false) return null;"],
   // a progress stage not mapped, a route event sent
   ["kit", "  return own(V1_4_DEPOSIT_STAGE, stage) ? V1_4_DEPOSIT_STAGE[stage as DepositStage] : null;", "  return stage;"],
-  ["api", 'if (!("stage" in msg)) return level !== "1.4" ? msg : null;', 'if (!("stage" in msg)) return msg;'],
-  ["api", 'if (!("stage" in msg)) return level !== "1.4" ? msg : null;', 'if (!("stage" in msg)) return level === "current" ? msg : null;'],
+  ["api", 'if (!("stage" in msg)) return level !== "1.4" ? routeFor(level, msg) : null;', 'if (!("stage" in msg)) return routeFor(level, msg);'],
+  ["api", 'if (!("stage" in msg)) return level !== "1.4" ? routeFor(level, msg) : null;', 'if (!("stage" in msg)) return level === "current" ? routeFor(level, msg) : null;'],
   // card held-move-forgotten-tx: kit-v1.5 sent moved_out (which it refuses the whole state for), or read at another level
   ["kit", 'from(1, 5) ? "1.5" : KIT_DEFAULT', 'from(1, 5) ? "current" : KIT_DEFAULT'],
   ["kit", 'from(1, 5) ? "1.5" : KIT_DEFAULT', 'from(1, 4) ? "1.5" : KIT_DEFAULT'],
@@ -147,11 +147,11 @@ export const MUTANTS = [
   ["kit", 'from(1, 12) ? "1.12" : ', ""],
   ["kit", 'from(1, 12) ? "1.12" : ', 'from(1, 12) ? "current" : '],
   ["kit", 'from(1, 12) ? "1.12" : ', 'from(1, 11) ? "1.12" : '],
-  ["kit", 'if (level === "current" || level === "1.13" || level === "1.12") return all;', 'if (level === "current" || level === "1.13") return all;'],
+  ["kit", 'if (level === "current" || level === "1.14" || level === "1.13" || level === "1.12") return all;', 'if (level === "current" || level === "1.14" || level === "1.13") return all;'],
   // card solana-buy-preview-complete: a dry buy's out sent to kit-v1.13 or below, whose schema refuses the whole answer
   // for it, kit-v1.13 read at another level or in part, a key of that name taken from another kind, or kit-v1.13 told no
   // closed notice
-  ["kit", "  const plain = dryOutFor(kind, given);\n", "  const plain = given;\n"],
+  ["kit", "  const plain = dryOutFor(kind, cashless);\n", "  const plain = cashless;\n"],
   ["kit", '  if (level === "1.13") return plain;\n', ""],
   ["kit", '  if (level === "1.13") return plain;\n', '  if (level === "1.13") return given;\n'],
   ["kit", "  const { out: _o, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
@@ -159,15 +159,38 @@ export const MUTANTS = [
   ["kit", 'from(1, 13) ? "1.13" : ', ""],
   ["kit", 'from(1, 13) ? "1.13" : ', 'from(1, 13) ? "current" : '],
   ["kit", 'from(1, 13) ? "1.13" : ', 'from(1, 12) ? "1.13" : '],
-  ["kit", 'if (level === "current" || level === "1.13" || level === "1.12") return all;', 'if (level === "current" || level === "1.12") return all;'],
-  ["api", '    if (!hello || (level !== "current" && level !== "1.13")) return;', '    if (!hello || level !== "current") return;'],
+  ["kit", 'if (level === "current" || level === "1.14" || level === "1.13" || level === "1.12") return all;', 'if (level === "current" || level === "1.14" || level === "1.12") return all;'],
+  ["api", '    if (!hello || (level !== "current" && level !== "1.14" && level !== "1.13")) return;', '    if (!hello || (level !== "current" && level !== "1.14")) return;'],
   ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 13] as [number, number];"],
+  // card one-balance-buys-on-every-chain: a dry buy's with_cash or a { move: "cash" } route event sent to kit-v1.14 or
+  // below, whose schema refuses the whole answer or the event for it, kit-v1.14 read at another level or in part, a key
+  // of that name taken from another kind, kit-v1.14 told no closed notice, or the move event told to no one
+  ["kit", "  const cashless = dryCashFor(kind, given);\n", "  const cashless = given;\n"],
+  ["kit", '  if (level === "1.14") return cashless;\n', ""],
+  ["kit", '  if (level === "1.14") return cashless;\n', '  if (level === "1.14") return given;\n'],
+  ["kit", "  const { with_cash: _w, ...rest } = result as Record<string, unknown>;\n  return rest;\n", "  return result;\n"],
+  ["kit", 'typeof result !== "object" || kind !== "pool.buy.dry") return result;', 'typeof result !== "object") return result;'],
+  ["kit", 'from(1, 14) ? "1.14" : ', ""],
+  ["kit", 'from(1, 14) ? "1.14" : ', 'from(1, 14) ? "current" : '],
+  ["kit", 'from(1, 14) ? "1.14" : ', 'from(1, 13) ? "1.14" : '],
+  ["kit", 'if (level === "current" || level === "1.14" || level === "1.13" || level === "1.12") return all;', 'if (level === "current" || level === "1.13" || level === "1.12") return all;'],
+  ["api", '    if (!hello || (level !== "current" && level !== "1.14" && level !== "1.13")) return;', '    if (!hello || (level !== "current" && level !== "1.13")) return;'],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 14] as [number, number];"],
+  ["kit", '  return level !== "current" && Object.hasOwn(e, "move") ? null : e;', "  return e;"],
+  ["kit", '  return level !== "current" && Object.hasOwn(e, "move") ? null : e;', '  return level !== "current" && level !== "1.14" && Object.hasOwn(e, "move") ? null : e;'],
+  ["kit", '  return level !== "current" && Object.hasOwn(e, "move") ? null : e;', '  return level !== "current" && Object.hasOwn(e, "out") ? null : e;'],
+  ["kit", '  return level !== "current" && Object.hasOwn(e, "move") ? null : e;', '  return Object.hasOwn(e, "move") ? null : e;'],
+  ["api", 'if (!("stage" in msg)) return level !== "1.4" ? routeFor(level, msg) : null;', 'if (!("stage" in msg)) return level !== "1.4" ? msg : null;'],
+  ["api", ' : own("move") ? { move: (r as { move: "cash" }).move, ...(own("op") ? { op: (r as { op: string }).op } : {}) } : null;', " : null;"],
+  ["api", ' : own("move") ? { move: (r as { move: "cash" }).move, ...(own("op") ? { op: (r as { op: string }).op } : {}) } : null;', ' : own("move") ? { move: "cash" } : null;'],
+  // card one-balance-buys-on-every-chain (pool.move): the buy's route event told with no op
+  ["api", ', ...(own("op") ? { op: (r as { op: string }).op } : {}) }', " }"],
   // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
   ["api", "if (kit !== null) return void ((level = kitLevel(kit)), (hello = true));", "if (kit !== null) return;"],
   // card signing-layer-says-when-it-closes (review P3-2): the closed notice sent with no hello since the last ready
   ["api", "if (kit !== null) return void ((level = kitLevel(kit)), (hello = true));", "if (kit !== null) return void (level = kitLevel(kit));"],
   ["api", "    hello = false;\n    queue = queue.then", "    queue = queue.then"],
-  ["api", "    if (!hello || (level !== \"current\" && level !== \"1.13\")) return;", "    if (level !== \"current\" && level !== \"1.13\") return;"],
+  ["api", "    if (!hello || (level !== \"current\" && level !== \"1.14\" && level !== \"1.13\")) return;", "    if (level !== \"current\" && level !== \"1.14\" && level !== \"1.13\") return;"],
   ["api", "      level = KIT_DEFAULT;\n", ""],
   ["api", "    post(answer, kind);", "    post(answer);"],
   ["api", "first.answer ? post(first.answer, first.kind)", "first.answer ? post(first.answer)"],

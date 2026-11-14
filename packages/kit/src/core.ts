@@ -61,3 +61,16 @@ export { HEIGHT_SPREAD_MAX } from "../../wallet/src/deposit/account.ts";
 // wallet's refusal of one provider twice
 export { solanaRestoreNotes, type SolanaRestoredNote, type SolanaRestoredSpend } from "../../wallet/src/pool/solana-restore.ts";
 export { solanaPoolOf, checkSolanaRpcs } from "../../wallet/src/pool/solana.ts";
+// card exit-evm-pools-with-the-words: the Base and Robinhood pools' restore from the 12 words (the wallet's own walk on
+// the pool's events, read on two RPCs and paged under each provider's cap), the pool's pinned address, its trees and
+// context, and the note's W
+export { evmRestoreNotes, type EvmRestoredNote, type EvmRestoredSpend } from "../../wallet/src/pool/evm-restore.ts";
+export { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, evmTreeSync, type EvmPoolPin, type EvmRelayData, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+export { jOf } from "../../wallet/src/pool/queue.ts";
+// and the exit's EVM signatures, each key derived and zeroed inside the wallet: G's release send, W's Withdraw and W's send
+export { evmExitGasAddress, evmExitSignSend, evmExitW, evmExitWithdrawCalldata, evmExitWithdrawSignature, EvmExitRefused, type EvmExitProof, type EvmExitSigner, type EvmExitTx } from "../../wallet/src/pool/evm-exit.ts";
+// card exit-with-only-the-words: the Solana pool's exit, run by the wallet's own code. Its fresh wallet W_{sol, l, j} and
+// the words' standard Solana key (m/44'/501'/0'/0', the exit's fee wallet), the pool's bind on a pin whose fee payer is
+// that wallet, and the program's context of a release, which the exit checks the bind's answer against
+export { freshWallet, solFirstAccount } from "../../wallet/src/derive/keys.ts";
+export { solanaPool, solanaContextOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";

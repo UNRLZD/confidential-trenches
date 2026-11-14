@@ -70,6 +70,8 @@ const POOLS: Record<string, { chain: "solana" | "base"; pools: Pool[] }> = {
 };
 const POOL = poolMode ? POOLS[poolMode] : undefined;
 if (POOL) STATE.pools = POOL.pools;
+// cash=0: no Cash on NEAR, so the trade box's Bal on a pool is the pool's own part (card one-balance-buys-on-every-chain)
+if (q.get("cash") === "0") STATE.vault_balance = "0";
 const PRICES = { solana: { price: 9_301_048_308n, expo: -8, decimals: 9 }, base: { price: 350_012_345_678n, expo: -8, decimals: 18 } };
 /** An EVM token's address for the Base runs (a shape only). */
 const EVM_TOKEN = "0x00000000000000000000000000000000000f1fe7";

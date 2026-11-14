@@ -411,11 +411,12 @@ export function poolView(pools: SignpageState["pools"], chain: Chain, price: Poo
 /**
  * What Max for the coin on screen is asked for (card max-is-priced-for-the-coin): the signing page's pool.buy.dry, the
  * chain's tap_max on the coin's own venue. The key names the coin and the proofs state.pools priced (its ready and
- * tap_max): an answer counts only while they are the same. Null where state.pools' tap_max is already the coin's
- * (Base and Robinhood: a tap spends a whole chunk) or there is none to price (no Solana pool, no proof ready).
+ * tap_max): an answer counts only while they are the same. On Base and Robinhood the tap_max is already the coin's (a
+ * tap spends a whole chunk; withCoinTap leaves it), and the answer is asked for its with_cash (card
+ * one-balance-buys-on-every-chain). Null where there is none to price (no pool on a chain Cash moves to, no proof ready).
  */
 export function coinTapKey(pools: SignpageState["pools"], chain: Chain, token: string): string | null {
-  const p = chain === "solana" ? poolOf(pools, chain) : null;
+  const p = cashMovesTo(chain) ? poolOf(pools, chain) : null;
   return p && token !== "" && p.ready !== undefined && p.tap_max !== undefined ? JSON.stringify([token, p.ready, p.tap_max]) : null;
 }
 
@@ -490,35 +491,71 @@ export function amountWrong(ask: PoolBuyAsk): boolean {
   return !ask.ok && (ask.why === "over_tap" || ask.why === "chunk" || ask.why === "too_small");
 }
 
+/** The chains whose buy moves its shortfall from Cash (the NEAR vault's USDC) into the pool before it buys (card
+ *  one-balance-buys-on-every-chain; the signing page's cash-to-pool.ts cashFirst): every pool chain. On Solana the
+ *  shortfall to the typed amount; on Base and Robinhood, where a tap spends one whole chunk, Cash makes the whole bigger
+ *  chunk with_cash names. */
+export const cashMovesTo = (chain: Chain): boolean => chain === "solana" || chain === "base" || chain === "robinhood";
+
+/** pool.buy.dry's with_cash (kit 1.15, card one-balance-buys-on-every-chain) in base units: the most one tap spends
+ *  with Cash moved first (on Base and Robinhood the one bigger chunk it makes). Only a plain decimal in the pool asset's
+ *  units at or above the entry's tap_max (the page's answer is hostile: anything else is not used); null with no tap_max
+ *  or on a chain Cash does not move to. */
+function cashTop(pools: SignpageState["pools"], chain: Chain, withCash: string | null): bigint | null {
+  const p = withCash === null || !cashMovesTo(chain) ? null : poolOf(pools, chain);
+  if (!p || p.tap_max === undefined) return null;
+  const d = POOL_ASSET_DECIMALS[p.asset];
+  const tap = decimalToUnits(p.tap_max, d);
+  const top = decimalToUnits(withCash!, d);
+  return tap === null || top === null || top < tap ? null : top;
+}
+
+/** The box's Max on a pool with Cash to move (card one-balance-buys-on-every-chain): with_cash in USD at the
+ *  device's price, rounded down; null (Max stays the pool's tap_max) with no with_cash it can use or no price. */
+export function cashMax(pools: SignpageState["pools"], chain: Chain, withCash: string | null, price: PoolPrice | null): Cents | null {
+  const top = price === null ? null : cashTop(pools, chain, withCash);
+  return top === null ? null : unitsToCents(top, price!);
+}
+
 /**
  * The tap's pool.buy for `c` cents: the USD in the pool asset's units at the device's price, rounded down. Only with a
  * proof ready and the page's `tap_max`, and at most it; on Base and Robinhood a tap spends one whole chunk (the signing
- * page refuses any other EVM amount, rules/pool.ts checkEvmBuy), so only the chunk's own USD asks for it.
+ * page refuses any other EVM amount, rules/pool.ts checkEvmBuy), so only the chunk's own USD asks for it, or with
+ * pool.buy.dry's `withCash` (card one-balance-buys-on-every-chain) that bigger chunk's USD: the page moves it from Cash
+ * and buys it whole. On Solana with `withCash` at most that: the page moves the shortfall from Cash and buys the whole
+ * ask once it lands, so an ask above tap_max is still one pool.buy. With `withCash` above zero a pool with no proof ready
+ * (or no note yet: the user whose money is all Cash) buys too, the page making and proving the note first.
  */
-export function poolBuyAsk(pools: SignpageState["pools"], chain: Chain, token: string, c: Cents, price: PoolPrice | null, slippageBps: number): PoolBuyAsk {
+export function poolBuyAsk(pools: SignpageState["pools"], chain: Chain, token: string, c: Cents, price: PoolPrice | null, slippageBps: number, withCash: string | null = null): PoolBuyAsk {
   const p = poolOf(pools, chain);
   if (!p) return { ok: false, why: "no_pool" };
   if (!price) return { ok: false, why: "no_price" };
   const d = POOL_ASSET_DECIMALS[p.asset];
   const tap = p.tap_max === undefined ? null : decimalToUnits(p.tap_max, d);
-  if (proofStatus(pools, chain) !== "ready" || tap === null || tap === 0n) return { ok: false, why: "no_proof" };
+  // Cash to move (card one-balance-buys-on-every-chain): a pool with no proof ready yet, or none at all, still buys
+  const top = cashTop(pools, chain, withCash);
+  const own = proofStatus(pools, chain) === "ready" && tap !== null && tap > 0n ? tap : null;
+  const most = top !== null && top > 0n ? top : own;
+  if (most === null) return { ok: false, why: "no_proof" };
   const units = centsToUnits(c, price);
   if (units <= 0n) return { ok: false, why: "too_small" };
-  if (units > tap) return { ok: false, why: "over_tap" };
-  if (chain !== "solana" && c !== unitsToCents(tap, price)) return { ok: false, why: "chunk" };
-  const amount = unitsToDecimal(chain === "solana" ? units : tap, d);
+  if (units > most) return { ok: false, why: "over_tap" };
+  const whole = chain === "solana" ? units : own !== null && c === unitsToCents(own, price) ? own : c === unitsToCents(most, price) ? most : null;
+  if (whole === null) return { ok: false, why: "chunk" };
+  const amount = unitsToDecimal(whole, d);
   return { ok: true, kind: "pool.buy", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } };
 }
 
 /**
  * The presets row (owner 8 Nov 07:55Z, kept): on Base and Robinhood a private buy spends one whole chunk, so the row is
  * one button holding the chunk's USD, the pool's `tapMax` (poolView: the page's tap_max at the device's price, the one
- * amount poolBuyAsk takes there), null while that is unknown (no proof ready, no price, no pool in the state); the four
- * presets everywhere else.
+ * amount poolBuyAsk takes there), or `top`, the bigger note Cash makes (cashMax, card one-balance-buys-on-every-chain),
+ * null while neither is known (no proof ready and no Cash to move, no price, no pool in the state); the four presets
+ * everywhere else.
  */
-export function presetsOf(chain: Chain, pool: PoolView | null): readonly (Cents | null)[] {
+export function presetsOf(chain: Chain, pool: PoolView | null, top: Cents | null = null): readonly (Cents | null)[] {
   if (!isPoolChain(chain) || chain === "solana") return PRESETS;
-  const c = pool?.tapMax ?? null;
+  const c = top ?? pool?.tapMax ?? null;
   return [c !== null && c > 0n ? c : null];
 }
 
@@ -536,9 +573,21 @@ export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: 
 /**
  * The trade box's Bal (card trade-box-bal-cash): on a chain with no pool, the vault path's part of Portfolio's Cash
  * (Totals.offPool, from the same totals as balanceOf, never a second sum; card portfolio-one-balance); on a chain whose
- * pool the signing page reports, that pool's balance in USD (poolView), its part of Cash, null while it cannot be priced.
- * One number for the amount gate (amountOk) either way.
+ * pool the signing page reports, that pool's balance in USD (poolView), its part of Cash, null while it cannot be priced,
+ * plus `moves`: the Cash a buy there moves into the pool first (card one-balance-buys-on-every-chain: Cash's NEAR part on
+ * a chain cashMovesTo names; 0 elsewhere), null while it is not read, and `waiting`: what the chain's deposit wallets
+ * still hold (waitingCents), null while it cannot be priced. One number for the amount gate (amountOk) either way.
  */
-export function tradeBal(onPool: boolean, pool: PoolView | null, cash: Cents | null): { from: "cash" | "pool"; cents: Cents | null } {
-  return onPool ? { from: "pool", cents: pool?.balance ?? null } : { from: "cash", cents: cash };
+export function tradeBal(onPool: boolean, pool: PoolView | null, cash: Cents | null, moves: Cents | null = 0n, waiting: Cents | null = 0n): { from: "cash" | "pool"; cents: Cents | null } {
+  return onPool ? { from: "pool", cents: pool === null || moves === null || waiting === null ? null : pool.balance + moves + waiting } : { from: "cash", cents: cash };
+}
+
+/** What a pool chain's deposit wallets still hold (state.deposit_wallets: a U_X's leftover, a W's tail; the sum
+ *  Portfolio's waitingAt makes, kept here so the two models import nothing of each other's) in USD at the device's
+ *  price, rounded down; null with no price (card one-balance-buys-on-every-chain: nothing the device holds is left out
+ *  of Bal). */
+export function waitingCents(wallets: SignpageState["deposit_wallets"], chain: Chain, asset: PoolAsset, price: PoolPrice | null): Cents | null {
+  let u = 0n;
+  if (isPoolChain(chain)) for (const w of wallets ?? []) if (w.chain === chain && w.asset === asset) u += decimalToUnits(w.amount, POOL_ASSET_DECIMALS[asset]) ?? 0n;
+  return u === 0n ? 0n : price === null ? null : unitsToCents(u, price);
 }

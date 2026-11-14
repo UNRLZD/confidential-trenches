@@ -40,6 +40,8 @@ export const SIGN_SITES = {
   "packages/wallet/src/deposit/refund.ts:runRefundMove": { n: 1, test: "packages/wallet/test/deposit-refund.test.ts" },
   "packages/wallet/src/near/swap-delegate.ts:signNearSwapDelegates": { n: 1, test: "packages/wallet/test/near-swap-delegate.test.ts" },
   "packages/wallet/src/arming/records.ts:solanaArmedSigner": { n: 1, test: "packages/wallet/test/arm-records.test.ts" },
+  "packages/wallet/src/pool/evm-exit.ts:evmExitWithdrawSignature": { n: 1, test: "packages/wallet/test/pool-evm-exit.test.ts" },
+  "packages/wallet/src/pool/evm-exit.ts:evmExitSignSend": { n: 1, test: "packages/wallet/test/pool-evm-exit.test.ts" },
   "packages/kit/src/trade/evm/buy-unpinned.ts:evmPoolSignBuyUnpinned": { n: 1, test: "packages/kit/test/evm-pool-buy.test.ts" },
   "packages/kit/src/trade/evm/sell-unpinned.ts:signDigest": { n: 1, test: "packages/kit/test/evm-pool-sell.test.ts" },
   "packages/kit/src/trade/evm/sell-unpinned.ts:evmPoolSignSellAuthorizationUnpinned": { n: 1, test: "packages/kit/test/evm-pool-sell.test.ts" },
@@ -55,9 +57,12 @@ export const SIGN_SITES = {
   "packages/signpage/src/rules/pool.ts:signEvmWithdraw": { n: 1, test: "packages/signpage/test/rules-pool.test.ts" },
   "packages/signpage/src/rules/pool.ts:signEvmOnwardSend": { n: 1, test: "packages/signpage/test/rules-pool-onward.test.ts" },
   "packages/signpage/src/rules/pool.ts:signEvmDeposit": { n: 1, test: "packages/signpage/test/rules-pool-deposit-evm.test.ts" },
+  "packages/exit/src/sol-out.ts:sendOnward": { n: 1, test: "packages/exit/test/sol-out.test.ts" },
+  "packages/exit/src/sol-out.ts:solExitWith": { n: 2, test: "packages/exit/test/sol-out.test.ts" },
 };
 
-/** The modules the four trees may load, besides their own relative files. */
+/** The modules the four trees may load, besides their own relative files. None signs but the curves and @scure/bip32,
+ *  whose bindings the census follows: node:readline reads the exit command's typed lines, snarkjs makes its proofs. */
 export const ALLOWED = new Set([
   "@blindfill/kit", "@blindfill/kit/core",
   "@blindfill/wallet/arming/ladder", "@blindfill/wallet/arming/records", "@blindfill/wallet/derive", "@blindfill/wallet/signin/passkey", "@blindfill/wallet/signin/words", "@blindfill/wallet/store",
@@ -65,8 +70,9 @@ export const ALLOWED = new Set([
   "@noble/hashes/hkdf.js", "@noble/hashes/hmac.js", "@noble/hashes/sha2.js", "@noble/hashes/sha3.js", "@noble/hashes/utils.js",
   "@scure/base", "@scure/bip32", "@scure/bip39", "@scure/bip39/wordlists/english.js",
   "@zk-kit/lean-imt",
+  "snarkjs",
   "poseidon-lite/poseidon1", "poseidon-lite/poseidon2", "poseidon-lite/poseidon3", "poseidon-lite/poseidon4", "poseidon-lite/poseidon5",
-  "node:crypto", "node:fs", "node:module", "node:path", "node:url",
+  "node:crypto", "node:fs", "node:module", "node:path", "node:readline", "node:url",
 ]);
 /** node:crypto's names a file may import (named only): none of them signs. */
 export const NODE_CRYPTO = new Set(["createHash"]);

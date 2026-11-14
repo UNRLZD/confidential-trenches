@@ -55,7 +55,7 @@
 //   token (quote, decimals), their newest block and the pool's whole release log over a block range, never W, the
 //   nullifier or a transaction hash.
 // Nothing here logs.
-import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
+import type { PoolStatePrice, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { evmPoolBuyQuote, evmPoolIndexPools, EVM_QUOTE_MAX_AGE_MS, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../kit/src/checks/evm/quote.ts";
 import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../../kit/src/trade/evm/buy-tap.ts";
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -67,8 +67,9 @@ import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, type PoolAsk } from "./rules/pool.ts";
-import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmReleaseRead } from "./evm-send.ts";
+import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmRelease, type EvmReleaseRead } from "./evm-send.ts";
 import { keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
+import { usdOf } from "./positions.ts";
 import { refusalRule } from "./refusal-rule.ts";
 import { duringTrade, TRADE_HELPER } from "./trade.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -97,6 +98,26 @@ export type EvmHolding = {
   buy?: EvmPendingBuy;
 };
 export type EvmPendingBuy = { nullifier: string; from: string; deadlineMs: string; minOut: string; value: string; feeCap: string; feeRecipient: string };
+
+/** A filled Base or Robinhood trade's op (card closed-positions-show-every-trade), src/state.ts's op contract, so the
+ *  app's Activity and Portfolio's closed positions read these chains' trades as they read Solana's (apps/terminal
+ *  portfolio model.ts tradeBook): the chain, the token as W's record names it, the token's whole units that moved, the
+ *  ETH that went into the venue or came back from it (pool_amount, whole ETH), its USD at the page's own price when one
+ *  is read, and the time it was read filled. Keyed by its chain and transaction, written once where none is: the tap's
+ *  run and a later load's follow of the same trade write the one op. Display only: nothing reads it to sign. */
+export type EvmTradeOp = { kind: "buy" | "sell"; stage: "filled"; txs: TxRef[]; created_ms: number; chain: Chain; token: string; units?: string; pool_amount: string; amount_usd?: string };
+/** The op key of a filled Base or Robinhood trade (EvmTradeOp). */
+export const evmTradeKey = (chain: Chain, tx: string): string => `trade/${chain}/${lower(tx)}`;
+/** The op of a filled EVM trade from what it moved: `units` the token's base units at `decimals` (null: not known),
+ *  `wei` the ETH into the venue or out of it, priced at `price` when given. */
+export function evmTradeOp(kind: "buy" | "sell", chain: Chain, tx: string, token: string, units: bigint | null, decimals: number | null, wei: bigint, price: PoolStatePrice | null, at: number): EvmTradeOp {
+  const usd = price === null ? null : usdOf(wei, 18, price);
+  return { kind, stage: "filled", txs: [{ chain, hash: lower(tx) }], created_ms: at, chain, token: lower(token), ...(units === null || decimals === null ? {} : { units: poolUnits(units, decimals) }), pool_amount: poolUnits(wei, 18), ...(usd === null ? {} : { amount_usd: usd }) };
+}
+/** Writes a filled EVM trade's op where none is under its key (evmTradeKey). */
+export async function writeEvmTradeOp(store: Pick<WalletStore, "update">, op: EvmTradeOp): Promise<void> {
+  await store.update("ops", evmTradeKey(op.chain, op.txs[0]!.hash), (v) => (v === undefined ? op : undefined));
+}
 
 export type EvmPoolBuyHost = {
   chain: Chain;
@@ -149,6 +170,10 @@ export type EvmPoolBuyHost = {
   landed?(noteId: string, attempt: string, withdrawn: bigint, block: bigint): void;
   /** An end the reads found after the tap's run answered "sent" at its bound. */
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
+  /** A filled buy read back (the tap's run or a load's follow): its trade op written (writeEvmTradeOp). */
+  traded?(op: EvmTradeOp): Promise<void>;
+  /** The chain's pool asset's USD price as the page read it (src/pool-price.ts), for the op's USD; null: none. */
+  price?(): PoolStatePrice | null;
   /** The notes a run on this page has picked and not finished. */
   claimed?: Set<string>;
   /** The page's follows: aborted at sign out, which ends the reads; nothing is written or settled after it. */
@@ -443,6 +468,8 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
     if (x.mine !== undefined) h.landed?.(x.mine.noteId, x.mine.attempt, x.mine.chunk, v.release.block);
     if (v.end === "filled") {
       await h.record(x.w, { ...x.holding, state: "filled", received: poolUnits(v.release.out, x.holding.decimals), route: at }).catch(() => {});
+      // the trade's op: the token W received, and the chunk less the fee the sender charged, what went into the venue
+      await h.traded?.(evmTradeOp("buy", h.chain, v.release.tx, x.holding.mint, v.release.out, x.holding.decimals, intoVenue(v.release), h.price?.() ?? null, Number(clock()))).catch(() => {});
       return { stage: "filled", txs };
     }
     // withdrawn: W holds the chunk less the fee in ETH; the buy did not fill. The carry puts it back into the pool, from
@@ -457,6 +484,9 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
   }
   return null;
 }
+
+/** What a release swapped at the venue: its value less the fee the sender charged. */
+const intoVenue = (r: EvmRelease): bigint => (r.value > r.fee ? r.value - r.fee : 0n);
 
 const big = (v: unknown): bigint | null => (typeof v === "string" && /^[0-9]{1,78}$/.test(v) ? BigInt(v) : null);
 
@@ -531,6 +561,8 @@ export type EvmBuyPage = {
   landed?(noteId: string, attempt: string, withdrawn: bigint, block: bigint): void;
   /** EvmPoolBuyHost.carry: the chain's carry pass. */
   carry?(chain: Chain): void;
+  /** The chain's pool asset's USD price as the page read it (src/pool-price.ts), for a trade op's USD; null: none. */
+  price?(chain: Chain): PoolStatePrice | null;
 };
 
 /** Whether `was`, W's holding, is an earlier buy of the note `now` buys: pending, the same nullifier, an earlier
@@ -610,6 +642,9 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     },
     following: page.following,
     ...(page.carry ? { carry: () => page.carry!(chain) } : {}),
+    price: () => page.price?.(chain) ?? null,
+    // into the store while it is open
+    traded: async (op) => writeEvmTradeOp(await page.held(), op),
     claimed,
     signal: page.signal,
     stopped: page.stopped,

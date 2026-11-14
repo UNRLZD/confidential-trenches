@@ -1,0 +1,148 @@
+// node --test scripts/live-checks/one-balance-buys-on-every-chain.test.mjs: the live check replays its recorded answers
+// (one-balance-buys-on-every-chain.answers.json). good: this card's SIGN_HOST build: PASS. liveBefore: SIGN_HOST as
+// served before this card: FAIL, every mark named. Planted on the good one: another script, no pin, each mark taken
+// away: each FAIL; and each mark's minified line as this card's build spells it, changed so its rule no longer holds:
+// each FAIL. The good answer is re-read from the build at 55538dc73 on (a tap reads its venue only when Cash or a
+// move on its way can add to it).
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { facts, judge, SAYS } from "./one-balance-buys-on-every-chain.mjs";
+
+const ANSWERS = JSON.parse(readFileSync(new URL("./one-balance-buys-on-every-chain.answers.json", import.meta.url), "utf8"));
+const ALL = Object.values(SAYS).map((s) => `BAD ${s}`);
+
+test("recorded good answer: this card's SIGN_HOST build: PASS", () => {
+  const v = judge(ANSWERS.good);
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  assert.deepEqual(v.lines, []);
+});
+
+test("recorded answer partOne (part 1's build, a0bd91187, before pool.move): FAIL, poolMove, toCash, poolToPool and leftCounted named", () => {
+  assert.deepEqual(judge(ANSWERS.partOne).lines, [`BAD ${SAYS.poolMove}`, `BAD ${SAYS.toCash}`, `BAD ${SAYS.poolToPool}`, `BAD ${SAYS.leftCounted}`]);
+});
+
+test("recorded answer beforeToCash (8235063eb's build, Cash to every pool, no way back): FAIL, toCash, poolToPool and leftCounted named", () => {
+  assert.deepEqual(judge(ANSWERS.beforeToCash).lines, [`BAD ${SAYS.toCash}`, `BAD ${SAYS.poolToPool}`, `BAD ${SAYS.leftCounted}`]);
+});
+
+test("recorded answer beforePoolToPool (e0e5034a9's build, Cash to every pool and back, no pool to pool): FAIL, poolToPool and leftCounted named", () => {
+  assert.deepEqual(judge(ANSWERS.beforePoolToPool).lines, [`BAD ${SAYS.poolToPool}`, `BAD ${SAYS.leftCounted}`]);
+});
+
+test("recorded answer beforeLeft (bad9ed47d's build, pool.move every way, no leftover counted): FAIL, leftCounted alone named", () => {
+  assert.deepEqual(judge(ANSWERS.beforeLeft).lines, [`BAD ${SAYS.leftCounted}`]);
+});
+
+test("recorded answer liveBefore (SIGN_HOST before this card): FAIL, every mark named", () => {
+  const v = judge(ANSWERS.liveBefore);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, ALL);
+});
+
+test("planted on the good answer: each fact taken away FAILs", () => {
+  const g = ANSWERS.good;
+  assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
+  assert.deepEqual(judge({ ...g, index: "<html></html>" }).lines, ["BAD SIGN_HOST's index.html pins no /app.js"]);
+  for (const [i, k] of Object.keys(SAYS).entries()) assert.deepEqual(judge({ ...g, [k]: false }).lines, [ALL[i]], k);
+  assert.equal(judge(null).ok, false);
+});
+
+// The minified lines as this card's build spells them (packages/signpage/scripts/build-app.mjs, mainnet), each changed
+// so its rule no longer holds.
+const JS = [
+  "Ox=/^[0-9a-f]{64}$/,Oz=/^[0-9a-f]{64}$/;",
+  "let u=`cash/${n}/${e.now()}`,d={error:`not_allowed`};",
+  "if(`error`in d||!Oz.test(d.address)||d.amountIn!==c||d.minOut<o)return a>0n;",
+  "let s=await o.any()?await o.tapMax(i):n.amount;if(s<n.amount&&await o.need(n.amount-s)){try{r?.route?.({move:`cash`})}catch{}}",
+  "return e!==null&&`result`in e&&n!==null?{...e,result:{...e.result,with_cash:n}}:e;",
+  "return i(Th[0],Th[1])?`current`:i(1,14)?`1.14`:i(1,13)?`1.13`:`1.4`}",
+  "Gh=(e,t)=>{if(typeof t!=`object`||!t||e!==`pool.buy.dry`)return t;let{with_cash:n,...r}=t;return r};",
+  "x=`1.15`",
+  'var zz=e=>[{step:`vault_out`,chain:`near`},{step:`intents`,chain:e},{step:`pool_in`,chain:e}];',
+  'var QG=e=>[{step:`pool_out`,chain:e},{step:`intents`,chain:`near`},{step:`vault_in`,chain:`near`}];',
+  "({solana:`nep141:sol.omft.near`,base:`nep141:base.omft.near`,robinhood:`nep141:hood.omft.near`});",
+  'function Uz(e){return{"pool.move":(t,n)=>{let r=Hz(t);if(`error`in r)return r;return r},"pool.move.dry":t=>{let n=Hz(t);return n}}}',
+  "i={result:{out:JG(s.out,LG[a]),fee:r,steps:[...QG(n),...zz(a)]}};",
+  "if(`error`in(r===null||i===null||r<=i?{error:`not_allowed`}:await e.onward.move(c,r-i,`${t}/on`).catch(()=>({error:`failed`}))))return n(t,{...s,stage:`failed`});",
+  "if(d=E!==null&&g<E.floor?T??{low:g,at:C,c:E}:null,E!==null&&g>=E.floor)await t.holds?.(0n),o&&!a&&g>c&&(await i(`in_transit`),s=!0);",
+  "let m=async e=>{let n=e.toString();await t.update(`ops`,r,t=>DY(t)&&t.follow.left!==n&&(e!==0n||t.follow.left!==void 0)?{...t,follow:{...t.follow,left:n}}:void 0)};await vY(l,{...c,stage:u,txs:d,left:p,holds:m,signal:s},o.stage);",
+  "for(let e of r.values()){if(e.stage!==`in_pool`||e.follow.left===void 0||!/^[0-9]{1,78}$/.test(e.follow.left))continue}",
+  ",ho=`w-tail/`;",
+  "async function iY(e){let t=(await e.keys(`meta`)).filter(e=>e.startsWith(ho));return Promise.all(t.map(t=>e.get(`meta`,t).catch(()=>void 0)))}",
+].join("");
+const INDEX = (js) => `<script type="module" src="/app.js" integrity="${facts("", js).sha384}"></script>`;
+
+test("the minified lines this card's build spells: PASS; each one changed so its rule no longer holds: FAIL, that mark named", () => {
+  assert.deepEqual(judge(facts(INDEX(JS), JS)).lines, []);
+  const cuts = [
+    // the vault pays a deposit address that is not a NEAR implicit account, another amount, or a min out under the shortfall
+    ["move", JS.replace("!Oz.test(d.address)||", "")],
+    ["move", JS.replace("d.amountIn!==c||", "")],
+    ["move", JS.replace("||d.minOut<o", "")],
+    // the rule tested is not the implicit one
+    ["move", JS.replace("Oz=/^[0-9a-f]{64}$/", "Oz=/^.*$/")],
+    // no follow op named for the move
+    ["move", JS.replace("`cash/${n}/${e.now()}`", "`x`")],
+    // the tap never asks the mover, asks it for another amount, or never tells the app
+    ["tap", JS.replace("await o.need(n.amount-s)", "!1")],
+    ["tap", JS.replace("o.need(n.amount-s)", "o.need(n.amount)")],
+    ["tap", JS.replace("r?.route?.({move:`cash`})", "0")],
+    // the tap read when nothing can add to it is skipped the other way round: a tap with Cash never read
+    ["tap", JS.replace("await o.any()?await o.tapMax(i):n.amount", "await o.any()?n.amount:await o.tapMax(i)")],
+    // no with_cash in the dry answer
+    ["max", JS.replace(",with_cash:n}", "}")],
+    // kit-v1.14 read in full, or with_cash never stripped
+    ["level", JS.replace("i(1,14)?`1.14`:", "")],
+    ["level", JS.replace("let{with_cash:n,...r}=t;return r", "return t")],
+    ["version", JS.replace("x=`1.15`", "x=`1.14`")],
+    // pool.move not checked before the mover, no dry of its own, or a route other than the paper's
+    ["poolMove", JS.replace("if(`error`in r)return r;return r", "return r")],
+    ["poolMove", JS.replace('"pool.move.dry":t=>', '"pool.move.x":t=>')],
+    ["poolMove", JS.replace("{step:`intents`,chain:e},", "")],
+    ["poolMove", JS.replace("{step:`pool_in`,chain:e}", "{step:`pool_in`,chain:`base`}")],
+    // no way back to Cash, a route that skips the vault, or a pool coin it never quotes
+    ["toCash", JS.replace("{step:`vault_in`,chain:`near`}", "{step:`pool_in`,chain:`near`}")],
+    // (with no pool_out step there is no way out of a pool at all, so no pool to pool either)
+    [["toCash", "poolToPool"], JS.replace("{step:`pool_out`,chain:e},", "")],
+    ["toCash", JS.replace("`nep141:hood.omft.near`", "`x`")],
+    // no pool-to-pool dry of six steps, its legs the other way round, or no onward move from Cash under <op>/on
+    ["poolToPool", JS.replace("steps:[...QG(n),...zz(a)]", "steps:[...QG(n)]")],
+    ["poolToPool", JS.replace("steps:[...QG(n),...zz(a)]", "steps:[...zz(a),...QG(n)]")],
+    ["poolToPool", JS.replace("e.onward.move(c,r-i,`${t}/on`)", "e.onward.move(c,r-i,`${t}`)")],
+    ["poolToPool", JS.replace("e.onward.move(c,r-i,`${t}/on`)", "e.onward.move(c,r,`${t}/on`)")],
+    // no 0 before a carry (its money counted twice), a 0 never written over a held left, only an ended op's left
+    // listed, or the tails read under another prefix
+    ["leftCounted", JS.replace("await t.holds?.(0n),", "")],
+    ["leftCounted", JS.replace("&&(e!==0n||t.follow.left!==void 0)", "&&e!==0n")],
+    ["leftCounted", JS.replace("e.stage!==`in_pool`||", "e.final!==!0||")],
+    ["leftCounted", JS.replace(",ho=`w-tail/`;", ",ho=`owed/`;")],
+  ];
+  for (const [mark, js] of cuts) {
+    assert.notEqual(js, JS, `${mark}: the cut changed nothing`);
+    assert.deepEqual(judge(facts(INDEX(js), js)).lines, [mark].flat().map((m) => `BAD ${SAYS[m]}`), `${mark}: ${js.slice(0, 80)}`);
+  }
+});
+
+test("the tap as each build spells it: before any() (15b7ae910), with any() (part 1), and with the move op told (pool.move): PASS; the op one never asking the mover, or telling another op: FAIL", () => {
+  const forms = [
+    "let s=await o.tapMax(i);if(s<n.amount&&await o.need(n.amount-s)){try{r?.route?.({move:`cash`})}catch{}}",
+    "let s=await o.any()?await o.tapMax(i):n.amount;if(s<n.amount&&await o.need(n.amount-s)){try{r?.route?.({move:`cash`})}catch{}}",
+    "let s=await o.any()?await o.tapMax(i):n.amount,c=s<n.amount?await o.need(n.amount-s):null;if(c!==null){try{r?.route?.({move:`cash`,op:c})}catch{}}",
+  ];
+  for (const f of forms) assert.equal(facts("", f).tap, true, f);
+  const op = forms[2];
+  assert.equal(facts("", op.replace("await o.need(n.amount-s)", "null")).tap, false);
+  assert.equal(facts("", op.replace("op:c})", "op:s})")).tap, false);
+});
+
+test("the tap on every pool chain (Cash to Base and Robinhood): the build's form PASS; the want not Solana's gap, the mover not asked for it, or the move op not told: FAIL", () => {
+  const all = "let o=e=>a===`solana`?n.amount-e:Nz(a,n.amount)?n.amount:null;let l=await c.any(a)?await c.tapMax(a,i):n.amount,u=l<n.amount?o(l):null,d=u===null?null:await c.need(a,u);if(d!==null){try{r?.route?.({move:`cash`,op:d})}catch{}}";
+  assert.equal(facts("", all).tap, true);
+  for (const bad of [
+    all.replace("?n.amount-e:", "?n.amount:"),
+    all.replace("await c.need(a,u)", "null"),
+    all.replace("op:d})", "op:u})"),
+    all.replace("c.tapMax(a,i)", "c.tapMax(`solana`,i)"),
+  ]) assert.equal(facts("", bad).tap, false, bad.slice(0, 90));
+});

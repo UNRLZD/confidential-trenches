@@ -2,8 +2,9 @@
 // (screens-never-say-proof.answers.json), each read by screens-never-say-proof.mjs collect() in headless Chromium, the
 // stand-in shell signed in with a Solana pool still being made spendable, at 390 and 1440:
 //   good: this card's build at APP_HOST's name in the stand-in shell (--harness): the trade box names no proof, shows
-//         the pool's balance, no Max and Buy busy; Portfolio's pools one Balance column; the deposit sheet and the
-//         scripts hold no removed word: PASS;
+//         the pool's balance, no Max and Buy busy; Portfolio's Private balance its heading, total and chain rows with
+//         no column header (card portfolio-moves-money-between-chains, re-recorded on its build); the deposit sheet and
+//         the scripts hold no removed word: PASS;
 //   bad:  main's build before the card (4c1826a75) in the same shell: the box's "Making proof", Portfolio's Ready and
 //         Pending columns, the scripts' four removed words: FAIL.
 // Planted from the good run: a proof mark, Max $0 above Buy, Buy not busy, a Ready column, a removed word in a script.
@@ -58,7 +59,13 @@ test("planted: the balance as $0 or a dash fails", () => {
   fails(mut((rec) => (rec.runs[0].box.balance = "$0 available")), /pool's balance shows/);
   fails(mut((rec) => (rec.runs[0].box.balance = "— available")), /pool's balance shows/);
 });
-test("planted: a Ready column on Portfolio fails", () => fails(mut((rec) => (rec.runs[0].pools.heads = ["Balance", "Ready"])), /Portfolio's pools/));
+test("planted: a Ready column on Portfolio fails", () => fails(mut((rec) => (rec.runs[0].pools.heads = ["Ready"])), /Portfolio's pools head \["Ready"\]/));
+test("planted: a Private balance row that names a proof fails", () => fails(mut((rec) => (rec.runs[1].pools.text += " Proof ready")), /Portfolio's pools .*say ".*Proof ready"/));
+test("planted: Private balance with no heading, total or chain row fails", () => {
+  fails(mut((rec) => (rec.runs[0].pools.head = null)), /Portfolio's pools .*heading null/);
+  fails(mut((rec) => (rec.runs[0].pools.total = null)), /Portfolio's pools .*heading "Private balance" null/);
+  fails(mut((rec) => (rec.runs[1].pools.rows = [])), /Portfolio's pools .*rows \[\]/);
+});
 test("planted: Pending on the deposit sheet fails", () => fails(mut((rec) => (rec.runs[1].deposit += " Pending 0.1 SOL")), /deposit sheet says/));
 test("planted: a removed word in a script, or no script read, fails", () => {
   fails(mut((rec) => (rec.scripts.found = ['"Pending" in /assets/index.js'])), /the app's scripts/);

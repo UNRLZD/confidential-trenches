@@ -11,11 +11,11 @@ import type { Chain, OrderTrigger } from "../orders/record.ts";
 import { deepFreeze } from "../freeze.ts";
 
 /**
- * The twenty-six request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
+ * The twenty-eight request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
  * pool kinds (card signpage-pool-kinds), the two deposit sheet reads, deposit.assets and deposit.dry (card
  * kit-deposit-assets-dry), pool.address (card pool-deposit-address), pool.sell.dry (card
- * app-sell-shows-what-you-receive) and pool.buy.dry (card max-is-priced-for-the-coin) were added after kit-v1 without
- * changing any other kind. A page of an earlier release refuses a kind it does not have "not_allowed".
+ * app-sell-shows-what-you-receive), pool.buy.dry (card max-is-priced-for-the-coin) and pool.move and pool.move.dry (card
+ * one-balance-buys-on-every-chain) were added after kit-v1 without changing any other kind. A page of an earlier release refuses a kind it does not have "not_allowed".
  */
 export const SIGNPAGE_KINDS = [
   "deposit.quote",
@@ -44,6 +44,8 @@ export const SIGNPAGE_KINDS = [
   "pool.address",
   "pool.sell.dry",
   "pool.buy.dry",
+  "pool.move",
+  "pool.move.dry",
 ] as const;
 deepFreeze(SIGNPAGE_KINDS);
 
@@ -183,12 +185,26 @@ export interface SignpageParams {
    * coin's own venue and mint kind (pump's curve or PumpSwap, Token or Token-2022, cashback or not), which the page reads
    * on two providers, where tap_max is priced on the costliest venue of any coin. Signs nothing, writes nothing and
    * sends nothing. Display only: a pool.buy at this amount or under passes the page's own funds rule on the same reads.
-   * Solana only (an EVM tap spends a whole chunk); not_allowed elsewhere. Its refusals: not_allowed, not_funded (signed
+   * Solana; on Base and Robinhood (kit 1.15, card one-balance-buys-on-every-chain) state.pools' tap_max, the largest
+   * ready note (an EVM tap spends a whole one), with with_cash the larger of it and the largest rung Cash makes;
+   * not_allowed elsewhere, and on an EVM chain from a page with no Cash to move. Its refusals: not_allowed, not_funded (signed
    * out or no proof ready), quote_check_failed (no venue the two providers agree on) and busy (a trade runs).
    * `amount` (kit 1.12, card buy-spends-several-pieces): a spend in whole SOL; the answer then also says how many pieces
    * a pool.buy of it spends now and what it costs for good (PoolBuyDry pieces and cost).
    */
   "pool.buy.dry": { chain: PoolChain; token: string; amount?: string };
+  /**
+   * Move `amount` of `from`'s own money to `to` (card one-balance-buys-on-every-chain; the Blindfill v2 lite paper §3-4):
+   * NEAR is Cash, the vault's USDC; any other chain its pool's asset (POOL_ASSET_DECIMALS: SOL, ETH). `amount` is in
+   * whole units of `from`'s asset; `from` and `to` differ. Every move stops in the NEAR vault and rides NEAR Intents
+   * (MoveStep), never a hop that ties two pools together. The request's id is the move op's id in state.ops, where its
+   * stages come (MoveStage). Its refusals: not_allowed (a pair or amount the page does not move), not_funded (more than
+   * the money there, with its fee), quote_check_failed (the rail's quote failed the device's checks).
+   */
+  "pool.move": { from: TradeChain; to: TradeChain; amount: string };
+  /** What a pool.move of these same params would give (PoolMoveDry). Signs nothing, writes nothing and sends nothing;
+   *  refused as pool.move refuses, so a dry never promises a move the page cannot run. */
+  "pool.move.dry": { from: TradeChain; to: TradeChain; amount: string };
 }
 
 export interface TxRef {
@@ -244,7 +260,40 @@ export interface SignpageResults {
   "pool.address": PoolAddress;
   "pool.sell.dry": PoolSellDry;
   "pool.buy.dry": PoolBuyDry;
+  /** Answered once the move has left (or failed); its later stages come in state.ops under the request's id. */
+  "pool.move": { stage: MoveStage; txs: TxRef[] };
+  "pool.move.dry": PoolMoveDry;
 }
+
+/**
+ * The legs of a move (card one-balance-buys-on-every-chain), each with the chain it runs on: vault_out (a withdrawal
+ * from the NEAR vault), pool_out (a release from a chain's pool), intents (NEAR Intents carries it; its chain is where
+ * it lands), vault_in (into the NEAR vault), pool_in (into a chain's pool). Cash to pool X: vault_out near, intents X,
+ * pool_in X; pool X to pool Y: pool_out X, intents near, vault_in near, vault_out near, intents Y, pool_in Y; pool X
+ * to Cash: pool_out X, intents near, vault_in near.
+ */
+export type MoveStep = "vault_out" | "pool_out" | "intents" | "vault_in" | "pool_in";
+export const MOVE_STEPS: readonly MoveStep[] = Object.freeze(["vault_out", "pool_out", "intents", "vault_in", "pool_in"] as const);
+
+/**
+ * pool.move.dry's answer: `out`, the least that arrives, in whole units of `to`'s asset; `fee`, what the move costs on
+ * top of `amount`, in whole units of `from`'s asset; `steps`, its legs in order. Numbers and chains only. Display only:
+ * no request takes them.
+ */
+export interface PoolMoveDry {
+  out: string;
+  fee: string;
+  steps: readonly { step: MoveStep; chain: TradeChain }[];
+}
+
+/**
+ * Every stage a move can reach (card one-balance-buys-on-every-chain), on the move op in state.ops: leaving (checked and
+ * on its way out of `from`), in_transit (out of `from`, NEAR Intents carrying it), in_vault (in the NEAR vault, between
+ * the two legs of a pool to pool move), into_pool (arrived on `to`, going into its pool), done (in `to`'s pool or the
+ * vault), refunded (NEAR Intents refunded it; the device carries the refund on), failed (it never left, or cannot go on).
+ */
+export type MoveStage = "leaving" | "in_transit" | "in_vault" | "into_pool" | "done" | "refunded" | "failed";
+export const MOVE_STAGES: readonly MoveStage[] = Object.freeze(["leaving", "in_transit", "in_vault", "into_pool", "done", "refunded", "failed"] as const);
 
 /** pool.buy.dry's answer: `tap_max`, in whole units of the chain pool's asset as state.pools' is, at most that entry's
  *  `ready`, "0" when no ready proof can pay the coin's venue. With the ask's `amount` at most tap_max (kit 1.12, card
@@ -254,9 +303,12 @@ export interface SignpageResults {
  *  back with the sale. Both absent with no amount or an amount over tap_max. `out` (kit 1.14, card
  *  solana-buy-preview-complete): with them, what that buy gets, in whole units of the token, at the device's own quote
  *  (the venue's own reads on both providers, its fees taken, before slippage) on the venue the buy takes; absent when
- *  that quote is not read. Display only: no request takes it. */
+ *  that quote is not read. `with_cash` (kit 1.15, card one-balance-buys-on-every-chain): the most one tap spends with its shortfall
+ *  moved from Cash first (src/cash-to-pool.ts), in the same whole units: tap_max plus what the largest Cash note buys of
+ *  the pool's coin less the move's costs (the relayer's fee and the quote's margin); absent with no Cash to move. Display only: no request takes it. */
 export interface PoolBuyDry {
   tap_max: string;
+  with_cash?: string;
   pieces?: number;
   cost?: string;
   out?: string;
@@ -367,7 +419,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.14";
+export const SIGNPAGE_KIT_VERSION = "1.15";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -412,9 +464,12 @@ export interface StateEvent {
  *   it comes;
  * - `out`: the token amount W received, a decimal string in the token's whole units, read from the transaction itself
  *   on both RPCs, the two the same and at least the buy's min out. Absent when they differ: never made up.
+ * - `move` (kit 1.15, card one-balance-buys-on-every-chain): "cash", told once when the tap moves its shortfall from Cash into the
+ *   chain's pool before it buys (src/cash-to-pool.ts), after the vault's move was checked and before it is made; `op`
+ *   the id of that move's op in state.ops (kind "move"), absent from a page before it.
  * Addresses, an amount and a signature only: never a key, the 12 words or a note.
  */
-export type BuyRoute = { wallet: string } | { venue: string; pool: string } | { out: string } | { tx: string };
+export type BuyRoute = { wallet: string } | { venue: string; pool: string } | { out: string } | { tx: string } | { move: "cash"; op?: string };
 
 /** The stage of a request still running, by its id. */
 export interface ProgressEvent {
@@ -551,7 +606,9 @@ export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
  * deposit.quote request's id (card kit-deposit-calls): the app finds the deposit it asked for in state.ops under the id
  * it sent, and a retry, which reuses the id, names the same op. The client drops an op it cannot read and keeps the
  * rest of the state (card kit-frame-version; kit-v1.4 and earlier refuse the whole state for one such op). A pool
- * deposit's op id is its pool.address request's id (card pool-deposit-stages), `chain` the pool's.
+ * deposit's op id is its pool.address request's id (card pool-deposit-stages), `chain` the pool's. A move's op id is its
+ * pool.move request's id, or the id a buy's route event names (card one-balance-buys-on-every-chain): `amount` what
+ * left `from`, in its asset's whole units, and `out` the least that arrives on `to`, in its asset's, each once known.
  */
 export type Operation = (
   | ({ readonly id: string; readonly kind: "deposit"; readonly stage: DepositStage; readonly txs: readonly TxRef[] } & DepositFacts)
@@ -561,6 +618,7 @@ export type Operation = (
   | { readonly id: string; readonly kind: "hop"; readonly stage: HopStage; readonly txs: readonly TxRef[] }
   | { readonly id: string; readonly kind: "return"; readonly stage: ReturnStage; readonly txs: readonly TxRef[] }
   | { readonly id: string; readonly kind: "restore"; readonly stage: RestoreStage; readonly txs: readonly TxRef[] }
+  | { readonly id: string; readonly kind: "move"; readonly from: TradeChain; readonly to: TradeChain; readonly stage: MoveStage; readonly txs: readonly TxRef[]; readonly amount?: string; readonly out?: string }
 ) & OpDetail;
 
 /**

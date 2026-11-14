@@ -5,7 +5,7 @@
 // times on the button and the toast are the buy's own measured ones.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fromBuyRoute, fromOutcome, fromProgress, fromStage, IDLE, liveRoute, routeEvent, routeTap, stepView, toastLine } from "../src/screens/trade/route.ts";
+import { fromBuyRoute, fromOutcome, fromProgress, fromStage, IDLE, liveRoute, moveView, routeEvent, routeTap, stepView, toastLine } from "../src/screens/trade/route.ts";
 import type { BuyRoute } from "@blindfill/kit";
 import type { Route } from "../src/screens/trade/route.ts";
 
@@ -261,4 +261,55 @@ test("review of 418af7d5: after the amount out, a run that ends not known is the
   // another buy's end never moves it
   assert.deepEqual(fromProgress(f, "b2", "not_landed"), f);
   assert.deepEqual(fromProgress(f, "b2", "sent"), f);
+});
+
+// Card one-balance-buys-on-every-chain: a Solana tap above what one tap spends moves its shortfall from Cash first and
+// the page tells it (route { move: "cash" }, packages/signpage/src/cash-to-pool.ts cashFirst). The strip draws the move
+// as its own step before the one-time wallet, with its running time from the moment the page told it, until the take
+// (the kit's sent) checks it with the time it took; a buy that ends while it moves marks it the error. A buy with no
+// move draws no move step.
+test("card one-balance-buys-on-every-chain: the move from Cash is its own step with its running time; the take checks it, an end while moving fails it", () => {
+  assert.equal(moveView(tap(), T0 + 1_000), null, "no move told: no move step");
+  assert.equal(moveView(IDLE, T0), null);
+  const moved = routeEvent(tap(), { t: "move", id: "b1", at: T0 + 200 });
+  assert.deepEqual(moveView(moved, T0 + 12_500), { state: "active", value: "12.3s" });
+  assert.deepEqual(steps(moved), ["active", "off", "off", "off"], "the move checks no other step");
+  // another buy's move, and a second move of the same buy, keep what is drawn
+  assert.equal(moveView(routeEvent(tap(), { t: "move", id: "b2", at: T0 + 200 }), T0 + 1_000), null);
+  assert.deepEqual(moveView(routeEvent(moved, { t: "move", id: "b1", at: T0 + 9_000 }), T0 + 12_500), { state: "active", value: "12.3s" });
+  // the move landed and the buy went out (the kit's sent): the move checks with the time it took, then the buy runs on
+  const sent = fromProgress(moved, "b1", "sent", T0 + 45_200);
+  assert.deepEqual(moveView(sent, T0 + 60_000), { state: "done", value: "45.0s" });
+  assert.deepEqual(steps(sent), ["done", "done", "active", "off"]);
+  const done = fromStage(sent, "b1", "filled", undefined, T0 + 46_000);
+  assert.deepEqual(moveView(done, T0 + 90_000), { state: "done", value: "45.0s" });
+  assert.equal(done.k, "done");
+  // the request's own answer checks it the same way
+  assert.deepEqual(moveView(fromOutcome(moved, "b1", { ok: true, result: { stage: "sent", txs: [{ hash: "sig" }] } }, T0 + 40_200), T0 + 50_000), { state: "done", value: "40.0s" });
+  // a move told after the take draws nothing new
+  assert.equal(moveView(routeEvent(fromStage(tap(), "b1", "sent", "sig", T0 + 900), { t: "move", id: "b1", at: T0 + 1_000 }), T0 + 2_000), null);
+  // the buy ends while it moves (the move never landed in time, or was refused): the move step is the error, with its time
+  const failed = fromOutcome(moved, "b1", { ok: false, error: { code: "not_funded" } }, T0 + 180_200);
+  assert.deepEqual(moveView(failed, T0 + 200_000), { state: "error", value: "180.0s" });
+  assert.deepEqual(steps(failed), ["error", "off", "off", "off"]);
+  assert.equal(failed.k, "failed");
+  // the client's own timeout ends nothing: the move still runs
+  assert.deepEqual(moveView(fromOutcome(moved, "b1", { ok: false, error: { code: "client_timeout" } }, T0 + 10_200), T0 + 12_500), { state: "active", value: "12.3s" });
+  // a new tap starts with no move
+  assert.equal(moveView(routeTap("b2", T0 + 300_000, 1_000n), T0 + 300_500), null);
+});
+
+test("card one-balance-buys-on-every-chain: the kit's route event { move: \"cash\" } is the strip's move, by its buy's id; any other move or an inherited one is nothing", () => {
+  assert.deepEqual(fromBuyRoute("b1", { move: "cash" }), { t: "move", id: "b1" });
+  assert.equal(fromBuyRoute("b1", { move: "card" } as unknown as BuyRoute), null);
+  assert.equal(fromBuyRoute("b1", Object.create({ move: "cash" }) as BuyRoute), null);
+  // through the live seam: the move told for b1 draws on b1's strip, from the tap's time when no time was stamped
+  const subs = new Set<(id: string, r: BuyRoute) => void>();
+  const route = liveRoute((fn) => (subs.add(fn), () => void subs.delete(fn)));
+  let r = tap();
+  route((d) => void (r = routeEvent(r, d)));
+  subs.forEach((f) => f("other", { move: "cash" }));
+  assert.equal(moveView(r, T0 + 1_000), null);
+  subs.forEach((f) => f("b1", { move: "cash" }));
+  assert.deepEqual(moveView(r, T0 + 1_000), { state: "active", value: "1.0s" });
 });

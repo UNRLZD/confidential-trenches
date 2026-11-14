@@ -28,6 +28,7 @@ import {
 } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaSellReserve } from "../src/pool-sell.ts";
 import { noteOf, SOL_GRID, SOL_NOTE_FLOOR } from "../../wallet/src/pool/pieces.ts";
+import { isRung } from "../../wallet/src/pool/ladder.ts";
 import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { evmPoolVenues, pinnedBuild, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -49,6 +50,7 @@ import {
   checkEvmWithdraw,
   checkPoolRequest,
   checkSolanaBuy,
+  checkSolanaCarry,
   checkSolanaDeposit,
   checkSolanaSell,
   checkSolanaWithdraw,
@@ -65,6 +67,7 @@ import {
   solanaSweepOf,
   solanaSweepKeep,
   checkSolanaSweep,
+  checkSolanaKeepSweep,
   type SolanaDepositHeld,
   type SolanaSellSurplus,
   evmWithdrawDigest,
@@ -484,6 +487,55 @@ test("Solana buy of several pieces: each tag 2 to the same W at its own state in
   }
 });
 
+test("card buy-spends-its-change-in-the-same-tap: a first round is tag 2s alone to W at their own state indexes; the buy's round counts them as landed, named first in before; any other wallet, index, note, sum or count is refused", async () => {
+  const cfg = { program: FX_PROGRAM, pool: solanaProgramAddress([enc("pool")], FX_PROGRAM) };
+  const base = await setup("pump");
+  const piece = (n: number, over: Partial<SolanaPoolRelease> = {}): SolanaPoolRelease => ({ ...fxRelease, existingNullifierHash: Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0)), withdrawnValue: 5_000_000n, ...over });
+  const p1 = piece(1), p2 = piece(2);
+  const spend = solanaPoolBuyMaxSpend([p1, p2, fxRelease], base.venue, base.req.tip, base.reads.rent);
+  const { venue, req: req0, chain, reads: reads0 } = await setup("pump", spend);
+  const tag2 = (r: SolanaPoolRelease, at: number, w = FX_W) => wire(FEE_PAYER, [cuLimit, { program: FX_PROGRAM, accounts: solanaPoolTag2Accounts(cfg, w, FEE_PAYER, r, at), data: solanaEncodePoolRelease(r) }], [FEE_PAYER, w], reads0.blockhash);
+  const ctx: PoolContext = { nowMs: NOW, wallet: FX_W, feeCap: 3_000_000n, solana: { program: FX_PROGRAM, feePayer: FEE_PAYER } };
+  const ask: PoolAsk = { kind: "pool.buy", chain: "solana", token: req0.token, amount: spend, slippageBps: 300, decimals: 9 };
+  // round 1: the pool's size read is 6, p1's change goes at 6
+  const one = [{ wire: tag2(p1, 6), release: p1 }];
+  assert.deepEqual(checkSolanaCarry(ask, ctx, one, { blockhash: reads0.blockhash, stateSize: 6 }).map((x) => x.withdrawnValue), [5_000_000n]);
+  const W2 = key(64);
+  for (const [list, rule] of [
+    [[{ wire: tag2(p1, 6, W2), release: p1 }], "signers"],
+    // its change note on another page than the one its index lands on
+    [[{ wire: tag2(p1, 6 + 1024), release: p1 }], "release_accounts"],
+    [[{ wire: tag2(piece(1, { withdrawnValue: 5_000_001n }), 6), release: p1 }], "release_not_devices"],
+    [[one[0]!, { wire: tag2(p1, 7), release: p1 }], "pieces"],
+    [[], "pieces"],
+    [[0, 1, 2, 3].map((i) => ({ wire: tag2(piece(10 + i), 6 + i), release: piece(10 + i) })), "pieces"],
+  ] as const) {
+    assert.throws(() => checkSolanaCarry(ask, ctx, list, { blockhash: reads0.blockhash, stateSize: 6 }), refusedAs(rule), rule);
+  }
+  assert.throws(() => checkSolanaCarry({ ...ask, kind: "pool.sell" } as PoolAsk, ctx, one, { blockhash: reads0.blockhash, stateSize: 6 }), refusedAs("kind"));
+  // round 2: p1 landed (its change at 6, the size read 7), p2's tag 2 at 7, the tag 3 at 8
+  const req = { ...req0, before: [p1, p2].map((p) => ({ withdrawnValue: p.withdrawnValue, relayFee: p.relayFee })) };
+  const built = buildSolanaPoolBuy(cfg, fxRelease, venue, req, { ...chain, stateSize: 8 }, { pick: () => 3 });
+  const reads = { ...reads0, stateSize: 8 };
+  const two = [{ wire: tag2(p2, 7), release: p2 }];
+  const d = checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, req, reads, two, [p1]);
+  assert.equal(d.to, FX_W);
+  assert.equal(d.feeCap, 3n * fxRelease.relayFeeCap, "the draw's fee cap is every release of the tap");
+  // without the landed release named, its before is one too many
+  assert.throws(() => checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, req, reads, two), refusedAs("pieces"));
+  for (const [landed, pieces, r, rule] of [
+    // the landed release's sum not the request's
+    [[piece(1, { withdrawnValue: 6_000_000n })], two, req, "pieces"],
+    // the landed note again as a piece, or as the tag 3's own
+    [[p2], two, req, "pieces"],
+    [[{ ...fxRelease, withdrawnValue: p1.withdrawnValue }], two, req, "pieces"],
+    // over the tap's count: three landed and one piece before the tag 3
+    [[piece(20), piece(21), piece(22)], two, { ...req, before: [piece(20), piece(21), piece(22), p2].map((p) => ({ withdrawnValue: p.withdrawnValue, relayFee: p.relayFee })) }, "pieces"],
+  ] as const) {
+    assert.throws(() => checkSolanaBuy(built.wire, ask, ctx, fxRelease, venue, r, reads, pieces, landed), refusedAs(rule), rule);
+  }
+});
+
 // ---------- Solana sell ----------
 
 test("Solana sell: the kit's venue sell from W at or above the device's floor, then on a partial sell a deposit of the grid note of min out less the device's reserve into the pinned pool, passes and draws it; each bad field is refused", async () => {
@@ -500,9 +552,10 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
     return wire(o.w ?? SOL_W, [cuLimit, ...steps, ...(o.extra ?? []), depositIx({ value: solanaNoteOf((o.minOut ?? floor) - RESERVE), ...o.dep })]);
   };
   const RESERVE = 5_000n;
-  // card every-lamport-can-move: the note on the grid, the rest under it left on W
+  // card every-lamport-can-move, card pool-amounts-are-standard-sizes: the note the largest rung of min out less the
+  // reserve, the rest past it left on W
   const NOTE = solanaNoteOf(floor - RESERVE);
-  assert.ok(NOTE % SOL_GRID === 0n && NOTE >= SOL_NOTE_FLOOR && floor - RESERVE - NOTE < SOL_GRID && NOTE !== floor - RESERVE, "the fixture's note is off its min out, on the grid");
+  assert.ok(isRung({ one: SOL_GRID, min: SOL_NOTE_FLOOR }, NOTE) && NOTE >= SOL_NOTE_FLOOR && solanaNoteOf(floor - RESERVE) === NOTE && NOTE !== floor - RESERVE, "the fixture's note is off its min out, a rung");
   // a partial sell's reads: the rent both RPCs read, the kit's release floor's (card sol-sell-deposit-back-floor)
   const PART: SolanaSellSurplus = { full: false, fee: 5_000n, rent: { lamportsPerByte: 5_080n, factor: 1n } };
   const d = checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART);
@@ -994,19 +1047,20 @@ test("Solana sell: a deposit back under the sale's note floor (the pool's piece 
     assert.throws(() => sell(at, [...steps(at), depositIx({ value: noteFloor })], { ...PART, rent: r as never }), refusedAs("reserve"), JSON.stringify(r, (_, v) => String(v)));
   }
   // the floor follows the rent read: where the kit's release floor passes the piece floor (here 3 x mainnet's rent:
-  // 7,800,000, up to the grid 8,000,000) the same deposit is under it
+  // 7,800,000, up to a rung 10,000,000 since card pool-amounts-are-standard-sizes) the same deposit is under it
   const steep = { lamportsPerByte: 15_240n, factor: 1n } as SolanaSellSurplus["rent"];
-  assert.ok(solanaSellNoteFloor(steep) > noteFloor && solanaSellNoteFloor(steep) % SOL_GRID === 0n, String(solanaSellNoteFloor(steep)));
+  assert.equal(solanaSellNoteFloor(steep), 10_000_000n);
   assert.throws(() => sell(at, [...steps(at), depositIx({ value: noteFloor })], { ...PART, rent: steep }), refusedAs("deposit_floor"));
 });
 
-// card every-lamport-can-move: the rules' grid note is the wallet's noteOf at SOL_PIECES, from its constants by name
-test("solanaNoteOf is noteOf at SOL_PIECES: down to SOL_GRID, none under SOL_NOTE_FLOOR, at every edge", () => {
+// card pool-amounts-are-standard-sizes: the rules' note is the wallet's noteOf at SOL_PIECES, from its constants by name
+test("solanaNoteOf is noteOf at SOL_PIECES: the largest rung, none under SOL_NOTE_FLOOR, at every edge", () => {
   for (const x of [0n, 1n, SOL_GRID - 1n, SOL_GRID, SOL_NOTE_FLOOR - 1n, SOL_NOTE_FLOOR, SOL_NOTE_FLOOR + 1n, SOL_NOTE_FLOOR + SOL_GRID - 1n, SOL_NOTE_FLOOR + SOL_GRID, 123_456_789n, 10n ** 18n + 7n]) {
     assert.equal(solanaNoteOf(x), noteOf(SOL_PIECES, x).note, String(x));
   }
   assert.equal(solanaNoteOf(-1n), 0n);
   assert.deepEqual(solanaSweepOf(SOL_NOTE_FLOOR + SOL_GRID - 1n), { value: SOL_NOTE_FLOOR, under: SOL_GRID - 1n });
+  assert.deepEqual(solanaSweepOf(27_000_000n), { value: 20_000_000n, under: 7_000_000n });
   assert.deepEqual(solanaSweepOf(SOL_NOTE_FLOOR), { value: SOL_NOTE_FLOOR, under: 0n });
   assert.deepEqual(solanaSweepOf(SOL_NOTE_FLOOR - 1n), { value: 0n, under: 0n });
   assert.deepEqual(solanaSweepOf(-5n), { value: 0n, under: 0n });
@@ -1070,65 +1124,64 @@ test("Solana partial sell: the rule passes exactly the device's reserve and grid
   assert.deepEqual(bad.slice(0, 10), []);
 });
 
-// card every-lamport-can-move: W's sweep, the rule's planted refusals. Review P3-1 of T1+T2: accepted exactly
-// the one tag 1 deposit, its value on the grid and at least SOL_NOTE_FLOOR, then at most one System transfer from W to
-// the pinned relayer's account (the pin's feePayer: review P1-1 of 1d3b96d9c, the pool's account holds no lamport past its
-// books, so a tail paid there is locked for good) of the rest under the grid (0 < t < SOL_GRID); no compute budget (W
-// pays its one signature, so a sweep that fails on chain costs 5,000); value + fee + t + rents + keep exactly W's lamports
-test("Solana sweep, P3-1: the grid note and its rest as one transfer to the pinned relayer's account pass; one to the pool's account, a budget, another recipient, a transfer at the grid, a second transfer, an off-grid value, an equation off by a lamport are each refused", () => {
+// card pool-amounts-are-standard-sizes: W's sweep, the rule's planted refusals. Accepted exactly the one tag 1 deposit
+// of the largest rung of W's rest (lamports less the fee, the rents and the keep) whose remainder on W is 0 or keeps W
+// rent-exempt; that remainder stays on W for its next sweep (never paid away: the transfer of the old shape is refused);
+// no compute budget (W pays its one signature, so a sweep that fails on chain costs 5,000). Mainnet 13 Nov: a sale's W
+// deposited 12,000,000 back, off the ladder.
+test("Solana sweep, standard sizes: the largest rung of W's rest passes with the rest left on W; a grid note off the ladder, a tail paid away, a smaller rung, a budget or a second deposit are each refused", () => {
   const rent = { lamportsPerByte: 5_080n, factor: 1n } as SolanaSellSurplus["rent"];
   const none = [null, null] as const;
   const held: SolanaDepositHeld = { mark: none, state: none, label: none };
   const rents = solanaDepositRents(rent, SOL_READS, held);
-  const limitIx = (l: number) => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, ...u64(BigInt(l)).slice(0, 4)) });
   const priceIx = (p: bigint) => ({ program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(3, ...u64(p)) });
   const sweep = (ixs: Ixx[], lamports: bigint, owed = 0) => checkSolanaSweep(wire(SOL_W, ixs), solCtx(), SOL_READS, lamports, rent, held, owed);
-  const value = SOL_NOTE_FLOOR + 7n * SOL_GRID;
-  const rest = 345_678n;
-  assert.ok(rest < SOL_GRID);
-  const lamports = value + 5_000n + rest + rents;
-  const ok = [depositIx({ value }), send(SOL_FEE_PAYER, rest)];
-  assert.equal(sweep(ok, lamports), value);
-  // the device's own split of that rest is this one
-  assert.deepEqual(solanaSweepOf(lamports - 5_000n - rents), { value, under: rest });
-  // a rest of 0: the deposit alone; the largest rest, a lamport under the grid
-  assert.equal(sweep([depositIx({ value })], value + 5_000n + rents), value);
-  assert.equal(sweep([depositIx({ value }), send(SOL_FEE_PAYER, SOL_GRID - 1n)], value + 5_000n + SOL_GRID - 1n + rents), value);
-  // an owed claim's keep stays on W, exactly; and a kept account's (review P2-1)
-  assert.equal(sweep(ok, lamports + solanaSweepKeep(rent, 1), 1), value);
-  assert.equal(checkSolanaSweep(wire(SOL_W, ok), solCtx(), SOL_READS, lamports + solanaSweepKeep(rent, 0, 2), rent, held, 0, 2), value);
+  // the mainnet case: 12,345,678 past the fee and rents makes a 10,000,000 note, 2,345,678 staying on W
+  const rest = 12_345_678n;
+  const lamports = rest + 5_000n + rents;
+  const value = 10_000_000n;
+  assert.equal(sweep([depositIx({ value })], lamports), value);
+  assert.deepEqual(solanaSweepOf(rest, solanaRentMin(rent, 0)), { value, under: rest - value });
+  // a rest that is a rung: W ends at 0
+  assert.equal(sweep([depositIx({ value: 20_000_000n })], 20_000_000n + 5_000n + rents), 20_000_000n);
+  // a remainder under rent(0) would leave W short of rent: the next rung down, the rest on W rent-exempt
+  const tight = 10_000_000n + 100_000n;
+  assert.equal(sweep([depositIx({ value: 5_000_000n })], tight + 5_000n + rents), 5_000_000n);
+  assert.deepEqual(solanaSweepOf(tight, solanaRentMin(rent, 0)), { value: 5_000_000n, under: 5_100_000n });
+  // an owed claim's keep stays on W, and the rung is of what is past it
+  assert.equal(sweep([depositIx({ value })], lamports + solanaSweepKeep(rent, 1), 1), value);
   for (const [name, ixs, l, rule] of [
-    // the old shape: the rest as a priority at a 1,000,000-unit limit, and any compute budget at all
-    ["the rest as a priority", [limitIx(1_000_000), priceIx(rest), depositIx({ value })], lamports, "instructions"],
-    ["a price before the deposit", [priceIx(rest), depositIx({ value })], lamports, "program"],
-    ["a budget after the deposit", [depositIx({ value }), priceIx(rest)], lamports, "transfer"],
-    // the transfer: to another account, from another, at or over the grid, of 0, a second one, before the deposit
-    ["to another account", [depositIx({ value }), send(key(79), rest)], lamports, "transfer_to"],
-    ["to W itself", [depositIx({ value }), send(SOL_W, rest)], lamports, "transfer_to"],
-    // review P1-1 of 1d3b96d9c: the pool's account keeps no lamport its books do not name, so nobody could ever take it
-    ["to the pool's account", [depositIx({ value }), send(POOL, rest)], lamports, "transfer_to"],
-    ["from another account", [depositIx({ value }), { ...send(SOL_FEE_PAYER, rest), accounts: [acc(key(78), false, true), acc(SOL_FEE_PAYER, false, true)] }], lamports, "transfer_to"],
-    ["at the grid", [depositIx({ value }), send(SOL_FEE_PAYER, SOL_GRID)], value + 5_000n + SOL_GRID + rents, "transfer_amount"],
-    ["over the grid", [depositIx({ value }), send(SOL_FEE_PAYER, SOL_GRID + 1n)], value + 5_000n + SOL_GRID + 1n + rents, "transfer_amount"],
-    ["of 0", [depositIx({ value }), send(SOL_FEE_PAYER, 0n)], value + 5_000n + rents, "transfer_amount"],
-    ["a second transfer", [depositIx({ value }), send(SOL_FEE_PAYER, rest - 1n), send(SOL_FEE_PAYER, 1n)], lamports, "instructions"],
-    ["the transfer first", [send(SOL_FEE_PAYER, rest), depositIx({ value })], lamports, "program"],
-    ["another program's bytes", [depositIx({ value }), { ...send(SOL_FEE_PAYER, rest), program: key(80) }], lamports, "transfer"],
-    ["another System instruction", [depositIx({ value }), { ...send(SOL_FEE_PAYER, rest), data: Uint8Array.of(3, 0, 0, 0, ...u64(rest)) }], lamports, "transfer"],
-    // an off-grid value, and one under the floor on the grid, each with the equation exact
-    ["off the grid", [depositIx({ value: value + 1n }), send(SOL_FEE_PAYER, rest - 1n)], lamports, "amount"],
-    ["no transfer, off the grid", [depositIx({ value: value + rest })], lamports, "amount"],
-    ["under the floor", [depositIx({ value: SOL_NOTE_FLOOR - SOL_GRID }), send(SOL_FEE_PAYER, rest)], SOL_NOTE_FLOOR - SOL_GRID + 5_000n + rest + rents, "amount"],
-    ["two deposits", [depositIx({ value }), depositIx({ value })], lamports, "transfer"],
-    // the equation off by a lamport either way, with and without the transfer
-    ["a lamport more on W", ok, lamports + 1n, "sweep_amount"],
-    ["a lamport less on W", ok, lamports - 1n, "sweep_amount"],
-    ["no transfer, a lamport more on W", [depositIx({ value })], value + 5_000n + rents + 1n, "sweep_amount"],
-    ["the keep not left", ok, lamports, "sweep_amount", 1],
+    // the grid note main made (12,000,000) and the tail it paid the relayer: both refused
+    ["the grid note off the ladder", [depositIx({ value: 12_000_000n })], lamports, "sweep_amount"],
+    ["the old tail paid away", [depositIx({ value: 12_000_000n }), send(SOL_FEE_PAYER, rest - 12_000_000n)], lamports, "instructions"],
+    ["the rung with the rest paid away", [depositIx({ value }), send(SOL_FEE_PAYER, rest - value)], lamports, "instructions"],
+    ["a smaller rung than the largest", [depositIx({ value: 5_000_000n })], lamports, "sweep_amount"],
+    ["the rest whole", [depositIx({ value: rest })], lamports, "sweep_amount"],
+    ["a budget", [priceIx(1n), depositIx({ value })], lamports, "instructions"],
+    ["two deposits", [depositIx({ value }), depositIx({ value: 2_000_000n })], lamports, "instructions"],
+    ["under the floor", [depositIx({ value: 2_000_000n })], 2_000_000n + 5_000n + rents, "sweep_amount"],
   ] as const) {
-    const owed = name === "the keep not left" ? 1 : 0;
-    assert.throws(() => sweep(ixs as unknown as Ixx[], l as bigint, owed), refusedAs(rule as string), name as string);
+    assert.throws(() => sweep(ixs as unknown as Ixx[], l as bigint), refusedAs(rule as string), name as string);
   }
+});
+
+// card pool-amounts-are-standard-sizes: a partial sale's deposit back and W's keep sweep are rungs, never a grid note off
+// the ladder; what is under the rung stays on W, which still holds tokens and sells again
+test("Solana sell and keep sweep, standard sizes: every note a sale makes is a rung", () => {
+  for (let x = SOL_NOTE_FLOOR; x < 3_000_000_000n; x = (x * 11n) / 10n + 7_919n) {
+    const note = solanaNoteOf(x);
+    assert.ok(isRung({ one: SOL_GRID, min: SOL_NOTE_FLOOR }, note) && note <= x, `${x}: ${note}`);
+  }
+  const rent = { lamportsPerByte: 5_080n, factor: 1n } as SolanaSellSurplus["rent"];
+  const none = [null, null] as const;
+  const held: SolanaDepositHeld = { mark: none, state: none, label: none };
+  const rents = solanaDepositRents(rent, SOL_READS, held);
+  const hold = 3_000_000n;
+  const lamports = 12_345_678n + 5_000n + rents + hold;
+  const keep = (value: bigint) => checkSolanaKeepSweep(wire(SOL_W, [depositIx({ value })]), solCtx(), SOL_READS, lamports, rent, held, hold);
+  assert.equal(keep(10_000_000n), 10_000_000n);
+  assert.throws(() => keep(12_000_000n), refusedAs("keep_amount"));
+  assert.throws(() => keep(5_000_000n), refusedAs("keep_amount"));
 });
 
 // card round-trip-costs-less, review P2-2 of 4f9217972: the sale's priority is bounded by the rule itself, not only by

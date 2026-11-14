@@ -310,8 +310,10 @@ const FIXTURE_FILES = sources(FIXTURES);
 // real file reaches, and the planted leak is a signer file, `define` as the real four are
 // the planted L3 case: the test exempts signDigest in it, as EXEMPT does in sell-unpinned.ts
 const L3_FIXTURE = "packages/signpage/test/fixtures/signer-guard/bad/l3-nested-exempt-name.ts";
+// the planted exit case: the test exempts the two signers in it, as EXEMPT does in the wallet's evm-exit.ts
+const X1_FIXTURE = "packages/signpage/test/fixtures/signer-guard/bad/x1-exit-third-signer.ts";
 const GUARD_MS = Date.now();
-const GUARD = signerGuard(ENTRY, [...TREE_FILES, ...FIXTURE_FILES], [...SIGNER_DEFS, ...FIXTURE_DEFS], VIRTUAL, { ...NON_SIGNERS, [FIXTURE_DEFS[0]!]: ["fixtureIsQuotedSell", "isSignedSell"], [FIXTURE_DEFS[2]!]: ["own"] }, { ...EXEMPT, [FIXTURE_DEFS[2]!]: { define: true }, [L3_FIXTURE]: { curve: ["signDigest"] } });
+const GUARD = signerGuard(ENTRY, [...TREE_FILES, ...FIXTURE_FILES], [...SIGNER_DEFS, ...FIXTURE_DEFS], VIRTUAL, { ...NON_SIGNERS, [FIXTURE_DEFS[0]!]: ["fixtureIsQuotedSell", "isSignedSell"], [FIXTURE_DEFS[2]!]: ["own"] }, { ...EXEMPT, [FIXTURE_DEFS[2]!]: { define: true }, [L3_FIXTURE]: { curve: ["signDigest"] }, [X1_FIXTURE]: { curve: ["evmExitWithdrawSignature", "evmExitSignSend"] } });
 const GUARD_BUILT_MS = Date.now() - GUARD_MS;
 const names = (files: readonly string[]) => files.map((f) => f.slice(ROOT.length));
 /** The npm packages the page bundles, by name and version: a new one (a signing library) is read here first. */
@@ -451,11 +453,13 @@ test("signer-guard-parser: every planted signer and encoder in fixtures/signer-g
     "h1c-namespace-exact.ts": r("reads schnorr of @noble/curves off a namespace"), // H1c
     "h1c-namespace-nonroot.ts": r(...Array(4).fill("reads schnorr of @noble/curves off a namespace")), // H1c
     "l1b-class-field.ts": r(...Array(4).fill(`calls .*${pool}${no}`)), // L1b
+    "x1-exit-third-signer.ts": r("uses @noble/curves: \\.sign of its ECDSA"), // the exit's third signer; its two exempt ones pass (below)
   };
   const bad = FIXTURE_FILES.filter((f) => f.startsWith(join(FIXTURES, "bad")));
   assert.deepEqual(bad.map((f) => f.slice(FIXTURES.length + 5)).sort(), Object.keys(BAD).sort(), "the planted cases were read");
   assert.deepEqual(names(GUARD.unguarded(bad)), names(bad));
   assert.deepEqual(GUARD.sites(join(ROOT, L3_FIXTURE)).map((s) => [s.line, s.ok]), [[5, true], [9, false]], "L3: only the top-level signDigest is exempt");
+  assert.deepEqual(GUARD.sites(join(ROOT, X1_FIXTURE)).map((s) => [s.line, s.ok]), [[6, true], [9, true], [12, false]], "the exit's two signers are exempt, a third is not");
   assert.ok(GUARD.sites(join(FIXTURES, "bad/h1c-namespace-nonroot.ts")).some((s) => s.line === 12 && !s.ok && /reads schnorr/.test(s.what)), "H1c: schnorr read off our own re-export");
   for (const f of bad) assert.match(GUARD.sites(f).filter((s) => !s.ok).map((s) => s.what).join("\n"), BAD[f.slice(FIXTURES.length + 5)]!, f);
   // no false refusal: the rule's signer by an alias, with the wallet's evmNextNote by an alias in the same function, is

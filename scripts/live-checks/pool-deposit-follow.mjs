@@ -113,8 +113,11 @@ const LOOP = new RegExp(
     // evm-first-proof-inside-ten-seconds); a carry only on costs read in its round
     `let (${N})=\\(\\5\\.now\\?\\?Date\\.now\\)\\(\\),(${N})=(${N}),(${N})=\\22!==null&&\\22\\.low===\\19&&\\21>=\\22\\.at&&\\21-\\22\\.at<15e3\\?\\22:null,` +
     `(${N})=\\19>=\\5\\.ladder\\.min\\?\\24\\?\\.c\\?\\?await ${N}\\(\\):null;if\\(\\23=\\25!==null&&\\19<\\25\\.floor\\?\\24\\?\\?\\{low:\\19,at:\\21,c:\\25\\}:null,\\25!==null&&\\19>=\\25\\.floor\\)` +
-    `\\11&&!\\13&&\\19>\\20&&\\(await \\14\\(${Q}in_transit${Q}\\),\\12=!0\\),await \\1\\(\\19,\\25\\)&&\\(\\16=!0\\),\\8&&\\(\\16=!0\\);` +
-    `else if\\(\\13\\)\\{if\\(!\\15&&(${N})!==${Q}in_pool${Q}&&await \\14\\(${Q}in_pool${Q}\\),!\\15&&await \\5\\.past\\(\\7\\)\\)` +
+    // (card one-balance-buys-on-every-chain: U_X's leftover written 0 before a carry, so a carry's money never counts twice)
+    `(?:await \\5\\.holds\\?\\.\\(0n\\),)?\\11&&!\\13&&\\19>\\20&&\\(await \\14\\(${Q}in_transit${Q}\\),\\12=!0\\),await \\1\\(\\19,\\25\\)&&\\(\\16=!0\\),\\8&&\\(\\16=!0\\);` +
+    `else if\\(\\13\\)\\{if\\(!\\15&&(${N})!==${Q}in_pool${Q}&&await \\14\\(${Q}in_pool${Q}\\),` +
+    // (card one-balance-buys-on-every-chain: what U_X holds written each in_pool round with no note of U_X's landing)
+    `(?:\\15\\|\\|await \\5\\.holds\\?\\.\\(\\19\\),)?!\\15&&await \\5\\.past\\(\\7\\)\\)` +
     `[^]{0,1200}?\\.status===${Q}SUCCESS${Q}&&\\(\\12=!0\\),`,
 );
 // pool-deposit.ts runPoolDeposit's fixed source (review H1): U_{s,i}'s own deposit note or its next arrival, a U the

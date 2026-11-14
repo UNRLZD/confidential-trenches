@@ -1,6 +1,7 @@
 // Card signpage-pool-withdraw-form: the pool withdraw screen (src/withdraw/pool-form.ts). To is checked per chain
 // (Solana base58 keys, never the pool's own; EVM 0x addresses, EIP-55 when mixed case, never zero or the pool), the
 // amount is refused above what the pool's notes can send, and To and Max fee are drawn before the press.
+import { isReleaseSize } from "../../wallet/src/pool/pieces.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CHECK_IDLE_MS } from "../src/withdraw/form.ts";
@@ -8,7 +9,7 @@ import { SOLANA_RESERVED_KEYS } from "../src/rules/pool.ts";
 import { planPoolWithdraw } from "../src/pool-withdraw.ts";
 import { SOL_GRID } from "../../wallet/src/pool/pieces.ts";
 import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
-import { checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady, type PoolWithdrawFormDeps } from "../src/withdraw/pool-form.ts";
+import { checkExitTo, checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady, type PoolWithdrawFormDeps } from "../src/withdraw/pool-form.ts";
 
 const POOL = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
 // stand-ins that are no key the runtime reserves, so each refusal below is its own check's
@@ -153,10 +154,15 @@ test("the drawn screen: To and Max fee shown before the press, the press hands o
 test("Amount on a piece rule: the plan's sum is the one number shown and handed over, and it plans exactly itself", async () => {
   const pieces: PoolFunds = { ...FUNDS, pieces: SOL_PIECES };
   const typed = 7_123_456n;
-  const sum = planPoolWithdraw(pieces.notes, typed, pieces)!.reduce((t, p) => t + p.part, 0n);
+  const plan = planPoolWithdraw(pieces.notes, typed, pieces)!;
+  const sum = plan.reduce((t, p) => t + p.part, 0n);
   assert.ok(sum > typed && sum - typed < SOL_GRID, `${sum}: a test whose typed amount the plan rounds up`);
-  assert.deepEqual(checkPoolAmount("solana", formatUnits(typed, 9), pieces), { ok: true, amount: sum, parts: 1, maxFee: FEE + W_FEE });
-  assert.deepEqual(checkPoolAmount("solana", formatUnits(sum, 9), pieces), { ok: true, amount: sum, parts: 1, maxFee: FEE + W_FEE });
+  // card pool-amounts-are-standard-sizes: each part a rung's, so the plan may take more than one part; the screen counts
+  // each part's fee
+  const parts = plan.length;
+  assert.ok(plan.every((p) => isReleaseSize(SOL_PIECES, p.chunk)), JSON.stringify(plan, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  assert.deepEqual(checkPoolAmount("solana", formatUnits(typed, 9), pieces), { ok: true, amount: sum, parts, maxFee: BigInt(parts) * (FEE + W_FEE) });
+  assert.deepEqual(checkPoolAmount("solana", formatUnits(sum, 9), pieces), { ok: true, amount: sum, parts, maxFee: BigInt(parts) * (FEE + W_FEE) });
   const f = drawn(async () => pieces);
   f.type("to", TO);
   f.type("amount", formatUnits(typed, 9));
@@ -165,7 +171,7 @@ test("Amount on a piece rule: the plan's sum is the one number shown and handed 
   const shown = Object.fromEntries(f.lines.children.filter((e) => e.tag === "dd").map((e) => [e.dataset.line, e.textContent]));
   assert.equal(shown.amount, `${formatUnits(sum, 9)} SOL`);
   await f.tap();
-  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: sum, maxFee: FEE + W_FEE }]);
+  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: sum, maxFee: BigInt(parts) * (FEE + W_FEE) }]);
 });
 
 // review #232 HIGH 2: an amount no plan sends without a change no withdraw could ever send is refused, naming the
@@ -279,4 +285,49 @@ test("no send owed, none read, or a read that fails: no fee line; a redraw that 
   await settle();
   assert.equal(rose.hidden, false);
   assert.equal(again.disabled, false);
+});
+
+// card pool-withdraws-to-any-chain: the Chain picker. Absent with no exits (the same chain as built); with exits, the
+// pool's own chain first and chosen, each other chain the page serves pickable, one it does not drawn Not available.
+test("To on another chain: Solana keys, EVM addresses with their checksum, NEAR accounts; nothing else", () => {
+  assert.deepEqual(checkExitTo("base", CHECKSUMMED.toLowerCase()), { ok: true, to: CHECKSUMMED });
+  assert.deepEqual(checkExitTo("robinhood", CHECKSUMMED), { ok: true, to: CHECKSUMMED });
+  assert.deepEqual(checkExitTo("solana", TO), { ok: true, to: TO });
+  for (const near of ["alice.near", "a1-b_c.tg", "5d".repeat(32), "0x" + "ab".repeat(20)]) assert.deepEqual(checkExitTo("near", near), { ok: true, to: near }, near);
+  const no = { ok: false, code: "address" };
+  for (const [dest, bad] of [["base", "0x" + "0".repeat(40)], ["base", "0x5AAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"], ["base", TO], ["solana", CHECKSUMMED],
+    ["solana", "11111111111111111111111111111111"], ["near", "Alice.near"], ["near", "a"], ["near", "a..b"], ["near", "-a.near"], ["near", TO], ["near", "alice.near‮"]] as const)
+    assert.deepEqual(checkExitTo(dest, bad), no, `${dest} ${bad}`);
+});
+
+test("the Chain picker: none with no exits; the pool's chain first and chosen, an unserved chain Not available; another chain hands over the typed address on it", async () => {
+  const plain = drawn();
+  const rowOf = (g: ReturnType<typeof drawn>) => g.form.find((e) => e.children.some((c) => c.dataset.input === "dest"))!;
+  assert.equal(plain.form.find((e) => e.dataset.input === "dest"), undefined, "no exits: no picker, the screen as built");
+  const f = drawn(async () => FUNDS, { exits: ["base", "near"] });
+  const pick = f.input("dest");
+  assert.equal(rowOf(f).hidden, false);
+  assert.equal(pick.value, "solana");
+  const opts = pick.children.map((o) => [o.value, o.textContent, o.disabled, o.dataset.draftCopy]);
+  assert.deepEqual(opts, [["solana", "Solana", false, undefined], ["base", "Base", false, undefined], ["robinhood", `Robinhood · ${POOL_WITHDRAW_WORDS["not-available"]}`, true, "not-available"], ["near", "NEAR", false, undefined]]);
+  assert.equal(rowOf(f).children[0]!.dataset.draftCopy, "chain", "Chain is a draft");
+  // Base: an EVM address on it, never a Solana key
+  pick.value = "base";
+  pick.fire("change");
+  f.type("to", TO);
+  f.type("amount", "0.002");
+  await settle();
+  assert.equal(f.form.dataset.state, "refused");
+  f.type("to", CHECKSUMMED.toLowerCase());
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  const shown = Object.fromEntries(f.lines.children.filter((e) => e.tag === "dd").map((e) => [e.dataset.line, e.textContent]));
+  assert.deepEqual(shown, { amount: "0.002 SOL", chain: "Base", to: CHECKSUMMED, "max-fee": "0.001305 SOL" });
+  await f.tap();
+  assert.deepEqual(f.handed, [{ chain: "solana", dest: "base", to: CHECKSUMMED, amount: 2_000_000n, maxFee: FEE + W_FEE }]);
+  // a chain not served, set by a script: the pool's own chain, so the EVM address is refused there
+  pick.value = "robinhood";
+  pick.fire("change");
+  await settle();
+  assert.equal(f.form.dataset.state, "refused");
 });

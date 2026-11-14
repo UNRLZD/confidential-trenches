@@ -179,9 +179,9 @@ test("a signed timeEstimate that is not a whole number of seconds gives no addre
   }
 });
 
-// 10 NEAR (24 decimals) at the device's two reads 2.5 and 2.5 into NEAR USDC: the other-pair floor (F 20, S 15) is
-// ⌈⌈10 × 2.5 × 10^6 × 9,965 / 10,000⌉ × 9,900 / 10,000⌉ − 5,328 = 24,663,375 − 5,328 = 24,658,047, for both amounts.
-const NEAR_FLOOR = 24_658_047n;
+// 10 NEAR (24 decimals) at the device's two reads 2.5 and 2.5 into NEAR USDC: the other-pair floor (F 20, S 50) is
+// ⌈⌈10 × 2.5 × 10^6 × 9,930 / 10,000⌉ × 9,900 / 10,000⌉ − 5,328 = 24,576,750 − 5,328 = 24,571,422, for both amounts.
+const NEAR_FLOOR = 24_571_422n;
 const nearAt = (out: bigint) => (a: Answer): void => {
   a.quote.amountInFormatted = "10.0";
   a.quoteRequest.appFees = [{ recipient: COLLECTOR, fee: 20 }]; // 1Click's fee on wNEAR to USDC (read 6 Nov 15:19Z)

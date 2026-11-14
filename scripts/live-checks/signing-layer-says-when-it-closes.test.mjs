@@ -41,6 +41,17 @@ test("recorded good answer goodKit114 (card solana-buy-preview-complete's build,
   for (const n of ["1.12", "1.14", "current"]) assert.equal(facts(g.index, js(n)).notice, null, n);
 });
 
+test("recorded good answer goodKit115 (card one-balance-buys-on-every-chain's build, kit 1.15): the notice at the current level, kit-v1.14's or kit-v1.13's, the three that read it: PASS", () => {
+  const g = ANSWERS.goodKit115;
+  assert.deepEqual(judge(g).lines, []);
+  assert.match(g.notice, /!==`current`&&[\w$]+!==`1\.14`&&[\w$]+!==`1\.13`\|\|/);
+  assert.notEqual(g.sha384, ANSWERS.goodKit114.sha384, "another build");
+  // the 1.15 shape with any other levels is no notice a kit-v1.13 or kit-v1.14 app reads
+  const js = (m, n) => `closed:e=>{!i||r!==\`current\`&&r!==\`${m}\`&&r!==\`${n}\`||o({v:1,type:\`closed\`,id:e})}`;
+  assert.notEqual(facts(g.index, js("1.14", "1.13")).notice, null);
+  for (const [m, n] of [["1.12", "1.13"], ["1.14", "1.12"], ["1.15", "1.13"]]) assert.equal(facts(g.index, js(m, n)).notice, null, `${m} ${n}`);
+});
+
 for (const [k, lines] of [
   ["bad", [NOTICE, TIMER, OPEN, CLOSE, TOLD, RUN, OPENS(0, 2)]],
   ["badBeforeReview", [NOTICE, TIMER, CLOSE, TOLD, RUN]],

@@ -28,7 +28,7 @@
 
 import type { BuyRoute, ClosedEvent, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema } from "../../kit/src/signpage/schema.ts";
-import { KIT_DEFAULT, helloKit, kitLevel, resultFor, stageFor, stateFor, type KitLevel } from "./kit-version.ts";
+import { KIT_DEFAULT, helloKit, kitLevel, resultFor, routeFor, stageFor, stateFor, type KitLevel } from "./kit-version.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
 export const APP_ORIGIN = "https://ct-app.unrealized.trade";
@@ -265,7 +265,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     if ("ok" in msg) return msg.ok && kind !== undefined ? { ...msg, result: resultFor(level, kind, msg.result) } : msg;
     if (msg.type === "state") return { ...msg, state: stateFor(level, msg.state) };
     if (msg.type !== "progress") return msg;
-    if (!("stage" in msg)) return level !== "1.4" ? msg : null;
+    if (!("stage" in msg)) return level !== "1.4" ? routeFor(level, msg) : null;
     const stage = stageFor(level, msg.stage);
     return stage === null ? null : stage === msg.stage ? msg : { ...msg, stage };
   };
@@ -304,7 +304,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     // posted, and only an event the kit's client takes (signpageProgressRouteSchema): anything else is not told
     const route = (r: BuyRoute): void => {
       const own = (k: string): boolean => Object.hasOwn(r, k);
-      const f: BuyRoute | null = own("wallet") ? { wallet: (r as { wallet: string }).wallet } : own("venue") ? { venue: (r as { venue: string }).venue, pool: (r as { pool: string }).pool } : own("out") ? { out: (r as { out: string }).out } : own("tx") ? { tx: (r as { tx: string }).tx } : null;
+      const f: BuyRoute | null = own("wallet") ? { wallet: (r as { wallet: string }).wallet } : own("venue") ? { venue: (r as { venue: string }).venue, pool: (r as { pool: string }).pool } : own("out") ? { out: (r as { out: string }).out } : own("tx") ? { tx: (r as { tx: string }).tx } : own("move") ? { move: (r as { move: "cash" }).move, ...(own("op") ? { op: (r as { op: string }).op } : {}) } : null;
       const msg: ProgressRouteEvent | null = f && { v: 1, type: "progress", id, ...f };
       if (msg === null || !signpageProgressRouteSchema(msg)) return;
       queue = queue.then(() => post(msg)).catch(() => {});
@@ -384,10 +384,10 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   if (!host.readyOnLoad) ready();
   // the shell posts `ready` on each load of its frame instead: each APP_HOST document needs its own, once
   // the notice that an open's layer has closed: the type and the id alone, to an app at kit-v1.13's level or above only
-  // (kit 1.13 reads it), as the hello of the frame's document since its ready named it (a ready's reset still in the
-  // queue: none)
+  // (kit 1.13 reads it; kit 1.14 too), as the hello of the frame's document since its ready named it (a ready's reset
+  // still in the queue: none)
   const closed = (id: string): void => {
-    if (!hello || (level !== "current" && level !== "1.13")) return;
+    if (!hello || (level !== "current" && level !== "1.14" && level !== "1.13")) return;
     const msg: ClosedEvent = { v: 1, type: "closed", id };
     post(msg);
   };

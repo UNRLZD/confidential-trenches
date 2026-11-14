@@ -84,7 +84,29 @@ const STATES = [
   ["openbuy", "S10.3", ["390", "1440"], false],
   ["openbuy-noheld", "S10.3", ["390", "1440"], false],
   ["axis", "S10.3", ["1440"], false],
+  // card portfolio-moves-money-between-chains: Private balance with Move and Withdraw on every row (the owner's own zero
+  // rows, all four funded, none held, and the live app before the kit has pool.move), then the move sheet: ready, pool
+  // to pool, over the balance, a pair the page does not move yet, running at the NEAR vault, and landed
+  ["move-zero", "S10.2", ["390", "1440"], false],
+  ["move-rows", "S10.3", ["390", "1440"], false],
+  ["move-empty", "S10.2", ["390", "1440"], false],
+  ["move-off", "S10.3", ["390", "1440"], false],
+  ["move-sheet", "S10.3", ["390", "1440"], false],
+  ["move-sheet-xy", "S10.3", ["390", "1440"], false],
+  ["move-over", "S10.3", ["390", "1440"], false],
+  ["move-refused", "S10.3", ["390", "1440"], false],
+  ["move-running", "S10.3", ["390", "1440"], false],
+  ["move-done", "S10.3", ["390", "1440"], false],
 ];
+// the move sheet's fixtures: what each draws once pool.move.dry answers [data-move-state, the flow's steps, each step's state]
+const MOVE_SHEETS = {
+  "move-sheet": ["idle", "pool:solana intents:near vault:near", ["idle", "idle", "idle"]],
+  "move-sheet-xy": ["idle", "pool:solana intents:near vault:near intents:base pool:base", ["idle", "idle", "idle", "idle", "idle"]],
+  "move-over": ["idle", "pool:solana intents:near vault:near intents:base pool:base", ["idle", "idle", "idle", "idle", "idle"]],
+  "move-refused": ["idle", "pool:base intents:near vault:near intents:robinhood pool:robinhood", ["idle", "idle", "idle", "idle", "idle"]],
+  "move-running": ["in_vault", "pool:solana intents:near vault:near intents:base pool:base", ["done", "done", "active", "idle", "idle"]],
+  "move-done": ["done", "pool:solana intents:near vault:near intents:base pool:base", ["done", "done", "done", "done", "done"]],
+};
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
 // a tap (phone): [chain, the drawn row's text, data-cents, moving]. Vault $73.18; SOL at $150, ETH at $3,000.
 const CASH = {
@@ -98,17 +120,23 @@ const CASH = {
 // item 7 (card app-faults-seen-on-122): each fixture's Positions tile and its parts as drawn, [tile, Coins, Reserve];
 // null: nothing held, no parts
 const HELD = { openbuy: ["$0.70", "$0.01", "$0.69"], "openbuy-noheld": null };
-// each fixture's pool view, and per row [chain, Balance, Withdraw] as drawn
+// each fixture's pool view, its total, and per row [chain, Balance, Value, the actions] as drawn (card
+// portfolio-moves-money-between-chains: a Value a row, a dash where the page sent no fresh price)
 const POOLS = {
   loading: ["loading"],
   offline: ["offline"],
   rows: ["unread"],
   // card app-faults-seen-on-122: NEAR's vault USDC first; one balance a chain, whatever is ready
-  pools: ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "1.25M SOL", ""], ["Base", "0.25 ETH", ""], ["Robinhood", "0 ETH", ""]]],
-  "pools-noready": ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "12.5 SOL", ""], ["Base", "0.001 ETH", ""]]],
-  "pools-empty": ["empty"],
+  pools: ["rows", [["NEAR", "73.18 USDC", "$73.18", ""], ["Solana", "1.25M SOL", "—", ""], ["Base", "0.25 ETH", "—", ""], ["Robinhood", "0 ETH", "$0.00", ""]], "$73.18"],
+  "pools-noready": ["rows", [["NEAR", "73.18 USDC", "$73.18", ""], ["Solana", "12.5 SOL", "—", ""], ["Base", "0.001 ETH", "—", ""]], "$73.18"],
+  "pools-empty": ["empty", null, "$0.00"],
   // card pool-balance-counts-the-remainder: the notes and the money at U_X, one balance a chain
-  "pools-remainder": ["rows", [["NEAR", "73.18 USDC", ""], ["Solana", "2.5125 SOL", ""], ["Base", "0.252 ETH", ""], ["Robinhood", "0.1003 ETH", ""]]],
+  "pools-remainder": ["rows", [["NEAR", "73.18 USDC", "$73.18", ""], ["Solana", "2.5125 SOL", "$376.87", ""], ["Base", "0.252 ETH", "$756.00", ""], ["Robinhood", "0.1003 ETH", "$300.90", ""]], "$1,506.95"],
+  // the owner's own rows (13 Nov 19:39Z): 0.021049 SOL at $150 is $3.15
+  "move-zero": ["rows", [["NEAR", "0 USDC", "$0.00", ""], ["Solana", "0.021049 SOL", "$3.15", ""], ["Base", "0 ETH", "$0.00", ""], ["Robinhood", "0 ETH", "$0.00", ""]], "$3.15"],
+  "move-rows": ["rows", [["NEAR", "73.18 USDC", "$73.18", ""], ["Solana", "2.5 SOL", "$375.00", ""], ["Base", "0.25 ETH", "$750.00", ""], ["Robinhood", "0.1 ETH", "$300.00", ""]], "$1,498.18"],
+  "move-empty": ["empty", null, "$0.00"],
+  "move-off": ["rows", [["NEAR", "73.18 USDC", "$73.18", ""], ["Solana", "2.5 SOL", "$375.00", ""], ["Base", "0.25 ETH", "$750.00", ""], ["Robinhood", "0.1 ETH", "$300.00", ""]], "$1,498.18"],
 };
 
 async function build() {
@@ -286,19 +314,25 @@ try {
           const sc = b.closest(".eqbrk");
           const edge = Math.min(panel.bottom, sc ? sc.getBoundingClientRect().bottom : panel.bottom);
           // the row's words and numbers (not Withdraw's tap box or its HopLine, padded past the line on purpose)
-          const cells = (x) => [...x.children].filter((c) => !c.matches(".plw, .hopline"));
+          const cells = (x) => [...x.children].filter((c) => !c.matches(".pla, .plw, .hopline"));
           const hidden = [...b.querySelectorAll("[data-pool]")].filter((x) => cells(x).some((c) => c.getBoundingClientRect().bottom > edge + 0.5)).map((x) => x.getAttribute("data-pool"));
           // one column header, Balance, and every row's balance ending where it ends: no empty column, no shifted number
-          const heads = [...b.querySelectorAll(".plc")].map((h) => h.textContent);
+          const heads = [...b.querySelectorAll(".plc")].filter((h) => h.getClientRects().length).map((h) => h.textContent);
           const headRight = b.querySelector(".plc")?.getBoundingClientRect().right ?? null;
           const shifted = [...b.querySelectorAll("[data-pool]")].filter((x) => x.getAttribute("data-pool") !== "unread").map((x) => x.children[1]?.getBoundingClientRect().right).filter((rt) => headRight === null || rt === undefined || Math.abs(rt - headRight) > 0.5);
           const named = /proo?f|\bready\b|pending/i.test(b.innerText);
-          return { heads, shifted, named, view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped, hidden, scroll: sc ? [sc.scrollHeight, sc.clientHeight] : null };
+          const total = b.querySelector("[data-pools-total]")?.textContent ?? null;
+          const totRight = b.querySelector(".pltot")?.getBoundingClientRect().right ?? null;
+          const offTotal = [...b.querySelectorAll("[data-pool] .plv")].map((v) => v.getBoundingClientRect().right).filter((rt) => totRight === null || Math.abs(rt - totRight) > 0.5);
+          return { total, offTotal, heads, shifted, named, view: b.getAttribute("data-pools"), rows, inside: box.bottom <= panel.bottom + 0.5 && box.right <= panel.right + 0.5, clipped, hidden, scroll: sc ? [sc.scrollHeight, sc.clientHeight] : null };
         }, phone ? ".pfm .pools" : ".pfd .pools");
-        const [view, rows] = POOLS[f];
+        const [view, rows, total] = POOLS[f];
         check(r?.view === view, `${tag}: pools view ${r?.view}, want ${view}`);
         if (rows) check(JSON.stringify(r.rows) === JSON.stringify(rows), `${tag}: pool rows ${JSON.stringify(r?.rows)}`);
-        if (view === "rows" || view === "unread" || view === "loading") check(JSON.stringify(r?.heads) === '["Balance"]' && r.shifted.length === 0, `${tag}: pool columns ${JSON.stringify(r?.heads)}, balances off their header ${JSON.stringify(r?.shifted)}`);
+        if (total) check(r?.total === total, `${tag}: Private balance's total ${r?.total}, want ${total}`);
+        // card portfolio-moves-money-between-chains: no column heads (each amount carries its unit and $); the total ends
+        // where the rows' dollars end, on the desktop's grid
+        if (view === "rows" || view === "unread" || view === "loading") check(JSON.stringify(r?.heads) === "[]" && (phone || r.offTotal.length === 0), `${tag}: pool heads ${JSON.stringify(r?.heads)}, values off the total's column ${JSON.stringify(r?.offTotal)}`);
         check(r?.named === false, `${tag}: the pool block names a proof, Ready or Pending`);
         check(r?.inside && r.clipped.length === 0, `${tag}: pool block outside its panel or clipped ${JSON.stringify(r)}`);
         check(r?.hidden.length === 0, `${tag}: pool rows past the bottom of what shows them ${JSON.stringify(r?.hidden)} (scroll ${JSON.stringify(r?.scroll)})`);
@@ -398,7 +432,23 @@ try {
         }
       }
       // a pool fixture's phone shot shows the pool rows (the S10.3 bar above scrolled to the segments)
-      if (phone && f.startsWith("pools")) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));
+      if (MOVE_SHEETS[f]) {
+        // the sheet once pool.move.dry answered (300 ms after the last change): its state, the route's steps and each step's state
+        await page.clock.runFor(500);
+        const m = await page.evaluate(() => {
+          const sh = document.querySelector('[data-sheet="move"]');
+          if (!sh) return null;
+          const fl = sh.querySelector("[data-testid=move-flow]");
+          const box = sh.querySelector(".dep-box").getBoundingClientRect();
+          return { state: sh.getAttribute("data-move-state"), steps: fl?.getAttribute("data-steps"), states: [...sh.querySelectorAll("[data-testid^=move-step-]")].map((n) => n.getAttribute("data-state")), inView: box.left >= -0.5 && box.right <= innerWidth + 0.5, flowFits: fl ? fl.scrollWidth <= fl.clientWidth + 0.5 : false, go: sh.querySelector('[data-control="move-go"]')?.disabled ?? null };
+        });
+        const [st, steps, states] = MOVE_SHEETS[f];
+        check(m?.state === st && m.steps === steps && JSON.stringify(m.states) === JSON.stringify(states), `${tag}: move sheet ${JSON.stringify(m)}, want ${st} ${steps} ${JSON.stringify(states)}`);
+        check(m?.inView && m.flowFits, `${tag}: move sheet off screen or its flow overflows ${JSON.stringify(m)}`);
+        if (f === "move-sheet" || f === "move-sheet-xy") check(m?.go === false, `${tag}: Move off with a priced amount under the balance`);
+        if (f === "move-over" || f === "move-refused" || f === "move-running") check(m?.go === true, `${tag}: Move on while ${f}`);
+      }
+      if (phone && (f.startsWith("pools") || ["move-zero", "move-rows", "move-empty", "move-off"].includes(f))) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}-${w.name}${SCHEME === "dark" ? "" : `-${SCHEME}`}.png`) });
       n++;
       await ctx.close();
@@ -471,6 +521,35 @@ try {
       await btn("base").click();
       const calls = await page.evaluate(() => window.__calls);
       check(JSON.stringify(calls) === JSON.stringify([{ kind: "pool-withdraw", chain: "base" }]), `@${w.name}: pool Withdraw hands ${JSON.stringify(calls)}, want the chain only`);
+      await ctx.close();
+    }
+    // card portfolio-moves-money-between-chains: no Move while the kit has no pool.move; with it, Move and Withdraw on
+    // every row, a zero row's off; NEAR's Withdraw is the vault's; Move opens the sheet from the row, Max fills the exact
+    // balance, a To swaps the route, and Move asks the page once with exactly From, To and the amount
+    {
+      const form = phone ? ".pfm" : ".pfd";
+      let { ctx, page } = await open(browser, w, "move-off");
+      check((await page.locator('[data-control^="pool-move-"]').count()) === 0, `@${w.name}: a Move drawn before the kit has pool.move`);
+      await ctx.close();
+      ({ ctx, page } = await open(browser, w, "move-zero"));
+      const mv = (c) => page.locator(`${form} [data-control="pool-move-${c}"]`);
+      const off = await Promise.all(["near", "solana", "base", "robinhood"].map((c) => mv(c).isDisabled()));
+      check(JSON.stringify(off) === "[true,false,true,true]", `@${w.name}: Move on/off ${JSON.stringify(off)}, want Solana on, the zero rows off and drawn`);
+      check((await page.locator(`${form} [data-control="pool-withdraw-near"]`).count()) === 1, `@${w.name}: NEAR's row has no Withdraw`);
+      if (phone) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));
+      await mv("solana").click();
+      const sheet = page.locator('[data-sheet="move"]');
+      check((await sheet.getAttribute("data-from")) === "solana" && (await sheet.getAttribute("data-to")) === "near", `@${w.name}: Move opens the sheet from its row`);
+      await page.locator('[data-control="move-max"]').click();
+      check((await page.locator('[data-field="move-amount"]').inputValue()) === "0.021049", `@${w.name}: Max fills the exact balance`);
+      await page.locator('[data-side="to"] [data-chain="base"]').click();
+      await page.clock.runFor(500);
+      check((await page.locator("[data-testid=move-flow]").getAttribute("data-steps")) === "pool:solana intents:near vault:near intents:base pool:base", `@${w.name}: To Base routes through the NEAR vault`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `move-tapped-${w.name}.png`) });
+      await page.locator('[data-control="move-go"]').click();
+      const calls = (await page.evaluate(() => window.__calls)).filter((c) => c.kind === "move");
+      check(JSON.stringify(calls) === JSON.stringify([{ kind: "move", from: "solana", to: "base", amount: "0.021049" }]), `@${w.name}: Move asks ${JSON.stringify(calls)}`);
+      check((await page.locator('[data-control="move-go"]').isDisabled()) && (await sheet.getAttribute("data-move-state")) === "starting", `@${w.name}: Move runs once`);
       await ctx.close();
     }
   }

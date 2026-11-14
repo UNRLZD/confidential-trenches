@@ -98,6 +98,9 @@ export function opOf(id: string, rec: unknown): Operation | null {
     if ((rec.refunded === true || op.stage === "refund_move") && POOL_DEPOSIT_REFUNDED_STAGES.includes(op.stage as PoolDepositStage)) op.refunded = true;
     if (rec.since_ms !== undefined && op.stage !== "quote_checked" && op.stage !== "expired") op.since_ms = rec.since_ms;
   }
+  // a move (card one-balance-buys-on-every-chain; cash-to-pool.ts MoveOpRecord): its two chains, and what left and the
+  // least that arrives once known
+  if (rec.kind === "move") for (const k of ["from", "to", "amount", "out"] as const) if (rec[k] !== undefined) op[k] = rec[k];
   const fits = (o: Record<string, unknown>): boolean => SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [o as Operation]));
   if (!fits(op)) return null;
   // what the op carries beside its stage (kit messages.ts OpDetail, card kit-portfolio-reads): its record's created_ms on

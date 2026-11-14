@@ -236,6 +236,35 @@ export function freshWallet(seed64: Uint8Array, c: Chain, l: bigint, j: number):
   return { chain: c, info: inf, path, address: evmAddress(publicKey), publicKey, secretKey };
 }
 
+// ---------- the words' first EVM account (card exit-evm-pools-with-the-words) ----------
+// m/44'/60'/0'/0/0, BIP-44's first Ethereum account: the address every EVM wallet opens these words on. The exit tool's
+// gas wallet G (../pool/evm-exit.ts); no W shares it, W's paths being four hardened steps (walletPath).
+export const EVM_FIRST_ACCOUNT_PATH = "m/44'/60'/0'/0/0";
+export function evmFirstAccount(seed64: Uint8Array): { address: string; publicKey: Uint8Array; secretKey: Uint8Array } {
+  let node = HDKey.fromMasterSeed(seed64);
+  for (const step of [44 + HARDENED, 60 + HARDENED, HARDENED, 0, 0]) {
+    const child = node.deriveChild(step);
+    node.wipePrivateData();
+    node = child;
+  }
+  const secretKey = node.privateKey, publicKey = node.publicKey;
+  node.wipePrivateData();
+  if (!secretKey || !publicKey) throw new Error("BIP-32 derivation gave no key");
+  return { address: evmAddress(publicKey), publicKey, secretKey };
+}
+
+// ---------- the words' first Solana account (card exit-with-only-the-words) ----------
+// m/44'/501'/0'/0', SLIP-10 ed25519: the address a standard Solana wallet shows for these words. The exit tool's fee
+// wallet F (packages/exit/src/sol-out.ts); W's last two steps are HKDF's (walletPath), so no W is meant to share it.
+export const SOL_FIRST_ACCOUNT_PATH = "m/44'/501'/0'/0'";
+export function solFirstAccount(seed64: Uint8Array): { address: string; publicKey: Uint8Array; secretKey: Uint8Array } {
+  const leaf = slip10Leaf(seed64, [44, 501, 0, 0].map((x) => x + HARDENED)); // only the key is copied out
+  const secretKey = leaf.slice(0, 32);
+  leaf.fill(0);
+  const publicKey = ed25519.getPublicKey(secretKey);
+  return { address: base58.encode(publicKey), publicKey, secretKey };
+}
+
 // ---------- EVM address ----------
 // The last 20 bytes of keccak-256 of the 64-byte public key, in EIP-55 mixed case.
 export function evmAddress(publicKey: Uint8Array): string {

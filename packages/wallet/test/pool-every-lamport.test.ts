@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { solanaPoolFee, solanaPoolNoteFloor, solanaRentMin } from "@blindfill/kit";
-import { changeMoves, isReleaseSize, noteOf, pieceChunk, releaseSizesUpTo, SOL_FINISH_LEAST, SOL_GRID, SOL_NOTE_FLOOR } from "../src/pool/pieces.ts";
+import { changeMoves, isReleaseSize, noteOf, pieceChunk, releaseSizesUpTo, SOL_FINISH_LEAST, SOL_NOTE_FLOOR } from "../src/pool/pieces.ts";
 import { rungsUpTo } from "../src/pool/ladder.ts";
 import { SOL_PIECES, SOL_TIP_CAP } from "../src/pool/solana.ts";
 
@@ -21,22 +21,22 @@ const M = 1_000_000n;
 
 // The chunk the device's proof queue releases from a note of `value` (queue.ts prove), or null when none can.
 const chunkFor = (value: bigint): bigint | null => pieceChunk(SOL_PIECES, value);
-// What a sale's return deposits for `rest` lamports W holds past its costs, and what it pays away.
-const returnFor = (rest: bigint): { note: bigint; fee: bigint } => {
-  const { note, paid } = noteOf(SOL_PIECES, rest);
-  return { note, fee: paid };
-};
+// What a sale's return deposits for `rest` lamports W holds past its costs, and what it keeps on W (card
+// pool-amounts-are-standard-sizes: never paid away).
+const returnFor = (rest: bigint): { note: bigint; kept: bigint } => noteOf(SOL_PIECES, rest);
 
 // Sale returns from just over the floor to 0.2 SOL, at odd lamports, as a venue's proceeds land.
 const RESTS: bigint[] = [];
 for (let x = EXACT + 1n; x < 200_000_000n; x = (x * 13n) / 10n + 7_919n) RESTS.push(x);
 
-test("every lamport: a sale's return lands as one note that buys drain to exactly 0, no change ever under a floor", () => {
+test("every lamport: a sale's return lands as one rung that buys drain to exactly 0, the rest kept on W", () => {
   const bad: string[] = [];
   for (const rest of RESTS) {
-    const { note, fee } = returnFor(rest);
-    assert.equal(note + fee, rest, `${rest}: the return accounts for every lamport`);
-    assert.ok(note === 0n ? fee === rest : fee < SOL_GRID, `${rest}: what is paid away is under the grid`);
+    const { note, kept } = returnFor(rest);
+    assert.equal(note + kept, rest, `${rest}: the return accounts for every lamport`);
+    // the note is the largest rung at or under the rest; under the floor none, all of it kept on W
+    assert.equal(note, rest < FLOOR ? 0n : rungsUpTo(SOL_PIECES.ladder, rest)[0], `${rest}: the note is the largest rung`);
+    assert.ok(note === 0n || isReleaseSize(SOL_PIECES, note), `${rest}: the note ${note} is a rung`);
     let v = note;
     for (let step = 0; v > 0n && step < 64; step++) {
       const c = chunkFor(v);
@@ -78,23 +78,27 @@ test("every lamport: the floor is the kit's buy and withdraw floors at mainnet r
   assert.equal(SOL_NOTE_FLOOR, 5_000_000n);
 });
 
-test("every lamport: a piece is a rung while its change moves, else a finishing size; under the floor, none", () => {
+test("every lamport: a piece is a rung while its change moves, else an older note's whole remainder once; under the least, none", () => {
   const cases: [bigint, bigint | null][] = [[2n * M, null], [3n * M, 3n * M], [4n * M, 4n * M], [5n * M, 5n * M], [6n * M, 6n * M], [7n * M, 7n * M], [9n * M, 9n * M], [10n * M, 10n * M], [11n * M, 5n * M], [12n * M, 5n * M], [14n * M, 5n * M], [15n * M, 10n * M], [20n * M, 20n * M], [22n * M, 10n * M], [27n * M, 20n * M], [57n * M, 50n * M]];
   for (const [v, c] of cases) assert.equal(chunkFor(v), c, `${v}`);
-  // the closed list: the rungs from 0.005 SOL and exactly 0.006 to 0.009 SOL
-  assert.deepEqual(releaseSizesUpTo(SOL_PIECES, 60n * M), [50n, 20n, 10n, 9n, 8n, 7n, 6n, 5n].map((x) => x * M));
-  for (const x of [3n * M, 4n * M, 11n * M, 27n * M, 5n * M + 1n]) assert.ok(!isReleaseSize(SOL_PIECES, x), `${x}`);
-  // every on-grid note from the floor up drains to 0 in sizes of the list, its finish 0.005 plus its last digit
+  // the closed list: the rungs from 0.005 SOL alone (card pool-amounts-are-standard-sizes: no finishing sizes)
+  assert.deepEqual(releaseSizesUpTo(SOL_PIECES, 60n * M), [50n, 20n, 10n, 5n].map((x) => x * M));
+  for (const x of [3n * M, 4n * M, 6n * M, 7n * M, 8n * M, 9n * M, 11n * M, 27n * M, 5n * M + 1n]) assert.ok(!isReleaseSize(SOL_PIECES, x), `${x}`);
+  // every on-grid note from the floor up drains to 0: a rung (every note made under the rule) in one release of itself;
+  // any other (made before the rule) in rungs while the change moves, then its last remainder once, whole
   for (let v = FLOOR; v <= 300n * M; v += M) {
     let x = v;
     const out: bigint[] = [];
     while (x > 0n) {
-      const c = chunkFor(x)!;
-      assert.ok(c !== null && isReleaseSize(SOL_PIECES, c), `${v}: ${c}`);
+      const c = chunkFor(x);
+      assert.ok(c !== null && c > 0n && c <= x, `${v}: ${c}`);
       out.push(c);
       x -= c;
     }
     assert.equal(out.reduce((a, b) => a + b, 0n), v);
+    const off = out.filter((c) => !isReleaseSize(SOL_PIECES, c));
+    if (isReleaseSize(SOL_PIECES, v)) assert.deepEqual(out, [v], `${v}: a rung releases whole`);
+    assert.ok(off.length <= 1 && (off.length === 0 || out.at(-1) === off[0]), `${v}: ${out.join(",")}`);
   }
   // a note already off the grid (made before this rule) still drains to 0: rungs while the change moves, then itself once
   for (const v of [5_004_120n, 6_513_275n, 11_025_647n, 23_843_232n]) {

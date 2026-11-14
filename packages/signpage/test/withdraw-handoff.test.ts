@@ -10,6 +10,8 @@
 // IndexedDB is fake-indexeddb; the fee_max reads are the wallet's recorded ones (wallet test/vectors/withdraw-feemax.json).
 // Test values only, never money: the notes are the public all-zero test seed's (wallet test/vectors/a8.json).
 /// <reference types="node" />
+// the 1Click mock's key hook first: the cash run to another chain checks its quotes with the kit (./oneclick-mock.ts)
+import { h1c } from "./oneclick-mock.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -17,26 +19,28 @@ import { createRequire } from "node:module";
 import { after, test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { IDBFactory } from "fake-indexeddb";
-import { checkWithdraw } from "../../../apps/helper/src/withdraw/checks.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
 import { VaultTree } from "../../kit/src/vault/inputs.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../kit/src/near/networks.ts";
-import { armAccount, entropyToWords, wordsToSeed64 } from "../../wallet/src/derive/index.ts";
-import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
-import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
+import { armAccount, entropyToWords, refundId, wordsToSeed64 } from "../../wallet/src/derive/index.ts";
+import type { NoteStore } from "../../wallet/src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../../wallet/src/store/index.ts";
 import type { RelayOutcome, RelayRpc } from "../../wallet/src/withdraw/relay.ts";
 import type { WithdrawRequest } from "../../wallet/src/withdraw/request.ts";
 import type { HandoffOver, HandoffPage } from "../src/withdraw/handoff.ts";
 
+// these load the kit's 1Click keys, so after the mock (in the order they loaded before it)
+const { checkWithdraw } = await import("../../../apps/helper/src/withdraw/checks.ts");
+const { noteCommitment, noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
+const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { RELEASE_WITHDRAW_RELAYER } = await import("../../wallet/src/withdraw/relay.ts");
 const { readTokenStorageMin } = await import("../../wallet/src/arming/accounts.ts");
-const { vaultScope } = await import("../src/withdraw/checks.ts");
-const { lowerFinalTime, treesOf, withdrawFormDeps, withdrawHandoff, withdrawSettle } = await import("../src/withdraw/handoff.ts");
+const { cashNotes, planCashWithdraw, vaultScope } = await import("../src/withdraw/checks.ts");
+const { cashWithdrawRun, lowerFinalTime, treesOf, withdrawFormDeps, withdrawHandoff, withdrawSettle } = await import("../src/withdraw/handoff.ts");
 
 const T = NEAR_NETWORKS.testnet;
 const SCOPE = vaultScope("testnet")!;
@@ -769,4 +773,134 @@ test("the settle pass: a note held to the bound never ends a later note's arriva
   assert.deepEqual(pass.outcomes, { [a.noteId]: "failed", [b.noteId]: "arrived" });
   assert.equal(arrivalSignals.length, 1);
   assert.equal(arrivalSignals[0], relaySignals.get(b.noteId), "B's arrival waits under B's own deadline, never a fresh one");
+});
+
+// ---------- the cash run (card cash-withdraws-everything-to-any-chain): one withdrawal per note, in order ----------
+async function runOf(v: World, p: Page, over: HandoffOver = {}) {
+  const blockNs = await lowerFinalTime(pair("testnet"));
+  const r = cashWithdrawRun(p, {
+    network: "testnet",
+    rpcs: pair("testnet"),
+    priceRpcs: pair("mainnet"),
+    fetchFn: helper(),
+    sync: async () => ({ stateTree: v.stateTree, labelTree: v.labelTree, newestStateRoot: v.stateTree.root!, newestLabelRoot: v.labelTree.root! }),
+    blockNs: async () => blockNs,
+    arrival: async () => Promise.reject(new Error("no arrival read in this test")),
+    ...over,
+  });
+  assert.ok(r);
+  return r;
+}
+
+test("the cash run sends Cash whole: one withdrawal per note, largest first, each exactly its part at the fee the form drew", async () => {
+  const v = await world([2_000_000n, 3_000_000n]);
+  // the form drew a fee 1,000 above the relayer's quote now: each part pays that fee, so each whole note goes out
+  // exactly as planned with no change left (the relayer takes any fee at or above its quote)
+  const drawn = RELAY_FEE + 1_000n;
+  const cash = cashNotes(await v.ns.list(), SCOPE);
+  const max = cash.reduce((t, n) => t + n.value - drawn, 0n);
+  const parts = planCashWithdraw(cash, max, drawn)!;
+  assert.equal(parts.length, 2);
+  const sent: WithdrawRequest[] = [];
+  const steps: [number, string][] = [];
+  const run = await runOf(v, page(v), {
+    relay: async (_seed, req) => {
+      sent.push(req);
+      return { kind: "landed", own: false, change: (await v.ns.get(req.noteId))!, spend: { recipient: req.recipient, status: "paid", refundValue: 0n } as never, tx: null };
+    },
+  });
+  assert.deepEqual(await run({ recipient: "alice.testnet", amount: max, parts }, drawn, (i, k) => steps.push([i, k])), { kind: "arrived" });
+  assert.deepEqual(steps, [[0, "sending"], [0, "arrived"], [1, "sending"], [1, "arrived"]]);
+  assert.deepEqual(sent.map((r) => [(cash.find((n) => n.id === r.noteId)!).value, r.changeValue, r.body.withdrawal.recipient, r.body.withdrawal.relay_fee]), [
+    [3_000_000n, 0n, "alice.testnet", String(drawn)],
+    [2_000_000n, 0n, "alice.testnet", String(drawn)],
+  ]);
+  // change 0 at the drawn fee: each withdrawal is its note less the drawn fee, the plan's part exactly
+  assert.deepEqual(parts.map((p) => p.part), [3_000_000n - drawn, 2_000_000n - drawn]);
+  // the relayer's own checks pass a request that pays more than its quote
+  const verdict = await checkWithdraw(structuredClone(sent[0]!.body), { vault: T.vault, token: T.usdc, scope: SCOPE, feeRecipient: R.fee_recipient }, { feeMin: async () => RELAY_FEE });
+  assert.deepEqual(verdict.ok ? "ok" : verdict, "ok");
+});
+
+// the 1Click answers here are test/oneclick-mock.ts's: 25 USDC in, signed by a key this process alone trusts
+const SOL_TO = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
+const DEPOSIT = "cd".repeat(32);
+function onwardFetch(m: Parameters<typeof h1c>[0] = {}) {
+  const q = h1c({ stampedAt: Date.now() - 500, before: (a) => void (a.quote.depositAddress = DEPOSIT), ...m });
+  const fee = helper();
+  const fetchFn = ((u: RequestInfo | URL, i?: RequestInit) => (String(u).includes("/oneclick/") ? q.fetch(u, i) : fee(u, i))) as typeof fetch;
+  return { fetchFn, sent: q.sent };
+}
+
+test("the cash run to another chain: each part's own checked 1Click quote, its refund under V of the change note, the vault paying its deposit address", async () => {
+  const v = await world([25_000_000n + RELAY_FEE]);
+  const cash = cashNotes(await v.ns.list(), SCOPE);
+  const parts = planCashWithdraw(cash, 25_000_000n, RELAY_FEE)!;
+  const { fetchFn, sent: asked } = onwardFetch();
+  const sent: WithdrawRequest[] = [];
+  const run = await runOf(v, page(v), {
+    fetchFn,
+    relay: async (_seed, req) => {
+      sent.push(req);
+      return { kind: "landed", own: false, change: (await v.ns.get(req.noteId))!, spend: { recipient: req.recipient, status: "paid", refundValue: 0n } as never, tx: null };
+    },
+  });
+  assert.deepEqual(await run({ recipient: SOL_TO, amount: 25_000_000n, parts, chain: "solana" }, RELAY_FEE), { kind: "arrived" });
+  assert.equal(asked.length, 1);
+  const q = asked[0]!.request;
+  assert.equal(q.recipient, SOL_TO);
+  assert.equal(q.amount, "25000000");
+  assert.equal(q.destinationAsset, "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near");
+  // the refund id is V_{l,0}, the change note's of the note's first spend, as restore reads it (restore/arms.ts kind "V")
+  const leaf = (await v.ns.get(parts[0]!.noteId))!.leaf!;
+  const k = refundId(SEED, leaf.label, 0);
+  k.secretKey.fill(0);
+  assert.equal(q.refundTo, k.id);
+  assert.equal(q.refundType, "INTENTS");
+  assert.equal(JSON.stringify(q).includes("alice"), false);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]!.body.withdrawal.recipient, DEPOSIT, "the vault pays the quote's deposit address");
+  assert.equal(sent[0]!.body.withdrawal.relay_fee, String(RELAY_FEE));
+  assert.equal(sent[0]!.changeValue, 0n, "the note less 25 USDC and the fee: the part exactly");
+});
+
+test("the cash run to another chain pays nothing on a quote the device refuses: the note stays in Cash", async () => {
+  for (const [m, re] of [
+    [{ before: () => {} }, /deposit address is not a NEAR implicit id/],
+    [{ before: (a) => void ((a.quote.depositAddress = DEPOSIT), (a.quoteRequest.recipient = "9".repeat(44))) }, /echo|recipient/],
+    [{ status: 503 }, /onward quote: HTTP 503/],
+  ] as [Parameters<typeof h1c>[0], RegExp][]) {
+    const v = await world([25_000_000n + RELAY_FEE]);
+    const parts = planCashWithdraw(cashNotes(await v.ns.list(), SCOPE), 25_000_000n, RELAY_FEE)!;
+    let relayed = 0;
+    const steps: [number, string][] = [];
+    const run = await runOf(v, page(v), { fetchFn: onwardFetch(m).fetchFn, relay: async (_s, req) => (relayed++, expired(v, req)) });
+    await assert.rejects(run({ recipient: SOL_TO, amount: 25_000_000n, parts, chain: "solana" }, RELAY_FEE, (i, kd) => steps.push([i, kd])), re);
+    assert.equal(relayed, 0);
+    assert.deepEqual(steps, [[0, "sending"], [0, "failed"]]);
+    assert.equal((await v.ns.get(parts[0]!.noteId))?.state, "UNSPENT");
+  }
+  // an address that is not the chain's is refused before any quote is asked
+  const v = await world([25_000_000n + RELAY_FEE]);
+  const parts = planCashWithdraw(cashNotes(await v.ns.list(), SCOPE), 25_000_000n, RELAY_FEE)!;
+  const o = onwardFetch();
+  const run = await runOf(v, page(v), { fetchFn: o.fetchFn });
+  await assert.rejects(run({ recipient: "alice.near", amount: 25_000_000n, parts, chain: "solana" }, RELAY_FEE), /not an address on the chain/);
+  assert.equal(o.sent.length, 0);
+});
+
+test("the cash run stops at the first withdrawal that does not leave the vault: the notes after it stay in Cash", async () => {
+  const v = await world([2_000_000n, 3_000_000n]);
+  const cash = cashNotes(await v.ns.list(), SCOPE);
+  const max = cash.reduce((t, n) => t + n.value - RELAY_FEE, 0n);
+  const parts = planCashWithdraw(cash, max, RELAY_FEE)!;
+  let relayed = 0;
+  const steps: [number, string][] = [];
+  const run = await runOf(v, page(v), { relay: async (_s, req) => (relayed++, expired(v, req)) });
+  assert.deepEqual(await run({ recipient: "alice.testnet", amount: max, parts }, RELAY_FEE, (i, k) => steps.push([i, k])), { kind: "expired" });
+  assert.equal(relayed, 1);
+  assert.deepEqual(steps, [[0, "sending"], [0, "expired"]]);
+  assert.equal((await v.ns.get(parts[1]!.noteId))?.state, "UNSPENT", "the second note never left Cash");
+  // a plan whose parts are not the amount is refused before anything is asked
+  await assert.rejects(run({ recipient: "alice.testnet", amount: max + 1n, parts }, RELAY_FEE), /parts: not the amount/);
 });
