@@ -1,18 +1,20 @@
 {
  "_note": {
-  "good": "a real run from the build Mac (`--record`, its `at`): SIGN_HOST and both public seats read with the page's Origin",
+  "good": "a real run (14 Nov, its `at`) of read() with the page's Origin: the three public seats read live, and SIGN_HOST's index.html and /app.js served from the 141 branch's build (card move-sends-or-says-why, a9e862cbd base; build-app --out), which names the third seat before SIGN_HOST does; re-record from SIGN_HOST (`--record`) once that release is served",
   "bad": "planted on good: the spare answers other bytes for the stable accounts",
   "bad2": "planted on good: the spare refuses the page (a non-JSON 403 with no allow-origin, as api.mainnet-beta answers a page)",
-  "quiet": "planted on good: the spare answers 429 to the read (a no-answer): INCONCLUSIVE, never PASS"
+  "quiet": "planted on good: the spare answers 429 to the read (a no-answer): INCONCLUSIVE, never PASS",
+  "bad3": "planted on good: the second spare (solanavibestation) answers other bytes for the stable accounts"
  },
  "good": {
-  "at": "2026-11-11T06:21:19.840Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-14T14:05:37.700Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
+   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
    "names": [
     "https://solana-rpc.publicnode.com",
-    "https://solana.api.pocket.network"
+    "https://solana.api.pocket.network",
+    "https://public.rpc.solanavibestation.com"
    ]
   },
   "seats": {
@@ -41,17 +43,31 @@
      "accounts": 10,
      "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
     }
+   },
+   "https://public.rpc.solanavibestation.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
    }
   }
  },
  "bad": {
-  "at": "2026-11-11T06:21:19.840Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-14T14:05:37.700Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
+   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
    "names": [
     "https://solana-rpc.publicnode.com",
-    "https://solana.api.pocket.network"
+    "https://solana.api.pocket.network",
+    "https://public.rpc.solanavibestation.com"
    ]
   },
   "seats": {
@@ -80,17 +96,31 @@
      "accounts": 10,
      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
+   },
+   "https://public.rpc.solanavibestation.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
    }
   }
  },
  "bad2": {
-  "at": "2026-11-11T06:21:19.840Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-14T14:05:37.700Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
+   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
    "names": [
     "https://solana-rpc.publicnode.com",
-    "https://solana.api.pocket.network"
+    "https://solana.api.pocket.network",
+    "https://public.rpc.solanavibestation.com"
    ]
   },
   "seats": {
@@ -118,17 +148,31 @@
      "acao": null,
      "noAnswer": "solana.api.pocket.network HTTP 403: not JSON (Forbidden)"
     }
+   },
+   "https://public.rpc.solanavibestation.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
    }
   }
  },
  "quiet": {
-  "at": "2026-11-11T06:21:19.840Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-14T14:05:37.700Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
+   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
    "names": [
     "https://solana-rpc.publicnode.com",
-    "https://solana.api.pocket.network"
+    "https://solana.api.pocket.network",
+    "https://public.rpc.solanavibestation.com"
    ]
   },
   "seats": {
@@ -155,6 +199,72 @@
      "status": 429,
      "acao": null,
      "noAnswer": "solana.api.pocket.network HTTP 429: 429 Too Many Requests"
+    }
+   },
+   "https://public.rpc.solanavibestation.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
+   }
+  }
+ },
+ "bad3": {
+  "at": "2026-11-14T14:05:37.700Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
+   "names": [
+    "https://solana-rpc.publicnode.com",
+    "https://solana.api.pocket.network",
+    "https://public.rpc.solanavibestation.com"
+   ]
+  },
+  "seats": {
+   "https://solana-rpc.publicnode.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
+   },
+   "https://solana.api.pocket.network": {
+    "preflight": {
+     "status": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "acao": "https://confidential.unrealized.trade",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
+   },
+   "https://public.rpc.solanavibestation.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
    }
   }
