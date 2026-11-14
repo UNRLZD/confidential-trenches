@@ -125,14 +125,12 @@ test("the drawn screen: To and Max fee shown before the press, the press hands o
   assert.equal(f.go.disabled, true);
   assert.equal(f.lines.hidden, true);
   f.type("to", TO);
-  f.type("amount", "1");
+  f.type("amount", formatUnits(MIN - 1n, 9));
   await settle();
   assert.equal(f.form.dataset.state, "refused");
   const refusal = f.form.find((e) => e.dataset.for === "amount")!;
-  assert.equal(refusal.dataset.refusal, "insufficient");
-  // what can be sent, in the nearest-amounts words (card withdraw-form-shows-what-you-can-send)
-  assert.equal(refusal.textContent, `${POOL_WITHDRAW_WORDS.try}0.03739 SOL`);
-  assert.equal(refusal.dataset.draftCopy, undefined, "Insufficient and Try were kept (owner 8 Nov 07:55Z): no draft mark");
+  assert.equal(refusal.dataset.refusal, "min");
+  assert.equal(refusal.textContent, `${POOL_WITHDRAW_WORDS.min}${formatUnits(MIN, 9)} SOL`);
   assert.equal(f.go.disabled, true);
   await f.tap();
   assert.deepEqual(f.handed, [], "a refused screen hands nothing over");
@@ -188,15 +186,17 @@ test("Amount: one no plan sends without dust is refused with the nearest amounts
   assert.equal(poolRefusalWords("solana", "unplannable", undefined, { above: cap }), `Try ${formatUnits(cap, 9)} SOL`);
 });
 
-test("the drawn screen: an unplannable amount draws the nearest amounts, with no draft mark on the Try words (kept, owner 8 Nov 07:55Z)", async () => {
+// card withdraw-max-means-all: no Try on the screen; an amount above all or between payable amounts is the nearest at
+// or below it (the tests at the end of this file)
+test("the drawn screen: an unplannable amount draws no Try words, only the payable amount it sends", async () => {
   const f = drawn(async () => ({ ...FUNDS, notes: [{ id: "a", value: 10_000_000n }] }));
   f.type("to", TO);
   f.type("amount", formatUnits(10_000_000n - FEE - W_FEE - 1n, 9));
   await settle();
   const refusal = f.form.find((e) => e.dataset.for === "amount")!;
-  assert.equal(refusal.dataset.refusal, "unplannable");
-  assert.equal(refusal.dataset.draftCopy, undefined);
-  assert.match(refusal.textContent, /^Try \S+ or \S+ SOL$/);
+  assert.equal(refusal.hidden, true);
+  assert.equal(refusal.dataset.refusal, undefined);
+  assert.equal(f.form.dataset.state, "ready");
 });
 
 // review #232 LOW: the press compares the amount it reads now with the one drawn, not only the input events
@@ -221,7 +221,9 @@ test("the press reads the funds again: a note spent meanwhile hands nothing over
   funds = { ...FUNDS, notes: [FUNDS.notes[1]!] };
   await f.tap();
   assert.deepEqual(f.handed, []);
-  assert.equal(f.form.dataset.state, "refused");
+  // what the one note left pays now is drawn for the next press
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(f.lines.children.find((e) => e.dataset.line === "amount")!.textContent, `${formatUnits(10_000_000n - FEE - W_FEE, 9)} SOL`);
 });
 
 // card signpage-withdraw-own-spend (5): a send owed whose network fee rose past the Max fee drawn; the words are drafts
@@ -330,4 +332,97 @@ test("the Chain picker: none with no exits; the pool's chain first and chosen, a
   pick.fire("change");
   await settle();
   assert.equal(f.form.dataset.state, "refused");
+});
+
+// card withdraw-max-means-all: Max is an intent, not a number. The owner's Base withdraw at 03:15Z: Max put
+// 0.009979579057849255 in the box, the To typed re-read the funds (W's send priced for it), Max moved to
+// 0.009979579069409213, and the box's old number was no longer payable ("Try ... or ..."), Withdraw disabled.
+const ETH_NOTE = 10_000_000_000_000_000n;
+const ETH_FEE = 20_000_000_000_000n;
+const ETH_MIN = 1_000_000_000_000n;
+const ethFunds = (wFee: bigint): PoolFunds => ({ notes: [{ id: "e", value: ETH_NOTE }], fee: ETH_FEE, wFee, minPart: ETH_MIN });
+function drawnBase(funds: (to?: string) => Promise<PoolFunds>) {
+  return drawn(funds as () => Promise<PoolFunds>, { chain: "base", keys: { pool: EVM_POOL } });
+}
+const maxTap = (f: ReturnType<typeof drawn>) => f.form.find((e) => e.dataset.action === "sendable")!.fire("click");
+const shownAmount = (f: ReturnType<typeof drawn>) => f.lines.children.find((e) => e.tag === "dd" && e.dataset.line === "amount")?.textContent;
+
+for (const [name, w1, w2] of [["raises", 50_000_000_000n, 38_440_042_000n], ["lowers", 38_440_042_000n, 50_000_000_000n]] as const) {
+  test(`Max tapped, then a funds re-read ${name} Max: the box follows the live Max, Withdraw is enabled, the press hands over the live Max`, async () => {
+    const f = drawnBase(async (to) => ethFunds(to === undefined ? w1 : w2));
+    await settle();
+    maxTap(f);
+    await settle();
+    assert.equal(f.input("amount").value, formatUnits(ETH_NOTE - ETH_FEE - w1, 18));
+    f.type("to", CHECKSUMMED);
+    await settle();
+    const live = ETH_NOTE - ETH_FEE - w2;
+    assert.equal(f.form.dataset.state, "ready", "Max still means everything after the re-read");
+    assert.equal(f.input("amount").value, formatUnits(live, 18), "the box shows the live Max");
+    assert.equal(shownAmount(f), `${formatUnits(live, 18)} ETH`);
+    assert.equal(f.go.disabled, false);
+    await f.tap();
+    assert.deepEqual(f.handed, [{ chain: "base", to: CHECKSUMMED, amount: live, maxFee: ETH_FEE + w2 }]);
+  });
+}
+
+test("Max at the press: a re-read that lowers the fee hands over the new live Max; one that raises it hands nothing over and draws it for the next press", async () => {
+  let w = 50_000_000_000n;
+  const f = drawnBase(async () => ethFunds(w));
+  await settle();
+  f.type("to", CHECKSUMMED);
+  await settle();
+  maxTap(f);
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  w = 40_000_000_000n;
+  await f.tap();
+  assert.deepEqual(f.handed, [{ chain: "base", to: CHECKSUMMED, amount: ETH_NOTE - ETH_FEE - w, maxFee: ETH_FEE + w }], "a lower fee: the live Max goes");
+  w = 60_000_000_000n;
+  await f.tap();
+  assert.equal(f.handed.length, 1, "a higher fee than drawn: nothing handed over");
+  assert.equal(shownAmount(f), `${formatUnits(ETH_NOTE - ETH_FEE - w, 18)} ETH`, "the new Max and fee are drawn");
+  await f.tap();
+  assert.deepEqual(f.handed[1], { chain: "base", to: CHECKSUMMED, amount: ETH_NOTE - ETH_FEE - w, maxFee: ETH_FEE + w });
+});
+
+test("a typed amount after Max ends the intent: the box keeps what was typed", async () => {
+  let w = 50_000_000_000n;
+  const f = drawnBase(async () => ethFunds(w));
+  await settle();
+  f.type("to", CHECKSUMMED);
+  maxTap(f);
+  await settle();
+  f.type("amount", "0.002");
+  await settle();
+  w = 40_000_000_000n;
+  f.type("to", CHECKSUMMED.toLowerCase());
+  await settle();
+  assert.equal(f.input("amount").value, "0.002");
+  assert.equal(shownAmount(f), "0.002 ETH");
+});
+
+test("a typed amount the notes cannot pay exactly: the nearest payable amount at or below it is shown and handed over, no Try", async () => {
+  const one: PoolFunds = { ...FUNDS, notes: [{ id: "a", value: 10_000_000n }] };
+  const cap = 10_000_000n - FEE - W_FEE;
+  const below = cap - (FEE + W_FEE + MIN);
+  const f = drawn(async () => one);
+  f.type("to", TO);
+  f.type("amount", formatUnits(cap - 1n, 9));
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(f.form.find((e) => e.dataset.for === "amount")!.hidden, true, "no refusal line");
+  assert.equal(shownAmount(f), `${formatUnits(below, 9)} SOL`);
+  await f.tap();
+  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: below, maxFee: FEE + W_FEE }]);
+  // above everything the notes pay: everything
+  f.type("amount", "1");
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(shownAmount(f), `${formatUnits(cap, 9)} SOL`);
+  // under the least part: still refused, naming the least (Min)
+  f.type("amount", formatUnits(MIN - 1n, 9));
+  await settle();
+  assert.equal(f.form.dataset.state, "refused");
+  assert.equal(f.form.find((e) => e.dataset.for === "amount")!.textContent, `${POOL_WITHDRAW_WORDS.min}${formatUnits(MIN, 9)} SOL`);
 });

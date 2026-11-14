@@ -453,7 +453,14 @@ try {
         check(m?.state === st && m.steps === steps && JSON.stringify(m.states) === JSON.stringify(states), `${tag}: move sheet ${JSON.stringify(m)}, want ${st} ${steps} ${JSON.stringify(states)}`);
         check(m?.inView && m.flowFits, `${tag}: move sheet off screen or its flow overflows ${JSON.stringify(m)}`);
         if (f === "move-sheet" || f === "move-sheet-xy") check(m?.go === false, `${tag}: Move off with a priced amount under the balance`);
-        if (f === "move-over" || f === "move-refused" || f === "move-running") check(m?.go === true, `${tag}: Move on while ${f}`);
+        if (f === "move-refused" || f === "move-running") check(m?.go === true, `${tag}: Move on while ${f}`);
+        // card withdraw-max-means-all: an amount over the balance is everything the move sends, in the box, Move on
+        if (f === "move-over") {
+          await page.clock.runFor(1000);
+          const v = await page.locator('[data-field="move-amount"]').inputValue();
+          const max = await page.locator('[data-control="move-max"]').getAttribute("data-max");
+          check(v === max && max !== null && !(await page.locator('[data-control="move-go"]').isDisabled()), `${tag}: over the balance: box ${v}, want Max ${max}, Move on`);
+        }
         // card move-sends-what-it-shows: Max is what the page says the move sends, never the balance it cannot; an amount
         // the move cannot send names what it can, each a tap that types it, and Move stays off until it is typed
         const lim = await page.evaluate(() => {
@@ -467,10 +474,31 @@ try {
           await page.locator('[data-control="move-max"]').click();
           await page.clock.runFor(500);
           check((await page.locator('[data-field="move-amount"]').inputValue()) === "2.4979" && !(await page.locator('[data-control="move-go"]').isDisabled()), `${tag}: Max types 2.4979 and Move is on`);
+          // card withdraw-max-means-all: Max is an intent; a re-read that raises or lowers the max moves the box with it
+          for (const live of ["2.4981", "2.4977"]) {
+            await page.evaluate((x) => void (window.__moveMax = x), live);
+            await page.locator('[data-side="to"] [data-chain="base"]').click();
+            await page.clock.runFor(1000);
+            await page.locator('[data-side="to"] [data-chain="near"]').click();
+            await page.clock.runFor(1000);
+            const v = await page.locator('[data-field="move-amount"]').inputValue();
+            check(v === live && !(await page.locator('[data-control="move-go"]').isDisabled()), `${tag}: Max after a re-read: box ${v}, want the live ${live}, Move on`);
+          }
+          // a typed amount ends the intent
+          await page.locator('[data-field="move-amount"]').fill("1");
+          await page.evaluate(() => void (window.__moveMax = "2.4975"));
+          await page.locator('[data-side="to"] [data-chain="base"]').click();
+          await page.clock.runFor(1000);
+          check((await page.locator('[data-field="move-amount"]').inputValue()) === "1", `${tag}: a typed amount stays as typed`);
         }
         if (f === "move-min") check(lim.hint === "min" && lim.min === "0.0545" && lim.text === "Min0.0545 SOL" && JSON.stringify(lim.taps) === '["0.0545"]' && m?.go === true, `${tag}: under the Base floor ${JSON.stringify(lim)}, go ${m?.go}`);
+        // card withdraw-max-means-all: an amount its plan cannot send is the nearest it sends at or below it, in the box
+        // with no tap, Move on; no Try
         if (f === "move-try") {
-          check(lim.hint === "try" && lim.text === "Try0.25 SOLor0.35 SOL" && JSON.stringify(lim.taps) === '["0.25","0.35"]' && m?.go === true, `${tag}: an amount its plan cannot send ${JSON.stringify(lim)}, go ${m?.go}`);
+          await page.clock.runFor(1000);
+          const after = await page.evaluate(() => ({ hint: document.querySelector('[data-sheet="move"] [data-move-dry]')?.getAttribute("data-move-dry") ?? null, taps: document.querySelectorAll('[data-control="move-try"]').length }));
+          const v = await page.locator('[data-field="move-amount"]').inputValue();
+          check(v === "0.25" && after.hint === null && after.taps === 0 && !(await page.locator('[data-control="move-go"]').isDisabled()), `${tag}: an amount its plan cannot send: box ${v}, ${JSON.stringify(after)}, want 0.25, no Try, Move on`);
         }
       }
       if (phone && (f.startsWith("pools") || ["move-zero", "move-rows", "move-empty", "move-off"].includes(f))) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));

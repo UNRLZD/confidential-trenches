@@ -266,6 +266,8 @@ export const FIXTURES: Record<string, Fx> = {
 declare global {
   interface Window {
     __calls: unknown[];
+    /** card withdraw-max-means-all: when set, every dry from now answers this max (a fee or balance re-read moved it) */
+    __moveMax?: string;
   }
 }
 window.__calls = [];
@@ -287,7 +289,7 @@ const moveSrc: MoveSource = {
     if (typeof fx.move === "string") return { kind: "refused", code: fx.move };
     const steps = routeSteps(p.from, p.to)!;
     if (fx.limits) {
-      const max = MOVE_MAX[p.from]!;
+      const max = window.__moveMax ?? MOVE_MAX[p.from]!;
       const x = Number(p.amount);
       if (x > Number(max)) return { kind: "limits", value: { max, steps } };
       if (p.to === "base" && x < 0.0545) return { kind: "limits", value: { max, steps, min: "0.0545" } };

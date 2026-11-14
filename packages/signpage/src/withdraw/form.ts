@@ -35,7 +35,7 @@ import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
 import type { WithdrawPart, WithdrawSource } from "../pool-withdraw.ts";
 import { POOL_CHAIN_MARK } from "./chain-mark.ts";
 import { isOnward, onwardTo, WITHDRAW_CHAINS, type WithdrawChain } from "./onward.ts";
-import { type AddressCode, type AmountCheck, type AmountCode, cashSendable, checkAmount, checkRecipient, type RecipientCheck, TOKEN_DECIMALS } from "./checks.ts";
+import { type AddressCode, type AmountCheck, type AmountCode, cashSendable, checkRecipient, parseAmount, payableAmount, type RecipientCheck, TOKEN_DECIMALS } from "./checks.ts";
 
 // Withdraw, Invalid address, Invalid amount, Insufficient and Busy · Retry were kept as drafted (owner 8 Nov 07:55Z, the 8 Nov
 // words page: pw.withdraw, pw.invalidAddress, pw.invalidAmount, pw.insufficient, pw.busy), so their elements carry no
@@ -123,7 +123,7 @@ export async function evaluate(
   const blankAmount = amount.trim() === "";
   const onward = isOnward(chain) ? onwardTo(chain, to) : null;
   const a: RecipientCheck | null = blankTo ? null : isOnward(chain) ? (onward === null ? { ok: false, code: "not-account" } : { ok: true, recipient: onward }) : await checkRecipient(to, ctx.network, ctx.rpcs);
-  const m = blankAmount ? null : checkAmount(amount, { notes: ctx.notes, fee: ctx.fee });
+  const m = blankAmount ? null : payableAmount(amount, { notes: ctx.notes, fee: ctx.fee });
   const ready = a?.ok && m?.ok ? Object.freeze({ recipient: a.recipient, amount: m.amount, parts: Object.freeze(m.parts.map((p) => Object.freeze({ ...p }))), ...(chain === "near" ? {} : { chain }) }) : null;
   const state: FormState = blankTo && blankAmount ? "empty" : (a && !a.ok) || (m && !m.ok) ? "refused" : ready ? "ready" : "typing";
   return { state, address: a, amount: m, ready };
@@ -259,8 +259,13 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   let seq = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let view: FormView = { state: "empty", address: null, amount: null, ready: null };
+  // Max tapped and no amount typed since: the box means everything (card withdraw-max-means-all)
+  let maxIntent = false;
+  // the fee bound the drawn view was checked at
+  let viewFee: bigint | null = null;
   const draw = (v: FormView): void => {
     view = v;
+    viewFee = ctx.fee;
     form.dataset.state = v.state;
     line(to.line, v.address && !v.address.ok ? v.address.code : null);
     const m = v.amount && !v.amount.ok ? v.amount : null;
@@ -291,8 +296,13 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   const check = async (): Promise<FormView | null> => {
     const at = ++seq;
     await loaded;
+    // Max is an intent (card withdraw-max-means-all): after every read the box holds the live Max
+    const can = ctx.notes === null || ctx.fee === null ? 0n : cashSendable(ctx.notes, ctx.fee);
+    if (maxIntent && can > 0n) amount.input.value = formatUnits(can);
     const v = await evaluate(to.input.value, amount.input.value, { network: deps.network, rpcs: deps.rpcs, ...ctx, chain });
     if (at !== seq) return null; // a newer keystroke or check: this answer is stale
+    // the amount sent is the one in the box: a typed one Cash cannot pay exactly becomes the nearest it pays below it
+    if (v.ready && parseAmount(amount.input.value) !== v.ready.amount) amount.input.value = formatUnits(v.ready.amount);
     draw(v);
     return v;
   };
@@ -304,10 +314,15 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     if (!blank) timer = setTimeout(() => void check(), CHECK_IDLE_MS);
   };
   to.input.addEventListener("input", typed);
-  amount.input.addEventListener("input", typed);
-  // the tap on Max: that amount in the field, checked now against the same reads
+  // a typed amount ends the Max intent
+  amount.input.addEventListener("input", () => {
+    maxIntent = false;
+    typed();
+  });
+  // the tap on Max: everything, followed through every read until an amount is typed
   sendable.addEventListener("click", () => {
     if (ctx.notes === null || ctx.fee === null || sendable.disabled) return;
+    maxIntent = true;
     amount.input.value = formatUnits(cashSendable(ctx.notes, ctx.fee));
     clearTimeout(timer);
     void check();
@@ -348,13 +363,16 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   // the tap: the note value and the fee bound read again, both fields checked again; only the same answer goes on
   async function withdraw(): Promise<void> {
     const before = view.ready;
+    const beforeFee = viewFee;
     if (!before || !deps.handoff) return;
     clearTimeout(timer);
     loaded = load();
     const v = await check();
-    // the same account, amount and plan as drawn: a note spent or added since is a new plan, drawn for the next tap
+    // the same account, amount and plan as drawn: a note spent or added since is a new plan, drawn for the next tap.
+    // Max: the live Max goes, at a fee bound no higher than the one drawn
     const plan = (r: CheckedCashWithdraw): string => r.parts.map((p) => `${p.noteId}:${p.part}`).join(",");
-    if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.chain !== before.chain || v.ready.amount !== before.amount || plan(v.ready) !== plan(before) || ctx.fee === null) return;
+    if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.chain !== before.chain || ctx.fee === null) return;
+    if (maxIntent ? beforeFee === null || ctx.fee > beforeFee : v.ready.amount !== before.amount || plan(v.ready) !== plan(before)) return;
     drawSteps(v.ready.parts);
     let end: void | { kind: string; fee?: bigint } = undefined;
     try {
