@@ -12,7 +12,7 @@ Blindfill sits under any wallet, terminal, trading bot or AI agent, and about 50
 Every chain NEAR Intents reaches can join, with fresh wallets of its own and the same private balance.
 Any market with a pool on chain can trade privately, from memecoins to stock tokens, and money can leave to any address.
 
-[The app](https://confidential.unrealized.trade) | [The vault on NEAR](https://nearblocks.io/address/vault.confidential.unrlzd.near) | [Proofs](docs/proofs.md) | [Research and audits](docs/research/README.md) | [Architecture](docs/architecture.md) | [Security](docs/security.md)
+[The app](https://confidential.unrealized.trade) | [The vault on NEAR](https://nearblocks.io/address/vault.confidential.unrlzd.near) | [Proofs](docs/proofs.md) | [Research and audits](research/README.md) | [Architecture](docs/architecture.md) | [Security](docs/security.md)
 <!-- demo video link: added at submission -->
 
 Blindfill is the engine. Its vault on NEAR has no key, and its wallets live on your device, where each one carries a single trade. Apps plug in through one public entry, `@blindfill/kit`.
@@ -135,8 +135,8 @@ The terminal calls only `@blindfill/kit`'s public entry, as any wallet, bot or a
 - **56 mainnet transactions** recorded by the changes that moved money: NEAR 14, Solana 28, Base 7, Robinhood Chain 7. Each links to its explorer in [docs/proofs.md](docs/proofs.md), and `node scripts/ci/money-gate.mjs --all` reads every one back on two public RPCs. 585 earlier runs on test networks are listed there too.
 - **The vault's own state**, read on two public RPCs: no access key, the code hash of its reproducible build, and a USDC balance equal to what it owes ([docs/proofs.md](docs/proofs.md#the-vault-read-on-two-public-near-rpcs)).
 - **A live check per change**, in [scripts/live-checks/](scripts/live-checks/), run against the deployed hosts after every deploy.
-- **Research proofs** from before the build: 44 measured runs, such as a Privacy Pools withdrawal proof checked by a NEAR contract with its gas measured, proofs made on a phone, a phone-browser Solana trade, and the full money loop with real money. See [docs/research/](docs/research/README.md).
-- **Audits and reviews** of the vault contract and a pre-audit security scan, in [docs/research/audits/](docs/research/README.md#audits-and-reviews).
+- **Research proofs** from before the build: 44 measured runs, such as a Privacy Pools withdrawal proof checked by a NEAR contract with its gas measured, proofs made on a phone, a phone-browser Solana trade, and the full money loop with real money. See [research/](research/README.md).
+- **Audits and reviews** of the vault contract and a pre-audit security scan, in [research/audits/](research/README.md#audits-and-reviews).
 
 ## How it works
 
@@ -253,7 +253,7 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 | `apps/helper/` | The helper server: API keys, relays and signed orders, never a money key |
 | `docs/` | The architecture and security pages |
 | `docs/proofs.md` | Every recorded mainnet transaction, with explorer links |
-| `docs/research/` | The research proofs and the audits |
+| `research/` | The research proofs and the audits |
 | `scripts/ci/` | CI gates |
 | `scripts/live-checks/` | A live check for each change, run after every deploy |
 
@@ -268,7 +268,7 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 
 ## Prior work
 
-Research and proofs from before Nov 1 are in `UNRLZD/confidential-trenches-proofs`, kept private. Their write-ups are copied into [docs/research/](docs/research/README.md). Blindfill builds on Privacy Pools (0xbow, Apache-2.0) and NEAR Intents.
+Research and proofs from before Nov 1 are in `UNRLZD/confidential-trenches-proofs`, kept private. Their write-ups are copied into [research/](research/README.md). Blindfill builds on Privacy Pools (0xbow, Apache-2.0) and NEAR Intents.
 
 The UNRLZD trading terminal existed before the hackathon as a separate product. This repository's history starts with the hackathon's first commit, [`88f2d3e`](https://github.com/UNRLZD/confidential-trenches/commit/88f2d3eac1748ad644ec52393277b9161f992b5f) on 2026-11-01 00:00Z, and [everything built since](https://github.com/UNRLZD/confidential-trenches/compare/88f2d3eac1748ad644ec52393277b9161f992b5f...main) is the hackathon's work.
 

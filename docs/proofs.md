@@ -670,4 +670,4 @@ These came before mainnet, while each change was being built. Mainnet is the pro
 
 ## Research proofs and audits
 
-Before the build, each design question was answered by a measured run. Their write-ups are in [docs/research/proofs/](research/proofs/), and the reviews of the vault and the final secret scan are in [docs/research/audits/](research/audits/). See [docs/research/README.md](research/README.md).
+Before the build, each design question was answered by a measured run. Their write-ups are in [research/proofs/](../research/proofs/), and the reviews of the vault and the final secret scan are in [research/audits/](../research/audits/). See [research/README.md](../research/README.md).
