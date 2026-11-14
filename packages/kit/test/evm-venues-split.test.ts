@@ -12,7 +12,9 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  index (card signpage-evm-reads-draw-no-refusal: Robinhood's own and the helper's keyed route, 500,000-block spans,
  *  one batch of at most 10 at once; 6,087 characters before it), and one entry added, Robinhood's quoteLast (card
  *  robinhood-quotes-inside-provider-limits; 6,124 characters before it), and one added, Robinhood's poolProviders spare
- *  rpc-robinhood.globalstake.io (card first-sign-in-reads-fast; 6,180 characters before it, sha256 df266463...). */
+ *  rpc-robinhood.globalstake.io (card first-sign-in-reads-fast, measured 2026-11-14 05:01Z and 05:13Z: the pool's whole
+ *  life in one page; 6,180 characters before it). The list with that one entry taken out hashes to the pin before it,
+ *  df2664634ab5b17d38e043d26bab95fe86bcb99e362c46b77f15988276b52604, so nothing else moved. */
 const BEFORE = "68f371210318d5eb539f408b05ee18a8bcfa7fd3d90c9b552aa6f753b8fe6a71";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
