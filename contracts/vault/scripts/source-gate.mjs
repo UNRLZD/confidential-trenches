@@ -30,8 +30,8 @@ import { fileURLToPath } from "node:url";
 export const REPO = "https://github.com/UNRLZD/confidential-trenches";
 /** What git clone writes into a new clone's .git/config (and git init's core keys): every other key is refused. */
 const CLONE_CONFIG = /^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode)|remote\.origin\.(url|fetch)|branch\.[^\n=]+\.(remote|merge))=/;
-/** The folders pnpm install makes: the root's node_modules and each workspace package's. */
-const MODULES = /^(node_modules|(apps|packages)\/[^/]+\/node_modules)$/;
+/** The folders pnpm install makes: the root's node_modules and each workspace package's (pnpm-workspace.yaml's globs). */
+export const MODULES = /^(node_modules|(apps|packages|examples)\/[^/]+\/node_modules)$/;
 
 /** git with no config but the clone's own: every GIT_* of the caller's environment dropped, no global or system file, no replace refs. */
 function gitIn(root) {

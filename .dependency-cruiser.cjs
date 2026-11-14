@@ -13,6 +13,8 @@
 // The kit's ./core holds the wallet's seed tools (packages/kit/src/core.ts), so no other file of the kit reaches it or
 // the wallet in any form, the kit's own package name included (`@blindfill/kit/core` resolves through its exports):
 // the public entry and everything it reaches stay free of the seed. The kit's tests may read core to pin its names.
+// examples/private-buy is another developer's app, held as the terminal is: by the first rule like every file outside
+// packages/ and contracts/, and its main must reach the kit's entry, so an example that stops using the kit fails too.
 const KIT_ENTRY = "^packages/kit/(dist/index\\.(js|d\\.ts)|src/index\\.ts)$";
 const KIT_CORE = "^packages/kit/(dist/core\\.(js|d\\.ts)|src/core\\.ts)$";
 const OUTSIDE = "^(packages|contracts)/";
@@ -56,6 +58,12 @@ module.exports = {
       name: "terminal-uses-kit-entry",
       severity: "error",
       module: { path: "^apps/terminal/src/main\\.tsx?$" },
+      to: { path: KIT_ENTRY, reachable: true },
+    },
+    {
+      name: "example-uses-kit-entry",
+      severity: "error",
+      module: { path: "^examples/private-buy/main\\.ts$" },
       to: { path: KIT_ENTRY, reachable: true },
     },
   ],

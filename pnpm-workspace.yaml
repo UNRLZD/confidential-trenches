@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "examples/*"
 # a package version must be a week old before it installs (minutes)
 minimumReleaseAge: 10080
 # ethers 6.13.5 (under @zk-kit/utils) pins ws 8.17.1, the release before ws's fragment and chunk bounds (ws 8.21.0,
