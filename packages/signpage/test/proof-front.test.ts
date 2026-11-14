@@ -5,7 +5,8 @@
 // a tab without it takes it and waits for its queue's pass; a buy under way keeps its tab's queues to its take.
 //   node --test test/proof-front.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
@@ -222,6 +223,27 @@ test("a tab that keeps the queues past QUEUES_WAIT_MS (frozen before its close e
   assert.deepEqual(seen, ["A true", "A false"], "A closes at once once its queues are taken");
 });
 
+// card move-sends-or-says-why: a tap waited for the front with no bound (a queues lock never given back, a close that
+// never ends), so a withdraw run, a Move's source release among them, never started and never ended. Past TAP_WAIT_MS
+// (twice QUEUES_WAIT_MS) the tap rejects, its tap ended.
+test("(card move-sends-or-says-why) a tap that gets no front within 60 s rejects, its tap ended", async () => {
+  const { locks: real } = originLocks();
+  // the queues lock is never granted, not even to a steal (the tab before it frozen in its close)
+  const locks = { request: (name: string, opts: LockOptions, cb: (l: Lock | null) => unknown) => (name === PROOF_QUEUES_LOCK ? new Promise(() => {}) : real.request(name, opts, cb as never)) } as unknown as Pick<LockManager, "request">;
+  const b = tabDoc(true, false);
+  const timers: { f: () => void; ms: number }[] = [];
+  const B = proofFront(locks, b, b, () => {}, (f, ms) => void timers.push({ f, ms }));
+  const seen: boolean[] = [];
+  B.onChange((h) => void seen.push(h));
+  const out = B.tap().then(() => "held", (e: unknown) => String((e as Error).message));
+  await tick();
+  assert.equal(await Promise.race([out, Promise.resolve("pending")]), "pending", "waiting for the front");
+  for (const t of timers.filter((x) => x.ms === 60_000)) t.f();
+  await tick();
+  assert.match(await Promise.race([out, Promise.resolve("pending")]), /not held in 60000 ms/);
+  assert.equal(B.held(), false);
+});
+
 // ------------------------------------------------------------------ the page: two tabs on one wallet store
 
 const closers: (() => void)[] = [];
@@ -406,4 +428,41 @@ test("solana: the queue opens only in the tab holding the front (it reads the se
   assert.equal(seedsB, 0, "the other tab opens none");
   await A.signedOut().catch(() => {});
   await B.signedOut().catch(() => {});
+});
+
+// card move-sends-or-says-why: the page's state reads every open queue's ready list in one turn of each queue's view.
+// A read that never answers held the views; every read after it waited for good, and with it the page's push queue.
+// A queue whose open or view's turn does not come within the kit's state timeout (5 s) is left out of that read, the
+// read answered; the stuck read lets the views go at 30 s (queue.ts READY_WITH_MS).
+test("(card move-sends-or-says-why) robinhood: a state read after one that never answers leaves the held queue out at 5 s and answers; the views are let go at 30 s", async () => {
+  const { r, tab, chunks } = await rig("robinhood", "robinhood-testnet", 46630n);
+  const a = tabDoc(true, true);
+  const A = tab(a);
+  assert.deepEqual(await chunks(A), [EVM_LADDER.min]);
+  const flushed = async (): Promise<void> => {
+    for (let i = 0; i < 30; i++) await new Promise((res) => setImmediate(res));
+  };
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    const stuck = A.readyWith(() => new Promise<never>(() => {})).then(() => "answered", (e: unknown) => String((e as Error).message));
+    const next = A.readyWith(async () => "v");
+    await flushed();
+    assert.equal(await Promise.race([next.then(() => "answered"), Promise.resolve("pending")]), "pending", "waits for the view first");
+    // each open queue (Robinhood's, and Solana's when it opened) left out at 5 s of its own
+    for (let i = 0; i < 2; i++) {
+      mock.timers.tick(5_000);
+      await flushed();
+    }
+    const got = await Promise.race([next, Promise.resolve(null)]);
+    assert.ok(got !== null, "the read after it answers");
+    assert.equal(got.value, "v");
+    assert.equal(got.open.size, 0, "the held queues left out of it");
+    mock.timers.tick(20_000);
+    await flushed();
+    assert.match(await Promise.race([stuck, Promise.resolve("pending")]), /no answer in 30000 ms/, "the stuck read let the views go at 30 s");
+  } finally {
+    resetTimers(mock.timers);
+  }
+  const ready = ((await A.readyWith(async () => null)).ready ?? []).filter((x) => x.noteId === r.id);
+  assert.deepEqual(ready.map((x) => x.chunk), [EVM_LADDER.min], "the next read answers with the proof");
 });

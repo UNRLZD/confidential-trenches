@@ -5,7 +5,8 @@
 // The seed is the published all-zero entropy vector (packages/wallet/test/vectors/a8.json); the Rent sysvar is the
 // kit's recorded answer of both providers (packages/kit/test/fixtures/solana-pool-buy.json).
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { IDBFactory } from "fake-indexeddb";
@@ -1671,6 +1672,39 @@ test("review of 418af7d5: withdraw, a release with no signature to read back who
 
 // on Solana: a cut that holds no leaf is refused, as the wallet's tree sync refuses it
 // (solana.ts: "no leaf before"; the typed PoolNoLeafError, a plain Error before it was typed)
+// card move-sends-or-says-why: the part's drop of a note this page's queue holds waits in the note's turn, behind a swap
+// and a state read; one that never settled held the run in proving with no end, so a Move on it stayed at Processing.
+// Bounded as the wait for the note after it (WITHDRAW_FREE_MS, 30 s): the part stops, nothing bound or sent, the note as the
+// queue holds it.
+test("(card move-sends-or-says-why) a note the page's queue holds whose drop never settles: the run stops at 30 s with its cause, nothing bound or sent", async () => {
+  const wd = await world([30_000_000n]);
+  const held = (await wd.ns.move(wd.ids[0]!, "UNSPENT", "HELD", { deadlineMs: NOW + 400_000n, context: "1" })).attempt!;
+  const flushed = async (): Promise<void> => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+  };
+  const pending = <T>(p: Promise<T>): Promise<T | "pending"> => Promise.race([p, flushed().then(() => "pending" as const)]);
+  let run!: Promise<{ stage: string; cause?: string }>;
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    run = runPoolWithdraw({ ...wd.host, drop: () => new Promise<void>(() => {}) }, ASK, TO, 5_000_000n, COST);
+    await flushed();
+    mock.timers.tick(29_999);
+    assert.equal(await pending(run), "pending", "the drop waited for until 30 s");
+    mock.timers.tick(1);
+    await flushed();
+  } finally {
+    resetTimers(mock.timers);
+  }
+  const got = await pending(run);
+  assert.notEqual(got, "pending", "the run ends at 30 s");
+  const end = got as { stage: string; cause?: string };
+  assert.equal(end.stage, "stopped");
+  assert.match(end.cause ?? "", /^Error drop\b/, `the part's stop and its word: ${end.cause}`);
+  assert.deepEqual([wd.binds.length, wd.releases.length], [0, 0], "nothing bound or sent");
+  const n = await wd.ns.get(wd.ids[0]!);
+  assert.deepEqual([n?.state, n?.attempt], ["HELD", held], "the note as the queue holds it");
+});
+
 const NoLeaf = (((await import("../../wallet/src/pool/pool.ts")) as { PoolNoLeafError?: new (m: string) => Error }).PoolNoLeafError ?? Error);
 function cutRefusingEmpty(times: readonly bigint[]) {
   return (state: readonly bigint[], labels: readonly bigint[]): Pool<SolanaReleaseRequest>["trees"] =>
@@ -1707,3 +1741,4 @@ test("beside it, on Solana: a pool with an older leaf and the note landed this e
     assert.deepEqual(ends[1], ends[0], `amount ${amount}: the same plan and root`);
   }
 });
+
