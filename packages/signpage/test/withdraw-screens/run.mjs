@@ -45,7 +45,7 @@ const states = (VAULT, TOKEN) => [
   ["unread", "down.near", "1", { state: "refused", to: ["unread", "Busy · Retry"] }],
   ["amount", "alice.near", "5,0", { state: "refused", amount: ["amount", "Invalid amount"] }],
   ["min", "alice.near", "0.12", { state: "refused", amount: ["min", "Min $0.120001"] }],
-  ["insufficient", "alice.near", "9.880001", { state: "refused", amount: ["insufficient", "Try 9.88 USDC"] }], // what can be sent, card withdraw-form-shows-what-you-can-send
+  ["over", "alice.near", "9.880001", { state: "ready" }], // over what can be sent: what can be, card withdraw-max-means-all
   ["ready", "alice.near", "9.88", { state: "ready" }],
 ];
 

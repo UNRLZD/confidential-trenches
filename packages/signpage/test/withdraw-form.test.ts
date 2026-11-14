@@ -45,7 +45,9 @@ test("empty, typing, each refusal and ready", async () => {
   await refused(MAIN.usdc, "5", "address", "token");
   await refused("alice.near", "5,0", "amount", "amount");
   await refused("alice.near", "0.12", "amount", "min");
-  await refused("alice.near", "9.880001", "amount", "insufficient");
+  // above what can be sent: what can be (card withdraw-max-means-all); nothing at all: Insufficient
+  assert.equal((await v("alice.near", "9.880001")).ready?.amount, 9_880_000n);
+  await refused("alice.near", "1", "amount", "insufficient", { ...ctx, notes: [] });
   await refused("alice.near", "5", "amount", "unread", { ...ctx, fee: null });
   // a refused address with a good amount is still refused: never ready
   await refused("intents.near", "1", "address", "intents");
@@ -217,10 +219,8 @@ test("no draft mark on the kept words: Withdraw and each refusal; To, Amount and
   assert.deepEqual(marks(), [["min", "min"]], "Min $X is this form's own word, still a draft");
   f.type("amount", "50");
   await settle();
-  // above what can be sent the line is "Try X USDC": Try was kept too (pw.tryOne), no mark
-  assert.deepEqual(marks(), [["insufficient", undefined]]);
-  // the drawn line names what can be sent (review of 3e8422132, P3: the draw, not only refusalWords)
-  assert.equal(f.form.children.find((e) => e.tag === "p" && e.dataset.for === "amount")!.textContent, "Try 9.88 USDC");
+  // above what can be sent: no refusal line, the Amount line names what can be (card withdraw-max-means-all)
+  assert.deepEqual(marks(), []);
   assert.equal(f.go.dataset.draftCopy, undefined);
 });
 
@@ -288,7 +288,9 @@ test("the tap reads the note value and the fee bound again: a smaller note or a 
   note = 4_000_000n;
   await f.tap();
   assert.deepEqual(f.handed, []);
-  assert.equal(f.form.dataset.state, "refused");
+  // what the smaller note pays now is drawn for the next tap; the box keeps what was typed
+  assert.equal(f.form.find((e) => e.dataset.input === "amount")!.value, "5");
+  assert.equal(f.form.find((e) => e.dataset.lines === "cash-withdraw")!.children.find((e) => e.dataset.line === "amount")!.textContent, "3.88 USDC");
   let fee = 120_000n;
   const g = drawn({ fee: async () => fee });
   g.type("to", "alice.near");
@@ -306,7 +308,7 @@ test("a stale answer is never drawn: a check that answers after a newer keystrok
   const open = f.hold();
   await settle(); // the first check (ready) is held at the RPCs
   f.free();
-  f.type("amount", "99"); // insufficient: the newer check reads at once
+  f.type("amount", "0.1"); // under the least: the newer check reads at once
   await settle();
   assert.equal(f.form.dataset.state, "refused");
   open(); // the held first check answers now, after the newer one
@@ -374,9 +376,9 @@ test("the settle pass's unmatched withdrawals are shown on the form; none, nothi
 // card withdraw-form-shows-what-you-can-send: above what the note can send, the line names what can be sent, as the
 // pool's form does (its kept nearest-amounts words, "Try 0.5 SOL"), with the vault's asset; Insufficient only when
 // nothing can be sent.
-test("an amount above what can be sent names what can be sent: Try 9.88 USDC; Insufficient when nothing can", async () => {
+test("an amount above what can be sent is what can be sent (card withdraw-max-means-all); Insufficient when nothing can", async () => {
   const r = await evaluate("alice.near", "50", ctx);
-  assert.deepEqual(r.amount, { ok: false, code: "insufficient", below: 9_880_000n });
+  assert.deepEqual(r.amount, { ok: true, amount: 9_880_000n, parts: oneNote(9_880_000n) });
   assert.equal(refusalWords("insufficient", undefined, 9_880_000n), "Try 9.88 USDC");
   const none = await evaluate("alice.near", "50", { ...ctx, notes: [] });
   assert.deepEqual(none.amount, { ok: false, code: "insufficient" });
@@ -418,16 +420,15 @@ test("Max is the whole of Cash: a tap fills it, Withdraw hands over one withdraw
   assert.equal(f.form.dataset.outcome, "expired");
 });
 
-test("an amount no plan sends names the nearest that can be: Try 9.639999 or 9.88 USDC", async () => {
+test("an amount no plan sends is the nearest one that can be at or below it, never a Try line", async () => {
   const f = drawn();
   f.type("to", "alice.near");
   f.type("amount", "9.8");
   await settle();
   const line = f.form.find((e) => e.tag === "p" && e.dataset.for === "amount")!;
-  assert.equal(line.dataset.refusal, "unplannable");
-  assert.equal(line.textContent, "Try 9.639999 or 9.88 USDC");
-  assert.equal(line.dataset.draftCopy, undefined, "Try and or were kept (pw.tryTwo)");
-  assert.equal(f.go.disabled, true);
+  assert.equal(line.hidden, true);
+  assert.equal(line.dataset.refusal, undefined);
+  assert.equal(f.go.disabled, false);
 });
 
 test("the tap hands over nothing when the notes changed since the plan was drawn", async () => {
@@ -468,4 +469,60 @@ test("the chain is checked again at the tap: a pick changed since the check hand
   assert.deepEqual(ev.ready, { recipient: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", amount: 5_000_000n, parts: oneNote(5_000_000n), chain: "base" });
   assert.equal((await evaluate("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "5", ctx)).ready, null, "on NEAR an EVM address is no account");
   assert.equal((await evaluate("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "5", { ...ctx, chain: "base" })).ready, null);
+});
+
+// card withdraw-max-means-all: Max is an intent, not a number, and a typed amount Cash cannot pay exactly is the nearest
+// payable amount at or below it, written in the box before the tap. No Try.
+test("Max tapped, then the tap's re-read moves Max: a lower fee hands over the live Max; a higher one hands nothing over and the box follows for the next tap", async () => {
+  let fee = 120_000n;
+  const f = drawn({ cash: async () => [{ id: "a", value: 10_000_000n }, { id: "b", value: 5_000_000n }], fee: async () => fee });
+  await settle();
+  f.type("to", "alice.near");
+  f.form.find((e) => e.dataset.action === "sendable")!.fire("click");
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  fee = 100_000n;
+  await f.tap();
+  assert.equal(f.handed.length, 1, "a lower fee: the live Max goes");
+  assert.equal((f.handed[0] as { amount: bigint }).amount, 14_800_000n);
+  const g = drawn({ cash: async () => [{ id: "a", value: 10_000_000n }, { id: "b", value: 5_000_000n }], fee: async () => fee });
+  await settle();
+  g.type("to", "alice.near");
+  g.form.find((e) => e.dataset.action === "sendable")!.fire("click");
+  await settle();
+  fee = 150_000n;
+  await g.tap();
+  assert.deepEqual(g.handed, [], "a higher fee than drawn: nothing handed over");
+  assert.equal(g.form.find((e) => e.dataset.input === "amount")!.value, "14.7", "the box follows the live Max");
+  assert.equal(g.form.dataset.state, "ready");
+  await g.tap();
+  assert.equal((g.handed[0] as { amount: bigint }).amount, 14_700_000n);
+});
+
+test("a typed amount Cash cannot pay exactly: the box keeps what was typed, the nearest payable at or below it is drawn on the Amount line, the tap sends it and the box takes it", async () => {
+  const f = drawn();
+  const box = f.form.find((e) => e.dataset.input === "amount")!;
+  const sent = () => f.form.find((e) => e.dataset.lines === "cash-withdraw")!.children.find((e) => e.dataset.line === "amount")?.textContent;
+  f.type("to", "alice.near");
+  // a half number is never rewritten
+  f.type("amount", "0.0");
+  await sleep(400);
+  assert.equal(box.value, "0.0");
+  f.type("amount", "9.8");
+  await sleep(400);
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(f.form.find((e) => e.tag === "p" && e.dataset.for === "amount")!.hidden, true, "no Try");
+  assert.equal(box.value, "9.8", "the box keeps what was typed past the pause");
+  assert.equal(sent(), "9.639999 USDC");
+  await f.tap();
+  assert.deepEqual(f.handed, [{ recipient: "alice.near", amount: 9_639_999n, parts: oneNote(9_639_999n) }]);
+  assert.equal(box.value, "9.639999", "at the tap the box takes what was sent");
+  // above everything: everything, on the line; the box takes it on blur
+  f.type("amount", "50");
+  await sleep(400);
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(box.value, "50");
+  assert.equal(sent(), "9.88 USDC");
+  box.fire("blur");
+  assert.equal(box.value, "9.88");
 });
