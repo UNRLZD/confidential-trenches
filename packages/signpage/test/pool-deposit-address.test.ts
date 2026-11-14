@@ -564,3 +564,76 @@ test("a sign out at each of pool.address's waits: nothing after it runs (no reco
     if (at !== "named" && at !== "read") assert.equal(floorSignal?.aborted, true, at);
   }
 });
+
+// Card move-one-confidential-swap: the Move's host (`confidential`) asks every quote on Confidential Intents rails and
+// takes only a confidential answer; the deposit sheet's host asks none. A Move prices another pool's coin at the
+// device's own two prices (poolMovePricing).
+const CONF_COLLECTOR = "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805";
+const conf = (a: Answer) => { a.quoteRequest.confidentiality = "advanced"; a.quoteRequest.appFees = [{ recipient: CONF_COLLECTOR, fee: 20 }]; };
+
+test("the Move's host asks confidentiality advanced, takes the confidential answer and hands it to the follow; a public answer gives no address", async () => {
+  const w = world({ change: conf });
+  const asked: string[] = [];
+  const d = poolAddressHost({ ...w.deps, confidential: true, hidden: async (address) => (asked.push(address), "hidden") })({ chain: "base", origin_asset: BASE_USDC, amount: "25" }, { id: "mv-1/pool" });
+  await d.after;
+  const a = d.answer() as { result?: { quote?: { deposit_address: string } } };
+  assert.equal(a.result?.quote?.deposit_address, ADDRESS, JSON.stringify(a));
+  assert.equal(w.sent[0]!.confidentiality, "advanced");
+  assert.equal(w.took.length, 1);
+  assert.deepEqual(asked, [ADDRESS], "1Click's own keyless status is asked for the signed address before it goes out");
+  // 1Click itself knows the address as a public swap (a helper that asked public and rewrote the unsigned mode), the
+  // read is down, or the host has no tell: no address, nothing followed
+  for (const [hidden, code] of [[async () => "public" as const, "quote_check_failed"], [async () => "down" as const, "down"], [async () => { throw new TypeError("fetch failed"); }, "down"], [undefined, "down"]] as const) {
+    const x = world({ change: conf });
+    const h = poolAddressHost({ ...x.deps, confidential: true, ...(hidden === undefined ? {} : { hidden }) })({ chain: "base", origin_asset: BASE_USDC, amount: "25" }, { id: "mv-3/pool" });
+    await h.after;
+    assert.deepEqual(h.answer(), { error: code });
+    assert.equal(x.took.length, 0);
+  }
+  // the helper answered public (or asked public): nothing goes out, nothing is followed
+  const p = world();
+  const e = poolAddressHost({ ...p.deps, confidential: true, hidden: async () => "hidden" })({ chain: "base", origin_asset: BASE_USDC, amount: "25" }, { id: "mv-2/pool" });
+  await e.after;
+  assert.deepEqual(e.answer(), { error: "quote_check_failed" });
+  assert.equal(p.took.length, 0);
+  // the deposit sheet's host asks no mode
+  const s = world();
+  await ask(s, { chain: "base", origin_asset: BASE_USDC, amount: "25" });
+  assert.equal("confidentiality" in s.sent[0]!, false);
+});
+
+test("poolMovePricing: another pool's coin at the device's own price of each; none with either price unread, for the pool's own coin, or another asset", async () => {
+  const { poolMovePricing } = await import("../src/pool-deposit-address.ts");
+  const px = { solana: { price: "15012345678", expo: -8 }, base: { price: "190012345678", expo: -8 }, robinhood: null } as Record<string, { price: string; expo: number } | null>;
+  const price = (c: string) => px[c] as never;
+  assert.deepEqual(poolMovePricing(price, "nep141:sol.omft.near", "base"), { decimalsIn: 9, pricing: { in: ["150.12345678", "150.12345678"], out: ["1900.12345678", "1900.12345678"] } });
+  assert.deepEqual(poolMovePricing(price, "nep141:base.omft.near", "solana"), { decimalsIn: 18, pricing: { in: ["1900.12345678", "1900.12345678"], out: ["150.12345678", "150.12345678"] } });
+  assert.equal(poolMovePricing(price, "nep141:hood.omft.near", "base"), null); // Robinhood's price unread
+  assert.equal(poolMovePricing(price, "nep141:sol.omft.near", "robinhood"), null);
+  assert.equal(poolMovePricing(price, "nep141:base.omft.near", "base"), null); // the pool's own coin: no Move
+  assert.equal(poolMovePricing(price, "nep141:wrap.near", "base"), null);
+  // Cash's USDC: as the deposit sheet prices it
+  assert.deepEqual(poolMovePricing(price, BASE_USDC, "base"), { decimalsIn: 6, pricing: { in: ["1", "1"], out: ["1900.12345678", "1900.12345678"] } });
+});
+
+test("oneClickHidden: hidden only on 1Click's exact not-found for that address, asked keyless at 1Click itself; a status is public; anything else down", async () => {
+  const { oneClickHidden, ONECLICK_PUBLIC_STATUS } = await import("../src/pool-deposit-address.ts");
+  const A = "57LxDLkS96hfigLJW45RFEBYT28kzZ8x8u28Vd14o3xU";
+  const urls: string[] = [];
+  const answer = (status: number, body: string) => (async (url: string | URL | Request, init?: RequestInit) => {
+    urls.push(String(url));
+    assert.equal(init?.headers, undefined, "no header: no key, nothing of the helper's");
+    return new Response(body, { status });
+  }) as typeof fetch;
+  // the answers read 2026-11-14 03:38Z: a confidential address, then a public one (PENDING_DEPOSIT)
+  assert.equal(await oneClickHidden(A, answer(404, JSON.stringify({ message: `Deposit address ${A} not found`, error: "Not Found", statusCode: 404 }))), "hidden");
+  assert.equal(urls[0], `${ONECLICK_PUBLIC_STATUS}?depositAddress=${A}`);
+  assert.ok(urls[0]!.startsWith("https://1click.chaindefuser.com/"));
+  assert.equal(await oneClickHidden(A, answer(200, JSON.stringify({ status: "PENDING_DEPOSIT", swapDetails: {} }))), "public");
+  // another address's not-found, a 404 page, a throttle, a 5xx, no answer: down
+  assert.equal(await oneClickHidden(A, answer(404, JSON.stringify({ message: "Deposit address X not found" }))), "down");
+  assert.equal(await oneClickHidden(A, answer(404, "<html>not found</html>")), "down");
+  assert.equal(await oneClickHidden(A, answer(429, "{}")), "down");
+  assert.equal(await oneClickHidden(A, answer(502, "")), "down");
+  assert.equal(await oneClickHidden(A, (async () => { throw new TypeError("fetch failed"); }) as typeof fetch), "down");
+});

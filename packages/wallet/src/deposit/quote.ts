@@ -126,7 +126,7 @@ export function checkPoolDepositWallet(chain: PoolDepositChain, wallet: string, 
  * and no other wallet of the user. Money already on X is pool.deposit's own: an origin that is X's coin is refused.
  * Throws on input that is not that.
  */
-export function poolDepositQuoteRequest(chain: PoolDepositChain, wallet: string, refundId: string, originAsset: string, amount: bigint, now: number): OneClickRequest {
+export function poolDepositQuoteRequest(chain: PoolDepositChain, wallet: string, refundId: string, originAsset: string, amount: bigint, now: number, confidential = false): OneClickRequest {
   checkPoolDepositWallet(chain, wallet, refundId);
   const destinationAsset = POOL_DEPOSIT_DESTINATION[chain];
   if (typeof originAsset !== "string" || originAsset === "") throw new Error("pool deposit quote: no origin asset");
@@ -146,6 +146,8 @@ export function poolDepositQuoteRequest(chain: PoolDepositChain, wallet: string,
     recipient: wallet,
     recipientType: "DESTINATION_CHAIN",
     deadline: new Date(now + DEPOSIT_QUOTE_DEADLINE_MS).toISOString(),
+    // a Move's quote (card move-one-confidential-swap): on Confidential Intents rails, so the origin is not linked to U_X
+    ...(confidential === true ? { confidentiality: "advanced" as const } : {}),
   };
 }
 

@@ -200,3 +200,31 @@ test("pool-deposit-follow floor: at the floor passes, one under is refused; no f
   refusedRule("floor", () => checkPoolDepositQuote(req, ans, noFloor as never));
   refusedRule("floor", () => checkPoolDepositQuote(req, ans, { ...ctxOf("solana", SOL_U, 9), floor: 9_999_999n }));
 });
+
+// Card move-one-confidential-swap: a Move's quote into a pool asks confidentiality "advanced" (pool.address's Move host,
+// `confidential`), on the partner path, and 1Click answers it under its confidential collector. The mode is the
+// caller's: a public answer to it, a confidential request where a deposit asked none, or none where a Move asked it, is
+// refused.
+const CONF_COLLECTOR = "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805";
+const confAnswer = (req: Req, change?: (a: Answer) => void) =>
+  answerOf(req, 18, 10n ** 9n, (a) => { a.quoteRequest.confidentiality = "advanced"; a.quoteRequest.appFees = [{ recipient: CONF_COLLECTOR, fee: 20 }]; change?.(a); });
+const confCtx = () => ({ ...ctxOf("base", EVM_U, 18), confidential: true as const, check: { ...ctxOf("base", EVM_U, 18).check, path: "partner" as const } });
+
+test("a Move's quote asks confidentiality advanced and passes under 1Click's confidential collector", () => {
+  const req = poolDepositQuoteRequest("base", EVM_U, EVM_ID, SOL_USDC, 25_000_000n, NOW, true);
+  assert.equal(req.confidentiality, "advanced");
+  assert.equal(checkPoolDepositQuote(req, confAnswer(req), confCtx()).depositAddress, ADDRESS);
+  // a deposit's own request asks no mode
+  assert.equal("confidentiality" in poolDepositQuoteRequest("base", EVM_U, EVM_ID, SOL_USDC, 25_000_000n, NOW), false);
+});
+
+test("a Move's quote answered as public, or under the public collector, is refused; the mode is always the caller's", () => {
+  const req = poolDepositQuoteRequest("base", EVM_U, EVM_ID, SOL_USDC, 25_000_000n, NOW, true);
+  refusedAnswer("echo", () => checkPoolDepositQuote(req, confAnswer(req, (a) => { a.quoteRequest.confidentiality = "public"; }), confCtx()));
+  refusedAnswer("app-fees", () => checkPoolDepositQuote(req, confAnswer(req, (a) => { a.quoteRequest.appFees = [{ recipient: COLLECTOR, fee: 20 }]; }), confCtx()));
+  // a Move's context with a public request, and a deposit's context with a confidential one
+  const plain = poolDepositQuoteRequest("base", EVM_U, EVM_ID, SOL_USDC, 25_000_000n, NOW);
+  refusedRule("confidentiality", () => checkPoolDepositQuote(plain, answerOf(plain, 18, 10n ** 9n), confCtx()));
+  refusedRule("confidentiality", () => checkPoolDepositQuote(req, confAnswer(req), { ...ctxOf("base", EVM_U, 18), check: confCtx().check }));
+  refusedRule("confidentiality", () => checkPoolDepositQuote({ ...req, confidentiality: "basic" } as unknown as Req, confAnswer(req), confCtx()));
+});

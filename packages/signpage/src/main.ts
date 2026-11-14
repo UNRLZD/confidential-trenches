@@ -79,7 +79,7 @@ import { solCashCarrySender } from "./carry-cash-sol.ts";
 import { POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS } from "./device-spacing.ts";
 import type { CarryOpen } from "./carry-cash.ts";
 import { depositToEnd, depositWalletsOf, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, poolFollowEnded, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
-import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, oneClickHidden, poolMovePricing, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
@@ -326,7 +326,7 @@ else {
       // NEAR Intents only: no Relay (a hop between pools ties two chains together, lite paper v2 §4)
       rails: ["1click"],
       quote: async (chain, usdc, id) => {
-        const r = poolAddress({ chain, origin_asset: `nep141:${NEAR_NETWORKS.mainnet.usdc}`, amount: formatPoolUnits(usdc, 6) }, { id });
+        const r = poolMoveAddress({ chain, origin_asset: `nep141:${NEAR_NETWORKS.mainnet.usdc}`, amount: formatPoolUnits(usdc, 6) }, { id });
         await r.after;
         const a = r.answer();
         if (a === null || "error" in a) return { error: a === null ? "failed" : a.error };
@@ -598,6 +598,9 @@ else {
   // where money for a pool goes (src/pool-deposit-address.ts), for a moving tap (cashMoverNow): the same host as the
   // deposit sheet's pool.address below, on the same reads, floor and follow
   const poolAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped });
+  // a Move's quote into a pool (card move-one-confidential-swap): the same host, reads, floor and follow, every quote asked
+  // and checked on Confidential Intents rails, and another pool's coin priced at the device's own price of each
+  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped, confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal) });
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
   // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
   const depositFromUx = (g: PoolFollowRecord, amount: bigint, signal: AbortSignal) =>
