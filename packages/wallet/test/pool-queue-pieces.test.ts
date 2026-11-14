@@ -139,7 +139,9 @@ test("tiers: after a buy takes one note's tier 1 proof, every other tier 1 proof
   // is taken, so it is not ready, and nothing says "ready" with Max 0
   const b = await bal(v, q as ProofQueue<unknown>);
   assert.equal(b.ready, "0.015");
-  assert.equal(b.tap_max, "0.009899");
+  // Max: the 10's leg and the 5.5's leg, each on its own W (card buy-any-amount-on-every-chain: one tap spends both),
+  // 0.009899 + 0.004899, never the larger alone
+  assert.equal(b.tap_max, "0.014798");
   // and takeable at once, with no pass: the 5.5 note's
   assert.equal((await q.take(Y!.id, before.get(Y!.id))).noteId, Y!.id);
   // the next pass makes tier 2 for the new primary, the 10 note, first (its own old piece goes, the 2 note's piece is

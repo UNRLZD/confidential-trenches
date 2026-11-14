@@ -131,16 +131,20 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
   const real = globalThis.fetch;
   const counted = async (url, init) => {
     const host = new URL(typeof url === "string" ? url : url.url).host;
-    const c = (counts[host] ??= { requests: 0, calls: 0, s429: 0 });
+    const c = (counts[host] ??= { requests: 0, calls: 0, s429: 0, logs: 0, s429Logs: 0 });
     c.requests++;
+    let logs = false;
     try {
       const b = JSON.parse(typeof init?.body === "string" ? init.body : "null");
       c.calls += Array.isArray(b) ? b.length : b === null ? 0 : 1;
+      logs = (Array.isArray(b) ? b : [b]).some((x) => x?.method === "eth_getLogs");
     } catch {
       c.calls++;
     }
+    if (logs) c.logs++;
     const r = await fetchFn(url, init);
     if (r.status === 429) c.s429++;
+    if (r.status === 429 && logs) c.s429Logs++;
     return r;
   };
   globalThis.fetch = counted;

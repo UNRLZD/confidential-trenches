@@ -187,12 +187,13 @@ export async function evmEpochFeeNow(pool: Pool<EvmPoolRequest>): Promise<{ fee:
 const latest = (rpcs: readonly [EvmRpc, EvmRpc]) => evmRetryLag(() => evmAgreedBlock(rpcs, "latest"));
 
 /** Base's L1 data fee bound for W's send (GasPriceOracle getL1FeeUpperBound and getOperatorFee, the kit's reads) at
- *  `tag` on both RPCs, the same; 0 on Robinhood, whose L1 cost is in the gas. */
-async function l1Of(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs">, gas: bigint, tag: string): Promise<[bigint, bigint]> {
+ *  `tag` on both RPCs, the same; 0 on Robinhood, whose L1 cost is in the gas. `bytes`: the send's size bound (W's own
+ *  buy, pool-buy-evm-rest.ts, carries its call's bytes). */
+export async function l1Of(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs">, gas: bigint, tag: string, bytes: bigint = EVM_ONWARD_L1_BYTES): Promise<[bigint, bigint]> {
   if (nitro(h.chain)) return [0n, 0n];
   const net = h.pin.network;
   const answers: [bigint[], bigint[]] = [[], []];
-  for (const c of evmPoolChainFeeReads(net, gas, EVM_ONWARD_L1_BYTES)) {
+  for (const c of evmPoolChainFeeReads(net, gas, bytes)) {
     const [a, b] = await both(h.rpcs, async (rpc) => {
       const x = await rpc("eth_call", [{ to: c.to, data: c.data }, tag]);
       return typeof x === "string" && /^0x[0-9a-fA-F]{64,}$/.test(x) ? BigInt(`0x${x.slice(2, 66)}`) : stop("read");
@@ -200,7 +201,7 @@ async function l1Of(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs">, gas: big
     answers[0].push(a);
     answers[1].push(b);
   }
-  const fees: [bigint, bigint] = [evmPoolChainFee(net, EVM_ONWARD_L1_BYTES, answers[0]), evmPoolChainFee(net, EVM_ONWARD_L1_BYTES, answers[1])];
+  const fees: [bigint, bigint] = [evmPoolChainFee(net, bytes, answers[0]), evmPoolChainFee(net, bytes, answers[1])];
   agree(fees);
   return fees;
 }

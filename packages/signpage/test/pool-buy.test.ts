@@ -31,6 +31,7 @@ import { onTestClock } from "../../kit/test/test-clock.ts";
 import { buyReads } from "../src/pool-testnet.ts";
 import type { ReadKind } from "../src/page-rpc.ts";
 import { liveRuns } from "../src/pool-sell-dry.ts";
+import { readWaits } from "../src/read-waits.ts";
 import { APP_ORIGIN, signedOutState, startApi } from "../src/api.ts";
 import type { IncomingMessage } from "../src/api.ts";
 
@@ -2859,4 +2860,71 @@ test("card buy-spends-its-change-in-the-same-tap: between a first round that lan
   assert.equal(await run(() => false), 1);
   assert.deepEqual(stranded, ["W"]);
   assert.equal(owed.all.size, 0);
+});
+
+// ---------- card buy-any-amount-on-every-chain: one tap, several W legs ----------
+
+/** A second W's own ready proof (W2: l 8 of the same seed), `chunk` its release. */
+const W2 = freshWallet(SEED64, "sol", 8n, 0);
+W2.secretKey.fill(0);
+const ownOnW2 = (chunk: bigint): ReadyProof<SolanaReleaseRequest> => {
+  const p = pieceProof("note-2", 777n, chunk, true);
+  return { ...p, wallet: { ...p.wallet, l: 8n, address: W2.address } };
+};
+
+test("legs: a tap past every single W's set, in a scope that may split, answers its legs' plan (the largest leg first, each note in one leg) before any claim, take, seed or send; never split, not_funded as before; past every leg, not_funded", async () => {
+  const own = readyProof();
+  const other = ownOnW2(2n * BigInt(r.withdrawn));
+  const s = await setup("pump", SPEND);
+  const one = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent);
+  const two = solanaPoolBuyMaxSpend([relOf(other)], s.venue, SOLANA_POOL_JITO_TIP, rent);
+  assert.ok(one > 0n && two > one);
+  const amount = two + one / 2n;
+  const w = await world({ readies: [[own, other]] });
+  const a = await poolBuy.runPoolBuyScoped(w.host, { ...ASK, amount }, readWaits(), { split: true });
+  assert.deepEqual(a, { legs: [{ address: W2.address, ids: ["note-2"], amount: two }, { address: W.address, ids: ["note-1"], amount: amount - two }] });
+  assert.equal(w.log.some((x) => /^(claim|take|seed|send)/.test(x)), false, w.log.filter((x) => /^(claim|take|seed|send)/.test(x)).join(","));
+  assert.equal(w.state(), "HELD");
+  // a run that may not split: not_funded, as before this card
+  assert.deepEqual(await runPoolBuy((await world({ readies: [[own, other]] })).host, { ...ASK, amount }), { error: "not_funded" });
+  // past every leg: not_funded, nothing claimed
+  const w3 = await world({ readies: [[own, other]] });
+  assert.deepEqual(await poolBuy.runPoolBuyScoped(w3.host, { ...ASK, amount: one + two + 1n }, readWaits(), { split: true }), { error: "not_funded" });
+  assert.equal(w3.log.some((x) => x.startsWith("claim")), false);
+});
+
+test("legs: a leg's run picks only its own W's proofs and never a note of another leg: its own note out of scope is not_funded, another W's scope finds none, its own W with the other leg's note left out fills from its own note", async () => {
+  const own = readyProof();
+  const other = ownOnW2(2n * BigInt(r.withdrawn));
+  const w = await world({ readies: [[own, other]] });
+  assert.deepEqual(await poolBuy.runPoolBuyScoped(w.host, ASK, readWaits(), { leg: { address: W.address, not: new Set(["note-1"]) } }), { error: "not_funded" });
+  const w1 = await world({ readies: [[own]] });
+  assert.deepEqual(await poolBuy.runPoolBuyScoped(w1.host, ASK, readWaits(), { leg: { address: W2.address, not: new Set() } }), { error: "not_funded" });
+  for (const x of [w, w1]) assert.equal(x.log.some((l) => /^(claim|take|seed|send)/.test(l)), false);
+  const w2 = await world({ readies: [[own, other]] });
+  const a = await poolBuy.runPoolBuyScoped(w2.host, ASK, readWaits(), { leg: { address: W.address, not: new Set(["note-2"]) } });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.deepEqual(w2.log.filter((l) => l.startsWith("claim") || l.startsWith("take:")), ["claim:note-1", "take:note-1"]);
+});
+
+test("legs: the kind runs a split tap's legs side by side, each on a host of its own; a leg that fails (W2's proof is not bound to W2) makes the tap part_filled, never filled, with the leg that filled named; each host ended", async () => {
+  const own = readyProof();
+  const other = ownOnW2(2n * BigInt(r.withdrawn));
+  const s = await setup("pump", SPEND);
+  const one = solanaPoolBuyMaxSpend([relOf(own)], s.venue, SOLANA_POOL_JITO_TIP, rent);
+  const two = solanaPoolBuyMaxSpend([relOf(other)], s.venue, SOLANA_POOL_JITO_TIP, rent);
+  const w = await world({ readies: [[own, other]] });
+  const locks = { request: (_n: string, _o: unknown, f: () => Promise<void>) => f() } as unknown as Pick<LockManager, "request">;
+  const stages: string[] = [];
+  let hosts = 0;
+  let ended = 0;
+  const r1 = poolBuy.poolBuyKind(() => (hosts++, { ...w.host, end: () => void ended++ }), locks)({ ...ASK, amount: two + one / 2n }, { id: "r1", sha: "00", progress: (x: string) => void stages.push(x) } as never) as { running: true; after: Promise<void>; answer: () => unknown };
+  await r1.after;
+  await new Promise((res) => setTimeout(res, 50));
+  assert.deepEqual(r1.answer(), { result: { stage: "part_filled", txs: [{ chain: "solana", hash: SIG }] } });
+  assert.deepEqual(stages, ["part_filled"]);
+  assert.equal(hosts, 2, "one host a leg, the plan's run on the first");
+  assert.equal(ended, 2);
+  assert.deepEqual(w.log.filter((l) => l.startsWith("take:")), ["take:note-1"], "W2's leg took nothing");
+  assert.equal(w.state(), "SPENT");
 });

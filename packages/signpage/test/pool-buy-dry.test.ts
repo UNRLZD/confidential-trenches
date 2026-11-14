@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { SOLANA_POOL_JITO_TIP } from "../../kit/src/checks/solana/checks.ts";
-import { SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolFee, type SolanaPoolRelease, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_POOL_WORST_BUY_VENUE, solanaPoolBuyFunds, solanaPoolBuyMaxSpend, solanaPoolFee, type SolanaPoolRelease, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { fx, replay } from "../../kit/test/solana-pool-buy-fx.ts";
@@ -311,4 +311,35 @@ test("Max is the most the buy pays at the tip it tips (card max-is-what-you-hold
   assert.notEqual(funds(venue as never, lamports(tap) + 1n), null, "and not one lamport more");
   const at = (await ask(kind, { chain: "solana", token: fx.pump.mint, amount: tap })) as { result: Record<string, unknown> };
   assert.equal(at.result.pieces, 4);
+});
+
+// Card buy-any-amount-on-every-chain: Max on Solana is every ready note's spend, one tap split across disjoint W sets
+// (src/pool-buy.ts solanaLegsPlan, each a pool.buy leg). Two 0.02 notes, each its own proof on its own W and no tier 2:
+// Max is both legs, and an amount past one leg is the legs' cost (each its relay fee and its tip), never refused.
+test("card buy-any-amount-on-every-chain: Max is the sum of the legs, two notes on their own Ws; an amount past one leg costs both legs, no pieces count", async () => {
+  const n = (id: string, label: bigint, value: bigint): NoteRecord => ({ ...held, id, attempt: `a-${id}`, leaf: { ...held.leaf!, value, label } });
+  const notes = [n("a", 1n, 2n * RUNG), n("b", 2n, 2n * RUNG)];
+  const list = notes.map((x) => ({ ...ready, noteId: x.id, attempt: x.attempt!, chunk: x.leaf!.value, own: true as const, wallet: { l: x.leaf!.label, j: 0, address: `W-${x.id}` } }));
+  const TIP = 100_000n;
+  const kind = poolBuyDryKind(deps({ tip: TIP, ready: async () => ({ notes, ready: list, open: new Set([SOL.id]) }) }));
+  const at = async (amount?: string) => (await ask(kind, { chain: "solana", token: fx.pump.mint, ...(amount === undefined ? {} : { amount }) })) as { result: Record<string, unknown> };
+  const lamports = (s: string): bigint => BigInt(s.replace(".", "").replace(/^0+/, "") || "0") * 10n ** BigInt(9 - (s.split(".")[1]?.length ?? 0));
+  const sol = (l: bigint) => (Number(l) / 1e9).toString();
+  const venue = await readCoinVenue(pair("pump"), fx.pump.mint);
+  // one leg's most: one 0.02 piece on its own W at the coin's venue and the page's tip
+  const one = solanaPoolBuyMaxSpend([{ withdrawnValue: 2n * RUNG, relayFee: FEE }], venue as never, TIP, RENT);
+  assert.ok(one > 0n);
+  const tap = (await at()).result.tap_max as string;
+  assert.equal(lamports(tap), 2n * one, "Max: both legs, never the larger one alone");
+  // within one leg: one piece, as before
+  assert.deepEqual((await at(sol(one))).result.pieces, 1);
+  // past one leg, up to Max: both legs' relay fees and tips; no pieces (the kit's count is one leg's)
+  for (const amount of [sol(one + 1n), tap]) {
+    const r = (await at(amount)).result;
+    assert.equal(r.cost, sol(2n * (FEE + TIP)), amount);
+    assert.equal("pieces" in r, false, amount);
+    assert.ok(SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](r), amount);
+  }
+  // past Max: tap_max alone, as no buy of it passes
+  assert.deepEqual(Object.keys((await at(sol(2n * one + 1n))).result), ["tap_max"]);
 });
