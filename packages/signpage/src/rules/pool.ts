@@ -1572,6 +1572,9 @@ export function checkEvmDeposit(tx: EvmOnwardSend, ask: PoolAsk, ctx: EvmDeposit
   // the rung: the pool's own bounds (PrivacyPool.sol:86-90), never more than asked, msg.value the call's value
   const rung = call.value;
   if (rung < EVM_DEPOSIT_MIN || rung >= (1n << 128n) - 1n || rung > ask.amount) return refuse("amount");
+  // a rung of the pool's ladder, never a value the pool takes off it (card evm-pool-amounts-are-standard-sizes): a
+  // deposit's value is public, so every one is one of the same few sizes
+  if (!isRung(EVM_LADDER, rung)) return refuse("rung");
   if (d.value !== rung) return refuse("value");
   // the note's own precommitment, below p, and the call's bytes exactly: the pool's deposit(uint256,uint256) selector
   // (PrivacyPool.sol:82), value, precommitment, nothing else
@@ -1603,24 +1606,14 @@ export type EvmCarryContext = EvmDepositContext & { readonly chain: "base" | "ro
 
 /**
  * W's carry: the ETH a release paid the fresh wallet W with no swap (a refused buy) goes back into the pinned pool as
- * one note of the user's, by a deposit W signs and pays the gas of. Every field is held as U's deposit is
- * (checkEvmDeposit: the pinned pool and chain, deposit(value, precommitment) and nothing else, W's agreed nonce, the
- * two-RPC estimate with the tree's headroom, the fee caps), and the value is W's whole lower balance reading less the
- * send's fee bound exactly: W keeps nothing past the gas it may not use, and no value is any server's word. Signed by
- * signEvmDeposit with W's key alone (the signer holds the key to `wallet`).
+ * notes of the user's, one deposit W signs and pays the gas of at a time. W's change after its own buy is held by the
+ * same rule (card evm-pool-amounts-are-standard-sizes): checkEvmChange, every field held as U's deposit is and the value
+ * the largest rung at or under W's lower balance reading less the send's fee bound, never W's whole balance; what is
+ * under the least rung stays on W, its tail. No value is any server's word. Signed by signEvmDeposit with W's key alone
+ * (the signer holds the key to `wallet`).
  */
 export function checkEvmCarry(tx: EvmOnwardSend, ctx: EvmCarryContext, reads: EvmDepositReads, testnet = false): PoolDraw {
-  if (ctx?.chain !== "base" && ctx?.chain !== "robinhood") return refuse("chain");
-  const value = ctx.call?.value;
-  if (typeof value !== "bigint") return refuse("call");
-  const ask: PoolAsk = { kind: "pool.deposit", chain: ctx.chain, token: null, amount: value, slippageBps: 0, decimals: 18 };
-  const draw = checkEvmDeposit(tx, ask, ctx, reads, testnet);
-  const low = reads.balance[0]! < reads.balance[1]! ? reads.balance[0]! : reads.balance[1]!;
-  if (draw.amount + draw.feeCap !== low) {
-    DEPOSIT_CHECKED.delete(tx);
-    return refuse("carry_whole");
-  }
-  return draw;
+  return checkEvmChange(tx, ctx, reads, testnet);
 }
 
 /** The device's side of a leftover's carry to Cash on Base or Robinhood (src/carry-cash-evm.ts): the wallet (U_X or W),

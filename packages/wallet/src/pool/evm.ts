@@ -80,6 +80,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, evmTwoOperators, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type EvmTwoOperators, type EvmTwoOperatorsOpts, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
+import type { PieceRule } from "./pieces.ts";
 import { POOL_TESTNET, SIGN_MAINNET } from "./network.ts";
 import { perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
@@ -93,6 +94,13 @@ export type EvmRpc = SolanaRpc;
  * 3 Nov 05:00Z on two RPCs each (Base 0.005 gwei, Robinhood 0.0201 gwei) that is 6.7e12 and 2.7e13 wei, so M356 (4)'s
  * 2 x (G x basefee), before the L1 fee, is 1.3% and 5.4% of 0.001 ETH, far under the pool's 50% backstop. */
 export const EVM_LADDER: Ladder = Object.freeze({ one: 100_000_000_000_000n, min: 1_000_000_000_000_000n });
+/** The Base and Robinhood pools' piece rule (./pieces.ts; card evm-pool-amounts-are-standard-sizes), as SOL_PIECES is
+ *  Solana's: every release a rung of EVM_LADDER from 0.001 ETH, on the grid of the pool's MIN_DEPOSIT (0.0001 ETH), and
+ *  a note's change 0 or at least the least rung, so no step leaves wei in the pool that no release can take. `least`,
+ *  the least note made before the rule a release still takes whole: MIN_DEPOSIT, the least any deposit made (a sale's
+ *  deposit back is what the sale brought less the fee, to the wei: 1,880,137,434,291,065 on Robinhood, 13 Nov 21:06Z,
+ *  which the largest rung alone would leave 880,137,434,291,065 of in the pool for good). */
+export const EVM_PIECES: PieceRule = Object.freeze({ grid: EVM_LADDER.one, floor: EVM_LADDER.min, ladder: EVM_LADDER, least: EVM_LADDER.one });
 export const EVM_EPOCH_MS = 60_000n;
 /** EVM's send margin (M356 (1)): 60 s, the helper's EVM_POOL_SEND_MARGIN_MS; this file's until card evm-pool-fee-kit
  * makes it the kit's constant (M371 (2)). */
@@ -2433,6 +2441,7 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
     chain: "evm",
     scope,
     ladder: EVM_LADDER,
+    pieces: EVM_PIECES,
     epochMs: EVM_EPOCH_MS,
     lifeMs: EVM_LIFE_MS,
     sendMarginMs: EVM_SEND_MARGIN_MS,

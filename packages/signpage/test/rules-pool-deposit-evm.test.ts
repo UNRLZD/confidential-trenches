@@ -98,6 +98,19 @@ test("EVM deposit: one refusal per field", () => {
   for (const [rule, f] of cases) assert.throws(f, refusedAs(rule), rule);
 });
 
+test("card evm-pool-amounts-are-standard-sizes: EVM deposit: only a rung of EVM_LADDER is deposited; an off-ladder value the pool would take is refused rung", () => {
+  // the call for `v` exactly as the wallet lays it out, asked for, and paid for on both RPCs: only the value's size differs
+  const at = (v: bigint) => {
+    const call = Object.freeze({ to: POOL, value: v, data: "0xe2bbb158" + v.toString(16).padStart(64, "0") + PRE.toString(16).padStart(64, "0") });
+    return () => checkEvmDeposit(txOf({ value: v, data: call.data }), { ...ASK, amount: v }, ctxOf({ call }), readsOf({ balance: [v + FEE, v + FEE] }));
+  };
+  // the Robinhood pool's off-ladder deposit read on chain (0x9306359433127c4f3be426f6faeb00a3c41f66db), a rung and one
+  // wei, a rung less one wei, and the pool's MIN_DEPOSIT (0.0001 ETH: the pool takes it, it is under the least rung)
+  for (const v of [1_880_137_434_291_065n, RUNG + 1n, 2n * RUNG - 1n, 3n * RUNG, EVM_LADDER.one]) assert.throws(at(v), refusedAs("rung"), `${v}`);
+  // each rung passes: 1, 2 and 5 x 10^k from 0.001 ETH
+  for (const v of [RUNG, 2n * RUNG, 5n * RUNG, 10n * RUNG, 20n * RUNG, 500n * RUNG]) assert.equal(at(v)().amount, v, `${v}`);
+});
+
 const addressOf = (pub: Uint8Array): string => "0x" + Buffer.from(keccak_256(pub.slice(1)).slice(12)).toString("hex");
 // RLP decode, enough for a type 2 tx: a list of byte strings and one empty list
 function rlpItems(b: Uint8Array): Uint8Array[] {
