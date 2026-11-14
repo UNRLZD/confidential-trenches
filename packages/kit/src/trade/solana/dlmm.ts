@@ -21,9 +21,11 @@
 //    helpers/math.ts (mulShr, shlDiv), helpers/binArray.ts (binIdToBinArrayIndex, getBinFromBinArray).
 //
 // What is not a candidate (verdict "none", never a guess): a pair not quoted in wSOL, a disabled pair, one not yet
-// active, a Token-2022 coin (transfer fees and hooks are not priced here), an active bin outside the pair's own bitmap
+// active, a Token-2022 coin with an extension not priced here (a transfer hook and the others solanaCoinTransferFee
+// names; its transfer fee is priced), an active bin outside the pair's own bitmap
 // (its extension account is not read), and an input the read bin arrays cannot fill.
 import { base58, base64 } from "@scure/base";
+import { deepFreeze } from "../../freeze.ts";
 import { solanaProgramAddress } from "../../checks/solana/message.ts";
 import { SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM } from "../../checks/solana/checks.ts";
 import { solanaTimedRpc, type SolanaRpc } from "./send.ts";
@@ -47,6 +49,7 @@ const ARRAY_DISC = [92, 142, 92, 220, 5, 148, 70, 181] as const;
 /** The LbPair bytes two honest reads at two slots may differ in: v_parameters, active_id, protocol_fee, reward_infos,
  *  bin_array_bitmap, last_updated_at. Every other byte must be the same on both providers. */
 export const SOLANA_DLMM_PAIR_MOVING: readonly (readonly [number, number])[] = [[40, 72], [76, 80], [216, 232], [264, 552], [584, 720]];
+deepFreeze(SOLANA_DLMM_PAIR_MOVING);
 
 export type SolanaDlmmAccount = { owner: string; data: Uint8Array };
 
