@@ -11,7 +11,7 @@ import type { EvmPoolSellErrorCode } from "../../kit/src/trade/evm/sell-unpinned
 /** Every rule word the device's rules refuse with (rules/pool.ts refuse, PoolRuleRefused): the test reads them from the
  *  source, so a rule added there is added here. */
 export const POOL_RULE_WORDS: ReadonlySet<string> = new Set([
-  "access_list", "adapter", "amount", "balance", "blockhash", "call", "carry_whole", "chain", "chain_id", "compute_budget",
+  "access_list", "adapter", "amount", "balance", "blockhash", "call", "carry_ctx", "carry_whole", "chain", "chain_id", "compute_budget",
   "context", "cu_limit", "cu_price", "data", "deadline_past", "decimals", "decode", "delegate_not_pinned",
   "deposit_accounts", "deposit_amount", "deposit_data", "deposit_floor", "deposit_full", "deposit_reads", "depositor", "depth",
   "evm_not_pinned", "fee_cap", "fee_cap_over_device_cap", "fee_over_cap", "fee_payer", "fee_recipient", "floor",
@@ -20,7 +20,7 @@ export const POOL_RULE_WORDS: ReadonlySet<string> = new Set([
   "recipient", "relay", "release_accounts", "release_data", "release_not_devices", "reserve", "sell", "sell_accounts",
   "signature_slots", "signers", "sim_block_after_clock", "sim_deadline", "sim_pool", "simulation", "slippage",
   "solana_not_pinned", "state_page", "sweep_amount", "sweep_reads", "system", "table", "tag", "teardown", "to", "token",
-  "transfer", "transfer_amount", "transfer_to", "tx_fields", "type", "unchecked", "value", "wallet", "wire",
+  "transfer", "transfer_accounts", "transfer_amount", "transfer_data", "transfer_to", "tx_fields", "type", "unchecked", "value", "wallet", "wire",
 ]);
 
 const QUOTE_CODES = [

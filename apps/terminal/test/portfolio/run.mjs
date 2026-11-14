@@ -97,6 +97,10 @@ const STATES = [
   ["move-refused", "S10.3", ["390", "1440"], false],
   ["move-running", "S10.3", ["390", "1440"], false],
   ["move-done", "S10.3", ["390", "1440"], false],
+  // card move-sends-what-it-shows: Max the page's, under the Base floor (Min), an amount its plan cannot send (Try)
+  ["move-max", "S10.3", ["390", "1440"], false],
+  ["move-min", "S10.3", ["390", "1440"], false],
+  ["move-try", "S10.3", ["390", "1440"], false],
 ];
 // the move sheet's fixtures: what each draws once pool.move.dry answers [data-move-state, the flow's steps, each step's state]
 const MOVE_SHEETS = {
@@ -105,6 +109,9 @@ const MOVE_SHEETS = {
   "move-over": ["idle", "pool:solana intents:near vault:near intents:base pool:base", ["idle", "idle", "idle", "idle", "idle"]],
   "move-refused": ["idle", "pool:base intents:near vault:near intents:robinhood pool:robinhood", ["idle", "idle", "idle", "idle", "idle"]],
   "move-running": ["in_vault", "pool:solana intents:near vault:near intents:base pool:base", ["done", "done", "active", "idle", "idle"]],
+  "move-max": ["idle", "pool:solana intents:near vault:near", ["idle", "idle", "idle"]],
+  "move-min": ["idle", "pool:solana intents:near vault:near intents:base pool:base", ["idle", "idle", "idle", "idle", "idle"]],
+  "move-try": ["idle", "pool:solana intents:near vault:near", ["idle", "idle", "idle"]],
   "move-done": ["done", "pool:solana intents:near vault:near intents:base pool:base", ["done", "done", "done", "done", "done"]],
 };
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
@@ -447,6 +454,24 @@ try {
         check(m?.inView && m.flowFits, `${tag}: move sheet off screen or its flow overflows ${JSON.stringify(m)}`);
         if (f === "move-sheet" || f === "move-sheet-xy") check(m?.go === false, `${tag}: Move off with a priced amount under the balance`);
         if (f === "move-over" || f === "move-refused" || f === "move-running") check(m?.go === true, `${tag}: Move on while ${f}`);
+        // card move-sends-what-it-shows: Max is what the page says the move sends, never the balance it cannot; an amount
+        // the move cannot send names what it can, each a tap that types it, and Move stays off until it is typed
+        const lim = await page.evaluate(() => {
+          const sh = document.querySelector('[data-sheet="move"]');
+          const mx = sh?.querySelector('[data-control="move-max"]');
+          const hint = sh?.querySelector("[data-move-dry]");
+          return { max: mx?.getAttribute("data-max") ?? null, maxOff: mx?.disabled ?? null, hint: hint?.getAttribute("data-move-dry") ?? null, min: hint?.getAttribute("data-move-min") ?? null, text: hint?.textContent ?? null, taps: [...(sh?.querySelectorAll('[data-control="move-try"]') ?? [])].map((b) => b.getAttribute("data-amount")) };
+        });
+        if (f === "move-max") {
+          check(lim.max === "2.4979" && lim.maxOff === false && lim.hint === null, `${tag}: Max ${JSON.stringify(lim)}, want the page's 2.4979 SOL, on`);
+          await page.locator('[data-control="move-max"]').click();
+          await page.clock.runFor(500);
+          check((await page.locator('[data-field="move-amount"]').inputValue()) === "2.4979" && !(await page.locator('[data-control="move-go"]').isDisabled()), `${tag}: Max types 2.4979 and Move is on`);
+        }
+        if (f === "move-min") check(lim.hint === "min" && lim.min === "0.0545" && lim.text === "Min0.0545 SOL" && JSON.stringify(lim.taps) === '["0.0545"]' && m?.go === true, `${tag}: under the Base floor ${JSON.stringify(lim)}, go ${m?.go}`);
+        if (f === "move-try") {
+          check(lim.hint === "try" && lim.text === "Try0.25 SOLor0.35 SOL" && JSON.stringify(lim.taps) === '["0.25","0.35"]' && m?.go === true, `${tag}: an amount its plan cannot send ${JSON.stringify(lim)}, go ${m?.go}`);
+        }
       }
       if (phone && (f.startsWith("pools") || ["move-zero", "move-rows", "move-empty", "move-off"].includes(f))) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}-${w.name}${SCHEME === "dark" ? "" : `-${SCHEME}`}.png`) });

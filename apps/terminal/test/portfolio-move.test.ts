@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
 import { pools } from "../src/screens/portfolio/model.ts";
-import { checkAmount, exact, moveOp, moveRunning, moveShips, nodesOf, poolTotal, reach, readDry, routeSteps, rowCents, stepStates } from "../src/screens/portfolio/move.ts";
+import { checkAmount, exact, moveOp, moveRunning, moveShips, nodesOf, poolTotal, reach, readDry, readLimits, routeSteps, rowCents, stepStates } from "../src/screens/portfolio/move.ts";
 import { DRAFTS, WORDS } from "../src/screens/portfolio/words.ts";
 
 const NOW = Date.parse("2026-11-13T20:00:00Z");
@@ -77,6 +77,20 @@ test("pool.move.dry's answer is read in kit 1.15's shape only", () => {
   assert.equal(readDry({ out: "-1", fee: "0", steps }), null);
   assert.equal(readDry({ out: "1", fee: "0", steps: [{ step: "teleport", chain: "near" }, ...steps] }), null);
   assert.equal(readDry(null), null);
+});
+
+test("card move-sends-what-it-shows: the page's max on a priced dry, and the answer for an amount the move cannot send (kit 1.16)", () => {
+  const steps = X_Y.map(([step, chain]) => ({ step, chain }));
+  assert.deepEqual(readDry({ out: "0.0042", fee: "0.0003", steps, max: "2.4979" }), { out: "0.0042", fee: "0.0003", steps, max: "2.4979" });
+  assert.equal(readDry({ out: "0.0042", fee: "0.0003", steps, max: "-1" }), null, "max is a decimal");
+  assert.equal(readDry({ max: "2.4979", steps }), null, "no out: not a priced answer");
+  assert.deepEqual(readLimits({ max: "2.4979", steps }), { max: "2.4979", steps });
+  assert.deepEqual(readLimits({ max: "2.4979", steps, min: "0.0545" }), { max: "2.4979", steps, min: "0.0545" });
+  assert.deepEqual(readLimits({ max: "2.4979", steps, below: "0.25", above: "0.35" }), { max: "2.4979", steps, below: "0.25", above: "0.35" });
+  assert.equal(readLimits({ max: "2.4979", steps, out: "1" }), null, "an answer with out is priced");
+  assert.equal(readLimits({ max: "2.4979", steps, min: "x" }), null);
+  assert.equal(readLimits({ steps, min: "0.0545" }), null, "max is required");
+  assert.equal(readLimits(null), null);
 });
 
 test("each row's dollars at the page's own fresh price; none made up; the total says when a row had none", () => {

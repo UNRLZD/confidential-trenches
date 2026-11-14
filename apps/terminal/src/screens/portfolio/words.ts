@@ -124,6 +124,10 @@ export const WORDS = {
   retry: ok("Retry", "owner-words-pass (src/screens/deposit/words.ts retry)"),
   notAvailable: ok("Not available", "owner 1 Nov 16:45Z, Keep the drafts (src/screens/deposit/words.ts notAvailable)"),
   quoteRefused: ok("Quote refused", "owner 2 Nov 06:08Z, all approved (src/screens/deposit/words.ts quoteRefused)"),
+  // card move-sends-what-it-shows: an amount the move cannot send names what it can, in words the owner already OK'd
+  min: ok("Min", "src/screens/deposit/words.ts min (R5 app.js:632 lim); the signing page's pool withdraw \"Min 0.00189 SOL\", owner 8 Nov 07:55Z, kept"),
+  try: ok("Try", "owner 8 Nov 07:55Z, kept: the signing page's pool withdraw \"Try 0.5 or 0.6 SOL\" (packages/signpage/src/withdraw/pool-form.ts try)"),
+  or: ok("or", "owner 8 Nov 07:55Z, kept: the signing page's pool withdraw \"Try 0.5 or 0.6 SOL\" (packages/signpage/src/withdraw/pool-form.ts or)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

@@ -70,7 +70,11 @@ const CHAIN_TAGS = Object.keys(CHAINS) as Chain[];
 export type EvmRestoredNote = { ref: NoteRef; scope: bigint; precommitment: bigint; leaf: Leaf; state: "UNSPENT" | "SPENT"; parent?: string; landed?: Landed };
 /** A spent note of ours: its release (l, j), the W it paid (lowercase), what it withdrew, the release's block, a buy's
  * token (lowercase; null for a withdraw), and the release log's block hash and log index. */
-export type EvmRestoredSpend = { l: bigint; j: number; note: string; w: string; withdrawn: bigint; block: bigint; token: string | null; blockHash: string; logIndex: bigint };
+export type EvmRestoredSpend = { l: bigint; j: number; note: string; w: string; withdrawn: bigint; block: bigint; token: string | null; blockHash: string; logIndex: bigint; tx: string | null; fee: bigint | null; out: bigint | null };
+/** A deposit back into the pool under a spent note's (l, j): a sale's ETH coming home (the return note, or a second
+ *  arrival of it), its transaction, block and value, from its Deposited event (card closed-positions-show-every-trade:
+ *  a restored device's sale op, keyed by this transaction as the device that sold keys its own). Data only. */
+export type EvmRestoredReturn = { l: bigint; j: number; note: string; tx: string | null; block: bigint; value: bigint };
 /** A spend's W and every token it was sent from the release's block on (lowercase contracts, sorted); null with the
  * error when its reads failed. */
 export type EvmRestoredWallet = { note: string; w: string; tokens: string[] | null; error?: string };
@@ -139,7 +143,17 @@ function depositLeaf(scope: bigint, events: readonly EvmPoolEvent[], ix: Deposit
  */
 export const SECOND_GAP = 20;
 
-type EvmRestored = { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[] };
+type EvmRestored = { notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[]; returns: EvmRestoredReturn[] };
+/** A pool event's transaction hash and its data words, from its `bytes` (./evm.ts decodeLog: block, block hash, log
+ *  index, transaction, its index, pool, topics 0 and 1, data); null where `bytes` holds none (an event not decodeLog's). */
+const txOf = (e: EvmPoolEvent): string | null => {
+  const t = e.bytes.split(" ")[3];
+  return t !== undefined && /^0x[0-9a-f]{64}$/.test(t) ? t : null;
+};
+const wordOf = (e: EvmPoolEvent, i: number): bigint | null => {
+  const h = e.bytes.split(" ")[8]?.slice(2 + 64 * i, 2 + 64 * (i + 1));
+  return h !== undefined && /^[0-9a-f]{64}$/.test(h) ? BigInt(`0x${h}`) : null;
+};
 export function evmRestore(a: EvmRestoreArgs): EvmRestored {
   const steps = evmRestoreSteps(a);
   for (let r = steps.next(); ; r = steps.next(a.seed64)) if (r.done) return r.value;
@@ -160,6 +174,7 @@ function* evmRestoreSteps(a: Omit<EvmRestoreArgs, "seed64">): Generator<void, Ev
   const notes: EvmRestoredNote[] = [];
   const spends: EvmRestoredSpend[] = [];
   const elsewhere: EvmRestoredElsewhere[] = [];
+  const returns: EvmRestoredReturn[] = [];
   const seen = new Set<string>();
   const put = (ref: NoteRef, precommitment: bigint, leaf: Leaf, parent?: string): void => {
     const key = refKey(ref);
@@ -218,7 +233,8 @@ function* evmRestoreSteps(a: Omit<EvmRestoreArgs, "seed64">): Generator<void, Ev
     // only a W the words give is listed (and read); a release the device did not make is listed as such, never a refusal
     // with the release's place (block hash, log index): the signing page reads a buy's route back from it (card
     // signpage-evm-pool-sell, pool-sell-evm.ts restoreEvmHoldings)
-    if (ours) spends.push({ l, j, note: key, w: e.recipient!, withdrawn: e.value, block: e.block, token: e.token, blockHash: e.blockHash, logIndex: e.logIndex });
+    // Withdrawn and Bought: _feeRecipient, _value, _fee, ..., then Bought's _token and _out (./evm.ts decodeLog)
+    if (ours) spends.push({ l, j, note: key, w: e.recipient!, withdrawn: e.value, block: e.block, token: e.token, blockHash: e.blockHash, logIndex: e.logIndex, tx: txOf(e), fee: wordOf(e, 2), out: e.kind === "buy" ? wordOf(e, 6) : null });
     if (!ours || !changeOurs) elsewhere.push({ note: key, to: e.recipient!, withdrawn: e.value, block: e.block, changeOurs });
     if (changeOurs) put(cref, cP, { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(at) }, key);
     // a release with no change of ours above the round's finalized block: the note is held UNSPENT with that block
@@ -232,11 +248,16 @@ function* evmRestoreSteps(a: Omit<EvmRestoreArgs, "seed64">): Generator<void, Ev
     yield* seconds({ id: "V", l, j });
     yield* seconds({ id: "A", l, j });
     for (const c of CHAIN_TAGS) {
+      const from = notes.length;
       yield* asDeposit({ kind: "return", c, l, j });
       yield* seconds({ id: "R", c, l, j });
+      for (const n of notes.slice(from)) {
+        const d = events[Number(n.leaf.leafIndex)]!;
+        returns.push({ l, j, note: key, tx: txOf(d), block: d.block, value: n.leaf.value });
+      }
     }
   }
-  return { notes, spends, elsewhere };
+  return { notes, spends, elsewhere, returns };
 }
 
 /** evmNextNote's wait for finality: a take in a block not final yet stands before the note to sign. A "not now",
@@ -409,7 +430,7 @@ export type EvmRestoreNotesArgs = {
  * Robinhood, on the two Transfer RPCs on a testnet), each W on its own budget. A W that cannot be read is listed
  * unread; the notes never fail with it.
  */
-export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[]; wallets: EvmRestoredWallet[]; block: bigint }> {
+export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: EvmRestoredNote[]; spends: EvmRestoredSpend[]; elsewhere: EvmRestoredElsewhere[]; returns: EvmRestoredReturn[]; wallets: EvmRestoredWallet[]; block: bigint }> {
   const rpcs = evmPair(a.rpcs);
   const chainId = EVM_CHAIN_IDS[a.pin.network];
   if (chainId === undefined) throw new Error(`network: unknown ${String(a.pin.network)}`);
@@ -449,7 +470,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
   const final = r.events;
   // the walk off the seed, yielding as it goes (walkLaneYielding: never one stretch on the page's thread, ended by the
   // signal), from the deposit masters of one short use of the seed; then the restore on those lanes
-  const { notes, spends, elsewhere } = await (a.turn ?? ((walk) => walk()))(async () => {
+  const { notes, spends, elsewhere, returns } = await (a.turn ?? ((walk) => walk()))(async () => {
     const byPre = indexEvents(final).byPre;
     const m = await withSeed(a.seed64, (seed64) => masters(seed64, "deposit"));
     const lanes: LaneWalk[] = [];
@@ -473,7 +494,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     }
     return step.value;
   });
-  if (a.wallets === false) return { notes, spends, elsewhere, wallets: [], block: r.anchor.number };
+  if (a.wallets === false) return { notes, spends, elsewhere, returns, wallets: [], block: r.anchor.number };
   const order = spends.map((_, k) => k);
   for (let i = order.length - 1; i > 0; i--) {
     const x = pick(i + 1);
@@ -510,5 +531,5 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
       wallets[k]!.error = cutError(e);
     }
   }
-  return { notes, spends, elsewhere, wallets, block: r.anchor.number };
+  return { notes, spends, elsewhere, returns, wallets, block: r.anchor.number };
 }

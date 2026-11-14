@@ -69,6 +69,11 @@ test("the marks on the build's minified shapes, any quote; a near miss is no mar
     "...i===null||a===null?{}:{units:mF(i,a)},pool_amount:mF(o,18),...l===null?{}:{amount_usd:l}",
     "await e.traded?.(i3(`buy`,e.chain,n.release.tx,t.holding.mint",
     "await e.traded?.(i3(`sell`,e.chain,n.deposit.tx,t.open.token",
+    "done:async()=>new Set([...await Yie(await e.store(),zZ),...Ct])",
+    "flatMap(([e,t])=>c5(t).rebuilt!==!0&&Object.hasOwn(n,e)?[e]:[])",
+    "logIndex:h.logIndex,tx:DL(h),fee:OL(h,2),out:h.kind===`buy`?OL(h,6):null}",
+    "await i(o3(`sell`,e.chain,r.tx,t.token,null,null,r.value,null,await n(r.block)))",
+    "await D7(yie({chain:n.chain,read:r,store:await(e.held?e.held():e.store()),spends:n.spends,returns:n.returns,signal:t}).catch(()=>0),t)",
   ].join(";");
   assert.deepEqual(marksIn("sign", sign), NAMES.sign);
   const dq = [
@@ -78,9 +83,14 @@ test("the marks on the build's minified shapes, any quote; a near miss is no mar
     "...i===null||a===null?{}:{units:mF(i,a)},pool_amount:mF(o,18),...l===null?{}:{amount_usd:l}",
     'await e.traded?.(i3("buy",e.chain,n.release.tx,t.holding.mint',
     'await e.traded?.(i3("sell",e.chain,n.deposit.tx,t.open.token',
+    "done:async()=>new Set([...await Yie(await e.store(),zZ),...Ct])",
+    "flatMap(([e,t])=>c5(t).rebuilt!==!0&&Object.hasOwn(n,e)?[e]:[])",
+    'logIndex:h.logIndex,tx:DL(h),fee:OL(h,2),out:h.kind==="buy"?OL(h,6):null}',
+    'await i(o3("sell",e.chain,r.tx,t.token,null,null,r.value,null,await n(r.block)))',
+    "await D7(yie({chain:n.chain,read:r,store:await(e.held?e.held():e.store()),spends:n.spends,returns:n.returns,signal:t}).catch(()=>0),t)",
   ].join(";");
   assert.deepEqual(marksIn("sign", dq), NAMES.sign);
-  // the old read (a plain release none at once), a mark of any value, an op keyed by chain alone, the ETH at 9 decimals, a buy's op from the pending record, a sale's from its hint
+  // the old read (a plain release none at once), a mark of any value, an op keyed by chain alone, the ETH at 9 decimals, a buy's op from the pending record, a sale's from its hint;
   const near = [
     "if(Zt(r,t,n))return l(Qt(r,t,n)?`none`:null)",
     "Gie=(e,t)=>Object.hasOwn(s5(e),t)",
@@ -88,6 +98,13 @@ test("the marks on the build's minified shapes, any quote; a near miss is no mar
     "{units:mF(i,a)},pool_amount:mF(o,9),...l===null?{}:{amount_usd:l}",
     "await e.traded?.(i3(`buy`,e.chain,n.pending.tx,",
     "await e.traded?.(i3(`sell`,e.chain,n.hint.tx,",
+    // the old skip list (no running buys; every own buy record, read or not), the fee's word read as _value, a sale's op
+    // with the buy's amount as its ETH, the restore run with the spends alone
+    "done:async()=>Yie(await e.store(),Ct)",
+    "flatMap(([e,t])=>c5(t).rebuilt===!0?[]:[e])",
+    "tx:DL(h),fee:OL(h,1),out:h.kind===`buy`?OL(h,6):null",
+    "await i(o3(`sell`,e.chain,r.tx,t.token,null,null,t.withdrawn,null,",
+    "yie({chain:n.chain,read:r,store:await(e.held?e.held():e.store()),spends:n.spends,signal:t})",
   ].join(";");
   assert.deepEqual(marksIn("sign", near), []);
 });
