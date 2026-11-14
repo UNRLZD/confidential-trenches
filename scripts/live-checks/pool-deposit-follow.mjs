@@ -90,7 +90,7 @@ const REFUND_FN = (y) =>
 // pool-deposit-follow.ts solanaPoolFollowDeps: both RPCs; the status with the refund id; the balance at finalized; the floor.
 const READS =
   new RegExp(
-    `function ${N}\\((${N})\\)\\{let (${N})=(${N})=>Promise\\.all\\(\\[\\3\\(\\1\\.rpcs\\[0\\]\\),\\3\\(\\1\\.rpcs\\[1\\]\\)\\]\\);return\\{status:\\((${N}),(${N})\\)=>${N}\\(\\4\\.address,\\4\\.u,\\1\\.fetch\\?\\?fetch,\\5,Date\\.now\\(\\),\\4\\.refund_id\\),` +
+    `function ${N}\\((${N})\\)\\{let (${N})=(${N})=>Promise\\.all\\(\\[\\3\\(\\1\\.rpcs\\[0\\]\\),\\3\\(\\1\\.rpcs\\[1\\]\\)\\]\\);return\\{status:\\((${N}),(${N})\\)=>${N}\\(\\4\\.address,\\4\\.u,\\1\\.fetch\\?\\?fetch,\\5,Date\\.now\\(\\),(?:\\4\\.refund_to\\?\\?)?\\4\\.refund_id\\),` +
       `balances:(${N})=>\\2\\(async (${N})=>${N}\\(await \\7\\(${Q}getBalance${Q},\\[\\6\\.u,\\{commitment:${Q}finalized${Q}\\}\\]\\)\\)\\),` +
       `costs:async (${N})=>\\{let\\{fee:(${N}),rent:(${N})\\}=await ${N}\\(\\1\\.rpcs,\\1\\.program,\\8\\.u\\),(${N})=${N}\\(\\9,\\10\\)`,
   );

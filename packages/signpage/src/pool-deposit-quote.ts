@@ -7,6 +7,8 @@
 //   the coin to U_X's own address on X), and as `refundTo` with INTENTS the scope's own ed25519 one-time id U_{s,i}
 //   (checkPoolDepositWallet: on Solana U_X's own key, on Base and Robinhood the id beside U^evm_{s,i}), the one key the
 //   refund move signs with on every chain; ORIGIN_CHAIN, EXACT_INPUT, and no key the vault's request may not carry;
+//   a Move from another pool (`refund`, card refunds-land-on-the-devices-own-wallet) refunds ORIGIN_CHAIN instead, to
+//   exactly U_{s,i}'s own address on the origin coin's chain (rules/deposit.ts originRefundRule);
 // - then the answer through the kit's one 1Click check (signature under the pinned keys, every signed field equal to
 //   the request, a live request taking only a live answer, the signed deadline and timestamp fresh, the device's own
 //   floors at its own two price reads per asset), with the output into a pool, never the vault (no vault floor);
@@ -21,7 +23,8 @@
 import { checkOneClickQuote, type OneClickChecked, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
 import { backupFirst } from "../../wallet/src/store/index.ts";
 import { POOL_DEPOSIT_DESTINATION, POOL_DEPOSIT_MIN_OUT, checkPoolDepositWallet, type PoolDepositChain } from "../../wallet/src/deposit/quote.ts";
-import { DepositRuleRefused, type DepositQuoteContext } from "./rules/deposit.ts";
+import { DepositRuleRefused, originRefundRule, type DepositQuoteContext } from "./rules/deposit.ts";
+import type { OriginRefund } from "../../wallet/src/deposit/quote.ts";
 import { solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { solanaPoolDepositCost } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
@@ -72,6 +75,9 @@ export interface PoolDepositQuoteContext {
   /** A Move's quote (card move-one-confidential-swap): the request must ask confidentiality "advanced", and a quote that
    *  does not is refused; absent, a request that asks it is refused too, so the mode is always the caller's. */
   confidential?: true;
+  /** A Move from another pool (card refunds-land-on-the-devices-own-wallet): the device's own derived address on the
+   *  origin coin's chain; the request must refund ORIGIN_CHAIN to exactly it. Absent, only INTENTS under U_{s,i}. */
+  refund?: OriginRefund;
 }
 
 const refuse = (rule: string): never => {
@@ -104,8 +110,7 @@ export function checkPoolDepositQuote(request: OneClickRequest, answer: unknown,
   if (req.originAsset === req.destinationAsset) refuse("originAsset");
   if (req.recipient !== ctx.wallet) refuse("recipient");
   if (req.recipientType !== "DESTINATION_CHAIN") refuse("recipientType");
-  if (req.refundTo !== ctx.refundId) refuse("refundTo");
-  if (req.refundType !== "INTENTS") refuse("refundType");
+  originRefundRule(req, ctx.refundId, ctx.refund);
   if (ctx.confidential === true ? req.confidentiality !== "advanced" : "confidentiality" in req) refuse("confidentiality");
   const checked = checkOneClickQuote(req, answer, { ...ctx.check, intoVault: false });
   if (checked.minAmountOut < ctx.floor) refuse("floor");

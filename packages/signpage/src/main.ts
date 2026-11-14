@@ -74,7 +74,8 @@ import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { storedTails, wTailWallets } from "./w-tails.ts";
-import { CARRY_FOLLOW_MS, CARRY_PASS_MS, carryLeftovers, carryOpenKey, clearLeftover, leftoverSources, worthUsdc, type CarryPass, type LeftoverCarryDeps } from "./leftover-carry.ts";
+import { CARRY_FOLLOW_MS, CARRY_PASS_MS, carryLeftovers, carryOpenKey, clearLeftover, keepRefund, leftoverSources, ownRefundAddress, storedRefunds, worthUsdc, type CarryPass, type LeftoverCarryDeps } from "./leftover-carry.ts";
+import { poolCoinChain } from "../../wallet/src/deposit/quote.ts";
 import { solCashCarrySender } from "./carry-cash-sol.ts";
 import { evmCashCarrySender } from "./carry-cash-evm.ts";
 import type { CarrySender } from "./carry-cash.ts";
@@ -371,11 +372,18 @@ else {
     read: fs.depositRead,
     named: () => namer.named(),
     priced: (origin) => pricedPoolCoin(origin, (c) => prices.get(c)),
-    checked: (id, r, u) => follows!.quoted(id, r, u),
+    checked: async (id, r, u) => {
+      // its refund address recorded first, so a refund there is carried (card refunds-land-on-the-devices-own-wallet)
+      if (u.refund_to !== undefined) await keepRefund(await open(), { chain: poolCoinChain(r.origin_asset)!, address: u.refund_to, s: u.scope.toString(), i: u.index, deadline_ms: Date.parse(r.deadline) });
+      await follows!.quoted(id, r, u);
+    },
     stop: quotesStopped,
     // a Move into Cash (card move-one-confidential-swap): one confidential swap, held to 1Click's keyless tell
     confidential: true,
     hidden: (address, signal) => oneClickHidden(address, fetch, signal),
+    // the pool coin a device wallet pays (a pool's run, a leftover's wallet): a refund back on its own chain, at U's own
+    // address there (card refunds-land-on-the-devices-own-wallet), never resting in intents.near
+    refund: ownRefund,
   });
   let toCashOf: { signal: AbortSignal; m: ReturnType<typeof poolToCash> } | null = null;
   const toCashNow = (): ReturnType<typeof poolToCash> => {
@@ -453,7 +461,7 @@ else {
       return evms.get(chain) ?? null;
     };
     const deps: LeftoverCarryDeps = {
-      sources: async () => leftoverSources(await pageOps().catch(() => []), await pageTails().catch(() => [])),
+      sources: async () => leftoverSources(await pageOps().catch(() => []), await pageTails().catch(() => []), await storedRefunds(await open()).catch(() => [])),
       sender: (chain) => (chain === "solana" ? sol : evmSender(chain)),
       worth: (chain, amount) => worthUsdc(prices.get(chain), amount, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]),
       quote: async (chain, amount, id) => {
@@ -643,7 +651,14 @@ else {
   // a Move's quote into a pool (card move-one-confidential-swap): pool.address's host, reads, floor and follow, every
   // quote asked and checked on Confidential Intents rails and held to 1Click's keyless tell on the page's stop, and another
   // pool's coin priced at the device's own price of each
-  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped });
+  // another pool's coin, which that pool's run pays, refunds back on its own chain at U_{s,i}'s own address there (card
+  // refunds-land-on-the-devices-own-wallet), recorded before the address goes out; Cash's NEAR USDC keeps INTENTS
+  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor,
+    checked: async (id, chain, quote, u) => {
+      if (u.refund_to !== undefined) await keepRefund(await open(), { chain: poolCoinChain(quote.origin_asset)!, address: u.refund_to, s: u.scope.toString(), i: u.index, deadline_ms: Date.parse(quote.deadline) });
+      await poolFollow!.quoted(id, chain, quote, u);
+    },
+    confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped, refund: ownRefund });
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
   // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
   const depositFromUx = (g: PoolFollowRecord, amount: bigint, signal: AbortSignal) =>
@@ -1347,6 +1362,16 @@ async function pageOps(): Promise<unknown[]> {
   return Promise.all((await st.keys("ops")).map((k) => st.get("ops", k).catch(() => undefined)));
 }
 // the W tail records, read only (state.deposit_wallets: src/w-tails.ts)
+// U_{s,i}'s own address on a pool chain, derived from the seed (src/leftover-carry.ts ownRefundAddress): where a quote a
+// device wallet pays in that chain's coin refunds (card refunds-land-on-the-devices-own-wallet)
+async function ownRefund(chain: PoolChain, scope: bigint, index: number, id: string): Promise<string> {
+  const seed = await openSeed64();
+  try {
+    return ownRefundAddress(seed, chain, scope, index, id);
+  } finally {
+    seed.fill(0);
+  }
+}
 async function pageTails(): Promise<unknown[]> {
   return storedTails(await open());
 }

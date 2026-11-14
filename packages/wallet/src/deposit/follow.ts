@@ -384,6 +384,9 @@ export interface FollowRecord {
   deadline_ms: number;
   origin: string;
   min_out: string;
+  /** A pool coin a device wallet paid (card refunds-land-on-the-devices-own-wallet): the address on the origin coin's
+   *  chain the quote refunds to (ORIGIN_CHAIN), U's own key there; absent, the refund is INTENTS under U. */
+  refund_to?: string;
   /** 1Click's status of this address has shown a send (any status past PENDING_DEPOSIT). */
   sent?: boolean;
   /** 1Click's status of this address as last read (one of its seven). */
@@ -696,7 +699,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     const all = (await opsOfU()).filter(([, op]) => !ENDS.has(op.stage));
     for (const [id, op] of all) await write(id, "held", legFacts(op, "held"), { why });
     for (const [id, op] of all) {
-      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());
+      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);
       await ops.update("ops", id, (v) => {
         const o = v as DepositOp | undefined;
         if (!isObj(o) || o.stage !== "held" || !isObj(o.follow)) return undefined;
@@ -1122,7 +1125,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
       if (now() < (statusAt.get(id) ?? 0)) continue;
       // REFUNDED is 1Click's last word on an address: read again at the slow pace only, through the helper's shared key
       if (op.follow.status === "REFUNDED") statusAt.set(id, now() + SLOW_MAX_MS);
-      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());
+      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);
       if (st === null) continue;
       if ("retry_ms" in st) {
         const b = st.retry_ms ?? Math.min(Math.max((backoff.get(id) ?? 0) * 2, STATUS_RETRY_MIN_MS), STATUS_RETRY_MAX_MS);

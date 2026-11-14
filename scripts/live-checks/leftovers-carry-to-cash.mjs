@@ -35,7 +35,7 @@ export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const N = "[\\w$]+";
 
-const FLOOR = new RegExp(`let (${N})=await (${N})\\.sendable\\((${N}),${N}\\.signal\\)\\.catch\\(\\(\\)=>null\\);if\\(\\1===null\\)return\\{src:\\3,end:\`unread\`\\};let (${N})=\\1>0n\\?${N}\\.worth\\(\\3\\.chain,\\1\\):0n;if\\(\\4===null\\|\\|\\4<1000000n\\)return\\{src:\\3,end:\`under\`\\}`);
+const FLOOR = new RegExp(`let (${N})=await (${N})\\.sendable\\((${N}),${N}\\.signal\\)\\.catch\\(\\(\\)=>null\\);if\\(\\1===null\\)return\\{src:\\3,end:\`unread\`\\};(?:if\\(\\3\\.kind===\`refund\`&&\\1===0n&&${N}\\.now\\(\\)>\\3\\.deadline_ms\\+864e5\\)return await ${N}\\.cleared\\(\\3\\),\\{src:\\3,end:\`under\`\\};)?let (${N})=\\1>0n\\?${N}\\.worth\\(\\3\\.chain,\\1\\):0n;if\\(\\4===null\\|\\|\\4<1000000n\\)return\\{src:\\3,end:\`under\`\\}`);
 const RECORD = new RegExp(`if\\(\`error\`in (${N})\\|\\|!(${N})\\.onChain\\((${N})\\.chain,\\1\\.address\\)\\)return\\{src:\\3,end:\`refused\`\\};let (${N})=\\{to:\\1\\.address,amount:(${N})\\.toString\\(\\),quote:${N},quotedMs:String\\(\\2\\.now\\(\\)\\),sends:\\[\\]\\};try\\{await \\2\\.keep\\(\\3,\\4\\)\\}catch\\{return\\{src:\\3,end:\`fault\`\\}\\}return ${N}\\(await ${N}\\.send\\(\\3,\\4,`);
 const SOURCES = new RegExp(`\\((${N})\\.stage===\`in_pool\`&&\\1\\.final===!0\\|\\|\\1\\.stage===\`short\`\\)&&\\1\\.follow\\.left!==void 0&&/\\^\\[0-9\\]\\{1,78\\}\\$/\\.test\\(\\1\\.follow\\.left\\)&&BigInt\\(\\1\\.follow\\.left\\)!==0n&&`);
 const SHORT = new RegExp(`\\(await (${N})\\(\`short\`\\),await (${N})\\.holds\\?\\.\\((${N})\\)(?:,${N}=!0)?\\)`, "g");
