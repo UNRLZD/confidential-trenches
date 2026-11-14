@@ -34,6 +34,7 @@ import { createNearLists } from "./data/near/lists.ts";
 import { createNearToken, type NearMarket } from "./data/near/token.ts";
 import { createNearTrades } from "./data/near/trades.ts";
 import { createEngineNear, engineFirst } from "./data/near/engine.ts";
+import { createGoPlus } from "./data/goplus.ts";
 import { nearAccount } from "./data/near/views.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
@@ -1282,7 +1283,9 @@ if (import.meta.main) {
     const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
     // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
-    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept })]));
+    // card every-cell-shows-a-value: and each token's contract checks from GoPlus, one pace for the helper (data/goplus.ts)
+    const goplus = createGoPlus();
+    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept, goplus })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
     const held = heldFrom(token, evmLists);
     // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence; card

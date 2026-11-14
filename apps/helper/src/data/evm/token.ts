@@ -35,6 +35,7 @@ import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Fiel
 import { createWanted, GT_PAGE_WAIT_MS, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./lists.ts";
 import { LINKS, linksOf, type Links } from "../links.ts";
+import type { ContractRisk, GoPlus } from "../goplus.ts";
 
 /** A token's GeckoTerminal info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
  *  `last_updated` was 1-3 min behind its read, 2026-11-09 01:50Z) and the keyless budget is 5 calls in 75 s for the
@@ -96,7 +97,7 @@ export function toInfo(token: string, answer: unknown, readAtMs: number): Info |
 
 /** The TokenPage from the token's Discover row, its GeckoTerminal info (null when none is held) and the pool and decimals
  *  the swap reads hold. */
-export function toPage(base: Row, info: Info | null, kept: { pool: string; decimals: number } | undefined): EvmTokenPage {
+export function toPage(base: Row, info: Info | null, kept: { pool: string; decimals: number } | undefined, risk: ContractRisk | null = null): EvmTokenPage {
   const row: Row = { ...base };
   if (info !== null) {
     row.holders = info.holders;
@@ -105,24 +106,28 @@ export function toPage(base: Row, info: Info | null, kept: { pool: string; decim
   const rowAt = row.as_of_ms as number;
   const none = (): Field<never> => ({ v: null, src: "none", as_of_ms: rowAt });
   const gt = <T>(v: T | null, at: number): Field<T> => ({ v, src: "geckoterminal", as_of_ms: at });
+  // card every-cell-shows-a-value: the contract's own checks from GoPlus (../goplus.ts), and its holders count and top
+  // 10 where GeckoTerminal's info has none
+  const gp = <T>(v: T | null | undefined): Field<T> => (risk === null || v === null || v === undefined ? none() : { v, src: "goplus", as_of_ms: risk.as_of_ms });
+  const gtOr = <T>(v: T | null | undefined, alt: T | null | undefined): Field<T> => (info !== null && v !== null && v !== undefined ? gt(v, info.asOfMs) : gp(alt));
   const created = row.created_s as number | null;
   return {
     row,
     decimals: kept?.decimals ?? info?.decimals ?? null,
     pool: kept?.pool ?? null,
     risk: {
-      mint_auth: none(),
-      freeze_auth: none(),
+      mint_auth: gp(risk?.mint_auth),
+      freeze_auth: gp(risk?.freeze_auth),
       lp: none(),
-      top10_bps: info === null ? none() : gt(info.top10Bps, info.asOfMs),
-      dev_bps: none(),
+      top10_bps: gtOr(info?.top10Bps, risk?.top10_bps),
+      dev_bps: gp(risk?.dev_bps),
       snipers_bps: none(),
-      holders: info === null ? none() : gt(info.holders, info.asOfMs),
+      holders: gtOr(info?.holders, risk?.holders),
       liq_usd: gt(row.liq_usd, rowAt),
       // the row's time is its pool's, made with the token by every listed launchpad (lists.ts)
       age_s: gt(created === null ? null : Math.max(0, Math.floor(rowAt / 1000) - created), rowAt),
-      tax: none(),
-      honeypot: none(),
+      tax: gp(risk?.tax),
+      honeypot: gp(risk?.honeypot),
       insiders_bps: none(),
       bundlers_bps: none(),
       fresh_bps: none(),
@@ -164,7 +169,7 @@ function bounded<V>(max: number) {
  *  swap reads' pool and decimals for a token, when held (swaps.ts kept). */
 export function createEvmToken(
   chain: EvmChain,
-  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean> }; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; later?: Later },
+  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean> }; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; later?: Later; goplus?: Pick<GoPlus, "risk"> },
 ) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
@@ -302,8 +307,9 @@ export function createEvmToken(
       if (row === undefined) return UPSTREAM;
       if (row === null) return NOT_FOUND;
       const { held, read } = infoOf(t, client);
+      const risk = deps.goplus?.risk(chain, t) ?? Promise.resolve(null);
       const info = held !== undefined ? usable(held) : read === undefined ? null : usable(await within(read, INFO_WAIT_MS));
-      const page = toPage(row, info, deps.kept?.(t));
+      const page = toPage(row, info, deps.kept?.(t), await risk);
       return { status: 200, body: JSON.stringify(page), src: "geckoterminal", asOfMs: row.as_of_ms as number };
     },
     /** 06b Holders: no rows, GeckoTerminal's count and top 10 share; no count (src "none", the read queued) when the

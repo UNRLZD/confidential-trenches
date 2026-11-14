@@ -415,7 +415,8 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const held = heldFrom\(token, evmLists\);/);
   // card market-data-evm-token: each served EVM chain's token page and holders, its rows the chain's lists, its info on
   // the one GeckoTerminal budget, its pool and decimals the swap reads' (and handed to start, above)
-  assert.match(main, /const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, gecko, kept: swaps\[c\]\?\.kept \}\)\]\)\);/);
+  // card every-cell-shows-a-value: with one GoPlus reader for every chain's contract checks
+  assert.match(main, /const goplus = createGoPlus\(\);\n    const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, gecko, kept: swaps\[c\]\?\.kept, goplus \}\)\]\)\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   // card robinhood-mainnet-rpcs: the pool senders' reads on that same hold and pace per provider
   assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env, undefined, holds\);/);
