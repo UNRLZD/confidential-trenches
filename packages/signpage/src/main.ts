@@ -761,7 +761,7 @@ else {
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
       "withdraw.open": (p, ctx) => (takesParams("withdraw.open", p) ? openKind(ctx.id, "withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
-      // money in from an outside wallet (card move-one-confidential-swap, CO 14 Nov): one confidential swap as a Move, held to
+      // money in from an outside wallet (card move-one-confidential-swap, 14 Nov): one confidential swap as a Move, held to
       // 1Click's keyless tell, so the paying wallet is not tied to U on chain
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
@@ -769,7 +769,7 @@ else {
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
       // took it (src/pool-deposit-follow.ts), on mainnet only; money in from an outside wallet (card
-      // move-one-confidential-swap, CO 14 Nov): every 1Click quote is one confidential swap, held to 1Click's keyless tell
+      // move-one-confidential-swap, 14 Nov): every 1Click quote is one confidential swap, held to 1Click's keyless tell
       // on the page's stop, so the paying wallet is not tied to U_X on chain; a plain send of the pool's own coin asks 1Click
       // nothing
       "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
