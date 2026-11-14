@@ -1,30 +1,31 @@
 #!/usr/bin/env node
-// Live check of card nearkat-opens-first on APP_HOST (https://ct-app.unrealized.trade). What it holds, and only that:
+// Live check of card mihao-opens-first on APP_HOST (https://ct-app.unrealized.trade). What it holds, and only that:
 // APP_HOST serves the script its index.html pins (its sha384), and that script opens / on All (a fresh open, no token in
-// the address) on NEARKAT, Solana mint 6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr (owner 14 Nov 17:20Z), read as
-// minified:
-//   - the token / opens (apps/terminal/src/routes/routes.ts OPEN_TOKEN): `{chain:`solana`,id:`6UtY…`}`;
+// the address) on mihao, Solana mint 4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump, a pump.fun coin on its PumpSwap pool,
+// a venue the private buy fills (owner 14 Nov 21:33Z, "pump fun coin"; card nearkat-opens-first's NEARKAT before it
+// trades on Meteora DLMM alone, so its Buy drew Unavailable), read as minified:
+//   - the token / opens (apps/terminal/src/routes/routes.ts OPEN_TOKEN): `{chain:`solana`,id:`4Cxj…`}`;
 //   - / on All reads that token, a chain pick its own top Trending token (source.ts loadHome): `e===`all`?x(T.chain,T.id`.
 // That a token named in the address still wins, and the page drawn, are held by the tests that build them
 // (apps/terminal/test/no-test-token.test.ts, test/chains-evm/run.mjs at 1440 in a browser). The recorded answers are
 // facts() over APP_HOST's build (apps/terminal/dist).
 // After: app
 // Bundle: read app
-//   node scripts/live-checks/nearkat-opens-first.mjs [--record <file>] [--answer <file>]
+//   node scripts/live-checks/mihao-opens-first.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const KEY = "nearkat-opens-first";
+const KEY = "mihao-opens-first";
 export const APP = "https://ct-app.unrealized.trade";
-export const NEARKAT = "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr";
+export const MIHAO = "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const N = "[\\w$]+";
 const Q = "[`\"']";
 /** The token / opens, as one object, its name kept (the group). */
-const OPEN = new RegExp(`(${N})=\\{chain:${Q}solana${Q},id:${Q}${NEARKAT}${Q}\\}`);
+const OPEN = new RegExp(`(${N})=\\{chain:${Q}solana${Q},id:${Q}${MIHAO}${Q}\\}`);
 /** / on All reads that token by its chain and id. */
 const HOME = (name) => new RegExp(`${N}===${Q}all${Q}\\?${N}\\(${name.replace(/\$/g, "\\$")}\\.chain,${name.replace(/\$/g, "\\$")}\\.id[,)]`);
 
@@ -48,8 +49,8 @@ export function judge(a) {
   const pin = pinned(a?.app?.index);
   if (!pin) bad("APP_HOST's index.html pins no script");
   else if (pin.integrity !== a.app.sha384) bad("APP_HOST's served script is not the one index.html pins");
-  if (a?.app?.open !== true) bad(`the app names no token for / to open: NEARKAT (${NEARKAT}) is not in it`);
-  else if (a?.app?.home !== true) bad("/ on All does not open NEARKAT: it opens the top Trending token");
+  if (a?.app?.open !== true) bad(`the app names no token for / to open: mihao (${MIHAO}) is not in it`);
+  else if (a?.app?.home !== true) bad("/ on All does not open mihao: it opens the top Trending token");
   return { ok: lines.length === 0, lines };
 }
 

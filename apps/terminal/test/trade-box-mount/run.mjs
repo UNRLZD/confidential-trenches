@@ -150,7 +150,7 @@ async function open(browser, route, w, scheme) {
     dialogs.push(d.message());
     void d.dismiss();
   });
-  // off the phone the recorded token's own address (/ on All opens NEARKAT, card nearkat-opens-first); the phone taps
+  // off the phone the recorded token's own address (/ on All opens mihao, card mihao-opens-first); the phone taps
   // its Trenches list's first row, that same token
   await page.goto(`${APP_HOST}/${w.isMobile ? "" : `token/solana/${ROW.token}`}`, { waitUntil: "load" });
   let f = null;

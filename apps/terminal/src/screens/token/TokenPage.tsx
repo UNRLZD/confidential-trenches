@@ -789,7 +789,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
 }
 
 /** The token route. /token/<chain>/<id> draws that token (source.ts); a chain the terminal does not draw is the page's
- *  not-found, with no read. / draws NEARKAT on All (routes.ts OPEN_TOKEN), a chain pick's top Trending token on a pick. */
+ *  not-found, with no read. / draws mihao on All (routes.ts OPEN_TOKEN), a chain pick's top Trending token on a pick. */
 /** The phone's width (shell.css): under it, / is the Trenches list (owner 12 Nov), not the top token's page. */
 const PHONE_MEDIA = "(max-width: 767.98px)";
 
@@ -802,7 +802,7 @@ export function TokenRoute() {
   return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;
 }
 
-/** / on the shell's chain filter: All draws NEARKAT, a chain pick that chain's top Trending token (source.ts loadHome). */
+/** / on the shell's chain filter: All draws mihao (OPEN_TOKEN), a chain pick that chain's top Trending token (source.ts loadHome). */
 function TopToken() {
   const pick = usePick();
   return <TopTokenOn key={pick} pick={pick} />;

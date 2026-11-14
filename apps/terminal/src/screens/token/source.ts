@@ -1,7 +1,7 @@
 // Where the token page's data comes from. Two routes draw the page. /token/<chain>/<id> (card app-token-route) reads
 // GET /v1/market/token for that chain and id (the helper's apps/helper/src/data/solana/token.ts, 06b `TokenPage`) and
 // draws its `row`: an id the helper does not know (it answers 404) is the empty state, the page's not-found. / on All
-// reads NEARKAT the same way (card nearkat-opens-first, loadHome). / on a chain pick (card app-no-test-token) draws the
+// reads OPEN_TOKEN the same way (card mihao-opens-first, loadHome). / on a chain pick (card app-no-test-token) draws the
 // top of Discover's Trending column on that pick (card app-chains-evm-rail):
 // one read of every chain's lists (Discover's own read, ../discover/data.ts sharedAllLists, shared with the rail's read
 // in flight), narrowed to the pick (pickSnapshot), the first row of the Trending column as Discover orders it
@@ -74,8 +74,8 @@ export async function loadTopToken(fetchFn: typeof fetch = fetch, pick: MarketCh
   }
 }
 
-/** The page's data for /: on All (a fresh open) OPEN_TOKEN, NEARKAT, read as /token/solana/<its mint> is (card
- *  nearkat-opens-first); on a chain pick that chain's top Trending token (loadTopToken). */
+/** The page's data for /: on All (a fresh open) OPEN_TOKEN, mihao, read as /token/solana/<its mint> is (card
+ *  mihao-opens-first); on a chain pick that chain's top Trending token (loadTopToken). */
 export async function loadHome(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch) => Promise<MarketSnapshot> = sharedAllLists): Promise<TokenData> {
   return pick === "all" ? loadToken(OPEN_TOKEN.chain, OPEN_TOKEN.id, fetchFn) : loadTopToken(fetchFn, pick, read);
 }

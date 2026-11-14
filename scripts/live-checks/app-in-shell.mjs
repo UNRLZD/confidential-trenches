@@ -486,7 +486,7 @@ export function shellHeaders(signHeadersFile) {
 /** The helper's reads the terminal makes on its own (Discover's lists, the token route's lists and token read),
  *  answered from recorded live answers so the page under test never reaches the network and / draws a real token
  *  (card app-no-test-token): GET /v1/market/lists?chain=solana as read on 1 Nov, and GET /v1/market/token for the top of
- *  its Trending column as read on 3 Nov and for NEARKAT, the token / opens on All, as read on 14 Nov
+ *  its Trending column as read on 3 Nov and for mihao, the token / opens on All, as read on 14 Nov
  *  (apps/terminal/test/discover-data, test/token-source); GET /v1/market/trades
  *  answers an empty tape (card app-chart-controls). A token read for any
  *  other mint answers 404, as the helper answers a mint it does not know, never an aborted load. */
@@ -497,8 +497,8 @@ const LISTS_READ = RECORDED("discover-data/helper-lists-2026-11-01.json");
 const LISTS = { chain: LISTS_READ.chain, as_of_ms: LISTS_READ.as_of_ms, lists: Object.fromEntries(Object.entries(LISTS_READ.lists).map(([k, rows]) => [k, unzipRows(LISTS_READ.fields, rows)])) };
 const TOKEN_READ = RECORDED("token-source/helper-token-2026-11-03.json");
 const TOKEN_ANSWER = { ...TOKEN_READ.rest, row: unzipRows(TOKEN_READ.fields, [TOKEN_READ.row])[0] };
-/** NEARKAT's recorded answer: the token / opens on All (card nearkat-opens-first, routes.ts OPEN_TOKEN). */
-const OPEN_READ = RECORDED("token-source/helper-token-nearkat-2026-11-14.json");
+/** mihao's recorded answer: the token / opens on All (card mihao-opens-first, routes.ts OPEN_TOKEN). */
+const OPEN_READ = RECORDED("token-source/helper-token-mihao-2026-11-14.json");
 const OPEN_ANSWER = { ...OPEN_READ.rest, row: unzipRows(OPEN_READ.fields, [OPEN_READ.row])[0] };
 /** Verify's NEAR reads on mainnet (the release's pair, apps/terminal/src/screens/verify/release.ts), answered from a
  *  recorded real read of the mainnet vault (apps/terminal/test/verify-mount/answers-mainnet.json, made by its record.ts
