@@ -165,7 +165,11 @@ export const MUTANTS = [
   [QUOTE, "  const asked: EvmPoolSellQuoteRequest = { ...req };", "  const asked: EvmPoolSellQuoteRequest = req;", S, "the sell quote reads each field"],
   [QUOTE, "if (rs !== null && fine(rs)) return void keep(rs);", "if (rs !== null) return void keep(rs);", R, "card evm-quote-head-watch: a scan provider that fails a full span"],
   [QUOTE, "  if (b - scanHead > maxLag) {", "  if (false) {", R, "card evm-quote-head-watch: a scan that ends more than maxLag"],
-  [QUOTE, '  const scanned = await scanOf([lower(token)], "all");', '  void agreedOnce();\n  const scanned = await scanOf([lower(token)], "all");', R, "card evm-quote-head-watch: the agreed block is picked once"],
+  [QUOTE, '  const scanning = scanOf([lower(token)], "all");', '  void agreedOnce();\n  const scanning = scanOf([lower(token)], "all");', R, "card evm-quote-head-watch: the agreed block is picked once"],
+  // card evm-quote-fast-from-asia: a warm buy's round beside its scan, used only where the scan agrees its block and pools
+  [QUOTE, "    if (a.sell || a.minBlock !== undefined || a.speculate === false || ", "    if (true || ", R, "W7 "],
+  [QUOTE, "  return a.size === b.size && [...a].every((id) => b.has(id));", "  return true;", R, "W8 "],
+  [QUOTE, "if (agreedNow.block.number !== block.number || agreedNow.block.hash !== block.hash || !samePools(", "if (!samePools(", R, "W9 "],
   // the held head: reused only while read under EVM_HEAD_REUSE_MS ago, and held only once confirmed by number
   [QUOTE, "since >= 0 && since <= EVM_HEAD_REUSE_MS && ", "", H, "held head: read more than"],
   // a held head is reused only while fresh on both clocks: its age when read plus the time since, and the device's clock

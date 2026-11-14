@@ -1088,6 +1088,9 @@ export type EvmHeadWatch = {
   head(nowMs: number): Promise<{ block: Block; confirm: () => Promise<void> }>;
   /** Keeps the head fresh in the background until EVM_HEAD_IDLE_MS from now. */
   keep(): void;
+  /** The held block, where head() would hand it on now with no read (card evm-quote-fast-from-asia: a warm buy sends
+   *  its read round at it beside its scan), else null; keeps the head fresh as head() does. */
+  peek(nowMs: number): Block | null;
 };
 /** A held head on the providers `rpcs`; `clock` is the device's (Date.now) and `mono` a clock that never steps back
  *  (performance.now), which times the hold, so a device clock stepped back cannot stretch its 5 s or 30 s (review of
@@ -1131,20 +1134,26 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
     until = clock() + EVM_HEAD_IDLE_MS;
     if (timer === null && refreshing === null) tick();
   };
+  // the held block while fresh on both clocks: `mono` cannot be stepped back, and the device's clock still runs while
+  // `mono` pauses in a sleep, so a block past 30 s on either is read again, never reused
+  const fresh = (t: number, m: number): Block | null => {
+    const h = held;
+    const since = h === null ? -1 : m - h.at;
+    return h !== null && since >= 0 && since <= EVM_HEAD_REUSE_MS && h.age + since <= EVM_QUOTE_MAX_AGE_MS && t - Number(h.block.timestamp) * 1000 <= EVM_QUOTE_MAX_AGE_MS ? h.block : null;
+  };
   return {
     keep,
+    peek(nowMs) {
+      keep();
+      return fresh(Math.max(nowMs, clock()), mono());
+    },
     async head(nowMs) {
       keep();
       // the device's clock now: a quote asks after its scan, which may have run for seconds since `nowMs`
       const t = Math.max(nowMs, clock());
-      const h = held;
-      // fresh on both clocks: `mono` cannot be stepped back, and the device's clock still runs while `mono` pauses in
-      // a sleep, so a block past 30 s on either is read again, never reused
       const m = mono();
-      const since = h === null ? -1 : m - h.at;
-      if (h !== null && since >= 0 && since <= EVM_HEAD_REUSE_MS && h.age + since <= EVM_QUOTE_MAX_AGE_MS && t - Number(h.block.timestamp) * 1000 <= EVM_QUOTE_MAX_AGE_MS) {
-        return { block: h.block, confirm: async () => {} };
-      }
+      const h = fresh(t, m);
+      if (h !== null) return { block: h, confirm: async () => {} };
       const a = await agreedBlock(rpcsNow(), maxLag, t);
       return {
         block: a.block,
@@ -1360,6 +1369,23 @@ const indexScanOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: strin
   });
   return { spans: [[Math.max(floor, ix.from), ix.through]], pools };
 };
+/** The pools of currency `c` (every kind) a scan of it hands a quote where its logs find none it did not hold: the
+ *  device's kept scan's, the index's from `floor` and the helper's (scanPools `cached` and `served`); a warm buy reads
+ *  them beside its scan (card evm-quote-fast-from-asia). */
+const keptPoolsOf = async (chain: EvmPoolChain, c: string, weth: string, floor: number): Promise<EvmPoolKey[]> => {
+  const own = SCANS.get(`${chain}:all:${c}`);
+  const ixs = indexScanOf(chain, "all", c, weth, Math.max(0, floor));
+  const served = await servedOf(chain, "all", c, weth);
+  return [...new Map([...(own?.pools ?? []), ...(ixs?.pools ?? []), ...served].map((k) => [poolId(k), k])).values()];
+};
+/** True where two lists hold the same pools. */
+const samePools = (x: readonly EvmPoolKey[] | undefined, y: readonly EvmPoolKey[] | undefined): boolean => {
+  const a = new Set((x ?? []).map(poolId));
+  const b = new Set((y ?? []).map(poolId));
+  return a.size === b.size && [...a].every((id) => b.has(id));
+};
+/** A warm buy whose first round, sent beside its scan, is not the round the scan asks for: run again, scan first. */
+const RESPEC = new Error("the warm round is asked again after the scan");
 /** `spans` with [a, b] added, merged where they touch. */
 const withSpan = (spans: Spans, a: number, b: number): Spans => {
   const out: Spans = [];
@@ -2259,7 +2285,7 @@ const scansOf = (s: EvmPoolVenue["scan"]): EvmRpc[] | undefined =>
 
 /** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
  *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
-export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], watch?: EvmHeadWatch, mono: () => number = monotonic): Promise<EvmPoolBuyQuote> {
+export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], watch?: EvmHeadWatch, mono: () => number = monotonic, speculate = true): Promise<EvmPoolBuyQuote> {
   const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   const { chain, token, amountIn, slippageBps } = req;
@@ -2324,6 +2350,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     rpcs,
     scan,
     reads,
+    speculate,
     // the route's own pools: the hook's take in them is H - Q, shown as a fee and bounded by minOut (M360), so R is
     // held to every other pool, never to the route's own pool with its hook replaced
     seen: keys.map(poolId),
@@ -2374,7 +2401,13 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
       if (q2 === null && route.venue === "uniswap-v3" && gas2 && route.tokens.length > 2) return refuse("out_of_gas", "twice the amount runs out of a read's gas alone on a v3 route of more than one hop: its quote may be a partial fill");
       if (q2 === null && route.venue === "uniswap-v3" && !gas2) return missed("partial_fill", "twice the amount reverts on a v3 route");
     },
+  }).catch((e) => {
+    if (e === RESPEC) return null;
+    throw e;
   });
+  // the warm round sent beside the scan was not the one the scan asks for: the quote again, its scan first, on the
+  // device's clock as it runs now (card evm-quote-fast-from-asia)
+  if (set === null) return evmPoolBuyQuoteWith(req, rpcsIn, nowMs + Math.max(0, mono() - start), scan, watch, mono, false);
   const { block, out, fills, filled } = set;
   const q = out(main)!;
   // The routes of more than one v3 hop dropped because a read at twice ran out of its gas alone (`outOfGas`) may be
@@ -2716,6 +2749,8 @@ async function routeSetOf(a: {
   mono?: (() => number) | undefined;
   /** `mono` at the quote's entry, where `nowMs` was read: a new agreed block's age counts every ms since */
   start: number;
+  /** false: a warm buy's first round waits for its scan (the run again after RESPEC) */
+  speculate?: boolean;
   /** the caller's reads after the standard pools' (the buy's first-hop reads, in the order its recorded reads hold) */
   beforeFound?: () => void;
   /** called once the block is agreed, before the first round's reads are sent: the caller's reads of that block */
@@ -2822,7 +2857,9 @@ async function routeSetOf(a: {
   // agreed again on the quote's own list first. One provider at most is held a quote (review LOW-1): a lower head still
   // that far behind leaves the scan to refuse as before.
   const agreedAt = async (): Promise<{ block: Block; confirm: () => Promise<void> }> => {
-    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
+    // a warm buy's read round already sent at the held block (`spec`) is agreed on that same block, never a newer one
+    // the watch held meanwhile
+    let got: { block: Block; confirm: () => Promise<void>; low?: EvmRpc } = spec !== null ? { block: spec, confirm: async () => {} } : a.watch === undefined ? await fresh(rpcs) : await a.watch.head(a.nowMs);
     if (!(await behind(got.block))) return got;
     if (got.low === undefined) {
       got = await fresh(rpcs);
@@ -2890,8 +2927,32 @@ async function routeSetOf(a: {
   if (plan !== undefined) plan.scans.forEach((p, i) => scans.set(`${p.kind}:${p.cs.join(",")}`, early[i]!));
   // a kept scan that fails refuses only where the quote asks it again
   for (const e of early) e?.catch(() => {});
-  const scanned = await scanOf([lower(token)], "all");
-  const { block, confirm } = await agreedOnce();
+  // A warm buy (card evm-quote-fast-from-asia): the token quoted within EVM_WARM_RANGE_S and a held head the watch hands
+  // on with no read. Its first round of reads is sent at once, at that block, with the token's pools the device kept,
+  // beside the token's scan (the scan provider's head, then the blocks since the kept scan), instead of after it: from
+  // this Mac those were two trips, about 220 ms, before any read (2026-11-14 19:0xZ: 2 of a warm quote's 6 rounds,
+  // the other 4 its reads). The answers count only where, once the scan is in, the block it agreed is that same block
+  // and the scan's pools are the ones the round read, so the round is the very one the quote would have sent after its
+  // scan; else nothing of it is used and the quote runs again, its scan first (RESPEC). A refusal the kept pools raise
+  // while the round is built (too_many_pools) the scan's pools raise too: they hold every kept pool
+  const spec: Block | null = (() => {
+    if (a.sell || a.minBlock !== undefined || a.speculate === false || plan === undefined || a.watch === undefined) return null;
+    const b = a.watch.peek(a.nowMs);
+    return b !== null && b.timestamp >= plan.ts && b.timestamp - plan.ts <= EVM_WARM_RANGE_S ? b : null;
+  })();
+  const scanning = scanOf([lower(token)], "all");
+  // (scanAt gives null where the chain has no scan: scanOf asserts it away)
+  let scanned: Awaited<typeof scanning> | null;
+  let block: Block;
+  let confirm: () => Promise<void>;
+  if (spec === null) {
+    scanned = await scanning;
+    ({ block, confirm } = await agreedOnce());
+  } else {
+    scanning?.catch(() => {});
+    [block, confirm] = [spec, async () => {}];
+    scanned = scanning === null ? null : { pools: new Map([[lower(token), await keptPoolsOf(chain, lower(token), lower(v.weth), Number(spec.number) - v.scan!.depth + 1)]]), commit: () => {} };
+  }
   a.atBlock?.(block);
   // a pool's hook is trusted as it is only where the sell builder takes it: a listed launchpad's hook with that
   // launchpad's own fee and tick spacing (evmHookListed, the one rule for both; card evm-route-parity); any other hook
@@ -3000,7 +3061,16 @@ async function routeSetOf(a: {
     }
   }
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
-  const ans = await readAgreed(confirm, rpcs, block.hash, reads, v.reads);
+  const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads);
+  if (spec !== null) {
+    reading.catch(() => {});
+    // the scan's own refusal ends the quote as before, whatever the round answered
+    const real = await scanning;
+    const agreedNow = await agreedOnce();
+    if (agreedNow.block.number !== block.number || agreedNow.block.hash !== block.hash || !samePools(real?.pools.get(lower(token)), scanned?.pools.get(lower(token)))) throw RESPEC;
+    scanned = real;
+  }
+  const ans = await reading;
   // the block is the same on both providers: the scan keeps what it read up to it
   scanned?.commit();
   const out = (i: number) => (ans[i]!.kind === "out" ? (ans[i] as { amountOut: bigint }).amountOut : null);

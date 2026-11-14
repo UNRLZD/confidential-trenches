@@ -5,8 +5,10 @@
 // chain the money arrives on and an amount the place holds; what is sent is decided on the signing page, never here.
 // Card withdraw-in-app-to-any-chain: a pool's money arrives on any chain (the kit's pool.withdraw `dest`, paid out through
 // 1Click; packages/signpage/src/withdraw/pool-form.ts refuses a dest the pool does not pay out to), so the form picks
-// the arrival chain and the address is checked on it. Cash arrives on NEAR only: the kit's withdraw.open takes no dest.
-import type { PoolChain, SignpageParams } from "@blindfill/kit";
+// the arrival chain and the address is checked on it. Card cash-withdraw-in-app-to-any-chain: Cash arrives on each chain
+// of the kit's CASH_WITHDRAW_DESTS, the one list SIGN_HOST's Cash form sends to (NEAR alone until a refunded send can come
+// back to Cash), and the tap's withdraw.open carries `dest` when it is not NEAR.
+import { CASH_WITHDRAW_DESTS, type PoolChain, type SignpageParams } from "@blindfill/kit";
 import { DESTS } from "../deposit/model.ts";
 import type { WithdrawPlace } from "./target.ts";
 
@@ -36,9 +38,10 @@ function base58Bytes(s: string): number | null {
   return lead + bytes;
 }
 
-/** Where a place's money can arrive: a pool's on every chain (its own and each 1Click pays out to), Cash's on NEAR. */
+/** Where a place's money can arrive: a pool's on every chain (its own and each 1Click pays out to), Cash's on each chain
+ *  SIGN_HOST's Cash form sends to (the kit's CASH_WITHDRAW_DESTS). */
 export function arrivals(place: WithdrawPlace): readonly Arrival[] {
-  return place.kind === "pool.withdraw" ? DESTS : ["near"];
+  return place.kind === "pool.withdraw" ? DESTS : CASH_WITHDRAW_DESTS;
 }
 
 /** Whether `typed` is an address of the arrival chain: a NEAR account on NEAR, a 32-byte key on Solana, 0x and 40 hex on an EVM chain. */
@@ -73,13 +76,14 @@ export function checkWithdraw(place: WithdrawPlace, dest: Arrival, amount: strin
 }
 
 type Given = { to: string; amount: string } | { to: string; max: true };
-export type WithdrawHop = { kind: "withdraw.open"; params: Given } | { kind: "pool.withdraw"; params: Given & { chain: PoolChain; dest?: Arrival } };
+export type WithdrawHop = { kind: "withdraw.open"; params: Given & { dest?: Arrival } } | { kind: "pool.withdraw"; params: Given & { chain: PoolChain; dest?: Arrival } };
 
 /** What the Withdraw tap sends SIGN_HOST: the place's kind with the address and the amount, or Max (the signing page's
- *  live Max); a pool's with `dest` when the money arrives on another chain than the pool's own (the kit's rule). */
+ *  live Max), with `dest` when the money arrives on another chain than the place's own (a pool's chain, Cash's NEAR;
+ *  the kit takes dest only with to). */
 export function withdrawHop(place: WithdrawPlace, dest: Arrival, amount: string, address: string, max: boolean): WithdrawHop {
   const to = address.trim();
   const given: Given = max ? { to, max: true } : { to, amount: amount.trim() };
-  if (place.kind !== "pool.withdraw") return { kind: "withdraw.open", params: given };
+  if (place.kind !== "pool.withdraw") return { kind: "withdraw.open", params: { ...given, ...(dest !== "near" ? { dest } : {}) } };
   return { kind: "pool.withdraw", params: { chain: place.chain, ...given, ...(dest !== place.chain ? { dest } : {}) } };
 }

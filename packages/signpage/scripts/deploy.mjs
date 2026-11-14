@@ -56,6 +56,7 @@ import { HEADERS, judge, WALK_CSP, WALK_PATH } from "../../../scripts/live-check
 import { ORIGINS } from "../../../scripts/live-checks/signpage-release.mjs";
 import { WORKER_CSP, WORKER_PATH, ZK_CACHE } from "../../../scripts/live-checks/signpage-prover-host.mjs";
 import { THREAD_CSP, THREAD_PATH } from "../../../scripts/live-checks/signpage-prover-threads.mjs";
+import { CONNECT_COOP, CONNECT_PATH } from "../../../scripts/live-checks/signpage-answers-outside-apps.mjs";
 import { facts as pinFacts, judge as judgePins } from "../../../scripts/live-checks/kit-oneclick-pins-frozen.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { SERVED, WALK_FILE, copyServed, pinProblems, walkSourceProblems } from "./build-app.mjs";
@@ -83,11 +84,15 @@ export const WRANGLER = "wrangler@4.151.1"; // published 2026-10-16
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
 
-// The whole _headers file, as an allow-list: these five rules, each exactly once, each setting exactly its own
-// headers and removing none; any other rule, header or removal is refused. /* holds the site's policy (judged below by
-// signpage-skeleton's check); the worker's rule its own CSP (W:880), the thread file's its own (card
-// signpage-prover-threads) and the walk Worker's its own (card restore-shows-the-balance-in-seconds), each joined by Pages
-// to /*'s; the setup files' rule their one Cache-Control (vault.md 2.14).
+// The whole _headers file, as an allow-list: these six rules, each exactly once, each setting exactly its own
+// headers and removing none but /connect's one; any other rule, header or removal is refused. /* holds the site's policy
+// (judged below by signpage-skeleton's check), frame-ancestors 'none' included, and reaches every path; the worker's rule
+// its own CSP (W:880), the thread file's its own (card signpage-prover-threads) and the walk Worker's its own (card
+// restore-shows-the-balance-in-seconds), each joined by Pages to /*'s; the setup files' rule their one Cache-Control
+// (vault.md 2.14). /connect (card signpage-answers-outside-apps), on that literal path and after /*, detaches /*'s
+// Cross-Origin-Opener-Policy and sets CONNECT_COOP, so an outside app that opens it in a popup keeps window.opener: set
+// without the detach, Pages would join it to /*'s same-origin with a comma. It detaches and sets nothing else, so the
+// site's CSP, frame-ancestors 'none' with it, holds on /connect as on every path.
 const EXACT = {
   [WORKER_PATH]: { "content-security-policy": WORKER_CSP },
   [THREAD_PATH]: { "content-security-policy": THREAD_CSP },
@@ -97,6 +102,7 @@ const EXACT = {
 export const RULES = {
   "/*": ["content-security-policy", ...Object.keys(HEADERS)],
   ...Object.fromEntries(Object.entries(EXACT).map(([path, exact]) => [path, Object.keys(exact)])),
+  [CONNECT_PATH]: ["cross-origin-opener-policy"],
 };
 
 /** `git -C pkg <args>`: { status, stdout, stderr }, and notTree when git says the folder is in no work tree. */
@@ -172,7 +178,10 @@ export function build(pkg = PKG) {
   return out;
 }
 
-/** Problems with a _headers file's text (empty = fine): one /* rule holding the whole policy, read as the live check reads a served answer. */
+/** Problems with a _headers file's text (empty = fine): the allow-list above, rule for rule. The /* rule holds the whole
+ *  site policy, read as signpage-skeleton's live check reads a served answer; each file rule sets exactly its own header;
+ *  /connect, once and after /*, only detaches Cross-Origin-Opener-Policy and then sets it to CONNECT_COOP; no other rule
+ *  detaches anything. */
 export function checkHeadersFile(text) {
   const rules = [];
   const p = [];
@@ -184,6 +193,7 @@ export function checkHeadersFile(text) {
     if (!rule) return void p.push(`_headers line ${i + 1} is a header before any URL line`);
     const rm = /^\s+!\s*(\S+)\s*$/.exec(line);
     const kv = /^\s+([^:\s]+):\s*(.*)$/.exec(line);
+    if (rm && rule.headers.length) rule.removesAfterSet = true;
     if (rm) rule.removes.push(rm[1].toLowerCase());
     else if (kv) rule.headers.push([kv[1].toLowerCase(), kv[2]]);
     else p.push(`_headers line ${i + 1} cannot be read`);
@@ -196,8 +206,22 @@ export function checkHeadersFile(text) {
       continue;
     }
     for (const [k] of r.headers) if (!allowed.includes(k)) p.push(`_headers rule ${r.path} sets ${k}, which the policy does not set there`);
-    for (const k of r.removes) p.push(`_headers rule ${r.path} removes ${k}`);
+    if (r.path !== CONNECT_PATH) for (const k of r.removes) p.push(`_headers rule ${r.path} removes ${k}`);
   }
+  // /connect: one rule, after /*, that detaches exactly /*'s COOP and then sets exactly CONNECT_COOP, nothing else
+  const conns = rules.filter((r) => r.path === CONNECT_PATH);
+  const conn = conns[0];
+  const connOk =
+    conns.length === 1 &&
+    rules.indexOf(conn) > rules.findIndex((r) => r.path === "/*") &&
+    rules.some((r) => r.path === "/*") &&
+    conn.removes.length === 1 &&
+    conn.removes[0] === "cross-origin-opener-policy" &&
+    !conn.removesAfterSet &&
+    conn.headers.length === 1 &&
+    conn.headers[0][0] === "cross-origin-opener-policy" &&
+    conn.headers[0][1].trim() === CONNECT_COOP;
+  if (!connOk) p.push(`_headers must hold one ${CONNECT_PATH} rule, after /*, that removes exactly cross-origin-opener-policy and then sets exactly cross-origin-opener-policy: ${CONNECT_COOP}`);
   for (const [path, exact] of Object.entries(EXACT)) {
     const these = rules.filter((r) => r.path === path);
     const want = Object.entries(exact).map(([k, v]) => `${k}: ${v}`).join("; ");

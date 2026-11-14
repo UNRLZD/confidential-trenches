@@ -14,6 +14,8 @@ import { APP_ORIGIN, RELEASE, signedOutState, type IncomingMessage } from "../sr
 import { appSrc, VEIL_CAP_MS, FRAME_SANDBOX, mountShell, navUrl, SERVED_FILES, wireShell } from "../src/shell.ts";
 // @ts-expect-error: the deploy script is plain JavaScript, with no types
 import { build } from "../scripts/deploy.mjs";
+import { outsideKinds } from "../src/outside.ts";
+import { FIXTURES } from "../../kit/test/signpage-fixtures.ts";
 
 test("appSrc: APP_HOST with this page's path and query; never another origin", () => {
   assert.equal(appSrc({ pathname: "/", search: "" }), `${APP_ORIGIN}/`);
@@ -147,8 +149,8 @@ function fakeDom(href = `${SIGN_ORIGIN}/token/solana/So111?tab=trades`) {
   };
   const doc = { defaultView: view, createElement, body, activeElement: null as unknown } as unknown as Document;
   const frames = () => children.filter((c) => c.tagName === "iframe");
-  const send = (data: unknown, source: unknown) => {
-    for (const fn of listeners) fn({ origin: APP_ORIGIN, source, data });
+  const send = (data: unknown, source: unknown, origin = APP_ORIGIN) => {
+    for (const fn of listeners) fn({ origin, source, data });
   };
   const key = (k: string, isTrusted = true, more: Record<string, unknown> = {}) => {
     for (const fn of keys) fn({ type: "keydown", key: k, isTrusted, ...more });
@@ -959,4 +961,135 @@ test("closed notice: the shell keeps the last 1024 ids told (CLOSED_KEPT) and le
   } finally {
     resetTimers(mock.timers);
   }
+});
+
+// Card signpage-answers-outside-apps: SIGN_HOST at /connect is an outside app's popup (src/outside.ts). It frames
+// nothing; its one peer is window.opener. Before allow() nothing is answered and no ready goes out: each message from the
+// opener only names its origin as the browser checked it (e.origin), whatever the message says. allow(origin) binds the
+// session to that origin alone; APP_HOST's path is unchanged.
+const OUT = "http://localhost:4792";
+function popupShell(opener: { postMessage(m: unknown, o: string): void } | null = { postMessage: () => {} }, kinds?: Parameters<typeof mountShell>[1]["kinds"]) {
+  const d = fakeDom(`${SIGN_ORIGIN}/connect`);
+  const knocks: string[] = [];
+  const posts: { msg: unknown; to: string }[] = [];
+  const op = opener && { postMessage: (msg: unknown, to: string) => void posts.push({ msg, to }) };
+  const sh = mountShell(d.doc, { state: () => signedOutState(), kinds, popup: { opener: op, knock: (o) => void knocks.push(o) } });
+  return { d, sh, knocks, posts, op };
+}
+
+test("popup: no frame at all; before allow() no ready and no answer, each opener message only names its e.origin", async () => {
+  const p = popupShell();
+  assert.equal(p.d.frames().length, 0);
+  // a spoofed name in the message: the knock is the browser's e.origin, never a field it carries
+  p.d.send({ v: 1, type: "hello", kit: "1.15", origin: APP_ORIGIN, name: "Blindfill" }, p.op, OUT);
+  p.d.send(ask(), p.op, OUT);
+  p.d.send({ v: 1, id: crypto.randomUUID(), type: "pool.buy", chain: "solana", token: "So11111111111111111111111111111111111111112", amount: "0.1", slippage_bps: 300 }, p.op, OUT);
+  await quiet();
+  assert.deepEqual(p.knocks, [OUT, OUT, OUT]);
+  assert.deepEqual(p.posts, [], "no ready, no state, no answer before Allow");
+  assert.deepEqual(p.d.posted, []);
+});
+
+test("popup: a message whose source is not the opener is ignored, before and after allow()", async () => {
+  const p = popupShell();
+  const other = { postMessage: () => assert.fail("posted to another window") };
+  p.d.send(ask(), other, OUT);
+  p.d.send(ask(), null, OUT);
+  assert.deepEqual(p.knocks, []);
+  p.sh.allow(OUT);
+  p.posts.length = 0;
+  p.d.send(ask(), other, OUT);
+  await quiet();
+  assert.deepEqual(p.posts, []);
+});
+
+test("popup: after allow(origin) its ready goes out at once and its state is answered, both to the opener with targetOrigin that origin only", async () => {
+  const p = popupShell();
+  p.sh.allow(OUT);
+  const q = ask();
+  p.d.send(q, p.op, OUT);
+  await until(() => p.posts.some((x) => (x.msg as { id?: string }).id === q.id), "the state answer");
+  assert.deepEqual(p.posts.map((x) => x.msg), [READY, { v: 1, id: q.id, ok: true, result: signedOutState() }]);
+  assert.ok(p.posts.every((x) => x.to === OUT), "never *, never APP_HOST");
+  // allow again, or for another origin: nothing changes
+  p.sh.allow("https://evil.example");
+  await quiet();
+  assert.equal(p.posts.length, 2);
+});
+
+test("popup: once allowed, a message from a second origin (the opener navigated) is ignored and names nothing", async () => {
+  const p = popupShell();
+  p.sh.allow(OUT);
+  p.posts.length = 0;
+  for (const origin of [APP_ORIGIN, SIGN_ORIGIN, "https://evil.example", "http://localhost:4793", "null", ""]) p.d.send(ask(), p.op, origin);
+  await quiet();
+  assert.deepEqual(p.posts, []);
+  assert.deepEqual(p.knocks, []);
+});
+
+test("popup: no nav and no reload, so connect and every Confirm stay in this one document at /connect", async () => {
+  const p = popupShell();
+  p.sh.allow(OUT);
+  const nav = { v: 1, id: crypto.randomUUID(), type: "nav", path: "/portfolio" };
+  const reload = { v: 1, id: crypto.randomUUID(), type: "reload" };
+  p.d.send(nav, p.op, OUT);
+  p.d.send(reload, p.op, OUT);
+  await until(() => p.posts.length >= 3, "two answers");
+  assert.deepEqual(p.posts.slice(1).map((x) => x.msg), [
+    { v: 1, id: nav.id, ok: false, error: { code: "not_allowed" } },
+    { v: 1, id: reload.id, ok: false, error: { code: "not_allowed" } },
+  ]);
+  assert.deepEqual(p.d.calls.replace, []);
+  assert.equal(p.d.calls.reload, 0);
+});
+
+test("popup: a sheet's close adds no frame and no dim", () => {
+  const p = popupShell();
+  p.sh.open(false);
+  p.sh.close();
+  assert.equal(p.d.frames().length, 0);
+  assert.equal(p.d.made.find((x) => x.dataset.sheet === "veil")?.hidden, true);
+});
+
+// an outside app gets the deposit kinds too (src/outside.ts OUTSIDE_KINDS), after Allow only
+test("popup: a deposit quote is answered after allow() and refused before it (no answer at all, only the knock)", async () => {
+  const quote = FIXTURES["deposit.quote"];
+  let runs = 0;
+  const kinds = outsideKinds({ "deposit.quote": () => (runs++, { result: quote.result }) } as unknown as NonNullable<Parameters<typeof outsideKinds>[0]>, async () => false);
+  const p = popupShell(undefined, kinds);
+  const before = { v: 1, id: crypto.randomUUID(), type: "deposit.quote", ...quote.params };
+  p.d.send(before, p.op, OUT);
+  await quiet();
+  assert.deepEqual(p.knocks, [OUT]);
+  assert.equal(p.posts.length, 0, "nothing before Allow");
+  assert.equal(runs, 0, "the quote is never asked before Allow");
+  p.sh.allow(OUT);
+  const after = { v: 1, id: crypto.randomUUID(), type: "deposit.quote", ...quote.params };
+  p.d.send(after, p.op, OUT);
+  await until(() => p.posts.some((x) => (x.msg as { id?: string }).id === after.id), "the quote's answer");
+  assert.deepEqual(p.posts.find((x) => (x.msg as { id?: string }).id === after.id), { msg: { v: 1, id: after.id, ok: true, result: quote.result }, to: OUT });
+  assert.equal(runs, 1);
+});
+
+test("popup with no opener: nothing is read, nothing is posted, allow() binds nothing", async () => {
+  const p = popupShell(null);
+  p.d.send(ask(), null, OUT);
+  p.sh.allow(OUT);
+  await quiet();
+  assert.deepEqual(p.knocks, []);
+  assert.deepEqual(p.d.posted, []);
+});
+
+test("APP_HOST's path is unchanged: the frame is APP_HOST, answered from its first message with no allow(), at APP_HOST only", async () => {
+  const d = fakeDom();
+  mountShell(d.doc, { state: () => signedOutState() });
+  const f = d.frames()[0]!;
+  assert.equal(new URL(f.src).origin, APP_ORIGIN);
+  f.fire("load");
+  const q = ask();
+  d.send(q, f.contentWindow);
+  d.send(ask(), f.contentWindow, OUT);
+  await answerTo(d, q.id);
+  assert.deepEqual(d.posted.map((p) => p.msg), [READY, { v: 1, id: q.id, ok: true, result: signedOutState() }]);
+  assert.ok(d.posted.every((p) => p.to === APP_ORIGIN));
 });

@@ -54,12 +54,28 @@ const IMPLICIT = /^[0-9a-f]{64}$/;
 /** The margin Cash is counted at in a tap's most (with_cash) under the device's price: 1Click's slippage (the deposit
  *  quote's 100 bps), its fee and withdraw fee, and the follow's per-rung deposit cost, with room. */
 export const CASH_MARGIN_BPS = 300n;
+/** A whole-SOL decimal (at most 9 fraction digits) in lamports; null when it is not one. */
+const lamportsOf = (sol: string): bigint | null => {
+  const m = /^(\d{1,30})(?:\.(\d{1,9}))?$/.exec(sol);
+  return m === null ? null : BigInt(m[1]!) * 10n ** 9n + BigInt((m[2] ?? "").padEnd(9, "0"));
+};
+/** Solana's CashToPoolDeps.tapMax (card solana-buy-never-moves-cash-for-a-coin-it-cannot-buy): the coin's pool.buy.dry,
+ *  its tap_max on the coin's venue in lamports, 0n when the pool holds nothing a tap spends (not_funded). Any other
+ *  refusal throws: the coin's venue was not read (src/pools.ts poolBuyDryKind: quote_check_failed for a coin with no
+ *  pump.fun curve or PumpSwap pool, down for a provider that failed), so cashFirst moves nothing from Cash for it. */
+export async function solanaTapMaxOf(r: HostRefusal | Running<"pool.buy.dry">): Promise<bigint> {
+  if (!("running" in r)) throw new Error(r.error);
+  await r.after;
+  const a = r.answer();
+  if (a !== null && "result" in a) return lamportsOf(a.result.tap_max) ?? 0n;
+  if (a?.error === "not_funded") return 0n;
+  throw new Error(a?.error ?? "failed");
+}
 /** pool.buy.dry's with_cash (kit 1.15), in whole SOL as tap_max is: tap_max, plus what the moves on their way bring,
  *  plus what the largest Cash note less the relay fee gives a tap (cashLamportsFor); null when tap_max is not an amount. */
 export function withCash(tapMax: string, coming: bigint, cash: bigint, fee: bigint, p: Pick<PoolStatePrice, "price" | "expo"> | null): string | null {
-  const m = /^(\d{1,30})(?:\.(\d{1,9}))?$/.exec(tapMax);
-  if (m === null) return null;
-  const tap = BigInt(m[1]!) * 10n ** 9n + BigInt((m[2] ?? "").padEnd(9, "0"));
+  const tap = lamportsOf(tapMax);
+  if (tap === null) return null;
   const all = tap + coming + (p === null || cash <= fee ? 0n : cashLamportsFor(cash - fee, p));
   const t = all.toString().padStart(10, "0");
   const f = t.slice(-9).replace(/0+$/, "");
@@ -586,8 +602,9 @@ export type CashToPoolDeps = {
   /** Cash holds money that can move or a move is on its way to `chain`: read on the device alone. With neither, a tap
    *  goes straight to the pool buy, with no read of the coin's venue. */
   any(chain: PoolChain): Promise<boolean>;
-  /** Base units one pool.buy of `token` on `chain` spends now (Solana: pool.buy.dry's tap_max on the coin's venue; Base
-   *  and Robinhood: the largest ready note, state.pools' tap_max); 0n when none. */
+  /** Base units one pool.buy of `token` on `chain` spends now (Solana: pool.buy.dry's tap_max on the coin's venue,
+   *  solanaTapMaxOf; Base and Robinhood: the largest ready note, state.pools' tap_max); 0n when none. Throws when the
+   *  coin's venue is not read: the tap then moves nothing from Cash. */
   tapMax(chain: PoolChain, token: string): Promise<bigint>;
   /** cashMover's need: the op id of the move on its way for it, or null. */
   need(chain: PoolChain, short: bigint): Promise<string | null>;
@@ -611,8 +628,10 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
     let answer: Answer = { error: "failed" };
     const after = (async () => {
       const d = deps();
-      const now = (await d.any(chain)) ? await d.tapMax(chain, token) : ask.amount;
-      const short = now < ask.amount ? want(now) : null;
+      // a tap read that throws (Solana: the coin's venue not read, solanaTapMaxOf) moves nothing from Cash: the pool buy
+      // reads the venue itself and answers its refusal at once
+      const now = (await d.any(chain)) ? await d.tapMax(chain, token).catch(() => null) : ask.amount;
+      const short = now !== null && now < ask.amount ? want(now) : null;
       const op = short === null ? null : await d.need(chain, short);
       if (op !== null) {
         try {

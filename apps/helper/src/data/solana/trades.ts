@@ -700,6 +700,22 @@ export function createSolanaTrades(deps: {
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
 
+  /** The token's top pool's newest `limit` trades (deps.tape), src theirs, dated by their read. Refused or down, the
+   *  empty tape with `filling`, so the page reads again; for a token with no open walk (`e` null), a mint no pool names
+   *  is the 404 it was. */
+  async function poolTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
+    const v = await deps.tape!(mint).catch(() => null);
+    if (v !== null && v.status === 200) {
+      const got = (JSON.parse(v.body) as unknown[]).slice(0, limit);
+      const src = v.src ?? "geckoterminal";
+      const at = v.asOfMs ?? now();
+      return { status: 200, body: JSON.stringify({ trades: got, src, as_of_ms: at }), src, asOfMs: at };
+    }
+    if (e === null && v !== null && v.status === 404) return NOT_FOUND;
+    const at = e?.readAt ?? now();
+    return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+  }
+
   /** A first read: the token's decimals, its subscription in force, then its newest COLD_SIGS signatures walked. */
   async function first(mint: string): Promise<Entry | DataAnswer> {
     const listed = await deps.listed(mint);
@@ -833,24 +849,19 @@ export function createSolanaTrades(deps: {
     async trades(token: string, limit: number): Promise<DataAnswer> {
       const mint = address(token);
       if (mint === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
+      // a token Discover's lists do not hold (one the user searched, or the lists dropped) is served its top pool's
+      // trades, as its chart's bars come from the history source (candles), with no walk of ours opened for it: the
+      // tape a token page reads is never a 404 while its page and chart answer (card solana-trades-show-on-every-token:
+      // the live helper at 837d9d810 answered NEARKAT's and BONK's trades 404, neither on the lists, their pages 200)
+      if (!entries.has(mint) && deps.tape !== undefined && (await deps.listed(mint)) !== true) return poolTape(mint, limit, null);
       const e = await open(mint);
       if (!("mint" in e)) return e;
       const rows = e.book === null ? [] : e.book.tape(limit);
       // a token with no trade of a venue this tape decodes (Raydium, Meteora, Orca, the other launchpads: every token
       // not on the pump.fun curve or PumpSwap) is served its top pool's trades (token.ts tape), never an empty tape for a
       // token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0 rows, src chain, while
-      // their pools traded); refused or down, the chain's answer with `filling`, so the page reads again
-      if (rows.length === 0 && deps.tape !== undefined) {
-        const v = await deps.tape(mint).catch(() => null);
-        if (v !== null && v.status === 200) {
-          const got = (JSON.parse(v.body) as unknown[]).slice(0, limit);
-          const src = v.src ?? "geckoterminal";
-          const at = v.asOfMs ?? now();
-          return { status: 200, body: JSON.stringify({ trades: got, src, as_of_ms: at }), src, asOfMs: at };
-        }
-        const at = e.readAt ?? now();
-        return { status: 200, body: JSON.stringify({ trades: [], filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
-      }
+      // their pools traded)
+      if (rows.length === 0 && deps.tape !== undefined) return poolTape(mint, limit, e);
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));
       // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first

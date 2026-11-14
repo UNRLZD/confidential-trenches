@@ -4,10 +4,13 @@
 // with to and amount or max, pool.withdraw with the chain and to and amount or max), so the signing page draws its Confirm.
 // Card withdraw-in-app-to-any-chain: a pool's money arrives on any chain (the To row), the tap's pool.withdraw carries it as
 // `dest` when it is not the pool's own (the kit's pool.withdraw takes dest with to), and the address is checked on the
-// chain the money arrives on, never the place's own; Cash arrives on NEAR only (withdraw.open takes no dest).
+// chain the money arrives on, never the place's own. Card cash-withdraw-in-app-to-any-chain: Cash arrives on each chain of
+// the kit's CASH_WITHDRAW_DESTS, the one list SIGN_HOST's Cash form sends to, and the tap's withdraw.open carries `dest`
+// when it is not NEAR (the kit's withdraw.open takes dest with to, as pool.withdraw does).
 //   node --test apps/terminal/test/withdraw-form.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { CASH_WITHDRAW_DESTS } from "@blindfill/kit";
 import type { WithdrawPlace } from "../src/screens/withdraw/target.ts";
 import { addressFits, arrivals, checkWithdraw, units, withdrawHop } from "../src/screens/withdraw/withdraw-form.ts";
 
@@ -30,8 +33,9 @@ test("an address of the arrival chain only: a NEAR account on NEAR, a Solana key
   }
 });
 
-test("where each place's money can arrive: a pool on every chain, in the deposit's To order; Cash on NEAR", () => {
-  assert.deepEqual(arrivals(CASH), ["near"]);
+test("where each place's money can arrive: a pool on every chain, in the deposit's To order; Cash on the chains SIGN_HOST sends it to", () => {
+  assert.equal(arrivals(CASH), CASH_WITHDRAW_DESTS, "the kit's one list, never a copy that can drift from the page's");
+  assert.equal(arrivals(CASH)[0], "near");
   for (const p of [SOL, BASE, HOOD]) assert.deepEqual(arrivals(p), ["near", "solana", "base", "robinhood"], p.chain);
 });
 
@@ -42,7 +46,10 @@ test("the address is checked on the chain the money arrives on, never the place'
   assert.equal(checkWithdraw(HOOD, "robinhood", "0.001", SOL_TO, false).address, "bad");
   assert.equal(checkWithdraw(SOL, "base", "0.05", EVM, false).ready, true);
   assert.equal(checkWithdraw(SOL, "near", "0.05", "alice.near", false).ready, true);
-  assert.equal(checkWithdraw(CASH, "solana", "1", SOL_TO, false).ready, false, "Cash does not arrive on Solana");
+  for (const c of ["solana", "base", "robinhood"] as const) {
+    const to = c === "solana" ? SOL_TO : EVM;
+    assert.equal(checkWithdraw(CASH, c, "1", to, false).ready, (CASH_WITHDRAW_DESTS as readonly string[]).includes(c), `Cash to ${c} only when the page sends it there`);
+  }
 });
 
 test("an amount above zero, no finer than the asset, at most what the place holds; Max is the place's balance", () => {
@@ -68,6 +75,9 @@ test("the tap's request: the place's kind with the address and the amount, or Ma
     // another chain: dest, the chain the money arrives on (the kit's pool.withdraw takes it only with to)
     [withdrawHop(HOOD, "solana", "0.001", SOL_TO, false), { kind: "pool.withdraw", params: { chain: "robinhood", to: SOL_TO, amount: "0.001", dest: "solana" } }],
     [withdrawHop(SOL, "near", "", "alice.near", true), { kind: "pool.withdraw", params: { chain: "solana", to: "alice.near", max: true, dest: "near" } }],
+    // Cash to another chain: dest, as a pool's (the kit's withdraw.open takes it only with to); on NEAR none, as before
+    [withdrawHop(CASH, "solana", "12.5", SOL_TO, false), { kind: "withdraw.open", params: { to: SOL_TO, amount: "12.5", dest: "solana" } }],
+    [withdrawHop(CASH, "base", "", EVM, true), { kind: "withdraw.open", params: { to: EVM, max: true, dest: "base" } }],
   ] as const;
   for (const [got, want] of cases) assert.deepEqual(got, want);
 });

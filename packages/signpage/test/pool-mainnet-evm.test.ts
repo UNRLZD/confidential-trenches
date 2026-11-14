@@ -152,7 +152,10 @@ test("on SIGN_HOST's build a state read follows a Base and a Robinhood buy left 
   }
 });
 
-test("on SIGN_HOST's build a chain whose pool list is not exactly two providers shows no positions and reads nothing for them", async () => {
+// card evm-buy-shows-coin-and-proof-after-fill: SIGN_HOST's lists are longer than two (Base five, Robinhood four), so a
+// list of three reads its positions too: the pair's heads (no W), and each W on the helper's route alone (decision M359),
+// never a W named to a provider of the list. A list of one makes no pair: no positions and no read.
+test("on SIGN_HOST's build a pool list of one shows no positions and reads nothing; a list of three reads them, each W on the helper's route alone", async () => {
   const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
   const { noteCommitment, noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
   const { evmPoolScopeOf, EVM_CHAIN_IDS } = await import("../../wallet/src/pool/evm.ts");
@@ -179,7 +182,9 @@ test("on SIGN_HOST's build a chain whose pool list is not exactly two providers 
   const W = k.address.toLowerCase();
   await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "filled", received: "1", route: { venue: "uniswap-v3", adapter: "0x" + "ad".repeat(20), path: { kind: "v3", fee: 500 }, tx: "0x" + "11".repeat(32), block: "90" } } }));
   const asked: string[] = [];
-  const any = (url: string): EvmRpc => Object.assign(async (method: string) => (asked.push(`${url} ${method}`), method === "eth_blockNumber" ? "0x64" : { number: "0x64", hash: "0x" + "4b".repeat(32) }), { url });
+  // every param a list provider is sent, lower case: none may name W
+  const params: string[] = [];
+  const any = (url: string): EvmRpc => Object.assign(async (method: string, ps: readonly unknown[] = []) => (asked.push(`${url} ${method}`), params.push(JSON.stringify(ps).toLowerCase()), method === "eth_blockNumber" ? "0x64" : { number: "0x64", hash: "0x" + "4b".repeat(32) }), { url });
   const fetched: string[] = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request) => (fetched.push(String(input instanceof Request ? input.url : input)), new Response("{}", { status: 429 }))) as typeof fetch;
@@ -192,11 +197,21 @@ test("on SIGN_HOST's build a chain whose pool list is not exactly two providers 
         positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: () => {} },
       });
       for (let i = 0; i < 10; i++) {
+        // the helper answers 429 here, so W has no agreed amount and no row, in both cases
         assert.deepEqual(((await t.positions()) ?? []).filter((p) => p.chain === "base"), [], `${list.length} providers: no row`);
         for (const f of timers.splice(0)) f();
         await new Promise((ok) => setTimeout(ok, 10));
       }
-      assert.deepEqual([...asked, ...fetched].filter((x) => !x.endsWith("eth_getLogs")), [], `${list.length} providers: no positions read`);
+      const reads = [...asked, ...fetched].filter((x) => !x.endsWith("eth_getLogs"));
+      if (list.length === 1) assert.deepEqual(reads, [], "1 provider: no positions read");
+      else {
+        assert.ok(fetched.some((u) => u.endsWith("/v1/rpc/base")), "3 providers: W is read on the helper's route");
+        assert.ok(asked.length > 0 && asked.every((x) => x.endsWith(" eth_blockNumber") || x.endsWith(" eth_getBlockByNumber") || x.endsWith(" eth_call")), `3 providers: the list reads heads only: ${asked.join(", ")}`);
+        assert.ok(!params.some((x) => x.includes(W.slice(2))), "3 providers: no W named to a provider of the list");
+      }
+      fetched.length = 0;
+      asked.length = 0;
+      params.length = 0;
       await t.signedOut();
     }
   } finally {

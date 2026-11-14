@@ -21,6 +21,11 @@
 //   poolwithdrawdest  the message the app's Withdraw sends for a Robinhood pool to Solana (card withdraw-in-app-to-any-chain,
 //            WithdrawForm.tsx withdrawHop: pool.withdraw with chain robinhood, a Solana address and dest solana): SIGN_HOST's
 //            Confirm sheet for the Robinhood pool, the dest taken (no Not available line), no field to type into
+//   cashwithdrawdest  the message the app's Withdraw sends for Cash to Solana (card cash-withdraw-in-app-to-any-chain,
+//            withdraw-form.ts withdrawHop: withdraw.open with a Solana address and dest solana): SIGN_HOST's Cash Confirm
+//            sheet, no field to type into. While the kit's CASH_WITHDRAW_DESTS holds Solana the dest is taken (the form's
+//            chain solana, no Not available line); while it does not, the dest is refused on its own line and Confirm is
+//            off, the form's chain left NEAR: never sent on NEAR in its place
 //   thief    both withdraw forms again, opened from an app that takes the keyboard's focus every 5 ms from before the
 //            open and reads every key, paste and text input it gets; the user taps To, types and pastes. The rule: the
 //            app reads nothing (0 keys, no paste), To holds it all and has the focus, the frame out of the page
@@ -52,6 +57,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CASH_WITHDRAW_DESTS } from "@blindfill/kit";
 import { addAuthenticator, cdpFor, HOSTS, REAL, startHarness } from "../../harness/harness.mjs";
 
 export const WIDTHS = [
@@ -63,7 +69,7 @@ export const WIDTHS = [
 export const TYPED = new Set(["words", "withdraw", "poolwithdraw", "backup", "backup2"]);
 // the closing controls a tap closes by: each is tapped twice, the second tap where the first was, as a double tap
 const TAPPED = new Set(["x", "scrim", "saved", "cancel"]);
-export const VIEWS = ["signin", "words", "choose", "existing", "backup", "backup2", "signout", "withdraw", "poolwithdraw", "withdrawconfirm", "poolwithdrawconfirm", "poolwithdrawdest"];
+export const VIEWS = ["signin", "words", "choose", "existing", "backup", "backup2", "signout", "withdraw", "poolwithdraw", "withdrawconfirm", "poolwithdrawconfirm", "poolwithdrawdest", "cashwithdrawdest"];
 const ROUTE = "/discover";
 const GUARD_MS = 600; // past SIGN_HOST's 500 ms activation guard (packages/signpage/src/guard.ts)
 const WAIT_MS = 15_000;
@@ -88,6 +94,13 @@ export function judge(rec) {
       if (!v.sheet) bad.push("no sheet box on screen");
       // the cross-chain Confirm: the Robinhood pool's, given by the app, its dest taken
       if (name === "poolwithdrawdest" && (v.confirm?.chain !== "robinhood" || v.confirm?.given !== "app" || v.confirm?.destRefused !== false)) bad.push(`the Confirm ${JSON.stringify(v.confirm ?? null)}, not the Robinhood pool's with Solana taken`);
+      // Cash to Solana: the Cash Confirm, given by the app; its dest taken only where SIGN_HOST sends Cash to Solana
+      if (name === "cashwithdrawdest") {
+        const reached = CASH_WITHDRAW_DESTS.includes("solana");
+        const c = v.confirm;
+        if (c?.form !== "form" || c?.given !== "app") bad.push(`the Confirm ${JSON.stringify(c ?? null)}, not the Cash form given by the app`);
+        else if (reached ? c.destRefused !== false || c.chain !== "solana" : c.destRefused !== true || c.chain !== "near" || c.goDisabled !== true) bad.push(`the Confirm ${JSON.stringify(c)}, not Solana ${reached ? "taken" : "refused with Confirm off"}`);
+      }
       if (v.topPath !== v.appPath) bad.push(`top path ${v.topPath}, the app's ${v.appPath}`);
       if (TYPED.has(name)) {
         if (v.frame !== "out") bad.push(`frame ${v.frame} under a typed view`);
@@ -472,6 +485,7 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
       ["withdrawconfirm", "withdraw-confirm", { type: "withdraw.open", to: "alice.near", amount: "1", return_key: "withdraw" }, "esc"],
       ["poolwithdrawconfirm", "pool-withdraw-confirm", { type: "pool.withdraw", chain: "solana", to: SOL_TO, amount: "0.001", return_key: "withdraw" }, "x"],
       ["poolwithdrawdest", "pool-withdraw-confirm", { type: "pool.withdraw", chain: "robinhood", to: SOL_TO, amount: "0.001", dest: "solana", return_key: "withdraw" }, "x"],
+      ["cashwithdrawdest", "withdraw-confirm", { type: "withdraw.open", to: SOL_TO, amount: "1", dest: "solana", return_key: "withdraw" }, "esc"],
     ]) {
       await page.waitForTimeout(400);
       m = await newMark();
@@ -480,10 +494,12 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
       if (typed !== 0) throw new Error(`${name}: ${typed} field(s) to type into on the Confirm sheet`);
       await look(name, m);
       // which pool's Confirm, given by the app, and whether its dest was refused (pool-form.ts destLine)
+      // Cash's too (form.ts destLine): its chain, state and whether Confirm is on
       out.views[name].confirm = await page.evaluate(() => {
-        const f = document.querySelector('#signin [data-withdraw="pool"]');
+        const f = document.querySelector('#signin [data-withdraw="pool"], #signin [data-withdraw="form"]');
         const d = f?.querySelector('[data-for="dest"]');
-        return f ? { chain: f.dataset.chain ?? null, given: f.dataset.given ?? null, destRefused: d ? !d.hidden : null } : null;
+        const go = f?.querySelector('button[data-action="withdraw"]');
+        return f ? { form: f.dataset.withdraw, chain: f.dataset.chain ?? null, given: f.dataset.given ?? null, state: f.dataset.state ?? null, destRefused: d ? !d.hidden : null, goDisabled: go ? go.disabled : null } : null;
       });
       await closed(name, by);
     }

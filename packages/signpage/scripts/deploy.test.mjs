@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, checkPins, deploy, liveRuns, servedSources } from "./deploy.mjs";
-import { makeList } from "./release-list.mjs";
+import { headersFor, makeList, parseRules } from "./release-list.mjs";
 import { bundle } from "./build-app.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { signBuilt } from "../../../scripts/signpage-built.mjs";
@@ -202,6 +202,82 @@ test("other policy breaks are refused", () => {
     "/assets/zk/* with inner double spaces": swap(ZK_RULE, ZK_RULE.replace("public, max-age", "public,  max-age")),
     "/assets/zk/* sets its Cache-Control twice": swap(ZK_RULE, `${ZK_RULE}  Cache-Control: public, max-age=31536000, immutable\n`),
     "/assets/zk/* removes a header": swap(ZK_RULE, `${ZK_RULE}  ! X-Content-Type-Options\n`),
+  };
+  for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);
+});
+
+// card signpage-answers-outside-apps: an outside app opens SIGN_HOST's /connect in a popup, and the page answers it through
+// window.opener, which COOP same-origin cuts for a cross-origin opener. Pages joins a header two rules set with a comma,
+// so /connect detaches /*'s COOP and sets unsafe-none; its CSP stays /*'s. Written out here, not read from the gate.
+const CONNECT_RULE = "/connect\n  ! Cross-Origin-Opener-Policy\n  Cross-Origin-Opener-Policy: unsafe-none\n";
+// the real file with the /connect rule right after /* (on a tree before this card, planted there)
+const WITH_CONNECT = REAL.includes(CONNECT_RULE) ? REAL : REAL.replace(WORKER_RULE, `${CONNECT_RULE}${WORKER_RULE}`);
+
+test("the real _headers holds the /connect rule after /*: COOP detached, then unsafe-none, nothing else", () => {
+  assert.ok(REAL.includes(CONNECT_RULE), "public/_headers lacks the /connect rule");
+  assert.ok(REAL.indexOf(CONNECT_RULE) > REAL.indexOf("/*\n"), "the /connect rule is not after /*");
+  assert.deepEqual(checkHeadersFile(REAL), []);
+});
+
+test("every path keeps frame-ancestors 'none' and one site CSP; / keeps COOP same-origin, /connect gets unsafe-none alone", () => {
+  // the file as Pages applies it: every matching rule in order, a `! Header` detaching what earlier rules set
+  const rules = parseRules(REAL);
+  for (const p of ["/", "/connect", "/app.js", "/prover-worker.js", "/prover-thread.js", "/walk-worker.js", "/assets/zk/x.zkey"]) {
+    const csp = headersFor(rules, p)["content-security-policy"] ?? "";
+    assert.ok(csp.split(/[;,]/).some((d) => d.trim() === "frame-ancestors 'none'"), `${p}: ${csp.slice(0, 60)}`);
+  }
+  assert.equal(headersFor(rules, "/connect")["content-security-policy"], headersFor(rules, "/")["content-security-policy"]);
+  assert.equal(headersFor(rules, "/")["cross-origin-opener-policy"], "same-origin");
+  assert.equal(headersFor(rules, "/connect")["cross-origin-opener-policy"], "unsafe-none");
+  assert.equal(headersFor(rules, "/connect/x")["cross-origin-opener-policy"], "same-origin");
+});
+
+test("the /connect rule passes as written, and each way off it is refused", () => {
+  assert.deepEqual(checkHeadersFile(WITH_CONNECT), []);
+  const off = (from, to) => {
+    assert.ok(WITH_CONNECT.includes(from), from);
+    return WITH_CONNECT.replace(from, to);
+  };
+  const set = "  Cross-Origin-Opener-Policy: unsafe-none\n";
+  const bad = {
+    // another path
+    "the rule on /connect/*": off("/connect\n", "/connect/*\n"),
+    "the rule on /connect*": off("/connect\n", "/connect*\n"),
+    "the rule on /Connect": off("/connect\n", "/Connect\n"),
+    "the rule on /": off("/connect\n", "/\n"),
+    // a CSP set or removed on /connect
+    "/connect removes the CSP": off(set, `${set}  ! Content-Security-Policy\n`),
+    "/connect sets a CSP": off(set, `${set}  Content-Security-Policy: frame-src *\n`),
+    "/connect detaches the CSP and sets its own": off(set, `${set}  ! Content-Security-Policy\n  Content-Security-Policy: frame-ancestors *\n`),
+    // another removal, on /connect or on any other rule
+    "/connect also removes Permissions-Policy": off(set, `  ! Permissions-Policy\n${set}`),
+    "/connect removes COOP twice": off(set, `  ! Cross-Origin-Opener-Policy\n${set}`),
+    "/connect removes Permissions-Policy instead": off("  ! Cross-Origin-Opener-Policy\n", "  ! Permissions-Policy\n"),
+    "/* removes COOP": off("  Integrity-Policy:", "  ! Cross-Origin-Opener-Policy\n  Integrity-Policy:"),
+    "/assets/zk/* removes COOP": `${WITH_CONNECT}  ! Cross-Origin-Opener-Policy\n`,
+    // COOP with any other value, missing, twice
+    "COOP same-origin-allow-popups": off(set, "  Cross-Origin-Opener-Policy: same-origin-allow-popups\n"),
+    "COOP same-origin": off(set, "  Cross-Origin-Opener-Policy: same-origin\n"),
+    "COOP unsafe-none with a second value": off(set, "  Cross-Origin-Opener-Policy: unsafe-none, same-origin\n"),
+    "COOP with an inner space": off(set, "  Cross-Origin-Opener-Policy: unsafe-none ;\n"),
+    "COOP set twice": off(set, `${set}${set}`),
+    "a detach and no COOP": off(set, ""),
+    "another header set on /connect": off(set, `${set}  Permissions-Policy: camera=(self)\n`),
+    // the missing detach: Pages joins same-origin and unsafe-none with a comma
+    "no detach": off("  ! Cross-Origin-Opener-Policy\n", ""),
+    "the detach after the set": off(CONNECT_RULE, `/connect\n${set}  ! Cross-Origin-Opener-Policy\n`),
+    // the order and the count of rules
+    "/connect before /*": `${CONNECT_RULE}${WITH_CONNECT.replace(CONNECT_RULE, "")}`,
+    "two /connect rules": off(CONNECT_RULE, `${CONNECT_RULE}${CONNECT_RULE}`),
+    "/connect again later": `${WITH_CONNECT}${CONNECT_RULE}`,
+    // a second extra path, with the same rule
+    "a second extra path (/login)": `${WITH_CONNECT}${CONNECT_RULE.replace("/connect", "/login")}`,
+    "a second extra path (/connect2)": off(CONNECT_RULE, `${CONNECT_RULE}${CONNECT_RULE.replace("/connect", "/connect2")}`),
+    // anything carrying frame-ancestors, detached or set, on /connect or on a file's rule
+    "/connect sets a header carrying frame-ancestors": off(set, `${set}  Content-Security-Policy: frame-ancestors *\n`),
+    "/connect COOP carrying frame-ancestors": off(set, "  Cross-Origin-Opener-Policy: unsafe-none; frame-ancestors *\n"),
+    "the worker's CSP with frame-ancestors *": off(WORKER_RULE, WORKER_RULE.replace("connect-src 'self'", "connect-src 'self'; frame-ancestors *")),
+    "the walk rule detaches the CSP and sets one with frame-ancestors *": off(WALK_RULE, `/walk-worker.js\n  ! Content-Security-Policy\n  Content-Security-Policy: default-src 'none'; script-src 'self'; frame-ancestors *\n`),
   };
   for (const [name, text] of Object.entries(bad)) assert.notDeepEqual(checkHeadersFile(text), [], name);
 });

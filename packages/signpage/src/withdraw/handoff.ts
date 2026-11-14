@@ -49,7 +49,7 @@ import { askDepositQuoteAgain } from "../../../wallet/src/deposit/quote.ts";
 import { readNotes, type NoteRecord, type NoteStore } from "../../../wallet/src/notes/store.ts";
 import { POOL_TESTNET } from "../../../wallet/src/pool/network.ts";
 import { readWithdrawFeeMax } from "../../../wallet/src/withdraw/feemax.ts";
-import { pacedNearRpc } from "../../../wallet/src/pace.ts";
+import { pacedNearRpc, viaSeat } from "../../../wallet/src/pace.ts";
 import { askWithdrawFee, RELEASE_WITHDRAW_RELAYER, type RelayDeps, type RelayOutcome, relayRpc, type RelayRpc, relayWithdraw } from "../../../wallet/src/withdraw/relay.ts";
 import { WITHDRAW_DEADLINE_MAX_MS, withdrawDeadlineMs, withdrawRequest, type WithdrawRequest } from "../../../wallet/src/withdraw/request.ts";
 import type { WalletStore } from "../../../wallet/src/store/index.ts";
@@ -85,6 +85,8 @@ export type HandoffOver = {
   /** The trees and the block time (the pair's own reads otherwise). */
   sync?: () => Promise<{ stateTree: VaultTree; labelTree: VaultTree; newestStateRoot: bigint; newestLabelRoot: bigint }>;
   blockNs?: () => Promise<string>;
+  /** The higher final height of the pair (upperFinalHeight), read right before RESERVED against the quote's window. */
+  height?: () => Promise<number>;
   /** relayWithdraw otherwise. */
   relay?: (seed64: Uint8Array, req: WithdrawRequest, deps: RelayDeps) => Promise<RelayOutcome>;
   /** HANDOFF_WAIT_MAX_MS otherwise. */
@@ -99,10 +101,24 @@ export type HandoffOver = {
  *  fresh quote above the fee the form drew (nothing proved). */
 export type HandoffEnd = { kind: RelayOutcome["kind"] | ArrivalOutcome["kind"]; tx?: string } | { kind: "fee"; fee: bigint };
 
-const pairOf = (network: NearNetwork): readonly [RelayRpc, RelayRpc] => {
+// The release pair (card near-buy-works-on-live): FastNEAR's seat is the helper's keyed route (NEAR_NETWORKS seat), its
+// keyless URL the spare (wallet/src/pace.ts viaSeat, the down time shared with the NEAR trade's nearSeatRpc), so the
+// hand-off's reads (the trees, the block time, the fee cap and storage minimum, the relay's rounds) keep the key's pace
+// and not the keyless 0.39 a second, which held one request's quote-to-send past the helper's quote window (live,
+// 14 Nov 20:5xZ); dRPC device-direct. A network with no seat (testnet) has the keyless URL alone.
+const seatRelayRpc = (network: NearNetwork): RelayRpc => {
   const net = NEAR_NETWORKS[network];
-  return [relayRpc(net.fastnear[0]), relayRpc(net.drpc)];
+  const spare = relayRpc(net.fastnear[0]);
+  if (net.seat === null) return spare;
+  const url = net.seat;
+  const seat = relayRpc(url);
+  return {
+    name: url,
+    query: (params, signal) => viaSeat(url, () => seat.query(params, signal), () => spare.query(params, signal), signal),
+    block: (params, signal) => viaSeat(url, () => seat.block(params, signal), () => spare.block(params, signal), signal),
+  };
 };
+const pairOf = (network: NearNetwork): readonly [RelayRpc, RelayRpc] => [seatRelayRpc(network), relayRpc(NEAR_NETWORKS[network].drpc)];
 
 type Net = {
   network: NearNetwork;
@@ -190,6 +206,7 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
   const vault = net.vault;
   const sync = over.sync ?? (async () => treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] })));
   const blockNs = over.blockNs ?? (() => lowerFinalTime(rpcs));
+  const height = over.height ?? (() => upperFinalHeight(rpcs));
   const relay = over.relay ?? relayWithdraw;
   // `note`: the note the caller picked (the NEAR buy's, withdrawRequest's `note`); none: the request's own pick.
   // `exact`: the request pays the drawn fee (at or above the quote, the relayer takes any fee at or above its fee_min),
@@ -198,14 +215,35 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
   return async (w, drawnFee, note, exact = false, claim) => {
     if (typeof drawnFee !== "bigint") throw new Error("drawnFee: not a bigint");
     ownPair(n);
-    const quote = await askWithdrawFee({ token: net.usdc, relayer, amount: w.amount, fetchFn });
-    if (quote.relayFee > drawnFee) return { kind: "fee", fee: quote.relayFee };
+    // card near-buy-works-on-live: the quote is asked last, after the trees and the block time, right before the proof;
+    // a quote whose window (the helper's FEE_QUOTE_WINDOW_BLOCKS) is about to close when the proof is made is let go
+    // before the note goes RESERVED (the note back UNSPENT, nothing sent) and the request is made again on a fresh quote,
+    // up to HANDOFF_QUOTE_TRIES times: past the window the helper prices at the fee now and refuses a lower one
+    // (fee_too_low), which would hold the note RESERVED until its deadline with nothing paid
+    for (let tryNo = 1; ; tryNo++) {
+      // the last try's stale quote ends it as a fee end: the note UNSPENT, nothing sent, the fee asked again on a tap
+      const end = await once(w, drawnFee, note, exact, claim).catch((e: unknown): HandoffEnd | null => {
+        if (!(e instanceof QuoteStale)) throw e;
+        return tryNo < HANDOFF_QUOTE_TRIES ? null : { kind: "fee", fee: e.fee };
+      });
+      if (end !== null) return end;
+    }
+  };
+  async function once(w: CheckedWithdraw, drawnFee: bigint, note: string | undefined, exact: boolean, claim: (() => Promise<void>) | undefined): Promise<HandoffEnd> {
     const [trees, ns] = await Promise.all([sync(), blockNs()]);
+    const quote = await askWithdrawFee({ token: net.usdc, relayer: relayer!, amount: w.amount, fetchFn });
+    if (quote.relayFee > drawnFee) return { kind: "fee", fee: quote.relayFee };
     const notes = await page.notes();
     const seed = await page.seed64();
     let going: Promise<RelayOutcome>;
     // one deadline per tap: the relay's wait and the arrival read after it share HANDOFF_WAIT_MAX_MS
     const signal = waitSignal(page, over);
+    // right before RESERVED: the quote still open HANDOFF_QUOTE_MARGIN_BLOCKS past both providers' final heights (the
+    // relay's first round and its send), then the caller's own claim
+    const fresh = async (): Promise<void> => {
+      if ((await height()) + HANDOFF_QUOTE_MARGIN_BLOCKS > quote.validUntilBlock) throw new QuoteStale(quote.relayFee);
+      await claim?.();
+    };
     try {
       const req = await withdrawRequest({
         seed64: seed,
@@ -226,7 +264,7 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
         blockTimestampNanosec: ns,
         // after the typed account's wiring, which wallet-withdraw-move-out reads in the build as it is minified
         ...(note === undefined ? {} : { note }),
-        ...(claim === undefined ? {} : { claim }),
+        claim: fresh,
       });
       going = relay(seed, req, { notes, network, rpcs, priceRpcs, fetchFn, signal });
     } finally {
@@ -235,7 +273,36 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
     const o = await going;
     const kind = await arrivedOf(o, w.recipient, n, over, signal);
     return o.kind === "landed" && typeof o.tx === "string" ? { kind, tx: o.tx } : { kind };
-  };
+  }
+}
+
+/** The tries of one hand-off's request on a fresh quote (withdrawHandoff); past them it ends { kind: "fee" }, the note
+ *  UNSPENT and nothing sent. */
+export const HANDOFF_QUOTE_TRIES = 3;
+/** Blocks the quote must stay open past both providers' final heights when the proof is made: the relay's first round
+ *  (the pages, the block time and the fee cap, on the seat) and its send. 30 blocks, about 17 s at mainnet's 0.566 s a
+ *  block (224567754 to 224569370 in 915 s, read 14 Nov 21:15Z), against the helper's 100-block window. */
+export const HANDOFF_QUOTE_MARGIN_BLOCKS = 30;
+/** A quote whose window closes before its request could be sent: the request is made again on a fresh one. */
+export class QuoteStale extends Error {
+  readonly fee: bigint;
+  constructor(fee: bigint) {
+    super("the fee quote's window closes before the request could be sent");
+    this.name = "QuoteStale";
+    this.fee = fee;
+  }
+}
+/** The higher of the two providers' final heights. */
+export async function upperFinalHeight(rpcs: readonly [RelayRpc, RelayRpc]): Promise<number> {
+  const hs = await Promise.all(
+    rpcs.map(async (r) => {
+      const a = (await r.block({ finality: "final" })) as { result?: { header?: { height?: unknown } }; error?: unknown } | null;
+      const h = a?.error === undefined ? a?.result?.header?.height : undefined;
+      if (typeof h !== "number" || !Number.isSafeInteger(h) || h <= 0) throw new Error(`${r.name}: not a final block with its height`);
+      return h;
+    }),
+  );
+  return Math.max(...hs);
 }
 
 /**

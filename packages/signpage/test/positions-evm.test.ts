@@ -762,7 +762,7 @@ test("P3-2: a floor the Deposited named never lapses: read at 1002 on both RPCs,
   await t.signedOut();
 });
 
-test("P3-1: a chain whose pool list has three providers reads no positions (the pair's walking seats can agree on one provider's word): a lies 9 and throttles one call, b throttles; truth 5", async () => {
+test("P3-1: a chain whose pool list has three providers never shows one provider's word (evmPair's walking seats never stand on one provider in an agreed read): a lies 9 and throttles one call, b throttles; truth 5", async () => {
   const w = await wallet();
   await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W1]: rec("base", "filled") }));
   const clock = pageClock();
@@ -797,7 +797,55 @@ test("P3-1: a chain whose pool list has three providers reads no positions (the 
   }
   assert.ok(seen.every((r) => !r.includes("9")), `never one provider's word: ${JSON.stringify(seen.find((r) => r.includes("9")))}`);
   assert.deepEqual(seen.at(-1), []);
-  assert.deepEqual(asked.filter((x) => x.endsWith("balanceOf")), [], "no balance read on a list of three");
+  // the pass reads on a list of three (every mainnet list has more than two), each read on two providers, so a's 9 never
+  // stands alone
+  assert.ok(asked.includes("c balanceOf"), "the pair reads on a list of three");
+  await t.signedOut();
+});
+
+// card evm-buy-shows-coin-and-proof-after-fill: SIGN_HOST's lists are Base's five (its pool list, mainnet.base.org and the
+// helper's keyed-only route) and Robinhood's four (pageEvmPoolRpcs); a rule that read positions only on a list of two
+// left both chains' positions empty on mainnet (the owner's Base XDP buy of 14 Nov 20:46Z filled and showed no row)
+test("a filled Base and Robinhood buy shows its row on lists of SIGN_HOST's sizes: Base five providers, Robinhood four", async () => {
+  const w = await wallet();
+  await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W1]: rec("base", "filled"), [W2]: rec("robinhood", "filled") }));
+  const clock = pageClock();
+  const provider = (host: string, held: Record<string, bigint>): EvmRpc =>
+    Object.assign(
+      async (method: string, params: readonly unknown[]) => {
+        const c = params[0] as { data?: string } | undefined;
+        if (method === "eth_blockNumber") return hex(100n);
+        if (method === "eth_call" && c?.data === "0x313ce567") return word(6);
+        if (method === "eth_call" && c?.data?.startsWith("0x70a08231")) return word(held[`0x${c.data.slice(-40)}`] ?? 0n);
+        throw new Error(`no such read: ${method}`);
+      },
+      { url: `https://${host}.example` },
+    );
+  const base = { [W1.toLowerCase()]: 12_345_678n };
+  const robinhood = { [W2.toLowerCase()]: 3_000_000n };
+  const lists = {
+    base: ["b1", "b2", "b3", "b4", "b5"].map((h) => provider(h, base)),
+    robinhood: ["r1", "r2", "r3", "r4"].map((h) => provider(h, robinhood)),
+  };
+  const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => PINS[c],
+    evmRpcs: (c) => lists[c],
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => fakeEvmPool(),
+    positions: { setTimer: clock.setTimer, clearTimer: () => {} },
+    positionsNow: clock.now,
+  });
+  let rows: { chain: string; amount: string }[] = [];
+  for (let s = 0; s < 30 && rows.length < 2; s++) {
+    await t.positions();
+    await clock.go(1_000);
+    rows = ((await t.positions()) ?? []).filter((p) => p.chain !== "solana").map((p) => ({ chain: p.chain, amount: p.amount }));
+  }
+  assert.deepEqual(rows.sort((a, b) => a.chain.localeCompare(b.chain)), [
+    { chain: "base", amount: "12.345678" },
+    { chain: "robinhood", amount: "3" },
+  ]);
   await t.signedOut();
 });
 

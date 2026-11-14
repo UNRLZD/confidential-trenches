@@ -1,7 +1,18 @@
 {
   "name": "@blindfill/kit",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/UNRLZD/confidential-trenches.git",
+    "directory": "packages/kit"
+  },
+  "homepage": "https://github.com/UNRLZD/confidential-trenches/tree/main/packages/kit#readme",
   "type": "module",
+  "files": ["dist"],
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.core.json",
     "test": "tsc -p tsconfig.json && tsc -p tsconfig.core.json && node -e \"import('@blindfill/kit').then(m => { if (!m.SIGNPAGE_KINDS || !m.ZK_SETUP_FILES) process.exit(1) })\" && node --test \"test/*.test.mjs\" \"test/*.test.ts\" \"test/prover/*.test.mjs\"",
     "test:mutants": "MUTANT_PART=1/2 node --test test/mutants/evm-pool-mutants.test.mjs && MUTANT_PART=2/2 node --test test/mutants/evm-pool-mutants.test.mjs && node --test test/mutants/pool-deposit-mutants.test.mjs && MUTANT_PART=1/2 node --test test/mutants/pool-usd-mutants.test.mjs && MUTANT_PART=2/2 node --test test/mutants/pool-usd-mutants.test.mjs && node --test test/mutants/vault-settle-mutants.test.mjs && node --test test/mutants/near-rhea-mutants.test.mjs && node --test test/mutants/near-swap-mutants.test.mjs && node test/evm-quote-mutants.mjs 1/2 && node test/evm-quote-mutants.mjs 2/2",
@@ -12,10 +23,22 @@
     "./core": { "types": "./src/core.ts", "default": "./src/core.ts" },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/kit/src/index.js",
+    "types": "./dist/kit/src/index.d.ts",
+    "exports": {
+      ".": { "types": "./dist/kit/src/index.d.ts", "default": "./dist/kit/src/index.js" },
+      "./core": { "types": "./dist/kit/src/core.d.ts", "default": "./dist/kit/src/core.js" },
+      "./package.json": "./package.json"
+    }
+  },
   "dependencies": {
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
     "@scure/base": "2.4.0",
+    "@scure/bip32": "2.4.0",
+    "@scure/bip39": "2.4.0",
     "@zk-kit/lean-imt": "2.2.4",
     "poseidon-lite": "0.3.0"
   },

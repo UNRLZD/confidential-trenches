@@ -503,6 +503,7 @@ test("card sign-out-stops-the-pages-reads: the page's fetch is the gate; it clos
   assert.match(own, /const still = hostLanesClosed\(\) \? undefined : await readSeed\(\)\.catch\(\(\) => undefined\);\n\s+if \(still !== undefined\) \{\n\s+still\.entropy\.fill\(0\);\n\s+leaving = false;\n(?:\s+\/\/[^\n]*\n)?\s+quotesSignedIn\(\);\n\s+throw refused\.e;\n\s+\}\n\s+return reloadSignedOut\(\);/, "a refusal stays signed in only with the seed still stored, else reloads");
   assert.equal(lines(own).at(-1), "reloadSignedOut();", "a sign out that landed reloads");
   assert.equal(lines(body("landed", "(l: Landing): Promise<void>"))[0], "if (hostLanesClosed()) return void (l.seed.entropy.fill(0), location.reload());", "a landing on a closed gate reloads");
-  assert.match(src, /kinds: whileSignedIn\(follows!\.withFollow\(\{/, "every shell kind is refused while leaving");
+  // an outside app's kinds (src/outside.ts, kindsFor) are cut from these, so the gate stays on every one of them
+  assert.match(src, /kinds: kindsFor\(whileSignedIn\(follows!\.withFollow\(\{/, "every shell kind is refused while leaving");
   assert.match(src, /\(\.\.\.a: never\[\]\) => \(leaving \? null : f\(\.\.\.a\)\)/, "refused not_allowed (null) while leaving");
 });

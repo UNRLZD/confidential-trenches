@@ -9,7 +9,7 @@
 //   - hopDest: the Withdraw tap's pool.withdraw carries the arrival chain as `dest` when it is not the pool's own
 //     (src/screens/withdraw/withdraw-form.ts withdrawHop);
 //   - addressOnArrival: the address is checked on the arrival chain, one the place can reach (checkWithdraw over
-//     arrivals: a pool's every chain, Cash's NEAR), never on the place's own chain.
+//     arrivals: a pool's every chain, Cash's NEAR or the kit's list of Cash's chains), never on the place's own chain.
 // What the form draws and sends at 390 and 1440 is apps/terminal/test/withdraw-form/run.mjs; SIGN_HOST's Confirm for
 // that message is test/e2e/signing-sheet/run.mjs (poolwithdrawdest); the shapes are test/withdraw-form.test.ts.
 // The recorded answers are facts() over `pnpm --filter terminal build` builds.
@@ -31,8 +31,10 @@ const ROW_IN_APP = new RegExp(`kind===\`pool-withdraw\`\\)return ${N}\\.includes
 const ROW_BARE = /\{to:`pool\.withdraw`,params:\{chain:/;
 // withdrawHop's pool request: dest when the arrival chain is not the pool's own (either order of the ternary)
 const HOP_DEST = new RegExp(`\\{kind:\`pool\\.withdraw\`,params:\\{chain:(${N})\\.chain,\\.\\.\\.${N},\\.\\.\\.(?:(${N})===\\1\\.chain\\?\\{\\}:\\{dest:\\2\\}|(${N})!==\\1\\.chain\\?\\{dest:\\3\\}:\\{\\})\\}\\}`);
-// arrivals(place): a pool's every chain, Cash's NEAR; checkWithdraw's address: arrivals(place).includes(dest) && fits on dest
-const ARRIVALS = new RegExp(`function (${N})\\((${N})\\)\\{return \\2\\.kind===\`pool\\.withdraw\`\\?${N}:\\[\`near\`\\]\\}`);
+// arrivals(place): a pool's every chain, Cash's NEAR, or the kit's CASH_WITHDRAW_DESTS by name since card
+// cash-withdraw-in-app-to-any-chain (whose own check reads that list); checkWithdraw's address: arrivals(place).includes(dest)
+// && fits on dest
+const ARRIVALS = new RegExp(`function (${N})\\((${N})\\)\\{return \\2\\.kind===\`pool\\.withdraw\`\\?${N}:(?:\\[\`near\`\\]|${N})\\}`);
 
 /** What the check keeps of APP_HOST's page scripts: how many, and the marks read from them. */
 export function facts(scripts) {

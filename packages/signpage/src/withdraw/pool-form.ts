@@ -314,6 +314,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   destPick.value = chain;
   if (deps.exits !== undefined) destRow.append(destName, destPick);
   destRow.hidden = deps.exits === undefined;
+  destRow.style.display = destRow.hidden ? "none" : "flex"; // an inline display would draw the row over `hidden`
   const destOf = (): ExitChain => (EXIT_CHAINS as readonly string[]).includes(destPick.value) && (destPick.value === chain || (deps.exits ?? []).includes(destPick.value as ExitChain)) ? (destPick.value as ExitChain) : chain;
   const to = field("to");
   const amount = field("amount");

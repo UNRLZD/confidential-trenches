@@ -25,6 +25,14 @@
 // before it, it waits SIGNPAGE_HANDSHAKE_MS for a ready. Everything else is the iframe mode's, so an app sees the same
 // snapshots and outcomes in both.
 //
+// Popup mode (mode "popup", card signpage-answers-outside-apps): an outside app, at its own address, reaches SIGN_HOST
+// as web wallets do. The client opens SIGN_HOST's /connect with host.open (window.open), so it is made in the user's own
+// tap, never on load; it mounts no iframe. Its one peer is that popup: a message counts only when its source is the
+// popup's window and its origin SIGN_HOST's, and every post goes to the popup with targetOrigin SIGN_HOST's origin,
+// never "*". Until the page's ready it posts its hello every SIGNPAGE_KNOCK_MS: the popup's page shows the user a connect
+// step naming this app's origin (as the browser checked it) and answers nothing until Allow, then posts its ready, and
+// the handshake runs as in parent mode. destroy() closes the popup. Everything else is parent mode's.
+//
 // Kit version (card kit-frame-version): before each handshake `state` request the client posts a hello naming
 // SIGNPAGE_KIT_VERSION (messages.ts HelloMessage), so the page sends it only what this version reads; a page of an
 // earlier release drops the hello unanswered. A state's op this client cannot read is left out, never the whole state.
@@ -56,6 +64,8 @@ export { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_MAX_DEPTH, SIGN
 
 /** The `api` of messages.ts, the only one this client speaks. */
 export const SIGNPAGE_CLIENT_API = 1;
+/** Popup mode: how often the hello goes to the popup until its page's ready (a post before its page loads is dropped). */
+export const SIGNPAGE_KNOCK_MS = 500;
 /** No `ready` in this long after the mount, or no `state` answer this long after the ready, and the client is down. */
 export const SIGNPAGE_HANDSHAKE_MS = 5_000;
 /** While down, a fresh iframe at least this often (the longest wait of the retry backoff). */
@@ -162,10 +172,13 @@ export interface SignpageClientHost {
   mount: Pick<HTMLElement, "appendChild">;
   /** Parent mode: the shell's window, the app's window.parent. */
   parent?: Pick<Window, "postMessage">;
+  /** Popup mode: opens `url` (SIGN_HOST's /connect) in a popup and gives its window: window.open, in the user's tap. */
+  open?: (url: string) => (Pick<Window, "postMessage"> & { close?(): void }) | null;
 }
 
-/** "iframe": a hidden iframe of SIGN_HOST (the default). "parent": the app runs inside SIGN_HOST's shell. */
-export type SignpageClientMode = "iframe" | "parent";
+/** "iframe": a hidden iframe of SIGN_HOST (the default). "parent": the app runs inside SIGN_HOST's shell. "popup": an
+ *  outside app opens SIGN_HOST's /connect in a popup from the user's tap. */
+export type SignpageClientMode = "iframe" | "parent" | "popup";
 
 export interface SignpageClientOptions {
   /** SIGN_HOST's release URL, for example "https://confidential.unrealized.trade/": https, no query, no fragment. */
@@ -255,9 +268,13 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   const { host } = opts;
   const retryMs = opts.retryMs ?? SIGNPAGE_RETRY_MS;
   const mode: unknown = opts.mode === undefined ? "iframe" : opts.mode;
-  if (mode !== "iframe" && mode !== "parent") throw new TypeError(`signpage: no such mode ${String(mode)}`);
-  /** Parent mode's shell window; null in the iframe mode. */
-  const shell = mode === "parent" ? (host.parent ?? null) : null;
+  if (mode !== "iframe" && mode !== "parent" && mode !== "popup") throw new TypeError(`signpage: no such mode ${String(mode)}`);
+  if (mode === "popup" && typeof host.open !== "function") throw new TypeError("signpage: popup mode needs host.open");
+  /** Popup mode's window: SIGN_HOST's /connect, opened now (the caller is in the user's tap). */
+  const popup = mode === "popup" ? (host.open!(`${origin}/connect`) ?? null) : null;
+  if (mode === "popup" && popup === null) throw new TypeError("signpage: the popup did not open: make the client in the user's tap");
+  /** The one peer with no iframe: parent mode's shell window, or popup mode's popup; null in the iframe mode. */
+  const shell = mode === "parent" ? (host.parent ?? null) : popup;
   if (mode === "parent" && (shell === null || shell === (host.window as unknown))) {
     throw new TypeError("signpage: parent mode needs host.parent, a window other than host.window");
   }
@@ -464,6 +481,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   };
 
   const onReady = (msg: { release: string; api: number }) => {
+    stopKnock();
     if (msg.api !== SIGNPAGE_CLIENT_API) return toUpdate();
     clearTimer(retryTimer);
     retryTimer = null;
@@ -621,6 +639,8 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
       host.window.removeEventListener("message", onMessage);
       host.window.removeEventListener("online", wake);
       host.window.removeEventListener("visibilitychange", wake);
+      stopKnock();
+      popup?.close?.();
       frame?.remove();
       frame = null;
       listeners.clear();
@@ -633,8 +653,14 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
   host.window.addEventListener("message", onMessage);
   host.window.addEventListener("online", wake);
   host.window.addEventListener("visibilitychange", wake);
+  // popup mode: the hello again every SIGNPAGE_KNOCK_MS until the page's ready (its page drops posts before it loads)
+  let knock: Timer | null = popup === null ? null : setInterval(hello, SIGNPAGE_KNOCK_MS);
+  function stopKnock(): void {
+    if (knock !== null) clearInterval(knock);
+    knock = null;
+  }
   // parent mode: the shell keeps a closed sheet's dim over this document until it says it has painted (PaintedMessage)
-  if (shell !== null) {
+  if (shell !== null && popup === null) {
     onFirstContentPaint(host.window, () => {
       if (destroyed) return;
       const msg: PaintedMessage = { v: 1, type: "painted" };

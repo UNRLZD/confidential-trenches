@@ -21,6 +21,7 @@
 // Nothing here logs.
 import { checkOneClickQuote, ONECLICK_USDC_ASSETS, type OneClickRequest } from "../../../kit/src/checks/oneclick.ts";
 import { NEAR_NETWORKS } from "../../../kit/src/near/networks.ts";
+import { CASH_WITHDRAW_DESTS } from "../../../kit/src/signpage/messages.ts";
 import { DEPOSIT_QUOTE_DEADLINE_MS, DEPOSIT_QUOTE_SLIPPAGE_BPS } from "../../../wallet/src/deposit/quote.ts";
 import { DEPOSIT_QUOTE_PATH } from "../rules/deposit-dry.ts";
 import { checkPoolTo } from "./address.ts";
@@ -31,8 +32,10 @@ export type OnwardChain = "solana" | "base";
 export type WithdrawChain = "near" | OnwardChain;
 // NEAR only for now: a part 1Click refunds lands under V_{l,j} inside intents.near, and Solana and Base join this list
 // with the carry that brings it back to Cash (cards v-binds-into-the-vault, onward-refund-comes-back), never before:
-// no send may leave money the app cannot move.
-export const WITHDRAW_CHAINS: readonly WithdrawChain[] = Object.freeze(["near"]);
+// no send may leave money the app cannot move. The list is the kit's CASH_WITHDRAW_DESTS (card
+// cash-withdraw-in-app-to-any-chain), so the app offers exactly the chains this form sends to; a chain added there that
+// this file has no address rule and USDC pin for fails the typecheck here.
+export const WITHDRAW_CHAINS: readonly WithdrawChain[] = CASH_WITHDRAW_DESTS;
 
 /** NEAR's USDC on 1Click: the vault's token, what every part leaves the vault in. */
 export const ONWARD_ORIGIN = `nep141:${NEAR_NETWORKS.mainnet.usdc}`;

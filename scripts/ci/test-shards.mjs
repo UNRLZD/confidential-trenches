@@ -257,6 +257,8 @@ export const PACKAGE_SECONDS = {
   "tests @confidential-trenches/helper": 191,
   "tests @blindfill/exit": 42,
   "tests terminal": 24,
+  // examples/agent's guard test (card example-agent-full-cycle): 4 tests, under a second on the Mac, rounded up
+  "tests blindfill-agent-example": 1,
   typecheck: 25,
   "deploy gate": 1,
   "live-check replays": 74,

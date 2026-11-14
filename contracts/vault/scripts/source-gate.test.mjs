@@ -46,7 +46,8 @@ function origin() {
   put(src, "packages/wallet/package.json", JSON.stringify({ name: "@blindfill/wallet" }));
   put(src, "packages/wallet/src/deposit/bind.ts", "export const x = 1;\n");
   put(src, "packages/wallet/src/withdraw/request.ts", "export const y = 1;\n");
-  git(src, "add", "--", ".gitignore", "packages");
+  put(src, "examples/agent/package.json", JSON.stringify({ name: "blindfill-agent-example" }));
+  git(src, "add", "--", ".gitignore", "packages", "examples");
   git(src, "commit", "-q", "-m", "old");
   const old = git(src, "rev-parse", "HEAD");
   put(src, "packages/wallet/src/deposit/bind.ts", "export const x = 2;\n");
@@ -255,6 +256,25 @@ test("L1 (B, C, D, H; review 5): a node_modules folder pnpm does not make, a dot
   unlinkSync(path.join(h, "packages/wallet/node_modules/fake-indexeddb"));
   cpSync(path.join(h, "node_modules/.pnpm/fake-indexeddb@1/node_modules/fake-indexeddb"), path.join(h, "packages/wallet/node_modules/fake-indexeddb"), { recursive: true });
   refuses(h, o.head, /fake-indexeddb from packages\/wallet\/package\.json resolves to .*outside node_modules\/\.pnpm of the clone/);
+});
+
+test("F1 (release 145): examples/*, a workspace folder as apps/* and packages/* are, holds pnpm's node_modules once installed; a link in it outside the clone, or a node_modules below its src, is refused", () => {
+  const o = origin();
+  // the merge queue's run 43640964674: pnpm install made examples/agent/node_modules, refused as a stray
+  const a = clone(o);
+  mkdirSync(path.join(a, "examples/agent/node_modules/@blindfill"), { recursive: true });
+  symlinkSync("../../../../packages/kit", path.join(a, "examples/agent/node_modules/@blindfill/kit"));
+  assert.deepEqual(gate({ root: a, commit: o.head }), []);
+  // planted: its link points outside the clone
+  const b = clone(o);
+  put(o.root, "evil-example-kit/package.json", JSON.stringify({ name: "@blindfill/kit" }));
+  mkdirSync(path.join(b, "examples/agent/node_modules/@blindfill"), { recursive: true });
+  symlinkSync(path.join(o.root, "evil-example-kit"), path.join(b, "examples/agent/node_modules/@blindfill/kit"));
+  refuses(b, o.head, /examples\/agent\/node_modules\/@blindfill\/kit links outside the clone/);
+  // planted: a node_modules pnpm does not make, below the example's own folders
+  const c = clone(o);
+  put(c, "examples/agent/src/node_modules/evil.js", "x\n");
+  refuses(c, o.head, /does not hold \(examples\/agent\/src/);
 });
 
 test("L1 (E, review 5): a replace ref that swaps the commit's tree is not honoured: the files are read against the commit's own tree", () => {

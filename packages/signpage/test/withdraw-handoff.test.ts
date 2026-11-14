@@ -904,3 +904,80 @@ test("the cash run stops at the first withdrawal that does not leave the vault: 
   // a plan whose parts are not the amount is refused before anything is asked
   await assert.rejects(run({ recipient: "alice.testnet", amount: max + 1n, parts }, RELAY_FEE), /parts: not the amount/);
 });
+
+// ---------- card near-buy-works-on-live: the quote's window ----------
+// The helper keeps a fee quote FEE_QUOTE_WINDOW_BLOCKS (100) blocks (apps/helper/src/withdraw/fee.ts); past it a POST is
+// priced at the fee now and a lower relay_fee is refused fee_too_low, which holds the note RESERVED until its deadline
+// with nothing paid (live 14 Nov 20:5xZ: a $1 NEAR buy's payout never reached the chain, its note held). A chain of
+// heights stands in for the network: each quote is the fee at its height, open 100 blocks; fee_min rises one unit a
+// block; the fake relay answers as the helper's POST does at the height it is sent.
+function windowWorld(o: { slowSync?: number; slowProofs?: number[] } = {}) {
+  const c = { h: 1_000, quotes: [] as { fee: bigint; until: number }[], answers: [] as string[], sent: [] as WithdrawRequest[], proofs: 0 };
+  const feeMin = (h: number) => RELAY_FEE + BigInt(h - 1_000);
+  const fetchFn = (async () => {
+    const q = { fee: feeMin(c.h), until: c.h + 100 };
+    c.quotes.push(q);
+    return new Response(JSON.stringify(feeAnswer({ relay_fee: String(q.fee), valid_until_block: q.until })), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const over = (v: World): HandoffOver => ({
+    fetchFn,
+    height: async () => c.h,
+    sync: async () => {
+      c.h += o.slowSync ?? 0; // the trees' reads take their blocks
+      return { stateTree: v.stateTree, labelTree: v.labelTree, newestStateRoot: v.stateTree.root!, newestLabelRoot: v.labelTree.root! };
+    },
+    relay: async (_seed, req) => {
+      c.sent.push(req);
+      const fee = BigInt(req.body.withdrawal.relay_fee);
+      const open = c.quotes.filter((q) => q.until >= c.h).map((q) => q.fee);
+      const floor = [feeMin(c.h), ...open].reduce((a, b) => (a < b ? a : b));
+      if (fee < floor) {
+        c.answers.push("fee_too_low");
+        // the real relay stops sending and waits for the deadline: the note stays RESERVED meanwhile
+        return { kind: "expired", note: (await v.ns.get(req.noteId))!, route: "relayer", lastAnswer: "fee_too_low" };
+      }
+      c.answers.push("submitted");
+      return { kind: "landed", own: true, change: (await v.ns.get(req.noteId))!, spend: {} as never, tx: null };
+    },
+  });
+  const prover: VaultProver = {
+    async load() {},
+    async prove(circuit, input) {
+      c.h += o.slowProofs?.[c.proofs] ?? o.slowProofs?.at(-1) ?? 0; // the proof takes its blocks
+      c.proofs += 1;
+      return snarkProver.prove(circuit, input);
+    },
+  };
+  return { c, over, prover };
+}
+
+test("quote-to-send past the helper's 100-block window with fee_min rising: the quote is asked after the slow reads, so the request is sent inside its window and lands (red: fee_too_low)", async () => {
+  const v = await world([5_000_000n]);
+  const { c, over, prover } = windowWorld({ slowSync: 120 });
+  const h = await handoffOf(v, page(v, prover), over(v));
+  const end = await h({ recipient: "ab".repeat(32), amount: 1_000_000n }, RELAY_FEE + 1_000n);
+  assert.deepEqual(c.answers, ["submitted"], "the helper's answer to the one request sent");
+  assert.deepEqual(end, { kind: "landed" });
+});
+
+test("a proof that outlasts the quote's window: the note goes back UNSPENT before anything is sent, the request is quoted and proved again in the same tap, and lands (red: sent stale, fee_too_low, the note held RESERVED)", async () => {
+  const v = await world([5_000_000n]);
+  const { c, over, prover } = windowWorld({ slowProofs: [150, 0] });
+  const h = await handoffOf(v, page(v, prover), over(v));
+  const end = await h({ recipient: "ab".repeat(32), amount: 1_000_000n }, RELAY_FEE + 1_000n);
+  assert.deepEqual(c.answers, ["submitted"], "only the fresh request is sent");
+  assert.equal(c.proofs, 2, "proved again on the fresh quote");
+  assert.equal(c.sent[0]!.body.withdrawal.relay_fee, String(c.quotes.at(-1)!.fee), "the fee of the fresh quote");
+  assert.deepEqual(end, { kind: "landed" });
+});
+
+test("every proof outlasts its quote's window: after the tries the hand-off ends with nothing sent and the note UNSPENT at once, never held RESERVED (red: RESERVED with a stale request)", async () => {
+  const v = await world([5_000_000n]);
+  const { c, over, prover } = windowWorld({ slowProofs: [150] });
+  const h = await handoffOf(v, page(v, prover), over(v));
+  const end = await h({ recipient: "ab".repeat(32), amount: 1_000_000n }, RELAY_FEE + 10_000n);
+  const [n] = await v.ns.list();
+  assert.equal(n!.state, "UNSPENT", "Cash holds the whole note again");
+  assert.deepEqual(c.answers, [], "nothing sent");
+  assert.equal(end.kind, "fee");
+});

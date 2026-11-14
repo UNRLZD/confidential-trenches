@@ -6,7 +6,8 @@
 // "This paper does not copy that walk"). The names are pinned in test/core-names.test.ts, so core never grows silently.
 // No other file of the kit reaches this file or the wallet, by any path or by the kit's own name
 // (.dependency-cruiser.cjs kit-entry-never-core), so the public entry (./index.ts) never holds the seed tools.
-// Workspace only: the kit is never packed (every user takes it as workspace:*), so ../../wallet/src resolves in the tree.
+// In the workspace every user takes the kit as workspace:*, so ../../wallet/src resolves in the tree; the npm tarball
+// (card kit-on-npm, scripts/build.mjs) carries the wallet files this reaches, built, under dist/wallet/src/.
 export {
   restoreNotes,
   restorePages,

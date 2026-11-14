@@ -9,6 +9,8 @@ import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { CHECK_IDLE_MS, drawWithdrawForm, evaluate, formatUnits, type GivenWithdraw, refusalWords, WITHDRAW_WORDS } from "../src/withdraw/form.ts";
 import { RELEASE_WITHDRAW_RELAYER } from "../../wallet/src/withdraw/relay.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "../src/withdraw/handoff.ts";
+import { WITHDRAW_CHAINS, type WithdrawChain } from "../src/withdraw/onward.ts";
+import { CASH_WITHDRAW_DESTS } from "../../kit/src/signpage/messages.ts";
 
 const MAIN = NEAR_NETWORKS.mainnet;
 const VIEW = { jsonrpc: "2.0", result: { amount: "1", block_hash: "x", block_height: 222692520, code_hash: "11111111111111111111111111111111", locked: "0", storage_paid_at: 0, storage_usage: 100 } };
@@ -129,7 +131,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settle = () => sleep(CHECK_IDLE_MS + 60);
 
 /** A drawn form whose RPCs answer from `exists` (an account's name -> it exists) and may be held by `gate`. */
-function drawn(over: { cash?: () => Promise<{ id: string; value: bigint }[]>; fee?: () => Promise<bigint>; handoff?: boolean; end?: (step: (i: number, kind: string) => void) => { kind: string; fee?: bigint } | void; unmatched?: () => number; given?: GivenWithdraw } = {}) {
+function drawn(over: { cash?: () => Promise<{ id: string; value: bigint }[]>; fee?: () => Promise<bigint>; handoff?: boolean; end?: (step: (i: number, kind: string) => void) => { kind: string; fee?: bigint } | void; unmatched?: () => number; given?: GivenWithdraw; chains?: readonly WithdrawChain[] } = {}) {
   const exists = new Set(["alice.near", "bob.near"]);
   let gate: Promise<void> | null = null;
   const view = (name: string): NearRpc => ({
@@ -153,6 +155,7 @@ function drawn(over: { cash?: () => Promise<{ id: string; value: bigint }[]>; fe
   };
   const deps = {
     network: "mainnet" as const,
+    ...(over.chains ? { chains: over.chains } : {}),
     rpcs: [view(MAIN.fastnear[0]), view(MAIN.drpc)] as const,
     cash: over.cash ?? (async () => [{ id: "a", value: 10_000_000n }]),
     available: async () => 10_000_000n,
@@ -453,6 +456,8 @@ test("Cash goes out to NEAR alone for now: one chain, the chain row hidden, the 
   const picks = f.form.findAll((e) => e.dataset.action === "chain");
   assert.deepEqual(picks.map((b) => [b.dataset.chain, b.textContent, b.getAttribute("aria-pressed")]), [["near", "NEAR", "true"]]);
   assert.equal(f.form.find((e) => e.dataset.row === "chains")!.hidden, true);
+  // card cash-withdraw-in-app-to-any-chain: hidden draws nothing (its inline display drew a NEAR pill on every Cash form)
+  assert.equal(f.form.find((e) => e.dataset.row === "chains")!.style.display, "none");
   assert.equal(f.form.dataset.chain, "near");
   f.type("to", "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
   f.type("amount", "5");
@@ -591,4 +596,58 @@ test("given Max: Amount is the live Max, the tap sends it; nothing Cash can send
   assert.equal(none.form.dataset.state, "refused");
   assert.equal(none.form.find((e) => e.dataset.for === "amount")?.dataset.refusal, "insufficient");
   assert.equal(none.go.disabled, true);
+});
+
+// card cash-withdraw-in-app-to-any-chain: withdraw.open's `dest`, the chain Cash arrives on, typed in the app. The form
+// sends on it through its onward path when the page reaches it (the kit's CASH_WITHDRAW_DESTS, WITHDRAW_CHAINS here);
+// any other dest is refused on its own line, never sent on NEAR in its place.
+const SOL_TO = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
+const destLine = (f: ReturnType<typeof drawn>) => f.form.find((e) => e.tag === "p" && e.dataset.for === "dest");
+
+test("given dest: the chains the form sends Cash to are the kit's one list", () => {
+  assert.equal(WITHDRAW_CHAINS, CASH_WITHDRAW_DESTS);
+});
+
+test("given dest the page does not reach: refused on its own line, Confirm hands over nothing, never sent on NEAR", async () => {
+  for (const [to, dest] of [[SOL_TO, "solana"], ["alice.near", "solana"], ["0x52908400098527886E0F7030069857D2E4169EE7", "robinhood"]] as const) {
+    const f = drawn({ given: { to, amount: "5", dest } });
+    await settle();
+    assert.equal(f.form.dataset.state, "refused", `${dest} ${to}`);
+    assert.equal(destLine(f)?.hidden, false, dest);
+    assert.equal(destLine(f)?.dataset.refusal, "not-available", dest);
+    assert.equal(destLine(f)?.dataset.draftCopy, "not-available", "a draft word, the pool form's own");
+    assert.equal(destLine(f)?.textContent, `${dest === "solana" ? "Solana" : "Robinhood"} · ${WITHDRAW_WORDS["not-available"]}`);
+    assert.equal(f.form.find((e) => e.tag === "p" && e.dataset.for === "to")?.hidden, true, "one refusal: the dest line");
+    assert.equal(givenValue(f, "to"), to, "To as the app sent it");
+    assert.equal(f.go.disabled, true, dest);
+    await f.tap();
+    assert.deepEqual(f.handed, [], `${dest} ${to}`);
+  }
+});
+
+test("given dest the page reaches: To is an address on it, Confirm hands over the chain; a NEAR account there is refused", async () => {
+  const f = drawn({ given: { to: SOL_TO, amount: "5", dest: "solana" }, chains: ["near", "solana", "base"] });
+  assert.equal(f.form.find((e) => e.dataset.row === "chains")?.hidden, true, "the app picked it: no row");
+  assert.equal(f.form.find((e) => e.dataset.row === "chains")?.style.display, "none", "and none drawn");
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(f.form.dataset.chain, "solana");
+  assert.equal(destLine(f)?.hidden, true);
+  await f.tap();
+  assert.deepEqual(f.handed, [{ recipient: SOL_TO, amount: 5_000_000n, parts: oneNote(5_000_000n), chain: "solana" }]);
+  const near = drawn({ given: { to: "alice.near", amount: "5", dest: "solana" }, chains: ["near", "solana", "base"] });
+  await settle();
+  assert.equal(near.form.dataset.state, "refused");
+  assert.equal(near.form.find((e) => e.dataset.for === "to")?.dataset.refusal, "not-account");
+  await near.tap();
+  assert.deepEqual(near.handed, []);
+});
+
+test("given dest NEAR: as with no dest", async () => {
+  const f = drawn({ given: { to: "alice.near", max: true, dest: "near" } });
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(f.form.dataset.chain, "near");
+  await f.tap();
+  assert.deepEqual(f.handed, [{ recipient: "alice.near", amount: 9_880_000n, parts: oneNote(9_880_000n) }]);
 });
