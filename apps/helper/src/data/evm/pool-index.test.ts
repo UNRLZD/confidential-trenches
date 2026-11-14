@@ -255,3 +255,17 @@ test("GET /v1/market/pools: one chain the helper indexes and one token address, 
     await new Promise((r) => h.close(r));
   }
 });
+
+test("the helper keeps Robinhood's index only by default: Base's is off until its volume is read for its room", async () => {
+  const { poolIndexesFromEnv, POOL_INDEX_ON } = await import("../../server.ts");
+  const d = dir();
+  try {
+    assert.deepEqual(POOL_INDEX_ON, ["robinhood"]);
+    const ixs = poolIndexesFromEnv({}, d, holdsNone as never)!;
+    assert.deepEqual(Object.keys(ixs), ["robinhood"]);
+    ixs.robinhood!.close();
+    assert.equal(poolIndexesFromEnv({}, "", holdsNone as never), null, "no store folder: no index");
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});

@@ -942,7 +942,7 @@ export function evmSwapRpcs(env: Record<string, string | undefined>, chain: "bas
 
 /**
  * Each EVM chain's pool index (card evm-pool-index-from-the-first-pool, src/data/evm/pool-index.ts), in the store
- * directory: Robinhood's backfill runs to its head first, then Base's beside it, each a background read on the helper's
+ * directory: Robinhood's backfill runs to its head first, then Base's beside it (when on, POOL_INDEX_ON), each a background read on the helper's
  * provider holds. Providers: Robinhood's own (10,000,000 blocks a getLogs, at most 10,000 logs) then the keyed ones;
  * Base's keyed ones, then base.api.pocket.network and base.gateway.tenderly.co, which serve its history keyless
  * (base-rpc.publicnode.com refuses it: "Archive requests require a personal token", 2026-11-14 08:05Z). First blocks:
@@ -953,7 +953,13 @@ export const POOL_INDEX_CHAINS: Readonly<Record<"base" | "robinhood", Omit<PoolI
   robinhood: { chain: "robinhood", chainId: 4663, poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951", first: 0, span: 2_000_000, margin: 1_000, publics: ["https://rpc.mainnet.chain.robinhood.com"] },
   base: { chain: "base", chainId: 8453, poolManager: "0x498581ff718922c3f8e6a244956af099b2652b2b", first: 25_350_000, span: 10_000, margin: 300, publics: ["https://base.api.pocket.network", "https://base.gateway.tenderly.co"] },
 };
-export function poolIndexesFromEnv(env: Record<string, string | undefined>, storeDir: string, holds: ProviderHolds): Record<"base" | "robinhood", PoolIndex> | null {
+/** The chains whose index this helper keeps. Base's is off until its volume is read for the room: about 15.9M pools
+ *  (500 blocks of its Initialize logs every 1M blocks, base.api.pocket.network, 08:2xZ) at about 260 bytes a pool with
+ *  both indexes is about 4.1 GB, and its first backfill on keyless providers alone about 18 h; Robinhood's whole
+ *  backfill, 1,145,455 pools, 297.8 MB, took 851.7 s on rpc.mainnet.chain.robinhood.com at the background pace
+ *  (2026-11-14 08:12-08:26Z, from a laptop). */
+export const POOL_INDEX_ON: readonly ("base" | "robinhood")[] = ["robinhood"];
+export function poolIndexesFromEnv(env: Record<string, string | undefined>, storeDir: string, holds: ProviderHolds, on: readonly ("base" | "robinhood")[] = POOL_INDEX_ON): Partial<Record<"base" | "robinhood", PoolIndex>> | null {
   if (storeDir === "") return null;
   const post = jsonRpcPost();
   const of = (chain: "base" | "robinhood") => {
@@ -962,7 +968,7 @@ export function poolIndexesFromEnv(env: Record<string, string | undefined>, stor
     const urls = [...new Set([...(chain === "robinhood" ? publics : []), ...(own === undefined || own === "" ? [] : [own]), ...keyedSpares(env, chain), ...(chain === "base" ? publics : [])])];
     return createPoolIndex(join(storeDir, `pool-index-${chain}.sqlite`), { ...c, urls }, { post, holds, sleep: (ms) => new Promise((r) => setTimeout(r, ms).unref()), now: () => performance.timeOrigin + performance.now() });
   };
-  return { robinhood: of("robinhood"), base: of("base") };
+  return Object.fromEntries(on.map((c) => [c, of(c)]));
 }
 
 /**
@@ -1367,9 +1373,10 @@ if (import.meta.main) {
     })();
     if (poolIndexes !== null) {
       const running = { stopped: false };
+      const [first, ...rest] = (["robinhood", "base"] as const).flatMap((c) => poolIndexes[c] ?? []);
       void senders.held
-        .then(() => poolIndexes.robinhood.run(running, true))
-        .then(() => (console.log("helper: pool index robinhood at its head"), Promise.all([poolIndexes.robinhood.run(running), poolIndexes.base.run(running)])))
+        .then(() => first?.run(running, true))
+        .then(() => (console.log("helper: pool index at its head"), Promise.all([first, ...rest].map((ix) => ix?.run(running)))))
         .catch((e: Error) => console.error(`helper: pool index stopped: ${e.message}`));
     }
     const listen = () => {

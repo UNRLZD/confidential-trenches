@@ -1,5 +1,5 @@
 {
- "_note": "good: a real run of scripts/live-checks/evm-pool-index-from-the-first-pool.mjs --chain robinhood --record, 2026-11-14 08:30:42Z, against the helper's own handler serving a whole Robinhood backfill made on this machine from rpc.mainnet.chain.robinhood.com (08:12-08:26Z, 1,145,455 pools), with the heads read live on rpc.mainnet.chain.robinhood.com and robinhood.drpc.org. badNotServed: a real run --chain base against the deployed helper, 2026-11-14 08:18:24Z, before this card: /v1/market/pools answered 404. The planted cases in the test edit the good answer.",
+ "_note": "Real runs of scripts/live-checks/evm-pool-index-from-the-first-pool.mjs --chain robinhood --record, 2026-11-14, the heads and the named pool slot0 read live on rpc.mainnet.chain.robinhood.com and robinhood.drpc.org. good (08:33:14Z): the helper's own handler serving a whole Robinhood backfill made on this machine from rpc.mainnet.chain.robinhood.com (08:12-08:26Z, 1,145,455 pools). badPartial (08:33:15Z): the same handler serving a backfill stopped after six spans (blocks 0-6,999,999), complete false. badNotServed (08:33:23Z): the deployed helper before this card, /v1/market/pools 404. The planted cases in the test edit the good answer (a pool the PoolManager does not hold: its slot0 edited to 0).",
  "good": {
   "chain": "robinhood",
   "reads": {
@@ -10,17 +10,36 @@
    "heads": [
     {
      "status": 200,
-     "text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x6cbf3b1\"}\n"
+     "text": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":\"0x6cbf913\"},{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde\"}]\n"
     },
     {
      "status": 200,
-     "text": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x6cbf3b2\"}"
+     "text": "[{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":\"0x6cbf915\"},{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde\"}]"
+    }
+   ]
+  }
+ },
+ "badPartial": {
+  "chain": "robinhood",
+  "reads": {
+   "answer": {
+    "status": 200,
+    "text": "{\"chainId\":4663,\"poolManager\":\"0x8366a39cc670b4001a1121b8f6a443a643e40951\",\"complete\":false,\"through\":6999999,\"pools\":[]}"
+   },
+   "heads": [
+    {
+     "status": 200,
+     "text": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":\"0x6cbf917\"},{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde\"}]\n"
+    },
+    {
+     "status": 200,
+     "text": "[{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":\"0x6cbf919\"},{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde\"}]"
     }
    ]
   }
  },
  "badNotServed": {
-  "chain": "base",
+  "chain": "robinhood",
   "reads": {
    "answer": {
     "status": 404,
@@ -29,11 +48,11 @@
    "heads": [
     {
      "status": 200,
-     "text": "{\"jsonrpc\":\"2.0\",\"result\":\"0x369dd7f\",\"id\":1}\n"
+     "text": "[{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":\"0x6cbf93c\"},{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde\"}]\n"
     },
     {
      "status": 200,
-     "text": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x369dd8d\"}"
+     "text": "[{\"id\":0,\"jsonrpc\":\"2.0\",\"result\":\"0x6cbf926\"},{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":\"0x00000000000000100101ef320000000000000235cbb426695fe5e6925ae62cde\"}]"
     }
    ]
   }

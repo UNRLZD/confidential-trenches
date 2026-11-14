@@ -4,16 +4,19 @@
 // (Base 1,000,000 blocks, Robinhood 10,000,000), so a token whose only pool is older was never a candidate for its
 // reference; the helper's index closes that, and this check holds it there after every helper deploy.
 // It asks GET {helper}/v1/market/pools for the chain's named token, whose named pool was made long before the scan's
-// depth, and reads the chain's head on two public providers. It passes only when:
+// depth, and reads on two public providers, in one batch each, the chain's head and the named pool's slot0 in the
+// PoolManager (extsload of its state slot, v4-core StateLibrary). It passes only when:
 //   - the answer is the chain's (chainId, PoolManager) and `complete: true`;
 //   - `through` is within the device's scan depth of the lower head of the two providers (no block between the index
 //     and the device's own scan is left unread) and not past the higher one;
 //   - every served pool's key hashes to its id (keccak of the encoded key) and names the token;
-//   - the named pool is served.
+//   - the named pool is served, and the PoolManager holds it on both providers (slot0's price above 0), as the device
+//     reads every served pool before it counts.
 // Every answer is hostile: shapes, sizes and numbers are checked, and a provider or the helper that errors, times out
 // (15 s) or answers something else is a BAD line naming it.
 // After: helper --chain robinhood
-// After: helper --chain base
+// (Base's index is off on the helper until its volume is read for its room, server.ts POOL_INDEX_ON: --chain base is run
+// by hand until it is on.)
 //   node scripts/live-checks/evm-pool-index-from-the-first-pool.mjs --chain <robinhood|base> [--helper <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
@@ -23,7 +26,7 @@ import { keccak } from "./pool-evm-deploy.mjs";
 const KEY = "evm-pool-index-from-the-first-pool";
 export const HELPER = "https://ct-api.unrealized.trade";
 /** Per chain: its id, PoolManager, the device's scan depth (kit trade/evm/buy-unpinned.ts), two public head providers, and
- *  the named token and pool. Robinhood's: native/0xb4c8b1f1…507b, fee 0, tick spacing 1, no hook, initialized at block
+ *  the named coin and pool. Robinhood's: native/0xb4c8b1f1…507b, fee 0, tick spacing 1, no hook, initialized at block
  *  100,150,105, its token's only pool at or after block 9,505 none newer (a whole backfill of the PoolManager from block 0
  *  on rpc.mainnet.chain.robinhood.com, 2026-11-14 08:12-08:26Z, head 114,027,190); Base's: native/0x36ede8f1…7584, fee 3000, tick spacing 60, no
  *  hook, initialized at block 27,500,318 (base.api.pocket.network, 2026-11-14 08:1xZ), 29.7M blocks before the head. */
@@ -33,7 +36,7 @@ export const CHAINS = {
     poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951",
     depth: 10_000_000,
     heads: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"],
-    token: "0xb4c8b1f18f67d4f25a51f5ead97dc95a79f2507b",
+    coin: "0xb4c8b1f18f67d4f25a51f5ead97dc95a79f2507b",
     pool: "0x7d527182d13d1bcdc4be889c2c52489a5fe94263cb427991dc80104dc1150e47",
   },
   base: {
@@ -41,7 +44,7 @@ export const CHAINS = {
     poolManager: "0x498581ff718922c3f8e6a244956af099b2652b2b",
     depth: 1_000_000,
     heads: ["https://base-rpc.publicnode.com", "https://base.gateway.tenderly.co"],
-    token: "0x36ede8f188161423640ad60d6930587037cd7584",
+    coin: "0x36ede8f188161423640ad60d6930587037cd7584",
     pool: "0x2011c00dc590317504b1c67c1295a277b1ca2adf8133fa12f9f0be9cba2616a2",
   },
 };
@@ -59,19 +62,36 @@ async function read(url, init) {
   if (text.length > MAX_BYTES) throw new Error(`answer past ${MAX_BYTES} bytes`);
   return { status: r.status, text };
 }
-const headOf = (url) => read(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }) });
+/** The pool's state slot in the PoolManager (StateLibrary._getPoolStateSlot: keccak(id, POOLS_SLOT 6)): slot0 there. */
+export const stateSlotOf = (id) => keccak(id + word(6n));
+const SEL_EXTSLOAD = "0x1e2eaeaf"; // PoolManager.extsload(bytes32)
+const readOf = (url, c) =>
+  read(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify([
+      { jsonrpc: "2.0", id: 0, method: "eth_blockNumber", params: [] },
+      { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: c.poolManager, data: SEL_EXTSLOAD + stateSlotOf(c.pool).slice(2) }, "latest"] },
+    ]),
+  });
 
-/** The verdict of one run's reads: { ok, lines }. `reads`: { answer: {status, text}, heads: [{status, text}, ...] }. */
+/** The verdict of one run's reads: { ok, lines }. `reads`: { answer: {status, text}, heads: [{status, text}, ...] }, each
+ *  head the provider's batch answer: its head, then the named pool's slot0. */
 export function judge(chain, reads) {
   const c = CHAINS[chain];
   const bad = [];
   const heads = reads.heads.map((h, i) => {
     let n = null;
+    let slot0 = null;
     try {
       const j = JSON.parse(h.text);
-      if (h.status === 200 && QUANTITY.test(j?.result ?? "")) n = Number(j.result);
+      const by = (id) => (Array.isArray(j) ? j.find((x) => x?.id === id) : undefined);
+      if (h.status === 200 && QUANTITY.test(by(0)?.result ?? "")) n = Number(by(0).result);
+      if (/^0x[0-9a-fA-F]{64}$/.test(by(1)?.result ?? "")) slot0 = BigInt(by(1).result);
     } catch {}
     if (n === null || !Number.isSafeInteger(n)) bad.push(`BAD head ${c.heads[i]}: no block number`);
+    if (slot0 === null) bad.push(`BAD pool ${c.heads[i]}: no slot0 of the named pool`);
+    else if ((slot0 & ((1n << 160n) - 1n)) === 0n) bad.push(`BAD pool ${c.heads[i]}: the PoolManager does not hold the named pool ${c.pool} (slot0's price 0)`);
     return n;
   });
   let a = null;
@@ -99,11 +119,11 @@ export function judge(chain, reads) {
       continue;
     }
     if (poolIdOf(k) !== p.id) bad.push(`BAD helper: pool ${p.id}'s key hashes to ${poolIdOf(k)}`);
-    if (k.currency0 !== c.token && k.currency1 !== c.token) bad.push(`BAD helper: pool ${p.id} does not pair ${c.token}`);
+    if (k.currency0 !== c.coin && k.currency1 !== c.coin) bad.push(`BAD helper: pool ${p.id} does not pair ${c.coin}`);
     ids.add(p.id);
   }
   if (!ids.has(c.pool)) bad.push(`BAD helper: the named pool ${c.pool}, made before the scan's depth, is not served`);
-  const lines = bad.length ? bad : [`OK ${chain}: complete, through ${a.through} (heads ${heads.join(", ")}), ${ids.size} pool(s) of ${c.token}, the named pool ${c.pool} among them`];
+  const lines = bad.length ? bad : [`OK ${chain}: complete, through ${a.through} (heads ${heads.join(", ")}), ${ids.size} pool(s) of ${c.coin}, the named pool ${c.pool} among them and held on both providers`];
   return { ok: bad.length === 0, lines };
 }
 
@@ -118,7 +138,7 @@ async function main() {
   const helper = opt("--helper") ?? HELPER;
   const c = CHAINS[chain];
   const failed = (e) => ({ status: 0, text: String(e?.message ?? e) });
-  const [answer, ...heads] = await Promise.all([read(`${helper}/v1/market/pools?chain=${chain}&token=${c.token}`).catch(failed), ...c.heads.map((u) => headOf(u).catch(failed))]);
+  const [answer, ...heads] = await Promise.all([read(`${helper}/v1/market/pools?chain=${chain}&token=${c.coin}`).catch(failed), ...c.heads.map((u) => readOf(u, c).catch(failed))]);
   const reads = { answer, heads };
   const record = opt("--record");
   if (record) writeFileSync(record, JSON.stringify({ chain, reads }, null, 2) + "\n");

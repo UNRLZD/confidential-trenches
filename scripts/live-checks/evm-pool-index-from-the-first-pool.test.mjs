@@ -28,8 +28,18 @@ test("the recorded good answer passes: Robinhood's index complete to within the 
   for (const p of a.pools) assert.equal(poolIdOf(p.key), p.id);
 });
 
-test("the recorded bad answer fails: the deployed helper before this card answered 404", () => {
+test("the recorded bad answers fail: a backfill short of its head (complete false, the named pool not yet read), and the deployed helper before this card (404)", () => {
+  fails(judge(A.badPartial.chain, A.badPartial.reads), /complete false/);
+  fails(judge(A.badPartial.chain, A.badPartial.reads), /named pool .* is not served/);
   fails(judge(A.badNotServed.chain, A.badNotServed.reads), /status 404/);
+});
+
+test("planted: a served pool the PoolManager does not hold on a provider (slot0's price 0) fails by name", () => {
+  const reads = structuredClone(A.good.reads);
+  const j = JSON.parse(reads.heads[0].text);
+  j.find((x) => x.id === 1).result = "0x" + "0".repeat(64);
+  reads.heads[0].text = JSON.stringify(j);
+  fails(judge(A.good.chain, reads), /does not hold the named pool/);
 });
 
 test("planted: an answer short of its head, another chain's, another PoolManager's, or behind the scan's depth fails by name", () => {
