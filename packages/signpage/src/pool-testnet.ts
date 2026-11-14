@@ -862,8 +862,9 @@ export type TestnetPool = {
   outSignal(): AbortSignal;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
   withdrawDeps(chain: PoolChain, opId: string): PoolWithdrawFormDeps;
-  /** The withdraw run of a screen's checked answer, its op record written as it goes; settles at the run's end. */
-  withdraw(r: PoolReady, opId: string): Promise<void>;
+  /** The withdraw run of a screen's checked answer, its op record written as it goes; settles at the run's end. `claim`
+   *  (a Move's, card move-sends-or-says-why) is awaited right before the run's first release leaves; a throw sends nothing. */
+  withdraw(r: PoolReady, opId: string, claim?: () => Promise<void>): Promise<void>;
 };
 
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
@@ -3226,7 +3227,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     stop: () => solanaStop.signal,
   };
   const exits = (chain: PoolChain) => ((x) => (x === undefined ? {} : { exits: x }))(exitsOf(exitDeps, chain));
-  const withdraw = async (ready: PoolReady, opId: string): Promise<void> => {
+  const withdraw = async (ready: PoolReady, opId: string, claim?: () => Promise<void>): Promise<void> => {
     if (!locks || !wayOut(ready.chain) || (ready.chain === "solana" ? pin === undefined : evmPool(ready.chain) === null)) return;
     withdrawing.add(opId);
     // the front taken at the tap and kept to the run's end (src/proof-front.ts tap): the tab that held it closes its
@@ -3234,7 +3235,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     let tapped: (() => void) | null = null;
     try {
       tapped = await front.tap();
-      await (ready.chain === "solana" ? withdrawRun(ready, opId) : evmWithdrawRun(ready.chain, ready, opId));
+      await (ready.chain === "solana" ? withdrawRun(ready, opId, claim) : evmWithdrawRun(ready.chain, ready, opId, claim));
     } finally {
       tapped?.();
       withdrawing.delete(opId);
@@ -3298,7 +3299,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes.close();
     }
   };
-  const evmWithdrawRun = async (chain: "base" | "robinhood", ready: PoolReady, opId: string): Promise<void> => {
+  const evmWithdrawRun = async (chain: "base" | "robinhood", ready: PoolReady, opId: string, claim?: () => Promise<void>): Promise<void> => {
     if (!wayOut(chain) || !locks) return;
     const ops = await page.store();
     const created_ms = Date.now();
@@ -3332,7 +3333,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // the run's planned notes out of every tab's proof queue and every other plan until it ends (as the Solana run's)
         const keepOut = async (ids: readonly string[], spanMs: bigint): Promise<void> => void (await keepOutNotes(ops, opId, ids, BigInt(Date.now()), spanMs));
         const exit = poolExit(exitDeps, ready);
-        const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep, keepOut, ...(exit ? { exit } : {}) }, { ...ask }, ready.to, ready.amount, ready.maxFee);
+        const end = await runEvmPoolWithdraw({ ...h, ...(q ? { drop: (id: string) => q.drop(id) } : {}), stage: write, owe, keep, keepOut, ...(exit ? { exit } : {}), ...(claim ? { claim } : {}) }, { ...ask }, ready.to, ready.amount, ready.maxFee);
         write(end.stage, end.txs, end.pending, end.arrived, end.held);
         if (end.feeNeeded !== undefined) void (writes = writes.then(() => ops.update("ops", opId, (v) => mergeWithdrawOp(v, { feeNeeded: end.feeNeeded! }))).catch(() => {}));
         // why a run or a part ended on a throw, on the record and the page's console (public words only: legCause), as
@@ -3358,7 +3359,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       ...(e !== null && locks ? { handoff: (r: PoolReady) => void withdraw(r, opId), owedFees, redraw, ...exits(chain) } : {}),
     };
   };
-  const withdrawRun = async (ready: PoolReady, opId: string): Promise<void> => {
+  const withdrawRun = async (ready: PoolReady, opId: string, claim?: () => Promise<void>): Promise<void> => {
     if (pin === undefined || !locks) return;
     const ops = await page.store();
     const created_ms = Date.now();
@@ -3425,6 +3426,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               for (const f of watchers) f();
             },
             ...((exit) => (exit ? { exit } : {}))(poolExit(exitDeps, ready)),
+            ...(claim ? { claim } : {}),
           },
           { ...ask },
           ready.to,

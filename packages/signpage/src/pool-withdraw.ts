@@ -283,6 +283,9 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
    *  withdraw: it sends to that address), so a refund names nothing the withdraw does not. Called once, after the plan
    *  and before any note moves; the address it answers is the run's To, checked as any To is. */
   exit?(refundTo: string): Promise<string>;
+  /** A Move's claim (src/pool-to-cash.ts, card move-sends-or-says-why): awaited right before a release is taken to leave
+   *  the device, before its note is RESERVED; a throw ends the run stopped with nothing sent. */
+  claim?(): Promise<void>;
 };
 
 /** A part's onward send still owed: its note (W is the note's own W_{sol, label, j}, derived on the device; the op
@@ -888,6 +891,8 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       // RESERVED, then the onward send owed, both written before anything leaves the device (review #232b HIGH 1):
       // a crash between the two leaves a RESERVED note with nothing sent, which the reserved pass frees
       take: async (_id: string, _attempt: string, _early?: unknown, lastHeight?: bigint) => {
+        // a Move past its send-by (or ended) sends nothing: the note goes back UNSPENT in the finally below
+        await h.claim?.();
         await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt!, ...(lastHeight === undefined ? {} : { lastHeight }) });
         reserved = true;
         const owed: PendingOnward = { noteId: p.noteId, attempt: attempt!, context: binding.context.toString(), ...base };

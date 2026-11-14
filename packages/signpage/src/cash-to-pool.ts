@@ -130,7 +130,10 @@ type Refusal = { error: ErrorCode };
  *  units of each side's asset; `cash` (pool to pool, src/pool-to-cash.ts): the deposit quote's least USDC in base units,
  *  what its onward move from Cash is sized by (kept in the store, never in state.ops). Nothing secret: no key, note,
  *  address of the user's or which note is whose. */
-export type MoveOpRecord = { kind: "move"; from: TradeChain; to: TradeChain; stage: MoveStage; txs: TxRef[]; amount: string; out?: string; created_ms: number; cash?: string };
+/** A move op's record. A move out of a pool (src/pool-to-cash.ts, card move-sends-or-says-why) also keeps `send_by_ms`,
+ *  the time its source release must have been claimed by; `claimed_ms`, the run's claim, written by compare-and-set right
+ *  before anything leaves the device; and `error`, the refusal a move that failed before it sent ends with. */
+export type MoveOpRecord = { kind: "move"; from: TradeChain; to: TradeChain; stage: MoveStage; txs: TxRef[]; amount: string; out?: string; created_ms: number; cash?: string; send_by_ms?: number; claimed_ms?: number; error?: ErrorCode };
 /** What a move's follow op (the quote's pool_deposit op, pool-deposit-follow.ts PoolDepositOp) says, read from the store. */
 export type MoveFollow = { stage: string; final?: true; txs?: readonly TxRef[] };
 

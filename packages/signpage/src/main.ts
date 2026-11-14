@@ -403,10 +403,11 @@ else {
       withdraw: (chain) => {
         if (!testnet) return null;
         const run = testnet.withdrawDeps(chain, "").handoff;
-        return run ? (ready, id) => void testnet.withdrawDeps(chain, id).handoff?.(ready) : null;
+        // the move's claim goes with the run (card move-sends-or-says-why): awaited right before its first release leaves
+        return run ? (ready, id, claim) => void testnet.withdraw(ready, id, claim) : null;
       },
       op: async (id) => (await (await open()).get("ops", id).catch(() => undefined)) as Awaited<ReturnType<PoolToCashDeps["op"]>>,
-      put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
+      update: async (id, change) => (await open()).update("ops", id, (v) => change(v as MoveOpRecord | undefined)),
       now: () => Date.now(),
       signal,
       // pool to pool (card move-one-confidential-swap): one confidential swap, X's coin into Y's pool to U_Y, quoted by the

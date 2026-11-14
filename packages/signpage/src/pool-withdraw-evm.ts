@@ -144,6 +144,8 @@ export type EvmWithdrawHost = {
   wait?(ms: number): Promise<void>;
   /** A payout to another chain: the Solana run's exit (src/pool-withdraw.ts PoolWithdrawHost exit). */
   exit?(refundTo: string): Promise<string>;
+  /** A Move's claim, as the Solana run's (src/pool-withdraw.ts PoolWithdrawHost claim). */
+  claim?(): Promise<void>;
 };
 
 /** `cause`: why a run or one of its parts ended on a throw, in public words only (pool-sell.ts legCause), for the op's
@@ -743,7 +745,9 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
       return s;
     });
     const data = evmWithdrawCalldata(h.pin.pool, relay, made.proof, made.publicSignals, c.fee, sig);
-    // RESERVED, then the owed send, both before anything leaves the device
+    // a Move past its send-by (or ended) sends nothing (card move-sends-or-says-why); then RESERVED and the owed send,
+    // both before anything leaves the device
+    await h.claim?.();
     await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt! });
     reserved = true;
     const owed: EvmPendingOnward = {

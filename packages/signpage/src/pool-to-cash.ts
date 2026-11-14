@@ -34,6 +34,12 @@
 // the run sent, then the follow's stage (cash-to-pool.ts moveStageOfFollow) to done. Moves written before (with `cash`)
 // resume on the vault route below.
 // A read not in yet (a price, the pool's funds, Y's floor) answers down (Busy, Retry), never not_allowed.
+// Every move out of a pool sends or fails in bounded time (card move-sends-or-says-why): its record is written leaving
+// before its quote is asked, with send_by_ms (MOVE_SEND_MS on); the pool run claims the move (claimed_ms, one
+// compare-and-set on the record) right before its first release leaves the device, and refuses to send past send_by_ms;
+// the follow, past send_by_ms with no claim, ends the move failed by the same compare-and-set. Whichever writes first
+// wins: a move shown failed never sends, and one that claimed is followed on to its end. A run that waits forever (a
+// queue, a lock, a proof) or never started, and a page closed before its run sent, all end there.
 // Nothing here logs.
 import { base58 } from "@scure/base";
 import { EVM_ADDRESS } from "./rules/pool.ts";
@@ -45,6 +51,29 @@ type Refusal = { error: ErrorCode };
 
 /** Whether `a` is an address of `chain`, as a deposit address there must be: a 32-byte base58 key on Solana, a 0x
  *  address on Base and Robinhood. */
+/** How long a move out of a pool has, from its tap, to start sending its release (card move-sends-or-says-why): its
+ *  quote (one 1Click round trip and its keyless tell), then a withdraw part's reads, its wait for an epoch's root (one
+ *  60 s epoch and WITHDRAW_BOUNDARY_LAG_MS 30 s), its proof (6.7 s on a laptop, several times that on a phone) and its
+ *  bind, about twice over; far inside the quote's 30 min deadline (DEPOSIT_QUOTE_DEADLINE_MS), so a release claimed at
+ *  the last moment still lands in time. */
+export const MOVE_SEND_MS = 300_000;
+
+/** The claim's compare-and-set on a move record (card move-sends-or-says-why): claimed once already, or still leaving
+ *  inside send_by_ms; never a move ended, nor one past its send_by_ms with no claim. A record with no send_by_ms (a
+ *  move written before this card) is claimed while it has not ended. */
+export function claimed(rec: MoveOpRecord | undefined, now: number): MoveOpRecord | null {
+  if (rec === undefined || rec.kind !== "move" || rec.stage === "failed" || rec.stage === "done") return null;
+  if (rec.claimed_ms !== undefined) return rec;
+  if (rec.stage === "leaving" && rec.send_by_ms !== undefined && now >= rec.send_by_ms) return null;
+  return { ...rec, claimed_ms: now };
+}
+
+/** The follow's end of a move nothing sent for in time: failed only while still leaving, unclaimed and past send_by_ms. */
+export function expired(rec: MoveOpRecord | undefined, now: number): MoveOpRecord | null {
+  if (rec === undefined || rec.kind !== "move" || rec.stage !== "leaving" || rec.claimed_ms !== undefined || rec.send_by_ms === undefined || now < rec.send_by_ms) return null;
+  return { ...rec, stage: "failed", error: "not_sent" };
+}
+
 export function onPoolChain(chain: PoolChain, a: string): boolean {
   if (chain !== "solana") return EVM_ADDRESS.test(a);
   try {
@@ -120,11 +149,15 @@ export type PoolToCashDeps = {
   quote(chain: PoolChain, amount: bigint, id: string): Promise<{ address: string; minOut: bigint } | Refusal>;
   /** Whether `a` is an address of `chain` (a deposit address must be). */
   onChain(chain: PoolChain, a: string): boolean;
-  /** `chain`'s pool withdraw run (started for `ready` under op id `id`); null while the chain has no run on this page. */
-  withdraw(chain: PoolChain): ((ready: PoolReady, id: string) => void) | null;
+  /** `chain`'s pool withdraw run (started for `ready` under op id `id`); null while the chain has no run on this page.
+   *  `claim` is awaited right before the run's first release leaves the device: it throws when the move may no longer
+   *  send, and the run then ends stopped with nothing sent. */
+  withdraw(chain: PoolChain): ((ready: PoolReady, id: string, claim: () => Promise<void>) => void) | null;
   /** An op record from the store's "ops". */
   op(id: string): Promise<{ stage?: unknown; txs?: readonly TxRef[] } | undefined>;
-  put(id: string, rec: MoveOpRecord): Promise<void>;
+  /** The store's compare-and-set on an op record (WalletStore.update): `change` gets the stored record and gives the
+   *  next one, or undefined to write nothing; resolves with what was written. */
+  update(id: string, change: (rec: MoveOpRecord | undefined) => MoveOpRecord | undefined): Promise<unknown>;
   now(): number;
   wait?(ms: number): Promise<void>;
   signal?: AbortSignal;
@@ -163,12 +196,29 @@ export type PoolToCash = {
 
 export function poolToCash(d: PoolToCashDeps): PoolToCash {
   const tracks: Promise<void>[] = [];
+  // a stage written by compare-and-set: the claim kept, and never over a move another write ended failed (an expiry)
   const put = async (id: string, rec: MoveOpRecord): Promise<void> => {
     try {
-      await d.put(id, rec);
+      await d.update(id, (v) => (v?.stage === "failed" && rec.stage !== "failed" ? undefined : { ...rec, ...(v?.claimed_ms === undefined ? {} : { claimed_ms: v.claimed_ms }), ...(v?.send_by_ms === undefined || rec.send_by_ms !== undefined ? {} : { send_by_ms: v.send_by_ms }) }));
     } catch {
       /* a write that fails costs the display, never the move */
     }
+  };
+  // the run's claim, right before its first release leaves: refused (a throw) once the move ended or passed send_by_ms
+  const claimOf = (id: string) => async (): Promise<void> => {
+    const now = d.now();
+    await d.update(id, (v) => {
+      const c = claimed(v, now);
+      return c === null || c === v ? undefined : c;
+    });
+    const r = (await d.op(id)) as MoveOpRecord | undefined;
+    if (r?.claimed_ms === undefined || r.stage === "failed") throw new Error("the move may no longer send");
+  };
+  // the follow's bound: past send_by_ms with no claim, the move ends failed (true); a claim or an end first, false
+  const expire = async (id: string): Promise<boolean> => {
+    const now = d.now();
+    const w = await d.update(id, (v) => expired(v, now) ?? undefined).catch(() => undefined);
+    return w !== undefined;
   };
   const plan = async (chain: PoolChain, amount: bigint): Promise<Refusal | { sum: bigint; fee: bigint }> => {
     if (amount <= 0n || d.withdraw(chain) === null) return { error: "not_allowed" };
@@ -195,6 +245,7 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
       const run = typeof out?.stage === "string" ? out.stage : null;
       const runTxs = txsOf(out);
       if (cur.stage === "leaving" && run === "stopped" && runTxs.length === 0) return set("failed", runTxs);
+      if (cur.stage === "leaving" && (await expire(op))) return;
       const depStage = typeof dep?.stage === "string" ? (dep.stage as DepositStage) : null;
       if (depStage !== null && depStage !== "quote_checked" && depStage !== "waiting") {
         const stage = moveStageOfDeposit(depStage);
@@ -246,6 +297,7 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
       const run = typeof out?.stage === "string" ? out.stage : null;
       const txs = [...txsOf(out), ...txsOf(f)];
       if (cur.stage === "leaving" && run === "stopped" && txsOf(out).length === 0) return set("failed", txs);
+      if (cur.stage === "leaving" && (await expire(op))) return;
       const fs = typeof f?.stage === "string" ? f.stage : null;
       if (fs !== null && fs !== "quote_checked" && fs !== "waiting") {
         const stage = moveStageOfFollow(f!);
@@ -255,12 +307,27 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
       await wait(CASH_MOVE_POLL_MS);
     }
   };
+  // the move's record, leaving with its send_by_ms, written before its quote is asked: from the tap on, the app follows
+  // an op that ends, never a request with nothing behind it
+  const begin = async (chain: PoolChain, to: PoolChain | "near", sum: bigint, id: string): Promise<MoveOpRecord> => {
+    const now = d.now();
+    const rec: MoveOpRecord = { kind: "move", from: chain, to, stage: "leaving", txs: [], amount: formatUnits(sum, POOL_ASSET[chain].decimals), created_ms: now, send_by_ms: now + MOVE_SEND_MS };
+    await put(id, rec);
+    return rec;
+  };
+  // a quote not answered by the move's send_by_ms is down: the move fails, nothing is paid to an address it never had
+  const bounded = <T,>(rec: MoveOpRecord, q: Promise<T>): Promise<T | Refusal> => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<Refusal>((r) => (t = setTimeout(() => r({ error: "down" }), Math.max(0, rec.send_by_ms! - d.now()))));
+    return Promise.race([q, late]).finally(() => clearTimeout(t));
+  };
   const sendDirect = async (chain: PoolChain, to: PoolChain, p: { sum: bigint; fee: bigint }, id: string): Promise<Refusal | { op: string }> => {
-    const rec: MoveOpRecord = { kind: "move", from: chain, to, stage: "leaving", txs: [], amount: formatUnits(p.sum, POOL_ASSET[chain].decimals), created_ms: d.now() };
-    const q = await d.direct!.quote(chain, to, p.sum, `${id}/pool`);
+    const rec = await begin(chain, to, p.sum, id);
+    const q = await bounded(rec, d.direct!.quote(chain, to, p.sum, `${id}/pool`));
     if ("error" in q || !d.onChain(chain, q.address)) {
-      await put(id, { ...rec, stage: "failed" });
-      return { error: "error" in q ? q.error : "quote_check_failed" };
+      const error = "error" in q ? q.error : "quote_check_failed";
+      await put(id, { ...rec, stage: "failed", error });
+      return { error };
     }
     const leaving: MoveOpRecord = { ...rec, out: formatUnits(q.minOut, POOL_ASSET[to].decimals) };
     await put(id, leaving);
@@ -269,7 +336,7 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
       await put(id, { ...leaving, stage: "failed" });
       return { error: "not_allowed" };
     }
-    run({ chain, to: q.address, amount: p.sum, maxFee: p.fee }, `${id}/out`);
+    run({ chain, to: q.address, amount: p.sum, maxFee: p.fee }, `${id}/out`, claimOf(id));
     tracks.push(followDirect(id, leaving).catch(() => {}));
     return { op: id };
   };
@@ -296,11 +363,12 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
         if ("error" in p) return p;
         if (to === chain || (to !== "near" && d.onward === undefined && d.direct === undefined)) return { error: "not_allowed" };
         if (to !== "near" && d.direct !== undefined) return await sendDirect(chain, to, p, id);
-        const rec: MoveOpRecord = { kind: "move", from: chain, to, stage: "leaving", txs: [], amount: formatUnits(p.sum, POOL_ASSET[chain].decimals), created_ms: d.now() };
-        const q = await d.quote(chain, p.sum, `${id}/1click`);
+        const rec = await begin(chain, to, p.sum, id);
+        const q = await bounded(rec, d.quote(chain, p.sum, `${id}/1click`));
         if ("error" in q || !d.onChain(chain, q.address)) {
-          await put(id, { ...rec, stage: "failed" });
-          return { error: "error" in q ? q.error : "quote_check_failed" };
+          const error = "error" in q ? q.error : "quote_check_failed";
+          await put(id, { ...rec, stage: "failed", error });
+          return { error };
         }
         const pr = d.price(chain);
         // to Cash: the least USDC shown; on to a pool: the quote's least USDC kept for the onward move (its `cash`)
@@ -311,7 +379,7 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
           await put(id, { ...leaving, stage: "failed" });
           return { error: "not_allowed" };
         }
-        run({ chain, to: q.address, amount: p.sum, maxFee: p.fee }, `${id}/out`);
+        run({ chain, to: q.address, amount: p.sum, maxFee: p.fee }, `${id}/out`, claimOf(id));
         tracks.push(follow(id, leaving).catch(() => {}));
         return { op: id };
       } catch {
