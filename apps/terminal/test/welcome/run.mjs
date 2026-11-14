@@ -69,6 +69,7 @@ const FRAME = () => {
   return h;
 };
 const fails = [];
+const lits = [];
 const check = (ok, what) => ok || fails.push(what);
 let BASE = "";
 async function open(browser, w, f = "force", mark = null) {
@@ -104,6 +105,7 @@ try {
       if (s > 1) {
         const lit = await page.waitForFunction(LIGHT, LIT, { timeout: 8000 }).then((h) => h.jsonValue(), () => page.evaluate(LIGHT));
         check(lit >= LIT, `${tag(s)}: the art lit ${lit} px, want ${LIT} or more`);
+        lits.push(`${s}@${w.name} ${lit}`);
       }
       const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       check(!m.hscroll, `${tag(s)}: horizontal scroll`);
@@ -189,4 +191,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} fault(s)`);
   process.exit(1);
 }
-console.log(`PASS welcome: 4 slides x 390/1440, BAR-10 per slide, the box still across slides, every move and every close${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS welcome: 4 slides x 390/1440, BAR-10 per slide, the box still across slides, every move and every close; art lit px (slide@width, want ${LIT}+): ${lits.join(", ")}${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

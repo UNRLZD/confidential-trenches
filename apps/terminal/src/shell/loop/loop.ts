@@ -326,8 +326,9 @@ function network(ctx: CanvasRenderingContext2D) {
 function flow(ctx: CanvasRenderingContext2D) {
   const { glyph, dot, dotted } = kit(ctx);
   const C = { x: 800, y: 450 }, HUB = { size: 136, crowd: [78, 112] as const, n: 44 }, SIZE = 80, R = 46;
-  const col = (ids: string[], x: number) => ids.map((id, i) => ({ id, x, y: 160 + i * 116, logo: id === "more" ? undefined : id }));
-  const IN = col(["bitcoin", "ethereum", "solana", "base", "sui", "more"], 250), OUT = col(["arbitrum", "bsc", "robinhood", "avalanche", "monad", "more"], 1350);
+  // the columns stay left of x 1370 at the top, the corner the close button covers (the frame's top right, every width)
+  const col = (ids: string[], x: number) => ids.map((id, i) => ({ id, x, y: 170 + i * 112, logo: id === "more" ? undefined : id }));
+  const IN = col(["bitcoin", "ethereum", "solana", "base", "sui", "more"], 280), OUT = col(["arbitrum", "bsc", "robinhood", "avalanche", "monad", "more"], 1320);
   const ALL = [...IN.map((n) => ({ ...n, key: `in-${n.id}` })), ...OUT.map((n) => ({ ...n, key: `out-${n.id}` }))];
   const SPOKE = Object.fromEntries(ALL.map((n) => [n.key, line(toward(C, n, HUB.crowd[1] + 12), toward(n, C, R + 12))])) as Record<string, Path>;
   const CROWD = { hub: crowdOf(1, HUB.n, ...HUB.crowd), mi: crowdOf(9, 14, 22, 50), mo: crowdOf(10, 14, 22, 50) };
@@ -359,14 +360,16 @@ function flow(ctx: CanvasRenderingContext2D) {
   };
 }
 
-/* ---------- slide 4: twelve word slots filled in turn, the way a backup is written down; never a real word */
+/* ---------- slide 4: twelve word slots filled in turn, the way a backup is written down; never a real word. Sized to
+   read on the 520 px desktop card (the frame at about a third): slots fill the frame's width, outlines and numbers bold */
 function words(ctx: CanvasRenderingContext2D, font: string) {
   const { dot } = kit(ctx);
-  const SW = 300, SH = 104, GX = 36, GY = 34, X0 = (W - (4 * SW + 3 * GX)) / 2, Y0 = (H - (3 * SH + 2 * GY)) / 2;
+  // the grid starts below y 225, clear of the close button in the frame's top right
+  const SW = 344, SH = 140, GX = 34, GY = 32, X0 = (W - (4 * SW + 3 * GX)) / 2, Y0 = (H - (3 * SH + 2 * GY)) / 2 + 36;
   const SLOTS = Array.from({ length: 12 }, (_, k) => ({ k, x: X0 + (k % 4) * (SW + GX), y: Y0 + Math.floor(k / 4) * (SH + GY), n: 4 + Math.floor(hash(k + 1, 3, 7) * 5) }));
   const START = 0.5, STEP = 0.62, WRITE = 0.5, HOLD = 9.0, FADE = 0.8;
   const outline = (x: number, y: number, w: number, h: number, a: number) => {
-    const r = 18, gap = 10, per = 2 * (w + h - 4 * r) + TAU * r, n = Math.floor(per / gap);
+    const r = 24, gap = 13, per = 2 * (w + h - 4 * r) + TAU * r, n = Math.floor(per / gap);
     for (let k = 0; k < n; k++) {
       let s = (k / n) * per, px = 0, py = 0;
       const seg = [w - 2 * r, (Math.PI / 2) * r, h - 2 * r, (Math.PI / 2) * r, w - 2 * r, (Math.PI / 2) * r, h - 2 * r, (Math.PI / 2) * r];
@@ -376,21 +379,21 @@ function words(ctx: CanvasRenderingContext2D, font: string) {
       else if (i === 2) { px = x + w; py = y + r + s; } else if (i === 3) arc(x + w - r, y + h - r, 0);
       else if (i === 4) { px = x + w - r - s; py = y + h; } else if (i === 5) arc(x + r, y + h - r, Math.PI / 2);
       else if (i === 6) { px = x; py = y + h - r - s; } else arc(x + r, y + r, Math.PI);
-      dot(px, py, 1.6, a);
+      dot(px, py, 2.8, a);
     }
   };
   return (t: number) => {
     t = mod(t, L);
     const fade = t < HOLD ? 1 : 1 - ease((t - HOLD) / FADE);
-    ctx.font = `400 30px ${font}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.font = `400 44px ${font}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
     for (const s of SLOTS) {
       const t0 = START + s.k * STEP, u = t >= HOLD + FADE ? 0 : clamp((t - t0) / WRITE), writing = u > 0 && u < 1;
-      outline(s.x, s.y, SW, SH, writing ? 0.85 : 0.22);
-      ctx.globalAlpha = 0.5; ctx.fillStyle = SOFT; ctx.fillText(String(s.k + 1).padStart(2, "0"), s.x + 30, s.y + SH / 2 + 1); ctx.globalAlpha = 1;
+      outline(s.x, s.y, SW, SH, writing ? 0.9 : u >= 1 ? 0.45 * fade + 0.3 * (1 - fade) : 0.3);
+      ctx.globalAlpha = 0.62; ctx.fillStyle = SOFT; ctx.fillText(String(s.k + 1).padStart(2, "0"), s.x + 34, s.y + SH / 2 + 2); ctx.globalAlpha = 1;
       for (let i = 0; i < s.n; i++) {
-        const on = clamp(u * s.n - i), x = s.x + 104 + i * 24, y = s.y + SH / 2;
-        dot(x, y, 2.2, 0.16);
-        if (on > 0) dot(x, y, 2.2 + 3 * ease(on), ease(on) * fade);
+        const on = clamp(u * s.n - i), x = s.x + 128 + i * 26, y = s.y + SH / 2;
+        dot(x, y, 3.2, 0.2);
+        if (on > 0) dot(x, y, 3.2 + 3.4 * ease(on), ease(on) * fade);
       }
     }
   };
@@ -412,7 +415,8 @@ export function startLoop(canvas: HTMLCanvasElement, scene: Scene, { still = fal
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(k, 0, 0, k, ox, oy); draw(t);
   };
-  const t0 = performance.now(), STILL_AT = 4.6;
+  // the still frame (reduced motion): the loop mid-trip; on slide 4, all twelve slots written
+  const t0 = performance.now(), STILL_AT = scene === "words" ? 8.4 : 4.6;
   const tick = (now: number) => { if (stopped) return; if (visible && !document.hidden) paint((now - t0) / 1000); raf = requestAnimationFrame(tick); };
   const ro = typeof ResizeObserver === "function" ? new ResizeObserver(() => { fit(); if (still) paint(STILL_AT); }) : null;
   ro?.observe(canvas);
