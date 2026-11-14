@@ -62,12 +62,34 @@ export const MIN_MAKERS = { base: 5, robinhood: 5 };
 const CHAIN_IDS = { base: 8453, robinhood: 4663 };
 export const HELD = 2; // quotes per mode
 export const WARMUP_MS = 240_000;
-/** The wait before each held quote: on Base past maxLag blocks (50 of its 200 ms blocks, 10 s), so the quote's scan
- *  always has blocks to ask the list for. 1.5 s after the warm-up the third's head stood at or behind the blocks the
- *  warm-up read, and the held quote asked it its head and no getLogs (live run 42135737951, 2026-11-06 00:18:37Z:
- *  "first two asked 2, third getLogs 0", an ok quote); past maxLag the scan either reads past the warm-up's blocks or
- *  catches up to the agreed block on the list (quote.ts scanPools). */
-export const HELD_GAP_MS = { base: 11_500, robinhood: 1_500 };
+/** The margin a held quote waits past its chain's maxLag blocks (Base's 11.5 s past its 10 s since live run
+ *  42135737951). */
+export const GAP_MARGIN_MS = 1_500;
+/** The blocks between the two headers a chain's block time is read from (their timestamps are whole seconds). */
+export const BLOCK_SPAN = 1_000n;
+/** The wait before each held quote, ms: past the chain's maxLag blocks (its kit venue entry, the maxLag quote.ts's venue()
+ *  reads; absent, 0 as there) at its block time read on chain (blockMsOf), plus GAP_MARGIN_MS, so the quote's scan always
+ *  has blocks to ask the list for. A shorter wait left the third's head at or behind the blocks the quote before read,
+ *  and the held quote asked it its head and no getLogs, an ok quote: Base 1.5 s after the warm-up (live run 42135737951,
+ *  2026-11-06 00:18:37Z, "first two asked 2, third getLogs 0"), Robinhood at a flat 1.5 s against its 100 blocks of
+ *  115 ms (11.5 s; read 2026-11-14 05:5xZ on rpc.mainnet.chain.robinhood.com and robinhood.api.pocket.network) in the
+ *  helper's live run 43561384236 (attempt 2: "robinhood-torch, first two refused: the first two asked 2 times, the third
+ *  0 getLogs", and so for 503). Past maxLag the scan either reads past the blocks before or catches up to the agreed
+ *  block on the list (quote.ts scanPools). */
+export const heldGapMs = (maxLag, blockMs) => Math.ceil((maxLag ?? 0) * blockMs) + GAP_MARGIN_MS;
+/** A chain's block time, ms, from the first provider of `list` that answers its head and the headers at the head and
+ *  BLOCK_SPAN blocks before it; null when none does (the run then stops: no wait is guessed). */
+export async function blockMsOf(list, fetchFn = fetch) {
+  for (const u of list) {
+    const h = await rpcCall(u, "eth_blockNumber", [], {}, fetchFn);
+    if (typeof h.result !== "string" || !/^0x[0-9a-f]+$/i.test(h.result) || BigInt(h.result) <= BLOCK_SPAN) continue;
+    const at = async (n) => (await rpcCall(u, "eth_getBlockByNumber", ["0x" + n.toString(16), false], {}, fetchFn)).result?.timestamp;
+    const [t0, t1] = [await at(BigInt(h.result) - BLOCK_SPAN), await at(BigInt(h.result))];
+    if (![t0, t1].every((t) => typeof t === "string" && /^0x[0-9a-f]+$/i.test(t)) || BigInt(t1) <= BigInt(t0)) continue;
+    return { url: u, blockMs: (Number(BigInt(t1) - BigInt(t0)) * 1000) / Number(BLOCK_SPAN) };
+  }
+  return null;
+}
 /** The least scan providers a chain lists: Base four (card base-rpc-list-fix: with the first two held, a third that
  *  answers no logs still leaves another), Robinhood three. */
 export const MIN_SCANS = { base: 4, robinhood: 3 };
@@ -388,9 +410,16 @@ export async function measure(venues = evmPoolVenues(), base = HELPER) {
       console.log(`helper ${chain} first two ${m}: HTTP ${row.status}, ${row.results ?? "no"} logs, answered by ${host(row.answeredBy)}`);
     }
   }
+  run.blockMs = {};
+  for (const chain of ["base", "robinhood"]) {
+    const b = await blockMsOf(scans[chain]);
+    if (b === null) throw new Error(`${chain}: no scan provider answered two block headers, so no held quote's wait`);
+    run.blockMs[chain] = b.blockMs;
+    console.log(`${chain} block time ${b.blockMs} ms (${host(b.url)}), maxLag ${venues[chain]?.maxLag ?? 0}: held quotes ${heldGapMs(venues[chain]?.maxLag, b.blockMs)} ms apart`);
+  }
   for (const [name, req, want] of CASES) {
     const list = scans[req.chain];
-    const c = (run.cases[name] = { first: [], held: [] });
+    const c = (run.cases[name] = { first: [], held: [], gapMs: heldGapMs(venues[req.chain]?.maxLag, run.blockMs[req.chain]) });
     const t0 = performance.now();
     for (let i = 0; performance.now() - t0 < WARMUP_MS && !c.first.some((q) => q.code === want); i++) {
       const q = await quote(req, list, null);
@@ -399,7 +428,7 @@ export async function measure(venues = evmPoolVenues(), base = HELPER) {
     }
     for (const m of MODES) {
       for (let i = 0; i < HELD; i++) {
-        await new Promise((r) => setTimeout(r, HELD_GAP_MS[req.chain] ?? 1500));
+        await new Promise((r) => setTimeout(r, c.gapMs));
         const q = await quote(req, list, m);
         c.held.push(q);
         console.log(`${name} first two ${m} ${i}: ${q.code} ${q.ms} ms, first two asked ${q.heldAsked}, third getLogs ${q.thirdLogs}${q.message ? `: ${q.message}` : ""}`);
