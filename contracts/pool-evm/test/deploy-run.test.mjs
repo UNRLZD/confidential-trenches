@@ -957,7 +957,7 @@ test("mainnet --only SellDelegate refusals, each before any key: another contrac
   }
 });
 
-test("mainnet --only SellDelegate: deployedElsewhere refuses when origin/main holds the delegate's record or the kit pins a delegate past the first set's (the build file's frozen SellDelegate.mainnet-1); the kit's pin today is that first one; the sweep line names --only", OPTS, async () => {
+test("mainnet --only SellDelegate: deployedElsewhere refuses when origin/main holds the delegate's record or the kit pins a delegate past the first set's (the build file's frozen SellDelegate.mainnet-1); the kit's pin today is v2 (card evm-pool-amounts-are-standard-sizes), so a second paste is refused; the sweep line names --only", OPTS, async () => {
   const ok = { status: 0 };
   const no = { status: 1 };
   const record = path.join(path.dirname(new URL(import.meta.url).pathname), "../deployments/base.sell-delegate-2.json");
@@ -966,9 +966,11 @@ test("mainnet --only SellDelegate: deployedElsewhere refuses when origin/main ho
   assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok), only: "SellDelegate", record, venues: async () => ({ base: { sellDelegate: first.base } }) }), null);
   assert.equal(await deployedElsewhere("base", { git: (cmd) => (cmd === "cat-file" ? no : ok), only: "SellDelegate", record, venues: async () => ({ base: { sellDelegate: "0x0101010101010101010101010101010101010101" } }) }), `the kit pins the base sell delegate 0x0101010101010101010101010101010101010101, not the first set's ${first.base}`);
   for (const chain of ["base", "robinhood"]) {
-    // the kit's own pin (through its entry) is still the first set's, so the paste is not refused today
+    // the kit's own pin (through its entry) is the owner's paste's v2 (its record committed beside the set's), so a
+    // second paste is refused even before main holds the record
     const rec = path.join(path.dirname(record), `${chain}.sell-delegate-2.json`);
-    assert.equal(await deployedElsewhere(chain, { git: (cmd) => (cmd === "cat-file" ? no : ok), only: "SellDelegate", record: rec }), null, chain);
+    const v2 = JSON.parse(readFileSync(rec, "utf8")).contracts.SellDelegate.address.toLowerCase();
+    assert.equal(await deployedElsewhere(chain, { git: (cmd) => (cmd === "cat-file" ? no : ok), only: "SellDelegate", record: rec }), `the kit pins the ${chain} sell delegate ${v2}, not the first set's ${first[chain]}`, chain);
   }
   assert.equal(sweepCommand("robinhood", "SellDelegate"), "sh contracts/pool-evm/script/mainnet-deploy.sh robinhood --only SellDelegate --sweep-kept");
   assert.equal(sweepCommand("robinhood"), "sh contracts/pool-evm/script/mainnet-deploy.sh robinhood --sweep-kept");
