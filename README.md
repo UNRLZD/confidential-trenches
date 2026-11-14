@@ -135,7 +135,7 @@ The terminal calls only `@blindfill/kit`'s public entry, as any wallet, bot or a
 - **56 mainnet transactions** recorded by the changes that moved money: NEAR 14, Solana 28, Base 7, Robinhood Chain 7. Each links to its explorer in [docs/proofs.md](docs/proofs.md), and `node scripts/ci/money-gate.mjs --all` reads every one back on two public RPCs. 585 earlier runs on test networks are listed there too.
 - **The vault's own state**, read on two public RPCs: no access key, the code hash of its reproducible build, and a USDC balance equal to what it owes ([docs/proofs.md](docs/proofs.md#the-vault-read-on-two-public-near-rpcs)).
 - **A live check per change**, in [scripts/live-checks/](scripts/live-checks/), run against the deployed hosts after every deploy.
-- **Research proofs** from before the build: 44 measured runs, such as a Privacy Pools withdrawal proof checked by a NEAR contract with its gas measured, proofs made on a phone, a phone-browser Solana trade, and the full money loop with real money. See [research/](research/README.md).
+- **Research proofs** from before the build: 33 measured runs here and 11 more in the private research repository, such as a Privacy Pools withdrawal proof checked by a NEAR contract with its gas measured, proofs made on a phone, a phone-browser Solana trade, and the full money loop with real money. See [research/](research/README.md).
 - **Audits and reviews** of the vault contract and a pre-audit security scan, in [research/audits/](research/README.md#audits-and-reviews).
 
 ## How it works
