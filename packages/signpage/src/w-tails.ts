@@ -3,8 +3,10 @@
 // the wallet store's "meta" under the store's WALLET_W_TAIL_PREFIX ("w-tail/") + "<chain>/<address>", written by the
 // rent back at its floor end and deleted once W reads empty or a sweep is sent:
 //   { chain, address, l, j, amount }
-//   chain: "sol" (the derive path's chain name); address: W's own address; l: W's label (a decimal string, as
-//   OwedRentBack.l); j: W's index; amount: what W holds, lamports as a decimal string.
+//   chain: "sol" (the derive path's chain name), or "base" / "robinhood" for an EVM W (card leftovers-carry-to-cash:
+//   written by the EVM carry when W ends empty or carried, src/pool-carry-evm.ts); address: W's own address (an EVM one
+//   lowercase); l: W's label (a decimal string, as OwedRentBack.l); j: W's index; amount: what W holds, lamports or wei
+//   as a decimal string.
 // From the store alone: nothing here reads a chain or names W in a request. Each tail is counted in the balance
 // (state.deposit_wallets, beside each U_X's leftover) and carried to Cash by pool to Cash (src/pool-to-cash.ts).
 import type { PoolAsset, PoolChain } from "../../kit/src/signpage/messages.ts";
@@ -13,7 +15,12 @@ import { WALLET_W_TAIL_PREFIX } from "@blindfill/wallet/store";
 export type WTail = { chain: PoolChain; address: string; l: string; j: number; amount: string };
 
 /** The record's chain name, the derive path's, as the pool chain. */
-const CHAINS: Readonly<Record<string, PoolChain>> = Object.freeze({ sol: "solana" });
+const CHAINS: Readonly<Record<string, PoolChain>> = Object.freeze({ sol: "solana", base: "base", robinhood: "robinhood" });
+const NAMES: Readonly<Record<PoolChain, string>> = Object.freeze({ solana: "sol", base: "base", robinhood: "robinhood" });
+
+/** A W's tail record's key and the chain name it carries: meta w-tail/<chain>/<address>. */
+export const wTailName = (chain: PoolChain): string => NAMES[chain];
+export const wTailKeyOf = (chain: PoolChain, address: string): string => `${WALLET_W_TAIL_PREFIX}${NAMES[chain]}/${address}`;
 const UNITS = /^[0-9]{1,78}$/;
 
 /** The record as stored, or null for anything that is not one exactly. */

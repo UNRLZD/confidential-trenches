@@ -60,6 +60,7 @@ import { depthsOf, EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS, l1FeesOf, sp
 import { evmBuyCalldataRead } from "./evm-send.ts";
 import { evmAgreedTx, evmRowTx } from "./evm-tx-hash.ts";
 import { shuffled } from "./positions-evm.ts";
+import { wTailKeyOf, wTailName } from "./w-tails.ts";
 
 type Chain = "base" | "robinhood";
 
@@ -350,6 +351,7 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
     const p: Pass = { h, store, seed, sleep, now };
     let end: EvmCarryOutcome["end"];
     let landed = false;
+    let tail: bigint | null = null;
     try {
       const open = (await store.list()).find((n) => n.scope === h.scope && n.state === "INCOMING" && onChain(n.ref, o.l, o.j));
       if (open !== undefined) end = await follow(p, o, open, recordsOf(await meta.get("meta", EVM_CARRY_OPEN_KEY))[o.w] as EvmCarryOpen | undefined);
@@ -364,6 +366,13 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
         const acct = await wReads(h.rpcs, o.w, sleep, h.signal);
         const low = acct.balance[0] < acct.balance[1] ? acct.balance[0] : acct.balance[1];
         if (low >= EVM_POOL_MIN_DEPOSIT) end = "pending";
+      }
+
+      // what a W ending empty or carried still holds (card leftovers-carry-to-cash), read before it ends so a failed read
+      // is unread and tried again, never a W ended with its money in no record
+      if (end === "empty" || end === "landed") {
+        const acct = await wReads(h.rpcs, o.w, sleep, h.signal);
+        tail = acct.balance[0] < acct.balance[1] ? acct.balance[0] : acct.balance[1];
       }
     } catch (e) {
       end = e instanceof EvmNotFinalError ? "pending" : "unread";
@@ -390,6 +399,12 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
       });
     }
     if (end === "withdraw" || end === "other" || end === "empty" || end === "landed") {
+      // W's tail: counted in the balance, carried to Cash once it is worth one Cash deposit (src/leftover-carry.ts),
+      // written before W ends so W's money is never in no record
+      if (tail !== null && tail > 0n) {
+        const rec = { chain: wTailName(h.chain), address: o.w, l: o.l.toString(), j: o.j, amount: tail.toString() };
+        await meta.update("meta", wTailKeyOf(h.chain, o.w), () => rec);
+      }
       const rec: EvmCarryDone = { chain: h.chain, end: end === "landed" ? "carried" : end };
       await meta.update("meta", EVM_CARRY_DONE_KEY, (v) => ({ ...recordsOf(v), [o.w]: rec }));
       await meta.update("meta", EVM_CARRY_OPEN_KEY, (v) => {
