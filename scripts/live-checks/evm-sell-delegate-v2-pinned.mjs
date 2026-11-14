@@ -2,7 +2,8 @@
 // Live check of card evm-pool-amounts-are-standard-sizes (release 142, the pin): every new sale on Base and Robinhood
 // mainnet signs W's EIP-7702 authorization to SellDelegate v2 (a sale deposits the largest 1-2-5 rung of its ETH less
 // the fee, W keeps the rest), the owner's paste of 14 Nov, its records contracts/pool-evm/deployments/<chain>.sell-delegate-2.json.
-//   - SIGN_HOST's bundle (the script its index names, the code the device runs) names each chain's v2 address, and
+//   - SIGN_HOST's bundle (https://confidential.unrealized.trade/: the /app.js its index pins, the code the device
+//     runs) names each chain's v2 address, and
 //     names neither first-set delegate (pool-evm-deploy.build.json frozen SellDelegate.mainnet-1), so the kit's pin
 //     the page signs with is v2 on both chains;
 //   - on each chain's two RPCs of two operators (pool-evm-deploy.mjs MAINNETS), the v2 address holds the current
