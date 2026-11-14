@@ -88,13 +88,15 @@ const { SOLANA_POOL_JITO_TIP } = await import("../../kit/src/checks/solana/check
 
 // copy-part1 (FLOW_COPY only): 6 deposits of 0.01 SOL, none enough alone; with all 6 ready, a buy that needs 5 (past
 // SOLANA_POOL_BUY_PIECES_MAX): refused, nothing taken or sent; a buy that needs 2 pieces; then Max, which takes the 4 left
+// copy-legs (FLOW_COPY only, card buy-any-amount-on-every-chain): 6 deposits of 0.01 SOL; with all 6 ready, the same ask
+// of 5 pieces is the page's legs, each its own W and pieces, filled in one tap
 // copy-takeable (FLOW_COPY only): 5 deposits of 0.01 SOL (an account of several small notes); the ms until Max reads 4
 // pieces ready, then again on a fresh load of the same store (a reload: the new page's queue makes every proof again);
 // then, on a note landed this epoch (its proof on the newest root), Max tapped 16 to 40 s past the next boundary of the
 // pool's time, while that proof's remake may run past its 15 s grace: it fills (or is not_funded), never fails. A
 // timeline each second (the pool's time, Max and its pieces, the ready proofs by root and epoch) and every pass and
 // proof's ms go in the record. FLOW_TAKEABLE_ROUNDS=0 stops after the load's Max; FLOW_PROVER_THREADS=1 proves on threads.
-const SCENARIOS = { "copy-part1": 6, "copy-takeable": 5, "pieces-2": 2, "pieces-3": 3, "pieces-4": 4, "back-to-back": 4, "landed-reload": 2, "tag3-fail": 2, found: 0 };
+const SCENARIOS = { "copy-part1": 6, "copy-legs": 6, "copy-takeable": 5, "pieces-2": 2, "pieces-3": 3, "pieces-4": 4, "back-to-back": 4, "landed-reload": 2, "tag3-fail": 2, found: 0 };
 const [SCENARIO, TABLE, MINT, OUT] = process.argv.slice(2);
 if (!OUT || !Object.hasOwn(SCENARIOS, SCENARIO)) throw new Error(`usage: pool-buy-pieces-devnet.mjs <${Object.keys(SCENARIOS).join("|")}> <table> <mint> <out.json>`);
 if (SCENARIO.startsWith("copy-") && !COPY) throw new Error(`${SCENARIO} runs on the copy only (FLOW_COPY)`);
@@ -611,6 +613,42 @@ if (SCENARIO === "copy-part1") {
   const allSpent = notes.filter((n) => n.ref === "deposit").length === 6 && notes.filter((n) => n.ref === "deposit").every((n) => n.state === "SPENT");
   const okSell = sold.answer?.result !== undefined && sold.holds?.units.every((u) => u === "0") && notes.some((n) => n.ref === "return");
   finish(okFive && okBuy(two, 2) && okBuy(max, 4) && allSpent && two.W !== max.W && okSell, `sell of ${units}: ${sold.end}, W holds ${JSON.stringify(sold.holds)}, a return note ${notes.some((n) => n.ref === "return")}; 5 pieces asked (${out.five.amount} SOL, 4 pieces' most ${out.five.fourMost}): ${JSON.stringify(ask5.answer)}, dry ${JSON.stringify(dry5)}, ${out.five.sent} sent, ${out.five.engineCalls} engine calls, ${out.five.helperLines} helper sends, ${out.five.reserved} notes taken; 2 pieces: ${two.end}, ${two.spent} spent, bundle of ${two.bundle?.txs}, W ${two.W} holds ${JSON.stringify(two.holds)}, tap to filled ${filledMs(two) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(two.waitedS ?? {}))}; Max ${tapMax} SOL: ${max.end}, ${max.spent} spent, bundle of ${max.bundle?.txs}, W ${max.W} holds ${JSON.stringify(max.holds)}, tap to filled ${filledMs(max) ?? "-"} ms, read-back s ${JSON.stringify(Object.values(max.waitedS ?? {}))}; every deposit note spent: ${allSpent}`);
+}
+
+if (SCENARIO === "copy-legs") {
+  // card buy-any-amount-on-every-chain: with the 6 notes of 0.01 SOL ready, a buy only 5 pieces pay, past the 4 one W's
+  // tap carries (SOLANA_POOL_BUY_PIECES_MAX): the page's legs (src/pool-buy.ts solanaLegsPlan), each its own W and
+  // pieces, all in the one tap, filled; every leg's transactions read back on both RPCs and every leg's W holding the coin
+  const bundles = () => copy.engineCalls.filter((x) => x.call === "pieces");
+  const landedAll = (rb) => Object.values(rb).every((x) => x.every((st) => st === "confirmed" || st === "finalized"));
+  // 0.001 SOL past what 4 pieces spend at no tip at all, as copy-part1's ask of 5
+  const four = solanaPoolBuyMaxSpend(Array.from({ length: 4 }, () => ({ withdrawnValue: RUNG, relayFee })), VENUE, 0n, rent);
+  const amount = solOf(four + 1_000_000n);
+  phase = "legs-ready";
+  // ready once pool.buy.dry prices it as legs: a cost and no one set's pieces (src/pools.ts poolBuyDryKind)
+  const t0 = performance.now();
+  let dry = null;
+  for (let i = 0; i < 40 && !(dry?.result?.cost !== undefined && dry.result.pieces === undefined); i++) {
+    if (i > 0) await sleep(3_000);
+    await A.t.proofs();
+    dry = await A.ask(amount);
+    log(`pool.buy.dry ${amount}: ${JSON.stringify(dry)}`);
+  }
+  const readyMs = Math.round(performance.now() - t0);
+  phase = "legs";
+  const before = { calls: bundles().length, ws: owedWs.length, spent: (await A.notesOf()).filter((n) => n.state === "SPENT").length };
+  const b = await once(A, "pool.buy", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
+  const end = stageName(lastStage(A, "pool.buy")) ?? b.answer?.result?.stage ?? b.answer?.error ?? null;
+  const legs = bundles().slice(before.calls);
+  const ws = owedWs.slice(before.ws);
+  const waitedS = {};
+  const rb = await readBack(legs.flatMap((x) => x.signatures), waitedS);
+  const holds = await Promise.all(ws.map((w) => wHolds(w)));
+  const spent = (await A.notesOf()).filter((n) => n.state === "SPENT").length - before.spent;
+  const filledMs = b.times.filled ?? b.times['"filled"'] ?? null;
+  out.legs = { amount, readyMs, dry, answer: b.answer, times: b.times, end, legs: legs.map((x) => ({ txs: x.txs, signatures: x.signatures })), ws, holds, spent, readBack: rb, waitedS };
+  const ok = end === "filled" && legs.length >= 2 && ws.length >= 2 && new Set(ws).size === ws.length && Object.keys(rb).length > 0 && landedAll(rb) && holds.every((h) => h.units.every((u) => u !== "0")) && spent >= 5;
+  finish(ok, `a buy of ${amount} SOL (4 pieces' most at no tip ${solOf(four)}): ${end}, ${legs.length} legs (${legs.map((x) => x.txs).join(" + ")} transactions), Ws ${JSON.stringify(ws)} hold ${JSON.stringify(holds)}, ${spent} notes spent, tap to filled ${filledMs ?? "-"} ms, ready ${readyMs} ms, read-back s ${JSON.stringify(Object.values(waitedS))}; dry ${JSON.stringify(dry)}`);
 }
 
 if (SCENARIO === "copy-takeable") {
