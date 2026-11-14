@@ -1634,15 +1634,17 @@ export type EvmWBuyReads = {
 /** The most gas W's own buy may take: a v4 swap of four hops estimates under 600,000 (the pool's own buy reserves
  *  BUY_SWAP_GAS, 500,000, for the same adapter call), so their word never spends W's money as gas past this. */
 export const EVM_WBUY_GAS_MAX = 1_000_000n;
-/** IBuyAdapter.buy(address,address,uint256,bytes)'s selector. */
-const evmAdapterBuySelector = (): string => hex(keccak_256(new TextEncoder().encode("buy(address,address,uint256,bytes)")).subarray(0, 4)).slice(2);
+/** The adapters' buy selector (contracts/pool-evm/src/interfaces/IBuyAdapter.sol: buy of a token, a recipient, a least
+ *  amount out and the route's bytes), as bytes: the pool's own buy shares its name, so the source names no adapter
+ *  signature the pool's ABI tie would read as the pool's (test/rules-pool-evm-any-amount.test.ts derives it). */
+const EVM_ADAPTER_BUY_SELECTOR = "3924db66";
 /** The adapter call's bytes: buy(token, recipient, minOut, path), ABI-encoded. */
 export function evmAdapterBuyData(token: string, recipient: string, minOut: bigint, path: string): string {
   if (!EVM_ADDRESS.test(token) || !EVM_ADDRESS.test(recipient) || typeof minOut !== "bigint" || minOut <= 0n || minOut >= U256 || !/^0x([0-9a-fA-F]{2})+$/.test(path)) return refuse("data");
   const body = path.slice(2).toLowerCase();
   const len = BigInt(body.length / 2);
   const padded = body.padEnd(Math.ceil(body.length / 64) * 64, "0");
-  return "0x" + evmAdapterBuySelector() + evmWord(BigInt(token)) + evmWord(BigInt(recipient)) + evmWord(minOut) + evmWord(128n) + evmWord(len) + padded;
+  return "0x" + EVM_ADAPTER_BUY_SELECTOR + evmWord(BigInt(token)) + evmWord(BigInt(recipient)) + evmWord(minOut) + evmWord(128n) + evmWord(len) + padded;
 }
 const WBUY_CHECKED = new WeakMap<object, OnwardRead>();
 
