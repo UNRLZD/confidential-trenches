@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/app-portfolio-mount.test.mjs: the live check's verdict replays recorded runs
 // (app-portfolio-mount.answers.json), each read on 4 Nov by app-portfolio-mount.mjs collect() in headless Chromium, the
 // stand-in shell sending the fixed signed-in account (ACCOUNT):
-//   good: this card's build served at APP_HOST's name (--harness --build): /portfolio draws Portfolio at 390 and 1440,
+//   good: re-read 14 Nov on card withdraw-address-in-the-app's build (--harness): /portfolio draws Portfolio at 390 and 1440,
 //         dark and light, the header's balance is Portfolio's Cash ($67.87), and Withdraw, Export, Deposit and Sell
 //         go where they belong: PASS;
 //   bad:  the deployed APP_HOST on 4 Nov, before this card: signed in, /portfolio draws nothing: FAIL.
@@ -44,7 +44,14 @@ test("recorded bad answer beforePick: the harness run before card withdraw-form-
   const r = judge(ANSWERS.beforePick);
   assert.equal(r.ok, false);
   assert.deepEqual(bad(r).map((l) => l.replace(/:.*/, "")), ["BAD phone dark", "BAD phone dark", "BAD desktop dark", "BAD desktop dark"]);
-  assert.ok(bad(r).every((l) => /Withdraw asks the shell for withdraw\.open|the pick's Solana row asks the shell for nothing/.test(l)), r.lines.join("\n"));
+  assert.ok(bad(r).every((l) => /Withdraw asks the shell for withdraw\.open|the app's Withdraw on Solana with Max and an address asks the shell for nothing/.test(l)), r.lines.join("\n"));
+});
+
+test("recorded bad answer beforeAppWithdraw: the harness run before card withdraw-address-in-the-app (the old good answer), Withdraw opens the pick and its Solana row asks for pool.withdraw with no address: FAIL on the Withdraw alone", () => {
+  const r = judge(ANSWERS.beforeAppWithdraw);
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r).map((l) => l.replace(/:.*/, "")), ["BAD phone dark", "BAD desktop dark"]);
+  assert.ok(bad(r).every((l) => /Withdraw asks the shell for pick near solana/.test(l)), r.lines.join("\n"));
 });
 
 test("recorded bad answer: the deployed app before this card draws nothing at /portfolio signed in: FAIL", () => {
@@ -62,10 +69,11 @@ test("planted: a header that differs from Portfolio's Cash fails (the Total, as 
 
 test("planted: a tap that asks for the wrong kind, or a Sell that opens something, fails", () => {
   fails(mut((rec) => (run(rec, "desktop", "dark").taps.withdraw = "signout")), /^BAD desktop dark: Withdraw asks the shell for signout/);
-  // card withdraw-form-shows-what-you-can-send: money in two places opens the pick, never the vault's form straight away
+  // card withdraw-address-in-the-app: Withdraw opens the app's own Withdraw with a tile per place, never SIGN_HOST's form
   fails(mut((rec) => (run(rec, "desktop", "dark").taps.withdraw = "withdraw.open")), /^BAD desktop dark: Withdraw asks the shell for withdraw\.open/);
-  fails(mut((rec) => (run(rec, "phone", "dark").taps.withdraw = "pick solana")), /^BAD phone dark: Withdraw opens the pick solana/);
-  fails(mut((rec) => (run(rec, "phone", "dark").taps.pick = "withdraw.open")), /^BAD phone dark: the pick's Solana row asks the shell for withdraw\.open/);
+  fails(mut((rec) => (run(rec, "phone", "dark").taps.withdraw = "pick near solana")), /^BAD phone dark: Withdraw asks the shell for pick near solana/);
+  fails(mut((rec) => (run(rec, "phone", "dark").taps.withdraw = "sheet solana")), /^BAD phone dark: Withdraw opens the app's Withdraw, its tiles solana/);
+  fails(mut((rec) => (run(rec, "phone", "dark").taps.pick = "withdraw.open")), /^BAD phone dark: the app's Withdraw on Solana with Max and an address asks the shell for withdraw\.open/);
   fails(mut((rec) => (run(rec, "phone", "dark").taps.export = "backup.open")), /^BAD phone dark: Export asks the shell for backup\.open/);
   fails(mut((rec) => (run(rec, "phone", "dark").taps.deposit = null)), /^BAD phone dark: Deposit opens nothing/);
   fails(mut((rec) => (run(rec, "desktop", "dark").taps.sell = "a sheet")), /^BAD desktop dark: Sell opens a sheet/);
