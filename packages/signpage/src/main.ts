@@ -69,7 +69,7 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
-import { cashMover, poolMoveKinds, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { cashMover, poolMoveKinds, solanaTapMaxOf, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -577,14 +577,10 @@ else {
       const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
       return (await withdrawFormDeps(vault).available().catch(() => 0n)) > 0n;
     },
-    // Solana: the dry's tap_max on the coin's venue; Base and Robinhood: state.pools' tap_max, the largest ready note
+    // Solana: the dry's tap_max on the coin's venue, a throw when that venue is not read (no move from Cash); Base and
+    // Robinhood: state.pools' tap_max, the largest ready note
     tapMax: async (chain, token) => {
-      if (chain === "solana") {
-        const r = tapDry({ chain: "solana", token });
-        await r.after;
-        const a = r.answer();
-        return a !== null && "result" in a ? (parsePoolUnits(a.result.tap_max, 9) ?? 0n) : 0n;
-      }
+      if (chain === "solana") return solanaTapMaxOf(tapDry({ chain: "solana", token }));
       if (!testnet) return 0n;
       const both = await testnet.readyWith(pageNotes);
       const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
