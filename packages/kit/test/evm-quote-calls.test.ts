@@ -94,3 +94,13 @@ test("the recorded USDG quote's reads finish inside the bound through each provi
   }
   assert.ok(ms <= BOUND_MS, `the quote's reads took ${Math.round(ms)} ms at ${POST_MS} ms a post, past ${BOUND_MS} ms`);
 });
+
+test("each mainnet quote provider has its own in-flight pin, and no pin names another URL", () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    const v = evmPoolVenues()[chain];
+    assert.deepEqual(Object.keys(v.inflight ?? {}).sort(), [...v.providers!].sort(), chain);
+    for (const n of Object.values(v.inflight!)) assert.ok(Number.isSafeInteger(n) && n >= 1 && n <= 8, `${chain}: ${n}`);
+  }
+  // the chain's own Robinhood RPC, the scan's seat, stays at the 2 at once the helper's pace records for it
+  assert.equal(evmPoolVenues().robinhood.inflight!["https://rpc.mainnet.chain.robinhood.com"], 2);
+});
