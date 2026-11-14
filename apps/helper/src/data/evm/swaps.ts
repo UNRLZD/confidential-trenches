@@ -196,6 +196,10 @@ export type Venues = {
   step: number;
   /** The blocks the ETH price is read before the earliest block a book reads, so its first swap has a price before it. */
   refBack: number;
+  /** The blocks a tape reads back past its book's first read while it holds fewer than TRADES_MAX trades (readBack):
+   *  one step a tick, in the background, so a token quiet for longer than the cold window still opens with its last
+   *  trades. */
+  tapeBack: number;
   /** A provider this many blocks behind the other is passed over for the third. */
   lagMax: number;
 };
@@ -229,6 +233,10 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     cold: 1_500,
     step: 1_500,
     refBack: 1_000,
+    // an hour of 200 ms blocks, 12 steps (card every-cell-shows-a-value: 16 of the 41 listed Base tokens answered an
+    // empty tape on the live helper 2026-11-14 05:0xZ; REVVY's 31 swaps and PEACEFROG's 32 over the hour before all lay
+    // past the five-minute window, its newest 4,660 and 7,578 blocks back, read on base-rpc.publicnode.com 05:1xZ)
+    tapeBack: 18_000,
     lagMax: 50,
   },
   // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): a step of 3,000 blocks is
@@ -259,6 +267,10 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     cold: 3_000,
     step: 3_000,
     refBack: 1_000,
+    // none: every Robinhood tape is read through the chain's swap index (fold 6, INDEX_RPCS), which holds the cold window
+    // and no further, so a read back is a token's own logs on its 100-block providers (480 reads for the recorded
+    // stretch of swaps-robinhood.test.ts fold 6), the cost that made its cold window one step (above)
+    tapeBack: 0,
     lagMax: 50,
   },
 };
@@ -460,6 +472,9 @@ const TRADERS_MAX = 5_000;
 /** Agreed eth_call results kept (callsAgreed), oldest out first. */
 const CALLED_MAX = 5_000;
 export const TRADES_MAX = 50;
+/** Failed steps in a row that end a tape's read back (readBack). [design: 3, three ticks: a provider pair that cannot
+ *  answer a step three times running is down for the forward reads too; the tape is then what it holds.] */
+export const BACK_FAILS_MAX = 3;
 export const CANDLES_MAX = 500;
 /** History before our first bar never changes: kept this long. */
 const GT_FRESH_MS = 3_600_000;
@@ -1850,7 +1865,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** `marking`: its mark's read in flight (markQuiet); `noMark`: its pool gives none; `offLogged`: its close off the
    *  list's price is logged (offScale). */
-  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean };
+  type Entry = { pool: Pool; decimals: number; book: Book; touched: number; readAt: number | null; headN: number; first?: Promise<void>; marking?: Promise<void>; noMark?: boolean; offLogged?: boolean; from?: number; back?: Back; backing?: Promise<void> };
+  /** A tape's trades before its book's first read (`from`: that read's first block; readBack): the blocks read back to
+   *  `lo`, their logs (the pool's and the ETH price's), the book they fold into (only its tape is served: the bars
+   *  before ours are CoinGecko's or GeckoTerminal's), and whether the read back is done (TRADES_MAX trades held, or
+   *  VENUES[chain].tapeBack blocks read). */
+  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -1993,7 +2013,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (w == null) return false;
       tradersAhead(e.pool, w.logs);
       if (e.pool.quote.kind === "eth" && !((await refReady) && (await readRef(urls, head.n, w.from)))) return false;
-      return apply(e, w.from, head.n, head.n, w.logs);
+      const ok = apply(e, w.from, head.n, head.n, w.logs);
+      if (ok) e.from ??= w.from;
+      return ok;
     }
     const from = e.book.settledTo + 1;
     // one tick reads at most a step, or CHUNKS_MAX spans past it; the rest is read the next tick
@@ -2002,6 +2024,82 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const logs = await agreedRange(urls, (lo, hi) => poolFilters(e.pool, lo, hi, chain), from, to);
     if (logs == null || (e.pool.quote.kind === "eth" && !(await refReady))) return false;
     return apply(e, from, to, head.n, logs);
+  }
+
+  /** The trades in `logs` (read back, before a book's first read) folded into a book of their own, with the ETH price
+   *  events read with them: the same events apply builds (the trader's leg after a hook's cut, a hook's own swap off the
+   *  tape), priced by the one rule, a swap with no ETH price before it in what is read dropped, never guessed. */
+  function backBook(e: Entry, logs: readonly Log[]): Book {
+    const b = createBook({ decimals: e.decimals, quote: e.pool.quote });
+    const takes = hookTakes(e.pool, logs, chain);
+    const events: Event[] = [];
+    let last: Log | null = null;
+    for (const l of logs) {
+      if (last !== null && l.block === last.block && l.index === last.index) continue; // a log two filters both named
+      last = l;
+      const ref = e.pool.quote.kind === "eth" ? decodeRef(l, chain) : null;
+      if (ref !== null) {
+        events.push(ref);
+        continue;
+      }
+      const sw = decodeSwap(e.pool, l, chain);
+      const t = sw === null ? null : timeOf(l);
+      if (sw === null || t === null) continue;
+      const got = traderLeg(sw, takes.get(`${l.tx}:${l.index}`));
+      const own = e.pool.hook !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === e.pool.hook;
+      events.push({ ...sw, t, ...(got === undefined ? {} : { got }), ...(own ? { tape: false as const } : {}) });
+    }
+    if (events.length > 0) b.ingest(events[0]!.block, events, events.at(-1)!.block);
+    return b;
+  }
+
+  /**
+   * One step of a short tape's read back (Entry.back; card every-cell-shows-a-value): a book whose tape holds fewer
+   * than TRADES_MAX trades reads the step before the blocks it holds, its pool's swaps (poolFilters) and the ETH
+   * price's (an ETH-quoted pool) in one agreed read, until TRADES_MAX trades or VENUES[chain].tapeBack blocks before its
+   * first read. A quiet token's tape had only the cold window's trades: 5 minutes on Base, where a token trading every
+   * few minutes opened with none. A read that fails is read again next tick; the blocks are old enough never to change.
+   */
+  async function readBack(e: Entry, urls: readonly string[]): Promise<void> {
+    if (e.from === undefined || e.back?.done === true) return;
+    const back = e.back ?? { lo: e.from, logs: [], tape: null, done: false };
+    const end = Math.max(0, e.from - V.tapeBack);
+    const held = e.book.tape(TRADES_MAX).length + (back.tape?.tape(TRADES_MAX).length ?? 0);
+    if (held >= TRADES_MAX || back.lo <= end) {
+      e.back = { ...back, done: true };
+      return;
+    }
+    const hi = back.lo - 1;
+    const lo = Math.max(end, hi - V.step + 1);
+    const eth = e.pool.quote.kind === "eth";
+    const logs = await agreedRange(urls, (a, b) => [...poolFilters(e.pool, a, b, chain), ...(eth ? [refFilter(a, b, chain)] : [])], lo, hi);
+    if (logs == null) {
+      // read again at a later tick, BACK_FAILS_MAX times in a row at most: the tape is then what it holds, not filling
+      const fails = (back.fails ?? 0) + 1;
+      e.back = { ...back, fails, done: fails >= BACK_FAILS_MAX };
+      return;
+    }
+    const all = logs.concat(back.logs);
+    tradersAhead(e.pool, logs);
+    e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end };
+  }
+  /** A short tape's read back, step after step, while its book is open and each step reads (a failed one is read again
+   *  at a later tick). */
+  async function backAll(e: Entry, urls: readonly string[]): Promise<void> {
+    while (books.get(e.pool.token) === e && e.back?.done !== true) {
+      const lo = e.back?.lo;
+      await readBack(e, urls).catch(() => undefined);
+      if (e.back === undefined || (e.back.lo === lo && !e.back.done)) return;
+    }
+  }
+  /** Whether a book's tape is still reading back (readBack): the answer says `filling`, so the page shows it loading,
+   *  not empty, and reads it again every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it is done. */
+  const backing = (e: Entry): boolean => V.tapeBack > 0 && e.from !== undefined && e.back?.done !== true && tapeOf(e, TRADES_MAX).length < TRADES_MAX;
+  /** A book's tape, then the trades read back before it (readBack): newest first, at most `limit`. */
+  function tapeOf(e: Entry, limit: number): ReturnType<Book["tape"]> {
+    const own = e.book.tape(limit);
+    const older = e.back?.tape;
+    return own.length >= limit || older == null ? own : own.concat(older.tape(limit - own.length));
   }
 
   /** A new book's first read, at once (card helper-robinhood-capacity fold 3): a dozen cold tapes opened together
@@ -2062,6 +2160,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // book whose first read is in flight (firstRead) is that read's
     const due = [...books.values()].filter((e) => e.first === undefined);
     for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
+    // then each read book whose tape is short reads back (readBack): its own background read, never the tick's wait, so
+    // a tick's period and forward reads are as they were; one read back a book at a time
+    for (const e of due) if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, head.with)).finally(() => (e.backing = undefined));
     await refReady;
   }
   function start(): Promise<void> {
@@ -2123,7 +2224,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // window): that is the book's first read
         if (found.seed !== undefined) {
           tradersAhead(found.pool, found.seed.logs);
-          apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs);
+          if (apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs)) e.from = found.seed.from;
         }
         books.set(token, e);
       }
@@ -2675,16 +2776,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // next read gets the rows. 503 is only a read that failed.
         const held = books.get(t);
         const at = now();
-        const trades = (held?.book.tape(limit) ?? []).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
+        const trades = (held === undefined ? [] : tapeOf(held, limit)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
         return timed({ status: 200, body: JSON.stringify({ trades, filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
       }
       if (e === "none") return timed(empty({ trades: [] }));
       if (!("book" in e)) return timed(e);
-      const rows = e.book.tape(limit);
+      const rows = tapeOf(e, limit);
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
-      return timed({ status: 200, body: JSON.stringify({ trades, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      return timed({ status: 200, body: JSON.stringify({ trades, ...(backing(e) ? { filling: true } : {}), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
     },
   };
 }
