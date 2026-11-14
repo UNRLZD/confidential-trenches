@@ -9,10 +9,11 @@
 //   GET /v1/market/token?chain=near&token=<UNLISTED> (an account with no Rhea pool)
 // It passes only when each answers 200 JSON with X-Helper-Commit a full sha, X-Fetched-At an ISO time within AGE_MS of
 // the read and Access-Control-Allow-Origin echoing APP_HOST, and the bodies hold exactly the frozen fields: the lists
-// {chain: "near", lists: {new, trending, ...}, as_of_ms} with rows exactly the terminal's Row fields, chain near, src
-// chain, a decimal price; the page {row, decimals, pool, risk, route, filling, links} for that token; holders {holders, total,
+// {chain: "near", lists: {new, trending, ...}, as_of_ms} with rows exactly the terminal's Row fields, chain near, a
+// decimal price; the page {row, decimals, pool, risk, route, filling, links} for that token; holders {holders, total,
 // top_bps, src, as_of_ms}; trades {trades, src, as_of_ms} with rows {t_ms, side, usd, amt, trader, tx}; candles {tf,
-// candles, src, as_of_ms} with 6-value bars; and the account with no pool answers 404. Anything else is a FAIL.
+// candles, src, as_of_ms} with 6-value bars; each part's src one the helper gives it (SRC); and the account with no pool
+// answers 404. Anything else is a FAIL.
 // After: helper
 //   node scripts/live-checks/helper-near-lists-and-token.mjs [--base <url>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed opens the token page of n listed
@@ -40,6 +41,16 @@ export const PAGE = ["row", "decimals", "pool", "risk", "route", "filling", "lin
 export const RISK = ["mint_auth", "freeze_auth", "lp", "top10_bps", "dev_bps", "snipers_bps", "holders", "liq_usd", "age_s", "tax", "honeypot", "insiders_bps", "bundlers_bps", "fresh_bps"];
 export const HOLDERS = ["holders", "total", "top_bps", "src", "as_of_ms"];
 export const TAPE = ["t_ms", "side", "usd", "amt", "trader", "tx"];
+/** The sources the helper gives each part (card every-cell-shows-a-value): the engine's keyless API's, "unrealized"
+ *  (apps/helper/src/data/near/engine.ts SRC), else Rhea's fallback's: rows "chain" (near/lists.ts), holders "none"
+ *  (near/token.ts), tape and chart "fastnear" (near/trades.ts). Any other src is a FAIL. */
+export const SRC = {
+  row: ["unrealized", "chain"],
+  holders: ["unrealized", "none"],
+  trades: ["unrealized", "fastnear"],
+  candles: ["unrealized", "fastnear"],
+};
+const srcFault = (part, b) => (SRC[part].includes(b.src) ? null : `src ${show(b.src)}`);
 const SHA = /^[0-9a-f]{40}$/;
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;
 const DEC = /^\d+(\.\d+)?$/;
@@ -64,7 +75,7 @@ export function pick(snapshot) {
 const rowFault = (r) => {
   if (!isObj(r) || JSON.stringify(Object.keys(r).sort()) !== JSON.stringify([...ROW].sort())) return `row ${show(r?.token)}: not the Row fields`;
   if (r.chain !== "near") return `row ${r.token}: chain ${show(r.chain)}`;
-  if (r.src !== "chain") return `row ${r.token}: src ${show(r.src)}`;
+  if (!SRC.row.includes(r.src)) return `row ${r.token}: src ${show(r.src)}`;
   if (r.price_usd !== null && !DEC.test(r.price_usd)) return `row ${r.token}: price ${show(r.price_usd)}`;
   return null;
 };
@@ -89,14 +100,16 @@ export const FAULTS = {
     if (!isObj(b.links) || !Object.entries(b.links).every(([k, v]) => ["site", "x", "telegram"].includes(k) && typeof v === "string" && /^https?:\/\/[^\s]+$/.test(v))) return `links ${show(b.links)}`;
     return null;
   },
-  holders: (b) => (same(b, HOLDERS) && Array.isArray(b.holders) ? null : "not the holders fields"),
+  holders: (b) => (same(b, HOLDERS) && Array.isArray(b.holders) ? srcFault("holders", b) : "not the holders fields"),
   trades: (b) => {
     if (!same(b, ["trades", "src", "as_of_ms"]) || !Array.isArray(b.trades)) return "not the trades fields";
+    if (srcFault("trades", b) !== null) return srcFault("trades", b);
     for (const t of b.trades) if (!same(t, TAPE) || (t.side !== "b" && t.side !== "s") || !DEC.test(t.usd) || !DEC.test(t.amt)) return `trade ${show(t)}`;
     return null;
   },
   candles: (b) => {
     if (!same(b, ["tf", "candles", "src", "as_of_ms"]) || b.tf !== "1h" || !Array.isArray(b.candles)) return "not the candles fields";
+    if (srcFault("candles", b) !== null) return srcFault("candles", b);
     for (const c of b.candles) if (!Array.isArray(c) || c.length !== 6 || !Number.isSafeInteger(c[0]) || !c.slice(1).every((x) => DEC.test(x))) return `bar ${show(c)}`;
     return null;
   },
