@@ -104,7 +104,7 @@ test("the links: Terms, Privacy and Verify, each a route the app has", () => {
 test("the words: only labels the design lock or the shipped app holds; an unpicked one is a draft", () => {
   assert.deepEqual(
     Object.fromEntries(Object.entries(FOOTER_WORDS).map(([k, w]) => [k, [w.text, w.draft]])),
-    { stable: ["Stable", true], offline: ["Offline", false], connection: ["Connection", true], block: ["Block", false], terms: ["Terms", false], privacy: ["Privacy", false] },
+    { stable: ["Stable", true], offline: ["Offline", false], connection: ["Connection", true], block: ["Block", false], terms: ["Terms", false], privacy: ["Privacy", false], github: ["GitHub", false], x: ["X", false], docs: ["Docs", false], telegram: ["Telegram", false] },
   );
   for (const w of Object.values(FOOTER_WORDS)) assert.match(w.source, /design-lock-r5|owner|shipped/);
 });

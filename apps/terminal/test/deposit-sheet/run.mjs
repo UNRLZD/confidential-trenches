@@ -173,6 +173,9 @@ try {
       check(m.smallText.length === 0, `${tag}: text under 11 px: ${m.smallText.join(", ")}`);
       check(m.smallTaps.length === 0, `${tag}: tap under 44 px: ${m.smallTaps.join(", ")}`);
       check(m.violations.length === 0, `${tag}: CSP violations ${JSON.stringify(m.violations)}`);
+      // the risk line (owner ask 14 Nov): over every state's action, once, linking the repo's issues in a new tab
+      const note = await page.locator('[data-control="deposit-notice"]').evaluateAll((ps) => ps.map((p) => [p.querySelector("a")?.getAttribute("href"), p.querySelector("a")?.getAttribute("target")].join(" ")));
+      check(note.length === 1 && note[0] === "https://github.com/UNRLZD/confidential-trenches/issues _blank", `${tag}: the risk line ${JSON.stringify(note)}`);
       check(external.length === 0, `${tag}: external requests ${external.join(" ")}`);
       // the address: only in the address states, and only the checked quote's (W:667, CH-028)
       const addrs = await page.$$eval("[data-address]", (els) => els.map((e) => e.getAttribute("data-address")));
@@ -435,4 +438,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} shots, BAR-05, BAR-11 and the calls`);
   process.exit(1);
 }
-console.log(`PASS ${n} shots (${STATES.length} states x 390/1440), BAR-10 per shot, BAR-05/AS-03, BAR-11 and the calls${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${n} shots (${STATES.length} states x 390/1440), BAR-10 per shot, BAR-05/AS-03, BAR-11, the calls and the risk line${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

@@ -66,6 +66,10 @@ export const WORDS = {
   sendOnlySolana: draft("Send only SOL on Solana.", "placeholder for the owner's copy pass, card pool-balance-counts-the-remainder, 13 Nov 10:50Z"),
   sendOnlyBase: draft("Send only ETH on Base.", "placeholder for the owner's copy pass, card pool-balance-counts-the-remainder, 13 Nov 10:50Z"),
   sendOnlyRobinhood: draft("Send only ETH on Robinhood.", "placeholder for the owner's copy pass, card pool-balance-counts-the-remainder, 13 Nov 10:50Z"),
+  // the risk line over every deposit's action (owner ask 14 Nov ~06:00Z: built for a hackathon, not ready for many users,
+  // only money you're willing to lose, feedback open at the repo): one plain sentence, never a pop-up or a tick box
+  notice: ok("Hackathon build, not tested at scale: deposit only what you can afford to lose.", "owner 14 Nov 09:05:57Z, words page picks (https://claude.ai/artifact/WZMM7eSuntvTFEqr6aAwAw): notice A, without the dot in front"),
+  feedback: ok("Feedback", "owner 14 Nov 09:05:57Z, words page picks (https://claude.ai/artifact/WZMM7eSuntvTFEqr6aAwAw): notice A (feedback is open at the repo: its issues)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

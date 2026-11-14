@@ -92,7 +92,12 @@
 .ddone { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 0 8px; }
 .damt-done { font: 500 34px/1 var(--font-num); letter-spacing: -0.03em; color: var(--text-1); }
 .dsub { font: 14px var(--font-ui); color: var(--text-2); }
-.dfoot { flex: none; height: 81px; padding: 12px 16px 16px; border-top: 1px solid var(--border-panel); }
+.dfoot { flex: none; min-height: 81px; padding: 12px 16px 16px; border-top: 1px solid var(--border-panel); }
+/* the risk line over the action (words.ts notice): one plain sentence and the repo's issues, no mark in front (owner
+   14 Nov 09:05Z); the link's tap box is 44 px on a phone through its ::after, so the line stays one text line high */
+.dnote { margin: 0 0 12px; font: 12px/1.45 var(--font-ui); color: var(--text-2); }
+.dnote a { position: relative; color: var(--text-1); white-space: nowrap; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+.dnote a::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: 44px; transform: translate(-50%, -50%); }
 .dbtn { height: 52px; border-radius: 13px; font: 600 16px var(--font-ui); display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
 .dep .dbtn.buy { background: var(--acc); color: var(--on-acc); box-shadow: 0 10px 30px rgba(var(--acc-rgb), .18); }
 .dep .dbtn.paper { background: var(--paper); color: var(--on-paper); }
@@ -116,7 +121,7 @@
   .dstat.row { padding-right: 0; border: 0; }
   .addrb { padding: 14px; gap: 10px; }
   .addrb .qr svg { width: 212px; height: 212px; } /* R5 app.js:645, 212 on the phone */
-  .dfoot { height: 76px; padding: 8px 16px 12px; border-top: 0; }
+  .dfoot { min-height: 76px; padding: 8px 16px 12px; border-top: 0; }
   .dbtn { height: 56px; border-radius: 16px; font-size: 17px; }
 }
 
