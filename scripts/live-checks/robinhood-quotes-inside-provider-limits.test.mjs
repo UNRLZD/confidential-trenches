@@ -4,7 +4,11 @@
 // - bad_live_before: the check run on the base 4fecb0326 (each currency's scan gap one request): FAIL, 279 answers of
 //   429 over 24 taps, up to 128 posts a warm tap to rpc.mainnet.chain.robinhood.com (4 its pace takes in 2 s);
 // - partial_after: the same on 95977bbbe (the gaps grouped): FAIL, 21 answers of 429, up to 46 posts a warm tap, warm
-//   taps 2.7-9.5 s.
+//   taps 2.7-9.5 s;
+// - step2_after: the same on step 2 at 2d4e7dead (each quote's later gaps read once a kind, Robinhood's own RPC asked
+//   last), 2026-11-14 23:5xZ (the helper's top rows moved: ARROW and RYFT out, PONS in): FAIL, no answer of 429 from
+//   rpc.mainnet.chain.robinhood.com and 4 from others, all on FRONG (dRPC 3, bloXroute 1), up to 11 posts a warm tap to
+//   it, warm taps 2.3-7.7 s.
 // No recorded run passes yet (the card is partial). The judge's pass is held by a plant on partial_after whose warm
 // taps are put inside the bound and the pace, and each other plant fails on its own line.
 import assert from "node:assert/strict";
@@ -61,6 +65,17 @@ test("the recorded run after the fix still fails, with under a tenth of the run 
   assert.equal(v.verdict, "FAIL");
   assert.ok(s429(A.partial_after) * 10 < s429(A.bad_live_before), `${s429(A.partial_after)} of ${s429(A.bad_live_before)}`);
   for (const l of bad(v)) assert.match(l, /warm taps end within|stay inside each provider's pace|ends in a quote or a true named refusal|answers of 429/, l);
+});
+
+test("the recorded run after step 2 gets no answer of 429 from Robinhood's own RPC, others only on FRONG, and asks it 11 posts a warm tap at most; it fails on the warm bound, the pace, the refusals and FRONG's 429s alone", () => {
+  const v = judge(A.step2_after);
+  assert.equal(v.verdict, "FAIL");
+  const rows = A.step2_after.quotes.chains.robinhood.rows;
+  assert.equal(rows.flatMap((r) => r.runs).reduce((n, u) => n + (u.hosts["rpc.mainnet.chain.robinhood.com"]?.s429 ?? 0), 0), 0);
+  assert.equal(s429({ quotes: { chains: { robinhood: { rows: rows.filter((r) => COINS[String(r.coin).toLowerCase()] !== "FRONG") } } } }), 0);
+  const posts = A.step2_after.quotes.chains.robinhood.rows.flatMap((r) => r.runs.filter((u) => u.kind === "warm").map((u) => u.hosts["rpc.mainnet.chain.robinhood.com"]?.requests ?? 0));
+  assert.ok(Math.max(...posts) <= 11, posts.join(","));
+  for (const l of bad(v)) assert.match(l, /warm taps end within|stay inside each provider's pace|ends in a quote or a true named refusal|FRONG taps got \d+ answers of 429/, l);
 });
 
 test("a run whose warm taps are inside the bound and the pace passes; each plant on it fails on its own line", () => {

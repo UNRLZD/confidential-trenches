@@ -61,6 +61,10 @@ export type EvmPoolVenue = {
    *  as measured: a quote asks two and the rest when one fails, is slow or differs (quote.ts agreeing, evmRanked); and
    *  how many blocks two heads may differ. */
   readonly providers?: readonly string[];
+  /** Of `providers`, those a quote asks only after every other (quote.ts evmRanked), however fast they answer: each is
+   *  paced far under a quote's rounds of reads and carries the chain's scan and pool sync (card
+   *  robinhood-quotes-inside-provider-limits). */
+  readonly quoteLast?: readonly string[];
   /** The two providers every read at a past block goes to (card evm-quote-warm-round fold 8): the chain fee and the
    *  pool's tree depth at an epoch's first block, read by the device before it binds and by the helper when it prices a
    *  proof's epoch, up to a proof's life (the helper's POOL_LIFE_MAX_MS, 600 s) back. Each keeps state that far back,
@@ -384,6 +388,11 @@ export const evmMainnetVenues = () =>
       // its history window), pocket and blockmachine (8 s and more, timeouts), thirdweb (refused requests), tatum,
       // nodeflare (no head)
       providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com", "https://rpc-robinhood.globalstake.io"]),
+      // Robinhood's own is asked last (card robinhood-quotes-inside-provider-limits): it answers 429 past about 1 post a
+      // second (apps/helper/src/limits/limits.ts PROVIDER_PACE) and is the scan's and the pool sync's seat, yet ranked in
+      // by its speed whenever publicnode was held it carried a warm tap's rounds of reads, FRONG's 35 to 38 posts in one
+      // tap (mainnet from the Mac, 2026-11-14 23:1xZ). It stays in the list, the state keeper of last resort.
+      quoteLast: Object.freeze(["https://rpc.mainnet.chain.robinhood.com"]),
       // 64 reads a call (card evm-buy-quote-in-window): a cold WETH-USDG quote's 2,303 reads at 6 a call were 128 batches,
       // which ran past the 10-13 s that three of these five keep a block's state. Its exact-out reads cost about 100,000
       // gas each, about 6.4M a call against the 50M caps; all five answered 3 calls of 64 alike (review of 2c02f7df) and
