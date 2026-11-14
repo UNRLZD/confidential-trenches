@@ -17,7 +17,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { depositIdEvm, freshWallet } from "../../wallet/src/derive/keys.ts";
 import { EVM_CHAIN_IDS, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { checkEvmCashCarry, EVM_ADDRESS, EVM_ONWARD_GAS, EVM_ONWARD_GAS_MAX, evmOnwardCodeGas, signEvmOnwardSend, type EvmOnwardSend } from "./rules/pool.ts";
-import { EVM_DEPOSIT_PRIORITY_CAP, l1FeesOf, spentFinal } from "./pool-deposit-evm.ts";
+import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS, l1FeesOf, spentFinal } from "./pool-deposit-evm.ts";
 import { wReads } from "./pool-carry-evm.ts";
 import type { CarryEnd, CarryOpen, CarrySender, CarrySource } from "./carry-cash.ts";
 
@@ -95,7 +95,22 @@ export function evmCashCarrySender(h: EvmCarryCashHost): CarrySender {
         if (at[0] === at[1] && lower(rs[0]!.blockHash as string) === lower(rs[1]!.blockHash as string) && at[0]! <= final) return "landed";
       }
     }
-    return s.final !== null && !mined ? "dead" : "pending";
+    if (s.final !== null && !mined) return "dead";
+    if (mined || s.final !== null) return "pending";
+    // unsent (the page closed between the record and the send, or a node dropped it): older than the resend window, no
+    // RPC knows any of its hashes, and the wallet's newest and pending nonce on both still the send's. Dead, so the
+    // sequencer quotes again; the new send takes the same nonce, so at most one of the two can land
+    // (pool-carry-evm.ts's unsent, the same rule)
+    if (!open.sends.every((x) => typeof x.sentMs === "string" && DIGITS.test(x.sentMs))) return "pending";
+    const newest = open.sends.map((x) => BigInt(x.sentMs)).reduce(max);
+    if (BigInt(h.now?.() ?? Date.now()) - newest <= EVM_DEPOSIT_RESEND_MS[h.network]) return "pending";
+    const known = await both(async (rpc) => {
+      for (const x of hashes) if ((await rpc("eth_getTransactionByHash", [x])) !== null) return true;
+      return false;
+    });
+    if (known[0] || known[1]) return "pending";
+    const counts = await both(async (rpc) => [quantity(await rpc("eth_getTransactionCount", [w, "latest"])), quantity(await rpc("eth_getTransactionCount", [w, "pending"]))]);
+    return counts.every((c) => c[0] === nonce && c[1] === nonce) ? "dead" : "pending";
   };
 
   return {

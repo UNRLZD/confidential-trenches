@@ -30,7 +30,7 @@ const hashOf = (n: bigint) => "0x" + n.toString(16).padStart(64, "0");
 const H = "0x" + "ee".repeat(32);
 
 type Receipt = { transactionHash: string; status: string; blockNumber: string; blockHash: string } | null;
-function rpc(o: { balance?: [bigint, bigint]; nonces?: [bigint, bigint]; pending?: [bigint, bigint]; nonceAt?: [bigint, bigint]; estimate?: [bigint, bigint]; baseFee?: bigint; l1?: bigint; simFail?: [boolean, boolean]; receipts?: [Receipt, Receipt]; block?: bigint; fin?: bigint } = {}) {
+function rpc(o: { balance?: [bigint, bigint]; nonces?: [bigint, bigint]; pending?: [bigint, bigint]; nonceAt?: [bigint, bigint]; estimate?: [bigint, bigint]; baseFee?: bigint; l1?: bigint; simFail?: [boolean, boolean]; receipts?: [Receipt, Receipt]; block?: bigint; fin?: bigint; byHash?: [unknown, unknown] } = {}) {
   const c = { balance: [994_100_000_000_000n, 994_100_000_000_000n], nonces: [5n, 5n], estimate: [21_000n, 21_000n], baseFee: 10_000_000n, l1: 0n, simFail: [false, false], receipts: [null, null] as [Receipt, Receipt], block: 100n, fin: 90n, ...o };
   const pending = o.pending ?? c.nonces;
   const nonceAt = o.nonceAt ?? c.nonces;
@@ -64,6 +64,8 @@ function rpc(o: { balance?: [bigint, bigint]; nonces?: [bigint, bigint]; pending
         return void sent[k]!.push(p[0] as string);
       case "eth_getTransactionReceipt":
         return c.receipts[k];
+      case "eth_getTransactionByHash":
+        return (o.byHash ?? [null, null])[k];
     }
     throw new Error(`unmocked ${method}`);
   };
@@ -218,6 +220,22 @@ test("(d) a reload reads its recorded send first and never sends again: landed, 
   // landed wins over a nonce past: its own send used it
   const r5 = rpc({ nonceAt: [6n, 6n], fin: 100n, block: 120n, receipts: [ok(80n), ok(80n)] });
   assert.equal(await sender(r5, "robinhood").send(SRC_UX, kept.at(-1)!, async () => {}), "landed");
+});
+
+test("(f) unsent: a recorded send no RPC knows, past the resend window, the wallet's nonce still its own on both: dead (quoted again at the same nonce); younger, known on one RPC, or a pending nonce ahead: pending", async () => {
+  const open: CarryOpen = { ...OPEN(1n), sends: [{ hash: H, value: "1", sentMs: "1", nonce: "5" }] };
+  const at = (r: ReturnType<typeof rpc>, now: number) => evmCashCarrySender({ chain: "robinhood", network: "robinhood", rpcs: r.rpcs, seed64: async () => SEED(), now: () => now });
+  const late = 1 + 60_000;
+  for (const [o, now, want] of [
+    [{}, late, "dead"],
+    [{}, 5, "pending"], // inside the resend window
+    [{ byHash: [null, { hash: H }] }, late, "pending"], // one RPC holds it
+    [{ pending: [6n, 5n] }, late, "pending"], // a send of the wallet's on its way
+  ] as const) {
+    const r = rpc(o as never);
+    assert.equal(await at(r, now).send(SRC_UX, open, async () => {}), want, `${Object.keys(o).join(",")} at ${now}`);
+    assert.deepEqual(r.sent, [[], []], "never sent from a verdict");
+  }
 });
 
 test("(e) the rule: each field held, each refusal its word; the signer signs only the checked send with the wallet's key", () => {

@@ -190,5 +190,8 @@ test("main.ts runs the carry after the moves resume, one tab's pass at a time, s
   assert.match(main, /sources: async \(\) => leftoverSources\(await pageOps\(\)\.catch\(\(\) => \[\]\), await pageTails\(\)\.catch\(\(\) => \[\]\)\)/);
   // the wait between passes never holds a process open: main.ts booted in a test (held-lock.test.ts) exits (it hung at
   // 6f2c48fae)
+  // a sender on every pool chain: Solana's, and Base's and Robinhood's on the chain's own pool pair
+  assert.match(main, /sender: \(chain\) => \(chain === "solana" \? sol : evmSender\(chain\)\)/);
+  assert.match(main, /const e = testnet\?\.evmPoolOf\(chain\) \?\? null;\s*evms\.set\(chain, e === null \? null : evmCashCarrySender\(\{ chain, network: e\.pin\.network, rpcs: e\.rpcs, seed64: \(\) => openSeed64\(\)/);
   assert.match(main, /const t = setTimeout\(ok, ms\);\s*\(t as unknown as \{ unref\?: \(\) => void \}\)\.unref\?\.\(\);/);
 });
