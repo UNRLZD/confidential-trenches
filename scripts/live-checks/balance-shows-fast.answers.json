@@ -1,0 +1,20 @@
+{
+ "_note": {
+  "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js built at card/balance-shows-fast 276cfd151 (build-app.mjs), the queue keeping and adopting its ready proofs",
+  "bad": "SIGN_HOST as served 14 Nov 03:50Z (release 133), before this card: no kept proofs, every reload or hand-over proves each note again: FAIL, all three marks named"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-fXh6FNyMWl1vJji7ukBqosal8nBkkC7qR5gl11JFusRh+J+4clHoySY0r4l0UK1Z\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-fXh6FNyMWl1vJji7ukBqosal8nBkkC7qR5gl11JFusRh+J+4clHoySY0r4l0UK1Z",
+  "store": true,
+  "adopt": true,
+  "wired": 2
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-CouZ+HUBTRzu8of3bSxz/qY0q2m2dzPzY1yK3NUPF7Fdekp79ob2eKjU7i7ACMNd\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-CouZ+HUBTRzu8of3bSxz/qY0q2m2dzPzY1yK3NUPF7Fdekp79ob2eKjU7i7ACMNd",
+  "store": false,
+  "adopt": false,
+  "wired": 0
+ }
+}
