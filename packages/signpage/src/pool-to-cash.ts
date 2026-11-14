@@ -58,19 +58,30 @@ type Refusal = { error: ErrorCode };
  *  the last moment still lands in time. */
 export const MOVE_SEND_MS = 300_000;
 
+/** A move's send-by: its own send_by_ms, or, for a move written before this card (release 137 and earlier, no
+ *  send_by_ms), its tap's time plus MOVE_SEND_MS. */
+export const sendByOf = (rec: MoveOpRecord): number => rec.send_by_ms ?? rec.created_ms + MOVE_SEND_MS;
+
 /** The claim's compare-and-set on a move record (card move-sends-or-says-why): claimed once already, or still leaving
- *  inside send_by_ms; never a move ended, nor one past its send_by_ms with no claim. A record with no send_by_ms (a
- *  move written before this card) is claimed while it has not ended. */
+ *  inside its send-by; never a move ended, nor one past its send-by with no claim. */
 export function claimed(rec: MoveOpRecord | undefined, now: number): MoveOpRecord | null {
   if (rec === undefined || rec.kind !== "move" || rec.stage === "failed" || rec.stage === "done") return null;
   if (rec.claimed_ms !== undefined) return rec;
-  if (rec.stage === "leaving" && rec.send_by_ms !== undefined && now >= rec.send_by_ms) return null;
+  if (rec.stage === "leaving" && now >= sendByOf(rec)) return null;
   return { ...rec, claimed_ms: now };
 }
 
-/** The follow's end of a move nothing sent for in time: failed only while still leaving, unclaimed and past send_by_ms. */
-export function expired(rec: MoveOpRecord | undefined, now: number): MoveOpRecord | null {
-  if (rec === undefined || rec.kind !== "move" || rec.stage !== "leaving" || rec.claimed_ms !== undefined || rec.send_by_ms === undefined || now < rec.send_by_ms) return null;
+/** Whether a move's pool run (its op under <id>/out) shows no release sent: no record, or one still before its send or
+ *  stopped, with no tx. in_transit is written before a release leaves (pool-testnet.ts owe), so it counts as sent. */
+export const nothingSent = (out: { stage?: unknown; txs?: readonly unknown[] } | undefined): boolean =>
+  out === undefined || ((out.stage === "proving" || out.stage === "stopped") && (!Array.isArray(out.txs) || out.txs.length === 0));
+
+/** The follow's end of a move nothing sent for in time: failed only while still leaving, unclaimed and past its
+ *  send-by. A move written before this card had no claim to write, so it ends only while its run (`out`) shows no
+ *  release sent; one whose run sent is followed on as before. */
+export function expired(rec: MoveOpRecord | undefined, now: number, out?: { stage?: unknown; txs?: readonly unknown[] }): MoveOpRecord | null {
+  if (rec === undefined || rec.kind !== "move" || rec.stage !== "leaving" || rec.claimed_ms !== undefined || now < sendByOf(rec)) return null;
+  if (rec.send_by_ms === undefined && !nothingSent(out)) return null;
   return { ...rec, stage: "failed", error: "not_sent" };
 }
 
@@ -215,9 +226,9 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
     if (r?.claimed_ms === undefined || r.stage === "failed") throw new Error("the move may no longer send");
   };
   // the follow's bound: past send_by_ms with no claim, the move ends failed (true); a claim or an end first, false
-  const expire = async (id: string): Promise<boolean> => {
+  const expire = async (id: string, out: { stage?: unknown; txs?: readonly TxRef[] } | undefined): Promise<boolean> => {
     const now = d.now();
-    const w = await d.update(id, (v) => expired(v, now) ?? undefined).catch(() => undefined);
+    const w = await d.update(id, (v) => expired(v, now, out) ?? undefined).catch(() => undefined);
     return w !== undefined;
   };
   const plan = async (chain: PoolChain, amount: bigint): Promise<Refusal | { sum: bigint; fee: bigint }> => {
@@ -245,7 +256,7 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
       const run = typeof out?.stage === "string" ? out.stage : null;
       const runTxs = txsOf(out);
       if (cur.stage === "leaving" && run === "stopped" && runTxs.length === 0) return set("failed", runTxs);
-      if (cur.stage === "leaving" && (await expire(op))) return;
+      if (cur.stage === "leaving" && (await expire(op, out))) return;
       const depStage = typeof dep?.stage === "string" ? (dep.stage as DepositStage) : null;
       if (depStage !== null && depStage !== "quote_checked" && depStage !== "waiting") {
         const stage = moveStageOfDeposit(depStage);
@@ -297,7 +308,7 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
       const run = typeof out?.stage === "string" ? out.stage : null;
       const txs = [...txsOf(out), ...txsOf(f)];
       if (cur.stage === "leaving" && run === "stopped" && txsOf(out).length === 0) return set("failed", txs);
-      if (cur.stage === "leaving" && (await expire(op))) return;
+      if (cur.stage === "leaving" && (await expire(op, out))) return;
       const fs = typeof f?.stage === "string" ? f.stage : null;
       if (fs !== null && fs !== "quote_checked" && fs !== "waiting") {
         const stage = moveStageOfFollow(f!);

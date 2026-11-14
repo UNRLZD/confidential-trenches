@@ -8,7 +8,7 @@
 //   node --test test/move-sends-or-says-why.test.ts      (from packages/signpage)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { poolToCash } from "../src/pool-to-cash.ts";
+import { claimed, poolToCash } from "../src/pool-to-cash.ts";
 import type { MoveOpRecord } from "../src/cash-to-pool.ts";
 import type { PoolFunds } from "../src/withdraw/pool-form.ts";
 
@@ -127,3 +127,27 @@ test("after a reload: a move left leaving and unclaimed past its send-by ends fa
   await p.m.idle();
   assert.equal(p.mem.get("mv")!.stage, "failed");
 });
+
+// The owner's own Move (14 Nov 11:44Z) was written by release 137: no send_by_ms, no claim. Loaded by this build it takes
+// its tap plus MOVE_SEND_MS as its send-by, and ends failed only while its run shows no release sent.
+const LEGACY: MoveOpRecord = { kind: "move", from: "solana", to: "base", stage: "leaving", txs: [], amount: "0.08", out: "0.0021", created_ms: T0 - 3_600_000 };
+for (const out of [{ stage: "proving" }, undefined, { stage: "stopped", txs: [] }])
+  test(`a release-137 move (no send-by, no claim, an hour old) whose run is ${out === undefined ? "absent" : out.stage} with no tx ends failed not_sent on load; a claim after it is refused`, BOUND, async () => {
+    const p = page(out === undefined ? {} : { out });
+    p.mem.set("mv", structuredClone(LEGACY));
+    p.m.resume([{ id: "mv", rec: structuredClone(LEGACY) }]);
+    await p.m.idle();
+    const end = p.mem.get("mv")!;
+    assert.equal(end.stage, "failed");
+    assert.equal(end.error, out?.stage === "stopped" ? undefined : "not_sent", "a stopped run with nothing sent fails as before; else the send-by");
+    assert.equal(claimed(end, T0), null, "nothing may send for it after");
+  });
+
+for (const out of [{ stage: "in_transit", txs: [{ chain: "solana", hash: "S" }] }, { stage: "in_transit" }, { stage: "sent", txs: [{ chain: "solana", hash: "S" }] }])
+  test(`a release-137 move whose run is ${out.stage}${"txs" in out ? " with its tx" : " (its release may be out)"} is never failed by the send-by`, BOUND, async () => {
+    const p = page({ out });
+    p.mem.set("mv", structuredClone(LEGACY));
+    p.m.resume([{ id: "mv", rec: structuredClone(LEGACY) }]);
+    await p.m.idle();
+    assert.notEqual(p.mem.get("mv")!.stage, "failed", p.log.map((r) => r.stage).join(" "));
+  });
