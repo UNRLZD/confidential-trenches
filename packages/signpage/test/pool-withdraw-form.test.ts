@@ -9,7 +9,7 @@ import { SOLANA_RESERVED_KEYS } from "../src/rules/pool.ts";
 import { planPoolWithdraw } from "../src/pool-withdraw.ts";
 import { SOL_GRID } from "../../wallet/src/pool/pieces.ts";
 import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
-import { checkExitTo, checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady, type PoolWithdrawFormDeps } from "../src/withdraw/pool-form.ts";
+import { checkExitTo, checkPoolAmount, checkPoolTo, drawPoolWithdrawForm, eip55, evaluatePool, formatUnits, type GivenPoolWithdraw, parseUnits, poolRefusalWords, POOL_WITHDRAW_WORDS, type PoolFunds, type PoolReady, type PoolWithdrawFormDeps } from "../src/withdraw/pool-form.ts";
 
 const POOL = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";
 // stand-ins that are no key the runtime reserves, so each refusal below is its own check's
@@ -97,7 +97,7 @@ class El {
 }
 const settle = () => new Promise((r) => setTimeout(r, CHECK_IDLE_MS + 60));
 
-function drawn(funds: () => Promise<PoolFunds> = async () => FUNDS, more: Partial<PoolWithdrawFormDeps> = {}) {
+function drawn(funds: () => Promise<PoolFunds> = async () => FUNDS, more: Partial<PoolWithdrawFormDeps> = {}, given?: GivenPoolWithdraw) {
   const handed: PoolReady[] = [];
   const steps: Promise<void>[] = [];
   const doc = { createElement: (tag: string) => new El(tag) } as unknown as Document;
@@ -108,7 +108,7 @@ function drawn(funds: () => Promise<PoolFunds> = async () => FUNDS, more: Partia
     b.addEventListener("click", onClick);
     return b as unknown as HTMLButtonElement;
   };
-  const form = drawPoolWithdrawForm(doc, { chain: "solana", keys: KEYS, funds, handoff: (r) => void handed.push(r), ...more }, button, (s) => void steps.push(s())) as unknown as El;
+  const form = drawPoolWithdrawForm(doc, { chain: "solana", keys: KEYS, funds, handoff: (r) => void handed.push(r), ...more }, button, (s) => void steps.push(s()), given) as unknown as El;
   const input = (k: string) => form.find((e) => e.dataset.input === k)!;
   return {
     form, handed,
@@ -425,4 +425,71 @@ test("a typed amount the notes cannot pay exactly: the nearest payable amount at
   await settle();
   assert.equal(f.form.dataset.state, "refused");
   assert.equal(f.form.find((e) => e.dataset.for === "amount")!.textContent, `${POOL_WITHDRAW_WORDS.min}${formatUnits(MIN, 9)} SOL`);
+});
+
+// ---------------------------------------------------------------- given: typed in the app's sheet, confirmed here
+// card withdraw-address-in-the-app (owner 14 Nov 12:22Z picked A): pool.withdraw with to and amount or max (and dest)
+// draws no field to type into, checks both here as typed ones are, and only Confirm hands over.
+const ddOf = (f: ReturnType<typeof drawn>) => Object.fromEntries(f.lines.children.filter((e) => e.tag === "dd").map((e) => [e.dataset.line, e.textContent]));
+
+test("given: no field or picker in the page, the lines drawn before the press are the confirm, the button reads Confirm, its tap hands them over", async () => {
+  const f = drawn(async () => FUNDS, {}, { to: ` ${TO} `, amount: "0.002" });
+  assert.equal(f.form.dataset.given, "app");
+  assert.equal(f.form.find((e) => e.tag === "input" || e.tag === "select" || e.tag === "textarea"), undefined, "nothing to type into: the frame stays");
+  assert.equal(f.form.find((e) => e.dataset.action === "sendable"), undefined, "Max is the app sheet's, not offered here");
+  assert.equal(f.go.textContent, "Confirm");
+  assert.equal(f.go.dataset.action, "withdraw", "the guarded action: the activation guard's hold applies");
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  assert.deepEqual(ddOf(f), { amount: "0.002 SOL", to: TO, "max-fee": "0.001305 SOL" });
+  await f.tap();
+  assert.deepEqual(f.handed, [{ chain: "solana", to: TO, amount: 2_000_000n, maxFee: FEE + W_FEE }]);
+});
+
+test("given: a bad address, one of another chain, or the pool itself is refused here and Confirm hands nothing over", async () => {
+  for (const to of [CHECKSUMMED, "alice.near", POOL, "not-an-address"]) {
+    const f = drawn(async () => FUNDS, {}, { to, amount: "0.002" });
+    await settle();
+    assert.equal(f.form.dataset.state, "refused", to);
+    assert.ok(f.form.find((e) => e.dataset.for === "to")?.dataset.refusal, to);
+    assert.equal(f.lines.hidden, true, to);
+    assert.equal(f.go.disabled, true, to);
+    await f.tap();
+    assert.deepEqual(f.handed, [], to);
+  }
+});
+
+test("given dest: a served chain checks To on it and hands it over; one the pool does not pay out to is refused, never swapped for the pool's own", async () => {
+  const f = drawn(async () => FUNDS, { exits: ["base", "near"] }, { to: CHECKSUMMED.toLowerCase(), amount: "0.002", dest: "base" });
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  assert.deepEqual(ddOf(f), { amount: "0.002 SOL", chain: "Base", to: CHECKSUMMED, "max-fee": "0.001305 SOL" });
+  await f.tap();
+  assert.deepEqual(f.handed, [{ chain: "solana", dest: "base", to: CHECKSUMMED, amount: 2_000_000n, maxFee: FEE + W_FEE }]);
+  const wrong = drawn(async () => FUNDS, { exits: ["base", "near"] }, { to: TO, amount: "0.002", dest: "base" });
+  await settle();
+  assert.equal(wrong.form.dataset.state, "refused", "a Solana key on Base");
+  const off = drawn(async () => FUNDS, { exits: ["base", "near"] }, { to: TO, amount: "0.002", dest: "robinhood" });
+  await settle();
+  assert.equal(off.form.dataset.state, "refused");
+  assert.equal(off.form.find((e) => e.dataset.for === "dest")?.dataset.refusal, "not-available");
+  assert.equal(off.go.disabled, true);
+  await off.tap();
+  assert.deepEqual(off.handed, []);
+});
+
+test("given Max: the live Max is the amount drawn and handed over; nothing the pool can send draws Insufficient", async () => {
+  const f = drawn(async () => FUNDS, {}, { to: TO, max: true });
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  const max = f.handed.length === 0 ? ddOf(f).amount : "";
+  assert.ok(max && max.endsWith(" SOL") && max !== "0 SOL", String(max));
+  await f.tap();
+  assert.equal(f.handed.length, 1);
+  assert.equal(`${formatUnits(f.handed[0]!.amount, 9)} SOL`, max);
+  const none = drawn(async () => ({ ...FUNDS, notes: [] }), {}, { to: TO, max: true });
+  await settle();
+  assert.equal(none.form.dataset.state, "refused");
+  assert.equal(none.form.find((e) => e.dataset.for === "amount")?.dataset.refusal, "insufficient");
+  assert.equal(none.go.disabled, true);
 });

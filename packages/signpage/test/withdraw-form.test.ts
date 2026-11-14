@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
-import { CHECK_IDLE_MS, drawWithdrawForm, evaluate, formatUnits, refusalWords, WITHDRAW_WORDS } from "../src/withdraw/form.ts";
+import { CHECK_IDLE_MS, drawWithdrawForm, evaluate, formatUnits, type GivenWithdraw, refusalWords, WITHDRAW_WORDS } from "../src/withdraw/form.ts";
 import { RELEASE_WITHDRAW_RELAYER } from "../../wallet/src/withdraw/relay.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "../src/withdraw/handoff.ts";
 
@@ -129,7 +129,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settle = () => sleep(CHECK_IDLE_MS + 60);
 
 /** A drawn form whose RPCs answer from `exists` (an account's name -> it exists) and may be held by `gate`. */
-function drawn(over: { cash?: () => Promise<{ id: string; value: bigint }[]>; fee?: () => Promise<bigint>; handoff?: boolean; end?: (step: (i: number, kind: string) => void) => { kind: string; fee?: bigint } | void; unmatched?: () => number } = {}) {
+function drawn(over: { cash?: () => Promise<{ id: string; value: bigint }[]>; fee?: () => Promise<bigint>; handoff?: boolean; end?: (step: (i: number, kind: string) => void) => { kind: string; fee?: bigint } | void; unmatched?: () => number; given?: GivenWithdraw } = {}) {
   const exists = new Set(["alice.near", "bob.near"]);
   let gate: Promise<void> | null = null;
   const view = (name: string): NearRpc => ({
@@ -160,7 +160,7 @@ function drawn(over: { cash?: () => Promise<{ id: string; value: bigint }[]>; fe
     ...(over.handoff === false ? {} : { handoff: async (w: unknown, fee: bigint, step: (i: number, kind: string) => void) => (handed.push(w), fees.push(fee), over.end?.(step)) }),
     ...(over.unmatched ? { unmatched: over.unmatched } : {}),
   };
-  const form = drawWithdrawForm(doc, deps, button, (step) => void steps.push(step())) as unknown as El;
+  const form = drawWithdrawForm(doc, deps, button, (step) => void steps.push(step()), over.given) as unknown as El;
   const input = (k: string) => form.find((e) => e.dataset.input === k)!;
   const go = form.find((e) => e.dataset.action === "withdraw")!;
   return {
@@ -525,4 +525,70 @@ test("a typed amount Cash cannot pay exactly: the box keeps what was typed, the 
   assert.equal(sent(), "9.88 USDC");
   box.fire("blur");
   assert.equal(box.value, "9.88");
+});
+
+// ------------------------------------------------------------------- given: typed in the app, confirmed here
+// card withdraw-address-in-the-app (owner 14 Nov 12:22Z picked A): withdraw.open with to and amount or max draws no field
+// to type into; both are checked here as typed ones are, and only Confirm hands over.
+const givenValue = (f: ReturnType<typeof drawn>, k: "to" | "amount") => f.form.find((e) => e.dataset.value === k)?.textContent;
+
+test("given: no field to type into, To and Amount drawn as the checked values, the button reads Confirm, its tap hands them over", async () => {
+  const f = drawn({ given: { to: " alice.near ", amount: "5" } });
+  assert.equal(f.form.dataset.given, "app");
+  assert.equal(f.form.find((e) => e.tag === "input" || e.tag === "textarea"), undefined, "no input in the page: nothing to seal the frame for");
+  assert.equal(f.go.textContent, "Confirm");
+  assert.equal(f.go.dataset.action, "withdraw", "the guarded action: the activation guard's hold applies to Confirm");
+  assert.equal(f.form.find((e) => e.dataset.row === "chains")?.hidden, true);
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(givenValue(f, "to"), "alice.near", "the account the check passed, trimmed");
+  assert.equal(givenValue(f, "amount"), "5 USDC");
+  assert.equal(f.go.disabled, false);
+  await f.tap();
+  assert.deepEqual(f.handed, [{ recipient: "alice.near", amount: 5_000_000n, parts: oneNote(5_000_000n) }]);
+});
+
+test("given: a bad address, one of another chain, or an unknown account is refused here and Confirm hands over nothing", async () => {
+  const bad: [string, string][] = [
+    ["Alice.near", "not-account"],
+    ["9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", "not-account"], // a Solana key: not a NEAR account
+    ["nobody-here.near", "no-account"], // no such account on either RPC
+    ["0x5290840009852788", "no-account"], // an EVM-looking name that is no NEAR account (a whole 0x+40 hex is an ETH-implicit NEAR account, valid)
+    ["intents.near", "intents"],
+    [MAIN.usdc, "token"],
+  ];
+  for (const [to, code] of bad) {
+    const f = drawn({ given: { to, amount: "5" } });
+    await settle();
+    assert.equal(f.form.dataset.state, "refused", to);
+    assert.equal(f.form.find((e) => e.dataset.for === "to")?.dataset.refusal, code, to);
+    assert.equal(f.go.disabled, true, to);
+    await f.tap();
+    assert.deepEqual(f.handed, [], to);
+  }
+});
+
+test("given: Confirm checks the drawn account again; gone on both RPCs since it was drawn, nothing is handed over", async () => {
+  const f = drawn({ given: { to: "alice.near", amount: "5" } });
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  f.exists.delete("alice.near");
+  await f.tap();
+  assert.deepEqual(f.handed, []);
+  assert.equal(f.form.dataset.state, "refused");
+});
+
+test("given Max: Amount is the live Max, the tap sends it; nothing Cash can send draws Insufficient, never a Confirm waiting", async () => {
+  const f = drawn({ given: { to: "alice.near", max: true } });
+  assert.equal(givenValue(f, "amount"), WITHDRAW_WORDS.max, "before the reads: Max");
+  await settle();
+  assert.equal(f.form.dataset.state, "ready");
+  assert.equal(givenValue(f, "amount"), "9.88 USDC");
+  await f.tap();
+  assert.deepEqual(f.handed, [{ recipient: "alice.near", amount: 9_880_000n, parts: oneNote(9_880_000n) }]);
+  const none = drawn({ given: { to: "alice.near", max: true }, cash: async () => [] });
+  await settle();
+  assert.equal(none.form.dataset.state, "refused");
+  assert.equal(none.form.find((e) => e.dataset.for === "amount")?.dataset.refusal, "insufficient");
+  assert.equal(none.go.disabled, true);
 });

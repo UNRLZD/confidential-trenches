@@ -40,6 +40,12 @@
 //   account), the funds are read for a plain send (W pays the quote's deposit address, an account with no code), and
 //   the press hands over the chain with the typed address; the run asks the quote (../pool-exit.ts) and pays its deposit
 //   address, never the typed one on the pool's chain. Chain and Not available are drafts (data-draft-copy).
+// - Given (card withdraw-address-in-the-app, owner 14 Nov 12:22Z picked A): pool.withdraw with `to` and `amount` or
+//   `max` (and `dest`, the chain it arrives on) typed in the app's own Withdraw sheet. No field to type into is drawn:
+//   the chain's mark, then the lines drawn before the press (Amount, Chain, To, Max fee) once both pass, each refusal on
+//   its line, and the button reads Confirm. Both values run through the same checks as typed ones, at open and again at
+//   the press. A `dest` this pool does not pay out to is refused (Not available), never swapped for the pool's own chain.
+//   No field typed into: the screen is not sealed (../frame-cover.ts), the app's frame stays under it, inert.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { PieceRule } from "../../../wallet/src/pool/pieces.ts";
 import { nearestPlannable, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
@@ -50,6 +56,9 @@ import { checkPoolTo, eip55, EVM_ZERO, type PoolAddressCheck, type PoolAddressCo
 import { POOL_CHAIN_MARK } from "./chain-mark.ts";
 import type { ExitChain } from "../../../kit/src/checks/oneclick-exit.ts";
 import { CHECK_IDLE_MS, markDraft, WITHDRAW_WORDS } from "./form.ts";
+
+/** What the app's Withdraw sheet took for a pool (the kit's WithdrawGiven with `to`, and `dest`). */
+export type GivenPoolWithdraw = Readonly<({ to: string; amount: string } | { to: string; max: true }) & { dest?: ExitChain }>;
 
 export { checkPoolTo, eip55, toCleaned, type PoolAddressCheck, type PoolAddressCode, type PoolKeys } from "./address.ts";
 
@@ -72,6 +81,7 @@ export const POOL_WITHDRAW_WORDS = {
   "fee-rose": "Network fee rose. New max fee: ", // owner 8 Nov 07:55Z, kept (pw.feeRose)
   "fee-redraw": "Send at new fee", // owner 8 Nov 07:55Z, kept (pw.feeRoseSend)
   max: "Max", // owner 12 Nov 13:03Z, "Add Max, the same word the trade box uses": the label of what can be sent, "Max 0.048695 SOL"
+  confirm: WITHDRAW_WORDS.confirm, // card withdraw-address-in-the-app: the given screen's button; owner 14 Nov 12:22Z, kept
   chain: "Chain", // DRAFT COPY: the picker of the chain the money arrives on (card pool-withdraws-to-any-chain)
   "not-available": "Not available", // DRAFT COPY: a chain 1Click does not serve from this pool, beside its name
 } as const;
@@ -225,13 +235,14 @@ export interface PoolWithdrawFormDeps {
 type Button = (action: string, label: string, onClick: () => void) => HTMLButtonElement;
 
 /** Draws the screen into `doc`; `button` is the page's own (the activation guard), `run` its step runner. */
-export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, button: Button, run: (step: () => Promise<void>) => void): HTMLElement {
+export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, button: Button, run: (step: () => Promise<void>) => void, given?: GivenPoolWithdraw): HTMLElement {
   const { chain } = deps;
   const { symbol, decimals } = POOL_ASSET[chain];
   const form = doc.createElement("div");
   form.dataset.withdraw = "pool";
   form.dataset.chain = chain;
   form.dataset.state = "empty";
+  if (given) form.dataset.given = "app";
   // one column, no wider than the app's drawer: each field's name over its input, the symbol beside the amount's
   Object.assign(form.style, { display: "flex", flexDirection: "column", alignItems: "stretch", gap: "12px", maxWidth: "440px" });
   const field = (key: "to" | "amount") => {
@@ -320,13 +331,21 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   const shown = doc.createElement("dl");
   shown.dataset.lines = "pool-withdraw";
   shown.hidden = true;
-  const go = button("withdraw", POOL_WITHDRAW_WORDS.withdraw, () => run(withdraw));
+  const go = button("withdraw", given ? POOL_WITHDRAW_WORDS.confirm : POOL_WITHDRAW_WORDS.withdraw, () => run(withdraw));
   if (!deps.handoff) go.dataset.pending = "pool-withdraw";
+  // given: a dest this pool does not pay out to, refused on its own line (destOf would fall back to the pool's chain)
+  const destLine = doc.createElement("p");
+  destLine.dataset.for = "dest";
+  destLine.hidden = true;
+  const givenDest = given?.dest ?? chain;
+  const destRefused = given !== undefined && givenDest !== chain && !(deps.exits ?? []).includes(givenDest);
   // a send owed whose fee rose: its line and its button, above the fields, once read
   const rose = doc.createElement("div");
   rose.dataset.lines = "fee-rose";
   rose.hidden = true;
-  form.append(head, rose, destRow, to.label, to.line, amount.label, canRow, amount.line, shown, go);
+  // given: no field to type into in the page, only the lines drawn before the press and each refusal's line
+  if (given) form.append(head, rose, destLine, to.line, amount.line, shown, go);
+  else form.append(head, rose, destRow, to.label, to.line, amount.label, canRow, amount.line, shown, go);
   if (deps.owedFees && deps.redraw) {
     const redraw = deps.redraw;
     const owedFees = deps.owedFees;
@@ -409,6 +428,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   };
   const draw = (v: PoolFormView): void => {
     view = v;
+    if (destRefused) v = { state: "refused", address: v.address, amount: v.amount, ready: null };
     form.dataset.state = v.state;
     line(to.line, v.address);
     line(amount.line, v.amount);
@@ -445,8 +465,14 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     }
     await loaded;
     // Max is an intent (card withdraw-max-means-all): after every read the box holds the live Max
-    if (maxIntent && funds !== null && poolSendable(funds) > 0n) amount.input.value = formatUnits(poolSendable(funds), decimals);
-    const v = evaluatePool(chain, to.input.value, amount.input.value, deps.keys, funds, dest);
+    const can = funds === null ? 0n : poolSendable(funds);
+    if (maxIntent && can > 0n) amount.input.value = formatUnits(can, decimals);
+    const e = evaluatePool(chain, to.input.value, amount.input.value, deps.keys, funds, dest);
+    // given Max and nothing the pool can send: Insufficient (Busy · Retry while the funds are unread), never a Confirm
+    // left waiting on an amount
+    const v: PoolFormView = given && "max" in given && !(can > 0n)
+      ? { state: "refused", address: e.address, amount: { ok: false, code: funds === null ? "unread" : "insufficient" }, ready: null }
+      : e;
     if (at !== seq) return null;
     draw(v);
     return v;
@@ -488,6 +514,19 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     if (!same) return;
     await deps.handoff(v.ready);
   }
-  draw(view);
+  if (given) {
+    destPick.value = givenDest;
+    to.input.value = given.to;
+    if ("max" in given) maxIntent = true;
+    else amount.input.value = given.amount;
+    if (destRefused) {
+      destLine.hidden = false;
+      destLine.dataset.refusal = "not-available";
+      markDraft(destLine, "not-available", POOL_DRAFT);
+      destLine.textContent = `${EXIT_CHAIN_NAME[givenDest]} · ${POOL_WITHDRAW_WORDS["not-available"]}`;
+    }
+    draw({ state: destRefused ? "refused" : "typing", address: null, amount: null, ready: null });
+    if (!destRefused) void check();
+  } else draw(view);
   return form;
 }
