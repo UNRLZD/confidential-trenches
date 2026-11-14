@@ -74,6 +74,10 @@ import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { storedTails, wTailWallets } from "./w-tails.ts";
+import { CARRY_FOLLOW_MS, CARRY_PASS_MS, carryLeftovers, carryOpenKey, clearLeftover, leftoverSources, worthUsdc, type CarryPass, type LeftoverCarryDeps } from "./leftover-carry.ts";
+import { solCashCarrySender } from "./carry-cash-sol.ts";
+import { POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS } from "./device-spacing.ts";
+import type { CarryOpen } from "./carry-cash.ts";
 import { depositToEnd, depositWalletsOf, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, poolFollowEnded, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
 import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
@@ -254,6 +258,9 @@ let poolWithdraw: { chain: PoolChain; opId: string } | null = null;
 // a move out of Cash a reload cut short (src/cash-to-pool.ts resume, card one-balance-buys-on-every-chain): set where
 // the mover is built, run at sign-in after the vault's withdrawals are settled
 let resumeMoves: (() => Promise<void>) | null = null;
+// the leftovers' carry to Cash (src/leftover-carry.ts, card leftovers-carry-to-cash): set beside the pool-to-Cash path,
+// started at sign-in after the moves resume, stopped by the sign out
+let carryLoop: (() => Promise<void>) | null = null;
 // Sign out (this tab's or another's) stops every quote's asks (card helper-says-why-a-vendor-refused, review P3):
 // deposit.quote, pool.address and the deposit sheet's reads send nothing more, a re-ask's pause included.
 const quotes = quotesStop();
@@ -402,6 +409,48 @@ else {
       cashMoverNow().resume(moves);
       toCashNow().resume(moves);
     };
+  // a one-time wallet's leftover goes whole to Cash (src/leftover-carry.ts, card leftovers-carry-to-cash): one wallet a
+  // pass, under one tab's lock (two tabs never carry the same wallet), Cash's own deposit quote as pool to Cash asks it;
+  // Solana's sender here (Base's and Robinhood's join with their sender)
+  carryLoop = async () => {
+    const signal = withdrawWait.signal;
+    const sol = PAGE_SOL_PIN === undefined ? null : solCashCarrySender({ rpcs: pageSolanaRpcs("pass"), seed64: () => openSeed64(), now: () => Date.now() });
+    const deps: LeftoverCarryDeps = {
+      sources: async () => leftoverSources(await pageOps().catch(() => []), await pageTails().catch(() => [])),
+      sender: (chain) => (chain === "solana" ? sol : null),
+      worth: (chain, amount) => worthUsdc(prices.get(chain), amount, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]),
+      quote: async (chain, amount, id) => {
+        const r = poolCoinQuote({ origin_asset: POOL_COIN_ASSET[chain], amount: formatPoolUnits(amount, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) }, { id });
+        await r.after;
+        const a = r.answer();
+        return a === null || "error" in a ? { error: a === null ? "failed" : a.error } : { address: a.result.deposit_address };
+      },
+      onChain: onPoolChain,
+      open: async (src) => (await (await open()).get("meta", carryOpenKey(src)).catch(() => undefined)) as CarryOpen | undefined,
+      keep: async (src, v) => {
+        const st = await open();
+        if (v === undefined) await st.delete("meta", carryOpenKey(src));
+        else await st.put("meta", carryOpenKey(src), v);
+      },
+      cleared: async (src) => clearLeftover(await open(), src),
+      now: () => Date.now(),
+      signal,
+    };
+    const locks = globalThis.navigator?.locks;
+    while (!signal.aborted) {
+      const pass = (): Promise<CarryPass> => carryLeftovers(deps).catch(() => null);
+      const r = locks ? await locks.request("ct-carry-cash", { ifAvailable: true }, (l) => (l ? pass() : null)) : await pass();
+      // a send on its way is read again soon; once one landed, the next wallet only after the rent backs' own spacing (no
+      // two wallets' sends side by side); else a short wait
+      const ms = r?.end === "pending" ? CARRY_FOLLOW_MS : r?.end === "landed" ? POOL_RENT_BACK_SPACE_MIN_MS + Math.floor(Math.random() * (POOL_RENT_BACK_SPACE_MAX_MS - POOL_RENT_BACK_SPACE_MIN_MS)) : CARRY_PASS_MS;
+      // a wait that never holds a process open (Node's unref; a browser's timer has none)
+      await new Promise<void>((ok) => {
+        const t = setTimeout(ok, ms);
+        (t as unknown as { unref?: () => void }).unref?.();
+        signal.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });
+      });
+    }
+  };
   // pool.buy.dry with with_cash on Solana (src/cash-to-pool.ts withCash): the dry answer as it is, plus Cash's largest
   // note less the relayer's fee at the device's price and what moves on their way bring; a read that fails leaves it out
   // the tap's most on Base and Robinhood (kit 1.15): an EVM tap spends one whole note, so state.pools' tap_max (the
@@ -1314,7 +1363,9 @@ async function landed(l: Landing): Promise<void> {
     .catch(() => {})
     // then a move out of Cash a reload cut short follows its quote's follow op on (src/cash-to-pool.ts resume)
     .then(() => resumeMoves?.())
-    .catch(() => {});
+    .catch(() => {})
+    // then a one-time wallet's leftover goes to Cash, a pass at a time while the page is open (src/leftover-carry.ts)
+    .then(() => void carryLoop?.().catch(() => {}));
   // a held deposit's move out a reload cut short (src/withdraw/held.ts)
   void settleHeld().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry; then the load walks every

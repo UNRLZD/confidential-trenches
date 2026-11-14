@@ -914,6 +914,27 @@ export function checkSolanaKeepSweep(wire: Uint8Array, ctx: PoolContext & { prec
   return value;
 }
 
+/** A leftover's carry to Cash on Solana (card leftovers-carry-to-cash, src/carry-cash-sol.ts): one System transfer from
+ *  the wallet (U_X or W, the one signer and fee payer) of exactly the amount Cash's deposit quote was asked for, to that
+ *  quote's checked deposit address, nothing else (no compute budget, no table, no other account), on the device's own
+ *  blockhash; and that amount is the wallet's whole balance less the one signature's fee, read alike on both RPCs, so the
+ *  wallet is left empty (a System account under rent is never left behind). */
+export type SolanaCashCarryCtx = { readonly wallet: string; readonly to: string; readonly amount: bigint; readonly lamports: bigint; readonly blockhash: string };
+export function checkSolanaCashCarry(wire: Uint8Array, ctx: SolanaCashCarryCtx): void {
+  if (typeof ctx?.wallet !== "string" || typeof ctx.to !== "string" || typeof ctx.amount !== "bigint" || typeof ctx.lamports !== "bigint") return refuse("carry_ctx");
+  if (ctx.to === ctx.wallet || ctx.amount <= 0n) return refuse("carry_ctx");
+  const d = decode(wire, { blockhash: ctx.blockhash, tables: {}, stateSize: 0, labelSize: 0 });
+  if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
+  if (d.ixs.length !== 1) return refuse("instructions");
+  const x = d.ixs[0]!;
+  if (x.program !== SOLANA_SYSTEM_PROGRAM) return refuse("program");
+  if (x.accounts.length !== 2 || !same(x.accounts[0], ctx.wallet, true, true) || !same(x.accounts[1], ctx.to, false, true)) return refuse("transfer_accounts");
+  if (x.data.length !== 12 || new DataView(x.data.buffer, x.data.byteOffset, 4).getUint32(0, true) !== 2) return refuse("transfer_data");
+  if (u64le(x.data, 4) !== ctx.amount) return refuse("amount");
+  if (ctx.amount !== ctx.lamports - SOLANA_LAMPORTS_PER_SIGNATURE) return refuse("carry_whole");
+  passedWire(wire);
+}
+
 /** A sell's teardown frames (card solana-sell-teardown): the kit's checkSolanaTeardown for W, nothing else. */
 export function checkSolanaTeardownFrames(wires: readonly Uint8Array[], ctx: PoolContext, reads: SolanaTeardownReads): void {
   const v = checkSolanaTeardown(wires, ctx.wallet, reads);
