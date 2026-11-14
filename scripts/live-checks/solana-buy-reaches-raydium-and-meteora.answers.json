@@ -1,0 +1,105 @@
+{
+  "good": {
+    "base": "http://127.0.0.1:8799",
+    "at": "2026-11-14T22:23:40.064Z",
+    "scan": {
+      "status": 200,
+      "json": {
+        "jsonrpc": "2.0",
+        "result": {
+          "context": {
+            "slot": 469493867,
+            "apiVersion": "4.3.0-beta.2"
+          },
+          "value": [
+            {
+              "pubkey": "B8BH6ZKr64agqNWG51CQWUKrLZZw5L31u2K6hubsZfyf",
+              "account": {
+                "lamports": 6535656,
+                "data": [
+                  "",
+                  "base64"
+                ],
+                "owner": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+                "executable": false,
+                "rentEpoch": 18446744073709552000,
+                "space": 904
+              }
+            },
+            {
+              "pubkey": "CjQGsQouTCDcd6He8reRoDdUQ1KikBNmNwnSDPfpLTGQ",
+              "account": {
+                "lamports": 6535656,
+                "data": [
+                  "",
+                  "base64"
+                ],
+                "owner": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+                "executable": false,
+                "rentEpoch": 18446744073709552000,
+                "space": 904
+              }
+            },
+            {
+              "pubkey": "DmLWzsAtNNcWDY9ULaHGbTW2Zh9A5LHWuAF4S8iFeoxd",
+              "account": {
+                "lamports": 6535656,
+                "data": [
+                  "",
+                  "base64"
+                ],
+                "owner": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+                "executable": false,
+                "rentEpoch": 18446744073709552000,
+                "space": 904
+              }
+            },
+            {
+              "pubkey": "J3wZVx37wfEpGNjBHiJyuGZf948jsFe3toCiMkD4D1oz",
+              "account": {
+                "lamports": 6535656,
+                "data": [
+                  "",
+                  "base64"
+                ],
+                "owner": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+                "executable": false,
+                "rentEpoch": 18446744073709552000,
+                "space": 904
+              }
+            }
+          ]
+        },
+        "id": 1
+      }
+    },
+    "wide": {
+      "status": 400,
+      "json": {
+        "error": {
+          "code": "method_not_allowed"
+        }
+      }
+    }
+  },
+  "bad": {
+    "base": "https://ct-api.unrealized.trade",
+    "at": "2026-11-14T22:21:42.447Z",
+    "scan": {
+      "status": 400,
+      "json": {
+        "error": {
+          "code": "method_not_allowed"
+        }
+      }
+    },
+    "wide": {
+      "status": 400,
+      "json": {
+        "error": {
+          "code": "method_not_allowed"
+        }
+      }
+    }
+  }
+}
