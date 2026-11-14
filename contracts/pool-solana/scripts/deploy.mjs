@@ -958,14 +958,15 @@ export function keysBase(env = process.env, home = homedir()) {
     const r = path.relative(real(d), real(p));
     return r === "" || (!r.startsWith("..") && !path.isAbsolute(r));
   };
-  for (const t of [tmpdir(), "/tmp", "/var/tmp", "/private/tmp", "/private/var/folders", "/var/folders"]) {
-    if (under(base, t)) throw new Error(`the key folder ${base} is in an OS temp folder (${t}), which is emptied: set XDG_STATE_HOME elsewhere`);
-  }
-  if (under(base, path.join(home, ".confidential-trenches"))) throw new Error(`the key folder ${base} is under ~/.confidential-trenches`);
+  // the git repo first: the more specific refusal wins when a checkout itself sits in OS temp
   for (let q = path.dirname(base); ; q = path.dirname(q)) {
     if (existsSync(path.join(q, ".git"))) throw new Error(`the key folder ${base} is inside the git repo or worktree ${q}`);
     if (q === path.dirname(q)) break;
   }
+  for (const t of [tmpdir(), "/tmp", "/var/tmp", "/private/tmp", "/private/var/folders", "/var/folders"]) {
+    if (under(base, t)) throw new Error(`the key folder ${base} is in an OS temp folder (${t}), which is emptied: set XDG_STATE_HOME elsewhere`);
+  }
+  if (under(base, path.join(home, ".confidential-trenches"))) throw new Error(`the key folder ${base} is under ~/.confidential-trenches`);
   return base;
 }
 
