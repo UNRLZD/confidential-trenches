@@ -236,7 +236,11 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   chains.append(...picks);
   chains.hidden = picks.length < 2; // one chain: nothing to pick
   drawChains();
-  form.append(notice, chains, to.label, to.line, amount.label, canRow, amount.line, go, steps);
+  // the amount the tap sends, drawn once both fields pass: the box keeps what was typed (card withdraw-max-means-all)
+  const shown = doc.createElement("dl");
+  shown.dataset.lines = "cash-withdraw";
+  shown.hidden = true;
+  form.append(notice, chains, to.label, to.line, amount.label, canRow, amount.line, shown, go, steps);
 
   // read at open, and again on Retry while either is unread; one that cannot be read stays null (unread)
   let ctx: { notes: readonly WithdrawSource[] | null; fee: bigint | null } = { notes: null, fee: null };
@@ -270,6 +274,17 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     line(to.line, v.address && !v.address.ok ? v.address.code : null);
     const m = v.amount && !v.amount.ok ? v.amount : null;
     line(amount.line, m ? m.code : null, m?.code === "min" ? m.min : undefined, m?.code === "insufficient" || m?.code === "unplannable" ? m.below : undefined, m?.code === "unplannable" ? m.above : undefined);
+    shown.replaceChildren();
+    shown.hidden = v.ready === null;
+    if (v.ready) {
+      const dt = doc.createElement("dt");
+      dt.textContent = WITHDRAW_WORDS.amount;
+      markDraft(dt, "amount", WITHDRAW_DRAFT);
+      const dd = doc.createElement("dd");
+      dd.textContent = `${formatUnits(v.ready.amount)} USDC`;
+      dd.dataset.line = "amount";
+      shown.append(dt, dd);
+    }
     go.disabled = v.state !== "ready" || !deps.handoff;
   };
   const line = (p: HTMLParagraphElement, code: AddressCode | AmountCode | null, min?: bigint, below?: bigint, above?: bigint): void => {
@@ -301,8 +316,6 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     if (maxIntent && can > 0n) amount.input.value = formatUnits(can);
     const v = await evaluate(to.input.value, amount.input.value, { network: deps.network, rpcs: deps.rpcs, ...ctx, chain });
     if (at !== seq) return null; // a newer keystroke or check: this answer is stale
-    // the amount sent is the one in the box: a typed one Cash cannot pay exactly becomes the nearest it pays below it
-    if (v.ready && parseAmount(amount.input.value) !== v.ready.amount) amount.input.value = formatUnits(v.ready.amount);
     draw(v);
     return v;
   };
@@ -319,6 +332,11 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     maxIntent = false;
     typed();
   });
+  // the box is never rewritten while typing; on blur it takes the amount the line shows
+  const settle = (): void => {
+    if (view.ready && parseAmount(amount.input.value) !== view.ready.amount) amount.input.value = formatUnits(view.ready.amount);
+  };
+  amount.input.addEventListener("blur", settle);
   // the tap on Max: everything, followed through every read until an amount is typed
   sendable.addEventListener("click", () => {
     if (ctx.notes === null || ctx.fee === null || sendable.disabled) return;
@@ -373,6 +391,8 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     const plan = (r: CheckedCashWithdraw): string => r.parts.map((p) => `${p.noteId}:${p.part}`).join(",");
     if (!v?.ready || v.ready.recipient !== before.recipient || v.ready.chain !== before.chain || ctx.fee === null) return;
     if (maxIntent ? beforeFee === null || ctx.fee > beforeFee : v.ready.amount !== before.amount || plan(v.ready) !== plan(before)) return;
+    // the tap sends the amount the line shows, and the box takes it
+    settle();
     drawSteps(v.ready.parts);
     let end: void | { kind: string; fee?: bigint } = undefined;
     try {

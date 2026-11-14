@@ -219,7 +219,7 @@ test("no draft mark on the kept words: Withdraw and each refusal; To, Amount and
   assert.deepEqual(marks(), [["min", "min"]], "Min $X is this form's own word, still a draft");
   f.type("amount", "50");
   await settle();
-  // above what can be sent: no line, the box holds what can be (card withdraw-max-means-all)
+  // above what can be sent: no refusal line, the Amount line names what can be (card withdraw-max-means-all)
   assert.deepEqual(marks(), []);
   assert.equal(f.go.dataset.draftCopy, undefined);
 });
@@ -288,8 +288,9 @@ test("the tap reads the note value and the fee bound again: a smaller note or a 
   note = 4_000_000n;
   await f.tap();
   assert.deepEqual(f.handed, []);
-  // what the smaller note pays now is in the box for the next tap
-  assert.equal(f.form.find((e) => e.dataset.input === "amount")!.value, "3.88");
+  // what the smaller note pays now is drawn for the next tap; the box keeps what was typed
+  assert.equal(f.form.find((e) => e.dataset.input === "amount")!.value, "5");
+  assert.equal(f.form.find((e) => e.dataset.lines === "cash-withdraw")!.children.find((e) => e.dataset.line === "amount")!.textContent, "3.88 USDC");
   let fee = 120_000n;
   const g = drawn({ fee: async () => fee });
   g.type("to", "alice.near");
@@ -498,18 +499,30 @@ test("Max tapped, then the tap's re-read moves Max: a lower fee hands over the l
   assert.equal((g.handed[0] as { amount: bigint }).amount, 14_700_000n);
 });
 
-test("a typed amount Cash cannot pay exactly: the nearest payable at or below it, in the box before the tap, and handed over", async () => {
+test("a typed amount Cash cannot pay exactly: the box keeps what was typed, the nearest payable at or below it is drawn on the Amount line, the tap sends it and the box takes it", async () => {
   const f = drawn();
+  const box = f.form.find((e) => e.dataset.input === "amount")!;
+  const sent = () => f.form.find((e) => e.dataset.lines === "cash-withdraw")!.children.find((e) => e.dataset.line === "amount")?.textContent;
   f.type("to", "alice.near");
+  // a half number is never rewritten
+  f.type("amount", "0.0");
+  await sleep(400);
+  assert.equal(box.value, "0.0");
   f.type("amount", "9.8");
-  await settle();
+  await sleep(400);
   assert.equal(f.form.dataset.state, "ready");
   assert.equal(f.form.find((e) => e.tag === "p" && e.dataset.for === "amount")!.hidden, true, "no Try");
-  assert.equal(f.form.find((e) => e.dataset.input === "amount")!.value, "9.639999");
+  assert.equal(box.value, "9.8", "the box keeps what was typed past the pause");
+  assert.equal(sent(), "9.639999 USDC");
   await f.tap();
   assert.deepEqual(f.handed, [{ recipient: "alice.near", amount: 9_639_999n, parts: oneNote(9_639_999n) }]);
+  assert.equal(box.value, "9.639999", "at the tap the box takes what was sent");
+  // above everything: everything, on the line; the box takes it on blur
   f.type("amount", "50");
-  await settle();
+  await sleep(400);
   assert.equal(f.form.dataset.state, "ready");
-  assert.equal(f.form.find((e) => e.dataset.input === "amount")!.value, "9.88", "above everything: everything");
+  assert.equal(box.value, "50");
+  assert.equal(sent(), "9.88 USDC");
+  box.fire("blur");
+  assert.equal(box.value, "9.88");
 });

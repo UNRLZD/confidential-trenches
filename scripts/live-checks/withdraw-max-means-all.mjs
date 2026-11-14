@@ -10,7 +10,9 @@
 //     other amount only exactly as drawn;
 //   - poolPayable: the pool form checks a typed amount as the nearest payable at or below it (Max above all), refusing
 //     only one under the least payable, in the Min words;
-//   - cashMax, cashPress, cashPayable: the same on the Cash form, whose box is rewritten to the amount it sends.
+//   - cashMax, cashPress, cashPayable: the same on the Cash form, the amount it sends drawn on its own Amount line;
+//   - cashSettle: the Cash form never rewrites the box while typing: its check draws without touching it, and the box
+//     takes the amount sent only on blur and at the press.
 // The numbers and every refusal are packages/signpage/test/pool-withdraw-form.test.ts, pool-withdraw-sendable.test.ts and
 // withdraw-form.test.ts at the released commit. The recorded answers are facts() over
 // packages/signpage/scripts/build-app.mjs's build (mainnet, as SIGN_HOST serves) and SIGN_HOST as served before.
@@ -33,9 +35,11 @@ const esc = (s) => s.replace(/[$]/g, "\\$");
 const POOL_MAX = new RegExp(`await ${N},(${N})&&(${N})!==null&&(${N})\\(\\2\\)>0n&&\\((${N})\\.input\\.value=(${N})\\(\\3\\(\\2\\),${N}\\)\\);`);
 const POOL_PRESS = new RegExp(`(${N})\\?\\.ready&&\\1\\.ready\\.dest===(${N})\\.dest&&\\1\\.ready\\.to===\\2\\.to&&\\(${N}\\?\\1\\.ready\\.maxFee<=\\2\\.maxFee:\\1\\.ready\\.amount===\\2\\.amount&&\\1\\.ready\\.maxFee===\\2\\.maxFee\\)&&await ${N}\\.handoff\\(\\1\\.ready\\)`);
 const POOL_PAYABLE = new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{let (${N})=(${N})\\(\\2,\\3,\\4\\);if\\(\\5\\.ok\\|\\|\\5\\.code!==\`insufficient\`&&\\5\\.code!==\`unplannable\`\\)return \\5;if\\(\\5\\.below!==void 0\\)\\{let (${N})=\\6\\(\\2,${N}\\(\\5\\.below,${N}\\[\\2\\]\\.decimals\\),\\4\\);if\\(\\7\\.ok\\)return \\7\\}return \\5\\.code===\`unplannable\`&&\\5\\.above!==void 0\\?\\{ok:!1,code:\`min\`,min:\\5\\.above\\}:\\5\\.code===\`insufficient\`\\?\\{ok:!1,code:\`insufficient\`\\}:\\5\\}`);
-// the Cash form's check: the live Max in the box while the intent holds, then the amount sent written in the box
+// the Cash form's check: the live Max in the box while the intent holds; the answer drawn, the box untouched
 const CASH_MAX = new RegExp(`let (${N})=(${N})\\.notes===null\\|\\|\\2\\.fee===null\\?0n:(${N})\\(\\2\\.notes,\\2\\.fee\\);(${N})&&\\1>0n&&\\((${N})\\.input\\.value=(${N})\\(\\1\\)\\);`);
-const CASH_BOX = new RegExp(`(${N})\\.ready&&${N}\\((${N})\\.input\\.value\\)!==\\1\\.ready\\.amount&&\\(\\2\\.input\\.value=${N}\\(\\1\\.ready\\.amount\\)\\)`);
+const CASH_CHECK_DRAWS = new RegExp(`;let (${N})=await ${N}\\(${N}\\.input\\.value,${N}\\.input\\.value,\\{[^}]*\\}\\);return ${N}===${N}\\?\\(${N}\\(\\1\\),\\1\\):null`);
+const CASH_LINE = new RegExp(`(${N})\\.textContent=\`\\$\\{${N}\\(${N}\\.ready\\.amount\\)\\} USDC\`,\\1\\.dataset\\.line=\`amount\``);
+const CASH_SETTLE = new RegExp(`let (${N})=\\(\\)=>\\{(${N})\\.ready&&${N}\\((${N})\\.input\\.value\\)!==\\2\\.ready\\.amount&&\\(\\3\\.input\\.value=${N}\\(\\2\\.ready\\.amount\\)\\)\\};\\3\\.input\\.addEventListener\\(\`blur\`,\\1\\)`);
 const CASH_PRESS = new RegExp(`if\\(!(${N})\\?\\.ready\\|\\|\\1\\.ready\\.recipient!==(${N})\\.recipient\\|\\|\\1\\.ready\\.chain!==\\2\\.chain\\|\\|(${N})\\.fee===null\\|\\|\\(${N}\\?(${N})===null\\|\\|\\3\\.fee>\\4:\\1\\.ready\\.amount!==\\2\\.amount\\|\\|(${N})\\(\\1\\.ready\\)!==\\5\\(\\2\\)\\)\\)return;`);
 const CASH_PAYABLE = new RegExp(`function (${N})\\((${N}),(${N})\\)\\{let (${N})=(${N})\\(\\2,\\3\\);if\\(\\4\\.ok\\|\\|\\4\\.code!==\`insufficient\`&&\\4\\.code!==\`unplannable\`\\)return \\4;if\\(\\4\\.below!==void 0\\)\\{let (${N})=\\5\\(${N}\\(\\4\\.below\\),\\3\\);if\\(\\6\\.ok\\)return \\6\\}return \\4\\.code===\`unplannable\`&&\\4\\.above!==void 0\\?\\{ok:!1,code:\`min\`,min:\\4\\.above\\}:\\4\\.code===\`insufficient\`\\?\\{ok:!1,code:\`insufficient\`\\}:\\4\\}`);
 
@@ -51,6 +55,7 @@ export function facts(index, js) {
   const cm = CASH_MAX.exec(js);
   const pp = POOL_PAYABLE.exec(js);
   const cp = CASH_PAYABLE.exec(js);
+  const cs = CASH_SETTLE.exec(js);
   return {
     index,
     sha384: sha384(js),
@@ -60,7 +65,9 @@ export function facts(index, js) {
     poolPayable: pp !== null && new RegExp(`(${N})=${N}\\?null:${esc(pp[1])}\\(${N},${N},${N}\\),${N}=${N}\\?\\.ok&&\\1\\?\\.ok\\?Object\\.freeze\\(\\{chain:`).test(js),
     cashMax: maxIntent(js, cm?.[4], cm?.[5], cm ? `${esc(cm[6])}\\(${esc(cm[3])}\\(${esc(cm[2])}\\.notes,${esc(cm[2])}\\.fee\\)\\)` : ""),
     cashPress: CASH_PRESS.test(js),
-    cashPayable: cp !== null && CASH_BOX.test(js) && new RegExp(`\\?null:${esc(cp[1])}\\(${N},\\{notes:(${N})\\.notes,fee:\\1\\.fee\\}\\)`).test(js),
+    // the check draws without touching the box; blur and the press (right after its same-as-drawn test) settle it
+    cashSettle: CASH_CHECK_DRAWS.test(js) && cs !== null && new RegExp(`\\.ready\\.recipient!==${N}\\.recipient\\|\\|${N}\\.ready\\.chain!==${N}\\.chain\\|\\|[^;]{0,200}\\)return;${esc(cs[1])}\\(\\),`).test(js),
+    cashPayable: cp !== null && CASH_LINE.test(js) && new RegExp(`\\?null:${esc(cp[1])}\\(${N},\\{notes:(${N})\\.notes,fee:\\1\\.fee\\}\\)`).test(js),
   };
 }
 
@@ -70,10 +77,11 @@ export const SAYS = Object.freeze({
   poolPayable: "the pool form does not send a typed amount as the nearest payable at or below it: it refuses with Try",
   cashMax: "the Cash form does not keep Max as everything: after the press's re-read the box keeps the old number",
   cashPress: "the Cash form's press under Max does not hand over the live Max at a fee bound no higher than drawn, or hands over any other amount not exactly as drawn",
-  cashPayable: "the Cash form does not send a typed amount as the nearest payable at or below it, written in the box: it refuses with Try",
+  cashSettle: "the Cash form rewrites the box while the user types, or does not put the amount sent in the box on blur and at the press",
+  cashPayable: "the Cash form does not send a typed amount as the nearest payable at or below it, drawn on its Amount line: it refuses with Try",
 });
 
-/** The verdict on an answer { index, sha384, poolMax, poolPress, poolPayable, cashMax, cashPress, cashPayable }. */
+/** The verdict on an answer { index, sha384, poolMax, poolPress, poolPayable, cashMax, cashPress, cashSettle, cashPayable }. */
 export function judge(a) {
   const lines = [];
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
