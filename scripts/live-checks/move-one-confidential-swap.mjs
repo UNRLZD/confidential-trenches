@@ -13,7 +13,7 @@
 //     were made by non-dry quotes through the helper and nothing was ever sent to either.
 // What the Move does with those (one quote into the destination pool, the source pool's run pays it, the pool follow
 // carries it in) is held by packages/signpage/test/pool-to-cash.test.ts and pool-deposit-address.test.ts.
-// Runs: pending move-one-confidential-swap, the release that carries it is not deployed yet
+// After: sign
 //   node scripts/live-checks/move-one-confidential-swap.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
