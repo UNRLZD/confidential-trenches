@@ -28,6 +28,15 @@
 //   - Aerodrome Slipstream: CLFactory 0x5e7bb104... (VELVET/USDC), 0x9cb22058... (SNDKc/USDC) and 0xf8f2eb49... (Paper/USDC);
 //     the same `Swap` as Uniswap v3.
 //   - Aerodrome v2: PoolFactory 0x420dd381... (VVV/WETH); `Swap` has amounts in and out.
+//   - Uniswap v2: factory 0x8909dc15... (card every-cell-shows-a-value: of the 41 listed Base tokens read 2026-11-14
+//     05:0xZ, 16 answered an empty tape, and 6 of those trade only on Uniswap v2 / WETH pairs (GeckoTerminal's
+//     uniswap-v2-base), SPCX with 63 buys in the hour and CHUBBY with 56 among them). Read 2026-11-14 05:1xZ at block
+//     57211255 on base-rpc.publicnode.com and 57211271 on mainnet.base.org alike: the CHUBBY, Basecat and PEPKING / WETH
+//     pairs (0xdc21ec23..., 0xb974a5c1..., 0x7c810a21...) each answer factory() 0x8909dc15..., the factory's
+//     getPair(token0, token1) names each back, stable() reverts and getReserves() answers three words; and at block
+//     57212554 the SPCX / WETH pair 0x282dbb70... alike on base-rpc.publicnode.com and base.gateway.tenderly.co
+//     (fixtures/swaps-univ2-base.json). Its pairs log Uniswap v2's `Swap` (sender, the four amounts, to; TOPIC.swapUni2),
+//     the two addresses indexed and the amounts in Aerodrome v2's order; a pair of it is Pool.log "univ2".
 //   - PancakeSwap v3: factory 0x0bfbcf9f... (card evm-chart-opens-without-a-vendor-call). Read 2026-11-11 07:34Z at block
 //     55960544 on base-rpc.publicnode.com and mainnet.base.org alike: GeckoTerminal's pancakeswap-v3-base ELSA / USDC
 //     pool 0x83f3aca29bc79b048b99c56013475570acc97ccf answers factory() 0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865,
@@ -87,6 +96,8 @@ export const TOPIC = {
   // PancakeV3Pool's: Uniswap v3's and its two protocol-fee fields (the venues above)
   swapPancake: topic("Swap(address,address,int256,int256,uint160,uint128,int24,uint128,uint128)"),
   swap2: topic("Swap(address,address,uint256,uint256,uint256,uint256)"),
+  // Uniswap v2's pair: sender, the four amounts, to (Aerodrome v2's names both addresses first; the venues above)
+  swapUni2: topic("Swap(address,uint256,uint256,uint256,uint256,address)"),
   curveBuy: topic("CurveBuy(address,address,uint256,uint256,uint256,uint256)"),
   curveSell: topic("CurveSell(address,address,uint256,uint256,uint256,uint256)"),
   transfer: topic("Transfer(address,address,uint256)"),
@@ -108,6 +119,7 @@ export const BASE_VENUES = {
   uniswapV3: "0x33128a8fc17869897dce68ed026d694621f6fdfd",
   slipstream: ["0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a", "0x9cb220581b91b0c83223012fe69688b92ad07a76", "0xf8f2eb4940cfe7d13603dddd87f123820fc061ef"],
   aerodromeV2: "0x420dd381b31aef6683db6b902084cb0ffece40da",
+  uniswapV2: "0x8909dc15e40173ff4699343b6eb8132c65e18ec6",
   pancakeV3: "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865",
   usdc: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
   weth: "0x4200000000000000000000000000000000000006",
@@ -117,9 +129,9 @@ const ZERO = "0x0000000000000000000000000000000000000000";
  *  factory's getLaunchedToken(address). */
 const SEL = { token0: "0x0dfe1681", token1: "0xd21220a7", factory: "0xc45a0155", decimals: "0x313ce567", poolKeys: "0x86b6be7d", launched: "0x3cf28b5a" } as const;
 /** A pool's getPool parameter (Venues.getPool), and each factory kind's getPool(address,address,<it>) (keccak-256 of the
- *  signatures, checked in swaps-confirm.test.ts). */
+ *  signatures, checked in swaps-confirm.test.ts); Uniswap v2's getPair(address,address) takes no third (swaps-univ2.test.ts). */
 const PARAM_SEL = { fee: "0xddca3f43", tickSpacing: "0xd0c93a7c", stable: "0x22be3de1" } as const;
-const GET_POOL_SEL = { fee: "0x1698ee82", tickSpacing: "0x28af8d0b", stable: "0x79bc57d5" } as const;
+const GET_POOL_SEL = { fee: "0x1698ee82", tickSpacing: "0x28af8d0b", stable: "0x79bc57d5", pair: "0xe6a43905" } as const;
 /** The ETH price: Uniswap v4's native ETH / USDC 0.05% pool (tick spacing 10, no hook), the one BuyV4Fork.t.sol buys through.
  *  Its id is keccak256(abi.encode(currency0 0x0, currency1 USDC, fee 500, tickSpacing 10, hooks 0x0)); 7 swaps in 100
  *  blocks read 2026-11-03 17:08Z, the last at 2,295.6 USD per ETH. */
@@ -167,9 +179,11 @@ export type Venues = {
   /** What each v2 and v3 factory's getPool takes beside the two tokens, read from the pool: Uniswap v3's uint24 fee(),
    *  a Slipstream-kind CL factory's int24 tickSpacing(), Aerodrome v2's bool stable(). A pool is read only once its
    *  factory names it by that call (confirmed), never by the factory() it claims alone: any contract can claim one. */
-  getPool: Readonly<Record<string, "fee" | "tickSpacing" | "stable">>;
+  getPool: Readonly<Record<string, keyof typeof GET_POOL_SEL>>;
   /** The v3 factories whose pools log PancakeV3Pool's `Swap` (TOPIC.swapPancake), not Uniswap v3's. */
   pancake: readonly string[];
+  /** The v2 factories whose pairs log Uniswap v2's `Swap` (TOPIC.swapUni2), not Aerodrome v2's, and have no stable(). */
+  uniV2: readonly string[];
   usd: string;
   weth: string;
   refPoolId: string;
@@ -190,14 +204,16 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     poolManager: BASE_VENUES.poolManager,
     positionManager: BASE_VENUES.positionManager,
     v3: [BASE_VENUES.uniswapV3, ...BASE_VENUES.slipstream, BASE_VENUES.pancakeV3],
-    v2: [BASE_VENUES.aerodromeV2],
+    v2: [BASE_VENUES.aerodromeV2, BASE_VENUES.uniswapV2],
     // read 2026-11-05 04:5xZ on mainnet.base.org: getPool(token0, token1, fee() 500) of 0x33128a8f names the ICNT/USDC
     // pool 0x9331f571; getPool(.., stable() false) of 0x420dd381 names VVV/WETH 0x01784ef3; each Slipstream factory's
     // getPool(WETH, USDC, tickSpacing) names a pool whose tickSpacing() and tokens give it back (0xb2cc224c, 0x2a430beb,
     // 0x4e392fbf)
     // (and PancakeSwap v3's getPool(token0, token1, fee() 100) names ELSA / USDC, 2026-11-11 07:34Z, the header)
-    getPool: { [BASE_VENUES.uniswapV3]: "fee", [BASE_VENUES.aerodromeV2]: "stable", [BASE_VENUES.pancakeV3]: "fee", ...Object.fromEntries(BASE_VENUES.slipstream.map((f) => [f, "tickSpacing" as const])) },
+    // (and Uniswap v2's getPair(token0, token1) names the CHUBBY, Basecat, PEPKING and SPCX / WETH pairs, 2026-11-14, the header)
+    getPool: { [BASE_VENUES.uniswapV3]: "fee", [BASE_VENUES.aerodromeV2]: "stable", [BASE_VENUES.uniswapV2]: "pair", [BASE_VENUES.pancakeV3]: "fee", ...Object.fromEntries(BASE_VENUES.slipstream.map((f) => [f, "tickSpacing" as const])) },
     pancake: [BASE_VENUES.pancakeV3],
+    uniV2: [BASE_VENUES.uniswapV2],
     usd: BASE_VENUES.usdc,
     weth: BASE_VENUES.weth,
     refPoolId: REF_POOL_ID,
@@ -230,6 +246,7 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     // 0x020bfc65's pool 0xd42a4910; the CL factory's getPool(.., tickSpacing() 50) names 0x39dbed3a's 0xf2a0be59
     getPool: { [ROBINHOOD_VENUES.uniswapV3]: "fee", [ROBINHOOD_VENUES.cl]: "tickSpacing" },
     pancake: [],
+    uniV2: [],
     usd: ROBINHOOD_VENUES.usdg,
     weth: ROBINHOOD_VENUES.weth,
     refPoolId: ROBINHOOD_REF_POOL_ID,
@@ -317,7 +334,7 @@ const INDEX_FOLLOW_MS = 5_000;
  *  2026-11-05 03:3xZ)] */
 const INDEX_SLACK = 500;
 /** The swap events the index holds: every venue's a tape reads (swapFilter, refFilter). */
-const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swapPancake, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell, ...POOL_CALLS];
+const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swapPancake, TOPIC.swap2, TOPIC.swapUni2, TOPIC.curveBuy, TOPIC.curveSell, ...POOL_CALLS];
 
 /** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
  *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
@@ -575,8 +592,9 @@ export type Pool = {
   /** A hooked v4 pool's: the token's other v4 pools the discovery found, whose swaps are read with this pool's only so
    *  hookTakes can tell a sender that swapped the token once in the transaction (card helper-v4-hook-liquidity). */
   siblings?: readonly string[];
-  /** A v3 pool whose factory is one of Venues.pancake: it logs PancakeV3Pool's `Swap` (TOPIC.swapPancake). */
-  log?: "pancake";
+  /** A v3 pool whose factory is one of Venues.pancake: it logs PancakeV3Pool's `Swap` (TOPIC.swapPancake); a v2 pair
+   *  whose factory is one of Venues.uniV2: Uniswap v2's (TOPIC.swapUni2). */
+  log?: "pancake" | "univ2";
 };
 
 /** v4-core Hooks.sol: BEFORE_SWAP_RETURNS_DELTA_FLAG (1 << 3) and AFTER_SWAP_RETURNS_DELTA_FLAG (1 << 2), read in the
@@ -620,7 +638,7 @@ export function swapFilter(pool: Pick<Pool, "venue" | "id" | "log">, from: numbe
   const range = { fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` };
   if (pool.venue === "v4") return { address: VENUES[chain].poolManager, topics: [TOPIC.swap4, pool.id], ...range };
   if (pool.venue === "curve") return { address: pool.id, topics: [[TOPIC.curveBuy, TOPIC.curveSell]], ...range };
-  return { address: pool.id, topics: [pool.venue === "v3" ? (pool.log === "pancake" ? TOPIC.swapPancake : TOPIC.swap3) : TOPIC.swap2], ...range };
+  return { address: pool.id, topics: [pool.venue === "v3" ? (pool.log === "pancake" ? TOPIC.swapPancake : TOPIC.swap3) : pool.log === "univ2" ? TOPIC.swapUni2 : TOPIC.swap2], ...range };
 }
 const refFilter = (from: number, to: number, chain: EvmChain) => swapFilter({ venue: "v4", id: VENUES[chain].refPoolId }, from, to, chain);
 
@@ -665,7 +683,8 @@ export function decodeSwap(pool: Pool, l: Log, chain: EvmChain = "base"): Omit<S
     if (l.address !== pool.id || l.topics.length !== 3 || l.topics[0] !== (pancake ? TOPIC.swapPancake : TOPIC.swap3) || l.data.length !== 2 + 64 * (pancake ? 7 : 5)) return null;
     [d0, d1] = [signed(word(l.data, 0), 256), signed(word(l.data, 1), 256)];
   } else {
-    if (l.address !== pool.id || l.topics.length !== 3 || l.topics[0] !== TOPIC.swap2 || l.data.length !== 2 + 64 * 4) return null;
+    // Uniswap v2's and Aerodrome v2's: the four amounts in the same order, their topics their own
+    if (l.address !== pool.id || l.topics.length !== 3 || l.topics[0] !== (pool.log === "univ2" ? TOPIC.swapUni2 : TOPIC.swap2) || l.data.length !== 2 + 64 * 4) return null;
     const w = [0, 1, 2, 3].map((i) => unsigned(word(l.data, i), 256));
     if (w.some((x) => x === null)) return null;
     [d0, d1] = [w[0]! - w[2]!, w[1]! - w[3]!];
@@ -823,11 +842,13 @@ export function v4StateSlot(id: string): string {
  *   - v4: the PoolManager's extsload(v4StateSlot(id)) (v4-core@v4.0.0 src/Extsload.sol:10), sqrtPriceX96 its low 160
  *     bits (src/types/Slot0.sol:33 MASK_160_BITS, :41-43; StateLibrary.sol:55).
  *   - Aerodrome v2: stable() and getReserves() (contracts/Pool.sol:27 and :212: reserve0, reserve1, blockTimestampLast).
+ *   - Uniswap v2: getReserves() alone (the same three words; a pair has no stable(), and its spot is the reserves' ratio:
+ *     constant product, v2-core UniswapV2Pair.sol).
  */
-export function poolStateCalls(pool: Pick<Pool, "venue" | "id">, chain: EvmChain = "base"): { to: string; data: string }[] | null {
+export function poolStateCalls(pool: Pick<Pool, "venue" | "id" | "log">, chain: EvmChain = "base"): { to: string; data: string }[] | null {
   if (pool.venue === "v3") return [{ to: pool.id, data: STATE_SEL.slot0 }];
   if (pool.venue === "v4") return [{ to: VENUES[chain].poolManager, data: `${STATE_SEL.extsload}${v4StateSlot(pool.id).slice(2)}` }];
-  if (pool.venue === "v2") return [{ to: pool.id, data: PARAM_SEL.stable }, { to: pool.id, data: STATE_SEL.getReserves }];
+  if (pool.venue === "v2") return pool.log === "univ2" ? [{ to: pool.id, data: STATE_SEL.getReserves }] : [{ to: pool.id, data: PARAM_SEL.stable }, { to: pool.id, data: STATE_SEL.getReserves }];
   return null;
 }
 
@@ -843,14 +864,15 @@ const refStateUsd = (a: string | undefined): bigint | null => (a !== undefined &
  * as token1 the other way about. Aerodrome v2's legs are its reserves. Null when an answer is not of its shape, a price
  * or a reserve is 0, or the pool is a stable one.
  */
-export function poolStateLegs(pool: Pick<Pool, "venue" | "tokenIs0">, answers: readonly (string | undefined)[]): { amt: bigint; quote: bigint } | null {
+export function poolStateLegs(pool: Pick<Pool, "venue" | "tokenIs0" | "log">, answers: readonly (string | undefined)[]): { amt: bigint; quote: bigint } | null {
   const a = answers[0];
   let sqrt: bigint | null = null;
   if (pool.venue === "v3") sqrt = a !== undefined && /^0x([0-9a-f]{64}){6,7}$/.test(a) ? unsigned(word(a, 0), 160) : null;
   else if (pool.venue === "v4") sqrt = a !== undefined && WORD.test(a) ? BigInt(a) & MASK_160 : null;
   else if (pool.venue === "v2") {
-    const r = answers[1];
-    if (a !== `0x${"0".repeat(64)}` || r === undefined || !/^0x([0-9a-f]{64}){3}$/.test(r)) return null;
+    // Aerodrome's stable() answer then its reserves; a Uniswap v2 pair's reserves alone
+    const r = pool.log === "univ2" ? a : answers[1];
+    if ((pool.log !== "univ2" && a !== `0x${"0".repeat(64)}`) || r === undefined || !/^0x([0-9a-f]{64}){3}$/.test(r)) return null;
     const [r0, r1] = [BigInt(`0x${word(r, 0)}`), BigInt(`0x${word(r, 1)}`)];
     if (r0 === 0n || r1 === 0n) return null;
     return pool.tokenIs0 ? { amt: r0, quote: r1 } : { amt: r1, quote: r0 };
@@ -1469,7 +1491,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const tokenIs0 = t0 === token;
     if (!tokenIs0 && t1 !== token) return null;
     const quote = quoteOf(tokenIs0 ? t1 : t0, false);
-    return quote === null ? null : { venue: V.v2.includes(f) ? "v2" : "v3", id: a, token, tokenIs0, quote, ...(V.pancake.includes(f) ? { log: "pancake" as const } : {}) };
+    return quote === null ? null : { venue: V.v2.includes(f) ? "v2" : "v3", id: a, token, tokenIs0, quote, ...(V.pancake.includes(f) ? { log: "pancake" as const } : V.uniV2.includes(f) ? { log: "univ2" as const } : {}) };
   }
   /** A v2 or v3 candidate of the token from its factory, two tokens and Venues.getPool parameter answers, with what its
    *  factory's getPool asks. */
@@ -1482,7 +1504,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  parameter not read. */
   const confirmCall = (c: { factory: string; t0: string; t1: string; param: string | undefined } | null): { to: string; data: string } | null => {
     const kind = c === null ? undefined : V.getPool[c.factory];
-    if (c === null || kind === undefined || c.param === undefined || !/^0x[0-9a-f]{64}$/.test(c.param)) return null;
+    if (c === null || kind === undefined) return null;
+    if (kind === "pair") return { to: c.factory, data: `${GET_POOL_SEL.pair}${pad32(c.t0)}${pad32(c.t1)}` };
+    if (c.param === undefined || !/^0x[0-9a-f]{64}$/.test(c.param)) return null;
     return { to: c.factory, data: `${GET_POOL_SEL[kind]}${pad32(c.t0)}${pad32(c.t1)}${c.param.slice(2)}` };
   };
   /** Each v2 or v3 candidate once its factory names it, else null: the factory's getPool(token0, token1, the pool's
@@ -1546,7 +1570,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (pool === null && !id) {
       const [f, t0, t1] = await callsAgreed(head.n, [SEL.factory, SEL.token0, SEL.token1].map((data) => ({ to: hint, data })));
       const kind = V.getPool[wordAddr(f) ?? ""];
-      const [param] = pairPool(token, hint, f, t0, t1) === null || kind === undefined ? [undefined] : await callsAgreed(head.n, [{ to: hint, data: PARAM_SEL[kind] }]);
+      const [param] = pairPool(token, hint, f, t0, t1) === null || kind === undefined || kind === "pair" ? [undefined] : await callsAgreed(head.n, [{ to: hint, data: PARAM_SEL[kind] }]);
       const c = pairCand(token, hint, f, t0, t1, param);
       const call = confirmCall(c);
       pool = call === null ? null : confirmed([c], await callsAgreed(head.n, [call]))[0]!;
@@ -1633,7 +1657,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const f = wordAddr(factories[i]);
       return f !== null && (V.v2.includes(f) || V.v3.includes(f)) ? [{ a, f: factories[i], kind: V.getPool[f] }] : [];
     });
-    const per = ofVenue.map((v) => [SEL.token0, SEL.token1, ...(v.kind === undefined ? [] : [PARAM_SEL[v.kind]])].map((data) => ({ to: v.a, data })));
+    const per = ofVenue.map((v) => [SEL.token0, SEL.token1, ...(v.kind === undefined || v.kind === "pair" ? [] : [PARAM_SEL[v.kind]])].map((data) => ({ to: v.a, data })));
     const pairs = await callsAgreed(head.n, per.flat(), missed);
     let at = 0;
     const paired = ofVenue.map((v, i) => {
