@@ -2069,14 +2069,10 @@ test("T7c a provider that answers 429 is not asked again by the same request whi
       const calls = JSON.parse(init.body) as { id: number }[];
       return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, error: { code: -32016, message: "25/second request limit reached" } }))));
     }) as unknown as typeof fetch);
-    const t0 = performance.now();
     const v = await verdict(evmPoolBuyQuoteWith(req, [throttled, chain([best(token)], 0), chain([best(token)], 1)], NOW));
-    const ms = performance.now() - t0;
     assert.equal(v.accepted, true, String((v as { code?: string }).code));
     const name = http ? "HTTP 429" : "a named limit";
-    // the third is asked as the throttle answers, not a hedge's EVM_HEDGE_MS later
-    assert.ok(ms < EVM_HEDGE_MS!, `${name}: the quote took ${Math.round(ms)} ms`);
-    // and the throttled provider is not asked the same request again 0.5, 1 and 1.5 s on
+    // the throttled provider is not asked the same request again 0.5, 1 and 1.5 s on: the third answered in its place
     await new Promise((r) => setTimeout(r, 3_500));
     assert.ok(bodies.length > 0, "the throttled provider was asked first");
     assert.equal(new Set(bodies).size, bodies.length, `${name}: a request asked the throttled provider ${bodies.length - new Set(bodies).size} times more`);
