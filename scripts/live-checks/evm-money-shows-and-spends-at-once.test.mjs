@@ -32,13 +32,15 @@ test("the recorded bad answer (SIGN_HOST before the head rule) fails", () => {
   assert.ok(r.lines.some((l) => /^BAD SIGN_HOST's note store writes EVM notes at the newest agreed block/.test(l)), r.lines.join("\n"));
 });
 
-test("the check's pool pairs are the page's own (MAINNET_POOL_RPCS), two operators each", () => {
+// the check reads each list's seats, its first two; a spare after them (Robinhood's GlobalStake, card
+// first-sign-in-reads-fast) is read only when a seat walks
+test("the check's pool pairs are the page's own seats (MAINNET_POOL_RPCS' first two), two operators each", () => {
   const src = readFileSync(path.join(HERE, "../../packages/signpage/src/pool-testnet.ts"), "utf8");
   const m = /export const MAINNET_POOL_RPCS[^=]*=[^{]*\{([\s\S]*?)\n\}\);/.exec(src);
   assert.ok(m, "MAINNET_POOL_RPCS read");
   for (const chain of Object.keys(POOL_RPCS)) {
     const row = new RegExp(`${chain}: [^\\[]*\\[([^\\]]*)\\]`).exec(m[1]);
-    assert.deepEqual([...row[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]), [...POOL_RPCS[chain]], chain);
+    assert.deepEqual([...row[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]).slice(0, 2), [...POOL_RPCS[chain]], chain);
     assert.notEqual(new URL(POOL_RPCS[chain][0]).host.split(".").slice(-2).join("."), new URL(POOL_RPCS[chain][1]).host.split(".").slice(-2).join("."), `${chain}: two operators`);
   }
 });

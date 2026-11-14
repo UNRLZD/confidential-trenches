@@ -455,7 +455,8 @@ export const EVM_SPARE_REST_MS = 60_000;
  * provider's now.
  * A range cap walks too (card helper-evm-range-cap-walk, the helper's rule in rpc.ts callEvm): an eth_getLogs refused in
  * words that name a span (CAP_SPANS) under the span asked, and no smaller than the widest that provider answered (a
- * smaller one is one backend's, the pager's to ask again), moves the seat to the next provider in the list, not the
+ * smaller one is one backend's: the seat walks to the next free provider not known to be narrow, asked at once, and
+ * with none the pager asks again; card first-sign-in-reads-fast), moves the seat to the next provider in the list, not the
  * other seat's and not resting, whose cap is not known to be under the span asked, and the call is made there at once;
  * with none, to the provider of the largest cap named, whose own refusal goes up so the pager pages at that cap. The
  * capped provider is not rested: it still answers the seat's other reads when a later move seats it. Which two
@@ -583,6 +584,18 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           const t = throttled(e);
           const cap = span !== null && t === null ? capSpanOf(String((e as Error)?.message ?? e)) : null;
           const capped = span !== null && cap !== null && cap >= 1n && cap < span && (answered[i] === null || cap >= answered[i]!);
+          // a cap under the widest span this provider answered: one of its backends' (card first-sign-in-reads-fast:
+          // robinhood.api.pocket.network answered 100,000 blocks and then "max 10001" on most calls, 513 calls in one box
+          // run of the sign-in, 14 Nov 04:38Z). The seat walks to a free spare not known to be narrow, asked at once; with
+          // none, the refusal goes up and the pager asks again (EVM_LOG_REFUSED_AGAIN). Its cap is not set, nor is it rested
+          const backend = !capped && span !== null && cap !== null && cap >= 1n && cap < span;
+          if (backend) {
+            if (at[k] !== i) continue; // another call on this seat moved it already
+            const n = next(k, span, asked);
+            if (n === null) throw e;
+            at[k] = n;
+            continue;
+          }
           if (capped) {
             capOf[i] = cap;
             restUntil[i] = 0; // it answers: no longer resting
@@ -640,8 +653,6 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   const pair: Rpcs = [seat(0), seat(1)];
   const read = {
     pair,
-    // a seat of a list with a spare walks between providers by its calls (above): a read on it pages one call at a time
-    walks: list.length > 2,
     begin: () => void inflight++,
     end: () => {
       if (--inflight === 0) sides[0].clear(), sides[1].clear(), paged[0].clear(), paged[1].clear();
@@ -652,7 +663,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   return pair;
 }
 /** Each pair's seats (evmPair), to its reads in flight: both() opens one around each agreed read. */
-const SEATS = new WeakMap<EvmRpc, { pair: Rpcs; walks: boolean; begin(): void; end(): void }>();
+const SEATS = new WeakMap<EvmRpc, { pair: Rpcs; begin(): void; end(): void }>();
 /** both(), an agreed read on a pair's two seats: for the tests (not in the index). */
 export const evmAgreedRead = <T>(rpcs: Rpcs, f: (rpc: EvmRpc, k: number, signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<[T, T]> => both(rpcs, f, signal);
 
@@ -1010,14 +1021,14 @@ export function evmPoolLogPager(): EvmLogPager {
  * under EVM_POOL_LOG_NARROW_BLOCKS, once the seat's provider answered the last page in full, with more than
  * EVM_POOL_LOG_PART_PAGES pages a part left, splits the rest into `inFlight` parts of contiguous blocks, each read so at
  * once (spreadLogs), their logs in block order; so does a wider page that can grow no more (at the rules' max, or held
- * at its provider's cap: twice its size refused in this read) with a page a part left; never on a seat that walks (a
- * list with a spare, evmPair).
+ * at its provider's cap: twice its size refused in this read) with a page a part left. A seat that walks (a list with a
+ * spare, evmPair) spreads too (card first-sign-in-reads-fast: Robinhood's own 100,000-block cap beside GlobalStake as a
+ * spare, 55 pages one after another): evmPair counts each part's call open to its provider, so no walk of either seat
+ * lands on a provider the other side asked or holds (pool-evm-narrow-seat-walks.test.ts counts it).
  */
 async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, progress?: { to: bigint; logs: E[] }, part?: LogReadState): Promise<E[]> {
   const { max, slowHalves } = pager.rules;
-  // never on a seat that walks (a list with a spare): its moves read one call of a seat in a read at a time, and the
-  // pool lists the page reads (Base's and Robinhood's) are two providers each
-  const parts = part === undefined && progress === undefined && SEATS.get(rpc)?.walks !== true ? (pager.rules.inFlight ?? 1) : 1;
+  const parts = part === undefined && progress === undefined ? (pager.rules.inFlight ?? 1) : 1;
   // `progress`: the pages read so far, kept by a caller whose read may be stopped (evmTreeSync's sources)
   const out: E[] = progress?.logs ?? [];
   // a part of a spread read (spreadLogs) starts from the read's own ceiling and widest, so its probes are the read's

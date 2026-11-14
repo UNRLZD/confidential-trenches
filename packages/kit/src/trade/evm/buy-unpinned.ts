@@ -440,15 +440,21 @@ export const evmMainnetVenues = () =>
       //   "exceeds maximum 50000", which the pager asks again, then halves), 20 of 20 of 10,000, p50 208-220 ms. The
       //   PoolManager's Swap logs over 100 blocks the same as Robinhood's own, digest for digest; CORS from the signing
       //   page's origin 204 and 200, allow-origin that origin; x-ratelimit-limit 1200 a minute.
-      // Not taken: rpc-robinhood.globalstake.io (GlobalStake; nitro v3.12.1, blockTimestamp set: all four at the head
-      // and 10,000 13M back, but 0.5-6.6 s and no answer in 15 s at 100,000 13M back and past the head, past the
-      // device's 3.5 s client even as a spare), robinhood-rpc.publicnode.com (HTTP 403 "Archive requests require a personal token" from 1,000 blocks),
+      // - rpc-robinhood.globalstake.io (GlobalStake; nitro v3.12.1, blockTimestamp set), the spare (card
+      //   first-sign-in-reads-fast): read 2026-11-07 it took 0.5-6.6 s and gave no answer in 15 s at 100,000 blocks 13M
+      //   back, before the pool's deploy block, and past the head. On the pool's own blocks, 14 Nov 05:01Z and
+      //   05:13Z: the whole life from the deploy block (5,498,193 and 5,504,334 blocks) answered at once, 353, 939 and
+      //   1,228 ms, the same 8 logs; 100,000-block pages 503-829 ms; 800,000 at 1.2-1.8 s, once 9.0 s at the head.
+      //   Robinhood's own refuses past 100,000 and Pocket's backends at "max 10001" from a URL that answered 1M, so a
+      //   seat whose provider refuses under a page it already answered walks here (the wallet's evmPair). CORS from
+      //   SIGN_HOST's origin 200, allow-origin *, allow-headers Content-Type (05:04Z).
+      // Not taken: robinhood-rpc.publicnode.com (HTTP 403 "Archive requests require a personal token" from 1,000 blocks),
       // robinhood.drpc.org (code 35 at 1,000), robinhood.daybreak-rpc.network (2,000), rpc-robinhood.blockmachine.io
       // and robinhood-mainnet-rpc.blockreq.com (the newest 5,000 and 1,024 blocks keyless), api.blockvectra.com (100
       // blocks, its history window), the Tatum gateway (100, then 429), 4663.rpc.thirdweb.com (1,000, then 429),
       // rpc.degenprotocol.io (Pocket's very words "max 10001 blocks", and a finalized block above its head),
       // robinhood.rpc.blxrbdn.com and rpc.nodeflare.app (403), lb.routeme.sh (429), rpc.ordofi.network (no answer).
-      poolProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]),
+      poolProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://rpc-robinhood.globalstake.io"]),
       // The trace pair (card evm-sell-hook-intrablock), read 2026-11-07 16:16-16:24Z from this Mac: of the five quote
       // providers only dRPC answers debug_traceTransaction (prestateTracer, diffMode and callTracer, 3, 100 and 600 blocks
       // back); publicnode, Robinhood's own and Globalstake answer -32601, bloXroute -32601 or 403. Of the keyless others,

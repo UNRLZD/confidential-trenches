@@ -304,8 +304,9 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
     new URL(near[0]).host,
     new URL(near[3]).host,
-    // each EVM pool's list on mainnet: exactly two per chain, so a third host the page adds fails here
-    ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_POOL_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n\}\);/),
+    // each EVM pool's list on mainnet: Base's two, Robinhood's two seats and its spare (card first-sign-in-reads-fast),
+    // exactly, so a host the page adds fails here
+    ...one("packages/signpage/src/pool-testnet.ts", /export const MAINNET_POOL_RPCS: [^=]+= \/\* @__PURE__ \*\/ Object\.freeze\(\{\n {2}base: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)"\]\),\n {2}robinhood: \/\* @__PURE__ \*\/ Object\.freeze\(\["([^"]+)", "([^"]+)", "([^"]+)"\]\),\n\}\);/),
   ];
   assert.deepEqual([...PINNED_HOSTS].sort(), [...new Set(want)].sort());
   // the mainnet page reads each EVM pool on that list (the testnet build on its testnet pair)
