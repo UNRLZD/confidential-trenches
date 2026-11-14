@@ -10,8 +10,8 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { entropyToWords, EVM_CHAIN_IDS, EVM_POOLS, evmExitGasAddress, evmPoolScopeOf, noteSecrets, wordsToSeed64, type EvmRpc } from "@blindfill/kit/core";
-import { solanaJsonRpc, type VaultProver } from "@blindfill/kit";
-import { EXIT_EVM_RPCS, exitEvm } from "../src/evm-out.ts";
+import type { VaultProver } from "@blindfill/kit";
+import { EXIT_EVM_RPCS, exitEvm, exitEvmRpc } from "../src/evm-out.ts";
 import { exitSetupFiles } from "../src/setup.ts";
 
 const chain = process.argv[2] as "base" | "robinhood";
@@ -49,7 +49,9 @@ const stop = (code: number): never => {
 };
 
 const urls: [string, string] = [`http://127.0.0.1:${PORT}`, `http://localhost:${PORT + 1}`];
-const rpcs = urls.map((u) => solanaJsonRpc(u, { timeoutMs: 60_000 })) as [EvmRpc, EvmRpc];
+// the command's own read (evm-out.ts exitEvmRpc): a connection the proof's long run left to drop is read again, as the
+// command reads it; the pair's own reads before the run (call, balance) go through it too
+const rpcs = urls.map((u) => exitEvmRpc(u)) as [EvmRpc, EvmRpc];
 const call = (method: string, params: unknown[]): Promise<any> => rpcs[0](method, params);
 const word = (v: bigint): string => v.toString(16).padStart(64, "0");
 // the pool's selectors: deposit(uint256,uint256) and usedPrecommitments(uint256) (cast sig)

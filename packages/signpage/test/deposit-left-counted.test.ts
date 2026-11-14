@@ -101,3 +101,12 @@ test("the page reads each W tail the rent back wrote from its own wallet store, 
   assert.match(main, /withDepositWallets\(p, \[\s*\.\.\.depositWalletsOf\(await pageOps\(\)[^\n]*\n(?:\s*\/\/[^\n]*\n)?\s*\.\.\.wTailWallets\(await pageTails\(\)/);
   assert.match(main, /async function pageTails\(\): Promise<unknown\[\]> \{\s*return storedTails\(await open\(\)\);/);
 });
+
+test("a short plain send (Base's \"Short deposit\": money at U_X under one deposit's floor, nothing landing) writes what U_X holds each round it shows short, so the balance counts it and the carry to Cash takes it (card leftovers-carry-to-cash)", async () => {
+  const x = ux(400_000_000_000_000n, 1_000);
+  const stages: string[] = [];
+  await followPoolQuote(PLAIN, { ...x.deps, stage: async (s) => void stages.push(s) });
+  assert.deepEqual(x.deposits, [], "no rung: under the floor");
+  assert.ok(stages.includes("short"));
+  assert.ok(x.holds.length > 0 && x.holds.every((h) => h === 400_000_000_000_000n), `holds ${x.holds}`);
+});

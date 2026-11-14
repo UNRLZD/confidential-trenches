@@ -27,8 +27,8 @@
 import { base58 } from "@scure/base";
 import { EVM_ADDRESS } from "./rules/pool.ts";
 import type { DepositStage, ErrorCode, MoveStage, PoolChain, PoolStatePrice, TxRef } from "../../kit/src/signpage/messages.ts";
-import { checkPoolAmount, formatUnits, POOL_ASSET, type PoolFunds, type PoolReady } from "./withdraw/pool-form.ts";
-import { CASH_MARGIN_BPS, CASH_MOVE_POLL_MS, type MoveOpRecord } from "./cash-to-pool.ts";
+import { checkPoolAmount, formatUnits, POOL_ASSET, poolSendable, type PoolFunds, type PoolReady } from "./withdraw/pool-form.ts";
+import { CASH_MARGIN_BPS, CASH_MOVE_POLL_MS, leastWhere, type MoveOpRecord } from "./cash-to-pool.ts";
 
 type Refusal = { error: ErrorCode };
 
@@ -113,8 +113,16 @@ export type PoolToCashDeps = {
 export type PoolToCash = {
   /** pool.move from `chain` to Cash (`to` "near") or on to pool `to`: answered once the run started (or refused). */
   move(chain: PoolChain, amount: bigint, id: string, to?: PoolChain | "near"): Promise<Refusal | { op: string }>;
-  /** What that move would give: the run's sum, the least USDC shown, the Max fee. */
-  dry(chain: PoolChain, amount: bigint): Promise<Refusal | { sum: bigint; out: bigint; fee: bigint }>;
+  /** What that move would give: the run's sum, the least USDC shown, the Max fee, and `max`, what the pool can send now
+   *  (each note's largest part after its fees, the withdraw form's Max); or, for an amount the plan cannot send, `limits`:
+   *  `max` and the nearest amounts it can (`below`, `above`) or one withdrawal's least part (`min`) (card
+   *  move-sends-what-it-shows). */
+  dry(chain: PoolChain, amount: bigint): Promise<Refusal | { sum: bigint; out: bigint; fee: bigint; max: bigint } | { limits: { max: bigint; min?: bigint; below?: bigint; above?: bigint } }>;
+  /** The least USDC `amount` of `chain`'s pool coin brings (cashUsdcOf at the device's price); 0n with no price. */
+  usdcOf(chain: PoolChain, amount: bigint): bigint;
+  /** The least amount the plan sends exactly for which `ok` holds (`ok` true from some amount on), or the least amount
+   *  for which it holds when the pool cannot send that much; null when none does. */
+  least(chain: PoolChain, ok: (amount: bigint) => boolean): Promise<bigint | null>;
   /** After a reload: each move to Cash not ended follows its ops on from its stage. */
   resume(moves: readonly { id: string; rec: MoveOpRecord }[]): void;
   idle(): Promise<void>;
@@ -219,14 +227,41 @@ export function poolToCash(d: PoolToCashDeps): PoolToCash {
     },
     dry: async (chain, amount) => {
       try {
-        const p = await plan(chain, amount);
-        if ("error" in p) return p;
+        if (amount <= 0n || d.withdraw(chain) === null) return { error: "not_allowed" };
         const pr = d.price(chain);
         if (pr === null) return { error: "not_allowed" };
-        return { sum: p.sum, out: cashUsdcOf(p.sum, pr, chain), fee: p.fee };
+        const funds = await d.funds(chain);
+        const max = poolSendable(funds);
+        const c = checkPoolAmount(chain, formatUnits(amount, POOL_ASSET[chain].decimals), funds);
+        if (!c.ok) {
+          if (c.code === "insufficient") return { limits: { max } };
+          if (c.code === "min") return { limits: { max, ...(c.min === undefined ? {} : { min: c.min }) } };
+          if (c.code === "unplannable") return { limits: { max, ...(c.below === undefined ? {} : { below: c.below }), ...(c.above === undefined ? {} : { above: c.above }) } };
+          return { error: "not_allowed" };
+        }
+        return { sum: c.amount, out: cashUsdcOf(c.amount, pr, chain), fee: c.maxFee, max };
       } catch {
         return { error: "failed" };
       }
+    },
+    usdcOf: (chain, amount) => {
+      const pr = d.price(chain);
+      return pr === null ? 0n : cashUsdcOf(amount, pr, chain);
+    },
+    least: async (chain, ok) => {
+      const funds = await d.funds(chain);
+      const t = leastWhere(ok);
+      if (t === null) return null;
+      // the amount the plan sends at or above t: the plan's own sum, the nearest above, or the least part
+      let x = t;
+      for (let k = 0; k < 4; k++) {
+        const c = checkPoolAmount(chain, formatUnits(x, POOL_ASSET[chain].decimals), funds);
+        if (c.ok) return c.amount;
+        if (c.code === "min" && c.min !== undefined && c.min > x) x = c.min;
+        else if (c.code === "unplannable" && c.above !== undefined) x = c.above;
+        else return x;
+      }
+      return x;
     },
     resume: (moves) => {
       for (const { id, rec } of moves)

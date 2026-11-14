@@ -83,6 +83,10 @@ interface Fx {
   /** The signing page has pool.move (true), or answers every dry with this refusal; absent: it has none (the kit
    *  today), so no Move is drawn. */
   move?: true | string;
+  /** The page answers as kit 1.16 does (card move-sends-what-it-shows): each dry names max, the most the move sends
+   *  (MOVE_MAX), and an amount it cannot send is answered with what it can: over max, max alone; to Base under 0.0545
+   *  SOL, min (its floor); 0.3 SOL, the nearest amounts its plan sends (below and above). */
+  limits?: true;
 }
 const PX = (usd: number) => ({ price: String(usd * 1e8), expo: -8, published_s: Math.floor(NOW / 1000) - 5, read_ms: NOW - 1000 });
 const FOUR: NonNullable<SignpageState["pools"]> = [
@@ -251,6 +255,11 @@ export const FIXTURES: Record<string, Fx> = {
   "move-over": { move: true, state: { pools: FOUR }, ui: { move: { from: "solana", to: "base", amount: "9", id: null, refused: null } } },
   "move-refused": { move: "not_allowed", state: { pools: FOUR }, ui: { move: { from: "base", to: "robinhood", amount: "0.1", id: null, refused: null } } },
   "move-running": { move: true, state: { pools: FOUR, ops: [{ id: "m1", kind: "move", from: "solana", to: "base", stage: "in_vault", txs: [], amount: "0.5" } as unknown as Operation] }, ui: { move: { from: "solana", to: "base", amount: "0.5", id: "m1", refused: null } } },
+  // card move-sends-what-it-shows: Max is the page's (2.4979 of the 2.5 SOL its plan sends), an amount to Base under
+  // its floor names Min, and an amount the plan cannot send names the nearest it can
+  "move-max": { move: true, limits: true, state: { pools: FOUR }, ui: { move: { from: "solana", to: "near", amount: "", id: null, refused: null } } },
+  "move-min": { move: true, limits: true, state: { pools: FOUR }, ui: { move: { from: "solana", to: "base", amount: "0.01", id: null, refused: null } } },
+  "move-try": { move: true, limits: true, state: { pools: FOUR }, ui: { move: { from: "solana", to: "near", amount: "0.3", id: null, refused: null } } },
   "move-done": { move: true, state: { pools: FOUR, ops: [{ id: "m1", kind: "move", from: "solana", to: "base", stage: "done", txs: [], amount: "0.5", out: "0.0241" } as unknown as Operation] }, ui: { move: { from: "solana", to: "base", amount: "0.5", id: "m1", refused: null } } },
 };
 
@@ -269,12 +278,22 @@ const snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v
 const src: PortfolioSource = { snapshot, data: fx.live ? heldData(snapshot, POOL_MARKETS, new Map(), NOW) : { ...base, ...fx.data }, now: () => NOW, tzMin: 0, act: (a) => void window.__calls.push(a) };
 /** pool.move.dry's recorded answers (kit 1.15 shapes): the least that arrives in To's asset, the fee in From's, and
  *  the steps; every ask and start is recorded in window.__calls. */
+const MOVE_MAX: Record<string, string> = { near: "73.13", solana: "2.4979", base: "0.2499", robinhood: "0.0999" };
 const DRY_OUT: Record<string, string> = { near: "71.92", solana: "0.4791", base: "0.0241", robinhood: "0.0241" };
 const moveSrc: MoveSource = {
   ships: true,
   dry: async (p) => {
     window.__calls.push({ kind: "move.dry", ...p });
     if (typeof fx.move === "string") return { kind: "refused", code: fx.move };
+    const steps = routeSteps(p.from, p.to)!;
+    if (fx.limits) {
+      const max = MOVE_MAX[p.from]!;
+      const x = Number(p.amount);
+      if (x > Number(max)) return { kind: "limits", value: { max, steps } };
+      if (p.to === "base" && x < 0.0545) return { kind: "limits", value: { max, steps, min: "0.0545" } };
+      if (p.amount === "0.3") return { kind: "limits", value: { max, steps, below: "0.25", above: "0.35" } };
+      return { kind: "ok", value: { out: DRY_OUT[p.to]!, fee: "0.0021", steps, max, time_estimate_s: 38 } };
+    }
     return { kind: "ok", value: { out: DRY_OUT[p.to]!, fee: p.from === "near" ? "0.42" : p.from === "solana" ? "0.0021" : "0.00004", steps: routeSteps(p.from, p.to)!, time_estimate_s: p.from === "near" || p.to === "near" ? 38 : 76 } };
   },
   start: (p) => {

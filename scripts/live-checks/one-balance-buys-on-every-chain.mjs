@@ -81,14 +81,16 @@ const POOL_TO_POOL = (js) => {
   const out = new RegExp(`(?:^|[^\\w$])(${N})=${N}=>\\[\\{step:\`pool_out\``).exec(js)?.[1];
   const into = new RegExp(`(?:^|[^\\w$])(${N})=${N}=>\\[\\{step:\`vault_out\``).exec(js)?.[1];
   if (out === undefined || into === undefined) return false;
-  const six = new RegExp(`steps:\\[\\.\\.\\.${esc(out)}\\(${N}\\),\\.\\.\\.${esc(into)}\\(${N}\\)\\]`);
+  // (card move-sends-what-it-shows: or as moveDry picks a move's steps, the pool-to-Cash ones alone to Cash, else the six)
+  const six = new RegExp(`(?:steps:|\`near\`\\?${esc(out)}\\(${N}\\):)\\[\\.\\.\\.${esc(out)}\\(${N}\\),\\.\\.\\.${esc(into)}\\(${N}\\)\\]`);
   const onward = new RegExp(`\\.onward\\.move\\(${N},${N}-${N},\`\\$\\{${N}\\}/on\`\\)`);
   return six.test(js) && onward.test(js);
 };
 /** The leftovers counted: the follow's holds (0 before a carry, and its write), an in_pool op's left listed, W tails read. */
 const HOLDS_ZERO = new RegExp(`\\.floor\\)await ${N}\\.holds\\?\\.\\(0n\\),`);
 const HOLDS_WRITE = new RegExp(`(${N})=async (${N})=>\\{let (${N})=\\2\\.toString\\(\\);await ${N}\\.update\\(\`ops\`,${N},(${N})=>${N}\\(\\4\\)&&\\4\\.follow\\.left!==\\3&&\\(\\2!==0n\\|\\|\\4\\.follow\\.left!==void 0\\)\\?\\{\\.\\.\\.\\4,follow:\\{\\.\\.\\.\\4\\.follow,left:\\3\\}\\}:void 0\\)\\};[^;]{0,200}holds:\\1,`);
-const LISTED = new RegExp(`if\\((${N})\\.stage!==\`in_pool\`\\|\\|\\1\\.follow\\.left===void 0\\|\\|`);
+// (card leftovers-carry-to-cash: a short op's left listed too)
+const LISTED = new RegExp(`if\\((${N})\\.stage!==\`in_pool\`(?:&&\\1\\.stage!==\`short\`)?\\|\\|\\1\\.follow\\.left===void 0\\|\\|`);
 const TAILS = new RegExp(`async function ${N}\\((${N})\\)\\{let (${N})=\\(await \\1\\.keys\\(\`meta\`\\)\\)\\.filter\\((${N})=>\\3\\.startsWith\\((${N})\\)\\);return Promise\\.all\\(\\2\\.map\\((${N})=>\\1\\.get\\(\`meta\`,\\5\\)`);
 const leftCounted = (js) => {
   const t = TAILS.exec(js);
