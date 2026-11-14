@@ -233,8 +233,9 @@ test("the testnet build's state: the devnet pool with the queue's ready proof as
   assert.equal(await balance(), "0.01", "its landed release: the note's change only, never the bought tokens twice");
   g.__ctLanded = undefined;
 
-  // a notes read that fails (a record the store refuses) still answers the state, signed in and without pools,
-  // as withPools answers any failed read: the read inside the queue's readyWith never throws past it
+  // a record the store refuses (card portfolio-counts-every-note) is left out of the state's totals, never every total
+  // with it: the state still answers, signed in, its pools the readable notes' (the owner's Portfolio read NEAR 0 and
+  // Base 0 at release 137 while one such record made the whole read throw)
   await w.put("notes", "bad", { id: "bad" });
   let after: Awaited<ReturnType<typeof askState>> | string;
   try {
@@ -242,7 +243,7 @@ test("the testnet build's state: the devnet pool with the queue's ready proof as
   } catch (e) {
     after = (e as Error).message;
   }
-  assert.deepEqual(typeof after === "string" ? after : { signed_in: after.signed_in, pools: after.pools ?? null }, { signed_in: true, pools: null }, "a failed notes read: the state without pools");
+  assert.deepEqual(typeof after === "string" ? after : { signed_in: after.signed_in, solana: after.pools?.find((x) => x.chain === "solana")?.balance ?? null }, { signed_in: true, solana: "0.05" }, "a refused record: the readable notes still counted");
   ns.close();
   w.close();
 });

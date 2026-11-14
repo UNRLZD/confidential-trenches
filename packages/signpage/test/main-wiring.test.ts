@@ -267,9 +267,10 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   // state.pools: an INCOMING note has no value yet; once it lands (UNSPENT, its leaf) the next state counts it
   const s0 = await askState();
   assert.equal(s0.signed_in, true);
-  const fromPageNotes = (name: string) => calls.filter((c) => c.name === name && /\bpageNotes\b/.test(c.stack));
-  assert.equal(fromPageNotes("openNoteStore").length, 0, "pageNotes opened the note store, which writes on open and list");
-  assert.ok(fromPageNotes("readNotes").length > 0, "pageNotes did not read with readNotes");
+  // the state's read is stateNotes (card portfolio-counts-every-note: readNotes with its refused callback), the others pageNotes
+  const fromPageNotes = (name: string) => calls.filter((c) => c.name === name && /\b(pageNotes|stateNotes)\b/.test(c.stack));
+  assert.equal(fromPageNotes("openNoteStore").length, 0, "pageNotes or stateNotes opened the note store, which writes on open and list");
+  assert.ok(fromPageNotes("readNotes").length > 0, "pageNotes and stateNotes did not read with readNotes");
   assert.deepEqual(s0.pools, [{ chain: "near", asset: "USDC", balance: "0" }], "the shell's state carries no pools of the page's notes");
   const n2 = await openNoteStore(other);
   const p1 = planned1[0]!;
