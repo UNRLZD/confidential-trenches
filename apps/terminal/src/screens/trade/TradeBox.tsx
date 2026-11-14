@@ -443,7 +443,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown: feeKey !== null, askable, running, ready, buy, presets, presetOff, tapPreset, preview, receive, coinOff, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -474,7 +474,7 @@ export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
 /** The box drawn from a trade state; any number of views of one state draw the same trade. `logo` whose logo the flow's
  *  coin step draws (the token page's own read); none draws the symbol's letters. */
 export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean; logo?: Logo }) {
-  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
+  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, withCash, path, onPool, price, balance, max, coming, fee, feeShown, askable, running, ready, buy, presets, presetOff, tapPreset, preview, coinOff } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   const [tab, setTab] = useState<OrderTab>("market");
@@ -488,7 +488,7 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
   const est = recv !== null ? `≈ ${fmtOut(recv.out)} ${symbol}` : (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
   const now = src.now();
   const state = signedOut ? "S8.1" : (stateId(phase, now, "buy") ?? "S8.3");
-  const canBuy = ready && !running && !off && amountOk(amount, max, balance) && askable(amount);
+  const canBuy = ready && !running && !unavailable(phase) && !coinOff && amountOk(amount, max, balance) && askable(amount);
 
   let label;
   if (signedOut) label = <W id="signInToTrade" />;
