@@ -12,13 +12,16 @@ Blindfill sits under any wallet, terminal, trading bot or AI agent, and about 50
 Every chain NEAR Intents reaches can join, with fresh wallets of its own and the same private balance.
 Any market with a pool on chain can trade privately, from memecoins to stock tokens, and money can leave to any address.
 
-[The app](https://confidential.unrealized.trade) | [60-second video](<video link>) | [The vault on NEAR](https://nearblocks.io/address/<vault account>) | [Architecture](docs/architecture.md) | [Security](docs/security.md)
+[The app](https://confidential.unrealized.trade) | [The vault on NEAR](https://nearblocks.io/address/vault.confidential.unrlzd.near) | [Proofs](docs/proofs.md) | [Research and audits](docs/research/README.md) | [Architecture](docs/architecture.md) | [Security](docs/security.md)
+<!-- demo video link: added at submission -->
 
 Blindfill is the engine. Its vault on NEAR has no key, and its wallets live on your device, where each one carries a single trade. Apps plug in through one public entry, `@blindfill/kit`.
 
 Confidential Trenches is the flagship app on Blindfill, the experimental edition of the UNRLZD trading terminal. It calls the same public entry as any outside application would, and it never holds a key.
 
 Built at NEAR HACKATHON, Nov 1-14, 2026.
+
+We designed Blindfill for its full reach: any chain NEAR Intents reaches, any asset with a pool on chain, any app. Because of the hackathon's time limit, this build integrates four chains: Solana, Base, Robinhood Chain and NEAR. Every other chain joins the same way, with fresh wallets of its own and the same private balance.
 
 ## Why it stands apart
 
@@ -38,11 +41,11 @@ Your device makes its proofs in the background, so a buy doesn't wait on a proof
 
 ### Any chain, one balance
 
-Blindfill is built for any chain NEAR Intents reaches. Money comes in from any of them, and a fresh wallet trades any token with a pool there, all from one private balance.
+Blindfill is built for any chain NEAR Intents reaches. Money comes in from any of them, and a fresh wallet trades any token with a pool there, all from one private balance. This build trades on Solana, Base, Robinhood Chain and NEAR.
 
 ### Orders with no key on our side
 
-Your device signs the stop and the take-profit right after the buy, with the price written into each. Our server sends them when the price arrives and can't change a byte, and once one fills, its twin can't land.
+Your device signs the stop and the take-profit right after the buy, with the price written into each. Our server sends them when the price arrives and can't change a byte, and once one fills, its twin can't land. In this build the app's order screens show Coming soon.
 
 ### Out with only your 12 words
 
@@ -52,7 +55,13 @@ Switch off every server we run and the exit tool still brings your money home, u
 
 ### Watch it run
 
-<a recording of one private buy, from sign-in to Verify>
+The live app, signed out, read on 2026-11-14:
+
+<img alt="The JUP token page on Solana: chart, holders and trades, and the trade box" src="docs/screenshots/token.png" width="100%">
+
+<img alt="Discover: new, trending, hot and graduating coins, live" src="docs/screenshots/discover.png" width="100%">
+
+<img alt="The JUP token page on a phone" src="docs/screenshots/phone-token.png" width="320">
 
 ### For people
 
@@ -62,7 +71,7 @@ You need a phone or a computer, and money in any wallet.
 2. Sign in with Face ID, a passkey or a wallet you already use.
 3. Save your 12 words.
 4. Deposit from any wallet, on any chain NEAR Intents reaches.
-5. Buy any token. Open the trade on a block explorer: the buyer is a wallet that has never been used.
+5. Buy any token on Solana, Base, Robinhood Chain or NEAR. Open the trade on a block explorer: the buyer is a wallet that has never been used.
 6. Tap Verify.
 7. Withdraw to any address.
 
@@ -71,7 +80,7 @@ You need a phone or a computer, and money in any wallet.
 Plain reads from two public NEAR RPCs. No account, no key, no install beyond `curl` and `jq`.
 
 ```sh
-VAULT=<vault account>
+VAULT=vault.confidential.unrlzd.near
 USDC=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1
 for RPC in https://rpc.mainnet.fastnear.com https://near.drpc.org; do
   q() { curl -s "$RPC" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":$1}"; }
@@ -88,8 +97,10 @@ done
 | Line | A passing read |
 |---|---|
 | 1 | `[]` on both RPCs |
-| 2 | `<code hash>`, equal to the hash of `<the vault's reproducible build>` |
+| 2 | `C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u`, the `code_hash` of the reproducible build of commit `e0623bf3` in [contracts/vault/deployments/mainnet-v1.json](contracts/vault/deployments/mainnet-v1.json) |
 | 3 | the USDC balance equals what `totals()` says the vault owes |
+
+Read on 2026-11-14 at 22:45Z, both RPCs answered `[]`, `C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u`, `{"deposited":"11879349","spent":"6403003","returned":"0"}` and `"5476346"`: 11879349 minus 6403003 is 5476346.
 
 ### For AI agents and scripts
 
@@ -108,20 +119,24 @@ A passing run exits with 0, and every package's summary reads:
 ℹ fail 0
 ```
 
-The private buy calls only `@blindfill/kit`'s public entry, as any wallet, bot or agent would, and ends with:
-
-```text
-<the example's last lines>
-```
+The terminal calls only `@blindfill/kit`'s public entry, as any wallet, bot or agent would, and `pnpm run check:imports` fails on any import past it. The kit is installed from this repository as a workspace package; it is not on npm yet.
 
 ## Live now
 
-| Piece | Address | Explorer |
+| Piece | Address | Link |
 |---|---|---|
-| The vault | `<vault account>` | `<NEAR explorer link>` |
-| The app | `confidential.unrealized.trade` | `<release link>` |
-| The signing page | `sign.confidential.unrealized.trade` | `<release link>` |
-| The helper | `api.confidential.unrealized.trade` | — |
+| The vault | `vault.confidential.unrlzd.near` | [nearblocks](https://nearblocks.io/address/vault.confidential.unrlzd.near) |
+| The signing page, which runs the app inside it | `confidential.unrealized.trade` | [open](https://confidential.unrealized.trade) |
+| The app | `ct-app.unrealized.trade` | |
+| The helper | `ct-api.unrealized.trade` | |
+
+## Proofs
+
+- **56 mainnet transactions** recorded by the changes that moved money: NEAR 14, Solana 28, Base 7, Robinhood Chain 7. Each links to its explorer in [docs/proofs.md](docs/proofs.md), and `node scripts/ci/money-gate.mjs --all` reads every one back on two public RPCs. 585 earlier runs on test networks are listed there too.
+- **The vault's own state**, read on two public RPCs: no access key, the code hash of its reproducible build, and a USDC balance equal to what it owes ([docs/proofs.md](docs/proofs.md#the-vault-read-on-two-public-near-rpcs)).
+- **A live check per change**, in [scripts/live-checks/](scripts/live-checks/), run against the deployed hosts after every deploy.
+- **Research proofs** from before the build: 44 measured runs, such as a Privacy Pools withdrawal proof checked by a NEAR contract with its gas measured, proofs made on a phone, a phone-browser Solana trade, and the full money loop with real money. See [docs/research/](docs/research/README.md).
+- **Audits and reviews** of the vault contract and a pre-audit security scan, in [docs/research/audits/](docs/research/README.md#audits-and-reviews).
 
 ## How it works
 
@@ -187,7 +202,7 @@ We put the same six questions to each kind of private trading product on the mar
 | Who can tie a trade to you | The operator | The operator | Timing and amount | Nobody holds the link. Timing and amount can hint. |
 | Who can move or freeze the money | The operator | The operator, or a DAO | An upgrade key, in some | Nobody. The vault has no key. |
 | Tokens minutes old | Yes, in public | No, a fixed list | Some | Yes, from a wallet never used |
-| Chains to trade on | Several, in public | Many, inside one network | One | Any chain NEAR Intents reaches, from one balance |
+| Chains to trade on | Several, in public | Many, inside one network | One | Any chain NEAR Intents reaches, from one balance (four in this build) |
 | Wait at the tap | None | None | A shielding wait, in some | None. Wallets are ready before you tap. |
 | Stops and limits while you sleep | Held on the operator's keys | Some | Rare | Signed on your device, with no key on our side |
 
@@ -237,6 +252,8 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 | `apps/terminal/` | The UNRLZD terminal |
 | `apps/helper/` | The helper server: API keys, relays and signed orders, never a money key |
 | `docs/` | The architecture and security pages |
+| `docs/proofs.md` | Every recorded mainnet transaction, with explorer links |
+| `docs/research/` | The research proofs and the audits |
 | `scripts/ci/` | CI gates |
 | `scripts/live-checks/` | A live check for each change, run after every deploy |
 
@@ -251,7 +268,9 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 
 ## Prior work
 
-Research and proofs from before Nov 1 are in `UNRLZD/confidential-trenches-proofs`, kept private. Blindfill builds on Privacy Pools (0xbow, Apache-2.0) and NEAR Intents.
+Research and proofs from before Nov 1 are in `UNRLZD/confidential-trenches-proofs`, kept private. Their write-ups are copied into [docs/research/](docs/research/README.md). Blindfill builds on Privacy Pools (0xbow, Apache-2.0) and NEAR Intents.
+
+The UNRLZD trading terminal existed before the hackathon as a separate product. This repository's history starts with the hackathon's first commit, [`88f2d3e`](https://github.com/UNRLZD/confidential-trenches/commit/88f2d3eac1748ad644ec52393277b9161f992b5f) on 2026-11-01 00:00Z, and [everything built since](https://github.com/UNRLZD/confidential-trenches/compare/88f2d3eac1748ad644ec52393277b9161f992b5f...main) is the hackathon's work.
 
 ## License
 
