@@ -17,13 +17,13 @@ const SOLANA = ["pump.fun", "stonkfun", "raydium-launchlab", "Raydium", "met-dbc
 /** The factory table's pads (apps/helper/src/data/evm/lists.ts FACTORIES, card market-data-evm-lists at 8d6e279; torch from card pad-torch-robinhood). */
 const EVM = ["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags", "torch"];
 /** The engine's NEAR pad ids the helper served on 14 Nov 06:19Z (test/pads/lists-near-2026-11-14.json) with a cited logo;
- *  GayPad and token0, also served, have none (NO_LOGO). */
-const NEAR = ["hoot", "nearlytrade", "qlyphs", "memecooking", "nearpaid"];
+ *  GayPad and token0, also served, have none (NO_LOGO). tkn: served from 14 Nov 10:35Z (app live run 43585050672). */
+const NEAR = ["hoot", "nearlytrade", "qlyphs", "memecooking", "nearpaid", "tkn"];
 const NAMES: Record<string, string> = {
   "pump.fun": "pump.fun", stonkfun: "StonkFun", "raydium-launchlab": "LaunchLab", Raydium: "Raydium", "met-dbc": "Meteora", "letsbonk.fun": "bonk.fun",
   metadao: "MetaDAO", "jup-studio": "Jupiter Studio", "bags.fun": "Bags", grainpad: "grainpad", zora: "Zora", clanker: "Clanker", doppler: "Doppler",
   flaunch: "Flaunch", virtuals: "Virtuals", pons: "Pons", bags: "Bags", torch: "Torch",
-  hoot: "Hoot", nearlytrade: "Nearly.trade", qlyphs: "Qlyphs", memecooking: "meme.cooking", nearpaid: "NearPaid",
+  hoot: "Hoot", nearlytrade: "Nearly.trade", qlyphs: "Qlyphs", memecooking: "meme.cooking", nearpaid: "NearPaid", tkn: "TKN",
 };
 
 /** A logo the table names: a file in src/screens/market/logos, a real PNG of 64 px or less or an SVG with no script. */
@@ -111,6 +111,41 @@ test("the EVM factory table's pads all have rows", { skip: !existsSync(EVM_SRC) 
   const pads = new Set([...readFileSync(EVM_SRC, "utf8").matchAll(/\{ pad: "([^"]+)"/g)].map((m) => m[1]!));
   assert.ok(pads.size > 0);
   assert.deepEqual([...pads].filter((p) => padOf(p) === null && !NO_LOGO.includes(p)), []);
+});
+
+// Card near-tkn-launchpad-badge: the helper serves a NEAR row's launchpad as the engine names it (apps/helper/src/data/
+// near/engine.ts engineRow: any id LAUNCHPAD admits, no table of its own), so the ids it can serve are the engine's
+// registry of pads, GET /v1/launchpads (test/pads/launchpads-near-2026-11-14.json). App live run 43585050672 (release
+// 137) found "tkn" served with no row; the registry held it all along.
+/** Registry pads that no list served when it was recorded (10:45Z), each still owed its row (a cited logo) or its NO_LOGO
+ *  reason: the live check app-launchpad-badges still fails the deploy the moment a list serves one. This list only
+ *  shrinks: a pad that gets its row or NO_LOGO entry must leave it. */
+const NEAR_OWED = [
+  "shardsmarket", "nearpad", "umbrafun", "nearrr", "nearafun", "intear", "wholemarket", "portalpad", "onetokenhub", "nucleusbroker", "shardpad",
+  "terminalpad", "rheameme", "chipfi", "npad", "dragonpad", "tknx", "tknprimitives", "runeshot", "jumplab", "shore", "nearbased", "nearfun",
+  "revshare", "patata", "nira", "vista", "nearmemefun", "kelytra",
+];
+
+/** The engine's registered pad ids that the table has no row, NO_LOGO entry or owed entry for. */
+function unregistered(slugs: string[]): string[] {
+  return slugs.filter((id) => padOf(id) === null && !NO_LOGO.includes(id) && !NEAR_OWED.includes(id)).sort();
+}
+
+test("every NEAR pad the engine registers (all the helper can serve) has a row, a NO_LOGO reason or is owed one; a new pad is caught", () => {
+  const rec = JSON.parse(readFileSync(path.join(HERE, "pads/launchpads-near-2026-11-14.json"), "utf8")) as { fields: string[]; launchpads: [string, string, string | null, string][] };
+  assert.deepEqual(rec.fields, ["slug", "name", "website", "kind"]);
+  const slugs = rec.launchpads.map(([slug]) => slug);
+  assert.ok(slugs.length >= 37 && slugs.includes("tkn") && slugs.includes("hoot"));
+  assert.deepEqual(unregistered(slugs), []);
+  // the owed list holds only registry pads still without a row or a reason
+  for (const id of NEAR_OWED) {
+    assert.ok(slugs.includes(id), `${id} owed but not in the registry`);
+    assert.ok(padOf(id) === null && !NO_LOGO.includes(id), `${id} has its row or reason: take it off NEAR_OWED`);
+  }
+  // every id the recorded NEAR lists served is one the registry holds
+  const lists = JSON.parse(readFileSync(path.join(HERE, "pads/lists-near-2026-11-14.json"), "utf8")) as { lists: Record<string, [string, string, string | null][]> };
+  for (const rows of Object.values(lists.lists)) for (const [, , pad] of rows) assert.ok(pad === null || slugs.includes(pad), `${pad} served but not registered`);
+  assert.deepEqual(unregistered([...slugs, "nextpad"]), ["nextpad"]);
 });
 
 test("badge size: 36% of the avatar, 10 to 16 px (design-lock-r5 P.badgeD)", () => {

@@ -1235,3 +1235,28 @@ test("an epoch cut refused for any other reason (the two RPCs apart: PoolReadErr
   assert.equal(world.chain.sends, 0, "nothing sent");
   assert.equal((await world.notes.get(world.noteId))?.state, "UNSPENT", "the note stays spendable");
 });
+
+test("card evm-pool-amounts-are-standard-sizes: a Base or Robinhood withdraw releases rungs of the 1-2-5 ladder from 0.001 ETH (or an older note whole), each change 0 or a note a release still moves", async () => {
+  const { isRung } = await import("../../wallet/src/pool/ladder.ts");
+  const { EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
+  for (const chain of ["base", "robinhood"] as const) {
+    // the pool's piece rule as the wallet's evmPool carries it (its EVM_PIECES: the 0.0001 ETH grid, the 0.001 ETH floor
+    // and least rung, an older note from 0.0001 ETH released whole; wallet test/pool-standard-sizes-evm.test.ts)
+    const pieces = { grid: 10n ** 14n, floor: 10n ** 15n, ladder: EVM_LADDER, least: 10n ** 14n };
+    const c = await evmWithdrawCosts({ ...hostOf(chain), pool: Object.assign(poolOf(), { pieces }) }, { to: TO, from: W, value: 10n ** 14n });
+    const notes = [{ id: "a", value: 5n * 10n ** 15n }, { id: "b", value: 2n * 10n ** 15n }, { id: "old", value: 1_880_137_434_291_065n }];
+    // what a release of a rung (or an older note whole) sends To: the chunk less the fee and W's fee, one or several
+    const k = c.fee + c.wFee;
+    for (const amount of [10n ** 15n - k, 2n * 10n ** 15n - k, 3n * 10n ** 15n - 2n * k, 1_880_137_434_291_065n - k, 7n * 10n ** 15n - 2n * k]) {
+      const plan = planPoolWithdraw(notes, amount, c);
+      assert.ok(plan, `${chain}: a plan for ${amount}`);
+      assert.equal(plan!.reduce((t, p) => t + p.part, 0n), amount, `${chain}: exactly ${amount} arrives`);
+      for (const p of plan!) {
+        const note = notes.find((n) => n.id === p.noteId)!;
+        assert.ok(isRung(EVM_LADDER, p.chunk) || p.chunk === note.value, `${chain} ${amount}: a release of ${p.chunk} from ${note.value}, off the ladder`);
+        const left = note.value - p.chunk;
+        assert.ok(left === 0n || left >= EVM_LADDER.min, `${chain} ${amount}: ${left} wei left in the note, under the least rung`);
+      }
+    }
+  }
+});

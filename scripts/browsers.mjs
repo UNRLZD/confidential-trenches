@@ -75,6 +75,7 @@ export async function launchBrowser(engine = "chromium", options = {}) {
     const browser = await type.launch(options);
     const name = engine === "firefox" ? "Firefox" : "WebKit";
     labels.set(browser, `${name} ${browser.version()}, Playwright's build`);
+    welcomed(browser);
     if (!warned.has(engine)) {
       warned.add(engine);
       console.warn(`browsers: WARNING ${engine} runs Playwright's own build (${name} ${browser.version()}), not an installed self-updating browser; it moves to GitHub's runners with ci-live-runners`);
@@ -83,7 +84,34 @@ export async function launchBrowser(engine = "chromium", options = {}) {
   }
   const browser = await startChrome(options);
   scaleByContext(browser, options);
+  welcomed(browser);
   return browser;
+}
+
+/**
+ * Every context opens the app as a returning visitor: the welcome (apps/terminal/src/shell/Welcome.tsx, a first visit's
+ * modal over the app) is marked closed in the app's own storage before any of its documents runs, on the app's hosts
+ * only (the live APP_HOST and the harness's app.ct.test), as the runs set ct-signin-hint. A check reads the app, never
+ * the welcome over it; the welcome's own run (apps/terminal/test/welcome/run.mjs) draws it on a fixture page.
+ */
+const WELCOME_SEEN = () => {
+  try {
+    if (/^ct-app[.-]|^app\.ct\.test$/.test(location.hostname)) localStorage.setItem("ct-welcome", "1");
+  } catch {}
+};
+function welcomed(browser) {
+  const own = { newContext: browser.newContext.bind(browser) };
+  browser.newContext = async (o = {}) => {
+    const ctx = await own.newContext(o);
+    await ctx.addInitScript(WELCOME_SEEN);
+    return ctx;
+  };
+  browser.newPage = async (o = {}) => {
+    const ctx = await browser.newContext(o);
+    const page = await ctx.newPage();
+    page.on("close", () => void ctx.close().catch(() => {}));
+    return page;
+  };
 }
 
 async function startChrome(options) {
@@ -141,6 +169,7 @@ export async function launchDiskProfile(options = {}) {
     rmSync(dir, { recursive: true, force: true });
     throw launchFailure(e);
   }
+  await context.addInitScript(WELCOME_SEEN);
   const page = context.pages()[0] ?? (await context.newPage());
   const session = await context.newCDPSession(page);
   const { product } = await session.send("Browser.getVersion");

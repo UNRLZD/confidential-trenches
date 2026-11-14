@@ -28,6 +28,7 @@
 
 import type { BuyRoute, ClosedEvent, ErrorCode, ProgressEvent, ProgressRouteEvent, ReadyEvent, SignpageAnswer, SignpageKind, SignpageResults, SignpageState, Stage, StateEvent } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_PARAM_SCHEMAS, signpageProgressRouteSchema } from "../../kit/src/signpage/schema.ts";
+import { SIGNPAGE_TIMEOUT_MS } from "../../kit/src/signpage/client.ts";
 import { KIT_DEFAULT, helloKit, kitLevel, resultFor, routeFor, stageFor, stateFor, type KitLevel } from "./kit-version.ts";
 
 /** APP_HOST: the one origin this page reads from and posts to. */
@@ -64,6 +65,9 @@ const END_STAGES: ReadonlySet<Stage> = new Set(["filled", "part_filled", "not_la
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATE: SignpageKind = "state";
+/** A state read this long, from its request's arrival, may answer past the app's wait (the kit's SIGNPAGE_TIMEOUT_MS.state,
+ *  less a second for the request's trip and the page's queue): named in the console and posted as a state event too. */
+export const STATE_SLOW_MS = SIGNPAGE_TIMEOUT_MS.state - 1_000;
 
 /** A window this page posts to. */
 export interface PostTarget {
@@ -94,6 +98,8 @@ export interface ApiHost {
   state(): SignpageState | Promise<SignpageState>;
   /** Registers `fn`, called on every change of the state's source (another tab's sign-in, sign-out, words saved, op). */
   watch?(fn: () => void): void;
+  /** The clock a state read is timed on, in ms (tests only; Date.now otherwise). */
+  now?(): number;
   /**
    * The shell's (src/shell.ts): no `ready` at start, only the caller's ready() on each load of the frame. At start the
    * frame holds no APP_HOST document yet, and a message posted then can still reach the one that comes (the target
@@ -273,6 +279,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     const out = shaped(msg, kind);
     if (out !== null) host.parent.postMessage(out, APP_ORIGIN);
   };
+  const clock = host.now ?? Date.now;
   // the JSON of the last state sent, as the app's kit reads it; null until the first `state` answer
   let sent: string | null = null;
   const read = async (): Promise<SignpageState> => {
@@ -281,7 +288,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     return s;
   };
 
-  const handle = async (data: unknown): Promise<void> => {
+  const handle = async (data: unknown, at: number): Promise<void> => {
     const bytes = plainRequestBytes(data);
     if (!bytes) return;
     const kit = helloKit(data);
@@ -293,7 +300,20 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
     const first = answered.get(id);
     if (first && first.sha !== sha) return post({ v: 1, id, ok: false, error: { code: "id_reused" } });
     if (first) return first.answer ? post(first.answer, first.kind) : undefined;
-    if (isStateRequest(m)) return post({ v: 1, id, ok: true, result: await read() }, STATE);
+    if (isStateRequest(m)) {
+      const s = await read();
+      post({ v: 1, id, ok: true, result: s }, STATE);
+      // card portfolio-counts-every-note: the app's kit waits SIGNPAGE_TIMEOUT_MS.state for this answer and drops one
+      // that comes later, keeping its last state, while `sent` above already holds this one, so no change after it
+      // would post it: an answer this slow (timed from the request's arrival, so a second short of the app's wait
+      // counts its trip) goes as a state event too, which has no timeout
+      const took = clock() - at;
+      if (took >= STATE_SLOW_MS) {
+        console.warn(`state read took ${took} ms (the app waits ${SIGNPAGE_TIMEOUT_MS.state} ms for its answer): sent as a state event too`);
+        post({ v: 1, type: "state", state: s });
+      }
+      return;
+    }
     // a Deferred is answered once its wait settles, either way; a plain answer is used as it is, in this task
     const progress = (stage: Stage): void => {
       const waiting = held.get(id);
@@ -368,7 +388,8 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   host.listen((e) => {
     if (e.origin !== APP_ORIGIN || e.source !== host.parent) return;
     const data = e.data;
-    queue = queue.then(() => handle(data)).catch(() => {});
+    const at = clock();
+    queue = queue.then(() => handle(data, at)).catch(() => {});
   });
   // each ready starts a new app document, read as kit-v1.4 until its hello, and sent no state event before its own first
   // `state` answer (its client asks one at once, after its hello); in the queue, so a hello its document posted before

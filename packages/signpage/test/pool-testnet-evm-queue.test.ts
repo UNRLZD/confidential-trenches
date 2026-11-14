@@ -1194,7 +1194,9 @@ test("a state read carries a refused buy's ETH on W back into the pool from the 
             case "eth_getTransactionCount":
               return "0x0";
             case "eth_getBalance":
-              return "0x" + (String(p[0]).toLowerCase() === W ? CHUNK - 10n ** 13n : 0n).toString(16);
+              // W holds a rung beside the send's bound (the release's ETH and more sent to W since): a carry deposits
+              // rungs only, what is under the least rung is W's tail (card evm-pool-amounts-are-standard-sizes)
+              return "0x" + (String(p[0]).toLowerCase() === W ? CHUNK + RUNG : 0n).toString(16);
             case "eth_estimateGas":
               return "0x3d090";
             case "eth_call":

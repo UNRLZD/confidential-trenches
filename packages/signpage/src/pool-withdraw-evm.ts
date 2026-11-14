@@ -21,8 +21,9 @@
 //   with the fee it needs (the screen's "fee rose" line and its button).
 // - The plan: the Solana withdraw's planPoolWithdraw over the pool's landed notes, with this chain's costs: the epoch
 //   fee (a bind's own fee cap for the epoch: the device's reads, the helper's answer held to them), W's fee bound, and
-//   the smallest part max(1 wei, fee - W's fee) (the pool's backstop: the fee at most half the chunk, PrivacyPool.sol:186).
-//   Each note's change is 0 or at least the note floor. A part whose bind gives another fee than the plan's stops before
+//   the smallest part max(1 wei, fee - W's fee) (the pool's backstop: the fee at most half the chunk, PrivacyPool.sol:186),
+//   and the pool's piece rule (the wallet's EVM_PIECES, card evm-pool-amounts-are-standard-sizes): every release a rung of the 1-2-5
+//   ladder from 0.001 ETH, or an older note whole once. Each note's change is 0 or at least the note floor. A part whose bind gives another fee than the plan's stops before
 //   W signs (the note goes back UNSPENT). The notes under the epoch root are planned first, but never in more parts than
 //   the plan over every note (the Solana withdraw's rested preference: the screen drew its Max fee on that one).
 // - The roots (the Solana withdraw's, card fresh-money-spendable-at-once): the epoch root when the note is in it; a note
@@ -59,6 +60,7 @@ import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { evmAddress, freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
+import type { PieceRule } from "../../wallet/src/pool/pieces.ts";
 import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, evmRetryLag, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { checkBinding, PoolNoLeafError, type Pool, type PoolTrees } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
@@ -258,7 +260,10 @@ export async function evmWithdrawCosts(h: Pick<EvmWithdrawHost, "chain" | "pin" 
   }
   const l1 = (await l1Of(h, gas, tag))[0];
   const wFee = gas * maxFee + l1;
-  return { fee, wFee, minPart: evmWithdrawMinPart(fee, wFee), gas, maxFee, tip, l1, toHasCode };
+  // the pool's piece rule (the wallet's EVM_PIECES, card evm-pool-amounts-are-standard-sizes), as the Solana withdraw
+  // takes its pool's: every part's release a rung, or an older note whole
+  const pieces = h.pool.pieces;
+  return { fee, wFee, minPart: evmWithdrawMinPart(fee, wFee), gas, maxFee, tip, l1, toHasCode, ...(pieces !== undefined ? { pieces } : {}) };
 }
 
 /** A note's W and its nullifier hash. */
@@ -867,7 +872,7 @@ async function sentValue(rpcs: readonly [EvmRpc, EvmRpc], hash: string): Promise
 
 /** The screen's funds on an EVM pool: the landed notes of the pool's scope this page may spend, and this chain's
  *  costs (a plain send's, or To's when typed). */
-export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs" | "pool" | "notes" | "seed64" | "owedNotes">, to?: string): Promise<{ notes: ReturnType<typeof withdrawSources>; fee: bigint; wFee: bigint; minPart: bigint }> {
+export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs" | "pool" | "notes" | "seed64" | "owedNotes">, to?: string): Promise<{ notes: ReturnType<typeof withdrawSources>; fee: bigint; wFee: bigint; minPart: bigint; pieces?: PieceRule }> {
   const notes = await h.notes();
   const owed = (await h.owedNotes?.()) ?? new Set<string>();
   const list = withdrawSources(await notes.list(), h.pool.scope).filter((n) => !owed.has(n.id));
@@ -880,5 +885,5 @@ export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" 
       c = await evmWithdrawCosts(h, { to, from: w, value: first.part }, c.fee);
     }
   }
-  return { notes: list, fee: c.fee, wFee: c.wFee, minPart: c.minPart };
+  return { notes: list, fee: c.fee, wFee: c.wFee, minPart: c.minPart, ...(c.pieces !== undefined ? { pieces: c.pieces } : {}) };
 }
