@@ -24,6 +24,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { APP_ORIGIN, LIMIT_CODES, RATE_LIMIT, RETRY, check, makerSpares, preflight, spareVerdict, throttled } from "./evm-rpc-spare-list.mjs";
 import { LIMIT_CODES as SHARED_LIMIT_CODES, RATE_LIMIT as SHARED_RATE_LIMIT, RETRY as SHARED_RETRY } from "./provider-answer.mjs";
+import * as M from "./evm-rpc-spare-list.mjs";
+import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 
 const A = JSON.parse(readFileSync(new URL("./evm-rpc-spare-list.answers.json", import.meta.url), "utf8"));
 const RETRY_MS = RETRY.ms; // as loaded, before a test sets it to 0
@@ -231,4 +233,36 @@ test("card evm-spare-check-reads-a-throttle-as-no-answer: the check's throttle w
   assert.deepEqual([...LIMIT_CODES].sort(), [...SHARED_LIMIT_CODES].sort());
   assert.equal(RETRY_MS, SHARED_RETRY.ms);
   assert.ok(throttled(undefined, A.throttledSpare.makers.robinhood.spares["https://4663.rpc.thirdweb.com"].error));
+});
+
+// card evm-rpc-spare-list-robinhood-gap: a held quote waits past its chain's maxLag blocks (the kit's venue entry) at the
+// chain's block time read on chain. Robinhood waited a flat 1.5 s, short of its 100 blocks: in the helper's live run
+// 43561384236 (attempt 2) both held robinhood-torch quotes asked the third no getLogs.
+/** The wait the check gives a held quote on `chain` at `blockMs` (read through the namespace, so the file loads at
+ *  a6b7a3ad7, whose wait was a flat HELD_GAP_MS). */
+const gapOf = (chain, blockMs) => (typeof M.heldGapMs === "function" ? M.heldGapMs(evmPoolVenues()[chain].maxLag, blockMs) : M.HELD_GAP_MS[chain]);
+
+test("a held quote waits past its chain's maxLag blocks at the block time read on chain: Robinhood 100 blocks of 115 ms (red at a6b7a3ad7: a flat 1.5 s)", () => {
+  // 200 ms: Base since block 53556127; 115 ms: Robinhood read 2026-11-14 05:5xZ on two providers; 102 ms: its 3 Nov read
+  for (const [chain, blockMs] of [["base", 200], ["robinhood", 115], ["robinhood", 102]]) {
+    const lag = evmPoolVenues()[chain].maxLag;
+    assert.ok(Number.isSafeInteger(lag) && lag > 0, `${chain}: the kit names its maxLag`);
+    assert.ok(gapOf(chain, blockMs) > lag * blockMs, `${chain} at ${blockMs} ms a block: ${gapOf(chain, blockMs)} ms is not past ${lag} blocks (${lag * blockMs} ms)`);
+  }
+  assert.equal(gapOf("base", 200), 11_500, "Base's wait as before");
+});
+
+test("blockMsOf: the first provider answering two headers BLOCK_SPAN apart names the block time; one refused, or with no header, is passed over (red at a6b7a3ad7: none)", async () => {
+  const header = { "https://c.example": { head: 0x6c9a3e0n, t: (n) => 0x6af70000n + (n * 115n) / 1000n } };
+  const fetchFn = async (url, init) => {
+    if (url === "https://a.example") throw new TypeError("fetch failed");
+    const { method, params } = JSON.parse(init.body);
+    const c = header[url];
+    const result = method === "eth_blockNumber" ? "0x6c9a3e0" : c === undefined ? null : { number: params[0], timestamp: "0x" + c.t(BigInt(params[0])).toString(16) };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
+  };
+  assert.equal(typeof M.blockMsOf, "function", "the check reads a block time");
+  assert.deepEqual(await M.blockMsOf(["https://a.example", "https://b.example", "https://c.example"], fetchFn), { url: "https://c.example", blockMs: 115 });
+  assert.equal(await M.blockMsOf(["https://a.example", "https://b.example"], fetchFn), null, "no provider answered: no block time, never a guess");
+  assert.equal(M.BLOCK_SPAN, 1_000n);
 });
