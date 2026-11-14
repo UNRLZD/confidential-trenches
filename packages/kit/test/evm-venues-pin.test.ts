@@ -101,8 +101,17 @@ const mainRecord = (chain: string) => {
   assert.equal(d.dryRun, false, `${chain}: a dry run's record is never a pin`);
   return d.contracts;
 };
+// card evm-pool-amounts-are-standard-sizes: the sell delegate is SellDelegate v2 (the largest 1-2-5 rung of a sale),
+// deployed alone by the owner's paste on 14 Nov, its record contracts/pool-evm/deployments/<chain>.sell-delegate-2.json;
+// the first set's delegate (deployments/<chain>.json) is never pinned for a new sale again
+const v2Record = (chain: string) => {
+  const d = JSON.parse(readFileSync(new URL(`../../../contracts/pool-evm/deployments/${chain}.sell-delegate-2.json`, import.meta.url), "utf8")) as { chain: string; dryRun: boolean; contracts: { SellDelegate: { address: string } } };
+  assert.equal(d.chain, chain);
+  assert.equal(d.dryRun, false, `${chain}: a dry run's record is never a pin`);
+  return d.contracts.SellDelegate.address;
+};
 
-test("the mainnet chains' pins are their deployment records: pool, v3 and v4 adapters, sell delegate and fee collector, the collector's sink the sell sender", () => {
+test("the mainnet chains' pins are their deployment records: pool, v3 and v4 adapters, sell delegate (v2's own record) and fee collector, the collector's sink the sell sender", () => {
   for (const chain of MAINNET_SETS) {
     const v = evmPoolVenues()[chain];
     const r = mainRecord(chain);
@@ -110,7 +119,8 @@ test("the mainnet chains' pins are their deployment records: pool, v3 and v4 ada
     assert.deepEqual(Object.keys(v.adapters ?? {}).sort(), ["v3", "v4"], chain); // both venues on both mainnets (M365 2: a v3 router is read on Robinhood)
     assert.equal(lower(v.adapters?.v3), lower(r.UniswapV3Adapter!.address), chain);
     assert.equal(lower(v.adapters?.v4), lower(r.UniswapV4Adapter!.address), chain);
-    assert.equal(lower(v.sellDelegate), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(v.sellDelegate), lower(v2Record(chain)), chain);
+    assert.notEqual(lower(v.sellDelegate), lower(r.SellDelegate!.address), `${chain}: the first set's delegate (v1) is never pinned for a new sale`);
     assert.equal(lower(v.feeCollector), lower(r.FeeCollector!.address), chain);
     assert.equal(lower(v.sellSender), lower(r.FeeCollector!.sink), chain);
     assert.equal(lower(v.weth), lower(DEPLOY.MAINNETS[chain]!.weth.address), chain);
@@ -148,7 +158,7 @@ test("on each mainnet a buy builds only through its pinned adapters into its pin
     const v4sell = { ...req, target: v.poolManager!, route: { venue: "uniswap-v4" as const, hops: [{ currency: ZERO, fee: 10000, tickSpacing: 200, hooks: ZERO, hookData: "0x" }] } };
     assert.equal(lower(pinnedBuildSell(evmPoolVenues(), chain, v4sell).pool), lower(pool), chain);
     const a = kit.evmPoolSignSellAuthorization(W_KEY, chain, 0n);
-    assert.equal(lower(a.address), lower(r.SellDelegate!.address), chain);
+    assert.equal(lower(a.address), lower(v2Record(chain)), chain);
     assert.equal(a.chainId, evmPoolVenues()[chain].chainId, chain);
   }
 });

@@ -59,14 +59,20 @@ export function recordOf(chain, file = deploymentFile(chain)) {
     if (s.chain !== chain || s.dryRun !== false) throw new Error(`${f} is not ${chain}'s real run`);
     return { [name]: s.contracts[name] };
   };
-  const f = SELL_KEYS.map((k) => sellFile(k, chain)).find(existsSync);
+  // a mainnet's sell delegate deployed alone (card pool-amounts-are-standard-sizes-evm: SellDelegate v2, the owner's
+  // paste's record <chain>.sell-delegate-2.json beside the set's), the kit's pin from card evm-pool-amounts-are-standard-sizes
+  const v2 = Object.hasOwn(MAINNETS, chain) ? file.replace(/\.json$/, ".sell-delegate-2.json") : undefined;
+  const f = v2 !== undefined ? (existsSync(v2) ? v2 : undefined) : SELL_KEYS.map((k) => sellFile(k, chain)).find(existsSync);
   // a testnet's fee collector, deployed beside its set (a mainnet's set holds its own)
   const fc = Object.hasOwn(MAINNETS, chain) ? undefined : sellFile("evm-fee-collector", chain);
   // a testnet's pool and its verifier from its newest pool set (pool-evm-deploy.mjs poolFile: card
   // pool-evm-buy-pays-revert's, whose buy pays a failed swap's chunk to W); the adapters and the delegate stay the kit's
   const pv = poolFile(chain);
   const pool = pv !== file && existsSync(pv) ? { ...alone(pv, "PrivacyPoolSimple"), ...alone(pv, "WithdrawalVerifier") } : {};
-  return { ...d, contracts: { ...d.contracts, ...pool, ...(f ? alone(f, "SellDelegate") : {}), ...(fc && existsSync(fc) ? alone(fc, "FeeCollector") : {}) } };
+  const contracts = { ...d.contracts, ...pool, ...(f ? alone(f, "SellDelegate") : {}), ...(fc && existsSync(fc) ? alone(fc, "FeeCollector") : {}) };
+  // a mainnet's set as its own record has it (its deploy transactions made the first set's delegate), for
+  // pool-evm-deploy-mainnet.mjs's read-back of that set; the kit's pins are read against `contracts`
+  return v2 !== undefined && f !== undefined ? { ...d, contracts, set: d.contracts } : { ...d, contracts };
 }
 
 /** The chains of the kit's venue list that pool-evm-deploy has a record for, with that record: the testnets, then the

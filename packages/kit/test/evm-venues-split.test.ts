@@ -16,8 +16,10 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  poolProviders spare rpc-robinhood.globalstake.io (card first-sign-in-reads-fast, measured 2026-11-14 05:01Z and
  *  05:13Z: the pool's whole life in one page; 6,546 characters before it). The list with that one poolProviders entry
  *  taken out hashes to the pin before it, 7e26e86db0c698f5677abf45ed712803b3552c7d47f1e757fe940ae41075fcbb, so
- *  nothing else moved. */
-const BEFORE = "6a80dd95709b43dcba99f0c30e4c7309c311260056c98f2efc12b9b36841d417";
+ *  nothing else moved. Then each mainnet's sellDelegate moved to SellDelegate v2 (card evm-pool-amounts-are-standard-sizes,
+ *  same length): the list with the first set's two delegates put back hashes to the pin before it,
+ *  6a80dd95709b43dcba99f0c30e4c7309c311260056c98f2efc12b9b36841d417, so nothing else moved. */
+const BEFORE = "654639cf7943e0a05961477f2ace244a03375ecc9dc96fb244f6392411b9ab1f";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
