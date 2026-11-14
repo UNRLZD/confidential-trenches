@@ -19,7 +19,8 @@ test("the trade box: a Solana coin whose pool.buy.dry says no venue draws Buy an
   // the coin's dry answer sets the box off for that coin key alone, Buy and the presets read it, a tap does nothing
   assert.match(box, /if \(coinUnavailable\(chain, o\.error\.code\)\) return void setNoVenue\(coinKey\);/);
   assert.match(box, /const coinOff = noVenue !== null && noVenue === coinKey;\n\s+const off = unavailable\(phase\) \|\| coinOff;/);
-  assert.match(box, /const canBuy = ready && !running && !off && /);
+  assert.match(box, /const canBuy = ready && !running && !unavailable\(phase\) && !coinOff && /);
+  assert.match(box, /presetOff, tapPreset, preview, receive, coinOff,/);
   assert.match(box, /const presetOff = \(p: Cents \| null\) => [^\n]*\|\| off \|\|/);
   assert.match(box, /unavailable\(phaseRef\.current\) \|\| coinOff \|\|/);
   // one short line where Max sits, the trade box's own word
