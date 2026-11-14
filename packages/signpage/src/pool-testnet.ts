@@ -2413,9 +2413,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const timer = over.positions?.setTimer ?? ((f: () => void, ms: number) => (setTimeout(f, ms) as { unref?: () => void }).unref?.());
       evmPositionsCaches.set(
         chain,
-        // only on a list of exactly two providers: on more, the pair's walking seats can both land on one provider, whose
-        // word alone would then read as two agreeing (a stuck or throttled seat leaves the rows waiting instead)
-        e === null || e.passList.length !== 2
+        // on every list of two or more (card evm-buy-shows-coin-and-proof-after-fill: SIGN_HOST's Base list is five and
+        // Robinhood's four, and a two-only rule left both chains' positions empty on mainnet): the pass pair is evmPair's,
+        // whose seats never stand on one provider within an agreed read (wallet pool/evm.ts evmPair `free`), so a
+        // walking seat never reads one provider's word as two (test/positions-evm.test.ts P3-1)
+        e === null
           ? null
           : positionsCache(
               (memo, run) =>
