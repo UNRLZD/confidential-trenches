@@ -45,6 +45,9 @@ export const PADS: Readonly<Record<string, Pad>> = {
   qlyphs: { name: "Qlyphs", logo: at("qlyphs.svg"), src: "https://qlyphs.com/icon.svg" },
   memecooking: { name: "meme.cooking", logo: at("memecooking.png"), src: "https://meme.cooking/assets/apple-touch-icon.png (180 px, cut to 64)" },
   nearpaid: { name: "NearPaid", logo: at("nearpaid.png"), src: "https://nearpaid.com/apple-touch-icon.png (180 px, cut to 64)" },
+  // tkn.near's factory (the engine's "tkn.farm"; tkn.farm no longer resolves): tkn.homes is its site, its code names
+  // tkn.near ("TKN") and tknx.near ("TKN Plus") as its factories (read 14 Nov 10:44Z)
+  tkn: { name: "TKN", logo: at("tkn.png"), src: "https://tkn.homes/apple-touch-icon.png (180 px, cut to 64; fetched 2026-11-14)" },
 };
 
 /** Pads the lists name whose own brand files could not be found or cited: they draw no badge until they can. GayPad
@@ -105,6 +108,7 @@ export const PAD_RING: Readonly<Record<string, RingColor | "neutral">> = {
   nearlytrade: { l: 0.57, c: 0.11, h: 159 }, // 0.59 0.10 169
   memecooking: { l: 0.58, c: 0.18, h: 139 }, // 0.56 0.17 140
   nearpaid: { l: 0.88, c: 0.1, h: 211 }, // 0.88 0.10 211
+  tkn: { l: 0.56, c: 0.1, h: 270 }, // 0.45 0.10 270 (sampled from tkn.png, lifted to the 0.56 floor)
   "bags.fun": "neutral", // white on black
   bags: "neutral", // white on black
   doppler: "neutral", // white on black
