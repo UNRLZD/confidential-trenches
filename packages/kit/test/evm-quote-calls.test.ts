@@ -4,6 +4,9 @@
 // robinhood-rpc.publicnode.com and robinhood.drpc.org, 2026-11-14 04:55-05:08Z). Each provider takes as many requests
 // at once as the venue list pins for it: one in-flight limit for every provider, the scan's 2, held this quote's
 // hundreds of posts in a queue for 10 s and more on mainnet.
+// The time is virtual: the quote runs on the replay's own clock (its `mono`), and each post is answered POST_MS of that
+// clock after it is sent. The clock moves only when the quote has nothing left to run but its posts in flight, to the
+// first of them due, so the time read is the posts' time through each provider's limit, the same on any runner.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -14,10 +17,12 @@ import { callKey } from "./evm-quote-calls-record.ts";
 
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-quote-calls.json.gz", import.meta.url))).toString("utf8"));
 const POST_MS = 200;
-// The bound: the recorded quote's 195 posts at POST_MS a post took 6.3 s through each provider's pinned limit and
-// 10.7 s through one limit of 2 for every provider (the replay's own work 0.9 s of each, with no wait a post), so a
-// runner twice as slow stays inside it and the one limit of 2 never does
+// The bound: the recorded quote's posts at POST_MS a post take about 5.4 s of the clock through each provider's pinned
+// limit and about 9.8 s through one limit of 2 for every provider (6.3 s and 10.7 s measured on the real clock, the
+// replay's own work 0.9 s of each)
 const BOUND_MS = 8_000;
+// turns of the event loop with no new post before the clock moves: an answer's body is read over a few turns
+const QUIET_TURNS = 5;
 
 const replay = () => {
   const answers = new Map<string, unknown>(F.calls);
@@ -26,13 +31,39 @@ const replay = () => {
   const flying = new Map<string, number>();
   const most = new Map<string, number>();
   let posts = 0;
+  // the clock: `at` ms, moved by drive() to the first post due once the quote is quiet
+  let at = 0;
+  const due: { at: number; go: () => void }[] = [];
+  let done = false;
+  const drive = async () => {
+    while (!done) {
+      let seen = -1, quiet = 0;
+      while (!done && quiet < QUIET_TURNS) {
+        await new Promise((r) => setImmediate(r));
+        quiet = posts === seen ? quiet + 1 : 0;
+        seen = posts;
+      }
+      if (done) return;
+      if (due.length === 0) {
+        // nothing in flight: the quote waits on its own timer, in real time (no post is due)
+        await new Promise((r) => setTimeout(r, 1));
+        continue;
+      }
+      const next = Math.min(...due.map((d) => d.at));
+      at = next;
+      for (const d of due.filter((d) => d.at === next)) {
+        due.splice(due.indexOf(d), 1);
+        d.go();
+      }
+    }
+  };
   const fetchFn = (async (url: string | URL, init?: RequestInit) => {
     const host = new URL(String(url)).host;
     flying.set(host, (flying.get(host) ?? 0) + 1);
     most.set(host, Math.max(most.get(host) ?? 0, flying.get(host)!));
     posts++;
     try {
-      await new Promise((r) => setTimeout(r, POST_MS));
+      await new Promise<void>((go) => due.push({ at: at + POST_MS, go }));
       const sent = JSON.parse(String(init?.body));
       const one = (c: { id: unknown; method: string; params: unknown }) => {
         const k = callKey(c);
@@ -48,7 +79,15 @@ const replay = () => {
       flying.set(host, flying.get(host)! - 1);
     }
   }) as typeof fetch;
-  return { fetchFn, missed, most, posts: () => posts };
+  const clock = () => at;
+  const run = <T>(p: () => Promise<T>): Promise<T> => {
+    const driving = drive();
+    return p().finally(() => {
+      done = true;
+      return driving;
+    });
+  };
+  return { fetchFn, missed, most, posts: () => posts, clock, run };
 };
 
 test("the recorded USDG quote's reads finish inside the bound through each provider's own in-flight limit, and pick the same quote", async () => {
@@ -68,12 +107,12 @@ test("the recorded USDG quote's reads finish inside the bound through each provi
   const scans = [v.scan!.url, ...(v.scan!.spares ?? []).map((s) => s.url)].map((u) => evmJsonRpc(u, r.fetchFn, 16 << 20));
   const { buys, ...rest } = F.request;
   const req: EvmPoolBuyQuoteRequest = { ...rest, token: buys, amountIn: BigInt(F.request.amountIn) };
-  const t = performance.now();
-  const q = await evmPoolBuyQuoteWith(req, evmProviders(evmRanked(v.providers!), r.fetchFn), F.now, scans).catch((e) => {
+  const q = await r.run(() => evmPoolBuyQuoteWith(req, evmProviders(evmRanked(v.providers!), r.fetchFn), F.now, scans, undefined, r.clock)).catch((e) => {
     throw new Error(`${e}; calls not in the recording: ${r.missed.length} ${JSON.stringify(r.missed.slice(0, 4))}`);
   });
-  const ms = performance.now() - t;
-  console.log(`replayed in ${Math.round(ms)} ms, ${r.posts()} posts, most at once per host ${JSON.stringify(Object.fromEntries(r.most))}`);
+  // the quote started at 0 on the clock
+  const ms = r.clock();
+  console.log(`replayed in ${ms} ms of the clock, ${r.posts()} posts, most at once per host ${JSON.stringify(Object.fromEntries(r.most))}`);
   // the pick: the quote the recording made, every field the device signs from
   assert.deepEqual(r.missed, []);
   assert.equal(F.outcome.code, "ok");
@@ -92,7 +131,7 @@ test("the recorded USDG quote's reads finish inside the bound through each provi
     const pin = url === undefined ? undefined : v.inflight?.[url];
     if (pin !== undefined) assert.ok(n <= pin, `${host}: ${n} at once, its pin ${pin}`);
   }
-  assert.ok(ms <= BOUND_MS, `the quote's reads took ${Math.round(ms)} ms at ${POST_MS} ms a post, past ${BOUND_MS} ms`);
+  assert.ok(ms <= BOUND_MS, `the quote's reads took ${ms} ms of the clock at ${POST_MS} ms a post, past ${BOUND_MS} ms`);
 });
 
 test("each mainnet quote provider has its own in-flight pin, and no pin names another URL", () => {
