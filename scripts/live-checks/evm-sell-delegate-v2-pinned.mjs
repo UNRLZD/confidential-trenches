@@ -57,10 +57,16 @@ export function bundleFacts(text, ds = delegatesOf()) {
   };
 }
 
-/** The bundle half's verdict: { ok, lines }. */
+/** The bundle half's verdict: { ok, lines }. A bundle read from SIGN_HOST (its index) must be the /app.js the index
+ *  pins by its integrity hash; a local file (--bundle) has no index. */
 export function judgeBundle(b, ds = delegatesOf()) {
   const lines = [];
   let ok = true;
+  if (b?.index !== undefined) {
+    const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(b.index)?.[1];
+    if (!pin) return { ok: false, lines: ["BAD SIGN_HOST's index.html pins no /app.js"] };
+    if (pin !== b.sha384) return { ok: false, lines: ["BAD SIGN_HOST's served /app.js is not the one index.html pins"] };
+  }
   for (const c of CHAINS) {
     const n = b?.names?.[c];
     const good = n?.v2 === true && n?.v1 === false;
@@ -74,7 +80,7 @@ export function judgeBundle(b, ds = delegatesOf()) {
 export async function readBundle(fetchFn = fetch, file) {
   if (file) return { url: file.split("/").pop(), ...bundleFacts(readFileSync(file, "utf8")) };
   const got = await signBundle(fetchFn);
-  return { url: got.url, ...bundleFacts(got.text) };
+  return { url: got.url, index: got.html, sha384: `sha384-${createHash("sha384").update(got.text).digest("base64")}`, ...bundleFacts(got.text) };
 }
 
 /** Both halves: the bundle's facts `b` and each chain's code on two RPCs through `fetchFn`. { verdict, lines } */

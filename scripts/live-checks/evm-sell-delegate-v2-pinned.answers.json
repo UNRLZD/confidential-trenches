@@ -1,7 +1,7 @@
 {
  "key": "evm-sell-delegate-v2-pinned",
  "notes": [
-  "Recorded 2026-11-14T13:40:29.191Z: good, this checkout's build (--bundle app.js) and the mainnets' answers; bad, SIGN_HOST's bundle read then (https://confidential.unrealized.trade/app.js), the release before the pin."
+  "Recorded 2026-11-14T13:48:25.830Z: good, this checkout's build (--bundle app.js) and the mainnets' answers; bad, SIGN_HOST's bundle read then (https://confidential.unrealized.trade/app.js), the release before the pin."
  ],
  "good": {
   "bundle": {
@@ -449,6 +449,8 @@
  "bad": {
   "bundle": {
    "url": "https://confidential.unrealized.trade/app.js",
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-My4L5OJYrLZJH077wo7tzoSaJ7Jl6rzWqs5XUh1Oi3TwKn4B1o2K94aaTsQdH4JB\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-My4L5OJYrLZJH077wo7tzoSaJ7Jl6rzWqs5XUh1Oi3TwKn4B1o2K94aaTsQdH4JB",
    "sha256": "166a453b71095d8633fe4226a34a050f7922a35272459ef728a71cda838eafac",
    "bytes": 1687512,
    "names": {
