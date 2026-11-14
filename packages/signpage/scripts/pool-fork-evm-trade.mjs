@@ -32,6 +32,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { IDBFactory } from "fake-indexeddb";
+import { anvilFetch } from "../../../contracts/pool-evm/test/fork-anvil.mjs";
 
 const USAGE = "usage: pool-fork-evm-trade.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token 0x...40 hex>";
 const [CHAIN, ANVIL, OUT, TOKEN] = process.argv.slice(2);
@@ -50,6 +51,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // installed before any module loads, so every provider made at load or later fetches through it; until the lists below
 // are read, only the fork itself is reached
 const realFetch = globalThis.fetch;
+// a block at or before the fork's block read from the fork's URL, never anvil's double lock (contracts/pool-evm/test/fork-anvil.mjs)
+const toAnvil = anvilFetch(realFetch, ANVIL);
+const toward = (u, input, init) => (u.origin === ANVIL && typeof init?.body === "string" ? toAnvil(init) : realFetch(input, init));
 const route = { fork: new Set(), helper: null, local: null };
 const refused = new Map();
 const requests = [];
@@ -68,7 +72,7 @@ globalThis.fetch = async (input, init) => {
     if (to === "fork" || to === "direct") {
       const s0 = Date.now();
       try {
-        const r = await realFetch(to === "fork" ? ANVIL : input, init);
+        const r = await (to === "fork" ? toAnvil(init) : toward(u, input, init));
         q.ms = Date.now() - s0;
         q.status = r.status;
         return r;
@@ -79,8 +83,8 @@ globalThis.fetch = async (input, init) => {
       }
     }
   }
-  if (to === "direct") return realFetch(input, init);
-  if (to === "fork") return realFetch(ANVIL, init);
+  if (to === "direct") return toward(u, input, init);
+  if (to === "fork") return toAnvil(init);
   if (to === "helper") return realFetch(`${route.local}${u.pathname}${u.search}`, init);
   if (!refused.has(u.host)) log("refused host", { host: u.host, path: u.pathname });
   refused.set(u.host, (refused.get(u.host) ?? 0) + 1);

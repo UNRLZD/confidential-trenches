@@ -31,13 +31,15 @@
 // times, the end, the transaction, its block and status, the notes after and the helper calls to <out.json>, and exits 0
 // only on filled with status 0x1. Nothing here logs a key or the words.
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
+import v8 from "node:v8";
 import { IDBFactory } from "fake-indexeddb";
 // a socket's type of service, best effort (contracts/pool-evm/test/socket-tos.mjs): a refused one holds no fork read
 import { refusedTos } from "../../../contracts/pool-evm/test/socket-tos.mjs";
+import { anvilFetch } from "../../../contracts/pool-evm/test/fork-anvil.mjs";
 
 const USAGE = "usage: pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token 0x...40 hex> [<amount ETH>]";
 const [CHAIN, ANVIL, OUT, TOKEN, AMOUNT] = process.argv.slice(2);
@@ -53,13 +55,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // installed before any module loads, so every provider made at load or later fetches through it; until the lists below
 // are read, only the fork itself is reached
 const realFetch = globalThis.fetch;
+// a block at or before the fork's block read from the fork's URL, never anvil's double lock (contracts/pool-evm/test/fork-anvil.mjs)
+const toAnvil = anvilFetch(realFetch, ANVIL);
 const route = { fork: new Set(), helper: null, local: null };
 const refused = new Map();
 const requests = [];
 let tapped = false;
 globalThis.fetch = async (input, init) => {
   const u = new URL(String(input instanceof Request ? input.url : input));
-  const to = u.origin === ANVIL || (route.local !== null && u.origin === route.local) ? "direct" : route.fork.has(u.host) ? "fork" : route.helper !== null && u.origin === route.helper ? "helper" : null;
+  // the helper's origin is a fork host only at its RPC route (Robinhood's history reads it, /v1/rpc/robinhood): the
+  // pool fee and the sends at that origin are the helper's own, never anvil's (which answers a GET 400, its websocket's)
+  const helperRpc = route.helper !== null && u.origin === route.helper && u.pathname.startsWith("/v1/rpc/");
+  const to =
+    u.origin === ANVIL || (route.local !== null && u.origin === route.local)
+      ? "direct"
+      : route.fork.has(u.host) && (route.helper === null || u.origin !== route.helper || helperRpc)
+        ? "fork"
+        : route.helper !== null && u.origin === route.helper
+          ? "helper"
+          : null;
   if (tapped) {
     let method = null;
     try {
@@ -67,8 +81,8 @@ globalThis.fetch = async (input, init) => {
     } catch {}
     requests.push({ atMs: Date.now(), host: u.host, path: u.pathname, verb: init?.method ?? "GET", method, to: to ?? "refused" });
   }
-  if (to === "direct") return realFetch(input, init);
-  if (to === "fork") return realFetch(ANVIL, init);
+  if (to === "direct") return u.origin === ANVIL && typeof init?.body === "string" ? toAnvil(init) : realFetch(input, init);
+  if (to === "fork") return toAnvil(init);
   if (to === "helper") return realFetch(`${route.local}${u.pathname}${u.search}`, init);
   if (!refused.has(u.host)) log("refused host", { host: u.host, path: u.pathname });
   refused.set(u.host, (refused.get(u.host) ?? 0) + 1);
@@ -119,6 +133,23 @@ const anvil = async (method, params) => {
 const head = await anvil("eth_getBlockByNumber", ["latest", false]);
 const fin = await anvil("eth_getBlockByNumber", ["finalized", false]);
 const firstHead = BigInt(head.number);
+// the fork's URL and block, where toAnvil reads a block at or before it: a run without them would meet anvil's lock
+const forkConfig = (await anvil("anvil_nodeInfo", []))?.forkConfig;
+if (typeof forkConfig?.forkUrl !== "string" || forkConfig.forkBlockNumber === undefined) throw new Error("anvil names no fork URL and block");
+log("fork config", { url: forkConfig.forkUrl, block: forkConfig.forkBlockNumber });
+// Robinhood's chain fee is ArbGasInfo's getL1BaseFeeEstimate (kit pool-fee.ts), a precompile at 0x...6c that anvil does
+// not have: the chain answers eth_getCode 0xfe there, which anvil runs as INVALID ("EVM error InvalidFEOpcode", every
+// proof pass's bind stopped, as in pool-fork-evm-carry-withdraw.mjs). The one stand-in, as there: code at 0x...6c that
+// returns the chain's own answer at the fork block, read through the fork's URL (kept in its book).
+if (CHAIN === "robinhood") {
+  const ARB_GAS_INFO = "0x000000000000000000000000000000000000006c";
+  const at = `0x${BigInt(forkConfig.forkBlockNumber).toString(16)}`;
+  const r = await (await realFetch(forkConfig.forkUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: ARB_GAS_INFO, data: "0xf5d6ded7" }, at] }) })).json();
+  if (!/^0x[0-9a-f]{64}$/i.test(r.result ?? "")) throw new Error(`ArbGasInfo at the fork block: ${JSON.stringify(r)}`);
+  // PUSH32 <answer> PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
+  await anvil("anvil_setCode", [ARB_GAS_INFO, `0x7f${r.result.slice(2)}60005260206000f3`]);
+  log("robinhood ArbGasInfo stand-in", { l1BaseFeeEstimate: BigInt(r.result).toString(), atBlock: at });
+}
 log("fork", { chain: CHAIN, chainId: Number(await anvil("eth_chainId", [])), pool: PIN.pool, head: firstHead, headAgeS: Math.round(Date.now() / 1000 - Number(BigInt(head.timestamp))), finalized: BigInt(fin.number), forkHosts: [...route.fork], helper: TRADE_HELPER });
 
 // the helper in this process: its own handler, its EVM pool sender on the fork with the published test key
@@ -219,7 +250,26 @@ const helperFetch = async (url, init) => {
   return r;
 };
 const page = { store: async () => w, held: async () => w, seed64: async () => seed64.slice() };
-const t = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch });
+// the page's pool index store (src/evm-index-store.ts's shape), in memory here: what the page keeps once its index sync
+// is whole, read below before the tap
+const indexed = new Map();
+// FORK_INDEX_FILE: the index kept across runs, as the page keeps it across reloads (a returning device): read at the
+// start when the file is there, written at each put. Robinhood's providers keep minutes of state, so a fresh fork block's
+// run must reach its tap within them, which a cold sync of every pool (about 9 min) does not
+const INDEX_FILE = process.env.FORK_INDEX_FILE;
+if (INDEX_FILE && existsSync(INDEX_FILE)) {
+  const kept = v8.deserialize(readFileSync(INDEX_FILE));
+  if (kept instanceof Map && kept.has(PIN.network)) indexed.set(PIN.network, kept.get(PIN.network));
+  log("index kept", { file: INDEX_FILE, chains: [...indexed.keys()] });
+}
+const evmIndexKept = {
+  get: async (c) => indexed.get(c) ?? null,
+  put: async (c, index) => {
+    indexed.set(c, index);
+    if (INDEX_FILE) writeFileSync(INDEX_FILE, v8.serialize(indexed));
+  },
+};
+const t = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch, evmIndexStore: evmIndexKept });
 const kinds = poolKinds(testnetPoolDeps(t.flow));
 
 // 2. the proof queue's proof: the state read starts the chain's pass; its ready proof. The queue proves at an epoch's
@@ -230,17 +280,42 @@ const EPOCH_MS = Number(EVM_EPOCH_MS);
 const nextEpoch = (Math.floor((Number(BigInt(head.timestamp)) * 1000) / EPOCH_MS) + 1) * EPOCH_MS;
 const epochWaitMs = Math.max(0, nextEpoch + 1_000 - Date.now());
 await sleep(epochWaitMs);
+// the block at the wall clock's time, as mainnet's head is: anvil's clock trails the wall after the trail and the
+// deposits, and a proof made on a trailing head is two epochs old once the tap's block (at the wall's time) is mined
+await anvil("anvil_setTime", [Math.floor(Date.now() / 1000)]);
 await anvil("evm_mine", []);
-log("epoch", { start: new Date(nextEpoch).toISOString(), waitedMs: epochWaitMs });
+const headNow = await anvil("eth_getBlockByNumber", ["latest", false]);
+log("epoch", { start: new Date(nextEpoch).toISOString(), waitedMs: epochWaitMs, headLagS: Math.round(Date.now() / 1000 - Number(BigInt(headNow.timestamp))) });
 const proveAt = Date.now();
 await t.stateRead();
+// every note the restore found (a buy of whole notes and a rest spends several, FORK_RUNG_MORE), one proof each
+const unspent = restored.notes.filter((n) => n.state === "UNSPENT").length;
 let ready = [];
-for (let i = 0; i < 120 && ready.length === 0; i++) {
+for (let i = 0; i < 120 && new Set(ready.map((p) => p.noteId)).size < unspent; i++) {
   await sleep(2_000);
   ready = ((await t.readyWith(async () => null)).ready ?? []).filter((p) => p.wallet.chain === "evm");
-  if (ready.length === 0 && i % 10 === 9) await t.stateRead();
+  if (new Set(ready.map((p) => p.noteId)).size < unspent && i % 10 === 9) await t.stateRead();
 }
 const readyMs = Date.now() - proveAt;
+// 2b. the page's pool index (src/pool-testnet.ts evmIndexOf): synced once a sign-in, after the state read's proof passes,
+// and served to the tap's quote, so the quote asks the scan only the blocks past it; a page signed in before the tap
+// holds it. A cold one here is read through the fork from the recorded answers and the public providers behind them,
+// so the tap waits for it as that page has it (a partial sync goes on at the next state read)
+const indexAt = Date.now();
+for (let i = 0; i < 240 && !indexed.has(PIN.network); i++) {
+  await sleep(2_500);
+  if (i % 8 === 7) await t.stateRead();
+}
+const kept = indexed.get(PIN.network);
+log("index", { ms: Date.now() - indexAt, pools: kept?.pools?.length ?? null, through: kept?.through ?? null });
+if (kept === undefined) throw new Error("the page's pool index never synced whole");
+// every note's proof again (an epoch may have turned while the index synced: the queue proves on the new root)
+ready = [];
+for (let i = 0; i < 60 && new Set(ready.map((p) => p.noteId)).size < unspent; i++) {
+  if (i > 0) await sleep(2_000);
+  ready = ((await t.readyWith(async () => null)).ready ?? []).filter((p) => p.wallet.chain === "evm");
+  if (new Set(ready.map((p) => p.noteId)).size < unspent && i % 10 === 9) await t.stateRead();
+}
 const notesNow = async () => (await ns.list()).map((n) => ({ id: n.id, ref: n.ref.kind, state: n.state, value: n.leaf ? n.leaf.value : null }));
 const record = { by: "packages/signpage/scripts/pool-fork-evm-buy.mjs", chain: CHAIN, pool: PIN.pool, token: TOKEN, anvil: ANVIL, sender: sender.sender, times: { restoreMs, proveMs: proves.at(-1) ?? null, readyMs, tapToAnswerMs: null, tapToEndMs: null }, end: null, refusal: null, tx: null, block: null, status: null, notesAfter: null, helperCalls, helperLines, requests: [], refusedHosts: {} };
 const finish = async (code) => {
@@ -312,10 +387,12 @@ if (process.env.FORK_WARM_BOOK) {
 }
 let r;
 let tapAt;
+let tapHead = 0n;
 for (let warm = 0; ; warm++) {
   await anvil("anvil_setTime", [Math.floor(Date.now() / 1000)]);
   await anvil("evm_mine", []);
   log("tap head", { ageS: Math.round(Date.now() / 1000 - Number(BigInt((await anvil("eth_getBlockByNumber", ["latest", false])).timestamp))) });
+  tapHead = BigInt(await anvil("eth_blockNumber", []));
   tapped = true;
   tapAt = Date.now();
   r = kinds["pool.buy"]({ chain: CHAIN, token: TOKEN, amount, slippage_bps: 300 }, { id: `buy${warm}`, sha: "00", progress: (s) => (stages.push(s), log("progress", { stage: s, ms: Date.now() - tapAt })) });
@@ -357,7 +434,12 @@ log("tap", { amount, answer: first, ms: record.times.tapToAnswerMs });
 // the send part holds the seed's lock; the read-back runs past it and ends as progress (the tap's or a late one)
 await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
 // an error answer sent nothing: no stage follows it
-for (let i = 0; i < 360 && !("error" in first) && !ENDS.includes(stages.at(-1)); i++) await sleep(1_000);
+// the chain goes on while the legs read back, as mainnet makes a block every 2 s: a rest's W buy ends once a safe block
+// holds it (pool-withdraw-evm.ts onwardReceipt), and this fork mines only on a send
+for (let i = 0; i < 360 && !("error" in first) && !ENDS.includes(stages.at(-1)); i++) {
+  await sleep(1_000);
+  if (i % 2 === 1) await anvil("evm_mine", []).catch(() => {});
+}
 record.end = stages.at(-1) ?? null;
 // sockets whose type of service the system refused this run (socket-tos.mjs), each a request that failed or went on
 record.refusedTos = refusedTos.count;
@@ -366,7 +448,9 @@ tapped = false;
 record.requests = requests.map((q) => ({ ...q, atMs: q.atMs - tapAt }));
 const holdings = await w.get("meta", EVM_POSITION_COSTS_KEY);
 const owed = await w.get("meta", EVM_OWED_BACK_KEY);
-log("end", { end: record.end, ms: record.times.tapToEndMs, stages, holding: holdings?.[proof.wallet.address] ?? null, owed: owed ?? null });
+// every leg's W (a buy of several notes, card buy-any-amount-on-every-chain): each holding the page recorded
+const legWs = [...new Set(ready.map((p) => p.wallet.address))];
+log("end", { end: record.end, ms: record.times.tapToEndMs, stages, holding: holdings?.[proof.wallet.address] ?? null, holdings: Object.fromEntries(legWs.map((a) => [a, holdings?.[a] ?? null])), owed: owed ?? null });
 
 // 4. the receipt, read on the fork
 const sent = helperCalls.filter((c) => c.path === "/v1/pool/evm/send" && c.status === 200).map((c) => /"hash":"(0x[0-9a-f]{64})"/.exec(c.body)?.[1]).filter(Boolean).at(-1);
@@ -382,10 +466,33 @@ record.tx = hash;
 record.block = rc?.blockNumber ? BigInt(rc.blockNumber) : null;
 record.status = rc?.status ?? null;
 log("receipt", { tx: hash, block: record.block, status: record.status, gasUsed: rc?.gasUsed ? BigInt(rc.gasUsed) : null, logs: rc?.logs?.length ?? null });
+// each leg's swap, read on the fork: a whole note's pool.buy, or a rest's W buy (the holding's route names it)
+record.legs = [];
+for (const a of legWs) {
+  const tx = holdings?.[a]?.route?.tx ?? null;
+  const got = tx ? await anvil("eth_getTransactionReceipt", [tx]).catch(() => null) : null;
+  record.legs.push({ w: a, state: holdings?.[a]?.state ?? null, tx, block: got?.blockNumber ? BigInt(got.blockNumber) : null, status: got?.status ?? null, from: got?.from ?? null, received: holdings?.[a]?.received ?? null });
+}
+log("legs", record.legs);
+// every transaction the fork holds past the deposits (the legs, a rest's release to W, the change's carry), each read back
+const txsSince = async (from) => {
+  const out = [];
+  const top = BigInt(await anvil("eth_blockNumber", []));
+  for (let b = from; b <= top; b++) {
+    const blk = await anvil("eth_getBlockByNumber", [`0x${b.toString(16)}`, true]);
+    for (const x of blk?.transactions ?? []) {
+      const got = await anvil("eth_getTransactionReceipt", [x.hash]);
+      out.push({ block: b, hash: x.hash, from: x.from, to: x.to, status: got?.status ?? null });
+    }
+  }
+  return out;
+};
 // 5. a rest W's change (card buy-any-amount-on-every-chain): the carry pass at each state read puts it back as rungs;
 // blocks mined past finalized (2 x slots) so its Deposited lands; W's balance after it, under the least rung
-const rest = (await w.get("meta", EVM_WBUY_KEY))?.[proof.wallet.address.toLowerCase()] ?? null;
-record.rest = rest;
+const wbuys = (await w.get("meta", EVM_WBUY_KEY)) ?? {};
+const restW = legWs.find((a) => wbuys[a.toLowerCase()] !== undefined) ?? null;
+const rest = restW === null ? null : wbuys[restW.toLowerCase()];
+record.rest = rest === null ? null : { w: restW, ...rest };
 let carried = true;
 if (rest !== null) {
   carried = false;
@@ -394,18 +501,25 @@ if (rest !== null) {
     await t.stateRead().catch(() => {});
     await sleep(3_000);
     await anvil("anvil_mine", ["0xc", "0x1"]);
-    const done = (await w.get("meta", EVM_CARRY_DONE_KEY))?.[proof.wallet.address.toLowerCase()] ?? null;
+    const done = (await w.get("meta", EVM_CARRY_DONE_KEY))?.[restW.toLowerCase()] ?? null;
     carried = done !== null;
-    if (i % 5 === 4 || carried) log("change", { done, notes: (await notesNow()).filter((n) => n.ref === "return" || n.ref === "second"), wBalance: BigInt(await anvil("eth_getBalance", [proof.wallet.address, "latest"])) });
+    if (i % 5 === 4 || carried) log("change", { done, notes: (await notesNow()).filter((n) => n.ref === "return" || n.ref === "second"), wBalance: BigInt(await anvil("eth_getBalance", [restW, "latest"])) });
   }
   record.change = {
     ms: Date.now() - changeAt,
-    done: (await w.get("meta", EVM_CARRY_DONE_KEY))?.[proof.wallet.address.toLowerCase()] ?? null,
+    done: (await w.get("meta", EVM_CARRY_DONE_KEY))?.[restW.toLowerCase()] ?? null,
     notes: (await notesNow()).filter((n) => n.ref === "return" || n.ref === "second"),
-    wBalance: BigInt(await anvil("eth_getBalance", [proof.wallet.address, "latest"])),
-    tokenOnW: BigInt(await anvil("eth_call", [{ to: TOKEN, data: "0x70a08231" + proof.wallet.address.slice(2).toLowerCase().padStart(64, "0") }, "latest"])),
+    wBalance: BigInt(await anvil("eth_getBalance", [restW, "latest"])),
+    tokenOnW: BigInt(await anvil("eth_call", [{ to: TOKEN, data: "0x70a08231" + restW.slice(2).toLowerCase().padStart(64, "0") }, "latest"])),
   };
-  carried = carried && record.change.wBalance < EVM_LADDER.min && record.change.notes.some((n) => n.state === "UNSPENT");
+  // the change ends as the carry reads it (src/pool-carry-evm.ts): a return note UNSPENT, or, a change under the least
+  // rung, W "empty" with that tail; either way W keeps less than the least rung
+  carried =
+    carried &&
+    record.change.wBalance < EVM_LADDER.min &&
+    (record.change.done?.end === "empty" || (record.change.done?.end === "carried" && record.change.notes.some((n) => n.ref === "return" && n.state === "UNSPENT")));
   log("change end", record.change);
 }
-await finish(record.end === "filled" && record.status === "0x1" && carried ? 0 : 1);
+record.txs = await txsSince(tapHead + 1n).catch((e) => [{ error: String(e) }]);
+log("txs", record.txs);
+await finish(record.end === "filled" && record.status === "0x1" && record.legs.every((l) => l.status === "0x1") && carried ? 0 : 1);

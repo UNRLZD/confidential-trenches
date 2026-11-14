@@ -35,6 +35,7 @@ import { dirname } from "node:path";
 import { IDBFactory } from "fake-indexeddb";
 // a socket's type of service, best effort (contracts/pool-evm/test/socket-tos.mjs): a refused one holds no fork read
 import "../../../contracts/pool-evm/test/socket-tos.mjs";
+import { anvilFetch } from "../../../contracts/pool-evm/test/fork-anvil.mjs";
 import { entropyToWords, wordsToSeed64 } from "../../wallet/src/derive/index.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { openWalletStore } from "../../wallet/src/store/index.ts";
@@ -64,10 +65,12 @@ const hex = (n) => `0x${BigInt(n).toString(16)}`;
 
 // the page's pair answered by the fork; any other host refused
 const realFetch = globalThis.fetch;
+// a block at or before the fork's block read from the fork's URL, never anvil's double lock (contracts/pool-evm/test/fork-anvil.mjs)
+const toAnvil = anvilFetch(realFetch, ANVIL);
 globalThis.fetch = async (input, init) => {
   const u = new URL(String(input instanceof Request ? input.url : input));
-  if (u.origin === ANVIL) return realFetch(input, init);
-  if (HOSTS.has(u.host)) return (pageRequests++, realFetch(ANVIL, init));
+  if (u.origin === ANVIL) return typeof init?.body === "string" ? toAnvil(init) : realFetch(input, init);
+  if (HOSTS.has(u.host)) return (pageRequests++, toAnvil(init));
   throw new Error(`pool-fork-evm: no request past the fork (${u.host})`);
 };
 let id = 0;
@@ -279,6 +282,33 @@ const C = await device();
 const quiet = await C.stateRead();
 const tailed = await A.stateRead();
 step("reads per state read", { noTail: quiet, tail: tailed, kept: [...(await A.ns.landings())].length });
+
+// FORK_RUNG_MORE (wei): a second note, another rung, deposited by device A after the first (a later buy that spends one
+// note whole and the rest from the other, card buy-any-amount-on-every-chain)
+if (process.env.FORK_RUNG_MORE) {
+  const more = BigInt(process.env.FORK_RUNG_MORE);
+  if (!isRung(EVM_LADDER, more)) throw new Error(`FORK_RUNG_MORE ${more} is not a rung of the ladder`);
+  const ask = { ...ASK, amount: more };
+  // the next deposit index is signed once the first note's block is final (wallet evm-restore.ts evmNextNote): blocks
+  // past it, finalized being the head less 2 x slots
+  await anvil("anvil_mine", [hex(2n * SLOTS + 1n), "0x0"]);
+  const named = shorts.length;
+  const asked = await runPoolDepositEvm(host(), ask);
+  const [U2, need2] = shorts.length > named ? shorts.at(-1) : [];
+  if (!U2) throw new Error(`no top-up named for the second note: ${JSON.stringify(asked)}`);
+  await anvil("anvil_setBalance", [U2, hex(need2)]);
+  const at2 = at();
+  const sent = await runPoolDepositEvm(host(), ask);
+  const tx2 = sent.txs?.[0]?.hash;
+  const rc3 = tx2 ? await minedReceipt(tx2) : null;
+  if (rc3?.status !== "0x1") throw new Error(`the second deposit did not land: ${JSON.stringify(sent)}`);
+  for (let k = 0; k < 6 && (await balanceOf(A.ns)) < RUNG + more; k++) {
+    await sleep(POOL_DEPOSIT_EVM_FOLLOW_MS);
+    await runPoolDepositEvm(host(), null);
+  }
+  step("second deposit", { u: U2, tx: tx2, block: BigInt(rc3.blockNumber), ms: at() - at2, balance: await balanceOf(A.ns), notes: await states(A.ns) });
+  if ((await balanceOf(A.ns)) < RUNG + more) throw new Error("the second note never showed in the balance");
+}
 
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, JSON.stringify(record, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2) + "\n");
