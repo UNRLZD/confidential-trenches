@@ -1,8 +1,15 @@
 // SIGN_HOST's top-level withdraw form (card signpage-withdraw-form; docs/plan1/wallet.md §2.8 withdraw.open W:927,
 // app.md CH-075 to CH-078 A:996-999 and AM-09 A:1272, at research 3a705af): the user types where the money goes (To)
 // and how much (Amount); ./checks.ts refuses a bad address or amount before any proof, and only a form whose both
-// fields pass, checked again at the tap, hands {recipient, amount} to the wallet's withdraw path. The app never passes
-// an address in: withdraw.open carries no address (the kit's schema), and the form starts empty.
+// fields pass, checked again at the tap, hands {recipient, amount} to the wallet's withdraw path. withdraw.open with no
+// address (the kit's WithdrawGiven: none) draws the form empty, to be typed here.
+// - Given (card withdraw-address-in-the-app, owner 14 Nov 12:22Z picked A): withdraw.open with `to` and `amount` or
+//   `max`, typed in the app's own Withdraw sheet. The form draws no field to type into: To and Amount are drawn as the
+//   checked values (To whole, wrapping, the account the check passed; Amount what the tap sends, the live Max for
+//   `max`), the chain row and Max hidden, and the button reads Confirm. Nothing the app said is trusted: both run
+//   through the same checks as typed ones, at open and again at the tap, and only the user's Confirm here sends. With no
+//   field typed into, the screen is not sealed (../frame-cover.ts): the app's frame stays under it, inert, its messages
+//   dropped while it shows (../shell.ts), so the app cannot change what is drawn, and comes back as it was, no reload.
 //
 // - States (data-state on the form): empty (both fields blank), typing (a field filled, nothing refused, not yet
 //   ready, a check waiting or reading), refused (a field refused: data-refusal on that field's line names the code),
@@ -51,6 +58,7 @@ export const WITHDRAW_WORDS = {
   min: "Min $", // S12.7's draft "Min $X" (09-design-brief.md:1403), X the smallest amount above the fee
   busy: "Busy · Retry", // S12.10 (09-design-brief.md:1405), for a check the RPCs could not answer; owner 8 Nov 07:55Z, kept
   unmatched: "Withdrawal unmatched", // new, card wallet-withdraw-move-out: a settle pass's drift note left RESERVED; the owner picks
+  confirm: "Confirm", // card withdraw-address-in-the-app: the given form's button; owner 14 Nov 12:22Z picked it on the withdraw page (option A), kept
   try: "Try ", // above what the note sends, "Try 9.88 USDC" (card withdraw-form-shows-what-you-can-send): pw.tryOne, owner 8 Nov 07:55Z, kept
   or: " or ", // no plan sends the amount: "Try 4.5 or 5 USDC", the pool form's pw.tryTwo; owner 8 Nov 07:55Z, kept
   max: "Max", // what Cash can send, "Max 19.76 USDC": the pool form's and the trade box's word, owner 12 Nov 13:03Z, kept
@@ -106,6 +114,8 @@ export interface WithdrawFormDeps {
 }
 
 export type FormState = "empty" | "typing" | "refused" | "ready";
+/** What the app's Withdraw sheet took (the kit's WithdrawGiven with `to`): the account and an amount, or Max. */
+export type GivenWithdraw = Readonly<{ to: string; amount: string } | { to: string; max: true }>;
 export interface FormView {
   state: FormState;
   /** null while the field is blank. */
@@ -156,13 +166,14 @@ type Button = (action: string, label: string, onClick: () => void) => HTMLButton
  * Draws the form into `doc` and returns its element. `button` is the page's own (src/main.ts), so Withdraw gets the
  * page's activation guard. `run` is the page's step runner (one step at a time, an error shown as the page's error).
  */
-export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: Button, run: (step: () => Promise<void>) => void): HTMLElement {
+export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: Button, run: (step: () => Promise<void>) => void, given?: GivenWithdraw): HTMLElement {
   const form = doc.createElement("div");
   form.dataset.withdraw = "form";
   form.dataset.state = "empty";
+  if (given) form.dataset.given = "app";
   // the pool form's spacing (src/withdraw/pool-form.ts): one column, 12 px between rows, each field's name over its input
   Object.assign(form.style, { display: "flex", flexDirection: "column", alignItems: "stretch", gap: "12px", maxWidth: "440px" });
-  const field = (key: "to" | "amount"): { input: HTMLInputElement; line: HTMLParagraphElement; label: HTMLLabelElement } => {
+  const field = (key: "to" | "amount"): { input: HTMLInputElement; line: HTMLParagraphElement; label: HTMLLabelElement; value: HTMLSpanElement } => {
     const label = doc.createElement("label");
     Object.assign(label.style, { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 8px" });
     const name = doc.createElement("span");
@@ -178,15 +189,19 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     input.setAttribute("autocapitalize", "none");
     input.setAttribute("autocorrect", "off");
     if (key === "amount") input.inputMode = "decimal";
-    label.append(name, input);
+    // given: the value drawn as text, never a field to type into; the input holds it for the checks and is not in the page
+    const value = doc.createElement("span");
+    value.dataset.value = key;
+    Object.assign(value.style, { flex: "1 1 0", minWidth: "0", overflowWrap: "anywhere", fontVariantNumeric: "tabular-nums" });
+    label.append(name, given ? value : input);
     const line = doc.createElement("p");
     line.dataset.for = key;
     line.hidden = true;
-    return { input, line, label };
+    return { input, line, label, value };
   };
   const to = field("to");
   const amount = field("amount");
-  const go = button("withdraw", WITHDRAW_WORDS.withdraw, () => run(withdraw));
+  const go = button("withdraw", given ? WITHDRAW_WORDS.confirm : WITHDRAW_WORDS.withdraw, () => run(withdraw));
   if (!deps.handoff) go.dataset.pending = "withdraw-relay";
   const notice = doc.createElement("p");
   notice.dataset.notice = "unmatched";
@@ -234,7 +249,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     form.dataset.chain = chain;
   };
   chains.append(...picks);
-  chains.hidden = picks.length < 2; // one chain: nothing to pick
+  chains.hidden = picks.length < 2 || given !== undefined; // one chain, or the app's sheet picked it: nothing to pick
   drawChains();
   // the amount the tap sends, drawn once both fields pass: the box keeps what was typed (card withdraw-max-means-all)
   const shown = doc.createElement("dl");
@@ -246,7 +261,7 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   let ctx: { notes: readonly WithdrawSource[] | null; fee: bigint | null } = { notes: null, fee: null };
   const drawSendable = (): void => {
     const can = ctx.notes === null || ctx.fee === null ? null : cashSendable(ctx.notes, ctx.fee);
-    canRow.hidden = can === null;
+    canRow.hidden = can === null || given !== undefined; // given: the amount is the app's, Max not offered here
     sendable.disabled = !can;
     Object.assign(sendable.style, { opacity: can ? "" : "0.5", cursor: can ? "pointer" : "default" }); // 0: shown, not offered
     sendable.textContent = can === null ? "" : `${WITHDRAW_WORDS.max} ${formatUnits(can)} USDC`;
@@ -275,8 +290,9 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     const m = v.amount && !v.amount.ok ? v.amount : null;
     line(amount.line, m ? m.code : null, m?.code === "min" ? m.min : undefined, m?.code === "insufficient" || m?.code === "unplannable" ? m.below : undefined, m?.code === "unplannable" ? m.above : undefined);
     shown.replaceChildren();
-    shown.hidden = v.ready === null;
-    if (v.ready) {
+    shown.hidden = v.ready === null || given !== undefined; // given: the Amount row draws what goes
+    if (given) drawGiven(v);
+    if (v.ready && !given) {
       const dt = doc.createElement("dt");
       dt.textContent = WITHDRAW_WORDS.amount;
       markDraft(dt, "amount", WITHDRAW_DRAFT);
@@ -314,7 +330,12 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     // Max is an intent (card withdraw-max-means-all): after every read the box holds the live Max
     const can = ctx.notes === null || ctx.fee === null ? 0n : cashSendable(ctx.notes, ctx.fee);
     if (maxIntent && can > 0n) amount.input.value = formatUnits(can);
-    const v = await evaluate(to.input.value, amount.input.value, { network: deps.network, rpcs: deps.rpcs, ...ctx, chain });
+    const e = await evaluate(to.input.value, amount.input.value, { network: deps.network, rpcs: deps.rpcs, ...ctx, chain });
+    // given Max and nothing Cash can send: Insufficient (Busy · Retry while a read is unread), never a Confirm left
+    // waiting on an amount
+    const v: FormView = given && "max" in given && !(can > 0n)
+      ? { state: "refused", address: e.address, amount: { ok: false, code: ctx.notes === null || ctx.fee === null ? "unread" : "insufficient" }, ready: null }
+      : e;
     if (at !== seq) return null; // a newer keystroke or check: this answer is stale
     draw(v);
     return v;
@@ -412,6 +433,18 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
     }
     if (end) form.dataset.outcome = end.kind;
   }
-  draw(view);
+  // given: To is the account the check passed (else as the app sent it), Amount what the tap sends (else as sent, or Max)
+  function drawGiven(v: FormView): void {
+    if (!given) return;
+    to.value.textContent = v.address?.ok ? v.address.recipient : given.to;
+    amount.value.textContent = v.ready ? `${formatUnits(v.ready.amount)} USDC` : "max" in given ? WITHDRAW_WORDS.max : `${given.amount} USDC`;
+  }
+  if (given) {
+    to.input.value = given.to;
+    if ("max" in given) maxIntent = true;
+    else amount.input.value = given.amount;
+    draw({ state: "typing", address: null, amount: null, ready: null });
+    void check();
+  } else draw(view);
   return form;
 }
