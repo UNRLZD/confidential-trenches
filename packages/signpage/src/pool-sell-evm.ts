@@ -88,6 +88,7 @@ import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts
 import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
 import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { refusalRule } from "./refusal-rule.ts";
+import { wTailKeyOf } from "./w-tails.ts";
 import { duringTrade, TRADE_HELPER } from "./trade.ts";
 import { shuffled } from "./positions-evm.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -819,6 +820,9 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
     }
     // the trade's op: the token units W sold, and what the sale put back into the pool, what came out of the venue
     if (v.end === "filled") {
+      // what SellDelegate v2 left on W off the rung: W's tail, owed to leftover-carry.ts (read again on each follow of
+      // the record until its block is final)
+      await owedTail(h, x.open).catch(() => {});
       const dec = Number.isSafeInteger(x.open.decimals) ? x.open.decimals! : null;
       await h.traded?.(evmTradeOp("sell", h.chain, v.deposit.tx, x.open.token, BigInt(x.open.amount), dec, v.deposit.value, h.price?.() ?? null, Number(clock()))).catch(() => {});
     }
@@ -1134,6 +1138,8 @@ export function evmSellHost(chain: Chain, pin: EvmPoolPin, scope: bigint, rpcs: 
     send: (body) => evmSellSend(TRADE_HELPER, body, page.fetch, page.signal),
     open: async () => recordsOf(await (await page.held()).get("meta", EVM_OPEN_SELLS_KEY)) as Record<string, EvmOpenSell>,
     price: () => page.price?.(chain) ?? null,
+    // W's tail after a sale, under w-tails.ts's key: counted in the balance, carried to Cash by leftover-carry.ts
+    tail: async (t) => void (await (await page.held()).update("meta", wTailKeyOf(chain, t.address), () => t)),
     // into the store while it is open
     traded: async (op) => writeEvmTradeOp(await page.held(), op),
     record: async (o) => void (await (await page.held()).update("meta", EVM_OPEN_SELLS_KEY, (v) => ({ ...recordsOf(v), [o.note]: o }))),
