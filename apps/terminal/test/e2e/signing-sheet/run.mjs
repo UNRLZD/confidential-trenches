@@ -343,7 +343,8 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
   // SIGN_HOST's answer to it (or "none" within 2 s), for a refusal's code in the error
   const post = (msg) =>
     app.locator(":root").evaluate(
-      (m) =>
+      // locator.evaluate hands the element first, the argument second
+      (_root, m) =>
         new Promise((done) => {
           const id = crypto.randomUUID();
           const t = setTimeout(() => done("none"), 2000);
@@ -362,7 +363,9 @@ async function oneWidth(h, w, shotDir, { cpu = 1, holdPaint = 0 } = {}) {
     const shown = top(`#screen:not([hidden]) #signin[data-signin="${state}"]`);
     let said = "";
     for (let i = 0; i < 10; i++) {
-      said = await post(msg);
+      // the app document a typed view's close loads again: post from the ready one (a post it took with it is "gone")
+      await app.locator(':root[data-signpage="ready"]').waitFor({ state: "attached", timeout: WAIT_MS });
+      said = await post(msg).catch((e) => `gone (${String(e.message ?? e).split("\n")[0]})`);
       if (await shown.waitFor({ timeout: 750 }).then(() => true, () => false)) return;
     }
     throw new Error(`${msg.type} never showed ${state}: SIGN_HOST answered ${said}, data-signin ${await top("#signin").getAttribute("data-signin").catch(() => "?")}`);
