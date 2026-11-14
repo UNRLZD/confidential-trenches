@@ -1,6 +1,6 @@
 // Card buy-any-amount-on-every-chain: the screen shows, before the tap, the amount an EVM buy will really spend. An ask
 // no plan carries exactly (within one buy's bound under a sum of spends) is planned at the largest amount under it one
-// carries (rules/pool.ts planEvmBuy), so pool.buy.dry on Base and Robinhood answers that amount as `buys` (kit 1.16)
+// carries (rules/pool.ts planEvmBuy), so pool.buy.dry on Base and Robinhood answers that amount as `buys` (kit 1.17)
 // whenever it is below the ask: the same pieces and bound the tap plans over (evmBuyPieces, one path for the tap and the
 // dry), the same planner. Red before this card: no evmBuyPieces, evmDryAmount or evmDryBuys in src/pool-buy-evm.ts.
 //   node --test test/pool-buy-evm-dry.test.ts      (from packages/signpage)

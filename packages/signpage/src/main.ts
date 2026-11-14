@@ -468,7 +468,7 @@ else {
   // the tap's most on Base and Robinhood (kit 1.15): an EVM tap spends one whole note, so state.pools' tap_max (the
   // largest ready note) and with_cash, the larger of it and the largest rung Cash makes (src/cash-to-pool.ts
   // withCashNote); before the card, and with no Cash to move, a pool.buy.dry on an EVM chain is refused not_allowed.
-  // With the ask's amount (kit 1.16, card buy-any-amount-on-every-chain), a decimal of ETH, at most tap_max: `buys`, what
+  // With the ask's amount (kit 1.17, card buy-any-amount-on-every-chain), a decimal of ETH, at most tap_max: `buys`, what
   // the tap's own plan spends in swaps for it (src/pool-buy-evm.ts evmDryBuys over the same ready proofs), when below it
   const evmDryWithCash = (chain: "base" | "robinhood", params: Record<string, unknown>): Running<"pool.buy.dry"> => {
     let answer: HostAnswer<"pool.buy.dry"> | HostRefusal = { error: "failed" };

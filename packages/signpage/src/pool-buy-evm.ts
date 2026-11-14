@@ -264,7 +264,7 @@ export function evmBuyPieces<R extends ReadyProof>(ready: readonly R[], claimed?
 
 /** ETH's decimals (the kit's POOL_ASSET_DECIMALS): every amount of a Base or Robinhood pool.buy.dry. */
 const ETH_DECIMALS = POOL_ASSET_DECIMALS.ETH;
-/** pool.buy.dry's `amount` on Base and Robinhood (kit 1.16): a decimal of ETH (at most 18 places, 30 digits whole) in
+/** pool.buy.dry's `amount` on Base and Robinhood (kit 1.17): a decimal of ETH (at most 18 places, 30 digits whole) in
  *  wei; null with none; undefined when it is not one (the kind answers not_allowed). */
 export function evmDryAmount(x: unknown): bigint | null | undefined {
   if (x === undefined) return null;
@@ -272,7 +272,7 @@ export function evmDryAmount(x: unknown): bigint | null | undefined {
   return m ? BigInt(m[1]!) * 10n ** BigInt(ETH_DECIMALS) + BigInt((m[2] ?? "").padEnd(ETH_DECIMALS, "0")) : undefined;
 }
 
-/** pool.buy.dry's `buys` on Base and Robinhood (kit 1.16, card buy-any-amount-on-every-chain), in whole ETH: for an ask of
+/** pool.buy.dry's `buys` on Base and Robinhood (kit 1.17, card buy-any-amount-on-every-chain), in whole ETH: for an ask of
  *  `amount` wei, above 0 and at most `tapMax` (state.pools' tap_max of the chain, whole ETH), what the tap spends in
  *  swaps: planEvmBuy over evmBuyPieces of the chain's `ready` proofs, as runEvmPoolBuy plans it. Null when that is the
  *  amount itself, with no amount, over tapMax (a tap that moves Cash first), or when the planner refuses. Display only:

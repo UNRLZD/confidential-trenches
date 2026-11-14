@@ -552,7 +552,7 @@ export function buysAskAmount(pools: SignpageState["pools"], chain: Chain, token
   return ask.ok ? ask.params.amount : null;
 }
 
-/** The amount box's cents for pool.buy.dry's `buys` (kit 1.16, card buy-any-amount-on-every-chain: what the tap spends in
+/** The amount box's cents for pool.buy.dry's `buys` (kit 1.17, card buy-any-amount-on-every-chain: what the tap spends in
  *  swaps for `asked`, when below it): buys in USD at the device's price, rounded down to the cent. The page's answer is
  *  hostile: only a plain decimal of the asset's units above 0 and below `asked` is used, and only when it is worth a
  *  cent; null otherwise (the box keeps what was typed). */
