@@ -83,6 +83,21 @@ test("a W's tail (meta w-tail/sol/<address>, the vault lead's record) is counted
   assert.deepEqual(wTailWallets(rows, () => 9, () => "SOL"), [{ chain: "solana", address: "W1", asset: "SOL", amount: "0.004" }]);
 });
 
+test("a Base or Robinhood W's tail (meta w-tail/<base|robinhood>/<address>, the EVM carry's record) is counted in ETH as main.ts maps it", async () => {
+  const { wTailWallets } = await import("../src/w-tails.ts");
+  const { POOL_ADDRESS_ASSET } = await import("../src/pool-deposit-address.ts");
+  const { POOL_ASSET_DECIMALS } = await import("../../kit/src/signpage/messages.ts");
+  const w = "0x" + "ab".repeat(20);
+  const rows = [
+    { chain: "base", address: w, l: "7", j: 0, amount: "987999887889754" },
+    { chain: "robinhood", address: w, l: "7", j: 1, amount: "1000000000000" },
+  ];
+  assert.deepEqual(wTailWallets(rows, (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], (c) => POOL_ADDRESS_ASSET[c]), [
+    { chain: "base", address: w, asset: "ETH", amount: "0.000987999887889754" },
+    { chain: "robinhood", address: w, asset: "ETH", amount: "0.000001" },
+  ]);
+});
+
 test("the page reads each W tail the rent back wrote from its own wallet store, and nothing else in meta, as a deposit wallet; main.ts adds them to state.deposit_wallets beside each U_X's", async () => {
   const { IDBFactory } = await import("fake-indexeddb");
   const { openWalletStore } = await import("@blindfill/wallet/store");

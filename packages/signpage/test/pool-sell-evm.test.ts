@@ -10,11 +10,13 @@ import { after, afterEach, beforeEach, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { openWalletStore } from "@blindfill/wallet/store";
+import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { noteOf } from "../../wallet/src/pool/pieces.ts";
+import { wTailKeyOf } from "../src/w-tails.ts";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
-import { evmPoolScopeOf, EVM_POOL_EVENTS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { evmPoolScopeOf, EVM_PIECES, EVM_POOL_EVENTS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { evmRestore, SECOND_GAP } from "../../wallet/src/pool/evm-restore.ts";
 import { EVM_SECOND_GAP } from "../../wallet/src/notes/store.ts";
@@ -26,7 +28,7 @@ import { EvmQuoteError, EVM_QUOTE_MAX_AGE_MS, type EvmPoolSellQuote, type EvmPoo
 import { BOUGHT, flat, provider, refreshHead, sellQuoteWith, TOKEN } from "../../kit/test/evm-sell-quote-fx.ts";
 import { EVM_POSITION_COSTS_KEY, type EvmHolding } from "../src/pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendNoAnswer, EvmSendRefused, evmBuyCalldata, evmSellSend } from "../src/evm-send.ts";
-import { EVM_OPEN_SELLS_KEY, EVM_SELL_DEADLINE_S, evmBuyRouteRead, evmSellPlanQuote, evmSellAnswer, followEvmSells, planEvmSell, poolSellEvmKind, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
+import { EVM_OPEN_SELLS_KEY, EVM_SELL_DEADLINE_S, evmBuyRouteRead, evmSellHost, evmSellPlanQuote, evmSellAnswer, followEvmSells, planEvmSell, poolSellEvmKind, runEvmPoolSell, type EvmOpenSell, type EvmSellHost } from "../src/pool-sell-evm.ts";
 import { POOL_TRADE_LOCK } from "../src/trade.ts";
 import { opOf } from "../src/state.ts";
 import { poolUnits, type PoolAsk } from "../src/rules/pool.ts";
@@ -96,7 +98,10 @@ function chain() {
     deposits: [] as { block: bigint; depositor: string; value: bigint; precommitment: bigint; tx: string }[],
     events: [] as EvmPoolEvent[],
     fin: 900n,
-    receipts: new Map<string, string>(),
+    /** a receipt's status, or the whole receipt (its block and logs) */
+    receipts: new Map<string, string | Record<string, unknown>>(),
+    /** W's ETH on each RPC (eth_getBalance) */
+    eth: [0n, 0n],
     /** transactions by hash (eth_getTransactionByHash) */
     txs: new Map<string, unknown>(),
     /** each RPC's eth_blockNumber below the head by this much */
@@ -123,7 +128,11 @@ function chain() {
         case "eth_getTransactionCount":
           return hx(c.authNonce[k]!);
         case "eth_getTransactionReceipt":
-          return c.receipts.has(p[0] as string) ? { status: c.receipts.get(p[0] as string) } : null;
+          if (!c.receipts.has(p[0] as string)) return null;
+          return typeof c.receipts.get(p[0] as string) === "string" ? { status: c.receipts.get(p[0] as string) } : c.receipts.get(p[0] as string);
+        case "eth_getBalance":
+          assert.equal(p[0], W, "only W's balance is read");
+          return hx(c.eth[k]!);
         case "eth_getLogs": {
           const f = p[0] as { address: string; topics: string[]; fromBlock: string; toBlock: string };
           assert.equal(f.address, POOL);
@@ -1216,4 +1225,124 @@ test("kind: the run holds the trade lock, shared, before the host is made", asyn
   await r.after;
   assert.deepEqual(r.answer(), { error: "failed" });
   assert.deepEqual(asked, [{ name: POOL_TRADE_LOCK, mode: "shared" }]);
+});
+
+// card evm-pool-amounts-are-standard-sizes: SellDelegate v2 deposits the largest 1-2-5 rung of the sale's ETH less the fee
+// (from 0.001 ETH) and none under the least rung, so a sale under it lands with no Deposited at all. Its own transaction,
+// read on both RPCs, ends it: W's sale (to W, SellDelegate.sell carrying the sale's precommitment and one of the run's
+// signatures), succeeded in one block on both, and no Deposited of the pool in its receipt. Without a hash, W's Sell nonce
+// taken at a final block on both with no Deposited of it past the grace ends it the same way. Never not_landed, never a
+// read that runs on for good.
+const SALE = "0x" + "5a".repeat(32);
+/** The sale runs and deposits nothing: W's Sell nonce on by one, `rest` wei left on W, its transaction and receipt. */
+const bare = (x: World, data: Uint8Array, rest: bigint, logs: unknown[] = []) => {
+  x.c.head += 1n;
+  x.c.sellNonce = (x.c.sellNonce ?? 0n) + 1n;
+  x.c.eth = [rest, rest];
+  x.c.txs.set(SALE, { to: W, input: "0x" + Buffer.from(data).toString("hex") });
+  x.c.receipts.set(SALE, { status: "0x1", blockNumber: hx(x.c.head), blockHash: w32(x.c.head), logs });
+};
+const tailKey = `w-tail/base/${W}`;
+const tails = (x: World) => {
+  x.h.tail = async (t) => void (await x.md.update("meta", `w-tail/${t.chain}/${t.address}`, () => t));
+};
+
+test("SellDelegate v2: a sale under the least rung deposits nothing: the tap reads its own transaction on both RPCs and answers filled, never not_landed; once its block is final the note goes back PLANNED and the record is dropped", async () => {
+  let x!: World;
+  x = await world({ send: async (_n, body) => (bare(x, body.data, 4n * 10n ** 14n), SALE) });
+  tails(x);
+  const a = await runEvmPoolSell(x.h, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "base", hash: SALE }] });
+  // its block not final yet: the note waits INCOMING and the record stays for the follow
+  assert.equal((await returnNote(x.store))?.state, "INCOMING");
+  assert.equal((await openOf(x)).length, 1);
+  x.c.head += 20n;
+  await followEvmSells(x.h);
+  assert.equal((await returnNote(x.store))?.state, "PLANNED", "no deposit took the note: the next sale signs on it");
+  assert.deepEqual(await openOf(x), []);
+});
+
+test("SellDelegate v2: a hash whose transaction is not W's sale of this note, or whose receipt logs a Deposited, never ends the sale bare", async () => {
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      // the sale's own bytes with another precommitment word in place of the note's
+      const hexd = Buffer.from(body.data).toString("hex").replace(P.toString(16).padStart(64, "0"), "11".repeat(32));
+      bare(x, Buffer.from(hexd, "hex"), 4n * 10n ** 14n);
+      return SALE;
+    },
+  });
+  tails(x);
+  x.h.keep = () => {};
+  const a = await runEvmPoolSell(x.h, ASK);
+  assert.deepEqual(a, { stage: "sent", txs: [] }, "read on, never filled on another sale's word");
+  let y!: World;
+  y = await world({
+    send: async (_n, body) => {
+      bare(y, body.data, 0n, [{ address: POOL, topics: [T_DEPOSITED, w32(BigInt(W))], data: "0x" }]);
+      return SALE;
+    },
+  });
+  tails(y);
+  y.h.keep = () => {};
+  assert.deepEqual(await runEvmPoolSell(y.h, ASK), { stage: "sent", txs: [] }, "a receipt with a Deposited is the logs' to read");
+});
+
+test("SellDelegate v2: a sale under the least rung with no hash from the helper: W's Sell nonce taken at a final block and no Deposited past the grace is told filled, never not_landed; the note back PLANNED, the record dropped", async () => {
+  closedPageTimers();
+  let x!: World;
+  x = await world({
+    send: async (_n, body) => {
+      bare(x, body.data, 4n * 10n ** 14n);
+      throw new EvmSendNoAnswer(null, "fault");
+    },
+  });
+  tails(x);
+  const kept: Promise<unknown>[] = [];
+  const late: unknown[] = [];
+  x.h.keep = (p) => void kept.push(p);
+  x.h.late = (a) => void late.push(a);
+  assert.deepEqual(await runEvmPoolSell(x.h, ASK), { stage: "sent", txs: [] });
+  await Promise.all(kept);
+  assert.deepEqual(late, [{ stage: "filled", txs: [] }]);
+  assert.equal((await returnNote(x.store))?.state, "PLANNED");
+  assert.deepEqual(await openOf(x), []);
+});
+
+test("SellDelegate v2: W's tail after a sale (the ETH it left on W off the rung) is owed to leftover-carry.ts as meta w-tail/<chain>/<W>, for a sale that deposited a rung and one that deposited nothing; none for a W left empty", async () => {
+  // a sale that deposited the rung of its ETH less the fee, W keeping the rest
+  let x!: World;
+  let rest = 0n;
+  x = await world({
+    send: async (_n, body) => {
+      const s = sellOf(body.data);
+      const got = s.minOut - s.fee + 3n * 10n ** 14n;
+      const rung = noteOf(EVM_PIECES, got).note;
+      rest = got - rung;
+      x.land(rung);
+      x.c.eth = [rest, rest + 7n];
+      return "0x" + "d1".repeat(32);
+    },
+  });
+  tails(x);
+  assert.equal((await runEvmPoolSell(x.h, ASK) as { stage: string }).stage, "filled");
+  assert.ok(rest > 0n);
+  assert.deepEqual(await x.md.get("meta", tailKey), { chain: "base", address: W, l: L.toString(), j: J, amount: rest.toString() }, "the lower of the two reads");
+  // a sale that deposited nothing: all of it W's tail
+  let y!: World;
+  y = await world({ send: async (_n, body) => (bare(y, body.data, 4n * 10n ** 14n), SALE) });
+  tails(y);
+  await runEvmPoolSell(y.h, ASK);
+  assert.deepEqual(await y.md.get("meta", tailKey), { chain: "base", address: W, l: L.toString(), j: J, amount: (4n * 10n ** 14n).toString() });
+  // the first sets' delegate (v1) deposits all of it: W holds nothing, no tail
+  let z!: World;
+  z = await world({ send: async (_n, body) => (z.land(sellOf(body.data).minOut - sellOf(body.data).fee), "0x" + "d1".repeat(32)) });
+  tails(z);
+  await runEvmPoolSell(z.h, ASK);
+  assert.equal(await z.md.get("meta", tailKey), undefined);
+  // the page's host writes it in the wallet store's meta, under w-tails.ts's key
+  const md = meta();
+  const host = evmSellHost("base", PIN, SCOPE, x.h.rpcs, { notes: x.h.notes, seed64: x.h.seed64, held: async () => md as unknown as WalletStore, round: x.h.round, testnet: false });
+  await host.tail!({ chain: "base", address: W, l: "7", j: 1, amount: "5" });
+  assert.deepEqual(await md.get("meta", wTailKeyOf("base", W)), { chain: "base", address: W, l: "7", j: 1, amount: "5" });
 });

@@ -350,13 +350,17 @@ contract HostileSellTest is SellBase {
     assertEq(_w().nonce(), 0);
   }
 
-  /// fee == gain: the deposit is 0, under the pool's minimum, and the sell reverts
-  function test_R_aFeeEqualToTheGainReverts() public {
+  /// fee == gain (a cap W signed that high): nothing is left for the pool, so nothing is deposited and no leaf is made;
+  /// the sale lands with the sender paid what W signed for, and W keeps no ether
+  function test_R_aFeeEqualToTheGainDepositsNothing() public {
     SellDelegate.Sell memory _s = _good(0);
     _s.feeCap = OUT;
     bytes memory _sig = _signed(_s);
-    vm.expectRevert(IPrivacyPool.MinimumDepositAmount.selector);
-    _send(_s, OUT, _sig);
+    uint256 _root = pool.currentRoot();
+    assertEq(_send(_s, OUT, _sig), 0, 'no commitment');
+    assertEq(pool.currentRoot(), _root, 'no leaf');
+    assertEq(SENDER.balance, OUT);
+    assertEq(W.balance, 0);
   }
 
   /// A target that takes the whole approval and gives part of the token back: the approval ends at 0, but W's balance
@@ -429,8 +433,8 @@ contract HostileSellTest is SellBase {
     assertEq(_t.allowance(W, address(_r)), 0);
   }
 
-  /// A fee under the cap: the sender is paid exactly the fee it names, the deposit is the gain less that fee, and W's
-  /// own ether is untouched. No card test pays 0 < fee < feeCap, so `{value: _fee}` -> `{value: _sell.feeCap}` survives
+  /// A fee under the cap: the sender is paid exactly the fee it names, the deposit is the largest rung of the gain less
+  /// that fee, and W's own ether is untouched (it keeps it and the sale's rest). No card test pays 0 < fee < feeCap, so `{value: _fee}` -> `{value: _sell.feeCap}` survives
   /// the card's suite while it would pay the cap and fund the deposit from W's prior ether.
   function test_R_theSenderGetsTheFeeItNamesNotTheCap() public {
     vm.deal(W, 1 ether);
@@ -439,8 +443,8 @@ contract HostileSellTest is SellBase {
     _send(_s, FEE / 2, _signed(_s));
     (,, uint256 _value,) = _deposited(vm.getRecordedLogs());
     assertEq(SENDER.balance, FEE / 2, 'the fee named, not the cap');
-    assertEq(_value, OUT - FEE / 2, 'the gain less that fee');
-    assertEq(W.balance, 1 ether, "W's prior ether stays");
+    assertEq(_value, _rungOf(OUT - FEE / 2), 'the largest rung of the gain less that fee');
+    assertEq(W.balance, 1 ether + OUT - FEE / 2 - _value, "W's prior ether stays, beside the sale's rest");
   }
 
   // ---- 5. the fee call to the fee recipient ----

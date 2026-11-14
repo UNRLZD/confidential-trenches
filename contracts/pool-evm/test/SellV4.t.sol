@@ -238,12 +238,14 @@ abstract contract SellV4Base is SellBase {
   function _quote(address _token, PathKey[] memory _path) internal returns (uint256 _out) {
     uint256 _snap = vm.snapshotState();
     uint256 _before = address(pool).balance;
+    uint256 _wBefore = W.balance;
     _send(_v4Sell(_token, _path, 1, SellDelegate(payable(W)).nonce()));
-    _out = address(pool).balance - _before + FEE;
+    _out = address(pool).balance - _before + (W.balance - _wBefore) + FEE;
     vm.revertToState(_snap);
   }
 
-  /// The sell lands: the leaf holds the proceeds less the fee, W keeps nothing, no approval was ever given
+  /// The sell lands: the leaf holds the largest rung of the proceeds less the fee, W keeps the rest in ether, no
+  /// approval was ever given
   function _lands(address _token, PathKey[] memory _path, string memory _what) internal {
     uint256 _quoted = _quote(_token, _path);
     assertGt(_quoted, FEE, 'the route gives something');
@@ -257,14 +259,14 @@ abstract contract SellV4Base is SellBase {
     (uint256 _c, uint256 _label, uint256 _value, uint256 _pre) = _deposited(vm.getRecordedLogs());
     _c;
     _label;
-    assertEq(_value, _quoted - FEE, 'the leaf holds the proceeds less the fee');
+    assertEq(_value, _rungOf(_quoted - FEE), 'the leaf holds the largest rung of the proceeds less the fee');
     assertEq(_pre, PRE);
-    assertEq(address(pool).balance, _poolBefore + _quoted - FEE);
+    assertEq(address(pool).balance, _poolBefore + _value);
     assertEq(SENDER.balance, FEE, 'the sender is paid the fee');
     assertEq(IERC20Balance(_token).balanceOf(W), _wTokens - AMOUNT, 'W sold exactly the amount');
     assertEq(IAllowance(_token).allowance(W, PM_ADDR), 0, 'no approval was given');
-    assertEq(W.balance, 0, 'W keeps no ether');
-    assertEq(IWETH9Sell(WETH).balanceOf(W), 0, 'nor WETH');
+    assertEq(W.balance, _quoted - FEE - _value, 'W keeps the rest in ether');
+    assertEq(IWETH9Sell(WETH).balanceOf(W), 0, 'and no WETH');
     // (a hook on the last hop may take its own cut of the output from the PoolManager too)
     if (_path[_path.length - 1].intermediateCurrency == address(0) && _path[_path.length - 1].hooks == address(0)) {
       assertEq(PM_ADDR.balance, _pmEth - _quoted, 'the PoolManager paid out exactly the proceeds');
@@ -305,7 +307,8 @@ contract SellV4Test is SellV4Base {
     vm.etch(WETH, hex'60006000fd'); // PUSH1 0, PUSH1 0, REVERT
     uint256 _poolBefore = address(pool).balance;
     _send(_v4Sell(T, _p, _quoted * 99 / 100, 0));
-    assertEq(address(pool).balance, _poolBefore + _quoted - FEE, 'the leaf holds the proceeds less the fee');
+    assertEq(address(pool).balance, _poolBefore + _rungOf(_quoted - FEE), 'the leaf holds the largest rung of the proceeds less the fee');
+    assertEq(W.balance, _quoted - FEE - _rungOf(_quoted - FEE), 'W keeps the rest');
     assertEq(SellDelegate(payable(W)).nonce(), 1);
   }
 

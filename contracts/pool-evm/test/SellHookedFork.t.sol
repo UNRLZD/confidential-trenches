@@ -120,13 +120,13 @@ abstract contract SellHookedForkBase is SellBase {
     console.log('sold', _amount);
     console.log('for wei', _quoted);
     console.log('gas', _g);
-    assertEq(_value, _quoted - FEE, 'the leaf holds the quote less the fee');
+    assertEq(_value, _rungOf(_quoted - FEE), 'the leaf holds the largest rung of the quote less the fee');
     assertEq(_pre, PRE);
-    assertEq(address(pool).balance, _poolBefore + _quoted - FEE);
+    assertEq(address(pool).balance, _poolBefore + _value);
     assertEq(SENDER.balance, FEE, 'the helper is paid the fee');
     assertEq(IERC20Balance(_token()).balanceOf(W), 0, 'W sold every token');
     assertEq(IAllowanceHooked(_token()).allowance(W, PM), 0, 'no approval was given');
-    assertEq(W.balance, 0, 'W keeps no ether');
+    assertEq(W.balance, _quoted - FEE - _value, 'W keeps the rest in ether');
     assertEq(IERC20Balance(WETH).balanceOf(W), 0, 'nor WETH');
     assertEq(SellDelegate(payable(W)).nonce(), 1);
   }
