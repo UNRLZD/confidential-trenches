@@ -2,8 +2,8 @@
 // replayed. frong-quotes-through-its-pools.answers.json holds two real Robinhood mainnet runs from the Mac (read only):
 // - bad_before: FRONG's four buy taps as robinhood-quotes-inside-provider-limits recorded them on 2d4e7dead
 //   (2026-11-13 23:52Z, its step2_after), every one too_many_pools; that check reads no sale, so no holder;
-// - good_after: this check's own `--record` on the card's branch (2026-11-14 02:33Z): four buy taps and two sells, each
-//   a quote.
+// - good_after: this check's own `--record` on the card's branch at 605707282, main 606fc443c merged (2026-11-14
+//   02:36Z): four buy taps and two sells, each a quote.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";

@@ -45,15 +45,15 @@
   "from": "robinhood-quotes-inside-provider-limits.answers.json step2_after (2d4e7dead, the Mac), its FRONG row"
  },
  "good_after": {
-  "readAt": "2026-11-14T02:33:02.354Z",
+  "readAt": "2026-11-14T02:36:28.974Z",
   "index": {
    "served": true,
-   "ms": 32020
+   "ms": 35290
   },
   "buys": [
    {
     "kind": "cold",
-    "ms": 9501,
+    "ms": 17246,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -68,7 +68,7 @@
    },
    {
     "kind": "warm",
-    "ms": 2247,
+    "ms": 9765,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -83,7 +83,7 @@
    },
    {
     "kind": "warm",
-    "ms": 2273,
+    "ms": 4591,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -98,7 +98,7 @@
    },
    {
     "kind": "warm",
-    "ms": 2524,
+    "ms": 2029,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -121,7 +121,7 @@
   "sells": [
    {
     "kind": "cold",
-    "ms": 7700,
+    "ms": 4827,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -136,7 +136,7 @@
    },
    {
     "kind": "warm",
-    "ms": 5280,
+    "ms": 3514,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -150,6 +150,6 @@
     }
    }
   ],
-  "from": "card/frong-quotes-through-its-pools, the Mac"
+  "from": "605707282 (card/frong-quotes-through-its-pools with main 606fc443c merged), the Mac"
  }
 }
