@@ -15,6 +15,7 @@ import { small } from "../discover/format.ts";
 import { initialsBps } from "../positions/model.ts";
 import { reasonOf, statePoolPrice, unitsToCents } from "../trade/model.ts";
 import type { Reason } from "../trade/model.ts";
+import { withoutMoveLegs } from "./move.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
@@ -896,8 +897,8 @@ export function line(series: PortfolioData["series"], range: Range, now: number)
 
 // ------------------------------------------------------------------------------------------------------ Activity S14
 
-export type ActKind = "buy" | "sell" | "deposit" | "withdraw" | "export";
-export const ACT_KINDS: readonly ActKind[] = ["buy", "sell", "deposit", "withdraw", "export"];
+export type ActKind = "buy" | "sell" | "deposit" | "withdraw" | "move" | "export";
+export const ACT_KINDS: readonly ActKind[] = ["buy", "sell", "deposit", "withdraw", "move", "export"];
 
 export interface ActRow {
   id: string;
@@ -916,6 +917,9 @@ export interface ActRow {
    *  reason for the kit's code on hover when the app has words for it (notLanded for a trade that did not land); null
    *  for any other row. Never the kit's code itself. */
   failed: { reason: Reason | "notLanded" | null } | null;
+  /** A Move's row (card move-shows-one-swap): its two chains and what left, whole units of `from`'s asset (the op's
+   *  amount; null before the page names it). */
+  move?: { from: Chain; to: Chain; amount: string | null; asset: string };
 }
 
 export interface ActGroup {
@@ -933,7 +937,7 @@ export interface ActFilter {
 
 export const NO_FILTER: ActFilter = { kinds: [], min: 0n, q: "" };
 
-const SHOWN = new Set(["buy", "sell", "deposit", "withdraw"]);
+const SHOWN = new Set(["buy", "sell", "deposit", "withdraw", "move"]);
 /** A trade's stages where its asked amount never moved in full: its row draws no amount (the dash), since the op's
  *  amount_usd and units are the request's ask (kit OpDetail), and only a done op's amount is what moved. */
 const NOT_MOVED = new Set(["refused", "not_landed", "part_filled"]);
@@ -945,13 +949,20 @@ function failedOf(o: Operation): ActRow["failed"] {
   return o.stage === "refused" ? { reason: reasonOf(o.code) } : null;
 }
 
-/** Every row Activity lists: the kit's deposits, withdrawals, buys and sells, each with what its op carries (kit OpDetail:
- *  time, USD size, units, chain, token; a deposit's USD is its amount_usd), and the exported keys. Newest first; rows
- *  with no time last, in the kit's order. */
+/** Every row Activity lists: the kit's deposits, withdrawals, buys, sells and Moves, each with what its op carries (kit
+ *  OpDetail: time, USD size, units, chain, token; a deposit's USD is its amount_usd; a Move its two chains and amount),
+ *  and the exported keys. A Move is one row, its legs none (card move-shows-one-swap). Newest first; rows with no time
+ *  last, in the kit's order. */
 export function activity(ops: readonly Operation[] | null | undefined, d: PortfolioData): ActRow[] {
   const rows: ActRow[] = [];
-  for (const o of ops ?? []) {
+  // a Move's legs (its pool withdraw run, its deposit) are the Move's, never a row of their own (card move-shows-one-swap)
+  for (const o of withoutMoveLegs(ops ?? [])) {
     if (!SHOWN.has(o.kind)) continue;
+    if (o.kind === "move") {
+      const move = { from: o.from, to: o.to, amount: o.amount ?? null, asset: TRADE_ASSET[o.from] ?? "USDC" };
+      rows.push({ id: o.id, kind: "move", stage: o.stage, at: o.created_ms ?? null, usd: null, units: null, chain: null, token: null, txs: o.txs, address: null, failed: o.stage === "failed" ? { reason: null } : null, move });
+      continue;
+    }
     const moved = !NOT_MOVED.has(o.stage);
     rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? centsNear(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null, failed: failedOf(o) });
   }

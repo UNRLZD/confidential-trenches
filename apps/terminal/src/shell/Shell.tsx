@@ -16,12 +16,14 @@ import { tellShell } from "./in-shell.ts";
 import { ReturnHopProvider } from "./ReturnHop.tsx";
 import { SignpageFrame, useSignpage } from "./signpage-frame.tsx";
 import { TabBar } from "./TabBar.tsx";
+import { Welcome } from "./Welcome.tsx";
 
 // The shell: the desktop top bar and footer, the phone header and tab bar, and one route per screen. Both forms are
 // in the page and CSS shows one (shell.css), so nothing is swapped after the first paint. SignpageFrame shares the
 // signing page's client (parent mode, start.tsx) with the whole app; ReturnHopProvider opens SIGN_HOST's own screens in
 // its shell; the one sign-in sheet (S2.1, S19) and the one deposit sheet with the withdraw progress (DepositMount.tsx)
-// sit outside both header forms, so CSS hiding either never hides them.
+// sit outside both header forms, so CSS hiding either never hides them. The welcome (Welcome.tsx) opens over all of it on
+// a first visit.
 // `screen` draws each route (the browser tests pass a probe screen; the app passes none). ShellAddress tells SIGN_HOST's
 // shell the app's path and query on every move and whenever the client is READY again, so the top window's address
 // follows the app.
@@ -47,6 +49,7 @@ export function Shell({ client, screen: S = Screen }: { client: SignpageClient; 
             </div>
             <SigninSheet />
             <DepositMount />
+            <Welcome />
             </WithdrawPickProvider>
           </DepositSheetProvider>
         </SigninSheetProvider>

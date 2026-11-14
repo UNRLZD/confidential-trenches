@@ -1,0 +1,26 @@
+{
+  "chain": "base",
+  "chainId": 8453,
+  "dryRun": false,
+  "at": "2026-11-14T12:46:53.180Z",
+  "deployer": "0xa2a16963691233c96132fa04fcfb9012a1407f6f",
+  "return": "0x9b0de76cb0a21cad9fd37675731f65773508af9e",
+  "need": "28002559845463",
+  "build": "solc 0.8.28 (contracts/pool-evm/foundry.toml), forge Version: 1.7.1-Homebrew",
+  "contracts": {
+    "SellDelegate": {
+      "address": "0x37984815725fc0dce72d051d6a8c30eee132285d"
+    }
+  },
+  "txs": [
+    {
+      "step": "deploy SellDelegate",
+      "hash": "0x59604b86d37f0692f80742c29cca9cfbbd623c2981e5415b9a69e29440ca44b3",
+      "contract": "SellDelegate"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0x510f02556fb11b7a3553004d5ad3145a4eb0bcaec665a851d7561912c29bbda6"
+    }
+  ]
+}

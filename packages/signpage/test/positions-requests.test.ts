@@ -119,6 +119,14 @@ test("the positions on the mainnet build: no request names a W to any host but t
     assert.ok(await f(), phase);
   };
   const settled = async (tp: Tp, want: unknown) => until(async () => JSON.stringify(show(await tp.positions())) === JSON.stringify(want));
+  // the state read's answer: a Solana read past STATE_READ_MS (card move-sends-or-says-why, T1) is left out of that one
+  // (null), and on this clock any wait outside it (the store's reads on a loaded box) lets the clock jump to that bound,
+  // so a read is asked again until it answers, each turn on the clock
+  const answered = async (tp: Tp): Promise<readonly Position[] | null> => {
+    let p: readonly Position[] | null = null;
+    await until(async () => (p = await tp.positions()) !== null);
+    return p;
+  };
   const both = [["BOUGHT", "4", ["W0"]], ["OLD", "4", ["W1"]]];
 
   phase = "1 a load";
@@ -127,24 +135,24 @@ test("the positions on the mainnet build: no request names a W to any host but t
   await settled(tp, both);
   // each W's SOL beside its token, read on the helper's keyed route (the log's checks below): W's 5,000 and its token
   // account's 2,039,280
-  assert.deepEqual((await tp.positions())?.map((p) => p.asset_held), ["0.00204428", "0.00204428"]);
+  assert.deepEqual((await answered(tp))?.map((p) => p.asset_held), ["0.00204428", "0.00204428"]);
   phase = "2 W1's read fails, and its retry";
   mode.failW = Ws[1]!;
   timers.length = 0;
   tp = make();
-  assert.deepEqual(show(await tp.positions()), both, "the kept pass at once");
+  assert.deepEqual(show(await answered(tp)), both, "the kept pass at once");
   await until(() => timers.length > 0);
   timers.shift()!();
   await until(() => timers.length > 0);
-  assert.deepEqual(show(await tp.positions()), both, "W1 keeps its last");
+  assert.deepEqual(show(await answered(tp)), both, "W1 keeps its last");
   mode.failW = "";
   phase = "3 the helper down";
   mode.helperDown = true;
   timers.length = 0;
   tp = make();
-  assert.deepEqual(show(await tp.positions()), both);
+  assert.deepEqual(show(await answered(tp)), both);
   await until(() => timers.length > 0);
-  assert.deepEqual(show(await tp.positions()), both, "every W keeps its last");
+  assert.deepEqual(show(await answered(tp)), both, "every W keeps its last");
   mode.helperDown = false;
   phase = "4 the public RPC down";
   mode.publicDown = true;
@@ -154,7 +162,7 @@ test("the positions on the mainnet build: no request names a W to any host but t
   await until(() => log.filter((l) => l.phase === phase && l.method === "getTokenAccountsByOwner").length >= 4);
   await tp.positions();
   await new Promise((r) => setTimeout(r, 100));
-  assert.deepEqual(show(await tp.positions()), both, "no decimals to read: the positions stand");
+  assert.deepEqual(show(await answered(tp)), both, "no decimals to read: the positions stand");
   mode.publicDown = false;
 
   const at = (l: (typeof log)[number]) => `${l.phase} | ${l.to} | ${l.method} | ${l.names.join(",")}`;

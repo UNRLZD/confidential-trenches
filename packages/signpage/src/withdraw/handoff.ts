@@ -183,7 +183,7 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
  * (relayWithdraw takes its one derivation before its first await, relay.ts); the relay's wait ends on sign out or at
  * HANDOFF_WAIT_MAX_MS, its note left RESERVED with its request for the settle pass (withdrawSettle).
  */
-export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedWithdraw, drawnFee: bigint, note?: string, exact?: boolean) => Promise<HandoffEnd>) | null {
+export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedWithdraw, drawnFee: bigint, note?: string, exact?: boolean, claim?: () => Promise<void>) => Promise<HandoffEnd>) | null {
   const n = netOf(over);
   const { network, net, rpcs, priceRpcs, relayer, scope, fetchFn } = n;
   if (net.vault === null || scope === null || relayer === null) return null;
@@ -194,7 +194,8 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
   // `note`: the note the caller picked (the NEAR buy's, withdrawRequest's `note`); none: the request's own pick.
   // `exact`: the request pays the drawn fee (at or above the quote, the relayer takes any fee at or above its fee_min),
   // so a part planned at that fee withdraws exactly what the plan says; else the quote's fee
-  return async (w, drawnFee, note, exact = false) => {
+  // `claim`: a move's claim on its send-by (cash-to-pool.ts), awaited right before the note goes RESERVED
+  return async (w, drawnFee, note, exact = false, claim) => {
     if (typeof drawnFee !== "bigint") throw new Error("drawnFee: not a bigint");
     ownPair(n);
     const quote = await askWithdrawFee({ token: net.usdc, relayer, amount: w.amount, fetchFn });
@@ -225,6 +226,7 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
         blockTimestampNanosec: ns,
         // after the typed account's wiring, which wallet-withdraw-move-out reads in the build as it is minified
         ...(note === undefined ? {} : { note }),
+        ...(claim === undefined ? {} : { claim }),
       });
       going = relay(seed, req, { notes, network, rpcs, priceRpcs, fetchFn, signal });
     } finally {

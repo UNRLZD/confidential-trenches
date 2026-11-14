@@ -6,7 +6,7 @@ import { Ic } from "./icons.tsx";
 import { amount, baseUnits, usd } from "./model.ts";
 import type { PoolRow } from "./model.ts";
 import { checkAmount, exact, moveOp, moveRunning, nodesOf, reach, refusedWord, routeSteps, rowCents, stepStates } from "./move.ts";
-import type { FlowNode, MoveChain, StepState } from "./move.ts";
+import type { FlowNode, MoveChain, MoveStep, StepState } from "./move.ts";
 import type { DryAnswer, MoveSource } from "./move-source.tsx";
 import { statePoolPrice, unitsToCents } from "../trade/model.ts";
 import { W } from "./W.tsx";
@@ -54,6 +54,7 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
   const pair = `${ui.from}>${ui.to}`;
   const started = useRef<number | null>(null);
   const [reached, setReached] = useState(-1);
+  const [ran, setRan] = useState<readonly MoveStep[] | null>(null);
   const [tick, setTick] = useState(0);
 
   // Max: a dry of the whole balance, asked once per pair and balance; its max (a page before kit 1.16 sends none and
@@ -115,7 +116,9 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
     if (ui.id === null && sends !== null && sendCheck.kind === "ok" && sends !== typed) set({ amount: sends });
   };
 
-  const steps = (dry && dry !== "loading" && dry.kind === "ok" ? dry.value.steps : null) ?? routeSteps(ui.from, ui.to) ?? [];
+  // a running move keeps the steps its dry answered at the press (card move-shows-one-swap): the dry is dropped once it
+  // starts, and the default is drawn only when there were none
+  const steps = (ui.id !== null ? ran : null) ?? (dry && dry !== "loading" && dry.kind === "ok" ? dry.value.steps : null) ?? routeSteps(ui.from, ui.to) ?? [];
   const nodes = nodesOf(steps);
   // the furthest node seen, so the leg after the vault reads as the second (kit 1.15 names both in_transit)
   const at = reach(nodes, op?.stage ?? (running ? "leaving" : null), reached);
@@ -141,6 +144,7 @@ export function MoveSheet({ ui, set, rows, state, src, on, now, withdraw, close 
     if (sendCheck.kind !== "ok" || !ask) return;
     // the press sends the amount the line shows, and the box takes it
     const h = src.start({ from: ui.from, to: ui.to, amount: ask });
+    setRan(q?.steps ?? null);
     set({ amount: ask, id: h.id, refused: null });
     void h.outcome.then((code) => code && set({ refused: code }));
   };

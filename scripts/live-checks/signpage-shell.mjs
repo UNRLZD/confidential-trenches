@@ -98,6 +98,8 @@ export const PINNED_HOSTS = Object.freeze([
   "base-rpc.publicnode.com", "base.api.pocket.network", "rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network",
   // Robinhood's pool-list spare, where a seat refused under a page its provider answered walks (card first-sign-in-reads-fast)
   "rpc-robinhood.globalstake.io",
+  // the Solana public seat's second spare, where provider A and Pocket both failing walk (card move-sends-or-says-why)
+  "public.rpc.solanavibestation.com",
   "mainnet.base.org", "base.gateway.tenderly.co", "robinhood.drpc.org", "robinhood-rpc.publicnode.com",
 ]);
 /** The hosts a CSP's connect-src names (https sources only). */

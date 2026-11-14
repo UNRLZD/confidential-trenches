@@ -54,6 +54,7 @@ const EFEE = "card evm-testnet-delegate-review3: an EVM sell pays";
 const DREF = "EVM deposit: one refusal per field";
 const DOK = "EVM deposit: U's one rung";
 const DSIGN = "EVM deposit: signs as U";
+const DRUNG = "card evm-pool-amounts-are-standard-sizes: EVM deposit: only a rung of EVM_LADDER";
 const SHARE = "card pool-sell-share-across-wallets: a sell by share is 1 to 10,000";
 
 // [text, replacement, the test that must fail, its file when not rules-pool.test.ts]
@@ -381,6 +382,7 @@ export const MUTANTS = [
   [' || lower(d.to) !== lower(pin.pool)) return refuse("to");', ') return refuse("to");', DREF, DEPEVM],
   ["if (rung < EVM_DEPOSIT_MIN || ", "if (", DREF, DEPEVM],
   [' || rung > ask.amount) return refuse("amount");', ') return refuse("amount");', DREF, DEPEVM],
+  ['if (!isRung(EVM_LADDER, rung)) return refuse("rung");', "", DRUNG, DEPEVM],
   ['if (d.value !== rung) return refuse("value");', "", DREF, DEPEVM],
   ['if (typeof pre !== "bigint" || pre <= 0n || pre >= EVM_DEPOSIT_FIELD_P) return refuse("precommitment");', "", DREF, DEPEVM],
   [' || data.slice(10) !== evmWord(rung) + evmWord(pre)) return refuse("data");', ') return refuse("data");', DREF, DEPEVM],

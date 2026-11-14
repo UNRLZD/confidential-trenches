@@ -67,6 +67,7 @@ import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana
 export { solanaWithdrawMinPart, withdrawNoteFloor, type WithdrawCosts } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 import { legCause, type PoolRide } from "./pool-sell.ts";
+import { within } from "./trade.ts";
 // moved to pool-spend.ts (card signpage-buy-own-spend: pool-buy.ts reads them too, with no import cycle); named here still
 export { HISTORY_PAGE, HISTORY_PASS, spendOwner, type HistoryPlaces } from "./pool-spend.ts";
 
@@ -283,6 +284,9 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
    *  withdraw: it sends to that address), so a refund names nothing the withdraw does not. Called once, after the plan
    *  and before any note moves; the address it answers is the run's To, checked as any To is. */
   exit?(refundTo: string): Promise<string>;
+  /** A Move's claim (src/pool-to-cash.ts, card move-sends-or-says-why): awaited right before a release is taken to leave
+   *  the device, before its note is RESERVED; a throw ends the run stopped with nothing sent. */
+  claim?(): Promise<void>;
 };
 
 /** A part's onward send still owed: its note (W is the note's own W_{sol, label, j}, derived on the device; the op
@@ -744,7 +748,9 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     const free = async (): Promise<NoteRecord> => {
       let n = await notes.get(p.noteId);
       if (n?.state === "HELD") {
-        await h.drop?.(p.noteId);
+        // the queue's drop waits in the note's turn (behind a swap and a state read): bounded as the wait below, past
+        // it the part stops with nothing held by it (card move-sends-or-says-why)
+        if (h.drop) await within(h.drop(p.noteId), WITHDRAW_FREE_MS, "the proof queue's drop").catch(() => stop("drop"));
         for (let waited = 0; (n = await notes.get(p.noteId))?.state === "HELD" && waited < WITHDRAW_FREE_MS; waited += 500) await wait(500);
       }
       if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
@@ -888,6 +894,8 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
       // RESERVED, then the onward send owed, both written before anything leaves the device (review #232b HIGH 1):
       // a crash between the two leaves a RESERVED note with nothing sent, which the reserved pass frees
       take: async (_id: string, _attempt: string, _early?: unknown, lastHeight?: bigint) => {
+        // a Move past its send-by (or ended) sends nothing: the note goes back UNSPENT in the finally below
+        await h.claim?.();
         await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt!, ...(lastHeight === undefined ? {} : { lastHeight }) });
         reserved = true;
         const owed: PendingOnward = { noteId: p.noteId, attempt: attempt!, context: binding.context.toString(), ...base };

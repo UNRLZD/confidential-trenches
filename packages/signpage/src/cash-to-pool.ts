@@ -130,7 +130,45 @@ type Refusal = { error: ErrorCode };
  *  units of each side's asset; `cash` (pool to pool, src/pool-to-cash.ts): the deposit quote's least USDC in base units,
  *  what its onward move from Cash is sized by (kept in the store, never in state.ops). Nothing secret: no key, note,
  *  address of the user's or which note is whose. */
-export type MoveOpRecord = { kind: "move"; from: TradeChain; to: TradeChain; stage: MoveStage; txs: TxRef[]; amount: string; out?: string; created_ms: number; cash?: string };
+/** A move op's record. A move out of a pool (src/pool-to-cash.ts, card move-sends-or-says-why) also keeps `send_by_ms`,
+ *  the time its source release must have been claimed by; `claimed_ms`, the run's claim, written by compare-and-set right
+ *  before anything leaves the device; and `error`, the refusal a move that failed before it sent ends with. */
+export type MoveOpRecord = { kind: "move"; from: TradeChain; to: TradeChain; stage: MoveStage; txs: TxRef[]; amount: string; out?: string; created_ms: number; cash?: string; send_by_ms?: number; claimed_ms?: number; error?: ErrorCode };
+/** How long a move has, from its tap, to start sending (card move-sends-or-says-why). Out of a pool: its quote (one
+ *  1Click round trip and its keyless tell), then a withdraw part's reads, its wait for an epoch's root (one 60 s epoch
+ *  and WITHDRAW_BOUNDARY_LAG_MS 30 s), its proof (6.7 s on a laptop, several times that on a phone) and its bind, about
+ *  twice over. Out of Cash: its quote, the vault's trees and the relayer's fee, and its proof, well inside the same.
+ *  Far inside the quote's 30 min deadline (DEPOSIT_QUOTE_DEADLINE_MS), so a send claimed at the last moment still lands
+ *  in time. */
+export const MOVE_SEND_MS = 300_000;
+
+/** A move's send-by: its own send_by_ms, or, for a move written before this card (release 137 and earlier, no
+ *  send_by_ms), its tap's time plus MOVE_SEND_MS. */
+export const sendByOf = (rec: MoveOpRecord): number => rec.send_by_ms ?? rec.created_ms + MOVE_SEND_MS;
+
+/** The claim's compare-and-set on a move record (card move-sends-or-says-why): claimed once already, or still leaving
+ *  inside its send-by; never a move ended, nor one past its send-by with no claim. */
+export function claimed(rec: MoveOpRecord | undefined, now: number): MoveOpRecord | null {
+  if (rec === undefined || rec.kind !== "move" || rec.stage === "failed" || rec.stage === "done") return null;
+  if (rec.claimed_ms !== undefined) return rec;
+  if (rec.stage === "leaving" && now >= sendByOf(rec)) return null;
+  return { ...rec, claimed_ms: now };
+}
+
+/** Whether a move's pool run (its op under <id>/out) shows no release sent: no record, or one still before its send or
+ *  stopped, with no tx. in_transit is written before a release leaves (pool-testnet.ts owe), so it counts as sent. */
+export const nothingSent = (out: { stage?: unknown; txs?: readonly unknown[] } | undefined): boolean =>
+  out === undefined || ((out.stage === "proving" || out.stage === "stopped") && (!Array.isArray(out.txs) || out.txs.length === 0));
+
+/** The follow's end of a move nothing sent for in time: failed only while still leaving, unclaimed and past its
+ *  send-by. A move written before this card had no claim to write, so it ends only while its run (`out`) shows no
+ *  release sent; one whose run sent is followed on as before. */
+export function expired(rec: MoveOpRecord | undefined, now: number, out?: { stage?: unknown; txs?: readonly unknown[] }): MoveOpRecord | null {
+  if (rec === undefined || rec.kind !== "move" || rec.stage !== "leaving" || rec.claimed_ms !== undefined || now < sendByOf(rec)) return null;
+  if (rec.send_by_ms === undefined && !nothingSent(out)) return null;
+  return { ...rec, stage: "failed", error: "not_sent" };
+}
+
 /** What a move's follow op (the quote's pool_deposit op, pool-deposit-follow.ts PoolDepositOp) says, read from the store. */
 export type MoveFollow = { stage: string; final?: true; txs?: readonly TxRef[] };
 
@@ -144,8 +182,9 @@ export type CashMoverDeps = {
   fee(): Promise<bigint>;
   /** The most one withdrawal of Cash carries (USDC base units): the largest UNSPENT note of the vault's scope. */
   cash(): Promise<bigint>;
-  /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. */
-  handoff: ((w: CheckedWithdraw, drawnFee: bigint) => Promise<HandoffEnd>) | null;
+  /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. `claim`, when given, is
+   *  awaited right before its note goes RESERVED (wallet withdraw/request.ts): a throw ends it with nothing sent. */
+  handoff: ((w: CheckedWithdraw, drawnFee: bigint, claim?: () => Promise<void>) => Promise<HandoffEnd>) | null;
   /** The quote's floor on a pool (pool.address's: on an EVM pool its least rung plus one deposit's gas, on Solana the
    *  rung, one deposit's cost and the rent U_X keeps; read now), null with no read: a note made for an EVM tap is quoted
    *  at the rung plus that gas, and a move's dry is held to it (bounds). */
@@ -155,6 +194,10 @@ export type CashMoverDeps = {
   now(): number;
   /** Writes the move op under its id (the store's "ops"); none: no op is written. */
   put?(id: string, rec: MoveOpRecord): Promise<void>;
+  /** The move op's compare-and-set (the wallet store's update: `change` gets the stored record and gives the next, or
+   *  undefined to write nothing; resolves with what it wrote). Given, every write goes through it and the move keeps a
+   *  send-by (card move-sends-or-says-why): its claim before the vault's note goes RESERVED, its end past it unclaimed. */
+  update?(id: string, change: (rec: MoveOpRecord | undefined) => MoveOpRecord | undefined): Promise<unknown>;
   /** The quote's follow op under `id`, read from the store; none: the move op stops at in_transit. */
   follow?(id: string): Promise<MoveFollow | undefined>;
   /** The wait between two reads of the follow op (setTimeout otherwise). */
@@ -216,10 +259,35 @@ export function cashMover(d: CashMoverDeps): CashMover {
   const tracks: Promise<void>[] = [];
   const put = async (id: string, rec: MoveOpRecord): Promise<void> => {
     try {
-      await d.put?.(id, rec);
+      // with a compare-and-set: the stored claim and send-by kept, and a move that ended failed (its send-by passed
+      // unclaimed) never written back to a live stage
+      if (d.update) await d.update(id, (v) => (v?.stage === "failed" && rec.stage !== "failed" ? undefined : { ...rec, ...(v?.claimed_ms === undefined ? {} : { claimed_ms: v.claimed_ms }), ...(v?.send_by_ms === undefined || rec.send_by_ms !== undefined ? {} : { send_by_ms: v.send_by_ms }) }));
+      else await d.put?.(id, rec);
     } catch {
       /* a write that fails costs the display, never the move */
     }
+  };
+  // the hand-off's claim, right before the vault's note goes RESERVED: refused (a throw) once the move ended or passed
+  // its send_by_ms with no claim, so the note goes back UNSPENT and nothing is sent
+  const claimOf = (id: string): (() => Promise<void>) | undefined =>
+    d.update === undefined
+      ? undefined
+      : async () => {
+          const now = d.now();
+          let ok = false;
+          await d.update!(id, (v) => {
+            const c = claimed(v, now);
+            ok = c !== null;
+            return c === null || c === v ? undefined : c;
+          });
+          if (!ok) throw new Error("the move may no longer send");
+        };
+  // past its send_by_ms with no claim, a move still leaving ends failed, its refusal not_sent (true when written). Only
+  // a move written with a send_by_ms: one from before it never claimed, so leaving tells nothing of what it sent
+  const expire = async (id: string): Promise<boolean> => {
+    if (d.update === undefined) return false;
+    const now = d.now();
+    return (await d.update(id, (v) => (v?.send_by_ms === undefined ? undefined : (expired(v, now) ?? undefined))).catch(() => undefined)) !== undefined;
   };
   // the move op's stages after the hand-off: in_transit once the vault's withdraw landed, then the follow op's
   const track = async (op: string, followId: string, rec: MoveOpRecord, ended: Promise<HandoffEnd | null>): Promise<void> => {
@@ -236,6 +304,8 @@ export function cashMover(d: CashMoverDeps): CashMover {
     let cur = from;
     const wait = d.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     while (!d.signal?.aborted) {
+      // a move still leaving (a reload's: its hand-off is gone) ends at its send-by unless its claim came first
+      if (cur.stage === "leaving" && (await expire(op))) return;
       const f = await d.follow(followId).catch(() => undefined);
       if (f !== undefined) {
         const stage = moveStageOfFollow(f);
@@ -251,21 +321,44 @@ export function cashMover(d: CashMoverDeps): CashMover {
   };
   // one move: the rail's quote of exactly `usdc`, held to every check, then the vault pays its deposit address
   const send = async (chain: PoolChain, usdc: bigint, least: bigint, op: string, fee: bigint, amount: string): Promise<MoveSent & { going?: Promise<boolean>; used?: string }> => {
+    // the move's record, leaving with its send_by_ms, written before its quote is asked (card move-sends-or-says-why):
+    // from the tap on, the app follows an op that ends, never a request with nothing behind it
+    const now = d.now();
+    const rec: MoveOpRecord = { kind: "move", from: "near", to: chain, stage: "leaving", txs: [], amount, created_ms: now, ...(d.update ? { send_by_ms: now + MOVE_SEND_MS } : {}) };
+    await put(op, rec);
     let q: CashQuote | Refusal = { error: "not_allowed" };
     let used = `${op}/${d.rails[0]}`;
-    for (const rail of d.rails) {
-      used = `${op}/${rail}`;
-      q = await d.quote(chain, usdc, used, rail);
-      if (!("error" in q)) break;
-    }
-    const rec: MoveOpRecord = { kind: "move", from: "near", to: chain, stage: "leaving", txs: [], amount, created_ms: d.now() };
+    // the rails' quotes, all of them by the move's send-by: past it the rail is down and nothing is paid
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<Refusal>((r) => (t = setTimeout(() => r({ error: "down" }), Math.max(0, sendByOf(rec) - d.now()))));
+    q = await Promise.race([
+      (async () => {
+        let a: CashQuote | Refusal = { error: "not_allowed" };
+        for (const rail of d.rails) {
+          used = `${op}/${rail}`;
+          a = await d.quote(chain, usdc, used, rail);
+          if (!("error" in a)) break;
+        }
+        return a;
+      })(),
+      late,
+    ]).finally(() => clearTimeout(t));
     if ("error" in q || !IMPLICIT.test(q.address) || q.amountIn !== usdc || q.minOut < least) {
-      await put(op, { ...rec, stage: "failed" });
-      return { error: "error" in q ? q.error : "quote_check_failed" };
+      const error = "error" in q ? q.error : "quote_check_failed";
+      await put(op, { ...rec, stage: "failed", ...(d.update ? { error } : {}) });
+      return { error };
     }
     const leaving: MoveOpRecord = { ...rec, out: unitsText(q.minOut, POOL_DECIMALS[chain]) };
     await put(op, leaving);
-    const ended = d.handoff!({ recipient: q.address, amount: usdc }, fee).catch(() => null);
+    const claim = claimOf(op);
+    const ended = d.handoff!({ recipient: q.address, amount: usdc }, fee, ...(claim ? [claim] : [])).catch(() => null);
+    // the send-by while the hand-off runs: a hand-off that has not claimed by then ends the move failed, not_sent, and
+    // its claim is refused after it
+    if (d.update) {
+      let s: ReturnType<typeof setTimeout> | undefined;
+      const at = new Promise<void>((r) => (s = setTimeout(r, Math.max(0, sendByOf(rec) - d.now()))));
+      void Promise.race([ended.then(() => false), at.then(() => true)]).then((due) => (clearTimeout(s), due ? expire(op) : false));
+    }
     const going = ended.then((e) => e !== null && (e.kind === "arrived" || e.kind === "landed"));
     tracks.push(track(op, used, leaving, ended).catch(() => {}));
     ways.push({ chain, id: used, op, lamports: q.minOut, going, since: d.now() });

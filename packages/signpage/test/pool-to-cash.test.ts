@@ -8,6 +8,23 @@ import { cashUsdcOf, moveStageOfDeposit, poolToCash, pricedPoolCoin, type PoolTo
 import { cashMover, poolMoveKinds, type MoveOpRecord } from "../src/cash-to-pool.ts";
 import type { PoolFunds, PoolReady } from "../src/withdraw/pool-form.ts";
 
+/** The store's compare-and-set on an op record (WalletStore.update) over a test's write log: a write that keeps the
+ *  record's stage replaces that record's last entry, so the log reads one entry a stage. */
+function casOver<E>(log: E[], entry: (id: string, rec: MoveOpRecord) => E, idOf: (e: E) => string): PoolToCashDeps["update"] {
+  const mem = new Map<string, MoveOpRecord>();
+  return async (id, change) => {
+    const prev = mem.get(id);
+    const v = change(prev === undefined ? undefined : structuredClone(prev));
+    if (v === undefined) return undefined;
+    mem.set(id, structuredClone(v));
+    const at = log.findLastIndex((e) => idOf(e) === id);
+    if (prev?.stage === v.stage && at >= 0) log[at] = entry(id, structuredClone(v));
+    else log.push(entry(id, structuredClone(v)));
+    return v;
+  };
+}
+const logged = (puts: { id: string; rec: MoveOpRecord }[]) => casOver(puts, (id, rec) => ({ id, rec }), (e) => e.id);
+
 const FUNDS: PoolFunds = { notes: [{ id: "a", value: 30_000_000n }, { id: "b", value: 10_000_000n }], fee: 1_300_000n, wFee: 5_000n, minPart: 1_890_880n };
 const SOL = { price: "8000000000", expo: -8 }; // SOL at 80 USD
 const DEPOSIT = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
@@ -29,7 +46,7 @@ function page(o: { quote?: { address: string; minOut: bigint } | { error: "above
       reads[id] = k + 1;
       return list[Math.min(k, list.length - 1)];
     },
-    put: async (id, rec) => void puts.push({ id, rec: structuredClone(rec) }),
+    update: logged(puts),
     now: () => 1_000,
     wait: async () => {},
   };
@@ -133,7 +150,7 @@ test("pool.move Solana to Base: to Cash first, then, once its deposit is done, C
       reads[id] = k + 1;
       return list[Math.min(k, list.length - 1)];
     },
-    put: async (id, rec) => void puts.push({ id, rec: structuredClone(rec) }),
+    update: logged(puts),
     now: () => 1_000,
     wait: async () => {},
     onward: { move: async (to, usdc, id) => (sent.push({ to, usdc, id }), { op: id }), fee: async () => 50_000n },
@@ -167,7 +184,7 @@ test("pool to pool: an onward move the page refuses fails the move (its money st
     onChain: () => true,
     withdraw: () => () => {},
     op: async (id: string) => (id.endsWith("/out") ? { stage: "sent" } : id.endsWith("/1click") ? { stage: "done" } : undefined),
-    put: async (_id: string, rec: MoveOpRecord) => void puts.push(structuredClone(rec)),
+    update: casOver(puts, (_id, rec) => rec, () => "r"),
     now: () => 1,
     wait: async () => {},
   };
@@ -232,7 +249,7 @@ function direct(o: { quote?: { address: string; minOut: bigint } | { error: "quo
     onChain: (_c, a) => a === DIRECT_ADDR,
     withdraw: () => (ready, id) => void runs.push({ ready, id }),
     op: async (id) => read(id),
-    put: async (id, rec) => void puts.push({ id, rec: structuredClone(rec) }),
+    update: logged(puts),
     now: () => 1_000,
     wait: async () => {},
     onward: { move: async (...a) => (onward.push(a), { op: "x" }), fee: async () => 50_000n },
@@ -323,7 +340,7 @@ test("pool.move.dry Solana to Base, one swap: out in Base's coin at the device's
 });
 
 test("pool to Cash: a price or the pool's funds not read yet is down (Busy, Retry), never not_allowed", async () => {
-  const d0 = { price: () => null, funds: async () => FUNDS, quote: async () => ({ error: "not_allowed" as const }), onChain: () => true, withdraw: () => () => {}, op: async () => undefined, put: async () => {}, now: () => 1 };
+  const d0 = { price: () => null, funds: async () => FUNDS, quote: async () => ({ error: "not_allowed" as const }), onChain: () => true, withdraw: () => () => {}, op: async () => undefined, update: async () => undefined, now: () => 1 };
   assert.deepEqual(await poolToCash(d0).dry("solana", 20_000_000n), { error: "down" });
   assert.deepEqual(await poolToCash({ ...d0, price: () => SOL, funds: async () => Promise.reject(new TypeError("fetch failed")) }).dry("solana", 20_000_000n), { error: "down" });
 });

@@ -1,0 +1,82 @@
+# Playwright's Firefox and WebKit and the system packages they need, from the cache (card firefox-runs-before-release:
+# live.yml's steps for its matrix's engines, written once here for ci.yml's browser-e2e, which runs Firefox before every
+# release). The key names the Playwright release, the engines and the runner image (ImageOS, ImageVersion), since the
+# .debs are the ones that image lacked: a hit installs them with dpkg and no request, then `install-deps --dry-run` must
+# find none missing; a miss, or a hit that fails either, runs Playwright's own install, bounded in time and tried once
+# more on another mirror, apt keeping each .deb it fetches for the save (card ci-cargo-near-cached, run 42044118472).
+# It runs after a checkout and a pnpm install.
+name: Playwright's engines from the cache
+description: Playwright's Firefox or WebKit build and its system packages, from actions/cache, Playwright's own install on a miss
+inputs:
+  engines:
+    description: the engines, space-separated (firefox, webkit)
+    required: true
+runs:
+  using: composite
+  steps:
+      - name: the cache key of Playwright's engines on this runner image
+        id: engines-key
+        env:
+          ENGINES: ${{ inputs.engines }}
+        shell: bash
+        run: |
+          version="$(pnpm --filter terminal exec playwright --version | awk '{ print $2 }')"
+          echo "key=playwright-$version-${ENGINES// /-}-${ImageOS:-unknown}-${ImageVersion:-unknown}" | tee -a "$GITHUB_OUTPUT"
+      - id: engines
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: ${{ steps.engines-key.outputs.key }}
+      - name: Playwright's Firefox and WebKit
+        env:
+          ENGINES: ${{ inputs.engines }}
+          HIT: ${{ steps.engines.outputs.cache-hit }}
+        shell: bash
+        run: |
+          debs="$HOME/.cache/playwright-debs"
+          started=$SECONDS
+          shopt -s nullglob
+          cached=("$debs"/*.deb)
+          # the log is the runner's own file, written by the shell, not by sudo
+          # shellcheck disable=SC2086,SC2024
+          if [ "$HIT" = true ] && { [ "${#cached[@]}" = 0 ] || sudo DEBIAN_FRONTEND=noninteractive dpkg -i "${cached[@]}" > "$RUNNER_TEMP/dpkg.log" 2>&1; } \
+            && pnpm --filter terminal exec playwright install-deps --dry-run $ENGINES; then
+            echo "the system packages from the cache: ${#cached[@]} .deb, none missing"
+          else
+            if [ "$HIT" = true ]; then echo "::warning::the cached .debs did not install or left a package missing: Playwright's own install runs"; cat "$RUNNER_TEMP/dpkg.log" 2>/dev/null || true; fi
+            sudo rm -rf "$debs"
+            mkdir -p "$debs/partial"
+            printf 'Dir::Cache::Archives "%s/";\nAPT::Keep-Downloaded-Packages "true";\nAcquire::Retries "5";\n' "$debs" | sudo tee /etc/apt/apt.conf.d/90playwright-debs
+            # Bounded: a normal install takes 15-17 s (run 42059594658's Firefox jobs); 180 s is a crawling mirror, as
+            # job 127357435385's azure.archive.ubuntu.com was (19.5 min to the job's limit). Then once more, on fresh
+            # connections, from Ubuntu's own archive.ubuntu.com and security.ubuntu.com: the image's apt reads its
+            # mirrors from /etc/apt/apt-mirrors.txt (mirror+file, Azure's first; actions/runner-images
+            # configure-apt-sources.sh), and a slow mirror is no failed one, so apt never moves on by itself.
+            # shellcheck disable=SC2086
+            deps() { timeout -k 10 180 pnpm --filter terminal exec playwright install --with-deps $ENGINES; }
+            if ! deps; then
+              echo "::warning::Playwright's install did not finish in 180 s: once more, from archive.ubuntu.com and security.ubuntu.com"
+              sudo pkill -TERM -x apt-get || true
+              sleep 2
+              sudo pkill -KILL -x apt-get || true
+              sudo dpkg --configure -a || true
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt
+              deps
+            fi
+            sudo rm -f /etc/apt/apt.conf.d/90playwright-debs
+            sudo rm -rf "$debs/partial" "$debs/lock"
+            sudo chown -R "$(id -u):$(id -g)" "$debs"
+          fi
+          # the engines themselves: nothing to fetch when the cache held them
+          # shellcheck disable=SC2086
+          pnpm --filter terminal exec playwright install $ENGINES
+          echo "browser setup took $((SECONDS - started)) s"
+      - if: steps.engines.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: ${{ steps.engines-key.outputs.key }}

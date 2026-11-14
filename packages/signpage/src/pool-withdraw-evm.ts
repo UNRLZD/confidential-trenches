@@ -21,8 +21,9 @@
 //   with the fee it needs (the screen's "fee rose" line and its button).
 // - The plan: the Solana withdraw's planPoolWithdraw over the pool's landed notes, with this chain's costs: the epoch
 //   fee (a bind's own fee cap for the epoch: the device's reads, the helper's answer held to them), W's fee bound, and
-//   the smallest part max(1 wei, fee - W's fee) (the pool's backstop: the fee at most half the chunk, PrivacyPool.sol:186).
-//   Each note's change is 0 or at least the note floor. A part whose bind gives another fee than the plan's stops before
+//   the smallest part max(1 wei, fee - W's fee) (the pool's backstop: the fee at most half the chunk, PrivacyPool.sol:186),
+//   and the pool's piece rule (the wallet's EVM_PIECES, card evm-pool-amounts-are-standard-sizes): every release a rung of the 1-2-5
+//   ladder from 0.001 ETH, or an older note whole once. Each note's change is 0 or at least the note floor. A part whose bind gives another fee than the plan's stops before
 //   W signs (the note goes back UNSPENT). The notes under the epoch root are planned first, but never in more parts than
 //   the plan over every note (the Solana withdraw's rested preference: the screen drew its Max fee on that one).
 // - The roots (the Solana withdraw's, card fresh-money-spendable-at-once): the epoch root when the note is in it; a note
@@ -59,12 +60,14 @@ import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { evmAddress, freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
+import type { PieceRule } from "../../wallet/src/pool/pieces.ts";
 import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, evmAgreedBlock, evmRetryLag, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { checkBinding, PoolNoLeafError, type Pool, type PoolTrees } from "../../wallet/src/pool/pool.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "./pool-buy-evm.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyVerdict, evmHeadNumber, evmReleaseRead, evmWithdrawCalldata, type EvmReleaseRead } from "./evm-send.ts";
 import { legCause } from "./pool-sell.ts";
+import { within } from "./trade.ts";
 import { planPoolWithdraw, withdrawSources, type Arrivals, type PendingOnward, type WithdrawPart } from "./pool-withdraw.ts";
 import {
   checkEvmOnwardSend, checkEvmWithdraw, EVM_ONWARD_GAS, EVM_ONWARD_GAS_MAX, EVM_PRECOMPILE_TOP, evmOnwardCodeGas, PoolRuleRefused, signEvmOnwardSend, signEvmWithdraw,
@@ -144,6 +147,8 @@ export type EvmWithdrawHost = {
   wait?(ms: number): Promise<void>;
   /** A payout to another chain: the Solana run's exit (src/pool-withdraw.ts PoolWithdrawHost exit). */
   exit?(refundTo: string): Promise<string>;
+  /** A Move's claim, as the Solana run's (src/pool-withdraw.ts PoolWithdrawHost claim). */
+  claim?(): Promise<void>;
 };
 
 /** `cause`: why a run or one of its parts ended on a throw, in public words only (pool-sell.ts legCause), for the op's
@@ -258,7 +263,10 @@ export async function evmWithdrawCosts(h: Pick<EvmWithdrawHost, "chain" | "pin" 
   }
   const l1 = (await l1Of(h, gas, tag))[0];
   const wFee = gas * maxFee + l1;
-  return { fee, wFee, minPart: evmWithdrawMinPart(fee, wFee), gas, maxFee, tip, l1, toHasCode };
+  // the pool's piece rule (the wallet's EVM_PIECES, card evm-pool-amounts-are-standard-sizes), as the Solana withdraw
+  // takes its pool's: every part's release a rung, or an older note whole
+  const pieces = h.pool.pieces;
+  return { fee, wFee, minPart: evmWithdrawMinPart(fee, wFee), gas, maxFee, tip, l1, toHasCode, ...(pieces !== undefined ? { pieces } : {}) };
 }
 
 /** A note's W and its nullifier hash. */
@@ -650,7 +658,9 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     const free = async (): Promise<NoteRecord> => {
       let n = await notes.get(p.noteId);
       if (n?.state === "HELD") {
-        await h.drop?.(p.noteId);
+        // the queue's drop waits in the note's turn (behind a swap and a state read): bounded as the wait below, past
+        // it the part stops with nothing held by it (card move-sends-or-says-why)
+        if (h.drop) await within(h.drop(p.noteId), EVM_WITHDRAW_FREE_MS, "the proof queue's drop").catch(() => stop("drop"));
         for (let waited = 0; (n = await notes.get(p.noteId))?.state === "HELD" && waited < EVM_WITHDRAW_FREE_MS; waited += 500) await wait(500);
       }
       if (n === undefined || n.state !== "UNSPENT" || n.leaf === undefined) stop("note");
@@ -743,7 +753,9 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
       return s;
     });
     const data = evmWithdrawCalldata(h.pin.pool, relay, made.proof, made.publicSignals, c.fee, sig);
-    // RESERVED, then the owed send, both before anything leaves the device
+    // a Move past its send-by (or ended) sends nothing (card move-sends-or-says-why); then RESERVED and the owed send,
+    // both before anything leaves the device
+    await h.claim?.();
     await notes.move(p.noteId, "HELD", "RESERVED", { attempt: attempt! });
     reserved = true;
     const owed: EvmPendingOnward = {
@@ -867,7 +879,7 @@ async function sentValue(rpcs: readonly [EvmRpc, EvmRpc], hash: string): Promise
 
 /** The screen's funds on an EVM pool: the landed notes of the pool's scope this page may spend, and this chain's
  *  costs (a plain send's, or To's when typed). */
-export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs" | "pool" | "notes" | "seed64" | "owedNotes">, to?: string): Promise<{ notes: ReturnType<typeof withdrawSources>; fee: bigint; wFee: bigint; minPart: bigint }> {
+export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" | "rpcs" | "pool" | "notes" | "seed64" | "owedNotes">, to?: string): Promise<{ notes: ReturnType<typeof withdrawSources>; fee: bigint; wFee: bigint; minPart: bigint; pieces?: PieceRule }> {
   const notes = await h.notes();
   const owed = (await h.owedNotes?.()) ?? new Set<string>();
   const list = withdrawSources(await notes.list(), h.pool.scope).filter((n) => !owed.has(n.id));
@@ -880,5 +892,5 @@ export async function evmWithdrawFunds(h: Pick<EvmWithdrawHost, "chain" | "pin" 
       c = await evmWithdrawCosts(h, { to, from: w, value: first.part }, c.fee);
     }
   }
-  return { notes: list, fee: c.fee, wFee: c.wFee, minPart: c.minPart };
+  return { notes: list, fee: c.fee, wFee: c.wFee, minPart: c.minPart, ...(c.pieces !== undefined ? { pieces: c.pieces } : {}) };
 }

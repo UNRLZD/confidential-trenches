@@ -31,11 +31,28 @@ const ALLOWED_OPTIONS = ["headless", "args", "slowMo", "timeout"];
 const SANDBOX_OFF = /--(no-sandbox|disable-setuid-sandbox|disable-gpu-sandbox|disable-seccomp-filter-sandbox|disable-namespace-sandbox)\b/;
 const NOT_INSTALLED = "Google Chrome (the stable channel) is not installed, and the checks never fall back to Playwright's bundled Chromium";
 
+// Firefox's Strict tracking protection (card firefox-runs-before-release: the owner's Firefox read "CORS request did not
+// succeed" on its RPC hosts): the one set of prefs a Firefox launch may pass, every key at exactly this value. Any other
+// pref could turn off Firefox's own sandbox (security.sandbox.*) or its certificate checks, so it is refused.
+export const FIREFOX_STRICT = Object.freeze({
+  "privacy.trackingprotection.enabled": true,
+  "privacy.trackingprotection.cryptomining.enabled": true,
+  "privacy.trackingprotection.fingerprinting.enabled": true,
+  "network.cookie.cookieBehavior": 5,
+});
+
 const labels = new WeakMap();
 const warned = new Set();
 
-function refuse(options) {
+/** Throws on a launch option the launcher does not allow `engine`; returns nothing when every option is allowed. */
+export function refuse(options, engine = "chromium") {
   for (const k of Object.keys(options)) {
+    if (k === "firefoxUserPrefs") {
+      const prefs = options[k] ?? {};
+      const exact = engine === "firefox" && typeof prefs === "object" && Object.keys(prefs).length === Object.keys(FIREFOX_STRICT).length && Object.entries(FIREFOX_STRICT).every(([p, v]) => Object.hasOwn(prefs, p) && prefs[p] === v);
+      if (!exact) throw new Error(`browsers: launch option firefoxUserPrefs is refused (only on Firefox, and only exactly FIREFOX_STRICT: ${Object.keys(FIREFOX_STRICT).join(", ")})`);
+      continue;
+    }
     if (!ALLOWED_OPTIONS.includes(k)) throw new Error(`browsers: launch option ${k} is refused (only ${ALLOWED_OPTIONS.join(", ")}; the launcher sets the build, the sandbox and the profile)`);
   }
   for (const a of options.args ?? []) {
@@ -69,12 +86,13 @@ export async function sandboxFlagsOf(browser) {
  */
 export async function launchBrowser(engine = "chromium", options = {}) {
   if (!ENGINES.includes(engine)) throw new Error(`browsers: engine ${engine} is not one of ${ENGINES.join(", ")}`);
-  refuse(options);
+  refuse(options, engine);
   const type = playwright()[engine];
   if (engine !== "chromium") {
     const browser = await type.launch(options);
     const name = engine === "firefox" ? "Firefox" : "WebKit";
     labels.set(browser, `${name} ${browser.version()}, Playwright's build`);
+    welcomed(browser);
     if (!warned.has(engine)) {
       warned.add(engine);
       console.warn(`browsers: WARNING ${engine} runs Playwright's own build (${name} ${browser.version()}), not an installed self-updating browser; it moves to GitHub's runners with ci-live-runners`);
@@ -83,7 +101,34 @@ export async function launchBrowser(engine = "chromium", options = {}) {
   }
   const browser = await startChrome(options);
   scaleByContext(browser, options);
+  welcomed(browser);
   return browser;
+}
+
+/**
+ * Every context opens the app as a returning visitor: the welcome (apps/terminal/src/shell/Welcome.tsx, a first visit's
+ * modal over the app) is marked closed in the app's own storage before any of its documents runs, on the app's hosts
+ * only (the live APP_HOST and the harness's app.ct.test), as the runs set ct-signin-hint. A check reads the app, never
+ * the welcome over it; the welcome's own run (apps/terminal/test/welcome/run.mjs) draws it on a fixture page.
+ */
+const WELCOME_SEEN = () => {
+  try {
+    if (/^ct-app[.-]|^app\.ct\.test$/.test(location.hostname)) localStorage.setItem("ct-welcome", "1");
+  } catch {}
+};
+function welcomed(browser) {
+  const own = { newContext: browser.newContext.bind(browser) };
+  browser.newContext = async (o = {}) => {
+    const ctx = await own.newContext(o);
+    await ctx.addInitScript(WELCOME_SEEN);
+    return ctx;
+  };
+  browser.newPage = async (o = {}) => {
+    const ctx = await browser.newContext(o);
+    const page = await ctx.newPage();
+    page.on("close", () => void ctx.close().catch(() => {}));
+    return page;
+  };
 }
 
 async function startChrome(options) {
@@ -141,6 +186,7 @@ export async function launchDiskProfile(options = {}) {
     rmSync(dir, { recursive: true, force: true });
     throw launchFailure(e);
   }
+  await context.addInitScript(WELCOME_SEEN);
   const page = context.pages()[0] ?? (await context.newPage());
   const session = await context.newCDPSession(page);
   const { product } = await session.send("Browser.getVersion");

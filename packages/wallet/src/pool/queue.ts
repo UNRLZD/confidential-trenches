@@ -88,6 +88,10 @@ export function readySetSize(hardwareConcurrency: number | undefined): number {
   return Math.max(1, Math.min(h - 1, 3));
 }
 
+/** The longest readyWith's read holds the view: the withdraw's own wait for a note the queue lets go (signpage
+ *  pool-withdraw.ts WITHDRAW_FREE_MS, 30 s), so a drop behind a stuck read is back inside a run's wait. */
+export const READY_WITH_MS = 30_000;
+
 /** Provers side by side: one, whatever hardwareConcurrency is; the thread budget goes to that prover's threads. */
 export function proofPoolSize(_hardwareConcurrency: number | undefined): number {
   return 1;
@@ -147,7 +151,9 @@ export interface ProofQueue<R> {
   /** ready() with `read`'s answer (the caller's read of the notes), both in one turn that no swap's write and ready list
    * update falls inside: the list and the notes agree on each note's attempts. `making`: the notes a proof is being made
    * for now (card buy-spends-several-pieces: state.pools' making counts those with none ready), and each note whose
-   * every ready proof is late, made again at the next pass. */
+   * every ready proof is late, made again at the next pass. A `read` with no answer in READY_WITH_MS lets the view go
+   * (card move-sends-or-says-why: else every swap, and so every take, drop and close of its note, waits on it for good)
+   * and the call rejects; the read itself runs on, its answer unused. */
   readyWith<T>(read: () => Promise<T>): Promise<{ ready: ReadyProof<R>[]; value: T; making: string[] }>;
   /** At the tap: refused (and its attempt let go) for a proof made before the previous epoch, a newest-root proof past
    * the next boundary + NEWEST_GRACE_MS, or one with less than sendMarginMs + TAKE_SLACK_MS left; else HELD -> RESERVED,
@@ -703,7 +709,10 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     readyWith: (read) =>
       inView(async () => {
         const t = takeableAt(nowSeen());
-        return { ready: t.ready, value: await read(), making: [...new Set([...inFlight.keys(), ...t.late])] };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const late = new Promise<never>((_, no) => (timer = setTimeout(() => no(new Error(`readyWith: the read gave no answer in ${READY_WITH_MS} ms`)), READY_WITH_MS)));
+        const value = await Promise.race([read(), late]).finally(() => clearTimeout(timer));
+        return { ready: t.ready, value, making: [...new Set([...inFlight.keys(), ...t.late])] };
       }),
     take(noteId, attempt, early, lastHeight, nullifier) {
       live();

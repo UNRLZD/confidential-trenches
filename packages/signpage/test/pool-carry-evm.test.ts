@@ -1,9 +1,10 @@
 // The carry on a Base or Robinhood pool (src/pool-carry-evm.ts): a refused buy's ETH on W goes back into the pool as a
 // note of the user's, found from the chain alone. Two mocked RPCs and a fake-indexeddb note store: the release a
-// Withdrawn of a buy() call to the pool; W's deposit signed under the rule (to the pool, from W, W's whole balance less
-// the fee bound) before it leaves; UNSPENT only from a final Deposited; a lost send built again at its own nonce; a dead
-// one at W's new nonce; a reload and a fresh device the same pass; a withdraw's W, a release the RPCs read apart, dust
-// and a sign out never carried.
+// Withdrawn of a buy() call to the pool; W's deposit signed under the rule (to the pool, from W, the largest rung of
+// EVM_LADDER at or under W's balance less the fee bound, card evm-pool-amounts-are-standard-sizes) before it leaves;
+// UNSPENT only from a final Deposited; a lost send built again at its own nonce; a dead one at W's new nonce; a reload
+// and a fresh device the same pass; a withdraw's W, a release the RPCs read apart, dust and a sign out never carried;
+// what is under the least rung W's tail.
 //   node --test test/pool-carry-evm.test.ts      (from packages/signpage)
 // The seed is the published all-zero vector (packages/wallet/test/vectors/a8.json).
 import assert from "node:assert/strict";
@@ -20,7 +21,7 @@ import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { checkEvmCarry, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmDepositReads, type EvmOnwardSend } from "../src/rules/pool.ts";
 import { EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS } from "../src/pool-deposit-evm.ts";
-import { EVM_BUY_SIGNATURE, EVM_WITHDRAW_SIGNATURE } from "../src/evm-send.ts";
+import { EVM_BUY_SIGNATURE, EVM_WITHDRAW_SIGNATURE, evmSellVerdict, type EvmDeposited, type EvmDepositedRead } from "../src/evm-send.ts";
 import { carryEvmOwed, EVM_CARRY_DONE_KEY, EVM_CARRY_OPEN_KEY, EVM_CARRY_WAIT_KEY, EVM_OWED_BACK_KEY, type EvmCarryHost, type EvmCarryOpen } from "../src/pool-carry-evm.ts";
 import { evmType2Hash } from "../src/evm-tx-hash.ts";
 
@@ -34,7 +35,9 @@ const CHAIN_ID = { base: 8453n, robinhood: 4663n } as const;
 const LABEL = 777n;
 const CHUNK = 1_000_000_000_000_000n; // 0.001 ETH, the ladder's least chunk
 const FEE = 20_000_000_000_000n;
-const OWED = CHUNK - FEE;
+/** What a refused buy of a 0.002 ETH chunk pays W: one rung (0.001 ETH) fits beside the send's bound, the rest is W's
+ *  tail. A refused buy of the least chunk pays W under the least rung (CHUNK - FEE): all of it W's tail. */
+const OWED = 2n * CHUNK - FEE;
 const q = (v: bigint) => "0x" + v.toString(16);
 const word = (v: bigint) => v.toString(16).padStart(64, "0");
 const sel = (sig: string) => "0x" + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString("hex").slice(0, 8);
@@ -215,7 +218,7 @@ const RETURN: NoteRef = { kind: "return", c: "evm", l: LABEL, j: 0 };
 const RETURN_PRE = noteSecrets(SEED, RETURN).precommitment;
 
 for (const name of ["base", "robinhood"] as const) {
-  test(`${name}: a refused buy's ETH on W is carried into the pool by W's own deposit, INCOMING before it leaves, UNSPENT from its final Deposited, W ended carried; the seed zeroed`, async () => {
+  test(`${name}: a refused buy's ETH on W is carried into the pool as one rung by W's own deposit, INCOMING before it leaves, UNSPENT from its final Deposited, W ended carried with its tail written; the seed zeroed`, async () => {
     const ch = chain(name);
     const { ns, ws } = await stores();
     await refused(ch, ns);
@@ -233,7 +236,8 @@ for (const name of ["base", "robinhood"] as const) {
     assert.equal(s.gas, gas);
     assert.equal(s.maxFee, 2n * ch.c.baseFee + EVM_DEPOSIT_PRIORITY_CAP);
     const l1 = name === "base" ? 7_000n : 0n;
-    assert.equal(s.value, OWED - gas * s.maxFee - l1, "W's whole balance less the send's bound");
+    assert.ok(OWED - gas * s.maxFee - l1 > CHUNK && OWED - gas * s.maxFee - l1 < 2n * CHUNK);
+    assert.equal(s.value, CHUNK, "the largest rung at or under W's balance less the send's bound, never W's whole balance");
     const open = await carries(ns, ch.scope);
     assert.equal(open.length, 1);
     assert.equal(open[0]!.state, "INCOMING");
@@ -253,6 +257,8 @@ for (const name of ["base", "robinhood"] as const) {
     assert.deepEqual(await ws.get("meta", EVM_CARRY_DONE_KEY), { [W]: { chain: name, end: "carried" } });
     assert.deepEqual(await ws.get("meta", EVM_OWED_BACK_KEY), {}, "the owed list ends empty");
     assert.deepEqual(await ws.get("meta", EVM_CARRY_OPEN_KEY), {}, "no open carry");
+    // what W still holds, under the least rung, is W's tail: carried to Cash by src/leftover-carry.ts
+    assert.deepEqual(await ws.get("meta", `w-tail/${name}/${W}`), { chain: name, address: W, l: LABEL.toString(), j: 0, amount: (gas * s.maxFee - 100_000n).toString() });
     // ended: never read again
     assert.deepEqual(await carryEvmOwed(h), []);
     assert.equal(ch.c.sent.length, 1);
@@ -324,7 +330,8 @@ test("a dead send (W's nonce past it at a block final on both RPCs, no Deposited
   const b = sentOf(ch.c.sent[1]!);
   assert.equal(b.nonce, 1n);
   assert.equal(b.pre, RETURN_PRE);
-  assert.ok(b.value < sentOf(ch.c.sent[0]!).value);
+  // the value read again from W's new balance: still the largest rung it pays
+  assert.deepEqual([sentOf(ch.c.sent[0]!).value, b.value], [CHUNK, CHUNK]);
 });
 
 test("a withdraw's W (its release not a Buy) is never carried, and ended so; nothing signed", async () => {
@@ -384,6 +391,47 @@ test("dust: W at or under the pool's least deposit is ended empty; over it but u
   assert.equal((await carries(c.ns, sim.scope)).length, 0, "no note written");
 });
 
+test("card evm-pool-amounts-are-standard-sizes: a refused buy's W holding under the least rung (a refused 0.001 ETH buy) deposits nothing: ended empty, all of it W's tail, carried to Cash", async () => {
+  for (const name of ["base", "robinhood"] as const) {
+    const ch = chain(name);
+    ch.c.balance = [CHUNK - FEE, CHUNK - FEE];
+    const { ns, ws } = await stores();
+    await refused(ch, ns);
+    assert.deepEqual(await carryEvmOwed(hostOf(ch, ns, ws, name)), [{ w: W, end: "empty" }], name);
+    assert.equal(ch.c.sent.length, 0, "nothing off the ladder signed");
+    assert.equal((await carries(ns, ch.scope)).length, 0, "no note written");
+    assert.deepEqual(await ws.get("meta", EVM_CARRY_DONE_KEY), { [W]: { chain: name, end: "empty" } });
+    assert.deepEqual(await ws.get("meta", `w-tail/${name}/${W}`), { chain: name, address: W, l: LABEL.toString(), j: 0, amount: (CHUNK - FEE).toString() });
+  }
+});
+
+test("card evm-pool-amounts-are-standard-sizes: a refused buy's W just over the least rung, with no rung beside the send's bound, is W's tail at a usual fee (read at a final block); at a fee over 5% of the least rung it waits", async () => {
+  const ch = chain();
+  ch.c.balance = [CHUNK + 1n, CHUNK + 1n];
+  const { ns, ws } = await stores();
+  await refused(ch, ns);
+  // more at the final block than now: a rung may still fit there, so W is not ended yet
+  ch.c.finBalance = [2n * CHUNK, 2n * CHUNK];
+  ch.c.fin = 99n;
+  const h = hostOf(ch, ns, ws);
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "pending" }]);
+  assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined);
+  ch.c.finBalance = null;
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "empty" }]);
+  assert.equal(ch.c.sent.length, 0, "nothing off the ladder signed");
+  assert.deepEqual(await ws.get("meta", `w-tail/base/${W}`), { chain: "base", address: W, l: LABEL.toString(), j: 0, amount: (CHUNK + 1n).toString() });
+  // a fee spike: the least rung's bound over 5% of it, so a lower fee is waited for, nothing ended
+  const hi = chain();
+  hi.c.balance = [CHUNK + 1n, CHUNK + 1n];
+  hi.c.baseFee = 300_000_000n;
+  const b = await stores();
+  await refused(hi, b.ns);
+  assert.deepEqual(await carryEvmOwed(hostOf(hi, b.ns, b.ws)), [{ w: W, end: "high_fee" }]);
+  assert.equal(await b.ws.get("meta", EVM_CARRY_DONE_KEY), undefined);
+  assert.equal(await b.ws.get("meta", `w-tail/base/${W}`), undefined);
+  assert.equal(hi.c.sent.length, 0);
+});
+
 test("a sign out before W signs: nothing signed, written or sent", async () => {
   const ch = chain();
   const { ns, ws } = await stores();
@@ -404,11 +452,15 @@ test("a release to another W (the note's secrets used elsewhere) is not the user
   assert.deepEqual(await carryEvmOwed(hostOf(ch, ns, ws)), []);
 });
 
-// the rule: every field held as U's deposit is, and W's whole lower balance less the bound exactly
+// the rule: every field held as U's deposit is, and the value the largest rung at or under W's lower balance less the
+// bound exactly (card evm-pool-amounts-are-standard-sizes)
 const READS: EvmDepositReads = { nonce: [0n, 0n], balance: [OWED, OWED + 5n], estimate: [250_000n, 250_000n], baseFee: [1_000_000n, 1_000_000n], l1Fee: [7_000n, 7_000n], stateDepth: [0n, 0n], labelDepth: [0n, 0n], priorityCap: EVM_DEPOSIT_PRIORITY_CAP };
 const GAS = 250_000n + evmDepositHeadroom(0n, 0n);
 const MAXFEE = 2n * 1_000_000n + EVM_DEPOSIT_PRIORITY_CAP;
-const VALUE = OWED - GAS * MAXFEE - 7_000n;
+const BOUND = GAS * MAXFEE + 7_000n;
+/** W's whole lower balance less the bound: off the ladder. */
+const WHOLE = OWED - BOUND;
+const VALUE = CHUNK;
 const callOf = (value: bigint, pre = RETURN_PRE, to = POOL) => Object.freeze({ to, value, data: DEPOSIT + word(value) + word(pre) });
 const txOf = (o: Partial<EvmOnwardSend> = {}, call = callOf(VALUE)): EvmOnwardSend => ({ type: 2, chainId: 8453n, nonce: 0n, maxPriorityFeePerGas: EVM_DEPOSIT_PRIORITY_CAP, maxFeePerGas: MAXFEE, gasLimit: GAS, to: call.to, value: call.value, data: call.data, accessList: [], ...o });
 const ctxOf = (call = callOf(VALUE)) => ({ wallet: W, precommitment: RETURN_PRE, call, pin: PINS.base, chain: "base" as const });
@@ -422,19 +474,29 @@ const rule = (f: () => unknown): string => {
   }
 };
 
-test("checkEvmCarry: W's whole lower balance less the bound, to the pinned pool's deposit, on the pin's chain; signed with W's key only", () => {
+test("checkEvmCarry: the largest rung at or under W's lower balance less the bound, to the pinned pool's deposit, on the pin's chain; signed with W's key only", () => {
   const tx = txOf();
   assert.equal(rule(() => checkEvmCarry(tx, ctxOf(), READS)), "passed");
   const raw = signEvmDeposit(freshWallet(SEED, "evm", LABEL, 0).secretKey, tx);
   assert.equal(sentOf("0x" + Buffer.from(raw).toString("hex")).to, POOL);
   assert.equal(rule(() => signEvmDeposit(freshWallet(SEED, "evm", LABEL, 1).secretKey, tx)), "wallet", "another key never signs W's carry");
-  // W keeping more than the bound: refused, and nothing of it can be signed
-  const less = callOf(VALUE - 1n);
-  const kept = txOf({}, less);
-  assert.equal(rule(() => checkEvmCarry(kept, ctxOf(less), READS)), "carry_whole");
-  assert.equal(rule(() => signEvmDeposit(freshWallet(SEED, "evm", LABEL, 0).secretKey, kept)), "unchecked");
-  const more = callOf(VALUE + 1n);
-  assert.equal(rule(() => checkEvmCarry(txOf({}, more), ctxOf(more), READS)), "balance");
+  // card evm-pool-amounts-are-standard-sizes: W's whole balance less the bound, off the ladder, is refused, and nothing
+  // of it can be signed; so is the Robinhood pool's off-ladder deposit read on chain, and a rung and one wei
+  const whole = callOf(WHOLE);
+  const off = txOf({}, whole);
+  assert.equal(rule(() => checkEvmCarry(off, ctxOf(whole), READS)), "rung");
+  assert.equal(rule(() => signEvmDeposit(freshWallet(SEED, "evm", LABEL, 0).secretKey, off)), "unchecked");
+  for (const v of [1_880_137_434_291_065n, VALUE + 1n, VALUE - 1n]) {
+    const c = callOf(v);
+    assert.equal(rule(() => checkEvmCarry(txOf({}, c), ctxOf(c), { ...READS, balance: [v + BOUND, v + BOUND] })), "rung", `${v}`);
+  }
+  // a smaller rung than the largest W pays: refused, it would leave a rung on W
+  const rich: EvmDepositReads = { ...READS, balance: [3n * CHUNK + BOUND, 3n * CHUNK + BOUND] };
+  assert.equal(rule(() => checkEvmCarry(txOf(), ctxOf(), rich)), "change_rung");
+  const two = callOf(2n * CHUNK);
+  assert.equal(rule(() => checkEvmCarry(txOf({}, two), ctxOf(two), rich)), "passed", "0.002 ETH: the largest rung under 0.003 ETH");
+  // a rung W's balance does not pay beside the bound
+  assert.equal(rule(() => checkEvmCarry(txOf({}, two), ctxOf(two), READS)), "balance");
   const elsewhere = callOf(VALUE, RETURN_PRE, "0x00000000000000000000000000000000000000cc");
   assert.equal(rule(() => checkEvmCarry(txOf({}, elsewhere), ctxOf(elsewhere), READS)), "to");
   assert.equal(rule(() => checkEvmCarry(txOf({ to: "0x00000000000000000000000000000000000000cc" }), ctxOf(), READS)), "to");
@@ -551,11 +613,12 @@ test("the 5% bound counts the tree's depth and Base's L1 fee: a carry at depth 0
   assert.equal(await at("base", 15_000_000n, 0n, 7_000n), "sent");
   assert.equal(await at("base", 15_000_000n, 20n, 7_000n), "high_fee");
   assert.equal(await at("base", 10_000_000n, 0n, 7_000n), "sent");
-  assert.equal(await at("base", 10_000_000n, 0n, 40_000_000_000_000n), "high_fee");
-  assert.equal(await at("robinhood", 10_000_000n, 0n, 40_000_000_000_000n), "sent");
+  // the value is the rung carried (0.001 ETH): a bound of 0.000054 ETH is over 5% of it
+  assert.equal(await at("base", 10_000_000n, 0n, 45_000_000_000_000n), "high_fee");
+  assert.equal(await at("robinhood", 10_000_000n, 0n, 45_000_000_000_000n), "sent");
 });
 
-test("a W still holding the least deposit or more after its carry landed is carried again on its chain's next note, never ended; ended carried once what is left is under it", async () => {
+test("a W still holding the least rung or more after its carry landed is carried again on its chain's next note, never ended; ended carried once what is left is under it", async () => {
   const ch = chain();
   const { ns, ws } = await stores();
   await refused(ch, ns);
@@ -564,14 +627,15 @@ test("a W still holding the least deposit or more after its carry landed is carr
   const a = sentOf(ch.c.sent[0]!);
   ch.land(a.pre, a.value);
   ch.c.nonce = 1n;
-  // more ETH reached W since (a second send to W): W holds more than the least deposit
-  ch.c.balance = [3n * EVM_POOL_MIN_DEPOSIT, 3n * EVM_POOL_MIN_DEPOSIT];
+  // more ETH reached W since (a second send to W): W holds more than the least rung
+  ch.c.balance = [3n * CHUNK, 3n * CHUNK];
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "pending" }], "landed, W not ended");
   assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined);
   assert.deepEqual(await ws.get("meta", EVM_CARRY_OPEN_KEY), {}, "the landed carry's record closed");
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "sent" }]);
   const b = sentOf(ch.c.sent[1]!);
   assert.notEqual(b.pre, a.pre, "the chain's next note");
+  assert.equal(b.value, 2n * CHUNK, "the largest rung of 0.003 ETH less the bound");
   ch.land(b.pre, b.value);
   ch.c.nonce = 2n;
   ch.c.balance = [10n ** 12n, 10n ** 12n];
@@ -651,6 +715,7 @@ test("card buy-any-amount-on-every-chain: a rest W (its release a pool withdraw,
 test("card buy-any-amount-on-every-chain: a rest W whose own buy has no end is never carried (nor ended a withdraw) until its window is long past", async () => {
   const ch = chain();
   ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+  ch.c.balance = [CHUNK - FEE, CHUNK - FEE];
   const { ns, ws } = await stores();
   await refused(ch, ns);
   const h = hostOf(ch, ns, ws);
@@ -660,4 +725,20 @@ test("card buy-any-amount-on-every-chain: a rest W whose own buy has no end is n
   assert.equal(await ws.get("meta", EVM_CARRY_DONE_KEY), undefined, "never ended a withdraw");
   h.clock.t = Number(signBy + (REST.EVM_WBUY_CARRY_AFTER_MS as bigint)) + 1;
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "empty" }], "past the window: carried (here W holds under the least rung: its tail)");
+});
+
+// card pool-amounts-are-standard-sizes-evm: SellDelegate deposits the largest rung at or under the sale's ETH less the
+// fee, so the sale's own deposit holds the rung of the least W signed for (min out less the fee cap), not that least; a
+// deposit of the rung is the sale's (filled), one under the rung, or another depositor's, is not
+test("evmSellVerdict: a sale's deposit of the rung of its least is filled; under that rung, or not from W, it is taken", () => {
+  const W = "0x1111111111111111111111111111111111111111";
+  const P = 77n;
+  const least = 12_345_000_000_000_000n; // min out less the fee cap: the rung under it is 0.01 ETH
+  const dep = (value: bigint, depositor = W): EvmDeposited => ({ block: 9n, blockHash: "0xab", tx: "0xcd", index: 0n, depositor, commitment: 1n, label: 2n, value, precommitment: P });
+  const read = (d: EvmDeposited): EvmDepositedRead => ({ head: 10n, final: 10n, stop: null, to: 10n, ended: false, deposits: [d] }) as unknown as EvmDepositedRead;
+  const end = (d: EvmDeposited) => evmSellVerdict([read(d), read(d)], { precommitment: P, w: W, least })?.end;
+  assert.equal(end(dep(10_000_000_000_000_000n)), "filled", "the rung of the least");
+  assert.equal(end(dep(least)), "filled", "the first sets' delegate: all of it");
+  assert.equal(end(dep(10_000_000_000_000_000n - 1n)), "taken", "under the rung");
+  assert.equal(end(dep(10_000_000_000_000_000n, "0x2222222222222222222222222222222222222222")), "taken", "another depositor");
 });

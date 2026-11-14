@@ -1676,8 +1676,9 @@ test("card helper-evm-range-cap-walk: sepolia.base.org's HTTP 413 \"limited to a
   const r = await sync(pair(c, c, capA, capB)).events();
   assert.equal(r.events.length, 3);
   const b = pageSizes(lb);
-  // the first page refused, then 200 at once (halving went 100,000 to 195 in 9 refusals and paged at 195: 7,693 pages)
-  assert.deepEqual(b.slice(0, 9), [100_000, ...Array(8).fill(200)], `b: ${b.slice(0, 12)}`);
+  // the first page refused, asked again twice (a first refusal may be one backend's: EVM_LOG_REFUSED_AGAIN, card
+  // first-sign-in-reads-fast), then 200 at once (halving went 100,000 to 195 in 9 refusals and paged at 195: 7,693 pages)
+  assert.deepEqual(b.slice(0, 11), [100_000, 100_000, 100_000, ...Array(8).fill(200)], `b: ${b.slice(0, 14)}`);
   const answered = b.filter((n) => n <= 200);
   assert.ok(answered.slice(0, -1).every((n) => n === 200), `b's pages under the cap: ${[...new Set(answered)]}`);
   // a few probes a part: the 200 cap's narrow pages go EVM_POOL_LOG_PAGES_IN_FLIGHT at once (card
@@ -2569,9 +2570,10 @@ test("card helper-evm-range-cap-walk (review LOW): a refusal from the provider a
   ];
   const r = await evmTreeSync({ rpcs: list, pin: PIN, sleep: async () => {} }).events();
   assert.equal(r.events.length, 3);
-  // c refused 100,000 for seat 1 after b's walk: c pages at its own 25,000 at once, never halved from b's page
+  // c refused 100,000 for seat 1 after b's walk: c pages at its own 25,000 once its first refusal is asked again twice
+  // (EVM_LOG_REFUSED_AGAIN, card first-sign-in-reads-fast), never halved from b's page
   const x = pageSizes(lc);
-  assert.deepEqual(x.slice(0, 2), [100_000, 25_000], `c's pages ${x.slice(0, 6)}`);
+  assert.deepEqual(x.slice(0, 4), [100_000, 100_000, 100_000, 25_000], `c's pages ${x.slice(0, 6)}`);
 });
 
 test("card helper-evm-range-cap-walk (re-check of d2b77940): a seat read alone, outside an agreed read, binds no provider: the next agreed read may seat it on the other side", async () => {
@@ -3455,6 +3457,19 @@ test("each refusal of the EVM tree read carries its code: rpc_disagree, root_mis
   const rpcs = pair(c, c);
   rpcs[1] = flaky(rpcs[1], byNumber("latest"), Array(100).fill(() => new SolanaRpcTransportError("http_429", "HTTP 429", 4, "b.example", 9_000)));
   await assert.rejects(evmNow(rpcs, undefined, async () => {}), (e) => e instanceof EvmUnansweredError && coded("unanswered", /latest block: no answer/)(e));
+});
+
+// the settle's heal (evm-settle.ts) backs a landed note out when a round lacks its leaf at its index: it holds only
+// because a round is never short. events() gives the pool's whole leaf list up to its anchor or refuses, never a list
+// missing a leaf at the head, the middle or the tail, as both RPCs (a mixed backend's short page) would give it
+test("an EVM sync round holds every leaf of the pool up to its anchor, or refuses: never a short or gapped list", async () => {
+  const c = C3();
+  const whole = await sync(pair(c, c)).events();
+  assert.equal(whole.events.length, 4);
+  for (const gone of [0, 2, 3]) {
+    const drop = (l: Record<string, unknown>[]) => l.filter((_, i) => i !== gone);
+    await assert.rejects(sync(pair(c, c, { logs: drop }, { logs: drop })).events(), (e) => (e as { code?: unknown }).code === "no_agreed_logs" && /the state tree from the logs \(3 leaves\) is not the pool's/.test(String((e as Error).message)));
+  }
 });
 
 test("card evm-deposit-on-mainnet: a pass's fresh sync after the pool's first deposit reads only past the page's hold of no leaf, never from the deploy block; a hold of no leaf the pool's root does not prove is read again from it, on Base and Robinhood", async () => {

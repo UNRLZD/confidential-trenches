@@ -123,6 +123,9 @@ export type WithdrawRequestArgs = {
   note?: string;
   /** The withdrawal's deadline, in block time, ms (withdrawDeadlineMs). */
   deadlineMs: number;
+  /** Awaited once the proof is made, right before the note goes RESERVED (a move's claim on its send-by, signpage
+   *  cash-to-pool.ts; card move-sends-or-says-why): a throw frees the note UNSPENT and nothing is handed back. */
+  claim?(): Promise<void>;
   /** The newest final block's header.timestamp_nanosec, a decimal string: the lower of two RPCs'. */
   blockTimestampNanosec: string;
 };
@@ -242,6 +245,7 @@ export async function withdrawRequest(a: WithdrawRequestArgs): Promise<WithdrawR
       body = { withdrawal: req.withdrawal, proof: vaultProof(p.proof), public_signals: p.publicSignals, fund_recipient: to === undefined, token };
       // WU-06: RESERVED, with the spent note's ref and so the change index, before the request leaves this function.
       // its body with it, so a later page sends the same bytes again (card signpage-withdraw-handoff: the settle pass)
+      await a.claim?.();
       await notes.move(note.id, "HELD", "RESERVED", { attempt, request: JSON.stringify(body) });
     } catch (e) {
       await free();

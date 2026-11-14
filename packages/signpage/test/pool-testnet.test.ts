@@ -2525,3 +2525,86 @@ test("a proof queue's opening starts the page's one prover worker and loads the 
     await t.signedOut();
   }
 });
+
+// card move-sends-or-says-why: no await with no bound in the page's state read, or before a withdraw run sends. The
+// page's push queue is one chain (src/api.ts), so one state read that never settles stopped every later push; a Move's
+// source release that never ran left the app at Processing. Each bound is the code's own: a queue's open waits for the
+// store and the seed TRADE_STORE_MS (10 s) each, a state read waits for each chain's positions the kit's state timeout
+// (5 s), and a tap with no front in its bound ends the withdraw stopped with its cause.
+const flushed = async (n = 30): Promise<void> => {
+  for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
+};
+const offlinePool = (): never =>
+  ({ id: "solana:offline", chain: "sol", scope: 1n, ladder: SOL_LADDER, epochMs: SOL_EPOCH_MS, lifeMs: SOL_LIFE_MS, sendMarginMs: SOL_SEND_MARGIN_MS, now: async () => assert.fail("offline"), trees: async () => assert.fail("offline"), bind: async () => assert.fail("offline") }) as never;
+
+test("(card move-sends-or-says-why) a proof queue's open whose seed never comes rejects at 10 s: the next pass opens it again, and a seed that comes after is zeroed", async () => {
+  const { w } = await wallet();
+  let calls = 0;
+  let give!: (s: Uint8Array) => void;
+  const late = new Promise<Uint8Array>((r) => (give = r));
+  const t = testnetPool({ store: async () => w, seed64: () => (calls++ === 0 ? late : Promise.resolve(SEED64.slice())) }, { prover: { vault: signalsProver(), stop: () => {} }, evmPin: () => undefined, pool: offlinePool() });
+  let first!: Promise<unknown>;
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    first = t.proofs();
+    await flushed();
+    mock.timers.tick(9_999);
+    await flushed();
+    assert.equal(await realWithin(first, 50), false, "still waiting for the seed at 9.999 s");
+    mock.timers.tick(1);
+    await flushed();
+  } finally {
+    resetTimers(mock.timers);
+  }
+  assert.equal(await realWithin(first, 2_000), true, "the pass ends once the seed's wait passed 10 s");
+  assert.equal(calls, 1);
+  await realWithin(t.proofs(), 2_000);
+  assert.equal(calls, 2, "the next pass opens the queue again");
+  const seed = new Uint8Array(64).fill(7);
+  give(seed);
+  await flushed();
+  assert.ok(seed.every((b) => b === 0), "the seed that came after the open gave up is zeroed");
+});
+
+test("(card move-sends-or-says-why) a state's positions read whose Solana read never answers: answered without it at 5 s", async () => {
+  const { w } = await wallet();
+  const { POSITIONS_KEPT_KEY } = await import("../src/positions.ts");
+  const { STATE_READ_MS } = await import("../src/pool-testnet.ts");
+  assert.equal(STATE_READ_MS, SIGNPAGE_TIMEOUT_MS.state, "the page's bound is the kit's state timeout");
+  // the store's read of the kept positions never answers (Solana's positions read waits on it)
+  const stuck = new Proxy(w, {
+    get: (o, k) =>
+      k === "get" ? (s: string, key: string) => (key === POSITIONS_KEPT_KEY ? new Promise(() => {}) : o.get(s as never, key)) : ((v) => (typeof v === "function" ? v.bind(o) : v))(Reflect.get(o, k)),
+  }) as WalletStore;
+  const t = testnetPool({ store: async () => stuck, seed64: async () => SEED64.slice() }, { prover: { vault: signalsProver(), stop: () => {} }, evmPin: () => undefined, pool: offlinePool() });
+  let p!: Promise<unknown>;
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    p = t.positions();
+    await flushed();
+    mock.timers.tick(4_999);
+    await flushed();
+    assert.equal(await realWithin(p, 50), false, "still waiting at 4.999 s");
+    mock.timers.tick(1);
+    await flushed();
+  } finally {
+    resetTimers(mock.timers);
+  }
+  assert.equal(await realWithin(p, 2_000), true, "answered at 5 s");
+  assert.equal(await p, null, "Solana left out and no EVM row: null, as before any pass");
+});
+
+test("(card move-sends-or-says-why) a withdraw whose tap gets no front in its bound ends stopped with its cause, nothing bound or sent", async () => {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n]);
+  const front = { held: () => true, want: () => {}, release: () => {}, onChange: () => {}, tap: () => Promise.reject(new Error("the proof front: not held in 60000 ms")) };
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, front, ...quickClock() };
+  const run = testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, over).withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  await realWithin(run.catch(() => {}), 5_000);
+  const op = (await wd.w.get("ops", "op-w")) as { stage?: string; cause?: string; txs?: unknown[] } | undefined;
+  assert.equal(op?.stage, "stopped", "the op ends stopped, so a Move on it fails");
+  assert.match(op?.cause ?? "", /^Error\b/, "its cause in public words");
+  assert.deepEqual(op?.txs, []);
+  assert.deepEqual([wd.binds.length, wd.releases.length], [0, 0], "nothing bound or sent");
+  assert.equal((await wd.ns.get(wd.ids[0]!))?.state, "UNSPENT");
+});

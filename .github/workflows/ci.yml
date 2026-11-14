@@ -668,7 +668,7 @@ jobs:
   browser-e2e:
     if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -686,6 +686,14 @@ jobs:
         run: node packages/signpage/test/withdraw-screens/run.mjs
       - name: the signing page's pool withdraw screen at 390 and 1440 wide, on Solana and Base
         run: node packages/signpage/test/pool-withdraw-screens/run.mjs
+      # card firefox-runs-before-release: the owner's Firefox read "CORS request did not succeed" from the page's RPC hosts
+      # (14 Nov, 137 build) and every run above is Chrome. Playwright's Firefox and its system packages, from the cache
+      - name: Playwright's Firefox
+        uses: ./.github/actions/playwright-engines
+        with:
+          engines: firefox
+      - name: the terminal and the signing page in Firefox with Strict tracking protection, each RPC host the page reads failed in turn (restore, balance, a Move's dry run)
+        run: pnpm --filter terminal build && node packages/signpage/scripts/firefox-rpc-blocked.mjs
 
   # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
   # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset. The one

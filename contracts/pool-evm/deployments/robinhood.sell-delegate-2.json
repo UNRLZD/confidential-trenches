@@ -1,0 +1,26 @@
+{
+  "chain": "robinhood",
+  "chainId": 4663,
+  "dryRun": false,
+  "at": "2026-11-14T13:04:57.062Z",
+  "deployer": "0x1eee32715d98fbdb871ffa6dcc71505305a93cc1",
+  "return": "0x9b0de76cb0a21cad9fd37675731f65773508af9e",
+  "need": "101783524908000",
+  "build": "solc 0.8.28 (contracts/pool-evm/foundry.toml), forge Version: 1.7.1-Homebrew",
+  "contracts": {
+    "SellDelegate": {
+      "address": "0x839da08c78b4adde96192e4e482634ac71dfa306"
+    }
+  },
+  "txs": [
+    {
+      "step": "deploy SellDelegate",
+      "hash": "0x4b86fcf9a54be052bafcb6d34566d23aca83f50f13eb3b3dd34f0b943c16f4f4",
+      "contract": "SellDelegate"
+    },
+    {
+      "step": "sweep (the run key's rest back)",
+      "hash": "0x70fcb203dcd41c3e18ff5025ba26677aade637648049e2887a40d09ad940b352"
+    }
+  ]
+}

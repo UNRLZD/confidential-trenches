@@ -56,6 +56,7 @@ const STATES = [
   ["notrades", "S10.14", ["390", "1440"], false],
   ["activity-empty", "S14.1", ["390", "1440"], true],
   ["activity", "S14.2", ["390", "1440"], true],
+  ["move-activity", "S14.2", ["390", "1440"], true],
   ["failed", "S14.2", ["390", "1440"], true],
   ["zeroprice", "S10.4", ["390", "1440"], true],
   ["restored", "S14.3", ["390", "1440"], true],
@@ -105,14 +106,15 @@ const STATES = [
 // the move sheet's fixtures: what each draws once pool.move.dry answers [data-move-state, the flow's steps, each step's state]
 const MOVE_SHEETS = {
   "move-sheet": ["idle", "pool:solana intents:near vault:near", ["idle", "idle", "idle"]],
-  "move-sheet-xy": ["idle", "pool:solana intents:near vault:near intents:base pool:base", ["idle", "idle", "idle", "idle", "idle"]],
-  "move-over": ["idle", "pool:solana intents:near vault:near intents:base pool:base", ["idle", "idle", "idle", "idle", "idle"]],
-  "move-refused": ["idle", "pool:base intents:near vault:near intents:robinhood pool:robinhood", ["idle", "idle", "idle", "idle", "idle"]],
-  "move-running": ["in_vault", "pool:solana intents:near vault:near intents:base pool:base", ["done", "done", "active", "idle", "idle"]],
+  // a pool to a pool is one swap, pool, NEAR Intents, pool (card move-shows-one-swap)
+  "move-sheet-xy": ["idle", "pool:solana intents:base pool:base", ["idle", "idle", "idle"]],
+  "move-over": ["idle", "pool:solana intents:base pool:base", ["idle", "idle", "idle"]],
+  "move-refused": ["idle", "pool:base intents:robinhood pool:robinhood", ["idle", "idle", "idle"]],
+  "move-running": ["in_transit", "pool:solana intents:base pool:base", ["done", "active", "idle"]],
   "move-max": ["idle", "pool:solana intents:near vault:near", ["idle", "idle", "idle"]],
-  "move-min": ["idle", "pool:solana intents:near vault:near intents:base pool:base", ["idle", "idle", "idle", "idle", "idle"]],
+  "move-min": ["idle", "pool:solana intents:base pool:base", ["idle", "idle", "idle"]],
   "move-try": ["idle", "pool:solana intents:near vault:near", ["idle", "idle", "idle"]],
-  "move-done": ["done", "pool:solana intents:near vault:near intents:base pool:base", ["done", "done", "done", "done", "done"]],
+  "move-done": ["done", "pool:solana intents:base pool:base", ["done", "done", "done"]],
 };
 // one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
 // a tap (phone): [chain, the drawn row's text, data-cents, moving]. Vault $73.18; SOL at $150, ETH at $3,000.
@@ -611,12 +613,37 @@ try {
       check((await page.locator('[data-field="move-amount"]').inputValue()) === "0.021049", `@${w.name}: Max fills the exact balance`);
       await page.locator('[data-side="to"] [data-chain="base"]').click();
       await page.clock.runFor(500);
-      check((await page.locator("[data-testid=move-flow]").getAttribute("data-steps")) === "pool:solana intents:near vault:near intents:base pool:base", `@${w.name}: To Base routes through the NEAR vault`);
+      // card move-shows-one-swap: To Base is one swap, and the running Move keeps the steps its dry answered
+      const flow = () => page.locator("[data-testid=move-flow]").getAttribute("data-steps");
+      check((await flow()) === "pool:solana intents:base pool:base", `@${w.name}: To Base is one swap: ${await flow()}`);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `move-tapped-${w.name}.png`) });
       await page.locator('[data-control="move-go"]').click();
       const calls = (await page.evaluate(() => window.__calls)).filter((c) => c.kind === "move");
       check(JSON.stringify(calls) === JSON.stringify([{ kind: "move", from: "solana", to: "base", amount: "0.021049" }]), `@${w.name}: Move asks ${JSON.stringify(calls)}`);
       check((await page.locator('[data-control="move-go"]').isDisabled()) && (await sheet.getAttribute("data-move-state")) === "starting", `@${w.name}: Move runs once`);
+      await page.clock.runFor(2000);
+      check((await flow()) === "pool:solana intents:base pool:base", `@${w.name}: the running Move draws ${await flow()}, want its dry's one swap`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `move-running-tapped-${w.name}.png`) });
+      await ctx.close();
+      // a dry that answers other steps than the default (a move through the NEAR vault): the running Move keeps them too
+      ({ ctx, page } = await open(browser, w, "move-sheet-xy"));
+      const vault = "pool:solana intents:near vault:near intents:base pool:base";
+      await page.evaluate(() => (window.__moveSteps = [["pool_out", "solana"], ["intents", "near"], ["vault_in", "near"], ["vault_out", "near"], ["intents", "base"], ["pool_in", "base"]].map(([step, chain]) => ({ step, chain }))));
+      await page.locator('[data-field="move-amount"]').fill("0.4");
+      await page.clock.runFor(500);
+      check((await flow()) === vault, `@${w.name}: the dry's vault steps drawn: ${await flow()}`);
+      await page.locator('[data-control="move-go"]').click();
+      await page.clock.runFor(2000);
+      check((await flow()) === vault, `@${w.name}: the running Move draws ${await flow()}, want the steps its dry answered`);
+      await ctx.close();
+      // a Move is one Activity row, its legs none: Move, from-chain to to-chain, the amount, its stage and its time
+      ({ ctx, page } = await open(browser, w, "move-activity"));
+      const acts = await page.$$eval(`${form} [data-row]`, (rs) => rs.map((r) => ({ id: r.getAttribute("data-row"), kind: r.getAttribute("data-kind"), text: r.querySelector(".ai")?.innerText.replace(/\s+/g, " ").trim() })));
+      const moves = Object.fromEntries(acts.filter((a) => a.kind === "move").map((a) => [a.id, a.text]));
+      const want = { "mv-run": "Move Solana → Base Processing 02:59 — 0.08 SOL", "mv-cash": "Move NEAR → Solana 02:58 — 12.5 USDC", "mv-fail": "Move Base → Robinhood Transaction failed 02:57 — 0.01 ETH" };
+      check(JSON.stringify(moves) === JSON.stringify(want), `@${w.name}: Move rows ${JSON.stringify(moves)}, want ${JSON.stringify(want)}`);
+      check(!acts.some((a) => a.id === "mv-run/out"), `@${w.name}: a Move's release drawn as its own row`);
+      check((await page.locator(`${form} [data-chip="move"]`).count()) === 1, `@${w.name}: no Move chip`);
       await ctx.close();
     }
   }

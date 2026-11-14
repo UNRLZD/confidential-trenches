@@ -345,7 +345,8 @@ else {
       },
       fee: () => form.fee(),
       cash: () => form.available(),
-      handoff,
+      // the move's claim reaches the request, right before its note goes RESERVED (card move-sends-or-says-why)
+      handoff: handoff && ((w, fee, claim) => handoff(w, fee, undefined, false, claim)),
       // a pool's quote floor, the same read pool.address checks against: an EVM pool's least rung plus one deposit's gas;
       // Solana's rung, one deposit's cost and the rent U_X keeps, its fee read for a message by the pool's pinned fee
       // payer (a deposit's fee is the same for any one signer, and the read names no account of the user's)
@@ -358,6 +359,7 @@ else {
       now: () => Date.now(),
       // the move op (kind "move", src/state.ts opOf): its stages from the hand-off, then from the quote's follow op
       put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
+      update: async (id, change) => (await open()).update("ops", id, (v) => change(v as MoveOpRecord | undefined)),
       follow: async (id) => (await (await open()).get("ops", id).catch(() => undefined)) as MoveFollow | undefined,
       signal,
     });
@@ -403,10 +405,11 @@ else {
       withdraw: (chain) => {
         if (!testnet) return null;
         const run = testnet.withdrawDeps(chain, "").handoff;
-        return run ? (ready, id) => void testnet.withdrawDeps(chain, id).handoff?.(ready) : null;
+        // the move's claim goes with the run (card move-sends-or-says-why): awaited right before its first release leaves
+        return run ? (ready, id, claim) => void testnet.withdraw(ready, id, claim) : null;
       },
       op: async (id) => (await (await open()).get("ops", id).catch(() => undefined)) as Awaited<ReturnType<PoolToCashDeps["op"]>>,
-      put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
+      update: async (id, change) => (await open()).update("ops", id, (v) => change(v as MoveOpRecord | undefined)),
       now: () => Date.now(),
       signal,
       // pool to pool (card move-one-confidential-swap): one confidential swap, X's coin into Y's pool to U_Y, quoted by the
@@ -714,7 +717,7 @@ else {
         // falls between them, so a note that stays ready never reads as ready "0". A failed notes read is kept and
         // thrown inside withPools, whose own catch answers the state without pools, as before: state never throws
         const both = s.signed_in && testnet && PAGE_POOLS.length > 0 ? await testnet.readyWith(notesOrError).catch(() => null) : null;
-        const notes = both ? async () => ("e" in both.value ? Promise.reject(both.value.e) : both.value.v) : pageNotes;
+        const notes = both ? async () => ("e" in both.value ? Promise.reject(both.value.e) : both.value.v) : stateNotes;
         // the vault's USDC from the same notes (src/vault-balance.ts, card signpage-state-holdings): one read shared
         // with state.pools, so both totals come from one view of the store
         let read: Promise<NoteRecord[]> | null = null;
@@ -1356,6 +1359,12 @@ const namer = depositNamer({
 async function pageNotes(): Promise<NoteRecord[]> {
   return readNotes(await open());
 }
+// the state's totals' notes (card portfolio-counts-every-note): a record the note store refuses is left out of
+// vault_balance and state.pools, its key logged so the record can be read, never every total zeroed with it; the note
+// store's own paths (every spend, withdraw and Move) still refuse it
+async function stateNotes(): Promise<NoteRecord[]> {
+  return readNotes(await open(), (key, e) => console.warn(`notes: record ${key} left out of the totals: ${String((e as Error)?.message ?? e).slice(0, 200)}`));
+}
 // the ops store's records, read only (state.deposit_wallets, and the namer's held: pool-deposit-follow.ts uxHeldOf)
 async function pageOps(): Promise<unknown[]> {
   const st = await open();
@@ -1375,9 +1384,9 @@ async function ownRefund(chain: PoolChain, scope: bigint, index: number, id: str
 async function pageTails(): Promise<unknown[]> {
   return storedTails(await open());
 }
-// pageNotes for the queue's readyWith: its failure kept as a value, so the turn ends and the state's withPools throws it
+// stateNotes for the queue's readyWith: its failure kept as a value, so the turn ends and the state's withPools throws it
 // in its own catch
-const notesOrError = (): Promise<{ v: NoteRecord[] } | { e: unknown }> => pageNotes().then((v) => ({ v }), (e: unknown) => ({ e }));
+const notesOrError = (): Promise<{ v: NoteRecord[] } | { e: unknown }> => stateNotes().then((v) => ({ v }), (e: unknown) => ({ e }));
 // a change to the notes, heard on the shell's channel (this document's store and other tabs'): name again
 function notesMoved(e: WalletEvent): void {
   if (!shell || (pageScope() === null && PAGE_POOLS.length === 0) || e?.kind !== "changed" || !Array.isArray(e.stores) || !e.stores.includes("notes")) return;

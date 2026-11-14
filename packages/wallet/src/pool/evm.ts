@@ -80,6 +80,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, evmTwoOperators, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type EvmTwoOperators, type EvmTwoOperatorsOpts, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
+import type { PieceRule } from "./pieces.ts";
 import { POOL_TESTNET, SIGN_MAINNET } from "./network.ts";
 import { perEpoch, PoolNoLeafError, PoolReadError, TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
@@ -93,6 +94,13 @@ export type EvmRpc = SolanaRpc;
  * 3 Nov 05:00Z on two RPCs each (Base 0.005 gwei, Robinhood 0.0201 gwei) that is 6.7e12 and 2.7e13 wei, so M356 (4)'s
  * 2 x (G x basefee), before the L1 fee, is 1.3% and 5.4% of 0.001 ETH, far under the pool's 50% backstop. */
 export const EVM_LADDER: Ladder = Object.freeze({ one: 100_000_000_000_000n, min: 1_000_000_000_000_000n });
+/** The Base and Robinhood pools' piece rule (./pieces.ts; card evm-pool-amounts-are-standard-sizes), as SOL_PIECES is
+ *  Solana's: every release a rung of EVM_LADDER from 0.001 ETH, on the grid of the pool's MIN_DEPOSIT (0.0001 ETH), and
+ *  a note's change 0 or at least the least rung, so no step leaves wei in the pool that no release can take. `least`,
+ *  the least note made before the rule a release still takes whole: MIN_DEPOSIT, the least any deposit made (a sale's
+ *  deposit back is what the sale brought less the fee, to the wei: 1,880,137,434,291,065 on Robinhood, 13 Nov 21:06Z,
+ *  which the largest rung alone would leave 880,137,434,291,065 of in the pool for good). */
+export const EVM_PIECES: PieceRule = Object.freeze({ grid: EVM_LADDER.one, floor: EVM_LADDER.min, ladder: EVM_LADDER, least: EVM_LADDER.one });
 export const EVM_EPOCH_MS = 60_000n;
 /** EVM's send margin (M356 (1)): 60 s, the helper's EVM_POOL_SEND_MARGIN_MS; this file's until card evm-pool-fee-kit
  * makes it the kit's constant (M371 (2)). */
@@ -155,6 +163,12 @@ export const EVM_POOL_LOG_PAGE_MAX_BLOCKS = 800_000n;
  * Sepolia pool's deploy block "query exceeds max block range 10000" and answered the rest (6 Nov 07:44Z), and the
  * restore's Base Sepolia sync there took 96 pages and 21 refusals where PublicNode took 31 and 3 (07:47Z). */
 export const EVM_LOG_REFUSED_AGAIN = 2;
+/** A refusal naming a span under the widest page its provider answered in full is one backend's words, never the
+ * provider's cap: the same page again at once, at most this many times in a row, then halved as any refusal. Read 14 Nov
+ * 10:2xZ from this Mac (card first-sign-in-reads-fast): base.api.pocket.network refused 46 of 153 calls of the Base
+ * pool's sync "block range exceeds maximum 500" or "max 10001 blocks" at sizes it answered up to 100,000, so three in a
+ * row (EVM_LOG_REFUSED_AGAIN's bound) halved a page about once in 37; seven in a row at that rate, about once in 5,000. */
+export const EVM_LOG_BACKEND_AGAIN = 6;
 /** A pool sync's page at or under this many blocks on a provider is narrow (card restore-walks-every-pool-on-129):
  * the seats' read keeps EVM_POOL_LOG_PAGES_IN_FLIGHT of its pages in flight there, never one after another. Release
  * 129's live run 43449697702 (13 Nov 15:10Z) never walked every pool in 120 s: robinhood.api.pocket.network's
@@ -477,6 +491,10 @@ export const EVM_SPARE_REST_MS = 60_000;
  * A pair passed in again (evmPool's to evmTreeSync, the restore's) is that pair, so its reads bind its own seats. Read live: the kit's Base list seats blastapi second, which
  * caps a getLogs at 10 blocks (evm-transfer-rpc-spares), and sepolia.base.org answers HTTP 413 "eth_getLogs is limited
  * to a 200 range" (6 Nov 18:51Z), where publicnode takes 50,000 and Pocket 100,000.
+ * A provider marked `logs: false` (EvmRpc's own field; card move-sends-or-says-why: mainnet.base.org, which answers every
+ * eth_getLogs 429 -32011 "request limit reached", read 6 Nov and 14 Nov 13:16Z) is a member for every other read and is
+ * never asked an eth_getLogs: a seat on it walks on for that call, and with none free the call is refused there, so the
+ * read goes to the sync's sources (evmTreeSync) and the provider is never rested for a page it was never fit for.
  */
 export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   if (!Array.isArray(list) || list.length < 2 || list.some((r) => typeof r !== "function")) throw new Error(`${what}: two or more`);
@@ -505,6 +523,8 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   // the narrow provider each seat last took for want of a wider one (cheapest): a seat leaves it for any wider one
   const narrowed: (number | null)[] = [null, null];
   const free = (k: number, i: number) => i !== at[1 - k] && !sides[1 - k]!.has(i) && open[1 - k]![i] === 0;
+  // a member that pages no logs (its `logs: false`)
+  const logless = (i: number): boolean => (list[i] as { logs?: unknown }).logs === false;
   const rested = (i: number) => restUntil[i]! <= Date.now();
   // each provider's eth_getLogs cap as its last refusal named it (null: none known), the widest span it answered, and
   // how long its last call took (ms: a page's cost there)
@@ -572,6 +592,14 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
       for (;;) {
         const i = at[k]!;
         if (asked.has(i)) throw asked.get(i);
+        // a member that pages no logs is never asked one: the seat walks on for this call, or the call is refused here
+        if (method === "eth_getLogs" && logless(i)) {
+          asked.set(i, new Error(`${(list[i] as { url?: string }).url ?? "this provider"} pages no logs`));
+          const n = next(k, span, asked);
+          if (n === null) throw asked.get(i);
+          at[k] = n;
+          continue;
+        }
         open[k]![i]!++;
         const t0 = Date.now();
         let r: unknown;
@@ -587,7 +615,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           // a cap under the widest span this provider answered: one of its backends' (card first-sign-in-reads-fast:
           // robinhood.api.pocket.network answered 100,000 blocks and then "max 10001" on most calls, 513 calls in one box
           // run of the sign-in, 14 Nov 04:38Z). The seat walks to a free spare not known to be narrow, asked at once; with
-          // none, the refusal goes up and the pager asks again (EVM_LOG_REFUSED_AGAIN). Its cap is not set, nor is it rested
+          // none, the refusal goes up and the pager asks again (EVM_LOG_BACKEND_AGAIN). Its cap is not set, nor is it rested
           const backend = !capped && span !== null && cap !== null && cap >= 1n && cap < span;
           if (backend) {
             if (at[k] !== i) continue; // another call on this seat moved it already
@@ -1012,7 +1040,8 @@ export function evmPoolLogPager(): EvmLogPager {
  * the provider ever answered in full, which takes the page back to that width (the read's ceiling), never below it.
  * Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page (or, naming a span
  * under it and no smaller than the provider answered in full, takes it to that span, CAP_SPANS), but one no wider
- * than the provider answered in full, asked again at once first (EVM_LOG_REFUSED_AGAIN); after a full page
+ * than the provider answered in full, asked again at once first (EVM_LOG_REFUSED_AGAIN; EVM_LOG_BACKEND_AGAIN for a span named
+ * under it, and EVM_LOG_REFUSED_AGAIN for the read's first refusal naming a span before any page was answered); after a full page
  * reads, the page doubles again, up to the rules' max and below the smallest size refused in this read until the
  * rules' ceilingPages full pages in a row have read under it (doubled while its probe meets that same size), so a
  * cap lifted, a refusal under the cap or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG)
@@ -1093,7 +1122,21 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
         await sleep(throttleWaitMs(tries, t.afterMs), signal);
         continue;
       }
-      if (end > at && p.answered !== null && end - at + 1n <= p.answered && ++again <= EVM_LOG_REFUSED_AGAIN) continue;
+      const named = capSpanOf(m);
+      // the same page again at once (a fresh draw of the provider's backends), never halved: a span named under the
+      // widest this provider answered in full is one backend's (EVM_LOG_BACKEND_AGAIN); any other refusal no wider
+      // than that, or the read's first refusal naming a span before this provider or this read answered any page, may be
+      // one too
+      // (EVM_LOG_REFUSED_AGAIN, card first-sign-in-reads-fast: base.api.pocket.network's first call "max 10001")
+      const asks =
+        p.answered !== null && end - at + 1n <= p.answered
+          ? named !== null && named < p.answered
+            ? EVM_LOG_BACKEND_AGAIN
+            : EVM_LOG_REFUSED_AGAIN
+          : p.answered === null && widest === null && refused === null && named !== null && named >= 1n && named < end - at + 1n
+            ? EVM_LOG_REFUSED_AGAIN
+            : 0;
+      if (end > at && ++again <= asks) continue;
       if (end > at) {
         again = 0;
         // a cap that names its span at most half this page: that span at once, held as the read's ceiling just past it
@@ -1101,7 +1144,6 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
         // nearer the page is halved past, so no words step the page down a block a call (review fold 2); never under a
         // page this provider or this read answered in full, where the words are one backend's, not its cap (Pocket's,
         // 6 Nov 07:44Z; review fold 3)
-        const named = capSpanOf(m);
         const floor = p.answered !== null && (widest === null || p.answered > widest) ? p.answered : widest;
         if (named !== null && named >= 1n && named <= (end - at + 1n) / 2n && (floor === null || named >= floor)) {
           ceiling(named + 1n);
@@ -1571,7 +1613,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   for (const r of [...(a.history ?? []), ...a.rpcs]) {
     if (typeof r !== "function") throw new Error("history: providers");
     const op = evmSourceOperator(r);
-    if (!SEATS.has(r) && op !== null && !sources.some((s) => s.op === op)) sources.push({ rpc: r, op });
+    // nor one that pages no logs (evmPair's `logs: false`): asked a page it answers a throttle, which pauses its host
+    if (!SEATS.has(r) && op !== null && (r as { logs?: unknown }).logs !== false && !sources.some((s) => s.op === op)) sources.push({ rpc: r, op });
   }
   // each source's logs from a round's first block up to its finalized anchor, by operator: a later round's read of that
   // source starts past them
@@ -2433,6 +2476,7 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
     chain: "evm",
     scope,
     ladder: EVM_LADDER,
+    pieces: EVM_PIECES,
     epochMs: EVM_EPOCH_MS,
     lifeMs: EVM_LIFE_MS,
     sendMarginMs: EVM_SEND_MARGIN_MS,

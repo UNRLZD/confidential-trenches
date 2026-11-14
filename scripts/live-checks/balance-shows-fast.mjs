@@ -35,8 +35,9 @@ const ADOPT = new RegExp(`${V}\\[1\\]!==${V}\\(${V},${V}\\.ref\\)\\.nullifierHas
 // the gate's next proof: a waiting "max" one, else a "rest" one only while nothing holds the gate
 const GATE = new RegExp(`${V}\\.max\\.shift\\(\\)\\?\\?\\(${V}===0\\?${V}\\.rest\\.shift\\(\\):void 0\\)`);
 // a queue opened with its kept proofs in the wallet store and on the gate: skip: the owed notes,
-// kept: keptProofs(await store(), pool.id), ranked: the page's one gate
-const WIRED = new RegExp(`skip:${V},kept:${V}\\(await ${V}\\.store\\(\\),${V}\\.id\\),ranked:${V}\\}`, "g");
+// kept: keptProofs(await store(), pool.id), ranked: the page's one gate; since card move-sends-or-says-why (T1) the store
+// is the page's own opener, bounded: keptProofs(await openStore(), pool.id)
+const WIRED = new RegExp(`skip:${V},kept:${V}\\(await ${V}(?:\\.store)?\\(\\),${V}\\.id\\),ranked:${V}\\}`, "g");
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {

@@ -2,7 +2,8 @@
 // each note's change 0 or spendable), To's refusals, the chain's costs read on two RPCs (a plain send, a To with code:
 // its estimate and margin and its run on both, refused when it reverts or the two disagree), the release's calldata
 // byte for byte the pool's testnet run's encoding, and an owed send's finish after a reload. The two RPCs are fakes.
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
@@ -1234,4 +1235,69 @@ test("an epoch cut refused for any other reason (the two RPCs apart: PoolReadErr
   assert.equal(world.chain.binds.length, 0, "nothing bound");
   assert.equal(world.chain.sends, 0, "nothing sent");
   assert.equal((await world.notes.get(world.noteId))?.state, "UNSPENT", "the note stays spendable");
+});
+
+test("card evm-pool-amounts-are-standard-sizes: a Base or Robinhood withdraw releases rungs of the 1-2-5 ladder from 0.001 ETH (or an older note whole), each change 0 or a note a release still moves", async () => {
+  const { isRung } = await import("../../wallet/src/pool/ladder.ts");
+  const { EVM_LADDER } = await import("../../wallet/src/pool/evm.ts");
+  for (const chain of ["base", "robinhood"] as const) {
+    // the pool's piece rule as the wallet's evmPool carries it (its EVM_PIECES: the 0.0001 ETH grid, the 0.001 ETH floor
+    // and least rung, an older note from 0.0001 ETH released whole; wallet test/pool-standard-sizes-evm.test.ts)
+    const pieces = { grid: 10n ** 14n, floor: 10n ** 15n, ladder: EVM_LADDER, least: 10n ** 14n };
+    const c = await evmWithdrawCosts({ ...hostOf(chain), pool: Object.assign(poolOf(), { pieces }) }, { to: TO, from: W, value: 10n ** 14n });
+    const notes = [{ id: "a", value: 5n * 10n ** 15n }, { id: "b", value: 2n * 10n ** 15n }, { id: "old", value: 1_880_137_434_291_065n }];
+    // what a release of a rung (or an older note whole) sends To: the chunk less the fee and W's fee, one or several
+    const k = c.fee + c.wFee;
+    for (const amount of [10n ** 15n - k, 2n * 10n ** 15n - k, 3n * 10n ** 15n - 2n * k, 1_880_137_434_291_065n - k, 7n * 10n ** 15n - 2n * k]) {
+      const plan = planPoolWithdraw(notes, amount, c);
+      assert.ok(plan, `${chain}: a plan for ${amount}`);
+      assert.equal(plan!.reduce((t, p) => t + p.part, 0n), amount, `${chain}: exactly ${amount} arrives`);
+      for (const p of plan!) {
+        const note = notes.find((n) => n.id === p.noteId)!;
+        assert.ok(isRung(EVM_LADDER, p.chunk) || p.chunk === note.value, `${chain} ${amount}: a release of ${p.chunk} from ${note.value}, off the ladder`);
+        const left = note.value - p.chunk;
+        assert.ok(left === 0n || left >= EVM_LADDER.min, `${chain} ${amount}: ${left} wei left in the note, under the least rung`);
+      }
+    }
+  }
+});
+
+// card move-sends-or-says-why: the part's drop of a note this page's queue holds waits in the note's turn, behind a swap
+// and a state read; one that never settled held the run in proving with no end, so a Move on it stayed at Processing.
+// Bounded as the wait for the note after it (EVM_WITHDRAW_FREE_MS, 30 s): the part stops, nothing bound or sent, the note as the
+// queue holds it.
+test("(card move-sends-or-says-why) a note the page's queue holds whose drop never settles: the run stops at 30 s with its cause, nothing bound or sent", async () => {
+  const world = await runWorld({ change: true, thisEpoch: true });
+  const held = (await world.notes.move(world.noteId, "UNSPENT", "HELD", { deadlineMs: NOW + 400_000n, context: "1" })).attempt!;
+  // the clock moves only once the run asked its drop, so the bound's timer is set first however slow the box's turns
+  let asked!: () => void;
+  const dropped = new Promise<void>((r) => (asked = r));
+  world.h.drop = () => (asked(), new Promise<void>(() => {}));
+  const flushed = async (): Promise<void> => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+  };
+  const pending = <T>(p: Promise<T>): Promise<T | "pending"> => Promise.race([p, flushed().then(() => "pending" as const)]);
+  let run!: Promise<{ stage: string; cause?: string }>;
+  enableTimers(mock.timers, { apis: ["setTimeout"] });
+  try {
+    run = runEvmPoolWithdraw(world.h, RUN_ASK, TO, PART, MAX);
+    await dropped;
+    await flushed();
+    mock.timers.tick(29_999);
+    assert.equal(await pending(run), "pending", "the drop waited for until 30 s");
+    mock.timers.tick(1);
+    await flushed();
+  } finally {
+    resetTimers(mock.timers);
+  }
+  // the stop's store writes take more turns than `pending` waits on a loaded box (14 Nov 13:19Z, the heavy box): held to
+  // 5 s of real time once the clock is real again, far short of a run held for good
+  const got = await Promise.race([run, new Promise<"pending">((r) => setTimeout(() => r("pending"), 5_000).unref())]);
+  assert.notEqual(got, "pending", "the run ends at 30 s");
+  const end = got as { stage: string; cause?: string };
+  assert.equal(end.stage, "stopped");
+  assert.match(end.cause ?? "", /^Error drop\b/, `the part's stop and its word: ${end.cause}`);
+  assert.deepEqual([world.chain.sends, world.chain.sent.length], [0, 0], "nothing sent");
+  const n = await world.notes.get(world.noteId);
+  assert.deepEqual([n?.state, n?.attempt], ["HELD", held], "the note as the queue holds it");
 });

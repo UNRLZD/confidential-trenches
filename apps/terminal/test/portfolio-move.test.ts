@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
 import { pools } from "../src/screens/portfolio/model.ts";
 import { checkAmount, exact, moveOp, moveRunning, moveShips, nodesOf, poolTotal, reach, readDry, readLimits, routeSteps, rowCents, stepStates } from "../src/screens/portfolio/move.ts";
+import type { MoveStep } from "../src/screens/portfolio/move.ts";
 import { DRAFTS, WORDS } from "../src/screens/portfolio/words.ts";
 
 const NOW = Date.parse("2026-11-13T20:00:00Z");
@@ -29,22 +30,24 @@ const STATE: SignpageState = {
   ],
 };
 
-// pool.move.dry's steps as the one-balance card fixed them (kit 1.15)
+// pool.move.dry's steps through the NEAR vault, as the one-balance card fixed them (kit 1.15): a page before release 136
+// answered them, and a move written then resumes on them (packages/signpage pool-to-cash.ts)
 const X_Y = [["pool_out", "solana"], ["intents", "near"], ["vault_in", "near"], ["vault_out", "near"], ["intents", "base"], ["pool_in", "base"]];
+const X_Y_STEPS = X_Y.map(([step, chain]) => ({ step, chain }) as MoveStep);
 const pairs = (s: { step: string; chain: string }[] | null) => s?.map((x) => [x.step, x.chain]);
 
-test("the route: Cash to a pool one NEAR Intents leg; a pool to Cash ends in the vault; pool to pool stops in the NEAR vault", () => {
+test("the route: Cash to a pool one NEAR Intents leg; a pool to Cash ends in the vault; pool to pool one swap", () => {
   assert.deepEqual(pairs(routeSteps("near", "solana")), [["vault_out", "near"], ["intents", "solana"], ["pool_in", "solana"]]);
   assert.deepEqual(pairs(routeSteps("base", "near")), [["pool_out", "base"], ["intents", "near"], ["vault_in", "near"]]);
-  assert.deepEqual(pairs(routeSteps("solana", "base")), X_Y);
+  assert.deepEqual(pairs(routeSteps("solana", "base")), [["pool_out", "solana"], ["intents", "base"], ["pool_in", "base"]]);
   assert.equal(routeSteps("base", "base"), null);
   // the flow draws the vault's in and out as one stop: pool, NEAR Intents, NEAR vault, NEAR Intents, pool
-  assert.deepEqual(nodesOf(routeSteps("solana", "base")!).map((n) => `${n.kind}:${n.chain}`), ["pool:solana", "intents:near", "vault:near", "intents:base", "pool:base"]);
+  assert.deepEqual(nodesOf(X_Y_STEPS).map((n) => `${n.kind}:${n.chain}`), ["pool:solana", "intents:near", "vault:near", "intents:base", "pool:base"]);
   assert.deepEqual(nodesOf(routeSteps("near", "robinhood")!).map((n) => `${n.kind}:${n.chain}`), ["vault:near", "intents:robinhood", "pool:robinhood"]);
 });
 
 test("the steps follow the op's stage, never back: the second in_transit is the leg after the vault", () => {
-  const five = nodesOf(routeSteps("solana", "base")!);
+  const five = nodesOf(X_Y_STEPS);
   const three = nodesOf(routeSteps("near", "solana")!);
   let r = -1;
   const go = (n: typeof five, st: Parameters<typeof reach>[1]) => ((r = reach(n, st, r)), stepStates(n, st, r));

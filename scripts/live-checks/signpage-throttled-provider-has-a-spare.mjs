@@ -25,8 +25,11 @@ import { writeFileSync } from "node:fs";
 import { EXIT, pageRefuses, preflight, preflightRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 export const SIGN = "https://confidential.unrealized.trade";
-/** The seat, in its order (provider A, then the spare), as the page's source names it. */
-export const SEATS = ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"];
+/** The seat, in its order (provider A, then its spares), as the page's source names it: the second spare since card
+ *  move-sends-or-says-why (solanavibestation, the one where a page walks when provider A and Pocket both fail). */
+export const SEATS = ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://public.rpc.solanavibestation.com"];
+/** The pause between a seat's reads of one stable account each (see read()). */
+export const READ_GAP_MS = 1_200;
 /** Ten accounts whose bytes never change: native and loader-held programs, and the mainnet pool program the page pins
  *  (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet). Ten is publicnode's cap for one getMultipleAccounts. */
 export const STABLE = [
@@ -86,7 +89,7 @@ export function check(a) {
   const read = hashes.filter((h) => h !== undefined);
   if (read.length === SEATS.length) {
     const same = read[0] !== null && read.every((h) => h === read[0]);
-    say(same, same ? `both seats answer the same bytes (sha256 ${read[0].slice(0, 16)})` : `the seats answer different bytes: ${SEATS.map((u, i) => `${new URL(u).host} ${hashes[i]?.slice(0, 16) ?? "none"}`).join(", ")}`);
+    say(same, same ? `every seat answers the same bytes (sha256 ${read[0].slice(0, 16)})` : `the seats answer different bytes: ${SEATS.map((u, i) => `${new URL(u).host} ${hashes[i]?.slice(0, 16) ?? "none"}`).join(", ")}`);
   }
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
   return { verdict, ok: verdict === "PASS", lines };
@@ -99,14 +102,26 @@ export async function read(fetchFn = fetch) {
   const run = { at: new Date().toISOString(), index, app: { sha384: sha384(js), names: SEATS.filter((u) => ['"', "'", "`"].some((q) => js.includes(`${q}${u}${q}`))) }, seats: {} };
   for (const u of SEATS) {
     const pre = await preflight(u, SIGN, { fetchFn });
-    const a = await rpcAnswer(u, "getMultipleAccounts", [STABLE, { encoding: "base64", commitment: "finalized" }], { fetchFn, headers: { origin: SIGN }, redirect: "error" });
-    const value = a.result?.value;
+    // one stable account a read, READ_GAP_MS apart, the values joined in STABLE's order: the same JSON as one read of all
+    // ten. solanavibestation answers 429 to all ten in one read, and to single reads close behind the ~240 KB of
+    // program bytes (read 14 Nov 14:05Z: each alone 200 at 1.2 s apart; back to back 200 200 200 200 429 429 200 429 429 429)
+    let a = null;
+    const value = [];
+    for (const k of STABLE) {
+      if (value.length > 0) await new Promise((r) => setTimeout(r, READ_GAP_MS));
+      a = await rpcAnswer(u, "getMultipleAccounts", [[k], { encoding: "base64", commitment: "finalized" }], { fetchFn, headers: { origin: SIGN }, redirect: "error" });
+      if (a.noAnswer !== undefined || a.error !== undefined || !Array.isArray(a.result?.value)) break;
+      value.push(...a.result.value);
+    }
+    if (a.noAnswer === undefined && a.error === undefined && Array.isArray(a.result?.value)) a = { ...a, result: { value } };
+    else if (a.noAnswer === undefined && a.error === undefined) a = { ...a, result: { value: null } };
     const post = { status: a.status ?? null, acao: a.acao ?? null };
     if (a.noAnswer !== undefined) post.noAnswer = a.noAnswer;
     else if (a.error !== undefined) post.error = a.error;
     else {
-      post.accounts = Array.isArray(value) ? value.filter((v) => v !== null && typeof v === "object").length : 0;
-      post.sha256 = Array.isArray(value) ? createHash("sha256").update(JSON.stringify(value)).digest("hex") : null;
+      const got = a.result?.value;
+      post.accounts = Array.isArray(got) ? got.filter((v) => v !== null && typeof v === "object").length : 0;
+      post.sha256 = Array.isArray(got) ? createHash("sha256").update(JSON.stringify(got)).digest("hex") : null;
     }
     run.seats[u] = { preflight: pre, post };
   }

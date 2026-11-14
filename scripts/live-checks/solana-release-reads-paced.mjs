@@ -77,8 +77,9 @@ export function facts(index, js) {
   const p = PACED.exec(js)?.[1];
   const a = urlVar(js, "https://solana-rpc.publicnode.com");
   const h = urlVar(js, "https://ct-api.unrealized.trade");
-  // the public seat (card signpage-throttled-provider-has-a-spare): provider A, then Pocket's gateway, nothing else
-  const seats = a ? [...js.matchAll(new RegExp(`(?<![\\w$])(${N})=Object\\.freeze\\(\\[${a},${Q}https://solana\\.api\\.pocket\\.network${Q}\\]\\)`, "g"))].map((x) => esc(x[1])) : [];
+  // the public seat (card signpage-throttled-provider-has-a-spare): provider A, then Pocket's gateway, then any further
+  // device-direct member as a quoted https URL (card move-sends-or-says-why: Solana Vibe Station's), never the helper's
+  const seats = a ? [...js.matchAll(new RegExp(`(?<![\\w$])(${N})=Object\\.freeze\\(\\[${a},${Q}https://solana\\.api\\.pocket\\.network${Q}(?:,${Q}https://(?!ct-api\\.)[a-z0-9.-]+${Q})*\\]\\)`, "g"))].map((x) => esc(x[1])) : [];
   const s = seats.length ? `(?:${seats.join("|")})` : undefined;
   const t = p ? TIMED(p).exec(js)?.[1] : undefined;
   const f = FAULT.exec(js)?.groups?.F;

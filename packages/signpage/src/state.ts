@@ -20,7 +20,7 @@
 //   false, so the Backup dot shows, and no `way`, which the kit's state type leaves optional: the frame does not know it
 //   and says nothing. A status with no seed is signed out: signed_in comes from the seed's key alone.
 // - ops: every record of the store's "ops", keyed by its op id, as { id, kind, stage, txs, code? } and a deposit's facts, a
-//   pool deposit's chain and facts, and any op's created_ms, chain, token, units and amount_usd (kit OpDetail; the op contract is
+//   pool deposit's chain and facts, a move's chains and amounts and its record's error as code, and any op's created_ms, chain, token, units and amount_usd (kit OpDetail; the op contract is
 //   at readOps). Only those fields are copied (a tx as { chain, hash }), and only when the op passes the kit's own state
 //   schema, the one the client checks every answer against: a record of another shape is left out, never sent, so one
 //   bad record cannot make the client refuse the whole state. Oldest first by created_ms; past the kit's
@@ -103,6 +103,10 @@ export function opOf(id: string, rec: unknown): Operation | null {
   if (rec.kind === "move") for (const k of ["from", "to", "amount", "out"] as const) if (rec[k] !== undefined) op[k] = rec[k];
   const fits = (o: Record<string, unknown>): boolean => SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [o as Operation]));
   if (!fits(op)) return null;
+  // why a move failed before it sent (card move-sends-or-says-why, kit 1.18; cash-to-pool.ts MoveOpRecord.error) as its
+  // op's code, the buy and sell ops' field: copied only when the op still fits with it, so a code of another shape
+  // costs that field, never the op
+  if (rec.kind === "move" && rec.error !== undefined && fits({ ...op, code: rec.error })) op.code = rec.error;
   // what the op carries beside its stage (kit messages.ts OpDetail, card kit-portfolio-reads): its record's created_ms on
   // every kind, and the chain, token, units and USD size a trade's record keeps from its request. Each copied only when
   // the op still fits with it, so a record from before them, or one field of another shape, costs that field, never

@@ -43,7 +43,7 @@ function world(o: { cash?: bigint; floor?: bigint | null } = {}) {
     onChain: (_c, a) => a === DEPOSIT,
     withdraw: () => (_r, id) => void runs.push(id),
     op: async () => undefined,
-    put: async () => {},
+    update: async () => undefined,
     now: () => 1_000,
     wait: () => new Promise((r) => setTimeout(r, 0)), // a turn of the loop, so a move that runs on cannot hold the test
     onward: { move: async () => ({ op: "on" }), fee: async () => 50_000n },

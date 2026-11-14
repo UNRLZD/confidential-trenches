@@ -45,7 +45,8 @@ const esc = (v) => v.replace(/\$/g, "\\$");
 /** The implicit-account rule (group: its name): the bundle has several of the same text, under their own names. */
 const IMPLICIT = new RegExp(`(${N})=/\\^\\[0-9a-f\\]\\{64\\}\\$/`, "g");
 /** The quote's check before the vault pays (group 1: the rule's name). */
-const checkOf = (rule) => new RegExp(`\`error\`in (${N})\\|\\|!${esc(rule)}\\.test\\(\\1\\.address\\)\\|\\|\\1\\.amountIn!==(${N})\\|\\|\\1\\.minOut<(${N})\\)return`);
+// (card move-sends-or-says-why: the refusal's write names its code, so the check may open a block before it returns)
+const checkOf = (rule) => new RegExp(`\`error\`in (${N})\\|\\|!${esc(rule)}\\.test\\(\\1\\.address\\)\\|\\|\\1\\.amountIn!==(${N})\\|\\|\\1\\.minOut<(${N})\\)(?:return|\\{let ${N}=\`error\`in \\1)`);
 /** The move's follow op id. */
 const MOVE_ID = new RegExp(`\`cash/\\$\\{${N}\\}/\\$\\{${N}\\.now\\(\\)\\}\``);
 /** The tap: the shortfall asked of the mover, the app told, then the wait. Its tap read only when Cash or a move on its
