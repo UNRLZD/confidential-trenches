@@ -208,6 +208,20 @@ export const FIXTURES: Record<string, Fx> = {
   // a price that reads zero is no read: KINU's value is the dash, never $0.00 (owner 10 Nov 18:12Z)
   zeroprice: { data: { market: (c, t) => (t === "KINU" ? { ...MARKET.get(`${c}:${t}`)!, price: "0" } : MARKET.get(`${c}:${t}`) ?? null) } },
   "activity-empty": { state: { ops: [] }, ui: act() },
+  // card move-shows-one-swap: a Move is one Activity row (Move, from-chain to to-chain, the amount, its stage, its time),
+  // its legs none: a running one with its pool release (`<id>/out`), one from Cash done, one failed
+  "move-activity": {
+    state: {
+      ops: [
+        ...STATE.ops,
+        { id: "mv-run", kind: "move", from: "solana", to: "base", stage: "in_transit", txs: [], amount: "0.08", created_ms: NOW - 30_000 },
+        { id: "mv-run/out", kind: "withdraw", stage: "in_transit", txs: [], created_ms: NOW - 29_000, amount_usd: "43.69" },
+        { id: "mv-cash", kind: "move", from: "near", to: "solana", stage: "done", txs: [], amount: "12.5", created_ms: NOW - 90_000 },
+        { id: "mv-fail", kind: "move", from: "base", to: "robinhood", stage: "failed", txs: [], amount: "0.01", created_ms: NOW - 150_000 },
+      ],
+    },
+    ui: act(),
+  },
   restored: {
     state: { ops: [{ id: "rs", kind: "restore", stage: "done", txs: [] }, ...STATE.ops.filter((o) => o.kind === "buy" || o.kind === "sell")] },
     ui: act(),

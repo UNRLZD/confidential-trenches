@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Operation } from "@blindfill/kit";
 import { recentRows } from "../src/screens/deposit/model.ts";
-import { activity } from "../src/screens/portfolio/model.ts";
+import { ACT_KINDS, activity, filterActivity } from "../src/screens/portfolio/model.ts";
 import type { PortfolioData } from "../src/screens/portfolio/model.ts";
 import { MOVE_CHAINS, nodesOf, routeSteps } from "../src/screens/portfolio/move.ts";
 import type { MoveChain } from "../src/screens/portfolio/move.ts";
@@ -54,11 +54,27 @@ test("a withdrawal of its own is still drawn beside a Move, and a leg whose Move
 
 test("a Move's legs are no Activity rows and no deposit Recent rows", () => {
   const ops = legs("done");
-  assert.deepEqual(activity(ops, DATA).map((r) => r.id), []);
+  assert.deepEqual(activity(ops, DATA).map((r) => r.id), [MOVE]);
   assert.deepEqual(recentRows(ops), []);
   // the same ops with no Move in the state are each its own row, as before
   assert.deepEqual(activity(ops.slice(1), DATA).map((r) => r.id).sort(), [`${MOVE}/1click`, `${MOVE}/out`]);
   assert.equal(recentRows(ops.slice(1)).length, 2);
+});
+
+test("a Move is one Activity row: Move, from-chain to to-chain, the amount, its stage and its time", () => {
+  const rows = activity(legs("in_transit"), DATA);
+  assert.equal(rows.length, 1);
+  const r = rows[0]!;
+  assert.deepEqual(
+    { id: r.id, kind: r.kind, stage: r.stage, at: r.at, move: r.move, failed: r.failed, usd: r.usd },
+    { id: MOVE, kind: "move", stage: "in_transit", at: NOW, move: { from: "solana", to: "base", amount: "0.08", asset: "SOL" }, failed: null, usd: null },
+  );
+  // a failed Move draws Transaction failed; one from Cash is in USDC; the Move chip filters to it
+  assert.deepEqual(activity([move("failed")], DATA)[0]?.failed, { reason: null });
+  const cash = { id: "c1", kind: "move", from: "near", to: "solana", stage: "done", txs: [], amount: "12.5", created_ms: NOW } as unknown as Operation;
+  assert.deepEqual(activity([cash], DATA)[0]?.move, { from: "near", to: "solana", amount: "12.5", asset: "USDC" });
+  assert.ok(ACT_KINDS.includes("move"));
+  assert.deepEqual(filterActivity(activity([...legs("done"), cash], DATA), { kinds: ["move"], min: 0n, q: "" }, DATA).map((x) => x.id).sort(), ["c1", MOVE].sort());
 });
 
 // the signing page's steps for each pair (packages/signpage/src/cash-to-pool.ts:359-363, release 136 on; main.ts gives
