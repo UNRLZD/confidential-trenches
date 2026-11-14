@@ -20,6 +20,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// a socket's type of service, best effort (socket-tos.mjs): a refused one no longer holds an upstream read forever
+import "./socket-tos.mjs";
 
 const BOOKS = {
   forge: { file: "fixtures/fork-rpc.json", upstream: { base: "https://mainnet.base.org", robinhood: "https://rpc.mainnet.chain.robinhood.com" } },

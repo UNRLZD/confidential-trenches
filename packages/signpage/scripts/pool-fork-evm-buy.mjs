@@ -36,6 +36,8 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
 import { IDBFactory } from "fake-indexeddb";
+// a socket's type of service, best effort (contracts/pool-evm/test/socket-tos.mjs): a refused one holds no fork read
+import { refusedTos } from "../../../contracts/pool-evm/test/socket-tos.mjs";
 
 const USAGE = "usage: pool-fork-evm-buy.mjs <base|robinhood> http://127.0.0.1:<port> <out.json> <token 0x...40 hex> [<amount ETH>]";
 const [CHAIN, ANVIL, OUT, TOKEN, AMOUNT] = process.argv.slice(2);
@@ -282,14 +284,6 @@ const WARM = Number(process.env.FORK_WARM_TAPS ?? 0);
 if (!Number.isInteger(WARM) || WARM < 0 || WARM > 20) throw new Error("FORK_WARM_TAPS is 0 to 20");
 // a warm tap's read the quote gave up on can still fail minutes later (a fork call past fetch's 300 s headers bound):
 // logged and kept in the record, never the run's end
-// and Node's own fetch can throw past every caller when it sets a socket's type of service on one the fork reset
-// (setTypeOfService EINVAL, Node 24.22 undici writeH1; the request fails as any provider fault): logged and kept too,
-// any other throw still ends the run
-process.on("uncaughtException", (e) => {
-  if (e?.syscall !== "setTypeOfService") throw e;
-  log("socket fault", { error: String(e.code) });
-  record.socketFaults = (record.socketFaults ?? 0) + 1;
-});
 if (WARM > 0)
   process.on("unhandledRejection", (e) => {
     log("stray rejection", { error: String(e?.cause?.code ?? e?.message ?? e) });
@@ -365,6 +359,8 @@ await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {})
 // an error answer sent nothing: no stage follows it
 for (let i = 0; i < 360 && !("error" in first) && !ENDS.includes(stages.at(-1)); i++) await sleep(1_000);
 record.end = stages.at(-1) ?? null;
+// sockets whose type of service the system refused this run (socket-tos.mjs), each a request that failed or went on
+record.refusedTos = refusedTos.count;
 record.times.tapToEndMs = Date.now() - tapAt;
 tapped = false;
 record.requests = requests.map((q) => ({ ...q, atMs: q.atMs - tapAt }));

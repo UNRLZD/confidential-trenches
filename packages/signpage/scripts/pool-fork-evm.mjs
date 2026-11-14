@@ -33,6 +33,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { IDBFactory } from "fake-indexeddb";
+// a socket's type of service, best effort (contracts/pool-evm/test/socket-tos.mjs): a refused one holds no fork read
+import "../../../contracts/pool-evm/test/socket-tos.mjs";
 import { entropyToWords, wordsToSeed64 } from "../../wallet/src/derive/index.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { openWalletStore } from "../../wallet/src/store/index.ts";
