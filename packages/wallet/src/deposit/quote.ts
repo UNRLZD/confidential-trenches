@@ -5,6 +5,8 @@
 //   as the destination, recipient U with recipientType DESTINATION_CHAIN (1Click delivers on the token to U's own NEAR
 //   account), refundTo U with refundType INTENTS (a refund lands under U inside intents.near, which only U's key
 //   moves), and nothing else: no sessionId, connectedWallets, customRecipientMsg, referral or quoteWaitingTimeMs.
+//   A pool coin a device wallet pays (card refunds-land-on-the-devices-own-wallet) refunds ORIGIN_CHAIN instead, to U's
+//   own address on that coin's chain (OriginRefund below), so no refund rests in public intents.near.
 // The request goes to 1Click through the helper's proxy (it holds the 1Click key, W:408), POST
 // /v1/proxy/oneclick/v0/quote on HELPER_HOST. It names U and the asset and amount only: no key, no words, no other id
 // of this user (§2.9 row 3, W:925). The answer is hostile: this file hands it back as data, and the signing page's
@@ -37,11 +39,12 @@ const IMPLICIT = /^[0-9a-f]{64}$/;
  * The request of §2.4 step 2 for a deposit of `amount` base units of `originAsset` to U (its 64-hex implicit id), asked
  * at `now` (ms). Throws on input that is not that.
  */
-export function depositQuoteRequest(u: string, originAsset: string, amount: bigint, now: number, confidential = false): OneClickRequest {
+export function depositQuoteRequest(u: string, originAsset: string, amount: bigint, now: number, confidential = false, refund?: OriginRefund): OneClickRequest {
   if (typeof u !== "string" || !IMPLICIT.test(u)) throw new Error("deposit quote: U must be a 64-hex implicit account id");
   if (typeof originAsset !== "string" || originAsset === "") throw new Error("deposit quote: no origin asset");
   if (typeof amount !== "bigint" || amount <= 0n) throw new Error("deposit quote: the amount must be a positive bigint");
   if (!Number.isSafeInteger(now) || now <= 0) throw new Error("deposit quote: now must be a time in ms");
+  if (refund !== undefined) checkOriginRefund(originAsset, refund);
   return {
     dry: false,
     swapType: "EXACT_INPUT",
@@ -50,8 +53,8 @@ export function depositQuoteRequest(u: string, originAsset: string, amount: bigi
     depositType: "ORIGIN_CHAIN",
     destinationAsset: DEPOSIT_QUOTE_DESTINATION,
     amount: amount.toString(),
-    refundTo: u,
-    refundType: "INTENTS",
+    // a pool coin a device wallet pays (card refunds-land-on-the-devices-own-wallet): the refund back on its own chain
+    ...(refund === undefined ? { refundTo: u, refundType: "INTENTS" } : { refundTo: refund.to, refundType: "ORIGIN_CHAIN" }),
     recipient: u,
     recipientType: "DESTINATION_CHAIN",
     deadline: new Date(now + DEPOSIT_QUOTE_DEADLINE_MS).toISOString(),
@@ -128,13 +131,14 @@ export function checkPoolDepositWallet(chain: PoolDepositChain, wallet: string, 
  * and no other wallet of the user. Money already on X is pool.deposit's own: an origin that is X's coin is refused.
  * Throws on input that is not that.
  */
-export function poolDepositQuoteRequest(chain: PoolDepositChain, wallet: string, refundId: string, originAsset: string, amount: bigint, now: number, confidential = false): OneClickRequest {
+export function poolDepositQuoteRequest(chain: PoolDepositChain, wallet: string, refundId: string, originAsset: string, amount: bigint, now: number, confidential = false, refund?: OriginRefund): OneClickRequest {
   checkPoolDepositWallet(chain, wallet, refundId);
   const destinationAsset = POOL_DEPOSIT_DESTINATION[chain];
   if (typeof originAsset !== "string" || originAsset === "") throw new Error("pool deposit quote: no origin asset");
   if (originAsset === destinationAsset) throw new Error("pool deposit quote: the pool's own coin needs no quote");
   if (typeof amount !== "bigint" || amount <= 0n) throw new Error("pool deposit quote: the amount must be a positive bigint");
   if (!Number.isSafeInteger(now) || now <= 0) throw new Error("pool deposit quote: now must be a time in ms");
+  if (refund !== undefined) checkOriginRefund(originAsset, refund);
   return {
     dry: false,
     swapType: "EXACT_INPUT",
@@ -143,14 +147,49 @@ export function poolDepositQuoteRequest(chain: PoolDepositChain, wallet: string,
     depositType: "ORIGIN_CHAIN",
     destinationAsset,
     amount: amount.toString(),
-    refundTo: refundId,
-    refundType: "INTENTS",
+    // a pool coin a device wallet pays (card refunds-land-on-the-devices-own-wallet): the refund back on its own chain
+    ...(refund === undefined ? { refundTo: refundId, refundType: "INTENTS" } : { refundTo: refund.to, refundType: "ORIGIN_CHAIN" }),
     recipient: wallet,
     recipientType: "DESTINATION_CHAIN",
     deadline: new Date(now + DEPOSIT_QUOTE_DEADLINE_MS).toISOString(),
     // a Move's quote (card move-one-confidential-swap): on Confidential Intents rails, so the origin is not linked to U_X
     ...(confidential === true ? { confidentiality: "advanced" as const } : {}),
   };
+}
+
+/**
+ * Where a failed swap's refund lands when a device wallet pays the quote (card refunds-land-on-the-devices-own-wallet):
+ * on the origin coin's own chain (refundType ORIGIN_CHAIN), at the quote's own deposit key there, derived on the device:
+ * base58 of U_{s,i} on Solana, U^evm_{s,i} on Base and Robinhood. Never INTENTS for such a leg: a refund resting in
+ * public intents.near can be frozen by the intents.near DAO, and nobody but the user may freeze or move their money.
+ * Only a pool coin (POOL_DEPOSIT_DESTINATION) has one; an outside wallet's money and Cash's NEAR USDC keep INTENTS.
+ */
+export type OriginRefund = { chain: PoolDepositChain; to: string };
+
+/** The pool chain whose native coin `originAsset` is on 1Click (POOL_DEPOSIT_DESTINATION), or null. */
+export function poolCoinChain(originAsset: unknown): PoolDepositChain | null {
+  for (const c of Object.keys(POOL_DEPOSIT_DESTINATION) as PoolDepositChain[]) if (POOL_DEPOSIT_DESTINATION[c] === originAsset) return c;
+  return null;
+}
+
+/** Throws unless `refund` is on `originAsset`'s own chain and its address one the device derives there: the base58 of
+ *  32 bytes on Solana, an EIP-55 address on Base and Robinhood. */
+export function checkOriginRefund(originAsset: unknown, refund: OriginRefund): void {
+  const chain = poolCoinChain(originAsset);
+  if (chain === null || refund === null || typeof refund !== "object" || refund.chain !== chain) throw new Error("origin refund: not the origin coin's own chain");
+  const to = refund.to;
+  if (typeof to !== "string") throw new Error("origin refund: no address");
+  if (chain === "solana") {
+    let key: Uint8Array;
+    try {
+      key = base58.decode(to);
+    } catch {
+      throw new Error("origin refund: not a Solana address");
+    }
+    if (key.length !== 32 || base58.encode(key) !== to) throw new Error("origin refund: not a Solana address");
+    return;
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to) || toChecksum(to) !== to) throw new Error("origin refund: not an EIP-55 address");
 }
 
 /** The helper's answer as data: its HTTP status and its JSON body, neither checked here. */

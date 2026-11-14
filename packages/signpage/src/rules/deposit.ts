@@ -33,6 +33,7 @@ import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
 import { VAULT_CONSTANTS, VAULT_DEPOSIT_CARRIER, VAULT_TOKEN_CODE_HASH, vaultDepositMessage } from "../../../kit/src/vault/shapes.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../../wallet/src/deposit/account.ts";
 import { RELEASE_BIND_URL } from "../../../wallet/src/deposit/delegate.ts";
+import { checkOriginRefund, type OriginRefund } from "../../../wallet/src/deposit/quote.ts";
 import { backupFirst } from "../../../wallet/src/store/index.ts";
 
 /** Wd: max_block_height is the lower of the two RPC heights + this (W:413: 120 blocks until vault SB run (6) sets it). */
@@ -287,6 +288,10 @@ export interface DepositQuoteContext {
   /** A Move's quote (card move-one-confidential-swap): the request must ask confidentiality "advanced"; absent, a request
    *  that asks it is refused, so the mode is always the caller's. */
   confidential?: true;
+  /** A quote a device wallet pays in a pool coin (card refunds-land-on-the-devices-own-wallet: pool to Cash, a leftover's
+   *  carry): the device's own derived address on the origin coin's chain (../../../wallet/src/deposit/quote.ts
+   *  OriginRefund). The request must refund ORIGIN_CHAIN to exactly it; absent, only INTENTS under U passes. */
+  refund?: OriginRefund;
 }
 
 /**
@@ -306,11 +311,29 @@ export function checkDepositQuote(request: OneClickRequest, answer: unknown, ctx
   if (req.swapType !== "EXACT_INPUT") refuse("swapType");
   if (req.depositType !== "ORIGIN_CHAIN") refuse("depositType");
   if (req.destinationAsset !== DEPOSIT_DESTINATION_ASSET) refuse("destinationAsset");
-  // 1Click delivers on the token to U's own NEAR account; a refund lands under U inside intents.near.
+  // 1Click delivers on the token to U's own NEAR account; a refund lands under U inside intents.near, or, when a device
+  // wallet pays in a pool coin, back on that coin's chain at the device's own address for the leg (never INTENTS then)
   if (req.recipient !== u) refuse("recipient");
   if (req.recipientType !== "DESTINATION_CHAIN") refuse("recipientType");
-  if (req.refundTo !== u) refuse("refundTo");
-  if (req.refundType !== "INTENTS") refuse("refundType");
+  originRefundRule(req, u, ctx.refund);
   if (ctx.confidential === true ? req.confidentiality !== "advanced" : "confidentiality" in req) refuse("confidentiality");
   return checkOneClickQuote(req, answer, { ...ctx.check, intoVault: true });
+}
+
+/** The refund rule of a deposit or pool deposit quote (card refunds-land-on-the-devices-own-wallet): with the device's
+ *  own `refund` for the leg, ORIGIN_CHAIN to exactly that address, on the origin coin's own chain; without it, INTENTS
+ *  under `id`. Anything else is refused before the answer is read. */
+export function originRefundRule(req: { originAsset: string; refundTo: string; refundType: string }, id: string, refund: OriginRefund | undefined): void {
+  if (refund === undefined) {
+    if (req.refundTo !== id) refuse("refundTo");
+    if (req.refundType !== "INTENTS") refuse("refundType");
+    return;
+  }
+  try {
+    checkOriginRefund(req.originAsset, refund);
+  } catch {
+    refuse("refundTo");
+  }
+  if (req.refundTo !== refund.to) refuse("refundTo");
+  if (req.refundType !== "ORIGIN_CHAIN") refuse("refundType");
 }
