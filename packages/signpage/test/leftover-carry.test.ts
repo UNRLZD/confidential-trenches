@@ -175,4 +175,7 @@ test("main.ts runs the carry after the moves resume, one tab's pass at a time, s
   assert.match(main, /locks\.request\("ct-carry-cash", \{ ifAvailable: true \}/);
   assert.match(main, /const signal = withdrawWait\.signal;\s*const sol = /);
   assert.match(main, /sources: async \(\) => leftoverSources\(await pageOps\(\)\.catch\(\(\) => \[\]\), await pageTails\(\)\.catch\(\(\) => \[\]\)\)/);
+  // the wait between passes never holds a process open: main.ts booted in a test (held-lock.test.ts) exits (it hung at
+  // 6f2c48fae)
+  assert.match(main, /const t = setTimeout\(ok, ms\);\s*\(t as unknown as \{ unref\?: \(\) => void \}\)\.unref\?\.\(\);/);
 });

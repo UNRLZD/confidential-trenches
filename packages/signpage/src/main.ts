@@ -437,8 +437,10 @@ else {
       // a send on its way is read again soon; once one landed, the next wallet only after the rent backs' own spacing (no
       // two wallets' sends side by side); else a short wait
       const ms = r?.end === "pending" ? CARRY_FOLLOW_MS : r?.end === "landed" ? POOL_RENT_BACK_SPACE_MIN_MS + Math.floor(Math.random() * (POOL_RENT_BACK_SPACE_MAX_MS - POOL_RENT_BACK_SPACE_MIN_MS)) : CARRY_PASS_MS;
+      // a wait that never holds a process open (Node's unref; a browser's timer has none)
       await new Promise<void>((ok) => {
         const t = setTimeout(ok, ms);
+        (t as unknown as { unref?: () => void }).unref?.();
         signal.addEventListener("abort", () => (clearTimeout(t), ok()), { once: true });
       });
     }
