@@ -11,6 +11,7 @@
 // live111 at the end. Card sign-live-checks-name-evm-pool-hosts: live119, with the EVM pools' hosts' cases planted on it.
 // Card restore-shows-the-balance-in-seconds: net, --local --net (this card's build with the pinned hosts on the network,
 // 13 Nov 00:00Z, the slowest of three runs): its first balance within BALANCE_MS, with that line's cases planted on it.
+// Card restore-check-names-fee-hosts: live135, release 135's live run 43573543107 (its fee read on mainnet.base.org).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -87,7 +88,9 @@ test("recorded live run on release 119: PASS with the EVM pools' hosts; an EVM h
     f(rec);
     return judge(rec);
   };
-  for (const h of ["mainnet.base.org", "robinhood.drpc.org", "base-mainnet.public.blastapi.io", "evil.example", "api.mainnet-beta.solana.com"]) {
+  // card restore-check-names-fee-hosts: the fee list's hosts (mainnet.base.org, robinhood.drpc.org) are the page's own
+  // since a restore holds the EVM period fee (live135 below); the quote list's and any third host still fail
+  for (const h of ["base-mainnet.public.blastapi.io", "base.rpc.blxrbdn.com", "evil.example", "api.mainnet-beta.solana.com"]) {
     if (h !== "evil.example") assert.ok(ANSWERS.live119.connect.includes(h), `${h} is in the served connect-src`);
     fails(x((rec) => (rec.hosts[h] = 1)), new RegExp(`^BAD every request goes to .*stray: ${h.replaceAll(".", "\\.")}\\)$`));
   }
@@ -95,6 +98,33 @@ test("recorded live run on release 119: PASS with the EVM pools' hosts; an EVM h
   // run 43184299402's hosts line, read from its log: stray before this card, every host pinned now
   const ran = x((rec) => (rec.hosts = { "confidential.unrealized.trade": 2, "ct-app.unrealized.trade": 2, "ct-api.unrealized.trade": 12, "base-rpc.publicnode.com": 32, "base.api.pocket.network": 32, "rpc.mainnet.chain.robinhood.com": 20, "robinhood.api.pocket.network": 20, "solana-rpc.publicnode.com": 9, "rpc.mainnet.fastnear.com": 6, "near.drpc.org": 6, "solana.api.pocket.network": 1 }));
   assert.equal(ran.ok, true, ran.lines.join("\n"));
+});
+
+// Card restore-check-names-fee-hosts: every restore asks evmPoolOf for Base and Robinhood (src/main.ts ux, its U_X
+// reads), which marks a deposit in sight and holds the period's fee at once on the fee list (pool-testnet.ts evmSight,
+// MAINNET_EVM_FEE_RPCS, card evm-landing-reads-batched), so the fee list's hosts are the pinned pools' too (PINNED_HOSTS).
+// live135: release 135's live sign run 43573543107, every value from its log, the served connect-src read the same
+// morning: stray mainnet.base.org before this card (FAIL at c3ae4484a), PASS now. Planted on it: a host on no list the
+// page reads a restore on (the quote list's, a third), and a fee host its connect-src does not name: FAIL.
+test("recorded live run on release 135: PASS with the fee list's host; a host on no page list, or a fee host not in the connect-src: FAIL", () => {
+  const L = ANSWERS.live135;
+  assert.match(L.source, /^live https:\/\/confidential\.unrealized\.trade/);
+  assert.equal(L.hosts["mainnet.base.org"], 1);
+  const r = judge(L);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("OK  every request goes to SIGN_HOST, APP_HOST or a pinned pool's host") && l.includes("mainnet.base.org 1")), r.lines.join("\n"));
+  const x = (f) => {
+    const rec = structuredClone(L);
+    f(rec);
+    return judge(rec);
+  };
+  for (const h of ["base-mainnet.public.blastapi.io", "robinhood.rpc.blxrbdn.com", "api.mainnet-beta.solana.com", "evil.example"]) {
+    if (h !== "evil.example") assert.ok(L.connect.includes(h), `${h} is in the served connect-src`);
+    fails(x((rec) => (rec.hosts[h] = 1)), new RegExp(`^BAD every request goes to .*stray: ${h.replaceAll(".", "\\.")}\\)$`));
+  }
+  for (const h of ["mainnet.base.org", "base.gateway.tenderly.co", "robinhood.drpc.org", "robinhood-rpc.publicnode.com"]) {
+    fails(x((rec) => ((rec.hosts[h] = 1), (rec.connect = rec.connect.filter((c) => c !== h)))), new RegExp(`not in its connect-src: ${h.replaceAll(".", "\\.")}\\)$`));
+  }
 });
 
 // live111: the live page on release 111 (the mainnet Solana pool pinned), this card's check, 10 Nov 20:03Z: every
