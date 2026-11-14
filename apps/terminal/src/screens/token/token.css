@@ -78,6 +78,8 @@
 /* every tile whole (card app-token-header): the strip keeps its own width and the identity gives way (its name and
    address end in "…" with the full text in the title), so no tile is ever cut at the trade column */
 .tkp-strip { flex: none; margin-left: auto; display: flex; gap: 6px; flex-wrap: nowrap; }
+/* the header's height before the token's identity lands (TokenPage.tsx): drawn, never seen */
+.tkp-strip[data-hold] { visibility: hidden; }
 .tkp-mc { flex: none; margin-left: auto; padding: 8px 14px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .tkp-mcval { min-width: max(120px, 8ch); text-align: center; font-size: 24px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; }
 /* a tile is drawn for 8 characters (discover/format.ts priceTile, usdTile; model.ts changeTile), skeleton or value,

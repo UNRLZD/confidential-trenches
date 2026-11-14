@@ -615,7 +615,14 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
               symbol and its icons need the room, and only the token's own symbol and icons say how much, so a strip drawn
               for the loading skeleton (a 120 px line, no icons) moved right by a tile once a long symbol with its icons
               landed (mihao, 14 Nov: Holders dropped, CLS 0.0014 at 1600). Drawn with them, the fit runs before its first
-              paint and nothing drawn moves (card mihao-opens-first). */}
+              paint and nothing drawn moves (card mihao-opens-first). Before it, an unseen strip of the Market cap's and a
+              tile's skeletons holds the header's height, so the chart under it never moves when the strip lands. */}
+          {!v && (
+            <div className="tkp-strip" data-hold="" aria-hidden="true">
+              <div className="tkp-mc"><span className="tkp-lbl"><W id="mcLong" /></span><SkLine cls="tkp-mcval" w={120} /></div>
+              <div className="tkp-tile"><span className="tkp-lbl"><W id="price" /></span><SkLine cls="tkp-val" w={64} /></div>
+            </div>
+          )}
           {v && <div className="tkp-strip">
             <div className="tkp-mc">
               <span className="tkp-lbl"><W id="mcLong" /></span>
