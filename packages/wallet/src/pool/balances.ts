@@ -18,13 +18,18 @@
 //   from every entry when no ready list is given (no queue runs), never "0" in its place; with `open` (the pool ids
 //   whose queue runs), absent from each chain none of whose pools is in it, so a chain whose queue is not open never
 //   reads ready "0".
-// - tap_max: the most one tap can spend on the chain: over the sets `ready` counts, across the chain's pools, the
-//   larger of spendOf(the owner's piece alone) and spendOf(the whole set: on a pool with piecesMax above 1, the primary
-//   and its ready tier 2 pieces), each piece its chunk, fee cap and tip cap; never a sum across sets and never below 0.
+// - tap_max: the most one tap can spend on the chain. Per set `ready` counts, the best of spendOf(the owner's piece
+//   alone) and spendOf(the owner's piece with others of the set: on a pool with piecesMax above 1, the primary and its
+//   ready tier 2 pieces and their carried changes), each piece its chunk, fee cap and tip cap; never below 0. On Solana
+//   (card buy-any-amount-on-every-chain) one tap spends several W sets side by side, each its own pool.buy leg (the
+//   signing page's legs, src/pool-buy.ts), so the pool's tap_max is the sum over solanaTapLegs' disjoint partition of
+//   the ready notes, each note in one leg only (a note spent as a tier 2 piece never again by its own tier 1 proof); a
+//   tap runs on one pool, so across a chain's pools the larger. On Base and Robinhood, where the signing page's plan
+//   (rules/pool.ts planEvmBuy) spends every note in one tap, each a whole pool.buy from its own W, the sets' spends sum.
 //   spendOf is the pool's, from its caller: solanaTapSpendOf (the kit's solanaPoolBuyMaxSpend on the worst
 //   venue, or on the coin's own for pool.buy.dry, at the tip the tap pays, the signing page's, at most the proof's own
-//   tip cap, and the rent the caller read on two RPCs) or evmTapSpendOf (the chunk itself: an EVM tap asks for a whole
-//   chunk, the signing page's checkEvmBuy refusing any other amount, and the relay fee comes out on chain). Present only
+//   tip cap, and the rent the caller read on two RPCs) or evmTapSpendOf (the chunk less its relay fee: what the pool's
+//   buy swaps, the fee coming out of the release on chain). Present only
 //   with ready, and only when every pool on the chain gives a spendOf; "0" when no proof is counted.
 // - making: with `making` (the notes the queue is making a proof for, ./queue.ts readyWith), the value of those HELD
 //   notes `ready` does not count, so ready + making never counts a note twice.
@@ -86,21 +91,58 @@ export function carriedChunk(rule: PieceRule | undefined, value: bigint, chunk: 
  *  any of the others, and a carried change only beside its own note's piece, at most SOLANA_POOL_BUY_PIECES_MAX
  *  releases in all (the round of tag 2s before and the buy's own round count alike). */
 export function bestTapSpend(own: TapPiece, others: readonly { piece: TapPiece; carried?: TapPiece }[], spendOf: (ps: readonly TapPiece[]) => bigint, max = SOLANA_POOL_BUY_PIECES_MAX): bigint {
+  return bestTapChoice(own, others, spendOf, max).spend;
+}
+/** bestTapSpend with the others it releases (their indexes; a carried change only beside its own note's piece). */
+function bestTapChoice(own: TapPiece, others: readonly { piece: TapPiece; carried?: TapPiece }[], spendOf: (ps: readonly TapPiece[]) => bigint, max: number): { spend: bigint; released: number[] } {
   const opts: { piece: TapPiece; of: number; carry: boolean }[] = [];
   others.forEach((o, i) => {
     opts.push({ piece: o.piece, of: i, carry: false });
     if (o.carried !== undefined) opts.push({ piece: o.carried, of: i, carry: true });
   });
-  let best = spendOf([own]);
+  let best = { spend: spendOf([own]), released: [] as number[] };
   for (let mask = 1; mask < 1 << opts.length; mask++) {
     const set = opts.filter((_, i) => (mask >> i) & 1);
     if (set.length + 1 > max) continue;
     const released = new Set(set.filter((x) => !x.carry).map((x) => x.of));
     if (set.some((x) => x.carry && !released.has(x.of))) continue;
     const s = spendOf([...set.map((x) => x.piece), own]);
-    if (s > best) best = s;
+    if (s > best.spend) best = { spend: s, released: [...released].sort((a, b) => a - b) };
   }
   return best;
+}
+
+/** One W's ready set for a tap: its own note's piece and the other notes' pieces bound to it (each with the change a
+ *  tap would carry, card buy-spends-its-change-in-the-same-tap). */
+export type TapSet = { address: string; ownId: string; own: TapPiece; others: readonly { id: string; piece: TapPiece; carried?: TapPiece }[] };
+/** One leg of a tap: a W, the notes it releases (its own note first) and the most it spends. */
+export type TapLeg = { address: string; ids: string[]; spend: bigint };
+
+/**
+ * The legs one Solana tap spends (card buy-any-amount-on-every-chain): a disjoint partition of the ready notes into W
+ * sets, each a pool.buy of its own (the signing page's legs, src/pool-buy.ts), each note in one leg only. The sets with
+ * other notes bound to them first (the primary's W with its tier 2 pieces: one W pays the per-buy costs once for them
+ * all), the largest spend first, then every other note on its own W by its tier 1 proof, the largest first. A set whose
+ * own note a leg already releases is none; a leg takes the best of its notes no leg holds yet (bestTapSpend, at most
+ * `max` releases); a set that spends nothing is no leg, and its notes stay free for another. In that order.
+ */
+export function solanaTapLegs(sets: readonly TapSet[], spendOf: (ps: readonly TapPiece[]) => bigint, max = SOLANA_POOL_BUY_PIECES_MAX): TapLeg[] {
+  const alone = (s: TapSet): bigint => spendOf([s.own]);
+  const order = [...sets]
+    .map((s) => ({ s, many: s.others.length > 0, best: s.others.length > 0 ? bestTapChoice(s.own, s.others, spendOf, max).spend : alone(s) }))
+    .sort((x, y) => (x.many !== y.many ? (x.many ? -1 : 1) : x.best > y.best ? -1 : x.best < y.best ? 1 : 0));
+  const used = new Set<string>();
+  const legs: TapLeg[] = [];
+  for (const { s } of order) {
+    if (used.has(s.ownId)) continue;
+    const others = s.others.filter((o) => o.id !== s.ownId && !used.has(o.id));
+    const got = bestTapChoice(s.own, others, spendOf, max);
+    if (got.spend <= 0n) continue;
+    const ids = [s.ownId, ...got.released.map((i) => others[i]!.id)];
+    for (const id of ids) used.add(id);
+    legs.push({ address: s.address, ids, spend: got.spend });
+  }
+  return legs;
 }
 /** An EVM pool's table entry: PrivacyPoolSimple holds native ETH (./evm.ts EVM_NATIVE_ASSET), on Base or Robinhood. */
 export function evmBalancePool(id: string, chain: "base" | "robinhood", scope: bigint, spendOf?: TapSpendOf): BalancePool {
@@ -182,10 +224,10 @@ export function solanaTapSpendOf(rent: SolanaRent, venue: Pick<SolanaPoolBuyVenu
     return solanaPoolBuyMaxSpend(pieces.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.feeCap })), venue, tip, rent);
   };
 }
-/** An EVM proof's ask at the tap: the whole chunk. The signing page's checkEvmBuy (signpage src/rules/pool.ts) refuses
- * an EVM pool.buy whose amount is not the proof's value; the relay fee comes out of it on chain (contracts/pool-evm
- * PrivacyPoolSimple.sol:64), so the trade box asks for chunks on EVM. */
-export const evmTapSpendOf: TapSpendOf = (pieces) => pieces.reduce((m, p) => (p.chunk > m ? p.chunk : m), 0n);
+/** What an EVM proof spends at the tap: its chunk less its relay fee, which comes out of the release on chain
+ * (contracts/pool-evm PrivacyPoolSimple.sol buy: the swap gets the withdrawn value less the fee). An ask is that ETH
+ * (card buy-any-amount-on-every-chain: the signing page's planEvmBuy spends whole notes for it). */
+export const evmTapSpendOf: TapSpendOf = (pieces) => pieces.reduce((s, p) => s + (p.chunk > p.feeCap ? p.chunk - p.feeCap : 0n), 0n);
 
 /** The asset's decimals from the kit's table; an asset not in it is refused. */
 function decimalsOf(p: BalancePool): number {
@@ -289,15 +331,24 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
     };
     // per set: the own piece and the best of the others and the changes the tap carries (card
     // buy-spends-its-change-in-the-same-tap), at most the cap in all
-    for (const s of owned) {
-      const others = [...s.pieces].filter(([id]) => id !== s.ownId).map(([id, piece]) => {
+    const tapSets: TapSet[] = [...sets].filter(([, s]) => s.own !== undefined).map(([address, s]) => ({
+      address,
+      ownId: s.ownId!,
+      own: s.own!,
+      others: [...s.pieces].filter(([id]) => id !== s.ownId).map(([id, piece]) => {
         const v = byId.get(id)!.leaf!.value;
         const k = carriedChunk(p.carry, v, piece.chunk);
-        return k === null ? { piece } : { piece, carried: { ...piece, chunk: k } };
-      });
-      const spend = bestTapSpend(s.own!, others, spendOf);
-      if (spend > c.tapMax) c.tapMax = spend;
+        return k === null ? { id, piece } : { id, piece, carried: { ...piece, chunk: k } };
+      }),
+    }));
+    if (p.chain === "base" || p.chain === "robinhood") {
+      for (const s of tapSets) c.tapMax += bestTapSpend(s.own, s.others, spendOf);
+      continue;
     }
+    // Solana (card buy-any-amount-on-every-chain): one tap spends every leg of a disjoint partition into W sets (the
+    // signing page's legs), so the pool's Max is their sum; a tap runs on one pool, so the chain's is the larger pool's
+    const legs = solanaTapLegs(tapSets, spendOf).reduce((a, l) => a + l.spend, 0n);
+    if (legs > c.tapMax) c.tapMax = legs;
   }
   return [...chains].map(([chain, c]) => ({
     chain,

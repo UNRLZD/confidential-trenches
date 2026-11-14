@@ -166,12 +166,25 @@ export function checkPoolAmount(chain: PoolChain, raw: string, funds: PoolFunds 
  *  random note sets); 0n when no note gives the smallest part. */
 export const poolSendable = (funds: PoolFunds): bigint => poolWithdrawable(funds.notes, funds);
 
+/** The amount the screen sends for a typed one (card withdraw-max-means-all): the typed amount when the notes pay it,
+ *  else the nearest they pay at or below it, Max above everything; nothing at or below it (under the least plannable
+ *  amount) is refused with that least amount, in the Min words. No Try: the screen never asks for a pick. */
+export function payablePoolAmount(chain: PoolChain, raw: string, funds: PoolFunds | null): PoolAmountCheck {
+  const c = checkPoolAmount(chain, raw, funds);
+  if (c.ok || (c.code !== "insufficient" && c.code !== "unplannable")) return c;
+  if (c.below !== undefined) {
+    const at = checkPoolAmount(chain, formatUnits(c.below, POOL_ASSET[chain].decimals), funds);
+    if (at.ok) return at;
+  }
+  return c.code === "unplannable" && c.above !== undefined ? { ok: false, code: "min", min: c.above } : c.code === "insufficient" ? { ok: false, code: "insufficient" } : c;
+}
+
 /** The screen's view of both fields, checked now. */
 export function evaluatePool(chain: PoolChain, to: string, amount: string, keys: PoolKeys, funds: PoolFunds | null, dest: ExitChain = chain): PoolFormView {
   const blankTo = toCleaned(to) === "";
   const blankAmount = amount.trim() === "";
   const a = blankTo ? null : dest === chain ? checkPoolTo(chain, to, keys) : checkExitTo(dest, to);
-  const m = blankAmount ? null : checkPoolAmount(chain, amount, funds);
+  const m = blankAmount ? null : payablePoolAmount(chain, amount, funds);
   const ready = a?.ok && m?.ok ? Object.freeze({ chain, ...(dest !== chain ? { dest } : {}), to: a.to, amount: m.amount, maxFee: m.maxFee }) : null;
   const state: PoolFormState = blankTo && blankAmount ? "empty" : (a && !a.ok) || (m && !m.ok) ? "refused" : ready ? "ready" : "typing";
   return { state, address: a, amount: m, ready };
@@ -349,6 +362,8 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   }
 
   let funds: PoolFunds | null = null;
+  // Max tapped and no amount typed since: the box means everything (card withdraw-max-means-all)
+  let maxIntent = false;
   // the To the funds were read for (Base and Robinhood: W's send to it is priced)
   let fundsTo: string | undefined;
   const drawSendable = (): void => {
@@ -429,6 +444,8 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
       }
     }
     await loaded;
+    // Max is an intent (card withdraw-max-means-all): after every read the box holds the live Max
+    if (maxIntent && funds !== null && poolSendable(funds) > 0n) amount.input.value = formatUnits(poolSendable(funds), decimals);
     const v = evaluatePool(chain, to.input.value, amount.input.value, deps.keys, funds, dest);
     if (at !== seq) return null;
     draw(v);
@@ -443,10 +460,15 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   };
   to.input.addEventListener("input", typed);
   destPick.addEventListener("change", typed);
-  amount.input.addEventListener("input", typed);
-  // the tap on what can be sent: that amount in the field, checked now against the same funds
+  // a typed amount ends the Max intent
+  amount.input.addEventListener("input", () => {
+    maxIntent = false;
+    typed();
+  });
+  // the tap on what can be sent: Max, everything, followed through every read until an amount is typed
   sendable.addEventListener("click", () => {
     if (funds === null || sendable.disabled) return;
+    maxIntent = true;
     amount.input.value = formatUnits(poolSendable(funds), decimals);
     clearTimeout(timer);
     void check();
@@ -459,7 +481,11 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     clearTimeout(timer);
     loaded = load();
     const v = await check();
-    if (!v?.ready || v.ready.dest !== before.dest || v.ready.to !== before.to || v.ready.amount !== before.amount || v.ready.maxFee !== before.maxFee) return;
+    if (!v?.ready || v.ready.dest !== before.dest || v.ready.to !== before.to) return;
+    // Max: the live Max goes, at a fee no higher than the one drawn; any other amount only exactly as drawn. Anything
+    // else is drawn by this check for the next press
+    const same = maxIntent ? v.ready.maxFee <= before.maxFee : v.ready.amount === before.amount && v.ready.maxFee === before.maxFee;
+    if (!same) return;
     await deps.handoff(v.ready);
   }
   draw(view);

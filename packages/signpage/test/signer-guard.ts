@@ -77,6 +77,10 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "EVM_PRECOMPILE_TOP", "evmOnwardCodeGas", "checkEvmDeposit", "checkEvmCarry", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P", "EVM_DEPOSIT_GAS_PER_LEVEL", "evmDepositHeadroom",
     "TOKEN_DECIMALS_MAX", // a number: the decimals bound the rule and the EVM buy's load follow read (card signpage-evm-pool-buy)
     "SOLANA_POOL_SELL_PRIORITY", // a number: the most priority a Solana sell pays (card round-trip-costs-less)
+    // card buy-any-amount-on-every-chain: the EVM buy's plan and its Max, W's own buy and change checks, the adapter
+    // call's bytes and the gas cap, and W's own buy's signer, which signs an adapter call on no precommitment (as
+    // signEvmBuy and signEvmOnwardSend); W's change is signed by signEvmDeposit, held to its evmNextNote pick
+    "planEvmBuy", "evmBuyMax", "checkEvmWBuy", "checkEvmChange", "checkEvmRestRelease", "evmAdapterBuyData", "EVM_WBUY_GAS_MAX", "signEvmWBuy",
     "checkSolanaCarry", // a buy's first round of tag 2s, checked (card buy-spends-its-change-in-the-same-tap): signs nothing
     "checkSolanaCashCarry", // a leftover's one System transfer to Cash, checked (card leftovers-carry-to-cash): signs nothing
     "checkEvmCashCarry", // a leftover's one plain EVM transfer to Cash, checked (card leftovers-carry-to-cash): signs nothing
@@ -92,7 +96,7 @@ export const EXEMPT: Readonly<Record<string, Exempt>> = {
   // a sell's signature and W's EIP-7702 authorization (sell-unpinned.ts:434, 463); the Sell digest (:411)
   "packages/kit/src/trade/evm/sell-unpinned.ts": { define: true, curve: ["signDigest", "evmPoolSignSellAuthorizationUnpinned"], sellType: ["sellDigest"] },
   "packages/kit/src/trade/evm/quoted.ts": { define: true },
-  "packages/signpage/src/rules/pool.ts": { define: true, curve: ["signEvmWithdraw", "signEvmOnwardSend", "signEvmDeposit"] }, // rules/pool.ts:853, 1020; signEvmDeposit (card pool-deposits)
+  "packages/signpage/src/rules/pool.ts": { define: true, curve: ["signEvmWithdraw", "signEvmOnwardSend", "signEvmDeposit", "signEvmWBuy"] }, // rules/pool.ts:853, 1020; signEvmDeposit (card pool-deposits); signEvmWBuy (card buy-any-amount-on-every-chain: W's own adapter buy)
   "packages/kit/src/trade/evm/buy-unpinned.ts": { curve: ["evmPoolSignBuyUnpinned"] }, // a buy's signature, buy-unpinned.ts:612
   // W's EVM return send to a 1Click deposit address (card signpage-refund-kinds), signed only as checkReturnEvm read it
   "packages/signpage/src/rules/refund.ts": { curve: ["signReturnEvm"] }, // rules/refund.ts:620

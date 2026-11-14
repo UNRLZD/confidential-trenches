@@ -161,6 +161,25 @@ export function checkAmount(typed: unknown, { notes, fee }: { notes: readonly Wi
   return { ok: true, amount, parts };
 }
 
+/** The amount the Cash form sends for a typed one (card withdraw-max-means-all): the typed amount when a plan sends it,
+ *  else the nearest a plan sends at or below it, Max above everything; nothing at or below it is refused with the least
+ *  plannable amount, in the Min words. No Try: the form never asks for a pick. */
+export function payableAmount(typed: unknown, reads: { notes: readonly WithdrawSource[] | null; fee: bigint | null }): AmountCheck {
+  const c = checkAmount(typed, reads);
+  if (c.ok || (c.code !== "insufficient" && c.code !== "unplannable")) return c;
+  if (c.below !== undefined) {
+    const at = checkAmount(unitsText(c.below), reads);
+    if (at.ok) return at;
+  }
+  return c.code === "unplannable" && c.above !== undefined ? { ok: false, code: "min", min: c.above } : c.code === "insufficient" ? { ok: false, code: "insufficient" } : c;
+}
+
+/** Base units as the plain decimal parseAmount reads. */
+const unitsText = (units: bigint): string => {
+  const s = units.toString().padStart(TOKEN_DECIMALS + 1, "0");
+  return `${s.slice(0, -TOKEN_DECIMALS)}.${s.slice(-TOKEN_DECIMALS)}`;
+};
+
 /** The vault scope's UNSPENT notes, each as a source a Cash plan may spend. */
 export function cashNotes(notes: readonly NoteRecord[], scope: bigint): WithdrawSource[] {
   return notes.filter((n) => n.state === "UNSPENT" && n.scope === scope && n.leaf !== undefined).map((n) => ({ id: n.id, value: n.leaf!.value }));

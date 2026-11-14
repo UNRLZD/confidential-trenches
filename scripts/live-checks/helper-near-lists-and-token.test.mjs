@@ -1,8 +1,10 @@
 // node --test scripts/live-checks/helper-near-lists-and-token.test.mjs: the live check replays recorded answers
-// (helper-near-lists-and-token.answers.json). good: apps/helper at this card run on a Mac on mainnet's public reads:
-// PASS. bad_not_deployed: the deployed helper before this card, chain=near 404: FAIL. Made from the good answer: a row
-// of another chain, a page missing a field, a trade with an extra field, a bar of five values, the account with no pool
-// answered 200, a stale read and no CORS echo: each FAIL.
+// (helper-near-lists-and-token.answers.json). good: the live helper at a6b7a3ad7, every read the engine's (src
+// "unrealized"): PASS. good_rhea: Rhea's fallback, the helper's answer when the engine has none (src "chain" rows, "none"
+// holders, "fastnear" tape and chart): PASS. bad_not_deployed: the deployed helper before this card, chain=near 404:
+// FAIL. Made from the good answer: a row of another chain, a page missing a field, a trade with an extra field, a bar of
+// five values, the account with no pool answered 200, a stale read, no CORS echo, and a source the helper never gives
+// a part (a third value, or another part's): each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -51,8 +53,14 @@ test("the pinned lists are the helper's own and the terminal's Row", () => {
   assert.deepEqual(HOLDERS, [...HOLDERS_FIELDS]);
 });
 
-test("good: the helper at this card answers every NEAR read in the frozen fields: PASS", async () => {
+test("good: the live helper at a6b7a3ad7 answers every NEAR read in the frozen fields, from the engine: PASS (red before card every-cell-shows-a-value's fix: src \"unrealized\")", async () => {
   const r = await run(A.good.run);
+  assert.deepEqual(bad(r), []);
+  assert.equal(r.ok, true);
+});
+
+test("good_rhea: Rhea's fallback answer, every NEAR read in the frozen fields: PASS", async () => {
+  const r = await run(A.good_rhea.run);
   assert.deepEqual(bad(r), []);
   assert.equal(r.ok, true);
 });
@@ -71,6 +79,13 @@ for (const [name, rec, want] of [
   ["the account with no pool answered 200", () => edit("unlisted", null, null, 200), /no Rhea pool\) answers 200/],
   ["a read dated an hour before", () => edit("trades", null, { "x-fetched-at": new Date(Date.parse(A.good.run.reads.trades.at) - 3_600_000).toISOString() }), /trades X-Fetched-At/],
   ["no CORS echo", () => edit("token", null, { "access-control-allow-origin": "*" }), /token Access-Control-Allow-Origin/],
+  // a source the helper never gives that part: a third value, or another part's
+  ["a list row of a third source", () => edit("lists", (b) => (b.lists.new[0].src = "rhea")), /lists: .*src "rhea"/],
+  ["the page's row of a third source", () => edit("token", (b) => (b.row.src = "geckoterminal")), /token: .*src "geckoterminal"/],
+  ["holders of a third source", () => edit("holders", (b) => (b.src = "nearblocks")), /holders: .*src "nearblocks"/],
+  ["holders of the tape's source", () => edit("holders", (b) => (b.src = "fastnear")), /holders: .*src "fastnear"/],
+  ["a tape of a third source", () => edit("trades", (b) => (b.src = "chain")), /trades: .*src "chain"/],
+  ["a chart of a third source", () => edit("candles", (b) => (b.src = "none")), /candles: .*src "none"/],
 ]) {
   test(`${name}: FAIL`, async () => {
     const r = await run(rec());

@@ -7,17 +7,21 @@
 // and the Base Sepolia pool's 0.001 ETH chunks. Per state: app-shell's BAR-10 rules (MEASURE), no external request, no
 // dialog. Then:
 //   - spendable on Solana: the balance line (`$N available`, UNRLZD's ticket) and Max are the pool's balance and one tap's most in USD ($0.93, $0.16),
-//     every preset is off (all over one tap), and the button sends pool.buy with the USD in SOL,
-//     rounded down (0.001720236), never the vault's buy; it fills on the kit's stage in under 2 s (Filled 1.1s);
+//     every preset is off (all over one tap), and the button sends pool.buy for Max's USD as the whole of Max, the
+//     pool's tap_max (0.00173608 SOL, card buy-any-amount-on-every-chain: Max's cents ask all of Max, never the units
+//     their rounding leaves a hair under), never the vault's buy; it fills on the kit's stage in under 2 s (Filled 1.1s);
 //   - over one tap ($0.17): the button is off, a tap sends nothing and the amount field is marked wrong;
 //   - money the device is still making spendable (making above 0, or no ready yet after a load): the balance shows, no
 //     Max, and Buy has the busy look of a tap in flight (data-kind live, aria-busy, aria-disabled; no new word); a tap
 //     sends nothing and the amount field is never marked wrong;
 //   - a balance with nothing being made (ready "0", no making) and an empty pool: no Max, the button off, a tap sends nothing;
 //   - no box names a proof (13 Nov 07:53Z: removed, the app names no proof): no proof mark, no word of proof, ready or pending;
-//   - Base: a whole chunk's USD ($3.50) sends pool.buy for 0.001 ETH; any other amount ($3.00) sends nothing;
-//   - the presets row: Solana and the vault keep the four; on Base it is one button, the row's width, holding the chunk's
-//     USD ($3.50), whose tap fills 3.50 and sends that pool.buy; with no proof ready yet its value is unknown: "—", off;
+//   - Base (card buy-any-amount-on-every-chain): any amount up to Max is one pool.buy, as on Solana: Max's USD ($3.50)
+//     asks the whole 0.001 ETH, $3.00 asks its own ETH at the fixture's price, rounded down; over Max it is marked wrong;
+//   - the box's own reads (test/trade-pool/reads.mjs): Max once at most on its own chain; one amount read at most, the Fee
+//     on Solana, the tap's own ask's amount on Base and Robinhood; nothing on another chain;
+//   - the presets row: the four on every chain, each a quarter of the row; a preset over Max is off, and its tap sends
+//     nothing and leaves the typed amount;
 //   - no pool: the vault's buy as before (data-path vault, no proof label);
 //   - the sell on a pool chain sends pool.sell for the same units the vault's sell would, and its line reads
 //     "Back to Cash"; with no pool the vault's sell goes as before.
@@ -30,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
+import { readsFault } from "./reads.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -38,6 +43,15 @@ const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : null;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 
 const NOW = Date.parse("2026-11-04T06:00:00Z");
+// ETH in USD as the trade box's fixture prices it (test/trade-box/fixtures.tsx PRICES.base): $3,500.12345678
+const BASE_PRICE = { price: 350_012_345_678n, expo: -8, decimals: 18 };
+/** Cents as ETH at BASE_PRICE, rounded down, as a plain decimal (the box's centsToUnits and unitsToDecimal). */
+const ethOf = (cents) => {
+  const units = (BigInt(cents) * 10n ** BigInt(BASE_PRICE.decimals - 2 - BASE_PRICE.expo)) / BASE_PRICE.price;
+  const d = 10n ** BigInt(BASE_PRICE.decimals);
+  const frac = String(units % d).padStart(BASE_PRICE.decimals, "0").replace(/0+$/, "");
+  return frac ? `${units / d}.${frac}` : String(units / d);
+};
 // the fixtures' mint and EVM token (shapes only), kept apart from a `token:` key (gitleaks reads a long id beside that word)
 const MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
 const EVM = "0x00000000000000000000000000000000000f1fe7";
@@ -53,31 +67,35 @@ const SCHEMES = ["dark", "light"];
 // the buy states: name, query, the path, whether Buy has the busy look (money being made spendable), Bal, the line above
 // the button, whether the button is on, the request one tap sends (null: none). Bal on a pool is the pool and Cash's NEAR
 // part (the fixture's $73.18), which a buy there moves in first (card one-balance-buys-on-every-chain)
+// Max's $0.16 on the Solana fixture asks the whole of Max: its tap_max, 1,736,080 lamports (test/trade-box/fixtures.tsx)
+const SOL_MAX = "0.00173608";
 const BUYS = [
-  ["sol-ready", "pool=sol-ready&amt=0.16", "pool", false, "$74.11 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-ready", "pool=sol-ready&amt=0.16", "pool", false, "$74.11 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: SOL_MAX, slippage_bps: 1000 } }],
   // the pool's own part with no Cash: Bal is the pool alone, so a wrong pool number still fails
-  ["sol-nocash", "pool=sol-ready&amt=0.16&cash=0", "pool", false, "$0.93 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
-  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", false, "$74.11 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.001720236", slippage_bps: 1000 } }],
+  ["sol-nocash", "pool=sol-ready&amt=0.16&cash=0", "pool", false, "$0.93 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: SOL_MAX, slippage_bps: 1000 } }],
+  ["sol-feedown", "pool=sol-ready&amt=0.16&fee=down", "pool", false, "$74.11 available", "Max $0.16", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: SOL_MAX, slippage_bps: 1000 } }],
   ["sol-over", "pool=sol-ready&amt=0.17", "pool", false, "$74.11 available", "Max $0.16", false, null],
   ["sol-making", "pool=sol-making&amt=0.16", "pool", true, "$74.11 available", "", false, null],
   ["sol-load", "pool=sol-load&amt=0.16", "pool", true, "$74.11 available", "", false, null],
   ["sol-none", "pool=sol-none&amt=0.16", "pool", false, "$74.11 available", "", false, null],
   ["sol-empty", "pool=sol-empty", "pool", false, "$73.18 available", "", false, null],
   ["base-chunk", "pool=base-ready&amt=3.50", "pool", false, "$83.68 available", "Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
-  ["base-other", "pool=base-ready&amt=3", "pool", false, "$83.68 available", "Max $3.50", false, null],
+  // any amount up to Max on Base (card buy-any-amount-on-every-chain): $3.00 is its own ETH, 0.000857112623895816
+  ["base-other", "pool=base-ready&amt=3", "pool", false, "$83.68 available", "Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: ethOf(300), slippage_bps: 1000 } }],
+  ["base-over", "pool=base-ready&amt=3.51", "pool", false, "$83.68 available", "Max $3.50", false, null],
   ["base-making", "pool=base-making&amt=3.50", "pool", true, "$83.68 available", "", false, null],
   ["vault", "amt=25", "vault", false, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
-const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": null, "base-other": null, "base-making": null, vault: null };
-// the amount field marked wrong: over one tap, or not a whole chunk on Base; never while a proof is still making (the
-// amount is not what is wrong) or on an amount the pool can take
+const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": null, "base-other": null, "base-over": null, "base-making": null, vault: null };
+// the amount field marked wrong: over one tap's most, on every chain; never while a proof is still making (the amount is
+// not what is wrong) or on an amount the pool can take
 // You receive on a Solana pool buy (card solana-buy-preview-complete): the dry answer's out for the typed amount (the
 // recorded curve coin's 35,294.263662 at 0.001 SOL), over the fixture's set preview, which the live source has none of
 const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-nocash": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH" };
-const BAD = { "sol-ready": "false", "sol-nocash": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
-// the presets row as data-preset:disabled:text per button: the four on Solana (all over one tap's most on the pool, $100
-// over the vault's max); on Base the chunk's one button, "—" and off while no proof is ready
+const BAD = { "sol-ready": "false", "sol-nocash": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "false", "base-over": "true", "base-making": "false", vault: "false" };
+// the presets row as data-preset:disabled:text per button: the four on every pool chain (all over one tap's most on the
+// pool, or off while no proof is ready), $100 over the vault's max
 const FOUR_OFF = "10.00:true:$10 25.00:true:$25 50.00:true:$50 100.00:true:$100";
 const PRESET_ROW = {
   "sol-ready": FOUR_OFF,
@@ -88,12 +106,12 @@ const PRESET_ROW = {
   "sol-load": FOUR_OFF,
   "sol-none": FOUR_OFF,
   "sol-empty": FOUR_OFF,
-  "base-chunk": "3.50:false:$3.50",
-  "base-other": "3.50:false:$3.50",
-  "base-making": ":true:—",
+  "base-chunk": FOUR_OFF,
+  "base-other": FOUR_OFF,
+  "base-over": FOUR_OFF,
+  "base-making": FOUR_OFF,
   vault: "10.00:false:$10 25.00:false:$25 50.00:false:$50 100.00:true:$100",
 };
-const BASE_ASK = { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } };
 const SELLS = [
   ["sell-pool", "f=up&pool=sol", "Back to Cash", { kind: "pool.sell", params: { chain: "solana", token: MINT, share_bps: 5000, slippage_bps: 1000 } }],
   ["sell-vault", "f=up", "", { kind: "buy", params: { chain: "solana", token: MINT, side: "sell", amount: HALF_UNITS, slippage_bps: 1000 } }],
@@ -217,10 +235,10 @@ try {
         check(busyWant || (await cta.isDisabled()) === !on, `${tag}: the button is ${(await cta.isDisabled()) ? "off" : "on"}, want ${on ? "on" : "off"}`);
         const presets = await page.$$eval('[data-testid="trade-presets"] [data-preset]', (bs) => bs.map((b) => `${b.getAttribute("data-preset")}:${b.disabled}:${b.textContent.trim()}`).join(" "));
         check(presets === PRESET_ROW[name], `${tag}: presets ${presets}, want ${PRESET_ROW[name]}`);
-        // Base's one button fills the row, never a quarter of it
-        if (name.startsWith("base")) {
-          const [row, btn] = await page.$$eval('[data-testid="trade-presets"], [data-testid="trade-presets"] [data-preset]', (els) => els.map((e) => e.getBoundingClientRect().width));
-          check(Math.abs(row - btn) < 1, `${tag}: the chunk button is ${btn}px of a ${row}px row`);
+        // the four presets share the row on every chain, Base's as Solana's: none is the row's whole width
+        if (pathWant === "pool") {
+          const [row, ...btns] = await page.$$eval('[data-testid="trade-presets"], [data-testid="trade-presets"] [data-preset]', (els) => els.map((e) => e.getBoundingClientRect().width));
+          check(btns.length === 4 && btns.every((b) => b < row / 3), `${tag}: the presets are ${btns.join(", ")}px of a ${row}px row, want four, each about a quarter`);
         }
         await common(page, w, tag, external, dialogs);
         if (SHOTS) (await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}-${scheme}.png`) }), shots++);
@@ -234,14 +252,13 @@ try {
           const recv = await settle(async () => norm(await page.locator('[data-testid="trade-receive"]').innerText()), RECEIVE[name]);
           check(recv === RECEIVE[name], `${tag}: You receive "${recv}", want "${RECEIVE[name]}"`);
         }
-        // the box's own reads (pool.buy.dry): this coin's Max, one a state at most, on the box's own pool chain (Base too,
-        // for its with_cash: card one-balance-buys-on-every-chain), and the Fee of the typed amount, one an amount, on
-        // Solana only; never a buy
+        // the box's own reads (pool.buy.dry, test/trade-pool/reads.mjs): this coin's Max, one a state at most, on the box's
+        // own pool chain (Base too, for its with_cash: card one-balance-buys-on-every-chain); one with an amount at most:
+        // the Fee of the typed amount on Solana, the tap's own ask's amount on Base and Robinhood (card
+        // buy-any-amount-on-every-chain, buysAskAmount); nothing on another chain; never a buy
         const reads = await page.evaluate(() => window.__reads);
-        const maxReads = reads.filter((c) => c.params.amount === undefined);
-        const feeReads = reads.filter((c) => c.params.amount !== undefined);
-        const own = name.startsWith("sol") ? "solana" : name.startsWith("base") ? "base" : null;
-        check(maxReads.length <= 1 && feeReads.length <= 1 && maxReads.every((c) => c.params.chain === own) && feeReads.every((c) => c.params.chain === "solana" && own === "solana"), `${tag}: the Max and Fee reads ${JSON.stringify(reads)}`);
+        const readFault = readsFault(name, reads, ask);
+        check(readFault === null, `${tag}: the Max and amount reads: ${readFault} ${JSON.stringify(reads)}`);
         // one tap: the ask the box's own checks passed, or nothing
         await cta.click({ force: true });
         await page.clock.runFor(100);
@@ -254,17 +271,14 @@ try {
           check(filled === "Filled 1.1s Final", `${tag}: after the tap "${filled}", want "Filled 1.1s Final"`);
           if (SHOTS && name === "sol-ready") (await page.screenshot({ path: path.join(SHOTS, `${name}-filled-${w.name}-${scheme}.png`) }), shots++);
         } else check(calls.length === 0, `${tag}: a tap on an off button sent ${JSON.stringify(calls)}`);
-        // the chunk button: a tap fills the amount with the chunk's USD and buys it, as a preset does; off, it does nothing
-        if (name === "base-other" || name === "base-making") {
+        // a preset over Max on Base (or while no proof is ready) is off: its tap sends nothing and leaves the typed amount
+        if (name === "base-over" || name === "base-making") {
+          const typed = await page.locator(".trb-input").inputValue();
           await page.locator('[data-testid="trade-presets"] [data-preset]').first().click({ force: true });
           await page.clock.runFor(100);
           const after = await page.evaluate(() => window.__calls);
-          const typed = await page.locator(".trb-input").inputValue();
-          if (name === "base-other") {
-            check(typed === "3.50", `${tag}: the chunk button filled "${typed}", want "3.50"`);
-            check(after.length === 1 && JSON.stringify({ kind: after[0].kind, params: after[0].params }) === JSON.stringify(BASE_ASK), `${tag}: the chunk button sent ${JSON.stringify(after)}, want ${JSON.stringify(BASE_ASK)}`);
-            if (SHOTS) (await page.screenshot({ path: path.join(SHOTS, `base-chunk-tap-${w.name}-${scheme}.png`) }), shots++);
-          } else check(after.length === 0 && typed === "3.50", `${tag}: the off chunk button sent ${JSON.stringify(after)} and left "${typed}"`);
+          const still = await page.locator(".trb-input").inputValue();
+          check(after.length === 0 && still === typed, `${tag}: the off $10 preset sent ${JSON.stringify(after)} and left "${still}", want nothing sent and "${typed}"`);
         }
         await ctx.close();
       }
@@ -299,4 +313,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} of ${checks} checks over ${n} states`);
   process.exit(1);
 }
-console.log(`PASS ${checks} checks over ${n} states (the pool buy, over one tap, money being made spendable (busy Buy), none coming, an empty pool, a Base chunk and not, Base's chunk button, the vault's buy; the pool and vault sell) at 390 and 1440, dark and light${SHOTS ? `; ${shots} shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${checks} checks over ${n} states (the pool buy, over one tap, money being made spendable (busy Buy), none coming, an empty pool, Base at Max, under it and over it, the four presets on Base, the vault's buy; the pool and vault sell) at 390 and 1440, dark and light${SHOTS ? `; ${shots} shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

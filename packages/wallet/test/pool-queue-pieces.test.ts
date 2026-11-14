@@ -139,7 +139,9 @@ test("tiers: after a buy takes one note's tier 1 proof, every other tier 1 proof
   // is taken, so it is not ready, and nothing says "ready" with Max 0
   const b = await bal(v, q as ProofQueue<unknown>);
   assert.equal(b.ready, "0.015");
-  assert.equal(b.tap_max, "0.009899");
+  // Max: the 10's leg and the 5.5's leg, each on its own W (card buy-any-amount-on-every-chain: one tap spends both),
+  // 0.009899 + 0.004899, never the larger alone
+  assert.equal(b.tap_max, "0.014798");
   // and takeable at once, with no pass: the 5.5 note's
   assert.equal((await q.take(Y!.id, before.get(Y!.id))).noteId, Y!.id);
   // the next pass makes tier 2 for the new primary, the 10 note, first (its own old piece goes, the 2 note's piece is
@@ -165,8 +167,12 @@ test("tiers: tier 2 holds at most piecesMax - 1 notes, and a pool of one piece m
   const pieces = q.ready().filter((r) => r.own !== true);
   assert.deepEqual(pieces.map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(10), usd(20), usd(50)]);
   for (const r of pieces) assert.equal(r.wallet.address, W(P));
-  // the notes past the room stay UNSPENT
-  for (const x of [usd(2), usd(5)]) assert.equal((await noteOf(v, x)).state, "UNSPENT");
+  // the notes past the room hold their own proof alone (card balance-shows-fast: every note spendable in one tap's legs)
+  for (const x of [usd(2), usd(5)]) {
+    const n = await noteOf(v, x);
+    assert.equal(n.state, "HELD");
+    assert.deepEqual(q.ready().filter((r) => r.noteId === n.id).map((r) => r.own), [true]);
+  }
   const v1 = await vaultWith(VALUES);
   const q1 = queue(v1, piecesPool(v1, 1) as Pool<unknown>);
   await q1.refresh();

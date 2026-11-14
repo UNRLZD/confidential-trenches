@@ -1,9 +1,10 @@
 // node --test scripts/live-checks/robinhood-pool-logs-on-keyed-route.test.mjs: the live check replays recorded answers
-// (robinhood-pool-logs-on-keyed-route.answers.json, each side as rpcAnswer read it). good: this card's helper in-process,
-// ROBINHOOD_RPC_URL a made-up Alchemy URL whose sends went to Robinhood's own RPC: PASS. bad_live: the deployed helper
+// (robinhood-pool-logs-on-keyed-route.answers.json, each side as rpcAnswer read it). good: the deployed helper read live
+// 14 Nov 05:4xZ, Alchemy's logs timed and Robinhood's own logged blockTimestamp 0x0: PASS. bad_live: the deployed helper
 // read live 13 Nov 16:26Z, both spans {"code":"upstream"}: FAIL. Planted from the good one: dRPC free's code-35 refusal,
 // a log the route lacks, a log changed, no keyed name in Server-Timing, one span missing: FAIL; the same logs with keys in
-// another order: PASS; a 429 on one side: INCONCLUSIVE, never PASS.
+// another order: PASS; a 429 on one side: INCONCLUSIVE, never PASS. A blockTimestamp of 0x0 or none on either side is no
+// time: PASS; two different times, or any other field different: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -43,7 +44,7 @@ function replay(a) {
   };
 }
 
-test("recorded good answer (this card's helper, a keyed URL serving wide spans): PASS", async () => {
+test("recorded good answer (the deployed helper 14 Nov, Alchemy's logs timed, Robinhood's own 0x0): PASS (red at a6b7a3ad7: not the same logs)", async () => {
   const r = judge(await read(BASE, replay(A.good)));
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
   assert.equal(judge(A.good).verdict, "PASS", "the recording as written passes too");
@@ -87,5 +88,40 @@ test("planted from the good answer: a 429 from the route or from Robinhood's own
   for (const side of ["route", "own"]) {
     const a = withSpan(1, (s) => ({ ...s, [side]: { noAnswer: "x HTTP 429: 429 Too Many Requests" } }));
     assert.equal(judge(await read(BASE, replay(a))).verdict, "INCONCLUSIVE", side);
+  }
+});
+
+// card robinhood-pool-logs-on-keyed-route, 14 Nov: Robinhood's own RPC logs blockTimestamp 0x0 on every log
+// (apps/helper/src/data/evm/swaps.ts Log), Alchemy the block's time, so a log is the same on both but for a time one
+// side does not give
+const TIMED = { ...LOG, blockHash: "0x" + "c".repeat(64), blockTimestamp: "0x6af77850" };
+const pair = (route, own) => withSpan(1, (s) => ({ ...s, route: { ...s.route, result: [route] }, own: { result: [own] } }));
+
+test("planted: a blockTimestamp of 0x0 or none on one side is no time: PASS (red at a6b7a3ad7: not the same logs)", async () => {
+  const { blockTimestamp: _, ...untimed } = TIMED;
+  for (const [what, a] of [
+    ["the own RPC's 0x0, the route's time", pair(TIMED, { ...TIMED, blockTimestamp: "0x0" })],
+    ["the route's 0x0, the own RPC's time", pair({ ...TIMED, blockTimestamp: "0x0" }, TIMED)],
+    ["the own RPC with no blockTimestamp, the route's time", pair(TIMED, untimed)],
+  ]) {
+    assert.equal(judge(a).verdict, "PASS", `${what}\n${judge(a).lines.join("\n")}`);
+    assert.equal(judge(await read(BASE, replay(a))).verdict, "PASS", `${what}, replayed`);
+  }
+});
+
+test("planted: two different times, or any other field different, with the other side's time 0x0: FAIL", async () => {
+  const own = { ...TIMED, blockTimestamp: "0x0" };
+  for (const [what, a, want] of [
+    ["two times, different", pair(TIMED, { ...TIMED, blockTimestamp: "0x6af77851" }), /log 0 blockTimestamp/],
+    ["data", pair({ ...TIMED, data: "0x01" }, own), /log 0 data/],
+    ["topics", pair({ ...TIMED, topics: ["0x" + "d".repeat(64)] }, own), /log 0 topics/],
+    ["logIndex", pair({ ...TIMED, logIndex: "0x1" }, own), /log 0 logIndex/],
+    ["blockHash", pair({ ...TIMED, blockHash: "0x" + "e".repeat(64) }, own), /log 0 blockHash/],
+    ["a field one side lacks", pair(TIMED, (({ transactionHash: _, ...x }) => x)(own)), /log 0 transactionHash/],
+  ]) {
+    const r = judge(a);
+    assert.equal(r.verdict, "FAIL", what);
+    assert.ok(r.lines.some((l) => l.startsWith("BAD") && want.test(l)), `${what}\n${r.lines.join("\n")}`);
+    assert.equal(judge(await read(BASE, replay(a))).verdict, "FAIL", `${what}, replayed`);
   }
 });

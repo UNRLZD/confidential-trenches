@@ -63,6 +63,17 @@ test("recorded good answer goodKit116 (card move-sends-what-it-shows's build, ki
   for (const [l, m, n] of [["1.16", "1.14", "1.13"], ["1.15", "1.12", "1.13"], ["1.15", "1.14", "1.12"]]) assert.equal(facts(g.index, js(l, m, n)).notice, null, `${l} ${m} ${n}`);
 });
 
+test("recorded good answer goodKit117 (card buy-any-amount-on-every-chain's build, kit 1.17): the notice at the current level, kit-v1.16's, kit-v1.15's, kit-v1.14's or kit-v1.13's, the five that read it: PASS", () => {
+  const g = ANSWERS.goodKit117;
+  assert.deepEqual(judge(g).lines, []);
+  assert.match(g.notice, /!==`current`&&[\w$]+!==`1\.16`&&[\w$]+!==`1\.15`&&[\w$]+!==`1\.14`&&[\w$]+!==`1\.13`\|\|/);
+  assert.notEqual(g.sha384, ANSWERS.goodKit116.sha384, "another build");
+  // the 1.17 shape with any other levels is no notice a kit-v1.13 to kit-v1.16 app reads
+  const js = (k, l, m, n) => `closed:e=>{!i||r!==\`current\`&&r!==\`${k}\`&&r!==\`${l}\`&&r!==\`${m}\`&&r!==\`${n}\`||o({v:1,type:\`closed\`,id:e})}`;
+  assert.notEqual(facts(g.index, js("1.16", "1.15", "1.14", "1.13")).notice, null);
+  for (const [k, l, m, n] of [["1.17", "1.15", "1.14", "1.13"], ["1.16", "1.14", "1.14", "1.13"], ["1.16", "1.15", "1.12", "1.13"], ["1.16", "1.15", "1.14", "1.12"]]) assert.equal(facts(g.index, js(k, l, m, n)).notice, null, `${k} ${l} ${m} ${n}`);
+});
+
 for (const [k, lines] of [
   ["bad", [NOTICE, TIMER, OPEN, CLOSE, TOLD, RUN, OPENS(0, 2)]],
   ["badBeforeReview", [NOTICE, TIMER, CLOSE, TOLD, RUN]],

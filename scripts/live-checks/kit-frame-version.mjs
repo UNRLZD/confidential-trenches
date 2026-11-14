@@ -49,6 +49,11 @@
 //     pool.move.dry priced answer's max (`let r=F(t,n);if(e===\`1.15\`)return r;`, F being NO_MAX), every lower stage
 //     built on that; the state shaper sends it the state in full and the route function tells it the move event: its
 //     schema refuses the whole answer for max, and it reads the state and the move event as the current level does;
+//   - (card buy-any-amount-on-every-chain) kit-v1.16 is a level of its own below kit 1.17: the answer shaper first takes a
+//     pool.buy.dry answer's buys (`let r=B(t,n);if(e===\`1.16\`)return r;`, B being NO_BUYS), the max strip, kit-v1.15's
+//     level and every lower stage built on that; the state shaper sends it the state in full and the route function tells
+//     it the move event: its schema refuses the whole answer for buys, and it reads the dry move's max, the state and the
+//     move event as the current level does;
 //   - (card pool-deposit-op-txs) a kit-v1.7+ app's pool_deposit op carries the txs that moved its money, each shown only
 //     on the device's own reads: the follow's Solana read lists U_X's finalized signatures (getSignaturesForAddress,
 //     finalized, limit 1e3) and keeps a tx only when every RPC's finalized getTransaction reads it a deposit (`.every(`);
@@ -71,8 +76,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "kit-frame-version";
 /** The kit version the page reads every app at in full (packages/kit/src/signpage/messages.ts SIGNPAGE_KIT_VERSION), and
  *  its levels below that, newest first, down to kit-v1.4's (packages/signpage/src/kit-version.ts KitLevel). */
-export const KIT = "1.16";
-export const LEVELS = ["1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
+export const KIT = "1.17";
+export const LEVELS = ["1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
 export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
@@ -136,6 +141,17 @@ const NO_MAX = /(?:^|[^\w$])([\w$]+)=\(([\w$]+),([\w$]+)\)=>\{if\(typeof \3!=`ob
 const MAX_STAGE = /(function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+)\)\{if\(\3===`current`\)return \5;)let ([\w$]+)=([\w$]+)\(\4,\5\);if\(\3===`1\.15`\)return \6;let ([\w$]+)=([\w$]+)\(\4,\6\);/;
 const STATE_115 = /(function ([\w$]+)\(([\w$]+),[\w$]+\)\{if\(\3===`current`)\|\|\3===`1\.15`\|\|/;
 const ROUTE_115 = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{return \2!==`current`&&\2!==`1\.15`&&Object\.hasOwn\(\3,`move`\)\?null:\3\}/;
+/** pool.buy.dry's answer with no buys (card buy-any-amount-on-every-chain), as minified: any other kind's result, and
+ *  null or one that is no object, as it is. */
+const NO_BUYS = /(?:^|[^\w$])([\w$]+)=\(([\w$]+),([\w$]+)\)=>\{if\(\3===null\|\|\2!==`pool\.buy\.dry`\|\|typeof \3!=`object`\)return \3;let\{buys:[\w$]+,\.\.\.([\w$]+)\}=\3;return \4\}/;
+/** kit-v1.16's own level (card buy-any-amount-on-every-chain), as minified: the answer shaper's first stage, the dry
+ *  buy's buys strip (`let r=B(t,n);if(e===\`1.16\`)return r;`) with the max strip built on what it returns; the state
+ *  shaper's full-state branch naming kit-v1.16 first after the current level; the route function letting kit-v1.16 have
+ *  the move event. Each is read and taken out of the text before kit-v1.15's are, so each check below reads the form it
+ *  was written for. */
+const BUYS_STAGE = /(function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+)\)\{if\(\3===`current`\)return \5;)let ([\w$]+)=([\w$]+)\(\4,\5\);if\(\3===`1\.16`\)return \6;let ([\w$]+)=([\w$]+)\(\4,\6\);/;
+const STATE_116 = /(function ([\w$]+)\(([\w$]+),[\w$]+\)\{if\(\3===`current`)\|\|\3===`1\.16`\|\|/;
+const ROUTE_116 = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{return \2!==`current`&&\2!==`1\.16`&&\2!==`1\.15`&&Object\.hasOwn\(\3,`move`\)\?null:\3\}/;
 /** The open kinds (packages/kit/src/signpage/messages.ts OPEN_KINDS): each one's ok answer carries closes from kit 1.13. */
 export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"];
 
@@ -149,6 +165,14 @@ function helloPath(given) {
   // card move-sends-what-it-shows: kit-v1.15's level read and taken out first (MAX_STAGE, STATE_115, ROUTE_115); `js` is
   // the text with it out, which a build before kit 1.16 already is
   let js = given;
+  // card buy-any-amount-on-every-chain: kit-v1.16's level read and taken out before it (BUYS_STAGE, STATE_116, ROUTE_116),
+  // leaving the text a kit 1.16 build is: the max strip on the given answer
+  const buysAt = BUYS_STAGE.exec(js);
+  if (buysAt) js = js.replace(buysAt[0], () => `${buysAt[1]}let ${buysAt[8]}=${buysAt[9]}(${buysAt[4]},${buysAt[5]});`);
+  const state116At = STATE_116.exec(js);
+  if (state116At) js = js.replace(state116At[0], () => `${state116At[1]}||`);
+  const route116At = ROUTE_116.exec(js);
+  if (route116At) js = js.replace(route116At[0], () => `function ${route116At[1]}(${route116At[2]},${route116At[3]}){return ${route116At[2]}!==\`current\`&&${route116At[2]}!==\`1.15\`&&Object.hasOwn(${route116At[3]},\`move\`)?null:${route116At[3]}}`);
   const maxAt = MAX_STAGE.exec(js);
   if (maxAt) js = js.replace(maxAt[0], () => `${maxAt[1]}let ${maxAt[8]}=${maxAt[9]}(${maxAt[4]},${maxAt[5]});`);
   const stateAt = STATE_115.exec(js);
@@ -296,6 +320,13 @@ function helloPath(given) {
   const max = maxAt && shaper && maxAt[2] === shaper[4] && maxAt[7] === noMax && typeof result16 === "string" ? maxAt[0] : null;
   const state115 = stateAt && shaper && stateAt[2] === shaper[5] && typeof poolOps === "string" ? stateAt[0] : null;
   const route115 = route115At && route && routeAt?.[1] === route115At[1] ? route115At[0] : null;
+  // card buy-any-amount-on-every-chain: kit-v1.16 is sent each pool.buy.dry answer with no buys (the strip the answer
+  // shaper's first stage, kit-v1.16 its own level on it, the max strip and every lower stage built on what it returns),
+  // the state in full, and the move event
+  const noBuys = NO_BUYS.exec(given)?.[1];
+  const buys = buysAt && max && buysAt[2] === shaper[4] && buysAt[7] === noBuys && buysAt[9] === noMax ? buysAt[0] : null;
+  const state116 = state116At && state115 && state116At[2] === shaper[5] ? state116At[0] : null;
+  const route116 = route116At && route115 && route116At[1] === route115At[1] ? route116At[0] : null;
   return {
     assign: assign?.[0] ?? null,
     shaper: shaper?.[0] ?? null,
@@ -328,6 +359,9 @@ function helloPath(given) {
     max,
     state115,
     route115,
+    buys,
+    state116,
+    route116,
   };
 }
 
@@ -378,7 +412,7 @@ export function judge(a, era = ERA) {
   else if (!sameMap(h.progressMap, MAP)) bad(`the progress stage function reads a map other than kit-v1.4's (${JSON.stringify(h.progressMap)})`);
   // card pool-deposit-stages: the version read in full, the levels below it, the pool deposit's op left out below it
   if (typeof h?.assign === "string" && typeof h?.shaper === "string" && typeof h?.post === "string") {
-    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : era.kit === "1.12" ? "pool making" : era.kit === "1.13" ? "open answer's closes" : era.kit === "1.14" ? "dry buy's out" : era.kit === "1.15" ? "dry buy's with_cash and move route event" : "dry move's max"} has no level of its own`);
+    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : era.kit === "1.12" ? "pool making" : era.kit === "1.13" ? "open answer's closes" : era.kit === "1.14" ? "dry buy's out" : era.kit === "1.15" ? "dry buy's with_cash and move route event" : era.kit === "1.16" ? "dry move's max" : "dry buy's buys"} has no level of its own`);
     if (!same(h.levels, era.levels)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(era.levels)}: an older kit's app is sent what it cannot read`);
     if (era.kit !== "1.7" && typeof h.decimals !== "string") bad("the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for");
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
@@ -411,6 +445,10 @@ export function judge(a, era = ERA) {
     if (!before115 && typeof h.max !== "string") bad("pool.move.dry's answer sent below the current level keeps its max, which kit-v1.15 refuses the whole answer for");
     if (!before115 && typeof h.state115 !== "string") bad("kit-v1.15 is not sent the state in full: it loses a field it reads");
     if (!before115 && typeof h.route115 !== "string") bad("kit-v1.15 is not told the move event, which it reads: its buy loses the Cash move it waits on");
+    const before116 = before115 || era.kit === "1.16";
+    if (!before116 && typeof h.buys !== "string") bad("pool.buy.dry's answer sent below the current level keeps its buys, which kit-v1.16 refuses the whole answer for");
+    if (!before116 && typeof h.state116 !== "string") bad("kit-v1.16 is not sent the state in full: it loses a field it reads");
+    if (!before116 && typeof h.route116 !== "string") bad("kit-v1.16 is not told the move event, which it reads: its buy loses the Cash move it waits on");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);
