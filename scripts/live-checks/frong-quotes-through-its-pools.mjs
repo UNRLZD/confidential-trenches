@@ -5,12 +5,14 @@
 // markets, the buy quote left those markets unquoted, took USDG for a currency with no market, read its pools with
 // other currencies one level further, and USDG pairs with more than EVM_QUOTE_MAX_OTHER (card
 // frong-quotes-through-its-pools, packages/kit/src/checks/evm/quote.ts quoteMarkets). It reads, after every sign deploy:
+//   - SIGN_HOST (https://confidential.unrealized.trade): its served /app.js is the one its index.html pins (sha384;
+//     evm-buy-and-sell-on-mainnet.mjs read), so the deploy whose commit this check runs at is the one served;
 //   - buy: the device's own Robinhood pool index synced cold on its two readers, then FRONG quoted by the tap's own
 //     quote (the kit's evmPoolBuyQuoteTap) at QUOTE_AMOUNT once cold and WARM_RUNS times warm;
 //   - sell: SELL_AMOUNT of FRONG sold by evmPoolSellQuote, once cold and once warm, as the first of HOLDERS whose FRONG
 //     balance both of two Robinhood providers read at SELL_AMOUNT or more (W in the quote's own reads; read only, the
 //     sale's probe is an eth_call), from WETH's 1% v3 pool's route as bought.
-// It passes when every buy tap and every sell ends in a quote. Nothing is signed or sent. The kit asks the providers
+// It passes when SIGN_HOST serves its pinned /app.js and every buy tap and every sell ends in a quote. Nothing is signed or sent. The kit asks the providers
 // for the quotes; the holders' balances are read here through provider-answer.mjs. No holder with SELL_AMOUNT on both
 // providers, or a provider with no answer: INCONCLUSIVE (exit 3), never a pass.
 // After: sign
@@ -22,7 +24,7 @@ import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexRefresh, evmPoolSellQuote } from "../../packages/kit/src/index.ts";
-import { evmPoolVenues } from "../../packages/kit/src/trade/evm/buy-unpinned.ts";
+import { read as readSign } from "./evm-buy-and-sell-on-mainnet.mjs";
 import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 export const KEY = "frong-quotes-through-its-pools";
@@ -34,13 +36,15 @@ export const WARM_RUNS = 3;
 export const SELL_AMOUNT = 1_000n * 10n ** 18n;
 // FRONG holders read 2026-11-14 02:2xZ (Transfer logs of the last 200,000 blocks, then balanceOf): 290,558 and 394,744
 export const HOLDERS = ["0x54428883e2a817170e4956459c87b1be96624bf5", "0x786275619e55cd38af81ead6232212420c36fe58"];
+// two of the kit's Robinhood quote providers (packages/kit/src/trade/evm/buy-unpinned.ts), for the holders' balances
+export const BALANCE_RPCS = ["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"];
 
 const big = (_, v) => (typeof v === "bigint" ? v.toString() : v);
 const ended = (f) => f().then((q) => ({ ok: true, route: JSON.parse(JSON.stringify(q.route, big)) }), (e) => ({ ok: false, code: String(e?.code ?? e?.name ?? "thrown"), message: String(e?.message ?? e).slice(0, 300) }));
 
 /** The holder the sale is quoted as: the first of HOLDERS that two providers both read at SELL_AMOUNT or more. */
 async function holderOf(fetchFn) {
-  const urls = evmPoolVenues().robinhood.providers.filter((u) => !evmPoolVenues().robinhood.quoteLast?.includes(u)).slice(0, 2);
+  const urls = BALANCE_RPCS;
   const lines = [];
   for (const w of HOLDERS) {
     const as = await Promise.all(urls.map((u) => rpcAnswer(u, "eth_call", [{ to: FRONG, data: "0x70a08231" + w.slice(2).padStart(64, "0") }, "latest"], { fetchFn })));
@@ -58,6 +62,7 @@ async function holderOf(fetchFn) {
 
 export async function read(fetchFn = fetch) {
   const readAt = new Date().toISOString();
+  const { page } = await readSign(fetchFn);
   const t0 = performance.now();
   const sync = await evmPoolIndexRefresh("robinhood", null, fetchFn);
   const index = { served: sync.served, ms: Math.round(performance.now() - t0) };
@@ -70,7 +75,7 @@ export async function read(fetchFn = fetch) {
   const { w, lines } = await holderOf(fetchFn);
   const sells = [];
   if (w !== null) {
-    const head = await rpcAnswer(evmPoolVenues().robinhood.providers[0], "eth_blockNumber", [], { fetchFn });
+    const head = await rpcAnswer(BALANCE_RPCS[0], "eth_blockNumber", [], { fetchFn });
     const boughtBlock = typeof head.result === "string" ? BigInt(head.result) - 5n : null;
     for (const kind of ["cold", "warm"]) {
       if (boughtBlock === null) break;
@@ -79,14 +84,17 @@ export async function read(fetchFn = fetch) {
       sells.push({ kind, ms: Math.round(performance.now() - t), ...end });
     }
   }
-  return { readAt, index, buys, holder: { w, lines }, sells };
+  return { readAt, page: { pin: page.pin, sha384: page.sha384 }, index, buys, holder: { w, lines }, sells };
 }
 
-/** The verdict on one run: PASS when every buy tap and every sell ends in a quote. */
+/** The verdict on one run: PASS when SIGN_HOST serves the /app.js its index.html pins and every buy tap and every sell
+ *  ends in a quote. */
 export function judge(run) {
   const lines = [];
   const say = (ok, line) => lines.push(`${ok ? "ok " : "BAD"} ${line}`);
   const of = (us) => us.map((u) => (u.ok ? `ok/${u.ms}` : `${u.code}/${u.ms}`)).join(", ");
+  const p = run.page;
+  say(typeof p?.pin === "string" && p.pin === p.sha384, `[SIGN_HOST] the served /app.js is the one index.html pins: ${p?.pin ?? "no page read"}`);
   say(run.index?.served === true, `the pool index synced and served in ${run.index?.ms} ms`);
   say(run.buys.length === 1 + WARM_RUNS && run.buys.every((u) => u.ok), `FRONG's ${run.buys.length} buy taps each end in a quote: ${of(run.buys)}`);
   for (const u of run.buys.filter((x) => !x.ok)) say(false, `buy ${u.kind}: ${u.message}`);

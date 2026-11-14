@@ -45,15 +45,19 @@
   "from": "robinhood-quotes-inside-provider-limits.answers.json step2_after (2d4e7dead, the Mac), its FRONG row"
  },
  "good_after": {
-  "readAt": "2026-11-14T02:36:28.974Z",
+  "readAt": "2026-11-14T02:49:53.164Z",
+  "page": {
+   "pin": "sha384-CouZ+HUBTRzu8of3bSxz/qY0q2m2dzPzY1yK3NUPF7Fdekp79ob2eKjU7i7ACMNd",
+   "sha384": "sha384-CouZ+HUBTRzu8of3bSxz/qY0q2m2dzPzY1yK3NUPF7Fdekp79ob2eKjU7i7ACMNd"
+  },
   "index": {
    "served": true,
-   "ms": 35290
+   "ms": 28931
   },
   "buys": [
    {
     "kind": "cold",
-    "ms": 17246,
+    "ms": 6109,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -68,7 +72,7 @@
    },
    {
     "kind": "warm",
-    "ms": 9765,
+    "ms": 1966,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -83,7 +87,7 @@
    },
    {
     "kind": "warm",
-    "ms": 4591,
+    "ms": 1904,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -98,7 +102,7 @@
    },
    {
     "kind": "warm",
-    "ms": 2029,
+    "ms": 2585,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -121,7 +125,7 @@
   "sells": [
    {
     "kind": "cold",
-    "ms": 4827,
+    "ms": 10724,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -136,7 +140,7 @@
    },
    {
     "kind": "warm",
-    "ms": 3514,
+    "ms": 8001,
     "ok": true,
     "route": {
      "venue": "uniswap-v3",
@@ -150,6 +154,6 @@
     }
    }
   ],
-  "from": "605707282 (card/frong-quotes-through-its-pools with main 606fc443c merged), the Mac"
+  "from": "card/frong-quotes-through-its-pools at f05c96481 with the check reading SIGN_HOST (main 606fc443c merged), the Mac"
  }
 }

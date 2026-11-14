@@ -1,9 +1,10 @@
 // node --test scripts/live-checks/frong-quotes-through-its-pools.test.mjs: the live check frong-quotes-through-its-pools,
 // replayed. frong-quotes-through-its-pools.answers.json holds two real Robinhood mainnet runs from the Mac (read only):
 // - bad_before: FRONG's four buy taps as robinhood-quotes-inside-provider-limits recorded them on 2d4e7dead
-//   (2026-11-13 23:52Z, its step2_after), every one too_many_pools; that check reads no sale, so no holder;
-// - good_after: this check's own `--record` on the card's branch at 605707282, main 606fc443c merged (2026-11-14
-//   02:36Z): four buy taps and two sells, each a quote.
+//   (2026-11-13 23:52Z, its step2_after), every one too_many_pools; that check reads no sale and no page here, so no
+//   holder and no SIGN_HOST pin;
+// - good_after: this check's own `--record` on the card's branch, main 606fc443c merged (2026-11-14 02:49Z): SIGN_HOST
+//   serving its pinned /app.js, four buy taps and two sells, each a quote.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -12,7 +13,7 @@ import { judge, WARM_RUNS } from "./frong-quotes-through-its-pools.mjs";
 const A = JSON.parse(readFileSync(new URL("./frong-quotes-through-its-pools.answers.json", import.meta.url), "utf8"));
 const bad = (v) => v.lines.filter((l) => l.startsWith("BAD"));
 
-test("the recorded run after the fix passes: every buy tap and both sells end in a quote", () => {
+test("the recorded run after the fix passes: SIGN_HOST serves its pin, every buy tap and both sells end in a quote", () => {
   const v = judge(A.good_after);
   assert.equal(v.verdict, "PASS", v.lines.join("\n"));
   assert.equal(A.good_after.buys.length, 1 + WARM_RUNS);
@@ -46,4 +47,9 @@ test("each plant on the good run fails on its own line; no holder is INCONCLUSIV
   const idx = g();
   idx.index.served = false;
   assert.equal(judge(idx).verdict, "FAIL");
+  const pin = g();
+  pin.page.sha384 = "sha384-planted";
+  const vp = judge(pin);
+  assert.equal(vp.verdict, "FAIL");
+  assert.ok(bad(vp).some((l) => /\[SIGN_HOST\]/.test(l)), vp.lines.join("\n"));
 });
