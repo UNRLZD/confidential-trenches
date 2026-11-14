@@ -15,7 +15,7 @@
 // Nothing here logs.
 import type { ErrorCode, PoolChain } from "../../kit/src/signpage/messages.ts";
 import type { CarryEnd, CarryOpen, CarrySender, CarrySource } from "./carry-cash.ts";
-import { wTailOf } from "./w-tails.ts";
+import { wTailKeyOf, wTailOf } from "./w-tails.ts";
 
 /** The vault's least deposit, USDC base units (contracts/vault/src/constants.rs MIN_DEPOSIT; kit ONECLICK_VAULT_MIN_OUT). */
 export const CARRY_VAULT_MIN = 1_000_000n;
@@ -113,7 +113,7 @@ export function leftoverSources(ops: readonly unknown[], tails: readonly unknown
   }
   for (const t of tails) {
     const w = wTailOf(t);
-    if (w !== null && w.chain === "solana" && BigInt(w.amount) > 0n) out.push({ chain: "solana", kind: "w", address: w.address, l: w.l, j: w.j });
+    if (w !== null && BigInt(w.amount) > 0n) out.push({ chain: w.chain, kind: "w", address: w.address, l: w.l, j: w.j });
   }
   return out;
 }
@@ -138,7 +138,7 @@ export function worthUsdc(p: { price: string; expo: number } | null | undefined,
 /** The leftover carried, cleared where the balance counted it: a U_X's newest op's `left` set to 0 (a later deposit to
  *  U_X writes its own), a W's tail record deleted. */
 export async function clearLeftover(st: { keys(s: "ops"): Promise<string[]>; get(s: "ops", k: string): Promise<unknown>; update(s: "ops", k: string, f: (v: unknown) => unknown): Promise<unknown>; delete(s: "meta", k: string): Promise<void> }, src: CarrySource): Promise<void> {
-  if (src.kind === "w") return st.delete("meta", `w-tail/sol/${src.address}`);
+  if (src.kind === "w") return st.delete("meta", wTailKeyOf(src.chain, src.address));
   let newest: { id: string; at: number } | null = null;
   for (const id of await st.keys("ops")) {
     const v = await st.get("ops", id).catch(() => undefined);

@@ -118,11 +118,19 @@ test("the sources: a U_X's newest op ended in the pool or short with money left,
     op("in_pool", "9", { final: true, u: "0x4444444444444444444444444444444444444444", created: 1 }),
     op("in_transit", undefined, { u: "0x4444444444444444444444444444444444444444", created: 2 }), // newer: being followed
   ];
-  const tails = [{ chain: "sol", address: W, l: "3", j: 1, amount: "2345678" }, { chain: "sol", address: "W0", l: "3", j: 2, amount: "0" }];
+  // an EVM W's tail too (card leftovers-carry-to-cash: the EVM carry writes it when W ends empty or carried)
+  const EW = "0x6666666666666666666666666666666666666666";
+  const tails = [
+    { chain: "sol", address: W, l: "3", j: 1, amount: "2345678" },
+    { chain: "sol", address: "W0", l: "3", j: 2, amount: "0" },
+    { chain: "robinhood", address: EW, l: "5", j: 0, amount: "900000000000000" },
+    { chain: "evm", address: EW, l: "5", j: 1, amount: "9" }, // no pool chain: not a record
+  ];
   assert.deepEqual(leftoverSources(ops, tails), [
     { chain: "robinhood", kind: "ux", address: U, s: "7", i: 3 },
     { chain: "base", kind: "ux", address: S, s: "7", i: 3 },
     { chain: "solana", kind: "w", address: W, l: "3", j: 1 },
+    { chain: "robinhood", kind: "w", address: EW, l: "5", j: 0 },
   ]);
   // the open record's key: under meta owed/ (never listed to the frame), one segment
   assert.match(carryOpenKey({ chain: "solana", address: W }), /^owed\/[^/]+$/);
@@ -162,6 +170,11 @@ test("cleared where counted: the U_X's newest op's left set to 0 in the wallet's
     await st.update("meta", `w-tail/sol/${W}`, () => ({ chain: "sol", address: W, l: "3", j: 1, amount: "7" }));
     await clearLeftover(st, { chain: "solana", kind: "w", address: W, l: "3", j: 1 });
     assert.equal(await st.get("meta", `w-tail/sol/${W}`), undefined);
+    // an EVM W's tail under its chain's name
+    const EW = "0x6666666666666666666666666666666666666666";
+    await st.update("meta", `w-tail/base/${EW}`, () => ({ chain: "base", address: EW, l: "5", j: 0, amount: "7" }));
+    await clearLeftover(st, { chain: "base", kind: "w", address: EW, l: "5", j: 0 });
+    assert.equal(await st.get("meta", `w-tail/base/${EW}`), undefined);
     // the open carry's key is one the store takes, and its write moves no seed
     await st.put("meta", carryOpenKey({ chain: "solana", address: W }), { to: "x" });
   } finally {
@@ -177,5 +190,8 @@ test("main.ts runs the carry after the moves resume, one tab's pass at a time, s
   assert.match(main, /sources: async \(\) => leftoverSources\(await pageOps\(\)\.catch\(\(\) => \[\]\), await pageTails\(\)\.catch\(\(\) => \[\]\)\)/);
   // the wait between passes never holds a process open: main.ts booted in a test (held-lock.test.ts) exits (it hung at
   // 6f2c48fae)
+  // a sender on every pool chain: Solana's, and Base's and Robinhood's on the chain's own pool pair
+  assert.match(main, /sender: \(chain\) => \(chain === "solana" \? sol : evmSender\(chain\)\)/);
+  assert.match(main, /const e = testnet\?\.evmPoolOf\(chain\) \?\? null;\s*evms\.set\(chain, e === null \? null : evmCashCarrySender\(\{ chain, network: e\.pin\.network, rpcs: e\.rpcs, seed64: \(\) => openSeed64\(\)/);
   assert.match(main, /const t = setTimeout\(ok, ms\);\s*\(t as unknown as \{ unref\?: \(\) => void \}\)\.unref\?\.\(\);/);
 });

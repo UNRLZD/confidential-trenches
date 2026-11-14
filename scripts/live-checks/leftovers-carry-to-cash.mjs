@@ -12,7 +12,12 @@
 //   - sources: a U_X's newest op ended in the pool or short with its left over 0;
 //   - short: the follow writes what U_X holds each time it shows short (Base's "Short deposit" counted and carried);
 //   - rule: the Solana send is one transfer of exactly the amount, the wallet's whole lamports less the one fee;
-//   - loop: the carry runs one tab's pass at a time (the ct-carry-cash lock), its open record under meta owed/.
+//   - loop: the carry runs one tab's pass at a time (the ct-carry-cash lock), its open record under meta owed/;
+//   - evmRule: Base's and Robinhood's send is one plain transfer at the read gas (Base 21,000, Robinhood its estimate), to
+//     a deposit address with no code on both RPCs;
+//   - evmRecord: an EVM send is written (hash, nonce) before it leaves, and one no RPC ever saw is quoted again;
+//   - evmTail: an EVM W ending empty or carried keeps what it holds as a counted tail (w-tail/base|robinhood/<W>);
+//   - evmWired: the page gives Base and Robinhood their sender on the chain's own pool pair.
 // The numbers and every refusal are packages/signpage/test/leftover-carry.test.ts, carry-cash-sol.test.ts and
 // deposit-left-counted.test.ts at the released commit. The recorded answers are facts() over
 // packages/signpage/scripts/build-app.mjs's build (mainnet, as SIGN_HOST serves) and SIGN_HOST as served before.
@@ -37,6 +42,17 @@ const SHORT = new RegExp(`\\(await (${N})\\(\`short\`\\),await (${N})\\.holds\\?
 const RULE = new RegExp(`if\\((${N})\\((${N})\\.data,4\\)!==(${N})\\.amount\\)return (${N})\\(\`amount\`\\);if\\(\\3\\.amount!==\\3\\.lamports-5000n\\)return \\4\\(\`carry_whole\`\\)`);
 const LOOP = /\.request\(`ct-carry-cash`,\{ifAvailable:!0\},/;
 const OPEN_KEY = new RegExp(`=(${N})=>\`owed/carry-cash-\\$\\{\\1\\.chain\\}-\\$\\{\\1\\.address\\}\``);
+// Base and Robinhood (src/carry-cash-evm.ts, rules/pool.ts checkEvmCashCarry, pool-carry-evm.ts, main.ts)
+const EVM_RULE = new RegExp(`if\\((${N})\\)\\{if\\((${N})<21000n\\|\\|\\2>100000n\\)return (${N})\\(\`gas_over_cap\`\\);if\\((${N})\\.gasLimit!==\\2\\)return \\3\\(\`gas_limit\`\\)\\}else\\{if\\(\\4\\.gasLimit!==21000n\\)return \\3\\(\`gas_limit\`\\);if\\(\\2!==21000n\\)return \\3\\(\`gas_estimate\`\\)\\}`);
+const EVM_RECORD = new RegExp(`return (${N})\\.fill\\(0\\),\\1=null,await (${N})\\(\\{\\.\\.\\.(${N}),sends:\\[\\.\\.\\.\\3\\.sends,\\{hash:[^}]{0,80},nonce:(${N})\\.nonce\\.toString\\(\\)\\}\\]\\}\\),await Promise\\.allSettled\\((${N})\\.map\\((${N})=>\\6\\(\`eth_sendRawTransaction\``);
+const EVM_UNSENT = new RegExp(`for\\(let (${N}) of (${N})\\)if\\(await (${N})\\(\`eth_getTransactionByHash\`,\\[\\1\\]\\)!==null\\)return!0;return!1\\}\\);return (${N})\\[0\\]\\|\\|\\4\\[1\\]\\?\`pending\`:[^;]{0,260}\\.every\\((${N})=>\\5\\[0\\]===(${N})&&\\5\\[1\\]===\\6\\)\\?\`dead\`:\`pending\``);
+const EVM_TAIL = new RegExp(`(${N})===\`empty\`\\|\\|\\1===\`landed\`\\)\\{if\\((${N})!==null&&\\2>0n\\)\\{let (${N})=\\{chain:(${N})\\((${N})\\.chain\\),address:(${N})\\.w,l:\\6\\.l\\.toString\\(\\),j:\\6\\.j,amount:\\2\\.toString\\(\\)\\};await (${N})\\.update\\(\`meta\`,(${N})\\(\\5\\.chain,\\6\\.w\\),\\(\\)=>\\3\\)\\}`);
+// the deposit address a plain account on both RPCs: the rule refuses code (or two answers apart), the sender reads it
+const EVM_NO_CODE = new RegExp(`\\|\\|${N}\\(${N}\\?\\.toHasCode,(${N})=>typeof \\1==\`boolean\`\\)\\)return ${N}\\(\`to\`\\)`);
+const EVM_CODE_READ = new RegExp(`let (${N})=await ${N}\\(\`eth_getCode\`,\\[${N},${N}\\.tag\\]\\);if\\(typeof \\1!=\`string\`[^;]{0,80}\\)throw Error\\(\`not code\`\\);return \\1!==\`0x\``);
+const TAIL_NAMES = /\{solana:`sol`,base:`base`,robinhood:`robinhood`\}/;
+const EVM_WIRED = new RegExp(`sender:(${N})=>\\1===\`solana\`\\?${N}:(${N})\\(\\1\\)`);
+const EVM_SENDER = new RegExp(`let (${N})=${N}\\?\\.evmPoolOf\\((${N})\\)\\?\\?null;${N}\\.set\\(\\2,\\1===null\\?null:${N}\\(\\{chain:\\2,network:\\1\\.pin\\.network,rpcs:\\1\\.rpcs,`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the marks read from it. */
 export function facts(index, js) {
@@ -49,6 +65,10 @@ export function facts(index, js) {
     short: (js.match(SHORT) ?? []).length >= 2,
     rule: RULE.test(js),
     loop: LOOP.test(js) && OPEN_KEY.test(js),
+    evmRule: EVM_RULE.test(js) && EVM_NO_CODE.test(js) && EVM_CODE_READ.test(js),
+    evmRecord: EVM_RECORD.test(js) && EVM_UNSENT.test(js),
+    evmTail: EVM_TAIL.test(js) && TAIL_NAMES.test(js),
+    evmWired: EVM_WIRED.test(js) && EVM_SENDER.test(js),
   };
 }
 
@@ -59,9 +79,13 @@ export const SAYS = Object.freeze({
   short: "the deposit follow does not write a short deposit's U_X money as its left: Base's Short deposit is neither counted nor carried",
   rule: "the Solana carry is not held to one transfer of exactly the wallet's whole lamports less the one fee",
   loop: "the page does not run the carry one tab at a time with its open record under meta owed/",
+  evmRule: "the Base and Robinhood carry is not held to one plain send at the read gas (Base exactly 21,000; Robinhood its agreed estimate, under 100,000) to a deposit address both RPCs read as holding no code",
+  evmRecord: "the Base and Robinhood carry does not write its send (hash and nonce) before it leaves, or never quotes again a send no RPC ever saw: a reload could send twice or wait forever",
+  evmTail: "an EVM W ending empty or carried does not keep what it still holds as a counted tail: the money reads as gone",
+  evmWired: "the page gives Base and Robinhood no carry sender on the chain's own pool pair: their leftovers stay on the wallet",
 });
 
-/** The verdict on an answer { index, sha384, floor, record, sources, short, rule, loop }. */
+/** The verdict on an answer { index, sha384, floor, record, sources, short, rule, loop, evmRule, evmRecord, evmTail, evmWired }. */
 export function judge(a) {
   const lines = [];
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
