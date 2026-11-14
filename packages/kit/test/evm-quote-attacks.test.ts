@@ -2054,6 +2054,35 @@ test("T7 a provider that answers 429 is asked again a little later; one that kee
   assert.equal(w.accepted, true, String((w as { code?: string }).code));
 }));
 
+// card base-quotes-inside-provider-limits: a throttled provider asked again by the same request 0.5, 1 and 1.5 s later
+// drew up to 4 answers of 429 a request and warm taps of 3 to 7 s (sign live run 43546443270, 2026-11-14 02:38Z: Base's
+// SNDKc 10, Robinhood's WALLET 61), while two other providers were left to answer
+test("T7c a provider that answers 429 is not asked again by the same request while another provider is left: the request moves to the next at once", { timeout: 20_000 }, () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000fe8fd";
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  for (const http of [true, false]) {
+    const bodies: string[] = [];
+    // HTTP 429, or mainnet.base.org's form: HTTP 200, each call of the batch an error naming its limit (2026-11-04 07:4xZ)
+    const throttled = evmJsonRpc("https://a.example", (async (_u: string, init: { body: string }) => {
+      bodies.push(init.body);
+      if (http) return new Response("", { status: 429 });
+      const calls = JSON.parse(init.body) as { id: number }[];
+      return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, error: { code: -32016, message: "25/second request limit reached" } }))));
+    }) as unknown as typeof fetch);
+    const t0 = performance.now();
+    const v = await verdict(evmPoolBuyQuoteWith(req, [throttled, chain([best(token)], 0), chain([best(token)], 1)], NOW));
+    const ms = performance.now() - t0;
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+    const name = http ? "HTTP 429" : "a named limit";
+    // the third is asked as the throttle answers, not a hedge's EVM_HEDGE_MS later
+    assert.ok(ms < EVM_HEDGE_MS!, `${name}: the quote took ${Math.round(ms)} ms`);
+    // and the throttled provider is not asked the same request again 0.5, 1 and 1.5 s on
+    await new Promise((r) => setTimeout(r, 3_500));
+    assert.ok(bodies.length > 0, "the throttled provider was asked first");
+    assert.equal(new Set(bodies).size, bodies.length, `${name}: a request asked the throttled provider ${bodies.length - new Set(bodies).size} times more`);
+  }
+}));
+
 test("T7b a request that made no connection (fetch failed, a connect error as its cause) is asked again; one that timed out is not, nor a connection that keeps failing (card evm-quote-warm-round)", { timeout: 20_000 }, () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000fe8ff";
   const inner = chain([best(token)], 1);

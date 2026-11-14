@@ -851,7 +851,7 @@ function agreeing<T>(
       if (done || started >= list.length) return;
       const k = started++;
       t0[k] = performance.now();
-      const gate: Gated = { sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now())), moved: () => movedK[k] === true };
+      const gate: Gated = { sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now())), moved: () => movedK[k] === true, spare: () => !done && started < list.length };
       one(list[k]!, k, gate).then(
         (v) => {
           settled++;
@@ -893,8 +893,8 @@ function agreeing<T>(
 }
 
 /** A request's hooks in its provider's gate (agreeing's `moving`): `sent` as it leaves the gate, and `moved`, read as it
- *  would leave: true, it is not sent (MOVED). */
-type Gated = { readonly sent: () => void; readonly moved: () => boolean };
+ *  would leave: true, it is not sent (MOVED). `spare`: agreeing has a provider left to ask in this one's place (ask). */
+type Gated = { readonly sent: () => void; readonly moved: () => boolean; readonly spare?: () => boolean };
 const MOVED = new Error("moved to the next provider before it was sent");
 // a gated provider's call with a request's hooks, and whether the provider is stalled (gated, ask)
 const GATED = new WeakMap<EvmRpc, (calls: readonly EvmRpcCall[], gate?: Gated) => Promise<readonly unknown[]>>();
@@ -903,7 +903,12 @@ const STALLED = new WeakMap<EvmRpc, () => boolean>();
 /** One provider's answer to `calls`, asked up to 3 more times 0.5, 1 and 1.5 s apart while it answers 429 (Too Many
  *  Requests: rpc.mainnet.chain.robinhood.com, 2026-11-04 06:53Z, to the reads of one quote), a call's error names its
  *  rate limit ("25/second request limit reached", mainnet.base.org, 07:4xZ) or no connection is made (Unreachable: a
- *  read is asked again, as it sends nothing); any other failure, or a fourth, refuses. */
+ *  read is asked again, as it sends nothing); any other failure, or a fourth, refuses.
+ *  A throttle is asked again on its own provider only while agreeing has no other provider left for the request (its
+ *  gate's `spare`): with one left the throttle refuses at once, so agreeing asks the next, and the throttled provider,
+ *  held (timed), is asked after the rest by every quote until its hold ends (card base-quotes-inside-provider-limits: a
+ *  throttled Base or Robinhood provider asked again 0.5, 1 and 1.5 s later drew up to 4 answers of 429 a request and
+ *  warm taps of 3 to 7 s, sign live run 43546443270, 2026-11-14 02:38Z). */
 async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Promise<readonly unknown[]> {
   let out: unknown;
   for (let i = 0; ; i++) {
@@ -917,7 +922,7 @@ async function ask(rpc: EvmRpc, calls: readonly EvmRpcCall[], gate?: Gated): Pro
     } catch (e) {
       // moved, or the quote's deadline passed in the gate (gated): nothing was sent
       if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;
-      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {
+      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3 || (e instanceof RateLimited && gate?.spare?.() === true)) {
         throw new EvmQuoteError("rpc_error", `a provider did not answer: ${(e as Error)?.message ?? e}`);
       }
       await new Promise((r) => setTimeout(r, 500 * (i + 1)));
@@ -988,7 +993,7 @@ async function agreedBlock(rpcs: readonly EvmRpc[], maxLag: bigint, nowMs: numbe
     list = [...rpcs];
     const round = agreeing(
       rpcs,
-      async (rpc, k) => header((await ask(rpc, [call]))[0], `provider ${k + 1}`),
+      async (rpc, k, gate) => header((await ask(rpc, [call], gate))[0], `provider ${k + 1}`),
       near,
       (x, y) => refuse("rpc_disagree", `the providers' heads ${x.number} and ${y.number} are more than ${maxLag} blocks apart`),
       // a head past maxLag is a missing answer, not a vote
@@ -3678,7 +3683,7 @@ async function releasesConfirmed(at: readonly ReleaseLog[], list: readonly EvmRp
 async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rpcs: readonly EvmRpc[], block: Block, maxLag: bigint, sent: readonly EvmSellSent[], funding: { token: string; block: bigint }, clock: () => number): Promise<EvmSellReleases> {
   const fins = await agreeing(
     rpcs,
-    async (rpc, k) => header((await ask(rpc, [{ method: "eth_getBlockByNumber", params: ["finalized", false] }]))[0], `provider ${k + 1}`),
+    async (rpc, k, gate) => header((await ask(rpc, [{ method: "eth_getBlockByNumber", params: ["finalized", false] }], gate))[0], `provider ${k + 1}`),
     () => true,
     () => refuse("rpc_error", "the providers gave no finalized block"),
     false,
@@ -3697,7 +3702,7 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
     pages.push([a, a + EVM_SELL_TAIL_PAGE - 1n]);
   }
   const wTopic = "0x" + word(BigInt(w));
-  const logsOf = async (rpc: EvmRpc, k: number) => {
+  const logsOf = async (rpc: EvmRpc, k: number, gate?: Gated) => {
     const who = `provider ${k + 1}`;
     const out: ReleaseLog[] = [];
     // two pages a batch, each with the agreed block's header, which must be the quote's (CALLS_PER_BATCH)
@@ -3707,7 +3712,7 @@ async function sellReleasesRead(chain: EvmPoolChain, pool: string, w: string, rp
         ...part.map(([a, b]) => ({ method: "eth_getLogs", params: [{ address: pool, fromBlock: hx(a), toBlock: b === null ? "latest" : hx(b), topics: [[TOPIC_WITHDRAWN, TOPIC_BOUGHT], wTopic] }] })),
         { method: "eth_getBlockByNumber", params: [hx(n), false] },
       ];
-      const got = await askAt(rpc, calls);
+      const got = await askAt(rpc, calls, gate);
       if (header(got[part.length], who).hash !== block.hash) return refuse("rpc_disagree", `${who} does not hold the quote's block ${n}`);
       for (let p = 0; p < part.length; p++) {
         const r = (got[p] as { result?: unknown } | null)?.result;
@@ -3963,9 +3968,9 @@ function logsOf(rc: Record<string, unknown>, who: string): string[] {
 async function tradeOf(rpcs: EvmRpc[], h: string): Promise<Trade> {
   const { a: sale } = await agreeing(
     rpcs,
-    async (rpc, k) => {
+    async (rpc, k, gate) => {
       const who = `provider ${k + 1}`;
-      const [t, r] = await askAt(rpc, [{ method: "eth_getTransactionByHash", params: [h] }, { method: "eth_getTransactionReceipt", params: [h] }]);
+      const [t, r] = await askAt(rpc, [{ method: "eth_getTransactionByHash", params: [h] }, { method: "eth_getTransactionReceipt", params: [h] }], gate);
       const tx = resultOf(t, who, "transaction"), rc = resultOf(r, who, "receipt");
       const auths = tx.authorizationList;
       const fees: Record<string, string> = typeof tx.maxFeePerGas === "string" ? { maxFeePerGas: num(tx, "maxFeePerGas", who), maxPriorityFeePerGas: num(tx, "maxPriorityFeePerGas", who) } : { gasPrice: num(tx, "gasPrice", who) };
@@ -4145,8 +4150,8 @@ async function tracedPre(trace: readonly (readonly [EvmRpc, EvmRpc])[], sale: Tr
   const read = async <T>(at: 0 | 1, tracer: object, of: (r: unknown) => T | null): Promise<T | null> => {
     const { a } = await agreeing(
       trace.map((t) => t[at]),
-      async (rpc, k) => {
-        const [x] = await ask(rpc, [{ method: "debug_traceTransaction", params: [sale.hash, tracer] }]);
+      async (rpc, k, gate) => {
+        const [x] = await ask(rpc, [{ method: "debug_traceTransaction", params: [sale.hash, tracer] }], gate);
         const r = (x as { result?: unknown } | null)?.result;
         if (r === undefined || r === null) return refuse("rpc_error", `trace provider ${k + 1} answered no trace of the trade`);
         return of(r);
@@ -4198,9 +4203,9 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   // 2. the sale's block: its parent, number and time, the same on two providers
   const { a: blk } = await agreeing(
     rpcs,
-    async (rpc, k) => {
+    async (rpc, k, gate) => {
       const who = `provider ${k + 1}`;
-      const [b] = await askAt(rpc, [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }]);
+      const [b] = await askAt(rpc, [{ method: "eth_getBlockByHash", params: [sale.blockHash, false] }], gate);
       const r = resultOf(b, who, "block of the sale");
       return { hash: str(r, "hash", who), number: num(r, "number", who), timestamp: num(r, "timestamp", who), parentHash: str(r, "parentHash", who), baseFeePerGas: num(r, "baseFeePerGas", who), mixHash: str(r, "mixHash", who) };
     },
@@ -4227,9 +4232,9 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
   if (sysSlots.length > 0) {
     const { a: words } = await agreeing(
       rpcs,
-      async (rpc, k) => {
+      async (rpc, k, gate) => {
         const who = `provider ${k + 1}`;
-        const got = await askAt(rpc, sysSlots.map(([a, s]) => ({ method: "eth_getStorageAt", params: [a, s, { blockHash: blk.hash, requireCanonical: true }] })));
+        const got = await askAt(rpc, sysSlots.map(([a, s]) => ({ method: "eth_getStorageAt", params: [a, s, { blockHash: blk.hash, requireCanonical: true }] })), gate);
         return got.map((g) => {
           const r = (g as { result?: unknown } | null)?.result;
           if (typeof r !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(r)) return refuse("rpc_error", `${who} answered a system slot of the sale's block with no word`);
@@ -4266,7 +4271,7 @@ async function blamed(rpcs: EvmRpc[], chain: EvmPoolChain, quote: { readonly min
     for (const [a, o] of Object.entries({ ...asW, ...extra })) state[lower(a)] = { ...state[lower(a)], ...o };
     const { a } = await agreeing(
       rpcs,
-      async (rpc, k) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }]))[0], `provider ${k + 1}`),
+      async (rpc, k, gate) => replayOf((await askAt(rpc, [{ method: "eth_call", params: [call, parent, state, env] }], gate))[0], `provider ${k + 1}`),
       (x, y) => (x.ok && y.ok && x.result === y.result) || (!x.ok && !y.ok && x.data === y.data),
       () => refuse("rpc_disagree", "the providers answer the sale's replay differently"),
     );
