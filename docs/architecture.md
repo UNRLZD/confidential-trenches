@@ -6,11 +6,11 @@ Technical words are explained where they first show up. The app runs on mainnet 
 
 ## The system on one page
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="../assets/architecture-dark.svg"><img alt="Apps call the kit's one public entry. Your device holds the 12 words, keys, notes, the prover and the signed orders. Helpers carry messages and hold no money keys. The vault on NEAR has no key and pays only what a proof names. NEAR Intents moves money between the vault, fresh wallets and any address." src="../assets/architecture-light.svg" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="../assets/architecture-dark.svg"><img alt="Apps call the kit's one public entry. Your device holds the 12 words, keys and notes, proves before the tap and checks every quote. Helpers carry messages and hold no money keys. On chain nothing has a key: the NEAR vault holds the USDC, and a pool on Solana, Base and Robinhood Chain pays only the wallet a proof names. A fresh wallet signs one transaction that gets paid by the pool and buys, and a sell goes back into the pool. NEAR Intents moves every dollar that changes chain." src="../assets/architecture-light.svg" width="100%"></picture>
 
 Solid green lines are money. Dashed blue lines are signed messages: requests that a key has already approved, which anyone can carry and nobody can change. Read it top to bottom.
 
-The diagram shows the NEAR vault path, the first design. Blindfill v2, which runs on mainnet today, adds a pool on each chain you trade on, described next and in full in the [v2 lite paper](litepaper.md).
+Blindfill v2 runs on mainnet today with a pool on each chain you trade on, described next and in full in the [v2 lite paper](litepaper.md).
 
 ### v2: a pool on every chain you trade on
 
@@ -36,13 +36,13 @@ A note is a sealed record that says "this much is mine". Only your 12 words can 
 
 ### The signing page
 
-`sign.confidential.unrealized.trade` sits on its own address. Keys are made there and stay there. Because the browser treats the two addresses as separate places, the terminal can't read the page's storage. Our terminal embeds the page out of sight and sends it requests such as "buy this" or "withdraw there". Anything that needs your full attention opens as a page of its own on this address: the passkey prompt, the screen that shows your 12 words, key export, the address for an outside withdrawal.
+`confidential.unrealized.trade` is the signing page, on its own address. Keys are made there and stay there. The terminal runs inside it, in a frame served from `ct-app.unrealized.trade`. Because the browser treats the two addresses as separate places, the terminal can't read the page's storage. It sends the page requests such as "buy this" or "withdraw there". Anything that needs your full attention opens as a page of its own on this address: the passkey prompt, the screen that shows your 12 words, key export, the address for an outside withdrawal.
 
 This is the one page that handles your keys, and the one we'd most like you to test. A release is built to come out byte for byte the same when built twice, with every file hashed and an outside check that compares what's served with the release. The exit tool below needs none of it.
 
 ### The terminal
 
-`confidential.unrealized.trade` shows the screens, the prices and the charts. It holds no key, no 12 words and no note secret. When you tap Buy, it hands a request to the signing page and waits.
+`ct-app.unrealized.trade` shows the screens, the prices and the charts. It holds no key, no 12 words and no note secret. When you tap Buy, it hands a request to the signing page and waits.
 
 ### The kit
 
@@ -50,7 +50,7 @@ This is the one page that handles your keys, and the one we'd most like you to t
 
 ### The helper
 
-`api.confidential.unrealized.trade` does five small jobs, and we've kept every key to anyone's money out of all five.
+`ct-api.unrealized.trade` does five small jobs, and we've kept every key to anyone's money out of all five.
 
 - The prices and quotes proxy keeps our vendor API keys, forwards requests and caches public data.
 - The withdrawal relayer pays the NEAR fee and storage for a withdrawal. The proof fixes the recipient, the fee recipient and the fee, so the relayer can't redirect the money or take more.
