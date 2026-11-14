@@ -9,6 +9,7 @@
 // up after it, whatever its stage, so one whose run the app missed while the signing page was down still ends on its
 // outcome. One already finished at the first state is old and never drawn. Done or the close drops one for the session.
 import type { Operation, TxRef, WithdrawStage } from "@blindfill/kit";
+import { withoutMoveLegs } from "../portfolio/move.ts";
 
 export type WithdrawView = "S12.11" | "S12.12" | "S12.14" | "S12.15" | "stopped";
 
@@ -38,7 +39,8 @@ export interface Watch {
 
 export const EMPTY: Watch = { old: null, seen: [], closed: [] };
 
-const withdrawals = (ops: readonly Operation[] | null | undefined): WithdrawOp[] => (ops ?? []).filter((o): o is WithdrawOp => o.kind === "withdraw");
+// a Move's pool withdraw run (`<move id>/out`) is the Move's, drawn in the Move sheet only (card move-shows-one-swap)
+const withdrawals = (ops: readonly Operation[] | null | undefined): WithdrawOp[] => withoutMoveLegs(ops ?? []).filter((o): o is WithdrawOp => o.kind === "withdraw");
 
 /** The watch after a state from the signing page (null: none known). The same object when nothing changed. */
 export function observe(w: Watch, ops: readonly Operation[] | null | undefined, now: number): Watch {

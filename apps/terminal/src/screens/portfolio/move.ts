@@ -5,9 +5,8 @@ import type { PoolRow } from "./model.ts";
 
 // Moving money between chains from Portfolio's Private balance (card portfolio-moves-money-between-chains), as pure
 // functions: each row's dollar figure and the block's total, the route a move takes (lite paper v2 §3: money from Cash
-// to a pool is one NEAR Intents leg; pool to pool stops in the NEAR vault, pool, NEAR Intents, NEAR vault, NEAR
-// Intents, pool), which step a running move is at, the amount typed against what the row can move, and whether the
-// signing page has the move at all.
+// to a pool is one NEAR Intents leg; a pool to a pool one confidential swap, pool, NEAR Intents, pool), which step a
+// running move is at, the amount typed against what the row can move, and whether the signing page has the move at all.
 //
 // The move itself is the signing page's (wallet card one-balance-buys-on-every-chain): pool.move {from, to, amount}
 // starts it, pool.move.dry {from, to, amount} prices it, and its op in state.ops says where it is. The app never builds
@@ -121,14 +120,29 @@ const isChain = (c: unknown): c is MoveChain => (MOVE_CHAINS as readonly unknown
 
 // ------------------------------------------------------------------------------------------------ the route
 
-/** The steps a move takes before pool.move.dry answers, as kit 1.15 names them (lite paper v2 §3): Cash to a pool one
- *  NEAR Intents leg; a pool to Cash one leg into the vault; pool to pool through the NEAR vault, so the two chains'
- *  money is never tied together. Null for a chain to itself. Once the dry answers, its own steps are drawn. */
+/** The steps a move takes before pool.move.dry answers, the signing page's own for every pair (packages/signpage
+ *  cash-to-pool.ts CASH_TO_POOL_STEPS, POOL_TO_CASH_STEPS, POOL_TO_POOL_STEPS; card move-shows-one-swap): Cash to a pool
+ *  one NEAR Intents leg; a pool to Cash one leg into the vault; a pool to a pool one confidential swap, no vault stop
+ *  (card move-one-confidential-swap). Null for a chain to itself. Once the dry answers, its own steps are drawn, and a
+ *  running move keeps them (MoveSheet). */
 export function routeSteps(from: MoveChain, to: MoveChain): MoveStep[] | null {
   if (from === to) return null;
   if (from === "near") return [{ step: "vault_out", chain: "near" }, { step: "intents", chain: to }, { step: "pool_in", chain: to }];
-  const out: MoveStep[] = [{ step: "pool_out", chain: from }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }];
-  return to === "near" ? out : [...out, { step: "vault_out", chain: "near" }, { step: "intents", chain: to }, { step: "pool_in", chain: to }];
+  if (to === "near") return [{ step: "pool_out", chain: from }, { step: "intents", chain: "near" }, { step: "vault_in", chain: "near" }];
+  return [{ step: "pool_out", chain: from }, { step: "intents", chain: to }, { step: "pool_in", chain: to }];
+}
+
+/** The ops with every Move's own legs left out (card move-shows-one-swap): the signing page runs a Move's parts as ops of
+ *  their own under its id (packages/signpage pool-to-cash.ts and cash-to-pool.ts: `<id>/out` the pool withdraw run,
+ *  `<id>/1click` or `<id>/pool` the deposit's follow, `<id>/on` the onward move) and state.ops sends each one. A Move is
+ *  drawn only in the Move sheet, so none of them is a withdrawal drawn, an Activity row or a deposit's Recent row. An op
+ *  is a leg only while the Move it hangs under is in the same ops: nothing is left out on its id's shape alone. */
+export function withoutMoveLegs<T extends { readonly id: string; readonly kind: string }>(ops: readonly T[]): T[] {
+  const moves = new Set(ops.filter((o) => o.kind === "move").map((o) => o.id));
+  return ops.filter((o) => {
+    const i = o.id.lastIndexOf("/");
+    return i < 0 || !moves.has(o.id.slice(0, i));
+  });
 }
 
 export type NodeKind = "pool" | "intents" | "vault";

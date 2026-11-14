@@ -15,6 +15,7 @@ import { small } from "../discover/format.ts";
 import { initialsBps } from "../positions/model.ts";
 import { reasonOf, statePoolPrice, unitsToCents } from "../trade/model.ts";
 import type { Reason } from "../trade/model.ts";
+import { withoutMoveLegs } from "./move.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
@@ -950,7 +951,8 @@ function failedOf(o: Operation): ActRow["failed"] {
  *  with no time last, in the kit's order. */
 export function activity(ops: readonly Operation[] | null | undefined, d: PortfolioData): ActRow[] {
   const rows: ActRow[] = [];
-  for (const o of ops ?? []) {
+  // a Move's legs (its pool withdraw run, its deposit) are the Move's, never a row of their own (card move-shows-one-swap)
+  for (const o of withoutMoveLegs(ops ?? [])) {
     if (!SHOWN.has(o.kind)) continue;
     const moved = !NOT_MOVED.has(o.stage);
     rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? centsNear(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null, failed: failedOf(o) });

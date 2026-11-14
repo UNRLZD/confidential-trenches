@@ -43,6 +43,15 @@ export const FIXTURES: Record<string, Fx> = {
   "stopped-down": { ops: [wd("stopped", [])], detail: DETAIL, moneyOn: false },
   reload: { first: [wd("in_transit", TXS.slice(0, 1))], ops: [wd("in_transit", TXS.slice(0, 1))], detail: DETAIL },
   old: { first: [wd("sent")], ops: [wd("sent")], detail: DETAIL },
+  // card move-shows-one-swap: a Move's pool release runs as a withdraw op under `<move id>/out` (release 137, a Move of
+  // 0.08 SOL to Base): it is the Move's, drawn in the Move sheet only, never here
+  move: {
+    ops: [
+      { id: "m1", kind: "move", from: "solana", to: "base", stage: "in_transit", txs: [], amount: "0.08" } as unknown as Operation,
+      { id: "m1/out", kind: "withdraw", stage: "in_transit", txs: TXS.slice(0, 1) },
+    ],
+    detail: { amount_usd: "43.69" },
+  },
 };
 
 declare global {
