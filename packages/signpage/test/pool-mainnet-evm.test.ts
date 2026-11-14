@@ -57,13 +57,19 @@ function rpcs() {
 }
 
 test("SIGN_HOST's build pins both mainnet pools and reads each chain's price on the pool list's two seats", async () => {
-  const { MAINNET_POOL_RPCS } = await import("../src/pool-testnet.ts");
+  const { MAINNET_POOL_RPCS, pageEvmPoolRpcs } = await import("../src/pool-testnet.ts");
   const deps = testnetPoolDeps();
+  const origins = (l: readonly unknown[] | null | undefined) => (l as { url?: string }[] | null | undefined)?.slice(0, 2).map((r) => new URL(String(r.url)).origin);
   for (const chain of ["base", "robinhood"] as const) {
     assert.ok(EVM_POOLS[chain] !== undefined, `${chain} pinned`);
     assert.equal(deps.pinned(chain), true, `${chain}: a pool kind passes the pin`);
     const pair = deps.rpcs(chain) as unknown as { url?: string }[] | null;
-    assert.deepEqual(pair?.map((r) => new URL(String(r.url)).origin), MAINNET_POOL_RPCS[chain].slice(0, 2), `${chain}: the price's pair (src/pool-price.ts), the trade box's Buy`);
+    assert.deepEqual(origins(pair), origins(pageEvmPoolRpcs(chain)), `${chain}: the price's pair (src/pool-price.ts), the trade box's Buy`);
+    // the first seat is the kit's own first, read device-direct; Robinhood's second is the helper's keyed-only route
+    // (card first-sign-in-reads-fast-on-live), Base's the kit's second
+    assert.equal(origins(pair)?.[0], MAINNET_POOL_RPCS[chain][0], `${chain}: the first seat is the chain's own, device-direct`);
+    if (chain === "base") assert.equal(origins(pair)?.[1], MAINNET_POOL_RPCS.base[1], "base: the second seat is the kit's second");
+    else assert.notEqual(origins(pair)?.[1], MAINNET_POOL_RPCS.robinhood[0], "robinhood: the second seat is another operator");
   }
 });
 
