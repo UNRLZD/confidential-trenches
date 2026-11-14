@@ -103,7 +103,7 @@ for (const c of CASES) {
     pair = evmPair(list);
     const got = await read(list, pair, FROM, TO, queue);
     assert.deepEqual(got.logs.map((l) => l.block), logs.map((l) => l.block), "every log once, in order");
-    const calls = list.map((p) => `${new URL(p.url).host} ${p.calls} calls, ${p.most} at once, seats ${[...p.sides].join("+")}`).join("; ");
+    const calls = list.map((p) => `${new URL(p.url!).host} ${p.calls} calls, ${p.most} at once, seats ${[...p.sides].join("+")}`).join("; ");
     t.diagnostic(`${got.rounds} rounds (bound ${c.bound}): ${calls}`);
     assert.ok(got.rounds <= c.bound, `${got.rounds} rounds (bound ${c.bound}): ${calls}`);
     for (const p of list) {
