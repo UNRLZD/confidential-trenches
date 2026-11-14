@@ -76,6 +76,8 @@ import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { storedTails, wTailWallets } from "./w-tails.ts";
 import { CARRY_FOLLOW_MS, CARRY_PASS_MS, carryLeftovers, carryOpenKey, clearLeftover, leftoverSources, worthUsdc, type CarryPass, type LeftoverCarryDeps } from "./leftover-carry.ts";
 import { solCashCarrySender } from "./carry-cash-sol.ts";
+import { evmCashCarrySender } from "./carry-cash-evm.ts";
+import type { CarrySender } from "./carry-cash.ts";
 import { POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS } from "./device-spacing.ts";
 import type { CarryOpen } from "./carry-cash.ts";
 import { depositToEnd, depositWalletsOf, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, poolFollowEnded, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
@@ -411,13 +413,22 @@ else {
     };
   // a one-time wallet's leftover goes whole to Cash (src/leftover-carry.ts, card leftovers-carry-to-cash): one wallet a
   // pass, under one tab's lock (two tabs never carry the same wallet), Cash's own deposit quote as pool to Cash asks it;
-  // Solana's sender here (Base's and Robinhood's join with their sender)
+  // a sender on each pool chain
   carryLoop = async () => {
     const signal = withdrawWait.signal;
     const sol = PAGE_SOL_PIN === undefined ? null : solCashCarrySender({ rpcs: pageSolanaRpcs("pass"), seed64: () => openSeed64(), now: () => Date.now() });
+    // Base's and Robinhood's on the chain's own pool pair (src/carry-cash-evm.ts), made once each, when first asked
+    const evms = new Map<"base" | "robinhood", CarrySender | null>();
+    const evmSender = (chain: "base" | "robinhood"): CarrySender | null => {
+      if (!evms.has(chain)) {
+        const e = testnet?.evmPoolOf(chain) ?? null;
+        evms.set(chain, e === null ? null : evmCashCarrySender({ chain, network: e.pin.network, rpcs: e.rpcs, seed64: () => openSeed64(), now: () => Date.now() }));
+      }
+      return evms.get(chain) ?? null;
+    };
     const deps: LeftoverCarryDeps = {
       sources: async () => leftoverSources(await pageOps().catch(() => []), await pageTails().catch(() => [])),
-      sender: (chain) => (chain === "solana" ? sol : null),
+      sender: (chain) => (chain === "solana" ? sol : evmSender(chain)),
       worth: (chain, amount) => worthUsdc(prices.get(chain), amount, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]),
       quote: async (chain, amount, id) => {
         const r = poolCoinQuote({ origin_asset: POOL_COIN_ASSET[chain], amount: formatPoolUnits(amount, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) }, { id });

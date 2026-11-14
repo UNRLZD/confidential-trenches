@@ -6,17 +6,20 @@
 import type { PoolChain } from "../../kit/src/signpage/messages.ts";
 
 /** The wallet a leftover is on and how the device derives its key: a U_X (U_{s,i} of the chain, the pool's scope `s`), or
- *  a W (W_{sol, l, j}). `address` is the wallet's own, checked against the key derived before anything is signed. */
+ *  a W (W_{sol, l, j} on Solana, W_{evm, l, j} on Base and Robinhood). `address` is the wallet's own, checked against the
+ *  key derived before anything is signed. */
 export type CarrySource =
   | { chain: PoolChain; kind: "ux"; address: string; s: string; i: number }
-  | { chain: "solana"; kind: "w"; address: string; l: string; j: number };
+  | { chain: PoolChain; kind: "w"; address: string; l: string; j: number };
 
 /** One signed send, recorded before it leaves (an EVM send's nonce; a Solana send's blockhash's last valid height). */
 export type CarrySend = { hash: string; value: string; sentMs: string; nonce?: string; lastValid?: string };
 
 /** The open carry of one wallet: the checked deposit address it pays, the amount quoted (exactly what it sends), the id
- *  of the quote's follow op, and each send signed for it. Written before the first send leaves. */
-export type CarryOpen = { to: string; amount: string; quote: string; quotedMs: string; sends: CarrySend[] };
+ *  of the quote's follow op, and each send signed for it. Written before the first send leaves. On EVM, `spent`: the
+ *  block at which both RPCs read the wallet's nonce past its sends' (pool-deposit-evm.ts spentFinal), kept so a reload
+ *  waits on that same block to turn final. */
+export type CarryOpen = { to: string; amount: string; quote: string; quotedMs: string; sends: CarrySend[]; spent?: { nonce: string; number: string; hash: string } };
 
 /** How a send ended: landed (read on both RPCs, the wallet's money at the address); pending (it may still land: read
  *  again next pass); dead (it cannot land and nothing of it did: quote again); short (the wallet's lower balance less the
