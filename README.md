@@ -173,10 +173,10 @@ Medians round to the nearest 0.1 s. A p95 always rounds up.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg">
-  <img alt="How Blindfill and Confidential Trenches fit together: apps call @blindfill/kit; your device holds the keys, notes, prover, quote checks and signed orders; helpers hold no money keys; the vault on NEAR has no key; NEAR Intents moves money between the vault, any wallet, any address and fresh wallets on any chain it reaches; the exit tool needs only the 12 words." src="assets/architecture-light.svg" width="640">
+  <img alt="How Blindfill and Confidential Trenches fit together: apps call @blindfill/kit; your device holds the keys and notes, proves before the tap and checks every quote; helpers hold no money keys; on chain nothing has a key: the NEAR vault holds the USDC and a pool on Solana, Base and Robinhood Chain pays only the wallet a proof names; a fresh wallet is paid by the pool and buys in one transaction, and a sell goes back into the pool; NEAR Intents moves every dollar that changes chain; the exit tool needs only the 12 words." src="assets/architecture-light.svg" width="640">
 </picture>
 
-Every box and arrow is explained in [docs/architecture.md](docs/architecture.md), and every party's view in [docs/security.md](docs/security.md). The diagram shows the NEAR vault path. Blindfill v2, live on mainnet, adds a pool with no keys on each chain you trade on, so a buy settles in one transaction on its own chain: see the [v2 lite paper](docs/litepaper.md).
+Every box and arrow is explained in [docs/architecture.md](docs/architecture.md), and every party's view in [docs/security.md](docs/security.md). Blindfill v2 is live on mainnet with a pool that has no keys on each chain you trade on, so a buy settles in one transaction on its own chain: see the [v2 lite paper](docs/litepaper.md).
 
 ## How this differs
 

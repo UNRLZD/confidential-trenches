@@ -6,11 +6,11 @@ Technical words are explained where they first show up. The app runs on mainnet 
 
 ## The system on one page
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="../assets/architecture-dark.svg"><img alt="Apps call the kit's one public entry. Your device holds the 12 words, keys, notes, the prover and the signed orders. Helpers carry messages and hold no money keys. The vault on NEAR has no key and pays only what a proof names. NEAR Intents moves money between the vault, fresh wallets and any address." src="../assets/architecture-light.svg" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="../assets/architecture-dark.svg"><img alt="Apps call the kit's one public entry. Your device holds the 12 words, keys and notes, proves before the tap and checks every quote. Helpers carry messages and hold no money keys. On chain nothing has a key: the NEAR vault holds the USDC, and a pool on Solana, Base and Robinhood Chain pays only the wallet a proof names. A fresh wallet signs one transaction that gets paid by the pool and buys, and a sell goes back into the pool. NEAR Intents moves every dollar that changes chain." src="../assets/architecture-light.svg" width="100%"></picture>
 
 Solid green lines are money. Dashed blue lines are signed messages: requests that a key has already approved, which anyone can carry and nobody can change. Read it top to bottom.
 
-The diagram shows the NEAR vault path, the first design. Blindfill v2, which runs on mainnet today, adds a pool on each chain you trade on, described next and in full in the [v2 lite paper](litepaper.md).
+Blindfill v2 runs on mainnet today with a pool on each chain you trade on, described next and in full in the [v2 lite paper](litepaper.md).
 
 ### v2: a pool on every chain you trade on
 
