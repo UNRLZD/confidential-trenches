@@ -345,6 +345,51 @@ test("no state event before the first state answer; a burst of changes makes one
   assert.equal(p.events().length, 1);
 });
 
+// card portfolio-counts-every-note (the owner's Portfolio, 14 Nov 11:06Z, showed totals hours old): the app's kit waits
+// SIGNPAGE_TIMEOUT_MS.state (5 s) for a state answer and drops one that comes later, keeping its last state; the page had
+// still counted that read as sent, so no change after it ever posted it. A read that slow is posted as a state event
+// too (events have no timeout), and named in the console
+test("a state answer slower than the app's wait is also posted as a state event: the app never stays on an older state", async () => {
+  let clock = 0;
+  let took = 0;
+  let now = { ...signedOutState(), signed_in: true, way: "words" as const, code_saved: true, vault_balance: "1" };
+  const posted: { msg: unknown; to: string }[] = [];
+  const parent = { postMessage: (msg: unknown, to: string) => void posted.push({ msg, to }) };
+  let listener: ((e: IncomingMessage) => void) | null = null;
+  const api = startApi({
+    parent,
+    listen: (fn) => (listener = fn),
+    state: async () => ((clock += took), structuredClone(now)),
+    watch: () => {},
+    now: () => clock,
+  } as Parameters<typeof startApi>[0]);
+  const ask = (id = uuid()) => listener!({ origin: APP_ORIGIN, source: parent, data: state(id) });
+  const events = () => posted.filter((p) => (p.msg as { type?: string }).type === "state");
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (...a: unknown[]) => void warned.push(a.map(String).join(" "));
+  try {
+    // a read in time: answered, and no event
+    ask();
+    await api.idle();
+    assert.equal(events().length, 0);
+    assert.equal(warned.length, 0);
+    // the money moved; the next read takes 6 s, past the app's 5 s: its answer comes too late for the app, and no
+    // change follows
+    now = { ...now, vault_balance: "2" };
+    took = 6_000;
+    const id = uuid();
+    ask(id);
+    await api.idle();
+    assert.deepEqual((posted.find((p) => idOf(p.msg) === id)?.msg as { result?: { vault_balance?: string } })?.result?.vault_balance, "2");
+    assert.deepEqual(events().map((p) => (p.msg as { state: { vault_balance: string } }).state.vault_balance), ["2"], "the newest state reaches the app as an event");
+    assert.equal(warned.length, 1);
+    assert.match(warned[0]!, /state read took 6000 ms/);
+  } finally {
+    console.warn = warn;
+  }
+});
+
 test("a kind whose handler answers later is answered with its result once it settles, in order, never refused", async () => {
   const posted: unknown[] = [];
   const parent = { postMessage: (msg: unknown) => void posted.push(msg) };

@@ -509,7 +509,9 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
     const m = data as Record<string, unknown>;
     if (Object.hasOwn(m, "ok")) {
       const p = typeof m.id === "string" ? pending.get(m.id) : undefined;
-      if (!p) return void drops.id++;
+      // an answer for no request open here: past its wait, or its frame gone (card portfolio-counts-every-note: named,
+      // never its content, so a screen left on an older state says why)
+      if (!p) return void (drops.id++, console.warn("signpage: an answer came after its request ended (past its wait, or its frame changed): dropped"));
       // a state's op this client cannot read is left out, never the whole state (card kit-frame-version)
       const result = signpageAnswerOkSchema(m) ? (p.kind === "state" ? signpageReadableOps(m.result) : m.result) : undefined;
       if (result !== undefined && SIGNPAGE_RESULT_SCHEMAS[p.kind](result)) {
@@ -525,7 +527,7 @@ export function createSignpageClient(opts: SignpageClientOptions): SignpageClien
         return settle(m.id as string, { ok: true, result: result as SignpageResults[SignpageKind] });
       }
       if (signpageAnswerErrorSchema(m)) return settle(m.id as string, { ok: false, error: m.error as { code: ErrorCode } });
-      return void drops.shape++;
+      return void (drops.shape++, console.warn(`signpage: a ${p.kind} answer this client cannot read: dropped`));
     }
     if (signpageReadySchema(m)) return onReady(m as { release: string; api: number });
     // a closed notice: only for an open whose ok answer said one comes, and once
