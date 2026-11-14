@@ -603,12 +603,14 @@ else {
   const deposits = liveRuns(poolKindMap["pool.deposit"]);
   poolKindMap["pool.deposit"] = deposits.kind;
   const withdraws = liveRuns(poolKindMap["pool.withdraw"]);
+  poolKindMap["pool.withdraw"] = withdraws.kind;
   // the request's given (card withdraw-address-in-the-app), checked by the kit's schema: the pool rule's ask carries the
   // chain alone, so it is held for this call only, where the flow opens the screen (openPoolWithdraw) in the same task
+  const withdrawCounted = poolKindMap["pool.withdraw"];
   poolKindMap["pool.withdraw"] = (p, ctx) => {
     poolGivenNow = givenPool(p);
     try {
-      return withdraws.kind(p, ctx);
+      return withdrawCounted(p, ctx);
     } finally {
       poolGivenNow = null;
     }
