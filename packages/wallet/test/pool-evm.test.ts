@@ -1676,8 +1676,9 @@ test("card helper-evm-range-cap-walk: sepolia.base.org's HTTP 413 \"limited to a
   const r = await sync(pair(c, c, capA, capB)).events();
   assert.equal(r.events.length, 3);
   const b = pageSizes(lb);
-  // the first page refused, then 200 at once (halving went 100,000 to 195 in 9 refusals and paged at 195: 7,693 pages)
-  assert.deepEqual(b.slice(0, 9), [100_000, ...Array(8).fill(200)], `b: ${b.slice(0, 12)}`);
+  // the first page refused, asked again twice (a first refusal may be one backend's: EVM_LOG_REFUSED_AGAIN, card
+  // first-sign-in-reads-fast), then 200 at once (halving went 100,000 to 195 in 9 refusals and paged at 195: 7,693 pages)
+  assert.deepEqual(b.slice(0, 11), [100_000, 100_000, 100_000, ...Array(8).fill(200)], `b: ${b.slice(0, 14)}`);
   const answered = b.filter((n) => n <= 200);
   assert.ok(answered.slice(0, -1).every((n) => n === 200), `b's pages under the cap: ${[...new Set(answered)]}`);
   // a few probes a part: the 200 cap's narrow pages go EVM_POOL_LOG_PAGES_IN_FLIGHT at once (card
@@ -2569,9 +2570,10 @@ test("card helper-evm-range-cap-walk (review LOW): a refusal from the provider a
   ];
   const r = await evmTreeSync({ rpcs: list, pin: PIN, sleep: async () => {} }).events();
   assert.equal(r.events.length, 3);
-  // c refused 100,000 for seat 1 after b's walk: c pages at its own 25,000 at once, never halved from b's page
+  // c refused 100,000 for seat 1 after b's walk: c pages at its own 25,000 once its first refusal is asked again twice
+  // (EVM_LOG_REFUSED_AGAIN, card first-sign-in-reads-fast), never halved from b's page
   const x = pageSizes(lc);
-  assert.deepEqual(x.slice(0, 2), [100_000, 25_000], `c's pages ${x.slice(0, 6)}`);
+  assert.deepEqual(x.slice(0, 4), [100_000, 100_000, 100_000, 25_000], `c's pages ${x.slice(0, 6)}`);
 });
 
 test("card helper-evm-range-cap-walk (re-check of d2b77940): a seat read alone, outside an agreed read, binds no provider: the next agreed read may seat it on the other side", async () => {

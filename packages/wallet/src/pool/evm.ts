@@ -1019,7 +1019,7 @@ export function evmPoolLogPager(): EvmLogPager {
  * Any other refusal of a page over one block (a provider's cap, in whatever words) halves its page (or, naming a span
  * under it and no smaller than the provider answered in full, takes it to that span, CAP_SPANS), but one no wider
  * than the provider answered in full, asked again at once first (EVM_LOG_REFUSED_AGAIN; EVM_LOG_BACKEND_AGAIN for a span named
- * under it, and EVM_LOG_REFUSED_AGAIN for a span named before any page was answered); after a full page
+ * under it, and EVM_LOG_REFUSED_AGAIN for the read's first refusal naming a span before any page was answered); after a full page
  * reads, the page doubles again, up to the rules' max and below the smallest size refused in this read until the
  * rules' ceilingPages full pages in a row have read under it (doubled while its probe meets that same size), so a
  * cap lifted, a refusal under the cap or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG)
@@ -1103,14 +1103,15 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       const named = capSpanOf(m);
       // the same page again at once (a fresh draw of the provider's backends), never halved: a span named under the
       // widest this provider answered in full is one backend's (EVM_LOG_BACKEND_AGAIN); any other refusal no wider
-      // than that, or a named span before this provider or this read answered any page, may be one too
+      // than that, or the read's first refusal naming a span before this provider or this read answered any page, may be
+      // one too
       // (EVM_LOG_REFUSED_AGAIN, card first-sign-in-reads-fast: base.api.pocket.network's first call "max 10001")
       const asks =
         p.answered !== null && end - at + 1n <= p.answered
           ? named !== null && named < p.answered
             ? EVM_LOG_BACKEND_AGAIN
             : EVM_LOG_REFUSED_AGAIN
-          : p.answered === null && widest === null && named !== null && named < end - at + 1n
+          : p.answered === null && widest === null && refused === null && named !== null && named >= 1n && named < end - at + 1n
             ? EVM_LOG_REFUSED_AGAIN
             : 0;
       if (end > at && ++again <= asks) continue;
