@@ -12,16 +12,19 @@
 //   - every served pool's key hashes to its id (keccak of the encoded key) and names the token;
 //   - the named pool is served, and the PoolManager holds it on both providers (slot0's price above 0), as the device
 //     reads every served pool before it counts.
-// Every answer is hostile: shapes, sizes and numbers are checked, and a provider or the helper that errors, times out
-// (15 s) or answers something else is a BAD line naming it.
+// Every answer is hostile: shapes, sizes and numbers are checked; the helper that errors, times out (15 s) or answers
+// something else is a BAD line naming it, and a provider that gives no answer (provider-answer.mjs rpcAnswer: a 429, a
+// 5xx, a timeout, a rate limit) leaves the run INCONCLUSIVE naming it, never PASS.
 // After: helper --chain robinhood
 // (Base's index is off on the helper until its volume is read for its room, server.ts POOL_INDEX_ON: --chain base is run
 // by hand until it is on.)
 //   node scripts/live-checks/evm-pool-index-from-the-first-pool.mjs --chain <robinhood|base> [--helper <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, so the check's test
+//   can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { keccak } from "./pool-evm-deploy.mjs";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "evm-pool-index-from-the-first-pool";
 export const HELPER = "https://ct-api.unrealized.trade";
@@ -65,40 +68,36 @@ async function read(url, init) {
 /** The pool's state slot in the PoolManager (StateLibrary._getPoolStateSlot: keccak(id, POOLS_SLOT 6)): slot0 there. */
 export const stateSlotOf = (id) => keccak(id + word(6n));
 const SEL_EXTSLOAD = "0x1e2eaeaf"; // PoolManager.extsload(bytes32)
-const readOf = (url, c) =>
-  read(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify([
-      { jsonrpc: "2.0", id: 0, method: "eth_blockNumber", params: [] },
-      { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: c.poolManager, data: SEL_EXTSLOAD + stateSlotOf(c.pool).slice(2) }, "latest"] },
-    ]),
-  });
+/** A provider's two reads: its head and the named pool's slot0 (each rpcAnswer's { result } | { error } | { noAnswer }). */
+const readOf = async (url, c) => {
+  const [head, slot] = await Promise.all([rpcAnswer(url, "eth_blockNumber", []), rpcAnswer(url, "eth_call", [{ to: c.poolManager, data: SEL_EXTSLOAD + stateSlotOf(c.pool).slice(2) }, "latest"])]);
+  return { url, head, slot };
+};
 
-/** The verdict of one run's reads: { ok, lines }. `reads`: { answer: {status, text}, heads: [{status, text}, ...] }, each
- *  head the provider's batch answer: its head, then the named pool's slot0. */
+/** The verdict of one run's reads: { verdict: PASS | FAIL | INCONCLUSIVE, ok, lines }. `reads`: { answer: {status, text}
+ *  (the helper's), providers: [{ url, head, slot }, ...] (readOf's). */
 export function judge(chain, reads) {
   const c = CHAINS[chain];
   const bad = [];
-  const heads = reads.heads.map((h, i) => {
+  const quiet = [];
+  const heads = reads.providers.map((p, i) => {
+    const host = c.heads[i];
+    if (p?.url !== host) bad.push(`BAD provider ${i}: read ${p?.url}, not ${host}`);
     let n = null;
-    let slot0 = null;
-    try {
-      const j = JSON.parse(h.text);
-      const by = (id) => (Array.isArray(j) ? j.find((x) => x?.id === id) : undefined);
-      if (h.status === 200 && QUANTITY.test(by(0)?.result ?? "")) n = Number(by(0).result);
-      if (/^0x[0-9a-fA-F]{64}$/.test(by(1)?.result ?? "")) slot0 = BigInt(by(1).result);
-    } catch {}
-    if (n === null || !Number.isSafeInteger(n)) bad.push(`BAD head ${c.heads[i]}: no block number`);
-    if (slot0 === null) bad.push(`BAD pool ${c.heads[i]}: no slot0 of the named pool`);
-    else if ((slot0 & ((1n << 160n) - 1n)) === 0n) bad.push(`BAD pool ${c.heads[i]}: the PoolManager does not hold the named pool ${c.pool} (slot0's price 0)`);
+    if (p?.head?.noAnswer !== undefined) quiet.push(`--  ${p.head.noAnswer}`);
+    else if (typeof p?.head?.result === "string" && QUANTITY.test(p.head.result) && Number.isSafeInteger(Number(p.head.result))) n = Number(p.head.result);
+    else bad.push(`BAD head ${host}: no block number (${JSON.stringify(p?.head).slice(0, 120)})`);
+    if (p?.slot?.noAnswer !== undefined) quiet.push(`--  ${p.slot.noAnswer}`);
+    else if (typeof p?.slot?.result !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(p.slot.result)) bad.push(`BAD pool ${host}: no slot0 of the named pool (${JSON.stringify(p?.slot).slice(0, 120)})`);
+    else if ((BigInt(p.slot.result) & ((1n << 160n) - 1n)) === 0n) bad.push(`BAD pool ${host}: the PoolManager does not hold the named pool ${c.pool} (slot0's price 0)`);
     return n;
   });
+  if (reads.providers.length !== c.heads.length) bad.push(`BAD providers: ${reads.providers.length} read, not ${c.heads.length}`);
   let a = null;
   try {
     a = reads.answer.status === 200 ? JSON.parse(reads.answer.text) : null;
   } catch {}
-  if (a === null || typeof a !== "object") return { ok: false, lines: [...bad, `BAD helper: status ${reads.answer.status}, no JSON answer`] };
+  if (a === null || typeof a !== "object") return { verdict: "FAIL", ok: false, lines: [...bad, `BAD helper: status ${reads.answer.status}, no JSON answer`, ...quiet] };
   if (a.chainId !== c.chainId) bad.push(`BAD helper: chainId ${a.chainId}, not ${c.chainId}`);
   if (typeof a.poolManager !== "string" || a.poolManager.toLowerCase() !== c.poolManager) bad.push(`BAD helper: poolManager ${a.poolManager}`);
   if (a.complete !== true) bad.push(`BAD helper: complete ${a.complete}: the backfill has not reached its head`);
@@ -123,8 +122,9 @@ export function judge(chain, reads) {
     ids.add(p.id);
   }
   if (!ids.has(c.pool)) bad.push(`BAD helper: the named pool ${c.pool}, made before the scan's depth, is not served`);
-  const lines = bad.length ? bad : [`OK ${chain}: complete, through ${a.through} (heads ${heads.join(", ")}), ${ids.size} pool(s) of ${c.coin}, the named pool ${c.pool} among them and held on both providers`];
-  return { ok: bad.length === 0, lines };
+  const verdict = verdictOf(bad.length > 0, quiet.length > 0);
+  const lines = bad.length ? [...bad, ...quiet] : quiet.length ? quiet : [`OK ${chain}: complete, through ${a.through} (heads ${heads.join(", ")}), ${ids.size} pool(s) of ${c.coin}, the named pool ${c.pool} among them and held on both providers`];
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 async function main() {
@@ -138,13 +138,13 @@ async function main() {
   const helper = opt("--helper") ?? HELPER;
   const c = CHAINS[chain];
   const failed = (e) => ({ status: 0, text: String(e?.message ?? e) });
-  const [answer, ...heads] = await Promise.all([read(`${helper}/v1/market/pools?chain=${chain}&token=${c.coin}`).catch(failed), ...c.heads.map((u) => readOf(u, c).catch(failed))]);
-  const reads = { answer, heads };
+  const [answer, ...providers] = await Promise.all([read(`${helper}/v1/market/pools?chain=${chain}&token=${c.coin}`).catch(failed), ...c.heads.map((u) => readOf(u, c))]);
+  const reads = { answer, providers };
   const record = opt("--record");
   if (record) writeFileSync(record, JSON.stringify({ chain, reads }, null, 2) + "\n");
   const v = judge(chain, reads);
   for (const l of v.lines) console.log(l);
-  console.log(v.ok ? `PASS ${KEY} ${chain}` : `FAIL ${KEY} ${chain}`);
-  process.exit(v.ok ? 0 : 1);
+  console.log(`${v.verdict} ${KEY} ${chain}`);
+  process.exit(EXIT[v.verdict]);
 }
 if (import.meta.url === `file://${process.argv[1]}`) main().catch((e) => (console.error(`${KEY}: ${e.message}`), process.exit(2)));

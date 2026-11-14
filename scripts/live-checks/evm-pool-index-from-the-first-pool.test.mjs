@@ -36,9 +36,7 @@ test("the recorded bad answers fail: a backfill short of its head (complete fals
 
 test("planted: a served pool the PoolManager does not hold on a provider (slot0's price 0) fails by name", () => {
   const reads = structuredClone(A.good.reads);
-  const j = JSON.parse(reads.heads[0].text);
-  j.find((x) => x.id === 1).result = "0x" + "0".repeat(64);
-  reads.heads[0].text = JSON.stringify(j);
+  reads.providers[0].slot.result = "0x" + "0".repeat(64);
   fails(judge(A.good.chain, reads), /does not hold the named pool/);
 });
 
@@ -63,8 +61,16 @@ test("planted: a forged key, a pool of another token, a malformed pool, or the n
   fails(edit((a) => (a.pools = a.pools.filter((p) => p.id !== CHAINS.robinhood.pool))), /named pool/);
 });
 
-test("planted: a head provider that answers no block number fails by name", () => {
+test("planted: a provider that answers a block number that is not one fails by name; one that does not answer is INCONCLUSIVE, never a pass", () => {
   const reads = structuredClone(A.good.reads);
-  reads.heads[1] = { status: 429, text: "rate limited" };
+  reads.providers[1].head = { result: "latest" };
   fails(judge(A.good.chain, reads), /BAD head/);
+  const quiet = structuredClone(A.good.reads);
+  quiet.providers[1].head = { noAnswer: "robinhood.drpc.org: no answer (HTTP 429)" };
+  const r = judge(A.good.chain, quiet);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.equal(r.ok, false);
+  const moved = structuredClone(A.good.reads);
+  moved.providers.reverse();
+  fails(judge(A.good.chain, moved), /BAD provider 0/);
 });
