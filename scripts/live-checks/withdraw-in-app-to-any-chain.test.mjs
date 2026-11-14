@@ -50,6 +50,8 @@ test("the facts read from a bundle, as vite writes them", () => {
   // the arrival check must be the arrivals function's, on the dest it fits the address to
   assert.equal(facts([ARR + CHECK.replace("tL(t,r)", "tL(e,r)")]).addressOnArrival, false);
   assert.equal(facts([CHECK]).addressOnArrival, false, "no arrivals function");
+  // card cash-withdraw-in-app-to-any-chain: Cash's arrivals are the kit's list, held by name
+  assert.equal(facts([ARR.replace("[`near`]", "m") + CHECK]).addressOnArrival, true, "Cash's chains by the kit's name");
   // both forms in the scripts: still a second form
   assert.equal(judge(facts([NOW_ROW + OLD_ROW + NOW_HOP + ARR + CHECK])).ok, false);
 });

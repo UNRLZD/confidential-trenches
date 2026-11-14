@@ -37,6 +37,13 @@
 //   history.replaceState (never a navigation), so the address bar, a reload, a new frame and a shared link follow the
 //   app. reload: the shell reloads the top window (a reload of the frame alone would keep the old shell).
 // - DOM by createElement and the CSSOM only: the CSP allows no inline style and requires Trusted Types for every sink.
+// - An outside app (card signpage-answers-outside-apps, src/outside.ts), with `popup`: this page is a popup the app
+//   opened at /connect, and frames nothing. Its one peer is window.opener: a message counts only when its source is the
+//   opener. Before allow() nothing is answered and no ready goes out; each message from the opener only names its
+//   origin, as the browser checked it (e.origin, never a field of the message), to host.knock. allow(origin) binds the
+//   session to that exact origin: from then a message counts only from the opener at that origin, every post goes to
+//   the opener with targetOrigin that origin, and the ready goes out at once. No nav and no reload. Without `popup`,
+//   nothing changes.
 import { SIGNPAGE_MAX_NAV_BYTES } from "../../kit/src/signpage/schema.ts";
 import { APP_ORIGIN, startApi, type ApiHost, type PostTarget } from "./api.ts";
 import { PROTECT_MS } from "./guard.ts";
@@ -117,14 +124,18 @@ export function navUrl(origin: string, path: string): string | null {
  * frame, and has none while its layer is open), and `ready` once on each load of the frame, never before.
  */
 export function wireShell(
-  frame: { window(): PostTarget; onLoad(fn: () => void): void },
-  host: Omit<ApiHost, "parent" | "readyOnLoad">,
+  frame: { window(): PostTarget; onLoad(fn: () => void): void; origin?(): string },
+  host: Omit<ApiHost, "parent" | "readyOnLoad" | "origin">,
 ): ReturnType<typeof startApi> {
   const api = startApi({
     ...host,
     readyOnLoad: true,
     get parent() {
       return frame.window();
+    },
+    // read on every post and message: a popup's is bound at its Allow (src/outside.ts)
+    get origin() {
+      return frame.origin?.() ?? APP_ORIGIN;
     },
   });
   frame.onLoad(api.ready);
@@ -169,6 +180,12 @@ export interface Shell {
   onDismiss: ((by: "key" | "tap") => void) | null;
   /** Whether the screen on the sheet may be left: the close control shows, and Esc and the scrim act, only then. */
   dismissible(may: boolean): void;
+  /**
+   * An outside app's session (`popup`): the user's Allow for `origin`, one the opener's messages came from. From now the
+   * opener's messages from that origin alone are read and answered, and the ready goes out to it now. Once per page:
+   * a second call, or one without `popup`, does nothing.
+   */
+  allow(origin: string): void;
 }
 
 /**
@@ -180,8 +197,16 @@ export interface Shell {
  */
 export function mountShell(
   doc: Document,
-  host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad"> & { settle?: () => Promise<void>; ground?: HTMLElement },
+  host: Omit<ApiHost, "parent" | "listen" | "readyOnLoad" | "origin"> & {
+    settle?: () => Promise<void>;
+    ground?: HTMLElement;
+    /** An outside app's popup (src/outside.ts): no frame; the opener is the one peer, from allow() on. */
+    popup?: { opener: PostTarget | null; knock(origin: string): void };
+  },
 ): Shell {
+  const popup = host.popup ?? null;
+  // the origin this shell answers: APP_HOST's; in a popup, none until allow() binds the one the user allowed
+  let origin: string | null = popup ? null : APP_ORIGIN;
   const view = doc.defaultView!;
   const sheet = drawSheet(doc);
   const layer = sheet.layer;
@@ -217,6 +242,7 @@ export function mountShell(
     setTimeout(() => layer.hidden && (veil.hidden = true), 200);
   };
   const add = (): void => {
+    if (popup) return;
     const f = doc.createElement("iframe");
     f.id = "app";
     f.setAttribute("sandbox", FRAME_SANDBOX);
@@ -241,13 +267,23 @@ export function mountShell(
     const f = veiled;
     if (f !== null && e.origin === APP_ORIGIN && e.source === f.contentWindow && isPainted(e.data)) lift(f);
   });
+  // a popup's peer is its opener, once allowed; before that, no post goes anywhere
+  const target = (): PostTarget => (popup ? (origin !== null && popup.opener ? popup.opener : NO_FRAME) : peer);
   const api = wireShell(
-    { window: () => peer, onLoad: (fn) => (onLoad = fn) },
+    { window: target, onLoad: (fn) => (onLoad = fn), origin: () => origin ?? "null" },
     {
       ...host,
-      // while the sheet shows, nothing the frame sends is read: no kind, nav or reload until the sheet closes
-      listen: (fn) => view.addEventListener("message", (e) => layer.hidden && fn(e)),
-      kinds: {
+      // while the sheet shows, nothing the frame sends is read: no kind, nav or reload until the sheet closes. A popup's:
+      // only the opener's; before allow() each only names its origin (knock), after it only that origin's is read
+      listen: (fn) =>
+        view.addEventListener("message", (e) => {
+          if (!popup) return void (layer.hidden && fn(e));
+          if (popup.opener === null || e.source !== popup.opener) return;
+          if (origin === null) return popup.knock(e.origin);
+          if (e.origin === origin && layer.hidden) fn(e);
+        }),
+      // an outside app gets no nav or reload: the popup's address stays the /connect it was opened at
+      kinds: popup ? { ...host.kinds } : {
         ...host.kinds,
         // nav and reload, as every kind, only while no sheet shows (one the frame sent before it opened included)
         nav: (p) => {
@@ -318,8 +354,8 @@ export function mountShell(
       showing = [];
       // a kept frame stays inert for PROTECT_MS after the close (the second tap of a double tap on Cancel, Saved, the x or
       // the scrim lands on no app control there), then is live again and takes the keyboard's focus back; a frame taken
-      // out comes back new, as inert for the same time, under the sheet's dim until it has painted
-      if (!frame) {
+      // out comes back new, as inert for the same time, under the sheet's dim until it has painted (a popup has none)
+      if (!frame && !popup) {
         veil.style.background = sheet.scrim.style.background;
         veil.style.opacity = "1";
         veil.hidden = false;
@@ -328,7 +364,7 @@ export function mountShell(
         veiled = f;
         veilCap = setTimeout(() => lift(f), VEIL_CAP_MS);
       }
-      wake(frame as unknown as HTMLIFrameElement);
+      if (frame) wake(frame);
     },
     told(id) {
       if (done.has(id) || showing.some((o) => o.id === id) || toTell.some((o) => o.id === id)) return;
@@ -341,6 +377,11 @@ export function mountShell(
       sheet.close.hidden = !may;
       sheet.close.style.visibility = may ? "visible" : "hidden";
       dismissOk = may;
+    },
+    allow(o) {
+      if (!popup || origin !== null || typeof o !== "string" || o === "null") return;
+      origin = o;
+      onLoad();
     },
   };
   // the kept frame inert for PROTECT_MS from now, then live again, and each open still to tell told then, in that task

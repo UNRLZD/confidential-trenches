@@ -94,6 +94,15 @@ export type WithdrawGiven =
   | { to: string; amount: string; max?: never }
   | { to: string; max: true; amount?: never };
 
+/**
+ * The chains Cash (the vault's NEAR USDC) arrives on, NEAR first (card cash-withdraw-in-app-to-any-chain): SIGN_HOST's
+ * Cash form sends only to these (packages/signpage/src/withdraw/onward.ts WITHDRAW_CHAINS is this list), and an app
+ * offers only these. NEAR alone for now: a part 1Click refunds would wait under V with no carry back to Cash, so Solana
+ * and Base join with cards v-binds-into-the-vault and onward-refund-comes-back, never before. Robinhood cannot join
+ * while 1Click lists no USDC there.
+ */
+export const CASH_WITHDRAW_DESTS = Object.freeze(["near"] as const) satisfies readonly ExitChain[];
+
 /** The params of each kind, spread into the request envelope next to v, id and type. */
 export interface SignpageParams {
   /**
@@ -131,9 +140,11 @@ export interface SignpageParams {
    * Open the withdraw form; with `from_id`, the move out of a one-time id or an arming account, whose account is typed
    * there. With `to` (card withdraw-address-in-the-app, owner 14 Nov 12:22Z), the address and the amount (or `max`: all
    * Cash can send) were typed in the app's own Withdraw sheet: SIGN_HOST checks both itself and shows them on a confirm
-   * sheet over the app, kept and inert, and only the user's Confirm there sends. Without either, the typed form.
+   * sheet over the app, kept and inert, and only the user's Confirm there sends. Without either, the typed form. `dest`
+   * (card cash-withdraw-in-app-to-any-chain; only with `to`, as pool.withdraw's) is the chain the money arrives on; absent,
+   * NEAR. SIGN_HOST sends Cash only to a chain of CASH_WITHDRAW_DESTS and refuses any other dest on its sheet.
    */
-  "withdraw.open": Open & WithdrawGiven & { from_id?: string };
+  "withdraw.open": Open & WithdrawGiven & { from_id?: string; dest?: ExitChain };
   /** Open the sign-in for one way in. */
   "signin.open": Open & { way: SigninWay };
   /** Open the backup screen. */

@@ -1,0 +1,13 @@
+{
+  "name": "blindfill-agent-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@blindfill/kit": "workspace:*",
+    "@scure/bip39": "2.4.0",
+    "rolldown": "1.2.15"
+  }
+}

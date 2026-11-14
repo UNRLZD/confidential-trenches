@@ -87,6 +87,7 @@ import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
+import type { ExitChain } from "../../kit/src/checks/oneclick-exit.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
 import { evmDryAmount, evmDryBuys } from "./pool-buy-evm.ts";
@@ -99,6 +100,7 @@ import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
 import { returningWallets, withPositions, withReturning } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
+import { CONFIRM_TITLE, CONNECT_PATH, confirmLines, outsideKinds, outsideOrigin, type ConfirmedKind } from "./outside.ts";
 import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
@@ -176,6 +178,9 @@ if (framed) root.dataset.framed = "true";
 // asks (signin.open, signout, backup.open and withdraw.open here; export.open is refused until its card builds it) and
 // closes on signed in, signed out by the signout kind, or Cancel
 let shell: Shell | null = null;
+// card signpage-answers-outside-apps (src/outside.ts): on /connect this page is an outside app's popup, its opener the
+// one peer; on every other path, APP_HOST's shell, which nothing here changes
+const outside = !framed && location.pathname === CONNECT_PATH;
 // top-level, on every build: the page network's pool flow, its settling and the next buy's proofs (src/pool-testnet.ts,
 // card signpage-pool-mainnet); with no pool pinned on the network it refuses every pool kind and reads nothing; the
 // store and the seed are opened when a run needs them
@@ -266,16 +271,14 @@ let poolWithdraw: { chain: PoolChain; opId: string; given: GivenPoolWithdraw | n
 let withdrawGiven: GivenWithdraw | null = null;
 // the given of the pool.withdraw request being handled now (its kind's wrapper sets and clears it around the call)
 let poolGivenNow: GivenPoolWithdraw | null = null;
-// WithdrawGiven from a request's params the kit's schema passed: `to` with `amount` or `max`, or nothing
+// WithdrawGiven from a request's params the kit's schema passed: `to` with `amount` or `max`, and its `dest` (withdraw.open's
+// and pool.withdraw's alike, card cash-withdraw-in-app-to-any-chain), or nothing
 function givenOf(p: Record<string, unknown>): GivenWithdraw | null {
   if (typeof p.to !== "string") return null;
-  if (p.max === true) return Object.freeze({ to: p.to, max: true as const });
-  return typeof p.amount === "string" ? Object.freeze({ to: p.to, amount: p.amount }) : null;
-}
-function givenPool(p: Record<string, unknown>): GivenPoolWithdraw | null {
-  const g = givenOf(p);
   const dest = p.dest;
-  return g === null ? null : Object.freeze({ ...g, ...(dest === "solana" || dest === "base" || dest === "robinhood" || dest === "near" ? { dest } : {}) }) as GivenPoolWithdraw;
+  const d: { dest?: ExitChain } = dest === "solana" || dest === "base" || dest === "robinhood" || dest === "near" ? { dest } : {};
+  if (p.max === true) return Object.freeze({ to: p.to, max: true as const, ...d });
+  return typeof p.amount === "string" ? Object.freeze({ to: p.to, amount: p.amount, ...d }) : null;
 }
 // a move out of Cash a reload cut short (src/cash-to-pool.ts resume, card one-balance-buys-on-every-chain): set where
 // the mover is built, run at sign-in after the vault's withdrawals are settled
@@ -611,7 +614,7 @@ else {
   // chain alone, so it is held for this call only, where the flow opens the screen (openPoolWithdraw) in the same task
   const withdrawCounted = poolKindMap["pool.withdraw"];
   poolKindMap["pool.withdraw"] = (p, ctx) => {
-    poolGivenNow = givenPool(p);
+    poolGivenNow = givenOf(p);
     try {
       return withdrawCounted(p, ctx);
     } finally {
@@ -783,7 +786,7 @@ else {
       testnet?.watch(fn);
     },
     // deposit.quote's checked answer followed (its host's `checked`), deposit.confirm answered where it is (src/deposit-follow.ts)
-    kinds: whileSignedIn(follows!.withFollow({
+    kinds: kindsFor(whileSignedIn(follows!.withFollow({
       // src/pages/open.ts decides what each draws, from the page's own state and store. The answer goes first, then the
       // layer opens (and the frame leaves).
       // each with its request's id: the layer it opens tells the app when it has closed (src/shell.ts)
@@ -818,7 +821,8 @@ else {
       ...(prover && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null ? poolMoveKinds(cashMoverNow, toCashNow) : {}),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
-    })),
+    }))),
+    popup: outside ? { opener: (window.opener as Window | null) ?? null, knock } : undefined,
   });
   shell.body.append(root);
   // the user's own Esc, close tap or scrim tap: Cancel's step, on a screen Cancel is drawn on (show() below). Esc leaves
@@ -828,6 +832,89 @@ else {
     if (by === "key" && copied) return;
     void run(cancel);
   };
+  // an outside app's popup with no opener (opened by hand, or its opener cut) has no one to connect
+  if (outside && !window.opener) notConnected();
+}
+
+// The kinds the shell answers: APP_HOST's every kind; an outside app's only OUTSIDE_KINDS, each buy and sell after the
+// user's Confirm, a withdraw.open only with the app's given, drawn as the withdraw form's own Confirm (src/outside.ts)
+function kindsFor<K extends object>(kinds: K): K {
+  return !outside ? kinds : (outsideKinds(kinds as Parameters<typeof outsideKinds>[0], confirmOutside) as K);
+}
+
+// An outside app's sheet, drawn in the layer in root's place: the connect step (its origin, Allow, Cancel), then each
+// buy's or sell's Confirm (its origin and what it does). Nothing is kept: a reload asks to connect again.
+const outsideView = document.createElement("main");
+outsideView.id = "outside";
+let confirming = false;
+const outsideText = (tag: string, text: string): HTMLElement => {
+  const e = document.createElement(tag);
+  e.textContent = text;
+  // a long origin or mint wraps inside the sheet
+  Object.assign(e.style, { overflowWrap: "anywhere", minWidth: "0" });
+  return e;
+};
+// the origin, as the browser checked it: the line the user reads before Allow and Confirm, in the sheet's first color
+// (a div, which the sheet's dress leaves as styled here)
+const originLine = (text: string): HTMLElement => {
+  const e = outsideText("div", text);
+  Object.assign(e.style, { color: "#f4f4f2", font: '600 15px/1.45 "Schibsted Grotesk", system-ui, sans-serif' });
+  return e;
+};
+// the sheet's dress gives a screen's main display flex again at each width change, so neither the hidden attribute nor
+// a display holds: the page's own screen leaves the sheet while an outside sheet shows, and comes back after
+function showOutside(parts: HTMLElement[]): void {
+  outsideView.replaceChildren(...parts);
+  root.remove();
+  if (!outsideView.isConnected) shell!.body.append(outsideView);
+  shell!.dismissible(false);
+  shell!.open(false);
+}
+function hideOutside(): void {
+  outsideView.replaceChildren();
+  outsideView.remove();
+  shell!.body.append(root);
+  shell!.close();
+}
+// the origin the first message from the opener came from, as the browser checked it (shown on the connect sheet), and
+// the one the user allowed (shown on every Confirm); a later message from another origin changes neither
+let knocked: string | null = null;
+let allowedOrigin: string | null = null;
+const status = document.createElement("p");
+Object.assign(status.style, { margin: "0", padding: "24px 16px", color: "#a3a3a3", font: '14px "Schibsted Grotesk", system-ui, sans-serif', overflowWrap: "anywhere" });
+function notConnected(): void {
+  showOutside([outsideText("p", "Not connected")]);
+}
+function knock(origin: string): void {
+  if (knocked !== null || !outsideOrigin(origin, location.origin)) return;
+  knocked = origin;
+  showOutside([
+    originLine(`Connect ${origin}`),
+    button("allow", "Allow", () => {
+      hideOutside();
+      allowedOrigin = origin;
+      status.textContent = `Connected ${origin}`;
+      if (!status.isConnected) document.body.append(status);
+      shell!.allow(origin);
+    }),
+    button("cancel", "Cancel", notConnected),
+  ]);
+}
+// one Confirm at a time, and none over another sheet: a request that comes then is refused
+function confirmOutside(kind: ConfirmedKind, params: Record<string, unknown>): Promise<boolean> {
+  const origin = allowedOrigin;
+  if (origin === null || confirming || !shell!.layer.hidden) return Promise.resolve(false);
+  confirming = true;
+  return new Promise((done) => {
+    const end = (yes: boolean): void => {
+      confirming = false;
+      hideOutside();
+      done(yes);
+    };
+    const what = document.createElement("dl");
+    for (const [k, v] of confirmLines(params, (c) => POOL_ADDRESS_ASSET[c as PoolChain] ?? "")) what.append(outsideText("dt", k), outsideText("dd", v));
+    showOutside([outsideText("p", CONFIRM_TITLE[kind]), originLine(origin), what, button("confirm", "Confirm", () => end(true)), button("cancel", "Cancel", () => end(false))]);
+  });
 }
 
 // Every kind the shell answers, refused not_allowed from a sign out's tap to its end (`leaving`): no new run starts on an
@@ -948,7 +1035,7 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out"]);
+const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out", "allow", "confirm"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -1035,6 +1122,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
       parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step)));
     } else if (!framed && state === "withdraw-confirm" && withdrawGiven) {
       // the same form for what the app's sheet took (card withdraw-address-in-the-app): checked here, confirmed here
+      if (outside && allowedOrigin !== null) parts.push(originLine(allowedOrigin));
       parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step), withdrawGiven));
     } else if (!framed && state === "held" && heldOp !== null) {
       // the held deposit's way out (src/withdraw/held.ts): the account typed here, never passed in by the app

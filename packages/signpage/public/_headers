@@ -29,6 +29,20 @@
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
   Permissions-Policy: accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()
+# An outside app built on @blindfill/kit opens SIGN_HOST at /connect in a popup (window.open; card
+# signpage-answers-outside-apps), and the page answers it through window.opener. COOP same-origin, which /* sets, gives a
+# page opened by a cross-origin opener a browsing context group of its own and cuts window.opener, so /connect is served
+# Cross-Origin-Opener-Policy: unsafe-none. Pages applies every matching rule in file order and joins a header two rules
+# set with a comma ("same-origin, unsafe-none", which a browser does not read as unsafe-none), so this rule, after /*,
+# first detaches /*'s COOP (! Cross-Origin-Opener-Policy, as Pages' docs detach and re-set a header in one rule) and
+# then sets its own. It touches nothing else: the CSP stays /*'s (frame-src APP_HOST alone, frame-ancestors 'none'),
+# and /*'s other headers apply. The one risk it takes: /connect shares a browsing context group with its opener, so the
+# opener keeps a handle to this window (navigate it, see when it closes) and the page is not process-isolated from it
+# by COOP. The deploy script refuses any other /connect rule, and the live check signpage-answers-outside-apps reads
+# both answers after each deploy.
+/connect
+  ! Cross-Origin-Opener-Policy
+  Cross-Origin-Opener-Policy: unsafe-none
 /prover-worker.js
   Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'
 /prover-thread.js

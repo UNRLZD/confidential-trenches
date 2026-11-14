@@ -688,3 +688,34 @@ test("card solana-trades-show-on-every-token: the pool's trades refused or down,
   t.stop();
 });
 let pumpOn: SourceEvents | null = null;
+
+test("card solana-trades-show-on-every-token: a token Discover's lists do not hold (a searched token, as NEARKAT and BONK were on the live helper at 837d9d810: 404 not_found) is served its top pool's trades with no walk of ours opened, never 404; a mint no pool names stays 404; the pool's trades refused, empty with filling", async () => {
+  let rpcCalls = 0;
+  const counted = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: NK.tx.slot }, { [NK.mint]: 6 });
+  const make = (tape: () => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>, listed: boolean | null = false) =>
+    createSolanaTrades({ fetch: async (u, i) => (rpcCalls++, counted(u, i)), now: () => TS * 1000, listed: async () => listed, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0, tape });
+  const pool = async () => ({ status: 200, body: JSON.stringify(POOL_ROWS), src: "geckoterminal", asOfMs: TS * 1000 - 5_000 });
+  for (const listed of [false, null]) {
+    const t = make(pool, listed);
+    const a = await t.trades(NK.mint, 50);
+    assert.equal(a.status, 200, `lists ${listed}: ${a.body}`);
+    const j = JSON.parse(a.body) as { trades: unknown[]; src: string; as_of_ms: number; filling?: boolean };
+    assert.deepEqual(j.trades, POOL_ROWS);
+    assert.equal(j.src, "geckoterminal");
+    assert.equal(j.as_of_ms, TS * 1000 - 5_000);
+    assert.equal(j.filling, undefined);
+    assert.equal((JSON.parse((await t.trades(NK.mint, 1)).body) as { trades: unknown[] }).trades.length, 1, "the limit holds");
+    t.stop();
+  }
+  assert.equal(rpcCalls, 0, "no walk of ours opens for a token the lists do not hold");
+  const none = make(async () => ({ status: 404, body: JSON.stringify({ error: { code: "not_found" } }) }));
+  assert.equal((await none.trades(NK.mint, 50)).status, 404, "a mint no pool names");
+  none.stop();
+  for (const tape of [async () => ({ status: 429, body: "{}" }), async () => Promise.reject(new Error("down"))]) {
+    const t = make(tape);
+    const a = await t.trades(NK.mint, 50);
+    assert.equal(a.status, 200);
+    assert.deepEqual(JSON.parse(a.body), { trades: [], filling: true, src: "chain", as_of_ms: TS * 1000 });
+    t.stop();
+  }
+});

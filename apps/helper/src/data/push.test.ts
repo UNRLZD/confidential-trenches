@@ -9,6 +9,7 @@ import type { AddressInfo, Socket } from "node:net";
 import { test } from "node:test";
 import { HELPER_CORS } from "@blindfill/kit";
 import { start } from "../server.ts";
+import { createSolanaTrades } from "./solana/trades.ts";
 
 const COMMIT = "a".repeat(40);
 const APP = "https://ct-app.unrealized.trade";
@@ -300,4 +301,26 @@ test("a plain GET of the push path, with no upgrade, is answered 426 and reads n
   assert.equal(r.status, 426);
   assert.equal(r.headers.get("upgrade"), "websocket");
   assert.deepEqual(reads, []);
+});
+
+test("card solana-trades-show-on-every-token: a Solana token Discover's lists do not hold is upgraded and pushed its top pool's trades, and GET /v1/market/trades answers them, never 404 (the live helper at 837d9d810 refused both 404 for NEARKAT and BONK)", async (t) => {
+  const rows = [{ t_ms: 1_000, side: "b", usd: "1.5", amt: "2", trader: null, tx: "5".repeat(88) }];
+  const trades = createSolanaTrades({
+    fetch: async () => assert.fail("no walk of ours opens for a token the lists do not hold"),
+    listed: async () => false,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+    tape: async () => ({ status: 200, body: JSON.stringify(rows), src: "geckoterminal", asOfMs: 5 }),
+  });
+  const server = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { solana: trades } as never);
+  t.after(() => (trades.stop(), server.closeAllConnections(), server.close()));
+  await listening(server);
+  const port = (server.address() as AddressInfo).port;
+  const r = await upgrade(port, PATH, APP);
+  assert.equal(r.status, 101, "the push socket is upgraded");
+  assert.deepEqual(JSON.parse(r.frame!).trades, rows, "and sent the pool's trades");
+  const got = await fetch(`http://127.0.0.1:${port}/v1/market/trades?chain=solana&token=${MINT}`, { headers: { origin: APP } });
+  assert.equal(got.status, 200);
+  assert.deepEqual(((await got.json()) as { trades: unknown[] }).trades, rows);
 });

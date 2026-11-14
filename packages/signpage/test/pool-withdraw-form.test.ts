@@ -306,9 +306,14 @@ test("the Chain picker: none with no exits; the pool's chain first and chosen, a
   const plain = drawn();
   const rowOf = (g: ReturnType<typeof drawn>) => g.form.find((e) => e.children.some((c) => c.dataset.input === "dest"))!;
   assert.equal(plain.form.find((e) => e.dataset.input === "dest"), undefined, "no exits: no picker, the screen as built");
+  // card cash-withdraw-in-app-to-any-chain: the hidden row draws nothing (an inline display would show it over hidden)
+  const emptyRow = plain.form.children.find((e) => e.tag === "label" && e.children.length === 0);
+  assert.equal(emptyRow?.hidden, true);
+  assert.equal(emptyRow?.style.display, "none");
   const f = drawn(async () => FUNDS, { exits: ["base", "near"] });
   const pick = f.input("dest");
   assert.equal(rowOf(f).hidden, false);
+  assert.equal(rowOf(f).style.display, "flex");
   assert.equal(pick.value, "solana");
   const opts = pick.children.map((o) => [o.value, o.textContent, o.disabled, o.dataset.draftCopy]);
   assert.deepEqual(opts, [["solana", "Solana", false, undefined], ["base", "Base", false, undefined], ["robinhood", `Robinhood · ${POOL_WITHDRAW_WORDS["not-available"]}`, true, "not-available"], ["near", "NEAR", false, undefined]]);

@@ -122,6 +122,19 @@ test("each file carries the headers of every rule that matches it, one header's 
   assert.ok(!matches("/prover-worker.js", "/prover-workerXjs"));
 });
 
+test("a rule's `! Header` line detaches what an earlier matching rule set, as Pages does (card signpage-answers-outside-apps' /connect)", () => {
+  const rules = parseRules("/*\n  Content-Security-Policy: frame-src a\n  X-A: b\n/connect\n  ! Content-Security-Policy\n  Content-Security-Policy: frame-src c\n/other\n  ! X-A\n");
+  assert.deepEqual(rules.map((r) => r.removes), [[], ["content-security-policy"], ["x-a"]]);
+  assert.deepEqual(headersFor(rules, "/connect"), { "content-security-policy": "frame-src c", "x-a": "b" });
+  assert.deepEqual(headersFor(rules, "/"), { "content-security-policy": "frame-src a", "x-a": "b" });
+  assert.deepEqual(headersFor(rules, "/other"), { "content-security-policy": "frame-src a" });
+  assert.throws(() => parseRules("  ! X-A\n"), /cannot be read/);
+  // the real SIGN_HOST _headers reads, and a served file (no file is at /connect) keeps the site's CSP alone
+  const real = parseRules(readFileSync(join(PKG, "public", "_headers"), "utf8"));
+  assert.ok(real.some((r) => r.path === "/connect" && r.removes.includes("cross-origin-opener-policy")));
+  assert.ok(!headersFor(real, "/app.js")["content-security-policy"].includes(","));
+});
+
 test("the generator refuses what it cannot model: another .html page, a _redirects file, no _headers, a bad tag", () => {
   assert.equal(publishedPath("docs/index.html"), "/docs/");
   assert.throws(() => publishedPath("about.html"), /about\.html/);

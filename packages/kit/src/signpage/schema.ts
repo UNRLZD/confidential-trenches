@@ -424,8 +424,9 @@ const withdrawGiven = (v: unknown): boolean => {
   const has = (k: string): boolean => Object.hasOwn(v as object, k);
   return has("to") ? has("amount") !== has("max") && !has("from_id") : !has("amount") && !has("max");
 };
-const withdrawOpenBase = obj({ return_key: returnKey }, { from_id: str, to: str, amount: dec, max: lit(true) });
-const withdrawOpenParams: SignpageSchema = (v) => withdrawOpenBase(v) && withdrawGiven(v);
+// dest (card cash-withdraw-in-app-to-any-chain): an ExitChain, only with `to`, exactly as pool.withdraw's below
+const withdrawOpenBase = obj({ return_key: returnKey }, { from_id: str, to: str, amount: dec, max: lit(true), dest: oneOf(["solana", "base", "robinhood", "near"]) });
+const withdrawOpenParams: SignpageSchema = (v) => withdrawOpenBase(v) && withdrawGiven(v) && (!Object.hasOwn(v as object, "dest") || Object.hasOwn(v as object, "to"));
 // dest: an ExitChain (../checks/oneclick-exit.ts), the chain the money arrives on through 1Click; only with `to`
 const poolWithdrawBase = obj({ return_key: returnKey, chain: poolChain }, { to: str, amount: dec, max: lit(true), dest: oneOf(["solana", "base", "robinhood", "near"]) });
 const poolWithdrawParams: SignpageSchema = (v) => poolWithdrawBase(v) && withdrawGiven(v) && (!Object.hasOwn(v as object, "dest") || Object.hasOwn(v as object, "to"));
