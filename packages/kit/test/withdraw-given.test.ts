@@ -40,3 +40,10 @@ test("pool.withdraw: the chain, with none of to, amount, max or to with exactly 
   assert.equal(P["pool.withdraw"]!({ ...RK, to: "x", amount: "1" }), false, "no chain");
   assert.equal(P["pool.withdraw"]!({ ...RK, chain: "solana", to: "x", amount: "1", from_id: "op-1" }), false, "from_id is not pool.withdraw's");
 });
+
+test("pool.withdraw: dest, an exit chain, only with to", () => {
+  assert.equal(P["pool.withdraw"]!({ ...RK, chain: "solana", to: "alice.near", amount: "0.05", dest: "near" }), true);
+  assert.equal(P["pool.withdraw"]!({ ...RK, chain: "base", to: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", max: true, dest: "solana" }), true);
+  assert.equal(P["pool.withdraw"]!({ ...RK, chain: "solana", dest: "near" }), false, "dest alone");
+  assert.equal(P["pool.withdraw"]!({ ...RK, chain: "solana", to: "x", amount: "1", dest: "ethereum" }), false, "not an exit chain");
+});
