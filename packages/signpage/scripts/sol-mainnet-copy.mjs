@@ -23,7 +23,8 @@
 // - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, on SOL_COPY_ENGINE (swallow by default),
 //   through pool-buy-pieces-devnet.mjs's copy-part1 in place of the flow: 6 notes of 0.01 SOL, a buy only 5 pay (refused,
 //   nothing sent), a buy of 2 pieces and Max of the 4 left, each carried as the helper's pieces route sends them (the tag 2s
-//   plain, then the tag 3, card owners-solana-buy-lands). SOL_COPY_SCENARIO=copy-takeable runs that scenario instead;
+//   plain, then the tag 3, card owners-solana-buy-lands). SOL_COPY_SCENARIO=copy-takeable runs that scenario instead; SOL_COPY_SCENARIO=copy-legs the same 6 notes'
+//   buy of 5 pieces as legs, each its own W, filled in one tap (card buy-any-amount-on-every-chain);
 //   SOL_COPY_SCENARIO=tag3-fail runs the driver's tag3-fail (FLOW_AFTER=stay): a buy of 2 pieces at 1 bp whose tag 3 pump
 //   refuses (F buys the coin first), its tag 2s landed; it passes when the page's rent back sweeps W's SOL into the pool.
 // - SOL_COPY_FLOW=plain (card deposit-takes-each-pools-own-coin): the curve coin's accounts only (no buy or sell), through
@@ -58,7 +59,7 @@ if (PLAIN && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "al
 // the pieces driver's scenario: copy-part1 (the default), copy-takeable (the Max past an epoch boundary, the load), or
 // tag3-fail (the tag 3 refused by pump once its tag 2s landed: W swept back into the pool)
 const SCENARIO = process.env.SOL_COPY_SCENARIO ?? "copy-part1";
-if (!["copy-part1", "copy-takeable", "tag3-fail"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1, copy-takeable or tag3-fail, not ${SCENARIO}`);
+if (!["copy-part1", "copy-legs", "copy-takeable", "tag3-fail"].includes(SCENARIO)) throw new Error(`SOL_COPY_SCENARIO: copy-part1, copy-legs, copy-takeable or tag3-fail, not ${SCENARIO}`);
 if (PIECES && (PLANT || (ONLY.length && ONLY.join() !== "curve") || STEPS !== "all")) throw new Error("SOL_COPY_FLOW=pieces runs the curve coin alone, with no plant and every step");
 // since card owners-solana-buy-lands a buy of several pieces needs no engine to land (its tag 2s go plain, its tag 3 with
 // a plain copy), so the pieces flow runs on the default stand-in too, the one that never lands a bundle
@@ -465,7 +466,7 @@ const record = {
   what: PLAIN
     ? "the Solana pool's own coin sent straight to U_X on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): the page's pool.address plain-send answer, an outside wallet's two transfers, the follow's carry with no 1Click read, and a withdraw of the note"
     : PIECES
-      ? `a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): ${SCENARIO === "tag3-fail" ? "2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool" : SCENARIO === "copy-takeable" ? "5 notes of 0.01 SOL, Max ready after a load and past an epoch boundary" : "6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max"}`
+      ? `a buy of several pieces of the Solana pool balance on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned): ${SCENARIO === "tag3-fail" ? "2 notes of 0.01 SOL, a buy of 2 pieces at 1 bp whose tag 3 pump refuses after a front-run, its tag 2s landed, W swept back into the pool" : SCENARIO === "copy-takeable" ? "5 notes of 0.01 SOL, Max ready after a load and past an epoch boundary" : SCENARIO === "copy-legs" ? "6 notes of 0.01 SOL, a buy only 5 pay, filled as legs on their own Ws in one tap" : "6 notes of 0.01 SOL, a buy only 5 pay, a buy of 2 pieces and Max"}`
       : "deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet (solana-test-validator, mainnet's feature set, mainnet accounts cloned)",
   validator: version,
   mainnetSlot: read.slot,

@@ -58,6 +58,7 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
 import { IDBFactory } from "fake-indexeddb";
+import { anvilFetch } from "../../../contracts/pool-evm/test/fork-anvil.mjs";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
@@ -94,6 +95,8 @@ const plannedAs = {};
 const sends = () => sent.page + sent.helper;
 let losing = false;
 const realFetch = globalThis.fetch;
+// a block at or before the fork's block read from the fork's URL, never anvil's double lock (contracts/pool-evm/test/fork-anvil.mjs)
+const toAnvil = anvilFetch(realFetch, ANVIL);
 const route = { fork: new Set(), helper: new Set(), local: null };
 const refused = new Map();
 // while `tracing`, each chain read the page makes and what it answered (method, its error or the answer's first bytes):
@@ -211,6 +214,7 @@ const lagged = async (body) => {
 let batches = 0;
 globalThis.fetch = async (input, init) => {
   const u = new URL(String(input instanceof Request ? input.url : input));
+  if (u.origin === ANVIL && typeof init?.body === "string") return toAnvil(init);
   if (u.origin === ANVIL || (route.local !== null && u.origin === route.local)) return realFetch(input, init);
   if (route.fork.has(u.host)) {
     const batch = ++batches;
@@ -233,14 +237,14 @@ globalThis.fetch = async (input, init) => {
     }
     if (LAG_HOST === u.host && typeof init?.body === "string") {
       const l = await lagged(init.body);
-      const res = await realFetch(ANVIL, { ...init, body: l.body });
+      const res = await toAnvil({ ...init, body: l.body });
       const j = await res.json();
       const asked = JSON.parse(l.body);
       const fix = (a, q) => (q?.method === "eth_blockNumber" && typeof a?.result === "string" ? { ...a, result: l.behind } : a);
       const out = Array.isArray(j) ? j.map((a) => fix(a, (Array.isArray(asked) ? asked : [asked]).find((q) => String(q.id) === String(a?.id)))) : fix(j, asked);
       return traced(u.host, init, new Response(JSON.stringify(out), { status: res.status, headers: { "content-type": "application/json" } }));
     }
-    return traced(u.host, init, await realFetch(ANVIL, init));
+    return traced(u.host, init, await toAnvil(init));
   }
   if (route.helper.has(u.origin)) return traced(`helper${u.pathname}`, init, await realFetch(`${route.local}${u.pathname}${u.search}`, init));
   if (!refused.has(u.host)) log("refused host", { host: u.host, path: u.pathname });

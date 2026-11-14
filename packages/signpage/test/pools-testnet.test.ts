@@ -110,12 +110,12 @@ test("withSolanaRent gives only the Solana entry a spend, and leaves the table i
   assert.ok(Object.isFrozen(out));
 });
 
-test("an EVM pin goes in under its pool kind's id and scope, on its app chain, spending a whole chunk at the tap", () => {
+test("an EVM pin goes in under its pool kind's id and scope, on its app chain, spending its chunk less its relay fee at the tap (card buy-any-amount-on-every-chain)", () => {
   const k = evmKind(EVM_PIN);
   const [e, ...rest] = pools.pagePoolsOf("testnet", {}, { "base-sepolia": EVM_PIN });
   assert.equal(rest.length, 0);
   assert.deepEqual({ id: e!.id, chain: e!.chain, scope: e!.scope, asset: e!.asset }, { id: k.id, chain: "base", scope: k.scope, asset: "ETH" });
-  assert.equal(e!.spendOf?.([{ chunk: 7n, feeCap: 1n, tipCap: undefined }]), 7n);
+  assert.equal(e!.spendOf?.([{ chunk: 7n, feeCap: 1n, tipCap: undefined }]), 6n);
   // the testnet table takes the testnet networks only, mainnet's the mainnet ones
   assert.deepEqual(pools.pagePoolsOf("mainnet", {}, { "base-sepolia": EVM_PIN }), []);
   assert.deepEqual(pools.pagePoolsOf("testnet", { mainnet: SOL_POOLS.devnet! }, {}), []);

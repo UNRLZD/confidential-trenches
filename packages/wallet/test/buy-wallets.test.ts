@@ -478,9 +478,13 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   // leftovers-carry-to-cash). And its Base and Robinhood twin (signpage src/carry-cash-evm.ts evmCashCarrySender:
   // W_{evm,l,j}, refused unless it is the source's address, signs only the one plain transfer to Cash's checked deposit
   // address that checkEvmCashCarry passed and both RPCs ran; its key zeroed once it has signed and again in a finally;
-  // test/carry-cash-evm.test.ts).
+  // test/carry-cash-evm.test.ts). And where an EVM buy's rest leg signs (signpage src/pool-buy-evm-rest.ts: prepRest's
+  // whole release to W_{evm,l,j} of the plan's rest note, refused unless it is the proof's W and the relay data's
+  // recipient, signs only what checkEvmRestRelease passed; signRest's buy by W itself, refused unless the derived W is the
+  // rest's W, signs only the transaction checkEvmWBuy passed; each key zeroed in a finally; card
+  // buy-any-amount-on-every-chain).
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/exit/src/sol-out.ts", "packages/signpage/src/carry-cash-evm.ts", "packages/signpage/src/carry-cash-sol.ts", "packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-carry-evm.ts", "packages/signpage/src/pool-found.ts", "packages/signpage/src/pool-holdings-evm.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw-evm.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/deposit/delegate.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/near/swap-delegate.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-exit.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
+  assert.deepEqual(calls, ["packages/exit/src/sol-out.ts", "packages/signpage/src/carry-cash-evm.ts", "packages/signpage/src/carry-cash-sol.ts", "packages/signpage/src/pool-buy-evm-rest.ts", "packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-carry-evm.ts", "packages/signpage/src/pool-found.ts", "packages/signpage/src/pool-holdings-evm.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw-evm.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/deposit/delegate.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/near/swap-delegate.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-exit.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
 });
 
 // ---------- fold 2 ----------

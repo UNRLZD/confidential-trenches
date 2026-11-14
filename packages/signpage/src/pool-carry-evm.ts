@@ -51,11 +51,13 @@ import { EVM_POOL_MIN_DEPOSIT } from "../../kit/src/trade/evm/pool-fee.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
-import { evmAgreedBlock, evmRetryLag, EVM_CHAIN_IDS, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { evmAgreedBlock, evmRetryLag, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolEvent, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { chunkOf } from "../../wallet/src/pool/ladder.ts";
 import { evmClaimTaken, evmNextNote, EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import type { WalletStore } from "@blindfill/wallet/store";
-import { checkEvmCarry, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, signEvmDeposit, type EvmOnwardSend } from "./rules/pool.ts";
+import { checkEvmCarry, checkEvmChange, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, signEvmDeposit, type EvmOnwardSend } from "./rules/pool.ts";
+import { EVM_WBUY_CARRY_AFTER_MS, EVM_WBUY_KEY, type EvmWBuyRecord } from "./pool-buy-evm-rest.ts";
 import { depthsOf, EVM_DEPOSIT_PRIORITY_CAP, EVM_DEPOSIT_RESEND_MS, l1FeesOf, spentFinal } from "./pool-deposit-evm.ts";
 import { evmBuyCalldataRead } from "./evm-send.ts";
 import { evmAgreedTx, evmRowTx } from "./evm-tx-hash.ts";
@@ -133,8 +135,10 @@ const onChain = (r: NoteRef, l: bigint, j: number): boolean =>
   (r.kind === "return" && r.c === "evm" && r.l === l && r.j === j) || (r.kind === "second" && r.id.id === "R" && r.id.c === "evm" && r.id.l === l && r.id.j === j);
 const recordsOf = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? { ...(v as Record<string, unknown>) } : {});
 
-/** A W of the user's that a release paid with no swap: its (l, j), address (lowercase) and the release. */
-type Owed = { l: bigint; j: number; w: string; release: EvmPoolEvent };
+/** A W of the user's that a release paid with no swap: its (l, j), address (lowercase) and the release. `rest`: a buy's
+ *  rest W (card buy-any-amount-on-every-chain, src/pool-buy-evm-rest.ts EVM_WBUY_KEY), whose change goes back as rungs
+ *  (checkEvmChange), what is under the least rung staying on W. */
+type Owed = { l: bigint; j: number; w: string; release: EvmPoolEvent; rest?: true };
 
 /**
  * What a Withdrawn paying W came from: its transaction, by the hash in the round's own row (two operators agreed it byte
@@ -196,7 +200,11 @@ async function carryOnce(p: Pass, o: Owed, again?: NoteRecord): Promise<EvmCarry
   if (acct.block < o.release.block) return "pending";
   const low = acct.balance[0] < acct.balance[1] ? acct.balance[0] : acct.balance[1];
   // empty ends W for good, so it is read at a final block: W's balance there, on both RPCs, at or under the least deposit
-  if (low <= EVM_POOL_MIN_DEPOSIT) return (await finalLow(p, o.w, round.fin.number)) <= EVM_POOL_MIN_DEPOSIT ? "empty" : "pending";
+  // (a rest W's: under the least rung, its tail)
+  const least = o.rest ? EVM_LADDER.min - 1n : EVM_POOL_MIN_DEPOSIT;
+  if (low <= least) return (await finalLow(p, o.w, round.fin.number)) <= least ? "empty" : "pending";
+  // a rest W's value: the largest rung W's balance pays beside the send's bound
+  const valueOf = (x: bigint): bigint | null => (o.rest ? chunkOf(EVM_LADDER, x < 0n ? 0n : x) : x);
   const tip = h.priorityCap ?? EVM_DEPOSIT_PRIORITY_CAP;
   const maxFee = 2n * acct.baseFee + tip;
   const r = { h: { rpcs: h.rpcs, pin: h.pin } };
@@ -205,21 +213,22 @@ async function carryOnce(p: Pass, o: Owed, again?: NoteRecord): Promise<EvmCarry
   const callOf = (value: bigint) => Object.freeze({ to: h.pin.pool, value, data: selector + word(value) + word(next.precommitment) });
   // a first value at the cap's gas, for the estimate; then the value at the estimate both RPCs agree on
   const cap = EVM_DEPOSIT_GAS_MAX + room;
-  const first0 = low - cap * maxFee - (await l1FeesOf(r, cap, acct.tag))[0];
-  if (first0 < EVM_POOL_MIN_DEPOSIT) return "high_fee";
+  const first0 = valueOf(low - cap * maxFee - (await l1FeesOf(r, cap, acct.tag))[0]);
+  if (first0 === null || first0 < EVM_POOL_MIN_DEPOSIT) return "high_fee";
   const est = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_estimateGas", [{ from: o.w, to: h.pin.pool, value: qty(first0), data: callOf(first0).data }, acct.tag]), `rpc ${k} estimate`));
   if (est[0] !== est[1]) throw new Error("carry: the two RPCs estimate W's deposit apart");
   if (est[0] > EVM_DEPOSIT_GAS_MAX) return "high_fee";
   const gasLimit = est[0] + room;
   const l1 = await l1FeesOf(r, gasLimit, acct.tag);
-  const value = low - gasLimit * maxFee - l1[0];
-  if (value < EVM_POOL_MIN_DEPOSIT) return "high_fee";
+  const value = valueOf(low - gasLimit * maxFee - l1[0]);
+  if (value === null || value < EVM_POOL_MIN_DEPOSIT) return "high_fee";
   // the send's bound (the L1 fee in it) at most 1/EVM_CARRY_FEE_PARTS of the value carried: over it, a lower fee is
   // waited for, so W never keeps more than that part (the bound less what the send cost)
   if ((gasLimit * maxFee + l1[0]) * EVM_CARRY_FEE_PARTS > value) return "high_fee";
   const call = callOf(value);
   const tx: EvmOnwardSend = { type: 2, chainId: EVM_CHAIN_IDS[h.pin.network], nonce: acct.nonce, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gasLimit, to: call.to, value: call.value, data: call.data, accessList: [] };
-  checkEvmCarry(tx, { wallet: o.w, precommitment: next.precommitment, call, pin: h.pin, chain: h.chain }, { nonce: acct.nonces, balance: acct.balance, estimate: est, baseFee: acct.baseFees, l1Fee: l1, stateDepth: depths.state, labelDepth: depths.label, priorityCap: tip }, h.testnet);
+  const reads = { nonce: acct.nonces, balance: acct.balance, estimate: est, baseFee: acct.baseFees, l1Fee: l1, stateDepth: depths.state, labelDepth: depths.label, priorityCap: tip };
+  (o.rest ? checkEvmChange : checkEvmCarry)(tx, { wallet: o.w, precommitment: next.precommitment, call, pin: h.pin, chain: h.chain }, reads, h.testnet);
   // simulated on both before W signs: a failure on either signs nothing
   const sim = await Promise.allSettled(h.rpcs.map((rpc) => rpc("eth_call", [{ from: o.w, to: call.to, value: qty(call.value), data: call.data, gas: qty(gasLimit) }, acct.tag])));
   if (sim.some((s) => s.status === "rejected")) return "sim_failed";
@@ -326,6 +335,7 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
   const meta = await h.held();
   const done = recordsOf(await meta.get("meta", EVM_CARRY_DONE_KEY));
   const waits = recordsOf(await meta.get("meta", EVM_CARRY_WAIT_KEY));
+  const rests = recordsOf(await meta.get("meta", EVM_WBUY_KEY));
   const round = await h.round();
   const releases = new Map<bigint, EvmPoolEvent>();
   for (const e of round.events) if (e.kind === "withdraw" && e.nullifier !== null) releases.set(e.nullifier, e);
@@ -344,6 +354,15 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
       if (lower(e.recipient) !== w || done[w] !== undefined) continue;
       const wait = waits[w] as EvmCarryWait | undefined;
       if (wait !== undefined && now() < BigInt(wait.at)) continue;
+      // a buy's rest W: carried once its own buy has its end, or its window is long past (W's one buy landed or never
+      // will); till then W's balance is its buy's, never carried
+      const rest = rests[w] as Partial<EvmWBuyRecord> | undefined;
+      if (rest !== undefined && rest.chain === h.chain) {
+        const by = typeof rest.signBy === "string" && /^[0-9]{1,20}$/.test(rest.signBy) ? BigInt(rest.signBy) : null;
+        if (rest.end === undefined && (by === null || now() <= by + EVM_WBUY_CARRY_AFTER_MS)) continue;
+        owed.push({ l, j, w, release: e, rest: true });
+        continue;
+      }
       owed.push({ l, j, w, release: e });
     }
     const o = shuffled(owed, h.random)[0];
@@ -356,8 +375,8 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
       const open = (await store.list()).find((n) => n.scope === h.scope && n.state === "INCOMING" && onChain(n.ref, o.l, o.j));
       if (open !== undefined) end = await follow(p, o, open, recordsOf(await meta.get("meta", EVM_CARRY_OPEN_KEY))[o.w] as EvmCarryOpen | undefined);
       else {
-        const kind = await evmReleaseKind(h.helper, h.pin.pool, o.release);
         // withdraw and other end W for good, so only from a release at a final block
+        const kind = o.rest ? "buy" : await evmReleaseKind(h.helper, h.pin.pool, o.release);
         end = kind === "buy" ? await carryOnce(p, o) : o.release.block <= round.fin.number ? kind : "pending";
       }
       if (end === "landed") {
@@ -365,7 +384,7 @@ export async function carryEvmOwed(h: EvmCarryHost): Promise<EvmCarryOutcome[]> 
         // a W still holding the least deposit or more is carried again (the next note of its chain), never ended
         const acct = await wReads(h.rpcs, o.w, sleep, h.signal);
         const low = acct.balance[0] < acct.balance[1] ? acct.balance[0] : acct.balance[1];
-        if (low >= EVM_POOL_MIN_DEPOSIT) end = "pending";
+        if (low >= (o.rest ? EVM_LADDER.min : EVM_POOL_MIN_DEPOSIT)) end = "pending";
       }
 
       // what a W ending empty or carried still holds (card leftovers-carry-to-cash), read before it ends so a failed read

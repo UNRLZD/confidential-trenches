@@ -55,6 +55,7 @@ export const SIGN_SITES = {
   "packages/signpage/src/rules/refund.ts:signReturnEvm": { n: 1, test: "packages/signpage/test/rules-refund.test.ts" },
   "packages/signpage/src/rules/pool.ts:signSolana": { n: 1, test: "packages/signpage/test/rules-pool.test.ts" },
   "packages/signpage/src/rules/pool.ts:signEvmWithdraw": { n: 1, test: "packages/signpage/test/rules-pool.test.ts" },
+  "packages/signpage/src/rules/pool.ts:signEvmWBuy": { n: 1, test: "packages/signpage/test/rules-pool-evm-any-amount.test.ts" },
   "packages/signpage/src/rules/pool.ts:signEvmOnwardSend": { n: 1, test: "packages/signpage/test/rules-pool-onward.test.ts" },
   "packages/signpage/src/rules/pool.ts:signEvmDeposit": { n: 1, test: "packages/signpage/test/rules-pool-deposit-evm.test.ts" },
   "packages/exit/src/sol-out.ts:sendOnward": { n: 1, test: "packages/exit/test/sol-out.test.ts" },
