@@ -54,6 +54,15 @@ test("planted: a link that opens an empty page fails", () => {
   fails(mut((rec) => (link(rec, "desktop", "/discover").main.text = 0)), /^BAD desktop \/discover: an empty page/);
 });
 
+test("a link out of the app (the footer's repo, 14 Nov) is judged on its new tab, never tapped as a page", () => {
+  const repo = "https://github.com/UNRLZD/confidential-trenches";
+  const ok = mut((rec) => (run(rec, "desktop").outside = [{ href: repo, target: "_blank", rel: "noopener noreferrer" }]));
+  assert.equal(ok.ok, true, ok.lines.join("\n"));
+  assert.ok(ok.lines.some((l) => /^ok\s+desktop https:\/\/github\.com\/UNRLZD\/confidential-trenches: a link out of the app opens a new tab with no opener$/.test(l)), ok.lines.join("\n"));
+  fails(mut((rec) => (run(rec, "desktop").outside = [{ href: repo, target: null, rel: null }])), /^BAD desktop https:\/\/github\.com\/UNRLZD\/confidential-trenches: a link out of the app opens with target none/);
+  fails(mut((rec) => (run(rec, "desktop").outside = [{ href: repo, target: "_blank", rel: "noreferrer" }])), /not a new tab with no opener/);
+});
+
 test("planted: a link to Orders fails, and so does its empty page", () => {
   const r = mut((rec) => run(rec, "desktop").links.push({ href: "/orders", main: { path: "/orders", route: "orders", text: 0, panel: false, token: null, signedOut: false }, sheet: null }));
   fails(r, /^BAD desktop: links to \/orders/);

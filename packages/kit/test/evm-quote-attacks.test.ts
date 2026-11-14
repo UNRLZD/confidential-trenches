@@ -762,6 +762,41 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   assert.deepEqual(await quoteOn(pools, "0x00000000000000000000000000000000000a22a2", seededRoute("0x00000000000000000000000000000000000a22a2"), broken), { accepted: false, code: "rpc_error" });
 });
 
+test("card evm-pool-index-from-the-first-pool: a token whose only real pool is older than the scan's depth is held to it through the helper's served pools, each key hashed to its id and read on both providers", async () => {
+  const { evmPoolServedUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolServedUse: (c: string, t: string, a: Promise<unknown>) => void; evmPoolIndexReset: () => void };
+  const answer = (token: string, o: Record<string, unknown> = {}, pools: unknown[] = [{ id: "0x" + pidOf(real(token).key), key: real(token).key }]) => ({ chainId: 8453, poolManager: PM, complete: true, through: 4_999_990, pools, ...o });
+  // Base's depth is 1M blocks back from 5,000,000: the real pool, made at 3,000,000, is past it
+  const old = (token: string) => scanner(5_000_000, [{ key: real(token).key, at: 3_000_000 }]);
+  const run = async (n: number, served?: (t: string) => unknown) => {
+    const token = "0x00000000000000000000000000000000000b" + n.toString(16).padStart(4, "0");
+    if (served !== undefined) evmPoolServedUse("base", token, Promise.resolve().then(() => served(token)));
+    return quoteOnStill([seeded(token), real(token)], token, seededRoute(token), old(token));
+  };
+  try {
+    // the hole: with nothing served, the scan never reaches the real pool and the seeded route is its own reference
+    assert.equal((await run(1)).accepted, true);
+    // served, the real pool is a candidate read on both providers: the seeded route is below it
+    assert.deepEqual(await run(2, (t: string) => answer(t)), below);
+    // a key that does not hash to the id it is served with is dropped
+    assert.equal((await run(3, (t: string) => answer(t, {}, [{ id: "0x" + "11".repeat(32), key: real(t).key }]))).accepted, true);
+    // an answer short of its head (the helper's backfill not done) is the helper down: none is added
+    assert.equal((await run(4, (t: string) => answer(t, { complete: false }))).accepted, true);
+    // another chain's or another PoolManager's answer adds none
+    assert.equal((await run(5, (t: string) => answer(t, { chainId: 4663 }))).accepted, true);
+    assert.equal((await run(6, (t: string) => answer(t, { poolManager: "0x0000000000000000000000000000000000000001" }))).accepted, true);
+    // the helper down: the quote stands on the device's own scan
+    assert.equal((await run(7, () => Promise.reject(new Error("down")))).accepted, true);
+    // a served pool the PoolManager does not hold (no state on either provider) counts for nothing, its hash right
+    const ghost = (t: string) => keyOf(t, NATIVE, 500, 10, NATIVE);
+    assert.equal((await run(8, (t: string) => answer(t, {}, [{ id: "0x" + pidOf(ghost(t)), key: ghost(t) }]))).accepted, true);
+    // past EVM_SERVED_MAX the answer is refused whole, never cut
+    assert.equal((await run(9, (t: string) => answer(t, {}, [...Array.from({ length: 4096 }, () => ({ id: "0x" + pidOf(ghost(t)), key: ghost(t) })), { id: "0x" + pidOf(real(t).key), key: real(t).key }]))).accepted, true);
+    assert.deepEqual(await run(10, (t: string) => answer(t, {}, [...Array.from({ length: 4095 }, () => ({ id: "0x" + pidOf(ghost(t)), key: ghost(t) })), { id: "0x" + pidOf(real(t).key), key: real(t).key }])), below);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
+
 test("card evm-buy-and-sell-on-mainnet: with the device's pool index served, a quote's scan asks only the blocks past the index's N, and the index's pool still holds a seeded one", async () => {
   const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
   const token = "0x00000000000000000000000000000000000a33a3";

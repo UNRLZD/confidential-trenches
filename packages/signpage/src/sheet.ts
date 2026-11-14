@@ -15,10 +15,13 @@ const FIT = "(min-width: 1024px)";
 const z = (px: number, fit: boolean): string => (fit ? `clamp(${px * 0.72}px, ${(px / 1920) * 100}vw, ${px}px)` : `${px}px`);
 
 /** The deposit sheet's tokens (deposit.css .dep) and the app's text and font tokens (shell.css :root). */
-const T = {
+export const T = {
   drawer: "#0c0c0c", panel: "#111111", border: "#1f1f1f", strong: "#2a2a2a", paper: "#f4f4f2", onPaper: "#0a0a0a",
   text1: "#f4f4f2", text2: "#a3a3a3", text3: "#6e6e6e", off: "#181818", sell: "#ff5d4d",
-  ui: '"Schibsted Grotesk", system-ui, sans-serif', num: '"Chivo Mono", ui-monospace, monospace',
+  // The page loads no font file (CSP font-src 'self', no face shipped), so the number font is the device's own: Chrome
+  // has no ui-monospace and its bare monospace is Courier, so the stack names each system's mono face before the generic.
+  ui: '"Schibsted Grotesk", system-ui, sans-serif',
+  num: '"Chivo Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", "DejaVu Sans Mono", "Liberation Mono", monospace',
 } as const;
 
 export interface Sheet {

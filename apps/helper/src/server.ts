@@ -28,6 +28,7 @@ import { address as solanaAddress, createSolanaLists } from "./data/solana/lists
 import { LOGO_NONE_MS, LOGOS, type LogoChain, type Logos } from "./data/logo.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
+import { createPoolIndex, jsonRpcPost, type PoolIndex, type PoolIndexConfig } from "./data/evm/pool-index.ts";
 import { createEvmToken, type EvmToken } from "./data/evm/token.ts";
 import { createHeld, parseHeld, type Held } from "./data/held.ts";
 import { createNearLists } from "./data/near/lists.ts";
@@ -90,8 +91,8 @@ const ONECLICK_QUOTE = "oneclick/v0/quote";
 /** GET /v1/health's header naming mainnet NEAR's agreement pair (card near-pair-on-keyed-providers; token-status/status.ts
  *  pairNames): "<first>, <second>", each "<company's domain>[ key<n>][ keyless]", never a URL or a key. */
 export const NEAR_PAIR_HEADER = "X-Helper-Near-Pair";
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
-const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX] = MOUNTED.proxy;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH, "/v1/market/held", "/v1/logo/", "/v1/market/pools"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell", "/v1/pool/solana/pieces"], delegate: ["/v1/bind", "/v1/bind/record"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH, MARKET_HELD, LOGO_PREFIX, MARKET_POOLS] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL, POOL_SOLANA_PIECES] = MOUNTED.relay;
 const [BIND, BIND_RECORD] = MOUNTED.delegate;
 const [INTENTS] = MOUNTED.intents;
@@ -295,6 +296,9 @@ export function handler(
   // readUrls: the watch, the fee quote, the carries), named on /v1/health in X-Helper-Near-Pair. A header, as the
   // commit is: the body is held to the kit's frozen 1 KB (HELPER_V1_PATHS), which its longest config leaves 11 B of
   nearPair: string[] = pairNames(process.env),
+  // card evm-pool-index-from-the-first-pool: GET /v1/market/pools, each EVM chain's PoolManager pools from its first
+  // block (src/data/evm/pool-index.ts); a chain with none answers 404
+  poolIndexes: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>> = {},
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -677,6 +681,18 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
+      if (path === MARKET_POOLS) {
+        if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
+        // a currency's pools in the chain's index: exactly one chain this helper indexes and one token address, no other
+        // key, refused before any read; `complete: false` until the backfill reaches its head's margin
+        const q = new URL(req.url ?? "/", "http://helper.invalid").searchParams;
+        const chain = q.getAll("chain").length === 1 ? q.get("chain")! : "";
+        const t = q.getAll("token").length === 1 ? q.get("token")! : "";
+        const ix = chain === "base" || chain === "robinhood" ? poolIndexes[chain] : undefined;
+        if ([...q.keys()].some((k) => k !== "chain" && k !== "token") || !/^0x[0-9a-fA-F]{40}$/.test(t)) return send(400, { error: { code: "bad_request" } }, cors(req));
+        if (ix === undefined) return send(404, { error: { code: "not_found" } }, cors(req));
+        return send(200, ix.pools(t.toLowerCase()), { ...cors(req), "Cache-Control": "no-store" });
+      }
       if (path === MARKET_HELD) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
         // the tokens a device holds (src/data/held.ts, card market-token-reads): exactly one chain this helper serves
@@ -925,6 +941,37 @@ export function evmSwapRpcs(env: Record<string, string | undefined>, chain: "bas
 }
 
 /**
+ * Each EVM chain's pool index (card evm-pool-index-from-the-first-pool, src/data/evm/pool-index.ts), in the store
+ * directory: Robinhood's backfill runs to its head first, then Base's beside it (when on, POOL_INDEX_ON), each a background read on the helper's
+ * provider holds. Providers: Robinhood's own (10,000,000 blocks a getLogs, at most 10,000 logs) then the keyed ones;
+ * Base's keyed ones, then base.api.pocket.network and base.gateway.tenderly.co, which serve its history keyless
+ * (base-rpc.publicnode.com refuses it: "Archive requests require a personal token", 2026-11-14 08:05Z). First blocks:
+ * Robinhood's 0 (its PoolManager's first Initialize at 9,505); Base's 25,350,000, where the PoolManager has no code on
+ * Pocket or Tenderly (eth_getCode "0x" at 25,350,000 and 25,350,736; code at 25,400,000; 08:2xZ).
+ */
+export const POOL_INDEX_CHAINS: Readonly<Record<"base" | "robinhood", Omit<PoolIndexConfig, "urls"> & { publics: readonly string[] }>> = {
+  robinhood: { chain: "robinhood", chainId: 4663, poolManager: "0x8366a39cc670b4001a1121b8f6a443a643e40951", first: 0, span: 2_000_000, margin: 1_000, publics: ["https://rpc.mainnet.chain.robinhood.com"] },
+  base: { chain: "base", chainId: 8453, poolManager: "0x498581ff718922c3f8e6a244956af099b2652b2b", first: 25_350_000, span: 10_000, margin: 300, publics: ["https://base.api.pocket.network", "https://base.gateway.tenderly.co"] },
+};
+/** The chains whose index this helper keeps. Base's is off until its volume is read for the room: about 15.9M pools
+ *  (500 blocks of its Initialize logs every 1M blocks, base.api.pocket.network, 08:2xZ) at about 260 bytes a pool with
+ *  both indexes is about 4.1 GB, and its first backfill on keyless providers alone about 18 h; Robinhood's whole
+ *  backfill, 1,145,455 pools, 297.8 MB, took 851.7 s on rpc.mainnet.chain.robinhood.com at the background pace
+ *  (2026-11-14 08:12-08:26Z, from a laptop). */
+export const POOL_INDEX_ON: readonly ("base" | "robinhood")[] = ["robinhood"];
+export function poolIndexesFromEnv(env: Record<string, string | undefined>, storeDir: string, holds: ProviderHolds, on: readonly ("base" | "robinhood")[] = POOL_INDEX_ON): Partial<Record<"base" | "robinhood", PoolIndex>> | null {
+  if (storeDir === "") return null;
+  const post = jsonRpcPost();
+  const of = (chain: "base" | "robinhood") => {
+    const { publics, ...c } = POOL_INDEX_CHAINS[chain];
+    const own = chain === "base" ? env.BASE_RPC_URL : undefined;
+    const urls = [...new Set([...(chain === "robinhood" ? publics : []), ...(own === undefined || own === "" ? [] : [own]), ...keyedSpares(env, chain), ...(chain === "base" ? publics : [])])];
+    return createPoolIndex(join(storeDir, `pool-index-${chain}.sqlite`), { ...c, urls }, { post, holds, sleep: (ms) => new Promise((r) => setTimeout(r, ms).unref()), now: () => performance.timeOrigin + performance.now() });
+  };
+  return Object.fromEntries(on.map((c) => [c, of(c)]));
+}
+
+/**
  * Solana's trade walk providers, in order: SOLANA_TRADES_RPC_URL when set (its slot's key), the QuickNode and dRPC URLs
  * when set (card rpc-keyed-lists: each read under its company's pace as a background read, rpc.ts background), then
  * the public ones (TRADES_RPCS).
@@ -1134,12 +1181,12 @@ export function readyGate(warm: Promise<void>, checked: Promise<void>): { ready:
   return { ready: () => ready, warmed };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes),
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
   attachPush(server, { commit, readers: evmSwaps ?? {}, allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
@@ -1312,8 +1359,28 @@ if (import.meta.main) {
     // Solana pool's check waits for its first good rent read, so a deploy beside a running helper is not ready while
     // that cluster's rent reads fail (each failure logged, pool/solana.ts), and redeploy.sh keeps the old one serving.
     const { ready, warmed } = readyGate(warmUntilReady({ lists, evmLists, token }), checked);
+    // card evm-pool-index-from-the-first-pool: each EVM chain's pools from its PoolManager's first block, answered from
+    // the start (partial until the backfill reaches its head); the backfill runs once the senders are ours, so the two
+    // helpers of a deploy never read it at once: Robinhood's to its head first, then Base's beside it
+    // (a file it cannot open leaves the route 404 and the device on its own scan, never a stopped helper)
+    const poolIndexes = ((): ReturnType<typeof poolIndexesFromEnv> => {
+      try {
+        return poolIndexesFromEnv(process.env, storeDir, holds);
+      } catch (e) {
+        console.error(`helper: pool index not opened: ${(e as Error).message}`);
+        return null;
+      }
+    })();
+    if (poolIndexes !== null) {
+      const running = { stopped: false };
+      const [first, ...rest] = (["robinhood", "base"] as const).flatMap((c) => poolIndexes[c] ?? []);
+      void senders.held
+        .then(() => first?.run(running, true))
+        .then(() => (console.log("helper: pool index at its head"), Promise.all([first, ...rest].map((ix) => ix?.run(running)))))
+        .catch((e: Error) => console.error(`helper: pool index stopped: ${e.message}`));
+    }
     const listen = () => {
-      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools, evmTokens, held, near); // warms both relayers once the senders are ours
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools, evmTokens, held, near, poolIndexes ?? undefined); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready() ? "" : ", warming"}`));
     };

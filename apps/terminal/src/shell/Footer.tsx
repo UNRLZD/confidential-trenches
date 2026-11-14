@@ -5,6 +5,7 @@ import { buildNetwork } from "../screens/verify/release.ts";
 import eth from "./coins/eth.svg";
 import sol from "../screens/market/logos/solana.svg";
 import { BLOCK_EVERY_MS, FOOTER_LINKS, FOOTER_WORDS, fmtBlock, fmtUsd, footerRpcs, footerTicks, nextConn, readFinalBlock, type BlockRead, type Conn } from "./footer.ts";
+import { GitHubMark, REPO_URL, SOCIALS, SocialMark } from "./repo.tsx";
 import { useSignpage } from "./signpage-frame.tsx";
 
 // The desktop footer as R5 draws it (design/proto/assets/app.js:375-385 at design-lock-r5): the prices, the connection
@@ -77,6 +78,17 @@ export function Footer({ read = liveRead }: { read?: () => Promise<BlockRead | n
         <Link to={FOOTER_LINKS.privacy}>{w("privacy")}</Link>
       </span>
       <Link to={FOOTER_LINKS.verify} className="pill" data-control="verify">{WORDS.title.text}</Link>
+      <a className="gh" href={REPO_URL} target="_blank" rel="noopener noreferrer" data-control="github">
+        <GitHubMark />
+        {w("github")}
+      </a>
+      <span className="soc">
+        {SOCIALS.map((l) => (
+          <a key={l.id} href={l.href} target="_blank" rel="noopener noreferrer" title={FOOTER_WORDS[l.id].text} aria-label={FOOTER_WORDS[l.id].text} data-control={l.id}>
+            <SocialMark id={l.id} />
+          </a>
+        ))}
+      </span>
     </footer>
   );
 }

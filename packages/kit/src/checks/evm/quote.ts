@@ -1300,7 +1300,55 @@ export function evmPoolIndexPools(chain: EvmPoolChain, token: string): readonly 
   return ix === undefined || typeof token !== "string" ? null : [...(ix.byCurrency.get(lower(token)) ?? [])];
 }
 /** For the tests: forgets every chain's index (not in the kit's index). */
-export const evmPoolIndexReset = (): void => INDEXES.clear();
+export const evmPoolIndexReset = (): void => (INDEXES.clear(), SERVED.clear());
+// The helper's pools of a currency (card evm-pool-index-from-the-first-pool): the helper keeps every Initialize log of
+// the PoolManager from its first block, and answers a currency's pools, so a pool older than the scan's depth (NOVAAI's
+// native pool on Robinhood: block 40,138,722, the depth's 10M blocks back from 113,982,434) is still a candidate. Never
+// trusted: a pool whose key does not hash to the id it is served with is dropped, and a served pool counts, as a scanned
+// one does, only where the PoolManager holds it at the agreed block on both providers. An answer of another chain or
+// PoolManager, past EVM_SERVED_MAX pools, or not `complete` (the helper's backfill short of its head) adds none, as a
+// helper that is down: the device's own scan stands. What the helper can still do: leave a pool out, which only lowers R.
+const SERVED = new Map<string, Promise<readonly EvmPoolKey[]>>();
+/** The most pools one served answer adds (more is refused whole, never cut). */
+export const EVM_SERVED_MAX = 4096;
+/** The currencies whose served answers this module holds at once (the oldest is forgotten first). */
+const SERVED_HELD = 256;
+/** The pools of `token` a helper's answer serves on `chain`, each key hashed to its id; none where the answer is not
+ *  whole, of another chain or PoolManager, or past EVM_SERVED_MAX. */
+export function evmPoolServedOf(chain: EvmPoolChain, token: string, answer: unknown): readonly EvmPoolKey[] {
+  const all = evmPoolVenues();
+  const pinned = typeof chain === "string" && Object.hasOwn(all, chain) ? all[chain] : undefined;
+  const pm = pinned?.poolManager;
+  if (pinned === undefined || pm === undefined || !isAddress(token) || typeof answer !== "object" || answer === null) return [];
+  const a = answer as { chainId?: unknown; poolManager?: unknown; complete?: unknown; pools?: unknown };
+  if (a.chainId !== pinned.chainId || typeof a.poolManager !== "string" || lower(a.poolManager) !== lower(pm) || a.complete !== true) return [];
+  if (!Array.isArray(a.pools) || a.pools.length > EVM_SERVED_MAX) return [];
+  const out = new Map<string, EvmPoolKey>();
+  for (const p of a.pools as unknown[]) {
+    const id = (p as { id?: unknown } | null)?.id;
+    const k = keyOf((p as { key?: unknown } | null)?.key, token);
+    if (k === null || typeof id !== "string" || lower(id) !== "0x" + poolId(k)) continue;
+    out.set(lower(id), k);
+  }
+  return [...out.values()];
+}
+/** Holds `answer` (the helper's answer for `token`'s pools, or its failure) for this module's scans of `token` on
+ *  `chain`: a scan of the token waits for it beside its own reads; a failure adds none. */
+export function evmPoolServedUse(chain: EvmPoolChain, token: string, answer: Promise<unknown>): void {
+  if (typeof token !== "string") return;
+  const key = `${chain}:${lower(token)}`;
+  SERVED.delete(key);
+  if (SERVED.size >= SERVED_HELD) SERVED.delete(SERVED.keys().next().value!);
+  SERVED.set(key, answer.then((x) => evmPoolServedOf(chain, token, x), () => []));
+}
+/** The served pools of currency `c` a scan of `kind` adds. */
+const servedOf = async (chain: EvmPoolChain, kind: ScanKind, c: string, weth: string): Promise<EvmPoolKey[]> => {
+  const ks = await (SERVED.get(`${chain}:${c}`) ?? []);
+  return ks.filter((k) => {
+    const other = k.currency0 === c ? k.currency1 : k.currency0;
+    return kind === "all" || other === NATIVE || other === weth;
+  });
+};
 /** The scan of currency `c` the index holds, from `floor` (the scan's oldest block) to its N, kept as a scan keeps its
  *  own: none where no index covers past `floor`. */
 const indexScanOf = (chain: EvmPoolChain, kind: ScanKind, c: string, weth: string, floor: number): { spans: Spans; pools: EvmPoolKey[] } | undefined => {
@@ -2014,8 +2062,11 @@ async function scanPools(
   };
   // `defer`: the quote reads these gaps once it has answered, with every other scan's of the same kind (routeSet)
   let deferred = false;
+  // the helper's pools of each currency (evmPoolServedUse), its answer asked before the quote: added to what the scan
+  // found for this quote only, never kept as scanned blocks
+  const served = await Promise.all(each.map((e) => servedOf(chain, kind, e.c, weth)));
   return {
-    pools: new Map(each.map((e) => [e.c, e.pools])),
+    pools: new Map(each.map((e, i) => [e.c, served[i]!.length === 0 ? e.pools : [...new Map([...e.pools, ...served[i]!].map((k) => [poolId(k), k])).values()]])),
     commit: () => {
       commit();
       if (later.length === 0) return;

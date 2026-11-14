@@ -73,6 +73,15 @@ svg { display: block; flex: none; }
 .ft .conn { flex: none; color: var(--text-3); }
 .ft .links { flex: none; display: flex; gap: 14px; font-family: var(--font-ui); color: var(--text-3); }
 .ft .links span { font-family: var(--font-num); }
+.ft .gh { flex: none; display: inline-flex; align-items: center; gap: 6px; font: 12px var(--font-ui); color: var(--text-2); }
+.ft .gh:hover { color: var(--text-1); }
+.ft .gh .ghmark { width: 13px; height: 13px; fill: currentColor; }
+/* X, Docs, Telegram: icons only, the name on hover, as the main product's footer */
+.ft .soc { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.ft .soc a { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; color: var(--text-2); }
+.ft .soc a:hover, .ft .soc a:focus-visible { color: var(--text-1); background: var(--bg-raised); }
+.ft .soc .socmark { width: 13px; height: 13px; fill: currentColor; }
+.ft .soc svg[fill="none"] { fill: none; }
 .ft .pill { flex: none; height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 11px; font: 600 11px var(--font-ui); background: var(--bg-raised); color: var(--text-2); }
 
 /* phone header and tab bar (proto.css:232-247, :368) */

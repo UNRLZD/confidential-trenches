@@ -24,7 +24,7 @@ import { bindSenderFromEnv } from "../src/bind/env.ts";
 import { pairNames, tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
 import { withdrawSenderFromEnv } from "../src/withdraw/send.ts";
-import { evmSwapsFromEnv, sendersFromEnv, solanaTokenFromEnv, solanaTradesFromEnv } from "../src/server.ts";
+import { evmSwapsFromEnv, poolIndexesFromEnv, sendersFromEnv, solanaTokenFromEnv, solanaTradesFromEnv } from "../src/server.ts";
 import { solanaPoolSendersFromEnv } from "../src/pool/solana.ts";
 import { evmPoolSendersFromEnv } from "../src/pool/evm.ts";
 import { releaseOf } from "../src/health.ts";
@@ -94,6 +94,11 @@ export const ENV_READERS = {
   checkPoolRpcOperators,
   // card sol-pools-mainnet-pin: every Solana keyed name (rpc.ts RPC_UPSTREAMS.solana keyed)
   checkSolanaPairOperators,
+  // card evm-pool-index-from-the-first-pool: each chain's index providers (Base's own URL and every keyed spare), Base on
+  // too so its names are read while it stays off
+  poolIndexesFromEnv: (env) => {
+    for (const ix of Object.values(poolIndexesFromEnv(env, env.HELPER_STORE_DIR, providerHolds(Date.now, {}), ["robinhood", "base"]) ?? {})) ix.close();
+  },
 };
 
 /** An env that records every name read from it (a get, an `in`), holding `values`. */

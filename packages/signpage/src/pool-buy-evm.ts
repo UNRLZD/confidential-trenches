@@ -73,6 +73,8 @@ import { usdOf } from "./positions.ts";
 import { refusalRule } from "./refusal-rule.ts";
 import { finishRest, mergeRest, prepRest, restState, EVM_WBUY_KEY, type EvmWBuyRecord, type RestLeg, type RestQuote, type RestState } from "./pool-buy-evm-rest.ts";
 import { duringTrade, TRADE_HELPER } from "./trade.ts";
+import { evmServedAsk } from "./evm-served.ts";
+import { laneFetch } from "../../wallet/src/throttle.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 type Ready = ReadyProof<EvmPoolRequest>;
@@ -721,7 +723,8 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
       return null;
     },
     seed64: page.seed64,
-    quote: evmPoolBuyQuote,
+    // the helper's pools of the token from the PoolManager's first block, asked beside the quote (evm-served.ts)
+    quote: (req) => (evmServedAsk(laneFetch(page.fetch), TRADE_HELPER, req.chain, req.token), evmPoolBuyQuote(req)),
     indexPools: evmPoolIndexPools,
     build: evmPoolBuildQuoted,
     // the page's kept decimals (pool-kinds.ts keptTokenDecimals: read on both RPCs and kept, so a sell after it reads none);

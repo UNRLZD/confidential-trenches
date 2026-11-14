@@ -7,6 +7,8 @@
 //     from a fresh load of "/": the main it opens has text on screen, outside the Verify panel; a link to a page whose
 //     own card has not shipped (WAITING) is named with that card, never passed silently;
 //   - no link to Orders (its screen is paused: it leaves the nav until it ships, as Copy trade did);
+//   - a link out of the app (an https address, as the footer's GitHub repo) is no page of the app: it is not tapped,
+//     and it must open in a new tab with no opener (target _blank, rel noopener), so the app stays where it was;
 //   - Account (the phone's tab) and Portfolio, signed out: the main draws Sign in, and a tap on it opens the sign-in
 //     sheet (S2.1);
 //   - /verify opened at its own address, and from the footer's pill: the Verify panel over the Trenches page (the
@@ -52,6 +54,9 @@ const CONTENT_MS = 10_000;
 // ------------------------------------------------------------------------------------------------ the verdict
 const desc = (m) => (m ? `${m.path ?? "?"}: main ${m.route ?? "none"}, ${m.text} char(s) of text${m.panel ? ", the Verify panel" : ""}${m.token ? `, the token page (${m.token})` : ""}${m.signedOut ? ", Sign in" : ""}` : "no main read");
 
+/** A link out of the app: an absolute https address (the app's own links are paths). */
+const OUTSIDE = /^https:\/\//;
+
 export function judge(rec) {
   const lines = [];
   const say = (ok, s) => lines.push(`${ok ? "ok " : "BAD"} ${s}`);
@@ -83,6 +88,10 @@ export function judge(rec) {
         if (SIGN_IN.includes(l.href) && m.signedOut && l.sheet !== "S2.1") bad.push(`its Sign in opens ${l.sheet ?? "nothing"}, not the sign-in sheet (S2.1)`);
       }
       say(bad.length === 0, `${n} ${l.href}: ${bad.length ? `${bad.join("; ")} (${desc(m)})` : desc(m)}${SIGN_IN.includes(l.href) && l.sheet ? `; Sign in opens ${l.sheet}` : ""}`);
+    }
+    for (const o of r.outside ?? []) {
+      const newTab = o.target === "_blank" && /\bnoopener\b/.test(o.rel ?? "");
+      say(newTab, `${n} ${o.href}: a link out of the app ${newTab ? "opens a new tab with no opener" : `opens with target ${o.target ?? "none"} and rel ${o.rel ?? "none"}, not a new tab with no opener`}`);
     }
     // Account is the phone's tab: it must be there to be judged
     if (n === "phone") say(links.some((l) => l.href === "/profile"), `${n}: the Account tab (/profile) ${links.some((l) => l.href === "/profile") ? "is drawn" : "is not drawn"}`);
@@ -175,7 +184,9 @@ async function runOne(browser, w, shots, route) {
     await settle(home.f, "/");
     run.header = await home.f.evaluate(READ_HEADER);
     await home.page.screenshot({ path: path.join(shots, `${w.name}-header-signed-out.png`) });
-    const hrefs = await home.f.$$eval(w.links, (as) => [...new Set(as.filter((a) => a.getClientRects().length > 0 && getComputedStyle(a).visibility !== "hidden").map((a) => a.getAttribute("href")))]);
+    const shown = await home.f.$$eval(w.links, (as) => as.filter((a) => a.getClientRects().length > 0 && getComputedStyle(a).visibility !== "hidden").map((a) => ({ href: a.getAttribute("href"), target: a.getAttribute("target"), rel: a.getAttribute("rel") })));
+    run.outside = [...new Map(shown.filter((a) => OUTSIDE.test(a.href)).map((a) => [a.href, a])).values()];
+    const hrefs = [...new Set(shown.filter((a) => !OUTSIDE.test(a.href)).map((a) => a.href))];
     await home.page.close();
     // each link tapped from a fresh "/"
     for (const href of hrefs) {
