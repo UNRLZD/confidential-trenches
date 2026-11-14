@@ -288,6 +288,22 @@ test("a Move into Cash: confidential request, confidential answer, the keyless t
   assert.equal("confidentiality" in depositQuoteRequest(U, SOL_USDC, 1n, NOW), false);
 });
 
+test("a Move into Cash: the keyless tell reads on the kind's own signal (deposit.quote's: the page's stop); cut, no address", async () => {
+  const m = h1c({ before: CONF });
+  const c = new AbortController();
+  let told: AbortSignal | undefined;
+  const hidden = (_addr: string, signal?: AbortSignal) =>
+    new Promise<"hidden">((_ok, no) => {
+      told = signal;
+      signal?.addEventListener("abort", () => no(signal.reason), { once: true });
+    });
+  const a = depositQuoteKind(PARAMS, ctx(m.fetch, { confidential: true, hidden, signal: c.signal }));
+  while (told === undefined) await new Promise((ok) => setImmediate(ok));
+  assert.equal(told, c.signal);
+  c.abort();
+  refusedWith(await a, "down");
+});
+
 test("a Move into Cash answered public, under the public collector, known to 1Click as public, or with the tell down: no address", async () => {
   for (const [m, hidden, code] of [
     [h1c(), async () => "hidden" as const, "quote_check_failed"],

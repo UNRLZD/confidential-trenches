@@ -310,7 +310,7 @@ else {
   // note, which buys on Rhea; its sell sells all of it back and moves the USDC into the vault; top-level only, as the
   // pool flow
   // one balance on every chain (src/cash-to-pool.ts, card one-balance-buys-on-every-chain): a Solana buy above one tap's
-  // spend moves its shortfall from Cash first, through the deposit sheet's own quote into U_X (poolAddress, below) and
+  // spend moves its shortfall from Cash first, through the Move's own quote into U_X (poolMoveAddress, below) and
   // the vault's hand-off to its deposit address, then buys once one tap spends the ask (tapDry, below: the dry read
   // with no trade gate, since the tap's own run holds it)
   // one mover per signed-in session (its signal is the sign out's): a move on its way is never counted for another
@@ -620,14 +620,10 @@ else {
     const pair = solPair();
     return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet, signal) : null;
   };
-  // where money for a pool goes (src/pool-deposit-address.ts), for a moving tap (cashMoverNow): the same host as the
-  // deposit sheet's pool.address below, on the same reads, floor and follow
-  // money in from an outside wallet (card move-one-confidential-swap, CO 14 Nov): every 1Click quote into a pool is one
-  // confidential swap, held to 1Click's keyless tell; a plain send of the pool's own coin asks 1Click nothing
-  const poolAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped, confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal) });
-  // a Move's quote into a pool (card move-one-confidential-swap): the same host, reads, floor and follow, every quote asked
-  // and checked on Confidential Intents rails, and another pool's coin priced at the device's own price of each
-  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped, confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal) });
+  // a Move's quote into a pool (card move-one-confidential-swap): pool.address's host, reads, floor and follow, every
+  // quote asked and checked on Confidential Intents rails and held to 1Click's keyless tell on the page's stop, and another
+  // pool's coin priced at the device's own price of each
+  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped });
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
   // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
   const depositFromUx = (g: PoolFollowRecord, amount: bigint, signal: AbortSignal) =>
@@ -732,13 +728,16 @@ else {
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       // money in from an outside wallet (card move-one-confidential-swap, CO 14 Nov): one confidential swap as a Move, held to
       // 1Click's keyless tell, so the paying wallet is not tied to U on chain
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped, confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal) }),
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
-      // took it (src/pool-deposit-follow.ts), on mainnet only
-      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped }),
+      // took it (src/pool-deposit-follow.ts), on mainnet only; money in from an outside wallet (card
+      // move-one-confidential-swap, CO 14 Nov): every 1Click quote is one confidential swap, held to 1Click's keyless tell
+      // on the page's stop, so the paying wallet is not tied to U_X on chain; a plain send of the pool's own coin asks 1Click
+      // nothing
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with

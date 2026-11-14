@@ -602,6 +602,26 @@ test("the Move's host asks confidentiality advanced, takes the confidential answ
   assert.equal("confidentiality" in s.sent[0]!, false);
 });
 
+// The tell reads on the page's stop: a sign out while it is in flight cuts it, and nothing is followed.
+test("a sign out while the Move's keyless tell is in flight: the tell's read is cut on the page's stop, nothing followed, not_allowed", async () => {
+  const { quotesStop } = await import("../src/quotes-stop.ts");
+  const w = world({ change: conf });
+  const page = quotesStop();
+  let told: AbortSignal | undefined;
+  const hidden = (_address: string, signal?: AbortSignal) =>
+    new Promise<"hidden">((_ok, no) => {
+      told = signal;
+      signal?.addEventListener("abort", () => no(signal.reason), { once: true });
+    });
+  const d = poolAddressHost({ ...w.deps, stop: page.stopped, confidential: true, hidden })({ chain: "base", origin_asset: BASE_USDC, amount: "25" }, { id: "mv-4/pool" });
+  while (told === undefined) await new Promise((ok) => setImmediate(ok));
+  assert.equal(told, page.stopped(), "the tell is handed the page's own stop");
+  page.signedOut();
+  await d.after;
+  assert.deepEqual(d.answer(), { error: "not_allowed" });
+  assert.equal(w.took.length, 0);
+});
+
 test("poolMovePricing: another pool's coin at the device's own price of each; none with either price unread, for the pool's own coin, or another asset", async () => {
   const { poolMovePricing } = await import("../src/pool-deposit-address.ts");
   const px = { solana: { price: "15012345678", expo: -8 }, base: { price: "190012345678", expo: -8 }, robinhood: null } as Record<string, { price: string; expo: number } | null>;
