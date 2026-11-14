@@ -174,7 +174,8 @@ export interface ProofQueue<R> {
    *  root, made at once after any pass running now (card buy-spends-its-change-in-the-same-tap: a release's change,
    *  proved to the W its release just paid, for the same tap's next round). The note stays carried until it is taken,
    *  dropped or the queue closes: no pass lets its proof go or makes it again to another W. Refused for a note not
-   *  UNSPENT, not of this pool, with no listed piece, or past the newest trees the pool reads now. */
+   *  neither UNSPENT nor held by its own ready proof alone (then the tier 2 proof is held beside it), not of this
+   *  pool, with no listed piece, or past the newest trees the pool reads now. */
   proveFor(noteId: string, to: { l: bigint; j: number; address: string }, signal?: AbortSignal): Promise<ReadyProof<R>>;
   /** The note's proofs are dropped and it goes back to UNSPENT. */
   drop(noteId: string): Promise<void>;
@@ -495,11 +496,30 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
     // a whole release's change of 0 holds no money: never small (card max-is-what-you-hold-after-a-trade)
     const small = all.filter((n) => n.scope === pool.scope && n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.value > 0n && poolChunkOf(pool, n.leaf.value) === null).length;
     if (small > 0) out.small = small;
-    // tier 1: a note with no tier 1 proof, UNSPENT or held by its tier 2 proof
-    const open = all.filter((n) => usable(n) && !ready.has(n.id) && (n.state === "UNSPENT" || (n.state === "HELD" && alt.has(n.id)))).sort(byChunk);
+    // tier 1: a note with no tier 1 proof, UNSPENT or held by its tier 2 proof. In a pool of one piece a tap spends one
+    // note, so the readySize largest. In a pool of pieces (card balance-shows-fast) a tap's legs spend Max's set and
+    // each other note's own proof, so tier 1 is the primary (the largest note this queue may prove) and every note
+    // outside tier 2's room (the altRoom largest others, which Max's set spends), at least readySize of them, filled from
+    // the room in its order: every note held is spendable in one tap. Before, the readySize largest took tier 1, so with
+    // equal notes they were the room's own and the notes past it had no proof (box run 14 Nov 04:46Z: Max held at one
+    // W's 4 pieces, the copy legs not funded).
+    let open: NoteRecord[];
+    let want = Infinity;
+    if (altRoom > 0) {
+      const avail = all.filter((n) => usable(n) && (n.state === "UNSPENT" || (n.state === "HELD" && (ready.has(n.id) || alt.has(n.id))))).sort(byChunk);
+      const top = avail[0];
+      const room0 = new Set(top === undefined ? [] : avail.filter((n) => n.id !== top.id && !carried.has(n.id)).slice(0, altRoom).map((n) => n.id));
+      const owned: NoteRecord[] = avail.filter((n) => !room0.has(n.id));
+      for (const n of avail) if (owned.length < readySize && room0.has(n.id)) owned.push(n);
+      const own = new Set(owned.map((n) => n.id));
+      // a tier 1 proof of a note no longer in that set is let go at its epoch's end, never made again (its note still
+      // HELD by its tier 2 proof if it has one)
+      for (const r of [...ready.values()]) if (r.epochStartMs < start && !own.has(r.noteId)) await onNote(r.noteId, () => letGoOf(ready, r.noteId));
+      open = owned.filter((n) => !ready.has(n.id) && (n.state === "UNSPENT" || (n.state === "HELD" && alt.has(n.id))));
+    } else open = all.filter((n) => usable(n) && !ready.has(n.id) && (n.state === "UNSPENT" || (n.state === "HELD" && alt.has(n.id)))).sort(byChunk);
     const again: NoteRecord[] = [];
     for (const r of ready.values()) if (r.epochStartMs < start) again.push(byId.get(r.noteId)!);
-    const want = readySize - ready.size + again.length;
+    if (altRoom === 0) want = readySize - ready.size + again.length;
     let epochTrees: PoolTrees | undefined;
     // the newest trees, read once for every note of this pass that landed this epoch; a failed read fails those notes
     // only, and the epoch's remakes and the epoch's notes still run
@@ -740,8 +760,12 @@ export function openProofQueue<R>(a: ProofQueueArgs<R>): ProofQueue<R> {
       const run = passes.then(async () => {
         live();
         const n = await notes.get(noteId);
-        if (n === undefined || n.state !== "UNSPENT" || n.scope !== pool.scope || n.leaf === undefined || poolChunkOf(pool, n.leaf.value) === null) {
-          throw new Error(`proveFor: note ${noteId} is not an UNSPENT landed note of this pool with a listed piece`);
+        // UNSPENT, or HELD by this queue's own proof of it alone (card balance-shows-fast: a pass gives every note outside
+        // Max's set its own proof, a change that just landed among them), the tier 2 proof then held beside it
+        const own = ready.get(noteId);
+        const free = n?.state === "UNSPENT" || (n?.state === "HELD" && own !== undefined && heldBy(n, own.attempt) && !alt.has(noteId) && !inFlight.has(noteId));
+        if (n === undefined || !free || n.scope !== pool.scope || n.leaf === undefined || poolChunkOf(pool, n.leaf.value) === null) {
+          throw new Error(`proveFor: note ${noteId} is not a landed note of this pool with a listed piece, UNSPENT or held by its own proof alone`);
         }
         const nowMs = await readNow(signal).catch(failAs("network"));
         const trees = await pool.trees(nowMs + 1n, signal, { newest: true }).catch(failAs("network"));

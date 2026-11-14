@@ -78,8 +78,9 @@ const tiers = (q: ProofQueue<unknown>, id: string): { own?: ReadyProof<unknown>;
 };
 const bal = async (v: Vault, q: ProofQueue<unknown>) => poolBalances(await v.ns.list(), [BAL], q.ready())[0]!;
 
-// five notes, piecesMax 4: tier 1 holds three (readySetSize(16)), tier 2 the three largest others; the second 2 note
-// (the later leaf) stays UNSPENT, as a change that just landed does
+// five notes, piecesMax 4: tier 2 holds the three largest others than the primary (the 20 note); tier 1 the primary and
+// every note outside that room (card balance-shows-fast), so the second 2 note (the later leaf), as a change that just
+// landed, holds its own proof alone, and proveFor holds its tier 2 proof beside it
 const FIVE = [usd(2), usd(5.5), usd(10), usd(20), usd(2)];
 const lastTwo = async (v: Vault): Promise<NoteRecord> => (await v.ns.list()).filter((n) => n.leaf?.value === usd(2)).sort((a, b) => (a.leaf!.leafIndex > b.leaf!.leafIndex ? -1 : 1))[0]!;
 const toOf = (n: NoteRecord): { l: bigint; j: number; address: string } => ({ l: n.leaf!.label, j: jOf(n.ref), address: W(n) });
@@ -90,7 +91,8 @@ test("proveFor: an UNSPENT note proved to the named W, on the newest root; a lat
   const q = queue(v, pool as Pool<unknown>);
   await q.refresh();
   const C = await lastTwo(v);
-  assert.equal(C.state, "UNSPENT", "the change: no proof yet");
+  assert.equal(C.state, "HELD", "the change: its own proof");
+  assert.equal(tiers(q as ProofQueue<unknown>, C.id).piece, undefined, "and no piece yet");
   const X = await noteOf(v, usd(10)); // the W the change pays: not the primary's (the 20 note's)
   const r = await q.proveFor(C.id, toOf(X));
   assert.equal(r.noteId, C.id);
@@ -117,9 +119,10 @@ test("proveFor: refused for a note that is not UNSPENT (held by a ready proof), 
   await q.refresh();
   const P = await noteOf(v, usd(20));
   const X = await noteOf(v, usd(10));
-  await assert.rejects(q.proveFor(P.id, toOf(X)), /not an UNSPENT landed note/);
-  await assert.rejects(q.proveFor("no-such-note", toOf(X)), /not an UNSPENT landed note/);
-  assert.equal((await lastTwo(v)).state, "UNSPENT");
+  // X holds a piece to the primary's W already; no such note at all
+  await assert.rejects(q.proveFor(X.id, toOf(P)), /not a landed note of this pool/);
+  await assert.rejects(q.proveFor("no-such-note", toOf(X)), /not a landed note of this pool/);
+  assert.equal(tiers(q as ProofQueue<unknown>, X.id).piece?.wallet.address, W(P), "X's piece as it was");
   // the queue still runs: the next proveFor goes through
   const r = await q.proveFor((await lastTwo(v)).id, toOf(X));
   assert.equal(r.wallet.address, W(X));
@@ -133,7 +136,7 @@ test("proveFor: drop frees a carried note; the next pass may use it again", asyn
   const C = await lastTwo(v);
   await q.proveFor(C.id, toOf(await noteOf(v, usd(10))));
   await q.drop(C.id);
-  assert.equal((await v.ns.get(C.id))!.state, "UNSPENT");
+  assert.equal((await v.ns.get(C.id))!.state, "UNSPENT", "both its proofs let go");
   assert.equal(q.ready().some((x) => x.noteId === C.id), false);
 });
 
