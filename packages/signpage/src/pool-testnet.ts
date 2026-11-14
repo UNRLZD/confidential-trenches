@@ -1900,13 +1900,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const v = await st.get("meta", key).catch(() => undefined);
       if (v !== null && typeof v === "object") for (const r of Object.values(v as Record<string, unknown>)) if (r !== null && typeof r === "object" && typeof (r as { chain?: unknown }).chain === "string") recorded.add((r as { chain: string }).chain);
     }
-    // only a chain whose pool holds a note of the device (any state; a deposit's INCOMING one, a restore's, a spent one
-    // a buy or a sale left) or that a buy or sale record names: each step below follows a note, a record or a W a note
-    // paid, so a chain with none has nothing of the user's to read, and its pool and its index are not read (card
-    // robinhood-note-spendable: a fresh account's every load, focus and show synced Robinhood's pool index on
+    // the pool steps only on a chain whose pool holds a note of the device (any state; a deposit's INCOMING one, a
+    // restore's, a spent one a buy or a sale left) or that a buy or sale record names: each follows a note, a record or
+    // a W a note paid (rebuildEvmHoldings returns early with no SPENT or RESERVED note), so a chain with none has
+    // nothing of the user's to read (card robinhood-note-spendable: a fresh account's every load, focus and show read
     // Robinhood's own provider, whose throttled answers the page cannot read, release 132's live run 43540749124)
     const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null && (recorded.has(c) || all.some((n) => n.scope === evmPool(c)!.scope)));
-    if (chains.length === 0) return;
+    // each chain's pool index (the kit's quote reads it; this is its only sync) on a device that holds money anywhere:
+    // any note of any scope in any state (Cash is the vault scope's notes in this same store, ./withdraw/checks.ts
+    // cashNotes) or a buy or sale record, so a buy on a chain the money is not on yet (one balance buys on every chain)
+    // quotes a launchpad hook's pool there; a fresh account with nothing syncs no index
+    const indexed = all.length > 0 || recorded.size > 0 ? (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null) : [];
+    if (chains.length === 0) {
+      if (!stop.aborted) for (const chain of indexed) evmIndexOf(chain);
+      return;
+    }
     // each chain's buys whose tab ended before their end, from their pending records (never awaited)
     for (const chain of chains) evmBuyFollow(chain);
     // and each chain's sales whose tab ended before their end, from their open records (never awaited)
@@ -1928,7 +1936,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     );
     // then each chain's pool index, for the buy's quote, once the proof passes this read started end (never awaited)
     void Promise.allSettled(chains.map((c) => evmPassing.get(c))).then(() => {
-      if (!stop.aborted) for (const chain of chains) evmIndexOf(chain);
+      if (!stop.aborted) for (const chain of indexed) evmIndexOf(chain);
     });
   };
   // the EVM turn pass (card evm-device-reads-need-no-old-state): a keyless operator keeps a block's state seconds to
