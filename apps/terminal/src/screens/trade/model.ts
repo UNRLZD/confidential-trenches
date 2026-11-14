@@ -480,6 +480,12 @@ export function coinTapAgainMs(code: string): number | null {
   return code === "busy" ? 1_000 : code === "down" ? 3_000 : null;
 }
 
+/** Whether the coin's pool.buy.dry refusal `code` says the private buy has no venue for it (card
+ *  solana-buy-never-moves-cash-for-a-coin-it-cannot-buy): on Solana the page answers quote_check_failed when the coin's
+ *  venue read throws (no pump.fun curve, no PumpSwap pool; signpage src/pools.ts poolBuyDryKind), so the box draws Buy
+ *  and its presets off with Unavailable before any tap, as after a refused one. */
+export const coinUnavailable = (chain: Chain, code: string): boolean => chain === "solana" && code === "quote_check_failed";
+
 export type PoolBuyAsk =
   | { ok: true; kind: "pool.buy"; params: SignpageParams["pool.buy"] }
   | { ok: false; why: "no_pool" | "no_price" | "no_proof" | "too_small" | "over_tap" };

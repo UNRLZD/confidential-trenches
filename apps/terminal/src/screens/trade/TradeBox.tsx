@@ -18,6 +18,7 @@ import {
   buysCents,
   centsToDecimal,
   coinTapAgainMs,
+  coinUnavailable,
   coinTapKey,
   feeAskAmount,
   feeShown,
@@ -194,6 +195,8 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const nearCash = useCashPart(snapshot, "near");
   const cashAt = nearCash === null ? "" : String(nearCash);
   const [coinTap, setCoinTap] = useState<{ key: string; tap_max: string; with_cash: string | null; cash: string } | null>(null);
+  // the coin key whose pool.buy.dry said the private buy has no venue for it (coinUnavailable): Buy off, Unavailable
+  const [noVenue, setNoVenue] = useState<string | null>(null);
   const request = useRef(kit.request);
   request.current = kit.request;
   useEffect(() => {
@@ -210,6 +213,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
           (o) => {
             if (!live) return;
             if (o.ok) return void setCoinTap({ key: coinKey, tap_max: o.result.tap_max, with_cash: o.result.with_cash ?? null, cash: cashAt });
+            if (coinUnavailable(chain, o.error.code)) return void setNoVenue(coinKey);
             const again = coinTapAgainMs(o.error.code);
             if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
           },
@@ -333,7 +337,8 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const askable = (c: Cents | null) => c !== null && (!onPool || poolBuyAsk(pools, chain, token, c, price, slippageBps, withCash).ok);
   const running = busy(phase);
   // the pool cannot buy this token yet (Unavailable): Buy and the presets stay off on this token's page
-  const off = unavailable(phase);
+  const coinOff = noVenue !== null && noVenue === coinKey;
+  const off = unavailable(phase) || coinOff;
 
   // the set preview for the amount in the box; a change asks again and the last numbers stay, dimmed, until it answers
   useEffect(() => {
@@ -403,7 +408,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const ready = on && moneyOn && kit.request !== null && max !== null && balance !== null;
 
   function buy(c: Cents) {
-    if (!ready || busy(phaseRef.current) || unavailable(phaseRef.current) || !amountOk(c, max, balance)) return;
+    if (!ready || busy(phaseRef.current) || unavailable(phaseRef.current) || coinOff || !amountOk(c, max, balance)) return;
     let h;
     if (path !== "vault") {
       // only an ask the box's own checks passed: on a pool, a proof ready, at most one tap's spend, the device's price as
@@ -483,7 +488,7 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
   const est = recv !== null ? `≈ ${fmtOut(recv.out)} ${symbol}` : (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
   const now = src.now();
   const state = signedOut ? "S8.1" : (stateId(phase, now, "buy") ?? "S8.3");
-  const canBuy = ready && !running && !unavailable(phase) && amountOk(amount, max, balance) && askable(amount);
+  const canBuy = ready && !running && !off && amountOk(amount, max, balance) && askable(amount);
 
   let label;
   if (signedOut) label = <W id="signInToTrade" />;
@@ -570,6 +575,10 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
       <div className="trb-warn" data-testid="trade-max">
         {phase.k === "ended" ? (
           <EndLine phase={phase} side="buy" part={kit.part?.(phase.id) ?? null} />
+        ) : coinOff ? (
+          <span className="trb-end" data-end="failed" data-testid="trade-end">
+            <W id="unavailable" />
+          </span>
         ) : (
           <>
             {max !== null && !coming && path !== "near" && (
