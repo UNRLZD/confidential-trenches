@@ -26,6 +26,11 @@ export const WORDS = {
   notSent: ok("Not sent", "owner 2 Nov 06:08Z, all approved; drafted from app.md CH-123 (the kit's `stopped`: nothing moved; NEW state, words still the owner's)"),
   transaction: ok("Transaction", "owner 2 Nov 06:08Z, all approved; drafted from R5 private.js:144 P.dc(\"Transaction\", \"CN-25\"); CN-25 still open"),
   done: ok("Done", "owner 2 Nov 06:08Z, all approved; drafted from R5 private.js:145 (P.dc); 09-design-brief S12 Done (v2.0)"),
+  // the app's Withdraw form (card withdraw-address-in-the-app): the words of the mock the owner picked on 14 Nov 12:22Z
+  // (https://claude.ai/artifact/AQ5Dc4wAfjqMk3JQHMgyAg, option A: Amount, Max 0.2522 SOL, Address, Withdraw)
+  amount: ok("Amount", "owner 14 Nov 12:22Z picked A (the mock's field); CN-06, owner round 16 (src/screens/deposit/words.ts amount)"),
+  max: ok("Max", "owner 14 Nov 12:22Z picked A (the mock's Max 0.2522 SOL); owner 2 Nov 06:08Z (src/screens/deposit/words.ts max)"),
+  address: ok("Address", "owner 14 Nov 12:22Z picked A (the mock's field label)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

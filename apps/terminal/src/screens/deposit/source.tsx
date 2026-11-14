@@ -170,16 +170,36 @@ export function useDepositSource(): DepositSource {
  */
 interface SheetView {
   open: boolean;
+  /** Opens (on Deposit) or closes the sheet. */
   setOpen(open: boolean): void;
+  /** Deposit or Withdraw: the segment drawn, switched in place (card withdraw-address-in-the-app, owner 14 Nov 12:22Z). */
+  mode: SheetMode;
+  setMode(mode: SheetMode): void;
+  /** The place a Withdraw opened for (a pool row's chain), or null: the first place that holds money. */
+  from: string | null;
+  /** Opens the sheet on Withdraw: every Withdraw in the app (WithdrawPick.tsx useWithdrawOpen). */
+  openWithdraw(from?: string | null): void;
 }
+export type SheetMode = "deposit" | "withdraw";
 
-const Sheet = createContext<SheetView>({ open: false, setOpen: () => {} });
+const Sheet = createContext<SheetView>({ open: false, setOpen: () => {}, mode: "deposit", setMode: () => {}, from: null, openWithdraw: () => {} });
 
 export const useDepositSheet = () => useContext(Sheet);
 
 export function DepositSheetProvider({ children, initial = false }: { children: ReactNode; initial?: boolean }) {
-  const [open, setOpen] = useState(initial);
-  return <Sheet.Provider value={{ open, setOpen }}>{children}</Sheet.Provider>;
+  const [open, setShown] = useState(initial);
+  const [mode, setMode] = useState<SheetMode>("deposit");
+  const [from, setFrom] = useState<string | null>(null);
+  const setOpen = useCallback((o: boolean) => {
+    if (o) setMode("deposit");
+    setShown(o);
+  }, []);
+  const openWithdraw = useCallback((f: string | null = null) => {
+    setFrom(f);
+    setMode("withdraw");
+    setShown(true);
+  }, []);
+  return <Sheet.Provider value={{ open, setOpen, mode, setMode, from, openWithdraw }}>{children}</Sheet.Provider>;
 }
 
 /** The clock for the counter and the countdown: one tick a second while a state draws a time, none otherwise. */

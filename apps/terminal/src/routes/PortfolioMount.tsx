@@ -1,7 +1,7 @@
 // Portfolio and Activity at /portfolio (card app-portfolio-mount): the screen with each of its taps mounted; Deposit opens
-// the shell's one deposit sheet (card app-deposit-mount, shell/DepositMount.tsx). A pool row's Withdraw opens SIGN_HOST's
-// pool withdraw with the chain only, and the shell's withdraw progress (S12.11-S12.15) draws the withdrawal the signing
-// page then reports (card app-pool-withdraw). Each
+// the shell's one deposit sheet (card app-deposit-mount, shell/DepositMount.tsx). A pool row's Withdraw opens the
+// app's Withdraw on that pool (card withdraw-address-in-the-app), and the shell's withdraw progress (S12.11-S12.15) draws
+// the withdrawal the signing page then reports (card app-pool-withdraw). Each
 // Export opens SIGN_HOST's key export for its own wallet, one the kit's moneyWallets names (card app-export-every-wallet).
 import { moneyWallets } from "@blindfill/kit";
 import { useNavigate } from "react-router";
@@ -26,7 +26,7 @@ export function PortfolioMount() {
     const view = (control: string) => ({ route: "portfolio" as const, sheet: null, control, fields: {} });
     if (m.to === "deposit") deposit.setOpen(true);
     else if (m.to === "withdraw") void openWithdraw(view("withdraw"), () => hop("withdraw.open", {}, view("withdraw")));
-    else if (m.to === "pool.withdraw") void hop("pool.withdraw", m.params, view(`pool-withdraw-${m.params.chain}`));
+    else if (m.to === "pool.withdraw") void openWithdraw(view(`pool-withdraw-${m.params.chain}`), () => hop("pool.withdraw", m.params, view(`pool-withdraw-${m.params.chain}`)), m.params.chain);
     else if (m.to === "token") void navigate(m.href);
     else if (m.to === "export") void hop("export.open", { chain: m.chain, address: m.address }, view(`export-${m.chain}-${m.address}`));
   };
