@@ -1,5 +1,5 @@
 // The launchpad and chain table (card app-launchpad-chain-badges, src/screens/market/pads.ts): every id the helper's
-// lists served on 3 Nov maps to its pad's own name and a logo file in the app; null, an unknown id and a pad with no
+// lists served on 3 Nov (and NEAR's on 14 Nov) maps to its pad's own name and a logo file in the app; null, an unknown id and a pad with no
 // cited logo draw no badge; every chain has its mark. The coverage case replays a live answer recorded 2026-11-03
 // 12:43Z (test/pads/lists-solana-2026-11-03.json, each row cut to its id, chain and launchpad, in columns): an id the lists serve
 // with no row in the table fails it, so a new pad shows up here, not as a missing badge.
@@ -16,10 +16,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SOLANA = ["pump.fun", "stonkfun", "raydium-launchlab", "Raydium", "met-dbc", "letsbonk.fun", "metadao", "jup-studio", "bags.fun", "grainpad"];
 /** The factory table's pads (apps/helper/src/data/evm/lists.ts FACTORIES, card market-data-evm-lists at 8d6e279; torch from card pad-torch-robinhood). */
 const EVM = ["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags", "torch"];
+/** The engine's NEAR pad ids the helper served on 14 Nov 06:19Z (test/pads/lists-near-2026-11-14.json) with a cited logo;
+ *  GayPad and token0, also served, have none (NO_LOGO). */
+const NEAR = ["hoot", "nearlytrade", "qlyphs", "memecooking", "nearpaid"];
 const NAMES: Record<string, string> = {
   "pump.fun": "pump.fun", stonkfun: "StonkFun", "raydium-launchlab": "LaunchLab", Raydium: "Raydium", "met-dbc": "Meteora", "letsbonk.fun": "bonk.fun",
   metadao: "MetaDAO", "jup-studio": "Jupiter Studio", "bags.fun": "Bags", grainpad: "grainpad", zora: "Zora", clanker: "Clanker", doppler: "Doppler",
   flaunch: "Flaunch", virtuals: "Virtuals", pons: "Pons", bags: "Bags", torch: "Torch",
+  hoot: "Hoot", nearlytrade: "Nearly.trade", qlyphs: "Qlyphs", memecooking: "meme.cooking", nearpaid: "NearPaid",
 };
 
 /** A logo the table names: a file in src/screens/market/logos, a real PNG of 64 px or less or an SVG with no script. */
@@ -46,20 +50,20 @@ function missingPads(lists: Record<string, { launchpad: string | null }[]>): str
   return [...ids].filter((id) => padOf(id) === null && !NO_LOGO.includes(id)).sort();
 }
 
-test("every id served on 3 Nov, Solana and EVM, maps to its pad's own name and a logo file in the app, with its source cited", () => {
-  for (const id of [...SOLANA, ...EVM]) {
+test("every id served on 3 Nov (Solana, EVM) and 14 Nov (NEAR) maps to its pad's own name and a logo file in the app, with its source cited", () => {
+  for (const id of [...SOLANA, ...EVM, ...NEAR]) {
     const p = padOf(id);
     assert.ok(p, `${id} has no row`);
     assert.equal(p.name, NAMES[id], id);
     assert.equal(logoFault(p.logo), null, `${id}: ${logoFault(p.logo)}`);
     assert.match(p.src, /^https:\/\//, `${id}: source not cited`);
   }
-  assert.deepEqual(Object.keys(PADS).sort(), [...SOLANA, ...EVM].sort(), "a row with no test, or a test id with no row");
+  assert.deepEqual(Object.keys(PADS).sort(), [...SOLANA, ...EVM, ...NEAR].sort(), "a row with no test, or a test id with no row");
 });
 
 test("null, undefined, an unknown id, an Object prototype key and a pad with no cited logo draw no launchpad badge", () => {
   for (const id of [null, undefined, "", "unknown-pad", "PUMP.FUN", "__proto__", "toString", "constructor", ...NO_LOGO]) assert.equal(padOf(id), null, String(id));
-  assert.deepEqual(NO_LOGO, ["spawn"]);
+  assert.deepEqual(NO_LOGO, ["spawn", "gaypad", "token0"]);
 });
 
 test("every chain a row can carry has its mark, with its source cited; an unknown chain none", () => {
@@ -86,6 +90,19 @@ test("the live lists recorded 2026-11-03 12:43Z: every launchpad id they serve h
   const planted = structuredClone(lists);
   planted.new![0]!.launchpad = "moonshot";
   assert.deepEqual(missingPads(planted), ["moonshot"]);
+});
+
+// Card every-cell-shows-a-value: NEAR's rows carry the engine's pad id (apps/helper/src/data/near/engine.ts) since the
+// helper reads NEAR from the engine; app live run 43564810887 (release 134) found "hoot" and "nearlytrade" with no row.
+test("the live NEAR lists recorded 2026-11-14 06:19Z: every launchpad id they serve has a row or is NO_LOGO", () => {
+  const rec = JSON.parse(readFileSync(path.join(HERE, "pads/lists-near-2026-11-14.json"), "utf8")) as { fields: string[]; lists: Record<string, [string, string, string | null][]> };
+  assert.deepEqual(rec.fields, ["token", "chain", "launchpad"]);
+  const lists = Object.fromEntries(Object.entries(rec.lists).map(([k, rs]) => [k, rs.map(([id, chain, launchpad]) => ({ id, chain, launchpad }))]));
+  const rows = Object.values(lists).flat();
+  const served = new Set(rows.map((r) => r.launchpad));
+  assert.ok(rows.length > 90 && rows.every((r) => r.chain === "near") && served.has(null));
+  assert.deepEqual([...served].filter((x) => x !== null).sort(), ["gaypad", "hoot", "memecooking", "nearlytrade", "nearpaid", "qlyphs", "token0"]);
+  assert.deepEqual(missingPads(lists), []);
 });
 
 // once card market-data-evm-lists is on this tree, every pad its factory table can tag must have a row (or be NO_LOGO)
