@@ -1654,8 +1654,11 @@ test("card evm-pool-sync-wide-pages: a 13M-block span on two providers with caps
   const r = await sync(pair(c, c, capA, capB)).events();
   assert.equal(r.events.length, 3);
   const a = pageSizes(la), b = pageSizes(lb);
-  assert.ok(a.length <= Math.ceil(span / 50_000) + 10, `the 50,000 cap: ${a.length} pages`);
-  assert.ok(b.length <= Math.ceil(span / 100_000) + 10, `the 100,000 cap: ${b.length} pages`);
+  // a few probes a part: a page held at its provider's cap goes EVM_POOL_LOG_PAGES_IN_FLIGHT at once (card
+  // first-sign-in-reads-fast), each part probing its own blocks past the cap the read held, as the narrow pages' parts
+  // do (the 200 cap below); 273 calls on the 50,000 cap at the card's head, against 260 pages at the cap
+  assert.ok(a.length <= Math.ceil(span / 50_000) + 10 * EVM_POOL_LOG_PAGES_IN_FLIGHT, `the 50,000 cap: ${a.length} pages`);
+  assert.ok(b.length <= Math.ceil(span / 100_000) + 10 * EVM_POOL_LOG_PAGES_IN_FLIGHT, `the 100,000 cap: ${b.length} pages`);
 });
 
 test("card helper-evm-range-cap-walk: sepolia.base.org's HTTP 413 \"limited to a 200 range\" pages the pool sync at 200 at once, never under it: 1.5M blocks in ceil(span/200) pages and a few probes", async () => {
@@ -1787,9 +1790,13 @@ test("card evm-pool-sync-wide-pages: a refusal halves only that provider's page;
   assert.deepEqual(pageSizes(l2).slice(0, 2), [25_000, 100_000], `the spare's pages: ${pageSizes(l2)}`);
   // a provider whose backends differ (Pocket's words, 6 Nov 07:44Z): a refusal of a size it answered is asked again at
   // once, never halved, up to EVM_LOG_REFUSED_AGAIN times in a row
+  // each page past the first refused at its first ask and answered at its second: the pattern every other call made
+  // while pages went one at a time, kept the same with a capped page's parts in flight at once (card
+  // first-sign-in-reads-fast), whose calls interleave
   const lp: string[] = [];
   let np = 0;
-  const lottery = { log: lp, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 100_000 || (++np > 1 && np % 2 === 0)) throw new Error("RPC error -32602: query exceeds max block range 10000"); } };
+  const asked = new Set<number>();
+  const lottery = { log: lp, getLogs: ({ from, to }: { from: number; to: number }) => { if (to - from + 1 > 100_000) throw new Error("RPC error -32602: query exceeds max block range 10000"); if (++np > 1 && !asked.has(from)) { asked.add(from); throw new Error("RPC error -32602: query exceeds max block range 10000"); } } };
   const r3 = await sync(pair(c, c, {}, lottery)).events();
   assert.equal(r3.events.length, 3);
   const p3 = pageSizes(lp);
