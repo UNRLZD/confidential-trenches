@@ -97,7 +97,15 @@ async function main() {
       // the hosts the owner's console named, and every other publicnode and Pocket host the page read
       const named = ["solana-rpc.publicnode.com", "solana.api.pocket.network", "base-rpc.publicnode.com", "base.api.pocket.network"];
       await run("every publicnode and Pocket host failed at once (the owner's case)", [...new Set([...named, ...chainHosts.filter(OWNERS_CASE)])].sort());
-    } else for (const h of only ?? chainHosts) await run(`${h} failed`, [h]);
+    } else {
+      // each host in turn, and each spare a failed host's run reached (solana.api.pocket.network is read only when
+      // publicnode fails) failed in a run of its own too
+      const queue = [...(only ?? chainHosts)];
+      for (let i = 0; i < queue.length; i++) {
+        const o = await run(`${queue[i]} failed`, [queue[i]]);
+        if (!only) for (const h of Object.keys(o.hosts).sort()) if (h !== REAL.api && !queue.includes(h)) queue.push(h);
+      }
+    }
   } finally {
     await browser?.close();
     rmSync(signRoot, { recursive: true, force: true });
