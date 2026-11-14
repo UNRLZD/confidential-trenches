@@ -1,0 +1,26 @@
+{
+ "good": {
+  "source": "build-app.mjs --out at card/evm-buy-shows-coin-and-proof-after-fill 753204fac",
+  "at": "2026-11-14T21:13:38.416Z",
+  "facts": {
+   "pin": "sha384-qwp+2ZD9BXMpJQ5K4aXQ/EWAsifH8NGJlTCI6HZPR3p+iN7CoUQzFRWtVSKoKNJ2",
+   "sha384": "sha384-qwp+2ZD9BXMpJQ5K4aXQ/EWAsifH8NGJlTCI6HZPR3p+iN7CoUQzFRWtVSKoKNJ2",
+   "marks": {
+    "pass": 1,
+    "gate": 0
+   }
+  }
+ },
+ "bad": {
+  "source": "live https://confidential.unrealized.trade",
+  "at": "2026-11-14T21:12:40.750Z",
+  "facts": {
+   "pin": "sha384-IUXx0E+72cpi1MA6bIfym1RfG+61HJTBQxbQEMgtIduJRde0FYejbopg4aciGwsB",
+   "sha384": "sha384-IUXx0E+72cpi1MA6bIfym1RfG+61HJTBQxbQEMgtIduJRde0FYejbopg4aciGwsB",
+   "marks": {
+    "pass": 1,
+    "gate": 1
+   }
+  }
+ }
+}
