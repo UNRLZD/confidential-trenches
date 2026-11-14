@@ -12,10 +12,11 @@
 // GAP_MS, 12 s, from the card's measure (this checkout's build with the pinned hosts on the network, box Chrome 156,
 // 14 Nov 04:38-04:40Z, three runs): Robinhood and Base walked 4.9 and 9.8 s after Solana where both Pocket seats paged
 // wide (robinhood.api.pocket.network 50 calls, base.api.pocket.network 83), and 41.1/10.0 s and 10.8/24.5 s where one
-// Pocket seat's backends paged narrow (513 and 291 calls): that seat, not the capped one this card spreads, is then the
-// read's bound, and this check fails on it.
-// Runs: pending first-sign-in-reads-fast, a Pocket seat whose backends page narrow (500 or 10,001 blocks) still
-//   bounds the read 2 runs in 3 (the measure above), so after each sign deploy this check would undo it until then
+// Pocket seat's backends paged narrow (513 and 291 calls). Then a seat refused under a page its provider answered
+// walked to a free spare (Robinhood's GlobalStake) and a walking seat's read spread too (evmPair, readLogs): three
+// runs 14 Nov 05:21-05:23Z, Robinhood 10.5, 6.4 and 9.0 s after Solana (robinhood.api.pocket.network 24, 19, 22
+// requests), Base 3.1, 3.1 and 5.7 s.
+// After: sign
 // Bundle: out a browser
 //   node scripts/live-checks/first-sign-in-reads-fast.mjs [--record <file>]                the deployed SIGN_HOST
 //   node scripts/live-checks/first-sign-in-reads-fast.mjs --local --net [--record <file>]  this checkout's build with

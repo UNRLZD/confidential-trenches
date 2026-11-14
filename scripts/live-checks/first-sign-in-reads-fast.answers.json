@@ -1,9 +1,9 @@
 {
  "good": {
-  "source": "local: this checkout's committed packages/signpage build, the pinned hosts on the network (branch card/first-sign-in-reads-fast at be8d331c9, box run fsirf-after2 run 3 of 3)",
-  "at": "2026-11-14T04:40:13.046Z",
+  "source": "local: this checkout's committed packages/signpage build, the pinned hosts on the network (branch card/first-sign-in-reads-fast at 7f3492ffa, box run fsirf-walk3 run 1 of 3, the slowest)",
+  "at": "2026-11-14T05:21:57.802Z",
   "browser": "Chrome 156.0.8078.79, sandbox on",
-  "walked": [{ "chain": "near", "t": 1794631223807 }, { "chain": "solana", "t": 1794631230893 }, { "chain": "robinhood", "t": 1794631235790 }, { "chain": "base", "t": 1794631240721 }],
+  "walked": [{ "chain": "near", "t": 1794633726613 }, { "chain": "solana", "t": 1794633731422 }, { "chain": "base", "t": 1794633734556 }, { "chain": "robinhood", "t": 1794633741961 }],
   "errors": []
  },
  "bad": {
