@@ -201,18 +201,11 @@ async function headerOf(rpc: EvmRpc, at: string, what: string): Promise<Spent> {
  * sends is in the pool's events up to it. `check` runs before each read and `signal` ends the lag waits (sign out).
  */
 export async function spentFinal(rpcs: readonly [EvmRpc, EvmRpc], u: string, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal, check: () => void = () => {}): Promise<{ final: bigint | null; kept: Spent | undefined }> {
-  return nonceFinal(rpcs, async (rpc, at, k) => quantity(await rpc("eth_getTransactionCount", [u, { blockHash: at }]), `rpc ${k} nonce at ${at}`), nonce, kept, sleep, signal, check);
-}
-
-/** spentFinal's rule for any nonce `read` at a block by its hash (EIP-1898): U's account nonce for a deposit's sends, W's
- *  SellDelegate Sell nonce for a sale (pool-sell-evm.ts). Never a state read at "finalized" or "safe" (Robinhood's
- *  nodes refuse it): the nonce is read at the newest block both RPCs hold, and its finality from block headers. */
-export async function nonceFinal(rpcs: readonly [EvmRpc, EvmRpc], read: (rpc: EvmRpc, blockHash: string, k: number) => Promise<bigint>, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal, check: () => void = () => {}): Promise<{ final: bigint | null; kept: Spent | undefined }> {
   if (kept === undefined) {
     check();
     const b = await evmRetryLag(() => evmAgreedBlock(rpcs, "latest", signal, sleep), sleep, signal);
     check();
-    const at = await both(rpcs, (rpc, k) => read(rpc, b.hash, k));
+    const at = await both(rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [u, { blockHash: b.hash }]), `rpc ${k} nonce at ${b.hash}`));
     if (at[0] <= nonce || at[1] <= nonce) return { final: null, kept: undefined };
     kept = { number: b.number, hash: b.hash.toLowerCase() };
   }
@@ -221,6 +214,25 @@ export async function nonceFinal(rpcs: readonly [EvmRpc, EvmRpc], read: (rpc: Ev
   const fin = await both(rpcs, (rpc, k) => headerOf(rpc, "finalized", `rpc ${k} finalized block`));
   if (fin[0].number < blk.number || fin[1].number < blk.number) return { final: null, kept: blk };
   check();
+  const at = await both(rpcs, (rpc, k) => headerOf(rpc, qty(blk.number), `rpc ${k} block ${blk.number}`));
+  if (at[0].hash !== blk.hash || at[1].hash !== blk.hash || at[0].number !== blk.number || at[1].number !== blk.number) return { final: null, kept: undefined };
+  return { final: blk.number, kept: blk };
+}
+
+/** spentFinal's rule for W's SellDelegate Sell nonce (pool-sell-evm.ts): `read` at the newest block both RPCs hold, by
+ *  its hash (EIP-1898), past `nonce` on both keeps that block; its finality from block headers. Never a state read at
+ *  "finalized" or "safe" (Robinhood's nodes refuse it). */
+export async function nonceFinal(rpcs: readonly [EvmRpc, EvmRpc], read: (rpc: EvmRpc, blockHash: string) => Promise<bigint>, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal): Promise<{ final: bigint | null; kept: Spent | undefined }> {
+  if (kept === undefined) {
+    const b = await evmRetryLag(() => evmAgreedBlock(rpcs, "latest", signal, sleep), sleep, signal);
+    const at = await both(rpcs, (rpc) => read(rpc, b.hash));
+    if (at[0] <= nonce || at[1] <= nonce) return { final: null, kept: undefined };
+    kept = { number: b.number, hash: b.hash.toLowerCase() };
+  }
+  // spentFinal's own header reads (kept apart: pool-deposit-sent-end.mjs reads spentFinal's whole body in the bundle)
+  const blk: Spent = kept;
+  const fin = await both(rpcs, (rpc, k) => headerOf(rpc, "finalized", `rpc ${k} finalized block`));
+  if (fin[0].number < blk.number || fin[1].number < blk.number) return { final: null, kept: blk };
   const at = await both(rpcs, (rpc, k) => headerOf(rpc, qty(blk.number), `rpc ${k} block ${blk.number}`));
   if (at[0].hash !== blk.hash || at[1].hash !== blk.hash || at[0].number !== blk.number || at[1].number !== blk.number) return { final: null, kept: undefined };
   return { final: blk.number, kept: blk };
