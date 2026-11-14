@@ -543,6 +543,28 @@ export function poolBuyAsk(pools: SignpageState["pools"], chain: Chain, token: s
   return { ok: true, kind: "pool.buy", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } };
 }
 
+/** What a Base or Robinhood box asks pool.buy.dry the spend of (card buy-any-amount-on-every-chain): the tap's own ask
+ *  for `c` (poolBuyAsk's amount, in whole ETH), so the page plans exactly what the tap would; null on any other chain
+ *  (a tap there spends the ask itself) or where the tap would ask nothing. */
+export function buysAskAmount(pools: SignpageState["pools"], chain: Chain, token: string, c: Cents, price: PoolPrice | null, slippageBps: number, withCash: string | null): string | null {
+  if (chain !== "base" && chain !== "robinhood") return null;
+  const ask = poolBuyAsk(pools, chain, token, c, price, slippageBps, withCash);
+  return ask.ok ? ask.params.amount : null;
+}
+
+/** The amount box's cents for pool.buy.dry's `buys` (kit 1.16, card buy-any-amount-on-every-chain: what the tap spends in
+ *  swaps for `asked`, when below it): buys in USD at the device's price, rounded down to the cent. The page's answer is
+ *  hostile: only a plain decimal of the asset's units above 0 and below `asked` is used, and only when it is worth a
+ *  cent; null otherwise (the box keeps what was typed). */
+export function buysCents(buys: unknown, asked: string, price: PoolPrice | null): Cents | null {
+  if (typeof buys !== "string" || price === null) return null;
+  const b = decimalToUnits(buys, price.decimals);
+  const a = decimalToUnits(asked, price.decimals);
+  if (b === null || a === null || b <= 0n || b >= a) return null;
+  const c = unitsToCents(b, price);
+  return c > 0n ? c : null;
+}
+
 /** Cents as the amount box takes them: "25" for whole dollars, "3.50" otherwise. */
 export const amountText = (c: Cents): string => (c % 100n === 0n ? String(c / 100n) : centsToDecimal(c));
 

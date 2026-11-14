@@ -343,7 +343,7 @@ test("hello at the kit's own version: every message as it is, and the kit's own 
 
 test("a hello gets no answer; a later or higher version reads everything, an older, malformed or extra-keyed one is kit-v1.4", async () => {
   for (const [msg, full] of [
-    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.13"), FULL], [hello("1.14"), FULL], [hello("1.15"), FULL], [hello("2.0"), FULL], [hello("1.12"), FULL], [hello("1.11"), FULL_V1_11], [hello("1.10"), FULL_V1_10], [hello("1.9"), FULL_V1_9], [hello("1.8"), FULL_V1_8], [hello("1.7"), FULL_V1_7], [hello("1.6"), FULL_V1_6], [hello("1.5"), FULL_V1_5],
+    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.13"), FULL], [hello("1.14"), FULL], [hello("1.15"), FULL], [hello("1.16"), FULL], [hello("2.0"), FULL], [hello("1.12"), FULL], [hello("1.11"), FULL_V1_11], [hello("1.10"), FULL_V1_10], [hello("1.9"), FULL_V1_9], [hello("1.8"), FULL_V1_8], [hello("1.7"), FULL_V1_7], [hello("1.6"), FULL_V1_6], [hello("1.5"), FULL_V1_5],
     [hello("1.4"), FULL_V1_4], [hello("1.0"), FULL_V1_4], [hello("1.5.0"), FULL_V1_4], [hello("v1.5"), FULL_V1_4], [hello(15), FULL_V1_4],
     [{ ...hello(SIGNPAGE_KIT_VERSION), id: crypto.randomUUID() }, FULL_V1_4], [{ v: 2, type: "hello", kit: SIGNPAGE_KIT_VERSION }, FULL_V1_4],
   ] as const) {
@@ -377,12 +377,12 @@ test("in the shell's order (hello, a 1.5 answer, the next document's ready, a st
   assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "100" } }], "events again after its answer, in its own shape");
 });
 
-test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.14's", async () => {
+test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.15's", async () => {
   const [major, minor] = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];
-  assert.equal(`${major}.${minor - 1}`, "1.14", "raising the version again adds its level here");
-  // kit-v1.14's, kit-v1.13's and kit-v1.12's state is the whole state (their levels take a dry buy's with_cash and a
-  // move route event, a dry buy's out, and an open's closes, alone)
-  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL], [`${major}.${minor - 2}`, FULL], [`${major}.${minor - 3}`, FULL], [`${major}.${minor - 4}`, FULL_V1_11], [`${major}.${minor - 5}`, FULL_V1_10], [`${major}.${minor - 6}`, FULL_V1_9], [`${major}.${minor - 7}`, FULL_V1_8], [`${major}.${minor - 8}`, FULL_V1_7], [`${major}.${minor - 9}`, FULL_V1_6], [`${major}.${minor - 10}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
+  assert.equal(`${major}.${minor - 1}`, "1.15", "raising the version again adds its level here");
+  // kit-v1.15's, kit-v1.14's, kit-v1.13's and kit-v1.12's state is the whole state (their levels take a dry buy's buys,
+  // a dry buy's with_cash and a move route event, a dry buy's out, and an open's closes, alone)
+  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL], [`${major}.${minor - 2}`, FULL], [`${major}.${minor - 3}`, FULL], [`${major}.${minor - 4}`, FULL], [`${major}.${minor - 5}`, FULL_V1_11], [`${major}.${minor - 6}`, FULL_V1_10], [`${major}.${minor - 7}`, FULL_V1_9], [`${major}.${minor - 8}`, FULL_V1_8], [`${major}.${minor - 9}`, FULL_V1_7], [`${major}.${minor - 10}`, FULL_V1_6], [`${major}.${minor - 11}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
     const p = page();
     p.send(hello(kit));
     const id = await p.ask();
@@ -592,8 +592,8 @@ test("hello kit 1.11 (card buy-spends-several-pieces): each pool entry with no m
   assert.ok(NOW.SIGNPAGE_RESULT_SCHEMAS.state({ ...FULL, pools: [{ ...entry, making: "2" }] }));
 });
 
-test("hello at the kit's own version (1.15): each position's decimals and asset_held and each pool entry's making as they are, and the kit's schema reads them", async () => {
-  assert.equal(SIGNPAGE_KIT_VERSION, "1.15");
+test("hello at the kit's own version (1.16): each position's decimals and asset_held and each pool entry's making as they are, and the kit's schema reads them", async () => {
+  assert.equal(SIGNPAGE_KIT_VERSION, "1.16");
   const p = page();
   p.send(hello(SIGNPAGE_KIT_VERSION));
   const id = await p.ask();
@@ -970,7 +970,7 @@ test("pool.buy.dry's out: kept for the kit's own version, left out for kit-v1.13
 });
 
 test("a kit-v1.13 app still gets the closed notice for its open (card signing-layer-says-when-it-closes); a kit-v1.12 one none", async () => {
-  for (const [kit, n] of [["1.13", 1], ["1.14", 1], [SIGNPAGE_KIT_VERSION, 1], ["1.12", 0]] as const) {
+  for (const [kit, n] of [["1.13", 1], ["1.14", 1], ["1.15", 1], [SIGNPAGE_KIT_VERSION, 1], ["1.12", 0]] as const) {
     const p = page();
     p.send(hello(kit));
     await p.api.idle();
@@ -1080,11 +1080,12 @@ async function routesTo(kit: string | null, routes: readonly unknown[]): Promise
   return events.map(({ id: _i, ...e }) => e);
 }
 
-test("the route event { move: \"cash\" }: told to a kit 1.15 app, whose schema reads it; never to kit-v1.14 or below, whose schema refuses it; the buy's other route events as before", async () => {
+test("the route event { move: \"cash\" }: told to a kit 1.15 app and above, whose schema reads it; never to kit-v1.14 or below, whose schema refuses it; the buy's other route events as before", async () => {
   const move = { move: "cash" };
   const out = { out: "1.5" };
   const now = await routesTo(SIGNPAGE_KIT_VERSION, [move, out]);
   assert.deepEqual(now, [{ v: 1, type: "progress", move: "cash" }, { v: 1, type: "progress", out: "1.5" }]);
+  assert.deepEqual(await routesTo("1.15", [move, out]), now, "kit 1.15 reads the move event");
   for (const e of now) assert.ok(NOW.signpageProgressRouteSchema({ ...e, id: "x" }), JSON.stringify(e));
   for (const kit of ["1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"]) {
     assert.deepEqual(await routesTo(kit, [move, out]), [{ v: 1, type: "progress", out: "1.5" }], kit);
@@ -1128,11 +1129,94 @@ test("a move op: sent to the kit's own version, whose schema reads it; kit-v1.14
   assert.deepEqual(resultFor(kitLevel("1.4"), "state", WITH), resultFor(kitLevel("1.4"), "state", FULL), "kit-v1.4: no move op");
 });
 
-test("the route event { move: \"cash\", op }: told with its op to a kit 1.15 app, whose schema reads it; never to kit-v1.14 or below", async () => {
+test("the route event { move: \"cash\", op }: told with its op to a kit 1.15 app and above, whose schema reads it; never to kit-v1.14 or below", async () => {
   const move = { move: "cash", op: "cash/solana/1000" };
   const now = await routesTo(SIGNPAGE_KIT_VERSION, [move]);
   assert.deepEqual(now, [{ v: 1, type: "progress", move: "cash", op: "cash/solana/1000" }]);
+  assert.deepEqual(await routesTo("1.15", [move]), now, "kit 1.15 reads it with its op");
   assert.ok(NOW.signpageProgressRouteSchema({ ...now[0], id: "x" }));
   for (const kit of ["1.14", "1.13", "1.5"]) assert.deepEqual(await routesTo(kit, [move]), [], kit);
   assert.deepEqual(await routesTo(null, [move]), []);
+});
+
+// kit 1.16 (card buy-any-amount-on-every-chain): pool.buy.dry's answer on Base and Robinhood carries `buys` (what the
+// tap spends in swaps for the ask's amount, when below it), a key kit-v1.15's schema refuses the whole answer for.
+// kit-v1.15's schema is this card's base at fc76ebd16 (at kit 1.15: packages/kit/test/fixtures/kit-v1.15/, each file
+// pinned by its SHA-256 below and compared with that commit byte for byte where the clone has it). Red before this
+// change: the kit version was 1.15, so a kit-v1.15 client read at the current level was sent `buys` as it was.
+import * as V115 from "../../kit/test/fixtures/kit-v1.15/signpage/schema.ts";
+const V115_COMMIT = "fc76ebd16";
+const V115_FILES = {
+  "signpage/schema.ts": "1886cec68915c29c6b79fe9e2a731d728bc83c4c061d872765dea585ef8d253f",
+  "signpage/messages.ts": "42120634239e3cefb4a718920019528df86bbd6164ec01ea0f26fd2202aed5ec",
+  "orders/record.ts": "1499cd86f07143d7205e1e86ffd3f37ae25f65e64c83b2c7fd70235a5a5def8d",
+  "freeze.ts": "28118f50d643c20f7604c945eaf4d5fc1b2a6e4246a5193d814b2fdfde75e4d0",
+};
+test("the kit-v1.15 files here are fc76ebd16's, at kit 1.15: each file's SHA-256 pinned, and byte for byte that commit's where the clone has it", (t) => {
+  const file = (f: string) => readFileSync(new URL(`../../kit/test/fixtures/kit-v1.15/${f}`, import.meta.url));
+  for (const [f, sha] of Object.entries(V115_FILES)) assert.equal(createHash("sha256").update(file(f)).digest("hex"), sha, f);
+  const shim = readFileSync(new URL("../../kit/test/fixtures/kit-v1.15/trade/solana/pool-buy.ts", import.meta.url), "utf8");
+  assert.deepEqual(shim.split("\n").filter((l) => !l.startsWith("//") && l.trim() !== ""), [PIECES_MAX]);
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${V115_COMMIT}^{commit}`], { stdio: "pipe" });
+  } catch {
+    return t.skip(`no ${V115_COMMIT} in this clone (a shallow checkout): the pins above hold the files`);
+  }
+  for (const f of Object.keys(V115_FILES)) assert.ok(execFileSync("git", ["show", `${V115_COMMIT}:packages/kit/src/${f}`], { maxBuffer: 1 << 24 }).equals(file(f)), `${f} is kit-v1.15's`);
+  assert.match(execFileSync("git", ["show", `${V115_COMMIT}:packages/kit/src/signpage/messages.ts`], { maxBuffer: 1 << 24 }).toString(), /^export const SIGNPAGE_KIT_VERSION = "1\.15";$/m, "that commit is at kit 1.15");
+  assert.match(execFileSync("git", ["show", `${V115_COMMIT}:packages/kit/src/trade/solana/pool-buy.ts`], { maxBuffer: 1 << 24 }).toString(), new RegExp(`^${PIECES_MAX}$`, "m"), "its value at kit 1.15");
+});
+
+const DRY_BUYS = { tap_max: "0.0147", with_cash: "0.05", buys: "0.0145" };
+test("pool.buy.dry's buys: kept for the kit's own version, left out for kit-v1.15 and every level below (with_cash kept for kit-v1.15), and each kit's own schema reads what it is sent", () => {
+  assert.deepEqual(resultFor(kitLevel(SIGNPAGE_KIT_VERSION), "pool.buy.dry", DRY_BUYS), DRY_BUYS);
+  assert.ok(NOW.SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](DRY_BUYS));
+  const v115 = resultFor(kitLevel("1.15"), "pool.buy.dry", DRY_BUYS);
+  assert.deepEqual(v115, { tap_max: "0.0147", with_cash: "0.05" });
+  assert.ok(V115.SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](v115));
+  const v114 = resultFor(kitLevel("1.14"), "pool.buy.dry", DRY_BUYS);
+  assert.deepEqual(v114, { tap_max: "0.0147" });
+  assert.ok(V114.SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](v114));
+  for (const kit of ["1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5", "1.4"]) assert.deepEqual(resultFor(kitLevel(kit), "pool.buy.dry", DRY_BUYS), { tap_max: "0.0147" }, kit);
+  // a Solana answer with every key kit-v1.15 reads: buys alone is taken
+  const sol = { ...DRY_CASH, buys: "0.9" };
+  assert.deepEqual(resultFor(kitLevel("1.15"), "pool.buy.dry", sol), DRY_CASH);
+  // the planted case: kit-v1.15's schema refuses a dry answer that carries buys, whole (its Max with it)
+  assert.equal(V115.SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](DRY_BUYS), false);
+  // the kit's own schema: buys is a decimal like every amount in the answer
+  for (const bad of ["", "-1", "1e3", 1, null]) assert.equal(NOW.SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"]({ ...DRY_BUYS, buys: bad }), false, JSON.stringify(bad));
+  // another kind keeps a key named buys: only the dry buy's is taken
+  const sell = { out: "0.01", min_out: "0.009", network: "0.00001", fee_bps: 0, buys: "1" };
+  assert.deepEqual(resultFor(kitLevel("1.15"), "pool.sell.dry", sell), sell);
+});
+
+test("hello kit 1.15 and 1.16 against this page: pool.buy.dry's answer with buys left out for kit-v1.15, kept for 1.16, each read by its kit's own schema", async () => {
+  for (const [kit, schema, want] of [["1.15", V115, { tap_max: "0.0147", with_cash: "0.05" }], [SIGNPAGE_KIT_VERSION, NOW, DRY_BUYS]] as const) {
+    const posted: unknown[] = [];
+    const parent = { postMessage: (m: unknown, to: string) => void (to === APP_ORIGIN && posted.push(structuredClone(m))) };
+    let listener: ((e: IncomingMessage) => void) | null = null;
+    const api = startApi({ parent, listen: (fn) => (listener = fn), state: () => FULL, kinds: { "pool.buy.dry": () => ({ result: DRY_BUYS }) } as unknown as ApiHost["kinds"] });
+    listener!({ origin: APP_ORIGIN, source: parent, data: hello(kit) });
+    const id = crypto.randomUUID();
+    listener!({ origin: APP_ORIGIN, source: parent, data: { v: 1, id, type: "pool.buy.dry", chain: "base", token: "0x0000000000000000000000000000000000000002", amount: "0.0146" } });
+    await api.idle();
+    const a = posted.find((m) => (m as { id?: string }).id === id) as { ok: boolean; result: unknown };
+    assert.deepEqual(a?.result, want, kit);
+    assert.ok(schema.signpageAnswerOkSchema(a) && schema.SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](a.result), `kit-v${kit}'s schema reads it`);
+  }
+});
+
+test("hello kit 1.15: the state answer and every state event as they are, the closed notice told, and kit-v1.15's own schema reads the state", async () => {
+  const p = page();
+  p.send(hello("1.15"));
+  const id = await p.ask();
+  assert.deepEqual(p.answer(id).result, FULL);
+  assert.ok(reads(V115, p.answer(id), "state"));
+  p.set({ ...FULL, vault_balance: "80" });
+  await p.api.idle();
+  const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
+  assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "80" } }]);
+  assert.ok(reads(V115, ev[0], "state"));
+  p.api.closed("open-1");
+  assert.equal(p.posted.filter((m) => (m as { type?: string }).type === "closed").length, 1);
 });

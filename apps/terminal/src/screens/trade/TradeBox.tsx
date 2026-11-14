@@ -14,6 +14,8 @@ import {
   amountText,
   amountWrong,
   busy,
+  buysAskAmount,
+  buysCents,
   centsToDecimal,
   coinTapAgainMs,
   coinTapKey,
@@ -269,6 +271,47 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
       clearTimeout(t);
     };
   }, [feeKey, amount, kit.request !== null]);
+  // what a Base or Robinhood tap really spends (card buy-any-amount-on-every-chain): it plans whole notes, and an amount
+  // no plan carries exactly is bought at the largest amount under it one carries. The page's pool.buy.dry for the tap's
+  // own ask answers that amount as `buys`, and the box shows it before the tap, set as a preset sets it; asked once per
+  // amount the box rests on, as the Fee is
+  const buysKey = onPool && (chain === "base" || chain === "robinhood") ? coinKey : null;
+  const buysAsk = useRef<(c: Cents) => string | null>(() => null);
+  buysAsk.current = (c) => buysAskAmount(pools, chain, token, c, price, slippageBps, withCash);
+  useEffect(() => {
+    const ask = request.current;
+    const p = priceNow.current;
+    const asked = buysKey !== null && amount !== null ? buysAsk.current(amount) : null;
+    if (buysKey === null || amount === null || asked === null || !ask) return;
+    let live = true;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    let downs = 0;
+    const once = (): void => {
+      try {
+        ask("pool.buy.dry", { chain: chain as PoolChain, token, amount: asked }).outcome.then(
+          (o) => {
+            if (!live) return;
+            if (o.ok) {
+              // the page's answer is hostile: buysCents takes only an amount above 0 and below the ask
+              const c = buysCents(o.result.buys, asked, p);
+              if (c !== null && c < amount && !busy(phaseRef.current)) setText(amountText(c));
+              return;
+            }
+            const again = coinTapAgainMs(o.error.code);
+            if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
+          },
+          () => {},
+        );
+      } catch {
+        // no client to ask: the box keeps what was typed
+      }
+    };
+    t = setTimeout(once, FEE_ASK_SETTLE_MS);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [buysKey, amount, kit.request !== null]);
   const fee = onPool ? feeShown(feeRead, feeKey, amount, price) : null;
   // You receive on the pool path: the same answer's out (the live source has no set preview, card
   // solana-buy-preview-complete)

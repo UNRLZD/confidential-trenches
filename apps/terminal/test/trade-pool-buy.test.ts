@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountOk, amountText, amountWrong, cashMax, cashMovesTo, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetOn, receiveShown, tradeBal, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
+import { amountOk, amountText, amountWrong, buysAskAmount, buysCents, cashMax, cashMovesTo, centsToUnits, coinTapAgainMs, coinTapKey, decimalToUnits, feeAskAmount, feeCents, feeShown, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetOn, receiveShown, tradeBal, unitsToCents, unitsToDecimal, withCoinTap } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -258,4 +258,34 @@ test("card buy-any-amount-on-every-chain: a Base or Robinhood buy of any amount 
     // with_cash: any amount up to what Cash adds
     assert.equal(poolBuyAsk(pools, chain, "0xabc", 1_100n, ETH, 500, "0.05").ok, true, chain);
   }
+});
+
+test("card buy-any-amount-on-every-chain: on Base and Robinhood the box asks pool.buy.dry the tap's own ask, and an answer's buys under it sets the box to buys in USD, rounded down to the cent; a hostile buys is never used", () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    // two notes, Max 0.0147 ETH: the box's $51.30 at $3,500.12 is 0.014656... ETH, between Max less one relay fee and Max
+    const pools = [{ ...base("0.015", "0.015", "0.0147"), chain }];
+    const asked = buysAskAmount(pools, chain, "0xabc", 5_130n, ETH, 500, null);
+    assert.equal(asked, unitsToDecimal(centsToUnits(5_130n, ETH), 18), chain);
+    // Max's own cents ask the whole of tap_max, as the tap does
+    const max = unitsToCents(decimalToUnits("0.0147", 18)!, ETH);
+    assert.equal(buysAskAmount(pools, chain, "0xabc", max, ETH, 500, null), "0.0147", chain);
+    // the page's buys, 0.0145 ETH (Max less the bound): $50.75 at the device's price, rounded down
+    assert.equal(buysCents("0.0145", asked!, ETH), 5_075n, chain);
+    assert.equal(unitsToCents(decimalToUnits("0.0145", 18)!, ETH), 5_075n);
+    // what the box shows: set as a preset sets it
+    assert.equal(amountText(buysCents("0.0145", asked!, ETH)!), "50.75");
+    // hostile: at or over the ask, zero, under one cent, not a plain decimal, more places than ETH has, no string
+    for (const bad of [asked!, "0.0147", "1", "0", "0.000000000000000001", "", "-0.0145", "1e-2", "0x10", " 0.0145", "0.0145 ", "0.0000000000000000001", "NaN", null, undefined, 0.0145, {}, ["0.0145"]]) assert.equal(buysCents(bad, asked!, ETH), null, `${chain} ${JSON.stringify(bad)}`);
+    // no price or an ask that is no amount: none
+    assert.equal(buysCents("0.0145", asked!, null), null);
+    assert.equal(buysCents("0.0145", "x", ETH), null);
+    // nothing to ask: no pool, no price, over Max, nothing typed
+    assert.equal(buysAskAmount([], chain, "0xabc", 5_130n, ETH, 500, null), null);
+    assert.equal(buysAskAmount(pools, chain, "0xabc", 5_130n, null, 500, null), null);
+    assert.equal(buysAskAmount(pools, chain, "0xabc", 6_000n, ETH, 500, null), null);
+    assert.equal(buysAskAmount(pools, chain, "0xabc", 0n, ETH, 500, null), null);
+  }
+  // Solana and NEAR: a tap spends the ask itself, so the box asks no buys
+  assert.equal(buysAskAmount([sol("1", "1", "1")], "solana", "Mint1", 1_000n, SOL, 500, null), null);
+  assert.equal(buysAskAmount([sol("1", "1", "1")], "near", "wrap.near", 1_000n, SOL, 500, null), null);
 });
