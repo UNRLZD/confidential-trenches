@@ -1230,9 +1230,12 @@ test("card helper-evm-range-cap-walk: a cap's named span is the page at once (ba
     assert.equal(answered.reduce((a, n) => a + n, 0), Number(span), `${words}: the span tiled`);
     assert.ok(answered.every((n) => n === cap), `${words}: every page at the cap ${cap}: ${[...new Set(answered)]}`);
     const refused = pages.filter(([, r]) => r).length;
-    assert.ok(refused <= 6, `${words}: ${refused} refused pages (the first, then a probe past the cap at most every 8, 16, 32 pages)`);
+    // the first page asked three times in all (a first refusal may be one backend's: EVM_LOG_REFUSED_AGAIN, card
+    // first-sign-in-reads-fast), then a probe past the cap at most every 8, 16, 32 pages
+    assert.deepEqual(pages.slice(0, 3).map(([n, r]) => [n, r]), Array(3).fill([pages[0]![0], true]), `${words}: the first page asked three times`);
+    assert.ok(refused <= 8, `${words}: ${refused} refused pages (the first page's three asks, then a probe past the cap at most every 8, 16, 32 pages)`);
     // review fold 5 (W4): the ceiling sits just past the named span, so the 8 pages after the jump are all at it, no probe
-    assert.deepEqual(pages.slice(1, 9).map(([n]) => n), Array(8).fill(cap), `${words}: the pages after the jump ${pages.slice(1, 10).map(([n]) => n)}`);
+    assert.deepEqual(pages.slice(3, 11).map(([n]) => n), Array(8).fill(cap), `${words}: the pages after the jump ${pages.slice(3, 12).map(([n]) => n)}`);
   }
 });
 
@@ -1255,9 +1258,11 @@ test("card helper-evm-range-cap-walk: the pager's cap forms are the helper's, wo
 
 test("card helper-evm-range-cap-walk (review fold 2): a span named just under each refused page (a lie, or a cap moving with the ask) halves the page, never steps it down one block a call", async () => {
   const pages = await readCapped(5_000n, 50, (size) => `RPC error -32001: Block range too large: maximum allowed is ${size - 1} blocks on your current plan`);
-  // halving: 7 refusals to 39 blocks, about 129 pages of it and a probe past it now and then; one block a call: 4,950
+  // halving: 7 refusals to 39 blocks, about 129 pages of it and a probe past it now and then; one block a call: 4,950.
+  // The first page asked twice more first (a first refusal may be one backend's: EVM_LOG_REFUSED_AGAIN, card
+  // first-sign-in-reads-fast), only the read's first
   assert.ok(pages.length <= 200, `${pages.length} calls`);
-  assert.deepEqual(pages.slice(0, 4).map(([n]) => n), [5_000, 2_500, 1_250, 625]);
+  assert.deepEqual(pages.slice(0, 6).map(([n]) => n), [5_000, 5_000, 5_000, 2_500, 1_250, 625]);
 });
 
 test("card helper-evm-range-cap-walk (review fold 5): a named span of 0, or one at or above the page refused, is no span: the page halves and the read ends", async () => {
@@ -1279,13 +1284,14 @@ test("card helper-evm-range-cap-walk (review fold 3): on a W's Transfer read, a 
     pages.push(size);
     if (pages.length > CALLS_MAX) return "no list" as never;
     if (size > 1_000) throw new Error("RPC error -32001: Block range too large: maximum allowed is 1000 blocks on your current plan");
-    // the fourth page, at a size this read answered in full three times: one backend's 50-block plan
-    if (pages.length === 5) throw new Error("RPC error -32001: Block range too large: maximum allowed is 50 blocks on your current plan");
+    // the fourth page, at a size this read answered in full three times: one backend's 50-block plan (the first page
+    // asked three times in all, EVM_LOG_REFUSED_AGAIN, card first-sign-in-reads-fast)
+    if (pages.length === 7) throw new Error("RPC error -32001: Block range too large: maximum allowed is 50 blocks on your current plan");
     return [];
   };
   const anchor = { number: head, hash: block.hash, timestamp: T0, baseFeePerGas: null };
   assert.deepEqual(await evmTokensSentToOne(rpc, W(0n, 0), from, { fin: anchor, anchor }, [EVM_LOG_PAGE_BLOCKS], undefined, async () => {}), []);
-  assert.deepEqual(pages.slice(0, 6), [10_000, 1_000, 1_000, 1_000, 1_000, 500], `pages ${pages.slice(0, 8)}`);
+  assert.deepEqual(pages.slice(0, 8), [10_000, 10_000, 10_000, 1_000, 1_000, 1_000, 1_000, 500], `pages ${pages.slice(0, 10)}`);
 });
 
 test("card helper-evm-range-cap-walk: a read no provider refuses pages at its widest every page, the last page's remainder aside: never a smaller page", async () => {
