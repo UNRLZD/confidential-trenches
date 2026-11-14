@@ -101,11 +101,16 @@ test("planted: a log whose key does not hash to its id, of another address, or o
   try {
     const t = tok(0xabc);
     const good = keyOf(tok(0), t);
+    // a forged Initialize whose topic id is a real pool's (logged first, so a kept forgery would hold that id), and one
+    // whose topic id is no pool's: neither key hashes to its id, so neither is kept under any id
     const forged = { ...logOf(keyOf(tok(7), t), 200), topics: [INITIALIZE, poolIdOf(good), "0x" + W(BigInt(tok(7))), "0x" + W(BigInt(t))] };
+    const loose = logOf(keyOf(tok(9), t), 250, "0x" + "ab".repeat(32));
     const other = { ...logOf(keyOf(tok(8), t), 300), address: "0x0000000000000000000000000000000000000001" };
-    const ix = createPoolIndex(join(d, "rh.sqlite"), cfg(), deps(chain(() => 2_000, [forged, other, logOf(good, 400)])));
+    const ix = createPoolIndex(join(d, "rh.sqlite"), cfg(), deps(chain(() => 2_000, [forged, loose, other, logOf(good, 400)])));
     await until(ix);
-    assert.deepEqual(ix.pools(t).pools.map((p) => p.id), [poolIdOf(good)]);
+    const served = ix.pools(t).pools;
+    assert.deepEqual(served, [{ id: poolIdOf(good), key: good }]);
+    for (const p of served) assert.equal(poolIdOf(p.key), p.id);
     ix.close();
   } finally {
     rmSync(d, { recursive: true, force: true });
