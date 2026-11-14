@@ -159,13 +159,17 @@ export const EVM_LOG_REFUSED_AGAIN = 2;
  * the seats' read keeps EVM_POOL_LOG_PAGES_IN_FLIGHT of its pages in flight there, never one after another. Release
  * 129's live run 43449697702 (13 Nov 15:10Z) never walked every pool in 120 s: robinhood.api.pocket.network's
  * backends of "max 10001 blocks" made the Robinhood pool's 5,039,892 blocks from its deploy block 507 calls, one at a
- * time at about 250 ms; its rerun at the same build paged them in 108 and walked in 67 s. A quarter of the first page,
- * so the wide pages (Robinhood's own and Pocket's 100,000, publicnode's 50,000 on Base) stay one at a time. */
+ * time at about 250 ms; its rerun at the same build paged them in 108 and walked in 67 s. A quarter of the first page.
+ * A wide page held at its provider's cap (Robinhood's own 100,000, publicnode's 50,000 on Base) is spread too (card
+ * first-sign-in-reads-fast): the Robinhood pool's 5,455,222 blocks were 55 such pages one after another at about 280
+ * ms, 17 of the cold restore read's 22 s (14 Nov 03:4xZ from this Mac). */
 export const EVM_POOL_LOG_NARROW_BLOCKS = EVM_POOL_LOG_PAGE_BLOCKS / 4n;
 /** A narrow provider's pages in flight on the seats' read: robinhood.api.pocket.network answered the scan's 4 at once
  * in every round (kit buy-unpinned.ts, 5 Nov 19:48Z) and limits 1,200 a minute (x-ratelimit-limit), which 4 pages of
  * about 250 ms (16 a second) stay under; base.api.pocket.network answered the index's 4 at once. Robinhood's own
- * answers 429 to 4 at once, and its 100,000-block pages are never narrow. */
+ * answered the pool's 56 single 100,000-block log pages at 4 at once, twice back to back, with no 429 and no error (6.5
+ * to 12.1 s a run; 8 at once, 3 rounds, too: 14 Nov 03:4x-03:51Z from this Mac); its 429s to 4 at once (kit
+ * buy-unpinned.ts) were batches of 5 spans each. */
 export const EVM_POOL_LOG_PAGES_IN_FLIGHT = 4;
 /** The narrow pages each part must have left before a read is spread: below EVM_POOL_LOG_PAGES_IN_FLIGHT times this
  * (64 pages, about 16 s at 250 ms) one page after another is no walk's bound, and the cap's probes stay one read's. */
@@ -1005,7 +1009,8 @@ export function evmPoolLogPager(): EvmLogPager {
  * With the rules' `inFlight` and no `progress` (the seats' read; a source's read keeps its pages in order), a page at or
  * under EVM_POOL_LOG_NARROW_BLOCKS, once the seat's provider answered the last page in full, with more than
  * EVM_POOL_LOG_PART_PAGES pages a part left, splits the rest into `inFlight` parts of contiguous blocks, each read so at
- * once (spreadLogs), their logs in block order; never on a seat that walks (a list with a spare, evmPair).
+ * once (spreadLogs), their logs in block order; so does a wider page held at its provider's cap (twice its size refused
+ * in this read) with a page a part left; never on a seat that walks (a list with a spare, evmPair).
  */
 async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, progress?: { to: bigint; logs: E[] }, part?: LogReadState): Promise<E[]> {
   const { max, slowHalves } = pager.rules;
@@ -1043,7 +1048,10 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     const size = p.size;
     // only once the provider seated now answered this read's last page in full at this size: a seat still walking
     // (a move back to a wide provider at its first call) is never spread
-    if (parts > 1 && size <= EVM_POOL_LOG_NARROW_BLOCKS && lastFull === via && to - at + 1n > size * BigInt(parts) * EVM_POOL_LOG_PART_PAGES) {
+    // a wide page held at its provider's cap (the size twice refused in this read) is spread too, once a page a part is
+    // left (card first-sign-in-reads-fast): its pages can grow no more, so one after another they are the read's bound
+    const atCap = size > EVM_POOL_LOG_NARROW_BLOCKS && refused !== null && size * 2n >= refused;
+    if (parts > 1 && lastFull === via && (size <= EVM_POOL_LOG_NARROW_BLOCKS ? to - at + 1n > size * BigInt(parts) * EVM_POOL_LOG_PART_PAGES : atCap && to - at + 1n > size * BigInt(parts))) {
       out.push(...(await spreadLogs(rpc, k, filter, decode, at, to, pager, parts, size, { refused, held, hold, lastCeiling, widest }, signal, sleep)));
       break;
     }

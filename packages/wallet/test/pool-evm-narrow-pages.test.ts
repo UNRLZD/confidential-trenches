@@ -74,7 +74,8 @@ test("card restore-walks-every-pool-on-129: a cold sync over 5.04M blocks on a p
   const bound = Number((TO - FROM + 1n) / 10_001n) / IN_FLIGHT + 40;
   assert.ok(rounds <= bound, `${rounds} rounds for ${pocket.calls} calls on the 10,001-block side (bound ${bound})`);
   assert.ok(pocket.most <= IN_FLIGHT, `${pocket.most} calls at once on the narrow side`);
-  // Robinhood's own answers 429 to 4 at once (kit buy-unpinned.ts robinhood scan, read 3 Nov 20:27Z): its 100,000-block
-  // pages go one at a time
-  assert.equal(own.most, 1, `${own.most} calls at once on the wide side`);
+  // Robinhood's own held at its 100,000-block cap keeps IN_FLIGHT pages in flight too (card first-sign-in-reads-fast:
+  // 56 single pool-log pages at 4 at once, twice back to back, no 429 and no error, 14 Nov 03:51Z from this Mac; the
+  // 429s of kit buy-unpinned.ts were batches of 5 spans, 4 batches at once), never more
+  assert.ok(own.most <= IN_FLIGHT, `${own.most} calls at once on the wide side`);
 });
