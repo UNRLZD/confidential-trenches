@@ -1,0 +1,1201 @@
+{
+  "read": "1Click POST /v0/quote, dry, through the helper proxy (partner key), 2026-11-14T06:58:48Z-07:02:27Z",
+  "reads": [
+    {
+      "place": "cash",
+      "blockchain": "eth",
+      "origin": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "eth",
+      "origin": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "arb",
+      "origin": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "arb",
+      "origin": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "base",
+      "origin": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "base",
+      "origin": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "sol",
+      "origin": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "sol",
+      "origin": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "gnosis",
+      "origin": "nep141:gnosis-0x2a22f9c3b484c3629090feed35f17ff8f88f76f0.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "gnosis",
+      "origin": "nep141:gnosis-0x2a22f9c3b484c3629090feed35f17ff8f88f76f0.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "pol",
+      "origin": "nep141:pol-0x3c499c542cef5e3811e1192ce70d8cc03d5c3359.omdep.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "pol",
+      "origin": "nep141:pol-0x3c499c542cef5e3811e1192ce70d8cc03d5c3359.omdep.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "bsc",
+      "origin": "nep141:bnb-0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d.omdep.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "bsc",
+      "origin": "nep141:bnb-0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d.omdep.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "aptos",
+      "origin": "nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "aptos",
+      "origin": "nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "op",
+      "origin": "nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "op",
+      "origin": "nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "avax",
+      "origin": "nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omdep.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "avax",
+      "origin": "nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omdep.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "sui",
+      "origin": "nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "sui",
+      "origin": "nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "stellar",
+      "origin": "nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 400,
+      "message": "Incorrect depositMode for originAsset from stellar chain"
+    },
+    {
+      "place": "cash",
+      "blockchain": "stellar",
+      "origin": "nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 400,
+      "message": "Incorrect depositMode for originAsset from stellar chain"
+    },
+    {
+      "place": "cash",
+      "blockchain": "monad",
+      "origin": "nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "monad",
+      "origin": "nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "xlayer",
+      "origin": "nep245:v2_1.omni.hot.tg:196_2dK9kLNR7Ekq7su8FxNGiUW3djTw",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "xlayer",
+      "origin": "nep245:v2_1.omni.hot.tg:196_2dK9kLNR7Ekq7su8FxNGiUW3djTw",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "cash",
+      "blockchain": "hypercore",
+      "origin": "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 400,
+      "message": "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054 supports only ORIGIN_CHAIN refundType"
+    },
+    {
+      "place": "cash",
+      "blockchain": "hypercore",
+      "origin": "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 400,
+      "message": "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054 supports only ORIGIN_CHAIN refundType"
+    },
+    {
+      "place": "cash",
+      "blockchain": "hypercore",
+      "origin": "1cs_v1:hypercore:erc20:0xb88339CB7199b77E23DB6E890353E22632Ba630f",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "public",
+      "status": 400,
+      "message": "1cs_v1:hypercore:erc20:0xb88339CB7199b77E23DB6E890353E22632Ba630f is not supported as origin asset"
+    },
+    {
+      "place": "cash",
+      "blockchain": "hypercore",
+      "origin": "1cs_v1:hypercore:erc20:0xb88339CB7199b77E23DB6E890353E22632Ba630f",
+      "destination": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "mode": "advanced",
+      "status": 400,
+      "message": "1cs_v1:hypercore:erc20:0xb88339CB7199b77E23DB6E890353E22632Ba630f is not supported as origin asset"
+    },
+    {
+      "place": "solana",
+      "blockchain": "miden",
+      "origin": "nep141:miden-0xf4f3dd3678997811522164320be4be.omft.near",
+      "destination": "nep141:sol.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "solana",
+      "blockchain": "miden",
+      "origin": "nep141:miden-0xf4f3dd3678997811522164320be4be.omft.near",
+      "destination": "nep141:sol.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "solana",
+      "blockchain": "aptos",
+      "origin": "1cs_v1:aptos:aptos-fa:0x0d829a23c3a3760e2fed60ca24d83cee8943f7c61859608ae0726fdb2e4f2784",
+      "destination": "nep141:sol.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": []
+    },
+    {
+      "place": "solana",
+      "blockchain": "aptos",
+      "origin": "1cs_v1:aptos:aptos-fa:0x0d829a23c3a3760e2fed60ca24d83cee8943f7c61859608ae0726fdb2e4f2784",
+      "destination": "nep141:sol.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": []
+    },
+    {
+      "place": "solana",
+      "blockchain": "starknet",
+      "origin": "1cs_v1:starknet:erc20:0x0752c64c8430f1a81a8f87e6252a8853cb9428352d585d90b4151cfe3702dcfe",
+      "destination": "nep141:sol.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": []
+    },
+    {
+      "place": "solana",
+      "blockchain": "starknet",
+      "origin": "1cs_v1:starknet:erc20:0x0752c64c8430f1a81a8f87e6252a8853cb9428352d585d90b4151cfe3702dcfe",
+      "destination": "nep141:sol.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": []
+    },
+    {
+      "place": "base",
+      "blockchain": "near",
+      "origin": "nep141:eth.bridge.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "near",
+      "origin": "nep141:eth.bridge.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "eth",
+      "origin": "nep141:eth.omft.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "eth",
+      "origin": "nep141:eth.omft.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "abs",
+      "origin": "nep141:abs.omdep.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 400,
+      "message": "No liquidity available"
+    },
+    {
+      "place": "base",
+      "blockchain": "abs",
+      "origin": "nep141:abs.omdep.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 400,
+      "message": "No liquidity available"
+    },
+    {
+      "place": "base",
+      "blockchain": "arb",
+      "origin": "nep141:arb.omft.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "arb",
+      "origin": "nep141:arb.omft.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "op",
+      "origin": "nep245:v2_1.omni.hot.tg:10_11111111111111111111",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "op",
+      "origin": "nep245:v2_1.omni.hot.tg:10_11111111111111111111",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "scroll",
+      "origin": "nep245:v2_1.omni.hot.tg:534352_11111111111111111111",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "scroll",
+      "origin": "nep245:v2_1.omni.hot.tg:534352_11111111111111111111",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "hood",
+      "origin": "nep141:hood.omft.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "hood",
+      "origin": "nep141:hood.omft.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "miden",
+      "origin": "nep141:miden-0x419f8f4bff72959132aa7cea15a4c1.omft.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "miden",
+      "origin": "nep141:miden-0x419f8f4bff72959132aa7cea15a4c1.omft.near",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "aptos",
+      "origin": "1cs_v1:aptos:aptos-fa:0xb07cf73714a0980fd589e1602ea98fc9c18b8c9c82b828ad3662ee873629be1d",
+      "destination": "nep141:base.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "base",
+      "blockchain": "aptos",
+      "origin": "1cs_v1:aptos:aptos-fa:0xb07cf73714a0980fd589e1602ea98fc9c18b8c9c82b828ad3662ee873629be1d",
+      "destination": "nep141:base.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 1
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "near",
+      "origin": "nep141:eth.bridge.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "near",
+      "origin": "nep141:eth.bridge.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "eth",
+      "origin": "nep141:eth.omft.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "eth",
+      "origin": "nep141:eth.omft.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "abs",
+      "origin": "nep141:abs.omdep.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 400,
+      "message": "No liquidity available"
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "abs",
+      "origin": "nep141:abs.omdep.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 400,
+      "message": "No liquidity available"
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "arb",
+      "origin": "nep141:arb.omft.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "arb",
+      "origin": "nep141:arb.omft.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "base",
+      "origin": "nep141:base.omft.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "base",
+      "origin": "nep141:base.omft.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "op",
+      "origin": "nep245:v2_1.omni.hot.tg:10_11111111111111111111",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "op",
+      "origin": "nep245:v2_1.omni.hot.tg:10_11111111111111111111",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "scroll",
+      "origin": "nep245:v2_1.omni.hot.tg:534352_11111111111111111111",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "scroll",
+      "origin": "nep245:v2_1.omni.hot.tg:534352_11111111111111111111",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "miden",
+      "origin": "nep141:miden-0x419f8f4bff72959132aa7cea15a4c1.omft.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "miden",
+      "origin": "nep141:miden-0x419f8f4bff72959132aa7cea15a4c1.omft.near",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "aptos",
+      "origin": "1cs_v1:aptos:aptos-fa:0xb07cf73714a0980fd589e1602ea98fc9c18b8c9c82b828ad3662ee873629be1d",
+      "destination": "nep141:hood.omft.near",
+      "mode": "public",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    {
+      "place": "robinhood",
+      "blockchain": "aptos",
+      "origin": "1cs_v1:aptos:aptos-fa:0xb07cf73714a0980fd589e1602ea98fc9c18b8c9c82b828ad3662ee873629be1d",
+      "destination": "nep141:hood.omft.near",
+      "mode": "advanced",
+      "status": 201,
+      "appFees": [
+        {
+          "recipient": "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805",
+          "fee": 20
+        }
+      ]
+    }
+  ],
+  "signed": {
+    "eth_eth_to_base": {
+      "request": {
+        "dry": true,
+        "swapType": "EXACT_INPUT",
+        "slippageTolerance": 100,
+        "originAsset": "nep141:eth.omft.near",
+        "depositType": "ORIGIN_CHAIN",
+        "destinationAsset": "nep141:base.omft.near",
+        "amount": "4000000000000000",
+        "refundTo": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "refundType": "INTENTS",
+        "recipient": "0x000000000000000000000000000000000000beef",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-14T07:30:40.940Z"
+      },
+      "answer": {
+        "quote": {
+          "amountIn": "4000000000000000",
+          "amountInFormatted": "0.004",
+          "amountInUsd": "7.618080000000",
+          "minAmountIn": "4000000000000000",
+          "amountOut": "3998636082795595",
+          "amountOutFormatted": "0.003998636082795595",
+          "amountOutUsd": "7.615482392406",
+          "minAmountOut": "3958649721967639",
+          "timeEstimate": 47,
+          "refundFee": "0",
+          "withdrawFee": "560000000000"
+        },
+        "quoteRequest": {
+          "dry": true,
+          "depositMode": "SIMPLE",
+          "swapType": "EXACT_INPUT",
+          "slippageTolerance": 100,
+          "originAsset": "nep141:eth.omft.near",
+          "depositType": "ORIGIN_CHAIN",
+          "destinationAsset": "nep141:base.omft.near",
+          "amount": "4000000000000000",
+          "refundTo": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "refundType": "INTENTS",
+          "recipient": "0x000000000000000000000000000000000000beef",
+          "recipientType": "DESTINATION_CHAIN",
+          "deadline": "2026-11-14T07:30:40.940Z",
+          "confidentiality": "public",
+          "quoteWaitingTimeMs": 0,
+          "insured": false,
+          "appFees": [
+            {
+              "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+              "fee": 1
+            }
+          ]
+        },
+        "signature": "ed25519:4TNK2gz2o8tqL9FFWfBV3cGeoVoEWDpzjeRsFTuVh6oLDhCa6nVSHRn2BRo31feaV2Z4AP6dobHzZeZjdiZHM5zs",
+        "timestamp": "2026-11-14T07:00:41.059Z"
+      }
+    },
+    "arb_eth_to_base": {
+      "request": {
+        "dry": true,
+        "swapType": "EXACT_INPUT",
+        "slippageTolerance": 100,
+        "originAsset": "nep141:arb.omft.near",
+        "depositType": "ORIGIN_CHAIN",
+        "destinationAsset": "nep141:base.omft.near",
+        "amount": "4000000000000000",
+        "refundTo": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "refundType": "INTENTS",
+        "recipient": "0x000000000000000000000000000000000000beef",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-14T07:30:57.446Z"
+      },
+      "answer": {
+        "quote": {
+          "amountIn": "4000000000000000",
+          "amountInFormatted": "0.004",
+          "amountInUsd": "7.618080000000",
+          "minAmountIn": "4000000000000000",
+          "amountOut": "3998632471502978",
+          "amountOutFormatted": "0.003998632471502978",
+          "amountOutUsd": "7.615475514627",
+          "minAmountOut": "3958646146787948",
+          "timeEstimate": 27,
+          "refundFee": "0",
+          "withdrawFee": "560000000000"
+        },
+        "quoteRequest": {
+          "dry": true,
+          "depositMode": "SIMPLE",
+          "swapType": "EXACT_INPUT",
+          "slippageTolerance": 100,
+          "originAsset": "nep141:arb.omft.near",
+          "depositType": "ORIGIN_CHAIN",
+          "destinationAsset": "nep141:base.omft.near",
+          "amount": "4000000000000000",
+          "refundTo": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "refundType": "INTENTS",
+          "recipient": "0x000000000000000000000000000000000000beef",
+          "recipientType": "DESTINATION_CHAIN",
+          "deadline": "2026-11-14T07:30:57.446Z",
+          "confidentiality": "public",
+          "quoteWaitingTimeMs": 0,
+          "insured": false,
+          "appFees": [
+            {
+              "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+              "fee": 1
+            }
+          ]
+        },
+        "signature": "ed25519:5uhLKzanwnj3qykcvPosiX6L3TwncueZSd5jkNGTQMex1Fe8Uw3YUA9JxAM22WDwBvNNVJ5VJoVsDVpBcMPKGZkB",
+        "timestamp": "2026-11-14T07:00:57.563Z"
+      }
+    },
+    "eth_usdc_to_cash": {
+      "request": {
+        "dry": true,
+        "swapType": "EXACT_INPUT",
+        "slippageTolerance": 100,
+        "originAsset": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+        "depositType": "ORIGIN_CHAIN",
+        "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "amount": "10000000",
+        "refundTo": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "refundType": "INTENTS",
+        "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-14T07:28:48.588Z"
+      },
+      "answer": {
+        "quote": {
+          "amountIn": "10000000",
+          "amountInFormatted": "10.0",
+          "amountInUsd": "9.995880000000",
+          "minAmountIn": "10000000",
+          "amountOut": "9994810",
+          "amountOutFormatted": "9.99481",
+          "amountOutUsd": "9.990692138280",
+          "minAmountOut": "9894861",
+          "timeEstimate": 45,
+          "refundFee": "0",
+          "withdrawFee": "4202"
+        },
+        "quoteRequest": {
+          "dry": true,
+          "depositMode": "SIMPLE",
+          "swapType": "EXACT_INPUT",
+          "slippageTolerance": 100,
+          "originAsset": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+          "depositType": "ORIGIN_CHAIN",
+          "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+          "amount": "10000000",
+          "refundTo": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "refundType": "INTENTS",
+          "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+          "recipientType": "DESTINATION_CHAIN",
+          "deadline": "2026-11-14T07:28:48.588Z",
+          "confidentiality": "public",
+          "quoteWaitingTimeMs": 0,
+          "insured": false,
+          "appFees": [
+            {
+              "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+              "fee": 1
+            }
+          ]
+        },
+        "signature": "ed25519:gsa6huCyuNH1vhyzgQu3eywm4THWZSsf8UyWeF4yQmvwsbPWGkqQjPRRw37dcJnunoiKJMTNqiSpP5NTiG9NAs4",
+        "timestamp": "2026-11-14T06:58:49.147Z"
+      }
+    },
+    "arb_usdc_to_cash": {
+      "request": {
+        "dry": true,
+        "swapType": "EXACT_INPUT",
+        "slippageTolerance": 100,
+        "originAsset": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+        "depositType": "ORIGIN_CHAIN",
+        "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "amount": "10000000",
+        "refundTo": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "refundType": "INTENTS",
+        "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-14T07:28:54.648Z"
+      },
+      "answer": {
+        "quote": {
+          "amountIn": "10000000",
+          "amountInFormatted": "10.0",
+          "amountInUsd": "9.995880000000",
+          "minAmountIn": "10000000",
+          "amountOut": "9994626",
+          "amountOutFormatted": "9.994626",
+          "amountOutUsd": "9.990508214088",
+          "minAmountOut": "9894679",
+          "timeEstimate": 25,
+          "refundFee": "0",
+          "withdrawFee": "4202"
+        },
+        "quoteRequest": {
+          "dry": true,
+          "depositMode": "SIMPLE",
+          "swapType": "EXACT_INPUT",
+          "slippageTolerance": 100,
+          "originAsset": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+          "depositType": "ORIGIN_CHAIN",
+          "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+          "amount": "10000000",
+          "refundTo": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "refundType": "INTENTS",
+          "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+          "recipientType": "DESTINATION_CHAIN",
+          "deadline": "2026-11-14T07:28:54.648Z",
+          "confidentiality": "public",
+          "quoteWaitingTimeMs": 0,
+          "insured": false,
+          "appFees": [
+            {
+              "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+              "fee": 1
+            }
+          ]
+        },
+        "signature": "ed25519:5xcEF283VstBcz1HKtK4i62xUBacYkDJgFkhoLDFGos2v11gXWGh6EtkWwSfKkEL4J9uPyS6PkzLHZCwG7hhirn6",
+        "timestamp": "2026-11-14T06:58:54.764Z"
+      }
+    }
+  }
+}
