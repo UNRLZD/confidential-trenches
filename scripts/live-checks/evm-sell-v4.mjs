@@ -23,7 +23,7 @@ import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BUILD, CHAINS, DUST, EIP1967, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf, selector } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, chainOf, DUST, EIP1967, keccak, operatorProblems, pinnedBuild, recorder, rpc, runtimeOf, selector } from "./pool-evm-deploy.mjs";
 
 const KEY = "evm-sell-v4";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -33,14 +33,15 @@ export const RUN_RECORD = path.join(HERE, `${KEY}.md`);
 /** The run record (the money gate reads it) from the redeploy records, after a PASS: each redeploy's transactions */
 export const runRecord = (ds) => runRecordFor(KEY, ds);
 export function runRecordFor(KEY, ds) {
-  for (const d of ds) if (d.dryRun || !CHAINS[d.chain]) throw new Error(`no run record for ${d.dryRun ? "a dry run" : d.chain}`);
+  // a mainnet redeploy alone too (card pool-amounts-are-standard-sizes-evm's SellDelegate v2)
+  for (const d of ds) if (d.dryRun || !chainOf(d.chain)) throw new Error(`no run record for ${d.dryRun ? "a dry run" : d.chain}`);
   return [
     `CARD ${KEY} / live: PASS`,
     "Money path: yes",
     ...ds.flatMap((d) => d.txs.map((t) => `Tx: ${d.chain} ${t.hash}`)),
     "",
     ...ds.flatMap((d) => [
-      `${d.chain}: contracts/pool-evm/script/deploy.mjs --only SellDelegate at ${d.at}; steps: ${d.txs.map((t) => t.step).join(", ")}. SellDelegate ${d.contracts.SellDelegate.address}, its code the build's, POOL_MANAGER() ${CHAINS[d.chain].poolManager.address} and WETH() ${CHAINS[d.chain].weth.address}, read by this live check on ${CHAINS[d.chain].rpcs.join(" and ")}. Deployer ${d.deployer}, a run key that lived only in the run, swept back to ${d.return}.`,
+      `${d.chain}: contracts/pool-evm/script/deploy.mjs --only SellDelegate at ${d.at}; steps: ${d.txs.map((t) => t.step).join(", ")}. SellDelegate ${d.contracts.SellDelegate.address}, its code the build's, POOL_MANAGER() ${chainOf(d.chain).poolManager.address} and WETH() ${chainOf(d.chain).weth.address}, read by this live check on ${chainOf(d.chain).rpcs.join(" and ")}. Deployer ${d.deployer}, a run key that lived only in the run, swept back to ${d.return}.`,
       "",
     ]),
   ].join("\n");

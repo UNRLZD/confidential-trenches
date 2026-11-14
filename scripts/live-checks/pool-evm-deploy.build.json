@@ -236,6 +236,76 @@
       "at": {
         "base": "0xe3223113781f527188f634615ad9a3ca0aa20a4d",
         "robinhood": "0xf79962b094991354270fe7866f0f590ef0c9b0cf"
+      },
+      "live": true,
+      "liveNote": "the kit still pins this delegate: the code the device calls today, until a later card moves the pin to the rebuilt delegate (evm-venues-pin.mjs reads a pin of it as its build)"
+    },
+    "SellDelegate.review3": {
+      "contract": "SellDelegate",
+      "note": "The testnets' sell delegate of card evm-testnet-delegate-review3 (its records evm-testnet-delegate-review3.<chain>.json), the same build as the mainnets' first set (SellDelegate.mainnet-1): it deposits the whole of a sale's ETH less the fee; frozen at its two testnet addresses when card pool-amounts-are-standard-sizes-evm rebuilt the delegate to deposit the largest 1-2-5 rung",
+      "length": 9201,
+      "masked": "0x810d3089ca939782b128e76d84c43f321ff126b76dd1dce140c5dc9782f48bf0",
+      "immutables": [
+        [
+          301,
+          1100,
+          2509,
+          2679,
+          3681,
+          6129
+        ],
+        [
+          169,
+          1409,
+          1629,
+          3284,
+          3913,
+          4571,
+          4664,
+          4703,
+          4926,
+          6003
+        ]
+      ],
+      "sell": "0x0c2cb9ca",
+      "at": {
+        "base-sepolia": "0x7a034461193cc6b1a7d5d0f5fe4a36b34e7ebc12",
+        "robinhood-testnet": "0xcec6c1b18be682cfa1679568eab309db79fe3cce"
+      },
+      "live": true,
+      "liveNote": "the kit still pins this delegate: the code the device calls today, until a later card moves the pin to the rebuilt delegate (evm-venues-pin.mjs reads a pin of it as its build)"
+    },
+    "SellDelegate.pool-buy-pays-revert": {
+      "contract": "SellDelegate",
+      "note": "The testnet sets' sell delegate of card pool-evm-buy-pays-revert (pool-evm-deploy.answers.json's records), the same build as SellDelegate.mainnet-1; frozen at its two testnet addresses when card pool-amounts-are-standard-sizes-evm rebuilt the delegate",
+      "length": 9201,
+      "masked": "0x810d3089ca939782b128e76d84c43f321ff126b76dd1dce140c5dc9782f48bf0",
+      "immutables": [
+        [
+          301,
+          1100,
+          2509,
+          2679,
+          3681,
+          6129
+        ],
+        [
+          169,
+          1409,
+          1629,
+          3284,
+          3913,
+          4571,
+          4664,
+          4703,
+          4926,
+          6003
+        ]
+      ],
+      "sell": "0x0c2cb9ca",
+      "at": {
+        "base-sepolia": "0x643ebf84fcf4d7ffafed691dc50df6a0b3729bfa",
+        "robinhood-testnet": "0xb0db0dff885f4f63ac72a695fd2047c2e1b64f74"
       }
     }
   }

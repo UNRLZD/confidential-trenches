@@ -72,12 +72,13 @@ test("the v1 delegate's code fails: this check takes only the build pinned to th
 });
 
 test("the current build's code at the frozen evm-sell-v4 delegate's address fails: that address holds only its own build", async () => {
-  // the current build as deploy.mjs's dry run deployed it (pool-evm-deploy.answers.json), served for the frozen delegate
-  const P = JSON.parse(readFileSync(new URL("./pool-evm-deploy.answers.json", import.meta.url), "utf8"));
+  // the current build as deploy.mjs deployed it alone (card pool-amounts-are-standard-sizes-evm's rehearsal on a Base
+  // mainnet fork, its replay file), served for the frozen delegate: the immutables are zeroed, so any chain's copy reads
+  const P = JSON.parse(readFileSync(new URL("./pool-amounts-are-standard-sizes-evm.answers.json", import.meta.url), "utf8")).dry.base;
   const cur = BUILD.contracts.SellDelegate;
   for (const chain of CHAIN_NAMES) {
-    const at = P.deployments[chain].contracts.SellDelegate.address;
-    const code = P.good[chain].find(isCode(at)).json.result;
+    const at = P.deployments.base.contracts.SellDelegate.address;
+    const code = JSON.parse(P.log.find((e) => isCode(at)(JSON.parse(e.body))).text).result;
     assert.equal(runtimeOf(code, cur.immutables).masked, cur.masked, `${chain}: the recorded code is the current build`);
     assert.notEqual(pinnedBuild(chain, "SellDelegate", del(chain)), cur, `${chain}: the delegate's address is frozen to an older build`);
     fails(await run(chain, mutate(chain, isCode(del(chain)), (j) => (j.result = code))), new RegExp(`SellDelegate \\S+ code is the build pinned to it: ${(code.length - 2) / 2} bytes`));

@@ -31,7 +31,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { BUILD, CHAINS, EIP1967, MAINNETS, chainOf, deploymentFile, gettersOf, keccak, operatorProblems, poolFile, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
+import { BUILD, CHAINS, EIP1967, MAINNETS, chainOf, deploymentFile, gettersOf, keccak, operatorProblems, pinnedBuild, poolFile, recorder, rpc, runtimeOf } from "./pool-evm-deploy.mjs";
 
 const KEY = "evm-venues-pin";
 const lower = (a) => (typeof a === "string" ? a.toLowerCase() : a);
@@ -130,8 +130,11 @@ export async function check({ chain, venue, deployment: d, fetchFn = fetch, rpcs
     for (const [role, pin, name] of [...want, ["verifier", d.contracts?.WithdrawalVerifier?.address ?? "0x", "WithdrawalVerifier"]]) {
       const [a, b] = await codeAt(pin);
       // the current build, never pinnedBuild's frozen one at an older contract's address: the kit's pin is what the
-      // device's code calls today
-      const build = BUILD.contracts[name];
+      // device's code calls today. One exception, named in the build file: a build frozen at this very pin with `live`
+      // (card pool-amounts-are-standard-sizes-evm rebuilt the sell delegate; the kit keeps pinning the deployed one
+      // until a later card moves the pin, after the owner's paste)
+      const frozen = pinnedBuild(chain, name, pin);
+      const build = frozen !== BUILD.contracts[name] && frozen.live === true ? frozen : BUILD.contracts[name];
       const r = runtimeOf(a, build.immutables);
       say(a === b && a !== "0x", `the ${role} ${pin}: the same code on both RPCs at block ${BigInt(block)} (${(a.length - 2) / 2} bytes)`);
       say(r.length === build.length && r.masked === build.masked, `the ${role} ${pin} is the build's ${name}: length ${r.length}, keccak256 with the immutables zeroed ${r.masked}`);
