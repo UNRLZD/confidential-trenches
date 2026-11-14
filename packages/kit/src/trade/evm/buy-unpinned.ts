@@ -239,7 +239,7 @@ export const evmMainnetVenues = () =>
       // or a rate-limit error). publicnode 6, the "6 at once" the helper's PROVIDER_PACE records for it (apps/helper/src/
       // limits/limits.ts); mainnet.base.org 8, under its 20; blastapi and Pocket's Base endpoint 8 (the helper names
       // neither: the measurement alone)
-      inflight: bare({ "https://base-rpc.publicnode.com": 6, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
+      inflight: bare<Record<string, number>>({ "https://base-rpc.publicnode.com": 6, "https://base-mainnet.public.blastapi.io": 8, "https://mainnet.base.org": 8, "https://base.api.pocket.network": 8 }),
       // 6 reads a call: aggregate3 shares one call's gas, and 64 of a 100 ETH buy's exact-out reads (8 of them 8.4-9.4M gas
       // each) needed 77.3M, past base-rpc.publicnode.com's 50M eth_call cap (3/3 refused "out of gas: gas required exceeds:
       // 50000000"; at 6 a call 30/30 answered; review of 2c02f7df, Base block 54,810,601). 24,000 bytes a request:
@@ -412,7 +412,7 @@ export const evmMainnetVenues = () =>
       // publicnode, blxrbdn and globalstake served every post at 8, none refused, and the helper names none of them: 8,
       // the measurement alone. One limit of 2 for every provider (the scan's) held a cold USDG quote's 173 posts in the
       // queue: 12.2 s, against 7.0 s at 6 (05:0xZ the same day)
-      inflight: bare({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 6, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8, "https://rpc-robinhood.globalstake.io": 8 }),
+      inflight: bare<Record<string, number>>({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 6, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8, "https://rpc-robinhood.globalstake.io": 8 }),
       // 64 reads a call (card evm-buy-quote-in-window): a cold WETH-USDG quote's 2,303 reads at 6 a call were 128 batches,
       // which ran past the 10-13 s that three of these five keep a block's state. Its exact-out reads cost about 100,000
       // gas each, about 6.4M a call against the 50M caps; all five answered 3 calls of 64 alike (review of 2c02f7df) and
