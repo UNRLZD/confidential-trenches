@@ -46,7 +46,7 @@ test("planted: each mark alone, and the index's pin", () => {
 test("facts() reads each mark from the minified code as the build writes it, and misses each when it is gone", () => {
   const index = '<script src="/app.js" integrity="x"></script>';
   const carry = "r.push({...a,noteId:`${a.noteId}#change`,chunk:o,root:`newest`,carryOf:a.noteId})";
-  const prove = "throw Error(`proveFor: note ${e} is not an UNSPENT landed note of this pool with a listed piece`)";
+  const prove = "throw Error(`proveFor: note ${e} is not a landed note of this pool with a listed piece, UNSPENT or held by its own proof alone`)";
   const round = "throw Error(`no change written for note ${t}`)";
   const all = facts(index, `${carry};${prove};${round}`);
   assert.deepEqual([all.carry, all.prove, all.round], [true, true, true]);

@@ -167,8 +167,12 @@ test("tiers: tier 2 holds at most piecesMax - 1 notes, and a pool of one piece m
   const pieces = q.ready().filter((r) => r.own !== true);
   assert.deepEqual(pieces.map((r) => r.chunk).sort((a, b) => (a < b ? -1 : 1)), [usd(10), usd(20), usd(50)]);
   for (const r of pieces) assert.equal(r.wallet.address, W(P));
-  // the notes past the room stay UNSPENT
-  for (const x of [usd(2), usd(5)]) assert.equal((await noteOf(v, x)).state, "UNSPENT");
+  // the notes past the room hold their own proof alone (card balance-shows-fast: every note spendable in one tap's legs)
+  for (const x of [usd(2), usd(5)]) {
+    const n = await noteOf(v, x);
+    assert.equal(n.state, "HELD");
+    assert.deepEqual(q.ready().filter((r) => r.noteId === n.id).map((r) => r.own), [true]);
+  }
   const v1 = await vaultWith(VALUES);
   const q1 = queue(v1, piecesPool(v1, 1) as Pool<unknown>);
   await q1.refresh();
