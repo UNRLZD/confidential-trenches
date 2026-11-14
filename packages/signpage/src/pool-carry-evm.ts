@@ -153,7 +153,7 @@ export async function evmReleaseKind(helper: EvmRpc, pool: string, e: Pick<EvmPo
 
 /** W's reads at one block both RPCs hold: the block, the base fee and W's nonce (each the same on both, each RPC's kept
  *  for the rule) and W's balance (each RPC's). */
-async function wReads(rpcs: readonly [EvmRpc, EvmRpc], w: string, sleep: (ms: number) => Promise<void>, signal?: AbortSignal) {
+export async function wReads(rpcs: readonly [EvmRpc, EvmRpc], w: string, sleep: (ms: number) => Promise<void>, signal?: AbortSignal) {
   const blk = await evmRetryLag(() => evmAgreedBlock(rpcs, "latest", signal, sleep), sleep, signal);
   const tag = qty(blk.number);
   const fees = await both(rpcs, async (rpc, k) => quantity(((await rpc("eth_getBlockByNumber", [tag, false])) as { baseFeePerGas?: unknown } | null)?.baseFeePerGas, `rpc ${k} base fee`));

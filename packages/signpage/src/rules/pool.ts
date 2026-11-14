@@ -92,7 +92,7 @@ import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmP
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
 import { isReleaseSize, noteOf, releaseSizesUpTo, SOL_GRID, SOL_NOTE_FLOOR, type PieceRule } from "../../../wallet/src/pool/pieces.ts";
-import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
+import { evmPoolContextOf, evmPoolScopeOf, EVM_CHAIN_IDS, EVM_LADDER, type EvmNetwork, type EvmPoolPin, type EvmRelayData } from "../../../wallet/src/pool/evm.ts";
 
 /** The four pool kinds the page signs for (the kit's messages.ts). */
 export const POOL_KINDS = ["pool.deposit", "pool.buy", "pool.sell", "pool.withdraw"] as const;
@@ -1331,7 +1331,8 @@ export function evmOnwardSendDigest(tx: EvmOnwardSend): Uint8Array {
 }
 
 /** W's signed onward send, the raw transaction 0x02 ‖ rlp([...the nine fields, yParity, r, s]), s low: only the very
- *  send checkEvmOnwardSend passed, while it reads as the check read it, and only with W's own key. */
+ *  send checkEvmOnwardSend passed, while it reads as the check read it, and only with W's own key. A leftover's carry to
+ *  Cash (checkEvmCashCarry) is signed the same way, with its wallet's own key. */
 export function signEvmOnwardSend(secretKey: Uint8Array, tx: EvmOnwardSend): Uint8Array {
   const read = typeof tx === "object" && tx !== null ? ONWARD_CHECKED.get(tx) : undefined;
   if (!read) return refuse("unchecked");
@@ -1493,6 +1494,78 @@ export function checkEvmCarry(tx: EvmOnwardSend, ctx: EvmCarryContext, reads: Ev
     return refuse("carry_whole");
   }
   return draw;
+}
+
+/** The device's side of a leftover's carry to Cash on Base or Robinhood (src/carry-cash-evm.ts): the wallet (U_X or W),
+ *  Cash's checked deposit address, the amount quoted, the chain and the page's network. */
+export type EvmCashCarryCtx = { readonly wallet: string; readonly to: string; readonly amount: bigint; readonly chain: "base" | "robinhood"; readonly network: EvmNetwork };
+/** The device's reads for it, each as its two RPCs answered: the wallet's nonce, its balance (each RPC's own), the
+ *  plain send's estimate, the base fee (each pair agreed), the L1 fee bound (Base; 0 on Robinhood, Nitro's L1 cost is in
+ *  its gas), and the device's cap on the priority fee. */
+export type EvmCashCarryReads = {
+  readonly nonce: readonly [bigint, bigint];
+  readonly balance: readonly [bigint, bigint];
+  readonly estimate: readonly [bigint, bigint];
+  readonly baseFee: readonly [bigint, bigint];
+  readonly l1Fee: readonly [bigint, bigint];
+  readonly priorityCap: bigint;
+};
+/**
+ * A leftover's carry to Cash on Base or Robinhood (card leftovers-carry-to-cash): one type 2 plain transfer from the
+ * wallet of exactly the amount Cash's deposit quote was asked for, to that quote's checked deposit address, nothing else
+ * (no data, no access list), at the wallet's agreed nonce, on the chain's own id; its gas a plain send's (21,000 on Base,
+ * both estimates 21,000 so no code runs at the address; on Robinhood, Nitro, the agreed estimate within
+ * EVM_ONWARD_GAS_MAX, since its L1 cost is gas there), its fees within the device's bound; and the wallet's lower
+ * balance pays the amount and the whole bound with the higher L1 fee. Signed by signEvmOnwardSend with the wallet's key
+ * alone (the signer holds the key to `wallet`).
+ */
+export function checkEvmCashCarry(tx: EvmOnwardSend, ctx: EvmCashCarryCtx, reads: EvmCashCarryReads): void {
+  if (ctx?.chain !== "base" && ctx?.chain !== "robinhood") return refuse("chain");
+  // the page's network of the chain: its chain id, no replay on another chain
+  if (!EVM_NETWORK_OF[ctx.chain].includes(ctx.network)) return refuse("chain");
+  const chainId = EVM_CHAIN_IDS[ctx.network];
+  const from = ctx.wallet;
+  if (typeof from !== "string" || !EVM_ADDRESS.test(from)) return refuse("wallet");
+  if (typeof ctx.amount !== "bigint" || ctx.amount <= 0n || ctx.amount >= U256) return refuse("carry_ctx");
+  // the deposit address: an address, never the wallet itself (the money where it was), the zero address nor a precompile
+  if (typeof ctx.to !== "string" || !EVM_ADDRESS.test(ctx.to) || BigInt(ctx.to) < EVM_PRECOMPILE_TOP || lower(ctx.to) === lower(from)) return refuse("to");
+  const c = onwardCopy(tx);
+  const uint = (x: unknown) => typeof x === "bigint" && x >= 0n && x < U256;
+  // two providers' answers that differ are no read at all; the balance and the L1 fee are each one's own reading
+  const nonce = agreed(reads?.nonce, uint);
+  const base = agreed(reads.baseFee, uint);
+  const estimate = agreed(reads.estimate, uint);
+  const pair = (p: readonly [bigint, bigint] | undefined) => Array.isArray(p) && p.length === 2 && p.every(uint);
+  if (!pair(reads.balance) || !pair(reads.l1Fee) || !uint(reads.priorityCap)) return refuse("reads");
+  const cap = reads.priorityCap;
+  const low = reads.balance[0] < reads.balance[1] ? reads.balance[0] : reads.balance[1];
+  const l1 = reads.l1Fee[0] > reads.l1Fee[1] ? reads.l1Fee[0] : reads.l1Fee[1];
+  const nitro = ctx.chain === "robinhood";
+  if (nitro && l1 !== 0n) return refuse("l1_fee");
+  if (c.chainId !== chainId) return refuse("chain_id");
+  // the quote's deposit address: no redirect
+  if (lower(c.to) !== lower(ctx.to)) return refuse("transfer_to");
+  // exactly the amount quoted
+  if (c.value !== ctx.amount) return refuse("value");
+  // a plain send: no contract call dressed as one, nothing beside it
+  if (c.data !== "0x") return refuse("data");
+  if (c.accessList.length !== 0) return refuse("access_list");
+  // the wallet's nonce on two RPCs: no replacing a send of its own, no queueing behind one
+  if (c.nonce !== nonce) return refuse("nonce");
+  if (nitro) {
+    // Nitro's plain send: its agreed estimate, no padding past it, never past the cap
+    if (estimate < EVM_ONWARD_GAS || estimate > EVM_ONWARD_GAS_MAX) return refuse("gas_over_cap");
+    if (c.gasLimit !== estimate) return refuse("gas_limit");
+  } else {
+    if (c.gasLimit !== EVM_ONWARD_GAS) return refuse("gas_limit");
+    if (estimate !== EVM_ONWARD_GAS) return refuse("gas_estimate");
+  }
+  // no tip past the device's cap nor above the max fee; no max fee past two base fees and the tip, nor under the base fee
+  if (c.maxPriorityFeePerGas > cap || c.maxPriorityFeePerGas > c.maxFeePerGas) return refuse("priority_fee");
+  if (c.maxFeePerGas > 2n * base + cap || c.maxFeePerGas < base) return refuse("max_fee");
+  // the amount and the whole bound within the lower balance, the higher L1 fee in it: neither RPC's word prices it
+  if (low < c.value + c.gasLimit * c.maxFeePerGas + l1) return refuse("balance");
+  ONWARD_CHECKED.set(tx, Object.freeze({ ...c, wallet: lower(from) }));
 }
 
 /** U's signed deposit, the raw transaction 0x02 ‖ rlp([...the nine fields, yParity, r, s]), s low: only the very send
