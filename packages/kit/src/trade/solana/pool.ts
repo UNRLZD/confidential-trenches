@@ -101,9 +101,10 @@ const DISC = {
   globalConfig: [149, 8, 156, 202, 160, 252, 176, 217],
 } as const;
 
-export type SolanaPoolVenue = "pump-curve" | "pumpswap";
-/** A venue the reference prices: the pool buy's own venues and a Meteora DLMM pair (dlmm.ts). */
-export type SolanaReferenceVenue = SolanaPoolVenue | "dlmm";
+/** A venue the pool buy trades and the reference prices: pump's curve, PumpSwap's canonical pool, a Meteora DLMM pair
+ *  (dlmm.ts). The pump venues are found from the mint; a DLMM pair from the request's `dlmmPairs`. */
+export type SolanaPoolVenue = "pump-curve" | "pumpswap" | "dlmm";
+export type SolanaReferenceVenue = SolanaPoolVenue;
 export type SolanaReference = {
   expectedOut: bigint;
   /** E(a_k) for each of the request's `amounts`, in order, from the read that gave `expectedOut`; [] without them. */
@@ -586,7 +587,7 @@ export function solanaCallFault(e: unknown): string {
   return "the call failed";
 }
 
-function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: ReturnType<typeof solanaPoolAddresses>, ga: Got, gb: Got): Verdict {
+function judge(venue: "pump-curve" | "pumpswap", req: SolanaReferenceRequest, addr: ReturnType<typeof solanaPoolAddresses>, ga: Got, gb: Got): Verdict {
   const a = ga.read;
   const b = gb.read;
   if (!a || !b) {
@@ -774,10 +775,10 @@ export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, Sol
         (e: unknown): Got => ({ read: null, fault: solanaCallFault(e) }),
       ),
     )) as Promise<[Got, Got]>;
-  const lists: Record<SolanaPoolVenue, string[]> = { "pump-curve": addr.curveList, pumpswap: addr.poolList };
-  const venues: SolanaPoolVenue[] = ["pump-curve", "pumpswap"];
+  const lists: Record<"pump-curve" | "pumpswap", string[]> = { "pump-curve": addr.curveList, pumpswap: addr.poolList };
+  const venues: ("pump-curve" | "pumpswap")[] = ["pump-curve", "pumpswap"];
   const slots: number[] = [];
-  const look = async (v: SolanaPoolVenue): Promise<Verdict> => {
+  const look = async (v: "pump-curve" | "pumpswap"): Promise<Verdict> => {
     const [a, b] = await readBoth(lists[v]);
     const verdict = judge(v, req, addr, a, b);
     if (verdict.kind === "ok" && a.read && b.read) slots.push(a.read.slot, b.read.slot);

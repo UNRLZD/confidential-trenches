@@ -155,7 +155,7 @@ test("pump's buy carries the bonding-curve-v2 PDA and one of Global's buyback re
   const buy = solanaPoolBuySteps(venue, W, SPEND, req.minOut).find((x) => x.program === SOLANA_PUMP_PROGRAM)!;
   assert.equal(buy.accounts.length, 18);
   assert.equal(buy.accounts[16]!.key, solanaProgramAddress([new TextEncoder().encode("bonding-curve-v2"), base58.decode(req.token)], SOLANA_PUMP_PROGRAM));
-  assert.ok(venue.buybackFeeRecipients.includes(buy.accounts[17]!.key) && buy.accounts[17]!.writable);
+  assert.ok(venue.kind === "pump-curve" && venue.buybackFeeRecipients.includes(buy.accounts[17]!.key) && buy.accounts[17]!.writable);
 });
 
 // @pump-fun/pump-sdk 4.3.1 src/idl/pump.json (sha256 c53b8f5d…6a01) buy_exact_sol_in and @pump-fun/pump-swap-sdk 2.2.0
@@ -169,7 +169,7 @@ test("both venues' buy accounts and flags are their IDL's, then the SDKs' remain
   for (const v of ["pump", "pumpswap"] as const) {
     const { venue, req } = await setup(v);
     const buy = solanaPoolBuySteps(venue, W, SPEND, req.minOut).find((x) => x.program === (v === "pump" ? SOLANA_PUMP_PROGRAM : SOLANA_PUMP_AMM_PROGRAM))!;
-    const idl = IDL[venue.kind];
+    const idl = IDL[venue.kind as "pump-curve" | "pumpswap"];
     assert.deepEqual(buy.accounts.slice(0, idl.length).map((a) => [a.signer ? 1 : 0, a.writable ? 1 : 0]), idl.map((x) => [...x]), `${v}: the IDL's flags`);
     // remaining: pump bonding-curve-v2 (read-only), buyback recipient (writable); PumpSwap (not a cashback coin, a coin
     // creator set) pool-v2 (read-only), buyback recipient (read-only), its wSOL account (writable)
@@ -247,7 +247,7 @@ test("Global is at least 1,088 bytes and GlobalConfig exactly 949, and both list
   for (const v of ["pump", "pumpswap"] as const) {
     const kind = v === "pump" ? "pump-curve" : "pumpswap";
     const venue = await readSolanaPoolBuyVenue(providers(v), kind, fx[v].mint, () => 0);
-    assert.deepEqual(venue.buybackFeeRecipients, BUYBACK, v);
+    assert.deepEqual(venue.kind !== "dlmm" && venue.buybackFeeRecipients, BUYBACK, v);
     // a GlobalConfig one byte longer or shorter on both providers (a layout change) is refused, and a Global one byte
     // shorter; a longer Global is the pump-curve-upgrade-still-buys test's
     for (const delta of v === "pump" ? [-1] : [1, -1]) {
@@ -334,7 +334,7 @@ test("a chunk too small to land is refused: W's token account, the volume accoun
   for (const v of ["pump", "pumpswap"] as const) {
     const { venue } = await setup(v);
     const ata = solanaRentMin(rent, venue.tokenAccountSize);
-    const vol = solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE[venue.kind]);
+    const vol = solanaRentMin(rent, SOLANA_POOL_VOLUME_ACCOUNT_SIZE[venue.kind as "pump-curve" | "pumpswap"]);
     const wsol = v === "pumpswap" ? solanaRentMin(rent, 165) : 0n;
     const at = (spend: bigint) => solanaPoolBuyFunds(release, venue, { spend, tip: TIP }, rent);
     // the review's GAP-2: the spend takes the whole chunk, nothing for W's accounts

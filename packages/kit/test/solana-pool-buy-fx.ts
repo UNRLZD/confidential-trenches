@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { base58, base64 } from "@scure/base";
 import { solanaPoolAddresses } from "../src/trade/solana/pool.ts";
+import { readSolanaDlmmBuyVenue } from "../src/trade/solana/pool-buy.ts";
 import {
   readSolanaPoolBuyVenue,
   readSolanaReference,
@@ -64,15 +65,35 @@ export const replay = (rec: { reads: Record<string, unknown>[] }, p: 0 | 1, edit
     return edit ? edit(params[0] as string[], copy) : copy;
   }) as SolanaRpc;
 export const providers = (v: "pump" | "pumpswap") => [replay(fx[v], 0), replay(fx[v], 1)] as const;
+// NEARKAT's DLMM pair B8BH6ZKr… as two mainnet providers answered it (test/vectors/nearkat-dlmm.json, solana-dlmm.test.ts)
+export const dlmmVector = JSON.parse(readFileSync(new URL("./vectors/nearkat-dlmm.json", import.meta.url), "utf8")) as {
+  mint: string; pair: string; providers: Record<string, { slot: number; accounts: Record<string, { owner: string; data: string } | null> }>;
+};
+export const dlmmReplay = (p: 0 | 1, edit: (addr: string, data: Uint8Array) => Uint8Array = (_a, d) => d): SolanaRpc => {
+  const rec = Object.values(dlmmVector.providers)[p]!;
+  return (async (method: string, params: readonly unknown[]) => {
+    assert.equal(method, "getMultipleAccounts");
+    return {
+      context: { slot: rec.slot },
+      value: (params[0] as string[]).map((a) => {
+        const x = rec.accounts[a];
+        return x ? { owner: x.owner, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(edit(a, base64.decode(x.data))), "base64"] } : null;
+      }),
+    };
+  }) as SolanaRpc;
+};
+export const dlmmProviders = () => [dlmmReplay(0), dlmmReplay(1)] as const;
 export const SPEND = 5_000_000n;
 export const BLOCKHASH = base58.encode(new Uint8Array(32).fill(7));
 export const TIP = 10_000n;
 
-export async function setup(v: "pump" | "pumpswap" = "pump", spend = SPEND) {
-  const kind = v === "pump" ? "pump-curve" : "pumpswap";
-  const mint = fx[v].mint as string;
-  const venue = await readSolanaPoolBuyVenue(providers(v), kind, mint, () => 2);
-  const ref = await readSolanaReference(providers(v), { side: "buy", token: mint, amount: spend });
+export async function setup(v: "pump" | "pumpswap" | "dlmm" = "pump", spend = SPEND) {
+  const kind = v === "pump" ? "pump-curve" : v;
+  const mint = v === "dlmm" ? dlmmVector.mint : (fx[v].mint as string);
+  const venue = v === "dlmm" ? await readSolanaDlmmBuyVenue(dlmmProviders(), mint, dlmmVector.pair, "buy") : await readSolanaPoolBuyVenue(providers(v), kind, mint, () => 2);
+  const ref = v === "dlmm"
+    ? await readSolanaReference(dlmmProviders(), { side: "buy", token: mint, amount: spend, dlmmPairs: [dlmmVector.pair] })
+    : await readSolanaReference(providers(v), { side: "buy", token: mint, amount: spend });
   assert.ok(ref && ref.slot !== undefined);
   const E = ref.pools.find((p) => p.venue === kind)!.expectedOut;
   const minOut = (E * 9_700n) / 10_000n;
