@@ -25,11 +25,15 @@ const SOL = 1_000_000_000n;
 const CHUNKS = [10_000_000n, 20_000_000n, 50_000_000n, SOL / 10n, SOL, 7n * SOL + 123n, 1_000n * SOL];
 const release = (withdrawnValue: bigint, relayFee: bigint) => ({ withdrawnValue, relayFee }) as SolanaPoolRelease;
 /** A venue for solanaPoolBuyFunds, which reads its kind, token account size and cashback flag. */
-const venue = (v: { kind: "pump-curve" | "pumpswap"; tokenAccountSize: number; cashback: boolean }) => v as unknown as SolanaPoolBuyVenue;
+const venue = (v: { kind: "pump-curve" | "pumpswap" | "dlmm"; tokenAccountSize: number; cashback: boolean }) => v as unknown as SolanaPoolBuyVenue;
 /** Every venue shape the kit's venue reader admits: both kinds, cashback or not, each token account size it computes. */
 // Token: 165; Token-2022: 170 (type byte, ImmutableOwner) and 4 + each extra the mint's extensions ask (8, 0, 1, 0)
 const SIZES = [165, ...new Set(Array.from({ length: 16 }, (_, m) => 170 + [12, 4, 5, 4].reduce((s, x, i) => s + (m & (1 << i) ? x : 0), 0)))];
-const VENUES = (["pump-curve", "pumpswap"] as const).flatMap((kind) => [false, true].flatMap((cashback) => SIZES.map((tokenAccountSize) => ({ kind, tokenAccountSize, cashback }))));
+const VENUES = [
+  ...(["pump-curve", "pumpswap"] as const).flatMap((kind) => [false, true].flatMap((cashback) => SIZES.map((tokenAccountSize) => ({ kind, tokenAccountSize, cashback })))),
+  // a Meteora DLMM pair (card solana-buy-reaches-raydium-and-meteora): no cashback, its coin on Token or Token-2022
+  ...SIZES.map((tokenAccountSize) => ({ kind: "dlmm" as const, tokenAccountSize, cashback: false })),
+];
 
 test("the worst venue: pump's curve on a cashback coin (its sell after graduation makes both PumpSwap cashback accounts) and the largest token account the venue reader admits (195 bytes)", () => {
   assert.deepEqual({ ...SOLANA_POOL_WORST_BUY_VENUE }, { kind: "pump-curve", tokenAccountSize: 195, cashback: true });
@@ -97,7 +101,7 @@ test("Solana: the max spend is the chunk less the fee, the tip, W's new accounts
 // The re-review of 3bdca74 (critical): a coin bought on pump's curve that graduates sells on PumpSwap only, which needs
 // the fee and rent(165) up front, and on a cashback coin W's PumpSwap volume account and its wrapped-SOL account too
 // (the sell names both, writable; a curve buy makes neither). A curve buy that kept the curve's own need stranded W.
-const sellNeedAfter = (rent: SolanaRent, v: { kind: "pump-curve" | "pumpswap"; cashback: boolean }): bigint =>
+const sellNeedAfter = (rent: SolanaRent, v: { kind: "pump-curve" | "pumpswap" | "dlmm"; cashback: boolean }): bigint =>
   5_000n + solanaRentMin(rent, 165) + (v.kind === "pump-curve" && v.cashback ? solanaRentMin(rent, 137) + solanaRentMin(rent, 165) : 0n);
 test("Solana: a max-spend buy leaves W what its sell needs up front on every venue the coin sells on, PumpSwap after a curve coin graduates", () => {
   for (const rent of RENTS) {
@@ -125,7 +129,7 @@ test("Solana: a buy that would leave W short of its sell's up-front need is refu
     assert.equal(solanaPoolBuyFunds(release(SOL / 10n, fee), venue(v), { spend: max, tip: 0n }, rent).left, need, JSON.stringify(v));
     // a spend that leaves W 1 lamport short, the fee short, at the first max (W at 0 on the curve, the wrapped-SOL rent
     // on PumpSwap) or at 3bdca74's (the curve's own need, fee and rent(0), run 5's W) is refused
-    const firstMax = max + (v.kind === "pumpswap" ? 5_000n : need);
+    const firstMax = max + (v.kind === "pumpswap" || v.kind === "dlmm" ? 5_000n : need);
     const curveOwn = max + need - (5_000n + solanaRentMin(rent, 0));
     for (const spend of [max + 1n, max + 5_000n, firstMax, ...(v.kind === "pump-curve" ? [curveOwn] : [])])
       assert.match(String(solanaPoolBuyFunds(release(SOL / 10n, fee), venue(v), { spend, tip: 0n }, rent).problem), /its sell needs up front/, `${JSON.stringify(v)} spend ${spend}`);
@@ -143,8 +147,9 @@ test("Solana: never below 0: a chunk the fee, the tip and the accounts eat is 0"
 // their sum less four relay fees, less the per-buy costs once (the tip cap, W's accounts, the sell's need), not one
 // piece's.
 const PIECES_OF_THE_ACCOUNT = [10_000_000n, 5_000_000n, 5_000_000n, 5_000_000n];
-const perBuy = (rent: SolanaRent, v: { kind: "pump-curve" | "pumpswap"; tokenAccountSize: number; cashback: boolean }): bigint =>
-  solanaRentMin(rent, v.tokenAccountSize) + solanaRentMin(rent, 137) + (v.kind === "pumpswap" && v.cashback ? solanaRentMin(rent, 165) : 0n) + sellNeedAfter(rent, v);
+const perBuy = (rent: SolanaRent, v: { kind: "pump-curve" | "pumpswap" | "dlmm"; tokenAccountSize: number; cashback: boolean }): bigint =>
+  // pump makes W's volume account (137 bytes) on a buy; a DLMM swap makes none
+  solanaRentMin(rent, v.tokenAccountSize) + (v.kind === "dlmm" ? 0n : solanaRentMin(rent, 137)) + (v.kind === "pumpswap" && v.cashback ? solanaRentMin(rent, 165) : 0n) + sellNeedAfter(rent, v);
 test("Solana pieces: Max over the account's four pieces is 25,000,000 less four relay fees, less the tip cap and the venue's per-buy costs once", () => {
   const rent = RENTS[0]!;
   const fee = solanaPoolFee(rent); // 1,300,000
