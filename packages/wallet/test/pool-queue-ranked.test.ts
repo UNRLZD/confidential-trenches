@@ -136,3 +136,35 @@ test("the gate: a hold keeps every rest proof back, never a max one; its release
   await rest;
   assert.deepEqual(order, ["m", "r"]);
 });
+
+test("eight equal notes on Solana: every note holds a proof, Max's set made first, then each other note's own (box run 14 Nov 04:46Z)", async () => {
+  // before: tier 1 took the 3 largest, with equal notes the primary and 2 of tier 2's room, so notes 5 to 8 had no
+  // proof and a tap's legs could spend 4 notes of 8 (Max held at one W's 4 pieces)
+  const p = worker();
+  const gate = proverGate(p);
+  const v = await vaultWith(Array.from({ length: 8 }, () => usd(5)));
+  const pool = fakePool(v, "test:sol8", 4);
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool, provers: [p], hardwareConcurrency: 4, ranked: gate });
+  open.push(q as ProofQueue<unknown>);
+  const pass = await q.refresh();
+  assert.deepEqual(pass.failed, []);
+  const ready = q.ready();
+  const notes = (await v.ns.list()).filter((n) => n.scope === SCOPE && n.leaf !== undefined);
+  assert.equal(notes.length, 8);
+  for (const n of notes) assert.ok(ready.some((r) => r.noteId === n.id), `note ${n.leaf!.leafIndex} holds a proof`);
+  const max = maxSet(ready);
+  assert.equal(max.size, 4, "Max: the primary's own proof and 3 pieces");
+  assert.deepEqual(p.ran.slice(0, 4).every((c) => max.has(c)), true, `Max's set first: ${p.ran.map((c) => (max.has(c) ? "M" : "r")).join("")}`);
+  // the others: each its own W, so each a leg of its own
+  const others = ready.filter((r) => !max.has(r.binding.context.toString()));
+  assert.equal(others.length, 4);
+  assert.ok(others.every((r) => r.own === true));
+  assert.equal(new Set(ready.filter((r) => r.own === true).map((r) => r.wallet.address)).size, 5, "five Ws: Max's and one per other note");
+  // and at the next epoch every one is made again, Max's set first
+  pool.t.now += E;
+  p.ran.length = 0;
+  await q.refresh();
+  const again = maxSet(q.ready());
+  assert.equal(p.ran.length, 8);
+  assert.ok(p.ran.slice(0, 4).every((c) => again.has(c)), p.ran.map((c) => (again.has(c) ? "M" : "r")).join(""));
+});
