@@ -88,6 +88,7 @@ import { ERC20_DECIMALS, keptTokenDecimals, type PoolRpc } from "./pool-kinds.ts
 import { stageOfLegs, type PoolSellAnswer, type PoolSellLeg } from "./pool-sell.ts";
 import { clockOf as readClockOf, readWaits, stopOf, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { refusalRule } from "./refusal-rule.ts";
+import { nonceFinal, type Spent } from "./pool-deposit-evm.ts";
 import { wTailKeyOf } from "./w-tails.ts";
 import { duringTrade, TRADE_HELPER } from "./trade.ts";
 import { shuffled } from "./positions-evm.ts";
@@ -473,7 +474,7 @@ const openSaleEnded = (o: EvmOpenSell, q: EvmPoolSellQuote): boolean => /^\d{1,2
 /** The read-back's state: each RPC's `stop`, and the round's want. */
 /** `mine`: the run's own Sell signatures (hex), each one it sent: a deposit whose transaction carries none of them is
  *  another signature's of the same nonce and note (another device's), never this run's fill. */
-type Watch = { open: EvmOpenSell; stops: [bigint | null, bigint | null]; hint: string | null; q: EvmPoolSellQuote | null; none: bigint | null; mine?: string[] };
+type Watch = { open: EvmOpenSell; stops: [bigint | null, bigint | null]; hint: string | null; q: EvmPoolSellQuote | null; none: bigint | null; mine?: string[]; taken?: Spent };
 
 /** One leg of one sell: signed, recorded, sent, read back. The tap waits on the send at most EVM_SELL_SEND_TAP_MS (a
  *  busy helper's waits and the second signature run on past it, kept by the page) and on the read-back at most
@@ -782,9 +783,15 @@ async function watch(h: EvmSellHost, x: Watch, more: () => boolean, wait: (ms: n
       if (used.some((n) => n > BigInt(x.open.nonce))) {
         if (at < deadlineMs + BigInt(EVM_SELL_USED_GRACE_MS)) continue;
         // past the grace with no Deposited of it: W's Sell nonce taken at a final block on both is a Sell that ran and
-        // deposited nothing (SellDelegate v2 under the least rung, its transaction unknown): landed, never not_landed
-        const taken = await Promise.all(h.rpcs.map(async (rpc) => word0(await rpc("eth_call", [{ to: x.open.w, data: nonceCall() }, "finalized"]), "nonce", true))).catch(() => null);
-        if (taken === null || taken.some((n) => n <= BigInt(x.open.nonce))) continue;
+        // deposited nothing (SellDelegate v2 under the least rung, its transaction unknown): landed, never not_landed.
+        // Read as the deposit's dead send is (nonceFinal): W's nonce at the newest block both RPCs hold, by its hash
+        // (EIP-1898), that block kept and its finality read from headers, never state at "finalized" (Robinhood's
+        // nodes keep ~10 to 24 s of state and refuse it, card evm-deposit-note-stays-incoming)
+        const taken = await nonceFinal(h.rpcs, async (rpc, at) => word0(await rpc("eth_call", [{ to: x.open.w, data: nonceCall() }, { blockHash: at }]), "nonce", true), BigInt(x.open.nonce), x.taken, wait, h.signal).catch(() => null);
+        if (!live()) return null;
+        if (taken === null) continue;
+        x.taken = taken.kept;
+        if (taken.final === null) continue;
         const end = await bareEnd(h, x, null, true, [], tap);
         if (end === undefined) continue;
         return end;

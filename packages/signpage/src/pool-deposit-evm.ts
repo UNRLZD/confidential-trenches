@@ -182,7 +182,7 @@ const both = <T>(rpcs: readonly [EvmRpc, EvmRpc], f: (rpc: EvmRpc, k: number) =>
  *  refused by pruned nodes (Robinhood's keep ~10 to 24 s), so the read is made once, at the newest block, and its block
  *  is waited on until final. The pass keeps it with the note's record (NoteRecord.evmSpent), so a reload waits on the
  *  same block; the end's reads keep their own for the follow's life. Nothing of it lives in the page past either. */
-type Spent = { number: bigint; hash: string };
+export type Spent = { number: bigint; hash: string };
 /** A block header by tag or number on one RPC: its number and hash (headers are served at any age; state is not). */
 async function headerOf(rpc: EvmRpc, at: string, what: string): Promise<Spent> {
   const b = (await rpc("eth_getBlockByNumber", [at, false])) as { number?: unknown; hash?: unknown } | null;
@@ -201,11 +201,18 @@ async function headerOf(rpc: EvmRpc, at: string, what: string): Promise<Spent> {
  * sends is in the pool's events up to it. `check` runs before each read and `signal` ends the lag waits (sign out).
  */
 export async function spentFinal(rpcs: readonly [EvmRpc, EvmRpc], u: string, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal, check: () => void = () => {}): Promise<{ final: bigint | null; kept: Spent | undefined }> {
+  return nonceFinal(rpcs, async (rpc, at, k) => quantity(await rpc("eth_getTransactionCount", [u, { blockHash: at }]), `rpc ${k} nonce at ${at}`), nonce, kept, sleep, signal, check);
+}
+
+/** spentFinal's rule for any nonce `read` at a block by its hash (EIP-1898): U's account nonce for a deposit's sends, W's
+ *  SellDelegate Sell nonce for a sale (pool-sell-evm.ts). Never a state read at "finalized" or "safe" (Robinhood's
+ *  nodes refuse it): the nonce is read at the newest block both RPCs hold, and its finality from block headers. */
+export async function nonceFinal(rpcs: readonly [EvmRpc, EvmRpc], read: (rpc: EvmRpc, blockHash: string, k: number) => Promise<bigint>, nonce: bigint, kept: Spent | undefined, sleep: (ms: number) => Promise<void>, signal?: AbortSignal, check: () => void = () => {}): Promise<{ final: bigint | null; kept: Spent | undefined }> {
   if (kept === undefined) {
     check();
     const b = await evmRetryLag(() => evmAgreedBlock(rpcs, "latest", signal, sleep), sleep, signal);
     check();
-    const at = await both(rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [u, { blockHash: b.hash }]), `rpc ${k} nonce at ${b.hash}`));
+    const at = await both(rpcs, (rpc, k) => read(rpc, b.hash, k));
     if (at[0] <= nonce || at[1] <= nonce) return { final: null, kept: undefined };
     kept = { number: b.number, hash: b.hash.toLowerCase() };
   }
