@@ -6,6 +6,8 @@
 // GARBAGE_COLLECTED_BLOCK for a block 24 h back and dRPC answered it (read 2026-11-11 18:3xZ), so the RPCs a past read
 // asks are given per read (PAST_RPCS first).
 
+import { HOST_PACE_MS } from "../../limits/limits.ts";
+
 /** Mainnet NEAR RPCs, two operators: FastNEAR first, dRPC second. */
 export const NEAR_RPCS = ["https://free.rpc.fastnear.com", "https://near.drpc.org"] as const;
 /** For a read a day back: dRPC holds it, FastNEAR's free RPC has dropped it (above); near.org's keyless archival host
@@ -41,7 +43,7 @@ export function pacedFetch(base: Fetch = (u, i) => fetch(u, i), clock: { now: ()
     if ((heldUntil.get(host) ?? 0) > t) throw new Error("host held");
     const at = Math.max(t, next.get(host) ?? 0);
     if (at - t > WAIT_MAX_MS) throw new Error("host busy");
-    next.set(host, at + HOST_GAP_MS);
+    next.set(host, at + (HOST_PACE_MS[host] ?? HOST_GAP_MS));
     if (at > t) await clock.sleep(at - t);
     const r = await base(url, init);
     if (r.status === 429) heldUntil.set(host, clock.now() + HOLD_MS);

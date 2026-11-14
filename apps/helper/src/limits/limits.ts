@@ -191,6 +191,19 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *     521, its origin down, 17:36-22:42Z on 6 Nov): 2, 4 and 6 a second for 6 s none refused; batches of 5 answered, of 10
  *     refused (code 8, "maximum of 5 requests"), 22:45Z. Paced at 4 calls a second, 5 at once.
  */
+/**
+ * The least time between two calls' starts to a keyless market data host, one schedule for the whole process (the NEAR
+ * market reads' paced fetch, data/near/views.ts pacedFetch; a host not named here is paced at its HOST_GAP_MS). A 429
+ * holds the host for a minute either way. Card every-cell-shows-a-value:
+ *   - api.unrealized.trade (the engine's public /v1, data/near/engine.ts): its one per-IP read limit is 120 a minute
+ *     for data it must fetch first (a token it has not cached; V1_LIMITS.coldReadsPerMin in the unrealized.trade repo,
+ *     read 2026-11-14 04:1xZ); its lists and a listed token's reads are cached. Paced at 4 calls a second: the lists
+ *     take 4 calls every 10 s and a token page 4, so a cold page's reads all start within a second.
+ *   - api.gopluslabs.io (token_security, data/goplus.ts): its free tier is 150 CU a minute and 30k a day
+ *     (gopluslabs.io/security-api, read 2026-11-14 04:0xZ); three calls back to back from one Mac answered one non-JSON
+ *     reply. Paced at one call every 2 s, each token's answer held 10 min.
+ */
+export const HOST_PACE_MS: Readonly<Record<string, number>> = { "api.unrealized.trade": 250, "api.gopluslabs.io": 2_000 };
 export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
   "https://rpc-robinhood.blockmachine.io": { perS: 0.5, burst: 25, unit: "call" },
