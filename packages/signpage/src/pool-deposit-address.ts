@@ -76,6 +76,57 @@ export function poolQuotePricing(p: PoolStatePrice | null, origin: string, chain
     : { decimalsIn: USDC_DECIMALS, pricing: { in: ["1", "1"], out: [usd, usd] } };
 }
 
+/** A Move's quote pricing (card move-one-confidential-swap): another pool's coin (`from`'s, 1Click's id for it) into X's
+ *  pool, at the device's own price of each (src/pool-price.ts), both reads each; Cash's USDC as poolQuotePricing prices
+ *  it. None for any other origin or with either price unread (no quote is asked). */
+export function poolMovePricing(price: (chain: PoolChain) => PoolStatePrice | null, origin: string, chain: PoolChain): PoolQuotePricing | null {
+  const to = price(chain);
+  if (to === null) return null;
+  const from = (Object.keys(POOL_DEPOSIT_DESTINATION) as PoolChain[]).find((c) => c !== chain && POOL_DEPOSIT_DESTINATION[c] === origin);
+  if (from === undefined) return isPlainSend(chain, origin) ? null : poolQuotePricing(to, origin, chain);
+  const p = price(from);
+  if (p === null) return null;
+  const usd = usdOf(p), out = usdOf(to);
+  return { decimalsIn: POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[from]], pricing: { in: [usd, usd], out: [out, out] } };
+}
+
+/** 1Click's own address, asked by the device directly with no key (never through the helper): the confidential tell. */
+export const ONECLICK_PUBLIC_STATUS = "https://1click.chaindefuser.com/v0/status";
+
+/**
+ * The confidential tell (card move-one-confidential-swap): whether 1Click itself, asked from this device with no key,
+ * knows `address` as a public swap. `confidentiality` and the fee entry are not in 1Click's signed message
+ * (kit checks/oneclick.ts ONECLICK_CONFIDENTIAL_COLLECTOR), so a broken-in helper could ask "public" and rewrite both;
+ * the echo and the collector pin would not see it. This read does not pass the helper: on 2026-11-14 03:38Z keyless
+ * GET /v0/status answered PENDING_DEPOSIT for a public quote's address made with the helper's key and 404 "Deposit
+ * address <address> not found" for a confidential one. So "hidden" only on that exact 404; a status answer is a public
+ * swap ("public", refused); 429, 5xx, no answer or anything else is "down" (nothing paid, asked again).
+ * The cost, weighed against M359 (1) (no device-direct read that tells a public provider the user's wallets): 1Click
+ * learns this device's IP beside one deposit address, never U_X's holdings, and 1Click already holds that swap whole,
+ * since it runs the confidential rails. Without the read, a broken-in helper could make every Move public and tie the
+ * two pools together on chain for anyone to read. The read stays: it is the one tell the helper cannot forge; the IP
+ * 1Click sees is a named limit on the judge-answer sheet.
+ */
+export async function oneClickHidden(address: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<"hidden" | "public" | "down"> {
+  let r: Response;
+  try {
+    r = await fetchFn(`${ONECLICK_PUBLIC_STATUS}?depositAddress=${encodeURIComponent(address)}`, { method: "GET", credentials: "omit", referrerPolicy: "no-referrer", ...(signal === undefined ? {} : { signal }) });
+  } catch {
+    return "down";
+  }
+  let body: unknown = null;
+  try {
+    const t = await r.text();
+    if (t.length <= 65_536) body = JSON.parse(t);
+  } catch {
+    body = null;
+  }
+  const o = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  if (r.status === 404 && o?.message === `Deposit address ${address} not found`) return "hidden";
+  if (r.status === 200 && typeof o?.status === "string") return "public";
+  return "down";
+}
+
 /** True when `origin` is X's own pool coin on X (1Click's id for it, POOL_DEPOSIT_DESTINATION: SOL on Solana, ETH on
  *  Base and Robinhood): money sent straight to U_X, with no quote (card deposit-takes-each-pools-own-coin). */
 export const isPlainSend = (chain: PoolChain, origin: unknown): boolean =>
@@ -114,6 +165,11 @@ export interface PoolAddressDeps {
    *  leaves (packages/wallet/src/deposit/quote.ts askDepositQuoteAgain). */
   stop?: () => AbortSignal;
   now?: () => number;
+  /** A Move's host (card move-one-confidential-swap): every 1Click quote asks confidentiality "advanced" and is checked
+   *  as one (pool-deposit-quote.ts `confidential`; the kit's echo and the confidential collector). */
+  confidential?: true;
+  /** The confidential tell (oneClickHidden), read with no key from the device; a Move's host with none answers no quote. */
+  hidden?(address: string, signal?: AbortSignal): Promise<"hidden" | "public" | "down">;
 }
 
 type Named = { record: DepositRecord; wallet: string; status: NonNullable<DepositPublic["status"]> };
@@ -277,7 +333,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       }
       let request;
       try {
-        request = poolDepositQuoteRequest(chain, before.wallet, before.record.id, origin, amount, now());
+        request = poolDepositQuoteRequest(chain, before.wallet, before.record.id, origin, amount, now(), deps.confidential === true);
       } catch {
         return;
       }
@@ -305,12 +361,19 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
           refundId: before.record.id,
           check: { path: DEPOSIT_QUOTE_PATH, pricing: atCheck.pricing, decimalsIn: atCheck.decimalsIn, decimalsOut, now: now() },
           floor,
+          ...(deps.confidential === true ? { confidential: true as const } : {}),
         });
       } catch (e) {
         return void (out = { error: e instanceof DepositRuleRefused ? "not_allowed" : "quote_check_failed" });
       }
       const timeEstimate = checked.timeEstimate;
       if (checked.depositAddress === undefined || checked.deadline === undefined) return void (out = { error: "quote_check_failed" });
+      // a Move's quote: 1Click itself, asked with no key from this device, must not know the address as a public swap
+      if (deps.confidential === true) {
+        const seen = deps.hidden === undefined ? "down" : await deps.hidden(checked.depositAddress, stop).catch(() => "down" as const);
+        if (stopped()) return void (out = { error: "not_allowed" });
+        if (seen !== "hidden") return void (out = { error: seen === "public" ? "quote_check_failed" : "down" });
+      }
       if (typeof timeEstimate !== "number" || !Number.isSafeInteger(timeEstimate) || timeEstimate < 0) return void (out = { error: "quote_check_failed" });
 
       // the address stands only while the records are the ones it was asked under

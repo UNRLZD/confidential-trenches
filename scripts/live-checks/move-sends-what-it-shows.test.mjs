@@ -10,7 +10,7 @@ import { appOf, facts, judge } from "./move-sends-what-it-shows.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./move-sends-what-it-shows.answers.json", import.meta.url), "utf8"));
 const LIMITS = "BAD pool.move.dry answers no amount it can send for one it cannot: the sheet has no Max, Min or Try to show";
-const PRICED = (n) => `BAD pool.move.dry names max on ${n} of its 3 priced answers: Max is not what the move sends`;
+const PRICED = (n) => `BAD pool.move.dry names max on ${n} of its 4 priced answers: Max is not what the move sends`;
 const FLOOR = "BAD a pool to pool dry does not read the destination pool's floor first: a move under it ends with its money in Cash";
 const HOLD = "BAD pool.move does not hold to its dry: a move the dry refuses still leaves Cash or its pool";
 const APP = (m) => `BAD APP_HOST's scripts lack the move sheet's ${m}: its Max or its hint is not what the page can send`;
@@ -19,6 +19,12 @@ test("recorded good answer: this card's builds hold every move to what it can se
   const v = judge(ANSWERS.good);
   assert.equal(v.ok, true, v.lines.join("\n"));
   assert.deepEqual(v.lines, []);
+});
+
+test("recorded goodRelease133 (three priced answers, before card move-one-confidential-swap's one-swap dry): FAIL, the count named", () => {
+  const v = judge(ANSWERS.goodRelease133);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [PRICED(3)]);
 });
 
 for (const k of ["bad", "liveBefore"]) {

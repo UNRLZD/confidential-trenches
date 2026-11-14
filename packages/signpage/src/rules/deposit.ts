@@ -274,7 +274,7 @@ export function checkDepositCall(delegate: Uint8Array, ctx: DepositCallContext):
 /** The request keys a deposit quote may carry (§2.4 step 2): no sessionId, connectedWallets or customRecipientMsg. */
 const QUOTE_KEYS = new Set([
   "dry", "swapType", "slippageTolerance", "originAsset", "depositType", "destinationAsset", "amount", "refundTo",
-  "refundType", "recipient", "recipientType", "deadline", "quoteWaitingTimeMs", "referral",
+  "refundType", "recipient", "recipientType", "deadline", "quoteWaitingTimeMs", "referral", "confidentiality",
 ]);
 
 export interface DepositQuoteContext {
@@ -284,6 +284,9 @@ export interface DepositQuoteContext {
   depositId: string;
   /** The kit's 1Click check options but the output's place: a deposit's output always goes into the vault. */
   check: Omit<OneClickCheckOptions, "intoVault">;
+  /** A Move's quote (card move-one-confidential-swap): the request must ask confidentiality "advanced"; absent, a request
+   *  that asks it is refused, so the mode is always the caller's. */
+  confidential?: true;
 }
 
 /**
@@ -308,5 +311,6 @@ export function checkDepositQuote(request: OneClickRequest, answer: unknown, ctx
   if (req.recipientType !== "DESTINATION_CHAIN") refuse("recipientType");
   if (req.refundTo !== u) refuse("refundTo");
   if (req.refundType !== "INTENTS") refuse("refundType");
+  if (ctx.confidential === true ? req.confidentiality !== "advanced" : "confidentiality" in req) refuse("confidentiality");
   return checkOneClickQuote(req, answer, { ...ctx.check, intoVault: true });
 }

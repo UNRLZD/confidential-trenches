@@ -81,7 +81,7 @@ import type { CarrySender } from "./carry-cash.ts";
 import { POOL_RENT_BACK_SPACE_MAX_MS, POOL_RENT_BACK_SPACE_MIN_MS } from "./device-spacing.ts";
 import type { CarryOpen } from "./carry-cash.ts";
 import { depositToEnd, depositWalletsOf, evmQuoteRoute, poolAgainWait, poolFollows, poolRefundMover, solanaPoolFollowDeps, uxHeldOf, uxNoteLanded, uxNoteOpen, poolFollowEnded, type PoolFollowHost, type PoolFollowRecord } from "./pool-deposit-follow.ts";
-import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import { POOL_ADDRESS_ASSET, POOL_FLOOR_PLACEHOLDER, oneClickHidden, poolMovePricing, poolQuotePricing, readEvmPoolFloor, readSolanaPoolFloor, walletOf, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import type { EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
@@ -312,10 +312,13 @@ else {
   // note, which buys on Rhea; its sell sells all of it back and moves the USDC into the vault; top-level only, as the
   // pool flow
   // one balance on every chain (src/cash-to-pool.ts, card one-balance-buys-on-every-chain): a Solana buy above one tap's
-  // spend moves its shortfall from Cash first, through the deposit sheet's own quote into U_X (poolAddress, below) and
+  // spend moves its shortfall from Cash first, through the Move's own quote into U_X (poolMoveAddress, below) and
   // the vault's hand-off to its deposit address, then buys once one tap spends the ask (tapDry, below: the dry read
   // with no trade gate, since the tap's own run holds it)
   // one mover per signed-in session (its signal is the sign out's): a move on its way is never counted for another
+  // the floor a Move's quote into a pool is held to (pool.address's), read for a message by the pool's pinned fee payer on
+  // Solana (a deposit's fee is the same for any one signer, and the read names no account of the user's)
+  const moveFloor = (chain: PoolChain): Promise<bigint | null> => (chain === "solana" ? (PAGE_SOL_PIN === undefined ? Promise.resolve(null) : floorFor(chain, PAGE_SOL_PIN.feePayer)) : evmRoute.floor(chain));
   let cashMoverOf: { signal: AbortSignal; m: ReturnType<typeof cashMover> } | null = null;
   const cashMoverNow = (): ReturnType<typeof cashMover> => {
     const signal = withdrawWait.signal;
@@ -328,7 +331,7 @@ else {
       // NEAR Intents only: no Relay (a hop between pools ties two chains together, lite paper v2 §4)
       rails: ["1click"],
       quote: async (chain, usdc, id) => {
-        const r = poolAddress({ chain, origin_asset: `nep141:${NEAR_NETWORKS.mainnet.usdc}`, amount: formatPoolUnits(usdc, 6) }, { id });
+        const r = poolMoveAddress({ chain, origin_asset: `nep141:${NEAR_NETWORKS.mainnet.usdc}`, amount: formatPoolUnits(usdc, 6) }, { id });
         await r.after;
         const a = r.answer();
         if (a === null || "error" in a) return { error: a === null ? "failed" : a.error };
@@ -344,7 +347,7 @@ else {
       // a pool's quote floor, the same read pool.address checks against: an EVM pool's least rung plus one deposit's gas;
       // Solana's rung, one deposit's cost and the rent U_X keeps, its fee read for a message by the pool's pinned fee
       // payer (a deposit's fee is the same for any one signer, and the read names no account of the user's)
-      floor: (chain) => (chain === "solana" ? (PAGE_SOL_PIN === undefined ? Promise.resolve(null) : floorFor(chain, PAGE_SOL_PIN.feePayer)) : evmRoute.floor(chain)),
+      floor: (chain) => moveFloor(chain),
       // the quote's follow op ended: its money is in the pool (or refunded), no longer on its way
       landed: async (id) => {
         const op = await (await open()).get("ops", id).catch(() => undefined);
@@ -369,6 +372,9 @@ else {
     priced: (origin) => pricedPoolCoin(origin, (c) => prices.get(c)),
     checked: (id, r, u) => follows!.quoted(id, r, u),
     stop: quotesStopped,
+    // a Move into Cash (card move-one-confidential-swap): one confidential swap, held to 1Click's keyless tell
+    confidential: true,
+    hidden: (address, signal) => oneClickHidden(address, fetch, signal),
   });
   let toCashOf: { signal: AbortSignal; m: ReturnType<typeof poolToCash> } | null = null;
   const toCashNow = (): ReturnType<typeof poolToCash> => {
@@ -394,7 +400,26 @@ else {
       put: async (id, rec) => void (await (await open()).put("ops", id, rec)),
       now: () => Date.now(),
       signal,
-      // pool to pool: Cash's own move on into the other pool (the mover's move), sized by the deposit's least USDC
+      // pool to pool (card move-one-confidential-swap): one confidential swap, X's coin into Y's pool to U_Y, quoted by the
+      // Move host (checked at the device's prices, Y's floor and 1Click's keyless tell, the pool follow written under
+      // `id`), then the pool run pays its address and the pool follow carries it in; no vault stop
+      direct: {
+        quote: async (from, to, amount, id) => {
+          const dIn = POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[from]], dOut = POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[to]];
+          const r = poolMoveAddress({ chain: to, origin_asset: POOL_COIN_ASSET[from], amount: formatPoolUnits(amount, dIn) }, { id });
+          await r.after;
+          const a = r.answer();
+          if (a === null || "error" in a) return { error: a === null ? "failed" : a.error };
+          const q = a.result.quote;
+          const amountIn = q === undefined ? null : parsePoolUnits(q.amount_in, dIn);
+          const minOut = q === undefined ? null : parsePoolUnits(q.min_amount_out, dOut);
+          if (q === undefined || amountIn !== amount || minOut === null) return { error: "quote_check_failed" };
+          return { address: q.deposit_address, minOut };
+        },
+        follow: async (id) => (await (await open()).get("ops", id).catch(() => undefined)) as MoveFollow | undefined,
+        floor: (to) => moveFloor(to),
+      },
+      // moves written before one-swap Moves (with `cash`): Cash's own move on into the other pool, sized by the deposit's least USDC
       onward: { move: (to, usdc, id) => cashMoverNow().move(to, usdc, id), fee: () => withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal }).fee() },
     });
     toCashOf = { signal, m };
@@ -606,9 +631,10 @@ else {
     const pair = solPair();
     return pair !== null && PAGE_SOL_PIN !== undefined ? readSolanaPoolFloor(pair, PAGE_SOL_PIN.program, wallet, signal) : null;
   };
-  // where money for a pool goes (src/pool-deposit-address.ts), for a moving tap (cashMoverNow): the same host as the
-  // deposit sheet's pool.address below, on the same reads, floor and follow
-  const poolAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped });
+  // a Move's quote into a pool (card move-one-confidential-swap): pool.address's host, reads, floor and follow, every
+  // quote asked and checked on Confidential Intents rails and held to 1Click's keyless tell on the page's stop, and another
+  // pool's coin priced at the device's own price of each
+  const poolMoveAddress = poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: (chain, origin) => poolMovePricing(prices.get, origin, chain), floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped });
   const nearPair = () => [followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)] as const;
   // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
   const depositFromUx = (g: PoolFollowRecord, amount: bigint, signal: AbortSignal) =>
@@ -622,7 +648,8 @@ else {
     poolRefundMover({
       read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair(), NEAR_NETWORKS.mainnet.usdc),
       floor,
-      priced: (g) => pricedFor(g.chain, g.origin),
+      // a Move's refund (card move-one-confidential-swap) holds another pool's coin: priced as the Move host prices it
+      priced: (g) => poolMovePricing(prices.get, g.origin, g.chain) ?? pricedFor(g.chain, g.origin),
       decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],
       seed64: () => openSeed64(),
       seedLock: (fn) => navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn),
@@ -710,13 +737,18 @@ else {
       // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
       "withdraw.open": (p, ctx) => (takesParams("withdraw.open", p) ? openKind(ctx.id, "withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
-      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), stop: quotesStopped }),
+      // money in from an outside wallet (card move-one-confidential-swap, CO 14 Nov): one confidential swap as a Move, held to
+      // 1Click's keyless tell, so the paying wallet is not tied to U on chain
+      "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
       ...depositReadHosts({ stop: quotesStopped, poolFloor: pagePoolFloor }),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain at the device's own price reads and floor, its address only once the follow
-      // took it (src/pool-deposit-follow.ts), on mainnet only
-      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), stop: quotesStopped }),
+      // took it (src/pool-deposit-follow.ts), on mainnet only; money in from an outside wallet (card
+      // move-one-confidential-swap, CO 14 Nov): every 1Click quote is one confidential swap, held to 1Click's keyless tell
+      // on the page's stop, so the paying wallet is not tied to U_X on chain; a plain send of the pool's own coin asks 1Click
+      // nothing
+      "pool.address": poolAddressHost({ pools: pageAddressPools, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named(), priced: pricedFor, floor: floorFor, checked: (id, chain, quote, u) => poolFollow!.quoted(id, chain, quote, u), confidential: true, hidden: (address, signal) => oneClickHidden(address, fetch, signal), stop: quotesStopped }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with

@@ -268,3 +268,50 @@ test("no liquidity on every ask: three asks, then not_available, no address", as
   refusedWith(await depositQuoteKind(PARAMS, ctx(mock.fetch)), "not_available");
   assert.equal(mock.sent.length, 3);
 });
+
+// Card move-one-confidential-swap: a Move into Cash (a pool's coin to U) asks confidentiality "advanced", is checked as
+// a confidential quote (the mode echoed, 1Click's confidential collector) and goes out only once 1Click itself, asked
+// with no key, does not know its address as a public swap. A deposit's own quote asks no mode.
+const CONF = (a: Answer) => { a.quoteRequest.confidentiality = "advanced"; a.quoteRequest.appFees = [{ recipient: "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805", fee: 1 }]; };
+
+test("a Move into Cash: confidential request, confidential answer, the keyless tell read for the signed address before it goes out", async () => {
+  const m = h1c({ before: CONF });
+  const told: string[] = [];
+  const a = await depositQuoteKind(PARAMS, ctx(m.fetch, { confidential: true, hidden: async (addr) => (told.push(addr), "hidden") }));
+  assert.equal(a.ok, true, JSON.stringify(a));
+  assert.equal(m.sent[0]!.request.confidentiality, "advanced");
+  assert.deepEqual(told, [ADDRESS]);
+  // the deposit sheet's own quote asks no mode
+  const d = h1c();
+  await depositQuoteKind(PARAMS, ctx(d.fetch));
+  assert.equal("confidentiality" in d.sent[0]!.request, false);
+  assert.equal("confidentiality" in depositQuoteRequest(U, SOL_USDC, 1n, NOW), false);
+});
+
+test("a Move into Cash: the keyless tell reads on the kind's own signal (deposit.quote's: the page's stop); cut, no address", async () => {
+  const m = h1c({ before: CONF });
+  const c = new AbortController();
+  let told: AbortSignal | undefined;
+  const hidden = (_addr: string, signal?: AbortSignal) =>
+    new Promise<"hidden">((_ok, no) => {
+      told = signal;
+      signal?.addEventListener("abort", () => no(signal.reason), { once: true });
+    });
+  const a = depositQuoteKind(PARAMS, ctx(m.fetch, { confidential: true, hidden, signal: c.signal }));
+  while (told === undefined) await new Promise((ok) => setImmediate(ok));
+  assert.equal(told, c.signal);
+  c.abort();
+  refusedWith(await a, "down");
+});
+
+test("a Move into Cash answered public, under the public collector, known to 1Click as public, or with the tell down: no address", async () => {
+  for (const [m, hidden, code] of [
+    [h1c(), async () => "hidden" as const, "quote_check_failed"],
+    [h1c({ before: (a) => { CONF(a); a.quoteRequest.appFees = [{ recipient: COLLECTOR, fee: 1 }]; } }), async () => "hidden" as const, "quote_check_failed"],
+    [h1c({ before: CONF }), async () => "public" as const, "quote_check_failed"],
+    [h1c({ before: CONF }), async () => "down" as const, "down"],
+    [h1c({ before: CONF }), undefined, "down"],
+  ] as const) {
+    refusedWith(await depositQuoteKind(PARAMS, ctx(m.fetch, { confidential: true, ...(hidden === undefined ? {} : { hidden }) })), code);
+  }
+});

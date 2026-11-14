@@ -52,7 +52,7 @@ export function evmPoolDepositFloor(r: { baseFee: bigint; tip: bigint; l1Fee: bi
 /** The request keys a pool deposit quote may carry: the vault's (rules/deposit.ts QUOTE_KEYS), no more. */
 const QUOTE_KEYS = new Set([
   "dry", "swapType", "slippageTolerance", "originAsset", "depositType", "destinationAsset", "amount", "refundTo",
-  "refundType", "recipient", "recipientType", "deadline", "quoteWaitingTimeMs", "referral",
+  "refundType", "recipient", "recipientType", "deadline", "quoteWaitingTimeMs", "referral", "confidentiality",
 ]);
 
 export interface PoolDepositQuoteContext {
@@ -69,6 +69,9 @@ export interface PoolDepositQuoteContext {
   /** The device's floor for this quote, read at quote time (solanaPoolDepositFloor, evmPoolDepositFloor), in the pool
    *  coin's base units; at least the rung. */
   floor: bigint;
+  /** A Move's quote (card move-one-confidential-swap): the request must ask confidentiality "advanced", and a quote that
+   *  does not is refused; absent, a request that asks it is refused too, so the mode is always the caller's. */
+  confidential?: true;
 }
 
 const refuse = (rule: string): never => {
@@ -103,6 +106,7 @@ export function checkPoolDepositQuote(request: OneClickRequest, answer: unknown,
   if (req.recipientType !== "DESTINATION_CHAIN") refuse("recipientType");
   if (req.refundTo !== ctx.refundId) refuse("refundTo");
   if (req.refundType !== "INTENTS") refuse("refundType");
+  if (ctx.confidential === true ? req.confidentiality !== "advanced" : "confidentiality" in req) refuse("confidentiality");
   const checked = checkOneClickQuote(req, answer, { ...ctx.check, intoVault: false });
   if (checked.minAmountOut < ctx.floor) refuse("floor");
   return checked;

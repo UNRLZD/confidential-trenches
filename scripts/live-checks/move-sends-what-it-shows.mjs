@@ -5,7 +5,7 @@
 //   - pool.move.dry answers an amount the move cannot send with what it can: max and, each when there is one, min,
 //     below and above, and no out (`limits`);
 //   - each priced answer names max, the most the move can send now (`priced`: Cash's, a pool's to Cash, a pool's to
-//     another pool);
+//     another pool in one confidential swap and through Cash; card move-one-confidential-swap added the third);
 //   - a move out of a pool to another pool reads the destination pool's deposit floor first and answers down when it
 //     cannot read it (`floor`), checking what the move brings there against it;
 //   - pool.move, from Cash or out of a pool, runs that same dry first and starts nothing when it answers no out, below_min
@@ -79,7 +79,9 @@ export function judge(a) {
   if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
   if (a?.limits !== true) bad("pool.move.dry answers no amount it can send for one it cannot: the sheet has no Max, Min or Try to show");
-  if (a?.priced !== 3) bad(`pool.move.dry names max on ${Number.isInteger(a?.priced) ? a.priced : "no"} of its 3 priced answers: Max is not what the move sends`);
+  // four priced answers since card move-one-confidential-swap: Cash's, a pool's to Cash, a pool's to another pool in one
+  // confidential swap, and a pool's to another pool through Cash (a page with no one-swap route)
+  if (a?.priced !== 4) bad(`pool.move.dry names max on ${Number.isInteger(a?.priced) ? a.priced : "no"} of its 4 priced answers: Max is not what the move sends`);
   if (a?.floor !== true) bad("a pool to pool dry does not read the destination pool's floor first: a move under it ends with its money in Cash");
   if (a?.hold !== true) bad("pool.move does not hold to its dry: a move the dry refuses still leaves Cash or its pool");
   const app = Array.isArray(a?.app) ? a.app : [];

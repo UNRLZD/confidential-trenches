@@ -38,6 +38,9 @@ export interface DepositWireDeps {
   /** Settles once the top-level page's naming of U in flight is done (src/main.ts); the frame names nothing. */
   named?(): Promise<unknown>;
   priced?: DepositQuoteKindContext["priced"];
+  /** A Move's host (card move-one-confidential-swap): every quote confidential, held to 1Click's keyless tell. */
+  confidential?: true;
+  hidden?: DepositQuoteKindContext["hidden"];
   fetch?: typeof fetch;
   /** The page's stop on sign out, read at each request (src/main.ts quotesSignedOut): its quote sends nothing once it aborts. */
   stop?: () => AbortSignal;
@@ -83,6 +86,8 @@ export function depositQuoteHost(deps: DepositWireDeps): (params: Record<string,
         seed: before.status,
         depositId: before.deposit.id,
         priced: deps.priced,
+        ...(deps.confidential === true ? { confidential: true as const } : {}),
+        ...(deps.hidden === undefined ? {} : { hidden: deps.hidden }),
         fetch: deps.fetch,
         now: deps.now,
         signal: stop,

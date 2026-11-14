@@ -55,6 +55,10 @@ export interface DepositQuoteKindContext {
    *  leaves (packages/wallet/src/deposit/quote.ts askDepositQuoteAgain). */
   signal?: AbortSignal;
   now?: () => number;
+  /** A Move's quote (card move-one-confidential-swap): asked and checked on Confidential Intents rails, and its address
+   *  held to 1Click's keyless tell (`hidden`, src/pool-deposit-address.ts oneClickHidden); with no tell, no quote. */
+  confidential?: true;
+  hidden?(address: string, signal?: AbortSignal): Promise<"hidden" | "public" | "down">;
 }
 
 export type DepositQuoteKindAnswer =
@@ -125,7 +129,7 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   const now = ctx.now ?? Date.now;
   let request;
   try {
-    request = depositQuoteRequest(ctx.depositId, origin, amount, now());
+    request = depositQuoteRequest(ctx.depositId, origin, amount, now(), ctx.confidential === true);
   } catch {
     return no("not_allowed");
   }
@@ -145,7 +149,7 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   let checked;
   const check = { path: DEPOSIT_QUOTE_PATH, pricing, decimalsIn, decimalsOut: USDC_DECIMALS, now: now() } as const;
   try {
-    checked = checkDepositQuote(request, reply.body, { seed: ctx.seed, depositId: ctx.depositId, check });
+    checked = checkDepositQuote(request, reply.body, { seed: ctx.seed, depositId: ctx.depositId, check, ...(ctx.confidential === true ? { confidential: true as const } : {}) });
   } catch (e) {
     // the rule's own refusals are of the request; the kit's (OneClickQuoteError) and anything else are of the answer,
     // but an answer short of the vault's least deposit alone, which says the amount is below the minimum
@@ -157,6 +161,11 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   const timeEstimate = checked.timeEstimate;
   if (checked.depositAddress === undefined || checked.deadline === undefined) return no("quote_check_failed");
   if (typeof timeEstimate !== "number" || !Number.isSafeInteger(timeEstimate) || timeEstimate < 0) return no("quote_check_failed");
+  // a Move's quote: 1Click itself, asked with no key from this device, must not know the address as a public swap
+  if (ctx.confidential === true) {
+    const seen = ctx.hidden === undefined ? "down" : await ctx.hidden(checked.depositAddress, ctx.signal).catch(() => "down" as const);
+    if (seen !== "hidden") return no(seen === "public" ? "quote_check_failed" : "down");
+  }
 
   // 5. The result, from the checked quote only.
   return {

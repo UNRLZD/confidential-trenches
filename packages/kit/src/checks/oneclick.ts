@@ -30,6 +30,20 @@ export { ONECLICK_SIGNING_KEYS };
 // A stablecoin route is one between two of ONECLICK_USDC_ASSETS; any other pair, a same-asset multichain one included,
 // is held to 20, so a 1 bp entry on a route not listed here is refused (fails closed) until the route joins the list.
 const ONECLICK_COLLECTOR = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd";
+// A confidential quote (card move-one-confidential-swap; request `confidentiality` "advanced": the OpenAPI of the quote,
+// docs.intents.aurora.dev llms-full.txt read 2026-11-14 03:35Z, "`basic` / `advanced` - the swap is settled on
+// Confidential Intents rails", no doc naming either one stronger; the quickstart asks "advanced") names another
+// collector: every basic and advanced answer read 2026-11-14 03:37-03:41Z through the helper's partner key (SOL to Base
+// ETH, fixtures/oneclick-confidential.json) carries [{recipient: 2238fd…7805, fee: 20}], a public one 5880ad…47dd; on a
+// stablecoin route the same collector at fee 1 (Solana USDC to NEAR USDC, dry, 04:13Z), as a public one's fee.
+// Keyless, a confidential quote answers 401 "User authentication is required for confidential intent quotes", so it is
+// partner only. Neither `confidentiality` nor appFees is in 1Click's signed message (the signature verifies without
+// them, signedMessage below), so the mode is held two ways the device reads: the echo of the request's mode, and the
+// collector pinned per mode. A helper that asks "public" and rewrites both unsigned fields to "advanced" and 2238fd…
+// passes both, so the signing page's Move also asks 1Click itself, from the device with no key, whether it knows the
+// deposit address as a public swap (packages/signpage/src/pool-deposit-address.ts oneClickHidden) before it pays.
+// Amounts, recipient, refund and deposit address stay signed.
+const ONECLICK_CONFIDENTIAL_COLLECTOR = "2238fd089f1c92b206c218cd16b8676cb98964e0d50f8ab729c6396a81e07805";
 /** 1Click's fee on a stablecoin route, one between two of ONECLICK_USDC_ASSETS, per path (it was one fee per path before
  *  card oneclick-partner-fee-live); the deposit's routes are all here. A stablecoin or same-asset route outside that list
  *  is held to ONECLICK_PAIR_FEE_BPS, so it must join the list before it ships, or its 1 bp quotes are refused. */
@@ -81,6 +95,9 @@ export interface OneClickRequest {
   referral?: string;
   virtualChainRecipient?: string;
   virtualChainRefundRecipient?: string;
+  /** Confidential Intents rails (ONECLICK_CONFIDENTIAL_COLLECTOR above): "advanced" only, on the partner path only;
+   *  absent is a public quote. */
+  confidentiality?: "advanced";
 }
 
 // The floor's price input. "usdc": USDC to USDC (§2.8's first floor). Otherwise each asset's two USD price reads as
@@ -281,14 +298,14 @@ export function oneClickFeeBps(path: OneClickPath, originAsset: string, destinat
 
 // The pinned fee entry: [] on a same-asset quote, else exactly one entry, the collector and the route's fee as read,
 // nothing else set. Returns F.
-function checkAppFees(v: unknown, path: OneClickPath, originAsset: string, destinationAsset: string): number {
+function checkAppFees(v: unknown, path: OneClickPath, originAsset: string, destinationAsset: string, collector: string): number {
   const fee = oneClickFeeBps(path, originAsset, destinationAsset);
   if (originAsset === destinationAsset) {
     if (!(Array.isArray(v) && v.length === 0)) fail("app-fees", `appFees ${show(JSON.stringify(v))} on a same-asset quote is not []`);
     return 0;
   }
   const e = Array.isArray(v) && v.length === 1 ? v[0] : undefined;
-  const ok = isObj(e) && e.recipient === ONECLICK_COLLECTOR && e.fee === fee &&
+  const ok = isObj(e) && e.recipient === collector && e.fee === fee &&
     Object.keys(e).every((k) => k === "recipient" || k === "fee" || e[k] === null || e[k] === undefined);
   if (!ok) fail("app-fees", `appFees ${show(JSON.stringify(v))} is not 1Click's own ${path} entry (fee ${fee} on this route)`);
   return fee;
@@ -314,6 +331,7 @@ function checkRequest(r: OneClickRequest, now: number): void {
   if (!isObj(r) || typeof r.dry !== "boolean") fail("request", "the request must say dry: true or false");
   if (r.swapType !== "EXACT_INPUT") fail("request", `swapType ${show(r.swapType)}: the kit asks EXACT_INPUT only`);
   if ("customRecipientMsg" in r) fail("request", "the kit never asks with a customRecipientMsg");
+  if ("confidentiality" in r && r.confidentiality !== "advanced") fail("request", `confidentiality ${show(r.confidentiality)}: the kit asks "advanced" or nothing`);
   uint(r.amount, "request amount");
   if (typeof r.deadline !== "string" || !ISO_ZONED.test(r.deadline) || Number.isNaN(Date.parse(r.deadline)))
     fail("request", `deadline ${show(r.deadline)} is not an ISO time with its zone`);
@@ -335,6 +353,11 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
   for (const k of REQ_SIGNED) if (qr[k] !== req[k]) fail("echo", `${k}=${show(qr[k])} is not the requested ${show(req[k])}`);
   for (const k of REQ_SIGNED_IF_SET)
     if (orU(qr[k]) !== orU(req[k])) fail("echo", `${k}=${show(qr[k])} is not the requested ${show(req[k])}`);
+  // the mode, unsigned: a public answer names "public" or nothing, a confidential one exactly the requested mode
+  const confidential = request.confidentiality === "advanced";
+  if (confidential ? qr.confidentiality !== "advanced" : !(qr.confidentiality === undefined || qr.confidentiality === "public"))
+    fail("echo", `confidentiality=${show(qr.confidentiality)} is not the requested ${show(request.confidentiality ?? "public")}`);
+  if (confidential && opts.path !== "partner") fail("request", "a confidential quote is asked on the partner path only");
 
   let depositAddress: string | undefined, deadline: string | undefined;
   if (!request.dry) {
@@ -346,7 +369,7 @@ export function checkOneClickQuote(request: OneClickRequest, answer: unknown, op
     depositAddress = q.depositAddress as string;
     deadline = q.deadline as string;
   }
-  const feeBps = checkAppFees(qr.appFees, opts.path, request.originAsset, request.destinationAsset);
+  const feeBps = checkAppFees(qr.appFees, opts.path, request.originAsset, request.destinationAsset, confidential ? ONECLICK_CONFIDENTIAL_COLLECTOR : ONECLICK_COLLECTOR);
 
   const t = typeof a.timestamp === "string" ? Date.parse(a.timestamp) : Number.NaN;
   if (!(now - t <= ONECLICK_MAX_AGE_MS && t - now <= ONECLICK_MAX_AHEAD_MS))
