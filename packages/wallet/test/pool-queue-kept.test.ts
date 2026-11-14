@@ -55,7 +55,7 @@ const proves = (ps: Counted[]): number => ps.reduce((a, p) => a + p.log.filter((
 /** One tab's queue on the vault, its ready proofs kept in the vault's wallet store. */
 function tab(v: Vault, pool: Fake): { q: ProofQueue<{ n: number }>; ps: Counted[] } {
   const ps = [signalsProver()];
-  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool, provers: ps, hardwareConcurrency: 4, kept: keptProofs(v.w, pool.id) });
+  const q = openProofQueue({ seed64: SEED, notes: v.ns, pool, provers: ps, hardwareConcurrency: 4, kept: keptProofs<{ n: number }>(v.w, pool.id) });
   open.push(q as ProofQueue<unknown>);
   return { q, ps };
 }
