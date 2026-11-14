@@ -370,6 +370,9 @@ else {
     priced: (origin) => pricedPoolCoin(origin, (c) => prices.get(c)),
     checked: (id, r, u) => follows!.quoted(id, r, u),
     stop: quotesStopped,
+    // a Move into Cash (card move-one-confidential-swap): one confidential swap, held to 1Click's keyless tell
+    confidential: true,
+    hidden: (address, signal) => oneClickHidden(address, fetch, signal),
   });
   let toCashOf: { signal: AbortSignal; m: ReturnType<typeof poolToCash> } | null = null;
   const toCashNow = (): ReturnType<typeof poolToCash> => {

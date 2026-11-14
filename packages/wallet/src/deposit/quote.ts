@@ -37,7 +37,7 @@ const IMPLICIT = /^[0-9a-f]{64}$/;
  * The request of §2.4 step 2 for a deposit of `amount` base units of `originAsset` to U (its 64-hex implicit id), asked
  * at `now` (ms). Throws on input that is not that.
  */
-export function depositQuoteRequest(u: string, originAsset: string, amount: bigint, now: number): OneClickRequest {
+export function depositQuoteRequest(u: string, originAsset: string, amount: bigint, now: number, confidential = false): OneClickRequest {
   if (typeof u !== "string" || !IMPLICIT.test(u)) throw new Error("deposit quote: U must be a 64-hex implicit account id");
   if (typeof originAsset !== "string" || originAsset === "") throw new Error("deposit quote: no origin asset");
   if (typeof amount !== "bigint" || amount <= 0n) throw new Error("deposit quote: the amount must be a positive bigint");
@@ -55,6 +55,8 @@ export function depositQuoteRequest(u: string, originAsset: string, amount: bigi
     recipient: u,
     recipientType: "DESTINATION_CHAIN",
     deadline: new Date(now + DEPOSIT_QUOTE_DEADLINE_MS).toISOString(),
+    // a Move into Cash (card move-one-confidential-swap): on Confidential Intents rails
+    ...(confidential === true ? { confidentiality: "advanced" as const } : {}),
   };
 }
 
