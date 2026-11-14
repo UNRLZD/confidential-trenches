@@ -12,10 +12,17 @@
 //   wallet that now holds another amount, is quoted again.
 // - Landed: the wallet's leftover is cleared where it was counted (the U_X op's left, the W's tail) and the open record
 //   dropped; the quote's follow op shows it on its way into Cash.
+// - A failed swap's refund (card refunds-land-on-the-devices-own-wallet): a quote a device wallet pays in a pool coin
+//   refunds ORIGIN_CHAIN to U_{s,i}'s own address on that coin's chain. Its record (refundRecordOf, meta
+//   owed/refund-<chain>-<address>) is written before the quote's address goes out, so whatever 1Click refunds there is
+//   carried to Cash as any leftover is, read on the chain alone (1Click's word that it refunded is never needed). An
+//   empty one is let go once the quote's signed deadline and REFUND_WATCH_MS more are past; a carried one once landed.
 // Nothing here logs.
 import type { ErrorCode, PoolChain } from "../../kit/src/signpage/messages.ts";
 import type { CarryEnd, CarryOpen, CarrySender, CarrySource } from "./carry-cash.ts";
 import { wTailKeyOf, wTailOf } from "./w-tails.ts";
+import { base58 } from "@scure/base";
+import { depositId, depositIdEvm } from "../../wallet/src/derive/keys.ts";
 
 /** The vault's least deposit, USDC base units (contracts/vault/src/constants.rs MIN_DEPOSIT; kit ONECLICK_VAULT_MIN_OUT). */
 export const CARRY_VAULT_MIN = 1_000_000n;
@@ -25,6 +32,9 @@ export const CARRY_PASS_MS = 2 * 60_000;
 export const CARRY_FOLLOW_MS = 15_000;
 /** An open carry with nothing sent is dropped and quoted again past this age (a deposit quote's own life is longer). */
 export const CARRY_UNSENT_MS = 10 * 60_000;
+/** How long past a quote's signed deadline its refund address is still read while empty: 1Click starts a refund at the
+ *  deadline when the swap has not completed, and pays it within hours; a day covers a slow one. */
+export const REFUND_WATCH_MS = 24 * 3_600_000;
 
 export type LeftoverCarryDeps = {
   /** Every wallet holding a leftover now, from the store alone (no chain read). */
@@ -64,7 +74,9 @@ export async function carryLeftovers(d: LeftoverCarryDeps): Promise<CarryPass> {
   const keep = (o: CarryOpen) => d.keep(src, o);
   const ended = async (end: CarryEnd): Promise<CarryPass> => {
     if (end === "landed") {
-      await d.cleared(src);
+      // a refund address stays recorded: another quote under the same U may refund there later; read empty past its
+      // watch, it is let go below
+      if (src.kind !== "refund") await d.cleared(src);
       await d.keep(src, undefined);
     } else if (end === "dead" || end === "short") await d.keep(src, undefined);
     return { src, end };
@@ -77,6 +89,11 @@ export async function carryLeftovers(d: LeftoverCarryDeps): Promise<CarryPass> {
   }
   const amount = await sender.sendable(src, d.signal).catch(() => null);
   if (amount === null) return { src, end: "unread" };
+  // a refund address still empty past its watch: nothing came back, nothing to carry; let go
+  if (src.kind === "refund" && amount === 0n && d.now() > src.deadline_ms + REFUND_WATCH_MS) {
+    await d.cleared(src);
+    return { src, end: "under" };
+  }
   // under the vault's least deposit at the device's price: kept, counted, tried again next pass
   const usd = amount > 0n ? d.worth(src.chain, amount) : 0n;
   if (usd === null || usd < CARRY_VAULT_MIN) return { src, end: "under" };
@@ -96,7 +113,7 @@ export async function carryLeftovers(d: LeftoverCarryDeps): Promise<CarryPass> {
 /** The wallets holding a leftover, from the store alone: each U_X whose newest op ended in the pool or shows short with
  *  money left (its `left` over 0, src/pool-deposit-follow.ts depositWalletsOf's rule), and each W's tail record
  *  (src/w-tails.ts). */
-export function leftoverSources(ops: readonly unknown[], tails: readonly unknown[]): CarrySource[] {
+export function leftoverSources(ops: readonly unknown[], tails: readonly unknown[], refunds: readonly unknown[] = []): CarrySource[] {
   const newest = new Map<string, { stage: string; created_ms: number; final?: true; follow: { chain: PoolChain; u: string; s: string; i: number; left?: string } }>();
   for (const v of ops) {
     if (!isUxOp(v)) continue;
@@ -115,7 +132,50 @@ export function leftoverSources(ops: readonly unknown[], tails: readonly unknown
     const w = wTailOf(t);
     if (w !== null && BigInt(w.amount) > 0n) out.push({ chain: w.chain, kind: "w", address: w.address, l: w.l, j: w.j });
   }
+  // each refund address a quote named, once (two quotes under one U name the same address)
+  const seen = new Set(out.map((x) => `${x.chain}\n${x.address}`));
+  for (const v of refunds) {
+    const r = refundRecordOf(v);
+    if (r === null || seen.has(`${r.chain}\n${r.address}`)) continue;
+    seen.add(`${r.chain}\n${r.address}`);
+    out.push(r);
+  }
   return out;
+}
+
+/** The meta key of a refund address's record (meta owed/: the frame's reader never reads or lists it). */
+export const refundKeyOf = (chain: PoolChain, address: string): string => `owed/refund-${chain}-${address}`;
+const REFUND_PREFIX = "owed/refund-";
+
+/** A refund address's record as stored, or null for anything that is not one exactly. */
+export function refundRecordOf(v: unknown): Extract<CarrySource, { kind: "refund" }> | null {
+  if (typeof v !== "object" || v === null) return null;
+  const o = v as Record<string, unknown>;
+  if (o.kind !== "refund" || (o.chain !== "solana" && o.chain !== "base" && o.chain !== "robinhood")) return null;
+  if (typeof o.address !== "string" || o.address === "" || typeof o.s !== "string" || !/^[0-9]{1,78}$/.test(o.s)) return null;
+  if (!Number.isSafeInteger(o.i) || (o.i as number) < 0 || !Number.isSafeInteger(o.deadline_ms) || (o.deadline_ms as number) <= 0) return null;
+  return { chain: o.chain, kind: "refund", address: o.address, s: o.s, i: o.i as number, deadline_ms: o.deadline_ms as number };
+}
+
+/** Every refund address record in the page's own wallet store, read only. */
+export async function storedRefunds(st: { keys(s: "meta"): Promise<string[]>; get(s: "meta", k: string): Promise<unknown> }): Promise<unknown[]> {
+  const keys = (await st.keys("meta")).filter((k) => k.startsWith(REFUND_PREFIX));
+  return Promise.all(keys.map((k) => st.get("meta", k).catch(() => undefined)));
+}
+
+/**
+ * Records the address a quote's refund lands at (ORIGIN_CHAIN, on its origin coin's chain), before that quote's address
+ * goes out: a write that fails throws, so no address goes out whose refund nothing would carry. Two quotes under one U
+ * name one address: the later deadline is kept.
+ */
+export async function keepRefund(st: { update(s: "meta", k: string, f: (v: unknown) => unknown): Promise<unknown> }, r: { chain: PoolChain; address: string; s: string; i: number; deadline_ms: number }): Promise<void> {
+  const rec = { kind: "refund" as const, chain: r.chain, address: r.address, s: r.s, i: r.i, deadline_ms: r.deadline_ms };
+  if (refundRecordOf(rec) === null) throw new Error("not a refund record");
+  await st.update("meta", refundKeyOf(r.chain, r.address), (v) => {
+    const had = refundRecordOf(v);
+    if (had !== null && had.s === rec.s && had.i === rec.i && had.deadline_ms >= rec.deadline_ms) return undefined;
+    return rec;
+  });
 }
 
 function isUxOp(v: unknown): v is { kind: "pool_deposit"; stage: string; created_ms: number; final?: true; follow: { chain: PoolChain; u: string; s: string; i: number; left?: string } } {
@@ -139,6 +199,7 @@ export function worthUsdc(p: { price: string; expo: number } | null | undefined,
  *  U_X writes its own), a W's tail record deleted. */
 export async function clearLeftover(st: { keys(s: "ops"): Promise<string[]>; get(s: "ops", k: string): Promise<unknown>; update(s: "ops", k: string, f: (v: unknown) => unknown): Promise<unknown>; delete(s: "meta", k: string): Promise<void> }, src: CarrySource): Promise<void> {
   if (src.kind === "w") return st.delete("meta", wTailKeyOf(src.chain, src.address));
+  if (src.kind === "refund") return st.delete("meta", refundKeyOf(src.chain, src.address));
   let newest: { id: string; at: number } | null = null;
   for (const id of await st.keys("ops")) {
     const v = await st.get("ops", id).catch(() => undefined);
@@ -163,4 +224,20 @@ function drawUniform(n: number): number {
     globalThis.crypto.getRandomValues(b);
     if (b[0]! < lim) return b[0]! % n;
   }
+}
+
+/**
+ * U_{s,i}'s own address on `chain` (card refunds-land-on-the-devices-own-wallet), derived from the seed: the base58 of
+ * U_{s,i}'s ed25519 key on Solana, which must be the record's `id`; U^evm_{s,i} on Base and Robinhood. Where a quote
+ * under that U refunds when a device wallet pays it in `chain`'s coin. Each secret is zeroed here; the seed is the
+ * caller's to zero.
+ */
+export function ownRefundAddress(seed64: Uint8Array, chain: PoolChain, s: bigint, i: number, id: string): string {
+  const k = depositId(seed64, s, i);
+  k.secretKey.fill(0);
+  if (k.id !== id) throw new Error("the seed's U_{s,i} is not the record's");
+  if (chain === "solana") return base58.encode(k.publicKey);
+  const e = depositIdEvm(seed64, s, i);
+  e.secretKey.fill(0);
+  return e.address;
 }

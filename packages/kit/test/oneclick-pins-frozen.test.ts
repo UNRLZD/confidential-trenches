@@ -33,6 +33,7 @@ function unfrozen(ns: Record<string, unknown>): string[] {
 const PINS = {
   ONECLICK_SIGNING_KEYS: ONECLICK.ONECLICK_SIGNING_KEYS,
   ONECLICK_USDC_ASSETS: ONECLICK.ONECLICK_USDC_ASSETS,
+  ONECLICK_SAME_COIN_ROUTES: ONECLICK.ONECLICK_SAME_COIN_ROUTES,
   ONECLICK_FEE_BPS: ONECLICK.ONECLICK_FEE_BPS,
   ONECLICK_PAIR_FEE_BPS: ONECLICK.ONECLICK_PAIR_FEE_BPS,
 } as const;
@@ -42,14 +43,14 @@ test("every export of the 1Click check that is not code or a primitive is frozen
   assert.deepEqual(unfrozen(KEYS as Record<string, unknown>), []);
   // the check reads the one key set: oneclick.ts re-exports oneclick-keys.ts's, never a copy of it
   assert.equal(ONECLICK.ONECLICK_SIGNING_KEYS, KEYS.ONECLICK_SIGNING_KEYS);
-  // the walk covers every object export: the four pins, and nothing else of the module is a non-code object
+  // the walk covers every object export: the five pins, and nothing else of the module is a non-code object
   const objects = Object.entries(ONECLICK).filter(([, v]) => typeof v === "object" && v !== null).map(([k]) => k).sort();
   assert.deepEqual(objects, Object.keys(PINS).sort());
 });
 
 test("a push or an index write into the key set or the USDC assets throws, and the pin is unchanged", () => {
-  for (const name of ["ONECLICK_SIGNING_KEYS", "ONECLICK_USDC_ASSETS"] as const) {
-    const pin = PINS[name] as string[];
+  for (const name of ["ONECLICK_SIGNING_KEYS", "ONECLICK_USDC_ASSETS", "ONECLICK_SAME_COIN_ROUTES"] as const) {
+    const pin = PINS[name] as unknown as string[];
     const before = [...pin];
     assert.throws(() => pin.push("ed25519:11111111111111111111111111111111"), TypeError, `${name}.push`);
     assert.throws(() => pin.unshift("x"), TypeError, `${name}.unshift`);
@@ -59,6 +60,13 @@ test("a push or an index write into the key set or the USDC assets throws, and t
     assert.throws(() => { pin.length = 0; }, TypeError, `${name}.length =`);
     assert.throws(() => Object.defineProperty(pin, "0", { value: "x" }), TypeError, `defineProperty(${name})`);
     assert.deepEqual([...pin], before);
+  }
+  // each same-coin route too (card same-coin-deposits-across-chains-quote): neither end can be rewritten
+  for (const route of ONECLICK.ONECLICK_SAME_COIN_ROUTES as unknown as string[][]) {
+    const before = [...route];
+    assert.throws(() => { route[1] = "nep141:hood.omft.near"; }, TypeError, "route[1] =");
+    assert.throws(() => route.push("x"), TypeError, "route.push");
+    assert.deepEqual([...route], before);
   }
 });
 
@@ -83,6 +91,7 @@ test("a write, a new path, a delete or a defineProperty on either fee table thro
 const PLANTS = {
   ONECLICK_SIGNING_KEYS: { file: "oneclick-keys.ts", line: "export const ONECLICK_SIGNING_KEYS: readonly string[] = Object.freeze([" },
   ONECLICK_USDC_ASSETS: { file: "oneclick.ts", line: "export const ONECLICK_USDC_ASSETS: readonly string[] = Object.freeze([" },
+  ONECLICK_SAME_COIN_ROUTES: { file: "oneclick.ts", line: "export const ONECLICK_SAME_COIN_ROUTES: readonly (readonly [string, string])[] = Object.freeze([" },
   ONECLICK_FEE_BPS: { file: "oneclick.ts", line: "export const ONECLICK_FEE_BPS = Object.freeze({" },
   ONECLICK_PAIR_FEE_BPS: { file: "oneclick.ts", line: "export const ONECLICK_PAIR_FEE_BPS = Object.freeze({" },
 } as const;

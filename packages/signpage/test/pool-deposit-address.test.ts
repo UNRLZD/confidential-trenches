@@ -657,3 +657,31 @@ test("oneClickHidden: hidden only on 1Click's exact not-found for that address, 
   assert.equal(await oneClickHidden(A, answer(502, "")), "down");
   assert.equal(await oneClickHidden(A, (async () => { throw new TypeError("fetch failed"); }) as typeof fetch), "down");
 });
+
+// Card refunds-land-on-the-devices-own-wallet: a Move from another pool (`refund`, U_{s,i}'s own address on the origin
+// coin's chain) asks ORIGIN_CHAIN to it, takes only an answer that echoes it under 1Click's signature, and hands the
+// follow the address to record; an answer whose signed request names INTENTS or another refund address gives no address.
+test("a Move from Solana's pool into Base's: ORIGIN_CHAIN to base58 of Base's U_{s,i}, echoed and signed, handed to the follow", async () => {
+  const REFUND = base58.encode(Buffer.from(BASE_ID, "hex"));
+  const refund = async (chain: string, s: bigint, i: number, id: string) => (assert.deepEqual([chain, s, i, id], ["solana", BASE_S, 4, BASE_ID]), REFUND);
+  const w = world({ change: conf });
+  const d = poolAddressHost({ ...w.deps, confidential: true, hidden: async () => "hidden", refund })({ chain: "base", origin_asset: "nep141:sol.omft.near", amount: "25" }, { id: "mv-r/pool" });
+  await d.after;
+  const a = d.answer() as { result?: { quote?: { deposit_address: string } } };
+  assert.equal(a.result?.quote?.deposit_address, ADDRESS, JSON.stringify(a));
+  assert.deepEqual([w.sent[0]!.refundType, w.sent[0]!.refundTo], ["ORIGIN_CHAIN", REFUND]);
+  assert.equal((w.took[0] as { u: { refund_to?: string } }).u.refund_to, REFUND);
+  for (const bad of [(x: Answer) => { conf(x); x.quoteRequest.refundType = "INTENTS"; }, (x: Answer) => { conf(x); x.quoteRequest.refundTo = BASE_ID; }]) {
+    const x = world({ change: bad });
+    const h = poolAddressHost({ ...x.deps, confidential: true, hidden: async () => "hidden", refund })({ chain: "base", origin_asset: "nep141:sol.omft.near", amount: "25" }, { id: "mv-r2/pool" });
+    await h.after;
+    assert.deepEqual(h.answer(), { error: "quote_check_failed" });
+    assert.equal(x.took.length, 0);
+  }
+  // a refund address that cannot be derived: down, nothing asked
+  const y = world({ change: conf });
+  const g = poolAddressHost({ ...y.deps, confidential: true, hidden: async () => "hidden", refund: async () => { throw new Error("no seed"); } })({ chain: "base", origin_asset: "nep141:sol.omft.near", amount: "25" }, { id: "mv-r3/pool" });
+  await g.after;
+  assert.deepEqual(g.answer(), { error: "down" });
+  assert.equal(y.sent.length, 0);
+});

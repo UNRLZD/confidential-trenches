@@ -2,12 +2,13 @@
 // script's own signing and addresses match Foundry's cast byte for byte.
 //   node --test contracts/pool-evm/test/deploy.test.mjs     (after a forge build: it reads out/)
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { BUILD_FILE, CHAINS } from "../../../scripts/live-checks/pool-evm-deploy.mjs";
-import { BUILT, ORDER, addressOf, buildOf, createAddress, main, signTx } from "../script/deploy.mjs";
+import { BUILT, ORDER, addressOf, buildOf, createAddress, keysBase, main, signTx } from "../script/deploy.mjs";
 
 // The secret key 1: a published test vector (its address 0x7E5F...5Bdf is in every secp256k1 test suite), never money.
 const KEY_ONE = new Uint8Array(32);
@@ -75,4 +76,20 @@ test("an RPC answering another chain's id is refused, a dry run needs --out, and
   await assert.rejects(main(["--chain", "base", ...RET]), /base is a mainnet: its deploy is the owner's paste .* which passes --mainnet/);
   await assert.rejects(main(["--chain", "ethereum", ...RET]), /--chain is one of/);
   await assert.rejects(main(["--chain", "base-sepolia", "--return", "E", ...FRESH("base-sepolia")]), /--return <address>/);
+});
+
+test("keysBase: a mainnet run's key folder is durable: under XDG_STATE_HOME or ~/.local/state, never OS temp, a git repo or ~/.confidential-trenches, wherever the checkout sits", () => {
+  const REPO = fileURLToPath(new URL("../../../", import.meta.url));
+  const home = mkdtempSync(path.join(os.tmpdir(), "keysbase-home-"));
+  try {
+    assert.equal(keysBase({ XDG_STATE_HOME: "/srv/state" }, "/home/x"), "/srv/state/pool-evm-deploy");
+    assert.equal(keysBase({}, "/home/x"), "/home/x/.local/state/pool-evm-deploy");
+    assert.throws(() => keysBase({ XDG_STATE_HOME: path.join(os.tmpdir(), "s") }, "/home/x"), /OS temp folder/);
+    // the more specific refusal wins, also when this checkout itself sits in OS temp
+    assert.throws(() => keysBase({ XDG_STATE_HOME: path.join(REPO, "state") }, "/home/x"), /inside the git repo or worktree/);
+    assert.throws(() => keysBase({ XDG_STATE_HOME: "/home/x/.confidential-trenches/state" }, "/home/x"), /under ~\/\.confidential-trenches/);
+    assert.throws(() => keysBase({}, home), /OS temp folder/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

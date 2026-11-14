@@ -34,7 +34,7 @@ import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type PoolStatePrice, type SignpageResults } from "../../kit/src/signpage/messages.ts";
-import { DEPOSIT_QUOTE_DEADLINE_MS, POOL_DEPOSIT_DESTINATION, POOL_DEPOSIT_NETWORK, askDepositQuoteAgain, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
+import { DEPOSIT_QUOTE_DEADLINE_MS, POOL_DEPOSIT_DESTINATION, POOL_DEPOSIT_NETWORK, askDepositQuoteAgain, poolCoinChain, poolDepositQuoteRequest, type OriginRefund } from "../../wallet/src/deposit/quote.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
 import { checkPoolDepositQuote, evmPoolDepositFloor, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
@@ -159,7 +159,12 @@ export interface PoolAddressDeps {
   /** The device's floor for a quote into X's pool to U_X, read at quote time on two RPCs (readSolanaPoolFloor); null
    *  when it has none for the chain. None given: no quote. */
   floor?(chain: PoolChain, wallet: string, signal?: AbortSignal): Promise<bigint | null>;
-  checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string }): Promise<void>;
+  checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string; refund_to?: string }): Promise<void>;
+  /** A Move from another pool (card refunds-land-on-the-devices-own-wallet): U_{scope,index}'s own address on `chain`,
+   *  the origin coin's chain, derived on the device (base58 of the id's key on Solana, U^evm on Base and Robinhood). That
+   *  quote then refunds ORIGIN_CHAIN there, never INTENTS. None (money from an outside wallet, Cash's NEAR USDC): INTENTS
+   *  under U_{s,i}. A throw answers down, nothing sent. */
+  refund?(chain: PoolChain, scope: bigint, index: number, id: string): Promise<string>;
   fetch?: typeof fetch;
   /** The page's stop for the quote's asks (card helper-says-why-a-vendor-refused, review P3). Once it aborts no ask
    *  leaves (packages/wallet/src/deposit/quote.ts askDepositQuoteAgain). */
@@ -331,9 +336,20 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
         if (stopped()) return void (out = { error: "not_allowed" });
         return void (out = { result: { chain, address: before.wallet, asset, quote } });
       }
+      // another pool's coin, which that pool's run pays: its refund back on its own chain, at U_{s,i}'s own address there
+      const coin = deps.refund === undefined ? null : poolCoinChain(origin);
+      let refund: OriginRefund | undefined;
+      if (coin !== null) {
+        try {
+          refund = { chain: coin, to: await deps.refund!(coin, pool.scope, before.record.index, before.record.id) };
+        } catch {
+          return void (out = { error: "down" });
+        }
+        if (stopped()) return void (out = { error: "not_allowed" });
+      }
       let request;
       try {
-        request = poolDepositQuoteRequest(chain, before.wallet, before.record.id, origin, amount, now(), deps.confidential === true);
+        request = poolDepositQuoteRequest(chain, before.wallet, before.record.id, origin, amount, now(), deps.confidential === true, refund);
       } catch {
         return;
       }
@@ -362,6 +378,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
           check: { path: DEPOSIT_QUOTE_PATH, pricing: atCheck.pricing, decimalsIn: atCheck.decimalsIn, decimalsOut, now: now() },
           floor,
           ...(deps.confidential === true ? { confidential: true as const } : {}),
+          ...(refund === undefined ? {} : { refund }),
         });
       } catch (e) {
         return void (out = { error: e instanceof DepositRuleRefused ? "not_allowed" : "quote_check_failed" });
@@ -388,7 +405,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
         deadline: checked.deadline,
         time_estimate_s: timeEstimate,
       };
-      await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id });
+      await deps.checked(ctx.id, chain, quote, { scope: pool.scope, index: before.record.index, wallet: before.wallet, refundId: before.record.id, ...(refund === undefined ? {} : { refund_to: refund.to }) });
       if (stopped()) return void (out = { error: "not_allowed" });
       out = { result: { chain, address: before.wallet, asset, quote } };
     })().catch(() => {
