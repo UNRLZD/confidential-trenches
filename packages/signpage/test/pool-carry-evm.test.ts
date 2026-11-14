@@ -644,6 +644,8 @@ test("card buy-any-amount-on-every-chain: a rest W (its release a pool withdraw,
   ch.c.balance = [change - RUNG - 10n ** 12n, change - RUNG - 10n ** 12n];
   assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "landed" }]);
   assert.deepEqual(await ws.get("meta", EVM_CARRY_DONE_KEY), { [W]: { chain: "base", end: "carried" } }, "what is under the least rung stays on W, its tail");
+  // that tail is a W tail record (card leftovers-carry-to-cash): counted, and carried to Cash once worth one deposit
+  assert.deepEqual(await ws.get("meta", `w-tail/base/${W}`), { chain: "base", address: W, l: LABEL.toString(), j: 0, amount: (change - RUNG - 10n ** 12n).toString() });
 });
 
 test("card buy-any-amount-on-every-chain: a rest W whose own buy has no end is never carried (nor ended a withdraw) until its window is long past", async () => {
