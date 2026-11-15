@@ -57,3 +57,16 @@ test("card evm-tape-from-our-index-fast: a log read wider than a provider's span
   assert.ok(!logSkip([f(100, 149)]).has(POKT), "50 blocks: within its cap");
   assert.ok(logSkip([f(100, 149)]).has(BASE_OWN) && logSkip([f(100, 1099)]).has(BASE_OWN));
 });
+
+test("card evm-tape-from-our-index-fast: the keyed companies' caps hold for the swap reads too (rpc.ts KEYED_LOGS_SPAN: QuickNode's trial 5 blocks, dRPC's free keys 100), named by the URL's company, never its key", () => {
+  const f = (from: number, to: number) => ({ address: "0x00", fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` });
+  const QN = "https://example-name.base-mainnet.quiknode.pro/0000/";
+  const DR = "https://lb.drpc.live/base/0000";
+  const PUB = "https://base-rpc.publicnode.com";
+  const wide = logSkip([f(100, 1099)], [QN, DR, PUB]);
+  assert.ok(wide.has(QN) && wide.has(DR) && !wide.has(PUB), "a 1,000-block span: the keyed two skipped, the public one asked");
+  const hundred = logSkip([f(100, 199)], [QN, DR, PUB]);
+  assert.ok(hundred.has(QN) && !hundred.has(DR), "100 blocks: within dRPC's cap, past QuickNode's");
+  assert.ok(!logSkip([f(100, 104)], [QN, DR]).has(QN), "5 blocks: within QuickNode's");
+  assert.ok(!logSkip([f(100, 199)], ["https://robinhood.drpc.org"]).has("https://robinhood.drpc.org"), "Robinhood's 100-block spans on dRPC's public endpoint: asked");
+});

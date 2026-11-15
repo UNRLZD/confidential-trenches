@@ -77,7 +77,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
-import { operatorOf } from "../../rpc/rpc.ts";
+import { KEYED_LOGS_SPAN, operatorOf } from "../../rpc/rpc.ts";
 import { isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
@@ -294,11 +294,26 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
  *  1,000-block spans asked it first and met its refusal, then waited for the next provider's pace (card
  *  evm-tape-from-our-index-fast: four cold Base tapes on the public providers, 10:4xZ). */
 export const LOG_SPAN_CAP: Readonly<Record<string, number>> = { "https://base-pokt.nodies.app": 50 };
-/** The providers a log read of `filters` is not sent: those that refuse every log read (LOGS_REFUSED), and those whose
- *  span cap (LOG_SPAN_CAP) is below the widest filter's span. */
-export function logSkip(filters: readonly Record<string, unknown>[]): ReadonlySet<string> {
+/** The keyed companies' log span caps (rpc.ts KEYED_LOGS_SPAN: a QuickNode trial 5 blocks, dRPC's free keys 100), by
+ *  the company that runs a URL (rpc.ts operatorOf, dRPC's lb.drpc.live folded in): a keyed URL is a secret, so its
+ *  company names it. */
+const COMPANY_LOGS_SPAN: Readonly<Record<string, number | undefined>> = { "quiknode.pro": KEYED_LOGS_SPAN.quicknode, "drpc.org": KEYED_LOGS_SPAN.drpc };
+/** A provider's log span cap, or undefined for none known. */
+const logSpanCap = (u: string): number | undefined => {
+  if (Object.hasOwn(LOG_SPAN_CAP, u)) return LOG_SPAN_CAP[u];
+  try {
+    return COMPANY_LOGS_SPAN[operatorOf(u)];
+  } catch {
+    return undefined;
+  }
+};
+/** The providers of `urls` a log read of `filters` is not sent: those that refuse every log read (LOGS_REFUSED), and
+ *  those whose span cap (LOG_SPAN_CAP, a keyed company's KEYED_LOGS_SPAN) is below the widest filter's span. The swap
+ *  reads sent their 1,000-block spans to the helper's keyed QuickNode and dRPC URLs as well, which refuse past 5 and
+ *  100 blocks, spending those accounts' pace and day on refusals (card evm-tape-from-our-index-fast). */
+export function logSkip(filters: readonly Record<string, unknown>[], urls: readonly string[] = []): ReadonlySet<string> {
   const widest = Math.max(0, ...filters.map((f) => parseInt(String(f.toBlock), 16) - parseInt(String(f.fromBlock), 16) + 1).filter((n) => Number.isSafeInteger(n)));
-  const capped = Object.entries(LOG_SPAN_CAP).filter(([, cap]) => cap < widest).map(([u]) => u);
+  const capped = [...new Set([...Object.keys(LOG_SPAN_CAP), ...urls])].filter((u) => (logSpanCap(u) ?? Infinity) < widest);
   return capped.length === 0 ? LOGS_REFUSED : new Set([...LOGS_REFUSED, ...capped]);
 }
 export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
@@ -1419,7 +1434,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. A provider whose
    *  log span cap (LOG_SPAN_CAP) is below the widest filter's span is not asked: it only refuses. */
   function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false): Promise<(Log[] | null)[]> {
-    const skip = logSkip(filters);
+    const skip = logSkip(filters, [...urls, ...rpcs]);
     return agreed<Log[]>(
       urls,
       filters.length,
