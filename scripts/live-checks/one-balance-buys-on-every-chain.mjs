@@ -64,10 +64,17 @@ const TAP = new RegExp(
 // (card solana-buy-never-moves-cash-for-a-coin-it-cannot-buy: a tap read that throws, a Solana coin with no venue read,
 // is null and moves nothing, `.catch(()=>null)` and `\1!==null&&`; a coin whose tap reads still moves its shortfall)
 const TAP_ALL = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.tapMax\\(\\3,${N}\\)(?:\\.catch\\(\\(\\)=>null\\))?:(${N})\\.amount,(${N})=(?:\\1!==null&&)?\\1<\\4\\.amount\\?(${N})\\(\\1\\):null,(${N})=\\5===null\\?null:await \\2\\.need\\(\\3,\\5\\);if\\(\\7!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\7\\}\\)\\}catch\\{\\}`);
+// (card you-receive-on-every-chain: Solana's shortfall is first asked of `short`, sized as pool.buy.dry prices it so the
+// notes the move brings pay the rest with their own Ws' costs, and falls back to the want; the mover asked for it, the
+// move op told, then the wait for the tap to reach the ask)
+const TAP_SIZED = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.tapMax\\(\\3,(${N})\\)(?:\\.catch\\(\\(\\)=>null\\))?:(${N})\\.amount,(${N})=\\1!==null&&\\1<\\5\\.amount&&\\3===\`solana\`&&\\2\\.short\\?await \\2\\.short\\(\\3,\\4,\\5\\.amount\\)\\.catch\\(\\(\\)=>null\\):null,(${N})=\\1!==null&&\\1<\\5\\.amount\\?\\6\\?\\?(${N})\\(\\1\\):null,(${N})=\\7===null\\?null:await \\2\\.need\\(\\3,\\7\\);if\\(\\9!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\9\\}\\)\\}catch\\{\\}let (${N})=\\2\\.now\\(\\)\\+${N};for\\(;!\\2\\.signal\\?\\.aborted&&\\2\\.now\\(\\)<\\10&&await \\2\\.tapMax\\(\\3,\\4\\)<\\5\\.amount;\\)await \\2\\.wait\\(${N}\\)\\}`);
 const tapAll = (js) => {
-  const m = TAP_ALL.exec(js);
-  if (m === null) return false;
-  const want = new RegExp(`(?:^|[^\\w$])${esc(m[6])}=(${N})=>${esc(m[3])}===\`solana\`\\?${esc(m[4])}\\.amount-\\1:`);
+  const all = TAP_ALL.exec(js);
+  const sized = all === null ? TAP_SIZED.exec(js) : null;
+  // the want's name, the chain's, the ask's
+  const [w, chain, ask] = all !== null ? [all[6], all[3], all[4]] : sized !== null ? [sized[8], sized[3], sized[5]] : [];
+  if (w === undefined) return false;
+  const want = new RegExp(`(?:^|[^\\w$])${esc(w)}=(${N})=>${esc(chain)}===\`solana\`\\?${esc(ask)}\\.amount-\\1:`);
   return want.test(js);
 };
 /** pool.buy.dry's answer with with_cash. */
