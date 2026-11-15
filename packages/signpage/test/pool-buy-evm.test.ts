@@ -1164,6 +1164,22 @@ test("card evm-buy-and-sell-on-mainnet: a refusal whose reference goes through a
   evmLastRouteReset();
 });
 
+test("card base-coin-quote-check-names-its-cause: a coin whose only market is behind a hook the venue does not list (NOVAAI on Robinhood, mainnet 2026-11-15: its v4 pool fee 0, tick spacing 200, hook 0xe5e7…f044) answers venue_not_built, which the app draws Unavailable with no Retry, never a bare Failed", async () => {
+  evmLastRouteReset();
+  const t = TOKEN.toLowerCase();
+  const { h, seen } = host();
+  const asked: unknown[] = [];
+  const hooked: EvmPoolBuyQuote["route"] = { venue: "uniswap-v4", currencyIn: "0x0000000000000000000000000000000000000000", hops: [{ currency: t, fee: 0, tickSpacing: 200, hooks: "0xe5e702641ea86f4ae6cc3cdaed2b886f976be044", hookData: "0x" }] };
+  // every route the tap may take quotes nothing; each refusal names the kit's best route, the hooked pool (4.55e18 of
+  // the coin for 0.00098 ETH on mainnet)
+  h.quote = async (req) => (asked.push(req.route), Promise.reject(new EvmQuoteError("no_quote", "the route reverts or quotes nothing", { amountOut: 4_550_164_062_791_742_294n, route: hooked })));
+  // the app's words for venue_not_built: apps/terminal/test/three-owner-labels.test.ts (Unavailable, Buy off, no Retry)
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "venue_not_built", rule: "no_quote" });
+  assert.ok(!asked.some((r) => JSON.stringify(r) === JSON.stringify(hooked)), "the unlisted hook's route is never asked");
+  assert.deepEqual([seen.takes.length, seen.sends.length], [0, 0]);
+  evmLastRouteReset();
+});
+
 test("card buy-any-amount-on-every-chain: a buy asks the ETH that goes into swaps (the chunk less its fee, not a chunk): the run plans it and spends that note whole", async () => {
   const { h, seen } = host(both([release()]));
   assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: CHUNK - FEE }), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
