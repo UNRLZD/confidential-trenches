@@ -510,7 +510,8 @@ const PLANTS = [
   ["id_keep", "the indexer's used made lasting", () => swap("return\\[`used`,!1\\]", "!1", "!0")],
   ["id_keep", "a new pass drops nothing", () => swap(String.raw`§\.lasting\.has\(§\)\|\|§\.answers\.delete\(§\);`, "||", "||1||")],
   ["id_keep", "a new pass drops everything (31be751d's rule)", () => plant(String.raw`for\(let (?<x>§) of\[\.\.\.(?<k>§)\.answers\.keys\(\)\]\)\k<k>\.lasting\.has\(\k<x>\)\|\|\k<k>\.answers\.delete\(\k<x>\);`, (s, g) => `${g.k}.answers.clear();`)],
-  ["id_keep", "keptIdReader opens a new pass on any refusal", () => swap(String.raw`catch\((?<e>§)\)\{if\(!\(\k<e> instanceof §\)\)throw \k<e>\}let`, "if(!(", "if(!1&&!(")],
+  // keptIdReader's own catch, after its kept reader (`keep:§})}}`): the evm Cash move's fee search has the same catch
+  ["id_keep", "keptIdReader opens a new pass on any refusal", () => swap(String.raw`keep:§\}\)\}\}catch\((?<e>§)\)\{if\(!\(\k<e> instanceof §\)\)throw \k<e>\}let`, "if(!(", "if(!1&&!(")],
   ["id_keep", "step 5 reads with a new keep each run", () => plant(String.raw`let\{rpcs:§,pass:§,reader:§\}=await §\(§\(§,§\.rpcs,(?<k>§),\{`, (s, g) => s.replace(`,${g.k},{`, ",{answers:new Map,lasting:new Set},{"))],
   // card restore-first-sign-in-under-two-minutes: the kept reader opened through letGo on the run's signal, letGo its body
   ["id_keep", "step 5's kept reader opened not let go", () => plant(String.raw`let\{rpcs:§,pass:§,reader:§\}=await (?<lg>§)\((?<call>§\(§,§\.rpcs,§,\{\.\.\.§\.opts,signal:(?<sig>§)\}\)),\k<sig>\)`, (s, g) => s.replace(`${g.lg}(${g.call},${g.sig})`, () => g.call))],

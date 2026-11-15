@@ -10,8 +10,8 @@ import { test } from "node:test";
 import type { EvmPoolBuyQuote, EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_BUY_TAP_QUOTES } from "../../kit/src/trade/evm/buy-tap.ts";
-import { evmBuyDry, evmBuyPieces, evmDryCost, evmLastRouteReset, type EvmBuyDryDeps, type EvmDryQuote } from "../src/pool-buy-evm.ts";
-import { planEvmBuy, type PoolAsk } from "../src/rules/pool.ts";
+import { evmBuyDry, evmBuyPieces, evmDryCost, evmLastRouteReset, evmMostWithCash, evmMovedPieces, evmMoveShort, evmTapBuys, EVM_MOVE_FEE_ROOM, type EvmBuyDryDeps, type EvmDryQuote } from "../src/pool-buy-evm.ts";
+import { planEvmBuy, poolUnits, type PoolAsk } from "../src/rules/pool.ts";
 
 const ETH = 10n ** 18n;
 const micro = (n: bigint) => (n * ETH) / 1_000_000n;
@@ -46,6 +46,8 @@ const deps = (over: Partial<EvmBuyDryDeps> & { quoteHost?: EvmDryQuote | null } 
     tap: over.tap ?? (async () => (reads.push("tap"), { tapMax: "0.0147", ready: READY })),
     withCash: over.withCash ?? (async () => (reads.push("cash"), "0.05")),
     quote: () => (over.quoteHost === undefined ? null : over.quoteHost),
+    ...(over.fee ? { fee: over.fee } : {}),
+    ...(over.moved ? { moved: over.moved } : {}),
   };
 };
 /** The dry's answer once it settles (unknown: a HostAnswer's `then` is no async function's return type). */
@@ -124,4 +126,56 @@ test("never while a trade runs: busy, with no read; an amount that is no ETH dec
   assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ tap: async () => null })), { error: "not_funded" });
   assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ withCash: async () => { throw new Error("cash"); } })), { error: "failed" });
   assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.0099" }, deps({ withCash: async () => null })), { result: { tap_max: "0.0147", cost: "0.0001" } });
+});
+
+// Card evm-cash-move-brings-its-fee: above tap_max, the box's You receive and Fee price the buy cashFirst runs after
+// moving from Cash, sized by the same plan (evmMoveShort at the epoch's fee). Red before: tap_max alone, no cost or out.
+test("above tap_max: cost is the sized plan's plus the move's, out one quote of the whole ask; no fee read or no move priced: tap_max alone", async () => {
+  const fee = micro(10n);
+  const sized = evmMoveShort(READY, micro(50_000n), fee)!;
+  assert.equal(sized.plan.amount, micro(50_000n), "the plan carries the whole ask");
+  evmLastRouteReset();
+  const asked: Asked = [];
+  const shorts: bigint[] = [];
+  const a = await run({ chain: "base", token: COIN, amount: "0.05" }, deps({ quoteHost: quoteHost(asked, good), fee: async () => fee, moved: async (s) => (shorts.push(s), micro(300n)) }));
+  assert.deepEqual(a, { result: { tap_max: "0.0147", with_cash: "0.05", cost: poolUnits(evmDryCost(sized.plan) + micro(300n), 18), out: "123.456789" } });
+  assert.deepEqual(shorts, [sized.short], "the move priced is the one cashFirst sizes");
+  assert.deepEqual(asked.map((r) => r.amountIn), [micro(50_000n)], "one quote of the whole ask");
+  for (const [name, over] of [["no fee read", { fee: async () => null, moved: async () => micro(300n) }], ["Cash cannot move it", { fee: async () => fee, moved: async () => null }], ["the fee read fails", { fee: async () => { throw new Error("rpc"); }, moved: async () => micro(300n) }]] as const) {
+    evmLastRouteReset();
+    const none: Asked = [];
+    const b = await run({ chain: "base", token: COIN, amount: "0.05" }, deps({ quoteHost: quoteHost(none, good), ...(over as Partial<EvmBuyDryDeps>) }));
+    assert.deepEqual(b, { result: { tap_max: "0.0147", with_cash: "0.05" } }, name);
+  }
+});
+
+test("evmMoveShort: the least whole rungs whose notes, each at twice the epoch fee, carry the ask in the tap's own plan", () => {
+  const fee = micro(10n);
+  // an empty pool: 0.005 ETH asks 0.006 of rungs (0.005 + 0.001: the 0.005 note alone spends 0.005 less its fee)
+  const empty = evmMoveShort([], micro(5_000n), fee)!;
+  assert.equal(empty.short, micro(6_000n));
+  assert.equal(empty.plan.amount, micro(5_000n));
+  // the least: one rung less does not carry it
+  const { pieces } = evmBuyPieces([]);
+  assert.throws(() => planEvmBuy({ kind: "pool.buy", chain: "base", token: COIN, amount: micro(5_000n), slippageBps: 0, decimals: 0 } as PoolAsk, [...pieces, ...evmMovedPieces(micro(5_000n), fee)], fee * EVM_MOVE_FEE_ROOM));
+  // with ready notes: only what they leave, the notes' own fees counted
+  const withReady = evmMoveShort(READY, micro(20_000n), fee)!;
+  assert.equal(withReady.plan.amount, micro(20_000n));
+  assert.ok(withReady.short < micro(20_000n) && withReady.short >= micro(5_000n), String(withReady.short));
+  assert.equal(evmMoveShort([], 0n, fee), null);
+});
+
+test("evmMostWithCash: the most one tap buys with Cash moved first, sized as cashFirst sizes it; every amount up to it the tap carries, the next step not", () => {
+  const fee = micro(10n);
+  // Cash pays a move of at most 0.01 ETH of rungs (its USDC and withdraw fee, as main.ts prices it)
+  const pays = (short: bigint) => short <= micro(10_000n);
+  const most = evmMostWithCash(READY, fee, pays, micro(100_000n));
+  assert.ok(evmTapBuys(READY, most, fee, pays), "the most is carried");
+  assert.ok(!evmTapBuys(READY, most + micro(1n), fee, pays), "one step more is not");
+  // more than the ready notes' 0.0147 and less than the ready notes and the whole move (0.0247): each note its own fee
+  assert.ok(most > micro(14_700n) && most < micro(24_700n), String(most));
+  // no Cash: the ready notes' own most (one bound under their sum, the band); the move's size is checked, never assumed
+  const none = evmMostWithCash(READY, fee, () => false, micro(100_000n));
+  assert.ok(none <= micro(14_700n) && none > micro(14_000n), String(none));
+  assert.equal(evmMostWithCash([], fee, () => false, micro(100_000n)), 0n);
 });

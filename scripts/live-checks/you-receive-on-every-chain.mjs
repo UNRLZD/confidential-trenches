@@ -30,7 +30,8 @@ export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 // Solana: the move's notes the dry prices, and cashFirst's sized shortfall
-const SOL = [/noteId:`move#\$\{[\w$]+\}`,own:(?:!0|true)/, /`solana`&&([\w$]+)\.short\?await \1\.short\(/];
+// (card evm-cash-move-brings-its-fee: `short` asked on every pool chain, after the tap read, not on Solana alone)
+const SOL = [/noteId:`move#\$\{[\w$]+\}`,own:(?:!0|true)/, /(?:`solana`|\.amount)&&([\w$]+)\.short\?await \1\.short\(/];
 // NEAR: the dry's route and its out from the quote of what W swaps
 const NEAR = [/\.chain===`near`\)return [\w$]+\([\w$]+\);if\(\([\w$]+\.chain===`base`/, /([\w$]+)\.amountOut>0n\?[\w$]+\(\1\.amountOut,[\w$]+\):void 0/];
 // the kit's params for pool.buy.dry take the trade chains (pool.move's own check), so a NEAR dry is not refused

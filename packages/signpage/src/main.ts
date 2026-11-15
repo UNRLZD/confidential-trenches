@@ -69,7 +69,7 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
-import { cashMover, cashUsdcFor, moveCostOf, poolMoveKinds, solanaTapMaxOf, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { cashMover, cashUsdcFor, evmCashWei, evmMoveCostOf, evmMoveOf, moveCostOf, poolMoveKinds, solanaTapMaxOf, unitsText, withCash, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -90,7 +90,7 @@ import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 import type { ExitChain } from "../../kit/src/checks/oneclick-exit.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
-import { evmBuyDry, evmDryQuote } from "./pool-buy-evm.ts";
+import { evmBuyDry, evmDryQuote, evmMostWithCash, evmMoveShort } from "./pool-buy-evm.ts";
 import { poolBalances } from "../../wallet/src/pool/balances.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -532,9 +532,9 @@ else {
   };
   // pool.buy.dry with with_cash on Solana (src/cash-to-pool.ts withCash): the dry answer as it is, plus Cash's largest
   // note less the relayer's fee at the device's price and what moves on their way bring; a read that fails leaves it out
-  // the tap's most on Base and Robinhood (kit 1.15): an EVM tap spends one whole note, so state.pools' tap_max (the
-  // largest ready note) and with_cash, the larger of it and the largest rung Cash makes (src/cash-to-pool.ts
-  // withCashNote); before the card, and with no Cash to move, a pool.buy.dry on an EVM chain is refused not_allowed.
+  // the tap's most on Base and Robinhood (kit 1.15): state.pools' tap_max and with_cash, the most one tap buys with Cash
+  // moved first (card evm-cash-move-brings-its-fee: src/pool-buy-evm.ts evmMostWithCash, the size cashFirst moves);
+  // before the card, and with no Cash to move, a pool.buy.dry on an EVM chain is refused not_allowed.
   // With the ask's amount (kit 1.17, card buy-any-amount-on-every-chain), a decimal of ETH, at most tap_max: `buys`, what
   // the tap's own plan spends in swaps for it (src/pool-buy-evm.ts evmDryBuys over the same ready proofs), when below it.
   // With it (card you-receive-on-every-chain): `cost`, what that plan costs for good, and `out`, the device's own tap
@@ -552,15 +552,42 @@ else {
         const ids = new Set(pools.map((p) => p.id));
         return { tapMax: tap, ready: (both.ready ?? []).filter((r) => ids.has(r.poolId)) };
       },
-      withCash: async (tap) => {
+      // with_cash (card evm-cash-move-brings-its-fee): the most one tap buys with Cash moved first, as cashFirst sizes
+      // the move (src/pool-buy-evm.ts evmMostWithCash at the epoch's fee, each move priced by src/cash-to-pool.ts
+      // evmMoveOf against Cash's largest note and its withdraw fee); with no price, floor or fee read, tap_max alone
+      withCash: async (tap, ready) => {
         const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
         const form = withdrawFormDeps(vault);
-        const [cash, fee, floor] = await Promise.all([form.available(), form.fee(), evmRoute.floor(chain)]);
-        return floor === null ? null : withCashNote(tap, cash, fee, prices.get(chain), chain, floor > EVM_LADDER.min ? floor - EVM_LADDER.min : 0n);
+        const [cash, fee, floor, epochFee] = await Promise.all([form.available(), form.fee(), evmRoute.floor(chain), testnet?.evmFeeNow(chain).catch(() => null) ?? null]);
+        const p = prices.get(chain);
+        const tapWei = parsePoolUnits(tap, POOL_ASSET_DECIMALS.ETH);
+        if (floor === null || epochFee === null || p === null || p === undefined || tapWei === null) return null;
+        const gas = floor > EVM_LADDER.min ? floor - EVM_LADDER.min : 0n;
+        const pays = (short: bigint): boolean => {
+          const m = evmMoveOf(short, gas, p, chain);
+          return m !== null && m.usdc + fee <= cash;
+        };
+        const most = evmMostWithCash(ready, epochFee, pays, tapWei + (cash > fee ? evmCashWei(cash - fee, p) : 0n));
+        return unitsText(most > tapWei ? most : tapWei, POOL_ASSET_DECIMALS.ETH);
       },
       quote: () => {
         const e = testnet?.evmPoolOf(chain) ?? null;
         return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs);
+      },
+      // above tap_max (card evm-cash-move-brings-its-fee): the move cashFirst starts, sized at the epoch's relay fee
+      // (src/pool-buy-evm.ts evmMoveShort) and priced on the device (src/cash-to-pool.ts evmMoveCostOf: the withdraw's fee,
+      // the move's margin and every deposit's gas at the device's price), only when Cash's largest note pays it
+      fee: () => testnet?.evmFeeNow(chain) ?? Promise.resolve(null),
+      moved: async (short) => {
+        const p = prices.get(chain);
+        if (p === null || p === undefined) return null;
+        const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+        const form = withdrawFormDeps(vault);
+        const [cash, fee, floor] = await Promise.all([form.available(), form.fee(), evmRoute.floor(chain)]);
+        if (floor === null) return null;
+        const gas = floor > EVM_LADDER.min ? floor - EVM_LADDER.min : 0n;
+        const m = evmMoveOf(short, gas, p, chain);
+        return m === null || m.usdc + fee > cash ? null : evmMoveCostOf(short, gas, fee, p, chain);
       },
     });
   // NEAR (card you-receive-on-every-chain): nearBuyDry on the NEAR buy's own page, never while a trade runs
@@ -616,8 +643,16 @@ else {
       const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
       return tap === undefined ? 0n : (parsePoolUnits(tap, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) ?? 0n);
     },
-    // Solana: the shortfall pool.buy.dry prices (src/pools.ts solanaMoveShort), so the move's notes pay the rest
-    short: (chain, token, amount) => (chain === "solana" ? tapDry.short(token, amount) : Promise.resolve(null)),
+    // the shortfall pool.buy.dry prices, so the move's notes pay the rest with their own costs: Solana's
+    // (src/pools.ts solanaMoveShort); Base's and Robinhood's (card evm-cash-move-brings-its-fee: src/pool-buy-evm.ts
+    // evmMoveShort over the chain's ready proofs as the tap reads them, at the epoch's relay fee)
+    short: async (chain, token, amount) => {
+      if (chain === "solana") return tapDry.short(token, amount);
+      if (!testnet) return null;
+      const [both, fee] = await Promise.all([testnet.readyWith(pageNotes), testnet.evmFeeNow(chain)]);
+      const ids = new Set(PAGE_POOLS.filter((p) => p.chain === chain).map((p) => p.id));
+      return fee === null ? null : (evmMoveShort((both.ready ?? []).filter((r) => ids.has(r.poolId)), amount, fee)?.short ?? null);
+    },
     need: (chain, short) => cashMoverNow().need(chain, short),
     wait: (ms) => new Promise((res) => setTimeout(res, ms)),
     now: () => Date.now(),

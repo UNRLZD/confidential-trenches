@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
-import { withCash, withCashNote, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
+import { withCash, evmCashWei, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, evmMoveCostOf, evmMoveOf, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
 
 const TOKEN = "So11111111111111111111111111111111111111112";
 const ADDRESS = "a".repeat(64);
@@ -195,24 +195,40 @@ test("cashFirst: with no Cash to move and nothing on its way the pool buy goes s
   assert.deepEqual([calls.inner, reads, needs, c.routes], [[400_000_000n], 0, 0, []]);
 });
 
-test("cashFirst on Base and Robinhood: a rung above every ready note asks the mover for that whole rung, waits for it, then buys it; an ask that is no rung goes straight to the pool buy", async () => {
+// Card evm-cash-move-brings-its-fee: the move is the size the page gives (pool-buy-evm.ts evmMoveShort: the notes it
+// brings each pay their own relay fee), for any amount, never the asked rung alone; with no size, nothing moves.
+test("cashFirst on Base and Robinhood: an ask above tap_max asks the mover for the page's size, waits for it, then buys it; no size: straight to the pool buy, nothing moved", async () => {
   for (const chain of ["base", "robinhood"] as const) {
     const calls = { inner: [] as bigint[] };
     const c = ctx();
     const d = tap({ taps: [2_000_000_000_000_000n, 2_000_000_000_000_000n, 5_000_000_000_000_000n], moving: true }, calls);
     const asked: [string, bigint][] = [];
+    d.short = async (_ch, _t, a) => (a === 4_300_000_000_000_000n ? 4_000_000_000_000_000n : null);
     d.need = async (ch, x) => (asked.push([ch, x]), `cash/${ch}/7`);
-    await run(cashFirst(innerOf(calls), () => d)({ ...ask(5_000_000_000_000_000n), chain }, c));
-    assert.deepEqual(asked, [[chain, 5_000_000_000_000_000n]], "the whole rung, never the gap to the ready note");
+    await run(cashFirst(innerOf(calls), () => d)({ ...ask(4_300_000_000_000_000n), chain }, c));
+    assert.deepEqual(asked, [[chain, 4_000_000_000_000_000n]], "the page's size, never the bare gap or the asked amount");
     assert.deepEqual(c.routes, [{ move: "cash", op: `cash/${chain}/7` }]);
-    assert.deepEqual(calls.inner, [5_000_000_000_000_000n]);
-    const odd = { inner: [] as bigint[] };
-    const o = tap({ taps: [0n], moving: true }, odd);
+    assert.deepEqual(calls.inner, [4_300_000_000_000_000n]);
+    const none = { inner: [] as bigint[] };
+    const o = tap({ taps: [0n], moving: true }, none);
     let needs = 0;
     o.need = async () => (needs++, "x");
-    await run(cashFirst(innerOf(odd), () => o)({ ...ask(4_000_000_000_000_000n), chain }, ctx()));
-    assert.deepEqual([odd.inner, needs], [[4_000_000_000_000_000n], 0]);
+    o.short = async () => null;
+    await run(cashFirst(innerOf(none), () => o)({ ...ask(5_000_000_000_000_000n), chain }, ctx()));
+    assert.deepEqual([none.inner, needs], [[5_000_000_000_000_000n], 0], "no size: no move, even for a whole rung");
   }
+});
+
+test("evmMoveOf and evmMoveCostOf: the move lands whole rungs, each with one deposit's gas; its cost the withdraw fee, the 3% margin and that gas, in wei, rounded up", () => {
+  const eth = { price: "300000000000", expo: -8 };
+  const gas = 20_000_000_000_000n;
+  // 0.0042 ETH rounds up to 0.005 ETH of rungs: 0.005 (one note); 0.009 is 0.005 + 0.002 + 0.002 (three notes)
+  assert.deepEqual(evmMoveOf(4_200_000_000_000_000n, gas, eth, "base"), { left: 5_020_000_000_000_000n, notes: 1, usdc: 15_511_800n });
+  assert.deepEqual(evmMoveOf(9_000_000_000_000_000n, gas, eth, "robinhood")?.left, 9_060_000_000_000_000n);
+  // 0.05 USDC fee + 15.5118 * 300 / 10300 = 0.4518 USDC margin: 0.5018 USDC = 0.000167266666...7 ETH at 3,000 (rounded up), + 0.00002 gas
+  assert.equal(evmMoveCostOf(4_200_000_000_000_000n, gas, 50_000n, eth, "base"), 167_266_666_666_667n + gas);
+  assert.equal(evmMoveOf(0n, gas, eth, "base"), null);
+  assert.equal(evmMoveCostOf(1n, gas, 50_000n, { price: "0", expo: -8 }, "base"), null);
 });
 
 test("cashFirst: a sell or a NEAR buy is the inner kind's alone", async () => {
@@ -239,13 +255,12 @@ test("withCash: tap_max plus the moves on their way plus what the largest Cash n
   assert.equal(withCash("x", 0n, 0n, 0n, p), null);
 });
 
-test("withCashNote (Base and Robinhood): the larger of the ready note and the largest rung Cash's largest note less its fee makes at the device's ETH price, 3% and one deposit's gas under; the ready note alone when Cash makes none bigger", () => {
+// card evm-cash-move-brings-its-fee: with_cash on Base and Robinhood is searched under what Cash buys with no margin
+// (pool-buy-evm.ts evmMostWithCash; the old withCashNote, the largest rung alone, is gone)
+test("evmCashWei: the wei Cash buys at the device's ETH price, no margin, rounded down; none with no price", () => {
   const eth = { price: "300000000000", expo: -8 };
-  const gas = 20_000_000_000_000n;
-  // 99.95 USDC at 3,000 USD less 3% = 0.032346 ETH, less 0.00002 gas: the largest rung under it is 0.02 ETH
-  assert.equal(withCashNote("0.005", 100_000_000n, 50_000n, eth, "base", gas), "0.02");
-  assert.equal(withCashNote("0.05", 100_000_000n, 50_000n, eth, "robinhood", gas), "0.05", "a ready note bigger than Cash makes");
-  assert.equal(withCashNote("0", 3_000_000n, 50_000n, eth, "base", gas), "0", "under the least rung: nothing");
-  assert.equal(withCashNote("0.005", 100_000_000n, 50_000n, null, "base", gas), "0.005", "no price: the ready note");
-  assert.equal(withCashNote("x", 100_000_000n, 50_000n, eth, "base", gas), null);
+  assert.equal(evmCashWei(30_000_000n, eth), 10_000_000_000_000_000n, "30 USDC at 3,000 USD: 0.01 ETH");
+  assert.equal(evmCashWei(1n, eth), 333_333_333n, "one micro-USDC");
+  assert.equal(evmCashWei(30_000_000n, { price: "0", expo: -8 }), 0n);
+  assert.equal(evmCashWei(0n, eth), 0n);
 });

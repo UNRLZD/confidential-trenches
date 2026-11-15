@@ -22,8 +22,9 @@
 // - A page that dies mid-move loses nothing: the follow resumes the quote's op on the next load, and withdrawSettle the
 //   RESERVED note; the money is in the pool for the next tap.
 //
-// cashFirst, at a tap: a Solana pool.buy above what one tap spends now (pool.buy.dry's tap_max) asks `need` for the
-// shortfall and, while money is on its way, waits for it (a read each CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS at most) and
+// cashFirst, at a tap: a pool.buy above what one tap spends now (tap_max) asks `need` for the shortfall the page sizes
+// (Solana's solanaMoveShort, Base's and Robinhood's evmMoveShort: the notes the move brings pay their own costs) and,
+// while money is on its way, waits for it (a read each CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS at most) and
 // buys the whole ask once one tap spends it. The app is told the tap waits on the move (route { move: "cash", op }, op
 // the move op's id in state.ops), so its flow shows the move as its own step. With nothing on its way: the pool buy's
 // own answer.
@@ -36,7 +37,7 @@
 import { TRADE_CHAINS, type ErrorCode, type MoveStage, type PoolChain, type PoolMoveDry, type PoolStatePrice, type TradeChain, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
 import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
-import { chunkOf, type Ladder } from "../../wallet/src/pool/ladder.ts";
+import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import type { PoolAsk } from "./rules/pool.ts";
 import type { CheckedWithdraw } from "./withdraw/form.ts";
@@ -88,20 +89,12 @@ const POOL_DECIMALS: Readonly<Record<PoolChain, number>> = { solana: 9, base: 18
 const RUNG: Readonly<Record<PoolChain, bigint>> = { solana: SOL_LADDER.min, base: EVM_LADDER.min, robinhood: EVM_LADDER.min };
 const LADDER: Readonly<Record<PoolChain, Ladder>> = { solana: SOL_LADDER, base: EVM_LADDER, robinhood: EVM_LADDER };
 const isPoolChain = (c: unknown): c is PoolChain => typeof c === "string" && Object.hasOwn(LADDER, c);
-/** Whether `x` is a rung of `chain`'s ladder: an EVM tap spends one whole note, so only a rung can be made for it. */
-const isRung = (chain: PoolChain, x: bigint): boolean => x > 0n && x < 1n << 128n && chunkOf(LADDER[chain], x) === x;
-/** pool.buy.dry's with_cash on Base and Robinhood (kit 1.15), in whole ETH as tap_max is: an EVM tap spends one whole
- *  note, so the larger of the ready note (tap_max) and the largest rung the largest Cash note less `fee` makes at the
- *  device's price, CASH_MARGIN_BPS and one deposit's `gas` under it; null when tap_max is not an amount. */
-export function withCashNote(tapMax: string, cash: bigint, fee: bigint, p: Pick<PoolStatePrice, "price" | "expo"> | null, chain: "base" | "robinhood", gas: bigint): string | null {
-  const d = POOL_DECIMALS[chain];
-  const m = new RegExp(`^(\\d{1,30})(?:\\.(\\d{1,${d}}))?$`).exec(tapMax);
-  if (m === null) return null;
-  const tap = BigInt(m[1]!) * 10n ** BigInt(d) + BigInt((m[2] ?? "").padEnd(d, "0"));
-  const px = p === null ? null : priceOf(p);
-  const gross = px === null || cash <= fee ? 0n : ((cash - fee) * px.d * 10n ** BigInt(d) * 10_000n) / (px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS));
-  const note = gross > gas ? (chunkOf(LADDER[chain], gross - gas) ?? 0n) : 0n;
-  return unitsText(note > tap ? note : tap, d);
+/** The wei `usdc` of Cash buys at the device's ETH price, rounded down, with no margin: a bound above what any move of it
+ *  brings (pool.buy.dry's with_cash on Base and Robinhood is searched under it, pool-buy-evm.ts evmMostWithCash); 0n with
+ *  no price. */
+export function evmCashWei(usdc: bigint, p: Pick<PoolStatePrice, "price" | "expo">): bigint {
+  const px = priceOf(p);
+  return px === null || usdc <= 0n ? 0n : (usdc * px.d * 10n ** BigInt(POOL_DECIMALS.base)) / (px.n * 10n ** 6n);
 }
 /** USDC (6 decimals) that buys `units` of `chain`'s pool coin at the device's price, CASH_MARGIN_BPS over, rounded up. */
 function cashUsdcExact(units: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: PoolChain): bigint | null {
@@ -125,6 +118,34 @@ export function moveCostOf(short: bigint, fee: bigint, p: Pick<PoolStatePrice, "
   const num = (fee + margin) * px.d * 10n ** BigInt(POOL_DECIMALS[chain]);
   const den = px.n * 10n ** 6n;
   return (num + den - 1n) / den;
+}
+
+/** A move from Cash into Base's or Robinhood's pool that lands `short` wei of notes (card evm-cash-move-brings-its-fee;
+ *  pool-buy-evm.ts evmMoveShort sizes it): `short` up to a whole number of the least rung, so every wei is a rung, and
+ *  `notes` of them as the follow deposits them from U_X (ladderSplit), each with one deposit's `gas` (the pool's floor
+ *  less its least rung); `left`, the least its quote must bring (the rungs and every deposit's gas), and `usdc`, what it
+ *  asks Cash at the device's price, CASH_MARGIN_BPS over. Null with no price or nothing to move. One model: the mover's
+ *  move, pool.buy.dry's Fee above tap_max (evmMoveCostOf) and its Cash check (main.ts) all read it. */
+export function evmMoveOf(short: bigint, gas: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: "base" | "robinhood"): { left: bigint; notes: number; usdc: bigint } | null {
+  const min = RUNG[chain];
+  if (short <= 0n || gas < 0n || short >= 1n << 127n) return null;
+  const rungs = ((short + min - 1n) / min) * min;
+  const notes = ladderSplit(LADDER[chain], rungs).notes.length;
+  const left = rungs + BigInt(notes) * gas;
+  const usdc = cashUsdcExact(left, p, chain);
+  return usdc === null ? null : { left, notes, usdc };
+}
+/** What that move costs for good, in wei at the device's price, rounded up (moveCostOf's sum on Base and Robinhood): the
+ *  vault withdraw's relay `fee` (USDC), the CASH_MARGIN_BPS margin of the USDC it asks, and every deposit's gas from
+ *  U_X. The rest arrives in the pool as the user's own notes. Null as evmMoveOf. */
+export function evmMoveCostOf(short: bigint, gas: bigint, fee: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: "base" | "robinhood"): bigint | null {
+  const m = evmMoveOf(short, gas, p, chain);
+  const px = priceOf(p);
+  if (m === null || px === null || fee < 0n) return null;
+  const margin = (m.usdc * CASH_MARGIN_BPS + 10_000n + CASH_MARGIN_BPS - 1n) / (10_000n + CASH_MARGIN_BPS);
+  const num = (fee + margin) * px.d * 10n ** BigInt(POOL_DECIMALS[chain]);
+  const den = px.n * 10n ** 6n;
+  return (num + den - 1n) / den + BigInt(m.notes) * gas;
 }
 
 /** USDC (6 decimals) a move asks for `short` base units of `chain`'s pool coin (lamports on Solana, wei on Base and
@@ -412,14 +433,16 @@ export function cashMover(d: CashMoverDeps): CashMover {
     const joined = mine.length > 0 ? mine[mine.length - 1]!.op : null;
     if (coming >= short) return joined;
     const p = d.price(chain);
-    // Solana: what one tap still lacks, the ladder's least rung over it; Base and Robinhood: the whole note of `short`, a
-    // rung (an EVM tap spends one whole note), plus one deposit's gas, so the deposit lands that note
+    // Solana: what one tap still lacks, the ladder's least rung over it; Base and Robinhood (card
+    // evm-cash-move-brings-its-fee): `short`'s notes, sized by the tap's own plan (pool-buy-evm.ts evmMoveShort), each
+    // with one deposit's gas, so the follow lands every one of them (evmMoveOf)
     let left = short - coming;
     let usdc: bigint | null = p === null ? null : cashUsdcFor(left, p, chain);
     if (chain !== "solana") {
       const floor = p === null ? null : await d.floor?.(chain).catch(() => null);
-      left = short + (typeof floor === "bigint" && floor > RUNG[chain] ? floor - RUNG[chain] : 0n);
-      usdc = p === null || typeof floor !== "bigint" ? null : cashUsdcExact(left, p, chain);
+      const m = p === null || typeof floor !== "bigint" ? null : evmMoveOf(short, floor > RUNG[chain] ? floor - RUNG[chain] : 0n, p, chain);
+      left = m?.left ?? short;
+      usdc = m?.usdc ?? null;
     }
     if (usdc === null || d.handoff === null || d.rails.length === 0) return joined;
     const fee = await d.fee();
@@ -621,9 +644,10 @@ export type CashToPoolDeps = {
    *  solanaTapMaxOf; Base and Robinhood: the largest ready note, state.pools' tap_max); 0n when none. Throws when the
    *  coin's venue is not read: the tap then moves nothing from Cash. */
   tapMax(chain: PoolChain, token: string): Promise<bigint>;
-  /** Solana (card you-receive-on-every-chain): the least shortfall a move must bring so one tap pays `amount` (src/pools.ts
-   *  solanaMoveShort: each note the move brings is its own W, with its own relay fee, tip and rent), the size
-   *  pool.buy.dry prices; null: `amount` less tapMax. */
+  /** The least shortfall a move must bring so one tap pays `amount`, the size pool.buy.dry prices: on Solana (card
+   *  you-receive-on-every-chain) src/pools.ts solanaMoveShort, each note the move brings its own W with its own relay
+   *  fee, tip and rent, null: `amount` less tapMax; on Base and Robinhood (card evm-cash-move-brings-its-fee)
+   *  pool-buy-evm.ts evmMoveShort, the wei of rungs the move lands, each note paying its own relay fee, null: no move. */
   short?(chain: PoolChain, token: string, amount: bigint): Promise<bigint | null>;
   /** cashMover's need: the op id of the move on its way for it, or null. */
   need(chain: PoolChain, short: bigint): Promise<string | null>;
@@ -642,16 +666,19 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
     if (ask.kind !== "pool.buy" || !isPoolChain(ask.chain) || ask.token === null) return inner(ask, ctx);
     const token = ask.token;
     const chain = ask.chain;
-    // Solana: the gap to one tap's spend; Base and Robinhood: the whole asked note, only when it is a rung
-    const want = (now: bigint): bigint | null => (chain === "solana" ? ask.amount - now : isRung(chain, ask.amount) ? ask.amount : null);
+    // with no size from the page: on Solana the gap to one tap's spend; on Base and Robinhood nothing, since a move of the
+    // bare gap or of the asked rung brings notes that each pay their own relay fee, short of the ask (card
+    // evm-cash-move-brings-its-fee), and the tap answers its own refusal at once
+    const want = (now: bigint): bigint | null => (chain === "solana" ? ask.amount - now : null);
     let answer: Answer = { error: "failed" };
     const after = (async () => {
       const d = deps();
       // a tap read that throws (Solana: the coin's venue not read, solanaTapMaxOf) moves nothing from Cash: the pool buy
       // reads the venue itself and answers its refusal at once
       const now = (await d.any(chain)) ? await d.tapMax(chain, token).catch(() => null) : ask.amount;
-      // Solana: sized as pool.buy.dry prices it, so the notes the move brings pay the rest with their own Ws' costs
-      const sized = now !== null && now < ask.amount && chain === "solana" && d.short ? await d.short(chain, token, ask.amount).catch(() => null) : null;
+      // sized as pool.buy.dry prices it, so the notes the move brings pay the rest with their own costs: on Solana each
+      // W's relay fee, tip and rent (solanaMoveShort), on Base and Robinhood each note's relay fee (evmMoveShort)
+      const sized = now !== null && now < ask.amount && d.short ? await d.short(chain, token, ask.amount).catch(() => null) : null;
       const short = now !== null && now < ask.amount ? (sized ?? want(now)) : null;
       const op = short === null ? null : await d.need(chain, short);
       if (op !== null) {
