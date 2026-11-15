@@ -120,7 +120,8 @@ import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
 import { liveRuns, poolSellDryKind } from "./pool-sell-dry.ts";
-import { PAGE_CLUSTER, PAGE_SOL_PIN, pageEvmFloorPool, pageEvmWalletRpc, pageSolanaRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { PAGE_CLUSTER, PAGE_SOL_PIN, PAGE_TABLES, pageEvmFloorPool, pageEvmWalletRpc, pageSolanaRpcs, pageSolanaTokenRpcs, poolWayOut, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
+import { keptPoolFinders, pinnedPoolFinders, setPagePoolFinders } from "./page-rpc.ts";
 import { closeHostLanes, gatedFetch, hostLane, hostLanesClosed } from "../../wallet/src/throttle.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import { walkWorkerPort } from "./walk-workers.ts";
@@ -187,6 +188,15 @@ const outside = !framed && location.pathname === CONNECT_PATH;
 // the page's one prover (src/prover-host.ts: one prover-worker per page, the CSP allows no second), shared by the pool
 // flow's proofs and the withdraw form's hand-off (src/withdraw/handoff.ts), top-level only
 const prover = !framed ? proverHost() : null;
+// every Solana reference on the page reads the coin's Meteora DLMM pairs and Raydium CPMM and AMM v4 pools too
+// (src/page-rpc.ts pageReference; card solana-buy-reaches-raydium-and-meteora): scanned on the token pair (a public seat
+// that answers getProgramAccounts, and the helper), ranked past each kind's cap on the trade pair; top-level, mainnet only
+const pageFinders = !framed && PAGE_CLUSTER === "mainnet" ? keptPoolFinders(() => pageSolanaTokenRpcs("trade"), () => pageSolanaRpcs("trade")) : null;
+setPagePoolFinders(pageFinders);
+// a DLMM or Raydium coin has a venue at the tap (pool.buy.dry) only while the page pins a table of that venue to buy it
+// on: else it stays quote_check_failed, so the tap moves nothing from Cash for it (card
+// solana-buy-never-moves-cash-for-a-coin-it-cannot-buy)
+const dryFinders = pinnedPoolFinders(pageFinders, PAGE_TABLES);
 // the page's own pool price reads (src/pool-price.ts), set once they are made below: a pool buy's cost reads them
 let pagePrice: ((chain: PoolChain) => PoolStatePrice | null) | null = null;
 // whether a seed is held (the frame state's signed_in), set once the frame state is made below; until then, signed out:
@@ -637,6 +647,7 @@ else {
   // same paced pair as background reads, never while a trade runs; the notes and ready proofs as state.pools reads them
   const poolBuyDry = poolBuyDryKind({
     pools: PAGE_POOLS,
+    finders: dryFinders,
     rpcs: dryPair,
     rent: () => (hasSolana ? rent.get() : null),
     ready: async () => {
@@ -649,6 +660,7 @@ else {
   // the same read for a moving tap (cashDeps.tapMax): never refused busy, since the tap that asks is the trade
   const tapDry = poolBuyDryKind({
     pools: PAGE_POOLS,
+    finders: dryFinders,
     rpcs: dryPair,
     rent: () => (hasSolana ? rent.get() : null),
     ready: async () => {

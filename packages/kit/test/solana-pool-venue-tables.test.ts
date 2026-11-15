@@ -53,11 +53,16 @@ const globalProvider = (kind: "pump-curve" | "pumpswap", p: 0 | 1, edit?: (v: an
     const value = structuredClone(g.value);
     return { context: g.context, value: [edit ? edit(value) : value] };
   }) as SolanaRpc;
+const PUMP_VENUES = ["pump-curve", "pumpswap"] as const;
 const tableVenue = (kind: "pump-curve" | "pumpswap") => readSolanaPoolTableVenue([globalProvider(kind, 0), globalProvider(kind, 1)], kind);
 
 test("the table venue reader gives the fee accounts the buy's own venue reader gives, for every venue the buy builds", async () => {
-  assert.deepEqual([...SOLANA_POOL_BUY_VENUES], ["pump-curve", "pumpswap"]);
-  for (const kind of SOLANA_POOL_BUY_VENUES) {
+  assert.deepEqual([...SOLANA_POOL_BUY_VENUES], ["pump-curve", "pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"]);
+  // a DLMM swap names no program-wide fee account: its table venue is the kind alone, read from nothing
+  assert.deepEqual(await readSolanaPoolTableVenue([globalProvider("pump-curve", 0), globalProvider("pump-curve", 1)], "dlmm"), { kind: "dlmm" });
+  // nor a Raydium CPMM or AMM v4 swap (card solana-buy-reaches-raydium-and-meteora)
+  for (const kind of ["raydium-cpmm", "raydium-amm-v4"] as const) assert.deepEqual(await readSolanaPoolTableVenue([globalProvider("pump-curve", 0), globalProvider("pump-curve", 1)], kind), { kind });
+  for (const kind of PUMP_VENUES) {
     const { venue } = await setup(FX[kind]);
     const t = await tableVenue(kind);
     if (t.kind === "pump-curve" && venue.kind === "pump-curve") assert.deepEqual(t, { kind, feeRecipient: venue.feeRecipient, buybackFeeRecipients: venue.buybackFeeRecipients });
@@ -67,7 +72,7 @@ test("the table venue reader gives the fee accounts the buy's own venue reader g
 });
 
 test("the table venue reader refuses: providers that disagree, an unset buyback recipient, a wrong owner, an unknown venue", async () => {
-  for (const kind of SOLANA_POOL_BUY_VENUES) {
+  for (const kind of PUMP_VENUES) {
     const flip = (v: any) => {
       const d = base64.decode(v.data[0]);
       d[d.length - 1] = d[d.length - 1]! ^ 1;
@@ -142,7 +147,10 @@ test("generations: PumpSwap's first fills its table, 135 state pages and 89 labe
     assert.deepEqual(c.range, SOLANA_POOL_CURVE_FIRST_RANGE);
     assert.equal(c.list.length, 25);
   }
-  assert.deepEqual(SOLANA_POOL_TABLE_GROWS, ["pumpswap"]);
+  // DLMM's buy is 1,182 bytes on its table with a tip and the next page (solana-pool-buy-dlmm.test.ts): a page past its
+  // range as a static key would outgrow 1,232, so it gets generations by tree size as PumpSwap does; so do the Raydium
+  // venues, whose buys name their pool's accounts as static keys too (1,102 and 1,024 bytes: solana-pool-buy-raydium.test.ts)
+  assert.deepEqual(SOLANA_POOL_TABLE_GROWS, ["pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"]);
   for (const g of [g1!, g2!, c1!, c2!]) {
     assert.equal(new Set(g.list).size, g.list.length);
     assert.equal(g.list[0], cfg.pool);

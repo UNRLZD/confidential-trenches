@@ -127,8 +127,9 @@ export function parsePins(text) {
   for (const c of block[1].matchAll(/\b(devnet|mainnet): Object\.freeze\(\{([^}]*)\}\)/g)) {
     if (Object.hasOwn(out, c[1])) throw new Error(`${c[1]} pinned twice`);
     out[c[1]] = {};
-    for (const v of c[2].matchAll(/("pump-curve"|pumpswap): Object\.freeze\(\[([^\]]*)\]\)/g)) {
+    for (const v of c[2].matchAll(/("[a-z0-9-]+"|[a-z0-9]+): Object\.freeze\(\[([^\]]*)\]\)/g)) {
       const venue = v[1].replaceAll('"', "");
+      if (!VENUES.includes(venue)) throw new Error(`${c[1]} ${venue}: not a venue the kit builds`);
       const list = [...v[2].matchAll(/"([^"]*)"/g)].map((m) => m[1]);
       if (list.length === 0 || !list.every((a) => BASE58.test(a)) || v[2].replace(/"[^"]*"/g, "").replace(/[\s,]/g, "") !== "") throw new Error(`${c[1]} ${venue}: the pin is not a list of address literals`);
       out[c[1]][venue] = list;

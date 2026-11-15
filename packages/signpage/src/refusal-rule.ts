@@ -20,7 +20,7 @@ export const POOL_RULE_WORDS: ReadonlySet<string> = new Set([
   "recipient", "relay", "release_accounts", "release_data", "release_not_devices", "reserve", "rung", "sell", "sell_accounts",
   "signature_slots", "signers", "sim_block_after_clock", "sim_deadline", "sim_pool", "simulation", "slippage",
   "solana_not_pinned", "state_page", "sweep_amount", "sweep_reads", "system", "table", "tag", "teardown", "to", "token",
-  "transfer", "transfer_accounts", "transfer_amount", "transfer_data", "transfer_to", "tx_fields", "type", "unchecked", "value", "wallet", "wire",
+  "transfer", "transfer_accounts", "transfer_amount", "transfer_data", "transfer_to", "tx_fields", "type", "unchecked", "value", "venue", "wallet", "wire",
 ]);
 
 const QUOTE_CODES = [

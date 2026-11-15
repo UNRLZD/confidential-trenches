@@ -7,9 +7,10 @@
 //   - quote: pool.buy.dry with an amount starts the device's own quote of it (pageReference, side buy, on the page's
 //     pair) before it reads the proofs, a failed read being no quote (`.catch(()=>null)`), so the quote adds no wait
 //     after the proofs and the venue;
-//   - out: its answer carries `out`, the best of pump's curve and PumpSwap in that quote (the venue the buy itself
-//     takes, src/pool-buy.ts), its expected out at the mint's decimals, beside the pieces and cost, and none when the
-//     quote or the decimals are not read;
+//   - out: its answer carries `out`, the best venue in that quote by the pick the buy itself makes (bestVenuePool,
+//     src/page-rpc.ts, which src/pool-buy.ts takes: the quote's pools on the venues the kit buys on, SOLANA_POOL_BUY_CU's
+//     keys, pump's curve and PumpSwap among them, sorted by expected out), its expected out at the mint's decimals,
+//     beside the pieces and cost, and none when the quote or the decimals are not read;
 //   - decimals: the venue read takes the mint's decimals from byte 44 of the mint both providers gave, after a length
 //     check, and puts them on the venue it gives;
 //   - level: a kit-v1.13 app is read at its own level (`(1,13)?`1.13``), and at that level pool.buy.dry's answer goes
@@ -36,10 +37,20 @@ const esc = (v) => v.replace(/\$/g, "\\$");
 
 /** The quote started before the proofs' read (groups: the quote, the amount). */
 const QUOTE = new RegExp(`(${N})=(${N})!==null&&\\2>0n\\?${N}\\(${N},\\{side:\`buy\`,token:${N},amount:\\2\\}\\)\\.catch\\(\\(\\)=>null\\):null,${N}=await ${N}\\.ready\\(\\)`);
-/** The out of the best of the two venues in that quote, at the venue's decimals, in the answer (group: the quote). */
-const outOf = (quote) =>
+/** The best venue's pick (bestVenuePool): the quote's pools on a venue list, sorted by expected out, the first
+ *  (groups: the function, the venue list). */
+const BEST = new RegExp(`(${N})=(${N})=>\\2\\?\\.pools\\.filter\\((${N})=>(${N})\\.includes\\(\\3\\.venue\\)\\)\\.sort\\(\\((${N}),(${N})\\)=>\\5\\.expectedOut>\\6\\.expectedOut\\?-1:1\\)\\[0\\]`, "g");
+/** The venue list is the keys of the kit's per-venue compute table, pump's curve and PumpSwap among them
+ *  (SOLANA_POOL_BUY_VENUES of SOLANA_POOL_BUY_CU, packages/kit/src/trade/solana/pool-buy.ts). */
+const buyVenues = (js, list) => {
+  const keys = new RegExp(`[,;\\s]${esc(list)}=Object\\.freeze\\(Object\\.keys\\((${N})\\)\\)`).exec(js);
+  const table = keys ? new RegExp(`[,;\\s]${esc(keys[1])}=\\{([^}]*)\\}`).exec(js) : null;
+  return table !== null && /(^|,)"pump-curve":/.test(table[1]) && /(^|,)pumpswap:/.test(table[1]);
+};
+/** The out of the best venue in that quote, at the venue's decimals, in the answer (groups: the quote, the pick). */
+const outOf = (quote, best) =>
   new RegExp(
-    `(${N})=\\(await ${esc(quote)}\\)\\?\\.pools\\.filter\\((${N})=>\\2\\.venue===\`pump-curve\`\\|\\|\\2\\.venue===\`pumpswap\`\\)\\.sort\\(\\((${N}),(${N})\\)=>\\3\\.expectedOut>\\4\\.expectedOut\\?-1:1\\)\\[0\\],(${N})=\\1!==void 0&&(${N})\\.decimals!==void 0&&\\1\\.expectedOut>0n\\?${N}\\(\\1\\.expectedOut,\\6\\.decimals\\):void 0;return\\{result:\\{tap_max:${N},pieces:(${N})\\.length,cost:${N}\\(\\7\\.reduce\\([^;]*?\\)\\),\\.\\.\\.\\5===void 0\\?\\{\\}:\\{out:\\5\\}\\}\\}`,
+    `(${N})=${esc(best)}\\(await ${esc(quote)}\\),(${N})=\\1!==void 0&&(${N})\\.decimals!==void 0&&\\1\\.expectedOut>0n\\?${N}\\(\\1\\.expectedOut,\\3\\.decimals\\):void 0;return\\{result:\\{tap_max:${N},pieces:(${N})\\.length,cost:${N}\\(\\4\\.reduce\\([^;]*?\\)\\),\\.\\.\\.\\2===void 0\\?\\{\\}:\\{out:\\2\\}\\}\\}`,
   );
 /** The mint's decimals, byte 44 after a length check (group: the decimals). */
 const DECIMALS = new RegExp(`if\\((${N})\\.data\\.length<82\\)throw Error\\(\`the mint is shorter than a mint\`\\);let (${N})=\\1\\.data\\[44\\]`);
@@ -51,7 +62,8 @@ const STRIP = new RegExp(`(${N})=\\((${N}),(${N})\\)=>\\{if\\(typeof \\3!=\`obje
 /** What the check keeps of the reads: the index, the served bundle's sha384, and the marks read from it. */
 export function facts(index, js) {
   const quote = QUOTE.exec(js);
-  const out = quote ? outOf(quote[1]).exec(js) : null;
+  // the out written from a pick of the best venue on the buy's venues
+  const out = quote ? [...js.matchAll(BEST)].some((b) => buyVenues(js, b[4]) && outOf(quote[1], b[1]).test(js)) : false;
   const dec = DECIMALS.exec(js);
   const strip = STRIP.exec(js);
   // the strip is what kit-v1.13's level returns: its result returned at that level, before any other strip
@@ -60,7 +72,7 @@ export function facts(index, js) {
     index,
     sha384: sha384(js),
     quote: quote !== null,
-    out: out !== null,
+    out,
     // the venue read gives the decimals it read, on both venues' venue objects
     decimals: dec !== null && (js.match(new RegExp(`decimals:${esc(dec[2])},`, "g")) ?? []).length >= 2,
     level: LEVEL.test(js) && atLevel,

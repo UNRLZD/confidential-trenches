@@ -21,11 +21,11 @@
 import type { Chain } from "../../kit/src/orders/record.ts";
 import type { ErrorCode, PoolBuyDry, PoolStatePrice, SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, solanaPoolBuyFunds, solanaPoolBuyTip, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, readSolanaVenueAt, solanaPoolBuyFunds, solanaPoolBuyTip, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { pickPieces, solanaLegsPlan, unitsOf } from "./pool-buy.ts";
 import { carriesOf, carryOk } from "./pool-carry.ts";
-import { pageReference } from "./page-rpc.ts";
+import { bestVenuePool, pageReference, POOL_FINDER_VENUES, type PoolFinderKind, type PoolFinders } from "./page-rpc.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { heldBy, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type LandedRelease } from "../../wallet/src/pool/balances.ts";
@@ -90,18 +90,40 @@ export type CoinVenue = Pick<SolanaPoolBuyVenue, "kind" | "tokenAccountSize" | "
 
 /**
  * The coin's venue as the buy reads it (the kit's readSolanaPoolBuyVenue: both providers' accounts the same): pump's
- * curve while it is open, else the coin's canonical PumpSwap pool (a complete curve, or no curve, is no buy venue). A
- * coin with neither, or a read the two providers do not agree on, throws. A curve coin read before it graduates prices
- * no higher than its PumpSwap pool does (the curve's buy keeps PumpSwap's sell need with both cashback accounts the sell
- * makes), so a venue kept from an earlier read (at most COIN_VENUE_KEEP_MS) never prices a Max the buy cannot pay on a
- * graduation.
+ * curve while it is open, else the coin's canonical PumpSwap pool (a complete curve, or no curve, is no buy venue), else,
+ * with `finders` (the page's finders, given only for the venues the page pins a table for: card
+ * solana-buy-reaches-raydium-and-meteora), the first of the coin's Meteora DLMM pairs, Raydium CPMM pools or Raydium
+ * AMM v4 pools, in that order, the kit's readSolanaVenueAt reads (no cashback; the coin's token account and decimals are
+ * its mint's, the same on every pool). A pump venue first: its spend is never above a DLMM or Raydium buy's (no volume
+ * account; the sell need of each is W's wrapped-SOL account alone), so a Max priced on it funds a buy the reference
+ * sends to any of them. A coin with none, or a read the two providers do not agree on, throws. A curve coin read before
+ * it graduates prices no higher than its PumpSwap pool does (the curve's buy keeps PumpSwap's sell need with both
+ * cashback accounts the sell makes), so a venue kept from an earlier read (at most COIN_VENUE_KEEP_MS) never prices a
+ * Max the buy cannot pay on a graduation.
  */
-export async function readCoinVenue(rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> {
+export async function readCoinVenue(rpcs: readonly [SolanaRpc, SolanaRpc], token: string, finders: PoolFinders | null = null): Promise<CoinVenue> {
   const of = (v: SolanaPoolBuyVenue): CoinVenue => ({ kind: v.kind, tokenAccountSize: v.tokenAccountSize, cashback: v.cashback, ...(v.decimals === undefined ? {} : { decimals: v.decimals }) });
   try {
     return of(await readSolanaPoolBuyVenue(rpcs, "pump-curve", token));
   } catch {
-    return of(await readSolanaPoolBuyVenue(rpcs, "pumpswap", token));
+    try {
+      return of(await readSolanaPoolBuyVenue(rpcs, "pumpswap", token));
+    } catch (swap) {
+      if (finders === null || swap instanceof SolanaRpcTransportError) throw swap;
+      let last: unknown = swap;
+      for (const k of Object.keys(POOL_FINDER_VENUES) as PoolFinderKind[]) {
+        const find = finders[k];
+        if (!find) continue;
+        for (const pool of await find(token)) {
+          try {
+            return of(await readSolanaVenueAt(rpcs, POOL_FINDER_VENUES[k], token, pool, "buy"));
+          } catch (e) {
+            last = e;
+          }
+        }
+      }
+      throw last;
+    }
   }
 }
 
@@ -127,6 +149,9 @@ export type PoolBuyDryDeps = {
   tip?: bigint;
   /** The page's clock, ms (performance.now): a kept venue's age. */
   now?(): number;
+  /** The page's finders (src/page-rpc.ts keptPoolFinders) of the venues the page pins a table for (pinnedPoolFinders);
+   *  none: a coin with no pump venue has no venue at the tap (quote_check_failed, no Cash moved). */
+  finders?: PoolFinders | null;
 };
 
 /**
@@ -165,7 +190,7 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
   const venueOf = async (rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> => {
     const kept = venues.get(token);
     if (kept !== undefined && now() - kept.at < COIN_VENUE_KEEP_MS) return kept.v;
-    const v = await readCoinVenue(rpcs, token);
+    const v = await readCoinVenue(rpcs, token, d.finders ?? null);
     venues.delete(token);
     if (venues.size >= COIN_VENUES_KEPT) venues.clear();
     venues.set(token, { v, at: now() });
@@ -218,11 +243,11 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
       if (picks === undefined || picks.some((x) => x === null)) return { result: { tap_max: tap } };
       // no `pieces`: the kit's count is one leg's (at most SOLANA_POOL_BUY_PIECES_MAX); the cost is every leg's
       const legCost = (picks as (typeof weighed)[number][][]).reduce((a, s) => a + s.reduce((b, p) => b + p.binding.feeCap, tipOf(s.length)), 0n);
-      const best = (await quote)?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+      const best = bestVenuePool(await quote);
       const out = best !== undefined && venue.decimals !== undefined && best.expectedOut > 0n ? unitsOf(best.expectedOut, venue.decimals) : undefined;
       return { result: { tap_max: tap, cost: solOf(legCost), ...(out === undefined ? {} : { out }) } };
     }
-    const best = (await quote)?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+    const best = bestVenuePool(await quote);
     const out = best !== undefined && venue.decimals !== undefined && best.expectedOut > 0n ? unitsOf(best.expectedOut, venue.decimals) : undefined;
     return { result: { tap_max: tap, pieces: set.length, cost: solOf(set.reduce((a, p) => a + p.binding.feeCap, tipOf(set.length))), ...(out === undefined ? {} : { out }) } };
   };

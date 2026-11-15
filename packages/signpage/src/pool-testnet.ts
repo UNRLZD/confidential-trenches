@@ -62,7 +62,7 @@ import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./p
 import { proverHost } from "./prover-host.ts";
 import { proofFront, type ProofFront } from "./proof-front.ts";
 import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, TRADE_STORE_MS, within, type TradeStore } from "./trade.ts";
-import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_PIECES, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_PIECES, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest, type SolanaPoolVenueName } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, solanaSettleSpentSet, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { exitsOf, poolExit, type PoolExitDeps } from "./pool-exit.ts";
@@ -677,7 +677,7 @@ export type TestnetOver = {
   fetch?: typeof fetch;
   hardwareConcurrency?: number;
   /** The lookup tables pool.buy may load, by venue, generations oldest first (the network's, PAGE_TABLES, otherwise). */
-  tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", readonly string[]>>>;
+  tables?: Readonly<Partial<Record<SolanaPoolVenueName, readonly string[]>>>;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
   locks?: Pick<LockManager, "request" | "query"> | null;
   /** The device's one proving tab (src/proof-front.ts, on this page's navigator.locks, document and window otherwise):
@@ -735,7 +735,7 @@ export type TestnetOver = {
 
 /** The page network's lookup tables by venue (the wallet's SOL_POOL_TABLES of PAGE_CLUSTER): a pool buy loads one of
  *  its venue's own generations, and a venue with none is refused venue_not_pinned (card sol-pool-venue-tables). */
-export const PAGE_TABLES: Readonly<Partial<Record<"pump-curve" | "pumpswap", readonly string[]>>> = SOL_POOL_TABLES[POOL_TESTNET ? "devnet" : "mainnet"] ?? {};
+export const PAGE_TABLES: Readonly<Partial<Record<SolanaPoolVenueName, readonly string[]>>> = SOL_POOL_TABLES[POOL_TESTNET ? "devnet" : "mainnet"] ?? {};
 /** The pool send's own window: the helper answers a tag 3 only once it has simulated and sent it, and a send may wait
  *  out a blockhash's life (~60 to 90 s), so this is over 90 s, never the client's 10 s for the pool.buy kind's answer
  *  (the kit's SIGNPAGE_TIMEOUT_MS["pool.buy"]: the run answers once both RPCs read its transaction back, or at its
