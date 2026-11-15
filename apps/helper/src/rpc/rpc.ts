@@ -565,8 +565,47 @@ type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timi
  *  and pace's wait before a send (rpc-wait); `keyedMs`, a keyed Solana provider's time before the read fell back
  *  (rpc-keyed); `last`, the last send, the one that answered when the read did: its time and its provider's environment
  *  NAME (rpc), never its URL, host or key. */
-type Trace = { waitMs: number; keyedMs?: number; last?: { name: string; ms: number }; cached?: true; pages?: { n: number; ms: number } };
+/** `shape`: an EVM read's rpcShape, which its hold and refusal log lines carry (card base-reads-never-starve-max). */
+type Trace = { waitMs: number; keyedMs?: number; last?: { name: string; ms: number }; cached?: true; pages?: { n: number; ms: number }; shape?: string };
 const traces = new AsyncLocalStorage<Trace>();
+/** The longest rpcShape: one log line per hold, so a hostile body never grows the log past it. */
+export const RPC_SHAPE_MAX = 200;
+/**
+ * A checked JSON-RPC request (or batch) as a log line names it (card base-reads-never-starve-max): its method (one of
+ * the chain's allowed, RPC_METHODS) and its params with every value as its kind and length alone: a string "s<length>",
+ * a number "n", true or false "b", null "null", a list its first four members and "+<n>" more, an object its first six
+ * keys (a key that is no plain name: "?"), three levels deep ("…" past them); a batch "batch<n>" and its first three.
+ * So a held or refused read names the function that sent it (eth_getLogs over a filter, a balanceOf eth_call, a block
+ * read), never an address, a block number, a key or the caller. At most RPC_SHAPE_MAX characters.
+ */
+export function rpcShape(req: unknown): string {
+  const val = (v: unknown, depth: number): string => {
+    if (typeof v === "string") return `s${v.length}`;
+    if (typeof v === "number") return "n";
+    if (typeof v === "boolean") return "b";
+    if (v === null) return "null";
+    if (depth >= 4) return "…";
+    if (Array.isArray(v)) return `[${v.slice(0, 4).map((x) => val(x, depth + 1)).join(",")}${v.length > 4 ? `,+${v.length - 4}` : ""}]`;
+    if (typeof v === "object") {
+      const keys = Object.keys(v as object);
+      const named = keys.slice(0, 6).map((k) => `${/^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(k) ? k : "?"}:${val((v as Record<string, unknown>)[k], depth + 1)}`);
+      return `{${named.join(",")}${keys.length > 6 ? `,+${keys.length - 6}` : ""}}`;
+    }
+    return "?";
+  };
+  const one = (r: unknown): string => {
+    const m = (r as { method?: unknown } | null)?.method;
+    const method = typeof m === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(m) ? m : "?";
+    return Object.hasOwn(r as object, "params") ? `${method}${val((r as { params: unknown }).params, 0)}` : method;
+  };
+  const s = Array.isArray(req) ? `batch${req.length} ${req.slice(0, 3).map(one).join(" ")}` : one(req);
+  return s.length > RPC_SHAPE_MAX ? `${s.slice(0, RPC_SHAPE_MAX - 1)}…` : s;
+}
+/** The current EVM read's shape as a log line's tail (" <shape>"), "" for any other read. */
+const shapeTail = (): string => {
+  const s = traces.getStore()?.shape;
+  return s === undefined ? "" : ` ${s}`;
+};
 /** A trace as Server-Timing entries: rpc-keyed when the read fell back, rpc-cache when the finalized-logs cache answered
  *  it (LOG_CACHE_ENTRIES), rpc-pages when it was paged (pagedLogs: its pages' time and count; their waits and sends ran
  *  side by side, so they are not summed into rpc-wait), then rpc-wait and rpc always ("none": no send). */
@@ -845,7 +884,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  background draws for a background read's), logged as one line with no caller in it. */
   const hold = (c: string, seconds: number, whose: "caller" | "background"): void => {
     budget.hold(c, now() + seconds * 1000, whose === "background");
-    log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s`);
+    log(`rpc hold ${c} ${whose} ${budget.heldFor(c, whose === "background")} s${shapeTail()}`);
   };
   const pacer = deps.pacer ?? createPacer();
   // card rpc-keyed-lists: the one hold and pace per provider a list walk draws on (server.ts passes the helper's, with
@@ -990,8 +1029,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (h.reading === undefined && now() - h.at >= FINAL_HEAD_MS) {
       const head = h;
       head.at = now();
-      head.reading = traces.exit(async () => {
-        const forward = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["finalized", false] });
+      // the helper's own head read, no caller's: its hold lines name it so (card base-reads-never-starve-max)
+      const forward = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["finalized", false] });
+      head.reading = traces.run({ waitMs: 0, shape: `helper ${rpcShape(JSON.parse(forward))}` }, async () => {
         const a = await callList(c, providers, forward, ["eth_getBlockByNumber"], undefined, false, now() + WALK_MS);
         if (a.status !== 200) return;
         const n = (JSON.parse(a.body) as { result?: { number?: unknown } | null }).result?.number;
@@ -1027,7 +1067,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false, keyedOnly = false): Promise<Answer> {
     const t: Trace = { waitMs: 0 };
     const a = await traces.run(t, () => route(chain, contentType, body, client, reserved, keyedOnly));
-    return { ...a, timing: timingOf(t) };
+    // card base-reads-never-starve-max: an EVM read's refusal names its shape in the refusal log (server.ts reply)
+    return { ...a, ...(a.why !== undefined && t.shape !== undefined ? { why: `${a.why} ${t.shape}` } : {}), timing: timingOf(t) };
   }
 
   async function route(chain: string, contentType: string | undefined, body: string, client: string | undefined, reserved: boolean, keyedOnly: boolean): Promise<Answer> {
@@ -1061,6 +1102,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
 
     const methods = ((Array.isArray(out) ? out : [out]) as { method: string }[]).map((r) => r.method);
+    // card base-reads-never-starve-max: an EVM read's shape (rpcShape) and its mode, for its hold and refusal log lines
+    const trace = traces.getStore();
+    if (trace !== undefined && EVM_CHAINS.has(c)) trace.shape = `${keyedOnly ? "keyed " : ""}${rpcShape(out)}`;
     // a keyed Solana provider fallen back (rpc/slot.ts): the public endpoint, on its own budget; the key while it serves
     // card rpc-keyed-lists: past the first (fallen back, or held by its 429), its keyed spares on their own budget, then
     // the public endpoint
@@ -1321,7 +1365,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
             sentTo(url, from);
             const s = upstreamRetryAfterS(r.headers, now());
             holds.hold(url, s);
-            log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${s} s`);
+            log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${s} s${shapeTail()}`);
             soonestMs = Math.min(soonestMs, holds.heldMs(url));
             continue;
           }
@@ -1353,7 +1397,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         const limited = evmLimited(c, answer);
         if (limited > 0) {
           holds.hold(url, limited);
-          log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${limited} s`);
+          log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${limited} s${shapeTail()}`);
           soonestMs = Math.min(soonestMs, holds.heldMs(url));
           continue;
         }

@@ -71,7 +71,7 @@ import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, PoolSendRefused, pool
 import { heldWs, ownWs } from "./pool-found.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, legCause, owedRentBacks, poolSellKind, POOL_RENT_BACK_SPACE_MAX_MS, READS_NONE, rentBackGapDrawn, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type OwedRentBack, type PoolSellKindHost } from "./pool-sell.ts";
-import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
+import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, evmHelperShownRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmFeeHold, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmFeeHold, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -253,20 +253,25 @@ export const pageAssetHeldRpc = (signal: AbortSignal): SolanaRpc =>
  *  so a provider the device reaches itself is never named a W of it, nor two in one burst. A sale reads none of it: its
  *  finding gates its signature, so it reads on the pool's two RPCs (src/pool-sell-evm.ts planEvmSell). None in the
  *  testnet build, whose helper has no route for the chain: there the pool's two RPCs read each W, as before. */
-export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET): EvmRpc | undefined => {
+/** `kind` (card base-reads-never-starve-max): "pass" for a background read (the buy follow, the carry, the holdings
+ *  rebuild, the deposit follow), never more than the wallet's EVM_PASS_IN_QUEUE of them in the route's queue at once;
+ *  "shown" for what a screen shows (the positions pass), which waits behind at most that many. */
+export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET, kind: "pass" | "shown" = "pass"): EvmRpc | undefined => {
   if (testnet) return undefined;
-  let r = WALLET_RPCS.get(chain);
+  const k = `${chain} ${kind}`;
+  let r = WALLET_RPCS.get(k);
   if (r === undefined) {
-    const route = evmHelperRpc(TRADE_HELPER, chain);
-    WALLET_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
+    const route = kind === "shown" ? evmHelperShownRpc(TRADE_HELPER, chain) : evmHelperRpc(TRADE_HELPER, chain);
+    WALLET_RPCS.set(k, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
   }
   return r;
 };
-const WALLET_RPCS = new Map<"base" | "robinhood", EvmRpc>();
+const WALLET_RPCS = new Map<string, EvmRpc>();
 /** A positions pass's readers (src/positions-evm.ts): the pool's pass pair, and on SIGN_HOST's build the helper's route
- *  as `one`, every W's balance read on it alone; the pair alone in the testnet build. */
+ *  as `one`, every W's balance read on it alone, in its shown lane (pageEvmWalletRpc); the pair alone in the testnet
+ *  build. */
 export const pageEvmPassReads = (chain: "base" | "robinhood", rpcs: readonly [EvmRpc, EvmRpc], testnet: boolean = POOL_TESTNET): { rpcs: readonly [EvmRpc, EvmRpc]; one?: EvmRpc } => {
-  const one = pageEvmWalletRpc(chain, testnet);
+  const one = pageEvmWalletRpc(chain, testnet, "shown");
   return one === undefined ? { rpcs } : { rpcs, one };
 };
 /** Tests only: forget this page's hold objects (EVM_HOLDS; each pool's record stays in the wallet store, as on a new

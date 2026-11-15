@@ -265,7 +265,9 @@ test("the page's pass readers: on SIGN_HOST's build the pool pair and the helper
   for (const chain of ["base", "robinhood"] as const) {
     const main = pageEvmPassReads(chain, pair);
     assert.equal(main.rpcs, pair);
-    assert.equal(main.one, pageEvmWalletRpc(chain));
+    // the positions read what Portfolio and the sell box show: the route's shown lane (card base-reads-never-starve-max)
+    assert.equal(main.one, pageEvmWalletRpc(chain, false, "shown"));
+    assert.notEqual(main.one, pageEvmWalletRpc(chain));
     assert.equal(main.one?.url, `${TRADE_HELPER}/v1/rpc/${chain}`);
     const test = pageEvmPassReads(chain, pair, true);
     assert.deepEqual(Object.keys(test), ["rpcs"]);

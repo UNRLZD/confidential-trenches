@@ -728,15 +728,59 @@ export function evmHelperHoldings(origin: string, chain: "base" | "robinhood", t
   const r = evmHelperRoute(origin, chain);
   return evmHoldingsReader(r.rpc, tokens, { wait429: r.wait429, gate: r.gate, lane: r.lane });
 }
-function evmHelperRoute(origin: string, chain: "base" | "robinhood"): Route {
+/**
+ * The most background calls (`pass`) one EVM helper route holds in its paced queue at once, sent or waiting their
+ * turn (card base-reads-never-starve-max). The queue is first come, first served at HOLDINGS_RPC_LIMIT (3 calls a
+ * 1,667 ms): with no bound a pass of 20 Ws (a restore's Transfer logs, a holdings rebuild) booked 60 calls ahead, and a
+ * read a screen shows waited 33 s behind them. Past the bound a pass call waits here, outside the queue, so a shown read
+ * (evmHelperShownRpc: the positions pass's balances, which Portfolio and the sell box draw) waits behind at most this
+ * many and its own window's room: one window, 1.7 s. The pace and the provider's draw are the queue's, as before.
+ */
+export const EVM_PASS_IN_QUEUE = 2;
+type EvmRoute = Route & { shown: SolanaRpc };
+const evmRoutes = new WeakMap<Route, EvmRoute>();
+function evmHelperRoute(origin: string, chain: "base" | "robinhood"): EvmRoute {
   const url = helperUrl(origin, chain);
-  return holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }));
+  const r = holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }));
+  let e = evmRoutes.get(r);
+  if (e === undefined) {
+    // the background calls in the queue now, and those waiting for room, in order
+    let inQueue = 0;
+    const waiting: (() => void)[] = [];
+    const pass = (method: string, params: readonly unknown[]): Promise<unknown> => {
+      const go = (): Promise<unknown> => {
+        inQueue++;
+        let p: Promise<unknown>;
+        try {
+          p = Promise.resolve(r.rpc(method, params));
+        } catch (err) {
+          p = Promise.reject(err);
+        }
+        return p.finally(() => {
+          inQueue--;
+          waiting.shift()?.();
+        });
+      };
+      if (inQueue < EVM_PASS_IN_QUEUE && waiting.length === 0) return go();
+      return new Promise<void>((ok) => waiting.push(ok)).then(go);
+    };
+    e = { ...r, rpc: r.rpc.url === undefined ? pass : Object.assign(pass, { url: r.rpc.url }), shown: r.rpc };
+    evmRoutes.set(r, e);
+  }
+  return e;
 }
-/** The helper's route for a mainnet W's other reads (./evm-restore.ts, the Transfer logs a restore reads for each W):
- * the holdings readers' one paced transport on POST /v1/rpc/{chain}, the same queue, so a restore's reads and the
- * holdings reads together stay at HOLDINGS_RPC_LIMIT. */
+/** The helper's route for a mainnet W's background reads (./evm-restore.ts, the Transfer logs a restore reads for each
+ * W; the buy follow, the carry, the holdings rebuild, the deposit follow): the holdings readers' one paced transport on
+ * POST /v1/rpc/{chain}, the same queue, so a restore's reads and the holdings reads together stay at HOLDINGS_RPC_LIMIT,
+ * never more than EVM_PASS_IN_QUEUE of them in it at once. */
 export function evmHelperRpc(origin: string, chain: "base" | "robinhood"): SolanaRpc {
   return evmHelperRoute(origin, chain).rpc;
+}
+/** The same route for a read a screen shows (the positions pass's W balances: Portfolio's rows, the sell box's Max): the
+ * same paced queue and gate, never behind more than EVM_PASS_IN_QUEUE background calls (card
+ * base-reads-never-starve-max). */
+export function evmHelperShownRpc(origin: string, chain: "base" | "robinhood"): SolanaRpc {
+  return evmHelperRoute(origin, chain).shown;
 }
 /** The helper's route in its keyed-only mode (POST /v1/rpc/{chain}?keyed=only, card evm-pool-leaves-any-source, review
  *  of 0b379bf4 P1-1): answered by the helper's keyed providers alone, never its public fallback (which holds the device's

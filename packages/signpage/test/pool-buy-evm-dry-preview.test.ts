@@ -124,7 +124,7 @@ test("never while a trade runs: busy, with no read; an amount that is no ETH dec
   assert.deepEqual(d.reads, []);
   assert.deepEqual(await run({ chain: "base", token: COIN, amount: "1e3" }, deps()), { error: "not_allowed" });
   assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ tap: async () => null })), { error: "not_funded" });
-  assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ withCash: async () => { throw new Error("cash"); } })), { error: "failed" });
+  assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ withCash: async () => { throw new Error("cash"); } })), { error: "down" });
   assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.0099" }, deps({ withCash: async () => null })), { result: { tap_max: "0.0147", cost: "0.0001" } });
 });
 
@@ -179,3 +179,27 @@ test("evmMostWithCash: the most one tap buys with Cash moved first, sized as cas
   assert.ok(none <= micro(14_700n) && none > micro(14_000n), String(none));
   assert.equal(evmMostWithCash([], fee, () => false, micro(100_000n)), 0n);
 });
+
+// Card base-reads-never-starve-max: a Base or Robinhood dry whose read fails (the proofs' view or Cash's notes, the
+// pool's floor or the epoch's fee read for with_cash, the move's fee or rungs above tap_max) answers "down", as Solana's
+// dry does, so the box asks again (the app's coinTapAgainMs); "failed" was never asked again, and the box kept Max at
+// state.pools' tap_max ($0 on the owner's live Base page, 15 Nov) with You receive a dash. Red at 6c13015c8: "failed".
+for (const chain of ["base", "robinhood"] as const) {
+  test(`card base-reads-never-starve-max: ${chain}'s dry answers down when any of its reads fails, never failed`, async () => {
+    const boom = async (): Promise<never> => { throw new Error("every provider held"); };
+    const cases: [string, Partial<EvmBuyDryDeps>, string?][] = [
+      ["the proofs' view and notes", { tap: boom }],
+      ["with_cash's reads", { withCash: boom }],
+      ["the move's fee above tap_max", { fee: boom, moved: async () => 0n }, "0.05"],
+      ["the move's cost above tap_max", { fee: async () => micro(10n), moved: boom }, "0.05"],
+    ];
+    for (const [what, over, amount] of cases) {
+      const r = evmBuyDry(chain, { chain, token: COIN, amount: amount ?? "0.001" }, deps(over));
+      await r.after;
+      const a = r.answer() as { error?: string; result?: unknown };
+      // a read the move's sizing makes fails only that part (tap_max still answers); every other: down
+      if (a.result !== undefined) assert.ok(what.startsWith("the move's"), `${what}: ${JSON.stringify(a)}`);
+      else assert.deepEqual(a, { error: "down" }, what);
+    }
+  });
+}

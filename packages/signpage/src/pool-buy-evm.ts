@@ -495,7 +495,10 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     const buys = plan !== null && amount !== null && plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
     const cost = plan !== null ? evmDryCost(plan) : moved !== null ? moved.cost : null;
     answer = { result: { tap_max: got.tapMax, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }), ...(cost === null ? {} : { cost: poolUnits(cost, ETH_DECIMALS) }), ...(o === null || (plan === null && moved === null) ? {} : { out: o }) } };
-  })().catch(() => void (answer = { error: "failed" }));
+    // a read that failed (the proofs' view, Cash's notes, the pool's floor, the epoch's fee: card
+    // base-reads-never-starve-max) is "down", as Solana's dry answers it (pools.ts poolBuyDryKind): the box asks again
+    // (the app's coinTapAgainMs), never keeps Max at a number no read gave, nor You receive at a dash for good
+  })().catch(() => void (answer = { error: "down" }));
   return { running: true, after, answer: () => answer };
 }
 
