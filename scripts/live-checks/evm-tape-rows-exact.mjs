@@ -22,6 +22,7 @@
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
+import { rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "evm-tape-rows-exact";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -153,22 +154,6 @@ async function getJson(base, path, fetchFn) {
   }
 }
 
-/** One provider's results for `calls`, in batches of 3 (the smallest a provider of ours takes); undefined where none. */
-async function batch(url, calls, fetchFn) {
-  const out = calls.map(() => undefined);
-  for (let k = 0; k < calls.length; k += 3) {
-    const part = calls.slice(k, k + 3);
-    try {
-      const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(part.map((c, i) => ({ jsonrpc: "2.0", id: k + i, method: c.method, params: c.params }))), signal: AbortSignal.timeout(15_000) });
-      const j = await r.json();
-      if (Array.isArray(j)) for (const o of j) if (isObj(o) && Number.isInteger(o.id) && o.id >= k && o.id < k + part.length && o.result != null) out[o.id] = o.result;
-    } catch {
-      // that part unanswered: asked of the next provider
-    }
-  }
-  return out;
-}
-
 const low = (v) => String(v).toLowerCase();
 /** The parts of a receipt the check judges, or null for one that is not a successful transaction of `tx`. */
 const receiptOf = (tx) => (r) =>
@@ -176,16 +161,20 @@ const receiptOf = (tx) => (r) =>
     ? { from: low(r.from), to: low(r.to), logs: r.logs.map((l) => ({ address: low(l.address), index: parseInt(l.logIndex, 16), topics: (l.topics ?? []).map(low), data: /^0x([0-9a-f]{2})*$/i.test(l.data ?? "") ? low(l.data) : "0x" })) }
     : null;
 
-/** Each call's result two providers gave alike (by `pick`), or null. */
+/** Each call's result two providers gave alike (by `pick`), or null; each one read through provider-answer.mjs
+ *  rpcAnswer, a provider's no-answer passed over for the next. */
 async function agreed(calls, fetchFn, rpcs, pick) {
-  const got = calls.map(() => []);
-  for (const url of rpcs) {
-    const want = calls.map((_, i) => i).filter((i) => got[i].length < 2);
-    if (want.length === 0) break;
-    const r = await batch(url, want.map((i) => calls[i]), fetchFn);
-    want.forEach((i, k) => r[k] !== undefined && got[i].push(JSON.stringify(pick[i](r[k]))));
-  }
-  return got.map((g) => (g.length >= 2 && g[0] === g[1] ? JSON.parse(g[0]) : null));
+  return Promise.all(
+    calls.map(async (c, i) => {
+      const got = [];
+      for (const url of rpcs) {
+        if (got.length === 2) break;
+        const a = await rpcAnswer(url, c.method, c.params, { fetchFn });
+        if (a.noAnswer === undefined && a.error === undefined && a.result != null) got.push(JSON.stringify(pick[i](a.result)));
+      }
+      return got.length === 2 && got[0] === got[1] ? JSON.parse(got[0]) : null;
+    }),
+  );
 }
 
 /** What the check reads on one chain. */

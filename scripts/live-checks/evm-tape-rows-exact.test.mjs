@@ -7,7 +7,10 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
+import { RETRY } from "./provider-answer.mjs";
 import { EXIT, judge, operations, read, units } from "./evm-tape-rows-exact.mjs";
+
+RETRY.ms = 0;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "evm-tape-rows-exact.answers.json"), "utf8"));
@@ -27,20 +30,16 @@ function replay(run) {
     const chain = Object.keys(SWAP_RPCS).find((k) => SWAP_RPCS[k].includes(url));
     assert.ok(chain, url);
     const c = run.chains[chain];
-    const reqs = JSON.parse(init.body);
-    return new Response(
-      JSON.stringify(
-        reqs.map((q) => {
-          if (q.method === "eth_call") {
-            const d = c.decimals[q.params[0].to];
-            return { jsonrpc: "2.0", id: q.id, result: Number.isSafeInteger(d) ? `0x${d.toString(16).padStart(64, "0")}` : null };
-          }
-          const r = c.receipts[q.params[0]];
-          return { jsonrpc: "2.0", id: q.id, result: r === null || r === undefined ? null : { transactionHash: q.params[0], status: "0x1", from: r.from, to: r.to, logs: r.logs.map((l) => ({ address: l.address, logIndex: `0x${l.index.toString(16)}`, topics: l.topics, data: l.data })) } };
-        }),
-      ),
-      { status: 200 },
-    );
+    const q = JSON.parse(init.body);
+    const result = (() => {
+      if (q.method === "eth_call") {
+        const d = c.decimals[q.params[0].to];
+        return Number.isSafeInteger(d) ? `0x${d.toString(16).padStart(64, "0")}` : null;
+      }
+      const r = c.receipts[q.params[0]];
+      return r === null || r === undefined ? null : { transactionHash: q.params[0], status: "0x1", from: r.from, to: r.to, logs: r.logs.map((l) => ({ address: l.address, logIndex: `0x${l.index.toString(16)}`, topics: l.topics, data: l.data })) };
+    })();
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result }), { status: 200 });
   };
 }
 
