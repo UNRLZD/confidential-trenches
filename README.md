@@ -136,6 +136,7 @@ The terminal calls only `@blindfill/kit`'s public entry, as any wallet, bot or a
 - **The vault's own state**, read on two public RPCs: no access key, the code hash of its reproducible build, and a USDC balance equal to what it owes ([docs/proofs.md](docs/proofs.md#the-vault-read-on-two-public-near-rpcs)).
 - **A live check per change**, in [scripts/live-checks/](scripts/live-checks/), run against the deployed hosts after every deploy.
 - **Research proofs** from before the build: 33 measured runs here and 11 more in the private research repository, such as a Privacy Pools withdrawal proof checked by a NEAR contract with its gas measured, proofs made on a phone, a phone-browser Solana trade, and the full money loop with real money. See [research/](research/README.md).
+- **The Pillow Auditors review** of the NEAR vault, the EVM pool and the Solana pool (7 Nov 2026): 0 Critical, 0 High, 0 Medium, 5 Low, 8 Info, and every Low fixed on main. The report and the commit that fixes each Low are in [research/audits/2026-11-07-pillow/](research/audits/2026-11-07-pillow/README.md).
 - **Audits and reviews** of the vault contract and a pre-audit security scan, in [research/audits/](research/README.md#audits-and-reviews).
 
 ## How it works

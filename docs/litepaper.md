@@ -197,7 +197,7 @@ What carries over from v1 and what is new:
 
 - **Raydium and Meteora routes on Solana** (open). Private Solana buys run through the pump.fun curve and PumpSwap today.
 - **A faster proof on the phone** (open). Today's phone prover runs on one thread; the desktop numbers above show what threads give.
-- **An outside audit of the new pools** (open). Privacy Pools v1's audit covers the design we ported, and the NEAR vault has its own reviews in [research/audits/](../research/audits/). The Solana and EVM pools have our tests and live checks, and no outside audit yet.
+- **A review of the cross-chain flow** (open). Pillow Auditors reviewed the NEAR vault, the EVM pool and the Solana pool at commit `46b16ca4` on 7 November 2026 and found 0 Critical, 0 High, 0 Medium, 5 Low and 8 Info. All 5 Lows have fixes on main ([the report and each fix](../research/audits/2026-11-07-pillow/)). The kit, the device checks, the helper, the deployed exchange adapters and the sell delegate were outside that review and are next.
 - **The signing page is code you load from a server.** Builds that come out byte for byte the same, a published hash for every file and an outside check narrow that gap; they don't close it. The exit tool needs none of that page.
 - **Thin crowds at the start.** Each new chain's pool starts empty and gets better for everyone as deposits grow.
 
