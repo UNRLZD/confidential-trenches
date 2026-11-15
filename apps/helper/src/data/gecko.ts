@@ -63,11 +63,13 @@ export const REFRESH_URGENT_MS = 240_000;
  *  and its calls never make the lists yield: it is the helper's background read, as theirs. */
 export const AHEAD_PER_WINDOW = 1;
 
-/** The newest bars held from GeckoTerminal serve a read it refuses or fails only while this old (their read time is the
- *  answer's X-Fetched-At): the market routes' freshness bound, the live checks' 10 minutes (scripts/live-checks/
- *  market-data-solana-token.mjs, market-data-evm.mjs). Older, the read answers its 429 with the wait, or 503: never a 200
- *  with old bars (card helper-restart-fresh: live run 41871356171 straight after a swap served PUMP's 1h bars 16 min
- *  old, handed over by the old helper). History before a time never changes and is served from what is held at any age. */
+/** The newest bars held from GeckoTerminal are fresh enough to serve with no re-read queued while this old (their read
+ *  time is the answer's X-Fetched-At): the market routes' freshness bound, the live checks' 10 minutes (scripts/live-checks/
+ *  market-data-solana-token.mjs, market-data-evm.mjs). Older, a read the budget refuses or that fails is still served
+ *  them, dated by their read, and the re-read waits in the queue (createWanted) for the next free call (card
+ *  helper-candles-never-refuse-a-listed-coin, stale-if-error: an empty chart is never the answer for a coin whose bars
+ *  are held; before it, past this bound the read answered 429 and the page drew an empty chart, release 157's app live
+ *  run 43763914220). History before a time never changes and is served from what is held at any age. */
 export const GT_SERVE_MS = 600_000;
 
 /** Calls a "stale" read leaves free: one read of a chart nobody can be served (card helper-crowd-429). */
@@ -101,12 +103,14 @@ export const WANTED_MAX = 64;
 const WANTED_RETRY_MS = 250;
 
 /** The lane of a read of the newest data, held since `heldAtMs` (null: nothing held): "pages" for a first read and for
- *  data past GT_SERVE_MS (nothing a caller may be served), "stale" for data REFRESH_URGENT_MS old that is still servable,
+ *  data past GT_SERVE_MS (nothing a caller may be served fresh), "stale" for data REFRESH_URGENT_MS old that is still servable,
  *  else "refresh". A "stale" read takes a call while STALE_RESERVE stay free, so a chart its holder can still serve
  *  never takes the call a chart with nothing to serve needs (card helper-crowd-429: live run 41935321432 right after the
  *  23:38Z swap, Trending's 15m chart, held and servable, waited for and took the window's last call at 23:39:03Z and
- *  PUMP's 1h, with nothing servable, answered 429 0.1 s later); refused, its holder serves what it has, dated. History
- *  before a time never changes and stays a refresh, whatever its age. */
+ *  PUMP's 1h, with nothing servable, answered 429 0.1 s later); refused, its holder serves what it has, dated. A "pages"
+ *  read of data held past GT_SERVE_MS takes a free call as a first read does but never waits for one: refused, it is
+ *  served what is held, dated, and queued (card helper-candles-never-refuse-a-listed-coin). History before a time never
+ *  changes and stays a refresh, whatever its age. */
 export function refreshLane(heldAtMs: number | null, nowMs: number): "pages" | "stale" | "refresh" {
   if (heldAtMs === null || nowMs - heldAtMs >= GT_SERVE_MS) return "pages";
   return nowMs - heldAtMs >= REFRESH_URGENT_MS ? "stale" : "refresh";

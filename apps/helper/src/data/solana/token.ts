@@ -26,7 +26,7 @@ import { LOGOS, type Logos } from "../logo.ts";
 import { LINKS, type Links } from "../links.ts";
 import { readFirstBuys, readHeld, shares, type FirstBuys, type Shares } from "./first-buyers.ts";
 import { createOrigins, hintsOf, onCurve, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { createWanted, geckoBudget, GT_LIMIT_PER_MIN, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { BURST_MS, QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
@@ -520,12 +520,15 @@ const DEC = /^\d{1,30}(\.\d{1,30})?$/;
 /** Bars as kept: at most 1000 Candles, each [t_s, o, h, l, c, vol] with t a whole second and the rest decimals. */
 export const isBars = (v: unknown): v is Candle[] =>
   Array.isArray(v) && v.length <= 1_000 && v.every((c) => Array.isArray(c) && c.length === 6 && Number.isSafeInteger(c[0]) && c[0] > 0 && c.slice(1).every((x) => typeof x === "string" && DEC.test(x)));
-/** The bytes of answers a process hands the next one (data/warm.ts holds the whole file under WARM_MAX, 16 MB, with
- *  the EVM lists' answers) [design: 4 MB, a few hundred pages and holders and two dozen charts' last bars]. */
-export const HANDOVER_MAX = 4 * 1024 * 1024;
+/** The bytes of answers a process hands the next one (data/warm.ts holds the whole file under WARM_MAX, which adds this
+ *  to its 16 MB, with the EVM lists' answers) [design: 10 MB, a few hundred pages and holders and every listed chart
+ *  held ahead (card helper-candles-never-refuse-a-listed-coin: 72 Solana charts off pump.fun on 15 Nov, 1,000 bars of
+ *  about 90 bytes each, 6.5 MB), so a deploy's new helper starts with them rather than hours of keyless reads]. */
+export const HANDOVER_MAX = 10 * 1024 * 1024;
 /** The last good bars handed over are at most this old: bars are history with their read time, so a swap's first loads
  *  are answered from them, dated, rather than going to a GeckoTerminal budget the old helper spent [design: a day]; the
- *  newest range only while they are under GT_SERVE_MS, history before their read at any age (card helper-restart-fresh). */
+ *  newest range when a read is refused, dated by their read, history before their read at any age (card
+ *  helper-restart-fresh; card helper-candles-never-refuse-a-listed-coin). */
 export const KEPT_HANDOVER_MS = 86_400_000;
 
 /** Card helper-restart-fresh: the newest charts callers read lately are re-read by the helper itself, in GeckoTerminal's
@@ -551,6 +554,13 @@ export const AHEAD_TF: Tf = "15m";
  *  token, 1h volume above 0, the largest first), the rows a visitor opens first, and the list's own first row, which "/"
  *  draws (app-console-429 reads it 25 at once; app-token-chart opens the column's third row). */
 export const TOP_MAX = 3;
+/** The launchpad whose coins' charts our own trade reads build (trades.ts: the pump.fun curve and PumpSwap): every other
+ *  listed coin's chart is GeckoTerminal's, held ahead (card helper-candles-never-refuse-a-listed-coin). */
+export const OWN_LAUNCHPAD = "pump.fun";
+/** Listed charts the ahead lane holds at most. [design: Discover's five Solana lists hold 290 rows at most (30 new, 100
+ *  in each trending column, 28 graduating; 203 distinct on 15 Nov 22:3xZ, 72 of them off pump.fun), each read once, two
+ *  calls (its top pool and its bars), so the bound is a few hundred calls once, not a rate] */
+export const LISTED_AHEAD_MAX = 300;
 /** How often the server asks for one re-read ahead (server.ts); each ask makes at most one GeckoTerminal call. */
 export const AHEAD_TICK_MS = 5_000;
 
@@ -650,7 +660,7 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
  *  429 on it would be the device's own reads' and sends' 429 too. */
 /** `sleep`: the GeckoTerminal budget's wait (setTimeout unless a test passes its clock's beside `now`, card
  *  helper-pace-test-clock). */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget; metaLogos?: Pick<Logos, "fromMeta">; keyed?: Keyed | null } = {}) {
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget; metaLogos?: Pick<Logos, "fromMeta">; keyed?: Keyed | null; later?: Later } = {}) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   const doFetch = deps.fetch ?? fetch;
@@ -1085,6 +1095,10 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     // bars held are served meanwhile)
     const at = await takeOrWait(gt, lane, what, untilMs, now, sleep, client);
     if (at !== null) throw new Throttled(secondsUntil(at, now()), lane === "pages" ? "geckoterminal budget" : `geckoterminal ${lane}`);
+    return gtFetch(path);
+  }
+  /** One GeckoTerminal call whose budget call is already taken (gecko, or the queue's turn: wantChart). */
+  async function gtFetch(path: string): Promise<unknown> {
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
       throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()), "geckoterminal 429");
@@ -1097,9 +1111,10 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   }
   /** A chart's read (its top pool, its bars): CoinGecko's keyed API first when a key is set (../coingecko.ts), else, or
    *  when it cannot serve the read, GeckoTerminal's keyless one in `lane`, as before (card helper-candles-keyed-gt).
-   *  `ok`: the keyed answer is the shape the caller reads. The read ahead is the keyed pace's background. */
-  async function chartRead(path: string, lane: "pages" | "stale" | "refresh" | "ahead", what: string, ok: (j: unknown) => boolean, untilMs?: number, client?: string): Promise<{ a: unknown; src: ChartSrc }> {
-    const k = deps.keyed == null ? undefined : await deps.keyed.read(path, ok, lane === "ahead");
+   *  `ok`: the keyed answer is the shape the caller reads. The read ahead is the keyed pace's background. `keyless`: the
+   *  keyless path alone (a listed chart read ahead, card helper-candles-never-refuse-a-listed-coin). */
+  async function chartRead(path: string, lane: "pages" | "stale" | "refresh" | "ahead", what: string, ok: (j: unknown) => boolean, untilMs?: number, client?: string, keyless = false): Promise<{ a: unknown; src: ChartSrc }> {
+    const k = deps.keyed == null || keyless ? undefined : await deps.keyed.read(path, ok, lane === "ahead");
     if (k !== undefined) return { a: k, src: CG_SRC };
     return { a: await gecko(path, lane, what, untilMs, client), src: "geckoterminal" };
   }
@@ -1130,9 +1145,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return graduated !== null && graduated !== o.pool ? graduated : p;
   };
 
-  /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails, while under GT_SERVE_MS
-   *  or for history before their read (an empty chart is never the answer for a token with known history, and an old one
-   *  never a 200: the read's 429 or 503, card helper-restart-fresh). */
+  /** The last good GeckoTerminal bars per mint and tf: served when a read is throttled or fails, at any age, dated by
+   *  their read (an empty chart is never the answer for a token with known history; card
+   *  helper-candles-never-refuse-a-listed-coin, before it past GT_SERVE_MS the read's 429 or 503). */
   const kept = bounded<{ bars: Candle[]; at: number; src?: typeof CG_SRC }>(CACHE_MAX);
   // the newest range (no `to`) moves with every trade: CANDLES_FRESH_MS; a range before a time is history: an hour
   // a re-read of bars held is a refresh: refused, candles() serves the kept bars, dated by their read. The newest range
@@ -1141,8 +1156,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
   // helper-chart-fresh); history before a time stays a refresh
   const bars = cached((key) => (key.endsWith(":") ? CANDLES_FRESH_MS : HISTORY_FRESH_MS), now, async (key, client, held) => {
     const [mint, tf, to] = key.split(":") as [string, Tf, string];
-    const lane = to === "" ? refreshLane(kept.get(`${mint}:${tf}`)?.at ?? null, now()) : held === true ? "refresh" : "pages";
-    const until = now() + GT_CHART_WAIT_MS;
+    const heldAt = kept.get(`${mint}:${tf}`)?.at ?? null;
+    const lane = to === "" ? refreshLane(heldAt, now()) : held === true ? "refresh" : "pages";
+    // card helper-candles-never-refuse-a-listed-coin: bars held (at any age) are served when this read is refused, so it
+    // never waits for a call: a wait past the route's CANDLES_ANSWER_MS answered an empty chart ("candles bound", the
+    // helper log 21:29-21:43Z on 15 Nov); only a chart with nothing held waits its GT_CHART_WAIT_MS
+    const until = to === "" && heldAt !== null ? now() : now() + GT_CHART_WAIT_MS;
     const p = await pools.get(mint, client);
     if (p.status !== 200) {
       if (p.status === 404) return NOT_FOUND;
@@ -1208,9 +1227,79 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       return [];
     }
   }
+  /** The Discover rows whose chart is no bars of ours (card helper-candles-never-refuse-a-listed-coin): every token an
+   *  answer of the lists holds whose launchpad is not pump.fun (its curve and PumpSwap are the venues our own trade reads
+   *  build bars from, trades.ts), so their AHEAD_TF chart is held before anyone opens it (ahead). */
+  async function listedOffOurVenues(): Promise<string[]> {
+    if (deps.listed === undefined) return [];
+    try {
+      const a = await deps.listed();
+      if (a.status !== 200) return [];
+      const out = new Set<string>();
+      for (const rows of Object.values(obj(obj(JSON.parse(a.body)).lists))) {
+        if (!Array.isArray(rows)) continue;
+        for (const r of rows.slice(0, 200).map(obj)) {
+          const m = address(r.token);
+          if (m !== null && r.launchpad !== OWN_LAUNCHPAD) out.add(m);
+        }
+      }
+      return [...out].slice(0, LISTED_AHEAD_MAX);
+    } catch {
+      return [];
+    }
+  }
   /** When the ahead lane last read a chart, whatever it got: a chart GeckoTerminal answers with no bars, or fails, waits
-   *  its AHEAD_MS like the rest and never holds the others back. */
-  const tried = bounded<number>(HOT_MAX * 4);
+   *  its AHEAD_MS like the rest and never holds the others back (one entry per listed chart, so a listed coin that fails
+   *  is not read again every tick). */
+  const tried = bounded<number>(HOT_MAX * 4 + LISTED_AHEAD_MAX);
+  /** The reads a caller's chart asked for and the budget refused (../gecko.ts createWanted, as the EVM charts' queue):
+   *  each read at the next free call, its bars held, so the page's next read is served them (card
+   *  helper-candles-never-refuse-a-listed-coin: a refused cold chart was read again only when a caller came back and
+   *  won the race to a free call, which under a live run's load it did not for 14 minutes). */
+  const wanted = createWanted(gt, "sol bars", now, deps.later);
+  const barsOf = (mint: string, pool: string, tf: Tf) => {
+    const { period, aggregate } = TF[tf];
+    return `/networks/solana/pools/${chartPool(mint, pool)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`;
+  };
+  /** A queued read's call: GeckoTerminal's 429 is "again" (the read stays first, the pause its wait). */
+  const turn = async (read: () => Promise<void>): Promise<"again" | void> => {
+    try {
+      await read();
+    } catch (e) {
+      if (e instanceof Throttled) return "again";
+      throw e;
+    }
+  };
+  function wantBars(mint: string, tf: Tf, since: number, first = false): void {
+    const k = `${mint}:${tf}`;
+    wanted.want(`bars:${k}`, {
+      done: () => (kept.get(k)?.at ?? -Infinity) >= since || pools.peek(mint)?.status !== 200,
+      run: () =>
+        turn(async () => {
+          const p = pools.peek(mint);
+          if (p?.status !== 200) return;
+          const a = await gtFetch(barsOf(mint, p.body, tf));
+          const got = a === null ? [] : toCandles(a, tf, 1_000, now());
+          if (got !== null) keep(k, got, now());
+        }),
+    }, first);
+  }
+  /** Queues `mint`'s `tf` chart: its top pool first when none is held, then its bars. */
+  function wantChart(mint: string, tf: Tf): void {
+    const since = now();
+    const p = pools.peek(mint);
+    if (p !== undefined) return p.status === 200 ? wantBars(mint, tf, since) : undefined;
+    wanted.want(`pool:${mint}`, {
+      done: () => pools.peek(mint) !== undefined,
+      run: () =>
+        turn(async () => {
+          const a = await gtFetch(`/networks/solana/tokens/${mint}`);
+          const top = a === null ? null : topPool(a);
+          pools.put(mint, top === null ? NOT_FOUND : { status: 200, body: top, asOfMs: now() });
+          if (top !== null) wantBars(mint, tf, since, true);
+        }),
+    });
+  }
   /** The newest a chart is held or was tried ahead. */
   const lastAhead = (k: string) => Math.max(kept.get(k)?.at ?? -Infinity, tried.get(k) ?? -Infinity);
   let aheadBusy = false;
@@ -1229,31 +1318,47 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         const t = now();
         // the callers' charts, and the Trending ones as the lists stand now, each once
         const asked = new Map<string, number>([...hot.entries(), ...(await topTrending()).map((m): [string, number] => [`${m}:${AHEAD_TF}`, t])]);
-        const [k] = [...asked]
-          // a token GeckoTerminal names no pool for is left to its callers' reads
-          .filter(([key, readAt]) => t - readAt <= HOT_MS && t - lastAhead(key) >= AHEAD_MS && (pools.peek(key.split(":")[0]!)?.status ?? 200) === 200)
-          .sort(([a], [b]) => lastAhead(a) - lastAhead(b))[0] ?? [];
-        if (k === undefined) return null;
-        const [mint, tf] = k.split(":") as [string, Tf];
-        const pool = pools.peek(mint);
-        try {
-          if (pool === undefined) {
-            const { a } = await chartRead(`/networks/solana/tokens/${mint}`, "ahead", "sol pool", poolOk);
-            const p = a === null ? null : topPool(a);
-            pools.put(mint, p === null ? NOT_FOUND : { status: 200, body: p, asOfMs: now() });
+        // a token GeckoTerminal names no pool for is left to its callers' reads
+        const due = ([key, readAt]: [string, number]) => t - readAt <= HOT_MS && t - lastAhead(key) >= AHEAD_MS && (pools.peek(key.split(":")[0]!)?.status ?? 200) === 200;
+        // card helper-candles-never-refuse-a-listed-coin: and each listed chart off our own venues with no bars held, read
+        // once (its bars then serve every later read, at any age, while its callers' reads refresh them), so a coin opened
+        // for the first time while the budget is spent is not an empty chart. A chart with nothing held goes before a
+        // re-read of one held, which serves its bars meanwhile: on the keyless budget alone the Trending rows' re-reads
+        // took every call of the lane, and 34 of 72 listed charts stayed empty after 6 h (the card's replay). A listed
+        // chart is read on GeckoTerminal's keyless "ahead" lane only, never CoinGecko's keyed day: the lists take in about
+        // two coins off pump.fun a minute (118 coins, 37 off pump.fun, between reads at 22:27Z and 22:46Z on 15 Nov), and
+        // their reads would spend the key's 3,225 calls a day that callers' charts read first. Refused, the tick goes to
+        // the oldest held chart a caller or Trending keeps fresh, as before: at most one call a tick either way.
+        const listed = (await listedOffOurVenues()).map((m): [string, number] => [`${m}:${AHEAD_TF}`, t]).filter(([key]) => !asked.has(key) && kept.get(key) === undefined);
+        const own = new Set(listed.map(([key]) => key));
+        const held = (key: string) => (kept.get(key) === undefined ? 0 : 1);
+        const order = [...asked, ...listed].filter(due).sort(([a], [b]) => held(a) - held(b) || lastAhead(a) - lastAhead(b)).map(([key]) => key);
+        const first = order[0];
+        const next = own.has(first ?? "") ? order.find((key) => !own.has(key)) : undefined;
+        for (const k of [first, next]) {
+          if (k === undefined) return null;
+          const [mint, tf] = k.split(":") as [string, Tf];
+          const pool = pools.peek(mint);
+          const keyless = own.has(k);
+          try {
+            if (pool === undefined) {
+              const { a } = await chartRead(`/networks/solana/tokens/${mint}`, "ahead", "sol pool", poolOk, undefined, undefined, keyless);
+              const p = a === null ? null : topPool(a);
+              pools.put(mint, p === null ? NOT_FOUND : { status: 200, body: p, asOfMs: now() });
+              return k;
+            }
+            const { a, src } = await chartRead(barsOf(mint, pool.body, tf), "ahead", "sol bars", (j) => toCandles(j, tf, 1_000, now()) !== null, undefined, undefined, keyless);
+            tried.set(k, now());
+            const got = a === null ? [] : toCandles(a, tf, 1_000, now());
+            if (got !== null) keep(k, got, now(), src);
             return k;
+          } catch (e) {
+            // refused by the budget: no call made, the next tick asks again; a failed call waits its AHEAD_MS
+            if (!(e instanceof Throttled)) return tried.set(k, now()), null;
+            if (!keyless) return null;
           }
-          const { period, aggregate } = TF[tf];
-          const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, pool.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}`, "ahead", "sol bars", (j) => toCandles(j, tf, 1_000, now()) !== null);
-          tried.set(k, now());
-          const got = a === null ? [] : toCandles(a, tf, 1_000, now());
-          if (got !== null) keep(k, got, now(), src);
-          return k;
-        } catch (e) {
-          // refused by the budget: no call made, the next tick asks again; a failed call waits its AHEAD_MS
-          if (!(e instanceof Throttled)) tried.set(k, now());
-          return null;
         }
+        return null;
       } finally {
         aheadBusy = false;
       }
@@ -1355,12 +1460,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         // the last good bars of this mint and tf (the newest range read), whatever range was asked
         keep(k, JSON.parse(a.body) as Candle[], a.asOfMs!, a.src);
       } else if (a.status === 429 || a.status === 503) {
-        // GeckoTerminal throttled or down: its last good bars, cut at `to`, read time theirs, while they are within
-        // GT_SERVE_MS or the range is history before their read; past it the 429 or 503, never a 200 with old bars (card
-        // helper-restart-fresh); nothing kept keeps the error
+        // GeckoTerminal throttled or down: its last good bars, cut at `to`, read time theirs, at any age (card
+        // helper-candles-never-refuse-a-listed-coin, stale-if-error: past GT_SERVE_MS this answered the 429, and the page
+        // drew an empty chart for a coin whose bars were held); the newest range refused by the budget is queued
+        // (wantChart), so the page's next read is served what the next free call reads; nothing kept keeps the error
         const had = kept.get(k);
-        const servable = had !== undefined && ((to !== null && to * 1000 <= had.at) || now() - had.at <= GT_SERVE_MS);
-        const cut = !servable ? [] : had.bars.filter((c) => to === null || c[0] < to);
+        const cut = had === undefined ? [] : had.bars.filter((c) => to === null || c[0] < to);
+        if (to === null && a.status === 429 && (had === undefined || now() - had.at > GT_SERVE_MS)) wantChart(mint, tf as Tf);
         if (cut.length > 0) a = { status: 200, body: JSON.stringify(cut), src: had!.src ?? "geckoterminal", asOfMs: had!.at };
       }
       if (a.status !== 200) return a;

@@ -487,8 +487,8 @@ export const CANDLES_MAX = 500;
 /** History before our first bar never changes: kept this long. */
 const GT_FRESH_MS = 3_600_000;
 /** GeckoTerminal's newest bars as a chart of their own (a listed token with no pool of ours, noneCandles): read again
- *  after this, as the Solana token page's (../solana/token.ts CANDLES_FRESH_MS), and served from what is held only within
- *  GT_SERVE_MS (card helper-restart-fresh). */
+ *  after this, as the Solana token page's (../solana/token.ts CANDLES_FRESH_MS); refused past GT_SERVE_MS, what is held
+ *  is served, dated, and the re-read queued (card helper-candles-never-refuse-a-listed-coin). */
 const GT_NEWEST_FRESH_MS = 60_000;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -2324,8 +2324,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** One GeckoTerminal call in `lane`: a caller's cold read ("pages") waits its turn for the budget's next free call up to
    *  GT_PAGE_WAIT_MS (../gecko.ts takeOrWait), as the Solana path's and the EVM token info's do; any other lane never
    *  waits, what is held serves (card market-reads-hold-under-load). */
-  const gtTake = async (lane: string, what: string, client?: string): Promise<boolean> =>
-    (await takeOrWait(deps.gecko!, lane, what, now() + GT_PAGE_WAIT_MS, now, deps.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms))), client)) === null;
+  /** `waitMs`: how long a page read waits for a free call (none for a read whose held bars serve it when refused). */
+  const gtTake = async (lane: string, what: string, client?: string, waitMs = GT_PAGE_WAIT_MS): Promise<boolean> =>
+    (await takeOrWait(deps.gecko!, lane, what, now() + waitMs, now, deps.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms))), client)) === null;
   /** A listed token with no pool our reads find: an empty answer from our own reads, timed now. */
   const empty = (fields: Record<string, unknown>): DataAnswer => {
     const at = now();
@@ -2552,7 +2553,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  or, when the read is refused, throttled or fails, the last good bars of the pool and tf cut there; with none of
    *  those, the 429 (with the wait to the next call) or 503 to answer. `alone`: the bars are the chart, with no book of
    *  ours after them (noneCandles), so their read is the answer's X-Fetched-At: the newest range is read again after
-   *  GT_NEWEST_FRESH_MS and served from what is held only within GT_SERVE_MS (card helper-restart-fresh); before a book
+   *  GT_NEWEST_FRESH_MS, and refused past GT_SERVE_MS it is served what is held and queued (card
+   *  helper-candles-never-refuse-a-listed-coin); before a book
    *  of ours they are history the book's own reads follow, kept GT_FRESH_MS. */
   async function geckoBars(e: Entry, tf: Tf, before: number | null, alone = false, client?: string): Promise<Candle[] | DataAnswer> {
     if (!Object.hasOwn(GT_TF, tf) || deps.gecko === undefined) return [];
@@ -2561,13 +2563,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const fresh = history.get(k);
     const newest = alone && before === null;
     if (fresh !== undefined && now() - fresh.at < (newest ? GT_NEWEST_FRESH_MS : GT_FRESH_MS)) return fresh.bars;
-    const servable = (at: number | undefined) => at !== undefined && (!newest || now() - at <= GT_SERVE_MS);
+    // card helper-candles-never-refuse-a-listed-coin (stale-if-error): bars held serve a read refused or failed at any
+    // age, dated by their read; past GT_SERVE_MS this answered the 429 and the page drew an empty chart for a coin whose
+    // bars were held (release 157's app live run 43763914220), so the newest range's re-read is queued instead (below)
     const fallback = (fail: DataAnswer): Candle[] | DataAnswer => {
-      if (fresh !== undefined && fresh.bars.length > 0 && servable(fresh.at)) return fresh.bars;
+      if (fresh !== undefined && fresh.bars.length > 0) return fresh.bars;
       const held = kept.get(`${e.pool.id}:${tf}`);
-      const cut = (servable(held?.at) ? held!.bars : []).filter((c) => before === null || c[0] < before);
+      const cut = (held?.bars ?? []).filter((c) => before === null || c[0] < before);
       return cut.length > 0 ? tagged(cut, held?.src) : fail;
     };
+    const heldAt = kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at;
+    const old = newest && heldAt !== undefined && now() - heldAt > GT_SERVE_MS;
     const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
     // a re-read of bars held is a refresh (../gecko.ts): it leaves a cold page its calls, and refused, the bars held are
     // served (card app-console-429); the newest range is a page read once its kept bars are REFRESH_URGENT_MS old, so
@@ -2583,12 +2589,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // card helper-candles-keyed-gt: CoinGecko's keyed API first; it cannot serve the read, the keyless path as before
     const keyedBars = await keyedBarsOf(e.pool.id, e.pool.token, tf, before, k);
     if (keyedBars !== undefined) return keyedBars;
-    if (!(await gtTake(lane, `${chain} bars`, client))) {
-      if (nothing) wantBars(e.pool.id, e.pool.token, tf, before, k);
+    // bars held (at any age) serve a refused read, so it never waits for a call (card
+    // helper-candles-never-refuse-a-listed-coin: a wait past the route's CANDLES_ANSWER_MS answered an empty chart)
+    if (!(await gtTake(lane, `${chain} bars`, client, nothing ? GT_PAGE_WAIT_MS : 0))) {
+      if (nothing || old) wantBars(e.pool.id, e.pool.token, tf, before, k, false, now());
       return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
     }
     const got = await readBars(e.pool.id, e.pool.token, tf, before, k);
-    if (got === "throttled" && nothing) wantBars(e.pool.id, e.pool.token, tf, before, k);
+    if (got === "throttled" && (nothing || old)) wantBars(e.pool.id, e.pool.token, tf, before, k, false, now());
     return Array.isArray(got) ? got : fallback(got === "throttled" ? wait("geckoterminal 429") : UPSTREAM);
   }
 
@@ -2649,8 +2657,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  then served from what it got (the app reads its chart in full every RESYNC_MS, 60 s, and a chart with no bars of
    *  ours AWAY_MS, 45 s: apps/terminal/src/screens/token/candles.ts). */
   const wanted = deps.gecko === undefined ? undefined : createWanted(deps.gecko, `${chain} bars`, now, deps.later);
-  function wantBars(pool: string, token: string, tf: Tf, before: number | null, k: string, first = false): void {
-    wanted?.want(k, { done: () => history.has(k), run: async () => ((await readBars(pool, token, tf, before, k)) === "throttled" ? "again" : undefined) }, first);
+  /** `since`: a re-read of bars held (card helper-candles-never-refuse-a-listed-coin) is done once they are read after it. */
+  function wantBars(pool: string, token: string, tf: Tf, before: number | null, k: string, first = false, since?: number): void {
+    const done = () => (since === undefined ? history.has(k) : (history.get(k)?.at ?? -Infinity) >= since);
+    wanted?.want(k, { done, run: async () => ((await readBars(pool, token, tf, before, k)) === "throttled" ? "again" : undefined) }, first);
   }
   /** A listed token our reads find no pool of: GeckoTerminal's top pool for it, then that pool's newest bars, first. */
   function wantPool(token: string, tf: Tf): void {
