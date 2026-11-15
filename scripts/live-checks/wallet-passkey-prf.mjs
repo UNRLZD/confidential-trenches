@@ -73,6 +73,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { consoleError } from "./console-errors.mjs";
+import { fetchOrAbort } from "./route-fetch.mjs";
 import { HARNESS_UNRESOLVED, keptAfterSignOut, sealProbe, SIGN_OUT_NOW, signedOutClean, storeAfter } from "./signpage-signin-kinds.mjs";
 
 const KEY = "wallet-passkey-prf";
@@ -757,7 +758,8 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
           headers["content-type"] = "text/html; charset=utf-8";
           body = readFileSync(path.join(h.root, "index.html"));
         } else {
-          const r = await rt.fetch();
+          const r = await fetchOrAbort(rt);
+          if (!r) return;
           headers = { ...r.headers() };
           body = await r.body();
         }

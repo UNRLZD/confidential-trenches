@@ -33,6 +33,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { APP_HOST, harnessRoute, recorded, watch, WIDTHS } from "./app-verify-mount.mjs";
+import { fetchOrAbort } from "./route-fetch.mjs";
 import { confirmDown, downNote, footerEvidence, isHeightRead, outages, readAnswered, readCap, releaseOrigins, verifyEvidence, watchPreflights } from "./rpc-outage.mjs";
 import { evmRpcOperator } from "../../packages/kit/src/index.ts";
 
@@ -351,7 +352,8 @@ export async function collect({ shots, route = null, network, source }) {
 const plantAuthority = (pass) => async (route) => {
   const body = route.request().postData() ?? "";
   if (!body.includes('"getMultipleAccounts"')) return pass(route);
-  const res = await route.fetch();
+  const res = await fetchOrAbort(route);
+  if (!res) return;
   const j = await res.json();
   const v = j?.result?.value?.[1];
   if (v?.data?.[0]) {
