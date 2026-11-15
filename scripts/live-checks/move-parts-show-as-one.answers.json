@@ -1,0 +1,41 @@
+{
+ "good": {
+  "at": "2026-11-15T14:43:03.586Z",
+  "app": {
+   "source": "https://ct-app.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/assets/index-BTZkxrq5.js",
+     "status": 200,
+     "integrity": "sha384-Ciboqo4noeJthWdYnXIsR49uCeMPbkF8Y3kMmfp8uNadDSz0gRfkthkZKU31Ue1o",
+     "sha384": "sha384-Ciboqo4noeJthWdYnXIsR49uCeMPbkF8Y3kMmfp8uNadDSz0gRfkthkZKU31Ue1o",
+     "found": [
+      "every move op under the move's id is read with it",
+      "its parts are the ids <id>/<n>",
+      "failed if any part failed, else the least advanced part, done only when every part is",
+      "its amount and what landed are the parts' sums",
+      "the Move sheet reads the move over its parts",
+      "an Activity row reads the move over its parts"
+     ]
+    }
+   ]
+  }
+ },
+ "bad": {
+  "at": "2026-11-15T14:43:13.452Z",
+  "app": {
+   "source": "https://ct-app.unrealized.trade/",
+   "pageStatus": 200,
+   "js": [
+    {
+     "url": "/assets/index-DlEPR7Cx.js",
+     "status": 200,
+     "integrity": "sha384-i4K2jp/5hMKLUUpMtBXaTVb/i5LKlGo865TOj44hWucw7I/mPBJlJ+C4zDHc/y9k",
+     "sha384": "sha384-i4K2jp/5hMKLUUpMtBXaTVb/i5LKlGo865TOj44hWucw7I/mPBJlJ+C4zDHc/y9k",
+     "found": []
+    }
+   ]
+  }
+ }
+}
