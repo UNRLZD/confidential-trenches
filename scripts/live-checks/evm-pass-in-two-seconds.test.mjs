@@ -58,8 +58,8 @@ test("planted on this tree's build: each part back to its shape before this card
   assert.deepEqual(off(planted(/let ([\w$]+)=([\w$]+)\.get\(([\w$]+)\)\?\.block\?\?await/, (_m, u, c, i) => `let ${u}=(${c}.get(${i})?.hash===${c}.get(${i})?.hash&&${c}.get(${i})?.hash===${c}.get(${i})?.hash?${c}.get(${i})?.block:null)??await`)), ["held"]);
   // the pool's time read alone, the helper's fee asked only by the bind
   assert.deepEqual(off(planted(/return typeof ([\w$]+)==`bigint`&&\1>0n&&[\w$]+\.get\(\1-\1%[\w$]+,([\w$]+)\)\.catch\(\(\)=>\{\}\),\1\}/, (_m, t) => `return ${t}}`)), ["fee"]);
-  // the logs read after the views, never beside them
-  assert.deepEqual(off(planted(/\{fin:([\w$]+),anchor:([\w$]+)\},([\w$]+),([\w$]+)\.length,([\w$]+),([\w$]+)\),([\w$]+)\.catch/, (m) => m.replace("{fin:", "{fin:await ")) ), ["batched"]);
+  // the logs read after the views, never beside them (past the round's base: card evm-trees-from-one-verified-source)
+  assert.deepEqual(off(planted(/\{fin:([\w$]+),anchor:([\w$]+)\},([\w$]+),([\w$]+)\.events\.length,([\w$]+),([\w$]+)\),([\w$]+)\.catch/, (m) => m.replace("{fin:", "{fin:await ")) ), ["batched"]);
   // the cut searched by root times: the sync never handed the first block
   assert.deepEqual(off(planted(/\{\.\.\.([\w$]+),first:([\w$]+)\.block\}/, (_m, n) => n)), ["cut"]);
   // the newest read a round of its own every time
