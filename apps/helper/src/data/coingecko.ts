@@ -81,9 +81,21 @@ export type Keyed = {
    * ahead, which leaves callers their room (limits.ts CALLER_ROOM).
    */
   read(path: string, ok: (json: unknown) => boolean, background?: boolean): Promise<unknown>;
+  // the minute line counts each outcome and, for a call made, the kind of read (pool, bars, trades, pools), so the reads
+  // that spend the key's day are named from the log (card helper-listed-charts-own-reads: the day was spent before
+  // 21:20Z on 15 Nov and no line said by what)
   /** The minute's count line since the last one, or null when nothing was asked. */
   minute(): string | null;
 };
+
+/** The kind of an on-chain read, by its path's last fixed part: "ohlcv", "trades", "pools" or "token" (never an address). */
+export function kindOf(path: string): string {
+  const p = path.split("?")[0]!;
+  if (p.includes("/ohlcv/")) return "ohlcv";
+  if (p.endsWith("/trades")) return "trades";
+  if (p.endsWith("/pools")) return "pools";
+  return "token";
+}
 
 /** The keyed reads, or null when no key is set (every read keyless, as main). `holds` must carry coingeckoPace(env). */
 export function createKeyed(env: Record<string, string | undefined>, holds: ProviderHolds, deps: { fetch?: Fetch } = {}): Keyed | null {
@@ -120,7 +132,7 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
         if (text.length > ANSWER_MAX) return bump("large"), undefined;
         const json: unknown = JSON.parse(text);
         if (!ok(json)) return bump("shape"), undefined;
-        bump("served");
+        bump(`served ${kindOf(path)}${background ? " background" : ""}`);
         return json;
       } catch (e) {
         // the body cut by the timeout is CoinGecko slow, a body that does not parse its answer's shape

@@ -2360,7 +2360,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // 0xb2000000...8c01, which GeckoTerminal charts); a read that fails is the 503
       const cold = p === undefined;
       const waitOf = (why: string) => limited(Math.min(Math.max(Math.ceil((deps.gecko!.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
-      const keyedPool = await keyedPoolOf(token);
+      // the key only for a pool nothing holds (../solana/token.ts KEYED_COLD_ONLY)
+      const keyedPool = cold ? await keyedPoolOf(token) : undefined;
       if (keyedPool !== undefined) p = keyedPool;
       else if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
         const got = await readPool(token);
@@ -2408,7 +2409,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (held !== undefined && now() - held.at < TAPE_FRESH_MS) return serve(held);
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
-      const keyedPool = await keyedPoolOf(token);
+      const keyedPool = p === undefined ? await keyedPoolOf(token) : undefined;
       if (keyedPool !== undefined) p = keyedPool;
       else if (await gtTake(p === undefined ? "pages" : "refresh", `${chain} pool`)) {
         const got = await readPool(token);
@@ -2421,7 +2422,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const path = `/networks/${chain}/pools/${p.id}/trades?token=${token}`;
     const rowsOf = (j: unknown) => toTape(j, token, TAPE_MAX, now(), EVM_IDS);
     let src: ChartSrc = CG_SRC;
-    let j: unknown = deps.keyed == null ? undefined : await deps.keyed.read(path, (x) => rowsOf(x) !== null);
+    // a held tape's refresh never spends the key (../solana/token.ts KEYED_COLD_ONLY): read every TAPE_FRESH_MS while
+    // a page watches it, it spent the key's day in hours
+    let j: unknown = deps.keyed == null || held !== undefined ? undefined : await deps.keyed.read(path, (x) => rowsOf(x) !== null);
     if (j === undefined) {
       src = "geckoterminal";
       j = (await gtTake(held === undefined ? "pages" : "refresh", `${chain} trades`)) ? await gtJson(path) : undefined;
@@ -2587,7 +2590,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // was never tried and its page answered an empty 200)
     const nothing = fresh === undefined && fallback(UPSTREAM) === UPSTREAM;
     // card helper-candles-keyed-gt: CoinGecko's keyed API first; it cannot serve the read, the keyless path as before
-    const keyedBars = await keyedBarsOf(e.pool.id, e.pool.token, tf, before, k);
+    // the key only for bars nothing holds (../solana/token.ts KEYED_COLD_ONLY)
+    const keyedBars = nothing ? await keyedBarsOf(e.pool.id, e.pool.token, tf, before, k) : undefined;
     if (keyedBars !== undefined) return keyedBars;
     // bars held (at any age) serve a refused read, so it never waits for a call (card
     // helper-candles-never-refuse-a-listed-coin: a wait past the route's CANDLES_ANSWER_MS answered an empty chart)

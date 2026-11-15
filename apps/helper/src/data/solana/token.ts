@@ -1109,6 +1109,13 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     if (text.length > ANSWER_MAX) throw new Upstream();
     return JSON.parse(text);
   }
+  /** KEYED_COLD_ONLY (card helper-listed-charts-own-reads): CoinGecko's key is spent only on a read with nothing held
+   *  (a coin's first top pool, first bars, first tape); a held answer's refresh, a caller's or the ahead lane's, goes to
+   *  the keyless path, and refused, what is held is served, dated, and queued. Before it each refresh asked the key
+   *  first: a non-pump coin's tape is held TAPE_FRESH_MS (10 s) and a watched token's tape is read every PUSH_TICK_MS
+   *  (data/push.ts), so one open page read the key about 8,640 times a day, its chart's newest bars 1,440 more, and the
+   *  ahead lane's seven charts every AHEAD_MS 2,016: the key's day is 3,225 (../coingecko.ts CG_DAY), spent on 15 Nov
+   *  before the 21:20Z helper started ("coingecko calls: day N" each minute after). */
   /** A chart's read (its top pool, its bars): CoinGecko's keyed API first when a key is set (../coingecko.ts), else, or
    *  when it cannot serve the read, GeckoTerminal's keyless one in `lane`, as before (card helper-candles-keyed-gt).
    *  `ok`: the keyed answer is the shape the caller reads. The read ahead is the keyed pace's background. `keyless`: the
@@ -1126,7 +1133,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     POOL_FRESH_MS,
     now,
     async (mint, client, held) => {
-      const { a } = await chartRead(`/networks/solana/tokens/${mint}`, held === true ? "refresh" : "pages", "sol pool", poolOk, undefined, client);
+      const { a } = await chartRead(`/networks/solana/tokens/${mint}`, held === true ? "refresh" : "pages", "sol pool", poolOk, undefined, client, held === true);
       const pool = a === null ? null : topPool(a);
       return pool === null ? NOT_FOUND : { status: 200, body: pool, asOfMs: now() };
     },
@@ -1170,7 +1177,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
     const { period, aggregate } = TF[tf];
     const before = to === "" ? "" : `&before_timestamp=${to}`;
-    const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane, "sol bars", (j) => toCandles(j, tf, 1_000, now()) !== null, until, client);
+    const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/ohlcv/${period}?aggregate=${aggregate}&limit=1000&currency=usd&token=${mint}${before}`, lane, "sol bars", (j) => toCandles(j, tf, 1_000, now()) !== null, until, client, to === "" ? heldAt !== null : held === true);
     const candles = a === null ? [] : toCandles(a, tf, 1_000, now());
     if (candles === null) throw new Upstream();
     const at = now();
@@ -1192,7 +1199,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         throw new Upstream();
       }
       const ok = (j: unknown) => toTape(j, mint, TAPE_MAX, now()) !== null;
-      const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/trades?token=${mint}`, held === true ? "refresh" : "pages", "sol trades", ok, undefined, client);
+      const { a, src } = await chartRead(`/networks/solana/pools/${chartPool(mint, p.body)}/trades?token=${mint}`, held === true ? "refresh" : "pages", "sol trades", ok, undefined, client, held === true);
       const rows = a === null ? [] : toTape(a, mint, TAPE_MAX, now());
       if (rows === null) throw new Upstream();
       return { status: 200, body: JSON.stringify(rows), src, asOfMs: now() };
@@ -1339,7 +1346,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
           if (k === undefined) return null;
           const [mint, tf] = k.split(":") as [string, Tf];
           const pool = pools.peek(mint);
-          const keyless = own.has(k);
+          // a held chart's re-read ahead never spends the key either (KEYED_COLD_ONLY)
+          const keyless = own.has(k) || (pool !== undefined && kept.get(k) !== undefined);
           try {
             if (pool === undefined) {
               const { a } = await chartRead(`/networks/solana/tokens/${mint}`, "ahead", "sol pool", poolOk, undefined, undefined, keyless);
