@@ -2434,7 +2434,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       for (const r of rows) {
         const f = vendorFacts.get(`${token} ${r.tx}`);
         if (f === undefined) waiting = true;
-        const x = f === undefined || f === "none" ? null : exactRow(r.amt, d, f);
+        const x = f === undefined || f === "none" ? null : exactRow(r.side, r.amt, d, f);
         if (x !== null) trades.push({ ...r, amt: x.amt, trader: x.trader });
       }
     return { trades, waiting };

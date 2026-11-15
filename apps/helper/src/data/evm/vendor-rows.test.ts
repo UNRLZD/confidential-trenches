@@ -10,13 +10,14 @@ type Row = { tx: string; side: string; amt: string; vendorTrader: string };
 const R = JSON.parse(readFileSync(new URL("./fixtures/vendor-rows-receipts.json", import.meta.url), "utf8")) as {
   base: { coin: string; decimals: number; rows: Row[]; receipts: Record<string, unknown> };
   robinhood: { coin: string; decimals: number; rows: Row[]; receipts: Record<string, unknown> };
+  hook: { coin: string; decimals: number; rows: Row[]; receipts: Record<string, unknown> };
 };
 
 test("Base tx 0xfa31c53f (live runs 43689567273, 43689580591): the vendor's 4029.69636401198 is served as the 4029696364011983028639 its buyer got, the buyer the transaction's sender", () => {
   const { coin: token, decimals, rows, receipts } = R.base;
   const f = receiptFacts(receipts[rows[0]!.tx], rows[0]!.tx, token, VENUES.base.poolManager);
   assert.ok(f !== null);
-  assert.deepEqual(exactRow(rows[0]!.amt, decimals, f), { amt: "4029.696364011983028639", trader: "0x89cdaf64636cc51337b306f38ce8bd8abd4df6f7" });
+  assert.deepEqual(exactRow("b", rows[0]!.amt, decimals, f), { amt: "4029.696364011983028639", trader: "0x89cdaf64636cc51337b306f38ce8bd8abd4df6f7" });
 });
 
 test("Robinhood bundles (v0.7 and v0.6 EntryPoints): each row names the user operation's account, never the bundler, and the token's exact move", () => {
@@ -28,7 +29,7 @@ test("Robinhood bundles (v0.7 and v0.6 EntryPoints): each row names the user ope
   rows.forEach((r, i) => {
     const f = receiptFacts(receipts[r.tx], r.tx, token, VENUES.robinhood.poolManager);
     assert.ok(f !== null, r.tx);
-    const got = exactRow(r.amt, decimals, f);
+    const got = exactRow(r.side as "b" | "s", r.amt, decimals, f);
     assert.deepEqual(got, want[i], r.tx);
     assert.notEqual(got!.trader, r.vendorTrader, "the bundler is never the trader");
   });
@@ -39,9 +40,9 @@ test("a row no move of the token in its receipt matches is no trade the chain sh
   const tx = rows[0]!.tx;
   const f = receiptFacts(receipts[tx], tx, token, VENUES.base.poolManager)!;
   // a float off in its 11th significant digit (1e-11 of it), and one of another token's size
-  assert.equal(exactRow("4029.69636411198", decimals, f), null);
-  assert.equal(exactRow("17949", decimals, f), null);
-  assert.equal(exactRow("-1", decimals, f), null);
+  assert.equal(exactRow("b", "4029.69636411198", decimals, f), null);
+  assert.equal(exactRow("b", "17949", decimals, f), null);
+  assert.equal(exactRow("b", "-1", decimals, f), null);
   assert.equal(receiptFacts(receipts[tx], `0x${"ab".repeat(32)}`, token, VENUES.base.poolManager), null);
   assert.equal(receiptFacts({ ...(receipts[tx] as object), status: "0x0" }, tx, token, VENUES.base.poolManager), null);
   assert.equal(receiptFacts({ ...(receipts[tx] as object), logs: [{ logIndex: "0x1", topics: "x", data: "0x" }] }, tx, token, VENUES.base.poolManager), null);
@@ -49,8 +50,9 @@ test("a row no move of the token in its receipt matches is no trade the chain sh
 
 test("two different moves that both match the vendor's float name no amount (never a guess)", () => {
   const traders = { from: `0x${"11".repeat(20)}` };
-  assert.equal(exactRow("1.5", 18, { traders, moves: [{ index: 1, raw: "1500000000000000000", tier: 1 }, { index: 2, raw: "1500000000000000001", tier: 1 }] }), null);
-  assert.deepEqual(exactRow("1.5", 18, { traders, moves: [{ index: 1, raw: "1500000000000000001", tier: 1 }, { index: 2, raw: "1500000000000000001", tier: 1 }] }), { amt: "1.500000000000000001", trader: traders.from });
+  const [pool, router] = [`0x${"22".repeat(20)}`, `0x${"33".repeat(20)}`];
+  assert.equal(exactRow("b", "1.5", 18, { traders, moves: [{ index: 1, raw: "1500000000000000000", tier: 1, from: pool, to: traders.from }, { index: 2, raw: "1500000000000000001", tier: 1, from: pool, to: traders.from }] }), null);
+  assert.deepEqual(exactRow("b", "1.5", 18, { traders, moves: [{ index: 1, raw: "1500000000000000001", tier: 1, from: pool, to: router }, { index: 2, raw: "1500000000000000001", tier: 1, from: router, to: traders.from }] }), { amt: "1.500000000000000001", trader: traders.from });
 });
 
 test("vendorUnits: decimal text to the token's units, digits past its decimals dropped", () => {
@@ -58,4 +60,20 @@ test("vendorUnits: decimal text to the token's units, digits past its decimals d
   assert.equal(vendorUnits("86.710609123", 6), 86710609n);
   assert.equal(vendorUnits("0", 6), null);
   assert.equal(vendorUnits("1e5", 6), null);
+});
+
+test("a row whose trader did not move the token its way is never served: Base tx 0x2bd3a576, whose sender sold 12,887,788.33 while the hook's contract 0x9982538f bought 18,198.82 with its cut (GeckoTerminal served both under the sender)", () => {
+  const { coin: token, decimals, rows, receipts } = R.hook;
+  const f = receiptFacts(receipts[rows[0]!.tx], rows[0]!.tx, token, VENUES.base.poolManager)!;
+  assert.equal(exactRow("b", rows[0]!.amt, decimals, f), null, "the hook's own buy is no trade of the sender");
+  assert.deepEqual(exactRow("s", rows[1]!.amt, decimals, f), { amt: "12887788.33122396375", trader: "0x89cdaf64636cc51337b306f38ce8bd8abd4df6f7" });
+  assert.equal(exactRow("b", rows[1]!.amt, decimals, f), null, "nor is the sender's sell read as a buy");
+});
+
+test("two transfers in a row through a router: the trader's net decides, the router's pass-through counts for no one", () => {
+  const traders = { from: `0x${"11".repeat(20)}` };
+  const [pool, router] = [`0x${"22".repeat(20)}`, `0x${"33".repeat(20)}`];
+  const moves = [{ index: 1, raw: "700", tier: 1 as const, from: traders.from, to: router }, { index: 2, raw: "700", tier: 1 as const, from: router, to: pool }];
+  assert.deepEqual(exactRow("s", "700", 0, { traders, moves }), { amt: "700", trader: traders.from });
+  assert.equal(exactRow("b", "700", 0, { traders, moves }), null);
 });

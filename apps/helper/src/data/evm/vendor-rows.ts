@@ -10,7 +10,11 @@
 // first a Transfer of the token; else, for a v4 pool that settles in claims, a leg of the PoolManager's Swap log or an
 // ERC-6909 claim of the token. "Printed from" is a match to 1e-12 of the value: a float keeps about 15 significant
 // digits, and two different moves of one token in one transaction that close are not seen in practice. A row with no
-// such move, or with two different ones, is no trade the chain shows: it is never served.
+// such move, or with two different ones, is no trade the chain shows: it is never served. Nor is a row whose trader did
+// not move the token its way: a buy's trader got more of it than it sent in the transaction (in a bundle, in its user
+// operation's run), a sell's sent more than it got. The vendor counts a v4 hook's own swaps as trades of the sender
+// (Base tx 0x2bd3a576: its sender sold 12,887,788.33, and the hook's contract 0x9982538f bought 18,198.82 with its cut
+// and put it back as liquidity; GeckoTerminal served both rows under the sender), and our own tape counts none of them.
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { traderAt, txTraders, type Traders } from "./index.ts";
@@ -23,7 +27,7 @@ const low = (v: unknown): string | null => (typeof v === "string" ? v.toLowerCas
 
 /** What a receipt says about one token: the transaction's traders and each move of the token with its log index
  *  (`tier` 1 a Transfer of the token, 2 a v4 Swap leg or an ERC-6909 claim of it), the raw value as decimal text. */
-export type Facts = { traders: Traders; moves: { index: number; raw: string; tier: 1 | 2 }[] };
+export type Facts = { traders: Traders; moves: { index: number; raw: string; tier: 1 | 2; from?: string; to?: string }[] };
 
 /** The facts of `token` in a receipt (eth_getTransactionReceipt's answer, hostile), or null for a malformed one, one of
  *  another transaction, or a reverted one. `poolManager`: the chain's v4 PoolManager. */
@@ -44,7 +48,12 @@ export function receiptFacts(receipt: unknown, tx: string, token: string, poolMa
     const address = low(l.address);
     const words = (data.length - 2) / 64;
     const word = (i: number): bigint => BigInt(`0x${data.slice(2 + 64 * i, 2 + 64 * (i + 1))}`);
-    if (address === token && topics[0] === TRANSFER && topics.length === 3 && words === 1) moves.push({ index, raw: word(0).toString(), tier: 1 });
+    const holder = (t: string | null | undefined): string | null => (t != null && /^0x0{24}[0-9a-f]{40}$/.test(t) ? `0x${t.slice(26)}` : null);
+    if (address === token && topics[0] === TRANSFER && topics.length === 3 && words === 1) {
+      const [from, to] = [holder(topics[1]), holder(topics[2])];
+      if (from === null || to === null) return null;
+      moves.push({ index, raw: word(0).toString(), tier: 1, from, to });
+    }
     else if (address === poolManager && topics[0] === SWAP4 && topics.length === 3 && words === 6) {
       // the swap's two legs, int128 each: either may be the token's
       for (const w of [word(0), word(1)]) {
@@ -77,7 +86,7 @@ function fixed(raw: bigint, decimals: number): string {
 /** The exact row for a vendor's `amt` of a token of `decimals` from its transaction's facts: the one raw value of the
  *  first tier that holds a match, and the trader of the first log that moved it; null when no move or two different ones
  *  match. */
-export function exactRow(amt: string, decimals: number, f: Facts): { amt: string; trader: string | null } | null {
+export function exactRow(side: "b" | "s", amt: string, decimals: number, f: Facts): { amt: string; trader: string | null } | null {
   const want = vendorUnits(amt, decimals);
   if (want === null) return null;
   for (const tier of [1, 2] as const) {
@@ -88,7 +97,15 @@ export function exactRow(amt: string, decimals: number, f: Facts): { amt: string
       // the trader of the moves that carry it: the one they name (a bundle's validation logs name none); two different
       // ones (two user operations moving the same amount) name no one, never a guess
       const named = [...new Set(hits.map((m) => traderAt(f.traders, m.index)).filter((t): t is string => t !== null))];
-      return { amt: fixed(BigInt(hits[0]!.raw), decimals), trader: named.length === 1 ? named[0]! : null };
+      const trader = named.length === 1 ? named[0]! : null;
+      if (trader !== null) {
+        // its net move of the token over the transaction, or its user operation's run
+        let net = 0n;
+        for (const m of f.moves)
+          if (m.tier === 1 && traderAt(f.traders, m.index) === trader) net += (m.to === trader ? BigInt(m.raw) : 0n) - (m.from === trader ? BigInt(m.raw) : 0n);
+        if (side === "b" ? net <= 0n : net >= 0n) return null;
+      }
+      return { amt: fixed(BigInt(hits[0]!.raw), decimals), trader };
     }
   }
   return null;
