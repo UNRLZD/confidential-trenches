@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as viteBuild } from "vite";
 import { browserLabel, launchBrowser } from "../../../scripts/browsers.mjs";
+import { fetchOrAbort } from "../../../scripts/live-checks/route-fetch.mjs";
 import { build, WRANGLER } from "./deploy.mjs";
 import { entropyToWords } from "../../wallet/src/derive/index.ts";
 
@@ -134,8 +135,9 @@ try {
   await ctx.route("**/*", async (r) => {
     const u = new URL(r.request().url());
     if (u.origin === SIGN) {
-      const res = await r.fetch({ url: `${LOCAL}${u.pathname}${u.search}`, maxRedirects: 0 });
-      return r.fulfill({ response: res });
+      // a read the local server drops is tried once more, then the page's own request fails (route-fetch.mjs)
+      const res = await fetchOrAbort(r, { url: `${LOCAL}${u.pathname}${u.search}`, maxRedirects: 0 });
+      return res && r.fulfill({ response: res });
     }
     if (u.origin === APP) {
       const p = u.pathname === "/" ? "/index.html" : u.pathname === "/embed" ? "/embed.html" : u.pathname;
