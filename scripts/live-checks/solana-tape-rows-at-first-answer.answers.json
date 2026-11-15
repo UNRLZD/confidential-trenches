@@ -1,0 +1,339 @@
+{
+ "_note": "good: this branch's Solana tape (apps/helper/src/data/solana/trades.ts createSolanaTrades on the public providers and stream, no vendor fallback) behind a local harness serving /v1/market/trades, the lists the deployed helper's own answer, read 2026-11-15T08:56:03Z: two flooded coins (0 and 1 of their newest 30 signatures successful) answered our own chain rows at the first answer (1 and 13): PASS. bad: the deployed helper 0d308d3bc read 2026-11-15T08:54:53Z: flooded 9nxbR8JV...pump (0 of 30 successful) answered CoinGecko's 50 rows, its own first read holding none: FAIL. bad_zero: helper live run 43689567273 (token-page-data-complete-and-fast, 07:27:09Z), CjRGc8wH...pump answered 0 rows at its first answer; its newest 30 signatures at 07:27:09Z read on api.mainnet-beta.solana.com 2026-11-15 08:4xZ (0 successful); the other two tapes of that run as its log prints them: FAIL.",
+ "good": {
+  "base": "http://127.0.0.1:18083",
+  "readAt": "2026-11-15T08:56:03.390Z",
+  "lists": {
+   "status": 200,
+   "busy": 12
+  },
+  "picks": [
+   {
+    "mint": "HxPrDS84HH3ijsJhiCLF55MN7DqLfxzbt99RnSuSpump",
+    "buys_5m": 210,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "8MkPonw1EsCVyPjdVF31BnTBFzPHHMZdrvZwk6aipump",
+    "buys_5m": 200,
+    "newest": {
+     "sigs": 30,
+     "ok": 29
+    }
+   },
+   {
+    "mint": "FZLgwRj7k7bESGAPMitaLGCwKtVNJNtd96gj3TjApump",
+    "buys_5m": 165,
+    "newest": {
+     "sigs": 30,
+     "ok": 25
+    }
+   },
+   {
+    "mint": "28yg1mZAqE4K9i334Xrg53wsT5YM14tgNvSYPjYppump",
+    "buys_5m": 103,
+    "newest": {
+     "sigs": 30,
+     "ok": 0
+    }
+   },
+   {
+    "mint": "8iySTuaQQNsBJAD1SEc9mhPEWwQL95Prst9cNzKBpump",
+    "buys_5m": 75,
+    "newest": {
+     "sigs": 30,
+     "ok": 28
+    }
+   },
+   {
+    "mint": "9PSAQ8XQNerHEDGgMCgW67vK5wh8Bsq3s7Ew7wTFpump",
+    "buys_5m": 73,
+    "newest": {
+     "sigs": 30,
+     "ok": 1
+    }
+   },
+   {
+    "mint": "FZjyGVc5Su7kJzLXUaz5ZqtotjT97LhWQ2jacrY4pump",
+    "buys_5m": 70,
+    "newest": {
+     "sigs": 30,
+     "ok": 29
+    }
+   },
+   {
+    "mint": "FzeA6pRFmhRihg4sH7eiQWcjqgfbtVdPZwt1MgkQpump",
+    "buys_5m": 66,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "C193XzgxAPyJgvtUEtuiP3Uxns5ExLKfdUWVasASpump",
+    "buys_5m": 63,
+    "newest": {
+     "sigs": 30,
+     "ok": 29
+    }
+   },
+   {
+    "mint": "CbCYmXwyvsahUnYWHCsiv5LM5Wbkw9zpDCtN2VYdpump",
+    "buys_5m": 50,
+    "newest": {
+     "sigs": 30,
+     "ok": 9
+    }
+   },
+   {
+    "mint": "GJAFwWjJ3vnTsrQVabjBVK2TYB1YtRCQXRDfDgUnpump",
+    "buys_5m": 35,
+    "newest": {
+     "sigs": 30,
+     "ok": 25
+    }
+   },
+   {
+    "mint": "EvbSSzACWAxqFhXdiPypjv6jMhRfHU257x65oFrjpump",
+    "buys_5m": 34,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   }
+  ],
+  "tapes": [
+   {
+    "mint": "28yg1mZAqE4K9i334Xrg53wsT5YM14tgNvSYPjYppump",
+    "flooded": true,
+    "status": 200,
+    "json": true,
+    "rows": 1,
+    "src": "chain",
+    "filling": true,
+    "ms": 2013
+   },
+   {
+    "mint": "9PSAQ8XQNerHEDGgMCgW67vK5wh8Bsq3s7Ew7wTFpump",
+    "flooded": true,
+    "status": 200,
+    "json": true,
+    "rows": 13,
+    "src": "chain",
+    "filling": true,
+    "ms": 1395
+   },
+   {
+    "mint": "HxPrDS84HH3ijsJhiCLF55MN7DqLfxzbt99RnSuSpump",
+    "flooded": false,
+    "status": 200,
+    "json": true,
+    "rows": 46,
+    "src": "chain",
+    "filling": false,
+    "ms": 2
+   }
+  ]
+ },
+ "bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-15T08:54:53.447Z",
+  "lists": {
+   "status": 200,
+   "busy": 12
+  },
+  "picks": [
+   {
+    "mint": "8MkPonw1EsCVyPjdVF31BnTBFzPHHMZdrvZwk6aipump",
+    "buys_5m": 257,
+    "newest": {
+     "sigs": 30,
+     "ok": 29
+    }
+   },
+   {
+    "mint": "HxPrDS84HH3ijsJhiCLF55MN7DqLfxzbt99RnSuSpump",
+    "buys_5m": 220,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "FZLgwRj7k7bESGAPMitaLGCwKtVNJNtd96gj3TjApump",
+    "buys_5m": 198,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "9UTsS9niChuTfJkaMBhTdHHDTWLNQkn76isWnD7Zpump",
+    "buys_5m": 123,
+    "newest": {
+     "sigs": 30,
+     "ok": 4
+    }
+   },
+   {
+    "mint": "52qGcqUi7Uo5gMLgF8FohU8MZJZWMUruJV1VrXdwpump",
+    "buys_5m": 77,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "Gqo6GrbMhX5cawJ1s9EuvNW6rr8CjCJcXYvsahBCpump",
+    "buys_5m": 67,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "9nxbR8JVEvrFS5UbPGksGFdCofoefQnFznt2DzApump",
+    "buys_5m": 63,
+    "newest": {
+     "sigs": 30,
+     "ok": 0
+    }
+   },
+   {
+    "mint": "EpTNrmf53Vbq8ePa19NZRY2buyH6ukoh3ESCLz3Npump",
+    "buys_5m": 62,
+    "newest": {
+     "sigs": 30,
+     "ok": 26
+    }
+   },
+   {
+    "mint": "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump",
+    "buys_5m": 59,
+    "newest": {
+     "sigs": 30,
+     "ok": 13
+    }
+   },
+   {
+    "mint": "4cwHD9nM8NNecb2zJJA8gr1Aj27braSt7TpPiMUFpump",
+    "buys_5m": 57,
+    "newest": {
+     "sigs": 30,
+     "ok": 26
+    }
+   },
+   {
+    "mint": "63ngAgcnHtE29ccUjUfbjcvvLJ7vd51Us4tEnRaKpump",
+    "buys_5m": 55,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   },
+   {
+    "mint": "GN7RNMYD3pyfXeTExXtEUbTb9N1QXS2e8fQpKGpHN2rX",
+    "buys_5m": 53,
+    "newest": {
+     "sigs": 30,
+     "ok": 30
+    }
+   }
+  ],
+  "tapes": [
+   {
+    "mint": "9nxbR8JVEvrFS5UbPGksGFdCofoefQnFznt2DzApump",
+    "flooded": true,
+    "status": 200,
+    "json": true,
+    "rows": 50,
+    "src": "coingecko",
+    "filling": false,
+    "ms": 1598
+   },
+   {
+    "mint": "8MkPonw1EsCVyPjdVF31BnTBFzPHHMZdrvZwk6aipump",
+    "flooded": false,
+    "status": 200,
+    "json": true,
+    "rows": 5,
+    "src": "chain",
+    "filling": true,
+    "ms": 1117
+   },
+   {
+    "mint": "HxPrDS84HH3ijsJhiCLF55MN7DqLfxzbt99RnSuSpump",
+    "flooded": false,
+    "status": 200,
+    "json": true,
+    "rows": 5,
+    "src": "chain",
+    "filling": true,
+    "ms": 922
+   }
+  ]
+ },
+ "bad_zero": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-15T07:27:09.100Z",
+  "lists": {
+   "status": 200,
+   "busy": 3
+  },
+  "picks": [
+   {
+    "mint": "FVzqGqRmr4UH1Fif6dewmwbJ1p4YUZCu8dcw4Efopump",
+    "buys_5m": null,
+    "newest": null
+   },
+   {
+    "mint": "2tHPtosmh76mmJHeskid7nYUeHjGUQ4ZAYChwdGJpump",
+    "buys_5m": null,
+    "newest": null
+   },
+   {
+    "mint": "CjRGc8wHEbHaLTnRYVqAEdnESsnkGwhCDajnysxwpump",
+    "buys_5m": null,
+    "newest": {
+     "sigs": 30,
+     "ok": 0
+    }
+   }
+  ],
+  "tapes": [
+   {
+    "mint": "CjRGc8wHEbHaLTnRYVqAEdnESsnkGwhCDajnysxwpump",
+    "flooded": true,
+    "status": 200,
+    "json": true,
+    "rows": 0,
+    "src": null,
+    "filling": false,
+    "ms": 742
+   },
+   {
+    "mint": "FVzqGqRmr4UH1Fif6dewmwbJ1p4YUZCu8dcw4Efopump",
+    "flooded": false,
+    "status": 200,
+    "json": true,
+    "rows": 5,
+    "src": null,
+    "filling": false,
+    "ms": 401
+   },
+   {
+    "mint": "2tHPtosmh76mmJHeskid7nYUeHjGUQ4ZAYChwdGJpump",
+    "flooded": false,
+    "status": 200,
+    "json": true,
+    "rows": 1,
+    "src": null,
+    "filling": false,
+    "ms": 389
+   }
+  ]
+ }
+}
