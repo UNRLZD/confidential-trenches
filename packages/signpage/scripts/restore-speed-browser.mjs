@@ -48,6 +48,7 @@ import { headersFor } from "../../../apps/terminal/test/harness/server.mjs";
 import { parseHeadersFile } from "../../../apps/terminal/scripts/check-deploy.ts";
 import { launchHarnessBrowser } from "../../../scripts/harness-sockets.mjs";
 import { browserLabel } from "../../../scripts/browsers.mjs";
+import { openInShell } from "../../../scripts/live-checks/open-in-shell.mjs";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
@@ -506,12 +507,8 @@ export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeo
   const app = page.frameLocator("iframe#app");
   const vis = (sel) => app.locator(`${sel} >> visible=true`).first();
   try {
-    // APP_HOST sends the top window to SIGN_HOST at once, which can land before goto's own commit: Playwright then throws
-    // "interrupted by another navigation" (box, 15 Nov 06:09Z, load 15); that is the redirect waited for below
-    await page.goto(`https://${REAL.app}/discover`, { waitUntil: "commit" }).catch((e) => {
-      if (!/interrupted by another navigation to "https:\/\/[^"]*"/.test(String(e?.message)) || !String(e.message).includes(REAL.sign)) throw e;
-    });
-    await page.waitForURL((x) => x.hostname === REAL.sign, { timeout: STEP_MS });
+    // the shared visit (scripts/live-checks/open-in-shell.mjs): ends at the shell whichever commit Firefox reports first
+    await openInShell(page, `https://${REAL.app}/discover`, `https://${REAL.sign}`, STEP_MS);
     await app.locator(':root[data-signpage="ready"]').waitFor({ state: "attached", timeout: STEP_MS });
     await vis('[data-header="S1.1"] button, button[data-header="S1.1"]').click({ timeout: STEP_MS });
     await vis('.sgn-opt[data-way="wallet"]').click({ timeout: STEP_MS });
