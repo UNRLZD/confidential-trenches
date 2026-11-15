@@ -1,7 +1,7 @@
 {
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-E0z5C9/yanXJvS407b3VgU0iQZfoCvshuFGPZEpEy0rDgRxmSEs7boW+UgxFgQYc\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-E0z5C9/yanXJvS407b3VgU0iQZfoCvshuFGPZEpEy0rDgRxmSEs7boW+UgxFgQYc",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oK9D0EXfu5jvQ/cdpJOgahur0oVkPswhp4eJwZfaPRqKwtUZ3lBh+kPuNQzWZ9/c\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-oK9D0EXfu5jvQ/cdpJOgahur0oVkPswhp4eJwZfaPRqKwtUZ3lBh+kPuNQzWZ9/c",
   "tap": true,
   "sizing": true,
   "move": true,
