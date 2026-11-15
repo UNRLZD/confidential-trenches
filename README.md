@@ -1,6 +1,6 @@
 Blindfill is the private engine without limit and compromise for every app: wallets, terminals, bots and AI agents plug in and trade as strangers.
 
-<img alt="Confidential Trenches by UNRLZD. Trade confidentially without limit and compromise. Speed: 1.2 s. Chains: any, by design; four in this build. Keys: self custody. Trades: confidential." src="assets/banner.png" width="100%">
+<img alt="Confidential Trenches by UNRLZD. Trade confidentially without limit and compromise. Speed: 1.2 s. Chains: any. Keys: self custody. Trades: confidential." src="assets/banner.png" width="100%">
 
 # Confidential Trenches
 
@@ -204,7 +204,7 @@ We put the same six questions to each kind of private trading product on the mar
 | Who can tie a trade to you | The operator | The operator | Timing and amount | Nobody holds the link. Timing and amount can hint. |
 | Who can move or freeze the money | The operator | The operator, or a DAO | An upgrade key, in some | Nobody can move it: the vault and the pools have no key. USDC's issuer can freeze the vault's USDC, as for any holder. |
 | Tokens minutes old | Yes, in public | No, a fixed list | Some | Yes, from a wallet never used |
-| Chains to trade on | Several, in public | Many, inside one network | One | Four in this build, from one balance: Solana, Base, Robinhood Chain and NEAR. More chains join through NEAR Intents |
+| Chains to trade on | Several, in public | Many, inside one network | One | Any chain NEAR Intents reaches, from one balance (four in this build) |
 | Wait at the tap | None | None | A shielding wait, in some | None when the money is already in that chain's pool. The proof is made before you tap. |
 | Stops and limits while you sleep | Held on the operator's keys | Some | Rare | Designed to be signed on your device, with no key on our side; not in this build |
 
@@ -227,7 +227,7 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 | Part | What it does |
 |---|---|
 | The vault | A NEAR contract that holds everyone's USDC in one pool. Money leaves only for a proof made on the owner's device from their 12 words, and goes only to the accounts that proof names. It ports Privacy Pools v1, whose code is audited and open source, to NEAR, with its admin parts removed: the vault approves every deposit itself. Its balance rests on NEAR beside NEAR Intents, never inside it. |
-| Fresh wallets | Brand-new wallets on Solana, Base, Robinhood Chain and NEAR, each one used once, all from the same 12 words; more chains join through NEAR Intents. Keys never leave the device. They come from the 12 words by published standards, so they can be rebuilt outside the app; a key export screen is not built yet. |
+| Fresh wallets | Brand-new wallets on any chain NEAR Intents reaches, each one used once, all from the same 12 words. Keys never leave the device. They come from the 12 words by published standards, so they can be rebuilt outside the app; a key export screen is not built yet. |
 | Orders signed in advance | Blindfill's design, not in this build. Stops and limit sells are signed on the device with the price written in. A helper sends each one when its price is hit; it fills only at that price or better, into the user's own wallet. When one of a pair fills, the other cancels on its own. |
 | The kit | `@blindfill/kit`, one public entry for any app: deposit, prove, ready the wallets, trade, withdraw, verify. The example agent in `examples/agent/` is written to run a full cycle through it (deposit, buy on NEAR, sell, withdraw) in 292 lines across 4 files. Its Confirm guard has tests; a full run on mainnet is not on record yet. |
 | The terminal | The UNRLZD trading terminal, rebuilt on the kit. It calls only the kit's public entry, as any outside app would, and holds no key: a separate signing page on its own address signs every request. |
@@ -277,7 +277,7 @@ The UNRLZD trading terminal existed before the hackathon as a separate product. 
 ## Hackathon entry
 
 - Tracks entered: Privacy & Private AI (`privacy`), Unstoppable DeFi (`defi`) and Open Innovation (`open`).
-- AI coding agents (Claude, by Anthropic) wrote code in this repository under the team's direction and review. Every change lands through its own tests and the CI gates above.
+- The code is written with an AI assistant, Claude by Anthropic, under the team's direction and review. Every change lands through its own tests and the CI gates above.
 
 ## Built with
 

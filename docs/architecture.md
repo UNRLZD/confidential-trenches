@@ -76,7 +76,7 @@ We keep the vault's resting balance outside `intents.near`, on purpose. The DAO 
 
 ### Fresh wallets
 
-Brand-new wallets on Solana, Base, Robinhood Chain and NEAR; more chains join through NEAR Intents. Each is used once: one wallet makes one buy and its sell. All keys come from your 12 words on standard-shape paths and never leave the device, so they can be rebuilt outside the app; a key export screen is not built yet.
+Brand-new wallets on any chain NEAR Intents reaches. Each is used once: one wallet makes one buy and its sell. All keys come from your 12 words on standard-shape paths and never leave the device, so they can be rebuilt outside the app; a key export screen is not built yet.
 
 On Solana, Base and Robinhood Chain the pool pays a fresh wallet inside the buy, so the money arrives from the shared pool, not from you or from a wallet that's been used before. On NEAR the vault pays it. One thing is visible from outside. A buy from a set of wallets shows up as several fresh wallets buying the same token in the same second. Watchers can group them as one position and read its size. They can't tell whose it is.
 
