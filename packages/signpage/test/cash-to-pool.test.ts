@@ -24,7 +24,9 @@ function mover(o: { floor?: bigint | null; cash?: bigint; quote?: (usdc: bigint)
   let clock = 1_000;
   const d: CashMoverDeps = {
     price: (c) => (o.price === null ? null : c === "solana" ? PRICE : { price: "300000000000", expo: -8 }),
-    floor: async () => (o.floor === undefined ? 1_020_000_000_000_000n : o.floor),
+    // the pool's quote floor: on Solana the rung, one deposit's cost and U_X's rent (card cash-buys-spend-every-note: a
+    // Solana move's parts are held to it), on Base and Robinhood the rung and one deposit's gas
+    floor: async (c) => (o.floor === undefined ? (c === "solana" ? 12_000_000n : 1_020_000_000_000_000n) : o.floor),
     rails: ["1click"],
     quote: async (chain, usdc, id, rail) => (quoted.push({ chain, usdc, id, rail }), o.quote?.(usdc) ?? { address: ADDRESS, amountIn: usdc, minOut: (usdc * 10n ** 9n) / 80_000_000n }),
     fee: async () => 50_000n,
@@ -246,13 +248,14 @@ test("cashLamportsFor: Cash counted in SOL at the device's price, less 3% and th
   assert.equal(cashLamportsFor(25_544_000n, { price: "-1", expo: -8 }), 0n);
 });
 
-test("withCash: tap_max plus the moves on their way plus what the largest Cash note less its fee gives, in whole SOL", () => {
+test("withCash: tap_max plus the moves on their way plus what a Cash note less its fee gives, in whole SOL", () => {
   const p = { price: "8000000000", expo: -8 };
+  const one = (value: bigint) => [{ id: "n1", value }];
   // 0.1 SOL a tap now, 0.05 on its way, 25.594 USDC of Cash less a 0.05 fee = 25.544 USDC = 0.3 SOL
-  assert.equal(withCash("0.1", 50_000_000n, 25_594_000n, 50_000n, p), "0.45");
-  assert.equal(withCash("0", 0n, 50_000n, 50_000n, p), "0", "Cash under its fee gives nothing");
-  assert.equal(withCash("0.1", 0n, 25_594_000n, 50_000n, null), "0.1", "no price: Cash is not counted");
-  assert.equal(withCash("x", 0n, 0n, 0n, p), null);
+  assert.equal(withCash("0.1", 50_000_000n, one(25_594_000n), 50_000n, p), "0.45");
+  assert.equal(withCash("0", 0n, one(50_000n), 50_000n, p), "0", "Cash under its fee gives nothing");
+  assert.equal(withCash("0.1", 0n, one(25_594_000n), 50_000n, null), "0.1", "no price: Cash is not counted");
+  assert.equal(withCash("x", 0n, [], 0n, p), null);
 });
 
 // card evm-cash-move-brings-its-fee: with_cash on Base and Robinhood is searched under what Cash buys with no margin

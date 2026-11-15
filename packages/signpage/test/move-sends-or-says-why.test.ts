@@ -177,7 +177,7 @@ function cashPage(o: { quote?: () => Promise<{ address: string; amountIn: bigint
     quote: async (_c, usdc) => (o.quote ? o.quote() : { address: CASH_ADDRESS, amountIn: usdc, minOut: (usdc * 10n ** 9n) / 80_000_000n }),
     fee: async () => 50_000n,
     cash: async () => 1_000_000_000n,
-    handoff: async (w, _fee, claim) => {
+    handoff: async (w, _fee, _note, claim) => {
       if (claim) claims.push(claim);
       const r = await (o.handoff ? o.handoff(claim) : new Promise<never>(() => {}));
       paid.push(w.amount);

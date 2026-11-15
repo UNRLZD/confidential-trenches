@@ -69,7 +69,7 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
-import { cashMover, cashUsdcFor, evmCashWei, evmMoveCostOf, evmMoveOf, moveCostOf, poolMoveKinds, solanaTapMaxOf, unitsText, withCash, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { cashMover, cashMoveCost, evmCashWei, evmMoveCostOf, evmMoveOf, planCashMove, poolMoveKinds, readOneClickLeast, solanaMoveModel, solanaTapMaxOf, unitsText, withCash, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -349,6 +349,17 @@ else {
   // the vault's hand-off to its deposit address, then buys once one tap spends the ask (tapDry, below: the dry read
   // with no trade gate, since the tap's own run holds it)
   // one mover per signed-in session (its signal is the sign out's): a move on its way is never counted for another
+  // 1Click's least for a move of Cash into a pool (card cash-buys-spend-every-note), read live, kept a minute so a dry
+  // per keystroke asks it once; a read that names none is not kept
+  const leastRead = new Map<PoolChain, { at: number; least: Promise<bigint | null> }>();
+  const oneClickLeastNow = (chain: PoolChain): Promise<bigint | null> => {
+    const kept = leastRead.get(chain);
+    if (kept !== undefined && Date.now() - kept.at < 60_000) return kept.least;
+    const least = readOneClickLeast(chain, fetch, Date.now());
+    leastRead.set(chain, { at: Date.now(), least });
+    void least.then((x) => x === null && leastRead.delete(chain));
+    return least;
+  };
   // the floor a Move's quote into a pool is held to (pool.address's), read for a message by the pool's pinned fee payer on
   // Solana (a deposit's fee is the same for any one signer, and the read names no account of the user's)
   const moveFloor = (chain: PoolChain): Promise<bigint | null> => (chain === "solana" ? (PAGE_SOL_PIN === undefined ? Promise.resolve(null) : floorFor(chain, PAGE_SOL_PIN.feePayer)) : evmRoute.floor(chain));
@@ -376,8 +387,13 @@ else {
       },
       fee: () => form.fee(),
       cash: () => form.available(),
-      // the move's claim reaches the request, right before its note goes RESERVED (card move-sends-or-says-why)
-      handoff: handoff && ((w, fee, claim) => handoff(w, fee, undefined, false, claim)),
+      // every Cash note, which a buy's move on Solana plans its parts over (card cash-buys-spend-every-note), and
+      // 1Click's least for the route, read live
+      notes: () => form.cash(),
+      least: (chain) => oneClickLeastNow(chain),
+      // the move's claim reaches the request, right before its note goes RESERVED (card move-sends-or-says-why); a
+      // part's note withdraws exactly as planned (`exact`: the drawn fee), so a note moved whole leaves no change
+      handoff: handoff && ((w, fee, note, claim) => handoff(w, fee, note, note !== undefined, claim)),
       // a pool's quote floor, the same read pool.address checks against: an EVM pool's least rung plus one deposit's gas;
       // Solana's rung, one deposit's cost and the rent U_X keeps, its fee read for a message by the pool's pinned fee
       // payer (a deposit's fee is the same for any one signer, and the read names no account of the user's)
@@ -615,8 +631,9 @@ else {
       if (a === null || !("result" in a)) return;
       const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal };
       const form = withdrawFormDeps(vault);
-      const [cash, fee] = await Promise.all([form.available(), form.fee()]);
-      extra = withCash(a.result.tap_max, cashMoverNow().coming("solana"), cash, fee, prices.get("solana"));
+      // every Cash note (card cash-buys-spend-every-note), at the pool's quote floor and 1Click's least read now
+      const [notes, fee, floor, leastIn] = await Promise.all([form.cash(), form.fee(), moveFloor("solana").catch(() => null), oneClickLeastNow("solana")]);
+      extra = withCash(a.result.tap_max, cashMoverNow().coming("solana"), notes, fee, prices.get("solana"), floor, leastIn);
     }).catch(() => {});
     return {
       running: true as const,
@@ -721,10 +738,11 @@ else {
       if (!prover || p === null || p === undefined || withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null) return null;
       const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal };
       const form = withdrawFormDeps(vault);
-      const [cash, fee] = await Promise.all([form.available(), form.fee()]);
-      // Cash's largest note pays the move and its fee, or no buy of it runs (cashMover's own bound)
-      const usdc = cashUsdcFor(short, p, "solana");
-      return usdc === null || usdc + fee > cash ? null : moveCostOf(short, fee, p, "solana");
+      // the move cashMover makes for it (card cash-buys-spend-every-note): its parts over every Cash note, each its own
+      // relay fee and margin, or no buy of it runs
+      const [notes, fee, floor, leastIn] = await Promise.all([form.cash(), form.fee(), moveFloor("solana").catch(() => null), oneClickLeastNow("solana")]);
+      const parts = planCashMove(notes, fee, short, solanaMoveModel(p, floor, leastIn));
+      return parts === null ? null : cashMoveCost(parts, fee, p, "solana");
     },
   });
   // the same read for a moving tap (cashDeps.tapMax): never refused busy, since the tap that asks is the trade

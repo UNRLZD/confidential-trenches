@@ -34,7 +34,10 @@
 // withdraw landed, then the quote's follow op's stage (moveStageOfFollow). Every other pair is refused not_allowed for
 // now, its dry too. A buy's shortfall writes the same op under its own id (cash/<chain>/<ms>).
 // Nothing here logs.
-import { TRADE_CHAINS, type ErrorCode, type MoveStage, type PoolChain, type PoolMoveDry, type PoolStatePrice, type TradeChain, type TxRef } from "../../kit/src/signpage/messages.ts";
+import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
+import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
+import { DEPOSIT_QUOTE_URL } from "../../wallet/src/deposit/quote.ts";
+import { DEPOSIT_DRY_PLACEHOLDER, TRADE_CHAINS, type ErrorCode, type MoveStage, type PoolChain, type PoolMoveDry, type PoolStatePrice, type TradeChain, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
 import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
@@ -73,11 +76,13 @@ export async function solanaTapMaxOf(r: HostRefusal | Running<"pool.buy.dry">): 
   throw new Error(a?.error ?? "failed");
 }
 /** pool.buy.dry's with_cash (kit 1.15), in whole SOL as tap_max is: tap_max, plus what the moves on their way bring,
- *  plus what the largest Cash note less the relay fee gives a tap (cashLamportsFor); null when tap_max is not an amount. */
-export function withCash(tapMax: string, coming: bigint, cash: bigint, fee: bigint, p: Pick<PoolStatePrice, "price" | "expo"> | null): string | null {
+ *  plus what a move of Cash brings a tap at most (card cash-buys-spend-every-note: every note a part may be made of,
+ *  each whole less its relay fee, cashMoveMost under the Solana model at the pool's quote `floor` and 1Click's least
+ *  `leastIn`, never only the largest note); null when tap_max is not an amount. */
+export function withCash(tapMax: string, coming: bigint, notes: readonly CashNote[], fee: bigint, p: Pick<PoolStatePrice, "price" | "expo"> | null, floor: bigint | null = null, leastIn: bigint | null = null): string | null {
   const tap = lamportsOf(tapMax);
   if (tap === null) return null;
-  const all = tap + coming + (p === null || cash <= fee ? 0n : cashLamportsFor(cash - fee, p));
+  const all = tap + coming + (p === null ? 0n : cashMoveMost(notes, fee, solanaMoveModel(p, floor, leastIn)));
   const t = all.toString().padStart(10, "0");
   const f = t.slice(-9).replace(/0+$/, "");
   return f ? `${t.slice(0, -9)}.${f}` : t.slice(0, -9);
@@ -166,6 +171,143 @@ export function cashLamportsFor(usdc: bigint, p: Pick<PoolStatePrice, "price" | 
   const gross = (usdc * px.d * 10n ** BigInt(POOL_DECIMALS[chain]) * 10_000n) / (px.n * 10n ** 6n * (10_000n + CASH_MARGIN_BPS));
   return gross > RUNG[chain] ? gross - RUNG[chain] : 0n;
 }
+/** A Cash note a move may spend: its id and value (USDC base units), as the withdraw form reads it (withdraw/checks.ts
+ *  cashNotes). */
+export type CashNote = { readonly id: string; readonly value: bigint };
+/** One part of a move out of Cash (card cash-buys-spend-every-note): one withdrawal of note `note` (one note a proof:
+ *  the vault's withdraw proof spends one commitment, contracts/vault/src/verifier.rs verify_withdraw), `usdc` into its own
+ *  1Click quote and its own one-time address, `least` what that quote must bring of the pool's coin, `units` the part of
+ *  the shortfall it covers. */
+export type CashMovePart = { note: string; usdc: bigint; least: bigint; units: bigint };
+/** How a chain's move of Cash prices a shortfall: `of(units)`, the USDC a move covering `units` asks and the least its
+ *  quote must bring (null with none); `step`, the units a part covers in (1 on Solana, a rung on Base and Robinhood);
+ *  `min`, the least units a part may cover (the pool's quote floor, as pool.address holds a quote to it); `leastIn`,
+ *  the least USDC 1Click takes for the route, read live (0n with no read: each part's own quote is still asked before
+ *  any part is sent). */
+export type CashMoveModel = { of(units: bigint): { usdc: bigint; least: bigint } | null; step: bigint; min: bigint; leastIn: bigint };
+/** Solana's model: a move covering `units` lamports asks cashUsdcFor (the units, one rung and CASH_MARGIN_BPS over) and
+ *  must bring the units; a part covers at least the pool's `floor` less the rung its quote brings over (none read: one
+ *  lamport). */
+export function solanaMoveModel(p: Pick<PoolStatePrice, "price" | "expo">, floor: bigint | null, leastIn: bigint | null): CashMoveModel {
+  return {
+    of: (units) => {
+      const usdc = cashUsdcFor(units, p, "solana");
+      return usdc === null ? null : { usdc, least: units };
+    },
+    step: 1n,
+    min: floor === null || floor - RUNG.solana < 1n ? 1n : floor - RUNG.solana,
+    leastIn: leastIn ?? 0n,
+  };
+}
+/** The most units a part of at most `usdc` covers under `m` (a whole number of steps, at least m.min, its USDC at least
+ *  m.leastIn), with the USDC and least that cover asks; null when it covers none. */
+function partOf(m: CashMoveModel, usdc: bigint): { units: bigint; usdc: bigint; least: bigint } | null {
+  const fits = (k: bigint) => {
+    const o = m.of(k * m.step);
+    return o !== null && o.usdc <= usdc;
+  };
+  if (usdc <= 0n || !fits(1n)) return null;
+  let lo = 1n;
+  let hi = 2n;
+  while (fits(hi)) {
+    lo = hi;
+    if (hi >= 1n << 128n) break;
+    hi *= 2n;
+  }
+  while (hi - lo > 1n) {
+    const mid = (lo + hi) / 2n;
+    if (fits(mid)) lo = mid;
+    else hi = mid;
+  }
+  const units = lo * m.step;
+  const o = m.of(units)!;
+  return units < m.min || o.usdc < m.leastIn ? null : { units, ...o };
+}
+/**
+ * The parts of a move out of Cash that covers `short` units of a pool's coin (card cash-buys-spend-every-note): over every
+ * UNSPENT note, never only the largest. One note that pays the whole move and its `fee`, with no change or change above
+ * two fees (the note floor), pays it alone, the smallest such (the move before this card). Else the notes largest first,
+ * each spent whole (no change note: its value less the fee, all of it moved, so nothing is left in Cash under a fee),
+ * until the next note pays what is left with a valid change; a note whose part would cover none of the shortfall, clear
+ * no quote floor or bring less than 1Click takes (CashMoveModel min, leastIn) is never asked: it stays in Cash. Null when
+ * Cash cannot cover `short`.
+ *
+ * Not withdraw/checks.ts planCashSpend (NEAR's planner): that plans a fixed USDC sum, and a move's USDC grows with its
+ * parts (each its own quote brings a rung over and must clear the quote's floor and 1Click's least on its own).
+ */
+export function planCashMove(notes: readonly CashNote[], fee: bigint, short: bigint, m: CashMoveModel): CashMovePart[] | null {
+  if (short <= 0n || fee < 0n) return null;
+  const change = (value: bigint, usdc: bigint) => value - usdc - fee === 0n || value - usdc - fee > 2n * fee;
+  const lastOf = (n: CashNote, left: bigint): CashMovePart | null => {
+    const units = left < m.min ? m.min : ((left + m.step - 1n) / m.step) * m.step;
+    const o = m.of(units);
+    if (o === null || o.usdc < m.leastIn || o.usdc + fee > n.value) return null;
+    // a change under the note floor: the note goes whole, its rest moved too
+    return change(n.value, o.usdc) ? { note: n.id, usdc: o.usdc, least: o.least, units } : { note: n.id, usdc: n.value - fee, least: o.least, units };
+  };
+  const asc = [...notes].sort((x, y) => (x.value !== y.value ? (x.value < y.value ? -1 : 1) : x.id < y.id ? -1 : 1));
+  for (const n of asc) {
+    const one = lastOf(n, short);
+    if (one !== null && change(n.value, one.usdc)) return [one];
+  }
+  const parts: CashMovePart[] = [];
+  let left = short;
+  const desc = [...asc].reverse();
+  for (let i = 0; i < desc.length; i++) {
+    const n = desc[i]!;
+    const last = lastOf(n, left);
+    if (last !== null) return [...parts, last];
+    const whole = partOf(m, n.value - fee);
+    if (whole === null) continue;
+    parts.push({ note: n.id, usdc: n.value - fee, least: whole.least, units: whole.units });
+    left -= whole.units;
+    if (left <= 0n) return parts;
+  }
+  return null;
+}
+/** The most a move out of Cash covers under `m` (Max with Cash): every note a part may be made of, each whole. */
+export function cashMoveMost(notes: readonly CashNote[], fee: bigint, m: CashMoveModel): bigint {
+  return notes.reduce((t, n) => t + (partOf(m, n.value - fee)?.units ?? 0n), 0n);
+}
+/** What a move of `parts` costs for good, in the pool coin's base units at the device's price, rounded up per part (a
+ *  one-part move: moveCostOf): each part's withdraw relay `fee` and the CASH_MARGIN_BPS margin of its USDC. Null with no
+ *  price. */
+export function cashMoveCost(parts: readonly CashMovePart[], fee: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: PoolChain): bigint | null {
+  const px = priceOf(p);
+  if (px === null || fee < 0n) return null;
+  let t = 0n;
+  for (const x of parts) {
+    const margin = (x.usdc * CASH_MARGIN_BPS + 10_000n + CASH_MARGIN_BPS - 1n) / (10_000n + CASH_MARGIN_BPS);
+    const num = (fee + margin) * px.d * 10n ** BigInt(POOL_DECIMALS[chain]);
+    const den = px.n * 10n ** 6n;
+    t += (num + den - 1n) / den;
+  }
+  return t;
+}
+/** 1Click's least amount in (USDC base units) for a move of Cash into `chain`'s pool, read live: a dry quote of one base
+ *  unit through the helper's 1Click proxy (nothing is made, nothing sent), whose refusal names it ("Amount is too low
+ *  for bridge, try at least N", 13:0xZ 15 Nov: 75,621 into SOL, 18,533 into Robinhood's ETH). Null when the answer
+ *  names none (Base answered "Failed to get quote" at one unit) or the read fails: each part's own quote is still asked
+ *  before any part is sent. */
+export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch, now: number): Promise<bigint | null> {
+  const body = {
+    dry: true, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: `nep141:${NEAR_NETWORKS.mainnet.usdc}`, depositType: "INTENTS", destinationAsset: POOL_COIN_ONECLICK[chain],
+    amount: "1", refundTo: DEPOSIT_DRY_PLACEHOLDER, refundType: "INTENTS", recipient: LEAST_RECIPIENT[chain], recipientType: "DESTINATION_CHAIN", deadline: new Date(now + 600_000).toISOString(),
+  };
+  try {
+    const r = await fetchFn(DEPOSIT_QUOTE_URL, { ...HELPER_FETCH_INIT, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
+    const text = (await r.text()).slice(0, 4096);
+    const m = /"message"\s*:\s*"Amount is too low for bridge, try at least (\d{1,30})"/.exec(text);
+    if (m !== null) return BigInt(m[1]!);
+    return r.status === 200 || r.status === 201 ? 1n : null;
+  } catch {
+    return null;
+  }
+}
+/** Each pool's coin, 1Click's id (as src/pool-to-cash.ts POOL_COIN_ASSET, which imports this module). */
+const POOL_COIN_ONECLICK: Readonly<Record<PoolChain, string>> = { solana: "nep141:sol.omft.near", base: "nep141:base.omft.near", robinhood: "nep141:hood.omft.near" };
+/** A dry read's recipient, an address of no one's: Solana's system program, an EVM address of ones. */
+const LEAST_RECIPIENT: Readonly<Record<PoolChain, string>> = { solana: "11111111111111111111111111111111", base: "0x1111111111111111111111111111111111111111", robinhood: "0x1111111111111111111111111111111111111111" };
 const priceOf = (p: Pick<PoolStatePrice, "price" | "expo">): { n: bigint; d: bigint } | null => {
   if (typeof p.price !== "string" || !/^[1-9][0-9]{0,30}$/.test(p.price) || !Number.isInteger(p.expo) || p.expo > 0 || p.expo < -30) return null;
   return { n: BigInt(p.price), d: 10n ** BigInt(-p.expo) };
@@ -234,9 +376,16 @@ export type CashMoverDeps = {
   fee(): Promise<bigint>;
   /** The most one withdrawal of Cash carries (USDC base units): the largest UNSPENT note of the vault's scope. */
   cash(): Promise<bigint>;
-  /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. `claim`, when given, is
-   *  awaited right before its note goes RESERVED (wallet withdraw/request.ts): a throw ends it with nothing sent. */
-  handoff: ((w: CheckedWithdraw, drawnFee: bigint, claim?: () => Promise<void>) => Promise<HandoffEnd>) | null;
+  /** Every UNSPENT note of the vault's scope (withdraw/checks.ts cashNotes), which a buy's move on Solana plans its parts
+   *  over (planCashMove, card cash-buys-spend-every-note); none: the one note `cash` names. */
+  notes?(): Promise<readonly CashNote[]>;
+  /** 1Click's least amount in for a move into `chain`'s pool, read live (readOneClickLeast); none or null: no bound but
+   *  each part's own quote. */
+  least?(chain: PoolChain): Promise<bigint | null>;
+  /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. `note`, when given, is the
+   *  note the withdrawal spends (a part's, planCashMove); none: the request's own pick. `claim`, when given, is awaited
+   *  right before its note goes RESERVED (wallet withdraw/request.ts): a throw ends it with nothing sent. */
+  handoff: ((w: CheckedWithdraw, drawnFee: bigint, note?: string, claim?: () => Promise<void>) => Promise<HandoffEnd>) | null;
   /** The quote's floor on a pool (pool.address's: on an EVM pool its least rung plus one deposit's gas, on Solana the
    *  rung, one deposit's cost and the rent U_X keeps; read now), null with no read: a note made for an EVM tap is quoted
    *  at the rung plus that gas, and a move's dry is held to it (bounds). */
@@ -372,7 +521,28 @@ export function cashMover(d: CashMoverDeps): CashMover {
     }
   };
   // one move: the rail's quote of exactly `usdc`, held to every check, then the vault pays its deposit address
-  const send = async (chain: PoolChain, usdc: bigint, least: bigint, op: string, fee: bigint, amount: string): Promise<MoveSent & { going?: Promise<boolean>; used?: string }> => {
+  const send = async (chain: PoolChain, usdc: bigint, least: bigint, op: string, fee: bigint, amount: string): Promise<MoveSent> => {
+    const a = await quoteOne(chain, usdc, least, op, amount);
+    return "error" in a ? { error: a.error } : handOne(chain, a, fee);
+  };
+  // a move's parts (card cash-buys-spend-every-note): every part's quote first, each held to every check, and only when
+  // every one passed does any note leave Cash, each part's withdrawal of its own note to its own quote's address; a part
+  // refused fails every part's op with its refusal, nothing sent. The first part's op is the move's.
+  const sendParts = async (chain: PoolChain, parts: readonly CashMovePart[], op: string, fee: bigint): Promise<MoveSent> => {
+    const quoted: Quoted[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i]!;
+      const a = await quoteOne(chain, p.usdc, p.least, i === 0 ? op : `${op}/${i}`, unitsText(p.usdc, USDC_DECIMALS), p.note === "" ? undefined : p.note);
+      if ("error" in a) {
+        for (const q of quoted) await put(q.op, { ...q.rec, stage: "failed", ...(d.update ? { error: a.error } : {}) });
+        return { error: a.error };
+      }
+      quoted.push(a);
+    }
+    return quoted.map((q) => handOne(chain, q, fee))[0]!;
+  };
+  type Quoted = { op: string; rec: MoveOpRecord; q: CashQuote; used: string; note?: string };
+  const quoteOne = async (chain: PoolChain, usdc: bigint, least: bigint, op: string, amount: string, note?: string): Promise<Quoted | Refusal> => {
     // the move's record, leaving with its send_by_ms, written before its quote is asked (card move-sends-or-says-why):
     // from the tap on, the app follows an op that ends, never a request with nothing behind it
     const now = d.now();
@@ -402,8 +572,14 @@ export function cashMover(d: CashMoverDeps): CashMover {
     }
     const leaving: MoveOpRecord = { ...rec, out: unitsText(q.minOut, POOL_DECIMALS[chain]) };
     await put(op, leaving);
+    return { op, rec: leaving, q, used, ...(note === undefined ? {} : { note }) };
+  };
+  const handOne = (chain: PoolChain, a: Quoted, fee: bigint): MoveSent => {
+    const { op, rec: leaving, q, used } = a;
+    const rec = leaving;
+    const usdc = q.amountIn;
     const claim = claimOf(op);
-    const ended = d.handoff!({ recipient: q.address, amount: usdc }, fee, ...(claim ? [claim] : [])).catch(() => null);
+    const ended = d.handoff!({ recipient: q.address, amount: usdc }, fee, a.note, ...(claim ? [claim] : [])).catch(() => null);
     // the send-by while the hand-off runs: a hand-off that has not claimed by then ends the move failed, not_sent, and
     // its claim is refused after it
     if (d.update) {
@@ -444,8 +620,21 @@ export function cashMover(d: CashMoverDeps): CashMover {
       left = m?.left ?? short;
       usdc = m?.usdc ?? null;
     }
-    if (usdc === null || d.handoff === null || d.rails.length === 0) return joined;
+    if (usdc === null || p === null || d.handoff === null || d.rails.length === 0) return joined;
     const fee = await d.fee();
+    if (chain === "solana") {
+      // Solana (card cash-buys-spend-every-note): the shortfall planned over every Cash note, one withdrawal a note,
+      // each part its own quote held to the pool's quote floor and 1Click's least, read now
+      const [notes, floor, leastIn] = await Promise.all([
+        d.notes ? d.notes() : d.cash().then((value): CashNote[] => [{ id: "", value }]),
+        d.floor ? d.floor(chain).catch(() => null) : Promise.resolve(null),
+        d.least ? d.least(chain).catch(() => null) : Promise.resolve(null),
+      ]);
+      const parts = planCashMove(notes, fee, left, solanaMoveModel(p, floor, leastIn));
+      if (parts === null) return joined;
+      const sent = await sendParts(chain, parts, `cash/${chain}/${d.now()}`, fee);
+      return "error" in sent ? joined : sent.op;
+    }
     if (usdc + fee > (await d.cash())) return joined;
     const sent = await send(chain, usdc, left, `cash/${chain}/${d.now()}`, fee, unitsText(usdc, USDC_DECIMALS));
     return "error" in sent ? joined : sent.op;
