@@ -3620,7 +3620,7 @@ test("card evm-pool-spend-binds: a fee seat that does not connect is asked once 
   assert.equal(b.feeCap, 3n * 10n ** 13n);
 });
 
-// card evm-trees-from-one-verified-source (CO decision 15 Nov 01:36Z): the proof's trees come from the first source whose
+// card evm-trees-from-one-verified-source: the proof's trees come from the first source whose
 // leaves rebuild the pool's root, read on the two seats at the anchor (the Privacy Pools client's baseline: the root
 // binds every leaf and its order). In the owner's browser only one log source answered in reach (publicnode and Pocket
 // blocked, the helper's keyed Base route 503 past 100 blocks), so a second operator's same bytes never came and no proof
