@@ -4,14 +4,16 @@
 //   - on Solana, the Fee of the typed amount: one read at most with an amount, on Solana;
 //   - on Base and Robinhood (card buy-any-amount-on-every-chain: the box asks pool.buy.dry with the tap's amount, the
 //     model's buysAskAmount), one read at most with an amount, on the box's own chain, its amount the tap's own ask's;
-//     none when the box has no ask (over Max, money still being made);
+//     none when the box has no ask (over Max, money still being made), but for a box with no pool note (card
+//     buy-box-quotes-before-funds), whose one amount read is `quote`, the typed USD in ETH;
 //   - nothing on another chain, and never a buy.
 
 /** The box's own pool chain from a state's name: sol-*, base-*, rh-*; null for the vault's states. */
 export const ownChain = (name) => (name.startsWith("sol") ? "solana" : name.startsWith("base") ? "base" : name.startsWith("rh") ? "robinhood" : null);
 
-/** Why `reads` break the rule for the state `name` whose tap asks `ask` (its pool.buy, or null), or null when they keep it. */
-export function readsFault(name, reads, ask) {
+/** Why `reads` break the rule for the state `name` whose tap asks `ask` (its pool.buy, or null) and, with no tap to
+ *  ask, whose quote asks `quote` (an amount, or null), or null when they keep it. */
+export function readsFault(name, reads, ask, quote = null) {
   const own = ownChain(name);
   if (!Array.isArray(reads)) return "no reads list";
   if (reads.some((c) => c?.kind !== undefined && c.kind !== "pool.buy.dry")) return "a read that is not pool.buy.dry";
@@ -23,7 +25,7 @@ export function readsFault(name, reads, ask) {
   if (amountReads.length === 0) return null;
   if (own === "solana") return null;
   if (own !== "base" && own !== "robinhood") return "an amount read with no pool";
-  const want = ask?.kind === "pool.buy" && ask.params?.chain === own ? ask.params.amount : null;
+  const want = ask?.kind === "pool.buy" && ask.params?.chain === own ? ask.params.amount : quote;
   if (want === null) return "an amount read with no tap to ask";
   return amountReads[0].params.amount === want ? null : "an amount read for another amount than the tap's ask";
 }
