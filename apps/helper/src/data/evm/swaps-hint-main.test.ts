@@ -133,6 +133,8 @@ test("card helper-live-run-green-after-122: a hint that is the main pool: one ba
   await s.ahead([]);
   const found = st.transfers;
   assert.ok(found > 0, "searched once in the background");
+  // the tape's read back of the blocks before its first read, started with it (card helper-listed-charts-own-reads), settles
+  for (let k = 0; k < 40; k++) await new Promise((ok) => setTimeout(ok, 5));
   const reads = st.poolReads.get(BUSY) ?? 0;
   const next = await s.trades(COIN, 50);
   assert.deepEqual(txsOf(next.body), new Set(busy.txs));

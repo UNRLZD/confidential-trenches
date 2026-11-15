@@ -766,3 +766,89 @@ test("card solana-trades-show-on-every-token: a token Discover's lists do not ho
     t.stop();
   }
 });
+
+test("card helper-listed-charts-own-reads: a listed coin off pump.fun (SPYx, Raydium CLMM against SOL, recorded) gets its own bar and tape row from the stream, src chain, the pool read once from its own program", async () => {
+  const V = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-venue-txs.json"), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
+  const SPYX = "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W";
+  const reads: string[] = [];
+  const inner = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [SPYX]: 8 });
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    const pool = V.pools[req.params[0]];
+    if (req.method === "getAccountInfo" && pool !== undefined) {
+      reads.push(req.params[0]);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner: pool.owner, data: [pool.data, "base64"] } } }));
+    }
+    return inner(url, init);
+  };
+  let on: SourceEvents | null = null;
+  // no history and no pool tape: the bar and the row can only be ours
+  const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === SPYX, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
+  assert.equal((await t.trades(SPYX, 50)).status, 200);
+  on!.note(SPYX, { sig: "C1", slot: 10, err: false, logs: V.txs["clmm-buy"]!.result.meta.logMessages });
+  // a route that only mentions SPYX's neighbours (SOL into SOL/Xs3eBt, then an Orca pool for AMZN): no SPYx trade
+  on!.note(SPYX, { sig: "C2", slot: 11, err: false, logs: V.txs["clmm-sol-in"]!.result.meta.logMessages });
+  await settle();
+  const a = JSON.parse((await t.trades(SPYX, 50)).body) as { trades: unknown[]; src: string };
+  assert.equal(a.src, "chain");
+  // SPYx is the pool's token 1: the trader paid 2,082,875,407 lamports of token 0 for 0.19699205 SPYx, a buy, dated by
+  // its arrival (the event has no clock); at 93.42267796 USD per SOL
+  assert.deepEqual(a.trades, [{ t_ms: TS * 1000, side: "b", usd: "194.58779837896492972", amt: "0.19699205", trader: "4GQeEya6ZTwvXre4Br6ZfDyfe2WQMkcDz2QbkJZazVqS", tx: "C1" }]);
+  const c = JSON.parse((await t.candles(SPYX, "1s", null, 10)).body) as { candles: [number, string, string, string, string, string][]; src: string };
+  assert.equal(c.src, "chain");
+  assert.equal(c.candles.length, 1);
+  assert.equal(c.candles[0]![0], TS);
+  assert.equal(c.candles[0]![5], "194.58779837896492972");
+  // each pool once (a pool's read is shared), from its own program: CLMM's two and the route's Orca pool
+  assert.deepEqual(reads.sort(), ["Af6Rt3zE8ZCFPtSQEePvAHfqpdqzsYA6H3bzY7P3tgCt", "BS9uyGV6XmNnPkM4f3xgxCdQEaFv7RSKs6fwrpvYHxfL", "HWZk6MfN28mYqDN1igNETjN2kueEryL33oVgt92Wkv6N"]);
+  t.stop();
+});
+
+test("card helper-listed-charts-own-reads: a Raydium CPMM trade names its own mints (no pool read), turned round for the token as the output, priced in its quote coin", async () => {
+  const V = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-venue-txs.json"), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }> };
+  const FCAT = "2YPWT4QK1Why57mxBZGwBAFckBC4nLwEAL2t6CcCQtvw";
+  const WXMR = "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp";
+  let on: SourceEvents | null = null;
+  // the rpc answers the SOL price and the two mints only: a pool read would throw
+  const t = createSolanaTrades({ fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FCAT]: 6, [WXMR]: 12 }), now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
+  assert.equal((await t.trades(FCAT, 50)).status, 200);
+  on!.note(FCAT, { sig: "F1", slot: 10, err: false, logs: V.txs["cpmm-buy-fee"]!.result.meta.logMessages });
+  await settle();
+  const a = JSON.parse((await t.trades(FCAT, 50)).body) as { trades: unknown[]; src: string };
+  assert.equal(a.src, "chain");
+  // the pool paid 3,264,281.114937 FCAT for 0.114146586323 of its quote coin at 300 USD; CPMM's event names no trader
+  assert.deepEqual(a.trades, [{ t_ms: TS * 1000, side: "b", usd: "34.2439758969", amt: "3264281.114937", trader: null, tx: "F1" }]);
+  t.stop();
+});
+
+test("card helper-listed-charts-own-reads: a Raydium LaunchLab coin's buy reaches its tape and bar, the pool read from LaunchLab itself", async () => {
+  const V = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-venue-txs.json"), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
+  const FLOYD = "EREcNf2Uz8E3VHxqeM5jnaCtiqbgWfWYHXXZLvjTCFQt";
+  const POOL = "8rHq4DwFfgUG4m4CK4ADQZsme1byBAwVV7Bbtb3BboUW";
+  const inner = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FLOYD]: 6 });
+  const answer = (owner: string) => async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    if (req.method === "getAccountInfo" && req.params[0] === POOL) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner, data: [V.pools[POOL]!.data, "base64"] } } }));
+    return inner(url, init);
+  };
+  const run = async (owner: string) => {
+    let on: SourceEvents | null = null;
+    const t = createSolanaTrades({ fetch: answer(owner), now: () => TS * 1000, listed: async (m) => m === FLOYD, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
+    await t.trades(FLOYD, 50);
+    on!.note(FLOYD, { sig: "L1", slot: 10, err: false, logs: V.txs["launchlab-buy"]!.result.meta.logMessages });
+    await settle();
+    const rows = (JSON.parse((await t.trades(FLOYD, 50)).body) as { trades: unknown[] }).trades;
+    const bars = (JSON.parse((await t.candles(FLOYD, "1s", null, 10)).body) as { candles: unknown[] }).candles;
+    t.stop();
+    return { rows, bars };
+  };
+  // 6,000,000 lamports at 93.42267796 USD per SOL for 940,352.945779 FLOYD
+  const ok = await run(RAY_LAUNCHLAB_ID);
+  assert.deepEqual(ok.rows, [{ t_ms: TS * 1000, side: "b", usd: "0.56053606776", amt: "940352.945779", trader: null, tx: "L1" }]);
+  assert.equal(ok.bars.length, 1);
+  // the same bytes in an account another program owns are no pool of LaunchLab's: no trade
+  const forged = await run("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
+  assert.deepEqual(forged.rows, []);
+  assert.equal(forged.bars.length, 0);
+});
+const RAY_LAUNCHLAB_ID = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj";

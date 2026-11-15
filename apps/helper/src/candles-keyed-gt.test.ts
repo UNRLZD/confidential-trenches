@@ -148,7 +148,7 @@ test("Solana, keyed budget: past its minute the read goes keyless at once; past 
   assert.notEqual(await keyed!.read("/networks/solana/tokens/x", ok), undefined);
   assert.equal(await keyed!.read("/networks/solana/tokens/y", ok), undefined, "the minute spent");
   assert.equal(v.cgCalls().length, 1);
-  assert.match(keyed!.minute()!, /^coingecko calls: minute 1, served 1$/);
+  assert.match(keyed!.minute()!, /^coingecko calls: minute 1, served token 1$/, "a call made is named by its kind (card helper-listed-charts-own-reads)");
   // the day: CG_DAY less the identity reads' share (limits.ts PROBE_DAY_SHARE), across the day's minutes
   const day = { COINGECKO_API_KEY: KEY, COINGECKO_CALLS_PER_MIN: "100000" };
   const s = solana(day, v, { t: Date.parse("2026-11-13T00:00:00Z") });
@@ -157,7 +157,7 @@ test("Solana, keyed budget: past its minute the read goes keyless at once; past 
   assert.ok(served < CG_DAY && served >= CG_DAY - Math.ceil(CG_DAY * 0.01) - 1, `${served} served in the day`);
   assert.equal(await s.keyed!.read("/n/more", ok), undefined, "the day spent");
   // 3,225 less the identity reads' 1% (32): 3,193 served, and the 43 past them refused by the day
-  assert.equal(s.keyed!.minute(), "coingecko calls: day 43, served 3193");
+  assert.equal(s.keyed!.minute(), "coingecko calls: day 43, served token 3193");
   s.t.t = Date.parse("2026-11-14T00:00:01Z");
   assert.notEqual(await s.keyed!.read("/n/next-day", ok), undefined, "the next UTC day reads keyed again");
   void t;
@@ -251,4 +251,15 @@ test("the key never leaves the request header: planted, it is in no log line, re
     process.stdout.write = write;
     process.stderr.write = ewrite;
   }
+});
+
+test("card helper-listed-charts-own-reads (KEYED_COLD_ONLY): a chart read every few seconds for an hour spends the key on its first top pool and bars only; every refresh of what is held goes keyless (before: about one keyed call a minute, the key's 3,225-call day gone in hours)", async () => {
+  const v = vendors((url) => json(url.includes("/ohlcv/") ? FX.gt_ohlcv : FX.gt_token));
+  const { token, t } = solana(ENV, v);
+  const first = await token.candles(BONK, "15m", null, 500);
+  assert.equal(first.status, 200, first.body.slice(0, 80));
+  assert.equal(v.cgCalls().length, 2, "its top pool and its bars, keyed");
+  for (const end = t.t + 3_600_000; t.t < end; t.t += 5_000) assert.equal((await token.candles(BONK, "15m", null, 500)).status, 200);
+  assert.equal(v.cgCalls().length, 2, `${v.cgCalls().length - 2} keyed refreshes in the hour`);
+  assert.ok(v.gtCalls().length > 0, "the refreshes went keyless");
 });

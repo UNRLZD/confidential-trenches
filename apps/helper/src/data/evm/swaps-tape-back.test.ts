@@ -96,8 +96,11 @@ test("a token whose only trade lies past the cold window: its first open has non
   // 300 blocks before the first read's window: the first step back holds it
   const at = head - V.cold - 300;
   const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, at);
-  assert.deepEqual(await rows(s, PCS.asset0), [], "the cold window holds no trade");
-  assert.equal(await filling(s, PCS.asset0), true, "short and reading back: filling, so the page shows it loading");
+  // the read back starts with the first read, in the background (card helper-listed-charts-own-reads: at the tick after,
+  // a dozen cold Robinhood tapes said filling for a minute): the first answer holds the trade read back already, or none
+  // and filling, so the page shows it loading
+  const opened = await rows(s, PCS.asset0);
+  assert.ok(opened.length === 1 || (opened.length === 0 && (await filling(s, PCS.asset0))), `first answer: ${JSON.stringify(opened)}`);
   await ticks(s, 2);
   assert.deepEqual(await rows(s, PCS.asset0), [["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash]]);
   // the read back went to TAPE_BACK blocks before the first read (one trade is short of TRADES_MAX), never past it
