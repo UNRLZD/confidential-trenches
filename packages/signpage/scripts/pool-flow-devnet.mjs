@@ -358,7 +358,7 @@ const venueBest = async () => {
   if (!best) throw new Error(`no reference pool for ${MINT}`);
   return best;
 };
-const { readSolanaDlmmBuyVenue } = await import("../../kit/src/trade/solana/pool-buy.ts");
+const { readSolanaDlmmBuyVenue, solanaPoolVenueAddress } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const VENUE = SPEND === "max" ? await venueBest().then((b) => (b.venue === "dlmm" ? readSolanaDlmmBuyVenue(rpcs, MINT, b.address, "buy") : readSolanaPoolBuyVenue(rpcs, b.venue, MINT))) : null;
 const KEEPS = VENUE === null ? null : solanaPoolBuySellNeed(VENUE, rent);
 if (VENUE !== null) log(`venue ${VENUE.kind} (token account ${VENUE.tokenAccountSize} B, cashback ${VENUE.cashback}); a buy leaves W ${KEEPS} for its sell on any venue the coin sells on`);
@@ -530,7 +530,9 @@ else if (landed) {
     if (!("result" in answer)) throw new Error(`pool.buy.dry refused: ${JSON.stringify(answer)}`);
     spend = answer.result.tap_max;
     const worst = solanaPoolBuyMaxSpend({ withdrawnValue: RUNG, relayFee }, SOLANA_POOL_WORST_BUY_VENUE, SOL_TIP_CAP, rent);
-    maxSpend = { page: spend, worstVenue: String(worst), runReads: String(max), venue: VENUE };
+    // the venue by its kind and the address the reference priced: the record is committed, and a venue's mint fields
+    // under token-like names (DLMM's tokenX) read to gitleaks' generic-api-key as keys
+    maxSpend = { page: spend, worstVenue: String(worst), runReads: String(max), venue: { kind: VENUE.kind, address: solanaPoolVenueAddress(VENUE) } };
     log(`max spend on ${VENUE.kind}: the page's pool.buy.dry ${spend} SOL (the costliest venue's ${worst} lamports, at most ${max} at the run's relay fee ${relayFee} and tip); W keeps at least ${KEEPS}, its sell's need on any venue`);
   }
   log(`pool.buy of ${spend} SOL of ${MINT}`);
