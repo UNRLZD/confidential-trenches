@@ -74,7 +74,7 @@ import {
 import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { evmSellReleasesAt, evmSellSentOf, type EvmReleaseLog, type EvmSellReleases, type EvmSellSent } from "../../trade/evm/sell-releases.ts";
-import { EVM_PROVIDER_HOLD_MS, evmPaceTake, evmProviderHeld, evmProviderHold } from "./pace.ts";
+import { EVM_PROVIDER_HOLD_MS, evmPaceTake, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -4750,6 +4750,12 @@ const RPC_URL = new WeakMap<EvmRpc, string>();
 const providerHeld = (rpc: EvmRpc): boolean => {
   const u = RPC_URL.get(rpc);
   return u !== undefined && evmProviderHeld(u);
+};
+/** How long an evmJsonRpc provider is still held for every reader, in ms (0: not held, or not an evmJsonRpc provider):
+ *  the pool index's readers, which have no other provider to ask, wait it out (pool-index.ts). */
+export const evmRpcHeldMs = (rpc: EvmRpc): number => {
+  const u = RPC_URL.get(rpc);
+  return u === undefined ? 0 : evmProviderHeldMs(u);
 };
 /** Each JSON-RPC request's time limit (the NEAR client's RPC_TIMEOUT_MS and Solana's SOLANA_CALL_TIMEOUT_MS do the same). */
 export const EVM_RPC_TIMEOUT_MS = 10_000;

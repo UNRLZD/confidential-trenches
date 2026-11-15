@@ -17,25 +17,27 @@ export type EvmPace = { readonly perS: number; readonly burst: number; readonly 
  *  - rpc.mainnet.chain.robinhood.com: 3.8 posts a second, then 429 (2026-11-04); posts of 3 eth_call at 8 a second for
  *    5 s none refused, while it answered the scans' and the index's getLogs 429 at 1 to 3 posts a minute (2026-11-15
  *    08:13-08:48Z): its limit weighs the logs. 1 a second, 2 at once.
- *  - robinhood.drpc.org: 33 calls a second for 8 s none refused (2026-11-04); posts of 3 eth_call at 8 a second for 5 s
- *    and 6 at once, none refused (sweep from the Mac, 2026-11-15 08:47Z); it refused 7 of 22 posts at 14 to 26 calls a
- *    second in the tap runs (08:05-08:22Z). 15 a second, 15 at once.
  *  - robinhood.daybreak-rpc.network: 7 posts a second, 3 at once (refuses past about 4 at once).
  *  - robinhood.api.pocket.network: x-ratelimit-limit 1200 a minute; 15 calls a second, 200 at once.
  *  - base.gateway.tenderly.co: 2 calls a second; rpc.sentio.xyz/base: 4 a second, 5 at once.
  *  - mainnet.base.org: 20 calls a second none refused (2026-11-05), its own error "25/second request limit reached",
  *    and 429 at 28 calls in one second (tap runs 2026-11-15 08:13Z and 08:20Z). 12 calls a second, 12 at once: no
  *    second holds more than 24 (the helper's 20 at once and 10 a second holds 30).
+ *  Not paced: robinhood.drpc.org, whose hold is its guard. 33 calls a second for 8 s none refused (2026-11-04); posts
+ *  of 3 eth_call at 8 a second for 5 s and 6 at once, none refused (sweep from the Mac, 2026-11-15 08:47Z). In the tap
+ *  runs (08:05-08:22Z) its 429s ("You reached Public endpoint rate limit", code 15) came at 1 to 5 posts in flight and
+ *  3 to 22 calls a second while 50 calls a second passed: no rate of ours sets them, and they come in a run once one
+ *  comes (20 in the 30 s after the first with no hold; 1 in a whole run with it, 09:03Z). Paced at 8 posts a second
+ *  it held the recorded USDG quote (test/evm-quote-calls.test.ts) to 15.2 s of its clock, past its 8 s bound.
  *  Not paced: base-rpc.publicnode.com. The helper's 3 a second was its single 1,000-block getLogs (2026-11-05); the
  *  quote's and the index's reads from the Mac took 315 calls in 10 s with no 429 (08:05Z). Read again before it is set. */
 export const EVM_PACE: Readonly<Record<string, EvmPace>> = Object.freeze({
-  "https://rpc.mainnet.chain.robinhood.com": { perS: 1, burst: 2, unit: "post" },
-  "https://robinhood.drpc.org": { perS: 15, burst: 15, unit: "call" },
-  "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
-  "https://robinhood.api.pocket.network": { perS: 15, burst: 200, unit: "call" },
-  "https://base.gateway.tenderly.co": { perS: 2, burst: 3, unit: "call" },
-  "https://rpc.sentio.xyz/base": { perS: 4, burst: 5, unit: "call" },
-  "https://mainnet.base.org": { perS: 12, burst: 12, unit: "call" },
+  "https://rpc.mainnet.chain.robinhood.com": Object.freeze({ perS: 1, burst: 2, unit: "post" }),
+  "https://robinhood.daybreak-rpc.network": Object.freeze({ perS: 7, burst: 7, unit: "post", inflight: 3 }),
+  "https://robinhood.api.pocket.network": Object.freeze({ perS: 15, burst: 200, unit: "call" }),
+  "https://base.gateway.tenderly.co": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
+  "https://rpc.sentio.xyz/base": Object.freeze({ perS: 4, burst: 5, unit: "call" }),
+  "https://mainnet.base.org": Object.freeze({ perS: 12, burst: 12, unit: "call" }),
 });
 
 /** How long a throttle (an HTTP 429, a call's error naming a rate limit) or a refused connection holds a provider for
@@ -72,8 +74,10 @@ export function evmProviderHold(url: string, ms = EVM_PROVIDER_HOLD_MS): void {
   const l = laneOf(evmProviderKey(url));
   l.heldUntil = Math.max(l.heldUntil, performance.now() + ms);
 }
+/** How long `url`'s provider is still held, in ms (0: not held). */
+export const evmProviderHeldMs = (url: string, now: number = performance.now()): number => Math.max(0, (LANES.get(evmProviderKey(url))?.heldUntil ?? 0) - now);
 /** Whether `url`'s provider is held now. */
-export const evmProviderHeld = (url: string, now: number = performance.now()): boolean => (LANES.get(evmProviderKey(url))?.heldUntil ?? 0) > now;
+export const evmProviderHeld = (url: string, now: number = performance.now()): boolean => evmProviderHeldMs(url, now) > 0;
 
 /** Sends every waiting post its turn has come for, in the order they asked, and sets the wake for the next. */
 function pump(l: Lane, p: EvmPace): void {
@@ -93,8 +97,8 @@ function pump(l: Lane, p: EvmPace): void {
   const a = l.queue[0];
   // no place free: the next post given back pumps again; else the time its units take to come in
   if (a === undefined || (p.inflight !== undefined && l.out >= p.inflight)) return;
+  // a post waiting its turn is work under way: its wake holds a Node process open as its fetch would (never unref'd)
   l.timer = setTimeout(() => ((l.timer = null), pump(l, p)), Math.max(1, Math.ceil(((a.need - l.tokens) / p.perS) * 1000)));
-  (l.timer as { unref?: () => void }).unref?.();
 }
 
 /** Waits for `url`'s turn for a post of `calls` calls at its pace (an unpaced provider: at once), first come first
