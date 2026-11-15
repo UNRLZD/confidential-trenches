@@ -6,6 +6,7 @@
 // e2e scripts and the live checks goes through fetchOrAbort; scripts/live-checks/route-fetch.test.mjs plants each end
 // and refuses a bare route.fetch anywhere else.
 // Runs: once, a module the e2e runs and the checks share (their route handlers), no check of its own
+import "../net-window.mjs";
 
 /** A connection that closed under the read: the server dropped a kept-alive socket, as Chrome itself retries once. */
 export const CLOSED = /socket hang up|ECONNRESET|EPIPE|ECONNABORTED/;
