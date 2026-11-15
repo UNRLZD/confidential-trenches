@@ -217,9 +217,14 @@ async function opened(kind: Record<string, unknown>, state: string): Promise<str
   await until(`the ${state} sheet`, () => shown() && root().dataset.signin === state);
   return id;
 }
-/** Waits out PROTECT_MS past a close with a margin, then checks `id`'s notices: `n` of them, each with the frame live. */
+/** Waits out PROTECT_MS past a close with a margin, then checks `id`'s notices: `n` of them, each with the frame live.
+ *  The close's PROTECT_MS starts at its run's end, which a loaded machine reaches later than the signal the caller
+ *  waited for (card readme-run-fits-an-agent-timeout: 0 notices after the margin on the 4-pinned box), so a notice still
+ *  to come is waited for, 10 s at most; a count of 0 is read after the margin alone, as before. */
 async function told(id: string, n: number, what: string): Promise<void> {
   await new Promise((r) => setTimeout(r, PROTECT_MS + 250));
+  const count = () => posted.filter((m) => m.type === "closed" && m.id === id).length;
+  for (const end = performance.now() + 10_000; count() < n && performance.now() < end; ) await new Promise((r) => setTimeout(r, 25));
   const at = posted.flatMap((m, i) => (m.type === "closed" && m.id === id ? [i] : []));
   assert.equal(at.length, n, `${what}: ${n} notice(s) for its id`);
   for (const i of at) {

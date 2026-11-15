@@ -4266,7 +4266,9 @@ for (const kept of [false, true]) {
     const stages: string[] = [];
     const r = poolSellKind(() => ({ ...w.host, ops: async () => endWriteFailsOnce(w.store) }), fakeLocks())({ ...ASK, amount: small }, ctxOf("p2", "00", stages)) as KindAnswer;
     await r.after;
-    await until(async () => stages.length > 0);
+    // the answer is told before the run's own write of sent settles: wait for that write, the one afterRun reads (card
+    // readme-run-fits-an-agent-timeout: read at "signed" on GitHub's 4-core runner, merge queue run 43699242739)
+    await until(async () => stages.length > 0 && opOf("p2", await w.store.get("ops", "p2"))?.stage !== "signed");
     const sig = r.answer().result!.txs[0]!.hash;
     assert.equal(w.c.txs.get(sig)?.err, null, "the sell landed");
     const held = async () => (kept ? [...w.kept.keys()] : (await ours(w.ns)).map((n) => n.state));
