@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
-import { withCash, withCashNote, cashFirst, cashLamportsFor, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
+import { withCash, withCashNote, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
 
 const TOKEN = "So11111111111111111111111111111111111111112";
 const ADDRESS = "a".repeat(64);
@@ -143,6 +143,32 @@ test("cashFirst: a buy above one tap while Cash moves waits for it, tells the ap
   assert.deepEqual(a, { result: { stage: "filled", txs: [] } });
   assert.deepEqual(calls.inner, [400_000_000n]);
   assert.deepEqual(c.routes, [{ move: "cash", op: "cash/solana/7" }], "the route event names the move's op");
+});
+
+// Card you-receive-on-every-chain: each note a move brings is its own W, with its own relay fee, tip and rent, so a move
+// of the bare gap leaves the tap short and the buy waits CASH_MOVE_WAIT_MS for money that never covers it. Red before:
+// cashFirst asked for amount less tapMax whatever the page's sizing said.
+test("cashFirst on Solana: the move is the shortfall the page sizes (pool.buy.dry's own, short), never the bare gap; none sized: the gap", async () => {
+  for (const [sized, want] of [[333_000_000n, 333_000_000n], [null, 300_000_000n]] as const) {
+    const calls = { inner: [] as bigint[] };
+    const asked: bigint[] = [];
+    const d = tap({ taps: [100_000_000n, 400_000_000n], moving: true }, calls);
+    const c = ctx();
+    await run(cashFirst(innerOf(calls), () => ({ ...d, short: async () => sized, need: async (_chain, short) => (asked.push(short), "cash/solana/7") }))(ask(400_000_000n), c));
+    assert.deepEqual(asked, [want], String(sized));
+    assert.deepEqual(calls.inner, [400_000_000n]);
+  }
+});
+
+test("moveCostOf: the move's withdraw fee and its 3% margin of the USDC it asks, in lamports at the device's price, rounded up", () => {
+  // SOL at $150 (Pyth price 15000000000, expo -8); a 0.01 SOL shortfall asks (0.01 + 0.01) SOL * 150 * 1.03 = 3.09 USDC
+  const p = { price: "15000000000", expo: -8 };
+  const usdc = cashUsdcFor(10_000_000n, p)!;
+  assert.equal(usdc, 3_090_000n);
+  // fee 0.05 USDC + margin ceil(3.09 * 300 / 10300) = 0.09 USDC: 0.14 USDC = 933,333.33 lamports, rounded up
+  assert.equal(moveCostOf(10_000_000n, 50_000n, p), 933_334n);
+  assert.equal(moveCostOf(0n, 50_000n, p), null);
+  assert.equal(moveCostOf(10_000_000n, 50_000n, { price: "0", expo: -8 }), null);
 });
 
 test("cashFirst: with nothing on its way the pool buy answers at once; a move that never lands is waited CASH_MOVE_WAIT_MS at most", async () => {

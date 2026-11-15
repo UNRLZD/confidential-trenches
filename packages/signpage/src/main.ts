@@ -69,7 +69,7 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
-import { cashMover, poolMoveKinds, solanaTapMaxOf, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { cashMover, cashUsdcFor, moveCostOf, poolMoveKinds, solanaTapMaxOf, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -596,6 +596,8 @@ else {
       const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
       return tap === undefined ? 0n : (parsePoolUnits(tap, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) ?? 0n);
     },
+    // Solana: the shortfall pool.buy.dry prices (src/pools.ts solanaMoveShort), so the move's notes pay the rest
+    short: (chain, token, amount) => (chain === "solana" ? tapDry.short(token, amount) : Promise.resolve(null)),
     need: (chain, short) => cashMoverNow().need(chain, short),
     wait: (ms) => new Promise((res) => setTimeout(res, ms)),
     now: () => Date.now(),
@@ -656,6 +658,19 @@ else {
       return { notes: both.value, ready: both.ready, open: both.open, landed: both.landed };
     },
     trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
+    // an amount above one tap's spend (card you-receive-on-every-chain): the move from Cash cashFirst starts for it,
+    // priced on the device (src/cash-to-pool.ts moveCostOf: the withdraw's relay fee and the move's margin at the
+    // device's price); none on a page with no Cash to move
+    moved: async (short) => {
+      const p = prices.get("solana");
+      if (!prover || p === null || p === undefined || withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null) return null;
+      const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal };
+      const form = withdrawFormDeps(vault);
+      const [cash, fee] = await Promise.all([form.available(), form.fee()]);
+      // Cash's largest note pays the move and its fee, or no buy of it runs (cashMover's own bound)
+      const usdc = cashUsdcFor(short, p, "solana");
+      return usdc === null || usdc + fee > cash ? null : moveCostOf(short, fee, p, "solana");
+    },
   });
   // the same read for a moving tap (cashDeps.tapMax): never refused busy, since the tap that asks is the trade
   const tapDry = poolBuyDryKind({

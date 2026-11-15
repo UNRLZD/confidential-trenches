@@ -21,9 +21,9 @@
 import type { Chain } from "../../kit/src/orders/record.ts";
 import type { ErrorCode, PoolBuyDry, PoolStatePrice, SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, readSolanaVenueAt, solanaPoolBuyFunds, solanaPoolBuyTip, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, readSolanaVenueAt, solanaPoolBuyFunds, solanaPoolBuyTip, solanaPoolFee, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { pickPieces, solanaLegsPlan, unitsOf } from "./pool-buy.ts";
+import { pickPieces, solanaLegsPlan, unitsOf, type LegPiece } from "./pool-buy.ts";
 import { carriesOf, carryOk } from "./pool-carry.ts";
 import { bestVenuePool, pageReference, POOL_FINDER_VENUES, type PoolFinderKind, type PoolFinders } from "./page-rpc.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -31,7 +31,8 @@ import { heldBy, type NoteRecord } from "../../wallet/src/notes/store.ts";
 import { evmBalancePool, evmTapSpendOf, poolBalances, solanaBalancePool, solanaTapSpendOf, type BalancePool, type BalanceProof, type LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork } from "../../wallet/src/pool/evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
-import { SOL_POOLS, solanaPoolOf } from "../../wallet/src/pool/solana.ts";
+import { SOL_LADDER, SOL_POOLS, SOL_TIP_CAP, solanaPoolOf } from "../../wallet/src/pool/solana.ts";
+import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import type { Running } from "./api.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
 
@@ -152,6 +153,11 @@ export type PoolBuyDryDeps = {
   /** The page's finders (src/page-rpc.ts keptPoolFinders) of the venues the page pins a table for (pinnedPoolFinders);
    *  none: a coin with no pump venue has no venue at the tap (quote_check_failed, no Cash moved). */
   finders?: PoolFinders | null;
+  /** What moving `short` lamports from Cash into the pool costs for good, in lamports, rounded up (main.ts: the move's
+   *  fee and margin at the device's price, src/cash-to-pool.ts moveCostOf), the move a tap above tap_max starts
+   *  (cashFirst, sized by solanaMoveShort); null when Cash cannot move it. None: an amount above tap_max answers tap_max
+   *  alone. */
+  moved?(short: bigint): Promise<bigint | null>;
 };
 
 /**
@@ -170,6 +176,10 @@ export type PoolBuyDryDeps = {
  * takes (pageReference on the pair, both providers' reads the same; the venue that gives the most of pump's curve and
  * PumpSwap), at the expected out before slippage; read beside the venue and the proofs, so it adds no wait after them,
  * and left out when that read fails (the Fee still shows). An amount that is not a SOL decimal: not_allowed.
+ * Above tap_max (card you-receive-on-every-chain), a buy cashFirst runs after moving a shortfall from Cash: with
+ * `moved`, `out` from the same quote and `cost` the same sum over the ready pieces and the notes the move brings
+ * (solanaMoveShort: the least move whose notes, each its own W, pay the rest), plus what `moved` says the move costs;
+ * tap_max alone when the move is not priced, so the Fee never reads under.
  */
 /** A SOL decimal (at most 9 fraction digits, 30 digits whole) in lamports; undefined when it is not one. */
 const lamportsOf = (x: unknown): bigint | undefined => {
@@ -183,7 +193,70 @@ const solOf = (l: bigint): string => {
 };
 /** Not a HostAnswer, whose `then` would make an async function's answer a thenable. */
 type BuyDryAnswer = { result: PoolBuyDry } | { error: ErrorCode };
-export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unknown>) => Running<"pool.buy.dry"> {
+
+/** What a pick weighs: a ready proof, or a note a move brings (solanaMovedPieces). */
+type DryPiece = LegPiece & { readonly root?: string };
+
+/**
+ * What a Solana pool.buy of `amount` lamports costs for good over `list` (the ready proofs a tap may release, each still
+ * HELD by its attempt), on `venue` at `rent` and the page's tip: as the buy picks it, one W's set (src/pool-buy.ts
+ * pickPieces, `pieces` its count) or, past every single W's set, its legs (solanaLegsPlan, card
+ * buy-any-amount-on-every-chain), each leg's pick at its own amount; `cost` every picked piece's relay fee and each
+ * set's tip. Null when no plan pays it.
+ */
+export function solanaBuyCost(list: readonly DryPiece[], valueOf: (noteId: string) => bigint | undefined, venue: CoinVenue, rent: SolanaRent, tipOf: (k: number) => bigint, amount: bigint): { cost: bigint; pieces?: number } | null {
+  // with the changes a tap carries (card buy-spends-its-change-in-the-same-tap), as the buy's own pick weighs them
+  const weighed = carriesOf(list, valueOf);
+  const paysAt = (spend: bigint) => (set: readonly (typeof weighed)[number][]): boolean =>
+    carryOk(set) &&
+    solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.feeCap })), venue, { spend, tip: tipOf(set.length) }, rent).problem === null;
+  const set = pickPieces(weighed, paysAt(amount));
+  if (set !== null) return { cost: set.reduce((a, p) => a + p.binding.feeCap, tipOf(set.length)), pieces: set.length };
+  const legs = solanaLegsPlan(list, valueOf, solanaTapSpendOf(rent, venue, tipOf), amount);
+  const picks = legs?.map((l) => {
+    // the leg's own W and notes, a carried change by its parent's id
+    const ids = new Set(l.ids);
+    return pickPieces(weighed.filter((p) => p.wallet.address === l.address && ids.has(p.noteId.replace(/#change$/, ""))), paysAt(l.amount));
+  });
+  if (picks === undefined || picks.some((x) => x === null)) return null;
+  // no `pieces`: the kit's count is one leg's (at most SOLANA_POOL_BUY_PIECES_MAX); the cost is every leg's
+  return { cost: (picks as (typeof weighed)[number][][]).reduce((a, s) => a + s.reduce((b, p) => b + p.binding.feeCap, tipOf(s.length)), 0n) };
+}
+
+/** The notes a move of Cash for `short` lamports brings into the pool (src/cash-to-pool.ts: cashUsdcFor sizes it at
+ *  the shortfall and the ladder's least rung, the follow deposits it in SOL_LADDER's rungs), each a note of its own with
+ *  its own W, proved at the pool's relay fee and the buy's tip cap (../../wallet/src/pool/solana.ts bind). */
+export function solanaMovedPieces(short: bigint, rent: SolanaRent): DryPiece[] {
+  const feeCap = solanaPoolFee(rent);
+  return ladderSplit(SOL_LADDER, short + SOL_LADDER.min).notes.map((chunk, i) => ({ noteId: `move#${i}`, own: true as const, chunk, wallet: { address: `move#${i}` }, binding: { feeCap, request: { tipCap: SOL_TIP_CAP } } }));
+}
+
+/** The least shortfall a move from Cash must bring so one tap pays `amount` (card you-receive-on-every-chain): at least
+ *  `amount - tap`, more by each new W's own costs (its relay fee, the tip, its accounts' rent), as solanaBuyCost over
+ *  `live` and solanaMovedPieces says; with that buy's cost. Null when no move up to 2^64 lamports pays it. */
+export function solanaMoveShort(live: readonly DryPiece[], valueOf: (noteId: string) => bigint | undefined, venue: CoinVenue, rent: SolanaRent, tipOf: (k: number) => bigint, amount: bigint, tap: bigint): { short: bigint; cost: bigint } | null {
+  const base = amount > tap ? amount - tap : 1n;
+  const at = (short: bigint) => solanaBuyCost([...live, ...solanaMovedPieces(short, rent)], valueOf, venue, rent, tipOf, amount);
+  if (at(base) !== null) return { short: base, cost: at(base)!.cost };
+  // the least extra over `base` that pays, by doubling then halving (a valid shortfall either way: `at` is read on it)
+  let hi = 1n;
+  while (at(base + hi) === null) {
+    if (hi >= 1n << 64n) return null;
+    hi *= 2n;
+  }
+  let lo = 0n;
+  while (hi - lo > 1n) {
+    const mid = (lo + hi) / 2n;
+    if (at(base + mid) !== null) hi = mid;
+    else lo = mid;
+  }
+  return { short: base + hi, cost: at(base + hi)!.cost };
+}
+
+/** pool.buy.dry's kind, and `short`: the shortfall cashFirst moves from Cash for a tap of `amount` lamports of `token`
+ *  (solanaMoveShort on the same reads), null when one tap pays it now or no move does, or the reads fail. */
+export type PoolBuyDryKind = ((params: Record<string, unknown>) => Running<"pool.buy.dry">) & { short(token: string, amount: bigint): Promise<bigint | null> };
+export function poolBuyDryKind(d: PoolBuyDryDeps): PoolBuyDryKind {
   const now = d.now ?? (() => performance.now());
   const tipOf = (k: number): bigint => d.tip ?? pageBuyTip(k);
   const venues = new Map<string, { v: CoinVenue; at: number }>();
@@ -196,6 +269,28 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
     venues.set(token, { v, at: now() });
     return v;
   };
+  // the reads a dry and a tap's shortfall both price on: the notes and ready proofs, the coin's venue and the rent
+  type Read = { error: ErrorCode } | { tap: string; tapL: bigint; venue: CoinVenue; rent: SolanaRent; live: DryPiece[]; valueOf: (id: string) => bigint | undefined };
+  const read = async (pair: readonly [SolanaRpc, SolanaRpc], token: string, sol: readonly BalancePool[]): Promise<Read> => {
+    const got = await d.ready();
+    if (got === null) return { error: "not_funded" };
+    let venue: CoinVenue;
+    let rent: SolanaRent;
+    try {
+      [venue, rent] = await Promise.all([venueOf(pair, token), d.rent() ?? readSolanaRent(pair)]);
+    } catch (e) {
+      return { error: e instanceof SolanaRpcTransportError ? "down" : "quote_check_failed" };
+    }
+    const tap = poolBalances(got.notes, withSolanaRent(sol, rent, venue, tipOf), got.ready, got.open, got.landed)[0]?.tap_max;
+    if (tap === undefined) return { error: "not_funded" };
+    const ids = new Set(sol.map((p) => p.id));
+    const byId = new Map(got.notes.map((n) => [n.id, n]));
+    const live: DryPiece[] = (got.ready ?? []).filter((r) => {
+      const n = byId.get(r.noteId);
+      return ids.has(r.poolId) && n !== undefined && heldBy(n, r.attempt);
+    });
+    return { tap, tapL: lamportsOf(tap)!, venue, rent, live, valueOf: (id) => byId.get(id)?.leaf?.value };
+  };
   const run = async (params: Record<string, unknown>): Promise<BuyDryAnswer> => {
     const sol = d.pools.filter((p) => p.chain === "solana");
     if (params.chain !== "solana" || sol.length === 0 || typeof params.token !== "string") return { error: "not_allowed" };
@@ -207,51 +302,38 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
     // the quote for `out`, beside the proofs and the venue (never awaited before them); a failed read is no out
     const token = params.token;
     const quote = amount !== null && amount > 0n ? pageReference(pair, { side: "buy", token, amount }).catch(() => null) : null;
-    const got = await d.ready();
-    if (got === null) return { error: "not_funded" };
-    let venue: CoinVenue;
-    let rent: SolanaRent;
-    try {
-      [venue, rent] = await Promise.all([venueOf(pair, params.token), d.rent() ?? readSolanaRent(pair)]);
-    } catch (e) {
-      return { error: e instanceof SolanaRpcTransportError ? "down" : "quote_check_failed" };
-    }
-    const tap = poolBalances(got.notes, withSolanaRent(sol, rent, venue, tipOf), got.ready, got.open, got.landed)[0]?.tap_max;
-    if (tap === undefined) return { error: "not_funded" };
-    if (amount === null || amount === 0n || amount > lamportsOf(tap)!) return { result: { tap_max: tap } };
-    const ids = new Set(sol.map((p) => p.id));
-    const byId = new Map(got.notes.map((n) => [n.id, n]));
-    const live = (got.ready ?? []).filter((r) => {
-      const n = byId.get(r.noteId);
-      return ids.has(r.poolId) && n !== undefined && heldBy(n, r.attempt);
-    });
-    // with the changes a tap carries (card buy-spends-its-change-in-the-same-tap), as the buy's own pick weighs them
-    const weighed = carriesOf(live, (id) => byId.get(id)?.leaf?.value);
-    const paysAt = (spend: bigint) => (set: readonly (typeof weighed)[number][]): boolean =>
-      carryOk(set) &&
-      solanaPoolBuyFunds(set.map((p) => ({ withdrawnValue: p.chunk, relayFee: p.binding.feeCap })), venue, { spend, tip: tipOf(set.length) }, rent).problem === null;
-    const set = pickPieces(weighed, paysAt(amount));
-    // past every single W's set (card buy-any-amount-on-every-chain): the buy's legs (src/pool-buy.ts solanaLegsPlan on
-    // the same proofs, venue, rent and tip), each its own pick at its own amount: the pieces and the cost of them all
-    if (set === null) {
-      const legs = solanaLegsPlan(live, (id) => byId.get(id)?.leaf?.value, solanaTapSpendOf(rent, venue, tipOf), amount);
-      const picks = legs?.map((l) => {
-        // the leg's own W and notes, a carried change by its parent's id
-        const ids = new Set(l.ids);
-        return pickPieces(weighed.filter((p) => p.wallet.address === l.address && ids.has(p.noteId.replace(/#change$/, ""))), paysAt(l.amount));
-      });
-      if (picks === undefined || picks.some((x) => x === null)) return { result: { tap_max: tap } };
-      // no `pieces`: the kit's count is one leg's (at most SOLANA_POOL_BUY_PIECES_MAX); the cost is every leg's
-      const legCost = (picks as (typeof weighed)[number][][]).reduce((a, s) => a + s.reduce((b, p) => b + p.binding.feeCap, tipOf(s.length)), 0n);
+    const r = await read(pair, token, sol);
+    if ("error" in r) return r;
+    const { tap, tapL, venue, rent, live, valueOf } = r;
+    if (amount === null || amount === 0n) return { result: { tap_max: tap } };
+    const outOf = async (): Promise<string | undefined> => {
       const best = bestVenuePool(await quote);
-      const out = best !== undefined && venue.decimals !== undefined && best.expectedOut > 0n ? unitsOf(best.expectedOut, venue.decimals) : undefined;
-      return { result: { tap_max: tap, cost: solOf(legCost), ...(out === undefined ? {} : { out }) } };
+      return best !== undefined && venue.decimals !== undefined && best.expectedOut > 0n ? unitsOf(best.expectedOut, venue.decimals) : undefined;
+    };
+    if (amount <= tapL) {
+      const c = solanaBuyCost(live, valueOf, venue, rent, tipOf, amount);
+      if (c === null) return { result: { tap_max: tap } };
+      const out = await outOf();
+      return { result: { tap_max: tap, ...(c.pieces === undefined ? {} : { pieces: c.pieces }), cost: solOf(c.cost), ...(out === undefined ? {} : { out }) } };
     }
-    const best = bestVenuePool(await quote);
-    const out = best !== undefined && venue.decimals !== undefined && best.expectedOut > 0n ? unitsOf(best.expectedOut, venue.decimals) : undefined;
-    return { result: { tap_max: tap, pieces: set.length, cost: solOf(set.reduce((a, p) => a + p.binding.feeCap, tipOf(set.length))), ...(out === undefined ? {} : { out }) } };
+    // above one tap's spend (card you-receive-on-every-chain): the buy cashFirst runs after moving the shortfall from
+    // Cash, sized as cashFirst sizes it (solanaMoveShort) and priced by `moved`; no pieces count (it is no one tap's)
+    if (!d.moved) return { result: { tap_max: tap } };
+    const m = solanaMoveShort(live, valueOf, venue, rent, tipOf, amount, tapL);
+    const moveCost = m === null ? null : await d.moved(m.short).catch(() => null);
+    if (m === null || moveCost === null || moveCost < 0n) return { result: { tap_max: tap } };
+    const out = await outOf();
+    return { result: { tap_max: tap, cost: solOf(m.cost + moveCost), ...(out === undefined ? {} : { out }) } };
   };
-  return (params) => {
+  const short = async (token: string, amount: bigint): Promise<bigint | null> => {
+    const sol = d.pools.filter((p) => p.chain === "solana");
+    const pair = d.rpcs();
+    if (sol.length === 0 || pair === null || amount <= 0n) return null;
+    const r = await read(pair, token, sol);
+    if ("error" in r || amount <= r.tapL) return null;
+    return solanaMoveShort(r.live, r.valueOf, r.venue, r.rent, tipOf, amount, r.tapL)?.short ?? null;
+  };
+  const kind = (params: Record<string, unknown>): Running<"pool.buy.dry"> => {
     let out: BuyDryAnswer = { error: "down" };
     const after = run(params).then(
       (a) => void (out = a),
@@ -260,6 +342,7 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): (params: Record<string, unkno
     // a read that runs (Running), as pool.sell.dry: the page's message queue never waits for a coin's venue read
     return { after, answer: () => out, running: true };
   };
+  return Object.assign(kind, { short });
 }
 
 /**
