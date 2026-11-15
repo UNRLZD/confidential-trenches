@@ -1602,6 +1602,10 @@ fn load_venue(env: &mut Env, name: &str) -> Value {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/venues/");
     let v: Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}{name}.json")).unwrap()).unwrap();
     assert_eq!(addr(&v["wallet"]), env.w.pubkey(), "the venue's W is the pool fixture's");
+    // mainnet's Rent sysvar, read with the venue (dump.mjs), so the venue's rent checks run on mainnet's rent and not
+    // LiteSVM's default; set_account on its address updates LiteSVM's sysvar cache
+    let rent = "SysvarRent111111111111111111111111111111111";
+    assert!(v["accounts"].as_array().unwrap().iter().any(|a| a["address"] == rent), "{name}.json carries mainnet's Rent sysvar: re-dump it");
     for a in v["accounts"].as_array().unwrap() {
         let data = b64(a["data"].as_str().unwrap());
         env.svm

@@ -228,8 +228,12 @@ async function dumpVenue(kind, mint) {
   if (unknown.length) throw new Error(`a step invokes an unknown program: ${unknown.join(",")}`);
   const venueProgram = kind === "pump-curve" ? PUMP : AMM;
   const nonBuiltin = [venueProgram, FEES];
-  // every named account but W, the programs and the builtins; kept only when it exists and is not executable
-  const toRead = named.filter((k) => k !== W && !BUILTINS.includes(k) && !nonBuiltin.includes(k));
+  // every named account but W, the programs and the builtins; kept only when it exists and is not executable. And the
+  // Rent sysvar, which LiteSVM otherwise gives its own default (3,480 lamports a byte, factor 2: the rent before
+  // SIMD-0194), so a venue's rent check ran on a rent mainnet no longer has: PumpSwap's buy refused a creator vault
+  // holding mainnet's minimum (1,488,440 lamports for 165 bytes) as under LiteSVM's 2,039,280 (ConstraintRentExempt).
+  // Rent is the same on every provider, so the two copies must be equal.
+  const toRead = [...named.filter((k) => k !== W && !BUILTINS.includes(k) && !nonBuiltin.includes(k)), kit.SOLANA_RENT_SYSVAR];
   const accounts = [];
   const differed = [];
   let slot = null;
@@ -239,7 +243,11 @@ async function dumpVenue(kind, mint) {
     if (slot === null) slot = a.context.slot;
     list.forEach((k, j) => {
       const va = a.value[j], vb = b.value[j];
-      if (JSON.stringify(va) !== JSON.stringify(vb)) differed.push(k);
+      if (JSON.stringify(va) !== JSON.stringify(vb)) {
+        if (k === kit.SOLANA_RENT_SYSVAR) throw new Error("the providers' Rent sysvar differs");
+        differed.push(k);
+      }
+      if (k === kit.SOLANA_RENT_SYSVAR) kit.solanaRentOf(va ? { owner: va.owner, data: Buffer.from(va.data[0], "base64") } : null);
       if (!va) { if (vb) console.log(`  ${k}: none on provider A, present on B (provider A's absence used)`); return; }
       if (va.executable) throw new Error(`${k}: an executable account the steps name that is not a known program`);
       accounts.push({ address: k, owner: va.owner, lamports: String(va.lamports), data: va.data[0], executable: false });
