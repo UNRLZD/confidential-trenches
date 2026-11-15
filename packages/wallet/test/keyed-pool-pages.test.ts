@@ -22,13 +22,17 @@ const PAGES = ((): [bigint, bigint][] => {
   return out;
 })();
 
-const onHelper = async (run: (sent: { t: number; method: string; host: string }[]) => Promise<void>): Promise<void> => {
-  const sent: { t: number; method: string; host: string }[] = [];
+// each request's send and answer time on the test clock, as the fetch saw them
+type Sent = { t: number; end: number; method: string; host: string };
+const onHelper = async (run: (sent: Sent[]) => Promise<void>): Promise<void> => {
+  const sent: Sent[] = [];
   const real = globalThis.fetch;
   globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
     const q = JSON.parse(String(init?.body)) as { id: number; method: string };
-    sent.push({ t: Date.now(), method: q.method, host: new URL(String(u)).host });
+    const s: Sent = { t: Date.now(), end: 0, method: q.method, host: new URL(String(u)).host };
+    sent.push(s);
     await new Promise((ok) => setTimeout(ok, 210));
+    s.end = Date.now();
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: q.method === "eth_getLogs" ? [] : "0x1" }), { headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   try {
@@ -41,10 +45,10 @@ const onHelper = async (run: (sent: { t: number; method: string; host: string }[
 test("the keyed-only route pages the pool's own logs at the helper's pool-logs allowance: the walk's 11 pages go back to back, inside one window", () => onTestClock(async () => {
   await onHelper(async (sent) => {
     const rpc = evmHelperKeyedRpc(ORIGIN, "robinhood");
-    const t0 = Date.now();
     for (const [a, b] of PAGES) await rpc("eth_getLogs", [{ address: POOL, topics: [], fromBlock: hex(a), toBlock: hex(b) }]);
-    const ms = Date.now() - t0;
     assert.equal(sent.length, PAGES.length);
+    // from the first page's send to the last one's answer
+    const ms = sent.at(-1)!.end - sent[0]!.t;
     // the allowance (read through the module, so the red run at the base reads the pace, not a missing name)
     assert.ok(PAGES.length <= ((bw as { EVM_POOL_PAGES_LIMIT?: { total: number } }).EVM_POOL_PAGES_LIMIT?.total ?? 30));
     // each page its own 210 ms and no wait for a turn (at HOLDINGS_RPC_LIMIT: 5 waits of the window, about 10.6 s)
@@ -63,9 +67,8 @@ test("every other read of the keyed-only route keeps HOLDINGS_RPC_LIMIT: eth_cal
       ["eth_getLogs", [{ address: EVM_POOLS.base!.pool, blockHash: `0x${"1".repeat(64)}` }]],
       ["eth_getLogs", [{ address: EVM_POOLS.base!.pool, fromBlock: "0x1", toBlock: "latest" }]],
     ];
-    const t0 = Date.now();
     await Promise.all(calls.map(([m, p]) => rpc(m, p)));
-    const starts = sent.map((s) => s.t - t0);
+    const starts = sent.map((s) => s.t - sent[0]!.t);
     assert.equal(sent.length, 4);
     // at most `total` in one window: the fourth waits for the next
     assert.ok(starts.filter((t) => t < HOLDINGS_RPC_LIMIT.windowMs).length <= HOLDINGS_RPC_LIMIT.total, `starts ${starts.join(", ")}`);
