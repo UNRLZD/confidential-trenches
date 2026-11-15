@@ -36,7 +36,7 @@ test("the testnet build pins each venue's devnet table as the devnet record hold
   assert.deepEqual(Object.keys(pins), ["devnet"]);
   const rec = record("devnet");
   assert.deepEqual(pins.devnet, rec);
-  // DLMM (card solana-buy-reaches-raydium-and-meteora) came after the test networks were dropped: its tables are mainnet's alone
-  assert.deepEqual(Object.keys(rec).sort(), [...SOLANA_POOL_BUY_VENUES].filter((v) => v !== "dlmm").sort(), "devnet pins a frozen table for every pump venue the kit builds");
+  // DLMM and Raydium (card solana-buy-reaches-raydium-and-meteora) came after the test networks were dropped: their tables are mainnet's alone
+  assert.deepEqual(Object.keys(rec).sort(), [...SOLANA_POOL_BUY_VENUES].filter((v) => !["dlmm", "raydium-cpmm", "raydium-amm-v4"].includes(v)).sort(), "devnet pins a frozen table for every pump venue the kit builds");
   for (const v of Object.keys(pins.devnet!)) assert.ok(SOLANA_POOL_BUY_VENUES.includes(v as never), `${v}: a venue the kit builds`);
 });

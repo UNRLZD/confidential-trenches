@@ -207,7 +207,7 @@ export type SolanaPoolPin = { readonly program: string; readonly feePayer: strin
 export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } = /* @__PURE__ */ Object.freeze({ program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", table: "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ" });
 
 /** A venue the pool buy builds (the kit's SOLANA_POOL_BUY_VENUES). */
-export type SolanaPoolVenueName = "pump-curve" | "pumpswap" | "dlmm";
+export type SolanaPoolVenueName = "pump-curve" | "pumpswap" | "dlmm" | "raydium-cpmm" | "raydium-amm-v4";
 /** The pool buy's frozen lookup tables per venue, by cluster (card sol-pool-venue-tables): a tag 3 loads its accounts
  *  from one of its venue's own tables, since one table cannot hold every venue and stay under 1,232 bytes (PumpSwap on
  *  the curve's table is 1,384 B). A venue's tables are generations, oldest first: each covers a range of the trees'

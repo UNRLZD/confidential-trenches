@@ -366,7 +366,7 @@ test("generations: the trees' sizes are the smaller of the two finalized pool re
 });
 
 test("refused by name: a venue whose buy fits at any tree size (the pump curve) never gets a generation for its trees; only changed venue accounts make one, on its first range", async () => {
-  assert.deepEqual(kit.SOLANA_POOL_TABLE_GROWS, ["pumpswap", "dlmm"]);
+  assert.deepEqual(kit.SOLANA_POOL_TABLE_GROWS, ["pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"]);
   // the mainnet curve table (generation 1, pages 0 and 1) at small and at huge trees: refused, nothing read about a key
   for (const sizes of [{ state: 0, label: 0 }, { state: 5_000, label: 2_800 }, { state: 0xffff_fff0, label: 0xffff_fff0 }])
     await assert.rejects(planOn(fakeCluster({ sizes: [sizes, sizes] }), "pump-curve", recordDir()), /^Error: nothing to add: pump-curve's buy fits 1,232 bytes at any tree size on its generation 1 \(BShWZ8Fb\S+\): a new generation is made for it only when the venue's accounts change$/);
