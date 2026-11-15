@@ -8,8 +8,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -95,15 +96,20 @@ export function jobRuns(jobIf, event) {
   return Function(`return (${js});`)();
 }
 
-const git = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const git = (cwd, args, env) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: env && { ...process.env, ...env } }).trim();
 
 // a temp clone at ROOT's HEAD (the base) with one commit on top (the head): the head names card base-gate-probe, adds
-// that card's live check and a "Money path: no" record, and tampers both gates so a head copy that ran would show it
-function prClone() {
+// that card's live check and a "Money path: no" record, and tampers both gates so a head copy that ran would show it.
+// The clone runs no auto maintenance (maintenance.auto=false in its own config): a commit or a merge ends with
+// `git maintenance run --auto --detach` (git 2.50 and 2.56), a process that outlives the command, and git 2.56's default
+// tasks (CI's runner) write a commit-graph when 100 commits are not in one, as on CI's checkout of all of main's history
+// with none; it wrote into the clone while t.after removed it (merge queue run 43665465254: rmSync ENOTEMPTY). env: the
+// planted case's git config for the commit.
+function prClone(env) {
   const dir = mkdtempSync(path.join(tmpdir(), "base-gate-"));
   const repo = path.join(dir, "repo");
   const base = git(ROOT, ["rev-parse", "HEAD"]);
-  git(dir, ["clone", "--quiet", "--shared", "--no-checkout", ROOT, repo]);
+  git(dir, ["clone", "--quiet", "--shared", "--no-checkout", "-c", "maintenance.auto=false", ROOT, repo]);
   git(repo, ["checkout", "--quiet", "--detach", base]);
   writeFileSync(path.join(repo, `scripts/live-checks/${PROBE}.mjs`), "// probe\n");
   writeFileSync(path.join(repo, `scripts/live-checks/${PROBE}.md`), `CARD ${PROBE} / live: PASS\nMoney path: no\n`);
@@ -113,7 +119,7 @@ function prClone() {
     writeFileSync(f, text.startsWith("#!") ? text.replace(/\n/, `\n${TAMPER}`) : TAMPER + text);
   }
   git(repo, ["add", "--", "scripts/live-checks", "scripts/ci"]);
-  git(repo, ["-c", "user.name=ci", "-c", "user.email=ci@example.invalid", "commit", "--quiet", "--no-verify", "-m", `Card ${PROBE}: probe`]);
+  git(repo, ["-c", "user.name=ci", "-c", "user.email=ci@example.invalid", "commit", "--quiet", "--no-verify", "-m", `Card ${PROBE}: probe`], env);
   return { dir, repo, base, head: git(repo, ["rev-parse", "HEAD"]) };
 }
 
@@ -273,4 +279,20 @@ test("planted: the old single-file copy of money-gate.mjs fails to load", (t) =>
   const { status, out } = replay(pr, old, env);
   assert.match(out, /ERR_MODULE_NOT_FOUND/, out);
   assert.notEqual(status, 0);
+});
+
+// planted (card ci-queue-races-gone): a commit-graph due on every commit, as git 2.56 finds on CI's checkout, starts no
+// process that writes into the clone after git returns; with auto maintenance on, git 2.50 and 2.56 write it from a
+// detached process some 50 ms later (run 43665465254: rmSync ENOTEMPTY in t.after)
+test("planted: a commit-graph due on the clone's commit leaves no process writing into it after git returns", async (t) => {
+  const due = { GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "maintenance.commit-graph.enabled", GIT_CONFIG_VALUE_0: "true", GIT_CONFIG_KEY_1: "maintenance.commit-graph.auto", GIT_CONFIG_VALUE_1: "-1" };
+  const pr = prClone(due);
+  t.after(() => rmSync(pr.dir, { recursive: true, force: true }));
+  const files = (dir) => readdirSync(dir, { recursive: true }).sort().map((f) => {
+    const s = statSync(path.join(dir, f), { throwIfNoEntry: false });
+    return `${f} ${s?.size}:${s?.mtimeMs}`;
+  });
+  const before = files(path.join(pr.repo, ".git"));
+  await sleep(1000);
+  assert.deepEqual(files(path.join(pr.repo, ".git")), before, "a process wrote into the clone after git returned");
 });

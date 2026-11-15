@@ -429,6 +429,28 @@ async function calibrate(browser, cpu) {
   return res;
 }
 
+/** Visits `url` on APP_HOST as a user does and waits for its move to SIGN_HOST's shell at the same path and query: a
+ *  top-level visit replaces itself with the shell at once (apps/terminal/src/shell/in-shell.ts moveToShell, from the
+ *  app's start). Firefox can report that move's commit before the visit's own, and goto then throws "interrupted by
+ *  another navigation" to the shell (merge queue run 43665465254), so the wait for the shell is armed before the visit,
+ *  and the visit ends at its own commit or at that move; any other error, or a move anywhere else, is thrown. The wait
+ *  ends at the shell's commit, not its load: a load state read across Firefox's two reports can wait for a load that
+ *  already fired, and oneRun's next step waits for the framed terminal's ready anyway. */
+export async function openInShell(page, url, timeout) {
+  const shell = new URL(url);
+  shell.hostname = REAL.sign;
+  const moved = page.waitForURL((x) => x.hostname === REAL.sign, { timeout, waitUntil: "commit" });
+  try {
+    await page.goto(url, { waitUntil: "commit" });
+  } catch (e) {
+    if (!String(e?.message).includes(`is interrupted by another navigation to "${shell.href}"`)) {
+      moved.catch(() => {});
+      throw e;
+    }
+  }
+  await moved;
+}
+
 export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeoutS, block = [], after = null }) {
   const start = Date.now();
   const out = { engine, mode, cpu, answers: {}, app: {}, unanswered: [], workers: [], workerAsks: 0, events: [], error: null, hosts: {}, blocked: {} };
@@ -469,8 +491,7 @@ export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeo
   const app = page.frameLocator("iframe#app");
   const vis = (sel) => app.locator(`${sel} >> visible=true`).first();
   try {
-    await page.goto(`https://${REAL.app}/discover`, { waitUntil: "commit" });
-    await page.waitForURL((x) => x.hostname === REAL.sign, { timeout: STEP_MS });
+    await openInShell(page, `https://${REAL.app}/discover`, STEP_MS);
     await app.locator(':root[data-signpage="ready"]').waitFor({ state: "attached", timeout: STEP_MS });
     await vis('[data-header="S1.1"] button, button[data-header="S1.1"]').click({ timeout: STEP_MS });
     await vis('.sgn-opt[data-way="wallet"]').click({ timeout: STEP_MS });
