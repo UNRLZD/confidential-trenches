@@ -240,12 +240,14 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // asked once per amount the box rests on, keyed on the typed USD (never on a price tick); the price is read at the ask
   const priceNow = useRef(price);
   priceNow.current = price;
-  // Solana's only: a Base or Robinhood tap spends one whole chunk, whose cost the page reads at the tap
-  const feeKey = chain === "solana" ? coinKey : null;
+  // on every pool chain (card you-receive-on-every-chain): Solana asks it here; Base and Robinhood read it from the one
+  // pool.buy.dry the box asks with the tap's own amount (below), so a typed amount is one read on every chain
+  const buysKey = onPool && (chain === "base" || chain === "robinhood") ? coinKey : null;
+  const feeKey = chain === "solana" ? coinKey : buysKey;
   const [feeRead, setFeeRead] = useState<FeeRead | null>(null);
   useEffect(() => {
     const ask = request.current;
-    const feeAmount = feeKey !== null ? feeAskAmount(amount, priceNow.current) : null;
+    const feeAmount = feeKey !== null && chain === "solana" ? feeAskAmount(amount, priceNow.current) : null;
     if (feeKey === null || feeAmount === null || !ask) return;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
@@ -275,8 +277,8 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // what a Base or Robinhood tap really spends (card buy-any-amount-on-every-chain): it plans whole notes, and an amount
   // no plan carries exactly is bought at the largest amount under it one carries. The page's pool.buy.dry for the tap's
   // own ask answers that amount as `buys`, and the box shows it before the tap, set as a preset sets it; asked once per
-  // amount the box rests on, as the Fee is
-  const buysKey = onPool && (chain === "base" || chain === "robinhood") ? coinKey : null;
+  // amount the box rests on, as the Fee is. An answer for the amount as typed (no smaller `buys`) is also the Fee and
+  // You receive of it (card you-receive-on-every-chain): its `cost` and `out`
   const buysAsk = useRef<(c: Cents) => string | null>(() => null);
   buysAsk.current = (c) => buysAskAmount(pools, chain, token, c, price, slippageBps, withCash);
   useEffect(() => {
@@ -295,7 +297,8 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
             if (o.ok) {
               // the page's answer is hostile: buysCents takes only an amount above 0 and below the ask
               const c = buysCents(o.result.buys, asked, p);
-              if (c !== null && c < amount && !busy(phaseRef.current)) setText(amountText(c));
+              if (c !== null && c < amount) return void (!busy(phaseRef.current) && setText(amountText(c)));
+              if (o.result.cost !== undefined) setFeeRead({ key: buysKey, cost: o.result.cost, ...(o.result.out === undefined ? {} : { out: o.result.out }), amount });
               return;
             }
             const again = coinTapAgainMs(o.error.code);
