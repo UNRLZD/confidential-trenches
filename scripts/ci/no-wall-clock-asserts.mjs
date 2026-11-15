@@ -56,7 +56,7 @@ export const LISTED = {
   "packages/kit/test/signpage-client.test.mjs": { count: 3, why: "to convert" },
   "packages/kit/test/solana-answer-caps.test.ts": { count: 2, why: "to convert" },
   "packages/kit/test/solana-send.test.ts": { count: 2, why: "to convert" },
-  "packages/kit/test/test-clock.test.ts": { count: 4, why: "it tests the test clock against the real one" },
+  "packages/kit/test/test-clock.test.ts": { count: 10, why: "it tests the test clock against the real one, and that real work moves it by 0 ms (card test-clock-runs-on-virtual-time)" },
   "packages/kit/test/vault-settle.test.ts": { count: 1, why: "to convert" },
   "packages/kit/test/vault-sync.test.ts": { count: 1, why: "to convert" },
   "packages/signpage/test/api.test.ts": { count: 2, why: "to convert" },
