@@ -1,9 +1,11 @@
 // The hand-off with the real relayWithdraw, and the arrival read after it (split from test/withdraw-handoff.test.ts, card
 // readme-run-fits-an-agent-timeout; the world in ./withdraw-handoff-world.ts).
+// Real proofs: only "hand-off with the real relayWithdraw ...", the hand-off end to end with a real proof to a landed
+// change note; every other test reads the relay's outcome and the notes, so its page proves on signalsProver.
 //   node --test test/withdraw-handoff-relay.test.ts   (from packages/signpage)
 /// <reference types="node" />
 // the world first: it loads the 1Click mock and sets __SIGN_NETWORK__ before the modules that read them (./withdraw-handoff-world.ts)
-import { RELAY_FEE, T, bytes, expired, handoffOf, helper, leftReserved, openNoteStore, page, pair, settleWith, testnet, view, withdrawSettle, world, zeroed } from "./withdraw-handoff-world.ts";
+import { RELAY_FEE, T, bytes, expired, handoffOf, helper, leftReserved, openNoteStore, page, pair, settleWith, testnet, view, withdrawSettle, world, zeroed, snarkProver } from "./withdraw-handoff-world.ts";
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import type { RelayOutcome, RelayRpc } from "../../wallet/src/withdraw/relay.ts";
@@ -70,7 +72,7 @@ const realRelayLanded = (c: Chain): HandoffOver["relay"] => (seed, req, deps) =>
 
 test("hand-off with the real relayWithdraw: the seed zeroed after the call, its own spend is still landed with the change note", async () => {
   const v = await world([5_000_000n]);
-  const p = page(v);
+  const p = page(v, snarkProver); // a real proof, carried the whole way to a landed change note
   const h = await handoffOf(v, p, { relay: realRelayLanded(new Chain()) });
   assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "landed" });
   assert.ok(zeroed(p.opened[0]!));

@@ -1,9 +1,11 @@
 // The cash run and the quote's window (split from test/withdraw-handoff.test.ts, card readme-run-fits-an-agent-timeout;
 // the world in ./withdraw-handoff-world.ts).
+// Real proofs: only "the cash run sends Cash whole ...", whose relayer checks verify its first part's proof; every
+// other test reads the run's plan, notes and the quote's window, so its page proves on signalsProver.
 //   node --test test/withdraw-handoff-cash.test.ts   (from packages/signpage)
 /// <reference types="node" />
 // the world first: it loads the 1Click mock and sets __SIGN_NETWORK__ before the modules that read them (./withdraw-handoff-world.ts)
-import { R, RELAY_FEE, SCOPE, SEED, T, cashNotes, cashWithdrawRun, checkWithdraw, expired, feeAnswer, handoffOf, helper, lowerFinalTime, page, pair, planCashWithdraw, snarkProver, testnet, world, h1c } from "./withdraw-handoff-world.ts";
+import { R, RELAY_FEE, SCOPE, SEED, T, cashNotes, cashWithdrawRun, checkWithdraw, expired, feeAnswer, handoffOf, helper, lowerFinalTime, page, pair, planCashWithdraw, snarkProver, testnet, world, h1c, signalsProver } from "./withdraw-handoff-world.ts";
 import type { Page, World } from "./withdraw-handoff-world.ts";
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
@@ -40,7 +42,7 @@ test("the cash run sends Cash whole: one withdrawal per note, largest first, eac
   assert.equal(parts.length, 2);
   const sent: WithdrawRequest[] = [];
   const steps: [number, string][] = [];
-  const run = await runOf(v, page(v), {
+  const run = await runOf(v, page(v, snarkProver), { // real proofs: the relayer's checks below verify the first
     relay: async (_seed, req) => {
       sent.push(req);
       return { kind: "landed", own: false, change: (await v.ns.get(req.noteId))!, spend: { recipient: req.recipient, status: "paid", refundValue: 0n } as never, tx: null };
@@ -177,12 +179,13 @@ function windowWorld(o: { slowSync?: number; slowProofs?: number[] } = {}) {
       return { kind: "landed", own: true, change: (await v.ns.get(req.noteId))!, spend: {} as never, tx: null };
     },
   });
+  const signals = signalsProver();
   const prover: VaultProver = {
     async load() {},
     async prove(circuit, input) {
       c.h += o.slowProofs?.[c.proofs] ?? o.slowProofs?.at(-1) ?? 0; // the proof takes its blocks
       c.proofs += 1;
-      return snarkProver.prove(circuit, input);
+      return signals.prove(circuit, input);
     },
   };
   return { c, over, prover };
