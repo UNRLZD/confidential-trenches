@@ -1747,29 +1747,30 @@ test("R10-BUDGET ten stale ops whose status reads stall: read at once, all withi
     const signal = init!.signal!;
     if (signal.aborted) throw signal.reason;
     most = Math.max(most, ++inFlight);
-    await new Promise((_, no) => signal.addEventListener("abort", () => no(signal.reason), { once: true }));
+    await new Promise((_, no) => signal.addEventListener("abort", () => (ended.push(signal.reason), no(signal.reason)), { once: true }));
   }) as unknown as typeof fetch;
   // only the first timeout made is cut: the tap's budget, made before any read's own 10 s timeout (follow.ts
-  // readDepositStatus), which stays as it is (delta review 11, F2)
+  // readDepositStatus), which stays as it is (delta review 11, F2). The budget ends with a reason of its own, so each
+  // read names what ended it: all ten the one budget, none its own 10 s timeout
+  const BUDGET = new DOMException("The operation timed out.", "TimeoutError");
+  const ended: unknown[] = [];
   const timeout = AbortSignal.timeout;
   let made = 0;
-  AbortSignal.timeout = (ms: number) => (made++ === 0 ? timeout(50) : timeout(ms));
-  let held = 0;
+  AbortSignal.timeout = (ms: number) => {
+    if (made++ > 0) return timeout(ms);
+    const c = new AbortController();
+    setTimeout(() => c.abort(BUDGET), 50);
+    return c.signal;
+  };
   try {
-    const uLock = async <T,>(fn: () => Promise<T>) => {
-      const t0 = Date.now();
-      try {
-        return await fn();
-      } finally {
-        held = Date.now() - t0;
-      }
-    };
+    const uLock = async <T,>(fn: () => Promise<T>) => await fn();
     assert.equal((await moveOutHeld("op1", TO, { ...deps(ops, chain), fetchFn: stall, uLock })).kind, "moved");
   } finally {
     AbortSignal.timeout = timeout;
   }
   assert.equal(most, 10, "the ten reads at once");
-  assert.ok(held < 400, `U's lock held ${held} ms: one budget, not ten`);
+  assert.equal(ended.length, 10, "every read ended inside the tap");
+  assert.ok(ended.every((r) => r === BUDGET), "U's lock held one budget, not ten: each read ended by the tap's budget");
   for (let k = 2; k <= 11; k++) assert.equal(((await ops.get("ops", `op${k}`)) as DepositOp).follow.status, "PENDING_DEPOSIT", `op${k}: a failed read keeps it`);
 });
 
@@ -1820,7 +1821,8 @@ test("R11-BUDGET2 a stale op new on a tap's second pass is read on the tap's one
   let made = 0;
   AbortSignal.timeout = (ms: number) => (made++ === 0 ? timeout(50) : timeout(ms));
   try {
-    assert.equal((await moveOutHeld("op1", TO, { ...deps(ops, chain), fetchFn: stall })).kind, "moved");
+    const uLock = async <T,>(fn: () => Promise<T>) => await fn();
+    assert.equal((await moveOutHeld("op1", TO, { ...deps(ops, chain), fetchFn: stall, uLock })).kind, "moved");
   } finally {
     AbortSignal.timeout = timeout;
   }

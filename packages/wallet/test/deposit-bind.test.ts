@@ -34,6 +34,7 @@ import {
 } from "../src/deposit/bind.ts";
 import { depositDelegate, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
 import { BUSY_WAIT_FIRST_MS } from "../src/busy.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../src/notes/store.ts";
@@ -548,9 +549,12 @@ test("busy: a stop during a busy pause with the bind's default sleep ends the bi
   let told = 0;
   const { sleep: _own, ...noSleep } = t.deps;
   const deps = { ...noSleep, signal: stop.signal, onWait: () => void ((told = performance.now()), setTimeout(() => stop.abort(new Error("stop")), 20)) };
-  await assert.rejects(bindDeposit(SEED, t.args, deps), /stop/);
-  assert.ok(told > 0, "the bind paused on the busy answer");
-  assert.ok(performance.now() - told < 150, `${(performance.now() - told).toFixed(0)} ms after the pause began`);
+  // on the test clock: the Retry-After's 10 s, if waited, reads its full length
+  await onTestClock(async () => {
+    await assert.rejects(bindDeposit(SEED, t.args, deps), /stop/);
+    assert.ok(told > 0, "the bind paused on the busy answer");
+    assert.ok(performance.now() - told < 150, `${(performance.now() - told).toFixed(0)} ms after the pause began`);
+  });
 });
 
 test("refused: U's nonce moved past the call, P not held and the USDC back in U: a new call on the same P, past the dead nonce", async () => {
@@ -1290,10 +1294,13 @@ test("R-03: deposits pages an RPC refuses as too heavy are read again at half th
     const mid: number[] = [];
     const ac = new AbortController();
     const midRpc = [capped(0, 0, DRPC_TIMEOUT, mid), t.deps.rpcs[1]] as unknown as [BindRpc, BindRpc];
-    setTimeout(() => ac.abort(new Error("caller stopped")), 50);
-    const t0 = Date.now();
-    await assert.rejects(new DepositsWatch(VAULT, t.note.precommitment, midRpc).read(ac.signal), /caller stopped/); // the stop, not a read
-    assert.ok(Date.now() - t0 < 200, `stopped after ${Date.now() - t0} ms`);
+    // on the test clock: a wait not cut by the stop reads its full length
+    await onTestClock(async () => {
+      setTimeout(() => ac.abort(new Error("caller stopped")), 50);
+      const t0 = Date.now();
+      await assert.rejects(new DepositsWatch(VAULT, t.note.precommitment, midRpc).read(ac.signal), /caller stopped/); // the stop, not a read
+      assert.ok(Date.now() - t0 < 200, `stopped after ${Date.now() - t0} ms`);
+    });
     assert.deepEqual(mid, [450]);
   }
   // any other error is not a cap: the read is unsure at once, with no smaller page asked
