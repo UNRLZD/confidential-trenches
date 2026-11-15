@@ -7,14 +7,18 @@
 // 0.014049625, Max 0.002734505 at the costliest venue, card max-is-what-you-hold-after-a-trade) and SOL at Pyth's
 // mainnet read of 4 Nov 07:40Z ($93.01048308, test/trade-box/fixtures.tsx). The shell answers pool.buy.dry as the
 // signing page answers an amount above one tap's own spend (packages/signpage/src/pools.ts poolBuyDryKind: tap_max,
-// and with Cash to move, with_cash; no cost, no out) and pool.buy filled. At 1440 x 900 (dpr 1, the right column) and
+// and with Cash to move, with_cash, cost and out; card you-receive-on-every-chain) and pool.buy filled. At 1440 x 900 (dpr 1, the right column) and
 // 390 x 844 (dpr 2, touch; the trade sheet, and the quick-buy bar with the sheet closed):
 //   - the fill toast covers none of the token header's Price, 24h change and Tax: at 1440 the strip's tiles, at 390 the
 //     hero's price row (the price and its 24h change) and the Tax tile, each measured against the toast's box;
 //   - at 1440 the toast covers no control of the main column either (the chart's control row);
-//   - the box after a buy: Bal and Max with no Cash (the pool alone, nothing typed), and with Cash, You receive and the
-//     Fee with $2 typed, above one tap's own spend; their lines are printed and shot for the card's report, not judged
-//     (not fixed here: the dash's root is the signing page's answer, and Bal beside Max needs new screen copy);
+//   - the box after a buy: Bal and Max with no Cash (the pool alone, nothing typed), printed and shot (Bal beside Max
+//     needs new screen copy);
+//   - You receive and the Fee with $2 typed on every chain (card you-receive-on-every-chain), judged: Solana above one
+//     tap's own spend (a move from Cash first), Base and Robinhood under one note, NEAR from Cash, each answered as the
+//     signing page answers pool.buy.dry for it now (packages/signpage/src/pools.ts poolBuyDryKind, main.ts
+//     evmDryWithCash, near-buy.ts nearBuyDry: cost and out), on the recorded mainnet token reads of each chain
+//     (test/chains-evm, test/near-trade); never a dash, at 1440 and 390;
 // Per state: app-shell's rules (no text under 11 px, a phone tap box of 44 px, no horizontal scroll, no CSP violation),
 // no page error, no dialog.
 //   node apps/terminal/test/trade-reads-after-buy/run.mjs [--build <dir>] [--shots <dir>]     PASS exit 0, FAIL exit 1
@@ -55,14 +59,51 @@ const BASE = { release: "harness-shell", api: 1, signed_in: true, way: "passkey"
 const signed = (vault) => ({ ...BASE, vault_balance: vault, pools: pools() });
 // with Cash ($40 on NEAR): one tap spends its own 0.002734505 and Cash's largest note moved first, 0.4 SOL at most
 // (cash-to-pool.ts withCash's shape); an amount above the tap's own spend is answered with no cost and no out
-const DRY_CASH = { tap_max: POOL.tap_max, with_cash: "0.4" };
+// (cash-to-pool.ts withCash's shape); an amount above the tap's own spend is answered with its cost (the pool part and
+// the move's, 0.0081 SOL) and out, as the page now answers it (card you-receive-on-every-chain)
+const DRY_CASH = { tap_max: POOL.tap_max, with_cash: "0.4", cost: "0.0081", out: "212345.678901" };
 const DRY = { tap_max: POOL.tap_max };
 const FILLED = { stage: "filled", txs: [{ chain: "solana", hash: TX }] };
+// Base and Robinhood: a pool of one ready 0.001 ETH note at $3,500.12345678 (test/trade-box/fixtures.tsx's ETH price), its
+// dry for the tap's own ask: the note's relay fee 0.000021 ETH and 10,600 tokens out
+const ETH_PRICE = () => ({ price: "350012345678", expo: -8, published_s: Math.floor(Date.now() / 1000), read_ms: Date.now() });
+const evmPool = (chain) => [{ chain, asset: "ETH", balance: "0.001", ready: "0.001", tap_max: "0.001", price: ETH_PRICE() }];
+const DRY_EVM = { tap_max: "0.001", cost: "0.000021", out: "10600" };
+// NEAR: $40 of Cash, the buy's fees 0.05 USDC and 1.2345 tokens out
+const DRY_NEAR = { tap_max: "40", cost: "0.05", out: "1.2345" };
 // name: the shell's state (made when the scene opens), its answers
 const SCENES = {
   cash: () => [signed("40.00"), { "pool.buy.dry": DRY_CASH, "pool.buy": FILLED }],
   nocash: () => [signed("0"), { "pool.buy.dry": DRY, "pool.buy": FILLED }],
+  base: () => [{ ...BASE, vault_balance: "40.00", pools: evmPool("base") }, { "pool.buy.dry": DRY_EVM }],
+  robinhood: () => [{ ...BASE, vault_balance: "40.00", pools: evmPool("robinhood") }, { "pool.buy.dry": DRY_EVM }],
+  near: () => [{ ...BASE, vault_balance: "40.00" }, { "pool.buy.dry": DRY_NEAR }],
 };
+// each chain's token page, from the recorded mainnet reads (Solana's is the shell's own)
+const read = (f) => JSON.parse(readFileSync(path.join(APP, "test", f), "utf8"));
+const unzip = (fields, values) => Object.fromEntries(fields.map((k, i) => [k, values[i]]));
+const evmToken = (c) => {
+  const t = read(`chains-evm/token-${c}-2026-11-09.json`);
+  const row = unzip(t.fields, t.row);
+  return { id: row.token, symbol: row.symbol, reads: { "/v1/market/token": { ...t.rest, row }, "/v1/market/candles": read(`chains-evm/candles-${c}-2026-11-09.json`).body, "/v1/market/holders": read(`chains-evm/holders-${c}-2026-11-09.json`).body } };
+};
+const NEAR_TOKEN = read("near-trade/token-near-2026-11-12.json");
+const TOKENS = {
+  base: evmToken("base"),
+  robinhood: evmToken("robinhood"),
+  near: { id: NEAR_TOKEN.row.token, symbol: NEAR_TOKEN.row.symbol, reads: { "/v1/market/token": NEAR_TOKEN, "/v1/market/candles": read("near-trade/candles-near-2026-11-12.json"), "/v1/market/holders": read("near-trade/holders-near-2026-11-12.json") } },
+};
+// the chain each scene's page is on, and what its box must draw with $2 typed: the dry's out (fmtOut) and its cost in
+// USD rounded up (0.0081 SOL at $93.01 is $0.7534; 0.000021 ETH at $3,500.12 is $0.0735; 0.05 USDC is $0.05)
+const CHAIN = { cash: "solana", nocash: "solana", base: "base", robinhood: "robinhood", near: "near" };
+const WANT = {
+  cash: { receive: `≈ 212.34K ${ROW.symbol}`, fee: "$0.76" },
+  base: { receive: `≈ 10.6K ${TOKENS.base.symbol}`, fee: "$0.08" },
+  robinhood: { receive: `≈ 10.6K ${TOKENS.robinhood.symbol}`, fee: "$0.08" },
+  near: { receive: `≈ 1.23 ${TOKENS.near.symbol}`, fee: "$0.05" },
+};
+const atOf = (scene) => (CHAIN[scene] === "solana" ? AT : `/token/${CHAIN[scene]}/${encodeURIComponent(TOKENS[CHAIN[scene]].id)}`);
+const json = (body, status = 200) => ({ status, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) });
 
 async function build() {
   const out = opt("--build");
@@ -89,6 +130,12 @@ async function open(browser, scene, w) {
   await ctx.route("**/*", (r) => {
     const u = new URL(r.request().url());
     if (u.origin !== APP_HOST && u.origin !== SIGN_HOST && u.origin !== HELPER) return r.abort();
+    // another chain's token reads, from its recording; anything else of that chain not found
+    const t = TOKENS[u.searchParams.get("chain")];
+    if (u.origin === HELPER && t && u.pathname !== "/v1/market/lists") {
+      const hit = u.searchParams.get("token") === t.id ? t.reads[u.pathname] : undefined;
+      return r.fulfill(hit ? json(hit) : json({ error: { code: "not_found" } }, 404));
+    }
     return route(r);
   });
   const page = await ctx.newPage();
@@ -99,7 +146,7 @@ async function open(browser, scene, w) {
     dialogs.push(d.message());
     void d.dismiss();
   });
-  await page.goto(`${APP_HOST}${AT}`, { waitUntil: "load" });
+  await page.goto(`${APP_HOST}${atOf(scene)}`, { waitUntil: "load" });
   let f = null;
   for (const until = Date.now() + 8_000; !f && Date.now() < until; ) {
     f = page.frames().find((x) => x !== page.mainFrame() && x.url().startsWith(`${APP_HOST}/`)) ?? null;
@@ -191,7 +238,16 @@ async function reads(browser, w, scene, amt) {
     await box.locator(".trb-input").fill(amt);
     // the box's dry reads settle (FEE_ASK_SETTLE_MS 250) and answer
     await f.waitForTimeout(900);
-    lines.push(`${tag}: "${await text(box, '[data-testid="trade-balance"]')}" | Max line "${await text(box, '[data-testid="trade-max"]')}" | You receive "${await text(box, '[data-testid="trade-receive"]')}" | Fee "${await text(box, '[data-testid="trade-cost"]')}" | Buy ${(await box.locator('[data-testid="trade-cta"]').isEnabled()) ? "on" : "off"}`);
+    const receive = await text(box, '[data-testid="trade-receive"]');
+    // the Fee row's number (its label and number are two spans, read apart)
+    const fee = await text(box, '[data-testid="trade-cost"] > span:last-child');
+    lines.push(`${tag}: "${await text(box, '[data-testid="trade-balance"]')}" | Max line "${await text(box, '[data-testid="trade-max"]')}" | You receive "${receive}" | Fee "${fee}" | Buy ${(await box.locator('[data-testid="trade-cta"]').isEnabled()) ? "on" : "off"}`);
+    // card you-receive-on-every-chain: with an amount typed, what the user receives and the fee, never a dash
+    const want = amt ? WANT[scene] : undefined;
+    if (want) {
+      check(receive === want.receive, `${tag}: You receive "${receive}", want "${want.receive}"`);
+      check(fee === want.fee, `${tag}: Fee "${fee}", want "${want.fee}"`);
+    }
     await rules(tag, f, w, errors, dialogs);
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${scene}${amt ? `-${amt}` : ""}-${w.name}.png`) });
   } finally {
@@ -205,7 +261,7 @@ try {
   for (const w of WIDTHS) {
     await fill(browser, w);
     await reads(browser, w, "nocash", "");
-    await reads(browser, w, "cash", "2");
+    for (const scene of ["cash", "base", "robinhood", "near"]) await reads(browser, w, scene, "2");
   }
 } finally {
   await browser.close();
@@ -218,4 +274,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} of ${checks} checks`);
   process.exit(1);
 }
-console.log(`PASS ${checks} checks: the fill toast clear of the header's Price, 24h change and Tax at 390 and 1440, from the built app inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${checks} checks: the fill toast clear of the header's Price, 24h change and Tax at 390 and 1440, and You receive and the Fee with $2 typed on Solana, Base, Robinhood and NEAR, from the built app inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
