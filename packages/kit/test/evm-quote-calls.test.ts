@@ -4,12 +4,9 @@
 // robinhood-rpc.publicnode.com and robinhood.drpc.org, 2026-11-14 04:55-05:08Z). Each provider takes as many requests
 // at once as the venue list pins for it: one in-flight limit for every provider, the scan's 2, held this quote's
 // hundreds of posts in a queue for 10 s and more on mainnet.
-// The time is virtual: the quote runs on the test clock (test/test-clock.ts), and each post is answered POST_MS of that
-// clock after it is sent. The clock moves only when the quote has nothing left to run but its timers, to the first of
-// them due, so the time read is the posts' time through each provider's limit, the same on any runner. Its hedges and
-// deadlines run on the same clock (card readme-run-fits-an-agent-timeout): on the replay's own clock, beside them in
-// real time, a loaded 4-core machine's slow replay let a real-time hedge ask a spare first, whose recorded answer is
-// "historical state ... is not available", and the quote refused rpc_error.
+// The time is virtual: the quote runs on the replay's own clock (its `mono`), and each post is answered POST_MS of that
+// clock after it is sent. The clock moves only when the quote has nothing left to run but its posts in flight, to the
+// first of them due, so the time read is the posts' time through each provider's limit, the same on any runner.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -17,7 +14,6 @@ import { gunzipSync } from "node:zlib";
 import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 import { callKey } from "./evm-quote-calls-record.ts";
-import { onTestClock } from "./test-clock.ts";
 
 const F = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/evm-quote-calls.json.gz", import.meta.url))).toString("utf8"));
 const POST_MS = 200;
@@ -25,6 +21,8 @@ const POST_MS = 200;
 // limit and about 9.8 s through one limit of 2 for every provider (6.3 s and 10.7 s measured on the real clock, the
 // replay's own work 0.9 s of each)
 const BOUND_MS = 8_000;
+// turns of the event loop with no new post before the clock moves: an answer's body is read over a few turns
+const QUIET_TURNS = 5;
 
 const replay = () => {
   const answers = new Map<string, unknown>(F.calls);
@@ -33,15 +31,39 @@ const replay = () => {
   const flying = new Map<string, number>();
   const most = new Map<string, number>();
   let posts = 0;
-  // the clock: the test clock's ms since the run began, and at its end the run's length
-  let t0 = 0, end: number | null = null;
+  // the clock: `at` ms, moved by drive() to the first post due once the quote is quiet
+  let at = 0;
+  const due: { at: number; go: () => void }[] = [];
+  let done = false;
+  const drive = async () => {
+    while (!done) {
+      let seen = -1, quiet = 0;
+      while (!done && quiet < QUIET_TURNS) {
+        await new Promise((r) => setImmediate(r));
+        quiet = posts === seen ? quiet + 1 : 0;
+        seen = posts;
+      }
+      if (done) return;
+      if (due.length === 0) {
+        // nothing in flight: the quote waits on its own timer, in real time (no post is due)
+        await new Promise((r) => setTimeout(r, 1));
+        continue;
+      }
+      const next = Math.min(...due.map((d) => d.at));
+      at = next;
+      for (const d of due.filter((d) => d.at === next)) {
+        due.splice(due.indexOf(d), 1);
+        d.go();
+      }
+    }
+  };
   const fetchFn = (async (url: string | URL, init?: RequestInit) => {
     const host = new URL(String(url)).host;
     flying.set(host, (flying.get(host) ?? 0) + 1);
     most.set(host, Math.max(most.get(host) ?? 0, flying.get(host)!));
     posts++;
     try {
-      await new Promise<void>((go) => setTimeout(go, POST_MS));
+      await new Promise<void>((go) => due.push({ at: at + POST_MS, go }));
       const sent = JSON.parse(String(init?.body));
       const one = (c: { id: unknown; method: string; params: unknown }) => {
         const k = callKey(c);
@@ -57,16 +79,14 @@ const replay = () => {
       flying.set(host, flying.get(host)! - 1);
     }
   }) as typeof fetch;
-  const clock = () => end ?? performance.now() - t0;
-  const run = <T>(p: () => Promise<T>): Promise<T> =>
-    onTestClock(async () => {
-      t0 = performance.now();
-      try {
-        return await p();
-      } finally {
-        end = performance.now() - t0;
-      }
+  const clock = () => at;
+  const run = <T>(p: () => Promise<T>): Promise<T> => {
+    const driving = drive();
+    return p().finally(() => {
+      done = true;
+      return driving;
     });
+  };
   return { fetchFn, missed, most, posts: () => posts, clock, run };
 };
 
