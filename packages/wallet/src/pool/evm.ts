@@ -2135,6 +2135,25 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   };
 }
 
+/** A fee walk's seat (evmTwoOperators: the walk is the retry across operators): a call that does not connect (fault
+ *  "network": no connection, a browser's CORS refusal, a host its tracking protection blocks) is its seat's answer at once,
+ *  never asked again inside the seat, so the side walks on to the next operator. Asked again (the pool read's throttle
+ *  waits), two such seats spent the walk's whole budget and the period's fee was never read (card evm-pool-spend-binds:
+ *  the owner's Firefox with publicnode and Pocket unreachable, mainnet probe of 15 Nov 01:16Z). A throttle or a slow
+ *  answer is still asked again as before. */
+const walkSeat = (rpc: EvmRpc): EvmRpc =>
+  Object.assign(
+    async (method: string, params: readonly unknown[]) => {
+      try {
+        return await rpc(method, params);
+      } catch (e) {
+        if ((e as { name?: unknown; fault?: unknown } | null)?.name === "SolanaRpcTransportError" && (e as { fault?: unknown }).fault === "network") throw new EvmUnansweredError(String((e as Error).message), e);
+        throw e;
+      }
+    },
+    { url: rpc.url },
+  ) as EvmRpc;
+
 /**
  * The period's chain fee at its first block, its state reads first and with the fewest (card
  * evm-device-reads-need-no-old-state; review of 7fbf2af3, P2-2): a keyless operator keeps a block's state seconds
@@ -2151,7 +2170,7 @@ export async function evmPeriodChainFee(feeRpcs: EvmTwoOperators<EvmRpc>, networ
   if (!flat) {
     let size: bigint;
     try {
-      [{ value: size }] = await feeRpcs.read(`the pool's size at block ${block.number} (${block.hash})`, (rpc, sig) => view(rpc, pool, VIEWS.currentTreeSize, block.hash, `fee rpc ${new URL(rpc.url!).host} currentTreeSize()`, sig, sleep), (x, y) => x === y, signal);
+      [{ value: size }] = await feeRpcs.read(`the pool's size at block ${block.number} (${block.hash})`, (rpc, sig) => view(walkSeat(rpc), pool, VIEWS.currentTreeSize, block.hash, `fee rpc ${new URL(rpc.url!).host} currentTreeSize()`, sig, sleep), (x, y) => x === y, signal);
     } catch (e) {
       if (e instanceof EvmOperatorsUnanswered) throw e.errors.length > 0 && e.errors.every((y) => y instanceof EvmLagError) ? new EvmLagError(e.message) : e;
       throw e;
@@ -2176,7 +2195,7 @@ export async function evmBindChainFee(feeRpcs: EvmTwoOperators<EvmRpc>, network:
   try {
     [{ value: x }] = await feeRpcs.read(
       `the chain fee at block ${block.number} (${block.hash})`,
-      (rpc, sig) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `fee rpc ${new URL(rpc.url!).host} chain fee`, sig, sleep))),
+      (rpc, sig) => Promise.all(reads.map((r) => view(walkSeat(rpc), r.to, r.data.slice(2), block.hash, `fee rpc ${new URL(rpc.url!).host} chain fee`, sig, sleep))),
       (p, q) => p.length === q.length && p.every((v, i) => v === q[i]),
       signal,
     );

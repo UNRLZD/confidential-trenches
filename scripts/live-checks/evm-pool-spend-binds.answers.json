@@ -1,0 +1,24 @@
+{
+ "key": "evm-pool-spend-binds",
+ "note": "Two real runs from the Mac (--record), none edited: good = --local, this card's build (5710f9a95) in SIGN_HOST's place; bad_live_before = SIGN_HOST as served before this card (release 146), its app.js pin as recorded.",
+ "good": {
+  "readAt": "2026-11-15T01:28:36.255Z",
+  "from": "local build",
+  "page": {
+   "pin": "sha384-CRD3w5EMyfBeeg+e8TD0ieo+B4evQ/9R/DE2+yn/4fKBugDkd6YBFq7/FR/FzfGQ",
+   "sha384": "sha384-CRD3w5EMyfBeeg+e8TD0ieo+B4evQ/9R/DE2+yn/4fKBugDkd6YBFq7/FR/FzfGQ",
+   "seat": true,
+   "uses": 2
+  }
+ },
+ "bad_live_before": {
+  "readAt": "2026-11-15T01:28:37.023Z",
+  "from": "https://confidential.unrealized.trade",
+  "page": {
+   "pin": "sha384-8idfWizj58fsGb6xOb6OTUFT8oerQma3sZ8Lo+G8i5iS5ielEStuxHkkIVwPz3Wu",
+   "sha384": "sha384-8idfWizj58fsGb6xOb6OTUFT8oerQma3sZ8Lo+G8i5iS5ielEStuxHkkIVwPz3Wu",
+   "seat": false,
+   "uses": 0
+  }
+ }
+}
