@@ -109,17 +109,20 @@ export function parseAmount(typed: unknown): bigint | null {
 
 /** A Cash withdrawal's costs in the pool planner's terms: each part pays the relay fee and no W's fee, a part is above
  *  the fee (the request refuses a fee at or above the amount), so a change is 0 or above two fees (withdrawNoteFloor):
- *  one a later withdrawal can still send. */
-export const cashCosts = (fee: bigint): WithdrawCosts => ({ fee, wFee: 0n, minPart: fee + 1n });
+ *  one a later withdrawal can still send. `minPart`, when given, is a higher least part (a move out of Cash, card
+ *  move-from-cash-spends-every-note: each part its own quote, held to the pool's floor and 1Click's least), and the
+ *  change floor rises with it, so a change is one a later move can still send. */
+export const cashCosts = (fee: bigint, minPart: bigint = fee + 1n): WithdrawCosts => ({ fee, wFee: 0n, minPart });
 
-/** The notes that can give a part: each sends more than its fee. Largest first, then by id. */
-const giving = (notes: readonly WithdrawSource[], fee: bigint): WithdrawSource[] =>
-  notes.filter((n) => n.value - fee > fee).sort((x, y) => (x.value !== y.value ? (x.value > y.value ? -1 : 1) : x.id < y.id ? -1 : 1));
+/** The notes that can give a part: each sends at least `minPart` (more than its fee) after its fee. Largest first, then by id. */
+const giving = (notes: readonly WithdrawSource[], fee: bigint, minPart: bigint = fee + 1n): WithdrawSource[] =>
+  notes.filter((n) => n.value - fee >= minPart).sort((x, y) => (x.value !== y.value ? (x.value > y.value ? -1 : 1) : x.id < y.id ? -1 : 1));
 const whole = (n: WithdrawSource, fee: bigint): WithdrawPart => ({ noteId: n.id, part: n.value - fee, chunk: n.value });
 
-/** What Cash can send now (Max): every note that gives more than its fee, each whole, less its fee. 0n when none. */
-export function cashSendable(notes: readonly WithdrawSource[], fee: bigint): bigint {
-  return giving(notes, fee).reduce((t, n) => t + n.value - fee, 0n);
+/** What Cash can send now (Max): every note that gives more than its fee (at least `minPart`), each whole, less its
+ *  fee. 0n when none. */
+export function cashSendable(notes: readonly WithdrawSource[], fee: bigint, minPart: bigint = fee + 1n): bigint {
+  return giving(notes, fee, minPart).reduce((t, n) => t + n.value - fee, 0n);
 }
 
 /**
@@ -127,16 +130,17 @@ export function cashSendable(notes: readonly WithdrawSource[], fee: bigint): big
  * (cashSendable) is every giving note whole, at any count of notes. Any other amount is the pool planner's plan
  * (planPoolWithdraw: the fewest parts, every change 0 or above the note floor), which reads the WITHDRAW_PLAN_NOTES
  * largest notes; past that many, the largest note goes whole and the rest is planned the same way, so a Cash of many
- * small notes still sends what its notes hold. The one planner for every Cash spend (the form and cashMover).
+ * small notes still sends what its notes hold. The one planner for every exact Cash spend: the form, and pool.move
+ * from Cash (cash-to-pool.ts planCashExact, every part at least `minPart`).
  */
-export function planCashWithdraw(notes: readonly WithdrawSource[], amount: bigint, fee: bigint): WithdrawPart[] | null {
-  if (typeof amount !== "bigint" || typeof fee !== "bigint" || fee < 0n || amount <= fee) return null;
-  const all = giving(notes, fee);
-  if (amount === cashSendable(all, fee)) return all.map((n) => whole(n, fee));
-  if (all.length <= WITHDRAW_PLAN_NOTES) return planPoolWithdraw(all, amount, cashCosts(fee));
+export function planCashWithdraw(notes: readonly WithdrawSource[], amount: bigint, fee: bigint, minPart: bigint = fee + 1n): WithdrawPart[] | null {
+  if (typeof amount !== "bigint" || typeof fee !== "bigint" || typeof minPart !== "bigint" || fee < 0n || minPart <= fee || amount < minPart) return null;
+  const all = giving(notes, fee, minPart);
+  if (amount === cashSendable(all, fee, minPart)) return all.map((n) => whole(n, fee));
+  if (all.length <= WITHDRAW_PLAN_NOTES) return planPoolWithdraw(all, amount, cashCosts(fee, minPart));
   const [first, ...rest] = all as [WithdrawSource, ...WithdrawSource[]];
-  const tail = amount > first.value - fee ? planCashWithdraw(rest, amount - (first.value - fee), fee) : null;
-  return tail !== null ? [whole(first, fee), ...tail] : planPoolWithdraw(all, amount, cashCosts(fee));
+  const tail = amount > first.value - fee ? planCashWithdraw(rest, amount - (first.value - fee), fee, minPart) : null;
+  return tail !== null ? [whole(first, fee), ...tail] : planPoolWithdraw(all, amount, cashCosts(fee, minPart));
 }
 
 /**
