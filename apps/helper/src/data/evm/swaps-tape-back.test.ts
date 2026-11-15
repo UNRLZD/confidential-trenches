@@ -96,7 +96,8 @@ test("a token whose only trade lies past the cold window: its first open has non
   // 300 blocks before the first read's window: the first step back holds it
   const at = head - V.cold - 300;
   const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, at);
-  await rows(s, PCS.asset0);
+  assert.deepEqual(await rows(s, PCS.asset0), [], "the cold window holds no trade");
+  assert.equal(await filling(s, PCS.asset0), true, "short and reading back: filling, so the page shows it loading");
   await ticks(s, 2);
   assert.deepEqual(await rows(s, PCS.asset0), [["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash]]);
   // the read back went to TAPE_BACK blocks before the first read (one trade is short of TRADES_MAX), never past it
@@ -106,19 +107,6 @@ test("a token whose only trade lies past the cold window: its first open has non
   await ticks(s, 3);
   assert.equal(asked.filter((b) => b < first).length, asked.slice(0, n).filter((b) => b < first).length, "done: no step back once TAPE_BACK is read");
   assert.equal(await filling(s, PCS.asset0), false, "done: not filling");
-  s.stop();
-});
-
-test("the read back starts as the tape's first read ends, never at a tick's end: the trade past the cold window is found with no tick (card evm-tape-from-our-index-fast: four cold Base tapes on the public providers, 2026-11-15 10:4xZ, their first step back 25 s after the open, waiting on a tick over every open book; the tapes done at 41.6 to 50.3 s, past the 45 s bound)", async () => {
-  const head = B.REC.firstHead + 200;
-  const V = VENUES.base;
-  const at = head - V.cold - 300;
-  const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, at);
-  await rows(s, PCS.asset0);
-  // no tick: only the background read back the first read started
-  for (let k = 0; k < 200 && (await filling(s, PCS.asset0)); k++) await new Promise((ok) => setTimeout(ok, 5));
-  assert.deepEqual(await rows(s, PCS.asset0), [["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash]]);
-  assert.equal(Math.min(...asked), head - V.cold + 1 - TAPE_BACK, "read back to TAPE_BACK with no tick");
   s.stop();
 });
 

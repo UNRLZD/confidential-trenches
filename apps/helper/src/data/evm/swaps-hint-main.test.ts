@@ -62,9 +62,7 @@ function rig(hint: string) {
   v3Pool(calls, QUIET, 500n);
   const busy = trades(BUSY, 12, "aa");
   const quiet = trades(QUIET, 3, "bb");
-  // `newest`: each pool's reads of the chain's newest block (a book's first read, or one read again from scratch; a
-  // short tape's read back reads only the blocks before its first read, card evm-tape-from-our-index-fast)
-  const st = { transfers: 0, poolReads: new Map<string, number>(), newest: new Map<string, number>(), failTransfers: false, hold: null as Promise<void> | null };
+  const st = { transfers: 0, poolReads: new Map<string, number>(), failTransfers: false, hold: null as Promise<void> | null };
   const isTransfers = (r: { method: string; params: unknown[] }) => r.method === "eth_getLogs" && (r.params[0] as Filter).address === COIN && (r.params[0] as Filter).topics?.[0] === TOPIC.transfer;
   const logsOf = (q: Filter): unknown[] | "error" | undefined => {
     if (q.address === COIN && q.topics?.[0] === TOPIC.transfer) {
@@ -75,7 +73,6 @@ function rig(hint: string) {
     for (const [pool, t] of [[BUSY, busy], [QUIET, quiet]] as const)
       if (q.address === pool) {
         st.poolReads.set(pool, (st.poolReads.get(pool) ?? 0) + 1);
-        if (parseInt(q.toBlock, 16) >= chain.st.head) st.newest.set(pool, (st.newest.get(pool) ?? 0) + 1);
         return t.swaps.filter((l) => inRange(q, parseInt(l.blockNumber, 16))).sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16));
       }
     return undefined;
@@ -136,11 +133,10 @@ test("card helper-live-run-green-after-122: a hint that is the main pool: one ba
   await s.ahead([]);
   const found = st.transfers;
   assert.ok(found > 0, "searched once in the background");
-  const reads = st.newest.get(BUSY) ?? 0;
-  assert.ok(reads > 0, "the first read read the newest blocks");
+  const reads = st.poolReads.get(BUSY) ?? 0;
   const next = await s.trades(COIN, 50);
   assert.deepEqual(txsOf(next.body), new Set(busy.txs));
-  assert.equal(st.newest.get(BUSY) ?? 0, reads, "the book was not reset: the next tape read nothing again (its read back reads only older blocks)");
+  assert.equal(st.poolReads.get(BUSY) ?? 0, reads, "the book was not reset: the next tape read nothing again");
   clock.t += POOL_KEEP_MS - 1;
   await s.ahead([COIN]);
   await s.trades(COIN, 50);

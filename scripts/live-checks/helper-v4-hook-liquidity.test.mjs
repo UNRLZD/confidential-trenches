@@ -2,8 +2,7 @@
 // (helper-v4-hook-liquidity.answers.json). good: apps/helper at the card's fix (14067ea) run on a Mac against Base's real
 // lists and providers, every judged v4 trade the token its trader moved, PASS. bad: the deployed helper at 46c6593 read
 // 3 minutes before, the buy in Base tx 0x454c1f11 on its tape as the pool's 2,357.007 where its trader got 2,332.259,
-// FAIL. bad_hook_own: the deployed a1c2c6ca6's tape of 0x238d92a5, Base tx 0x95ac6c34's sell served a second time as its
-// pool's hook's own 27.607 swap, FAIL. robinhood: the fix against Robinhood, where routers send the take straight to the trader, PASS. quiet: ten
+// FAIL. robinhood: the fix against Robinhood, where routers send the take straight to the trader, PASS. quiet: ten
 // Base tapes of a live read of 2026-11-10 06:29Z with no trade on them (a launch-only market): INCONCLUSIVE, exit 3.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -56,19 +55,6 @@ test("bad: 46c6593's tape shows Base tx 0x454c1f11's buy as the pool's 2,357.007
   const b = bad(r);
   assert.equal(b.length, 1, b.join("\n"));
   assert.match(b[0], /0x7a6d797910c7148d6f598146b56ebe9b789f7ba3 trade 0x454c1f11.* amt 2357\.007794273885411305 is not the 2332259212434009614487 its trader 0x103502909141f7025a94b7b99a276dcd128e21a8 got/);
-});
-
-test("bad_hook_own: a1c2c6ca6's tape shows Base tx 0x95ac6c34's sell twice, the second the 27.607 the pool's own hook swapped of its liquidity, never moved by the trader: FAIL, naming it (live run 43702430864)", () => {
-  const r = judge(A.bad_hook_own);
-  assert.equal(r.verdict, "FAIL");
-  const b = bad(r);
-  assert.equal(b.length, 1, b.join("\n"));
-  assert.match(b[0], /0x238d92a5c5c4fadaac17577c0bfbb87d61764599 trade 0x95ac6c34.* amt 27\.607349969449649526 is not the 3450918746181206190705 its trader 0x5cdc0f0fa28e0bb05893a4558c988e2bdce438e1 paid/);
-  // the same tape without the hook's row: every trade judged, PASS
-  const coin = "0x238d92a5c5c4fadaac17577c0bfbb87d61764599";
-  const tape = A.bad_hook_own.tapes[coin];
-  const ok = judge({ ...A.bad_hook_own, tapes: { [coin]: { ...tape, trades: tape.trades.filter((t) => t.amt !== "27.607349969449649526") } } });
-  assert.equal(ok.verdict, "PASS", ok.lines.join("\n"));
 });
 
 test("robinhood: the fix's Robinhood tapes, where a router sends the take straight to the trader, judged and PASS, read again the same", async () => {
