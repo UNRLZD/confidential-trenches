@@ -105,13 +105,13 @@ import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
-import { vaultScope } from "./withdraw/checks.ts";
+import { parseAmount, vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type GivenWithdraw } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
 import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
-import { nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
+import { nearBuyDry, nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
 import { rheaPoolsKept } from "./near-pools.ts";
 import { nearSeatRpc, pacedNearRpc, seatsUp } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
@@ -558,7 +558,22 @@ else {
     })().catch(() => void (answer = { error: "failed" }));
     return { running: true, after, answer: () => answer };
   };
+  // NEAR (card you-receive-on-every-chain): nearBuyDry on the NEAR buy's own page, never while a trade runs
+  const nearDry = (params: Record<string, unknown>): HostRefusal | Running<"pool.buy.dry"> => {
+    const page = nearBuyPage();
+    const amount = params.amount === undefined ? null : parseAmount(params.amount);
+    if (page === null || typeof params.token !== "string" || (params.amount !== undefined && amount === null)) return { error: "not_allowed" };
+    if (buys.live() + sells.live() > 0) return { error: "busy" };
+    let answer: HostAnswer<"pool.buy.dry"> | HostRefusal = { error: "failed" };
+    const token = params.token;
+    const after = (async () => {
+      if (!(await fs.state()).signed_in) return void (answer = { error: "not_funded" });
+      answer = await nearBuyDry(page, token, amount);
+    })().catch(() => void (answer = { error: "failed" }));
+    return { running: true, after, answer: () => answer };
+  };
   const dryWithCash = (params: Record<string, unknown>) => {
+    if (params.chain === "near") return nearDry(params);
     if ((params.chain === "base" || params.chain === "robinhood") && prover && typeof params.token === "string" && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null) return evmDryWithCash(params.chain, params);
     const r = poolBuyDry(params);
     if (!prover || params.chain !== "solana" || withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null) return r;

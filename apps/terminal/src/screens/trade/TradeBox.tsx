@@ -60,6 +60,9 @@ import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "./trade.css";
 
+/** USDC as the Fee prices a NEAR buy's cost: a dollar, 6 decimals (the cost is Cash's own USDC). */
+const USDC = { price: 1n, expo: 0, decimals: 6 } as const;
+
 /** How long the typed amount rests before the Fee is asked for it [design: a keystroke's gap, so a typed number is one ask]. */
 const FEE_ASK_SETTLE_MS = 250;
 
@@ -242,19 +245,20 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   priceNow.current = price;
   // on every pool chain (card you-receive-on-every-chain): Solana asks it here; Base and Robinhood read it from the one
   // pool.buy.dry the box asks with the tap's own amount (below), so a typed amount is one read on every chain
+  // NEAR: asked as Solana is, for the typed USD in USDC (nearBuyAsk's own amount), the coin by its token
   const buysKey = onPool && (chain === "base" || chain === "robinhood") ? coinKey : null;
-  const feeKey = chain === "solana" ? coinKey : buysKey;
+  const feeKey = chain === "solana" ? coinKey : path === "near" && on && !signedOut ? `near:${token}` : buysKey;
   const [feeRead, setFeeRead] = useState<FeeRead | null>(null);
   useEffect(() => {
     const ask = request.current;
-    const feeAmount = feeKey !== null && chain === "solana" ? feeAskAmount(amount, priceNow.current) : null;
+    const feeAmount = feeKey === null ? null : chain === "solana" ? feeAskAmount(amount, priceNow.current) : chain === "near" && amount !== null && amount > 0n ? centsToDecimal(amount) : null;
     if (feeKey === null || feeAmount === null || !ask) return;
     let live = true;
     let t: ReturnType<typeof setTimeout> | undefined;
     let downs = 0;
     const once = (): void => {
       try {
-        ask("pool.buy.dry", { chain: "solana", token, amount: feeAmount }).outcome.then(
+        ask("pool.buy.dry", { chain: chain === "near" ? "near" : "solana", token, amount: feeAmount }).outcome.then(
           (o) => {
             if (!live) return;
             if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: feeKey, cost: o.result.cost, ...(o.result.out === undefined ? {} : { out: o.result.out }), ...(amount === null ? {} : { amount }) }));
@@ -316,10 +320,10 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
       clearTimeout(t);
     };
   }, [buysKey, amount, kit.request !== null]);
-  const fee = onPool ? feeShown(feeRead, feeKey, amount, price) : null;
-  // You receive on the pool path: the same answer's out (the live source has no set preview, card
+  const fee = onPool ? feeShown(feeRead, feeKey, amount, price) : path === "near" ? feeShown(feeRead, feeKey, amount, USDC) : null;
+  // You receive on the pool path and on NEAR: the same answer's out (the live source has no set preview, card
   // solana-buy-preview-complete)
-  const receive = onPool ? receiveShown(feeRead, feeKey, amount) : null;
+  const receive = onPool || path === "near" ? receiveShown(feeRead, feeKey, amount) : null;
   // Bal: the vault path's money (Cash less the SOL and ETH pools, useOffPool) on a chain with no pool, the pool's on a
   // chain with one, with Cash's NEAR part where a buy moves from it (Solana, card one-balance-buys-on-every-chain); on
   // NEAR, Cash's NEAR part, the money a NEAR buy spends. One number for the amount gate. Signed out there is none to
