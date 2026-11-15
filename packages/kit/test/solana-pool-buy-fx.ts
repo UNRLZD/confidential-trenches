@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { base58, base64 } from "@scure/base";
 import { solanaPoolAddresses } from "../src/trade/solana/pool.ts";
-import { readSolanaDlmmBuyVenue } from "../src/trade/solana/pool-buy.ts";
+import { readSolanaDlmmBuyVenue, readSolanaRaydiumBuyVenue } from "../src/trade/solana/pool-buy.ts";
 import {
   readSolanaPoolBuyVenue,
   readSolanaReference,
@@ -83,17 +83,48 @@ export const dlmmReplay = (p: 0 | 1, edit: (addr: string, data: Uint8Array) => U
   }) as SolanaRpc;
 };
 export const dlmmProviders = () => [dlmmReplay(0), dlmmReplay(1)] as const;
+// HIGH's Raydium CPMM pool CqvMZmWD… and CzLSuj…'s Raydium AMM v4 pool 9Tb2ohu5… as two mainnet providers answered them,
+// with the program's own out on mainnet simulation (test/vectors/high-cpmm.json and czlsuj-amm-v4.json, recorded by
+// solana-raydium.test.ts's note)
+export type RaydiumVector = {
+  kind: "raydium-cpmm" | "raydium-amm-v4"; mint: string; pool: string; sellAmount: string;
+  providers: Record<string, { slot: number; accounts: Record<string, { owner: string; data: string } | null> }>;
+  programOut: Record<string, { E: string; atE: { err: unknown; units: number; program: { received: string } }; atE1: { err: unknown } }>;
+};
+const vec = (f: string) => JSON.parse(readFileSync(new URL(`./vectors/${f}`, import.meta.url), "utf8")) as RaydiumVector;
+export const raydiumVectors = { "raydium-cpmm": vec("high-cpmm.json"), "raydium-amm-v4": vec("czlsuj-amm-v4.json") } as const;
+/** A provider that answers getMultipleAccounts from a vector's recorded accounts (any other address: no account). */
+export const vectorReplay = (v: { providers: RaydiumVector["providers"] }, p: 0 | 1, edit: (addr: string, data: Uint8Array) => Uint8Array = (_a, d) => d): SolanaRpc => {
+  const rec = Object.values(v.providers)[p]!;
+  return (async (method: string, params: readonly unknown[]) => {
+    assert.equal(method, "getMultipleAccounts");
+    return {
+      context: { slot: rec.slot },
+      value: (params[0] as string[]).map((a) => {
+        const x = rec.accounts[a];
+        return x ? { owner: x.owner, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(edit(a, base64.decode(x.data))), "base64"] } : null;
+      }),
+    };
+  }) as SolanaRpc;
+};
+export const raydiumProviders = (k: "raydium-cpmm" | "raydium-amm-v4", edit?: (addr: string, data: Uint8Array) => Uint8Array) => [vectorReplay(raydiumVectors[k], 0, edit), vectorReplay(raydiumVectors[k], 1, edit)] as const;
+/** The reference request field a Raydium kind's pools go in. */
+export const raydiumField = (k: "raydium-cpmm" | "raydium-amm-v4") => (k === "raydium-cpmm" ? "cpmmPools" : "ammV4Pools");
 export const SPEND = 5_000_000n;
 export const BLOCKHASH = base58.encode(new Uint8Array(32).fill(7));
 export const TIP = 10_000n;
 
-export async function setup(v: "pump" | "pumpswap" | "dlmm" = "pump", spend = SPEND) {
+export async function setup(v: "pump" | "pumpswap" | "dlmm" | "raydium-cpmm" | "raydium-amm-v4" = "pump", spend = SPEND) {
   const kind = v === "pump" ? "pump-curve" : v;
-  const mint = v === "dlmm" ? dlmmVector.mint : (fx[v].mint as string);
-  const venue = v === "dlmm" ? await readSolanaDlmmBuyVenue(dlmmProviders(), mint, dlmmVector.pair, "buy") : await readSolanaPoolBuyVenue(providers(v), kind, mint, () => 2);
+  const ray = v === "raydium-cpmm" || v === "raydium-amm-v4" ? raydiumVectors[v] : null;
+  const mint = v === "dlmm" ? dlmmVector.mint : ray ? ray.mint : (fx[v as "pump" | "pumpswap"].mint as string);
+  const venue = v === "dlmm" ? await readSolanaDlmmBuyVenue(dlmmProviders(), mint, dlmmVector.pair, "buy")
+    : ray ? await readSolanaRaydiumBuyVenue(raydiumProviders(ray.kind), ray.kind, mint, ray.pool)
+    : await readSolanaPoolBuyVenue(providers(v as "pump" | "pumpswap"), kind, mint, () => 2);
   const ref = v === "dlmm"
     ? await readSolanaReference(dlmmProviders(), { side: "buy", token: mint, amount: spend, dlmmPairs: [dlmmVector.pair] })
-    : await readSolanaReference(providers(v), { side: "buy", token: mint, amount: spend });
+    : ray ? await readSolanaReference(raydiumProviders(ray.kind), { side: "buy", token: mint, amount: spend, [raydiumField(ray.kind)]: [ray.pool] })
+    : await readSolanaReference(providers(v as "pump" | "pumpswap"), { side: "buy", token: mint, amount: spend });
   assert.ok(ref && ref.slot !== undefined);
   const E = ref.pools.find((p) => p.venue === kind)!.expectedOut;
   const minOut = (E * 9_700n) / 10_000n;

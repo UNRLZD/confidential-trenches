@@ -12,9 +12,10 @@ import { cfg, FEE_PAYER, release, rent, setup, W } from "./solana-pool-buy-fx.ts
 // the reverse): the steps' programs depend on the venue's kind and its token program, and on nothing else of it.
 async function venues(): Promise<{ name: string; venue: SolanaPoolBuyVenue; req: Awaited<ReturnType<typeof setup>>["req"] }[]> {
   const out = [];
-  for (const v of ["pump", "pumpswap", "dlmm"] as const) {
+  for (const v of ["pump", "pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"] as const) {
     const { venue, req } = await setup(v);
-    for (const tp of [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM]) out.push({ name: `${v} ${tp === SOLANA_TOKEN_PROGRAM ? "Token" : "Token-2022"}${tp === venue.tokenProgram ? " (recorded)" : ""}`, venue: { ...venue, tokenProgram: tp }, req });
+    // an AMM v4 swap moves SPL Token only: its venue reader never gives a Token-2022 one, and its builder refuses one
+    for (const tp of v === "raydium-amm-v4" ? [SOLANA_TOKEN_PROGRAM] : [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM]) out.push({ name: `${v} ${tp === SOLANA_TOKEN_PROGRAM ? "Token" : "Token-2022"}${tp === venue.tokenProgram ? " (recorded)" : ""}`, venue: { ...venue, tokenProgram: tp }, req });
   }
   return out;
 }
@@ -22,7 +23,7 @@ async function venues(): Promise<{ name: string; venue: SolanaPoolBuyVenue; req:
 test("the list equals the programs the builder's steps invoke, over every venue and both token programs", async () => {
   const used = new Set<string>();
   const all = await venues();
-  assert.equal(all.length, 6);
+  assert.equal(all.length, 9);
   for (const { venue, req } of all) for (const s of solanaPoolBuySteps(venue, W, req.spend, req.minOut)) used.add(s.program);
   assert.deepEqual([...used].sort(), [...solanaPoolStepPrograms()].sort());
   assert.ok(!solanaPoolStepPrograms().includes(SOLANA_TOKEN_2022_PROGRAM), "Token-2022 is an account of the ATA create, never an inner program");

@@ -341,25 +341,31 @@ const isKey = (s: unknown): s is string => {
     return false;
   }
 };
+/** How a coin's SOL pools of one program are found (solanaScannedPools): the scan of the pools whose two mints are `x`
+ *  and `y` in that order, each pool's SOL reserve (an SPL Token account, its amount at 64) as `rpc` names it (at most
+ *  RANK_BATCH pools at a time; a pool it cannot name has depth 0), and the name a refusal says. */
+export type SolanaPoolScanKind = { readonly name: string; readonly scan: (x: string, y: string) => readonly unknown[]; readonly solReserves: (rpc: SolanaRpc, pools: readonly string[]) => Promise<readonly string[]> };
 /** One scan's addresses; throws on an answer that is not a list of at most SOLANA_DLMM_SCAN_MAX addresses. */
-async function scanOn(rpc: SolanaRpc, x: string, y: string): Promise<string[]> {
-  const a = (await solanaTimedRpc(rpc, SCAN_TIMEOUT_MS)("getProgramAccounts", [...solanaDlmmPairScan(x, y)])) as { value?: unknown } | unknown[] | null;
+async function scanOn(rpc: SolanaRpc, kind: SolanaPoolScanKind, x: string, y: string): Promise<string[]> {
+  const a = (await solanaTimedRpc(rpc, SCAN_TIMEOUT_MS)("getProgramAccounts", [...kind.scan(x, y)])) as { value?: unknown } | unknown[] | null;
   const v = Array.isArray(a) ? a : (a as { value?: unknown } | null)?.value;
-  if (!Array.isArray(v) || v.length > SOLANA_DLMM_SCAN_MAX) throw new Error("a DLMM pair scan answered no list of at most 512 accounts");
+  if (!Array.isArray(v) || v.length > SOLANA_DLMM_SCAN_MAX) throw new Error(`a ${kind.name} scan answered no list of at most 512 accounts`);
   return v.map((e) => {
     const k = (e as { pubkey?: unknown } | null)?.pubkey;
-    if (!isKey(k)) throw new Error("a DLMM pair scan answered an entry that is not an address");
+    if (!isKey(k)) throw new Error(`a ${kind.name} scan answered an entry that is not an address`);
     return k;
   });
 }
-/** `rpc`'s own SOL depth of each pair (its SOL reserve's amount; 0 when it holds none or is no SPL Token account). */
-async function depthsOn(rpc: SolanaRpc, pairs: readonly string[]): Promise<Map<string, bigint>> {
+/** `rpc`'s own SOL depth of each pool (its SOL reserve's amount; 0 when it holds none or is no SPL Token account). */
+async function depthsOn(rpc: SolanaRpc, kind: SolanaPoolScanKind, pairs: readonly string[]): Promise<Map<string, bigint>> {
   const out = new Map<string, bigint>();
   for (let i = 0; i < pairs.length; i += RANK_BATCH) {
     const some = pairs.slice(i, i + RANK_BATCH);
-    const a = (await solanaTimedRpc(rpc, SCAN_TIMEOUT_MS)("getMultipleAccounts", [some.map((p) => solanaDlmmReserve(p, SOLANA_SOL_MINT)), { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 64, length: 8 } }])) as { value?: unknown } | null;
+    const reserves = await kind.solReserves(rpc, some);
+    if (reserves.length !== some.length) throw new Error(`a ${kind.name} reserve list is not one per pool`);
+    const a = (await solanaTimedRpc(rpc, SCAN_TIMEOUT_MS)("getMultipleAccounts", [[...reserves], { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 64, length: 8 } }])) as { value?: unknown } | null;
     const v = a?.value;
-    if (!Array.isArray(v) || v.length !== some.length) throw new Error("a DLMM reserve read answered no list of the asked length");
+    if (!Array.isArray(v) || v.length !== some.length) throw new Error(`a ${kind.name} reserve read answered no list of the asked length`);
     some.forEach((p, k) => {
       const e = v[k] as { owner?: unknown; data?: unknown } | null;
       let d: Uint8Array | null = null;
@@ -373,26 +379,37 @@ async function depthsOn(rpc: SolanaRpc, pairs: readonly string[]): Promise<Map<s
 }
 
 /**
- * A coin's Meteora DLMM SOL pairs, for the reference's `dlmmPairs` (pool.ts readSolanaReferenceWhy, which reads and
- * judges each one on both of its providers). `scan`: two providers that answer getProgramAccounts; each lists the pairs
- * of the coin and wSOL, the coin as X and as Y, and the list is the union of both, so one provider cannot hide a pair
- * the other names, and a pair one makes up is judged like any other (the program's account, the coin, wSOL, enabled).
- * Past SOLANA_DLMM_MAX_PAIRS, `read`'s two providers each keep the half they read deepest in SOL (each pair's SOL
- * reserve, the program's address of [pair, wSOL]), and the union of the two halves is the list: one provider cannot push
- * the pair the other reads deepest out. Sorted; [] for wSOL itself. Throws when a provider fails or answers out of shape.
+ * A coin's SOL pools of one program, found on the chain (readSolanaDlmmPairs; cpmm.ts readSolanaCpmmPools). `scan`: two
+ * providers that answer getProgramAccounts; each lists the pools of the coin and wSOL, the coin first and second, and
+ * the list is the union of both, so one provider cannot hide a pool the other names, and a pool one makes up is judged
+ * like any other by the reference. Past SOLANA_DLMM_MAX_PAIRS, `read`'s two providers each keep the half they read
+ * deepest in SOL (each pool's SOL reserve), and the union of the two halves is the list: one provider cannot push the
+ * pool the other reads deepest out. Sorted; [] for wSOL itself. Throws when a provider fails or answers out of shape.
  */
-export async function readSolanaDlmmPairs(scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string): Promise<string[]> {
+export async function solanaScannedPools(kind: SolanaPoolScanKind, scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string): Promise<string[]> {
   if (!isKey(mint)) throw new Error("the coin is not a 32-byte address");
   if (mint === SOLANA_SOL_MINT) return [];
-  const lists = await Promise.all(scan.map((rpc) => Promise.all([scanOn(rpc, mint, SOLANA_SOL_MINT), scanOn(rpc, SOLANA_SOL_MINT, mint)])));
+  const lists = await Promise.all(scan.map((rpc) => Promise.all([scanOn(rpc, kind, mint, SOLANA_SOL_MINT), scanOn(rpc, kind, SOLANA_SOL_MINT, mint)])));
   const all = [...new Set(lists.flat(2))].sort();
   if (all.length <= SOLANA_DLMM_MAX_PAIRS) return all;
   const half = SOLANA_DLMM_MAX_PAIRS / 2;
   const tops = await Promise.all(
     read.map(async (rpc) => {
-      const d = await depthsOn(rpc, all);
+      const d = await depthsOn(rpc, kind, all);
       return [...all].sort((a, b) => (d.get(a)! === d.get(b)! ? (a < b ? -1 : 1) : d.get(a)! > d.get(b)! ? -1 : 1)).slice(0, half);
     }),
   );
   return [...new Set(tops.flat())].sort();
 }
+
+/** Reserves named by the pool's address alone (a program address of the pool and wSOL). */
+export const solanaDerivedReserves = (f: (pool: string) => string) => async (_rpc: SolanaRpc, pools: readonly string[]): Promise<readonly string[]> => pools.map(f);
+/** A scan or ranking read's time bound, for a kind's own reserve read. */
+export const SOLANA_POOL_SCAN_TIMEOUT_MS = SCAN_TIMEOUT_MS;
+const DLMM_SCAN: SolanaPoolScanKind = { name: "DLMM pair", scan: (x, y) => solanaDlmmPairScan(x, y), solReserves: solanaDerivedReserves((p) => solanaDlmmReserve(p, SOLANA_SOL_MINT)) };
+/**
+ * A coin's Meteora DLMM SOL pairs, for the reference's `dlmmPairs` (pool.ts readSolanaReferenceWhy, which reads and
+ * judges each one on both of its providers): solanaScannedPools over the DLMM pair scan, the coin as X and as Y, ranked
+ * past 8 by each pair's SOL reserve (the program's address of [pair, wSOL]).
+ */
+export const readSolanaDlmmPairs = (scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string): Promise<string[]> => solanaScannedPools(DLMM_SCAN, scan, read, mint);

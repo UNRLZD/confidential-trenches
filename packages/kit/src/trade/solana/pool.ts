@@ -77,6 +77,27 @@ import {
   type SolanaDlmmPair,
   type SolanaTransferFee,
 } from "./dlmm.ts";
+import {
+  SOLANA_CPMM_AUTHORITY,
+  SOLANA_CPMM_MAX_POOLS,
+  SOLANA_CPMM_POOL_MOVING,
+  solanaCpmmLive,
+  solanaCpmmSide,
+  solanaCpmmTradeOut,
+  solanaDecodeCpmmConfig,
+  solanaDecodeCpmmPool,
+  type SolanaCpmmPool,
+} from "./cpmm.ts";
+import {
+  SOLANA_AMM_V4_AUTHORITY,
+  SOLANA_AMM_V4_MAX_POOLS,
+  SOLANA_AMM_V4_POOL_MOVING,
+  solanaAmmV4Live,
+  solanaAmmV4Side,
+  solanaAmmV4TradeOut,
+  solanaDecodeAmmV4Pool,
+  type SolanaAmmV4Pool,
+} from "./amm-v4.ts";
 
 /** §2.0 LD1's band between two providers' reads of one reserve. */
 export const SOLANA_POOL_READ_TOL_BPS = 200;
@@ -102,8 +123,10 @@ const DISC = {
 } as const;
 
 /** A venue the pool buy trades and the reference prices: pump's curve, PumpSwap's canonical pool, a Meteora DLMM pair
- *  (dlmm.ts). The pump venues are found from the mint; a DLMM pair from the request's `dlmmPairs`. */
-export type SolanaPoolVenue = "pump-curve" | "pumpswap" | "dlmm";
+ *  (dlmm.ts), a Raydium CPMM pool (cpmm.ts), a Raydium AMM v4 pool (amm-v4.ts). The pump venues are found from the
+ *  mint; a DLMM pair from the request's `dlmmPairs`, a CPMM pool from its `cpmmPools`, an AMM v4 pool from its
+ *  `ammV4Pools`. */
+export type SolanaPoolVenue = "pump-curve" | "pumpswap" | "dlmm" | "raydium-cpmm" | "raydium-amm-v4";
 export type SolanaReferenceVenue = SolanaPoolVenue;
 export type SolanaReference = {
   expectedOut: bigint;
@@ -117,9 +140,14 @@ export type SolanaReference = {
   /** The oldest slot of the reads it rests on (readSolanaReference), so a check can bound its age. */
   slot?: number;
 };
-/** `dlmmPairs`: the coin's Meteora DLMM pairs, as solanaDlmmPairs lists them from the chain (at most
- *  SOLANA_DLMM_MAX_PAIRS); each is read and judged here on both providers like any other candidate. */
-export type SolanaReferenceRequest = { side: "buy" | "sell"; token: string; amount: bigint; amounts?: readonly bigint[]; dlmmPairs?: readonly string[] };
+/** `dlmmPairs`: the coin's Meteora DLMM pairs, as readSolanaDlmmPairs lists them from the chain (at most
+ *  SOLANA_DLMM_MAX_PAIRS); `cpmmPools`: its Raydium CPMM pools, as readSolanaCpmmPools lists them (at most
+ *  SOLANA_CPMM_MAX_POOLS); `ammV4Pools`: its Raydium AMM v4 pools, as readSolanaAmmV4Pools lists them (at most
+ *  SOLANA_AMM_V4_MAX_POOLS). Each is read and judged here on both providers like any other candidate. */
+export type SolanaReferenceRequest = {
+  side: "buy" | "sell"; token: string; amount: bigint; amounts?: readonly bigint[];
+  dlmmPairs?: readonly string[]; cpmmPools?: readonly string[]; ammV4Pools?: readonly string[];
+};
 /** The most legs one request prices. */
 const MAX_LEGS = 64;
 
@@ -736,6 +764,124 @@ function judgeDlmm(address: string, indexes: readonly number[], req: SolanaRefer
   }
 }
 
+/** The accounts one CPMM pool's read names, in order (solanaCpmmReadList): the pool, the mint, the Clock, its
+ *  AmmConfig, its token 0 and token 1 vaults. */
+const MI = { pool: 0, mint: 1, clock: 2, config: 3, vault0: 4, vault1: 5 } as const;
+export function solanaCpmmReadList(address: string, pool: SolanaCpmmPool, mint: string): string[] | null {
+  if (!solanaCpmmSide(pool, mint)) return null;
+  return [address, mint, SOLANA_CLOCK_SYSVAR, pool.ammConfig, pool.vault0, pool.vault1];
+}
+
+/** What one CPMM pool's read pair says (the module note in cpmm.ts): not a candidate, a disagreement, or agreed. */
+function judgeCpmm(address: string, req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
+  const a = ga.read;
+  const b = gb.read;
+  if (!a || !b) {
+    const why = [ga, gb].flatMap((g, i) => (g.read ? [] : [`${PROVIDER[i]} gave no answer${g.fault ? ` (${g.fault})` : " (not an accounts read)"}`]));
+    return { kind: "bad", why: why.join(", ") };
+  }
+  const at = (r: (SolanaPoolAccount | null)[], i: number): SolanaPoolAccount | null => r[i] ?? null;
+  const A = a.accounts;
+  const B = b.accounts;
+  try {
+    const pa = at(A, MI.pool);
+    const pb = at(B, MI.pool);
+    if (!pa && !pb) return { kind: "none" };
+    if (!sameAcc(pa, pb, SOLANA_CPMM_POOL_MOVING)) return { kind: "bad", why: "the CPMM pool's static bytes differ" };
+    const pools = [solanaDecodeCpmmPool(pa!), solanaDecodeCpmmPool(pb!)] as const;
+    const p = pools[0];
+    const side = solanaCpmmSide(p, req.token);
+    if (!side || p.creatorFeeOn > 2) return { kind: "none" };
+    if ((side.solIs0 ? p.program0 : p.program1) !== SOLANA_TOKEN_PROGRAM) return { kind: "none" };
+    const ms = mints(at(A, MI.mint), at(B, MI.mint));
+    if (typeof ms === "string") return { kind: "bad", why: ms };
+    if ((side.solIs0 ? p.program1 : p.program0) !== ms[0].program) return { kind: "bad", why: "the pool's token program is not the mint's program" };
+    if (!sameAcc(at(A, MI.config), at(B, MI.config))) return { kind: "bad", why: "the CPMM AmmConfig differs" };
+    const cfg = solanaDecodeCpmmConfig(at(A, MI.config) ?? fail("no CPMM AmmConfig"));
+    const clocks = [solanaDecodeClock(at(A, MI.clock) ?? fail("no Clock")), solanaDecodeClock(at(B, MI.clock) ?? fail("no Clock"))] as const;
+    if (!solanaCpmmLive(p, clocks[0].unixTimestamp) || !solanaCpmmLive(p, clocks[1].unixTimestamp)) return { kind: "none" };
+    let fees: readonly [SolanaTransferFee | null, SolanaTransferFee | null];
+    try {
+      fees = [solanaCoinTransferFee(at(A, MI.mint)!, clocks[0].epoch), solanaCoinTransferFee(at(B, MI.mint)!, clocks[1].epoch)];
+    } catch {
+      return { kind: "none" }; // a Token-2022 extension the reference does not price
+    }
+    const vault = (r: (SolanaPoolAccount | null)[], i: 0 | 1): bigint => heldBy(at(r, i === 0 ? MI.vault0 : MI.vault1), i === 0 ? p.mint0 : p.mint1, SOLANA_CPMM_AUTHORITY, i === 0 ? p.program0 : p.program1);
+    const v0 = [vault(A, 0), vault(B, 0)] as const;
+    const v1 = [vault(A, 1), vault(B, 1)] as const;
+    // the reserves the swap prices on: each vault net of the pool's fee counters, each provider's own
+    const net = (k: 0 | 1) => [v0[k] - pools[k].fees0, v1[k] - pools[k].fees1] as const;
+    const n = [net(0), net(1)] as const;
+    // a pool whose vaults hold no more than its fees cannot swap (InsufficientVault, or nothing to pay out): no candidate
+    // when both providers read it so, a disagreement when one does
+    const empty = n.map(([x, y]) => x <= 0n || y <= 0n);
+    if (empty[0] && empty[1]) return { kind: "none" };
+    if (empty[0] || empty[1]) return { kind: "bad", why: "the CPMM pool's vaults hold less than its fees" };
+    if (!solanaReservesAgree(n[0][0], n[1][0]) || !solanaReservesAgree(n[0][1], n[1][1])) return { kind: "bad", why: "the CPMM pool's reserves are outside the band" };
+    const amounts = req.amounts ?? [];
+    const one = (k: 0 | 1): SolanaCandidateRead => {
+      const out = (x: bigint) => solanaCpmmTradeOut(pools[k], cfg, req.side, x, side.solIs0, v0[k], v1[k], fees[k]) ?? 0n;
+      return { depth: side.solIs0 ? n[k][0] : n[k][1], out: out(req.amount), spotOut: null, outs: amounts.map(out) };
+    };
+    return { kind: "ok", candidate: { venue: "raydium-cpmm", address, reads: [one(0), one(1)] } };
+  } catch (e) {
+    return { kind: "bad", why: String(e instanceof Error ? e.message : e).slice(0, 200) };
+  }
+}
+
+/** The accounts one AMM v4 pool's read names, in order (solanaAmmV4ReadList): the pool, the mint, the Clock, its coin
+ *  and pc vaults. */
+const AI = { pool: 0, mint: 1, clock: 2, coinVault: 3, pcVault: 4 } as const;
+export function solanaAmmV4ReadList(address: string, pool: SolanaAmmV4Pool, mint: string): string[] | null {
+  if (!solanaAmmV4Side(pool, mint)) return null;
+  return [address, mint, SOLANA_CLOCK_SYSVAR, pool.coinVault, pool.pcVault];
+}
+
+/** What one AMM v4 pool's read pair says (the module note in amm-v4.ts): not a candidate, a disagreement, or agreed. */
+function judgeAmmV4(address: string, req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
+  const a = ga.read;
+  const b = gb.read;
+  if (!a || !b) {
+    const why = [ga, gb].flatMap((g, i) => (g.read ? [] : [`${PROVIDER[i]} gave no answer${g.fault ? ` (${g.fault})` : " (not an accounts read)"}`]));
+    return { kind: "bad", why: why.join(", ") };
+  }
+  const at = (r: (SolanaPoolAccount | null)[], i: number): SolanaPoolAccount | null => r[i] ?? null;
+  const A = a.accounts;
+  const B = b.accounts;
+  try {
+    const pa = at(A, AI.pool);
+    const pb = at(B, AI.pool);
+    if (!pa && !pb) return { kind: "none" };
+    if (!sameAcc(pa, pb, SOLANA_AMM_V4_POOL_MOVING)) return { kind: "bad", why: "the AMM v4 pool's static bytes differ" };
+    const pools = [solanaDecodeAmmV4Pool(pa!), solanaDecodeAmmV4Pool(pb!)] as const;
+    const p = pools[0];
+    const side = solanaAmmV4Side(p, req.token);
+    if (!side) return { kind: "none" };
+    const ms = mints(at(A, AI.mint), at(B, AI.mint));
+    if (typeof ms === "string") return { kind: "bad", why: ms };
+    if (ms[0].program !== SOLANA_TOKEN_PROGRAM) return { kind: "none" }; // swap_base_in_v2 moves SPL Token only
+    const clocks = [solanaDecodeClock(at(A, AI.clock) ?? fail("no Clock")), solanaDecodeClock(at(B, AI.clock) ?? fail("no Clock"))] as const;
+    if (!solanaAmmV4Live(pools[0], clocks[0].unixTimestamp) || !solanaAmmV4Live(pools[1], clocks[1].unixTimestamp)) return { kind: "none" };
+    const vault = (r: (SolanaPoolAccount | null)[], coin: boolean): bigint => heldBy(at(r, coin ? AI.coinVault : AI.pcVault), coin ? p.coinMint : p.pcMint, SOLANA_AMM_V4_AUTHORITY, SOLANA_TOKEN_PROGRAM);
+    const coins = [vault(A, true), vault(B, true)] as const;
+    const pcs = [vault(A, false), vault(B, false)] as const;
+    // the reserves the swap prices on: each vault less its need_take_pnl, each provider's own
+    const n = [[coins[0] - pools[0].needTakePnlCoin, pcs[0] - pools[0].needTakePnlPc], [coins[1] - pools[1].needTakePnlCoin, pcs[1] - pools[1].needTakePnlPc]] as const;
+    const empty = n.map(([x, y]) => x <= 0n || y <= 0n);
+    if (empty[0] && empty[1]) return { kind: "none" };
+    if (empty[0] || empty[1]) return { kind: "bad", why: "the AMM v4 pool's vaults hold less than its pnl" };
+    if (!solanaReservesAgree(n[0][0], n[1][0]) || !solanaReservesAgree(n[0][1], n[1][1])) return { kind: "bad", why: "the AMM v4 pool's reserves are outside the band" };
+    const amounts = req.amounts ?? [];
+    const one = (k: 0 | 1): SolanaCandidateRead => {
+      const out = (x: bigint) => solanaAmmV4TradeOut(pools[k], req.side, x, side.solIsPc, coins[k], pcs[k]) ?? 0n;
+      return { depth: side.solIsPc ? n[k][1] : n[k][0], out: out(req.amount), spotOut: null, outs: amounts.map(out) };
+    };
+    return { kind: "ok", candidate: { venue: "raydium-amm-v4", address, reads: [one(0), one(1)] } };
+  } catch (e) {
+    return { kind: "bad", why: String(e instanceof Error ? e.message : e).slice(0, 200) };
+  }
+}
+
 /**
  * The reference E for one exact input on the token's own pools, read on both providers (provider A device-direct,
  * provider B the second, as LD1 has them). Null when there is no candidate ("no reference pool"), or when a candidate
@@ -784,33 +930,61 @@ export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, Sol
     if (verdict.kind === "ok" && a.read && b.read) slots.push(a.read.slot, b.read.slot);
     return verdict;
   };
-  // a DLMM pair: its active bin first (one call per provider for every pair), then the pair's own read at one slot
-  const dlmmPairs = [...new Set(req.dlmmPairs ?? [])];
-  if (dlmmPairs.length > SOLANA_DLMM_MAX_PAIRS) throw new Error(`at most ${SOLANA_DLMM_MAX_PAIRS} DLMM pairs`);
-  for (const p of dlmmPairs) if (typeof p !== "string" || base58.decode(p).length !== 32) throw new Error("a DLMM pair is not a 32-byte address");
-  const heads = dlmmPairs.length ? await readBoth(dlmmPairs) : null;
-  const lookDlmm = async (i: number): Promise<Verdict> => {
-    const address = dlmmPairs[i]!;
-    // the arrays from provider A's active bin, else provider B's: both reads then name the same accounts
-    let plan: { list: string[]; indexes: number[] } | null = null;
-    for (const h of heads!) {
+  // a pool found by a scan (a DLMM pair, a CPMM pool, an AMM v4 pool): every such pool of a kind read first (one call per
+  // provider for them all), then each one's own read at one slot, its list planned from provider A's read of the pool,
+  // else provider B's: both reads then name the same accounts, and the judge holds both to the same static bytes
+  type Scanned = { name: string; plural: string; prefix: string; max: number; pools: string[]; plan: (address: string, acc: SolanaPoolAccount) => { list: string[]; judge: (a: Got, b: Got) => Verdict } | null };
+  const scanned: Scanned[] = [
+    {
+      name: "DLMM pair", plural: "DLMM pairs", prefix: "dlmm", max: SOLANA_DLMM_MAX_PAIRS, pools: [...new Set(req.dlmmPairs ?? [])],
+      plan: (address, acc) => {
+        const plan = solanaDlmmReadList(address, solanaDecodeDlmmPair(acc), req.token, req.side);
+        return plan && { list: plan.list, judge: (a, b) => judgeDlmm(address, plan.indexes, req, a, b) };
+      },
+    },
+    {
+      name: "CPMM pool", plural: "CPMM pools", prefix: "raydium-cpmm", max: SOLANA_CPMM_MAX_POOLS, pools: [...new Set(req.cpmmPools ?? [])],
+      plan: (address, acc) => {
+        const list = solanaCpmmReadList(address, solanaDecodeCpmmPool(acc), req.token);
+        return list && { list, judge: (a, b) => judgeCpmm(address, req, a, b) };
+      },
+    },
+    {
+      name: "AMM v4 pool", plural: "AMM v4 pools", prefix: "raydium-amm-v4", max: SOLANA_AMM_V4_MAX_POOLS, pools: [...new Set(req.ammV4Pools ?? [])],
+      plan: (address, acc) => {
+        const list = solanaAmmV4ReadList(address, solanaDecodeAmmV4Pool(acc), req.token);
+        return list && { list, judge: (a, b) => judgeAmmV4(address, req, a, b) };
+      },
+    },
+  ];
+  for (const k of scanned) {
+    if (k.pools.length > k.max) throw new Error(`at most ${k.max} ${k.plural}`);
+    for (const p of k.pools) if (typeof p !== "string" || base58.decode(p).length !== 32) throw new Error(`a ${k.name} is not a 32-byte address`);
+  }
+  const heads = await Promise.all(scanned.map((k) => (k.pools.length ? readBoth(k.pools) : null)));
+  const lookScanned = async (k: number, i: number): Promise<Verdict> => {
+    const kind = scanned[k]!;
+    const address = kind.pools[i]!;
+    let plan: { list: string[]; judge: (a: Got, b: Got) => Verdict } | null = null;
+    for (const h of heads[k]!) {
       const acc = h.read?.accounts[i];
       if (plan || !acc) continue;
       try {
-        plan = solanaDlmmReadList(address, solanaDecodeDlmmPair(acc), req.token, req.side);
+        plan = kind.plan(address, acc);
       } catch {
-        return { kind: "bad", why: "the DLMM pair is malformed" };
+        return { kind: "bad", why: `the ${kind.name} is malformed` };
       }
       if (!plan) return { kind: "none" };
     }
-    if (!plan) return heads!.every((h) => h.read) ? { kind: "none" } : { kind: "bad", why: "a provider gave no answer for the DLMM pair" };
+    if (!plan) return heads[k]!.every((h) => h.read) ? { kind: "none" } : { kind: "bad", why: `a provider gave no answer for the ${kind.name}` };
     const [a, b] = await readBoth(plan.list);
-    const verdict = judgeDlmm(address, plan.indexes, req, a, b);
+    const verdict = plan.judge(a, b);
     if (verdict.kind === "ok" && a.read && b.read) slots.push(a.read.slot, b.read.slot);
     return verdict;
   };
-  const named = [...venues, ...dlmmPairs.map((p) => `dlmm ${p}`)];
-  const lookAt = (i: number): Promise<Verdict> => (i < venues.length ? look(venues[i]!) : lookDlmm(i - venues.length));
+  const at: (readonly [number, number])[] = scanned.flatMap((k, ki) => k.pools.map((_, i) => [ki, i] as const));
+  const named = [...venues, ...at.map(([k, i]) => `${scanned[k]!.prefix} ${scanned[k]!.pools[i]}`)];
+  const lookAt = (i: number): Promise<Verdict> => (i < venues.length ? look(venues[i]!) : lookScanned(...at[i - venues.length]!));
   let verdicts = await Promise.all(named.map((_, i) => lookAt(i)));
   // one more read on both of a candidate that did not agree; if it still does not, the route is refused
   verdicts = await Promise.all(verdicts.map((v, i) => (v.kind === "bad" ? lookAt(i) : v)));

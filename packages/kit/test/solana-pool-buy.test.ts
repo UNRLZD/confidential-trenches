@@ -247,7 +247,7 @@ test("Global is at least 1,088 bytes and GlobalConfig exactly 949, and both list
   for (const v of ["pump", "pumpswap"] as const) {
     const kind = v === "pump" ? "pump-curve" : "pumpswap";
     const venue = await readSolanaPoolBuyVenue(providers(v), kind, fx[v].mint, () => 0);
-    assert.deepEqual(venue.kind !== "dlmm" && venue.buybackFeeRecipients, BUYBACK, v);
+    assert.deepEqual((venue.kind === "pump-curve" || venue.kind === "pumpswap") && venue.buybackFeeRecipients, BUYBACK, v);
     // a GlobalConfig one byte longer or shorter on both providers (a layout change) is refused, and a Global one byte
     // shorter; a longer Global is the pump-curve-upgrade-still-buys test's
     for (const delta of v === "pump" ? [-1] : [1, -1]) {

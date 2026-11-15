@@ -94,6 +94,24 @@ import {
   solanaDlmmSwapForY,
   solanaDlmmTokenProgram,
 } from "./dlmm.ts";
+import {
+  SOLANA_CPMM_AUTHORITY,
+  SOLANA_CPMM_POOL_MOVING,
+  SOLANA_CPMM_PROGRAM,
+  SOLANA_CPMM_SWAP_BASE_INPUT,
+  solanaCpmmLive,
+  solanaCpmmSide,
+  solanaDecodeCpmmPool,
+} from "./cpmm.ts";
+import {
+  SOLANA_AMM_V4_AUTHORITY,
+  SOLANA_AMM_V4_POOL_MOVING,
+  SOLANA_AMM_V4_PROGRAM,
+  SOLANA_AMM_V4_SWAP_BASE_IN_V2,
+  solanaAmmV4Live,
+  solanaAmmV4Side,
+  solanaDecodeAmmV4Pool,
+} from "./amm-v4.ts";
 import { deepFreeze } from "../../freeze.ts";
 
 export const SOLANA_POOL_TAG_RELEASE = 2;
@@ -108,8 +126,10 @@ export const SOLANA_POOL_MAX_DEPTH = 32;
 /** A release and a buy: the release's Groth16 check is ~111k CU (research S1), a pump buy ~58k, ATA and wrap a few k.
  *  DLMM: the wrap, the coin's account and swap2 took 65,330 CU for 0.1 SOL and 169,335 for 5 SOL across NEARKAT's bins
  *  (simulateTransaction on mainnet, B8BH6ZKr…, 2026-11-14 21:40Z), so 450k holds the release and the widest walk three
- *  bin arrays allow. */
-export const SOLANA_POOL_BUY_CU = { "pump-curve": 300_000, pumpswap: 400_000, dlmm: 450_000 } as const;
+ *  bin arrays allow. Raydium: the wrap, the coin's account, the swap and the unwrap took 52,607 CU on HIGH's CPMM pool
+ *  and 39,846 on CzLSuj…'s AMM v4 pool for 1 SOL (simulateTransaction on mainnet, 2026-11-15 01:41Z; test/vectors
+ *  high-cpmm.json, czlsuj-amm-v4.json), under pump's curve buy, so pump's 300k holds them with the release. */
+export const SOLANA_POOL_BUY_CU = { "pump-curve": 300_000, pumpswap: 400_000, dlmm: 450_000, "raydium-cpmm": 300_000, "raydium-amm-v4": 300_000 } as const;
 deepFreeze(SOLANA_POOL_BUY_CU);
 /** Tag 3's inner instructions: at most this many (TAG3.md). */
 export const SOLANA_POOL_TAG3_MAX_INNER = 8;
@@ -273,10 +293,22 @@ export type SolanaPoolBuyVenue = { readonly decimals?: number } & (
       readonly kind: "dlmm"; readonly mint: string; readonly tokenProgram: string; readonly tokenAccountSize: number; readonly cashback: false;
       readonly side: "buy" | "sell"; readonly pair: string; readonly tokenX: string; readonly tokenY: string; readonly reserveX: string;
       readonly reserveY: string; readonly oracle: string; readonly binArrays: readonly string[];
+    }
+  | {
+      // a Raydium CPMM pool quoted in wSOL (cpmm.ts): the same accounts for a buy and a sell, input and output swapped
+      readonly kind: "raydium-cpmm"; readonly mint: string; readonly tokenProgram: string; readonly tokenAccountSize: number; readonly cashback: false;
+      readonly pool: string; readonly ammConfig: string; readonly solVault: string; readonly coinVault: string; readonly observation: string;
+    }
+  | {
+      // a Raydium AMM v4 pool quoted in wSOL (amm-v4.ts), swapped by swap_base_in_v2: SPL Token coins only
+      readonly kind: "raydium-amm-v4"; readonly mint: string; readonly tokenProgram: string; readonly tokenAccountSize: number; readonly cashback: false;
+      readonly pool: string; readonly coinVault: string; readonly pcVault: string;
     });
 
-/** The address a venue's reference read names: the curve, the PumpSwap pool, the DLMM pair. */
-export const solanaPoolVenueAddress = (venue: SolanaPoolBuyVenue): string => (venue.kind === "pump-curve" ? venue.curve : venue.kind === "pumpswap" ? venue.pool : venue.pair);
+/** The address a venue's reference read names: the curve, the PumpSwap pool, the DLMM pair, the Raydium pool. */
+export const solanaPoolVenueAddress = (venue: SolanaPoolBuyVenue): string => (venue.kind === "pump-curve" ? venue.curve : venue.kind === "dlmm" ? venue.pair : venue.pool);
+/** The program a venue's buy and sell invoke. */
+const VENUE_PROGRAM = { "pump-curve": SOLANA_PUMP_PROGRAM, pumpswap: SOLANA_PUMP_AMM_PROGRAM, dlmm: SOLANA_DLMM_PROGRAM, "raydium-cpmm": SOLANA_CPMM_PROGRAM, "raydium-amm-v4": SOLANA_AMM_V4_PROGRAM } as const;
 
 const PUMP_GLOBAL = solanaProgramAddress([enc("global")], SOLANA_PUMP_PROGRAM);
 const PUMP_FEE_CONFIG = solanaProgramAddress([enc("fee_config"), base58.decode(SOLANA_PUMP_PROGRAM)], SOLANA_PUMP_FEES_PROGRAM);
@@ -329,7 +361,9 @@ export type SolanaPoolTableVenue =
        *  table holds it and its wSOL account, so a Mayhem pool buy fits as any other. */
       readonly reservedFeeRecipient?: string;
     })
-  | { readonly kind: "dlmm" };
+  | { readonly kind: "dlmm" }
+  | { readonly kind: "raydium-cpmm" }
+  | { readonly kind: "raydium-amm-v4" };
 
 /** The program-wide accounts a pool buy uses: what our lookup table holds (the pool and its pages, the venue's shared
  * accounts and programs, the token programs and wSOL). Not the Jito tip accounts: the tip goes as a static key
@@ -337,6 +371,8 @@ export type SolanaPoolTableVenue =
 export function solanaPoolBuyTableAccounts(cfg: SolanaPoolConfig, venue: SolanaPoolTableVenue, pages: readonly string[] = []): string[] {
   const common = [cfg.pool, ...pages, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SOL_MINT, SOLANA_PUMP_FEES_PROGRAM];
   if (venue.kind === "dlmm") return [...common, SOLANA_DLMM_PROGRAM, SOLANA_DLMM_EVENT_AUTHORITY, SOLANA_MEMO_PROGRAM];
+  if (venue.kind === "raydium-cpmm") return [...common, SOLANA_CPMM_PROGRAM, SOLANA_CPMM_AUTHORITY];
+  if (venue.kind === "raydium-amm-v4") return [...common, SOLANA_AMM_V4_PROGRAM, SOLANA_AMM_V4_AUTHORITY];
   return venue.kind === "pump-curve"
     ? [...common, SOLANA_PUMP_PROGRAM, PUMP_GLOBAL, venue.feeRecipient, solanaEventAuthority(SOLANA_PUMP_PROGRAM), PUMP_GLOBAL_VOLUME, PUMP_FEE_CONFIG, ...venue.buybackFeeRecipients]
     : [
@@ -388,12 +424,61 @@ function dlmmSwap(venue: Extract<SolanaPoolBuyVenue, { kind: "dlmm" }>, wallet: 
   ], [...DLMM_SWAP2, ...u64le(amountIn), ...u64le(minOut), 0, 0, 0, 0]);
 }
 
+/**
+ * W's Raydium CPMM swap_base_input of exactly `amountIn` for at least `minOut` (cpmm.ts; the 13 accounts of
+ * instructions/swap_base_input.rs in order): on a buy wSOL in from W's wrapped-SOL account, the coin out to W's coin
+ * account; on a sell the reverse. The program holds `minOut` to what W receives, net of the coin's transfer fee.
+ */
+function cpmmSwap(venue: Extract<SolanaPoolBuyVenue, { kind: "raydium-cpmm" }>, wallet: string, side: "buy" | "sell", amountIn: bigint, minOut: bigint): SolanaApiInstruction {
+  const wsol = { account: solanaAta(wallet, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), vault: venue.solVault, program: SOLANA_TOKEN_PROGRAM, mint: SOLANA_SOL_MINT };
+  const coin = { account: solanaAta(wallet, venue.mint, venue.tokenProgram), vault: venue.coinVault, program: venue.tokenProgram, mint: venue.mint };
+  const [i, o] = side === "buy" ? [wsol, coin] : [coin, wsol];
+  return ix(SOLANA_CPMM_PROGRAM, [
+    acc(wallet, true, false),
+    acc(SOLANA_CPMM_AUTHORITY, false, false),
+    acc(venue.ammConfig, false, false),
+    acc(venue.pool, false, true),
+    acc(i.account, false, true),
+    acc(o.account, false, true),
+    acc(i.vault, false, true),
+    acc(o.vault, false, true),
+    acc(i.program, false, false),
+    acc(o.program, false, false),
+    acc(i.mint, false, false),
+    acc(o.mint, false, false),
+    acc(venue.observation, false, true),
+  ], [...SOLANA_CPMM_SWAP_BASE_INPUT, ...u64le(amountIn), ...u64le(minOut)]);
+}
+
+/**
+ * W's Raydium AMM v4 swap_base_in_v2 (tag 16) of exactly `amountIn` for at least `minOut` (amm-v4.ts; processor.rs's 8
+ * accounts in order): on a buy W's wrapped SOL in, the coin out; on a sell the reverse.
+ */
+function ammV4Swap(venue: Extract<SolanaPoolBuyVenue, { kind: "raydium-amm-v4" }>, wallet: string, side: "buy" | "sell", amountIn: bigint, minOut: bigint): SolanaApiInstruction {
+  if (venue.tokenProgram !== SOLANA_TOKEN_PROGRAM) throw new Error("an AMM v4 coin must be an SPL Token mint");
+  const wsol = solanaAta(wallet, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  const coin = solanaAta(wallet, venue.mint, SOLANA_TOKEN_PROGRAM);
+  const [src, dst] = side === "buy" ? [wsol, coin] : [coin, wsol];
+  return ix(SOLANA_AMM_V4_PROGRAM, [
+    acc(SOLANA_TOKEN_PROGRAM, false, false),
+    acc(venue.pool, false, true),
+    acc(SOLANA_AMM_V4_AUTHORITY, false, false),
+    acc(venue.coinVault, false, true),
+    acc(venue.pcVault, false, true),
+    acc(src, false, true),
+    acc(dst, false, true),
+    acc(wallet, true, false),
+  ], [SOLANA_AMM_V4_SWAP_BASE_IN_V2, ...u64le(amountIn), ...u64le(minOut)]);
+}
+
 /** The buy itself, W the venue's `user`: spend exactly `spend` lamports for at least `minOut` of the token. */
 export function solanaPoolVenueBuy(venue: SolanaPoolBuyVenue, wallet: string, spend: bigint, minOut: bigint): SolanaApiInstruction {
   if (!isU64(spend) || spend === 0n || !isU64(minOut)) throw new Error("spend and minOut must be u64s, spend above 0");
   const tp = venue.tokenProgram;
   if (tp !== SOLANA_TOKEN_PROGRAM && tp !== SOLANA_TOKEN_2022_PROGRAM) throw new Error("the token program must be Token or Token-2022");
   if (venue.kind === "dlmm") return dlmmSwap(venue, wallet, "buy", spend, minOut);
+  if (venue.kind === "raydium-cpmm") return cpmmSwap(venue, wallet, "buy", spend, minOut);
+  if (venue.kind === "raydium-amm-v4") return ammV4Swap(venue, wallet, "buy", spend, minOut);
   if (venue.kind === "pump-curve") {
     const creatorVault = solanaProgramAddress([enc("creator-vault"), base58.decode(venue.creator)], SOLANA_PUMP_PROGRAM);
     return ix(SOLANA_PUMP_PROGRAM, [
@@ -469,10 +554,10 @@ const transfer = (from: string, to: string, lamports: bigint): SolanaApiInstruct
  */
 let stepPrograms: readonly string[] | undefined;
 export const solanaPoolStepPrograms = (): readonly string[] =>
-  (stepPrograms ??= Object.freeze([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_DLMM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SYSTEM_PROGRAM]));
+  (stepPrograms ??= Object.freeze([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_DLMM_PROGRAM, SOLANA_CPMM_PROGRAM, SOLANA_AMM_V4_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_SYSTEM_PROGRAM]));
 
-/** What W does with its chunk, in order: its token account, the wrap (PumpSwap, DLMM), the buy, the unwrap (PumpSwap,
- *  DLMM). */
+/** What W does with its chunk, in order: its token account, the wrap (every venue but pump's curve), the buy, the unwrap
+ *  (the same). */
 export function solanaPoolBuySteps(venue: SolanaPoolBuyVenue, wallet: string, spend: bigint, minOut: bigint): SolanaApiInstruction[] {
   const buy = solanaPoolVenueBuy(venue, wallet, spend, minOut);
   const base = createIdempotent(wallet, venue.mint, venue.tokenProgram);
@@ -597,12 +682,12 @@ export const solanaSellFloor = (expectedOut: bigint, slippageBps: number): bigin
  */
 export function solanaPoolSellSteps(venue: SolanaPoolBuyVenue, wallet: string, amount: bigint, minOut: bigint): SolanaApiInstruction[] {
   if (!isU64(amount) || amount === 0n || !isU64(minOut) || minOut === 0n) throw new Error("amount and minOut must be u64s above 0");
-  if (venue.kind === "dlmm") {
-    // W's wrapped-SOL account made, swap2 of the coin into it, the account closed so W ends with plain SOL
+  if (venue.kind === "dlmm" || venue.kind === "raydium-cpmm" || venue.kind === "raydium-amm-v4") {
+    // W's wrapped-SOL account made, the swap of the coin into it, the account closed so W ends with plain SOL
     const wsol = solanaAta(wallet, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
     return [
       createIdempotent(wallet, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM),
-      dlmmSwap(venue, wallet, "sell", amount, minOut),
+      venue.kind === "dlmm" ? dlmmSwap(venue, wallet, "sell", amount, minOut) : venue.kind === "raydium-cpmm" ? cpmmSwap(venue, wallet, "sell", amount, minOut) : ammV4Swap(venue, wallet, "sell", amount, minOut),
       ix(SOLANA_TOKEN_PROGRAM, [acc(wsol, false, true), acc(wallet, false, true), acc(wallet, true, false)], [9]), // CloseAccount
     ];
   }
@@ -689,7 +774,7 @@ const TOKEN_ACCOUNT_SIZE = 165;
 export const SOLANA_POOL_VOLUME_ACCOUNT_SIZE = { "pump-curve": 137, pumpswap: 137 } as const;
 deepFreeze(SOLANA_POOL_VOLUME_ACCOUNT_SIZE);
 /** The rent of the volume account a buy on `kind` makes for W: pump's and PumpSwap's; a DLMM swap makes none. */
-const volumeRent = (rent: SolanaRent, kind: unknown): bigint => (kind === "dlmm" ? 0n : solanaRentMin(rent, perPump(SOLANA_POOL_VOLUME_ACCOUNT_SIZE, kind)));
+const volumeRent = (rent: SolanaRent, kind: unknown): bigint => (kind === "dlmm" || kind === "raydium-cpmm" || kind === "raydium-amm-v4" ? 0n : solanaRentMin(rent, perPump(SOLANA_POOL_VOLUME_ACCOUNT_SIZE, kind)));
 /** A per-venue constant of pump's two venues (perVenue over the pump venues only). */
 function perPump<T>(table: Readonly<Record<"pump-curve" | "pumpswap", T>>, kind: unknown): T {
   if (typeof kind !== "string" || !Object.hasOwn(table, kind)) throw new Error(`no such venue ${typeof kind === "string" ? kind.slice(0, 40) : typeof kind}`);
@@ -717,7 +802,7 @@ function perVenue<T>(table: Readonly<Record<SolanaPoolVenue, T>>, kind: unknown)
 export const SOLANA_POOL_SELL_FEE = SOLANA_LAMPORTS_PER_SIGNATURE;
 /** The bytes of the account W keeps rent for up front: none beyond its own on pump's curve (rent(0)), the wrapped-SOL
  *  account on PumpSwap (whose rent is above rent(0), so it covers W's own floor too). */
-const SELL_UP_FRONT_SIZE = { "pump-curve": 0, pumpswap: TOKEN_ACCOUNT_SIZE, dlmm: TOKEN_ACCOUNT_SIZE } as const;
+const SELL_UP_FRONT_SIZE = { "pump-curve": 0, pumpswap: TOKEN_ACCOUNT_SIZE, dlmm: TOKEN_ACCOUNT_SIZE, "raydium-cpmm": TOKEN_ACCOUNT_SIZE, "raydium-amm-v4": TOKEN_ACCOUNT_SIZE } as const;
 /**
  * W's accounts a PumpSwap sell of a cashback coin names, writable: W's PumpSwap volume account (137 bytes, as the
  * PumpSwap buy makes it: SOLANA_POOL_VOLUME_ACCOUNT_SIZE) and its wrapped-SOL account (165), the remaining accounts
@@ -748,7 +833,7 @@ export function solanaPoolSellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "cas
 export function solanaPoolBuySellNeed(venue: Pick<SolanaPoolBuyVenue, "kind" | "cashback">, rent: SolanaRent): bigint {
   perVenue(SELL_UP_FRONT_SIZE, venue.kind);
   // a DLMM coin sells on its pair: the sell makes W's wrapped-SOL account, no cashback account
-  if (venue.kind === "dlmm") return solanaPoolSellNeed({ kind: "dlmm", cashback: false }, rent);
+  if (venue.kind === "dlmm" || venue.kind === "raydium-cpmm" || venue.kind === "raydium-amm-v4") return solanaPoolSellNeed({ kind: venue.kind, cashback: false }, rent);
   return venue.kind === "pump-curve"
     ? solanaPoolSellNeed({ kind: "pumpswap", cashback: venue.cashback }, rent)
     : solanaPoolSellNeed(venue, rent, { ammVolume: true, ammVolumeAta: true });
@@ -798,7 +883,7 @@ export function solanaPoolBuyFunds(release: SolanaPoolBuyPiece | readonly Solana
   const kept = req.spend + solanaRentMin(rent, venue.tokenAccountSize) + volumeRent(rent, venue.kind) +
     (venue.kind === "pumpswap" && venue.cashback ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   // PumpSwap and DLMM hold the spend in W's wrapped-SOL account until the buy (its rent comes back when it is closed)
-  const peak = kept + (venue.kind === "pumpswap" || venue.kind === "dlmm" ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
+  const peak = kept + (venue.kind !== "pump-curve" ? solanaRentMin(rent, TOKEN_ACCOUNT_SIZE) : 0n);
   const left = chunk - kept;
   const need = solanaPoolBuySellNeed(venue, rent);
   const problem =
@@ -989,7 +1074,7 @@ export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRel
   };
   let built = compile(true);
   // after the first compile, which refuses a venue of another token or of no known kind first
-  const venueProgram = venue.kind === "pump-curve" ? SOLANA_PUMP_PROGRAM : venue.kind === "pumpswap" ? SOLANA_PUMP_AMM_PROGRAM : SOLANA_DLMM_PROGRAM;
+  const venueProgram = perVenue(VENUE_PROGRAM, venue.kind);
   if (!chain.table.table.addresses.includes(venueProgram)) throw new SolanaPoolBuyError("venue_not_in_table", `our lookup table holds no account of the ${venue.kind} program`);
   if (built.size > SOLANA_MAX_TX_BYTES) built = compile(false);
   const { instructions, message } = built;
@@ -1081,6 +1166,7 @@ function ammConfigFeeRecipient(global: SolanaPoolAccount, mayhem = false): strin
 
 export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accounts: readonly (SolanaPoolAccount | null)[], pick: (n: number) => number = () => 0): SolanaPoolBuyVenue {
   if (kind === "dlmm") throw new Error("a DLMM venue is read from its pair (solanaDlmmBuyVenueOf)");
+  if (kind === "raydium-cpmm" || kind === "raydium-amm-v4") throw new Error("a Raydium venue is read from its pool (solanaRaydiumBuyVenueOf)");
   const [m, main, global] = accounts;
   if (!m || !main || !global) throw new Error("an account is missing");
   if (m.owner !== SOLANA_TOKEN_PROGRAM && m.owner !== SOLANA_TOKEN_2022_PROGRAM) throw new Error(`mint owned by ${m.owner}`);
@@ -1126,6 +1212,7 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
 export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, SolanaRpc], kind: SolanaPoolVenue, mint: string, pick: (n: number) => number = randomIndex): Promise<SolanaPoolBuyVenue> {
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   if (kind === "dlmm") throw new Error("a DLMM venue is read from its pair (readSolanaDlmmBuyVenue)");
+  if (kind === "raydium-cpmm" || kind === "raydium-amm-v4") throw new Error("a Raydium venue is read from its pool (readSolanaRaydiumBuyVenue)");
   const addr = solanaPoolAddresses(mint);
   const list = kind === "pump-curve" ? [mint, addr.curve, PUMP_GLOBAL] : [mint, addr.pool, AMM_GLOBAL_CONFIG];
   const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }]))));
@@ -1224,6 +1311,89 @@ export async function readSolanaDlmmBuyVenue(providers: readonly [SolanaRpc, Sol
   return venues[0]!;
 }
 
+/** The Raydium accounts a venue read names, in order: the mint, the pool, the Clock. */
+const RAYDIUM_VENUE_LIST = (mint: string, pool: string): string[] => [mint, pool, "SysvarC1ock11111111111111111111111111111111"];
+
+/**
+ * A Raydium pool as the buy and the sell need it, from one provider's read of [mint, pool, Clock]: a CPMM pool of
+ * `mint` and wSOL (wSOL on SPL Token, the coin on its mint's program, swap enabled and open by the Clock, a creator fee
+ * mode the program knows, a coin whose Token-2022 extensions dlmm.ts solanaCoinTransferFee prices), or an AMM v4 pool of
+ * `mint` and wSOL (a status that swaps, open by the Clock, an SPL Token coin). Any other pool: SolanaPoolBuyError
+ * venue_not_built.
+ */
+export function solanaRaydiumBuyVenueOf(kind: "raydium-cpmm" | "raydium-amm-v4", mint: string, pool: string, accounts: readonly (SolanaPoolAccount | null)[]): Extract<SolanaPoolBuyVenue, { kind: "raydium-cpmm" | "raydium-amm-v4" }> {
+  const [m, pa, clock] = accounts;
+  if (!m || !pa || !clock) throw new Error("an account is missing");
+  if (m.owner !== SOLANA_TOKEN_PROGRAM && m.owner !== SOLANA_TOKEN_2022_PROGRAM) throw new Error(`mint owned by ${m.owner}`);
+  if (m.data.length < 82) throw new Error("the mint is shorter than a mint");
+  if (clock.owner !== "Sysvar1111111111111111111111111111111111111" || clock.data.length !== 40) throw new Error("not the Clock sysvar");
+  const dv = new DataView(clock.data.buffer, clock.data.byteOffset, 40);
+  const epoch = dv.getBigUint64(16, true);
+  const now = dv.getBigInt64(32, true);
+  const notBuilt = (why: string): never => {
+    throw new SolanaPoolBuyError("venue_not_built", why);
+  };
+  const base = { mint, decimals: m.data[44] as number, tokenProgram: m.owner, tokenAccountSize: solanaTokenAccountSize(m), cashback: false as const, pool };
+  if (kind === "raydium-cpmm") {
+    const p = solanaDecodeCpmmPool(pa);
+    const s = solanaCpmmSide(p, mint);
+    if (!s) return notBuilt("the CPMM pool is not this coin's against wSOL");
+    if ((s.solIs0 ? p.program0 : p.program1) !== SOLANA_TOKEN_PROGRAM) notBuilt("the pool's wSOL side is not SPL Token");
+    if ((s.solIs0 ? p.program1 : p.program0) !== m.owner) throw new Error("the pool's token program is not the mint's program");
+    if (p.creatorFeeOn > 2) notBuilt("the CPMM pool's creator fee mode is not known");
+    if (!solanaCpmmLive(p, now)) notBuilt("the CPMM pool does not swap now");
+    try {
+      solanaCoinTransferFee(m, epoch);
+    } catch (e) {
+      notBuilt(`the coin's mint is not priced: ${(e as Error).message}`);
+    }
+    return { kind, ...base, ammConfig: p.ammConfig, solVault: s.solIs0 ? p.vault0 : p.vault1, coinVault: s.solIs0 ? p.vault1 : p.vault0, observation: p.observation };
+  }
+  const p = solanaDecodeAmmV4Pool(pa);
+  if (!solanaAmmV4Side(p, mint)) return notBuilt("the AMM v4 pool is not this coin's against wSOL");
+  if (m.owner !== SOLANA_TOKEN_PROGRAM) notBuilt("an AMM v4 swap moves SPL Token coins only");
+  if (!solanaAmmV4Live(p, now)) notBuilt("the AMM v4 pool does not swap now");
+  return { kind, ...base, coinVault: p.coinVault, pcVault: p.pcVault };
+}
+
+/** A Raydium venue read on both providers: the pool's static bytes the same on both (its kind's moving bytes masked) and
+ *  the same venue from each. venue_not_built only when both providers read it so. */
+export async function readSolanaRaydiumBuyVenue(providers: readonly [SolanaRpc, SolanaRpc], kind: "raydium-cpmm" | "raydium-amm-v4", mint: string, pool: string): Promise<Extract<SolanaPoolBuyVenue, { kind: "raydium-cpmm" | "raydium-amm-v4" }>> {
+  if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
+  if (kind !== "raydium-cpmm" && kind !== "raydium-amm-v4") throw new Error("not a Raydium venue");
+  if (!isKey(mint) || !isKey(pool)) throw new Error("the mint and the pool must be addresses");
+  const list = RAYDIUM_VENUE_LIST(mint, pool);
+  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }]))));
+  const parsed = reads.map((r) => solanaParseAccountsAnswer(r, list.length));
+  if (!parsed[0] || !parsed[1]) throw new Error("a provider's answer is not an accounts read");
+  const moving = kind === "raydium-cpmm" ? SOLANA_CPMM_POOL_MOVING : SOLANA_AMM_V4_POOL_MOVING;
+  const [pa, pb] = [parsed[0].accounts[1], parsed[1].accounts[1]];
+  if (!pa || !pb || pa.owner !== pb.owner || pa.data.length !== pb.data.length || pa.data.some((x, i) => x !== pb.data[i] && !moving.some(([a, b]) => i >= a && i < b))) {
+    throw new Error(`the providers disagree on the ${kind} pool`);
+  }
+  const got = parsed.map((r): { venue: Extract<SolanaPoolBuyVenue, { kind: "raydium-cpmm" | "raydium-amm-v4" }> } | { error: unknown } => {
+    try {
+      return { venue: solanaRaydiumBuyVenueOf(kind, mint, pool, r!.accounts) };
+    } catch (e) {
+      if (e instanceof SolanaPoolBuyError && e.code === "venue_not_built") return { error: e };
+      throw e;
+    }
+  });
+  const built = got.filter((g) => "venue" in g).length;
+  if (built === 0) throw (got[0] as { error: unknown }).error;
+  const venues = got.map((g) => ("venue" in g ? g.venue : null));
+  if (built === 1 || JSON.stringify(venues[0]) !== JSON.stringify(venues[1])) throw new Error("the providers disagree on the venue's accounts");
+  return venues[0]!;
+}
+
+/** A venue the reference priced, read for `side` where it priced it: pump's two venues from the mint, a DLMM pair or a
+ *  Raydium pool at its address (a DLMM pair's bin arrays walk the side's way). */
+export function readSolanaVenueAt(providers: readonly [SolanaRpc, SolanaRpc], kind: SolanaPoolVenue, mint: string, address: string, side: "buy" | "sell", pick?: (n: number) => number): Promise<SolanaPoolBuyVenue> {
+  if (kind === "dlmm") return readSolanaDlmmBuyVenue(providers, mint, address, side);
+  if (kind === "raydium-cpmm" || kind === "raydium-amm-v4") return readSolanaRaydiumBuyVenue(providers, kind, mint, address);
+  return readSolanaPoolBuyVenue(providers, kind, mint, ...(pick ? [pick] : []));
+}
+
 /** Every venue the pool buy builds (solanaPoolVenueBuy): each has its own frozen lookup table, made from
  *  readSolanaPoolTableVenue and solanaPoolBuyTableAccounts (contracts/pool-solana/scripts/venue-table.mjs). */
 export const SOLANA_POOL_BUY_VENUES: readonly SolanaPoolVenue[] = Object.freeze(Object.keys(SOLANA_POOL_BUY_CU) as SolanaPoolVenue[]);
@@ -1239,7 +1409,7 @@ export function solanaPoolTableVenueOf(kind: SolanaPoolVenue, global: SolanaPool
   };
   if (kind === "pump-curve") return { kind, feeRecipient: pumpGlobalFeeRecipient(global), buybackFeeRecipients: list(PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
   if (kind === "pumpswap") return { kind, protocolFeeRecipient: ammConfigFeeRecipient(global), buybackFeeRecipients: list(AMM_GLOBAL_BUYBACK_RECIPIENTS), reservedFeeRecipient: ammConfigFeeRecipient(global, true) };
-  if (kind === "dlmm") return { kind };
+  if (kind === "dlmm" || kind === "raydium-cpmm" || kind === "raydium-amm-v4") return { kind };
   throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
 }
 
@@ -1251,7 +1421,8 @@ export function solanaPoolTableVenueOf(kind: SolanaPoolVenue, global: SolanaPool
 export async function readSolanaPoolTableVenue(providers: readonly [SolanaRpc, SolanaRpc], kind: SolanaPoolVenue): Promise<SolanaPoolTableVenue> {
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   if (!SOLANA_POOL_BUY_VENUES.includes(kind)) throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
-  if (kind === "dlmm") return { kind }; // a DLMM swap names no program-wide fee account: nothing to read
+  // a DLMM or Raydium swap names no program-wide fee account: nothing to read
+  if (kind === "dlmm" || kind === "raydium-cpmm" || kind === "raydium-amm-v4") return { kind };
   const at = kind === "pump-curve" ? PUMP_GLOBAL : AMM_GLOBAL_CONFIG;
   const name = kind === "pump-curve" ? "pump Global" : "PumpSwap GlobalConfig";
   const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS, late)("getMultipleAccounts", [[at], { encoding: "base64", commitment: "finalized" }]))));
@@ -1279,7 +1450,7 @@ export const SOLANA_POOL_CURVE_FIRST_RANGE: SolanaPoolPageRange = Object.freeze(
  *  curve's buy fits 1,232 bytes at any tree size on its first range, every page past it a static key (at most 1,137 B:
  *  packages/kit/test/solana-pool-venue-tables.test.ts), so its next range is always its first and a new generation is
  *  made for it only when the venue's accounts change. */
-export const SOLANA_POOL_TABLE_GROWS: readonly SolanaPoolTableVenue["kind"][] = Object.freeze(["pumpswap", "dlmm"]);
+export const SOLANA_POOL_TABLE_GROWS: readonly SolanaPoolTableVenue["kind"][] = Object.freeze(["pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"]);
 /** A range's pages in table order: the state tree's, then the label tree's. */
 export function solanaPoolRangePages(program: string, range: SolanaPoolPageRange): string[] {
   const one = (tree: 0 | 1, [from, to]: readonly [number, number]): string[] => {

@@ -57,9 +57,11 @@ const PUMP_VENUES = ["pump-curve", "pumpswap"] as const;
 const tableVenue = (kind: "pump-curve" | "pumpswap") => readSolanaPoolTableVenue([globalProvider(kind, 0), globalProvider(kind, 1)], kind);
 
 test("the table venue reader gives the fee accounts the buy's own venue reader gives, for every venue the buy builds", async () => {
-  assert.deepEqual([...SOLANA_POOL_BUY_VENUES], ["pump-curve", "pumpswap", "dlmm"]);
+  assert.deepEqual([...SOLANA_POOL_BUY_VENUES], ["pump-curve", "pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"]);
   // a DLMM swap names no program-wide fee account: its table venue is the kind alone, read from nothing
   assert.deepEqual(await readSolanaPoolTableVenue([globalProvider("pump-curve", 0), globalProvider("pump-curve", 1)], "dlmm"), { kind: "dlmm" });
+  // nor a Raydium CPMM or AMM v4 swap (card solana-buy-reaches-raydium-and-meteora)
+  for (const kind of ["raydium-cpmm", "raydium-amm-v4"] as const) assert.deepEqual(await readSolanaPoolTableVenue([globalProvider("pump-curve", 0), globalProvider("pump-curve", 1)], kind), { kind });
   for (const kind of PUMP_VENUES) {
     const { venue } = await setup(FX[kind]);
     const t = await tableVenue(kind);
@@ -146,8 +148,9 @@ test("generations: PumpSwap's first fills its table, 135 state pages and 89 labe
     assert.equal(c.list.length, 25);
   }
   // DLMM's buy is 1,182 bytes on its table with a tip and the next page (solana-pool-buy-dlmm.test.ts): a page past its
-  // range as a static key would outgrow 1,232, so it gets generations by tree size as PumpSwap does
-  assert.deepEqual(SOLANA_POOL_TABLE_GROWS, ["pumpswap", "dlmm"]);
+  // range as a static key would outgrow 1,232, so it gets generations by tree size as PumpSwap does; so do the Raydium
+  // venues, whose buys name their pool's accounts as static keys too (1,102 and 1,024 bytes: solana-pool-buy-raydium.test.ts)
+  assert.deepEqual(SOLANA_POOL_TABLE_GROWS, ["pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"]);
   for (const g of [g1!, g2!, c1!, c2!]) {
     assert.equal(new Set(g.list).size, g.list.length);
     assert.equal(g.list[0], cfg.pool);
