@@ -171,6 +171,15 @@ test("a tag 3 inner instruction invoking Meteora DLMM (a DLMM coin's buy) is car
   assert.equal(code(await sender({ tablesA: { [TABLE]: tableData(on) } }).carry(body(wire({ inner: DLMM, table: on })))), "ok");
 });
 
+test("a tag 3 inner instruction invoking Raydium CPMM or AMM v4 (a Raydium coin's buy or sell) is carried, named in the message or loaded from a table", async () => {
+  // by their addresses: b6657467d's list had neither
+  for (const program of ["CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C", "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"]) {
+    assert.equal(verdict(wire({ inner: program })), "ok", program);
+    const on = [program, TO];
+    assert.equal(code(await sender({ tablesA: { [TABLE]: tableData(on) } }).carry(body(wire({ inner: program, table: on })))), "ok", program);
+  }
+});
+
 test("M362 (1): a tag 3 inner step invoking Token-2022 (a transfer that runs the mint's hook) is refused before any read (inner_program)", async () => {
   assert.equal(verdict(wire({ inner: SOLANA_TOKEN_2022_PROGRAM })), "inner_program");
   const calls: Calls = [];
