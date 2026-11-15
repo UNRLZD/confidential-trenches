@@ -62,8 +62,14 @@ const PYTH_FEED = "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b
 const PRICE_UPDATE_DISC = "22f123639d7ef4cd";
 const TOKEN_PROGRAMS = ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"];
 
-/** A first read's signatures (the bars before them are the history source's), and the transactions read at once. */
+/** A first read's successful signatures (the bars before them are the history source's), and the transactions read at once. */
 export const COLD_SIGS = 30;
+/** A first read's second signature page, past a first page that held fewer than COLD_SIGS successful: Solana's largest
+ *  (getSignaturesForAddress `limit` at most 1000). A bot-flooded token's newest signatures are failed transactions:
+ *  CjRGc8wH...pump at 2026-11-15T07:27:09Z, 0 successful in its newest 30, 29 in its newest 1000 (4,562 of 4,992 failed in
+ *  the 10 minutes before). Read 08:5xZ: a 1000 page of it is 246,915 bytes, 269 ms on api.mainnet-beta, 386 ms on
+ *  publicnode. */
+export const COLD_PAGE = 1_000;
 const TX_PARALLEL = 5;
 export const SIG_PAGE = 100;
 export const REFILL_MAX = 1_000;
@@ -577,26 +583,36 @@ export function createSolanaTrades(deps: {
     e.readAt = now();
   }
 
-  /** Walks `mint`'s signatures newer than `until` (all of the newest COLD_SIGS when null) and holds each transaction's
-   *  trades, each in its place in the list. The reads go newest first, TX_PARALLEL at a time, and the tape is folded
-   *  after each round (`round`), so a first read serves the newest trades after one round, not after the whole walk
-   *  (card token-page-data-complete-and-fast: 30 reads at 5 a time held a cold tape 3.8 to 7.9 s on public endpoints). */
+  /** Walks `mint`'s signatures newer than `until` (the newest COLD_SIGS successful ones when null) and holds each
+   *  transaction's trades, each in its place in the list. The reads go newest first, TX_PARALLEL at a time, and the tape
+   *  is folded after each round (`round`), so a first read serves the newest trades after one round, not after the whole
+   *  walk (card token-page-data-complete-and-fast: 30 reads at 5 a time held a cold tape 3.8 to 7.9 s on public
+   *  endpoints). */
   async function walk(e: Entry, until: string | null, round?: () => void): Promise<void> {
     const sigs: { signature: string; slot: number; err: unknown }[] = [];
+    const ok = (s: { err: unknown }): boolean => s.err === null || s.err === undefined;
     let before: string | undefined;
-    const max = until === null ? COLD_SIGS : REFILL_MAX;
-    while (sigs.length < max) {
-      const page = (await rpc("getSignaturesForAddress", [e.mint, { limit: Math.min(SIG_PAGE, max - sigs.length), commitment: "confirmed", ...(until !== null ? { until } : {}), ...(before !== undefined ? { before } : {}) }])) as unknown;
+    const cold = until === null;
+    while (cold ? sigs.filter(ok).length < COLD_SIGS : sigs.length < REFILL_MAX) {
+      // a first read's newest COLD_SIGS, then once, when they were not all successful, one COLD_PAGE before them: a
+      // bot-flooded token's newest signatures are failed transactions, and a first read of them alone held no trade
+      // (card solana-tape-rows-at-first-answer: live run 43689567273 read CjRGc8wH...pump 0 rows at +0 ms)
+      const limit = cold ? (before === undefined ? COLD_SIGS : COLD_PAGE) : Math.min(SIG_PAGE, REFILL_MAX - sigs.length);
+      const page = (await rpc("getSignaturesForAddress", [e.mint, { limit, commitment: "confirmed", ...(until !== null ? { until } : {}), ...(before !== undefined ? { before } : {}) }])) as unknown;
       if (!Array.isArray(page)) throw new Error("signatures");
       for (const s of page as Record<string, unknown>[]) {
         if (typeof s?.signature === "string" && Number.isSafeInteger(s.slot)) sigs.push({ signature: s.signature, slot: s.slot as number, err: s.err });
       }
-      if (page.length < SIG_PAGE || until === null) break;
+      if (page.length < limit || sigs.length === 0 || (cold && before !== undefined)) break;
       before = sigs[sigs.length - 1]!.signature;
     }
     sigs.reverse();
-    // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time
-    const todo = sigs.filter((s) => (s.err === null || s.err === undefined) && !e.held.has(s.signature)).map((s) => ({ ...s, order: ++seq }));
+    // each transaction's place is the list's (oldest first), taken before the reads, which go TX_PARALLEL at a time; a
+    // first read keeps the newest COLD_SIGS successful
+    const todo = sigs
+      .filter((s) => ok(s) && !e.held.has(s.signature))
+      .slice(cold ? -COLD_SIGS : 0)
+      .map((s) => ({ ...s, order: ++seq }));
     for (let k = todo.length; k > 0; k -= TX_PARALLEL) {
       await Promise.all(
         todo.slice(Math.max(0, k - TX_PARALLEL), k).map(async (s) => {

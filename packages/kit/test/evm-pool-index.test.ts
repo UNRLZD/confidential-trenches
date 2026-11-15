@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { evmPoolIdOf, evmPoolIndexSync, type EvmPoolIndexConfig, type EvmPoolIndexData } from "../src/checks/evm/pool-index.ts";
 import { EvmQuoteError, evmJsonRpc, type EvmPoolKey, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import * as poolIndex from "../src/checks/evm/pool-index.ts";
+import { evmPaceReset, evmProviderHold } from "../src/checks/evm/pace.ts";
 // read off the module, so this file still loads (and each test fails on its own) on a build without it
 const INDEX_LIMITED_WAIT_MS = (poolIndex as { INDEX_LIMITED_WAIT_MS?: number }).INDEX_LIMITED_WAIT_MS;
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -456,6 +457,40 @@ test("Q1: a 429 whose Retry-After is 0 or a past date waits at least the backoff
     assert.ok(asked < 20, `${retry}: ${asked} requests`);
     assert.ok(slept >= INDEX_LIMITED_WAIT_MS!, `${retry}: slept ${slept} ms`);
   }
+});
+
+// card evm-taps-meet-no-429: a throttle or a refused connection any reader meets holds the provider for every reader
+// (pace.ts); the index, which has no other reader to ask, waits the hold out and sends it nothing meanwhile (Robinhood's
+// own refused the index's getLogs at 1 to 3 posts a minute, 2026-11-15 08:13-08:48Z)
+test("H1: a reader held by another reader's throttle is sent nothing until the hold ends, then the sync completes", async () => {
+  const head = 1_000_000;
+  const ps = pools(3, head);
+  const a: Reader = { head, pools: ps, calls: [] };
+  const b: Reader = { head, pools: ps, calls: [] };
+  const inner = reader(a);
+  const url = "https://held-reader.example";
+  const viaFetch = (async (_u: string, init?: RequestInit) => {
+    const sent = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }[];
+    const out = await inner(sent.map((c) => ({ method: c.method, params: c.params })));
+    return new Response(JSON.stringify(out.map((o, id) => ({ jsonrpc: "2.0", id, ...(o as object) }))), { status: 200 });
+  }) as unknown as typeof fetch;
+  evmPaceReset();
+  evmProviderHold(url, 30_000);
+  const naps: number[] = [];
+  let sentAtFirstNap = -1;
+  const r = await evmPoolIndexSync(null, cfgOf(a, b, {
+    readers: [evmJsonRpc(url, viaFetch), reader(b)],
+    // the hold ends while the index waits (its nap): a sync that had sent before it holds a.calls already
+    nap: async (ms) => {
+      if (naps.push(ms) === 1) sentAtFirstNap = a.calls.length;
+      evmPaceReset();
+    },
+  }));
+  evmPaceReset();
+  assert.equal(sentAtFirstNap, 0, "nothing is sent to the held reader before its hold ends");
+  assert.ok(naps[0]! > 29_000 && naps[0]! <= 30_000, `the wait is the hold's: ${naps[0]} ms`);
+  assert.equal(r.error, null);
+  assert.equal(r.coversThrough, head);
 });
 
 test("Q3: a pool one reader logs inside the depth whose transaction's receipt on the other is another block refuses", async () => {

@@ -34,7 +34,7 @@
 import type { EvmPoolKey, EvmRpc } from "./quote.ts";
 // `limited`: a call's error naming the reader's rate limit, in the quote's own words: asked again later, never as halves,
 // which would spend the halves on a reader that is only busy
-import { EvmQuoteError, evmErrorLimited as limited } from "./quote.ts";
+import { EvmQuoteError, evmErrorLimited as limited, evmRpcHeldMs } from "./quote.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -197,6 +197,17 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
     let waited = 0;
     let waits = 0;
     for (let tries = 0; tries < INDEX_TRIES; ) {
+      // a reader any reader on the device met a throttle or a refused connection on is held (pace.ts): the index has no
+      // other reader to ask, so it waits the hold out, inside the same wait a 429 has, and sends it nothing meanwhile
+      // (card evm-taps-meet-no-429: Robinhood's own refused the index's getLogs at 1 to 3 posts a minute, 2026-11-15)
+      const held = evmRpcHeldMs(c.readers[r]);
+      if (held > 0 && waited < INDEX_LIMITED_WAIT_MS) {
+        const ms = Math.min(held, INDEX_LIMITED_WAIT_MS - waited);
+        waited += ms;
+        stats.limitedMaxMs[r] = Math.max(stats.limitedMaxMs[r], waited);
+        await nap(ms);
+        continue;
+      }
       stats.requests[r]++;
       stats.getLogs[r] += calls.filter((x) => x.method === "eth_getLogs").length;
       try {

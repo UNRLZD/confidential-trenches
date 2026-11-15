@@ -14,6 +14,7 @@ import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote,
 import { EVM_QUOTE_MAX_KEYS, evmBuyRevertedPoolsWith, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolSellQuoteWith, evmSellRevertedPoolsWith, type EvmPoolSellQuote, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 // as namespaces: the red run before card evm-route-parity reads them where evmSellRouteOf and evmSellRouteCheck are not
 import * as quoteMod from "../src/checks/evm/quote.ts";
+import { evmPaceReset, evmPaceTake, evmProviderHeld, evmProviderHold } from "../src/checks/evm/pace.ts";
 import * as sellMod from "../src/trade/evm/sell-unpinned.ts";
 import { evmQuotedBuy, evmQuotedSell } from "../src/trade/evm/quoted.ts";
 const { evmSellRouteOf } = quoteMod as unknown as { evmSellRouteOf: (r: EvmRoute) => import("../src/trade/evm/sell-unpinned.ts").EvmSellRoute };
@@ -5325,6 +5326,85 @@ test("SP4 a first scan provider whose rate limit would hold a warm scan's reques
   assert.ok(throttled === 1 && asked.length > 0, `${throttled} throttled, ${asked.length} on the second`);
 });
 
+// card evm-taps-meet-no-429: one pace and one hold per provider for every reader (src/checks/evm/pace.ts)
+test("PACE1 posts to a paced provider leave at its pace across every reader: mainnet.base.org takes 12 calls at once, then 12 a second, so no second holds more than 24 (its error names 25)", { timeout: 30_000 }, () => onTestClock(async () => {
+  evmPaceReset();
+  let sent = 0;
+  const f = (async (_u: string, init: RequestInit) => {
+    sent++;
+    const calls = JSON.parse(init.body as string) as { id: number }[];
+    return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: "0x1" }))));
+  }) as unknown as typeof fetch;
+  // the pace judged on the test clock's own timers, never by reading a clock: a mark set at each time reads how many
+  // posts had left by then (the clock fires every timer in order of its time)
+  const marks = [50, 450, 550, 950, 1_050, 1_450, 1_550];
+  const by: number[] = [];
+  for (const m of marks) setTimeout(() => by.push(sent), m);
+  // two readers, each its own provider object for the same URL (a quote's and the index's), 5 posts of 6 calls each
+  const a = evmJsonRpc("https://mainnet.base.org", f);
+  const b = evmJsonRpc("https://mainnet.base.org/", f);
+  const six = Array.from({ length: 6 }, () => ({ method: "eth_blockNumber", params: [] }));
+  await Promise.all([a(six), b(six), a(six), b(six), a(six)]);
+  await new Promise((r) => setTimeout(r, 1_600));
+  // the first two at once (12 calls), each next 6 calls 0.5 s on: 2 by 50 and 450 ms, 3 by 550 and 950, 4 by 1,050 and
+  // 1,450, 5 by 1,550; so no second holds more than 3 posts, 18 calls (24 at most)
+  assert.deepEqual(by, [2, 2, 3, 3, 4, 4, 5], `posts sent by ${marks.join(", ")} ms`);
+  evmPaceReset();
+}));
+
+test("PACE2 a throttle one reader meets holds the provider for every reader: the quote's ranking puts it last though no quote provider met it", { timeout: 30_000 }, () => onTestClock(async () => {
+  evmPaceReset();
+  quoteMod.evmSpeedReset();
+  const urls = ["https://held.pace2.test", "https://open.pace2.test"];
+  assert.deepEqual(evmRanked!(urls), urls);
+  // the index's reader or a scan, a provider object of its own, answered 429
+  const reader = evmJsonRpc(urls[0]!, (async () => new Response("", { status: 429 })) as unknown as typeof fetch);
+  await assert.rejects(reader([{ method: "eth_getLogs", params: [] }]));
+  assert.equal(evmProviderHeld(urls[0]!), true);
+  assert.deepEqual(evmRanked!(urls), [urls[1], urls[0]]);
+  // a refused connection holds it too (a browser's form of a 429 whose CORS headers it refuses)
+  const refused = evmJsonRpc("https://cors.pace2.test", (async () => {
+    throw new TypeError("Failed to fetch");
+  }) as unknown as typeof fetch);
+  await assert.rejects(refused([{ method: "eth_call", params: [] }]));
+  assert.equal(evmProviderHeld("https://cors.pace2.test"), true);
+  evmPaceReset();
+}));
+
+test("PACE3 a held provider is not asked as a backup while two unheld are in the round: a slow one is waited on; one that fails lets the held one answer", { timeout: 30_000 }, () => onTestClock(async () => {
+  evmPaceReset();
+  quoteMod.evmSpeedReset();
+  const token = "0x00000000000000000000000000000000005ace03";
+  const req = { chain: "base" as const, token, amountIn: AMOUNT, slippageBps: 100, route: bestRoute(token) };
+  const urls = ["https://fast.pace3.test", "https://slow.pace3.test", "https://held.pace3.test"];
+  const asked: Record<string, number> = {};
+  const net = (failSlow: boolean) =>
+    (async (u: string, init: RequestInit) => {
+      const h = new URL(u).hostname;
+      asked[h] = (asked[h] ?? 0) + 1;
+      const calls = JSON.parse(init.body as string) as { id: number; method: string; params: unknown[] }[];
+      if (h.startsWith("slow")) {
+        await new Promise((r) => setTimeout(r, 1_200));
+        if (failSlow) throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+      }
+      const answers = await chain([best(token)], h.startsWith("fast") ? 0 : 1)(calls.map((c) => ({ method: c.method, params: c.params })));
+      return new Response(JSON.stringify(answers.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
+    }) as unknown as typeof fetch;
+  evmProviderHold(urls[2]!);
+  const v = await verdict(evmPoolBuyQuoteWith(req, quoteMod.evmProviders(urls, net(false)), NOW));
+  assert.equal((v as { accepted: boolean }).accepted, true, String((v as { code?: string }).code));
+  assert.equal(asked["held.pace3.test"] ?? 0, 0, `the held provider was asked ${asked["held.pace3.test"]} times`);
+  // the slow one refuses its connection: one unheld is left, so the held one answers in its place
+  for (const k of Object.keys(asked)) delete asked[k];
+  quoteMod.evmSpeedReset();
+  evmPaceReset();
+  evmProviderHold(urls[2]!);
+  const w = await verdict(evmPoolBuyQuoteWith(req, quoteMod.evmProviders(urls, net(true)), NOW));
+  assert.equal((w as { accepted: boolean }).accepted, true, String((w as { code?: string }).code));
+  assert.ok((asked["held.pace3.test"] ?? 0) > 0, "the held provider was not asked with one unheld left");
+  evmPaceReset();
+}));
+
 test("SP429 card evm-taps-meet-no-429: a first scan provider that answers a warm scan 429 with no Retry-After is asked nothing more: the request goes to the second at once, and each warm quote within the hold reads its head and blocks on the second", { timeout: 30_000 }, () => onTestClock(async () => {
   // rpc.mainnet.chain.robinhood.com answered 16 warm-scan posts 429 in 6.4 s, three taps in a row, no Retry-After, while
   // daybreak and Pocket stood by (read-only run from the Mac, 2026-11-15 08:05Z): each 429 was asked again after 0.5,
@@ -5352,13 +5432,14 @@ test("SP429 card evm-taps-meet-no-429: a first scan provider that answers a warm
   assert.deepEqual(again.v, below);
   assert.deepEqual(posts.slice(before), [], "the held first was asked again within its hold");
   assert.ok(second.length > 0 && second.every(([a, b]) => a === 5_000_011 && b === 5_000_030), `the second read ${JSON.stringify(second)}`);
-  // a new token's first quote within the hold, 20,000 blocks to scan (past one round of the second's, as the gap past
-  // an index and its margin is): the second reads them in its own spans, the first is asked nothing
+  // a new token's first quote within the hold, 9,000 blocks to scan (past one round of the second's 4 x 2,000 as one
+  // scan, as the gap past an index and its margin is; inside it as each request): the second reads them in its own
+  // spans, the first is asked nothing
   const token2 = "0x00000000000000000000000000000000005c450c";
-  await pairQuote(token2, scanner(4_980_000, []), scanner(4_980_000, []), "robinhood", 4_980_000);
+  await pairQuote(token2, scanner(4_991_030, []), scanner(4_991_030, []), "robinhood", 4_991_030);
   const at2 = posts.length;
   const span2: [number, number][] = [];
-  const cold = await pairQuote(token2, first, scanner(5_000_030, realAt(token2, 4_990_000), span2), "robinhood", 5_000_030);
+  const cold = await pairQuote(token2, first, scanner(5_000_030, realAt(token2, 4_995_000), span2), "robinhood", 5_000_030);
   assert.deepEqual(cold.v, below);
   assert.deepEqual(posts.slice(at2), [], "the held first was asked a cold scan's blocks within its hold");
   assert.ok(span2.length > 0 && span2.every(([a, b]) => b - a + 1 <= 2_000), `the second read ${JSON.stringify(span2)}`);
@@ -5385,6 +5466,30 @@ test("SP429b card evm-taps-meet-no-429: a first scan provider whose throttle a b
   const again = await pairQuote(token, first, scanner(5_000_030, realAt(token, 5_000_005)), "robinhood", 5_000_030);
   assert.deepEqual(again.v, below);
   assert.deepEqual(posts.slice(before), [], "the first was asked again within its hold");
+}));
+
+test("PACE4 card evm-taps-meet-no-429: a warm scan request whose first provider's pace has no turn free goes to the next at once, never waiting its turn", { timeout: 30_000 }, () => onTestClock(async () => {
+  // rpc.mainnet.chain.robinhood.com, the scan's first, paced at 1 post a second, took 2 to 6 of each warm tap's posts and
+  // 1 to 4 s of its time (read-only run from the Mac, 2026-11-15 09:03Z)
+  evmPaceReset();
+  const token = "0x00000000000000000000000000000000005c4511";
+  const url = "https://rpc.mainnet.chain.robinhood.com";
+  const inner = scanner(5_000_010, []);
+  let firstLogs = 0;
+  const first = evmJsonRpc(url, (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    if (calls.some((c) => c.method === "eth_getLogs")) firstLogs++;
+    return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+  }) as unknown as typeof fetch);
+  await pairQuote(token, scanner(5_000_000, []), scanner(5_000_000, []), "robinhood");
+  // another reader on the device (the index, a quote) spent the provider's turns just now
+  for (const g of await Promise.all([evmPaceTake(url, 1), evmPaceTake(url, 1)])) (g as () => void)();
+  const asked: [number, number][] = [];
+  const { v } = await pairQuote(token, first, scanner(5_000_010, realAt(token, 5_000_005), asked), "robinhood", 5_000_010);
+  evmPaceReset();
+  assert.deepEqual(v, below);
+  assert.equal(firstLogs, 0, "the first was sent a warm getLogs it waited its turn for");
+  assert.ok(asked.length > 0, "the second was asked nothing");
 }));
 
 test("SP5 a first scan provider that answers a warm scan with no logs: the request goes to the second whole, never asked of the first as halves", { timeout: 30_000 }, async () => {
