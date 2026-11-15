@@ -230,7 +230,7 @@ test("the last good bars are handed over across a swap for a day, not an hour: h
   assert.deepEqual([a.status, a.asOfMs], [200, NOW], "served from the handover, dated by its read");
 });
 
-test("card helper-restart-fresh: the newest bars kept over a swap past GT_SERVE_MS are never served: on a spent budget the first read answers 429 with its wait (live run 41871356171 at 6832227: PUMP's 1h bars from 16:33:56Z served as a 200 at 16:50:11Z)", async () => {
+test("card helper-candles-never-refuse-a-listed-coin (was helper-restart-fresh's 429): the newest bars kept over a swap past GT_SERVE_MS, on a spent budget, are served dated by their own read, never an empty chart, and their re-read is queued for the next free call (release 157's app live run 43763914220: TTWO's chart empty at 21:41Z)", async () => {
   let t = NOW;
   const now = () => t;
   const gt = gecko();
@@ -240,13 +240,15 @@ test("card helper-restart-fresh: the newest bars kept over a swap past GT_SERVE_
   t += 16 * 60_000 + 15_000; // the old helper last read PUMP's chart 16 min before the swap (the fixture's bars are minute bars)
   const spent = geckoBudget(now);
   for (let i = 0; i < GT_LIMIT_PER_MIN; i++) assert.equal(spent.take("pages"), true);
-  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent, holdersRpc: chain(() => false) });
+  const queued: (() => void)[] = [];
+  const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: spent, holdersRpc: chain(() => false), later: (fn: () => void) => void queued.push(fn) });
   next.restore(st);
+  const n = gt.urls.length;
   const a = await next.candles(PUMP, "1m", null, 24);
-  assert.notEqual(a.status, 200, `never a 200 with bars ${Math.round((t - (a.asOfMs ?? t)) / 60_000)} min old`);
-  assert.equal(a.status, 429, a.body);
-  assert.equal(JSON.parse(a.body).error.code, "rate_limited");
-  assert.ok((a.retryAfterS ?? 0) >= 1, "with the wait to the next call");
+  assert.deepEqual([a.status, a.asOfMs], [200, NOW], "the handed-over bars, dated by their read: as old as they are, never as fresh");
+  assert.ok(JSON.parse(a.body).candles.length > 0);
+  assert.equal(gt.urls.length, n, "no call into the spent window");
+  assert.equal(queued.length, 1, "the re-read waits in the queue for the next free call");
   // inside the bound the kept bars still serve, dated: a swap's first loads 5 min after the old helper's read
   t = NOW + GT_SERVE_MS - 1_000;
   const spent2 = geckoBudget(now);
@@ -433,7 +435,9 @@ test("card helper-restart-fresh fold: the Trending column's third row as Discove
   const r = await idleThenSwap(12 * 60_000, { listed }, false);
   assert.deepEqual(r.answers.map((a) => a.status), Array(CROWD_429).fill(200), r.lines.join("; "));
   assert.ok(r.t - JSON.parse(r.answers[0]!.body).as_of_ms <= GT_SERVE_MS);
-  assert.ok(!r.oldGt.some((u) => u.includes("2uxaYT1")), "the fourth row by volume is not kept");
+  // card helper-candles-never-refuse-a-listed-coin: a listed row off pump.fun is read once ahead (its top pool and its
+  // bars), so it is never an empty chart; it is not kept fresh as the Trending rows are
+  assert.ok(r.oldGt.filter((u) => u.includes("2uxaYT1")).length <= 2, "the fourth row by volume is read once, never kept fresh");
   // the ahead lane's call in the window: a chart nobody holds still reads its top pool and its bars at once
   let t = NOW;
   const now = () => t;

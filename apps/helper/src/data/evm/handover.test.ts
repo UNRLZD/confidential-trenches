@@ -106,7 +106,7 @@ function swapsPart(clock: { t: number }, spent = false) {
   return { s, NOPOOL, calls: () => calls };
 }
 
-test("a chart the old helper read from GeckoTerminal is served by the next one on a spent budget, dated by the old read; past GT_SERVE_MS the 429, never the old bars", async () => {
+test("a chart the old helper read from GeckoTerminal is served by the next one on a spent budget, dated by the old read; past GT_SERVE_MS still served, dated, never an empty chart (card helper-candles-never-refuse-a-listed-coin, was the 429)", async () => {
   const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
   const old = swapsPart(clock);
   const first = await old.s.candles(old.NOPOOL, "1m", null, 60);
@@ -128,9 +128,11 @@ test("a chart the old helper read from GeckoTerminal is served by the next one o
   assert.equal(late.s.restore(handed), true);
   const l = await late.s.candles(late.NOPOOL, "1m", null, 60);
   late.s.stop();
-  // the newest bars past their bound are not served, and nothing of ours: the 429, never an empty 200 while the read
-  // is owed (card evm-chart-opens-without-a-vendor-call: live run 42995547054)
-  assert.equal(l.status, 429, "the newest bars past their bound are not served");
+  // the newest bars past their bound, on a spent budget: served, dated by their read, and the re-read queued (card
+  // helper-candles-never-refuse-a-listed-coin: the 429 answered an empty chart, release 157's app live run 43763914220)
+  assert.equal(l.status, 200, l.body);
+  assert.deepEqual(JSON.parse(l.body).candles, JSON.parse(first.body).candles);
+  assert.equal(JSON.parse(l.body).as_of_ms, JSON.parse(first.body).as_of_ms, "dated by the old read, never as fresh");
 });
 
 test("a handed-over swaps state that fails any check restores nothing: bars malformed, a key not ours, a read time ahead, too many entries", async () => {

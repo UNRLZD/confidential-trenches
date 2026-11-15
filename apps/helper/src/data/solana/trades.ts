@@ -836,7 +836,14 @@ export function createSolanaTrades(deps: {
       // a mint the lists do not hold has no bars of ours: its candles are the history source's own answer, as before
       if (!entries.has(mint) && deps.history !== undefined && (await deps.listed(mint)) !== true) return deps.history(mint, tf, to, limit, client);
       const e = await open(mint);
-      if (!("mint" in e)) return e;
+      // card helper-candles-never-refuse-a-listed-coin: a token whose walk cannot open (OPEN_MAX walks open, its 429; or
+      // nothing held yet, 503) is served the history source's chart, held ahead for every listed coin off our venues
+      // (token.ts ahead), as a token off the lists is, never a refusal while those bars answer
+      if (!("mint" in e)) {
+        if (deps.history === undefined) return e;
+        const h = await deps.history(mint, tf, to, limit, client).catch(() => e);
+        return h.status === 200 ? h : e;
+      }
       const own: Candle[] = e.book === null ? [] : e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book === null ? null : e.book.ownFrom(tf as Tf);
       let bars = own;
