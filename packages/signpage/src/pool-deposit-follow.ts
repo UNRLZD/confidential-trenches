@@ -38,8 +38,9 @@
 //   is landing (a top-up carries it), expired past its deadline with nothing seen (read on: a late send is carried).
 // - Pace: FAST_MS while a status shows a send in flight or a deposit ran; else SLOW_MS doubling to SLOW_MAX_MS (a plain
 //   send waiting for its money: SLOW_MS, no doubling, until its deadline).
-// Nothing here logs but the trace (./trace.ts, card buy-shows-every-step, through `mark`): each 1Click status read, the
-// money's arrival at U_X, each deposit from it, a round that threw and the end, public ids and amounts only. Every read names one public account (U_X) or the quote's deposit address; no request carries a
+// Nothing here logs but the trace (./trace.ts, card buy-shows-every-step: tracedFollow's deps and `mark`): each 1Click
+// status read, the money's arrival at U_X, each deposit from it, a round that threw and the end, public ids and amounts
+// only. Every read names one public account (U_X) or the quote's deposit address; no request carries a
 // key, the words, or which note is whose.
 import type { PoolAsset, PoolChain, PoolDepositStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
@@ -308,9 +309,53 @@ export function uxHeldOf(ops: readonly unknown[], chain: PoolChain, u: string): 
   }
 }
 
+/** A follow's deps that write its trace lines (./trace.ts, card buy-shows-every-step) through `mark`, around the reads
+ *  themselves so followPoolQuote's own code is unchanged: each 1Click status read of the quote's deposit address, the
+ *  first that tells 1Click saw the deposit (KNOWN_DEPOSIT_TX, PROCESSING or SUCCESS), the first read of money at U_X
+ *  on both RPCs, and each deposit from U_X with its end and tx. A mark that throws never stops the follow. */
+export function tracedFollow<D extends Pick<PoolFollowDeps, "status" | "deposit" | "balances">>(d: D, mark: (step: TraceStep, f: TraceFields) => void): D & { mark: typeof mark } {
+  const say = (step: TraceStep, f: TraceFields): void => {
+    try {
+      mark(step, f);
+    } catch {
+      /* the trace only */
+    }
+  };
+  let intents = false;
+  let arrived = false;
+  return {
+    ...d,
+    mark: say,
+    status: async (f: PoolFollowRecord, signal: AbortSignal) => {
+      const st = await d.status(f, signal);
+      say("status", { address: f.address, status: st === null ? "unread" : "status" in st ? st.status : "throttled" });
+      if (!intents && st !== null && "status" in st && (st.status === "KNOWN_DEPOSIT_TX" || st.status === "PROCESSING" || st.status === "SUCCESS")) {
+        intents = true;
+        say("intents", { address: f.address, status: st.status });
+      }
+      return st;
+    },
+    balances: async (f: Pick<PoolUx, "u">) => {
+      const b = await d.balances(f);
+      const low = b[0] < b[1] ? b[0] : b[1];
+      if (!arrived && low > 0n) {
+        arrived = true;
+        say("arrived", { address: f.u, amount: low.toString() });
+      }
+      return b;
+    },
+    deposit: async (f: PoolUx, amount: bigint, signal: AbortSignal) => {
+      const r = await d.deposit(f, amount, signal);
+      say("pool_deposit", { address: f.u, amount: amount.toString(), stage: r.end, ...(r.txs[0]?.hash ? { tx: r.txs[0].hash } : {}) });
+      return r;
+    },
+  };
+}
+
 /** Follows one pool quote to its end (in_pool past the deadline), or until the signal stops it; returns the last stage. */
 export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps, from: PoolFollowStage = "quote_checked"): Promise<PoolFollowStage> {
   let shown: PoolFollowStage = from;
+  // a round that threw, as a trace line (the trace's other lines are tracedFollow's, on the deps)
   const mark = (step: TraceStep, x: TraceFields): void => {
     try {
       deps.mark?.(step, x);
@@ -318,9 +363,6 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       /* the trace only */
     }
   };
-  // the trace's one-time lines: 1Click first telling the deposit seen, the money first at U_X
-  let toldIntents = false;
-  let toldArrived = false;
   const show = async (s: PoolFollowStage): Promise<void> => {
     if (s === shown) return;
     // a status moves the stage shown forward only (a stale answer never steps it back); the device's own reads may
@@ -394,7 +436,6 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
     const amount = askOf(deps.ladder, low, c.perRung, c.keep);
     if (amount === 0n) return false;
     const { end, txs } = await deps.deposit(f, amount, deps.signal);
-    mark("pool_deposit", { address: f.u, amount: amount.toString(), stage: end, ...(txs[0]?.hash ? { tx: txs[0].hash } : {}) });
     if (end === "filled" || end === "part_filled") filledNow = true;
     // landed only with nothing of U_X's still landing: a rung sent after the one that landed is followed first
     const went = (end === "filled" || end === "part_filled") && !(await isOpen());
@@ -460,8 +501,6 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       under = c !== null && low < c.floor ? (keep ?? { low, at: t, c }) : null;
       if (c !== null && low >= c.floor) {
         await deps.holds?.(0n);
-        if (!toldArrived) mark("arrived", { address: f.u, amount: low.toString() });
-        toldArrived = true;
         if (plain && !landed && low > base) {
           await show("in_transit");
           paid = true;
@@ -494,7 +533,6 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
                 else if (e.low > 0n) cost = await costsNow().then((c) => c.keep + c.perRung);
                 await deps.left(e.low, cost);
               }
-              mark("follow", { stage: shown, address: f.u, amount: e.low.toString() });
               return shown;
             }
           }
@@ -507,11 +545,6 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
           paid = true;
         }
         const st = plain ? null : await deps.status(f, deps.signal);
-        if (!plain) mark("status", { address: f.address, status: st === null ? "unread" : "status" in st ? st.status : "throttled" });
-        if (st !== null && "status" in st && !toldIntents && (st.status === "KNOWN_DEPOSIT_TX" || st.status === "PROCESSING" || st.status === "SUCCESS")) {
-          toldIntents = true;
-          mark("intents", { address: f.address, status: st.status });
-        }
         let refund: RefundRead | null = null;
         if (st !== null && "status" in st) {
           // REFUNDED shows nothing the chain has not read: refunded only once the carry's read finds the money under
@@ -741,7 +774,9 @@ export function poolFollows(h: PoolFollowHost) {
         const l = low.toString();
         await ops.update("ops", id, (v) => (isPoolOp(v) && v.follow.left !== l && !(low === 0n && v.follow.left === undefined) ? { ...v, follow: { ...v.follow, left: l } } : undefined));
       };
-      const end = await followPoolQuote(g, { ...d, stage, txs, left, holds, signal, mark: (step, x) => void trace(id, null, step, x) }, now.stage);
+      // the follow's end as a trace line too (said: the stage it returns, written as it passes)
+      const said = (s: PoolFollowStage): PoolFollowStage => (trace(id, null, "follow", { stage: s }), s);
+      const end = said(await followPoolQuote(g, tracedFollow({ ...d, stage, txs, left, holds, signal }, (step, x) => void trace(id, null, step, x)), now.stage));
       // the follow returns past its deadline only at in_pool; a signal's return leaves the op to the next landing
       if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...withStage(v, "in_pool", (h.now ?? Date.now)()), final: true, ...(endLeft === null ? {} : { follow: { ...v.follow, ...endLeft } }) } : undefined));
     };

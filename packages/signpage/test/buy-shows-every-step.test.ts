@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
 import { cashFirst, cashMover, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashToPoolDeps, type MoveOpRecord } from "../src/cash-to-pool.ts";
-import { followPoolQuote } from "../src/pool-deposit-follow.ts";
+import { followPoolQuote, tracedFollow } from "../src/pool-deposit-follow.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
 import { trace, traceAlias, traceBegin, traceTo, TRACE_TAG } from "../src/trace.ts";
 
@@ -243,7 +243,7 @@ test("the quote's follow writes each 1Click status read, 1Click's first sight of
   const out: { step: string; f: Record<string, unknown> }[] = [];
   const end = await followPoolQuote(
     { chain: "solana", s: "777", i: 3, u: "53WArd2utpvQ9pXiUJh2ekcLnrTeYVYwEkUmUAwVPZiT", refund_id: "ab".repeat(32), address: "6215b306511c5cb375ac153417d8ee7ed1090a2e24fe26c1510af4604f4de085", deadline_ms: 1, origin: "nep141:usdc", min_out: "20000000" },
-    {
+    tracedFollow({
       status: async () => ({ status: rounds[Math.min(k, 3)]!.status as never, delivered: null }),
       balances: async () => rounds[Math.min(k, 3)]!.bal as unknown as [bigint, bigint],
       costs: async () => ({ floor: FLOOR, perRung: PER, keep: KEEP }),
@@ -253,11 +253,10 @@ test("the quote's follow writes each 1Click status read, 1Click's first sight of
       stage: async () => {},
       sleep: async () => void (++k >= 7 && ac.abort()),
       signal: ac.signal,
-      mark: (step, f) => void out.push({ step, f: f as Record<string, unknown> }),
-    },
+    }, (step, f) => void out.push({ step, f: f as Record<string, unknown> })),
   );
   assert.equal(end, "in_pool");
-  assert.deepEqual(out.map((x) => `${x.step}:${x.f.status ?? x.f.stage ?? ""}`), ["status:PENDING_DEPOSIT", "status:PROCESSING", "intents:PROCESSING", "arrived:", "pool_deposit:filled", "follow:in_pool"]);
+  assert.deepEqual(out.map((x) => `${x.step}:${x.f.status ?? x.f.stage ?? ""}`), ["status:PENDING_DEPOSIT", "status:PROCESSING", "intents:PROCESSING", "arrived:", "pool_deposit:filled"]);
   assert.equal(out[0]!.f.address, "6215b306511c5cb375ac153417d8ee7ed1090a2e24fe26c1510af4604f4de085", "the quote's deposit address, never the intents receiver");
   assert.equal(out[3]!.f.amount, "20000000");
   assert.equal(out[4]!.f.tx, "VFC5hqbQxyVDAEybRXmeQLHEiP3rfab6AqGwZpvXWLt5dMt8k2tDjxR52N1EJTMowadauBu6iZbjgdEDDbnE9Hs");
