@@ -15,7 +15,8 @@
 //   - quotes (read only, never signed or sent; skipped with --local, as on a pull request's build): each chain's pool
 //     index synced cold on its two readers and served, then the helper's top QUOTE_ROWS list rows by liquidity, each
 //     quoted by the tap's own quote (the kit's evmPoolBuyQuoteTap) once cold and WARM_RUNS times warm. Each tap ends
-//     in a quote or a refusal whose name is true (NAMED), asks at most EVM_BUY_TAP_QUOTES kit quotes, gets no 429, and
+//     in a quote or a refusal whose name is true (NAMED), asks at most EVM_BUY_TAP_QUOTES kit quotes, gets no 429 (each
+//     one named by its tap, host, share of that host's posts and the reads it answered), and
 //     each warm tap ends within WARM_MAX_MS. The index sync's limits are reported, never judged, until each
 //     chain's index ships with the release.
 // What each part does is held by the signing page's tests (test/pool-carry-evm.test.ts, test/pool-evm-trade-open.test.ts,
