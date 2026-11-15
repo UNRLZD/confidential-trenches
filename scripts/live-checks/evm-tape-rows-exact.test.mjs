@@ -51,6 +51,13 @@ test("good: the fixed helper's Base and Robinhood tapes, every judged row exactl
   assert.ok(r.lines.some((l) => /^ok {2}robinhood: \d+ rows? judged, [1-9]\d* of them from a tape not of our own reads/.test(l)), "a vendor's rows were judged");
 });
 
+test("good_hook: the fixed helper at da17c540b, Base vendor rows judged exact, the v4 hook's own buy in tx 0x2bd3a576 not served: PASS", () => {
+  const r = judge(A.good_hook);
+  assert.deepEqual(bad(r), []);
+  assert.equal(r.exit, EXIT.PASS);
+  assert.ok(r.lines.some((l) => /^ok {2}base: \d+ rows? judged, [1-9]\d* of them from a tape not of our own reads/.test(l)), "a vendor's rows were judged");
+});
+
 test("bad: the deployed helper 0d308d3bc served CoinGecko's float amounts on Robinhood tapes: FAIL, naming each", () => {
   const r = judge(A.bad);
   assert.equal(r.exit, EXIT.FAIL);
@@ -59,7 +66,7 @@ test("bad: the deployed helper 0d308d3bc served CoinGecko's float amounts on Rob
 });
 
 test("read() asks the helper and two providers what judge() judges: each recorded run read again judges the same", async () => {
-  for (const k of ["good", "bad"]) {
+  for (const k of ["good", "good_hook", "bad"]) {
     const again = await read(A[k].base, replay(A[k]), Object.keys(A[k].chains));
     assert.deepEqual(judge(again).lines, judge(A[k]).lines, k);
   }
