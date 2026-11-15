@@ -71,7 +71,7 @@ import { pacedNearRpc } from "../../wallet/src/pace.ts";
 import { unitsOf } from "./pool-buy.ts";
 import { legCause } from "./pool-sell.ts";
 import type { Position } from "./positions.ts";
-import { vaultScope } from "./withdraw/checks.ts";
+import { planCashSpend, vaultScope } from "./withdraw/checks.ts";
 import { HANDOFF_WAIT_MAX_MS, type HandoffEnd, type SettlePass } from "./withdraw/handoff.ts";
 
 /** The record's key prefix in its store. */
@@ -115,6 +115,10 @@ export type NearBuyRecord = {
   /** The vault's payout to W from the note: "none" until it is asked (written before the hand-off, so before the note
    *  can go HELD), "asked", then "landed" on proof that it paid W. Absent on a record written before it: read as asked. */
   payout?: NearPayoutMark;
+  /** The payout's withdrawals, in order (card near-cash-pays-any-amount): one a note, each into W at `fee`, their
+   *  amounts summing to `amount`; the first is `note`. Absent on a record written before it: one part, `note` and
+   *  `amount`, marked as `payout`. */
+  parts?: NearBuyPart[];
   swap?: { floor: string; before: string };
   /** What W received of the token (base units) and its decimals, read at the buy's end. */
   fill?: { out: string; decimals: number };
@@ -125,6 +129,12 @@ export type NearBuyRecord = {
 /** Where the record's payout is: see NearBuyRecord.payout. */
 export type NearPayoutMark = "none" | "asked" | "landed";
 const PAYOUT_MARKS: readonly unknown[] = ["none", "asked", "landed"];
+/** One withdrawal of a buy's payout: its note, what it pays W, its own mark (as NearBuyRecord.payout, for this note) and
+ *  the relayer's transaction once its own hand-off named one. */
+export type NearBuyPart = { note: string; amount: string; payout: NearPayoutMark; tx?: string };
+/** The record's parts: its own, or the one part of a record written before them. */
+const partsOf = (r: NearBuyRecord): NearBuyPart[] => r.parts ?? [{ note: r.note, amount: r.amount, payout: r.payout ?? "asked" }];
+const AMOUNT = /^[1-9]\d{0,38}$/;
 
 /** A sell of the record's W, kept on its buy record. */
 export type NearSellMark = {
@@ -159,7 +169,7 @@ export type NearBuyPage = {
   /** The vault payout's fee as the withdraw form draws it (withdrawFormDeps().fee). */
   fee(): Promise<bigint>;
   /** withdrawHandoff(page) on the page's network; null where it names no vault or relayer. */
-  handoff: ((w: { recipient: string; amount: bigint }, drawnFee: bigint, note?: string) => Promise<HandoffEnd>) | null;
+  handoff: ((w: { recipient: string; amount: bigint }, drawnFee: bigint, note?: string, exact?: boolean) => Promise<HandoffEnd>) | null;
   /** withdrawSettle(page): the RESERVED notes followed to their end. */
   settle(): Promise<SettlePass>;
   /** The vault's spend row of a nullifier, followed until its payout ran (the wallet's withdrawArrival on rpcs() unless given). */
@@ -250,6 +260,13 @@ export function nearBuyRecordOf(v: unknown): NearBuyRecord | undefined {
   if (typeof v.amount !== "string" || !/^[1-9]\d{0,38}$/.test(v.amount) || typeof v.l !== "string" || !/^\d{1,78}$/.test(v.l) || !Number.isSafeInteger(v.j)) return undefined;
   if (typeof v.fee !== "string" || !/^\d{1,39}$/.test(v.fee) || !Array.isArray(v.txs)) return undefined;
   if (v.payout !== undefined && !PAYOUT_MARKS.includes(v.payout)) return undefined;
+  if (v.parts !== undefined) {
+    const ps = v.parts;
+    if (!Array.isArray(ps) || ps.length === 0 || !isObj(ps[0]) || ps[0].note !== v.note) return undefined;
+    const ok = ps.every((p) => isObj(p) && typeof p.note === "string" && typeof p.amount === "string" && AMOUNT.test(p.amount) && PAYOUT_MARKS.includes(p.payout) && (p.tx === undefined || typeof p.tx === "string"));
+    if (!ok || new Set(ps.map((p) => p.note)).size !== ps.length) return undefined;
+    if (ps.reduce((t, p) => t + BigInt(p.amount as string), 0n) !== BigInt(v.amount)) return undefined;
+  }
   return v as NearBuyRecord;
 }
 
@@ -391,30 +408,58 @@ export function depsOf(page: NearBuyPage, only: string | null, id: string, route
   // request naming W, or the vault's spend row of the note's nullifier naming W. A note spent or held by anything
   // else ends the record "taken" (payout_taken), nothing signed for W. `askable` false (a record at the resume cap):
   // never a new ask, "none" where one would be made.
+  // A payout of several parts (card near-cash-pays-any-amount): each part decided in order by that rule; the next part
+  // is asked only once the one before it landed. The first part not landed ends the payout: with no part landed, with
+  // its kind (the buy refused, every note back in Cash); with some landed, the record keeps only those (the rest's notes
+  // back in Cash), its amount what W was paid, and the buy goes on with that.
   const decide = async (askable: boolean): Promise<NearPayoutEnd> => {
+    const parts = partsOf(rec!);
+    const txs: string[] = [];
+    let paid = 0n;
+    let i = 0;
+    for (; i < parts.length; i++) {
+      const end = await decidePart(i, askable);
+      if (end.kind !== "landed") {
+        if (paid === 0n) return end;
+        break;
+      }
+      paid += BigInt(parts[i]!.amount);
+      if (typeof end.tx === "string") txs.push(end.tx);
+    }
+    const kept = partsOf(rec!).slice(0, i);
+    rec = { ...rec!, parts: kept, amount: paid.toString(), payout: "landed" };
+    await write(rec);
+    return { kind: "landed", tx: txs[0] ?? null, ...(txs.length > 1 ? { txs } : {}), ...(i < parts.length ? { amount: paid } : {}) };
+  };
+  const decidePart = async (i: number, askable: boolean): Promise<NearPayoutEnd> => {
     const r = rec!;
+    const p = partsOf(r)[i]!;
     const notes = await page.notes();
-    const mark = async (m: NearPayoutMark): Promise<void> => {
-      rec = { ...rec!, payout: m };
+    const mark = async (m: NearPayoutMark, tx?: string): Promise<void> => {
+      const ps = partsOf(rec!).map((x, k) => (k === i ? { ...x, payout: m, ...(tx === undefined ? {} : { tx }) } : x));
+      // the record's own mark: asked from the first ask on, landed only once the whole payout is decided (decide)
+      rec = { ...rec!, parts: ps, payout: m === "asked" ? "asked" : (rec!.payout ?? "asked") };
       await write(rec);
     };
-    const landed = async (tx: string | null): Promise<NearPayoutEnd> => (await mark("landed"), { kind: "landed", tx });
-    const before = r.txs[0]?.hash ?? null;
+    const landed = async (tx: string | null): Promise<NearPayoutEnd> => (await mark("landed", tx ?? undefined), { kind: "landed", tx });
+    // a part's own tx; a record from before the parts: the payout's first tx
+    const before = p.tx ?? (r.parts === undefined ? (r.txs[0]?.hash ?? null) : null);
     const ask = async (): Promise<NearPayoutEnd> => {
       if (page.handoff === null) throw new Error("no vault on this network");
       // asked, on the record before the hand-off can hold the note
       await mark("asked");
-      const end = await page.handoff({ recipient: r.w, amount: BigInt(r.amount) }, BigInt(r.fee), r.note);
+      // exact: the part pays the fee the plan drew, so a note planned whole leaves no change it could not move
+      const end = await page.handoff({ recipient: r.w, amount: BigInt(p.amount) }, BigInt(r.fee), p.note, true);
       if (end.kind === "arrived" || end.kind === "landed") return landed("tx" in end && typeof end.tx === "string" ? end.tx : null);
       if (end.kind === "unmatched") throw new Error("the payout's spend is not this device's");
       return { kind: end.kind };
     };
-    const n = await notes.get(r.note);
+    const n = await notes.get(p.note);
     if (n === undefined) throw new Error("the record's note is not in the store");
     if (n.state === "UNSPENT") return askable ? ask() : { kind: "none" };
     if (n.state === "SPENT") {
-      if (r.payout === "landed") return { kind: "landed", tx: before };
-      if (r.payout === "none") return { kind: "taken" };
+      if (p.payout === "landed") return { kind: "landed", tx: before };
+      if (p.payout === "none") return { kind: "taken" };
       // asked (or a record from before the mark): the vault's spend row of the note says where it paid
       const seed = await page.seed64();
       let nullifierHash: bigint;
@@ -431,12 +476,12 @@ export function depsOf(page: NearBuyPage, only: string | null, id: string, route
     }
     if (n.state === "RESERVED") {
       // a withdrawal in flight that is not this record's (never asked, or its stored request pays another account)
-      if (r.payout === "none" || reservedRecipient(n) !== r.w) return { kind: "taken" };
-      const out = (await page.settle()).outcomes[r.note];
+      if (p.payout === "none" || reservedRecipient(n) !== r.w) return { kind: "taken" };
+      const out = (await page.settle()).outcomes[p.note];
       if (out === "arrived" || out === "landed") return landed(before);
       if (out === "refunded") return { kind: "refunded" };
       if (out === "elsewhere") return { kind: "taken" };
-      if (out === "expired" && (await notes.get(r.note))?.state === "UNSPENT") return askable ? ask() : { kind: "none" };
+      if (out === "expired" && (await notes.get(p.note))?.state === "UNSPENT") return askable ? ask() : { kind: "none" };
       throw new Error(`the payout is ${String(out)}`);
     }
     throw new Error(`the note is ${n.state}`);
@@ -463,16 +508,18 @@ export function depsOf(page: NearBuyPage, only: string | null, id: string, route
         if (scope === null || page.handoff === null) return (unlock(), null);
         const fee = await page.fee();
         const notes = await page.notes();
-        const need = ask.amount + fee;
         // the pick and the record's write are one step for the whole network (any token): two buys begun together never
         // take one note, and a note named by any unended record is never picked again
         const begun = await picking(async (): Promise<NearBuyBegun | null> => {
-          const named = new Set((await records()).filter((r) => !ended(r)).map((r) => r.note));
-          const fits = (await notes.list())
-            .filter((n): n is NoteRecord & { leaf: NonNullable<NoteRecord["leaf"]> } => n.scope === scope && n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.value >= need && !named.has(n.id))
-            .sort((x, y) => (x.leaf.value < y.leaf.value ? -1 : x.leaf.value > y.leaf.value ? 1 : Number(x.leaf.leafIndex - y.leaf.leafIndex)));
-          const note = fits[0];
-          if (note === undefined) return null;
+          const named = new Set((await records()).filter((r) => !ended(r)).flatMap((r) => partsOf(r).map((p) => p.note)));
+          const free = (await notes.list()).filter((n): n is NoteRecord & { leaf: NonNullable<NoteRecord["leaf"]> } => n.scope === scope && n.state === "UNSPENT" && n.leaf !== undefined && !named.has(n.id));
+          // card near-cash-pays-any-amount: the ask is what leaves Cash, the fees inside it (the box offers all of Cash),
+          // planned over every free note on Cash's own planner, one withdrawal a note into the same W
+          const plan = planCashSpend(free.map((n) => ({ id: n.id, value: n.leaf.value })), ask.amount, fee);
+          if (plan === null || plan.length === 0) return null;
+          const note = free.find((n) => n.id === plan[0]!.noteId)!;
+          const amount = plan.reduce((t, p) => t + p.part, 0n);
+          const parts: NearBuyPart[] = plan.map((p) => ({ note: p.noteId, amount: p.part.toString(), payout: "none" }));
           const l = note.leaf.label;
           const j = jOf(note.ref);
           const seed = await page.seed64();
@@ -482,12 +529,13 @@ export function depsOf(page: NearBuyPage, only: string | null, id: string, route
           } finally {
             seed.fill(0);
           }
-          rec = { v: 1, id, network: page.network, token: ask.token, amount: ask.amount.toString(), slippage_bps: ask.slippageBps, w, l: l.toString(), j, note: note.id, fee: fee.toString(), created_ms: now(), resumes: 0, stage: "pending", step: "payout", payout: "none", txs: [] };
+          rec = { v: 1, id, network: page.network, token: ask.token, amount: amount.toString(), slippage_bps: ask.slippageBps, w, l: l.toString(), j, note: note.id, fee: fee.toString(), created_ms: now(), resumes: 0, stage: "pending", step: "payout", payout: "none", parts, txs: [] };
           await write(rec);
-          return { ask, w: { id: w, l, j }, txs: [] };
+          // what W swaps: the parts' sum, the ask less its fees (and less what no plan can carry)
+          return { ask: { ...ask, amount }, w: { id: w, l, j }, txs: [] };
         });
         if (begun === null) return (unlock(), null);
-        log("near buy recorded");
+        log(`near buy recorded, paid from ${rec!.parts!.length} note(s)`);
         return begun;
       } catch (e) {
         unlock();
@@ -583,7 +631,9 @@ export async function nearPositions(page: Pick<NearBuyPage, "network" | "store">
     const p = by.get(r.token) ?? { out: 0n, cost: 0n, decimals, wallets: [] };
     if (p.decimals !== decimals) continue;
     p.out += BigInt(before) + BigInt(out);
-    p.cost += BigInt(r.amount);
+    // what left Cash: W's USDC and, on a record with parts (card near-cash-pays-any-amount, the fees inside the ask),
+    // each part's fee; a record from before them, W's USDC as it was counted
+    p.cost += BigInt(r.amount) + (r.parts === undefined ? 0n : BigInt(r.parts.length) * BigInt(r.fee));
     p.wallets.push(r.w);
     by.set(r.token, p);
   }

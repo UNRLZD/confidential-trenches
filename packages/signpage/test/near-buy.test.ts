@@ -67,7 +67,7 @@ function pageOf(v: { w: WalletStore; ns: NoteStore }, o: { end?: HandoffEnd; set
   return { page, ev };
 }
 
-test("a new buy: the smallest note covering the amount and the fee is picked, W is W_{near,l,j} of it, and the record and its op are written before the payout is asked", async () => {
+test("a new buy: the smallest note covering the amount (the fee inside it, card near-cash-pays-any-amount) is picked, W is W_{near,l,j} of it, and the record and its op are written before the payout is asked", async () => {
   const v = await world([2_000_000n, 5_000_000n, 10_000_000n]);
   const { page, ev } = pageOf(v);
   const d = depsOf(page, null, "req-1");
@@ -85,12 +85,13 @@ test("a new buy: the smallest note covering the amount and the fee is picked, W 
   assert.ok(!JSON.stringify(await v.w.get("ops", "req-1")).includes(w));
   const end = await d.payout();
   assert.deepEqual(end, { kind: "landed", tx: TX });
-  assert.deepEqual(ev.find((e) => e[0] === "handoff"), ["handoff", { recipient: w, amount: ASK.amount }, FEE, note.id, 1]);
+  assert.deepEqual(ev.find((e) => e[0] === "handoff"), ["handoff", { recipient: w, amount: ASK.amount - FEE }, FEE, note.id, 1]);
+  assert.equal(begun.ask.amount, ASK.amount - FEE, "W swaps the ask less its fee");
   d.release();
 });
 
-test("no note covers the amount and the fee: refused, nothing written", async () => {
-  const v = await world([3_000_000n]);
+test("an ask above all of Cash: refused, nothing written", async () => {
+  const v = await world([1_000_000n, 1_999_999n]);
   const { page } = pageOf(v);
   const d = depsOf(page, null, "req-1");
   assert.equal(await d.begin(ASK), null);
@@ -111,14 +112,15 @@ test("P1-1 an unfinished buy is taken up by its own resume: the same W and note,
   const b = (await other.begin({ ...ASK, amount: 1_000_000n }))!;
   other.release();
   assert.notDeepEqual(b.w, a.w);
-  assert.equal(b.ask.amount, 1_000_000n, "the ask's own amount");
+  assert.equal(b.ask.amount, 1_000_000n - FEE, "the ask's own amount, less its fee");
   assert.equal(((await v.w.get("ops", "req-2")) as { stage: string }).stage, "pending", "the ask's own op");
   // the record's resume follows its payout
   const again = depsOf(page, "req-1", "req-1");
   const c = (await again.begin(ASK))!;
   assert.deepEqual(c.w, a.w);
-  assert.equal(c.ask.amount, ASK.amount, "the record's own ask");
-  assert.deepEqual(await again.payout(), { kind: "landed", tx: null });
+  assert.equal(c.ask.amount, ASK.amount - FEE, "the record's own ask, less its fee");
+  // the part keeps its own hand-off's tx (card near-cash-pays-any-amount), so the resume names it
+  assert.deepEqual(await again.payout(), { kind: "landed", tx: TX });
   assert.deepEqual(ev.map((e) => e[0]).filter((x) => x !== "log"), ["settle"]);
   const rec = nearBuyRecordOf(await v.w.get("quotes", `${NEAR_BUY_KEY}req-1`))!;
   assert.equal(rec.resumes, 1);
@@ -788,4 +790,87 @@ test("a load never reads, creates or sends home a W whose buy has a fill (a posi
   await resumeNearSells(page);
   assert.equal(asked, 0);
   assert.equal((await recOf(v, "b1")).sell, undefined);
+});
+
+// ---- card near-cash-pays-any-amount: one tap pays across notes ----
+
+/** A page whose hand-off records each call (with `exact`) and ends each in turn as `ends` says (arrived by default). */
+function pagedOf(v: { w: WalletStore; ns: NoteStore }, ends: HandoffEnd[] = []) {
+  const { page, ev } = pageOf(v);
+  const calls: { to: string; amount: bigint; fee: bigint; note: string; exact: boolean | undefined }[] = [];
+  page.handoff = async (w, fee, note, exact) => {
+    calls.push({ to: w.recipient, amount: w.amount, fee, note: note!, exact });
+    const end = ends[calls.length - 1] ?? { kind: "arrived", tx: String(calls.length).repeat(44) };
+    if (end.kind === "arrived" || end.kind === "landed") {
+      const n = await v.ns.move(note!, "UNSPENT", "HELD", { deadlineMs: 1n, context: "7" });
+      await v.ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt!, request: JSON.stringify({ withdrawal: { recipient: w.recipient } }) });
+    }
+    return end;
+  };
+  return { page, ev, calls };
+}
+
+test("near-cash-pays-any-amount: no one note covers the buy: it is paid from two notes into the same W, each part at the drawn fee exactly, the fees inside what leaves Cash", async () => {
+  const v = await world([2_000_000n, 2_000_000n]);
+  const { page, calls } = pagedOf(v);
+  const d = depsOf(page, null, "req-1");
+  const begun = await d.begin(ASK);
+  assert.ok(begun, "a buy of 3 USDC from two notes of 2 USDC is begun");
+  const end = await d.payout();
+  assert.equal(end.kind, "landed");
+  assert.equal(calls.length, 2, "two withdrawals");
+  assert.equal(new Set(calls.map((c) => c.to)).size, 1, "both into one W");
+  assert.equal(calls[0]!.to, begun.w.id);
+  assert.notEqual(calls[0]!.note, calls[1]!.note, "one note a withdrawal");
+  for (const c of calls) assert.deepEqual([c.fee, c.exact], [FEE, true], "each part pays the drawn fee exactly");
+  const paid = calls.reduce((t, c) => t + c.amount, 0n);
+  assert.equal(begun.ask.amount, paid, "W swaps what the parts pay it");
+  assert.ok(paid + 2n * FEE <= ASK.amount, "never more than the ask leaves Cash");
+  const rec = await recOf(v, "req-1");
+  assert.equal(rec.payout, "landed");
+  assert.deepEqual(rec.parts!.map((p) => p.payout), ["landed", "landed"]);
+  assert.equal(BigInt(rec.amount), paid);
+  d.release();
+});
+
+test("near-cash-pays-any-amount: the box's whole Cash pays: every note whole, less a fee each, no change left", async () => {
+  const v = await world([2_000_000n, 5_000_000n]);
+  const { page, calls } = pagedOf(v);
+  const d = depsOf(page, null, "req-1");
+  const begun = (await d.begin({ ...ASK, amount: 7_000_000n }))!;
+  assert.ok(begun);
+  assert.equal((await d.payout()).kind, "landed");
+  assert.deepEqual(calls.map((c) => c.amount).sort(), [1_980_000n, 4_980_000n].sort());
+  assert.equal(begun.ask.amount, 6_960_000n);
+  d.release();
+});
+
+test("near-cash-pays-any-amount: a part that does not leave after one landed: the buy goes on with what W was paid, the other note back in Cash and free for the next buy", async () => {
+  const v = await world([2_000_000n, 2_000_000n]);
+  const { page, calls } = pagedOf(v, [{ kind: "arrived", tx: TX } as HandoffEnd, { kind: "fee", fee: FEE + 1n }]);
+  const d = depsOf(page, null, "req-1");
+  await d.begin(ASK);
+  const end = await d.payout();
+  assert.equal(end.kind, "landed");
+  assert.equal(end.amount, calls[0]!.amount, "W swaps the one part that landed");
+  const rec = await recOf(v, "req-1");
+  assert.equal(rec.parts!.length, 1);
+  assert.equal(BigInt(rec.amount), calls[0]!.amount);
+  assert.equal((await v.ns.get(calls[1]!.note))!.state, "UNSPENT");
+  d.release();
+  // the note the record let go is picked by the next buy
+  const { page: p2, calls: c2 } = pagedOf(v);
+  const e = depsOf(p2, null, "req-2");
+  assert.ok(await e.begin({ ...ASK, amount: 1_000_000n }));
+  await e.payout();
+  assert.equal(c2[0]!.note, calls[1]!.note);
+  e.release();
+});
+
+test("near-cash-pays-any-amount: a spend at or under two fees has no plan: refused, nothing written", async () => {
+  const v = await world([5_000_000n]);
+  const { page } = pagedOf(v);
+  const d = depsOf(page, null, "req-1");
+  assert.equal(await d.begin({ ...ASK, amount: 2n * FEE }), null);
+  assert.deepEqual(await v.w.keys("quotes"), []);
 });

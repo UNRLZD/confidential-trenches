@@ -174,6 +174,32 @@ export function payableAmount(typed: unknown, reads: { notes: readonly WithdrawS
   return c.code === "unplannable" && c.above !== undefined ? { ok: false, code: "min", min: c.above } : c.code === "insufficient" ? { ok: false, code: "insufficient" } : c;
 }
 
+/**
+ * A spend of `spend` from Cash with the fees inside it (card near-cash-pays-any-amount: the NEAR buy, whose box offers
+ * all of Cash): refused (null) above all of Cash or at or under two fees. One note covers it: the smallest whose change
+ * is 0 or above two fees (the note floor: a change a later withdrawal can still send), one part of spend less the fee
+ * (the buy's rule before this card, withdrawRequest's pick, so the larger notes stay whole). Else the withdrawals whose
+ * parts and fees together take the most of `spend` a plan can, never more, each part from its own note at `fee`
+ * (planCashWithdraw's plan, or payableAmount's nearest under it): tried at one fee, then two, up to one per giving
+ * note, the first count whose plan needs no more fees than counted. All of Cash is every giving note whole.
+ */
+export function planCashSpend(notes: readonly WithdrawSource[], spend: bigint, fee: bigint): WithdrawPart[] | null {
+  if (typeof spend !== "bigint" || typeof fee !== "bigint" || fee < 0n || spend <= 2n * fee) return null;
+  if (spend > notes.reduce((t, x) => t + x.value, 0n)) return null;
+  const one = notes
+    .filter((x) => x.value >= spend && (x.value === spend || x.value - spend > 2n * fee))
+    .sort((x, y) => (x.value !== y.value ? (x.value < y.value ? -1 : 1) : x.id < y.id ? -1 : 1))[0];
+  if (one !== undefined) return [{ noteId: one.id, part: spend - fee, chunk: spend }];
+  const n = giving(notes, fee).length;
+  for (let k = 1; k <= n; k++) {
+    const net = spend - BigInt(k) * fee;
+    if (net <= fee) return null;
+    const c = payableAmount(unitsText(net), { notes, fee });
+    if (c.ok && c.parts.length <= k) return [...c.parts];
+  }
+  return null;
+}
+
 /** Base units as the plain decimal parseAmount reads. */
 const unitsText = (units: bigint): string => {
   const s = units.toString().padStart(TOKEN_DECIMALS + 1, "0");
