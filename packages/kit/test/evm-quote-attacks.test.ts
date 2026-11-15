@@ -14,7 +14,7 @@ import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote,
 import { EVM_QUOTE_MAX_KEYS, evmBuyRevertedPoolsWith, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolSellQuoteWith, evmSellRevertedPoolsWith, type EvmPoolSellQuote, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 // as namespaces: the red run before card evm-route-parity reads them where evmSellRouteOf and evmSellRouteCheck are not
 import * as quoteMod from "../src/checks/evm/quote.ts";
-import { evmPaceReset, evmPaceTake, evmProviderHeld, evmProviderHold } from "../src/checks/evm/pace.ts";
+import { evmPaceReady, evmPaceReset, evmPaceTake, evmProviderHeld, evmProviderHold } from "../src/checks/evm/pace.ts";
 import * as sellMod from "../src/trade/evm/sell-unpinned.ts";
 import { evmQuotedBuy, evmQuotedSell } from "../src/trade/evm/quoted.ts";
 const { evmSellRouteOf } = quoteMod as unknown as { evmSellRouteOf: (r: EvmRoute) => import("../src/trade/evm/sell-unpinned.ts").EvmSellRoute };
@@ -5482,14 +5482,38 @@ test("PACE4 card evm-taps-meet-no-429: a warm scan request whose first provider'
     return new Response(JSON.stringify(await inner(calls)), { status: 200 });
   }) as unknown as typeof fetch);
   await pairQuote(token, scanner(5_000_000, []), scanner(5_000_000, []), "robinhood");
-  // another reader on the device (the index, a quote) spent the provider's turns just now
-  for (const g of await Promise.all([evmPaceTake(url, 1), evmPaceTake(url, 1)])) (g as () => void)();
+  // another reader on the device (the index, a scan) spent the provider's turns just now: three getLogs posts, its
+  // bucket's 24 at 8 each
+  const logs = [{ method: "eth_getLogs" }];
+  for (const g of await Promise.all([evmPaceTake(url, logs), evmPaceTake(url, logs), evmPaceTake(url, logs)])) (g as () => void)();
   const asked: [number, number][] = [];
   const { v } = await pairQuote(token, first, scanner(5_000_010, realAt(token, 5_000_005), asked), "robinhood", 5_000_010);
   evmPaceReset();
   assert.deepEqual(v, below);
   assert.equal(firstLogs, 0, "the first was sent a warm getLogs it waited its turn for");
   assert.ok(asked.length > 0, "the second was asked nothing");
+}));
+
+test("PACE5 card robinhood-quote-inside-the-bound-under-the-pace: rpc.mainnet.chain.robinhood.com is paced in calls, a getLogs post at 8: a quote's 7 posts of 3 eth_call leave at once, never 1 a second, and getLogs alone still go 1 a second", { timeout: 30_000 }, () => onTestClock(async () => {
+  evmPaceReset();
+  const url = "https://rpc.mainnet.chain.robinhood.com";
+  const call = [{ method: "eth_call" }, { method: "eth_call" }, { method: "eth_call" }];
+  const logs = [{ method: "eth_getLogs" }, { method: "eth_getBlockByNumber" }];
+  // the pace judged on the test clock's own timers, never by reading a clock: a mark at each time reads how many had
+  // left by then
+  let sent = 0;
+  const marks = [1, 999, 1_001, 1_999, 2_001];
+  const by: number[] = [];
+  // the reads the recorded USDG quote left to it alone (test/evm-quote-calls.test.ts): 21 calls, inside its 24
+  await Promise.all(Array.from({ length: 7 }, async () => (await evmPaceTake(url, call))()));
+  assert.equal(evmPaceReady(url, call), true, "the 7 posts spent more than 21 of 24");
+  evmPaceReset();
+  // getLogs posts alone: 3 at once (24), then one each 8 calls' time, 1 s
+  for (const m of marks) setTimeout(() => by.push(sent), m);
+  await Promise.all(Array.from({ length: 5 }, async () => ((await evmPaceTake(url, logs))(), sent++)));
+  await new Promise((r) => setTimeout(r, 2_100));
+  assert.deepEqual(by, [3, 3, 4, 4, 5], `getLogs posts sent by ${marks.join(", ")} ms`);
+  evmPaceReset();
 }));
 
 test("SP5 a first scan provider that answers a warm scan with no logs: the request goes to the second whole, never asked of the first as halves", { timeout: 30_000 }, async () => {

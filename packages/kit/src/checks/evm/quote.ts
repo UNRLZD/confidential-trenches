@@ -1672,12 +1672,23 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
       // blocks, past one round of daybreak's 4 x 2,000 as one scan, inside it as each request). Never more: a request of
       // SCAN_ALONE blocks on Base's Tenderly is 100 requests at its 2 calls a second
       const spare = fast || (spareNext && scanBlocksOf(calls) <= spareBlocks);
-      // such a request goes to the next while this provider is held: nothing is sent to it
-      if (spare && provider !== undefined && ((SCAN_HELD.get(provider) ?? 0) > performance.now() || providerHeld(provider))) throw new ScanRefused("rpc_error", "the scan provider is held after its throttle");
-      // and while its pace has no turn free now (pace.ts): the next takes it at once instead of the tap waiting its turn
-      // (rpc.mainnet.chain.robinhood.com, the scan's first at 1 post a second, took 2 to 6 of each warm tap's posts and
-      // 1 to 4 s of its time: read-only run from the Mac, 2026-11-15 09:03Z)
-      if (spare && provider !== undefined && !providerReady(provider, calls.length)) throw new ScanRefused("rpc_error", "the scan provider's pace has no turn free now");
+      // such a request goes to the next while this provider is held: nothing is sent to it; and while its pace has no
+      // turn free (pace.ts): the next takes it at once instead of the tap waiting its turn (rpc.mainnet.chain.robinhood.com,
+      // the scan's first at 1 post a second, took 2 to 6 of each warm tap's posts and 1 to 4 s of its time: read-only run
+      // from the Mac, 2026-11-15 09:03Z). Judged when the request has its slot, as it is sent: judged as it asked, a
+      // request then waiting for a slot behind the gate's 2 at once found the turn spent by those ahead and waited it in
+      // the pace (the recorded USDG quote's warm getLogs, 2 of them 1 s each; card
+      // robinhood-quote-inside-the-bound-under-the-pace)
+      const away = (): ScanRefused | null =>
+        !spare || provider === undefined
+          ? null
+          : (SCAN_HELD.get(provider) ?? 0) > performance.now() || providerHeld(provider)
+            ? new ScanRefused("rpc_error", "the scan provider is held after its throttle")
+            : !providerReady(provider, calls)
+              ? new ScanRefused("rpc_error", "the scan provider's pace has no turn free now")
+              : null;
+      const before = away();
+      if (before !== null) throw before;
       // a throttle holds the provider; such a request goes to the next at once, a longer cold one waits the gate's backoff
       const held = (sent: number, afterMs: number | null) => {
         if (provider !== undefined) SCAN_HELD.set(provider, performance.now() + EVM_HOLD_MS);
@@ -1687,6 +1698,11 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
       let refused = 0;
       for (let i = 0; ; ) {
         await take(fast);
+        const now = away();
+        if (now !== null) {
+          done();
+          throw now;
+        }
         const sent = cuts;
         let out: unknown;
         try {
@@ -4755,8 +4771,8 @@ const providerHeld = (rpc: EvmRpc): boolean => {
   const u = RPC_URL.get(rpc);
   return u !== undefined && evmProviderHeld(u);
 };
-/** Whether a post of `calls` calls to an evmJsonRpc provider leaves now, with no wait for its pace's turn (pace.ts). */
-const providerReady = (rpc: EvmRpc, calls: number): boolean => {
+/** Whether a post of `calls` to an evmJsonRpc provider leaves now, with no wait for its pace's turn (pace.ts). */
+const providerReady = (rpc: EvmRpc, calls: readonly EvmRpcCall[]): boolean => {
   const u = RPC_URL.get(rpc);
   return u === undefined || evmPaceReady(u, calls);
 };
@@ -4773,7 +4789,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
   if (typeof url !== "string" || !/^https:\/\//.test(url)) return refuse("bad_request", "a provider URL is https");
   const rpc: EvmRpc = async (calls, until) => {
     // the provider's turn at its pace, shared by every reader on the device (pace.ts); its time is not the request's
-    const turn = evmPaceTake(url, calls.length, until);
+    const turn = evmPaceTake(url, calls, until);
     const give = typeof turn === "function" ? turn : await turn;
     try {
       return await post(calls, until);
