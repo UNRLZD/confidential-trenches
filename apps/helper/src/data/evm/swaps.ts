@@ -77,7 +77,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
-import { KEYED_LOGS_SPAN, operatorOf } from "../../rpc/rpc.ts";
+import { operatorOf } from "../../rpc/rpc.ts";
 import { isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
@@ -288,34 +288,6 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
 // blocks and more (code 35 "ranges over 10000 blocks are not supported on free plan") and 429s bursts; base-pokt.nodies.app
 // takes 50 blocks at most (-32001) and 429s bursts; 1rpc.io, base.meowrpc.com, base.llamarpc.com, base.lava.build,
 // base.api.onfinality.io, api.zan.top, endpoints.omniatech.io and base.blockpi.network (no key) refused or failed every read.
-/** Swap read providers that answer a log read only up to this many blocks, and refuse any wider one: a wider read is
- *  not sent them (agreedLogs). base-pokt.nodies.app: -32001 "Block range too large: maximum allowed is 50 blocks on your
- *  current plan" (49 blocks answered, 51 and 1,000 refused, from the Mac 2026-11-15 10:38Z), so each read back step's
- *  1,000-block spans asked it first and met its refusal, then waited for the next provider's pace (card
- *  evm-tape-from-our-index-fast: four cold Base tapes on the public providers, 10:4xZ). */
-export const LOG_SPAN_CAP: Readonly<Record<string, number>> = { "https://base-pokt.nodies.app": 50 };
-/** The keyed companies' log span caps (rpc.ts KEYED_LOGS_SPAN: a QuickNode trial 5 blocks, dRPC's free keys 100), by
- *  the company that runs a URL (rpc.ts operatorOf, dRPC's lb.drpc.live folded in): a keyed URL is a secret, so its
- *  company names it. */
-const COMPANY_LOGS_SPAN: Readonly<Record<string, number | undefined>> = { "quiknode.pro": KEYED_LOGS_SPAN.quicknode, "drpc.org": KEYED_LOGS_SPAN.drpc };
-/** A provider's log span cap, or undefined for none known. */
-const logSpanCap = (u: string): number | undefined => {
-  if (Object.hasOwn(LOG_SPAN_CAP, u)) return LOG_SPAN_CAP[u];
-  try {
-    return COMPANY_LOGS_SPAN[operatorOf(u)];
-  } catch {
-    return undefined;
-  }
-};
-/** The providers of `urls` a log read of `filters` is not sent: those that refuse every log read (LOGS_REFUSED), and
- *  those whose span cap (LOG_SPAN_CAP, a keyed company's KEYED_LOGS_SPAN) is below the widest filter's span. The swap
- *  reads sent their 1,000-block spans to the helper's keyed QuickNode and dRPC URLs as well, which refuse past 5 and
- *  100 blocks, spending those accounts' pace and day on refusals (card evm-tape-from-our-index-fast). */
-export function logSkip(filters: readonly Record<string, unknown>[], urls: readonly string[] = []): ReadonlySet<string> {
-  const widest = Math.max(0, ...filters.map((f) => parseInt(String(f.toBlock), 16) - parseInt(String(f.fromBlock), 16) + 1).filter((n) => Number.isSafeInteger(n)));
-  const capped = [...new Set([...Object.keys(LOG_SPAN_CAP), ...urls])].filter((u) => (logSpanCap(u) ?? Infinity) < widest);
-  return capped.length === 0 ? LOGS_REFUSED : new Set([...LOGS_REFUSED, ...capped]);
-}
 export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // base.drpc.org is left out: it answers none of the reads' ranges (250 blocks and more) and 429s about one a second.
   // mainnet.base.org, Base's own, answers the heads, calls and the traders' lookups (20 eth_getTransactionByHash a
@@ -639,11 +611,6 @@ export type Pool = {
   /** A v4 pool's hook when its address carries a return-delta flag (hookOf): the hook may then take from or add to
    *  what the swapper pays or gets, after the `Swap` log is written. */
   hook?: string;
-  /** A v4 pool's hook contract, whatever its flags (hooksOf): a swap it sends itself is its own, never a trader's (v4
-   *  calls no hook for it), so it is in the bars and off the tape. A hook with no return-delta flag sends them too: the
-   *  pool 0x014dd010...'s hook 0x0469a4bd (afterSwap and beforeSwap, no return delta) swapped 27.607... of its own
-   *  liquidity in Base tx 0x95ac6c34's sell (Swap log 18). */
-  hooks?: string;
   /** A hooked v4 pool's: the token's other v4 pools the discovery found, whose swaps are read with this pool's only so
    *  hookTakes can tell a sender that swapped the token once in the transaction (card helper-v4-hook-liquidity). */
   siblings?: readonly string[];
@@ -669,19 +636,6 @@ export function hookOf(key: string): string | undefined {
   const h = `0x${key.slice(2 + 64 * 4 + 24)}`;
   return (BigInt(h) & (BEFORE_SWAP_DELTA | AFTER_SWAP_DELTA)) !== 0n ? h : undefined;
 }
-
-/** The hook contract of a v4 PoolKey (abi-encoded, its fifth word) whatever its flags, or undefined for none. */
-export function hooksOf(key: string): string | undefined {
-  if (!/^0x[0-9a-f]{320}$/.test(key)) return undefined;
-  const h = `0x${key.slice(2 + 64 * 4 + 24)}`;
-  return BigInt(h) === 0n ? undefined : h;
-}
-
-/** Whether a v4 swap log is its pool's own hook's (Pool.hooks, else Pool.hook): in the bars, off the tape. */
-const ownSwap = (pool: Pool, l: Log): boolean => {
-  const by = pool.hooks ?? pool.hook;
-  return pool.venue === "v4" && by !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === by;
-};
 
 /** The `eth_getLogs` filters for a pool's trades over blocks `from` to `to`: its swaps, and for a pool with a hook
  *  (Pool.hook) the token's transfers and the PoolManager's ERC-6909 claims of the token, which show what each swap's
@@ -1449,10 +1403,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return out;
   }
 
-  /** For each filter, its logs when two providers return the same ones; null where they do not agree. A provider whose
-   *  log span cap (LOG_SPAN_CAP) is below the widest filter's span is not asked: it only refuses. */
+  /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
   function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false): Promise<(Log[] | null)[]> {
-    const skip = logSkip(filters, [...urls, ...rpcs]);
     return agreed<Log[]>(
       urls,
       filters.length,
@@ -1463,7 +1415,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       (a, b) => sameLogs(a, b, true),
       true,
       only,
-      skip,
+      LOGS_REFUSED,
     );
   }
 
@@ -1622,8 +1574,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const tokenIs0 = c0 === token;
     if (!tokenIs0 && c1 !== token) return null;
     const quote = quoteOf(tokenIs0 ? c1 : c0, true);
-    const [hook, hooks] = [hookOf(k), hooksOf(k)];
-    return quote === null ? null : { venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }), ...(hooks === undefined ? {} : { hooks }) };
+    const hook = hookOf(k);
+    return quote === null ? null : { venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }) };
   }
   /** The Pons curves the factories' records of the token name (a record of another token, or not live, names none). */
   const curvePools = (token: string, recs: readonly (string | undefined)[]): Pool[] =>
@@ -2064,7 +2016,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a swap the pool's own hook sends (its fees sold in its own pool) is no trader's trade: in the bars, off the tape
       // (card market-reads-hold-under-load: Base tx 0xa1782de0's log 0x33, the hook 0x0469a4bd selling 555.17 of its
       // fees after the trader's 69,395.86 sell, was on the tape as a second sell of the trader's)
-      const own = ownSwap(e.pool, l);
+      const own = e.pool.hook !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === e.pool.hook;
       events.push({ ...s, t, ...(got === undefined ? {} : { got }), ...(own ? { tape: false as const } : {}) });
     }
     let merged: Event[] = events;
@@ -2125,7 +2077,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = sw === null ? null : timeOf(l);
       if (sw === null || t === null) continue;
       const got = traderLeg(sw, takes.get(`${l.tx}:${l.index}`));
-      const own = ownSwap(e.pool, l);
+      const own = e.pool.hook !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === e.pool.hook;
       events.push({ ...sw, t, ...(got === undefined ? {} : { got }), ...(own ? { tape: false as const } : {}) });
     }
     if (events.length > 0) b.ingest(events[0]!.block, events, events.at(-1)!.block);
@@ -2190,15 +2142,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (e.back === undefined || (e.back.lo === lo && !e.back.done)) return;
     }
   }
-  /** A read book whose tape is short reads back (readBack) from the moment its read ends: its first read's (firstRead) or
-   *  a tick's, its own background read, never a caller's or the tick's wait, so a tick's period and forward reads are as
-   *  they were; one read back a book at a time. It started only once a whole tick had read every open book, and a tick
-   *  over a few cold books on paced providers took 10 s and more (card evm-tape-from-our-index-fast: four cold Base
-   *  tapes on the public providers from a Mac, 2026-11-15 10:4xZ: the first read back step 25 s after its tape opened,
-   *  the tapes done at 41.6 to 50.3 s, past the 45 s a listed tape is held to). */
-  function startBack(e: Entry, urls: readonly string[]): void {
-    if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, urls)).finally(() => (e.backing = undefined));
-  }
   /** Whether a book's tape is still reading back (readBack): the answer says `filling`, so the page shows it loading,
    *  not empty, and reads it again every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it is done. */
   const backing = (e: Entry): boolean => V.tapeBack > 0 && e.from !== undefined && e.back?.done !== true && tapeOf(e, TRADES_MAX).length < TRADES_MAX;
@@ -2215,10 +2158,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function firstRead(e: Entry): Promise<void> {
     e.first ??= (async () => {
       const head = await agreedHead();
-      if (head !== null) {
-        await readBook(e, head.with, head, Promise.resolve(true)).catch(() => false);
-        startBack(e, head.with);
-      }
+      if (head !== null) await readBook(e, head.with, head, Promise.resolve(true)).catch(() => false);
     })().finally(() => {
       e.first = undefined;
     });
@@ -2269,8 +2209,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks; a
     // book whose first read is in flight (firstRead) is that read's
     const due = [...books.values()].filter((e) => e.first === undefined);
-    // each read book whose tape is short then reads back (startBack) as soon as its own read ends, never at the tick's
-    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false).then(() => startBack(e, head.with))));
+    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
+    // then each read book whose tape is short reads back (readBack): its own background read, never the tick's wait, so
+    // a tick's period and forward reads are as they were; one read back a book at a time
+    for (const e of due) if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, head.with)).finally(() => (e.backing = undefined));
     await refReady;
   }
   function start(): Promise<void> {
@@ -2335,11 +2277,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs)) e.from = found.seed.from;
         }
         books.set(token, e);
-        // a seeded book is read: its read back starts now (startBack), not at the next tick's end
-        if (e.readAt !== null) {
-          const seeded = e;
-          void agreedHead().then((h) => h !== null && startBack(seeded, h.with)).catch(() => undefined);
-        }
       }
     }
     e.touched = now();
@@ -2517,7 +2454,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           const x = r?.[k];
           // no receipt yet (a provider behind the vendor) is no answer; one that shows no trade of the hash is "none"
           if (!x?.ok || x.result === null || typeof x.result !== "object") return null;
-          return receiptFacts(x.result, ask[i]!, token, V.poolManager, SWAP_TOPICS) ?? "none";
+          return receiptFacts(x.result, ask[i]!, token, V.poolManager) ?? "none";
         });
       },
       (a, b) => JSON.stringify(a) === JSON.stringify(b),

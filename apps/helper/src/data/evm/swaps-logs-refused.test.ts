@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { LOGS_REFUSED, providerHolds } from "../../limits/limits.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { fakeChain, ICNT, open, REC, URLS } from "../../../test/evm-swaps/base.ts";
-import { LOG_SPAN_CAP, logSkip, SWAP_RPCS } from "./swaps.ts";
+import { SWAP_RPCS } from "./swaps.ts";
 
 const BASE_OWN = "https://mainnet.base.org";
 
@@ -45,28 +45,4 @@ test("a /v1/rpc/base caller's eth_getLogs goes to the pinned providers, never to
   const head = await rpc.handle("base", "application/json", body("eth_blockNumber", []), "198.51.100.7");
   assert.equal(head.status, 200, head.body);
   assert.deepEqual(asked, [BASE_OWN], "the chain's own endpoint first");
-});
-
-test("card evm-tape-from-our-index-fast: a log read wider than a provider's span cap is not sent it (base-pokt.nodies.app, 50 blocks: it refused every 1,000-block read back span, 2026-11-15 10:38Z); one within it may be, and a provider that refuses every log read never is", () => {
-  const f = (from: number, to: number) => ({ address: "0x00", fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` });
-  const POKT = "https://base-pokt.nodies.app";
-  assert.equal(LOG_SPAN_CAP[POKT], 50);
-  assert.ok(SWAP_RPCS.base.includes(POKT));
-  assert.ok(logSkip([f(100, 1099)]).has(POKT), "a 1,000-block span");
-  assert.ok(logSkip([f(100, 149), f(200, 250)]).has(POKT), "the widest decides: 51 blocks");
-  assert.ok(!logSkip([f(100, 149)]).has(POKT), "50 blocks: within its cap");
-  assert.ok(logSkip([f(100, 149)]).has(BASE_OWN) && logSkip([f(100, 1099)]).has(BASE_OWN));
-});
-
-test("card evm-tape-from-our-index-fast: the keyed companies' caps hold for the swap reads too (rpc.ts KEYED_LOGS_SPAN: QuickNode's trial 5 blocks, dRPC's free keys 100), named by the URL's company, never its key", () => {
-  const f = (from: number, to: number) => ({ address: "0x00", fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}` });
-  const QN = "https://example-name.base-mainnet.quiknode.pro/0000/";
-  const DR = "https://lb.drpc.live/base/0000";
-  const PUB = "https://base-rpc.publicnode.com";
-  const wide = logSkip([f(100, 1099)], [QN, DR, PUB]);
-  assert.ok(wide.has(QN) && wide.has(DR) && !wide.has(PUB), "a 1,000-block span: the keyed two skipped, the public one asked");
-  const hundred = logSkip([f(100, 199)], [QN, DR, PUB]);
-  assert.ok(hundred.has(QN) && !hundred.has(DR), "100 blocks: within dRPC's cap, past QuickNode's");
-  assert.ok(!logSkip([f(100, 104)], [QN, DR]).has(QN), "5 blocks: within QuickNode's");
-  assert.ok(!logSkip([f(100, 199)], ["https://robinhood.drpc.org"]).has("https://robinhood.drpc.org"), "Robinhood's 100-block spans on dRPC's public endpoint: asked");
 });

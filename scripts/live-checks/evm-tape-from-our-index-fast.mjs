@@ -133,9 +133,7 @@ export function judge(run) {
   }
   const back = tapes.some(({ answers }) => answers.some((a) => a.filling) && answers.at(-1)?.filling === false && answers.at(-1)?.fault === null);
   const allFull = tapes.length > 0 && tapes.every(({ answers }) => (answers[0]?.n ?? 0) >= TRADES_MAX);
-  // a short tape that said filling and never ended is the read back too slow (its own line above), not one never said
-  const said = tapes.some(({ answers }) => answers.some((a) => a.filling));
-  say(back || (allFull ? null : false), back ? "a short tape said filling, then ended: read back seen end to end" : allFull ? "every tape full at its first answer: nothing to read back" : said ? `no tape that said filling ended within ${BOUND_MS} ms: no read back seen end to end` : "no tape said filling while a tape answered short: no read back");
+  say(back || (allFull ? null : false), back ? "a short tape said filling, then ended: read back seen end to end" : allFull ? "every tape full at its first answer: nothing to read back" : "no tape said filling while a tape answered short: no read back");
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("N/A")) ? "INCONCLUSIVE" : "PASS";
   return { ok: verdict === "PASS", verdict, lines };
 }
