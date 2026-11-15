@@ -47,7 +47,9 @@ test("review M1: nodies down, dRPC's three keys first in rank: the logs a tape t
 
 test("review M1: with dRPC the only company left that answers logs (the public spares down, mainnet.base.org refusing logs), no log is agreed: dRPC's keys never agree with each other", async () => {
   const { r, logHosts } = await tape((u) => !u.includes("drpc") && !u.includes("mainnet.base.org"));
-  assert.ok(logHosts.length > 0 && logHosts.every((h) => h === "lb.drpc.live"), "only dRPC answered logs");
+  // dRPC's keys are asked no log read past their 100-block span (swaps.ts logSkip, card evm-tape-from-our-index-fast), so a
+  // cold tape's 1,000-block reads reach none of them; any narrower one they answer is theirs alone
+  assert.ok(logHosts.every((h) => h === "lb.drpc.live"), "only dRPC answered logs");
   const trades = r.status === 200 ? ((JSON.parse(r.body) as { trades?: unknown[] }).trades ?? []) : [];
   assert.equal(trades.length, 0, `${trades.length} trades taken on dRPC's word alone (${r.status})`);
 });
