@@ -635,6 +635,53 @@ test("card helper-live-run-green-after-122: a token none of whose newest transac
   t.stop();
 });
 
+// card solana-trades-show-on-every-token: a token whose newest signatures are failed bot transactions
+/** A token's signature list, newest first, as getSignaturesForAddress pages it (`limit`, `before`); `ok(i)` whether the
+ *  i-th newest succeeded. Each call's `limit` is kept in `asked`. */
+function botFlood(n: number, ok: (i: number) => boolean) {
+  const list = Array.from({ length: n }, (_, i) => ({ signature: `${BUY.signature.slice(0, -4)}${String(i).padStart(4, "0")}`, slot: 469_645_431 - Math.floor(i / 20), err: ok(i) ? null : { InstructionError: [3, { Custom: 6003 }] } }));
+  const asked: number[] = [];
+  const sigs = (p: Record<string, unknown>) => {
+    asked.push(p.limit as number);
+    const from = p.before === undefined ? 0 : list.findIndex((s) => s.signature === p.before) + 1;
+    return list.slice(from, from + (p.limit as number));
+  };
+  const txs = Object.fromEntries(list.filter((s) => s.err === null).map((s) => [s.signature, BUY.result]));
+  return { list, asked, sigs, txs };
+}
+const reads = (f: ReturnType<typeof botFlood>) => {
+  let tx = 0;
+  const base = rpcFetch({ sigs: f.sigs, txs: f.txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const fetchCount = async (url: string, init: RequestInit) => ((JSON.parse(String(init.body)) as { method: string }).method === "getTransaction" && tx++, base(url, init));
+  const t = createSolanaTrades({ fetch: fetchCount, now: () => TS * 1000, listed: async (m) => m === MINT, rpcs: ["https://rpc.test"], source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
+  return { t, tx: () => tx };
+};
+
+test("card solana-tape-rows-at-first-answer: a busy token whose newest signatures are all failed bot transactions answers its first tape read with the newest COLD_SIGS successful trades, never 0 rows (live run 43689567273: CjRGc8wH...pump 0 rows at +0 ms; at 07:27:09Z its newest 30 signatures held 0 successful, its newest 1000 held 29)", async () => {
+  // as read on mainnet: the newest 30 all failed, then one in 34 succeeded
+  const f = botFlood(1_030, (i) => i >= 30 && i % 34 === 0);
+  const { t, tx } = reads(f);
+  const first = JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] };
+  const ok = f.list.filter((s) => s.err === null).map((s) => s.signature);
+  assert.ok(first.trades.length > 0, `rows at the first answer: ${first.trades.length}`);
+  await new Promise((r) => setTimeout(r, 50));
+  const all = (JSON.parse((await t.trades(MINT, 50)).body) as { trades: { tx: string }[] }).trades.map((r) => r.tx);
+  assert.deepEqual(all.sort(), ok.slice(0, 30).sort(), "the newest successful transactions, at most COLD_SIGS");
+  assert.deepEqual(f.asked, [30, 1_000], "one more signature page, of Solana's largest size, only past a first page of failed ones");
+  assert.equal(tx(), ok.slice(0, 30).length, "a transaction read for each successful one only");
+  t.stop();
+});
+
+test("card solana-tape-rows-at-first-answer, guard: a token whose newest COLD_SIGS signatures succeeded asks its one page, as before", async () => {
+  const f = botFlood(1_030, (i) => i < 40 || i % 3 === 0);
+  const { t, tx } = reads(f);
+  await t.trades(MINT, 50);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(f.asked, [30]);
+  assert.equal(tx(), 30);
+  t.stop();
+});
+
 // card solana-trades-show-on-every-token: NEARKAT (6UtY9iTZ..., a Raydium CPMM token, 29k USD a day) and BONK answered
 // {"trades":[],"src":"chain"} on the deployed helper (main 204ee6b8a, 14 Nov 17:21Z): the chain tape decodes the pump.fun
 // curve and PumpSwap only, and the helper's log read "no trade of a venue read" for every such token open
