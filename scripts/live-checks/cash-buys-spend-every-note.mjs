@@ -11,6 +11,7 @@
 // That the plan spends every note, never asks a note too small for a part and checks every part's quote before any note
 // leaves Cash is packages/signpage/test/cash-buys-spend-every-note.test.ts's. The money run is the owner's $2 buy.
 // After: sign
+// Bundle: read sign
 //   node scripts/live-checks/cash-buys-spend-every-note.mjs [--record <file>] [--answer <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. Reads only: a dry quote names no account of anyone's, nothing is made or sent.
 import "../net-window.mjs";
@@ -34,18 +35,35 @@ export function facts(index, js, oneclick) {
   return { index, sha384: sha384(js), mark: MARK.test(js), oneclick: String(oneclick).slice(0, 2048) };
 }
 
-/** The verdict on an answer { index, sha384, mark, oneclick }. */
-export function judge(a) {
-  const lines = [];
-  const bad = (m) => lines.push(m.startsWith("BAD ") ? m : `BAD ${m}`);
+/** The build's half of the verdict: the pin and the least read's mark, which the pull request's own build is held to. */
+function buildLines(a, bad) {
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
   if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
   if (a?.mark !== true) bad(NO_MARK);
+}
+
+/** The verdict on an answer { index, sha384, mark, oneclick }. */
+export function judge(a) {
+  const lines = [];
+  const bad = (m) => lines.push(m.startsWith("BAD ") ? m : `BAD ${m}`);
+  buildLines(a, bad);
   const least = LEAST.exec(a?.oneclick ?? "")?.[1];
   if (least === undefined || BigInt(least) <= 0n) bad(NO_LEAST);
   else lines.push(`ok 1Click's least into SOL: ${least} USDC base units`);
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
+}
+
+/** The bundle checks' run on a build (scripts/ci/bundle-checks.mjs): its pin and mark; 1Click is past the build, read live only. */
+export async function bundle(fetchFn) {
+  const get = async (path) => {
+    const r = await fetchFn(`${SIGN}${path}`, { redirect: "error" });
+    if (r.status !== 200) throw new Error(`${path}: HTTP ${r.status}`);
+    return r.text();
+  };
+  const lines = [];
+  buildLines(facts(await get("/"), await get("/app.js"), ""), (m) => lines.push(m.startsWith("BAD ") ? m : `BAD ${m}`));
+  return { ok: lines.length === 0, lines };
 }
 
 export async function read(fetchFn = fetch) {
