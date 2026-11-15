@@ -26,8 +26,10 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
  *    for 20 s none refused, twice, as posts of 1 and of 3; 19 calls a second as posts of 1 for 12 s, none refused;
  *    posts of 3 at 18 to 27 calls a second refused from the 70th to 90th call (2.6 to 4 s in); posts of 3 at 18 a
  *    second beside one 2,000-block getLogs post a second refused from the 47th call, getLogs posts as well (one limit
- *    for both). The helper's 3.8 posts a second then 429 (2026-11-04) were getLogs. 8 calls a second, 24 at once; a
- *    getLogs post takes 8, so getLogs alone go at 1 a second, as they did, and at most 3 at once. One bucket of 1 post a
+ *    for both). The helper's 3.8 posts a second then 429 (2026-11-04) were getLogs. At 8 calls a second, 24 at once, real
+ *    taps met it 429 4 times in 24 (a warm getLogs, 3 eth_call of a USDG tap's 191 calls, 11:13-11:17Z), at 1 post a
+ *    second none in 48: 6 calls a second, 18 at once; a getLogs post takes 8, so getLogs alone go 3 in 4 s, under
+ *    the 1 a second they went, 2 at once. One bucket of 1 post a
  *    second, 2 at once, for every post held the recorded USDG quote's 7 eth_call posts it alone settles (publicnode,
  *    blxrbdn and globalstake past their state at the quote's block, dRPC the other answer) 1 s apart behind the scan's
  *    getLogs, 13.4 s of the test clock past its 8 s bound, where 5.6 s unpaced (test/evm-quote-calls.test.ts); and
@@ -48,7 +50,7 @@ const needOf = (p: EvmPace, calls: EvmPaceCalls): number =>
  *  Not paced: base-rpc.publicnode.com. The helper's 3 a second was its single 1,000-block getLogs (2026-11-05); the
  *  quote's and the index's reads from the Mac took 315 calls in 10 s with no 429 (08:05Z). Read again before it is set. */
 export const EVM_PACE: Readonly<Record<string, EvmPace>> = Object.freeze({
-  "https://rpc.mainnet.chain.robinhood.com": Object.freeze({ perS: 8, burst: 24, unit: "call", logs: 8 }),
+  "https://rpc.mainnet.chain.robinhood.com": Object.freeze({ perS: 6, burst: 18, unit: "call", logs: 8 }),
   "https://robinhood.daybreak-rpc.network": Object.freeze({ perS: 7, burst: 7, unit: "post", inflight: 3 }),
   "https://robinhood.api.pocket.network": Object.freeze({ perS: 15, burst: 200, unit: "call" }),
   "https://base.gateway.tenderly.co": Object.freeze({ perS: 2, burst: 3, unit: "call" }),
