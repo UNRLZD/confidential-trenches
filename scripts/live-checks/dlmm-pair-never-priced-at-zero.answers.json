@@ -1,0 +1,35 @@
+{
+ "good": {
+  "readAt": "2026-11-15T06:34:51.199Z",
+  "from": "local build",
+  "page": {
+   "pin": "sha384-nlJhpbGWSvpCccf4Q20qx7Oed7wZHGSjBBmc63/1s/Ljis0WCpiRdisAHcj6PlEZ",
+   "sha384": "sha384-nlJhpbGWSvpCccf4Q20qx7Oed7wZHGSjBBmc63/1s/Ljis0WCpiRdisAHcj6PlEZ",
+   "plan": 1,
+   "walk": 1,
+   "relook": 1
+  }
+ },
+ "bad_801_build": {
+  "readAt": "2026-11-15T06:35:00.119Z",
+  "from": "local build",
+  "page": {
+   "pin": "sha384-n22TfZC6V9Lvj/RrWZxugftAUmOZf/Y380rpKguiqiqFg/NyDeYVeCTozIADMMg/",
+   "sha384": "sha384-n22TfZC6V9Lvj/RrWZxugftAUmOZf/Y380rpKguiqiqFg/NyDeYVeCTozIADMMg/",
+   "plan": 0,
+   "walk": 0,
+   "relook": 0
+  }
+ },
+ "bad_live_before": {
+  "readAt": "2026-11-15T06:34:52.003Z",
+  "from": "https://confidential.unrealized.trade",
+  "page": {
+   "pin": "sha384-8idfWizj58fsGb6xOb6OTUFT8oerQma3sZ8Lo+G8i5iS5ielEStuxHkkIVwPz3Wu",
+   "sha384": "sha384-8idfWizj58fsGb6xOb6OTUFT8oerQma3sZ8Lo+G8i5iS5ielEStuxHkkIVwPz3Wu",
+   "plan": 0,
+   "walk": 0,
+   "relook": 0
+  }
+ }
+}

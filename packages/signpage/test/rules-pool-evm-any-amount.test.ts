@@ -16,6 +16,7 @@ import { evmPoolContextOf, evmPoolScopeOf, EVM_LADDER, type EvmPoolPin, type Evm
 import {
   checkEvmBuy,
   checkEvmChange,
+  checkEvmRestRelease,
   checkEvmWBuy,
   evmAdapterBuyData,
   evmBuyMax,
@@ -25,6 +26,7 @@ import {
   signEvmBuy,
   signEvmDeposit,
   signEvmWBuy,
+  signEvmWithdraw,
   type EvmBuyPiece,
   type EvmDepositReads,
   type EvmOnwardSend,
@@ -141,6 +143,23 @@ test("checkEvmBuy: a non-standard amount's whole note passes as a piece of its p
   assert.throws(() => checkEvmBuy(built, POOL, proof, r, ask, ctxOf({ feeCap: fee + 1n }), agreed, plan), refusedAs("amount"));
 });
 
+test("checkEvmRestRelease: the plan's rest piece alone is released whole to its W at its own fee, and only then signs; a proof of another value, another fee or a plan with no rest is refused", () => {
+  const ask = askOf(677_118_972_877_694n);
+  const plan = planEvmBuy(ask, [TWO, ONE], BOUND);
+  assert.deepEqual(plan.rest?.piece, ONE);
+  const r = relay({ feeCap: FEE });
+  const proof = proofOf(r, ONE.chunk);
+  const ctx = ctxOf({ feeCap: FEE });
+  // a proof never released is never signed; once checked, W's withdraw signs
+  assert.throws(() => signEvmWithdraw(W_KEY, ctx, ask, POOL, proofOf(r, ONE.chunk)), refusedAs("unchecked"));
+  assert.equal(checkEvmRestRelease(POOL, proof, r, ask, ctx, plan).amount, ONE.chunk);
+  assert.equal(signEvmWithdraw(W_KEY, ctx, ask, POOL, proof).length, 65);
+  assert.throws(() => checkEvmRestRelease(POOL, proofOf(r, TWO.chunk), r, ask, ctx, plan), refusedAs("amount"));
+  assert.throws(() => checkEvmRestRelease(POOL, proof, r, ask, ctxOf({ feeCap: FEE + 1n }), plan), refusedAs("amount"));
+  const max = evmBuyMax([TWO, ONE]);
+  assert.throws(() => checkEvmRestRelease(POOL, proof, r, askOf(max), ctx, planEvmBuy(askOf(max), [TWO, ONE], BOUND)), refusedAs("plan"));
+});
+
 const BASE_FEE = 10_000_000n, TIP = 1_000_000n, EST = 300_000n, L1 = 1_000_000_000n;
 const GAS = EST + EST / 5n;
 const wbuyReads = (balance: bigint, o: Partial<EvmWBuyReads> = {}): EvmWBuyReads => ({ nonce: [0n, 0n], balance: [balance, balance], estimate: [EST, EST], simulated: [true, true], baseFee: [BASE_FEE, BASE_FEE], l1Fee: [L1, L1], priorityCap: TIP, ...o });
@@ -170,6 +189,13 @@ test("checkEvmWBuy: W buys exactly the plan's rest through the pinned adapter, t
   assert.throws(() => signEvmDeposit(W_KEY, tx), refusedAs("unchecked"));
   const other = "0x2222222222222222222222222222222222222222";
   const R = wbuyReads(held);
+  // a send changed after its check is not signed
+  const moved = txOf();
+  checkEvmWBuy(moved, built, ask, ctxOf(), R, agreed, plan);
+  (moved as { value: bigint }).value += 1n;
+  assert.throws(() => signEvmWBuy(W_KEY, moved), refusedAs("unchecked"));
+  // an adapter the venue does not pin
+  const unpinned = ctxOf({ evm: { venues: Object.freeze({ base: pin(VENUES.base, { adapters: Object.freeze({ v3: other, v4: A_V4 }) }) }), feeRecipient: FEE_TO } });
   for (const [f, rule] of [
     [() => checkEvmWBuy(txOf({ to: other }), built, ask, ctxOf(), R, agreed, plan), "to"],
     [() => checkEvmWBuy(txOf({ to: A_V4 }), built, ask, ctxOf(), R, agreed, plan), "to"],
@@ -182,6 +208,16 @@ test("checkEvmWBuy: W buys exactly the plan's rest through the pinned adapter, t
     [() => checkEvmWBuy(txOf(), built, ask, ctxOf(), wbuyReads(held, { estimate: [2_000_000n, 2_000_000n] }), agreed, plan), "gas_over_cap"],
     [() => checkEvmWBuy(txOf({ maxPriorityFeePerGas: TIP + 1n }), built, ask, ctxOf(), R, agreed, plan), "priority_fee"],
     [() => checkEvmWBuy(txOf({ maxFeePerGas: 2n * BASE_FEE + TIP + 1n }), built, ask, ctxOf(), R, agreed, plan), "max_fee"],
+    // a tip above the max fee, within a cap that allows it; a max fee under the base fee
+    [() => checkEvmWBuy(txOf({ maxPriorityFeePerGas: 2n * BASE_FEE + TIP + 1n }), built, ask, ctxOf(), wbuyReads(held, { priorityCap: 10n ** 9n }), agreed, plan), "priority_fee"],
+    [() => checkEvmWBuy(txOf({ maxFeePerGas: BASE_FEE - 1n }), built, ask, ctxOf(), R, agreed, plan), "max_fee"],
+    // no estimate at all
+    [() => checkEvmWBuy(txOf(), built, ask, ctxOf(), wbuyReads(held, { estimate: [0n, 0n] }), agreed, plan), "gas_over_cap"],
+    // W itself an address; the adapter a pinned one; the build of the ask's own token; a slippage under 100%
+    [() => checkEvmWBuy(txOf(), built, ask, ctxOf({ wallet: "0x12" }), R, agreed, plan), "wallet"],
+    [() => checkEvmWBuy(txOf(), built, ask, unpinned, R, agreed, plan), "adapter"],
+    [() => checkEvmWBuy(txOf(), built, { ...ask, token: other }, ctxOf(), R, { ...agreed, token: other }, plan), "token"],
+    [() => checkEvmWBuy(txOf(), built, { ...ask, slippageBps: 10_000 }, ctxOf(), R, agreed, plan), "slippage"],
     [() => checkEvmWBuy(txOf({ accessList: [other] }), built, ask, ctxOf(), R, agreed, plan), "access_list"],
     [() => checkEvmWBuy({ ...txOf(), type: 4 } as never, built, ask, ctxOf(), R, agreed, plan), "type"],
     // the reads: two RPCs that differ, a run that failed, a balance that cannot pay the rest and its bound

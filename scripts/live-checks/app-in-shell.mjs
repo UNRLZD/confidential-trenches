@@ -47,6 +47,7 @@ import { isDeepStrictEqual } from "node:util";
 import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleLine } from "./console-errors.mjs";
+import { openInShell } from "./open-in-shell.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
 
@@ -262,6 +263,15 @@ const originOf = (u) => {
   }
 };
 
+/** The run's visit (card app-in-shell-visit-race): APP_HOST at PATH as a user opens it, to the shell at the same path
+ *  and query, through the shared openInShell (open-in-shell.mjs), so Firefox reporting the app's move before the
+ *  visit's own commit is no failed run (runs 43665465254 and 43669414912). A failed visit, or a move anywhere else, is
+ *  the run's error; a shell that does not commit within READY_MS is left to the reads below (no frame), as before. */
+export const openApp = (page) =>
+  openInShell(page, APP_HOST + PATH, SIGN_HOST, READY_MS).catch((e) => {
+    if (!/^page\.waitForURL: /.test(String(e?.message))) throw e;
+  });
+
 async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
   const ctx = await browser.newContext({
     viewport: w.viewport,
@@ -289,8 +299,7 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
       d.dismiss().catch(() => {});
     });
     ctx.on("page", () => run.popups++);
-    await page.goto(APP_HOST + PATH, { waitUntil: "commit" });
-    await page.waitForURL((u) => u.origin === SIGN_HOST, { timeout: READY_MS }).catch(() => {});
+    await openApp(page);
     await page.waitForLoadState("load").catch(() => {});
     const appFrame = async () => page.frames().find((f) => f !== page.mainFrame() && originOf(f.url()) === APP_HOST) ?? null;
     let f = null;

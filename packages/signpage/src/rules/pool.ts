@@ -408,12 +408,15 @@ const u64le = (d: Uint8Array, at: number): bigint => new DataView(d.buffer, d.by
 const be32 = (d: Uint8Array): bigint => d.reduce((a, b) => (a << 8n) | BigInt(b), 0n);
 const same = (a: { key: string; signer: boolean; writable: boolean } | undefined, key: string, signer: boolean, writable: boolean): boolean =>
   a !== undefined && a.key === key && a.signer === signer && a.writable === writable;
-/** `got` is `want` key for key, each key with the privileges a message gives it: the most any of `want` asks for it
- *  (a key named twice, as a release's root page and its new page can be, is one account in the message). */
-const sameList = (got: Ix["accounts"], want: readonly { key: string; signer: boolean; writable: boolean }[]): boolean => {
+/** `got` is `want` key for key, each key with the privileges a message gives it: the most any of `all` asks for it
+ *  (a key named twice, as a release's root page and its new page can be, is one account in the message). `all`: every
+ *  account the whole expected message names, when `want` is one instruction of several (a key one step names read-only
+ *  is writable in the message when another step, or the fee payer's place, makes it so: DLMM's swap2 names its user W
+ *  a read-only signer, and W pays). */
+const sameList = (got: Ix["accounts"], want: readonly { key: string; signer: boolean; writable: boolean }[], all: readonly { key: string; signer: boolean; writable: boolean }[] = want): boolean => {
   if (got.length !== want.length) return false;
   const merged = new Map<string, { signer: boolean; writable: boolean }>();
-  for (const a of want) {
+  for (const a of all) {
     const m = merged.get(a.key);
     merged.set(a.key, { signer: a.signer || (m?.signer ?? false), writable: a.writable || (m?.writable ?? false) });
   }
@@ -711,6 +714,8 @@ export function checkSolanaSell(
   if (ask.shareBps !== undefined) return refuse("amount");
   const pin = pinOf(ctx);
   if (venue.mint !== ask.token) return refuse("token");
+  // a DLMM venue read for a buy names the bin arrays a buy walks, never a sell's (the kit's solanaDlmmBuyVenueOf)
+  if (venue.kind === "dlmm" && venue.side !== "sell") return refuse("venue");
   if (reference.slippageBps !== ask.slippageBps) return refuse("slippage");
   let floor: bigint;
   try {
@@ -726,11 +731,16 @@ export function checkSolanaSell(
   if (priority > SOLANA_POOL_SELL_PRIORITY) return refuse("priority");
   const body = d.ixs.slice(n);
   if (body.length === 0) return refuse("instructions");
-  // the min out the bytes carry: the venue sell's last 8 data bytes (pump's and PumpSwap's sell(amount, min_out)); the
-  // pool's deposit is 41 bytes, so it is never read as the venue's
-  const venueIx = body.find((x) => x.data.length === 24 && x.program !== pin.program);
+  // the min out the bytes carry: pump's and PumpSwap's sell(amount, min_out), 24 bytes, its last 8; DLMM's swap2(amount_in,
+  // min_amount_out, remaining_accounts_info), 28 bytes with no slices, bytes 16..24 (the kit's dlmmSwap); Raydium CPMM's
+  // swap_base_input(amount_in, minimum_amount_out), 24 bytes, its last 8 (the kit's cpmmSwap); Raydium AMM v4's
+  // swap_base_in_v2, tag 16, amount_in, minimum_amount_out, 17 bytes, bytes 9..17 (the kit's ammV4Swap). The pool's
+  // deposit is 41 bytes, so it is never read as the venue's; whatever is read, the steps below are rebuilt from it and the
+  // device's own venue, so a wire whose min out sits elsewhere is refused there
+  const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];
+  const venueIx = body.find((x) => x.data.length === sellLen && x.program !== pin.program);
   if (!venueIx) return refuse("sell");
-  const minOut = u64le(venueIx.data, 16);
+  const minOut = u64le(venueIx.data, minAt);
   if (minOut < floor) return refuse("min_out");
   const want = solanaPoolSellSteps(venue, ctx.wallet, ask.amount, minOut);
   if (typeof reserve !== "bigint" || reserve < 0n || reserve >= minOut) return refuse("reserve");
@@ -754,11 +764,14 @@ export function checkSolanaSell(
   const bare = kept || p.full;
   const sell = bare ? body : body.slice(0, -1);
   if (sell.length !== want.length) return refuse("sell");
+  // each key's privileges as the whole expected message gives them, over every step (W pays and each venue's steps name
+  // it a writable signer somewhere, though DLMM's swap2 and Raydium's swaps name it read-only)
+  const all = want.flatMap((x) => x.accounts);
   for (let i = 0; i < want.length; i++) {
     const w = want[i]!;
     const g = sell[i]!;
     if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");
-    if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
+    if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");
   }
   if (bare) {
     passedWire(wire);

@@ -200,8 +200,8 @@ export async function bundle(pkg = PKG, { network = "mainnet", repo = REPO } = {
   };
 }
 
-/** Problems with the walk Worker's bytes (empty = fine): it must run as one file under its own policy (script-src 'self',
- *  no 'unsafe-eval'), so it may import, export, eval, make a Function or importScripts nothing. Read on the minified text,
+/** Problems with the walk Worker's bytes (empty = fine): it must run as one file under its own policy (script-src 'self'
+ *  'wasm-unsafe-eval', no 'unsafe-eval'), so it may import, export, eval, make a Function or importScripts nothing. Read on the minified text,
  *  beside the bundler's own import list (bundle().walkImports). */
 export function walkSourceProblems(bytes) {
   const t = bytes.toString("utf8");

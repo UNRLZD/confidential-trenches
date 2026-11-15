@@ -48,12 +48,14 @@ import { headersFor } from "../../../apps/terminal/test/harness/server.mjs";
 import { parseHeadersFile } from "../../../apps/terminal/scripts/check-deploy.ts";
 import { launchHarnessBrowser } from "../../../scripts/harness-sockets.mjs";
 import { browserLabel } from "../../../scripts/browsers.mjs";
+import { openInShell } from "../../../scripts/live-checks/open-in-shell.mjs";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { entropyToWords } from "../../wallet/src/derive/index.ts";
 import { RESTORE_GAP, RESTORE_LANES } from "../../wallet/src/notes/restore.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf } from "../../wallet/src/pool/evm.ts";
+import { SOL_MAINNET_DEPLOY } from "../../wallet/src/pool/solana.ts";
 import { vaultScope } from "../src/withdraw/checks.ts";
 import { RTT_MS, SLOT, solanaAccount, solanaAnswer } from "../test/restore-speed-pool.ts";
 
@@ -61,6 +63,8 @@ const SHIPPED_GAP = 10_000;
 const WORKER_PATH = "/walk-worker.js";
 export const CONTINUE = '#signin[data-signin="words"] button[data-action="next"]';
 export const STEP_MS = 60_000;
+/** A fixed loop of `n` steps, timed by the Worker that runs it (calibrate: 4e8 in one Worker). */
+export const speedLoop = (n) => `let x=0;const t=performance.now();for(let i=0;i<${n};i++)x=(x*31+i)|0;postMessage([performance.now()-t,x]);`;
 const secs = (ms) => (ms === null || ms === undefined ? "-" : (ms / 1000).toFixed(2));
 
 // ------------------------------------------------------------------------------------------------ the chains' answers
@@ -355,6 +359,88 @@ async function slowWorkers(context, page, cpu, out) {
   return cdp;
 }
 
+/** The gap each lane of walkSpeed's pools walks: a tenth of the shipped RESTORE_GAP, so it times a tenth of a restore's
+ *  walk. */
+export const SPEED_GAP = 1_000;
+
+/** walkSpeed's answer from its rounds: the median time, or a throw when any round's 32 lanes did not all answer that
+ *  they hashed on WebAssembly (a BigInt walk, or a Worker that named no field, never sets a bound). */
+export function speedOf(runs) {
+  const off = runs.find((r) => r.hashes.bigint > 0 || r.hashes.other > 0 || r.hashes.wasm !== 4 * RESTORE_LANES);
+  if (runs.length === 0 || off) throw new Error(`the speed walk did not hash on WebAssembly in every lane: ${JSON.stringify(off?.hashes ?? null)}`);
+  const sorted = [...runs].sort((a, b) => a.ms - b.ms);
+  return { ms: sorted[Math.floor(sorted.length / 2)].ms, workers: sorted[0].workers, runs: runs.map((r) => r.ms) };
+}
+
+/**
+ * The machine's speed at the restore's own work (card firefox-bound-times-the-walk-itself): the shipped /walk-worker.js
+ * (the signing page's build, under its own _headers, so it compiles its WebAssembly field as SIGN_HOST's does) walks
+ * four pools as a restore does, one Solana pool (each index a Poseidon precommitment and its PDA mark) and three
+ * precommitment pools (Base, the NEAR vault, Robinhood: the hashes alone), one pool after another, each pool's 8 lanes in
+ * as many Workers at once as walkCores starts (hardwareConcurrency, 8 at most), a new Worker a lane, each lane SPEED_GAP
+ * indices with nothing to find. Timed on a page this context serves itself (no host is reached), the median of `rounds`.
+ * Every lane must answer that it hashed on WebAssembly, or this throws: a BigInt walk never sets a bound.
+ * (A fixed JS integer loop, card firefox-restore-holds-on-every-runner, put an Azure runner at 1.49 times the box while
+ * its restore ran 3.4 times slower: queue run 43681047546.)
+ */
+export async function walkSpeed(browser, site, rounds = 3, gap = SPEED_GAP) {
+  const context = await browser.newContext();
+  try {
+    const host = "speed.ct.test";
+    const walk = readFileSync(path.join(site.root, WORKER_PATH.slice(1)));
+    await context.route(`https://${host}/**`, (r) => {
+      const p = new URL(r.request().url()).pathname;
+      if (p === WORKER_PATH) {
+        const headers = Object.fromEntries(headersFor(site.rules, p));
+        headers["content-type"] = "text/javascript; charset=utf-8";
+        return r.fulfill({ status: 200, headers, body: walk });
+      }
+      return r.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>speed</title>" });
+    });
+    const page = await context.newPage();
+    await page.goto(`https://${host}/`);
+    const runs = [];
+    for (let k = 0; k < rounds; k++)
+      runs.push(
+        await page.evaluate(
+          async ({ gap, lanes, program, path }) => {
+            const n = Math.max(1, Math.min(lanes, Number.isSafeInteger(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 1));
+            const hashes = { wasm: 0, bigint: 0, other: 0 };
+            const lane = (ask) =>
+              new Promise((ok, no) => {
+                const w = new Worker(path, { type: "module", name: "walk" });
+                w.onmessage = (e) => {
+                  w.terminate();
+                  if (e.data?.ok !== true) return no(new Error(`the speed walk refused: ${String(e.data?.error)}`));
+                  hashes[e.data.hash === "wasm" || e.data.hash === "bigint" ? e.data.hash : "other"] += 1;
+                  ok();
+                };
+                w.onerror = (e) => (w.terminate(), no(new Error(`the speed walk Worker failed: ${e.message}`)));
+                w.postMessage(ask);
+              });
+            // public stand-ins: two masters and a scope that are no seed's, and nothing to find
+            const pool = async (match) => {
+              let next = 0;
+              await Promise.all(
+                Array.from({ length: n }, async () => {
+                  for (let l = next++; l < lanes; l = next++) await lane({ lane: l, scope: 7n, gap, reach: null, nullifier: 11n, secret: 13n, ...match });
+                }),
+              );
+            };
+            const pre = { precommitments: [] };
+            const t = performance.now();
+            for (const m of [pre, { solana: { program, marks: [] } }, pre, pre]) await pool(m);
+            return { ms: performance.now() - t, workers: n, hashes };
+          },
+          { gap, lanes: RESTORE_LANES, program: SOL_MAINNET_DEPLOY.program, path: WORKER_PATH },
+        ),
+      );
+    return speedOf(runs);
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
 /** A fixed loop in a Worker on the harness's plain host, timed by the Worker: at no rate, the page's rate alone, and the
  *  page's and the Worker target's. */
 async function calibrate(browser, cpu) {
@@ -368,13 +454,13 @@ async function calibrate(browser, cpu) {
     if (how === "both") await slowWorkers(context, page, cpu, sink);
     await page.goto(`https://${HOSTS.sibling}/`);
     res[how] = await page.evaluate(
-      () =>
+      (src) =>
         new Promise((ok) => {
-          const src = "let x=0;const t=performance.now();for(let i=0;i<4e8;i++)x=(x*31+i)|0;postMessage([performance.now()-t,x]);";
           const w = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
           const t = performance.now();
           w.onmessage = (e) => ok({ inWorker: e.data[0], wall: performance.now() - t });
         }),
+      speedLoop(4e8),
     );
     await context.close();
   }
@@ -421,8 +507,8 @@ export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeo
   const app = page.frameLocator("iframe#app");
   const vis = (sel) => app.locator(`${sel} >> visible=true`).first();
   try {
-    await page.goto(`https://${REAL.app}/discover`, { waitUntil: "commit" });
-    await page.waitForURL((x) => x.hostname === REAL.sign, { timeout: STEP_MS });
+    // the shared visit (scripts/live-checks/open-in-shell.mjs): ends at the shell whichever commit Firefox reports first
+    await openInShell(page, `https://${REAL.app}/discover`, `https://${REAL.sign}`, STEP_MS);
     await app.locator(':root[data-signpage="ready"]').waitFor({ state: "attached", timeout: STEP_MS });
     await vis('[data-header="S1.1"] button, button[data-header="S1.1"]').click({ timeout: STEP_MS });
     await vis('.sgn-opt[data-way="wallet"]').click({ timeout: STEP_MS });
@@ -465,10 +551,26 @@ export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeo
   out.workerEvents = workerEvents.filter((p) => p === WORKER_PATH).length;
   out.walkWorkers = out.workers.filter((w) => w.path === WORKER_PATH).length;
   out.workerRates = [...new Set(out.workers.filter((w) => w.path === WORKER_PATH).map((w) => w.rate))];
+  out.hashed = hashedOf(out.lines);
   delete out.events;
   await context.close().catch(() => {});
   return out;
 }
+
+/** The field the walk Workers hashed on, summed over the page's lines (src/pool-restore.ts: "restore: the walk Workers
+ *  hashed on wasm N, bigint M", one a pass), or null when the page said none (a build before card
+ *  firefox-restore-holds-on-every-runner, or no walk ran in Workers). */
+export function hashedOf(lines) {
+  let n = null;
+  for (const l of lines) {
+    const m = /^restore: the walk Workers hashed on wasm (\d+), bigint (\d+)/.exec(l);
+    if (m) n = { wasm: (n?.wasm ?? 0) + Number(m[1]), bigint: (n?.bigint ?? 0) + Number(m[2]) };
+  }
+  return n;
+}
+
+/** The hash path as a run line says it. */
+export const hashText = (h) => (h ? `the walk hashed on WebAssembly in ${h.wasm} Workers, on BigInt in ${h.bigint}` : "the walk's hash path not said by the page");
 
 export function line(o, label) {
   const ok = o.error === null && o.shownMs !== null && o.doneMs !== null && o.unanswered.length === 0;
@@ -480,7 +582,7 @@ export function line(o, label) {
       `${ok ? "ok " : "BAD"} ${label}, ${o.mode === "workers" ? "Workers" : "page (/walk-worker.js 404)"}, CPU ${o.cpu}x: ` +
       `balance shown ${secs(o.shownMs)} s (in the state ${secs(o.drawnMs)} s), restore done ${secs(o.doneMs)} s (${o.sheetEnd ?? "not ended"}; op ${o.stage ?? "-"} at ${secs(o.stageMs)} s); ` +
       `${w}, ${o.workerRequests} /walk-worker.js requests (${o.workerStatuses.join(", ") || "none"}); hardwareConcurrency ${o.cores ?? "-"}; ` +
-      `${n} reads answered ${RTT_MS / 1000} s late, ${Object.values(o.app).reduce((s, x) => s + x, 0)} app helper reads answered 421 by the harness, ${o.unanswered.length} unanswered before the restore's end, ${o.unansweredAfter.length} refused after it (step 5)${o.error ? `; error: ${o.error}` : ""}`,
+      `${hashText(o.hashed)}; ${n} reads answered ${RTT_MS / 1000} s late, ${Object.values(o.app).reduce((s, x) => s + x, 0)} app helper reads answered 421 by the harness, ${o.unanswered.length} unanswered before the restore's end, ${o.unansweredAfter.length} refused after it (step 5)${o.error ? `; error: ${o.error}` : ""}`,
   };
 }
 

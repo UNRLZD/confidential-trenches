@@ -1,5 +1,5 @@
 // Removes each of src/rules/pool.ts's checks, one at a time, and runs the test named for it in test/rules-pool.test.ts
-// (or the test file a mutant names, test/rules-pool-onward.test.ts): each named test passes on the code as it is and fails
+// (or the test file a mutant names, test/rules-pool-onward.test.ts, rules-pool-evm-any-amount.test.ts...): each named test passes on the code as it is and fails
 // on every mutant. A mutant is written to a copy beside pool.ts (src/rules/.pool-mutant-<pid>.ts) and run by a copy of
 // its test file that imports it, all removed after: pool.ts itself is
 // never changed, so a test run at the same time (the package's own, in parallel) never reads a mutant. Exits 1 when a
@@ -16,6 +16,7 @@ const ONWARD = "rules-pool-onward.test.ts";
 const ATTACKS = "rules-pool-attacks.test.ts";
 const DEPEVM = "rules-pool-deposit-evm.test.ts";
 const SELLT = "pool-sell.test.ts";
+const ANY = "rules-pool-evm-any-amount.test.ts";
 const DROOM = "EVM deposit: the headroom is G(depth)";
 const testOf = (file) => fileURLToPath(new URL(`./${file}`, import.meta.url));
 const MUTANT_SRC = fileURLToPath(new URL(`../src/rules/.pool-mutant-${process.pid}.ts`, import.meta.url));
@@ -37,6 +38,9 @@ const FLOORT = "Solana sell: a deposit back under the sale's note floor";
 const WD = "Solana withdraw: another pool program";
 const BUY = "Solana buy: the kit's tag 3";
 const SELL = "Solana sell:";
+const DLMMT = "Solana sell on a DLMM pair";
+const RAYV4 = "Solana sell on a Raydium AMM v4 pool";
+const RAYC = "Solana sell on a Raydium CPMM pool";
 const EBUY = "EVM buy:";
 const EWD = "EVM withdraw:";
 const ESELL = "EVM sell and authorization";
@@ -56,6 +60,11 @@ const DOK = "EVM deposit: U's one rung";
 const DSIGN = "EVM deposit: signs as U";
 const DRUNG = "card evm-pool-amounts-are-standard-sizes: EVM deposit: only a rung of EVM_LADDER";
 const SHARE = "card pool-sell-share-across-wallets: a sell by share is 1 to 10,000";
+// card buy-any-amount-on-every-chain (test/rules-pool-evm-any-amount.test.ts): a whole piece's buy, the rest's release
+// and W's own buy of the rest, whose checks copy the EVM buy's, the withdraw's and the onward send's lines
+const ABUY = "checkEvmBuy: a non-standard amount's whole note";
+const RREL = "checkEvmRestRelease: the plan's rest piece alone";
+const WBUY = "checkEvmWBuy: W buys exactly the plan's rest";
 
 // [text, replacement, the test that must fail, its file when not rules-pool.test.ts]
 export const MUTANTS = [
@@ -173,10 +182,24 @@ export const MUTANTS = [
   ['if (sell.length !== want.length) return refuse("sell");', "", SELL],
   // the sell's accounts from the device's venue, never the wire (card sol-pool-buys-mayhem-coins): the rule unasked, or
   // the fee recipient it holds the wire to taken from the wire itself
-  ['if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', "", SELL],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', "", SELL],
   ["const want = solanaPoolSellSteps(venue, ctx.wallet, ask.amount, minOut);", 'const want = solanaPoolSellSteps(venue.kind === "pump-curve" ? { ...venue, feeRecipient: venueIx.accounts[1]!.key } : venue, ctx.wallet, ask.amount, minOut);', SELL],
   // the review of 6eb64bdb: one account the wire names, the curve's creator vault (its sell's account 8), taken as the rule's own
-  ['if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts.map((a, j) => (j === 8 && g.accounts[8] ? { ...a, key: g.accounts[8].key } : a)))) return refuse("sell_accounts");', SELL],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts.map((a, j) => (j === 8 && g.accounts[8] ? { ...a, key: g.accounts[8].key } : a)), all)) return refuse("sell_accounts");', SELL],
+  // card solana-buy-reaches-raydium-and-meteora: a DLMM sell held to its own reading: the venue read for a sell, its
+  // swap2 (28 bytes) found as the venue's, each key's privileges as the whole expected message gives them (W pays), and
+  // every swap2 account the device's own venue names (its bin arrays, W's coin in and wSOL out, the token programs)
+  ['if (venue.kind === "dlmm" && venue.side !== "sell") return refuse("venue");', "", DLMMT],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', DLMMT],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : [24, 16];', RAYV4],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 1] : [24, 16];', RAYV4],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', DLMMT],
+  // the review of 7637cce9f: a CPMM sell's min out read at another offset (its amount at 8), and one CPMM or AMM v4 swap
+  // account taken from the wire (CPMM's observation 12, AMM v4's token program 0)
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : venue.kind === "raydium-cpmm" ? [24, 8] : [24, 16];', RAYC],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.program === "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C" ? w.accounts.map((a, j) => (j === 12 && g.accounts[j] ? { ...a, key: g.accounts[j].key } : a)) : w.accounts, all)) return refuse("sell_accounts");', RAYC],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.program === "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8" ? w.accounts.map((a, j) => (j === 0 && g.accounts[j] ? { ...a, key: g.accounts[j].key } : a)) : w.accounts, all)) return refuse("sell_accounts");', RAYV4],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.program === "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo" ? w.accounts.map((a, j) => (j >= 16 && g.accounts[j] ? { ...a, key: g.accounts[j].key } : a)) : w.accounts, all)) return refuse("sell_accounts");', DLMMT],
   ['if (back !== solanaNoteOf(minOut - reserve)) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
   // card every-lamport-can-move: the deposit back on the grid, never the exact lamport amount
   ["if (back !== solanaNoteOf(minOut - reserve))", "if (back !== minOut - reserve)", SELL],
@@ -216,10 +239,12 @@ export const MUTANTS = [
   ['if (lower(pool) !== lower(read.pool)) return refuse("pool");', "", EWD],
   // the EVM buy and withdraw
   ['if (lower(pool) !== lower(pins.pool)) return refuse("pool");\n  if (![pins.v3', "if (![pins.v3", EBUY],
-  ['if (![pins.v3, pins.v4].some((a) => a !== undefined && lower(a) === lower(built.adapter))) return refuse("adapter");', "", EBUY],
-  ['if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");\n  if (proof.value', "if (proof.value", EBUY],
-  ['if (proof.value !== ask.amount) return refuse("amount");', "", EBUY],
+  ['refuse("pool");\n  if (![pins.v3, pins.v4].some((a) => a !== undefined && lower(a) === lower(built.adapter))) return refuse("adapter");', 'refuse("pool");', EBUY],
+  ['if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");\n  // the proof\'s value', "// the proof's value", EBUY],
+  ["(p) => p.chunk === proof.value && p.fee === ctx.feeCap", "(p) => p.fee === ctx.feeCap", ABUY, ANY],
   ['if (lower(pool) !== lower(pins.pool)) return refuse("pool");\n  if (proof.value === 0n)', "if (proof.value === 0n)", EWD],
+  // the rest's release to its W: as the withdraw's, recorded as checked
+  ['piece.fee) return refuse("amount");\n  checkRelay(proof, relay, pins, ctx);\n  passed("evm.withdraw", given, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, proof });\n', 'piece.fee) return refuse("amount");\n  checkRelay(proof, relay, pins, ctx);\n', RREL, ANY],
   ['if (ask.kind !== "pool.withdraw") return refuse("kind");\n  const proof', "const proof", EWD],
   // the EVM sell and authorization
   ['if (lower(built.w) !== lower(ctx.wallet)) return refuse("wallet");', "", ESELL],
@@ -254,13 +279,13 @@ export const MUTANTS = [
   ["  if (typeof p.fee !== \"bigint\"", "  if (!p.full) {} else if (typeof p.fee !== \"bigint\"", P3B],
   ["  let limit = BigInt(SOLANA_POOL_CU_LIMIT_MAX);\n", "  let limit = 0n;\n", P22],
   // only a build from the device's own quote (card evm-buy-hookdata-fee, review fold 1 M1)
-  ['  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");\n', "", EBUY],
+  ['  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");\n  const proof = snapProof(given);', "  const proof = snapProof(given);", EBUY],
   ['  if (!evmIsQuotedSell(built)) return refuse("not_quoted");\n', "", ESELL],
   // the EVM floors
   ['if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', "checkRelay", EBUY],
   // the EVM buy's floor, the check's own from the device's quote (card signpage-evm-pool-buy)
   ['if (lower(agreed.token) !== lower(ask.token ?? "")) return refuse("token");', "", EBUY],
-  ['ctx.feeCap >= ask.amount || agreed.amountIn !== ask.amount - ctx.feeCap)', "ctx.feeCap >= ask.amount)", EBUY],
+  ['ctx.feeCap >= piece.chunk || agreed.amountIn !== piece.chunk - ctx.feeCap)', "ctx.feeCap >= piece.chunk)", EBUY],
   ['if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");\n  if (typeof agreed.amountOut !== "bigint"', 'if (typeof agreed.amountOut !== "bigint"', EBUY],
   ['typeof agreed.amountOut !== "bigint" || agreed.amountOut <= 0n) return refuse("min_out");\n  const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;', 'typeof agreed.amountOut !== "bigint" || agreed.amountOut <= 0n) return refuse("min_out");\n  const floor = 1n;', EBUY],
   ['if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
@@ -275,7 +300,7 @@ export const MUTANTS = [
   ['  passed("evm.buy", given, read);\n', "", EBUY],
   ['if (lower(pool) !== lower(read.pool) || b.pool !== read.pool || b.venues !== read.venues || b.proof !== read.proof) return refuse("unchecked");', "", EBUY],
   [" || b.proof !== read.proof) return refuse(\"unchecked\");", ") return refuse(\"unchecked\");", EBUY],
-  ['  passed("evm.withdraw", given, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, proof });\n', "", EWD],
+  ['=== 0n) return refuse("amount");\n  checkRelay(proof, relay, pins, ctx);\n  passed("evm.withdraw", given, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, proof });\n', '=== 0n) return refuse("amount");\n  checkRelay(proof, relay, pins, ctx);\n', EWD],
   ['  passed("evm.sell", built, { venues: pins.venues, pool: pins.pool, chainId: pins.chainId });\n', "", ESELL],
   ["pinnedSignSellAuthorization(read.venues,", "pinnedSignSellAuthorization(_ctx.evm!.venues,", ESELL],
   // the review's fold: the sell's precommitment, the venue list's chain id
@@ -291,7 +316,7 @@ export const MUTANTS = [
   ['if (lower(built.feeRecipient) !== lower(pins.feeCollector)) return refuse("fee_recipient");', 'if (lower(built.feeRecipient) !== pins.feeCollector) return refuse("fee_recipient");', "ATTACK A9", ATTACKS],
   // the EVM onward send (W's second step of a withdraw): each refusal, and the signer's
   ['if (ask.kind !== "pool.withdraw") return refuse("kind");\n  const chain', "const chain", ONC, ONWARD],
-  ['if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");', "", ONC, ONWARD],
+  ['if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");\n  const t = onwardCopy(tx);', "const t = onwardCopy(tx);", ONC, ONWARD],
   ['typeof tx !== "object" || tx === null || Object.keys', "Object.keys", ONC, ONWARD],
   ["Object.keys(tx).sort().join() !== ONWARD_KEYS || ", "", ONC, ONWARD],
   [' || tx.type !== 2) return refuse("type");', ') return refuse("type");', ONC, ONWARD],
@@ -305,7 +330,7 @@ export const MUTANTS = [
   ["const estimate = hasCode || nitro ?", "const estimate = hasCode ?", ONRH, ONWARD],
   ['const nitro = ask.chain === "robinhood";', "const nitro = false;", ONRH, ONWARD],
   ['if (nitro && l1Fee !== 0n) return refuse("l1_fee");', "", ONRH, ONWARD],
-  ['if (t.chainId !== pins.chainId) return refuse("chain_id");', "", ONC, ONWARD],
+  ['if (t.chainId !== pins.chainId) return refuse("chain_id");\n  // the typed address', "// the typed address", ONC, ONWARD],
   ["!EVM_ADDRESS.test(to) || BigInt(to) < EVM_PRECOMPILE_TOP", "BigInt(to) < EVM_PRECOMPILE_TOP", ONC, ONWARD],
   // the zero address and every precompile: the bound gone, lowered, raised, or taken as inclusive
   [" || BigInt(to) < EVM_PRECOMPILE_TOP", "", ONC, ONWARD],
@@ -315,9 +340,9 @@ export const MUTANTS = [
   [" || lower(to) === lower(pins.pool)", "", ONC, ONWARD],
   [' || lower(to) === lower(ctx.wallet)) return refuse("to");', ') return refuse("to");', ONC, ONWARD],
   ['if (lower(t.to) !== lower(to)) return refuse("transfer_to");', "", ONC, ONWARD],
-  ['if (t.nonce !== nonce) return refuse("nonce");', "", ONC, ONWARD],
+  ['if (t.nonce !== nonce) return refuse("nonce");\n  // a plain send', "// a plain send", ONC, ONWARD],
   ['if (t.data !== "0x") return refuse("data");', "", ONC, ONWARD],
-  ['if (t.accessList.length !== 0) return refuse("access_list");', "", ONC, ONWARD],
+  ['if (t.accessList.length !== 0) return refuse("access_list");\n  if (estimate === null)', "if (estimate === null)", ONC, ONWARD],
   ['if (t.gasLimit !== EVM_ONWARD_GAS) return refuse("gas_limit");', "", ONC, ONWARD],
   // a To with code: its estimate and the margin, exactly; on Nitro with no code the estimate alone
   ['if (t.gasLimit !== (hasCode ? evmOnwardCodeGas(estimate) : estimate)) return refuse("gas_estimate");', "", ONK, ONWARD],
@@ -331,19 +356,19 @@ export const MUTANTS = [
   ["export const EVM_ONWARD_GAS_MAX = 100_000n;", "export const EVM_ONWARD_GAS_MAX = 100_001n;", ONRH, ONWARD],
   // the very send run on both RPCs before a To with code takes it: gone, or one RPC's answer alone
   ['  if (hasCode && agreed(reads.simulated, (x) => typeof x === "boolean") !== true) return refuse("simulation");\n', "", ONK, ONWARD],
-  ['agreed(reads.simulated, (x) => typeof x === "boolean")', "reads.simulated?.[0]", ONK, ONWARD],
-  ['agreed(reads.simulated, (x) => typeof x === "boolean") !== true', 'agreed(reads.simulated, (x) => typeof x === "boolean") === undefined', ONK, ONWARD],
-  ['if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");', "", ONC, ONWARD],
-  [" || t.maxPriorityFeePerGas > t.maxFeePerGas) return", ") return", ONF, ONWARD],
-  ['if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");', "", ONC, ONWARD],
-  [" || t.maxFeePerGas < baseFee) return", ") return", ONF, ONWARD],
-  ["t.maxFeePerGas > 2n * baseFee", "t.maxFeePerGas > 3n * baseFee", ONC, ONWARD],
+  ['hasCode && agreed(reads.simulated, (x) => typeof x === "boolean")', "hasCode && reads.simulated?.[0]", ONK, ONWARD],
+  ['hasCode && agreed(reads.simulated, (x) => typeof x === "boolean") !== true', 'hasCode && agreed(reads.simulated, (x) => typeof x === "boolean") === undefined', ONK, ONWARD],
+  ['(a send no node includes)\n  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");', "(a send no node includes)", ONC, ONWARD],
+  ["(a send no node includes)\n  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return", "(a send no node includes)\n  if (t.maxPriorityFeePerGas > reads.priorityCap) return", ONF, ONWARD],
+  ['the money stuck on W)\n  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");', "the money stuck on W)", ONC, ONWARD],
+  ["the money stuck on W)\n  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return", "the money stuck on W)\n  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap) return", ONF, ONWARD],
+  ["the money stuck on W)\n  if (t.maxFeePerGas > 2n * baseFee", "the money stuck on W)\n  if (t.maxFeePerGas > 3n * baseFee", ONC, ONWARD],
   // the fee bound within the Max fee drawn: gone, a wei of slack, at the cap refused, no Max fee let through
   ['if (typeof ctx.feeCap !== "bigint" || feeBound > ctx.feeCap) return refuse("fee_cap");', "", ONP, ONWARD],
   ["feeBound > ctx.feeCap) return refuse", "feeBound > ctx.feeCap + 1n) return refuse", ONP, ONWARD],
   ["feeBound > ctx.feeCap) return refuse", "feeBound >= ctx.feeCap) return refuse", ONP, ONWARD],
   ['typeof ctx.feeCap !== "bigint" || feeBound', "feeBound", ONP, ONWARD],
-  ["const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;", "const feeBound = t.gasLimit * t.maxFeePerGas;", ONP, ONWARD],
+  ["const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;\n  if (typeof ctx.feeCap", "const feeBound = t.gasLimit * t.maxFeePerGas;\n  if (typeof ctx.feeCap", ONP, ONWARD],
   // the part: a read, never 0
   ['if (!uint(reads.part) || reads.part === 0n) return refuse("reads");', "", ONP, ONWARD],
   ['if (!uint(reads.part) || reads.part', "if (reads.part", ONP, ONWARD],
@@ -391,7 +416,7 @@ export const MUTANTS = [
   ['if (d.nonce !== uNonce) return refuse("nonce");', "", DREF, DEPEVM],
   ['if (d.accessList.length > 0) return refuse("access_list");', "", DREF, DEPEVM],
   ['if (estimate === 0n || estimate > EVM_DEPOSIT_GAS_MAX) return refuse("gas_over_cap");', "", DREF, DEPEVM],
-  ["if (estimate === 0n || ", "if (", DREF, DEPEVM],
+  ["if (estimate === 0n || estimate > EVM_DEPOSIT_GAS_MAX", "if (estimate > EVM_DEPOSIT_GAS_MAX", DREF, DEPEVM],
   ['if (d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)) return refuse("gas_estimate");', "", DREF, DEPEVM],
   ["d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)", "d.gasLimit > estimate + evmDepositHeadroom(stateDepth, labelDepth)", DREF, DEPEVM],
   ["d.gasLimit !== estimate + evmDepositHeadroom(stateDepth, labelDepth)", "d.gasLimit < estimate", DREF, DEPEVM],
@@ -405,9 +430,33 @@ export const MUTANTS = [
   ['if (reads.balance.some((b) => rung + bound > b)) return refuse("balance");', "", DREF, DEPEVM],
   ["reads.balance.some((b) => rung + bound > b)", "reads.balance.every((b) => rung + bound > b)", DREF, DEPEVM],
   ["  DEPOSIT_CHECKED.set(tx, Object.freeze({ ...d, wallet: lower(u) }));\n", "", DSIGN, DEPEVM],
-  ['if (passed === undefined) return refuse("unchecked");', "", DSIGN, DEPEVM],
-  ['if (keys.some((k) => again[k] !== passed[k]) || again.accessList.length > 0) return refuse("unchecked");', "", DSIGN, DEPEVM],
+  ['DEPOSIT_CHECKED.get(tx) : undefined;\n  if (passed === undefined) return refuse("unchecked");', "DEPOSIT_CHECKED.get(tx) : undefined;", DSIGN, DEPEVM],
+  ['if (keys.some((k) => again[k] !== passed[k]) || again.accessList.length > 0) return refuse("unchecked");\n  // U\'s own key', "// U's own key", DSIGN, DEPEVM],
   ['if (signer !== passed.wallet) return refuse("wallet");', "", DSIGN, DEPEVM],
+  // W's own buy of a buy's rest (card buy-any-amount-on-every-chain): the lines it copies from the EVM buy, the onward
+  // send and U's deposit signer, each its own mutant at its own place
+  ['  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");\n  const chain = evmChainOf(ask, testnet);', "  const chain = evmChainOf(ask, testnet);", WBUY, ANY],
+  ['if (typeof ctx.wallet !== "string" || !EVM_ADDRESS.test(ctx.wallet)) return refuse("wallet");\n  if (built.chain', "if (built.chain", WBUY, ANY],
+  ['refuse("chain");\n  if (![pins.v3, pins.v4].some((a) => a !== undefined && lower(a) === lower(built.adapter))) return refuse("adapter");', 'refuse("chain");', WBUY, ANY],
+  ['if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");\n  if (lower(quote.token)', "if (lower(quote.token)", WBUY, ANY],
+  ['if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");\n  if (typeof quote.amountOut', "if (typeof quote.amountOut", WBUY, ANY],
+  ["const floor = (quote.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;", "const floor = 1n;", WBUY, ANY],
+  ['if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  const t = onwardCopy(tx);', "const t = onwardCopy(tx);", WBUY, ANY],
+  ['  if (agreed(reads.simulated, (x) => typeof x === "boolean") !== true) return refuse("simulation");\n', "", WBUY, ANY],
+  ['if (agreed(reads.simulated, (x) => typeof x === "boolean")', "if (reads.simulated?.[0]", WBUY, ANY],
+  ['if (agreed(reads.simulated, (x) => typeof x === "boolean") !== true', 'if (agreed(reads.simulated, (x) => typeof x === "boolean") === undefined', WBUY, ANY],
+  ['refuse("l1_fee");\n  if (t.chainId !== pins.chainId) return refuse("chain_id");', 'refuse("l1_fee");', WBUY, ANY],
+  ['refuse("data");\n  if (t.nonce !== nonce) return refuse("nonce");', 'refuse("data");', WBUY, ANY],
+  ['refuse("nonce");\n  if (t.accessList.length !== 0) return refuse("access_list");', 'refuse("nonce");', WBUY, ANY],
+  ["if (estimate === 0n || estimate > EVM_WBUY_GAS_MAX", "if (estimate > EVM_WBUY_GAS_MAX", WBUY, ANY],
+  ['refuse("gas_estimate");\n  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return refuse("priority_fee");', 'refuse("gas_estimate");', WBUY, ANY],
+  ['refuse("gas_estimate");\n  if (t.maxPriorityFeePerGas > reads.priorityCap || t.maxPriorityFeePerGas > t.maxFeePerGas) return', 'refuse("gas_estimate");\n  if (t.maxPriorityFeePerGas > reads.priorityCap) return', WBUY, ANY],
+  ['refuse("priority_fee");\n  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return refuse("max_fee");', 'refuse("priority_fee");', WBUY, ANY],
+  ['refuse("priority_fee");\n  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap || t.maxFeePerGas < baseFee) return', 'refuse("priority_fee");\n  if (t.maxFeePerGas > 2n * baseFee + reads.priorityCap) return', WBUY, ANY],
+  ['refuse("priority_fee");\n  if (t.maxFeePerGas > 2n * baseFee', 'refuse("priority_fee");\n  if (t.maxFeePerGas > 3n * baseFee', WBUY, ANY],
+  ["const feeBound = t.gasLimit * t.maxFeePerGas + l1Fee;\n  if (feeBound > plan.bound)", "const feeBound = t.gasLimit * t.maxFeePerGas;\n  if (feeBound > plan.bound)", WBUY, ANY],
+  ['WBUY_CHECKED.get(tx) : undefined;\n  if (passed === undefined) return refuse("unchecked");', "WBUY_CHECKED.get(tx) : undefined;", WBUY, ANY],
+  ['if (keys.some((k) => again[k] !== passed[k]) || again.accessList.length > 0) return refuse("unchecked");\n  if (lower(hex(', "if (lower(hex(", WBUY, ANY],
 ];
 
 // a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
@@ -423,7 +472,7 @@ const run = (name, file) => {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const original = readFileSync(POOL, "utf8");
-  const files = [TEST, ONWARD, DEPEVM, SELLT];
+  const files = [TEST, ONWARD, DEPEVM, SELLT, ANY];
   process.on("exit", () => { for (const f of files) rmSync(mutantTestOf(f), { force: true }); rmSync(MUTANT_SRC, { force: true }); });
   for (const f of files) {
     const test = readFileSync(testOf(f), "utf8");

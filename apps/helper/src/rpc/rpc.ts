@@ -50,7 +50,17 @@
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
 import { AsyncLocalStorage } from "node:async_hooks";
-import { evmPoolVenues, HELPER_SOLANA_BLOCK_HEADER } from "@blindfill/kit";
+import {
+  evmPoolVenues,
+  HELPER_SOLANA_BLOCK_HEADER,
+  SOLANA_AMM_V4_PROGRAM,
+  SOLANA_CPMM_PROGRAM,
+  SOLANA_DLMM_PROGRAM,
+  SOLANA_SOL_MINT,
+  solanaAmmV4PoolScan,
+  solanaCpmmPoolScan,
+  solanaDlmmPairScan,
+} from "@blindfill/kit";
 import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_CLIENTS, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
@@ -154,6 +164,40 @@ export const LOG_CACHE_MS = 60 * 60 * 1000;
  *  no caller's share) at most once this often, and only for a page that ends past the head it holds. [design: 10 s: the
  *  page's tail reads past the head on every round; Robinhood's finalized block lags its head 155 s or more.] */
 export const FINAL_HEAD_MS = 10_000;
+/**
+ * The widest eth_getLogs range, in blocks (toBlock - fromBlock + 1), each keyed company's plan serves (card
+ * helper-base-logs-page), at its plan today: a plan change is a change here. A name of no company here (an existing name
+ * such as ROBINHOOD_RPC_URL, Alchemy's Pay As You Go, "unlimited" per robinhood-alchemy-key.sh) has no known span: it
+ * is asked any range, as before.
+ *   - QuickNode: "the block range limit for this RPC method is 5 blocks for users on the Free Trial plan", paid plans
+ *     10,000 (quicknode.com/docs/base/eth_getLogs, read 2026-11-15 02:4xZ); the owner's endpoints are on the trial
+ *     (KEYED_DAY's note, limits.ts).
+ *   - dRPC, the free keys: the helper's keyed Base route, read live 2026-11-15 02:37Z, answered the pool's eth_getLogs
+ *     over 5, 10, 11, 50 and 100 blocks on BASE_RPC_URL_DRPC_1 (98-108 ms, Server-Timing), and 101 blocks a 429 after
+ *     its keys refused it (rpc;desc="BASE_RPC_URL_DRPC_2", 8 ms), 102, 120 and 200 blocks 503 (code 35 "ranges over
+ *     10000 blocks are not supported on freetier", HTTP 400: data/evm/index.ts, packages/wallet/src/pool/evm.ts). 100.
+ * A log read on the keyed-only route goes only to the providers whose span covers it (a QuickNode trial asked 100 blocks
+ * spends 20 credits on a refusal); one no provider covers is paged (LOGS_PAGES_MAX).
+ */
+export const KEYED_LOGS_SPAN: Readonly<Partial<Record<KeyedProvider, number>>> = { quicknode: 5, drpc: 100 };
+/**
+ * The most pages one eth_getLogs on the keyed-only route is split into (card helper-base-logs-page): a range wider than
+ * every keyed provider's span (KEYED_LOGS_SPAN) is read in pages of the widest one's span, sent to the providers of that
+ * span, and joined in order as one answer. Past this many pages (or the chain's 10 s total, when smaller) the read is
+ * refused before any send with a JSON-RPC range cap naming the span served (LOGS_CAP_CODE: "maximum block range: N", a
+ * form the page's pager reads, packages/wallet/src/pool/evm.ts CAP_SPANS), so the page asks narrower ranges. Each
+ * caller's paged reads draw on their own allowance, this many pages a 10 s window (logsKey), never the caller's share.
+ * [design: 100: on Base's dRPC keys 10,000 blocks, the card's end state, about 5.5 h of chain at 200 ms blocks; 100 calls
+ * are 2,000 CU of a dRPC key's 7,000,000 a day (limits.ts KEYED_DAY, KEYED_COST), and 100 pages at the three keys' 24
+ * a second take about 4 s of the read's WALK_MS.]
+ */
+export const LOGS_PAGES_MAX = 100;
+/** The JSON-RPC code of the helper's own range cap: invalid params, as Pocket's and PublicNode's caps. */
+const LOGS_CAP_CODE = -32602;
+/** The asks one page gets (pagedLogs): its worker's provider, then the page's whole list for each ask after. */
+const LOGS_PAGE_TRIES = 3;
+/** The budget key callers' paged eth_getLogs draw on (LOGS_PAGES_MAX), one per chain; no space, so never a method's. */
+const logsKey = (c: RpcChain): string => `${c}:logs`;
 /** A block number as an EVM node writes it: 0x, lowercase or uppercase hex, no leading zero, at most 64 bits. */
 const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
 /**
@@ -173,14 +217,14 @@ export const POOL_LOGS_CLIENT = "pool-logs";
 /** A request the finalized-logs cache may keep (LOG_CACHE_ENTRIES): one eth_getLogs, one filter with numbers for both ends
  *  and no blockHash; its key (the chain and the exact params as sent), its toBlock, and whether its address is the
  *  chain's pool (`pool`, the kit's pin, lowercase), alone. Anything else: null. */
-function finalLogsOf(chain: RpcChain, r: Record<string, unknown>, pool: string | undefined): { key: string; to: bigint; pool: boolean } | null {
+function finalLogsOf(chain: RpcChain, r: Record<string, unknown>, pool: string | undefined): { key: string; from: bigint; to: bigint; pool: boolean } | null {
   if (!EVM_CHAINS.has(chain) || r.method !== "eth_getLogs" || !Array.isArray(r.params) || r.params.length !== 1) return null;
   const f = r.params[0];
   if (!isPlain(f) || Object.hasOwn(f, "blockHash") || typeof f.fromBlock !== "string" || typeof f.toBlock !== "string") return null;
   if (!BLOCK_NUMBER.test(f.fromBlock) || !BLOCK_NUMBER.test(f.toBlock)) return null;
   const from = BigInt(f.fromBlock);
   const to = BigInt(f.toBlock);
-  return from > to ? null : { key: `${chain} ${JSON.stringify(r.params)}`, to, pool: pool !== undefined && typeof f.address === "string" && f.address.toLowerCase() === pool };
+  return from > to ? null : { key: `${chain} ${JSON.stringify(r.params)}`, from, to, pool: pool !== undefined && typeof f.address === "string" && f.address.toLowerCase() === pool };
 }
 /** A send's timeout with `left` ms of its walk's time left: RPC_TIMEOUT_MS at most, whole ms (AbortSignal.timeout refuses
  *  a fraction, and the clock is a monotonic one in fractional ms). */
@@ -521,13 +565,15 @@ type Answer = RpcAnswer & { headers?: Record<string, string>; why?: string; timi
  *  and pace's wait before a send (rpc-wait); `keyedMs`, a keyed Solana provider's time before the read fell back
  *  (rpc-keyed); `last`, the last send, the one that answered when the read did: its time and its provider's environment
  *  NAME (rpc), never its URL, host or key. */
-type Trace = { waitMs: number; keyedMs?: number; last?: { name: string; ms: number }; cached?: true };
+type Trace = { waitMs: number; keyedMs?: number; last?: { name: string; ms: number }; cached?: true; pages?: { n: number; ms: number } };
 const traces = new AsyncLocalStorage<Trace>();
 /** A trace as Server-Timing entries: rpc-keyed when the read fell back, rpc-cache when the finalized-logs cache answered
- *  it (LOG_CACHE_ENTRIES), then rpc-wait and rpc always ("none": no send). */
+ *  it (LOG_CACHE_ENTRIES), rpc-pages when it was paged (pagedLogs: its pages' time and count; their waits and sends ran
+ *  side by side, so they are not summed into rpc-wait), then rpc-wait and rpc always ("none": no send). */
 const timingOf = (t: Trace): string[] => [
   ...(t.keyedMs === undefined ? [] : [`rpc-keyed;dur=${Math.round(t.keyedMs)};desc="fell back"`]),
   ...(t.cached === undefined ? [] : ['rpc-cache;desc="hit"']),
+  ...(t.pages === undefined ? [] : [`rpc-pages;dur=${Math.round(t.pages.ms)};desc="${t.pages.n}"`]),
   `rpc-wait;dur=${Math.round(t.waitMs)}`,
   `rpc;dur=${Math.round(t.last?.ms ?? 0)};desc="${t.last?.name ?? "none"}"`,
 ];
@@ -650,6 +696,32 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
 }
 
 /**
+ * getProgramAccounts of a coin's SOL pools only as the kit's pool scans (card solana-buy-reaches-raydium-and-meteora):
+ * Meteora DLMM (solanaDlmmPairScan, readSolanaDlmmPairs), Raydium CPMM (solanaCpmmPoolScan, readSolanaCpmmPools) and
+ * Raydium AMM v4 (solanaAmmV4PoolScan, readSolanaAmmV4Pools), which the signing page sends: the pools of one coin and
+ * wSOL, by the pool's size and both mints, addresses only, the coin on either side. The request must equal that
+ * program's scan for its two mints, key for key, one of them wSOL and the other another 32-byte address; one mint alone,
+ * no size, any bytes of the pools or any other filter would sweep the program on the keyed provider's quota. Anything
+ * else is refused before any call. Route A only (the solana route), as every scan there.
+ */
+const POOL_SCANS: Readonly<Record<string, (x: string, y: string) => readonly unknown[]>> = Object.freeze({
+  [SOLANA_DLMM_PROGRAM]: solanaDlmmPairScan,
+  [SOLANA_CPMM_PROGRAM]: solanaCpmmPoolScan,
+  [SOLANA_AMM_V4_PROGRAM]: solanaAmmV4PoolScan,
+});
+function poolScanAllowed(r: Record<string, unknown>): boolean {
+  const p = r.params;
+  if (!Array.isArray(p) || p.length !== 2 || typeof p[0] !== "string" || !Object.hasOwn(POOL_SCANS, p[0]) || !isPlain(p[1])) return false;
+  const f = p[1].filters;
+  if (!Array.isArray(f) || f.length !== 3) return false;
+  const mint = (x: unknown): string | null => (isPlain(x) && isPlain(x.memcmp) && typeof x.memcmp.bytes === "string" && x.memcmp.bytes.length <= 44 && base58Bytes(x.memcmp.bytes)?.length === 32 ? x.memcmp.bytes : null);
+  const x = mint(f[1]);
+  const y = mint(f[2]);
+  if (x === null || y === null || x === y || (x !== SOLANA_SOL_MINT && y !== SOLANA_SOL_MINT)) return false;
+  return JSON.stringify(p) === JSON.stringify(POOL_SCANS[p[0]]!(x, y));
+}
+
+/**
  * getBlock only as a header read (card buy-spends-several-pieces): the signing page reads the finalized height of one
  * block, the one a found W's latest transaction is in (packages/signpage/src/pool-sell.ts foundQuiet), as params exactly
  * [slot, the kit's HELPER_SOLANA_BLOCK_HEADER] (finalized, json, transactionDetails none, rewards false,
@@ -694,7 +766,7 @@ function check(chain: RpcChain, r: unknown, scan: readonly string[] = []): Recor
   if (!((typeof id === "number" && Number.isSafeInteger(id)) || (typeof id === "string" && id.length <= ID_MAX))) return undefined;
   if (typeof r.method !== "string" || !RPC_METHODS[chain].includes(r.method)) return undefined;
   if (Object.hasOwn(r, "params") && !isPlain(r.params) && !Array.isArray(r.params)) return undefined;
-  if (r.method === "getProgramAccounts" && !scanAllowed(r, scan)) return undefined;
+  if (r.method === "getProgramAccounts" && !scanAllowed(r, scan) && !(chain === "solana" && poolScanAllowed(r))) return undefined;
   if (r.method === "getBlock" && !blockHeaderAllowed(r)) return undefined;
   const out: Record<string, unknown> = { jsonrpc: "2.0", id, method: r.method };
   if (Object.hasOwn(r, "params")) out.params = r.params;
@@ -748,8 +820,22 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       return [ch, { ...b, total, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(total) }];
     }),
   ) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
+  // card helper-base-logs-page: the most pages one paged eth_getLogs may take on `c` (LOGS_PAGES_MAX, never past the
+  // chain's 10 s total, so a read at the cap always fits a window), and the allowance callers' paged reads draw on
+  // (logsKey): the chain's total, each caller this many pages a window, never the caller's own share
+  const pagesMaxOf = (c: RpcChain): number => Math.min(LOGS_PAGES_MAX, limits[c].total);
+  const logsLimits: Record<string, BudgetLimits & { perMethod?: number }> = Object.fromEntries(RPC_CHAINS.map((ch) => [logsKey(ch), { total: limits[ch].total, perClient: pagesMaxOf(ch), reserve: 0, userRoom: userRoomOf(limits[ch].total) }]));
+  // each keyed URL's eth_getLogs span (KEYED_LOGS_SPAN); none: no known span, asked any range
+  const logsSpanByUrl = new Map<string, bigint>();
+  for (const ch of RPC_CHAINS) for (const k of upstreams[ch].keyed) {
+    const co = KEYED_PROVIDER[k.env];
+    const s = co === undefined ? undefined : KEYED_LOGS_SPAN[co];
+    if (s !== undefined) logsSpanByUrl.set(k.url, BigInt(s));
+  }
+  /** Whether `url` serves an eth_getLogs of `span` blocks: no known span, or one at least that. */
+  const covers = (url: string, span: bigint): boolean => (logsSpanByUrl.get(url) ?? span) >= span;
   // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
-  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : k === SPARES_KEY ? limits.solana : limits[k as RpcChain]);
+  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : k === SPARES_KEY ? limits.solana : (logsLimits[k] ?? limits[k as RpcChain]));
   const budget = upstreamBudget((key) => {
     const [k, method] = key.split(" ") as [string, string | undefined];
     const l = limitsOf(k);
@@ -1015,7 +1101,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         // ask then draws on its own allowance (POOL_LOGS_CLIENT), any other on the caller's share as before
         const final = await finalized(c, logs.to, own);
         const who = final && logs.pool && client !== undefined ? `${POOL_LOGS_CLIENT} ${client}` : client;
-        const a = await callList(c, own, forward, methods, who, reserved, by);
+        // card helper-base-logs-page: sent whole only to the providers whose span covers it; when none does, or those
+        // that do all failed it (503), the narrower ones read it in pages (pagedLogs)
+        const span = logs.to - logs.from + 1n;
+        const whole = own.filter((u) => covers(u, span));
+        const narrow = own.filter((u) => !covers(u, span));
+        let a = whole.length > 0 ? await callList(c, whole, forward, methods, who, reserved, by) : UPSTREAM();
+        if (narrow.length > 0 && a.status === 503) a = await pagedLogs(c, narrow, out as Record<string, unknown>, logs.from, logs.to, who, reserved, by);
         if (final) logCachePut(logs.key, a);
         return a;
       }
@@ -1039,6 +1131,88 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (c === "solana" && keyed && !slot.useKeyed()) return solanaRest(forward, methods, client, reserved, by);
     if ((EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) || (c !== "solana" && walks(c))) return callList(c, listOf(c), forward, methods, client, reserved, by);
     return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved, by);
+  }
+
+  /**
+   * One eth_getLogs (`req`, checked, numbers for both ends) of `from` to `to` on `providers`, none of whose span covers
+   * it, read in pages (card helper-base-logs-page, LOGS_PAGES_MAX): pages of the widest span among them, back to back
+   * from `from`, each the caller's filter with its own fromBlock and toBlock and the caller's id, sent to the providers
+   * of that span alone through callList (each provider's pace, hold and day as any read), one in flight per provider,
+   * a page its provider fails asked of the others (LOGS_PAGE_TRIES asks, within the walk's time). Answered as
+   * one eth_getLogs: every page's result list joined in block order under the caller's id; else the first page's own
+   * failure in block order (its JSON-RPC error with the caller's id, or the helper's 429 or 503). Past the page cap, or once the pages' logs pass RPC_ANSWER_MAX, a JSON-RPC range cap naming the
+   * span that is served (LOGS_CAP_CODE), the first before any send. The pages draw the caller's paged allowance
+   * (logsKey), all at once; refused, the caller's 429.
+   */
+  async function pagedLogs(c: RpcChain, providers: readonly string[], req: Record<string, unknown>, from: bigint, to: bigint, client: string | undefined, reserved: boolean, by: number): Promise<Answer> {
+    const id = JSON.stringify(req.id);
+    const capAnswer = (blocks: bigint, why: string): Answer => ({ status: 200, body: `{"jsonrpc":"2.0","id":${id},"error":{"code":${LOGS_CAP_CODE},"message":"${why}, maximum block range: ${blocks}"}}` });
+    const w = providers.reduce((m, u) => (logsSpanByUrl.get(u)! > m ? logsSpanByUrl.get(u)! : m), 0n);
+    const list = providers.filter((u) => logsSpanByUrl.get(u) === w);
+    if (w <= 0n || list.length === 0) return UPSTREAM();
+    const n = Number((to - from + w) / w);
+    const max = pagesMaxOf(c);
+    if (n > max) return capAnswer(BigInt(max) * w, "eth_getLogs range too wide");
+    const wait = budget.takeEach([[logsKey(c), n]], client, false, reserved);
+    if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
+    const filter = (req.params as unknown[])[0] as Record<string, unknown>;
+    const pageBody = (i: number): string => {
+      const a = from + BigInt(i) * w;
+      const b = a + w - 1n < to ? a + w - 1n : to;
+      return JSON.stringify({ jsonrpc: "2.0", id: req.id, method: "eth_getLogs", params: [{ ...filter, fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` }] });
+    };
+    /** Each page's outcome: its result list as JSON text without the brackets, or the answer the read fails with. */
+    const done: ({ part: string } | { fail: Answer } | undefined)[] = new Array(n);
+    let bytes = 0;
+    let stop = false;
+    let next = 0;
+    // one worker per provider, each sending its pages to its own provider first, so the workers never race for one
+    // provider's second (racing ones lost every wake to the one already waiting: a page refused three times in a row)
+    const one = async (i: number, mine: string): Promise<void> => {
+      let a: Answer = UPSTREAM();
+      // a page its provider did not serve (down, held, its second taken by other reads) is asked of the whole list
+      for (let t = 0; t < LOGS_PAGE_TRIES && !stop && by - now() > WALK_SEND_MIN_MS; t++) {
+        a = await callList(c, t === 0 ? [mine] : list, pageBody(i), ["eth_getLogs"], client, reserved, by, null);
+        if (a.status === 200) break;
+      }
+      if (a.status !== 200) return void (done[i] = { fail: a });
+      let answer: unknown;
+      try {
+        answer = parse(a.body);
+      } catch {
+        return void (done[i] = { fail: UPSTREAM() });
+      }
+      if (isPlain(answer) && Object.hasOwn(answer, "error")) return void (done[i] = { fail: { status: 200, body: `{"jsonrpc":"2.0","id":${id},"error":${JSON.stringify(answer.error)}}` } });
+      if (!isPlain(answer) || !Array.isArray(answer.result)) return void (done[i] = { fail: UPSTREAM() });
+      const part = JSON.stringify(answer.result).slice(1, -1);
+      bytes += Buffer.byteLength(part) + 1;
+      done[i] = { part };
+    };
+    const worker = async (mine: string): Promise<void> => {
+      while (!stop && next < n) {
+        const i = next++;
+        await one(i, mine);
+        if (!(done[i] && "part" in done[i]!) || bytes > RPC_ANSWER_MAX) stop = true;
+      }
+    };
+    const t0 = now();
+    const t = traces.getStore();
+    // each page's waits and send in a trace of its own: side by side, they would sum past the read's own time
+    await Promise.all(list.slice(0, n).map((u) => traces.run({ waitMs: 0 }, () => worker(u))));
+    if (t !== undefined) t.pages = { n: next, ms: now() - t0 };
+    // in block order: the first page that failed, or the pages that fit the answer cap
+    const parts: string[] = [];
+    let size = 0;
+    for (let i = 0; i < n; i++) {
+      // pages start in order and every started one ends before here, so a page never asked follows a failure or the cap
+      const d = done[i];
+      if (d === undefined) return UPSTREAM();
+      if ("fail" in d) return d.fail;
+      size += Buffer.byteLength(d.part) + 1;
+      if (size > RPC_ANSWER_MAX) return capAnswer(BigInt(Math.max(1, i)) * w, "eth_getLogs response size exceeded");
+      if (d.part !== "") parts.push(d.part);
+    }
+    return { status: 200, body: `{"jsonrpc":"2.0","id":${id},"result":[${parts.join(",")}]}` };
   }
 
   /**

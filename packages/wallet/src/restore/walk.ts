@@ -33,6 +33,7 @@
 import { base58 } from "@scure/base";
 import { masters } from "../derive/index.ts";
 import { RESTORE_LANES, walkLaneOf, walkLaneYielding, type LaneWalk, type RestoreArgs, type Slices } from "../notes/restore.ts";
+import { walkHash, type WalkHash } from "../notes/poseidon-walk.ts";
 import { solanaPda } from "../pool/solana.ts";
 
 /** What a lane's walk matches: the precommitments a pool holds, or the Solana pool's precommitment marks by address. */
@@ -68,8 +69,9 @@ export function matchOf(match: WalkMatch | { kind?: unknown }): (precommitment: 
   }
   throw new Error("match: neither precommitments nor solana marks");
 }
-/** What a walk Worker answers. */
-export type WalkAnswer = { ok: true; walk: LaneWalk } | { ok: false; error: string };
+/** What a walk Worker answers: a walk carries the field the Worker hashed it on (card
+ *  firefox-restore-holds-on-every-runner). */
+export type WalkAnswer = { ok: true; walk: LaneWalk; hash: WalkHash } | { ok: false; error: string };
 
 /** The Worker side: one lane's walk from a WalkAsk, every field checked first. */
 export function answerWalk(ask: unknown): WalkAnswer {
@@ -81,7 +83,8 @@ export function answerWalk(ask: unknown): WalkAnswer {
     if (a.reach !== null && !Number.isSafeInteger(a.reach)) throw new Error("reach: not an index or null");
     if (typeof a.scope !== "bigint" || typeof a.nullifier !== "bigint" || typeof a.secret !== "bigint") throw new Error("scope and masters: not bigints");
     const has = a.solana !== undefined ? matchOf({ kind: "solana", ...(a.solana as object) }) : matchOf({ kind: "pre", precommitments: a.precommitments });
-    return { ok: true, walk: walkLaneOf({ nullifier: a.nullifier, secret: a.secret }, a.scope, a.lane!, has, a.gap!, a.reach ?? null) };
+    const walk = walkLaneOf({ nullifier: a.nullifier, secret: a.secret }, a.scope, a.lane!, has, a.gap!, a.reach ?? null);
+    return { ok: true, walk, hash: walkHash() };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "the walk failed" };
   }
@@ -92,6 +95,22 @@ export interface WalkPort {
   postMessage(message: unknown): void;
   addEventListener(type: "message" | "error" | "messageerror", listener: (e: { data?: unknown }) => void): void;
   terminate(): void;
+}
+
+/** How many walk Workers answered a walk on each field. */
+export type WalkHashes = Record<WalkHash, number>;
+
+/** `spawn`, with each walk its Workers answer counted in `n` by the field it was hashed on (card
+ *  firefox-restore-holds-on-every-runner): the page says the count, so a run that fell back to BigInt is seen. */
+export function countingHashes(spawn: () => WalkPort, n: WalkHashes): () => WalkPort {
+  return () => {
+    const w = spawn();
+    w.addEventListener("message", (e) => {
+      const h = (e.data as { ok?: unknown; hash?: unknown } | undefined) ?? {};
+      if (h.ok === true && (h.hash === "wasm" || h.hash === "bigint")) n[h.hash] += 1;
+    });
+    return w;
+  };
 }
 
 /**

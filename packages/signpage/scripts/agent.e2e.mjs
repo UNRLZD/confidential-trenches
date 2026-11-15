@@ -12,6 +12,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fetchOrAbort } from "../../../scripts/live-checks/route-fetch.mjs";
 import { build, WRANGLER } from "./deploy.mjs";
 import { entropyToWords } from "../../wallet/src/derive/index.ts";
 import { APP, home, session, SIGN, steps } from "../../../examples/agent/agent.mjs";
@@ -34,7 +35,11 @@ const hooks = {
   context: (ctx) =>
     ctx.route("**/*", async (r) => {
       const u = new URL(r.request().url());
-      if (u.origin === SIGN) return r.fulfill({ response: await r.fetch({ url: `${LOCAL}${u.pathname}${u.search}`, maxRedirects: 0 }) });
+      if (u.origin === SIGN) {
+        // a read the local server drops is tried once more, then the page's own request fails (route-fetch.mjs)
+        const res = await fetchOrAbort(r, { url: `${LOCAL}${u.pathname}${u.search}`, maxRedirects: 0 });
+        return res && r.fulfill({ response: res });
+      }
       if (u.origin === APP) return r.fallback();
       return r.abort();
     }),

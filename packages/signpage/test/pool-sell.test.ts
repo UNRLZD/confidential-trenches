@@ -5698,24 +5698,29 @@ test("card wallets-found-in-one-read: no recorded W holds the token (an airdrop 
 // venue read (the recorded fixtures carry one venue per coin, so the miss is planted at the leg's choice itself)
 test("a later leg's guessed venue its reference does not confirm is read again as the chosen one, the guess never used", async () => {
   const { legVenue } = await import("../src/pool-sell.ts");
+  type VenuePick = import("../src/pool-sell.ts").VenuePick;
   const asked: string[] = [];
-  const venueOf = async (k: "pump-curve" | "pumpswap") => (asked.push(k), `read ${k} now`);
+  const venueOf = async (k: VenuePick) => (asked.push(k.kind), `read ${k.kind} now`);
+  const curve: VenuePick = { kind: "pump-curve", address: "C1" };
   // a hit: the guess's own read, nothing asked again
-  assert.equal(await legVenue({ kind: "pump-curve", read: Promise.resolve("guessed curve") }, "pump-curve", venueOf), "guessed curve");
+  assert.equal(await legVenue({ pick: curve, read: Promise.resolve("guessed curve") }, { ...curve }, venueOf), "guessed curve");
   assert.deepEqual(asked, []);
   // a miss: the chosen venue read now, the guess (even one that fails) never used and never unhandled
   let seen = false;
   const failing = Promise.reject(new Error("rpc 0: socket hang up"));
   const watch = (e: unknown) => void (seen = e instanceof Error);
   process.once("unhandledRejection", watch);
-  assert.equal(await legVenue({ kind: "pump-curve", read: failing }, "pumpswap", venueOf), "read pumpswap now");
+  assert.equal(await legVenue({ pick: curve, read: failing }, { kind: "pumpswap", address: "P1" }, venueOf), "read pumpswap now");
   await new Promise((r) => setImmediate(r));
   process.off("unhandledRejection", watch);
   assert.equal(seen, false, "the dropped guess's failure is handled");
   assert.deepEqual(asked, ["pumpswap"]);
   // no guess (the first leg, or a leg before whom none chose): the chosen venue read
-  assert.equal(await legVenue(null, "pump-curve", venueOf), "read pump-curve now");
+  assert.equal(await legVenue(null, curve, venueOf), "read pump-curve now");
   assert.deepEqual(asked, ["pumpswap", "pump-curve"]);
+  // the same kind at another address (a coin's other DLMM pair): a miss, the chosen pair read now
+  assert.equal(await legVenue({ pick: { kind: "dlmm", address: "D1" }, read: Promise.resolve("guessed D1") }, { kind: "dlmm", address: "D2" }, venueOf), "read dlmm now");
+  assert.deepEqual(asked, ["pumpswap", "pump-curve", "dlmm"]);
 });
 
 // Review of 55d4c6eb, P2-B: the plan's Rent and pool-size reads are handed to every leg; one that failed is a later
