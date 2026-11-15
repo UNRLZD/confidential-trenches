@@ -1,46 +1,67 @@
 #!/usr/bin/env node
-// Live check of card solana-buy-reaches-raydium-and-meteora: the deployed helper carries the signing page's DLMM pair
-// scan, so a coin whose SOL pools are Meteora DLMM pairs has its pairs found. POST /v1/rpc/solana with the kit's
-// solanaDlmmPairScan for NEARKAT (6UtY9iTZ…) and wSOL, the coin as X, must answer 200 with a list of addresses that
-// holds NEARKAT's two pairs with SOL in them (B8BH6ZKr… and J3wZVx37…, read on two mainnet RPCs 14 Nov); the same scan
-// with one mint alone (a sweep of every pair of the coin) must be refused 400, before any call. A helper that refuses the
-// scan, or whose upstream cannot answer it (the page then finds no pair and the coin stays unbought), fails.
+// Live check of card solana-buy-reaches-raydium-and-meteora: the deployed helper carries the signing page's pool scans,
+// so a coin whose SOL pools are Meteora DLMM pairs, Raydium CPMM pools or Raydium AMM v4 pools has its pools found.
+// POST /v1/rpc/solana with each kit scan for one coin and wSOL, the coin on either side as the page sends it, must answer
+// 200 with lists of addresses that together hold that coin's SOL pools read on two mainnet RPCs (14-15 Nov):
+//   - DLMM, solanaDlmmPairScan: NEARKAT (6UtY9iTZ…), its pairs B8BH6ZKr… and J3wZVx37…;
+//   - CPMM, solanaCpmmPoolScan: HIGH (7ymF66Z6…), its pool CqvMZmWD… (wSOL its token 0);
+//   - AMM v4, solanaAmmV4PoolScan: CzLSuj… (a pump.fun coin graduated to AMM v4), its pool 9Tb2ohu5… (wSOL its coin side).
+// Each scan with one mint alone (a sweep of every pool of the coin) must be refused 400, before any call. A helper that
+// refuses a scan, or whose upstream cannot answer it (the page then finds no pool and the coin stays unbought), fails.
 // Its recorded runs are solana-buy-reaches-raydium-and-meteora.answers.json, replayed by its .test.mjs.
 // After: helper
 //   node scripts/live-checks/solana-buy-reaches-raydium-and-meteora.mjs [--base <helper url>] [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2 (no answer). Reads only: no key, no transaction.
 import { writeFileSync } from "node:fs";
-import { SOLANA_SOL_MINT, solanaDlmmPairScan } from "../../packages/kit/src/index.ts";
+import { SOLANA_SOL_MINT, solanaAmmV4PoolScan, solanaCpmmPoolScan, solanaDlmmPairScan } from "../../packages/kit/src/index.ts";
 
 const KEY = "solana-buy-reaches-raydium-and-meteora";
 export const NEARKAT = "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr";
 export const NEARKAT_PAIRS = ["B8BH6ZKr64agqNWG51CQWUKrLZZw5L31u2K6hubsZfyf", "J3wZVx37wfEpGNjBHiJyuGZf948jsFe3toCiMkD4D1oz"];
+/** Each venue's scan, its coin and the SOL pools the scan must name. */
+export const VENUES = Object.freeze({
+  dlmm: { name: "DLMM pair", coin: "NEARKAT", mint: NEARKAT, pools: NEARKAT_PAIRS, scan: solanaDlmmPairScan },
+  cpmm: { name: "Raydium CPMM pool", coin: "HIGH", mint: "7ymF66Z6VhgNiwadtVhjTtT6U7iQRpSxeiRrhfufhigh", pools: ["CqvMZmWDvEufa5rzkubidyR4zMDqDPoLjAtsW6wGsPMu"], scan: solanaCpmmPoolScan },
+  ammV4: { name: "Raydium AMM v4 pool", coin: "CzLSuj", mint: "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump", pools: ["9Tb2ohu5P16BpBarqd3N27WnkF51Ukfs8Z1GzzLDxVZW"], scan: solanaAmmV4PoolScan },
+});
 const BASE = "https://ct-api.unrealized.trade";
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-/** The two requests: the kit's scan, and the same with the wSOL filter dropped (one mint alone). */
+/** Per venue, three requests: the kit's scan with the coin first and with wSOL first, and the first with the wSOL filter
+ *  dropped (one mint alone). */
 export function requests() {
-  const scan = solanaDlmmPairScan(NEARKAT, SOLANA_SOL_MINT);
-  const [program, cfg] = scan;
-  const wide = [program, { ...cfg, filters: cfg.filters.slice(0, 2) }];
-  return { scan: { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: scan }, wide: { jsonrpc: "2.0", id: 2, method: "getProgramAccounts", params: wide } };
+  const out = {};
+  let id = 0;
+  for (const [k, v] of Object.entries(VENUES)) {
+    const scan = v.scan(v.mint, SOLANA_SOL_MINT);
+    const [program, cfg] = scan;
+    const wide = [program, { ...cfg, filters: cfg.filters.slice(0, 2) }];
+    const q = (params) => ({ jsonrpc: "2.0", id: ++id, method: "getProgramAccounts", params });
+    out[k] = { scan: q(scan), flip: q(v.scan(SOLANA_SOL_MINT, v.mint)), wide: q(wide) };
+  }
+  return out;
 }
 
-/** The verdict on one run's two answers ({ status, json } each): { verdict: PASS | FAIL | ERROR, lines }. */
+/** The verdict on one run's answers ({ [venue]: { scan, flip, wide } }, each { status, json }): { verdict: PASS | FAIL | ERROR, lines }. */
 export function judge(run) {
   const lines = [];
   const say = (ok, s) => lines.push(`${ok ? "ok  " : "FAIL"} ${s}`);
-  const s = run?.scan;
-  const w = run?.wide;
-  if (!s || !w || typeof s.status !== "number" || typeof w.status !== "number") return { verdict: "ERROR", lines: ["no answer to one of the two requests"] };
-  const value = s.json?.result?.value;
-  const keys = Array.isArray(value) ? value.map((e) => e?.pubkey) : null;
-  say(s.status === 200 && keys !== null, `the kit's DLMM pair scan for NEARKAT answers 200 with a list (status ${s.status}${s.json?.error ? `, error ${JSON.stringify(s.json.error).slice(0, 120)}` : ""})`);
-  if (keys !== null) {
-    say(keys.every((k) => typeof k === "string" && B58.test(k)), `every entry is an address (${keys.length} entries)`);
-    for (const p of NEARKAT_PAIRS) say(keys.includes(p), `it names NEARKAT's SOL pair ${p}`);
+  for (const [k, v] of Object.entries(VENUES)) {
+    const w = run?.[k]?.wide;
+    const both = [run?.[k]?.scan, run?.[k]?.flip];
+    if (!w || typeof w.status !== "number" || both.some((s) => !s || typeof s.status !== "number")) return { verdict: "ERROR", lines: [`no answer to one of the ${v.name} requests`] };
+    const all = [];
+    for (const [s, order] of [[both[0], "the coin first"], [both[1], "wSOL first"]]) {
+      const value = s.json?.result?.value;
+      const keys = Array.isArray(value) ? value.map((e) => e?.pubkey) : null;
+      say(s.status === 200 && keys !== null, `the kit's ${v.name} scan for ${v.coin}, ${order}, answers 200 with a list (status ${s.status}${s.json?.error ? `, error ${JSON.stringify(s.json.error).slice(0, 120)}` : ""})`);
+      if (keys === null) continue;
+      say(keys.every((x) => typeof x === "string" && B58.test(x)), `every ${v.name} entry, ${order}, is an address (${keys.length} entries)`);
+      all.push(...keys);
+    }
+    for (const p of v.pools) say(all.includes(p), `it names ${v.coin}'s SOL pool ${p}`);
+    say(w.status === 400, `the ${v.name} scan with one mint alone is refused 400 (status ${w.status})`);
   }
-  say(w.status === 400, `the scan with one mint alone is refused 400 (status ${w.status})`);
   return { verdict: lines.every((l) => l.startsWith("ok")) ? "PASS" : "FAIL", lines };
 }
 
@@ -61,7 +82,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const q = requests();
   let run;
   try {
-    run = { base, at: new Date().toISOString(), scan: await post(base, q.scan), wide: await post(base, q.wide) };
+    run = { base, at: new Date().toISOString() };
+    for (const [k, r] of Object.entries(q)) run[k] = { scan: await post(base, r.scan), flip: await post(base, r.flip), wide: await post(base, r.wide) };
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR ${String(e?.message ?? e).slice(0, 200)}`);
     process.exit(2);
