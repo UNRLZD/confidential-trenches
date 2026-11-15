@@ -11,8 +11,10 @@
 // typed (never printed), and every chain read answered by its models (no real host is reached). The first run fails
 // nothing and lists the chain hosts the page read; then one run per host with that host failed (or the --hosts named),
 // or with --owners-case one run with every publicnode and Pocket host failed at once (the owner's case). Each run passes
-// when the restore sheet draws a balance and ends (done, nothing or offline) inside the bound, and nothing the run did
-// not model was asked.
+// when the restore sheet draws a balance and ends (done, nothing or offline) inside the bound, every walk Worker says
+// it hashed on WebAssembly, and nothing the run did not model was asked. The bound is BOUND_S on the bound's machine,
+// scaled by how much slower this machine runs a fixed loop in the walk's Workers (scaledBound; card
+// firefox-restore-holds-on-every-runner).
 //
 //   node packages/signpage/scripts/firefox-rpc-blocked.mjs [--bound <s> (BOUND_S)] [--hosts <a,b> | --owners-case] [--record <file>]
 // Reads only: the models answer reads, and no send has an answer. PASS exit 0, FAIL exit 1, error exit 2.
@@ -22,10 +24,21 @@ import { fileURLToPath } from "node:url";
 import { buildSignpage, defaultSites, HOSTS, REAL, TERMINAL } from "../../../apps/terminal/test/harness/harness.mjs";
 import { launchHarnessBrowser } from "../../../scripts/harness-sockets.mjs";
 import { browserLabel, FIREFOX_STRICT } from "../../../scripts/browsers.mjs";
-import { line, oneRun, siteTable, workerRouted } from "./restore-speed-browser.mjs";
+import { line, machineSpeed, oneRun, siteTable, workerRouted } from "./restore-speed-browser.mjs";
 
-/** The bound on the balance drawn and the restore's end, in seconds (--bound overrides it). */
+/** The bound on the balance drawn and the restore's end, in seconds, on the bound's machine (--bound overrides it). */
 export const BOUND_S = 45;
+
+/** The bound's machine (card firefox-restore-holds-on-every-runner): the heavy box's Playwright Firefox 155.0 taskset to
+ *  4 cores (hardwareConcurrency 16, so 8 walk Workers), where machineSpeed took 1.66-1.78 s and the restore 18.8 s; at
+ *  2 cores the loop took 3.37 s and the restore 36.7 s (firefox-rpc-blocked.test.mjs). */
+export const REF_SPEED_MS = 1730;
+
+/** The bound on this machine: `boundS` times how much slower than the bound's machine machineSpeed found it, never
+ *  less than `boundS`. The same code's restore took 39 s on one GitHub runner of the label and 64 s on another (15 Nov),
+ *  so a bound in seconds alone failed or passed by the machine drawn; scaled, it holds the restore's time to the
+ *  machine it ran on. Pre-WebAssembly code fails apart from it: its walk says no hash path (verdict). */
+export const scaledBound = (boundS, speedMs) => boundS * Math.max(1, speedMs / REF_SPEED_MS);
 
 /** The owner's case: every host of the two providers whose answers his Firefox never got. */
 export const OWNERS_CASE = (h) => /(^|\.)publicnode\.com$|(^|\.)pocket\.network$/.test(h);
@@ -52,14 +65,21 @@ export const moveDry = (boundS) => async ({ app, vis }) => {
   return { ended: true, how, ms: Date.now() - typed, opened: typed - t0 };
 };
 
-/** One run's verdict: the balance drawn and the restore ended inside `boundS`, nothing unanswered, no error. */
+/** One run's verdict: the balance drawn and the restore ended inside `boundS`, every walk Worker hashed on WebAssembly,
+ *  nothing unanswered, no error. */
 export function verdict(o, boundS) {
   const why = [];
   if (o.error) why.push(`error: ${o.error}`);
+  // card firefox-restore-holds-on-every-runner: the field each walk Worker hashed on, as the page said it
+  if (!o.hashed) why.push("the page never said which field the walk hashed on (no \"restore: the walk Workers hashed on\" line)");
+  else {
+    if (o.hashed.bigint > 0) why.push(`${o.hashed.bigint} walk Workers hashed on BigInt, not WebAssembly`);
+    if (o.hashed.wasm + o.hashed.bigint !== o.workerEvents) why.push(`${o.hashed.wasm + o.hashed.bigint} walk Workers answered a walk of the ${o.workerEvents} started`);
+  }
   if (o.shownMs === null) why.push("the balance never drew");
-  else if (o.shownMs > boundS * 1000) why.push(`the balance drew at ${(o.shownMs / 1000).toFixed(1)} s, past ${boundS} s`);
+  else if (o.shownMs > boundS * 1000) why.push(`the balance drew at ${(o.shownMs / 1000).toFixed(1)} s, past ${+boundS.toFixed(1)} s`);
   if (o.doneMs === null) why.push("the restore never ended (the sheet still scanning)");
-  else if (o.doneMs > boundS * 1000) why.push(`the restore ended at ${(o.doneMs / 1000).toFixed(1)} s, past ${boundS} s`);
+  else if (o.doneMs > boundS * 1000) why.push(`the restore ended at ${(o.doneMs / 1000).toFixed(1)} s, past ${+boundS.toFixed(1)} s`);
   if (o.unanswered.length) why.push(`${o.unanswered.length} reads the run does not model`);
   if (o.after?.error) why.push(`the Move's dry run: ${o.after.error}`);
   else if (o.after && !o.after.ended) why.push(`the Move's dry run still waiting after ${(o.after.ms / 1000).toFixed(1)} s`);
@@ -71,9 +91,9 @@ async function main() {
     const i = process.argv.indexOf(k);
     return i > 0 ? process.argv[i + 1] : d;
   };
-  // card firefox-restore-fast: 45 s (the walk's field in WebAssembly ended the restore at 20-23 s on 4 cores of the
-  // heavy box, 67.5-67.9 s on BigInt before it; firefox-rpc-blocked.test.mjs replays both runs)
-  const boundS = Number(opt("--bound", String(BOUND_S)));
+  // 45 s on the bound's machine (card firefox-restore-fast; card firefox-restore-holds-on-every-runner scales it to the
+  // machine and reads the hash path: firefox-rpc-blocked.test.mjs replays the runs)
+  const refBoundS = Number(opt("--bound", String(BOUND_S)));
   const only = opt("--hosts", null)?.split(",").filter(Boolean) ?? null;
   const ownersCase = process.argv.includes("--owners-case");
   const signRoot = buildSignpage();
@@ -87,11 +107,14 @@ async function main() {
     const label = `${browserLabel(browser)}, Strict tracking protection (${Object.entries(FIREFOX_STRICT).map(([k, v]) => `${k}=${v}`).join(" ")})`;
     const probe = await workerRouted(browser);
     if (!probe.seen) throw new Error(`${label}: its Worker script requests do not reach context.route, so a run could reach a real host`);
+    const speed = await machineSpeed(browser);
+    const boundS = scaledBound(refBoundS, speed.ms);
+    console.log(`bound ${boundS.toFixed(1)} s: ${refBoundS} s on the bound's machine times ${(boundS / refBoundS).toFixed(2)} (a fixed loop in ${speed.workers} Workers at once took ${(speed.ms / 1000).toFixed(2)} s here, runs ${speed.runs.map((x) => (x / 1000).toFixed(2)).join(", ")} s; ${(REF_SPEED_MS / 1000).toFixed(2)} s there)`);
     const run = async (name, block) => {
       const o = await oneRun(browser, { engine: "firefox", mode: "workers", cpu: 1, sites: table, evmSpan: 1000, timeoutS: boundS + 30, block, after: moveDry(boundS) });
       const v = verdict(o, boundS);
       ok &&= v.ok;
-      recs.push({ name, block, ok: v.ok, why: v.why, move: o.after ?? null, shownMs: o.shownMs, doneMs: o.doneMs, sheetEnd: o.sheetEnd, stage: o.stage, hosts: o.hosts, blocked: o.blocked, lines: o.lines, unanswered: o.unanswered, error: o.error });
+      recs.push({ name, block, ok: v.ok, why: v.why, boundS, speedMs: speed.ms, hashed: o.hashed, workerEvents: o.workerEvents, move: o.after ?? null, shownMs: o.shownMs, doneMs: o.doneMs, sheetEnd: o.sheetEnd, stage: o.stage, hosts: o.hosts, blocked: o.blocked, lines: o.lines, unanswered: o.unanswered, error: o.error });
       console.log(`${v.ok ? "ok " : "BAD"} ${name}: ${line(o, label).text.replace(/^(ok |BAD) /, "")}${v.ok ? "" : ` | ${v.why.join("; ")}`}`);
       console.log(`    hosts read: ${Object.entries(o.hosts).map(([h, n]) => `${h} ${n}${o.blocked[h] ? ` (${o.blocked[h]} failed)` : ""}`).join(", ") || "none"}`);
       console.log(`    Move dry (Solana to Base, 0.01): ${o.after ? (o.after.error ? `error ${o.after.error}` : o.after.ended ? `${o.after.how} in ${(o.after.ms / 1000).toFixed(1)} s` : `no answer and no reason in ${(o.after.ms / 1000).toFixed(1)} s`) : "not run (the restore failed)"}`);

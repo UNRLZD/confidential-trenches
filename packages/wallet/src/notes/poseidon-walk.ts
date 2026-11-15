@@ -247,6 +247,12 @@ const slotsOnce = (f: FieldWasm): NonNullable<typeof slots> =>
     sh: f.slot(),
   });
 
+/** The field this thread's walk hashes on: "wasm" where the module compiles and passes its check, "bigint" where it
+ *  does not (card firefox-restore-holds-on-every-runner: a walk Worker says which in its answer, so a run is never
+ *  blind on it). */
+export type WalkHash = "wasm" | "bigint";
+export const walkHash = (): WalkHash => (fieldWasm() === null ? "bigint" : "wasm");
+
 /** poseidon2Walk and poseidon3Walk on the WebAssembly field, or null where it does not compile (tests). */
 export function poseidonWasm(): { poseidon2(inputs: readonly [bigint, bigint]): bigint; poseidon3(inputs: readonly [bigint, bigint, bigint]): bigint } | null {
   const f = fieldWasm();
