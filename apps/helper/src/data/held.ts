@@ -1,6 +1,6 @@
 // GET /v1/market/held: the symbol, name and USD price of each token a device holds, on Solana, Base and Robinhood, in
-// one request (card market-token-reads). Portfolio needs them for tokens that are no longer in Discover's lists, which
-// the token page (solana/token.ts, evm/token.ts) answers 404 for on the EVM chains.
+// one request (card market-token-reads). Portfolio needs them for tokens that are no longer in Discover's lists, in one
+// call for all of them (the token page names one at a time: evm/named.ts on the EVM chains, on this DexScreener budget).
 //
 // Sources, per chain:
 //   - solana: each mint through the token page (solana/token.ts page), whose caches the token screen shares; read in
@@ -41,7 +41,8 @@ export const DEX_CHAIN: Readonly<Record<EvmChain, string>> = { base: "base", rob
  *  device's Portfolio refresh being one call a chain, so one address sending fresh addresses holds at most 60 of the
  *  240 a minute and a name read before is served meanwhile (HELD_SERVE_MS)]. */
 export const DEX_LIMITS: BudgetLimits = { total: 240, perClient: 10, windowMs: 60_000 };
-const DEX_KEY = "dexscreener";
+/** The budget key DexScreener's reads draw, here and for a token page no list carries (evm/named.ts): one share. */
+export const DEX_KEY = "dexscreener";
 const ANSWER_MAX = 256 * 1024;
 const TIMEOUT_MS = 8_000;
 /** A plain decimal string of at most 30 digits and 40 decimals: no sign, exponent, "NaN" or hex. */

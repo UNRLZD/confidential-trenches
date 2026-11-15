@@ -15,7 +15,8 @@
 // transaction, trusted only when the hash equals the id. A token with
 // no such pool (Zora's creator-coin pairs, a cbBTC or VIRTUAL pair, a Pons curve quoted in a stock token, a venue not listed
 // here) answers an empty chart and tape from our own reads (200, src "chain"), never a guess; 404 is only for a token no
-// lists answer of the last 6 h held (lists.ts listed, card robinhood-listed-tape-opens) or a malformed request. A read that fails is never kept as "no pool": it answers 503 and is read again.
+// lists answer of the last 6 h held (lists.ts listed, card robinhood-listed-tape-opens) and DexScreener names no pool
+// for (server.ts evmKnown, card evm-token-page-opens-any-coin), or a malformed request. A read that fails is never kept as "no pool": it answers 503 and is read again.
 //
 // Venues on Base, each address read from the chain on 2026-11-03 17:0xZ (a pool's factory() on base-rpc.publicnode.com,
 // and a PoolCreated or Initialize log of the factory decoded against the pool's token0() and token1()):
@@ -953,7 +954,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null }) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
@@ -1783,10 +1784,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  answer of the last SERVED_MS held it (deps.listed: lists.ts listed, never only the newest answer). The list's
    *  pool, once the chain confirms it (fromHint), answers the first open at once and is kept as hinted; the discovery
    *  (findPool) then decides the main pool in the background (verify, on the lists' search ahead). */
-  async function mainPool(token: string): Promise<Found | null | "unlisted"> {
+  async function mainPool(token: string, client?: string): Promise<Found | null | "unlisted"> {
     const kept = pools.get(token);
     if (kept !== undefined && kept.found !== null && now() - kept.at < POOL_KEEP_MS) return { ...kept.found };
-    if (!(await deps.listed(token))) return "unlisted";
+    // `client`: the caller whose open asks (a token no list carries is named on that caller's share, server.ts evmKnown)
+    if (!(await deps.listed(token, client))) return "unlisted";
     if (kept !== undefined && kept.found === null && now() - kept.at < NONE_MS) return null;
     let p = resolving.get(token);
     if (p !== undefined) join(resolvingLane.get(token)!);
@@ -2249,7 +2251,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** The book of a listed token, read once before it is served (a first open waits for its cold read); "none" for a
    *  listed token our reads find no pool of, served as an empty chart and tape from our own reads, never a 404. */
-  async function open(token: string): Promise<Entry | DataAnswer | "none"> {
+  async function open(token: string, client?: string): Promise<Entry | DataAnswer | "none"> {
     let e = books.get(token);
     if (e === undefined) {
       let found: Found | null | "unlisted" = null;
@@ -2258,7 +2260,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       try {
         for (let attempt = 0; attempt < 2 && found === null; attempt++) {
           try {
-            found = await mainPool(token);
+            found = await mainPool(token, client);
             break;
           } catch {
             if (attempt === 1) return UPSTREAM;
@@ -2306,8 +2308,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const failedOpen = new Map<string, number>();
   const FAILED_MS = 60_000;
   /** A caller's open of `t` in `lane`, LATE past OPEN_BOUND_MS while it goes on; how it ended is kept in failedOpen. */
-  function openWithin(t: string, lane: Lane): Promise<Awaited<ReturnType<typeof open>> | typeof LATE> {
-    const opened = lanes.run(lane, () => open(t));
+  function openWithin(t: string, lane: Lane, client?: string): Promise<Awaited<ReturnType<typeof open>> | typeof LATE> {
+    const opened = lanes.run(lane, () => open(t, client));
     const failed = () => {
       failedOpen.delete(t);
       failedOpen.set(t, now());
@@ -2892,7 +2894,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // names their wait (Server-Timing)
       const lane = newLane(true);
       const began = performance.now();
-      const e = await openWithin(t, lane);
+      const e = await openWithin(t, lane, client);
       const openMs = performance.now() - began;
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
       if (e === LATE && failedLately(t)) return timed(UPSTREAM);
@@ -2931,7 +2933,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
     },
     /** 06b Trades: the newest `limit` swaps, newest first. */
-    async trades(token: string, limit: number): Promise<DataAnswer> {
+    async trades(token: string, limit: number, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
       // a first open past its bound answers filling and its read goes on (OPEN_BOUND_MS); the traders are looked up
@@ -2940,7 +2942,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a caller's reads, in the foreground lane, their wait named in the answer (as candles)
       const lane = newLane(true);
       const began = performance.now();
-      const e = await openWithin(t, lane);
+      const e = await openWithin(t, lane, client);
       const openMs = performance.now() - began;
       // the queue wait counts the traders' lookups below too: the answer waits on them
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));

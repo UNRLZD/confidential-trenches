@@ -4,8 +4,12 @@
 //
 // Sources:
 //   - the row: Discover's own row for the token (lists.ts), the one its lists answer held, with the launchpad its
-//     maker read tagged on chain and the chain it is listed on. Only a token the chain's lists served (lists.ts listed,
-//     the gate the candles and the tape share) has a page; any other address answers 404.
+//     maker read tagged on chain and the chain it is listed on, for a token the chain's lists served (lists.ts listed);
+//     any other token's row is DexScreener's (named.ts, card evm-token-page-opens-any-coin: a coin opened from a search,
+//     a shared link or a position held after it left trending), its launchpad the same maker read (lists.ts maker),
+//     waited for beside the info, both within INFO_WAIT_MS of the request's start. 404 only for an address DexScreener
+//     names no pool for (a typo, a wallet); 503 while it cannot be read. The candles and the tape share the gate
+//     (server.ts evmKnown).
 //   - decimals, the holder count and the top 10 share: GeckoTerminal's keyless `networks/<net>/tokens/<address>/info`
 //     (api.geckoterminal.com/docs/index.html, "tokens/{address}/info", read 2026-11-09 01:50Z: `decimals`,
 //     `holders.count`, `holders.distribution_percentage.top_10` and `holders.last_updated` for a Base and a Robinhood
@@ -35,6 +39,7 @@ import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Fiel
 import { createWanted, GT_PAGE_WAIT_MS, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./lists.ts";
 import { LINKS, linksOf, type Links } from "../links.ts";
+import type { EvmNamed } from "./named.ts";
 import type { ContractRisk, GoPlus } from "../goplus.ts";
 
 /** A token's GeckoTerminal info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
@@ -169,7 +174,7 @@ function bounded<V>(max: number) {
  *  swap reads' pool and decimals for a token, when held (swaps.ts kept). */
 export function createEvmToken(
   chain: EvmChain,
-  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean> }; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; later?: Later; goplus?: Pick<GoPlus, "risk"> },
+  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean>; maker?(token: string, createdS: number): Promise<string | null | undefined> }; named?: Pick<EvmNamed, "named">; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; later?: Later; goplus?: Pick<GoPlus, "risk"> },
 ) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
@@ -181,7 +186,7 @@ export function createEvmToken(
 
   /** The token's row from the lists' newest answer, else the last one an answer held, while the lists still count it
    *  served; null for a token they never served; undefined while the lists have never answered. */
-  async function rowOf(token: string): Promise<Row | null | undefined> {
+  async function listedRow(token: string): Promise<Row | null | undefined> {
     const a = await deps.lists.get();
     if (a.status !== 200 || a.asOfMs === undefined) return undefined;
     // keyed on the answer itself: a tick rebuilds it with a maker newly read and the same as_of_ms (its oldest list
@@ -193,6 +198,26 @@ export function createEvmToken(
     }
     const row = rows.get(token);
     return row !== undefined && row.chain === chain && (await deps.lists.listed(token)) ? row : null;
+  }
+
+  /** The token's listed row, else its DexScreener row (`named`, with the launchpad wait it needs); null for an address no
+   *  source names; undefined when neither could answer. Without `named` deps (tests of the lists alone) a token the
+   *  lists never served is null, as before. */
+  async function rowOf(token: string, client?: string): Promise<{ row: Row; maker?: Promise<string | null | undefined> } | null | undefined> {
+    const listed = await listedRow(token);
+    if (listed !== null && listed !== undefined) return { row: listed };
+    if (deps.named === undefined) return listed;
+    const n = await deps.named.named(token, client);
+    if (n === "unread") return undefined;
+    if (n === null) return null;
+    const created = n.row.created_s;
+    return { row: n.row, maker: typeof created === "number" ? deps.lists.maker?.(token, created) : undefined };
+  }
+  /** The row with its launchpad, when its maker read answers within `waitMs` (lists.ts maker keeps it). */
+  async function tagged(r: { row: Row; maker?: Promise<string | null | undefined> }, waitMs: number): Promise<Row> {
+    if (r.maker === undefined) return r.row;
+    const pad = await within(r.maker.catch(() => undefined), waitMs);
+    return typeof pad === "string" ? { ...r.row, launchpad: pad } : r.row;
   }
 
   async function readInfo(token: string, lane: "pages" | "stale" | "refresh", client?: string): Promise<Read> {
@@ -299,27 +324,32 @@ export function createEvmToken(
       }
       return true;
     },
-    /** 06b TokenPage for a token the chain's lists served; 404 for any other address, 503 while the lists never answered. */
+    /** 06b TokenPage for a token the chain's lists served or DexScreener names (rowOf); 404 for any other address, 503
+     *  while neither can answer. */
     async page(token: string, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
-      const row = await rowOf(t);
-      if (row === undefined) return UPSTREAM;
-      if (row === null) return NOT_FOUND;
+      const began = performance.now();
+      const found = await rowOf(t, client);
+      if (found === undefined) return UPSTREAM;
+      if (found === null) return NOT_FOUND;
       const { held, read } = infoOf(t, client);
       const risk = deps.goplus?.risk(chain, t) ?? Promise.resolve(null);
-      const info = held !== undefined ? usable(held) : read === undefined ? null : usable(await within(read, INFO_WAIT_MS));
+      // the first reads are waited for INFO_WAIT_MS from the request's start, so a coin DexScreener had to name first
+      // (rowOf) still answers inside the page's second, its info and tag held for the next read
+      const wait = Math.max(0, INFO_WAIT_MS - (performance.now() - began));
+      const [row, info] = await Promise.all([tagged(found, wait), held !== undefined ? usable(held) : read === undefined ? null : within(read, wait).then(usable)]);
       const page = toPage(row, info, deps.kept?.(t), await risk);
-      return { status: 200, body: JSON.stringify(page), src: "geckoterminal", asOfMs: row.as_of_ms as number };
+      return { status: 200, body: JSON.stringify(page), src: row.src === "dexscreener" ? "dexscreener" : "geckoterminal", asOfMs: row.as_of_ms as number };
     },
     /** 06b Holders: no rows, GeckoTerminal's count and top 10 share; no count (src "none", the read queued) when the
      *  budget refuses a token nothing is held for (or held past INFO_SERVE_MS), 503 when GeckoTerminal fails it. */
     async holders(token: string, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
-      const row = await rowOf(t);
-      if (row === undefined) return UPSTREAM;
-      if (row === null) return NOT_FOUND;
+      const found = await rowOf(t, client);
+      if (found === undefined) return UPSTREAM;
+      if (found === null) return NOT_FOUND;
       const { held, read } = infoOf(t, client);
       const got: Read | undefined = read === undefined ? held : await read;
       const info: Info | "none" | undefined = got === "refused" || got === "failed" ? held : got;

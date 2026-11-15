@@ -30,7 +30,8 @@ import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
 import { createPoolIndex, jsonRpcPost, type PoolIndex, type PoolIndexConfig } from "./data/evm/pool-index.ts";
 import { createEvmToken, type EvmToken } from "./data/evm/token.ts";
-import { createHeld, parseHeld, type Held } from "./data/held.ts";
+import { createHeld, DEX_LIMITS, parseHeld, type Held } from "./data/held.ts";
+import { createEvmNamed, type EvmNamed } from "./data/evm/named.ts";
 import { createNearLists } from "./data/near/lists.ts";
 import { createNearToken, type NearMarket } from "./data/near/token.ts";
 import { createNearTrades } from "./data/near/trades.ts";
@@ -60,7 +61,7 @@ import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender }
 import { POOL_SOLANA_PIECES_BODY_MAX } from "./pool/solana-pieces.ts";
 import { poolSendLine, type PoolSendNote } from "./pool/send-log.ts";
 import { evmFeeWarm, evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
-import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
+import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, upstreamBudget, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { evmMarketOf, readWarm, restoreEvmMarket, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
@@ -740,7 +741,7 @@ export function handler(
         if (path === MARKET_TRADES) {
           const limit = most("limit");
           if (limit === null || !/^(|[1-9]\d?)$/.test(limit) || Number(limit) > TRADES_MAX) return send(404, { error: { code: "not_found" } }, cors(req));
-          read = swaps!.trades(mint, limit === "" ? TRADES_MAX : Number(limit));
+          read = swaps!.trades(mint, limit === "" ? TRADES_MAX : Number(limit), clientOf(req));
         } else if (path === MARKET_CANDLES) {
           const tf = one("tf");
           const to = most("to");
@@ -863,8 +864,30 @@ export function handler(
  *  no chain read (solana/token.ts named: Discover's row or Jupiter's search), so a device's held tokens never spend its
  *  own RPC share; each served EVM chain's lists, and DexScreener on its own budget for a token no list carries, so a
  *  held read never takes a GeckoTerminal call the token page and the charts need. */
-export function heldFrom(token: Pick<Token, "named">, evmLists: EvmLists): Held {
-  return createHeld({ solana: { page: (mint) => token.named(mint) }, lists: evmLists });
+export function heldFrom(token: Pick<Token, "named">, evmLists: EvmLists, dex?: ReturnType<typeof upstreamBudget>): Held {
+  return createHeld({ solana: { page: (mint) => token.named(mint) }, lists: evmLists, ...(dex === undefined ? {} : { dex }) });
+}
+
+/** Each EVM chain's rows of tokens no list carries (src/data/evm/named.ts, card evm-token-page-opens-any-coin), on
+ *  DexScreener's one budget, the one GET /v1/market/held draws (`dex`). */
+export function evmNamedFrom(chains: readonly EvmChain[], dex: ReturnType<typeof upstreamBudget>): Partial<Record<EvmChain, EvmNamed>> {
+  return Object.fromEntries(chains.map((c) => [c, createEvmNamed(c, { dex })]));
+}
+
+/**
+ * The gate an EVM token's candles and tape open behind, the one its page answers behind (data/evm/token.ts rowOf):
+ * true for a token an answer of the lists' last SERVED_MS held (lists.ts listed) or a token DexScreener names a pool for
+ * (named.ts); false for an address neither names (404); throws when DexScreener cannot be read for it, so the read
+ * answers 503 and is asked again (swaps.ts open), never a 404 for a real coin.
+ */
+export function evmKnown(lists: Pick<ReturnType<typeof createEvmLists>, "listed">, named: Pick<EvmNamed, "named"> | undefined): (token: string, client?: string) => Promise<boolean> {
+  return async (token, client) => {
+    if (await lists.listed(token)) return true;
+    if (named === undefined) return false;
+    const n = await named.named(token, client);
+    if (n === "unread") throw new Error("dexscreener unread");
+    return n !== null;
+  };
 }
 
 export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc, gecko?: GeckoBudget, slots?: Map<SlotName, Slot>, keyed?: Keyed | null): Token {
@@ -882,11 +905,12 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
  * The EVM chains' own swap reads (src/data/evm/swaps.ts): Base's and Robinhood's candles and trade tape. A token is
  * served only when its chain's Discover lists hold it. The providers: evmSwapRpcs.
  */
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null): Swaps {
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
     if (lists === undefined) continue;
+    const named = evmNamed[chain];
     let seen: { asOfMs: number; tokens: Set<string>; pools: Record<string, string>; prices: Map<string, number> } | null = null;
     // the lists' newest answer, read once per answer: its tokens, each one's pool as the list names it, and its price
     const snapshot = async () => {
@@ -911,16 +935,18 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       rpcs: evmSwapRpcs(env, chain),
       index: INDEX_RPCS[chain],
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
-      // refresh between drops tokens (card robinhood-listed-tape-opens)
-      listed: lists.listed,
+      // refresh between drops tokens (card robinhood-listed-tape-opens); and any token DexScreener names a pool for, as
+      // its page (card evm-token-page-opens-any-coin: a coin no list served answered 404)
+      listed: evmKnown(lists, named),
       // a hint only: swaps.ts fromHint takes it once the chain says the pool is the token's; the pool the last answer that
       // held the token named (lists.pool), so a token a refresh dropped opens from it, not the whole discovery
       hint: async (token) => {
         const s = await snapshot();
-        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : (lists.pool?.(token) ?? null);
+        return s !== null && Object.hasOwn(s.pools, token) ? s.pools[token]! : (lists.pool?.(token) ?? named?.pool(token) ?? null);
       },
-      // the same rows' price_usd, as the last answer read held it: a book off it by SCALE_BOUND is not served as ours
-      price: (token) => seen?.prices.get(token) ?? null,
+      // the same rows' price_usd, as the last answer read held it (a token no list carries: its DexScreener row's): a
+      // book off it by SCALE_BOUND is not served as ours
+      price: (token) => seen?.prices.get(token) ?? named?.price(token) ?? null,
     });
     out[chain] = swaps;
     // the lists' tokens' pools looked for as each answer loads, not at each token's first open (card
@@ -1329,14 +1355,17 @@ if (import.meta.main) {
     // card helper-evm-fee-at-epoch-start: each pool's fee read at its period's start, while every provider still holds
     // the period's first block's state; a request answers it from memory
     stopWarm = evmFeeWarm(evmPools.values());
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    // card evm-token-page-opens-any-coin: a token no list carries is named by DexScreener, on the budget held reads draw
+    const dex = upstreamBudget(() => DEX_LIMITS, Date.now);
+    const evmNamed = evmNamedFrom(SERVED_EVM, dex);
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
     // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
     // card every-cell-shows-a-value: and each token's contract checks from GoPlus, one pace for the helper (data/goplus.ts)
     const goplus = createGoPlus();
-    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept, goplus })]));
+    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, named: evmNamed[c], gecko, kept: swaps[c]?.kept, goplus })]));
     if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
-    const held = heldFrom(token, evmLists);
+    const held = heldFrom(token, evmLists, dex);
     // card helper-near-lists-and-token: NEAR's lists from Rhea classic's views, read now and on their cadence; card
     // every-cell-shows-a-value: the unrealized.trade engine's reads first, Rhea's whenever the engine has no good answer
     const nearLists = createNearLists();

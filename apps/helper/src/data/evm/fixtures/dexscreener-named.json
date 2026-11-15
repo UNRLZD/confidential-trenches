@@ -1,0 +1,152 @@
+{
+ "recorded_at": "2026-11-15T20:20:45Z",
+ "source": "https://api.dexscreener.com/tokens/v1/<chainId>/<address>, read from a Mac",
+ "answers": {
+  "robinhood:0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa": [
+   {
+    "chainId": "robinhood",
+    "dexId": "uniswap",
+    "url": "https://dexscreener.com/robinhood/0x5291cfd042d8a771a510534ee31090bc4f4dc72724871e8f321aecfd12332a9a",
+    "pairAddress": "0x5291cfd042d8a771a510534ee31090bc4f4dc72724871e8f321aecfd12332a9a",
+    "labels": [
+     "v4"
+    ],
+    "baseToken": {
+     "address": "0x0B7C6c138dc75622f4200d157B13FB93e6BD94FA",
+     "name": "MowCat",
+     "symbol": "MOW"
+    },
+    "quoteToken": {
+     "address": "0x0000000000000000000000000000000000000000",
+     "name": "Ether",
+     "symbol": "ETH"
+    },
+    "priceNative": "0.00008562",
+    "priceUsd": "0.1547",
+    "txns": {
+     "m5": {
+      "buys": 0,
+      "sells": 0
+     },
+     "h1": {
+      "buys": 0,
+      "sells": 0
+     },
+     "h6": {
+      "buys": 31,
+      "sells": 33
+     },
+     "h24": {
+      "buys": 372,
+      "sells": 374
+     }
+    },
+    "volume": {
+     "h24": 8236602.72,
+     "h6": 698233.77,
+     "h1": 0,
+     "m5": 0
+    },
+    "priceChange": {
+     "h6": -0.85,
+     "h24": -1.01
+    },
+    "liquidity": {
+     "usd": 15474358.35,
+     "base": 99999000,
+     "quote": 0.6599
+    },
+    "fdv": 154733203,
+    "marketCap": 154733203,
+    "pairCreatedAt": 1790956630000
+   }
+  ],
+  "base:0x4ed4e862860bed51a9570b96d89af5e1b0efefed": [
+   {
+    "chainId": "base",
+    "dexId": "uniswap",
+    "url": "https://dexscreener.com/base/0xc9034c3e7f58003e6ae0c8438e7c8f4598d5acaa",
+    "pairAddress": "0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA",
+    "labels": [
+     "v3"
+    ],
+    "baseToken": {
+     "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
+     "name": "Degen",
+     "symbol": "DEGEN"
+    },
+    "quoteToken": {
+     "address": "0x4200000000000000000000000000000000000006",
+     "name": "Wrapped Ether",
+     "symbol": "WETH"
+    },
+    "priceNative": "0.0000003911",
+    "priceUsd": "0.0007108",
+    "txns": {
+     "m5": {
+      "buys": 0,
+      "sells": 1
+     },
+     "h1": {
+      "buys": 20,
+      "sells": 12
+     },
+     "h6": {
+      "buys": 155,
+      "sells": 204
+     },
+     "h24": {
+      "buys": 529,
+      "sells": 864
+     }
+    },
+    "volume": {
+     "h24": 50899.79,
+     "h6": 6067.45,
+     "h1": 416.5,
+     "m5": 0.03
+    },
+    "priceChange": {
+     "m5": -0.13,
+     "h1": -0.11,
+     "h6": -0.27,
+     "h24": -0.53
+    },
+    "liquidity": {
+     "usd": 202701.98,
+     "base": 144120676,
+     "quote": 55.1743
+    },
+    "fdv": 25480088,
+    "marketCap": 25480088,
+    "pairCreatedAt": 1704655845000,
+    "info": {
+     "imageUrl": "https://cdn.dexscreener.com/cms/images/c865067e6e29f660b5d0c2a69814875c7415c3fc0022434651525c21f03cc24a?width=800&height=800&quality=95&format=auto",
+     "header": "https://cdn.dexscreener.com/cms/images/b0bbfdf2aa7c44176f77b9e541ae3e247c358f0ee1aed5dbe171f5cd5f8f5cd1?width=1500&height=500&quality=95&format=auto",
+     "openGraph": "https://cdn.dexscreener.com/token-images/og/base/0x4ed4e862860bed51a9570b96d89af5e1b0efefed?timestamp=1794774000000",
+     "websites": [
+      {
+       "url": "https://www.degen.tips/",
+       "label": "Website"
+      },
+      {
+       "url": "https://farcaster.xyz/~/channel/degen",
+       "label": "Farcaster"
+      }
+     ],
+     "socials": [
+      {
+       "url": "https://twitter.com/degentokenbase",
+       "type": "twitter"
+      },
+      {
+       "url": "https://t.me/degentokenbase",
+       "type": "telegram"
+      }
+     ]
+    }
+   }
+  ],
+  "base:0x0000000000000000000000000000000000000001": []
+ }
+}

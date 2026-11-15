@@ -72,6 +72,9 @@ export const MAKER_PER_TICK = 10;
 /** Makers read per tick on a chain with RECORDS: every token of the three lists GT_READS reads (page 1, 20 pools each),
  *  one `eth_call` a record in batches of BATCH_MAX, so a helper started fresh settles its lists in its first tick. */
 export const RECORDS_PER_TICK = 60;
+/** Makers of tokens no list carries read at once (createEvmLists maker) [design: a page's own read, a few at a time
+ *  beside the lists' ticks, so a burst of strangers' addresses spends no provider's pace the lists need]. */
+export const MAKER_ASK_MAX = 4;
 const ANSWER_MAX = 2 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
 const LOGS_MAX = 2_000;
@@ -939,5 +942,36 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return x !== undefined && now() - x.at <= SERVED_MS ? x.pool : null;
   }
 
-  return { get, warm, tick, state, restore, onAnswer, listed, pool };
+  /**
+   * The maker of a token no list carries (card evm-token-page-opens-any-coin: its page's launchpad, named.ts), by the
+   * same read and kept in the same map as a listed token's: a pad, null for none, undefined while not settled. One read
+   * a token at a time, at most MAKER_ASK_MAX at once and one a token per SETTLE_MS, so addresses opened faster than
+   * that wait for their next open, never queue reads.
+   */
+  const asking = new Map<string, Promise<string | null | undefined>>();
+  const askedAt = new Map<string, number>(); // the least recently asked first
+  function maker(token: string, createdS: number): Promise<string | null | undefined> {
+    if (makers.has(token)) return Promise.resolve(makers.get(token)!);
+    const running = asking.get(token);
+    if (running !== undefined) return running;
+    const last = askedAt.get(token);
+    if (asking.size >= MAKER_ASK_MAX || (last !== undefined && now() - last < SETTLE_MS)) return Promise.resolve(undefined);
+    askedAt.delete(token);
+    askedAt.set(token, now());
+    while (askedAt.size > MAKER_MAX) askedAt.delete(askedAt.keys().next().value!);
+    const p = readMakers(chain, rpcFetch, [{ token, createdS }], now())
+      .then((got) => {
+        const pad = got.get(token);
+        if (pad === undefined) return undefined;
+        if (makers.size >= MAKER_MAX) makers.delete(makers.keys().next().value!);
+        makers.set(token, pad);
+        return pad;
+      })
+      .catch(() => undefined)
+      .finally(() => asking.delete(token));
+    asking.set(token, p);
+    return p;
+  }
+
+  return { get, warm, tick, state, restore, onAnswer, listed, pool, maker };
 }

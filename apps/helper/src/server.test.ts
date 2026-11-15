@@ -397,7 +397,10 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const \{ ready, warmed \} = readyGate\(warmUntilReady\(\{ lists, evmLists, token \}\), checked\);/);
   assert.doesNotMatch(main, /await[^;]*\.ready/, "a pool's rent read never holds up the helper's start");
   // the chains' own swap reads: the EVM chains' and Solana's (the token page's lists and candles as its history)
-  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds, keyed\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
+  // card evm-token-page-opens-any-coin: a coin no list carries named by DexScreener for the swap reads and the token page,
+  // on the one DexScreener budget GET /v1/market/held draws
+  assert.match(main, /const swaps: Swaps = \{ \.\.\.evmSwapsFromEnv\(process\.env, evmLists, gecko, holds, keyed, evmNamed\), solana: solanaTradesFromEnv\(process\.env, lists, token, rpc, slots\) \};/);
+  assert.match(main, /const dex = upstreamBudget\(\(\) => DEX_LIMITS, Date\.now\);\n\s*const evmNamed = evmNamedFrom\(SERVED_EVM, dex\);/);
   // card helper-robinhood-capacity: one hold per provider, the same one handed to /v1/rpc, the EVM lists and the swap reads
   // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health; each account's
   // daily spend in the store, shared with the helper this one replaces (review H1 of 424dce1e)
@@ -412,11 +415,11 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /const near = engineFirst\(\{ lists: nearLists, token: createNearToken\(nearLists\), trades: createNearTrades\(nearLists\) \}, createEngineNear\(\)\);\n    nearLists\.warm\(\);\n    near\.warm\(\);/);
   // card market-token-reads: the held tokens' read takes the Solana token page and the EVM chains' lists, and DexScreener on
   // its own budget for a token no list carries, never the GeckoTerminal budget
-  assert.match(main, /const held = heldFrom\(token, evmLists\);/);
+  assert.match(main, /const held = heldFrom\(token, evmLists, dex\);/);
   // card market-data-evm-token: each served EVM chain's token page and holders, its rows the chain's lists, its info on
   // the one GeckoTerminal budget, its pool and decimals the swap reads' (and handed to start, above)
   // card every-cell-shows-a-value: with one GoPlus reader for every chain's contract checks
-  assert.match(main, /const goplus = createGoPlus\(\);\n    const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, gecko, kept: swaps\[c\]\?\.kept, goplus \}\)\]\)\);/);
+  assert.match(main, /const goplus = createGoPlus\(\);\n    const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, named: evmNamed\[c\], gecko, kept: swaps\[c\]\?\.kept, goplus \}\)\]\)\);/);
   // card helper-ready-without-gt: every environment read at the start, none left to handler()'s defaults at listen()
   // card robinhood-mainnet-rpcs: the pool senders' reads on that same hold and pace per provider
   assert.match(main, /const evmPools = evmPoolSendersFromEnv\(process\.env, undefined, holds\);/);
