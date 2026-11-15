@@ -1686,7 +1686,12 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
           if (e instanceof BadAnswer) throw new ScanAnswered("rpc_error", `the scan provider answered: ${e.message}`);
           if (spareNext && /^the provider answered HTTP 5\d\d$/.test(String((e as Error | null)?.message))) throw new ScanRefused("rpc_error", `the scan provider is out: ${(e as Error).message}`);
           if (e instanceof Unreachable) {
-            if (spareNext) throw new ScanRefused("rpc_error", `the scan provider refused a connection: ${e.message}`);
+            // held as a throttle is: a browser reads rpc.mainnet.chain.robinhood.com's 429 as no connection (its answer
+            // carries access-control-allow-origin "*,*", which CORS refuses: sign live run 43693987836, 14 of them)
+            if (spareNext) {
+              if (provider !== undefined) SCAN_HELD.set(provider, performance.now() + EVM_HOLD_MS);
+              throw new ScanRefused("rpc_error", `the scan provider refused a connection: ${e.message}`);
+            }
             if (++refused >= SCAN_TRIES) throw new ScanRefused("rpc_error", `the scan provider refused ${refused} connections in a row: ${e.message}`);
             await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));
             continue;
