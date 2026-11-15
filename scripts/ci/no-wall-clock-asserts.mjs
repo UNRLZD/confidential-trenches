@@ -80,8 +80,6 @@ export const LISTED = {
 // no more than its count; a new call passes `mono` or runs inside onTestClock.
 export const QUOTE_LISTED = {
   "packages/kit/test/evm-quote-attacks.test.ts": { count: 143, why: "to convert" },
-  "packages/kit/test/evm-quote-head.test.ts": { count: 15, why: "to convert" },
-  "packages/kit/test/evm-quote.test.ts": { count: 5, why: "to convert" },
   "packages/signpage/test/pool-buy-evm-kind.test.ts": { count: 1, why: "to convert" },
   "packages/signpage/test/pool-buy-evm.test.ts": { count: 2, why: "to convert" },
   "packages/signpage/test/rules-pool-attacks.test.ts": { count: 1, why: "to convert" },

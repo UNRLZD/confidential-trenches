@@ -8,6 +8,7 @@ import { mock, test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import * as kit from "../src/index.ts";
+import { onTestClock } from "./test-clock.ts";
 import { EVM_NOOP_HOOK_CODE, evmPoolBuildQuoted, EvmPoolBuyError, evmPoolSignBuy, EvmQuoteError, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
 import { evmPoolBuyQuoteWith, evmProviders, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues, pinnedBuild } from "../src/trade/evm/buy-unpinned.ts";
@@ -63,8 +64,9 @@ const request = (name: string): EvmPoolBuyQuoteRequest => {
   const { buys, amountIn, ...rest } = F[name]!.request;
   return { ...(rest as Omit<EvmPoolBuyQuoteRequest, "token" | "amountIn">), token: buys as string, amountIn: BigInt(amountIn as string) };
 };
+// each quote on the test clock: its age rule and bounds read the waits it set, never the machine's speed
 const quote = (name: string, edit1?: Edit, edit2?: Edit, now = F[name]!.now): Promise<EvmPoolBuyQuote> =>
-  evmPoolBuyQuoteWith(request(name), [replay(F[name]!.exchanges[0], edit1), replay(F[name]!.exchanges[1], edit2)], now);
+  onTestClock(() => evmPoolBuyQuoteWith(request(name), [replay(F[name]!.exchanges[0], edit1), replay(F[name]!.exchanges[1], edit2)], now));
 const refused = async (p: Promise<unknown>, code: string) => {
   await assert.rejects(p, (e: unknown) => {
     assert.ok(e instanceof EvmQuoteError, `an EvmQuoteError, not ${e}`);
@@ -351,13 +353,13 @@ test("Q8 a bad request refuses before any read", async () => {
     [{ ...r, slippageBps: 1.5 }, "bad_request"],
     [{ ...r, token: "0x4200000000000000000000000000000000000006" }, "token_mismatch"],
   ] as const) {
-    await refused(evmPoolBuyQuoteWith(bad as EvmPoolBuyQuoteRequest, [none, other], now), code);
+    await refused(onTestClock(() => evmPoolBuyQuoteWith(bad as EvmPoolBuyQuoteRequest, [none, other], now)), code);
   }
-  await refused(evmPoolBuyQuoteWith(r, [none, none], now), "bad_request");
+  await refused(onTestClock(() => evmPoolBuyQuoteWith(r, [none, none], now)), "bad_request");
   // Robinhood testnet pins a V4Quoter and no QuoterV2 (no v3 there, M365; card evm-sell-device-quote): a v3 route is
   // refused before any read, on any providers and on the pinned ones
   const rhV3 = { ...r, chain: "robinhood-testnet" as const, route: { venue: "uniswap-v3" as const, tokens: [kit.evmPoolVenues()["robinhood-testnet"].weth, r.token], fees: [3000] } };
-  await refused(evmPoolBuyQuoteWith(rhV3, [none, other], now), "no_quoter");
+  await refused(onTestClock(() => evmPoolBuyQuoteWith(rhV3, [none, other], now)), "no_quoter");
   await refused(kit.evmPoolBuyQuote(rhV3), "no_quoter");
   // two providers on one host, or not https, are refused
   assert.throws(() => evmProviders(["https://a.example.org/x", "https://A.example.org/y"], fetch), (e: unknown) => e instanceof EvmQuoteError && e.code === "bad_request");
@@ -410,7 +412,7 @@ test("Q9 a provider error or a malformed answer refuses", async () => {
   const down: EvmRpc = async () => {
     throw new Error("offline");
   };
-  await refused(evmPoolBuyQuoteWith(request("base-ok"), [replay(F["base-ok"]!.exchanges[0]), down], F["base-ok"]!.now), "rpc_error");
+  await refused(onTestClock(() => evmPoolBuyQuoteWith(request("base-ok"), [replay(F["base-ok"]!.exchanges[0]), down], F["base-ok"]!.now)), "rpc_error");
 });
 
 test("Q10 a quote too small for a minimum above 0 refuses", async () => {
