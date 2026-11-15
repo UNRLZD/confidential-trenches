@@ -15,6 +15,8 @@
 //     Max, and Buy has the busy look of a tap in flight (data-kind live, aria-busy, aria-disabled; no new word); a tap
 //     sends nothing and the amount field is never marked wrong;
 //   - a balance with nothing being made (ready "0", no making) and an empty pool: no Max, the button off, a tap sends nothing;
+//   - a fresh account with $0 on Solana and Base (card buy-box-quotes-before-funds: no ready, no tap_max): Max $0, an
+//     amount over it marked wrong, the button off, a tap sends nothing;
 //   - no box names a proof (13 Nov 07:53Z: removed, the app names no proof): no proof mark, no word of proof, ready or pending;
 //   - Base (card buy-any-amount-on-every-chain): any amount up to Max is one pool.buy, as on Solana: Max's USD ($3.50)
 //     asks the whole 0.001 ETH, $3.00 asks its own ETH at the fixture's price, rounded down; over Max it is marked wrong;
@@ -84,19 +86,22 @@ const BUYS = [
   ["base-other", "pool=base-ready&amt=3", "pool", false, "$83.68 available", "Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: ethOf(300), slippage_bps: 1000 } }],
   ["base-over", "pool=base-ready&amt=3.51", "pool", false, "$83.68 available", "Max $3.50", false, null],
   ["base-making", "pool=base-making&amt=3.50", "pool", true, "$83.68 available", "", false, null],
+  // a fresh account with $0 (card buy-box-quotes-before-funds): Max $0, so the grey Buy has its reason
+  ["sol-fresh", "pool=sol-fresh&amt=5&cash=0", "pool", false, "$0 available", "Max $0", false, null],
+  ["base-fresh", "pool=base-fresh&amt=5&cash=0", "pool", false, "$0 available", "Max $0", false, null],
   ["vault", "amt=25", "vault", false, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
 // and on Base (card you-receive-on-every-chain), the tap's own ask's cost: 0.000021 ETH at $3,500.12 is $0.0735, $0.08;
 // a dash where the tap asks nothing (over Max)
-const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": "Fee $0.08", "base-other": "Fee $0.08", "base-over": "Fee —", "base-making": null, vault: null };
+const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": "Fee $0.08", "base-other": "Fee $0.08", "base-over": "Fee —", "base-making": null, "sol-fresh": null, "base-fresh": null, vault: null };
 // the amount field marked wrong: over one tap's most, on every chain; never while a proof is still making (the amount is
 // not what is wrong) or on an amount the pool can take
 // You receive on a Solana pool buy (card solana-buy-preview-complete): the dry answer's out for the typed amount (the
 // recorded curve coin's 35,294.263662 at 0.001 SOL), over the fixture's set preview, which the live source has none of
 // and on Base (card you-receive-on-every-chain), the tap's own ask's out, 10,600 tokens
 const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-nocash": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH", "base-chunk": "≈ 10.6K TORCH", "base-other": "≈ 10.6K TORCH" };
-const BAD = { "sol-ready": "false", "sol-nocash": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "false", "base-over": "true", "base-making": "false", vault: "false" };
+const BAD = { "sol-ready": "false", "sol-nocash": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "false", "base-over": "true", "base-making": "false", "sol-fresh": "true", "base-fresh": "true", vault: "false" };
 // the presets row as data-preset:disabled:text per button: the four on every pool chain (all over one tap's most on the
 // pool, or off while no proof is ready), $100 over the vault's max
 const FOUR_OFF = "10.00:true:$10 25.00:true:$25 50.00:true:$50 100.00:true:$100";
@@ -113,6 +118,8 @@ const PRESET_ROW = {
   "base-other": FOUR_OFF,
   "base-over": FOUR_OFF,
   "base-making": FOUR_OFF,
+  "sol-fresh": FOUR_OFF,
+  "base-fresh": FOUR_OFF,
   vault: "10.00:false:$10 25.00:false:$25 50.00:false:$50 100.00:true:$100",
 };
 const SELLS = [

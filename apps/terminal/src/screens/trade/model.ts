@@ -515,6 +515,14 @@ export function cashMax(pools: SignpageState["pools"], chain: Chain, withCash: s
   return top === null ? null : unitsToCents(top, price!);
 }
 
+/** The box's Max on a pool chain: with_cash's (cashMax) or one tap's own (poolView's tapMax) once the page prices one;
+ *  else $0 while Bal is $0, since a tap spends no more than Bal (card buy-box-quotes-before-funds: a fresh account's
+ *  pool, which state.pools lists with no ready and no tap_max, as no proof is made with nothing in it); null otherwise
+ *  (no Max line: money there the page has not priced a tap of yet). */
+export function poolMax(withCash: Cents | null, tapMax: Cents | null, bal: Cents | null): Cents | null {
+  return withCash ?? tapMax ?? (bal === 0n ? 0n : null);
+}
+
 /**
  * The tap's pool.buy for `c` cents: the USD in the pool asset's units at the device's price, rounded down. Only with a
  * proof ready and the page's `tap_max`, and at most it, or with pool.buy.dry's `withCash` (card

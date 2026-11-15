@@ -67,6 +67,10 @@ const POOLS: Record<string, { chain: "solana" | "base"; pools: Pool[] }> = {
   "sol-empty": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0", ready: "0" }] },
   "base-ready": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0.003", tap_max: "0.001" }] },
   "base-making": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0", making: "0.003" }] },
+  // a fresh account (card buy-box-quotes-before-funds): its pool as the live page listed it on 15 Nov 20:23Z, a balance
+  // of "0" and no ready or tap_max (no note has landed, so no proof queue runs)
+  "sol-fresh": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0" }] },
+  "base-fresh": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0" }] },
 };
 const POOL = poolMode ? POOLS[poolMode] : undefined;
 if (POOL) STATE.pools = POOL.pools;

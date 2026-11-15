@@ -31,6 +31,7 @@ import {
   outcome,
   parseUsd,
   poolBuyAsk,
+  poolMax,
   poolView,
   receiveShown,
   tradeBal,
@@ -333,7 +334,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const waiting = onPool && pool !== null ? waitingCents(snapshot.state?.deposit_wallets, chain, pool.asset, price) : 0n;
   const balance = signedOut ? null : path === "near" ? nearCash : tradeBal(onPool, pool, cash, cashMovesTo(chain) ? nearCash : 0n, waiting).cents;
   const maxText = path === "vault" ? kit.maxBuy(chain) : null;
-  const max = onPool ? (cashMax(pools, chain, withCash, price) ?? pool?.tapMax ?? null) : path === "near" ? balance : maxText === null ? null : parseUsd(maxText);
+  const max = onPool ? poolMax(cashMax(pools, chain, withCash, price), pool?.tapMax ?? null, balance) : path === "near" ? balance : maxText === null ? null : parseUsd(maxText);
   // money on the chain's pool that a tap cannot spend yet but will (the seconds after a load or a fresh deposit): the
   // balance shows, Max does not, and Buy takes the busy look of a tap in flight until the amount arrives
   const coming = onPool && !signedOut && spendSoon(pools, chain, max);
@@ -525,7 +526,7 @@ export function TradeView({ t, symbol, footer, toast = true, logo }: { t: Trade;
       {/* Limit and TP/SL: Coming soon in the box's place; Market: the box (two parts, the toast between them as before) */}
       {tab !== "market" && <OrdersSoon place={tab === "limit" ? "buy-limit" : "buy-tpsl"} W={W} />}
       {tab === "market" && (<>
-      <label className="trb-amount" data-bad={!signedOut && amount !== null && amount > 0n && (onPool ? amountWrong(poolBuyAsk(pools, chain, token, amount, price, slippageBps, withCash)) : !amountOk(amount, max, balance))}>
+      <label className="trb-amount" data-bad={!signedOut && amount !== null && amount > 0n && (onPool ? amountWrong(poolBuyAsk(pools, chain, token, amount, price, slippageBps, withCash)) || (max !== null && amount > max) : !amountOk(amount, max, balance))}>
         <input
           className="trb-input"
           value={text}
