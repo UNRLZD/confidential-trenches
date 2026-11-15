@@ -398,9 +398,25 @@ test("the page's walk Workers reach every pool's walk: Solana's and each EVM poo
     solana: (async (a: { walkers?: unknown }) => (got.push({ chain: "solana", walkers: a.walkers }), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
     evm: (async (a: { pin: { network: string }; walkers?: unknown }) => (got.push({ chain: a.pin.network, walkers: a.walkers }), { notes: notesOf(EVM_SCOPE, LABEL_E, 2000n), spends: [], elsewhere: [], wallets: [], block: 1n })) as never,
   });
-  await w.r.auto();
+  const was = console.info;
+  const said: string[] = [];
+  console.info = (...a: unknown[]) => void said.push(a.map(String).join(" "));
+  try {
+    await w.r.auto();
+  } finally {
+    console.info = was;
+  }
+  // and once the walks settle the page says how many walk Workers answered on each field, in the words the Firefox
+  // gate reads (scripts/restore-speed-browser.mjs hashedOf, its test holds the same line): none here, as the stub
+  // walks start no Worker
+  assert.ok(said.includes("restore: the walk Workers hashed on wasm 0, bigint 0"), said.join(" | "));
   assert.ok(got.some((x) => x.chain === "solana") && got.some((x) => x.chain !== "solana"), JSON.stringify(got.map((x) => x.chain)));
-  for (const x of got) assert.equal(x.walkers, walkers, `${x.chain}: the host's walkers`);
+  // each handed spawn starts the host's own Worker (card firefox-restore-holds-on-every-runner wraps it to count each
+  // answer's hash field, so it is the host's spawn behind a counter, not the same function)
+  for (const x of got) {
+    assert.equal(typeof x.walkers, "function", `${x.chain}: a spawn`);
+    assert.throws(() => (x.walkers as () => unknown)(), /not started here/, `${x.chain}: the host's walkers`);
+  }
 });
 
 // card restore-shows-the-balance-in-seconds: the live check pool-restore-wired reads when the first pool's balance is

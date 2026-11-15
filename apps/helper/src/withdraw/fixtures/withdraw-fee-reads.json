@@ -23,7 +23,7 @@
    "gp": "100000000",
    "px": "4.135781763845",
    "g_w": "92505000000000",
-   "valid_until_block": 222699586
+   "valid_until_block": 222700686
   },
   "testnet": {
    "relayer_account": "relayer.confidential.unrlzd.near",
@@ -32,7 +32,7 @@
    "gp": "100000000",
    "px": "4.135781763845",
    "g_w": "92505000000000",
-   "valid_until_block": 275879166
+   "valid_until_block": 275880266
   }
  },
  "calls": [

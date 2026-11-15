@@ -48,6 +48,7 @@ import { headersFor } from "../../../apps/terminal/test/harness/server.mjs";
 import { parseHeadersFile } from "../../../apps/terminal/scripts/check-deploy.ts";
 import { launchHarnessBrowser } from "../../../scripts/harness-sockets.mjs";
 import { browserLabel } from "../../../scripts/browsers.mjs";
+import { openInShell } from "../../../scripts/live-checks/open-in-shell.mjs";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
@@ -61,6 +62,11 @@ const SHIPPED_GAP = 10_000;
 const WORKER_PATH = "/walk-worker.js";
 export const CONTINUE = '#signin[data-signin="words"] button[data-action="next"]';
 export const STEP_MS = 60_000;
+/** A fixed loop of `n` steps, timed by the Worker that runs it (calibrate: 4e8 in one Worker; machineSpeed: SPEED_STEPS
+ *  shared by its Workers). */
+export const speedLoop = (n) => `let x=0;const t=performance.now();for(let i=0;i<${n};i++)x=(x*31+i)|0;postMessage([performance.now()-t,x]);`;
+/** The steps machineSpeed shares among its Workers, as a walk shares its fixed work among them. */
+export const SPEED_STEPS = 1_600_000_000;
 const secs = (ms) => (ms === null || ms === undefined ? "-" : (ms / 1000).toFixed(2));
 
 // ------------------------------------------------------------------------------------------------ the chains' answers
@@ -355,6 +361,49 @@ async function slowWorkers(context, page, cpu, out) {
   return cdp;
 }
 
+/** The machine's speed as the walk uses it (card firefox-restore-holds-on-every-runner): SPEED_STEPS of a fixed loop
+ *  shared by as many Workers at once as the walk starts (walkCores: hardwareConcurrency, 8 at most), as a pool's walk
+ *  shares its fixed work among them, on a page this context serves itself (no host is reached), the slowest Worker's
+ *  time; the median of `rounds`. The same code's Firefox restore took 39 s on one
+ *  GitHub runner of the label ubuntu-24.04 (AWS) and 48 and 64 s on two others (Azure), 15 Nov: a bound in seconds is
+ *  scaled by this time (firefox-rpc-blocked.mjs scaledBound). */
+export async function machineSpeed(browser, rounds = 3) {
+  const context = await browser.newContext();
+  try {
+    await context.route("https://speed.ct.test/**", (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>speed</title>" }));
+    const page = await context.newPage();
+    await page.goto("https://speed.ct.test/");
+    const runs = [];
+    for (let k = 0; k < rounds; k++)
+      runs.push(
+        await page.evaluate(
+          (steps) =>
+            new Promise((ok, no) => {
+              const n = Math.max(1, Math.min(8, Number.isSafeInteger(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 1));
+              const src = `let x=0;const t=performance.now();for(let i=0;i<${Math.round(steps / n)};i++)x=(x*31+i)|0;postMessage([performance.now()-t,x]);`;
+              const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+              let left = n;
+              let worst = 0;
+              for (let i = 0; i < n; i++) {
+                const w = new Worker(url);
+                w.onmessage = (e) => {
+                  worst = Math.max(worst, e.data[0]);
+                  w.terminate();
+                  if (--left === 0) ok({ ms: worst, workers: n });
+                };
+                w.onerror = (e) => no(new Error(`the speed Worker failed: ${e.message}`));
+              }
+            }),
+          SPEED_STEPS,
+        ),
+      );
+    const sorted = [...runs].sort((a, b) => a.ms - b.ms);
+    return { ms: sorted[Math.floor(sorted.length / 2)].ms, workers: sorted[0].workers, runs: runs.map((r) => r.ms) };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
 /** A fixed loop in a Worker on the harness's plain host, timed by the Worker: at no rate, the page's rate alone, and the
  *  page's and the Worker target's. */
 async function calibrate(browser, cpu) {
@@ -368,13 +417,13 @@ async function calibrate(browser, cpu) {
     if (how === "both") await slowWorkers(context, page, cpu, sink);
     await page.goto(`https://${HOSTS.sibling}/`);
     res[how] = await page.evaluate(
-      () =>
+      (src) =>
         new Promise((ok) => {
-          const src = "let x=0;const t=performance.now();for(let i=0;i<4e8;i++)x=(x*31+i)|0;postMessage([performance.now()-t,x]);";
           const w = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
           const t = performance.now();
           w.onmessage = (e) => ok({ inWorker: e.data[0], wall: performance.now() - t });
         }),
+      speedLoop(4e8),
     );
     await context.close();
   }
@@ -421,8 +470,8 @@ export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeo
   const app = page.frameLocator("iframe#app");
   const vis = (sel) => app.locator(`${sel} >> visible=true`).first();
   try {
-    await page.goto(`https://${REAL.app}/discover`, { waitUntil: "commit" });
-    await page.waitForURL((x) => x.hostname === REAL.sign, { timeout: STEP_MS });
+    // the shared visit (scripts/live-checks/open-in-shell.mjs): ends at the shell whichever commit Firefox reports first
+    await openInShell(page, `https://${REAL.app}/discover`, `https://${REAL.sign}`, STEP_MS);
     await app.locator(':root[data-signpage="ready"]').waitFor({ state: "attached", timeout: STEP_MS });
     await vis('[data-header="S1.1"] button, button[data-header="S1.1"]').click({ timeout: STEP_MS });
     await vis('.sgn-opt[data-way="wallet"]').click({ timeout: STEP_MS });
@@ -465,10 +514,26 @@ export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeo
   out.workerEvents = workerEvents.filter((p) => p === WORKER_PATH).length;
   out.walkWorkers = out.workers.filter((w) => w.path === WORKER_PATH).length;
   out.workerRates = [...new Set(out.workers.filter((w) => w.path === WORKER_PATH).map((w) => w.rate))];
+  out.hashed = hashedOf(out.lines);
   delete out.events;
   await context.close().catch(() => {});
   return out;
 }
+
+/** The field the walk Workers hashed on, summed over the page's lines (src/pool-restore.ts: "restore: the walk Workers
+ *  hashed on wasm N, bigint M", one a pass), or null when the page said none (a build before card
+ *  firefox-restore-holds-on-every-runner, or no walk ran in Workers). */
+export function hashedOf(lines) {
+  let n = null;
+  for (const l of lines) {
+    const m = /^restore: the walk Workers hashed on wasm (\d+), bigint (\d+)/.exec(l);
+    if (m) n = { wasm: (n?.wasm ?? 0) + Number(m[1]), bigint: (n?.bigint ?? 0) + Number(m[2]) };
+  }
+  return n;
+}
+
+/** The hash path as a run line says it. */
+export const hashText = (h) => (h ? `the walk hashed on WebAssembly in ${h.wasm} Workers, on BigInt in ${h.bigint}` : "the walk's hash path not said by the page");
 
 export function line(o, label) {
   const ok = o.error === null && o.shownMs !== null && o.doneMs !== null && o.unanswered.length === 0;
@@ -480,7 +545,7 @@ export function line(o, label) {
       `${ok ? "ok " : "BAD"} ${label}, ${o.mode === "workers" ? "Workers" : "page (/walk-worker.js 404)"}, CPU ${o.cpu}x: ` +
       `balance shown ${secs(o.shownMs)} s (in the state ${secs(o.drawnMs)} s), restore done ${secs(o.doneMs)} s (${o.sheetEnd ?? "not ended"}; op ${o.stage ?? "-"} at ${secs(o.stageMs)} s); ` +
       `${w}, ${o.workerRequests} /walk-worker.js requests (${o.workerStatuses.join(", ") || "none"}); hardwareConcurrency ${o.cores ?? "-"}; ` +
-      `${n} reads answered ${RTT_MS / 1000} s late, ${Object.values(o.app).reduce((s, x) => s + x, 0)} app helper reads answered 421 by the harness, ${o.unanswered.length} unanswered before the restore's end, ${o.unansweredAfter.length} refused after it (step 5)${o.error ? `; error: ${o.error}` : ""}`,
+      `${hashText(o.hashed)}; ${n} reads answered ${RTT_MS / 1000} s late, ${Object.values(o.app).reduce((s, x) => s + x, 0)} app helper reads answered 421 by the harness, ${o.unanswered.length} unanswered before the restore's end, ${o.unansweredAfter.length} refused after it (step 5)${o.error ? `; error: ${o.error}` : ""}`,
   };
 }
 

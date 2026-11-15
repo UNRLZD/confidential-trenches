@@ -1,10 +1,10 @@
 {
- "_note": "Recorded 4 Nov by app-pool-withdraw.mjs --record: good = card app-hop-sync-lock's build (--harness --build apps/terminal/dist; the opened run's control stays locked until the shell's screen takes the frame), bad = the deployed APP_HOST before card app-pool-withdraw; both framed by the stand-in shell signed in with POOLS.",
+ "_note": "Re-recorded 15 Nov by app-pool-withdraw.mjs --record (card app-pool-withdraw-reads-146, release 146's hand-off: a pool row's Withdraw opens the app's form, whose Withdraw asks pool.withdraw with the chain, the address and the amount): good = the deployed APP_HOST at release 146 (main 245496a84, deployed 01:31Z), read 01:45Z; noLine = main 245496a84's terminal built with the form's HopLine taken out (--harness), the refused answer drawn nowhere; bad = the deployed APP_HOST on 4 Nov, before card app-pool-withdraw. All framed by the stand-in shell signed in with POOLS.",
  "good": {
   "check": "app-pool-withdraw",
-  "at": "2026-11-04T17:18:05.603Z",
-  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
-  "browser": "156.0.8078.79",
+  "at": "2026-11-15T01:45:33.528Z",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in",
+  "browser": "157.0.8103.51",
   "runs": [
    {
     "width": "phone",
@@ -16,15 +16,44 @@
      "base": true,
      "robinhood": false
     },
+    "row": [
+     {
+      "v": 1,
+      "id": "50043164-1338-475a-ba18-5cd4ec443ff1",
+      "type": "deposit.assets"
+     },
+     {
+      "chain": "solana",
+      "v": 1,
+      "id": "70d960de-a95f-4b4a-8bfd-88d78f76e690",
+      "type": "pool.address"
+     },
+     {
+      "chain": "base",
+      "v": 1,
+      "id": "777ee123-5766-4535-adbb-56f183a5c93a",
+      "type": "pool.address"
+     },
+     {
+      "chain": "robinhood",
+      "v": 1,
+      "id": "96fbcc03-7b93-413c-ba28-774e01edd45d",
+      "type": "pool.address"
+     }
+    ],
+    "form": "base",
     "asked": [
      {
       "chain": "base",
+      "to": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.005",
       "return_key": "withdraw",
       "v": 1,
-      "id": "e20eadfe-be95-4372-ba14-5d1b25613fe4",
+      "id": "2cf121a8-f540-4abc-9f7e-9dd8e93a65f3",
       "type": "pool.withdraw"
      }
     ],
+    "sheet": true,
     "line": "refused",
     "unlocked": true,
     "inside": true
@@ -39,15 +68,44 @@
      "base": true,
      "robinhood": false
     },
+    "row": [
+     {
+      "v": 1,
+      "id": "a6334534-e1ad-4e92-84d1-c3cea977eea2",
+      "type": "deposit.assets"
+     },
+     {
+      "chain": "solana",
+      "v": 1,
+      "id": "e25ae0aa-ffb3-4021-b269-d611bf8d9b9f",
+      "type": "pool.address"
+     },
+     {
+      "chain": "base",
+      "v": 1,
+      "id": "51d919df-dc06-463d-be09-6fffe95ccc3a",
+      "type": "pool.address"
+     },
+     {
+      "chain": "robinhood",
+      "v": 1,
+      "id": "c84e9b75-acce-4e00-ae44-f41861747f23",
+      "type": "pool.address"
+     }
+    ],
+    "form": "base",
     "asked": [
      {
       "chain": "base",
+      "to": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.005",
       "return_key": "withdraw",
       "v": 1,
-      "id": "c8132803-9f63-4ebc-b7f4-a8d0af653854",
+      "id": "b5847e88-6961-4a31-be58-ba2a628dbed7",
       "type": "pool.withdraw"
      }
     ],
+    "sheet": false,
     "line": null,
     "unlocked": false,
     "inside": true
@@ -62,15 +120,44 @@
      "base": true,
      "robinhood": false
     },
+    "row": [
+     {
+      "v": 1,
+      "id": "7b565b42-d69f-47fb-8bc0-209bd329879d",
+      "type": "deposit.assets"
+     },
+     {
+      "chain": "solana",
+      "v": 1,
+      "id": "25288010-f78f-496b-89f1-2f08e5daa3b9",
+      "type": "pool.address"
+     },
+     {
+      "chain": "base",
+      "v": 1,
+      "id": "595dcd3b-cf12-4853-99f4-dbf91b360807",
+      "type": "pool.address"
+     },
+     {
+      "chain": "robinhood",
+      "v": 1,
+      "id": "18ed2dda-565d-4c56-b105-6048196b7a3d",
+      "type": "pool.address"
+     }
+    ],
+    "form": "base",
     "asked": [
      {
       "chain": "base",
+      "to": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.005",
       "return_key": "withdraw",
       "v": 1,
-      "id": "549516b8-54be-4071-9680-15088f61bf40",
+      "id": "6a05a6ea-be7a-4929-83ff-b3e1d851be3c",
       "type": "pool.withdraw"
      }
     ],
+    "sheet": true,
     "line": "refused",
     "unlocked": true,
     "inside": true
@@ -85,15 +172,260 @@
      "base": true,
      "robinhood": false
     },
+    "row": [
+     {
+      "v": 1,
+      "id": "9c2c147f-58bd-42ed-8916-d6297a701675",
+      "type": "deposit.assets"
+     },
+     {
+      "chain": "solana",
+      "v": 1,
+      "id": "f365c01f-7a5f-411d-944b-b6b52cb09413",
+      "type": "pool.address"
+     },
+     {
+      "chain": "base",
+      "v": 1,
+      "id": "4806a45c-95ab-4ef5-b8ce-c5cd8ad105e8",
+      "type": "pool.address"
+     },
+     {
+      "chain": "robinhood",
+      "v": 1,
+      "id": "73332578-9272-4bc3-b274-8bf44786a524",
+      "type": "pool.address"
+     }
+    ],
+    "form": "base",
     "asked": [
      {
       "chain": "base",
+      "to": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.005",
       "return_key": "withdraw",
       "v": 1,
-      "id": "2f6f1625-831c-4e52-bc08-a275e9085d05",
+      "id": "1da36863-be97-4056-b008-eaf187a3f4d3",
       "type": "pool.withdraw"
      }
     ],
+    "sheet": false,
+    "line": null,
+    "unlocked": false,
+    "inside": true
+   }
+  ]
+ },
+ "noLine": {
+  "check": "app-pool-withdraw",
+  "at": "2026-11-15T01:46:34.572Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in",
+  "browser": "157.0.8103.51",
+  "runs": [
+   {
+    "width": "phone",
+    "shell": "refused",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": true,
+     "base": true,
+     "robinhood": false
+    },
+    "row": [
+     {
+      "v": 1,
+      "id": "0dfbd797-2ae2-4c81-8b9e-88a87a1bc7a7",
+      "type": "deposit.assets"
+     },
+     {
+      "chain": "solana",
+      "v": 1,
+      "id": "dca6f261-2f52-4418-b627-dd8737d5ffa7",
+      "type": "pool.address"
+     },
+     {
+      "chain": "base",
+      "v": 1,
+      "id": "a15fd73b-ee3c-4b91-a43a-1a9f02f25aa9",
+      "type": "pool.address"
+     },
+     {
+      "chain": "robinhood",
+      "v": 1,
+      "id": "f1b635d3-2d6b-433e-b417-4d9465a39cf0",
+      "type": "pool.address"
+     }
+    ],
+    "form": "base",
+    "asked": [
+     {
+      "chain": "base",
+      "to": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.005",
+      "return_key": "withdraw",
+      "v": 1,
+      "id": "29dfecf7-3997-4157-9e1b-3365b0a3733e",
+      "type": "pool.withdraw"
+     }
+    ],
+    "sheet": true,
+    "line": null,
+    "unlocked": true,
+    "inside": true
+   },
+   {
+    "width": "phone",
+    "shell": "opened",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": true,
+     "base": true,
+     "robinhood": false
+    },
+    "row": [
+     {
+      "v": 1,
+      "id": "b36aab50-29a4-40dd-b84f-9b36eb7c7f03",
+      "type": "deposit.assets"
+     },
+     {
+      "chain": "solana",
+      "v": 1,
+      "id": "c023ab58-c057-48a8-ab99-325c9e40ffd2",
+      "type": "pool.address"
+     },
+     {
+      "chain": "base",
+      "v": 1,
+      "id": "78698bb5-aac6-49b6-9589-b032f5524803",
+      "type": "pool.address"
+     },
+     {
+      "chain": "robinhood",
+      "v": 1,
+      "id": "46bd6b9a-4bfb-4a16-bd63-ec003ed6d1a1",
+      "type": "pool.address"
+     }
+    ],
+    "form": "base",
+    "asked": [
+     {
+      "chain": "base",
+      "to": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.005",
+      "return_key": "withdraw",
+      "v": 1,
+      "id": "0585af39-7419-457f-862f-96bc009a3ca5",
+      "type": "pool.withdraw"
+     }
+    ],
+    "sheet": false,
+    "line": null,
+    "unlocked": false,
+    "inside": true
+   },
+   {
+    "width": "desktop",
+    "shell": "refused",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": true,
+     "base": true,
+     "robinhood": false
+    },
+    "row": [
+     {
+      "v": 1,
+      "id": "a0a96450-b33a-45b6-b4f3-bc267505e8bb",
+      "type": "deposit.assets"
+     },
+     {
+      "chain": "solana",
+      "v": 1,
+      "id": "3e1325b5-aa5f-49ee-826e-7c89f0357ac0",
+      "type": "pool.address"
+     },
+     {
+      "chain": "base",
+      "v": 1,
+      "id": "faab2cec-3798-4e8a-a94a-adc18d0765b6",
+      "type": "pool.address"
+     },
+     {
+      "chain": "robinhood",
+      "v": 1,
+      "id": "6c66b696-0ae1-4e3b-82fa-4d97007ff3bd",
+      "type": "pool.address"
+     }
+    ],
+    "form": "base",
+    "asked": [
+     {
+      "chain": "base",
+      "to": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.005",
+      "return_key": "withdraw",
+      "v": 1,
+      "id": "c9f6a1c5-ba7a-4540-90ac-4042c4a4c159",
+      "type": "pool.withdraw"
+     }
+    ],
+    "sheet": true,
+    "line": null,
+    "unlocked": true,
+    "inside": true
+   },
+   {
+    "width": "desktop",
+    "shell": "opened",
+    "framed": true,
+    "screen": "portfolio",
+    "on": {
+     "solana": true,
+     "base": true,
+     "robinhood": false
+    },
+    "row": [
+     {
+      "v": 1,
+      "id": "0146ece2-fff2-4fc9-abde-91c821ed6121",
+      "type": "deposit.assets"
+     },
+     {
+      "chain": "solana",
+      "v": 1,
+      "id": "c6daf785-c7ff-40af-8a3d-528dee48dcef",
+      "type": "pool.address"
+     },
+     {
+      "chain": "base",
+      "v": 1,
+      "id": "22ca2de4-88d9-4020-830b-133315ed222b",
+      "type": "pool.address"
+     },
+     {
+      "chain": "robinhood",
+      "v": 1,
+      "id": "55d9bb60-eb15-4efe-95ba-5c9f5fa395a1",
+      "type": "pool.address"
+     }
+    ],
+    "form": "base",
+    "asked": [
+     {
+      "chain": "base",
+      "to": "0x000000000000000000000000000000000000dEaD",
+      "amount": "0.005",
+      "return_key": "withdraw",
+      "v": 1,
+      "id": "6d3a11b2-754d-448f-a423-dfe418a678e3",
+      "type": "pool.withdraw"
+     }
+    ],
+    "sheet": false,
     "line": null,
     "unlocked": false,
     "inside": true

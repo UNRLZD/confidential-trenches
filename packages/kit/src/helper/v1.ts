@@ -247,6 +247,11 @@ export const HELPER_RPC_METHODS = {
     "eth_estimateGas",
     "eth_getBlockByNumber",
     "eth_getTransactionByHash",
+    // the signing page's EVM pool sync, whose Robinhood second seat is this route (card helper-rpc-takes-batches; signpage
+    // pool-testnet.ts pageEvmPoolRpcs, wallet test/pool-evm-reads-once.test.ts runs the sync on a seat that refuses
+    // every method off this list): the pool's chain on each seat, and a leaf's block time by its hash
+    "eth_chainId",
+    "eth_getBlockByHash",
   ],
   robinhood: [
     "eth_call",
@@ -261,6 +266,11 @@ export const HELPER_RPC_METHODS = {
     "eth_estimateGas",
     "eth_getBlockByNumber",
     "eth_getTransactionByHash",
+    // the signing page's EVM pool sync, whose Robinhood second seat is this route (card helper-rpc-takes-batches; signpage
+    // pool-testnet.ts pageEvmPoolRpcs, wallet test/pool-evm-reads-once.test.ts runs the sync on a seat that refuses
+    // every method off this list): the pool's chain on each seat, and a leaf's block time by its hash
+    "eth_chainId",
+    "eth_getBlockByHash",
   ],
   near: ["query", "block", "gas_price", "tx", "send_tx", "EXPERIMENTAL_tx_status", "EXPERIMENTAL_protocol_config"],
 } as const satisfies Record<Chain, readonly string[]>;

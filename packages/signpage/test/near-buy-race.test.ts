@@ -245,9 +245,10 @@ test("F5 a new ask of a token with an unfinished record runs as its own record w
   const r1 = await recOf(v, "req-1");
   const r2 = await recOf(v, "req-2");
   assert.equal((await recOf(v, "req-b")).resumes, 0, "another token's record is not this ask's to take up");
-  assert.equal(r1.amount, "3000000");
+  // a record's amount is what W is paid: the ask less its fee (card near-cash-pays-any-amount)
+  assert.equal(r1.amount, String(3_000_000n - FEE));
   assert.ok(r2, "the ask is a record of its own");
-  assert.equal(r2.amount, "1000000", "the ask's own amount");
+  assert.equal(r2.amount, String(1_000_000n - FEE), "the ask's own amount, less its fee");
   assert.notEqual(r2.w, a.w.id);
   assert.notEqual(r2.note, r1.note);
   assert.equal(((await v.w.get("ops", "req-2")) as { stage: string } | undefined)?.stage, r2.stage, "the ask's own op");

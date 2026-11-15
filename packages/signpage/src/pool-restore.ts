@@ -122,7 +122,7 @@ import { NEAR_NETWORKS, type NearRpc } from "../../wallet/src/deposit/account.ts
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { POOL_DEPOSIT_NETWORK } from "../../wallet/src/deposit/quote.ts";
 import { readConfig, RESTORE_GAP, RESTORE_LANES, restorePagesSteps, slices, walkEnd, withSeed, writeRestored, type LaneWalk, type PagesRestored, type RestoredNote, type SeedUse } from "../../wallet/src/notes/restore.ts";
-import { walkLanes, type WalkPort } from "../../wallet/src/restore/walk.ts";
+import { countingHashes, walkLanes, type WalkHashes, type WalkPort } from "../../wallet/src/restore/walk.ts";
 import { masters } from "../../wallet/src/derive/notes.ts";
 import { vaultSync, vaultSyncStart, type VaultSyncRpc } from "../../kit/src/vault/sync.ts";
 import { nearPairNetwork, nearPairRule, type NearNetwork } from "../../kit/src/near/networks.ts";
@@ -815,7 +815,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             // a walk that throws at once frees the turn too (review of 9de383865, P3)
             .finally(next);
         const solanaTurn = <T,>(walk: () => Promise<T>): Promise<T> => turn(walk, true);
-        const walkers = h.walkers ? { walkers: h.walkers } : {};
+        // each walk Worker's answer counted by the field it hashed on, said in one line once the walks settle (card
+        // firefox-restore-holds-on-every-runner: a Firefox run whose Workers fell back to BigInt is named, never only slow)
+        const hashed: WalkHashes = { wasm: 0, bigint: 0 };
+        const walkers = h.walkers ? { walkers: countingHashes(h.walkers, hashed) } : {};
         // the floor, a pool at a time as its walk ends: its scope's deposit counter past the walk's highest note in this
         // store's lane (step 7's, on the notes alone; step 5 raises it again once the lane's ids are read, and a counter
         // only goes up), so the naming the notes' write sets off names past them, then its notes, each pool's write after
@@ -888,6 +891,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // read. On a restored device nothing on the page reads a vault deposit id the lost device left money on; that
         // was so before this walk too
         const settled = await Promise.allSettled(reads);
+        if (h.walkers) console.info(`restore: the walk Workers hashed on wasm ${hashed.wasm}, bigint ${hashed.bigint}`);
         settled.forEach((r, k) => {
           const p = pools[k]!;
           if (p.chain === "near") {

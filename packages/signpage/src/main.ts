@@ -1225,7 +1225,7 @@ function nearBuyPage(): NearBuyPage | null {
     seedLock: heldSeedLock,
     fee: () => withdrawFormDeps(vault()).fee(),
     // the hand-off on the sign out's signal of the moment it is asked
-    handoff: withdrawHandoff(vault()) === null ? null : (w, fee, note) => withdrawHandoff(vault())!(w, fee, note),
+    handoff: withdrawHandoff(vault()) === null ? null : (w, fee, note, exact) => withdrawHandoff(vault())!(w, fee, note, exact),
     settle: () => withdrawSettle(vault()),
     rpcs: () => pair,
     signal: () => withdrawWait.signal,

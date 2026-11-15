@@ -46,6 +46,7 @@ import { launchBrowser } from "../browsers.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { consoleError } from "./console-errors.mjs";
 import { named } from "./record-names.mjs";
+import { fetchOrAbort } from "./route-fetch.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-postmessage";
@@ -253,7 +254,8 @@ async function run(browser, { parent, headers, signUrl, dir }) {
   if (dir) await ctx.route((u) => u.origin === signOrigin, serveDir(dir, headers === "lifted"));
   else if (headers === "lifted") {
     await ctx.route(signUrl, async (r) => {
-      const res = await r.fetch();
+      const res = await fetchOrAbort(r);
+      if (!res) return;
       const h = res.headers();
       if (h["content-security-policy"]) h["content-security-policy"] = lift(h["content-security-policy"]);
       await r.fulfill({ response: res, headers: h });

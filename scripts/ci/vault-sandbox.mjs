@@ -99,8 +99,10 @@ export function matches(file, paths = PATHS) {
 // shard 1's other targets 301 (s10 139, withdraw_spend 66, s14 33, s13 30, s01 19, withdraw_context 12, vkey 0). p02
 // moves to a fifth shard of its own, since any target beside it only lengthens the longest job: about 410, 511, 539,
 // 473 and 650 s (42 + about 30 of compile + 577).
+// mainnet_copy_payouts (card near-cash-pays-any-amount: the mainnet vault's copy, three deposits, three relayed
+// withdrawals and their settles through the helper's CLI) joins shard 1, then the lightest at about 410.
 export const SHARDS = [
-  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13"],
+  ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13", "mainnet_copy_payouts"],
   ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16", "exit_out"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12", "exit_words"],
   ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
