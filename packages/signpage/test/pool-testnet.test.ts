@@ -1118,7 +1118,7 @@ test("a state read refuses a dead pending sell record, and a later state read en
   assert.deepEqual(z2.legs.map((l) => [l.stage, l.code ?? null]), [["filled", null], ["refused", "failed"]]);
 });
 
-// Card pool-sell-record-never-stays-sent, the CO's note from the sell's merge (10 Nov 05:48Z): another tab's sign out
+// Card pool-sell-record-never-stays-sent, the note from the sell's merge (10 Nov 05:48Z): another tab's sign out
 // (signedOut) stopped the Solana settle but not the sell host, whose stopped counted this tab's sign out alone. Both stop
 // it now (card sign-out-stops-the-pages-reads, e8b41f515: stopReads); held here for the sell host and its rent backs.
 test("another tab's sign out stops the Solana sell host as this tab's does: stopped reads true and its signal is aborted", async () => {
