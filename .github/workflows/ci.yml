@@ -470,7 +470,7 @@ jobs:
   # The mutant sweeps: each package's test:mutants (card fresh-run-margin), a shard of their own (card
   # mutant-sweep-no-orphans): in test-packages, after its tests, they grew from 351 s to 502 s and the job hit its
   # 15 minutes at f3a9cbb (run 42009584431, 904 s), cutting off the live replays. The README's test command runs a
-  # package's test script only, so a reviewer's fresh run ends well inside readme-fresh-run's 15 minutes.
+  # package's test script only, so a reviewer's fresh run ends inside readme-fresh-run's 8 minutes.
   # Split across the matrix (card ci-mutants-sharded): in one job they reached 838 s of its 900 at d208a681 (run
   # 42399498783) and were cancelled at the limit on PR #420 (run 42396730156). scripts/ci/test-shards.mjs splits each
   # package's test:mutants into its commands and gives each to exactly one part, by the job's own strategy.job-index
