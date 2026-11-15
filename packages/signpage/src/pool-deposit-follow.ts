@@ -459,9 +459,9 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       const c: Under["c"] | null = low >= deps.ladder.min ? (keep?.c ?? (await costsNow())) : null;
       under = c !== null && low < c.floor ? (keep ?? { low, at: t, c }) : null;
       if (c !== null && low >= c.floor) {
+        await deps.holds?.(0n);
         if (!toldArrived) mark("arrived", { address: f.u, amount: low.toString() });
         toldArrived = true;
-        await deps.holds?.(0n);
         if (plain && !landed && low > base) {
           await show("in_transit");
           paid = true;

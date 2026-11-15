@@ -949,6 +949,46 @@ export type CashToPoolDeps = {
 type Inner = (ask: PoolAsk, ctx: KindContext | null) => HostRefusal | Running<"pool.buy">;
 type Answer = HostAnswer<"pool.buy"> | HostRefusal;
 
+/** The tap's deps as cashFirst reads them (card buy-shows-every-step): each tap read that throws says why in a trace
+ *  line; the move asked of the mover, or none, said too; and once a move is on its way, each read of what one tap
+ *  spends is bounded by the wait's time left (CASH_MOVE_WAIT_MS from the move's answer) and one that throws or never
+ *  answers counts as nothing yet, so the wait runs to its end and the pool buy then answers its own refusal: never a
+ *  tap that fails with its money already moved, or holds past the wait, with nothing said. `last()`: the last read. */
+function steadyTap(d: CashToPoolDeps, t: (step: TraceStep, f?: TraceFields) => void): CashToPoolDeps & { last(): bigint } {
+  let until: number | null = null;
+  let move: string | null = null;
+  let last = 0n;
+  const said = (e: unknown): TraceFields => ({ ...(move === null ? {} : { move }), stage: "tap_unread", error: errorText(e) });
+  return {
+    ...d,
+    tapMax: async (chain, token) => {
+      if (until === null) {
+        last = await d.tapMax(chain, token).catch((e: unknown) => {
+          t("move", said(e));
+          throw e;
+        });
+        return last;
+      }
+      let s: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<null>((r) => (s = setTimeout(() => r(null), Math.max(0, until! - d.now()))));
+      const got = await Promise.race([d.tapMax(chain, token).catch((e: unknown) => (t("move", said(e)), 0n)), late]).finally(() => clearTimeout(s));
+      if (got === null) t("move", said("the read of what one tap spends did not answer by the wait's end"));
+      last = got ?? 0n;
+      return last;
+    },
+    need: async (chain, short) => {
+      const op = await d.need(chain, short);
+      t("move", op === null ? { stage: "none", amount: short.toString(), error: "no move from Cash started or on its way for the shortfall" } : { move: op, amount: short.toString() });
+      if (op !== null) {
+        move = op;
+        until = d.now() + CASH_MOVE_WAIT_MS;
+      }
+      return op;
+    },
+    last: () => last,
+  };
+}
+
 /** The pool.buy kind that waits for Cash on its way: `inner` (the pool buy) once one tap spends the ask, or at once when
  *  nothing is on its way. No async function here returns an answer: a HostAnswer's `then` would make it a thenable. */
 export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
@@ -966,16 +1006,15 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
     const t = (step: TraceStep, f: TraceFields = {}): void => void (ctx ? trace(ctx.id, null, step, f) : undefined);
     if (ctx) traceBegin(ctx.id);
     const after = (async () => {
-      const d = deps();
+      const d = steadyTap(deps(), t);
       // a tap read that throws (Solana: the coin's venue not read, solanaTapMaxOf) moves nothing from Cash: the pool buy
       // reads the venue itself and answers its refusal at once
-      const now = (await d.any(chain)) ? await d.tapMax(chain, token).catch((e: unknown) => (t("move", { stage: "tap_unread", error: errorText(e) }), null)) : ask.amount;
+      const now = (await d.any(chain)) ? await d.tapMax(chain, token).catch(() => null) : ask.amount;
       // sized as pool.buy.dry prices it, so the notes the move brings pay the rest with their own costs: on Solana each
       // W's relay fee, tip and rent (solanaMoveShort), on Base and Robinhood each note's relay fee (evmMoveShort)
       const sized = now !== null && now < ask.amount && d.short ? await d.short(chain, token, ask.amount).catch(() => null) : null;
       const short = now !== null && now < ask.amount ? (sized ?? want(now)) : null;
       const op = short === null ? null : await d.need(chain, short);
-      if (short !== null) t("move", op === null ? { stage: "none", amount: short.toString(), error: "no move from Cash started or on its way for the shortfall" } : { move: op, amount: short.toString() });
       if (op !== null) {
         try {
           ctx?.route?.({ move: "cash", op });
@@ -983,20 +1022,11 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
           /* the app's display never stops a buy */
         }
         const until = d.now() + CASH_MOVE_WAIT_MS;
-        let have = 0n;
-        // each read of what one tap spends is bounded by the wait's time left, and one that throws (the dry refused down
-        // or quote_check_failed on a slow RPC) or never answers counts as nothing yet (card buy-shows-every-step): the
-        // wait runs to its end and the pool buy then answers its own refusal, never a tap that fails with its money
-        // already moved, or holds past CASH_MOVE_WAIT_MS, with nothing said
-        const read = async (): Promise<bigint> => {
-          let s: ReturnType<typeof setTimeout> | undefined;
-          const late = new Promise<bigint>((r) => (s = setTimeout(() => r(-1n), Math.max(0, until - d.now()))));
-          const got = await Promise.race([d.tapMax(chain, token).catch((e: unknown) => (t("move", { move: op, stage: "tap_unread", error: errorText(e) }), 0n)), late]).finally(() => clearTimeout(s));
-          if (got < 0n) t("move", { move: op, stage: "tap_unread", error: "the read of what one tap spends did not answer by the wait's end" });
-          return got < 0n ? 0n : got;
-        };
-        while (!d.signal?.aborted && d.now() < until && (have = await read()) < ask.amount) await d.wait(CASH_MOVE_POLL_MS);
-        // what one tap spends when the wait ended, against the ask: "ready", or the wait ran out (or a sign out) short
+        while (!d.signal?.aborted && d.now() < until && (await d.tapMax(chain, token)) < ask.amount) await d.wait(CASH_MOVE_POLL_MS);
+      }
+      // what one tap spends when the wait ended, against the ask: "ready", or the wait ran out (or a sign out) short
+      if (op !== null) {
+        const have = d.last();
         t("move", { move: op, stage: have >= ask.amount ? "ready" : d.signal?.aborted ? "signed_out" : "wait_over", amount: have.toString(), ...(have >= ask.amount ? {} : { error: `one tap spends ${have} of the ${ask.amount} asked after ${CASH_MOVE_WAIT_MS} ms` }) });
       }
       // the pool buy's stages as trace lines too (sent, filled, not_landed: its answer comes at its first send)
