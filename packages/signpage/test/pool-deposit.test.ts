@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { throughApi } from "./api-ends.ts";
 import { after, test } from "node:test";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
 import { base58, base64 } from "@scure/base";
@@ -2252,13 +2253,16 @@ test("pool-deposit-sent-end low 4: the end's own wait ends at the sign out, its 
   const ns = await notes();
   const stop = new AbortController();
   const { wait: _no, ...bare } = host(c, ns); // the page's host: no wait of its own, so the follower's is used
-  const got = followPoolDeposit({ ...bare, signal: stop.signal }, openLeft(1));
-  await settleMs(300); // the first read done, the 2 s wait running
-  const t0 = Date.now();
-  stop.abort();
-  const end = await Promise.race([got, settleMs(1_200).then(() => "still waiting" as const)]);
-  assert.equal(end, null, "the follow ended with the sign out");
-  assert.ok(Date.now() - t0 < 1_000, `ended ${Date.now() - t0} ms after the sign out`);
+  // on the test clock: the 2 s wait, if not cut by the sign out, reads its full length
+  await onTestClock(async () => {
+    const got = followPoolDeposit({ ...bare, signal: stop.signal }, openLeft(1));
+    await settleMs(300); // the first read done, the 2 s wait running
+    const t0 = Date.now();
+    stop.abort();
+    const end = await Promise.race([got, settleMs(1_200).then(() => "still waiting" as const)]);
+    assert.equal(end, null, "the follow ended with the sign out");
+    assert.ok(Date.now() - t0 < 1_000, `ended ${Date.now() - t0} ms after the sign out`);
+  });
 });
 
 test("pool-deposit-sent-end low 1: a note the pass sends anew gets a new landing window: past the window, a dead read starts the pass, and the new send is read every 2 s again", async () => {
