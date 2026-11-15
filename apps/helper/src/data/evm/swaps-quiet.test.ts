@@ -449,3 +449,44 @@ for (const [name, price] of [["50 times over the list's price", (c: number) => c
     assert.ok((JSON.parse(a.body).candles as unknown[]).length > 0);
     assert.deepEqual(lines, []);
   });
+
+// Card evm-keyed-checks-hold-steady: helper live run 43722667540 (attempt 2, 15 Nov 14:26:30Z) read Base 0x4f66b4a9...
+// (1KTO100M) candles from CoinGecko alone (src "coingecko", no own_from_s) while its tape was our own: its Uniswap v2
+// pool 0x114d1690... fell from 8.8e-10 to 4.3e-14 ETH at 14:23:34Z (the pool's Sync logs on base-rpc.publicnode.com),
+// so our newest close sat 10^4 under the list's price_usd, still the price before the fall. A pool read at the wrong
+// scale moves every bar of its book by the same factor; a book that crashed or pumped holds bars at the list's price.
+/** A Uniswap v3 Swap log of POOL (token0 USDC, token1 COIN): the pool's two signed amounts. */
+const swap3 = (pool: string, block: number, k: number, amount0: bigint, amount1: bigint) => ({
+  address: pool,
+  topics: [TOPIC.swap3, `0x${w(TRADER(k))}`, `0x${w(TRADER(k))}`],
+  data: `0x${[amount0, amount1, 1n << 96n, 10n ** 18n, 0n].map((v) => w(word(BigInt.asUintN(256, v)))).join("")}`,
+  blockNumber: `0x${block.toString(16)}`,
+  blockTimestamp: `0x${B.timeOf(block).toString(16)}`,
+  logIndex: "0x1",
+  transactionHash: `0x${"cd".repeat(31)}${k.toString(16).padStart(2, "0")}`,
+  removed: false,
+});
+for (const [name, listed] of [["at the list's price, then 10^4 under it (a rug)", 0.25], ["at the list's price, then 10^4 over it (a pump)", 0.000025]] as const)
+  test(`a book whose bars went ${name} within the book is served as ours, src chain with own_from_s: the scale bound judges every price the book held, not its newest close (red at b78515461: served as a token with no pool of ours)`, async () => {
+    const POOL = `0x${"f0".repeat(20)}`;
+    const calls = base();
+    v3Pool(calls, POOL);
+    // a buy of 1 COIN for 0.25 USDC and a sell of 10,000 COIN for 0.25 USDC (0.000025 USD each), five blocks apart: the
+    // one at the list's price first
+    const [hi, lo] = [swap3(POOL, HEAD - 20, 1, 250_000n, -(10n ** 18n)), swap3(POOL, HEAD - 15, 2, -250_000n, 10n ** 22n)];
+    const logs = listed === 0.25 ? [hi, lo] : [{ ...lo, blockNumber: hi.blockNumber, blockTimestamp: hi.blockTimestamp }, { ...hi, blockNumber: lo.blockNumber, blockTimestamp: lo.blockTimestamp }];
+    const lines: string[] = [];
+    const r = rig({ calls, logs: (q) => (q.address === COIN ? [] : q.address === POOL ? logs.filter((l) => inRange(q, parseInt(l.blockNumber, 16))) : undefined) });
+    const s = B.open(r.chain, r.clock, { fetch: r.fetch as never, pools: new Map(), gecko: r.budget, sleep: async () => undefined, hint: async () => POOL, price: (t) => (t === COIN ? listed : null), log: (l) => lines.push(l) });
+    const a = await s.candles(COIN, "1m", null, 500);
+    s.stop();
+    assert.equal(a.status, 200, a.body);
+    const body = JSON.parse(a.body) as { candles: string[][]; src: string; own_from_s?: number };
+    assert.equal(body.src, "chain", a.body);
+    assert.equal(typeof body.own_from_s, "number", a.body);
+    const prices = body.candles.flatMap((b) => b.slice(1, 5).map(Number));
+    assert.ok(Math.max(...prices) / Math.min(...prices) >= 1e4, a.body);
+    assert.equal(Number(body.candles.at(-1)![4]), listed === 0.25 ? 0.000025 : 0.25, a.body);
+    assert.deepEqual(lines.filter((l) => l.includes("differ past")), []);
+    assert.deepEqual(r.gt, [], "no GeckoTerminal call went out");
+  });
