@@ -15,12 +15,17 @@
 // chart is told apart and not judged: a 404, or a 200 with no bars and no `filling` for a Solana coin (GeckoTerminal names
 // no pool); a Base or Robinhood coin the lists name a pool for has one, so its empty chart is BAD. A 200 with no bars
 // and `filling` true is the refusal's form (server.ts fillingOf) and is BAD, as is any other status.
-// Runs: pending helper-listed-charts-own-reads, it fails on the helper this branch deploys too: Base's and Robinhood's cold books answer filling past the route's 5 s (Base 38 of 45 at 22:41Z) and more coins than OPEN_MAX open at once, and Solana's lists take in about two coins off pump.fun a minute, more than the keyless budget reads ahead; it joins the helper's list once every listed coin's chart is our own reads'
+// Then the tapes of TAPES, coins on no list that traded within the day (card helper-listed-charts-own-reads: MOW on
+// Robinhood answered 0 trades, src chain, at 23:1xZ on 15 Nov with 745 over the day, its newest 12 minutes back; DEGEN on
+// Base 0 at 23:16:40Z), each read as the page reads it: again every TRADES_POLL_MS while it says `filling`, for the page's
+// TAPE_WAIT_MS at most. Want: 200 with trades, src chain.
+// Runs: pending helper-listed-charts-own-reads, it fails on the helper deployed today (23:42Z: Solana 145, Base 35 and Robinhood 14 listed coins refused, MOW's tape GeckoTerminal's); it joins the helper's list once a deploy of this card's branch reads PASS by hand (the listed charts held ahead fill over the first hours, at one keyless call a tick)
 //   node scripts/live-checks/helper-candles-never-refuse-a-listed-coin.mjs [--base <url>] [--chains solana,base,robinhood] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { CANDLES_LIMIT, DEFAULT_TF, TF_API } from "../../apps/terminal/src/screens/token/candles.ts";
+import { TRADES_POLL_MS } from "../../apps/terminal/src/screens/token/trades.ts";
 
 const KEY = "helper-candles-never-refuse-a-listed-coin";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -34,6 +39,13 @@ export const WAVE = 100;
 export const WAVE_GAP_MS = 10_500;
 /** The rows a chain's lists may hold that are read (Discover's five Solana lists hold 290 rows at most). */
 export const COINS_MAX = 400;
+/** Coins on no list whose pool traded within the day: their tape is our own swap reads (each its `address`). */
+export const TAPES = [
+  { chain: "robinhood", name: "MOW", address: "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa" },
+  { chain: "base", name: "DEGEN", address: "0x4ed4e862860bed51a9570b96d89af5e1b0efefed" },
+];
+/** How long a filling tape is read again [design: 45 s, a cold Robinhood tape's locate and steps to TRADES_MAX]. */
+export const TAPE_WAIT_MS = 45_000;
 const SOL = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const EVM = /^0x[0-9a-fA-F]{40}$/;
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -106,7 +118,25 @@ export async function read(base = BASE, chains = CHAINS, fetchFn = fetch, wait =
       )),
     );
   }
-  return { base, at, tf: TF, chains, lists, reads };
+  const tapes = await Promise.all(TAPES.map((t) => tapeOf(base, t, fetchFn, wait)));
+  return { base, at, tf: TF, chains, lists, reads, tapes };
+}
+
+/** One coin's tape as the page reads it: again every TRADES_POLL_MS while it says filling, TAPE_WAIT_MS at most. */
+export async function tapeOf(base, t, fetchFn = fetch, wait = sleep) {
+  let waited = 0;
+  for (;;) {
+    const a = await ask(base, `/v1/market/trades?chain=${t.chain}&token=${t.address}&limit=50`, fetchFn);
+    let j = null;
+    try {
+      j = a.status === 200 ? JSON.parse(a.body) : null;
+    } catch {}
+    const ok = Array.isArray(j?.trades);
+    const r = { ...t, status: a.status, ms: a.ms, waited_ms: waited, ...(ok ? { trades: j.trades.length, src: j.src, filling: j.filling === true } : { body: a.body.slice(0, 120) }) };
+    if (!ok || !r.filling || waited >= TAPE_WAIT_MS) return r;
+    await wait(TRADES_POLL_MS);
+    waited += TRADES_POLL_MS;
+  }
 }
 
 const pct = (xs, p) => (xs.length === 0 ? null : [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))]);
@@ -132,6 +162,11 @@ export function judge(run) {
       const what = r.status === 200 ? (r.shape ?? `${r.bars} bars${r.filling ? ", filling" : ""}${r.pool ? ", the lists name its pool" : ""}`) : `${r.status} ${r.body ?? r.error ?? ""}`.trim();
       say(false, `${r.chain} ${r.address}: ${what}`);
     }
+  }
+  if (!Array.isArray(run.tapes) || run.tapes.length === 0) say(false, "no tape read");
+  for (const t of run.tapes ?? []) {
+    const good = t.status === 200 && t.trades > 0 && t.src === "chain";
+    say(good, `${t.chain} ${t.name} tape: ${t.status === 200 ? `${t.trades ?? "no"} trades, src ${t.src}${t.filling ? ", still filling" : ""}` : `${t.status} ${t.body ?? ""}`.trim()} after ${((t.waited_ms ?? 0) + (t.ms ?? 0)) / 1000} s`);
   }
   for (const [chain, c] of Object.entries(counts)) {
     const ms = (run.reads ?? []).filter((r) => r.chain === chain).map((r) => r.ms);
