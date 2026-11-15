@@ -57,7 +57,7 @@
 import { SOLANA_LAMPORTS_PER_SIGNATURE, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, solanaVolumeAccumulator, solanaVolumeClaimable } from "../../kit/src/checks/solana/checks.ts";
 import type { ErrorCode, PoolSellDry } from "../../kit/src/signpage/messages.ts";
 import { solanaParseAccountsAnswer, type SolanaPoolVenue } from "../../kit/src/trade/solana/pool.ts";
-import { readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaRentMin, solanaSellFloor, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaRent, SOLANA_POOL_BUY_VENUES, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaRentMin, solanaSellFloor, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_PAGE_ENTRY, SOLANA_POOL_PAGE_HEADER } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { SOL_NOTE_FLOOR } from "../../wallet/src/pool/pieces.ts";
 import { SolanaRpcTransportError, solanaWrappedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -265,15 +265,15 @@ async function readOne(rpcs: readonly [SolanaRpc, SolanaRpc], keys: readonly str
  *   a full sale's costs, at 0 at least, is summed.
  */
 export function poolSellPays(rent: SolanaRent, venue: SolanaPoolVenue, wallets: readonly DryWallet[], full: boolean, e: bigint, minOut: bigint, cashback?: boolean, sizes: Sizes | null = null, mainnet = false): { out: bigint; minOut: bigint; priority: bigint; network: bigint } | { refused: "not_funded" | "quote_check_failed" } {
-  // a DLMM pair has no cashback (its reference reads no flag): its sale makes only W's wrapped-SOL account, which its own
-  // need counts, and owes no venue claim (card solana-buy-reaches-raydium-and-meteora)
-  const dlmm = venue === "dlmm";
-  const cb = dlmm ? false : (cashback ?? true);
+  // a DLMM pair or a Raydium pool has no cashback (its reference reads no flag): its sale makes only W's wrapped-SOL
+  // account, which its own need counts, and owes no venue claim (card solana-buy-reaches-raydium-and-meteora)
+  const noFlag = venue !== "pump-curve" && venue !== "pumpswap";
+  const cb = noFlag ? false : (cashback ?? true);
   const made = solanaPoolSellNeed({ kind: venue, cashback: cb }, rent) - solanaPoolSellNeed({ kind: venue, cashback: cb }, rent, { ammVolume: true, ammVolumeAta: true });
   // on mainnet each W's sale pays its priority (pool-sell.ts solanaSellPriority) for what W holds beyond the sale's need
   // (the most it can be, so its priority the least), on a form with room for the compute budget (solanaSellBudgetFits,
   // the sale's own decision; the coin's flag unknown: either); a partial sale keeps it on W for the next sale too
-  const roomy = mainnet && (dlmm ? solanaSellBudgetFits(venue, false) : cashback === undefined ? solanaSellBudgetFits(venue, false) || solanaSellBudgetFits(venue, true) : solanaSellBudgetFits(venue, cashback));
+  const roomy = mainnet && (noFlag ? solanaSellBudgetFits(venue, false) : cashback === undefined ? solanaSellBudgetFits(venue, false) || solanaSellBudgetFits(venue, true) : solanaSellBudgetFits(venue, cashback));
   const need = solanaPoolSellNeed({ kind: venue, cashback: cb }, rent);
   // the cap itself, never the budget's own rounding (solanaSellPriority: none at a lamport of room, 2 at two): at least
   // what the sale pays at any lamports, and growing at most one for one with them, so a W priced at fewer lamports than it
@@ -295,7 +295,7 @@ export function poolSellPays(rent: SolanaRent, venue: SolanaPoolVenue, wallets: 
   // W's volume accounts owed a claim after the sale (pool-sell.ts owesOn): the venue's own on a cashback coin, or one
   // with cashback to claim; unread, both
   const owed = (w: DryWallet): number => (w.claim === undefined ? SOLANA_SWEEP_OWED_MAX : w.claim.filter((c, i) => c || (cb && i === venueClaim)).length);
-  const keepPart = (dlmm ? [false] : cashback === undefined ? [false, true] : [cashback]).map((c) => solanaPoolBuySellNeed({ kind: venue, cashback: c }, rent)).reduce((x, y) => (x > y ? x : y)) + (mainnet ? SOLANA_POOL_SELL_PRIORITY : 0n);
+  const keepPart = (noFlag ? [false] : cashback === undefined ? [false, true] : [cashback]).map((c) => solanaPoolBuySellNeed({ kind: venue, cashback: c }, rent)).reduce((x, y) => (x > y ? x : y)) + (mainnet ? SOLANA_POOL_SELL_PRIORITY : 0n);
   const net = (x: bigint, r: bigint): bigint => (x - r > 0n ? x - r : 0n);
   // a full sale's costs out of W's lamports and the sale (card every-lamport-can-move): the sale carries no deposit, so its
   // notes are W's sweeps after the teardown: W's lamports and the sale in, the token account's rent back (rent(165)),
@@ -524,7 +524,7 @@ async function previewOn(d: PoolSellDryDeps, params: Record<string, unknown>, po
   }
   if (!quoted) return { error: "quote_check_failed" };
   const venue = quoted.best.venue;
-  if (venue !== "pump-curve" && venue !== "pumpswap" && venue !== "dlmm") return { error: "quote_check_failed" };
+  if (!SOLANA_POOL_BUY_VENUES.includes(venue)) return { error: "quote_check_failed" };
   // a sign out while it read: the old holding is not answered
   if (d.positions() === null || (pos !== undefined && holding(d, token) === undefined)) return { error: "not_funded" };
   const e = quoted.best.expectedOut;

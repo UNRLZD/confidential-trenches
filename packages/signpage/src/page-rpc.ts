@@ -19,6 +19,9 @@
 //   faults.
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
 import { readSolanaDlmmPairs } from "../../kit/src/trade/solana/dlmm.ts";
+import { readSolanaCpmmPools } from "../../kit/src/trade/solana/cpmm.ts";
+import { readSolanaAmmV4Pools } from "../../kit/src/trade/solana/amm-v4.ts";
+import { SOLANA_POOL_BUY_VENUES } from "../../kit/src/trade/solana/pool-buy.ts";
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaFetch, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 import { HostPaused, gateSignal, hostLane } from "../../wallet/src/throttle.ts";
@@ -180,45 +183,73 @@ export const pageHelperRpcStopped = (origin: string, signal: AbortSignal, kind: 
  * READ_TIMEOUT_MS in kit pool.ts, met while the page's lane held it for a paused host: the review of 507431c0, P2) is a
  * failed read too: a null resting on it is that provider's no answer, a timeout fault, never "no reference pool".
  */
-export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest, pairsOf: DlmmPairsOf | null = pageDlmmPairs): Promise<SolanaReference | null> {
+export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest, finders: PoolFinders | null = pageFinders): Promise<SolanaReference | null> {
   if (solanaSameProvider(rpcs[0], rpcs[1])) throw new Error("the two providers are the same provider: a reference must never rest on one provider's word");
-  // the coin's DLMM pairs (card solana-buy-reaches-raydium-and-meteora), found beside the pump venues' read: a coin with
-  // none costs no wait; one with some is read again with them, every venue judged on the same reads' rules
-  if (req.dlmmPairs === undefined && pairsOf !== null) {
-    const found = pairsOf(req.token).catch(() => [] as readonly string[]);
+  // the coin's DLMM pairs and Raydium CPMM and AMM v4 pools (card solana-buy-reaches-raydium-and-meteora), found beside
+  // the pump venues' read: a coin with none costs no wait; one with some is read again with them, every venue judged on
+  // the same reads' rules. A request that names a kind's pools is read with those, that kind's finder never asked.
+  const kinds = FINDER_KINDS.filter((k) => req[k] === undefined && finders?.[k]);
+  if (kinds.length > 0) {
+    const found = Promise.all(kinds.map((k) => finders![k]!(req.token).catch(() => [] as readonly string[])));
     const pump = readReference(rpcs, req);
-    const pairs = await found;
-    if (pairs.length === 0) return pump;
+    const lists = await found;
+    if (lists.every((l) => l.length === 0)) return pump;
     pump.catch(() => {});
-    return readReference(rpcs, { ...req, dlmmPairs: pairs });
+    const more: { -readonly [K in PoolFinderKind]?: string[] } = {};
+    kinds.forEach((k, i) => void (lists[i]!.length > 0 && (more[k] = [...lists[i]!])));
+    return readReference(rpcs, { ...req, ...more });
   }
   return readReference(rpcs, req);
 }
 
-/** Finds a coin's Meteora DLMM SOL pairs for a reference (the kit's readSolanaDlmmPairs on the page's pairs). */
-export type DlmmPairsOf = (token: string) => Promise<readonly string[]>;
-/** The page's finder, set once at start on mainnet (pool-testnet.ts); none: a reference reads the pump venues alone. */
-let pageDlmmPairs: DlmmPairsOf | null = null;
-export const setPageDlmmPairs = (f: DlmmPairsOf | null): void => void (pageDlmmPairs = f);
-/** How many coins' pairs a finder keeps, and how long: a pair made since is found on the next read a minute on. */
-export const DLMM_PAIRS_KEPT = 256;
-export const DLMM_PAIRS_KEEP_MS = 60_000;
+/** The best of a reference's priced pools among the venues the kit builds (each of SOLANA_POOL_BUY_VENUES): the most out. */
+export const bestVenuePool = (ref: SolanaReference | null | undefined): SolanaReference["pools"][number] | undefined =>
+  ref?.pools.filter((p) => SOLANA_POOL_BUY_VENUES.includes(p.venue)).sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+
+/** Finds a coin's SOL pools of one venue for a reference (the kit's readSolanaDlmmPairs, readSolanaCpmmPools or
+ *  readSolanaAmmV4Pools on the page's providers). */
+export type PoolsOf = (token: string) => Promise<readonly string[]>;
+/** The reference request's field each finder fills, and the venue whose pools it names. */
+export const POOL_FINDER_VENUES = Object.freeze({ dlmmPairs: "dlmm", cpmmPools: "raydium-cpmm", ammV4Pools: "raydium-amm-v4" } as const);
+export type PoolFinderKind = keyof typeof POOL_FINDER_VENUES;
+const FINDER_KINDS = Object.keys(POOL_FINDER_VENUES) as PoolFinderKind[];
+/** The page's finders, one per scanned venue; a kind with none is read without its pools. */
+export type PoolFinders = { readonly [K in PoolFinderKind]?: PoolsOf | null };
+/** The page's finders, set once at start on mainnet (main.ts); none: a reference reads the pump venues alone. */
+let pageFinders: PoolFinders | null = null;
+export const setPagePoolFinders = (f: PoolFinders | null): void => void (pageFinders = f);
+/** How many coins' pools a finder keeps, and how long: a pool made since is found on the next read a minute on. */
+export const POOLS_KEPT = 256;
+export const POOLS_KEEP_MS = 60_000;
+type ScanRead = (scan: readonly [SolanaRpc, SolanaRpc], read: readonly [SolanaRpc, SolanaRpc], mint: string) => Promise<string[]>;
+const FIND: Readonly<Record<PoolFinderKind, ScanRead>> = Object.freeze({ dlmmPairs: readSolanaDlmmPairs, cpmmPools: readSolanaCpmmPools, ammV4Pools: readSolanaAmmV4Pools });
 /**
- * A finder that keeps each coin's pairs DLMM_PAIRS_KEEP_MS: the kit's readSolanaDlmmPairs, scanning on `scan` (two
- * providers that answer getProgramAccounts) and ranking past 8 pairs on `read`. A read that fails is kept for nothing,
- * so the next reference asks again; one read at a time per coin.
+ * A finder of one venue that keeps each coin's pools POOLS_KEEP_MS: the kit's reader, scanning on `scan` (two providers
+ * that answer getProgramAccounts) and ranking past its cap on `read`. A read that fails is kept for nothing, so the next
+ * reference asks again; one read at a time per coin.
  */
-export function keptDlmmPairs(scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now: () => number = () => performance.now()): DlmmPairsOf {
-  const kept = new Map<string, { at: number; pairs: Promise<readonly string[]> }>();
+export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now: () => number = () => performance.now()): PoolsOf {
+  const kept = new Map<string, { at: number; pools: Promise<readonly string[]> }>();
+  const find = FIND[kind];
   return (token) => {
     const k = kept.get(token);
-    if (k !== undefined && now() - k.at < DLMM_PAIRS_KEEP_MS) return k.pairs;
-    if (kept.size >= DLMM_PAIRS_KEPT) kept.clear();
-    const pairs = readSolanaDlmmPairs(scan(), read(), token);
-    kept.set(token, { at: now(), pairs });
-    pairs.catch(() => kept.get(token)?.pairs === pairs && kept.delete(token));
-    return pairs;
+    if (k !== undefined && now() - k.at < POOLS_KEEP_MS) return k.pools;
+    if (kept.size >= POOLS_KEPT) kept.clear();
+    const pools = find(scan(), read(), token);
+    kept.set(token, { at: now(), pools });
+    pools.catch(() => kept.get(token)?.pools === pools && kept.delete(token));
+    return pools;
   };
+}
+/** Every venue's kept finder on the same providers. */
+export const keptPoolFinders = (scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now?: () => number): PoolFinders =>
+  Object.freeze(Object.fromEntries(FINDER_KINDS.map((k) => [k, keptPools(k, scan, read, now)])) as PoolFinders);
+/** The finders of the venues `tables` pins a non-empty table for (a coin of a venue with none stays unbought at the tap:
+ *  quote_check_failed, no Cash moved); null when none is left. */
+export function pinnedPoolFinders(finders: PoolFinders | null, tables: Readonly<Record<string, readonly string[] | undefined>>): PoolFinders | null {
+  if (finders === null) return null;
+  const kept = FINDER_KINDS.filter((k) => finders[k] && Object.hasOwn(tables, POOL_FINDER_VENUES[k]) && (tables[POOL_FINDER_VENUES[k]]?.length ?? 0) > 0);
+  return kept.length === 0 ? null : Object.freeze(Object.fromEntries(kept.map((k) => [k, finders[k]])) as PoolFinders);
 }
 
 async function readReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<SolanaReference | null> {

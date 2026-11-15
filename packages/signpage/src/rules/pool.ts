@@ -732,13 +732,15 @@ export function checkSolanaSell(
   const body = d.ixs.slice(n);
   if (body.length === 0) return refuse("instructions");
   // the min out the bytes carry: pump's and PumpSwap's sell(amount, min_out), 24 bytes, its last 8; DLMM's swap2(amount_in,
-  // min_amount_out, remaining_accounts_info), 28 bytes with no slices, bytes 16..24 (the kit's dlmmSwap). The pool's
+  // min_amount_out, remaining_accounts_info), 28 bytes with no slices, bytes 16..24 (the kit's dlmmSwap); Raydium CPMM's
+  // swap_base_input(amount_in, minimum_amount_out), 24 bytes, its last 8 (the kit's cpmmSwap); Raydium AMM v4's
+  // swap_base_in_v2, tag 16, amount_in, minimum_amount_out, 17 bytes, bytes 9..17 (the kit's ammV4Swap). The pool's
   // deposit is 41 bytes, so it is never read as the venue's; whatever is read, the steps below are rebuilt from it and the
   // device's own venue, so a wire whose min out sits elsewhere is refused there
-  const sellLen = venue.kind === "dlmm" ? 28 : 24;
+  const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];
   const venueIx = body.find((x) => x.data.length === sellLen && x.program !== pin.program);
   if (!venueIx) return refuse("sell");
-  const minOut = u64le(venueIx.data, 16);
+  const minOut = u64le(venueIx.data, minAt);
   if (minOut < floor) return refuse("min_out");
   const want = solanaPoolSellSteps(venue, ctx.wallet, ask.amount, minOut);
   if (typeof reserve !== "bigint" || reserve < 0n || reserve >= minOut) return refuse("reserve");
@@ -763,7 +765,7 @@ export function checkSolanaSell(
   const sell = bare ? body : body.slice(0, -1);
   if (sell.length !== want.length) return refuse("sell");
   // each key's privileges as the whole expected message gives them, over every step (W pays and each venue's steps name
-  // it a writable signer somewhere, though DLMM's swap2 names it read-only)
+  // it a writable signer somewhere, though DLMM's swap2 and Raydium's swaps name it read-only)
   const all = want.flatMap((x) => x.accounts);
   for (let i = 0; i < want.length; i++) {
     const w = want[i]!;

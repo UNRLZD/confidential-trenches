@@ -22,17 +22,17 @@ import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { dlmmProviders, dlmmReplay, dlmmVector, PROGRAM, rent } from "../../kit/test/solana-pool-buy-fx.ts";
 import { tokenDecimalsKept } from "../src/pool-kinds.ts";
-import { setPageDlmmPairs } from "../src/page-rpc.ts";
+import { setPagePoolFinders } from "../src/page-rpc.ts";
 import { forgetPageLoad, runPoolSell, solanaSellBudgetFits, type PoolSellHost } from "../src/pool-sell.ts";
 import { poolSellDry, poolSellPays } from "../src/pool-sell-dry.ts";
 import { poolUnits, solanaNoteOf, solanaSweepOf, solanaSweepStay } from "../src/rules/pool.ts";
 import { ASK, DLMM_AMOUNT, DLMM_WITHHELD, ENOUGH, J, L, PIN, SEED64, VF, W, chain, rentMin, withheldOf, type Plant } from "./pool-sell-world.ts";
 
-// the page's finder on mainnet finds the coin's DLMM SOL pairs (main.ts setPageDlmmPairs): here, NEARKAT's one pair
-setPageDlmmPairs(async (token) => (token === dlmmVector.mint ? [dlmmVector.pair] : []));
+// the page's finder on mainnet finds the coin's DLMM SOL pairs (main.ts setPagePoolFinders): here, NEARKAT's one pair
+setPagePoolFinders({ dlmmPairs: async (token) => (token === dlmmVector.mint ? [dlmmVector.pair] : []) });
 const closers: (() => void)[] = [];
 after(() => {
-  setPageDlmmPairs(null);
+  setPagePoolFinders(null);
   closers.forEach((f) => f());
 });
 

@@ -73,7 +73,7 @@ const { noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
 const { SOL_POOLS, SOL_TIP_CAP, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 const { solanaRestoreNotes } = await import("../../wallet/src/pool/solana-restore.ts");
 const { refKey } = await import("../../wallet/src/notes/store.ts");
-const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed, SOLANA_POOL_WORST_BUY_VENUE } = await import("../../kit/src/trade/solana/pool-buy.ts");
+const { readSolanaRent, solanaRentMin, readSolanaVenueAt, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed, solanaPoolVenueAddress, SOLANA_POOL_BUY_VENUES, SOLANA_POOL_WORST_BUY_VENUE } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { SOLANA_POOL_JITO_TIP, SOLANA_JITO_TIP_ACCOUNTS } = await import("../../kit/src/checks/solana/checks.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
@@ -88,7 +88,7 @@ if (!OUT) throw new Error("usage: pool-flow-devnet.mjs <pinned | venue=table[+ta
 // before their pin commit), each venue's joined by +
 const TABLES = TABLE === "pinned" ? PAGE_TABLES : Object.freeze(Object.fromEntries(TABLE.split(",").map((x) => {
   const [v, a] = x.split("=");
-  if ((v !== "pump-curve" && v !== "pumpswap" && v !== "dlmm") || !a) throw new Error(`not a venue=table pair: ${x}`);
+  if (!SOLANA_POOL_BUY_VENUES.includes(v) || !a) throw new Error(`not a venue=table pair: ${x}`);
   return [v, Object.freeze(a.split("+"))];
 })));
 // FLOW_RUNG=<lamports> (card round-trip-costs-less): the one note's size, a rung of the deposit ladder from 0.01 SOL
@@ -213,12 +213,12 @@ const logged = (rpc) => {
   return p;
 };
 const rpcs = COPY ? copy.rpcs.map(logged) : [logged(testnetRpc(TESTNET_RPCS.solana[0])), logged(testnetRpc(TESTNET_RPCS.solana[1]))];
-// FLOW_COPY: the page's DLMM pair finder on the copy's pair, as main.ts sets it on mainnet (src/page-rpc.ts; card
-// solana-buy-reaches-raydium-and-meteora): every reference of the run reads the coin's DLMM pairs; the tap's venue falls
-// back to one only while the run's tables name a DLMM table
-const { keptDlmmPairs, setPageDlmmPairs } = await import("../src/page-rpc.ts");
-const dlmmPairs = COPY ? keptDlmmPairs(() => rpcs, () => rpcs) : null;
-setPageDlmmPairs(dlmmPairs);
+// FLOW_COPY: the page's pool finders on the copy's pair, as main.ts sets them on mainnet (src/page-rpc.ts; card
+// solana-buy-reaches-raydium-and-meteora): every reference of the run reads the coin's DLMM pairs and Raydium CPMM and AMM
+// v4 pools; the tap's venue falls back to one only while the run's tables name a table of its venue
+const { bestVenuePool, keptPoolFinders, pinnedPoolFinders, setPagePoolFinders } = await import("../src/page-rpc.ts");
+const finders = COPY ? keptPoolFinders(() => rpcs, () => rpcs) : null;
+setPagePoolFinders(finders);
 // the script's own reads (never the page's): a throttled one waits out the provider's Retry-After and is asked again, up
 // to 4 tries, so a devnet 429 after a filled buy never ends the run before its checks (run 1 of card
 // sol-buy-reads-side-by-side: Retry-After 10 s on getTokenAccountsByOwner, past the transport's deadline)
@@ -353,13 +353,13 @@ const balance = async () => {
 // the coin graduated; card sol-pool-venue-tables)
 const { readSolanaReference } = await import("../../kit/src/trade/solana/pool.ts");
 const venueBest = async () => {
-  const ref = await readSolanaReference(rpcs, { side: "buy", token: MINT, amount: 1_000_000n, dlmmPairs: dlmmPairs === null ? [] : await dlmmPairs(MINT) });
-  const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap" || p.venue === "dlmm").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+  const found = finders === null ? {} : Object.fromEntries(await Promise.all(Object.entries(finders).map(async ([k, f]) => [k, await f(MINT)])));
+  const ref = await readSolanaReference(rpcs, { side: "buy", token: MINT, amount: 1_000_000n, ...found });
+  const best = bestVenuePool(ref);
   if (!best) throw new Error(`no reference pool for ${MINT}`);
   return best;
 };
-const { readSolanaDlmmBuyVenue, solanaPoolVenueAddress } = await import("../../kit/src/trade/solana/pool-buy.ts");
-const VENUE = SPEND === "max" ? await venueBest().then((b) => (b.venue === "dlmm" ? readSolanaDlmmBuyVenue(rpcs, MINT, b.address, "buy") : readSolanaPoolBuyVenue(rpcs, b.venue, MINT))) : null;
+const VENUE = SPEND === "max" ? await venueBest().then((b) => readSolanaVenueAt(rpcs, b.venue, MINT, b.address, "buy")) : null;
 const KEEPS = VENUE === null ? null : solanaPoolBuySellNeed(VENUE, rent);
 if (VENUE !== null) log(`venue ${VENUE.kind} (token account ${VENUE.tokenAccountSize} B, cashback ${VENUE.cashback}); a buy leaves W ${KEEPS} for its sell on any venue the coin sells on`);
 // FLOW_DUST: S, its key kept beside the seed, funded by someone else before anything moves
@@ -523,7 +523,7 @@ else if (landed) {
         return { notes: b.value, ready: b.ready, open: b.open, landed: b.landed };
       },
       trading: () => false,
-      dlmmPairs: TABLES.dlmm ? dlmmPairs : null,
+      finders: pinnedPoolFinders(finders, TABLES),
     })({ chain: "solana", token: MINT });
     await dry.after;
     const answer = dry.answer();

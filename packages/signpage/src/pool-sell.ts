@@ -65,10 +65,10 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaDlmmBuyVenue, readSolanaPoolBuyVenue, readSolanaRent, SOLANA_RENT_SYSVAR, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaRent, readSolanaVenueAt, SOLANA_RENT_SYSVAR, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount, type SolanaPoolVenue, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
-import { pageReference } from "./page-rpc.ts";
+import { bestVenuePool, pageReference } from "./page-rpc.ts";
 import { SOLANA_MAX_TX_BYTES, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -787,7 +787,7 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
 };
 
 /** The venue a sale's reference chose: its kind and the address it priced (pump's curve, the PumpSwap pool, the DLMM
- *  pair; a coin may have several DLMM pairs, so the kind alone never names the venue). */
+ *  pair, the Raydium CPMM or AMM v4 pool; a coin may have several of these, so the kind alone never names the venue). */
 export type VenuePick = { kind: SolanaPoolVenue; address: string };
 /** A later leg's venue: the one it read at its turn when that is the venue its own reference chose (the leg before it
  *  chose it too: the same kind at the same address), else the chosen venue read now; a guess not taken is never used,
@@ -1021,9 +1021,9 @@ export const poolSellUnits = (total: bigint, ask: Pick<PoolAsk, "amount" | "shar
  *  own quote on the same reads. A provider's fault is thrown (pageReference). */
 export async function poolSellReference(rpcs: Rpcs, token: string, amount: bigint): Promise<{ reference: SolanaReference; best: SolanaReference["pools"][number] } | null> {
   const reference = await pageReference(rpcs, { side: "sell", token, amount });
-  // every venue the sale builds: pump's curve, PumpSwap, and a Meteora DLMM pair the page's finder named (card
-  // solana-buy-reaches-raydium-and-meteora: a coin bought on its pair sells there)
-  const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap" || p.venue === "dlmm").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+  // every venue the sale builds: pump's curve, PumpSwap, and a Meteora DLMM pair or a Raydium CPMM or AMM v4 pool the
+  // page's finders named (card solana-buy-reaches-raydium-and-meteora: a coin bought on its pool sells there)
+  const best = bestVenuePool(reference);
   return reference && best ? { reference, best } : null;
 }
 
@@ -1304,8 +1304,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
       forgetYoung(rpcs);
     }
     asked = true;
-    // a DLMM pair is read at the address the reference priced, for a sell (its bin arrays walked toward SOL)
-    const venueOf = (pick: VenuePick): Promise<SolanaPoolBuyVenue> => (pick.kind === "dlmm" ? readSolanaDlmmBuyVenue(rpcs, token, pick.address, "sell") : readSolanaPoolBuyVenue(rpcs, pick.kind, token, ...(h.pick ? [h.pick] : [])));
+    // a DLMM pair (its bin arrays walked toward SOL) or a Raydium pool is read at the address the reference priced, for
+    // a sell; pump's venues by the coin
+    const venueOf = (pick: VenuePick): Promise<SolanaPoolBuyVenue> => readSolanaVenueAt(rpcs, pick.kind, token, pick.address, "sell", ...(h.pick ? [h.pick] : []));
     // after its turn, a leg after the first asks all of them in one round: the blockhash (its check on RPC 1 as soon as
     // RPC 0 answered), the deposit's pages at the sizes read before the turn, and the venue the last leg chose
     let first: Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number }> | null = null;
@@ -1703,7 +1704,9 @@ export const SOLANA_POOL_SELL_CU_MIN = Number(SOLANA_POOL_SELL_PRIORITY);
  *  A DLMM sell (card solana-buy-reaches-raydium-and-meteora): its largest form, a Token-2022 coin with the three bin
  *  arrays dlmmSwap names at most, every account its own, no lookup table, measured compiled (wire bytes): the sell
  *  alone 779, with the budget 831; with the six-account deposit 989, with the budget 1,041; with the eight-account
- *  deposit 1,055, with the budget 1,107. An SPL Token coin's is 32 bytes less, one bin array 66 less. */
+ *  deposit 1,055, with the budget 1,107. An SPL Token coin's is 32 bytes less, one bin array 66 less.
+ *  A Raydium CPMM sell (a Token-2022 coin's, every account its own) and an AMM v4 sell (SPL Token only) are held to the
+ *  same form here (test/pool-sell-raydium.test.ts: both fit). */
 export function solanaSellBudgetFits(kind: SolanaPoolVenue, cashback: boolean): boolean {
   const key = (k: number): string => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? k : i === 1 ? 0xb5 : 3)));
   const v: SolanaPoolBuyVenue =
@@ -1711,7 +1714,11 @@ export function solanaSellBudgetFits(kind: SolanaPoolVenue, cashback: boolean): 
       ? { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, curve: key(2), creator: key(3), feeRecipient: key(4), cashback, buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) }
       : kind === "pumpswap"
         ? { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, pool: key(2), baseVault: key(3), quoteVault: key(4), coinCreator: key(6), cashback, protocolFeeRecipient: key(7), buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) }
-        : { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 182, cashback: false, side: "sell", pair: key(2), tokenX: key(1), tokenY: SOLANA_SOL_MINT, reserveX: key(3), reserveY: key(4), oracle: key(6), binArrays: [key(15), key(16), key(17)] };
+        : kind === "dlmm"
+          ? { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 182, cashback: false, side: "sell", pair: key(2), tokenX: key(1), tokenY: SOLANA_SOL_MINT, reserveX: key(3), reserveY: key(4), oracle: key(6), binArrays: [key(15), key(16), key(17)] }
+          : kind === "raydium-cpmm"
+            ? { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 182, cashback: false, pool: key(2), ammConfig: key(3), solVault: key(4), coinVault: key(6), observation: key(15) }
+            : { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_PROGRAM, tokenAccountSize: 165, cashback: false, pool: key(2), coinVault: key(3), pcVault: key(4) };
   const w = key(8);
   const deposit = { program: key(9), accounts: [key(10), w, key(11), key(12), key(13), SOLANA_SYSTEM_PROGRAM].map((k, i) => ({ key: k, signer: i === 1, writable: i !== 5 })), data: new Uint8Array(1 + 8 + 32) };
   const budget = budgetIxs({ limit: SOLANA_POOL_CU_LIMIT_MAX, price: SOLANA_CU_PRICE_MAX });

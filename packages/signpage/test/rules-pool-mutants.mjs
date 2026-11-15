@@ -39,6 +39,7 @@ const WD = "Solana withdraw: another pool program";
 const BUY = "Solana buy: the kit's tag 3";
 const SELL = "Solana sell:";
 const DLMMT = "Solana sell on a DLMM pair";
+const RAYV4 = "Solana sell on a Raydium AMM v4 pool";
 const EBUY = "EVM buy:";
 const EWD = "EVM withdraw:";
 const ESELL = "EVM sell and authorization";
@@ -188,7 +189,9 @@ export const MUTANTS = [
   // swap2 (28 bytes) found as the venue's, each key's privileges as the whole expected message gives them (W pays), and
   // every swap2 account the device's own venue names (its bin arrays, W's coin in and wSOL out, the token programs)
   ['if (venue.kind === "dlmm" && venue.side !== "sell") return refuse("venue");', "", DLMMT],
-  ['const sellLen = venue.kind === "dlmm" ? 28 : 24;', "const sellLen = 24;", DLMMT],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', DLMMT],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : [24, 16];', RAYV4],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 1] : [24, 16];', RAYV4],
   ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', DLMMT],
   ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.program === "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo" ? w.accounts.map((a, j) => (j >= 16 && g.accounts[j] ? { ...a, key: g.accounts[j].key } : a)) : w.accounts, all)) return refuse("sell_accounts");', DLMMT],
   ['if (back !== solanaNoteOf(minOut - reserve)) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],

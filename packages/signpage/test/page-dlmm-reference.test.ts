@@ -1,6 +1,6 @@
 /// <reference types="node" />
 // Every Solana reference on the page reads the coin's Meteora DLMM pairs (card solana-buy-reaches-raydium-and-meteora):
-// src/page-rpc.ts pageReference asks the page's finder (keptDlmmPairs, set at start by main.ts on mainnet) beside the
+// src/page-rpc.ts pageReference asks the page's finder (keptPools, set at start by main.ts on mainnet) beside the
 // pump venues' read. Replays NEARKAT's pair B8BH6ZKr… as two mainnet providers answered it (the kit's
 // test/vectors/nearkat-dlmm.json). Good: with the finder the buy's reference is the pair's, E the program's own out;
 // a finder that fails, or none, leaves the pump venues alone (no reference for NEARKAT, what main answered), never a
@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DLMM_PAIRS_KEEP_MS, keptDlmmPairs, pageReference } from "../src/page-rpc.ts";
+import { POOLS_KEEP_MS, keptPools, pageReference } from "../src/page-rpc.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 
 type Provider = { slot: number; accounts: Record<string, { owner: string; data: string } | null> };
@@ -31,7 +31,7 @@ const buy = { side: "buy" as const, token: V.mint, amount: 100_000_000n };
 
 test("with the page's finder a DLMM coin's buy has the pair's reference, E the program's own out", async () => {
   const asked: string[] = [];
-  const ref = await pageReference(pair(), buy, async (t) => (asked.push(t), [V.pair]));
+  const ref = await pageReference(pair(), buy, { dlmmPairs: async (t) => (asked.push(t), [V.pair]) });
   assert.deepEqual(asked, [V.mint]);
   assert.ok(ref !== null);
   assert.equal(ref.pools[0]!.venue, "dlmm");
@@ -41,10 +41,10 @@ test("with the page's finder a DLMM coin's buy has the pair's reference, E the p
 
 test("no finder, a finder that finds none, or one that fails: the pump venues alone, no reference for NEARKAT, never a throw", async () => {
   assert.equal(await pageReference(pair(), buy, null), null);
-  assert.equal(await pageReference(pair(), buy, async () => []), null);
-  assert.equal(await pageReference(pair(), buy, async () => Promise.reject(new Error("scan down"))), null);
+  assert.equal(await pageReference(pair(), buy, { dlmmPairs: async () => [] }), null);
+  assert.equal(await pageReference(pair(), buy, { dlmmPairs: async () => Promise.reject(new Error("scan down")) }), null);
   // a request that names its pairs is read with those, the finder never asked
-  const ref = await pageReference(pair(), { ...buy, dlmmPairs: [V.pair] }, async () => assert.fail("asked"));
+  const ref = await pageReference(pair(), { ...buy, dlmmPairs: [V.pair] }, { dlmmPairs: async () => assert.fail("asked") });
   assert.equal(ref?.pools[0]?.venue, "dlmm");
 });
 
@@ -59,12 +59,12 @@ test("the finder reads a coin's pairs once a minute; a failed read is not kept",
       return { context: { slot: 1 }, value: [] };
     }) as SolanaRpc, { url: "https://scan.example" });
   let down = true;
-  const find = keptDlmmPairs(() => [scan(() => down), scan(() => down)], () => pair(), () => t);
+  const find = keptPools("dlmmPairs", () => [scan(() => down), scan(() => down)], () => pair(), () => t);
   await assert.rejects(find(V.mint));
   down = false;
   assert.deepEqual(await find(V.mint), []);
   const after = reads;
-  t += DLMM_PAIRS_KEEP_MS - 1;
+  t += POOLS_KEEP_MS - 1;
   assert.deepEqual(await find(V.mint), []);
   assert.equal(reads, after, "kept for the minute");
   t += 1;
@@ -74,11 +74,11 @@ test("the finder reads a coin's pairs once a minute; a failed read is not kept",
 
 test("the tap's venue (readCoinVenue): a DLMM coin's pair with the finder; with none (no DLMM table pinned) it throws, so the tap moves nothing from Cash", async () => {
   const { readCoinVenue } = await import("../src/pools.ts");
-  const v = await readCoinVenue(pair(), V.mint, async () => [V.pair]);
+  const v = await readCoinVenue(pair(), V.mint, { dlmmPairs: async () => [V.pair] });
   assert.deepEqual({ ...v }, { kind: "dlmm", tokenAccountSize: v.tokenAccountSize, cashback: false, decimals: v.decimals });
   assert.ok(v.tokenAccountSize > 165, "NEARKAT is a Token-2022 coin with a transfer fee: its account is larger");
   await assert.rejects(readCoinVenue(pair(), V.mint));
-  await assert.rejects(readCoinVenue(pair(), V.mint, async () => []));
+  await assert.rejects(readCoinVenue(pair(), V.mint, { dlmmPairs: async () => [] }));
   // a pair the finder names that is not this coin's is no venue
-  await assert.rejects(readCoinVenue(pair(), V.mint, async () => ["11111111111111111111111111111111"]));
+  await assert.rejects(readCoinVenue(pair(), V.mint, { dlmmPairs: async () => ["11111111111111111111111111111111"] }));
 });

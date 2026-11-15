@@ -20,6 +20,7 @@ import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import {
   buildSolanaPoolBuy,
   readSolanaDlmmBuyVenue,
+  readSolanaVenueAt,
   type SolanaPoolBuyVenue,
   solanaPoolBuyMaxSpend,
   solanaPoolTag2Accounts,
@@ -42,7 +43,9 @@ import { evmQuotedBuy, evmQuotedSell } from "../../kit/src/trade/evm/quoted.ts";
 import { flat, provider as sellModel, req as sellReq, sellQuoteWith } from "../../kit/test/evm-sell-quote-fx.ts";
 import { asRecorded, gasRoundAnswers, withMarker } from "../../kit/test/evm-quote-gas-fx.ts";
 import { evmPoolContextOf, evmPoolScopeOf, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
-import { FEE_PAYER, PROGRAM as FX_PROGRAM, W as FX_W, dlmmProviders, dlmmVector, release as fxRelease, setup } from "../../kit/test/solana-pool-buy-fx.ts";
+import { FEE_PAYER, PROGRAM as FX_PROGRAM, W as FX_W, dlmmProviders, dlmmVector, raydiumField, raydiumProviders, raydiumVectors, release as fxRelease, setup } from "../../kit/test/solana-pool-buy-fx.ts";
+import { SOLANA_CPMM_PROGRAM } from "../../kit/src/trade/solana/cpmm.ts";
+import { SOLANA_AMM_V4_PROGRAM } from "../../kit/src/trade/solana/amm-v4.ts";
 import {
   POOL_KINDS,
   PoolRuleRefused,
@@ -992,8 +995,8 @@ test("Solana sell: each account of each step of the venue's sell, on the curve, 
   let planted = 0;
   for (const [name, v, cashback] of [["curve", "pump", false], ["cashback curve", "pump", true], ["pumpswap", "pumpswap", false]] as const) {
     const s = await setup(v);
-    // the venue union holds DLMM too, which never carries cashback: only a pump venue is made a cashback coin's
-    const venue: SolanaPoolBuyVenue = cashback && s.venue.kind !== "dlmm" ? { ...s.venue, cashback: true } : s.venue;
+    // the venue union holds DLMM and Raydium too, which never carry cashback: only a pump venue is made a cashback coin's
+    const venue: SolanaPoolBuyVenue = cashback && (s.venue.kind === "pump-curve" || s.venue.kind === "pumpswap") ? { ...s.venue, cashback: true } : s.venue;
     const kind = venue.kind;
     const reference = { amount, ref: s.ref, slippageBps: 300 };
     const floor = (s.ref.pools.find((p) => p.venue === kind)!.expectedOut * 9_700n) / 10_000n;
@@ -1087,6 +1090,66 @@ test("Solana sell on a DLMM pair: the kit's swap2 of W's coin into its wrapped S
   const pumpSteps = solanaPoolSellSteps(pump.venue, SOL_W, amount, floor) as Ixx[];
   assert.throws(() => check(part(pumpSteps)), refusedAs("sell"));
 });
+
+// Card solana-buy-reaches-raydium-and-meteora: HIGH's CPMM pool CqvMZmWD… and CzLSuj's AMM v4 pool 9Tb2ohu5… as two
+// mainnet providers answered them (kit test/vectors/high-cpmm.json, czlsuj-amm-v4.json)
+for (const kind of ["raydium-cpmm", "raydium-amm-v4"] as const) {
+  const name = kind === "raydium-cpmm" ? "CPMM" : "AMM v4";
+  test(`Solana sell on a Raydium ${name} pool: the kit's swap of W's coin into its wrapped SOL at or above the floor passes, partial and full; another pool, vault, min out or receiving account is refused`, async () => {
+    const vec = raydiumVectors[kind];
+    const program = kind === "raydium-cpmm" ? SOLANA_CPMM_PROGRAM : SOLANA_AMM_V4_PROGRAM;
+    // HIGH: 130,000 coins, about 0.9 SOL; CzLSuj: 100,000 coins, about 15 SOL (6 decimals each)
+    const amount = kind === "raydium-cpmm" ? 130_000_000_000n : 100_000_000_000n;
+    const venue = await readSolanaVenueAt(raydiumProviders(kind), kind, vec.mint, vec.pool, "sell");
+    const ref = (await readSolanaReference(raydiumProviders(kind), { side: "sell", token: vec.mint, amount, [raydiumField(kind)]: [vec.pool] }))!;
+    const slot = ref.slot! + 2;
+    const reference = { amount, ref, slippageBps: 300 };
+    const floor = (ref.pools.find((p) => p.venue === kind && p.address === vec.pool)!.expectedOut * 9_700n) / 10_000n;
+    assert.ok(floor > SOLANA_POOL_SELL_RESERVE_MAX + 1n, String(floor));
+    const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: vec.mint, amount, slippageBps: 300, decimals: 6 };
+    const RESERVE = 5_000n;
+    const PART: SolanaSellSurplus = { full: false, fee: 5_000n, rent: { lamportsPerByte: 5_080n, factor: 1n } };
+    const FULL: SolanaSellSurplus = { ...PART, full: true };
+    const steps = (o: { minOut?: bigint; v?: SolanaPoolBuyVenue } = {}): Ixx[] => solanaPoolSellSteps(o.v ?? venue, SOL_W, amount, o.minOut ?? floor).map((x) => ({ ...x, accounts: x.accounts.map((a) => ({ ...a })) }));
+    const part = (sell: Ixx[], minOut = floor) => wire(SOL_W, [cuLimit, ...sell, depositIx({ value: solanaNoteOf(minOut - RESERVE) })]);
+    const check = (w: Uint8Array, p = PART, r = RESERVE, v: SolanaPoolBuyVenue = venue) => checkSolanaSell(w, ask, solCtx(), v, reference, slot, SOL_READS, r, p);
+    const d = check(part(steps()));
+    assert.deepEqual([d.token, d.amount, d.to, d.back], [vec.mint, amount, POOL, solanaNoteOf(floor - RESERVE)]);
+    const f = check(wire(SOL_W, [cuLimit, ...steps()]), FULL, 0n);
+    assert.deepEqual([f.back, f.to], [null, SOL_W]);
+    // the steps the rule holds the wire to: W's wrapped-SOL account made, the swap, that account closed to W
+    const built = steps();
+    assert.deepEqual(built.map((x) => x.program), [SOLANA_ATA_PROGRAM, program, SOLANA_TOKEN_PROGRAM]);
+    // where each account sits in the swap: the pool, a vault, W's coin in and its wrapped SOL out
+    const [poolAt, vaultAt, srcAt, dstAt] = kind === "raydium-cpmm" ? [3, 6, 4, 5] : [1, 3, 5, 6];
+    const keys = built[1]!.accounts.map((a) => a.key);
+    assert.deepEqual([keys[poolAt], keys[srcAt], keys[dstAt]], [vec.pool, solanaAta(SOL_W, vec.mint, SOLANA_TOKEN_PROGRAM), solanaAta(SOL_W, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)]);
+    const bend = (i: number, k: string): Uint8Array => {
+      const x = steps();
+      x[1]!.accounts[i] = { ...x[1]!.accounts[i]!, key: k };
+      return part(x);
+    };
+    const thief = key(93);
+    for (const [w, rule, why] of [
+      [bend(poolAt, key(90)), "sell_accounts", "another pool"],
+      [bend(vaultAt, key(91)), "sell_accounts", "another vault"],
+      [bend(dstAt, solanaAta(thief, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)), "sell_accounts", "the SOL out to another's account"],
+      [bend(srcAt, solanaAta(thief, vec.mint, SOLANA_TOKEN_PROGRAM)), "sell_accounts", "the coin in from another account"],
+      [part(steps({ v: { ...venue, pool: key(95) } as SolanaPoolBuyVenue })), "sell_accounts", "a pool the venue read did not name"],
+      [part(steps({ minOut: floor - 1n }), floor - 1n), "min_out", "a min out under the floor"],
+      [part(steps({ minOut: 1n }), SOLANA_POOL_SELL_RESERVE_MAX + 10_000_000n), "min_out", "a min out of 1"],
+      [wire(SOL_W, [cuLimit, ...steps().slice(1), depositIx({ value: solanaNoteOf(floor - RESERVE) })]), "sell", "no wrapped-SOL account made first"],
+      [wire(SOL_W, [cuLimit, ...steps().slice(0, 2), depositIx({ value: solanaNoteOf(floor - RESERVE) })]), "sell", "the wrapped-SOL account left open"],
+    ] as const) {
+      assert.throws(() => check(w), refusedAs(rule), why);
+    }
+    // a pool the reference did not price: no floor
+    assert.throws(() => check(part(steps()), PART, RESERVE, { ...venue, pool: key(95) } as SolanaPoolBuyVenue), refusedAs("floor"));
+    // a wire built for another venue kind than the device read: pump's 24-byte sell is not this venue's
+    const pump = await setup("pump");
+    assert.throws(() => check(part(solanaPoolSellSteps(pump.venue, SOL_W, amount, floor) as Ixx[])), refusedAs("sell"));
+  });
+}
 
 test("Solana sell: a deposit back under the sale's note floor (the pool's piece floor, or the kit's release floor at the rent read up to the grid) is refused by name (deposit_floor); at the floor it passes; under it the venue's sell alone passes, drawing no deposit", async () => {
   const { venue, ref, reads } = await setup("pump");
