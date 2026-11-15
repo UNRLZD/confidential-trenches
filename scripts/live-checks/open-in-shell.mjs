@@ -4,6 +4,7 @@
 // goto then throws "interrupted by another navigation" to the shell (merge queue runs 43665465254 and 43669414912,
 // 8 of 100 visits under load on the box). Used by scripts/live-checks/app-in-shell.mjs and
 // packages/signpage/scripts/restore-speed-browser.mjs; scripts/live-checks/open-in-shell.test.mjs plants each end.
+// Runs: once, a module the checks share (app-in-shell's visit and the restore runs'), no check of its own
 
 /**
  * Visits `url` (on APP_HOST) and waits for its move to the shell at `shellOrigin` with the same path and query. The
