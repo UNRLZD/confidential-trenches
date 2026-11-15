@@ -3693,19 +3693,20 @@ const logsOf = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map
 test("card evm-restore-walk-keeps-its-place: a walk stopped mid-round keeps its place, so the reload reads on from it (its last page again), never from the deploy block; a walk done reads only the gap; on Base and Robinhood", async () => {
   for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
     const pin: EvmPoolPin = { ...PIN, network };
-    // 600,000 blocks on seats that page 10,000 blocks at most (Pocket's "max 10001 blocks"), one page after another
-    const c = longChain(deps(PP, [10, 200_000, 550_000]), 600_000);
+    // 2,000,000 blocks on seats that page 10,000 blocks at most (Pocket's "max 10001 blocks"): past 64 pages left the
+    // seats' read keeps EVM_POOL_LOG_PAGES_IN_FLIGHT pages in flight (spreadLogs)
+    const c = longChain(deps(PP, [10, 400_000, 1_500_000]), 2_000_000);
     const seats = (la: string[], lb: string[], over: Over = {}) => pair(c, c, { chainId, cap: 10_000, log: la, ...over }, { chainId, cap: 10_000, log: lb });
     // the whole walk, cold, for its count
     const ca: string[] = [], cb: string[] = [];
     await evmTreeSync({ rpcs: seats(ca, cb), pin, ...noWait }).events();
     const cold = logsOf(ca).length + logsOf(cb).length;
-    // load 1: the tab closes after 30 of seat a's pages
+    // load 1: the tab closes after 60 of seat a's pages
     const box = evmMemoryHold();
     const stop = new AbortController();
     let n = 0;
     const l1a: string[] = [], l1b: string[] = [];
-    await assert.rejects(evmTreeSync({ rpcs: seats(l1a, l1b, { getLogs: () => void (++n === 30 && stop.abort(new Error("the tab closed"))) }), pin, held: box, ...noWait }).events(stop.signal));
+    await assert.rejects(evmTreeSync({ rpcs: seats(l1a, l1b, { getLogs: () => void (++n === 60 && stop.abort(new Error("the tab closed"))) }), pin, held: box, ...noWait }).events(stop.signal));
     await new Promise((r) => setTimeout(r, 0));
     const placed = await box.read();
     assert.ok(placed && placed.to > pin.fromBlock, `${network}: the place written mid-walk (${placed?.to})`);
@@ -3715,11 +3716,12 @@ test("card evm-restore-walk-keeps-its-place: a walk stopped mid-round keeps its 
     assert.equal(r.events.length, 3, `${network}: every leaf`);
     const froms = [...logsOf(l2a), ...logsOf(l2b)];
     assert.ok(froms.every((f) => f > Number(placed!.to - EVM_HOLD_REREAD_BLOCKS)), `${network}: the reload read from ${Math.min(...froms)}, below the place ${placed!.to} less a page`);
-    // read twice: each sync's probes of its providers' caps (3 refused pages a seat), the page in flight at the stop,
-    // the faster seat's pages past the slower one's place, and the place's last page; from the deploy block again (as
-    // before this card) it is every page of load 1
+    // read twice: each sync's probes of its providers' caps (3 refused pages a seat), the pages in flight at the stop
+    // (EVM_POOL_LOG_PAGES_IN_FLIGHT a seat), the faster seat's pages past the slower one's place, and the place's last
+    // page; from the deploy block again (as before this card) it is every page of load 1, 131; with a spread read's
+    // parts each a run of contiguous blocks, the place stood at the first run's, 105
     const again = logsOf(l1a).length + logsOf(l1b).length + froms.length - cold;
-    assert.ok(again <= 14, `${network}: ${again} pages read twice across the reload (cold ${cold}, load 1 ${logsOf(l1a).length + logsOf(l1b).length}, load 2 ${froms.length})`);
+    assert.ok(again <= 20, `${network}: ${again} pages read twice across the reload (cold ${cold}, load 1 ${logsOf(l1a).length + logsOf(l1b).length}, load 2 ${froms.length})`);
     assert.equal((await box.read())?.to, BigInt(c.finalized), `${network}: the walk done, its hold whole`);
     // load 3, the walk done once: only the gap and its last page, one page a seat
     const moved = c.finalized;

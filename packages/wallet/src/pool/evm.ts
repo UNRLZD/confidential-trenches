@@ -608,6 +608,9 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
         } catch (e) {
           open[k]![i]!--;
           took[i] = Date.now() - t0;
+          // the provider that refused, on its error, so the pager halves that provider's page however the seat moved
+          // since (another call on the seat may have moved it: spreadLogs' readers share it)
+          if (e !== null && typeof e === "object" && !Object.hasOwn(e, EVM_REFUSED_BY)) Object.defineProperty(e, EVM_REFUSED_BY, { value: list[i]!.url });
           asked.set(i, e);
           const t = throttled(e);
           const cap = span !== null && t === null ? capSpanOf(String((e as Error)?.message ?? e)) : null;
@@ -690,6 +693,8 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   SEATS.set(pair[1], read);
   return pair;
 }
+/** The property a seat's provider error names its provider's URL by (evmPair; readLogs reads it). */
+const EVM_REFUSED_BY = Symbol("refused by");
 /** Each pair's seats (evmPair), to its reads in flight: both() opens one around each agreed read. */
 const SEATS = new WeakMap<EvmRpc, { pair: Rpcs; begin(): void; end(): void }>();
 /** both(), an agreed read on a pair's two seats: for the tests (not in the index). */
@@ -1173,9 +1178,11 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
       lastFull = null;
       // the other RPC failed and this read was stopped: never a smaller page for the next W
       signal?.throwIfAborted();
-      // the refusal is the page of the provider that refused it: the seat's provider now, which a cap walk may have
-      // moved during the call (review of 8cdf6ee8, LOW)
-      const p = pager.of(rpc, k);
+      // the refusal is the page of the provider that refused it: the one its error names (a seat's), else the seat's
+      // provider now, which a cap walk may have moved during the call (review of 8cdf6ee8, LOW), as may another call
+      // on the seat (card evm-restore-walk-keeps-its-place: a spread read's readers share one)
+      const by = e !== null && typeof e === "object" ? (e as Record<symbol, unknown>)[EVM_REFUSED_BY] : undefined;
+      const p = typeof by === "string" ? pager.of(Object.assign((() => Promise.resolve(null)) as unknown as EvmRpc, { url: by }), k) : pager.of(rpc, k);
       const m = String((e as Error)?.message ?? e);
       if (HEAD_LAG.test(m)) lag(`rpc ${k}: its logs of ${at}..${end} are behind its head (${m})`);
       const t = throttled(e);
@@ -1247,6 +1254,9 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     const a = out[i - 1]!, b = out[i]!;
     if (b.block < a.block || (b.block === a.block && (b.logIndex <= a.logIndex || b.blockHash !== a.blockHash))) throw new Error(`rpc ${k}: the logs are not in order at ${i}`);
   }
+  // a spread read's reader takes its next page on with this ceiling, its full pages held so far and its widest
+  // (spreadLogs): a page at a time, each its own readLogs, it lifts a ceiling as one read does
+  if (part !== undefined) Object.assign(part, { refused, held, hold, lastCeiling, widest });
   return out;
 }
 
@@ -1254,17 +1264,17 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
 type LogReadState = { refused: bigint | null; held: number; hold: number; lastCeiling: bigint | null; widest: bigint | null };
 
 /**
- * from..to as `parts` runs of contiguous blocks, each a readLogs of its own on the same provider and pager, all at once
- * (card restore-walks-every-pool-on-129); their logs joined in block order. The first part that fails stops the others,
- * and every part settles before its error is thrown, so a failed read leaves no call of it behind (as both()).
+ * from..to read by `parts` readers at once on the same provider (card restore-walks-every-pool-on-129), each taking the
+ * next page from one cursor at its own page's size, never under the read's at the split (card
+ * evm-restore-walk-keeps-its-place: what is read in order from `from` trails the cursor by the pages in flight only,
+ * so a walk's place written as it reads keeps nearly all of it, where contiguous runs a part each kept the first run's);
+ * their logs joined in block order. Each reader keeps its own page per provider and its own ceiling, from the read's
+ * at the split, carried from each of its pages to the next: one
+ * reader's probe past a cap never cuts another's page, and the shared page takes only the widest any reader answered
+ * back (it only grows, as readLogs keeps it). The first reader that fails stops the others, and every reader settles
+ * before its error is thrown, so a failed read leaves no call of it behind (as both()).
  */
 async function spreadLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, parts: number, size: bigint, state: LogReadState, signal?: AbortSignal, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>, tick?: LogTick<E>): Promise<E[]> {
-  const n = BigInt(parts);
-  // each part a whole number of pages at the read's size, so its pages tile as one read's would; the last part the tail
-  const count = (to - from + size) / size;
-  const span = ((count + n - 1n) / n) * size;
-  // each part's own page per provider, from the read's at the split: one part's probe past a cap never cuts another's
-  // page, and the shared page takes only the widest any part answered back (it only grows, as readLogs keeps it)
   const own: Map<string, EvmLogPage>[] = [];
   const partPager = (): EvmLogPager => {
     const pages = new Map<string, EvmLogPage>();
@@ -1288,8 +1298,8 @@ async function spreadLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: E
   if (signal?.aborted) stop.abort(signal.reason);
   else signal?.addEventListener("abort", outer, { once: true });
   let first: { e: unknown } | null = null;
-  // each part's place (its last block read and its logs so far): the read's own is the parts' run in order up to the
-  // first one still reading (card evm-restore-walk-keeps-its-place)
+  // each page taken, in block order (the cursor only rises), with its last block read and its logs so far: the read's
+  // place is the pages' run in order up to the first one still reading
   const places: { end: bigint; to: bigint; logs: readonly E[] }[] = [];
   const told = (): void => {
     let at = from - 1n;
@@ -1301,21 +1311,34 @@ async function spreadLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: E
     }
     tick!(at, logs);
   };
-  try {
-    const runs: Promise<E[]>[] = [];
-    for (let at = from; at <= to; at += span) {
-      const end = at + span - 1n < to ? at + span - 1n : to;
+  let next = from;
+  const reader = async (): Promise<void> => {
+    const mine = partPager();
+    const ceiling: LogReadState = { ...state };
+    while (next <= to) {
+      stop.signal.throwIfAborted();
+      const at = next;
+      const s = mine.of(rpc, k).size > size ? mine.of(rpc, k).size : size;
+      const end = at + s - 1n < to ? at + s - 1n : to;
+      next = end + 1n;
       const place = { end, to: at - 1n, logs: [] as readonly E[] };
       places.push(place);
+      const got = await readLogs(rpc, k, filter, decode, at, end, mine, stop.signal, sleep, undefined, ceiling, tick === undefined ? undefined : (t, l) => ((place.to = t), (place.logs = l), told()));
+      place.to = end;
+      place.logs = got;
+    }
+  };
+  try {
+    const runs: Promise<void>[] = [];
+    for (let i = 0; i < parts; i++)
       runs.push(
-        readLogs(rpc, k, filter, decode, at, end, partPager(), stop.signal, sleep, undefined, state, tick === undefined ? undefined : (t, l) => ((place.to = t), (place.logs = l), told())).catch((e: unknown) => {
+        reader().catch((e: unknown) => {
           first ??= { e };
           stop.abort(e);
           throw e;
         }),
       );
-    }
-    const got = await Promise.allSettled(runs);
+    await Promise.allSettled(runs);
     const p = pager.of(rpc, k);
     const id = (rpc as { url?: unknown }).url;
     for (const pages of own) {
@@ -1323,7 +1346,7 @@ async function spreadLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: E
       if (q?.answered != null && (p.answered === null || q.answered > p.answered)) p.answered = q.answered;
     }
     if (first !== null) throw (first as { e: unknown }).e;
-    return got.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    return places.flatMap((x) => x.logs);
   } finally {
     signal?.removeEventListener("abort", outer);
   }
