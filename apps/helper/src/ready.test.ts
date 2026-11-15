@@ -634,8 +634,8 @@ async function startOnce(env: Record<string, string>, boundMs: number, readies: 
 // for up to 90 s (pool/evm-failover.test.ts (3)); an answer that two operators give differently is refused at once
 test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently stops the start with exit 2 naming the read, and /v1/health never says ready before it", async (t) => {
   // two JSON-RPC nodes on loopback, a block every 2 s up to now; the second answers every state read with another word,
-  // held until the helper has answered its health (at least a second), so the helper is up and answering while the check
-  // runs: a held answer waits on that event, never on a fixed second the helper's own start can outlast under load
+  // held until the helper has answered its health, so the helper is up and answering while the check runs: a held answer
+  // waits on that event, never on a fixed second the helper's own start can outlast under load
   const seen: unknown[] = [];
   const g = BigInt(Math.floor(Date.now() / 1000)) - 2_000n;
   // two loopback addresses: an env pair must be two operators (fold B), and an IP host is its address
@@ -652,8 +652,7 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
         if (method !== "eth_call") return answer({ error: { code: -32601, message: "no" } });
         const out = { result: `0x${"0".repeat(63)}${word}` };
         if (word === 2) return answer(out);
-        const t0 = Date.now();
-        const late = () => (seen.length > 0 && Date.now() - t0 >= 1_000 ? answer(out) : void setTimeout(late, 50));
+        const late = () => (seen.length > 0 ? answer(out) : void setTimeout(late, 50));
         late();
       });
     }).listen(0, word === 2 ? "::1" : "127.0.0.1"),
