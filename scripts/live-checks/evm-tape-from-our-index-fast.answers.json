@@ -1,5 +1,5 @@
 {
- "_note": "Each tape answers as the check read them (time from its first read, status, X-Helper-Commit, rows, filling, first fault; not the rows). good: a keyless helper of this card on a Mac (branch card/evm-tape-from-our-index-fast, the read back of a step that holds no swap asking its pool swaps alone and ending at the pool birth), started cold at 08:20Z and read as --base 2026-11-15T08:21:51.538Z: three short tapes said filling and ended done within the bound (34.9, 45.5 and 42.5 s), one full at once: PASS. bad_live: the deployed helper 0d308d3bc read 2026-11-15T08:17:20.598Z: two new tokens tapes still filling at 45.9 and 47.7 s: FAIL.",
+ "_note": "Each tape answers as the check read them (time from its first read, status, X-Helper-Commit, rows, filling, first fault; not the rows). good: a keyless helper of this card on a Mac (branch card/evm-tape-from-our-index-fast, the read back of a step that holds no swap asking its pool swaps alone and ending at the pool birth), started cold at 08:20Z and read as --base 2026-11-15T08:21:51.538Z: three short tapes said filling and ended done within the bound (34.9, 45.5 and 42.5 s), one full at once: PASS. bad_live: the deployed helper 0d308d3bc read 2026-11-15T08:17:20.598Z: two new tokens tapes still filling at 45.9 and 47.7 s: FAIL. Card evm-keyed-checks-hold-steady (each answer's `open` is the helper's Server-Timing evm-open in ms, null where none was read): good_live: the deployed helper beb3ef4f8 read 2026-11-15T15:01:17Z with this card's picks (new's and trending_1h's next two past helper-base-tape-reads-back's), three tapes opened cold (3317, 3141, 1201 ms) said filling and ended within the bound: PASS. warm_live: the same check again at 15:01:31Z, every tape open from the run before (evm-open 0 ms), the short two done at their first answer: INCONCLUSIVE (the check at b78515461 FAILs it: no read back, as helper live run 43722667540 attempt 1 did at 14:16Z).",
  "good": {
   "base": "http://127.0.0.1:18787",
   "readAt": "2026-11-15T08:21:51.538Z",
@@ -638,6 +638,219 @@
       "commit": "0d308d3bc373cd5e7a6ef4805ccaafa89811307a",
       "n": 50,
       "filling": false,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ },
+ "good_live": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-15T15:01:31.280Z",
+  "lists": {
+   "status": 200,
+   "new": 20
+  },
+  "tapes": [
+   {
+    "address": "0xd36e7323bcc72f90f8c4d45dba3c2ec65d2f64c8",
+    "answers": [
+     {
+      "t": 3608,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 0,
+      "filling": true,
+      "open": 3317,
+      "fault": null
+     },
+     {
+      "t": 6826,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 0,
+      "filling": true,
+      "open": 0,
+      "fault": null
+     },
+     {
+      "t": 10037,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 0,
+      "filling": true,
+      "open": 0,
+      "fault": null
+     },
+     {
+      "t": 13269,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 5,
+      "filling": false,
+      "open": 0,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0xf6565de512d3bcc33852049fc4a717460f41cccc",
+    "answers": [
+     {
+      "t": 3789,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 0,
+      "filling": true,
+      "open": 3141,
+      "fault": null
+     },
+     {
+      "t": 7029,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 0,
+      "filling": true,
+      "open": 0,
+      "fault": null
+     },
+     {
+      "t": 10242,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 0,
+      "filling": true,
+      "open": 0,
+      "fault": null
+     },
+     {
+      "t": 13461,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 1,
+      "filling": false,
+      "open": 0,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x22af33fe49fd1fa80c7149773dde5890d3c76f3b",
+    "answers": [
+     {
+      "t": 1904,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 1,
+      "filling": true,
+      "open": 1201,
+      "fault": null
+     },
+     {
+      "t": 5136,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 1,
+      "filling": true,
+      "open": 0,
+      "fault": null
+     },
+     {
+      "t": 8347,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 49,
+      "filling": true,
+      "open": 0,
+      "fault": null
+     },
+     {
+      "t": 11567,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 50,
+      "filling": false,
+      "open": 0,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "answers": [
+     {
+      "t": 1160,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 50,
+      "filling": false,
+      "open": 383,
+      "fault": null
+     }
+    ]
+   }
+  ]
+ },
+ "warm_live": {
+  "base": "https://ct-api.unrealized.trade",
+  "readAt": "2026-11-15T15:01:32.716Z",
+  "lists": {
+   "status": 200,
+   "new": 20
+  },
+  "tapes": [
+   {
+    "address": "0xd36e7323bcc72f90f8c4d45dba3c2ec65d2f64c8",
+    "answers": [
+     {
+      "t": 215,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 5,
+      "filling": false,
+      "open": 0,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0xf6565de512d3bcc33852049fc4a717460f41cccc",
+    "answers": [
+     {
+      "t": 656,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 1,
+      "filling": false,
+      "open": 0,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x22af33fe49fd1fa80c7149773dde5890d3c76f3b",
+    "answers": [
+     {
+      "t": 663,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 50,
+      "filling": false,
+      "open": 0,
+      "fault": null
+     }
+    ]
+   },
+   {
+    "address": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+    "answers": [
+     {
+      "t": 673,
+      "status": 200,
+      "commit": "beb3ef4f8174d2706dc87750e19fe2dc1889c2ae",
+      "n": 50,
+      "filling": false,
+      "open": 0,
       "fault": null
      }
     ]

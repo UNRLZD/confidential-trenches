@@ -544,7 +544,7 @@ test("the helper's plan runs the nine checks that spend the Jupiter budget as ON
 
 // card helper-live-run-holds-its-own-load: the checks that read the helper's keyed Base and Robinhood providers, in order:
 // the RPC routes first, then the tapes and the chain chart
-const KEYED_KEYS = ["helper-rpc-takes-batches", "evm-pool-leaves-any-source", "evm-pool-sync-holds", "helper-base-logs-page", "helper-pool-logs-outside-the-caller-budget", "robinhood-pool-logs-on-keyed-route", "helper-rpc-proxy", "evm-rpc-spare-list", "evm-chart-opens-without-a-vendor-call", "index-evm-swaps", "helper-base-tape-reads-back", "evm-tape-from-our-index-fast", "helper-v4-hook-liquidity", "solana-trades-show-on-every-token", "robinhood-listed-tape-opens", "helper-tape-4337-trader", "evm-tape-rows-exact", "helper-robinhood-capacity", "helper-robinhood-search-ahead"];
+const KEYED_KEYS = ["helper-rpc-takes-batches", "evm-pool-leaves-any-source", "evm-pool-sync-holds", "helper-base-logs-page", "helper-pool-logs-outside-the-caller-budget", "robinhood-pool-logs-on-keyed-route", "helper-rpc-proxy", "evm-rpc-spare-list", "evm-tape-from-our-index-fast", "evm-chart-opens-without-a-vendor-call", "index-evm-swaps", "helper-base-tape-reads-back", "helper-v4-hook-liquidity", "solana-trades-show-on-every-token", "robinhood-listed-tape-opens", "helper-tape-4337-trader", "evm-tape-rows-exact", "helper-robinhood-capacity", "helper-robinhood-search-ahead"];
 
 test("the helper's plan runs the nineteen checks that read its keyed Base and Robinhood providers as ONE matrix entry, and KEYED_READS finds exactly them", async () => {
   const plan = await planFor("helper", { commit: COMMIT });

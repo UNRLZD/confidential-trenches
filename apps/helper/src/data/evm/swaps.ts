@@ -74,7 +74,7 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
+import { BUCKETS_MAX, change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
@@ -927,10 +927,13 @@ export function poolStateLegs(pool: Pick<Pool, "venue" | "tokenIs0" | "log">, an
   return pool.tokenIs0 ? { amt: TWO_192, quote: sqrt * sqrt } : { amt: sqrt * sqrt, quote: TWO_192 };
 }
 
-/** A book whose newest close is more than this many times over or under its list row's price_usd is not served as
- *  ours (createSwaps' candles): a pool read wrong (a quote of another scale, a decimals slip) answers what a token
- *  with no pool of ours answers. [design: 100, two orders of magnitude: far past any spread between a pool's own price
- *  and the list's; a 6-decimal quote's decimals taken for an 18-decimal token's are off by 10^12.] */
+/** A book none of whose prices (every bar's high and low it holds) comes within this many times of its list row's
+ *  price_usd is not served as ours (createSwaps' candles): a pool read wrong (a quote of another scale, a decimals slip)
+ *  moves every bar by one factor and answers what a token with no pool of ours answers. A book that fell or rose past it
+ *  in its own bars is served: the list's price lags the chain (card evm-keyed-checks-hold-steady: Base 0x4f66b4a9...'s
+ *  pool fell 10^4 at 15 Nov 14:23:34Z and its list row still held the price before at 14:26:30Z). [design: 100, two
+ *  orders of magnitude: far past any spread between a pool's own price and the list's; a 6-decimal quote's decimals
+ *  taken for an 18-decimal token's are off by 10^12.] */
 export const SCALE_BOUND = 100;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -2759,17 +2762,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     );
   }
 
-  /** Whether the book's newest close and the token's list price (deps.price) differ by more than SCALE_BOUND times
-   *  either way: its bars are then not served as ours. Logged once per book with both prices. No list price, no bound. */
+  /** Whether every price the book holds (its close and its day bars' highs and lows, the coarsest bars it keeps, so all
+   *  of them) lies more than SCALE_BOUND times over or under the token's list price (deps.price): its bars are then not
+   *  served as ours. Never its newest close alone: a pool that fell or rose past the bound since the list's read is ours to
+   *  serve. Logged once per book with the prices. No list price, no bound. */
   function offScale(e: Entry, token: string): boolean {
     const listed = deps.price?.(token) ?? null;
     const close = e.book.close();
     if (listed === null || !Number.isFinite(listed) || listed <= 0 || close === null) return false;
     const ours = Number(fixed(close, PRICE_SCALE));
-    if (ours <= listed * SCALE_BOUND && ours * SCALE_BOUND >= listed) return false;
+    const days = e.book.candles("1d", null, BUCKETS_MAX["1d"]);
+    const lo = Math.min(ours, ...days.map((b) => Number(b[3])));
+    const hi = Math.max(ours, ...days.map((b) => Number(b[2])));
+    if (lo <= listed * SCALE_BOUND && hi * SCALE_BOUND >= listed) return false;
     if (e.offLogged !== true) {
       e.offLogged = true;
-      log(`${chain} candles ${token}: our close ${ours} USD and the list's ${listed} USD differ past ${SCALE_BOUND} times; answered as a token with no pool of ours (pool ${e.pool.id})`);
+      log(`${chain} candles ${token}: our close ${ours} USD, every price the book held (${lo} to ${hi} USD), and the list's ${listed} USD differ past ${SCALE_BOUND} times; answered as a token with no pool of ours (pool ${e.pool.id})`);
     }
     return true;
   }

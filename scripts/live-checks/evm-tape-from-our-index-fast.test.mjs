@@ -4,11 +4,14 @@
 // deployed helper 0d308d3bc: a short tape still filling at BOUND_MS: FAIL. Planted from the good one: a tape still filling
 // at its end, an answer off the tape's fields, a 503, fewer trades at the end, no X-Helper-Commit: FAIL; every tape full
 // at its first answer: INCONCLUSIVE. The bound is the listed tape's, the read's pacing and picks are held on their own.
+// Card evm-keyed-checks-hold-steady: good_live, the deployed helper beb3ef4f8 with tapes opened cold: PASS; warm_live,
+// the same check a run later, every tape open before it (evm-open 0 ms): INCONCLUSIVE, never the FAIL the check at
+// b78515461 gave it; planted from it: the short tapes opened cold (or naming no open) and done with no filling: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { TRADES_MAX as HELPER_TRADES_MAX } from "../../apps/helper/src/data/evm/swaps.ts";
-import { APP, BOUND_MS, bodyFault, judge, OPEN, POLL_MS, readRun, TRADES_MAX } from "./evm-tape-from-our-index-fast.mjs";
+import { APP, BOUND_MS, bodyFault, judge, OPEN, POLL_MS, readRun, TRADES_MAX, WARM_MS } from "./evm-tape-from-our-index-fast.mjs";
 import { FILLED_MS } from "./tape-read.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-tape-from-our-index-fast.answers.json", import.meta.url), "utf8"));
@@ -39,6 +42,32 @@ test("bad_live: the deployed helper 0d308d3bc, a short tape still filling at BOU
   const r = judge(A.bad_live);
   assert.equal(r.verdict, "FAIL");
   assert.ok(bad(r).length > 0 && bad(r).every((l) => / still filling at \d+ ms/.test(l)), r.lines.join("\n"));
+});
+
+test("good_live: the deployed helper beb3ef4f8, short tapes opened cold said filling then ended: PASS", () => {
+  const r = judge(A.good_live);
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.ok(A.good_live.tapes.filter((t) => t.answers[0].n < TRADES_MAX).every((t) => t.answers[0].open > 0), "every short tape opened cold");
+});
+
+test("warm_live: every tape open before the check's first read (evm-open 0 ms), the short ones done at once: INCONCLUSIVE, naming them (red at b78515461: FAIL)", () => {
+  const r = judge(A.warm_live);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  const warmShort = A.warm_live.tapes.filter((t) => t.answers[0].n < TRADES_MAX);
+  assert.ok(warmShort.length > 0 && A.warm_live.tapes.every((t) => t.answers[0].open === 0));
+  assert.ok(r.lines.some((l) => l.startsWith("N/A every short tape open before this check's first read") && warmShort.every((t) => l.includes(t.address))), r.lines.join("\n"));
+  // a held book's open read 1 ms on this branch's helper (15 Nov 15:08:51Z, 0x734be42b, opened twice before): still warm
+  const one = { ...A.warm_live, tapes: A.warm_live.tapes.map((t) => ({ ...t, answers: t.answers.map((a, i) => (i === 0 ? { ...a, open: WARM_MS - 9 } : a)) })) };
+  assert.equal(judge(one).verdict, "INCONCLUSIVE", judge(one).lines.join("\n"));
+});
+
+test("planted from warm_live: a short tape opened cold, or naming no open, done at its first answer with no filling: FAIL", () => {
+  for (const open of [WARM_MS, 215, null, undefined]) {
+    const run = { ...A.warm_live, tapes: A.warm_live.tapes.map((t) => (t.answers[0].n < TRADES_MAX ? { ...t, answers: t.answers.map((a, i) => (i === 0 ? { ...a, open } : a)) } : t)) };
+    const r = judge(run);
+    assert.equal(r.verdict, "FAIL", `open ${open}\n${r.lines.join("\n")}`);
+    assert.ok(bad(r).includes("BAD no tape said filling while a tape opened cold answered short: no read back"), r.lines.join("\n"));
+  }
 });
 
 test("planted from the good answer: FAIL, or INCONCLUSIVE when nothing was short", () => {
@@ -76,37 +105,39 @@ test("bodyFault: the tape's fields exactly, filling only as true, rows newest fi
   ]) assert.match(bodyFault(b) ?? "null", want, what);
 });
 
-test("readRun: opens new's and trending_1h's first OPEN / 2 as the page reads them, each again every POLL_MS until it ends or BOUND_MS pass", async () => {
+test("readRun: opens new's and trending_1h's next OPEN / 2 past helper-base-tape-reads-back's picks (the first OPEN / 2 of each) as the page reads them, each again every POLL_MS until it ends or BOUND_MS pass, with the helper's evm-open", async () => {
   const tok = (c) => "0x" + c.repeat(40);
-  const lists = { chain: "base", lists: { new: [{ token: tok("1") }, { token: tok("2") }, { token: tok("3") }], trending_1h: [{ token: tok("2") }, { token: tok("4") }, { token: tok("5") }] } };
+  // helper-base-tape-reads-back opens 1, 2 (new) and 2, 4 (trending_1h); this check the next two of each not among them
+  const lists = { chain: "base", lists: { new: [1, 2, 3, 6, 7].map((c) => ({ token: tok(String(c)) })), trending_1h: [2, 4, 5, 3, 8].map((c) => ({ token: tok(String(c)) })) } };
   let clock = 0;
   const asked = [];
-  // tok 1: filling twice, then done with 4; tok 2: full at once; tok 4: filling for ever
+  // tok 3: opened cold in 812 ms, filling twice, then done with 4; tok 6: full at once; tok 5: filling for ever
   const reads = new Map();
   const fetchFn = async (url, init) => {
     assert.equal(init.headers.origin, APP);
     const u = new URL(url);
-    const h = { "content-type": "application/json", "x-helper-commit": "a".repeat(40) };
+    const h = { "content-type": "application/json", "x-helper-commit": "a".repeat(40), ...(u.searchParams.get("token") === tok("3") ? { "server-timing": `evm-open;dur=${reads.has(tok("3")) ? 0 : 812}, evm-queue;dur=3;desc="1 posts"` } : {}) };
     if (u.pathname === "/v1/market/lists") return new Response(JSON.stringify(lists), { status: 200, headers: h });
     const t = u.searchParams.get("token");
     asked.push([t, u.searchParams.get("limit"), clock]);
     const n = (reads.get(t) ?? 0) + 1;
     reads.set(t, n);
     const body =
-      t === tok("1") ? { trades: Array.from({ length: n < 3 ? 1 : 4 }, (_, i) => ROW(10 - i, i)), src: "chain", as_of_ms: 1, ...(n < 3 ? { filling: true } : {}) }
-      : t === tok("2") ? { trades: Array.from({ length: TRADES_MAX }, (_, i) => ROW(100 - i, i)), src: "chain", as_of_ms: 1 }
+      t === tok("3") ? { trades: Array.from({ length: n < 3 ? 1 : 4 }, (_, i) => ROW(10 - i, i)), src: "chain", as_of_ms: 1, ...(n < 3 ? { filling: true } : {}) }
+      : t === tok("6") ? { trades: Array.from({ length: TRADES_MAX }, (_, i) => ROW(100 - i, i)), src: "chain", as_of_ms: 1 }
       : { trades: [], src: "chain", as_of_ms: 1, filling: true };
     return new Response(JSON.stringify(body), { status: 200, headers: h });
   };
   const run = await readRun("https://h.example", { fetchFn, sleep: async (ms) => void (clock += ms), now: () => clock });
-  assert.deepEqual(run.tapes.map((t) => t.address), [tok("1"), tok("2"), tok("4")], "new's first two and trending_1h's, each once");
+  assert.deepEqual(run.tapes.map((t) => t.address), [tok("3"), tok("6"), tok("5")], "new's and trending_1h's next two past the other check's picks, each once");
   assert.ok(asked.every(([, limit]) => limit === String(TRADES_MAX)));
   const by = Object.fromEntries(run.tapes.map((t) => [t.address, t.answers]));
-  assert.deepEqual(by[tok("1")].map((a) => [a.n, a.filling]), [[1, true], [1, true], [4, false]]);
-  assert.equal(by[tok("2")].length, 1, "full at once: read once");
-  assert.ok(by[tok("4")].length <= BOUND_MS / POLL_MS + 2 && by[tok("4")].at(-1).t >= BOUND_MS, "never ends: read until BOUND_MS, then stopped");
+  assert.deepEqual(by[tok("3")].map((a) => [a.n, a.filling, a.open]), [[1, true, 812], [1, true, 0], [4, false, 0]]);
+  assert.equal(by[tok("6")].length, 1, "full at once: read once");
+  assert.equal(by[tok("6")][0].open, null, "no Server-Timing: no open read");
+  assert.ok(by[tok("5")].length <= BOUND_MS / POLL_MS + 2 && by[tok("5")].at(-1).t >= BOUND_MS, "never ends: read until BOUND_MS, then stopped");
   const r = judge(run);
   assert.equal(r.verdict, "FAIL");
-  assert.ok(bad(r).some((l) => l.startsWith(`BAD ${tok("4")}: first 0 trade(s) filling, still filling`)), r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => l.startsWith(`BAD ${tok("5")}: first 0 trade(s) filling, still filling`)), r.lines.join("\n"));
   assert.equal(OPEN, 4);
 });
