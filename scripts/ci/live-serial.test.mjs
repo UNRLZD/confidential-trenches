@@ -1,7 +1,7 @@
 // node --test scripts/ci/live-serial.test.mjs: a serial group's checks run one after another, each once the helper's budget is
 // idle, every one whatever an earlier one ended with, none twice (scripts/ci/live-serial.mjs, card helper-live-jup-serial).
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -269,6 +269,25 @@ test("the process run: the supply check, released, reads on while the next check
     assert.match(text, /^::notice title=inconclusive solana-mint-supply-moves::no burn landed between two reads: the run proves nothing either way$/m);
     assert.match(text, /live-serial: PASS 2 checks, one after another \(inconclusive: solana-mint-supply-moves: no burn landed/);
     assert.deepEqual(JSON.parse(readFileSync(path.join(root, "group.verdict.json"), "utf8")).results.map((x) => [x.key, x.verdict]), [[K, "inconclusive"], ["next", "pass"]]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// card live-runs-keep-what-a-fail-needs: a group's member that FAILs keeps its record beside the job's log, under its key
+test("planted (live-runs-keep-what-a-fail-needs): a member that FAILs keeps its record, named by its key; a member that passes keeps none", async () => {
+  const { main } = await import("./live-serial.mjs");
+  const root = mkdtempSync(path.join(tmpdir(), "live-serial-record-"));
+  try {
+    mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+    const put = (k, tail) => writeFileSync(path.join(root, `scripts/live-checks/${k}.mjs`), `// Record: the member's run\n//   node scripts/live-checks/${k}.mjs [--record <file>]\nimport { writeFileSync } from "node:fs";\nconst i = process.argv.indexOf("--record");\nif (i >= 0) writeFileSync(process.argv[i + 1], JSON.stringify({ key: "${k}" }));\n${tail}\n`);
+    put("m-pass", 'console.log("live-check m-pass: PASS");');
+    put("m-fail", 'console.log("live-check m-fail: FAIL (x)"); process.exit(1);');
+    const log = path.join(root, "evm-keyed.log");
+    assert.equal(await main(["--log", log, "m-pass", "m-fail"], { root, idle: async () => IDLE }), 1);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(root, "evm-keyed.m-fail.record.json"), "utf8")), { key: "m-fail" });
+    assert.equal(existsSync(path.join(root, "evm-keyed.m-pass.record.json")), false);
+    assert.match(readFileSync(log, "utf8"), /^live-serial m-fail: its record kept: evm-keyed\.m-fail\.record\.json$/m);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

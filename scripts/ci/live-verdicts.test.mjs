@@ -10,8 +10,10 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { idsOf, judge } from "./live-verdicts.mjs";
 
-const file = (...results) => JSON.stringify({ results });
+const file = (...results) => JSON.stringify({ attempt: 1, results });
+const at = (attempt, ...results) => JSON.stringify({ attempt, results });
 const pass = (key) => ({ key, verdict: "pass", reason: "", runs: 1 });
+const fail = (key) => ({ key, verdict: "fail", reason: "exit 1", runs: 1 });
 
 test("planted pass: every check passed, green, with its counts", () => {
   const r = judge(["a", "g"], { a: file(pass("a")), g: file(pass("g1"), pass("g2")) });
@@ -55,6 +57,43 @@ test("planted crash: an error, a check not run, and a job that left no verdict (
   assert.ok(odd.lines.includes("live-verdicts: error a: no reason given (passed)"));
 });
 
+// card live-runs-keep-what-a-fail-needs: a re-run's verdict is its newest attempt's (run 43708092717: attempt 2 passed
+// evm-pool-index and evm-quote-warm-round, yet attempt 1's FAIL was read)
+test("planted (live-runs-keep-what-a-fail-needs): attempt 1 FAIL then attempt 2 PASS reads PASS, in either file order", () => {
+  for (const files of [[at(1, fail("a")), at(2, pass("a"))], [at(2, pass("a")), at(1, fail("a"))]]) {
+    const r = judge(["a", "b"], { a: files, b: [at(1, pass("b"))] });
+    assert.equal(r.ok, true, r.lines.join("\n"));
+    assert.equal(r.counts.passed, 2);
+    assert.ok(r.lines.includes("live-verdicts: job a: attempt 2's verdict read, attempt 1's set aside"));
+  }
+});
+test("planted (live-runs-keep-what-a-fail-needs): attempt 1 PASS then attempt 2 FAIL reads FAIL, in either file order", () => {
+  for (const files of [[at(1, pass("a")), at(2, fail("a"))], [at(2, fail("a")), at(1, pass("a"))]]) {
+    const r = judge(["a"], { a: files });
+    assert.equal(r.ok, false);
+    assert.ok(r.lines.includes("live-verdicts: failed a: exit 1"));
+  }
+});
+test("planted (live-runs-keep-what-a-fail-needs): the newest attempt is read whole, never an older one in its place", () => {
+  // a job re-run in attempt 2 that left no verdict there reads its attempt-1 FAIL (the reason it was re-run): red
+  assert.equal(judge(["a"], { a: [at(1, fail("a"))] }).ok, false);
+  // a job with no verdict in any attempt stays red, as on one attempt
+  assert.ok(judge(["a", "b"], { a: [at(1, pass("a"))] }).lines.includes("live-verdicts: no verdict from job b: it ended before its runner wrote one (a crash, a cancel or a timeout)"));
+  // the newest names no check, or a check not run: red, never attempt 1's pass
+  assert.equal(judge(["a"], { a: [at(1, pass("a")), at(2)] }).ok, false);
+  assert.equal(judge(["g"], { g: [at(1, pass("g1"), pass("g2")), at(2, pass("g1"), { key: "g2", verdict: "not_run", reason: "x", runs: 0 })] }).ok, false);
+  // a file that cannot be read, or names no attempt, holds its job red whatever another attempt says
+  for (const bad of ["{not json", JSON.stringify({ results: [pass("a")] }), at(0, pass("a")), at("2", pass("a"))]) {
+    const r = judge(["a"], { a: [at(1, pass("a")), bad] });
+    assert.equal(r.ok, false, bad);
+    assert.equal(r.counts.noVerdict, 1, bad);
+  }
+  // two files for one attempt: no way to tell which is the job's, red
+  const two = judge(["a"], { a: [at(2, pass("a")), at(2, fail("a")), at(1, pass("a"))] });
+  assert.equal(two.ok, false);
+  assert.ok(two.lines.includes("live-verdicts: no verdict from job a: two verdict files for attempt 2"));
+});
+
 test("the matrix's ids are read whole: an empty matrix or an id that is not one is refused", () => {
   assert.deepEqual(idsOf('{"include":[{"id":"a"},{"id":"jupiter-budget"}]}'), ["a", "jupiter-budget"]);
   assert.throws(() => idsOf('{"include":[]}'));
@@ -65,15 +104,18 @@ const READER = fileURLToPath(new URL("./live-verdicts.mjs", import.meta.url));
 test("the process: exit 0 on passes and inconclusives, 1 on a FAIL or a missing verdict, 2 on bad arguments; the summary gets the lines", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "live-verdicts-"));
   try {
-    // download-artifact with merge-multiple puts every file in one folder; a nested one is read too
-    mkdirSync(path.join(dir, "v/nested"), { recursive: true });
+    // download-artifact puts each artifact in a folder named after it (verdict-<id>-attempt-<n>), or a lone one at the top
+    mkdirSync(path.join(dir, "v/verdict-g-attempt-1"), { recursive: true });
+    mkdirSync(path.join(dir, "v/verdict-g-attempt-2"), { recursive: true });
     writeFileSync(path.join(dir, "v/a.verdict.json"), file(pass("a")));
-    writeFileSync(path.join(dir, "v/nested/g.verdict.json"), file({ key: "g1", verdict: "inconclusive", reason: "why", runs: 1 }));
+    writeFileSync(path.join(dir, "v/verdict-g-attempt-1/g.verdict.json"), at(1, { key: "g1", verdict: "fail", reason: "first", runs: 1 }));
+    writeFileSync(path.join(dir, "v/verdict-g-attempt-2/g.verdict.json"), at(2, { key: "g1", verdict: "inconclusive", reason: "why", runs: 1 }));
     const summary = path.join(dir, "summary.md");
     const run = (matrix) => spawnSync(process.execPath, [READER, "--dir", path.join(dir, "v"), "--matrix", matrix, "--summary", summary], { encoding: "utf8" });
     const ok = run('{"include":[{"id":"a"},{"id":"g"}]}');
     assert.equal(ok.status, 0, ok.stdout);
     assert.match(ok.stdout, /^live-verdicts: inconclusive g1: why$/m);
+    assert.match(ok.stdout, /^live-verdicts: job g: attempt 2's verdict read, attempt 1's set aside$/m);
     assert.match(readFileSync(summary, "utf8"), /live-verdicts: inconclusive g1: why/);
     const missing = run('{"include":[{"id":"a"},{"id":"g"},{"id":"b"}]}');
     assert.equal(missing.status, 1);

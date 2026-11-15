@@ -29,6 +29,7 @@
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, for the test's replay (evm-pool-index.answers.json:
 // its bad answer is this script run in a checkout of the kit before this card). Reads only: no key, no transaction, no
 // money moves.
+// Record: what the run read; a live run that fails keeps it beside its log
 import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
