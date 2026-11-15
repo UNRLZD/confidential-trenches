@@ -22,7 +22,7 @@ Thirty-three write-ups are here. Eleven more (archival reads, the treasury watch
 | [g1-money-loop](proofs/g1-money-loop/RESULT.md) | G1 proof 6: the Plan 1 money loop (real money) |
 | [g1-phone-prover](proofs/g1-phone-prover/RESULT.md) | G1 proof 2: proofs on a phone (g1-phone-prover) |
 | [g1-phone-trade](proofs/g1-phone-trade/RESULT.md) | G1 proof 5: phone-browser Solana trade, results |
-| [g1-presigned-exits](proofs/g1-presigned-exits/RESULT.md) | G1 proof 4: exits signed in advance (DRAFT) |
+| [g1-presigned-exits](proofs/g1-presigned-exits/RESULT.md) | G1 proof 4: exits signed in advance. Passed on Solana devnet and Base Sepolia; the real-money leg was not run, and one section is still a draft |
 | [g1-setup-files](proofs/g1-setup-files/RESULT.md) | g1-setup-files: the Privacy Pools v1.3.0 ceremony keys, checked |
 | [g1-vault-gas](proofs/g1-vault-gas/RESULT.md) | G1 proof 1: a Privacy Pools withdrawal proof checked by a NEAR contract, gas measured |
 | [gitleaks-history](proofs/gitleaks-history/RESULT.md) | gitleaks full-history scan |

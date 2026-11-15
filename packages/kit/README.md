@@ -2,14 +2,13 @@
 
 The one entry an app imports to reach Blindfill: `import { ... } from "@blindfill/kit"`, which resolves to `src/index.ts` and nothing deeper (`pnpm run check:imports` fails a deep import).
 
-<!-- Draft for the owner's docs pass (audit V-02, I-1, I-8, S-01, I-3): the words are not final. -->
 ## What the contracts leave to you
 
 The contracts enforce the money rules. Still, a few checks are left to whoever reads them. Our own code makes each of these, in the kit, the wallet or the helper as named below, so if you call the contracts yourself or read their events for your own books, they become yours. Each heading names its finding in the Pillow Auditors review of 7 November 2026.
 
 ### Refund notes on the NEAR vault (audit V-02)
 
-`vaultSync` reads the vault's lists on two RPCs, and `vaultSettleOwn` writes a refund note. We take a refund note as the spend row's own leaf, at `refund_leaf_index`, and never look one up by its precommitment. The vault doesn't reserve that precommitment (`contracts/vault/src/withdraw.rs:256`; only a deposit writes one, `contracts/vault/src/deposit.rs:144`), so a stranger can put 1 USDC on it, and if that payout bounces there are two notes with one nullifier. Spend the stranger's first and the refund is frozen. We'd treat any note a client found by precommitment alone as a bug. `vaultSettleOwn` takes the leaf (`packages/kit/src/vault/settle.ts:17-21`), and the restore is held to the same rule by `packages/wallet/test/note-restore.test.ts:888`.
+`vaultSync` reads the vault's lists on two RPCs, and `vaultSettleOwn` writes a refund note. We take a refund note as the spend row's own leaf, at `refund_leaf_index`, and never look one up by its precommitment. The vault doesn't reserve that precommitment (`contracts/vault/src/withdraw.rs:256`; only a deposit writes one, `contracts/vault/src/deposit.rs:144`), so a stranger can put 1 USDC on it, and if that payout bounces there are two notes with one nullifier. Spend the stranger's first and the refund is frozen. We'd treat any note a client found by precommitment alone as a bug. `vaultSettleOwn` takes the leaf (`packages/kit/src/vault/settle.ts:17-21`), and the restore is held to the same rule by `packages/wallet/test/note-restore.test.ts:979`.
 
 ### Reading a payout (audit I-1)
 
@@ -17,11 +16,11 @@ A USDC `ft_transfer` event alone doesn't prove a payout arrived. A payout is one
 
 ### The fee on an EVM sell (audit I-8)
 
-A sell pays its fee to the chain's FeeCollector, whose `receive()` logs `Paid(from, value)` and forwards the ETH in the same call (`contracts/pool-evm/src/FeeCollector.sol:38-42`). Anyone can send it ETH, of any amount, zero included, which means anyone can make a `Paid` log. Credit a fee only when the log comes from the collector's own address, `from` is the wallet you expect, the value covers what's owed, and it sits in the receipt of the transaction you're crediting. Our helper checks all four before it counts a sale as paid (`apps/helper/src/pool/evm.ts:553-565`).
+A sell pays its fee to the chain's FeeCollector, whose `receive()` logs `Paid(from, value)` and forwards the ETH in the same call (`contracts/pool-evm/src/FeeCollector.sol:38-42`). Anyone can send it ETH, of any amount, zero included, which means anyone can make a `Paid` log. Credit a fee only when the log comes from the collector's own address, `from` is the wallet you expect, the value covers what's owed, and it sits in the receipt of the transaction you're crediting. Our helper checks all four before it counts a sale as paid (`apps/helper/src/pool/evm.ts:589-604`).
 
 ### The smallest Solana pool deposit (audit S-01)
 
-`solanaPoolDepositIx` refuses a note too small to release, and its error names the floor it used (`packages/kit/src/trade/solana/pool-deposit.ts:155`). The program itself takes any note from 1,000,000 lamports, but a release has to leave the fresh wallet rent-exempt, and its fee can be at most half of what it takes out. So the floor is the smallest note one release can take whole at the kit's relay fee, the fee our relayer charges on every release (`packages/kit/src/trade/solana/pool-deposit.ts:66`, `contracts/pool-solana/src/lib.rs:52-57`). At mainnet rent as read on 2 November 2026 that's 2,600,000 lamports, twice the 1,300,000 fee. The kit works the floor out from the rent you pass in, with nothing added on top, so read it on two RPCs (`readSolanaRent`), and a rent change moves the floor with it. Under that line a note would cost more to get out than it holds, and since the pool has no ragequit and no merge, it would be stuck at a loss. Our wallet's ladder starts at 10,000,000 (`packages/wallet/src/pool/solana.ts:51`), and every note it makes is a whole rung (`packages/wallet/src/pool/ladder.ts:9-10`).
+`solanaPoolDepositIx` refuses a note too small to release, and its error names the floor it used (`packages/kit/src/trade/solana/pool-deposit.ts:155`). The program itself takes any note from 1,000,000 lamports, but a release has to leave the fresh wallet rent-exempt, and its fee can be at most half of what it takes out. So the floor is the smallest note one release can take whole at the kit's relay fee, the fee our relayer charges on every release (`packages/kit/src/trade/solana/pool-deposit.ts:66`, `contracts/pool-solana/src/lib.rs:52-57`). At mainnet rent as read on 2 November 2026 that's 2,600,000 lamports, twice the 1,300,000 fee. The kit works the floor out from the rent you pass in, with nothing added on top, so read it on two RPCs (`readSolanaRent`), and a rent change moves the floor with it. Under that line a note would cost more to get out than it holds, and since the pool has no ragequit and no merge, it would be stuck at a loss. Our wallet's ladder starts at 10,000,000 (`packages/wallet/src/pool/solana.ts:53`), and every note it makes is a whole rung (`packages/wallet/src/pool/ladder.ts:9-10`).
 
 ### USDC (audit I-3)
 

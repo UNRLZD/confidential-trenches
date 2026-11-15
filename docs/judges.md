@@ -1,0 +1,119 @@
+# Check every claim yourself
+
+Each row below takes one claim from the [README](../README.md), names where it is proven, gives a command, and shows what a passing run prints. Every command runs from a fresh clone with Node 24 or later and pnpm 10.33.1, with no key and no account. A few also use `curl` and `jq`; one needs gitleaks 8.30.1 and one needs Rust 1.96.0, as their rows say. We ran each one on 15 November 2026 and pasted what it printed.
+
+```sh
+git clone https://github.com/UNRLZD/confidential-trenches
+cd confidential-trenches
+pnpm install --frozen-lockfile
+```
+
+## What is on mainnet
+
+| Contract | Address | Explorer |
+|---|---|---|
+| The vault, on NEAR | `vault.confidential.unrlzd.near` | [nearblocks](https://nearblocks.io/address/vault.confidential.unrlzd.near) |
+| The Solana pool | `EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF` | [solscan](https://solscan.io/account/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF) |
+| The Base pool | `0xaa080e74ec99cf5c684548c77ca145edfcf899cf` | [basescan](https://basescan.org/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf) |
+| The Robinhood Chain pool | `0x9306359433127c4f3be426f6faeb00a3c41f66db` | [blockscout](https://robinhoodchain.blockscout.com/address/0x9306359433127c4f3be426f6faeb00a3c41f66db) |
+
+The 56 recorded mainnet transactions, by the change that made them. [docs/proofs.md](proofs.md) lists the same ones a row each.
+
+| Change (its record) | Chain | Transactions | Explorer links |
+|---|---|---|---|
+| [vault-mainnet-deploy](../scripts/live-checks/vault-mainnet-deploy.md) | NEAR | 5 | [`FkNJCwdRTT…7RWdexMw`](https://nearblocks.io/txns/FkNJCwdRTTPps7QEyuN9aQgHL9tmQzABiru77RWdexMw), [`jZhfysps9z…YrBQm6RG`](https://nearblocks.io/txns/jZhfysps9zTyVUjoBKJmKJ2VKG3g6fnF8ooYrBQm6RG), [`Gu7ptqE43x…jP27h1Gk`](https://nearblocks.io/txns/Gu7ptqE43xpwYDrstuHu2UrinHah9rjVuD6EjP27h1Gk), [`4rYpSgDpG1…zDAVuW2u`](https://nearblocks.io/txns/4rYpSgDpG163YCCxAFdb7NazwNxNrACmFH5ezDAVuW2u), [`FmKGVwzqq4…B4feR733`](https://nearblocks.io/txns/FmKGVwzqq4BJakXd4ifKHZ8A1h7HK4ETiP3dB4feR733) |
+| [vault-mainnet-money](../scripts/live-checks/vault-mainnet-money.md) | NEAR | 5 | [`69oUWMcN32…u2GFJGiu`](https://nearblocks.io/txns/69oUWMcN329Su1LsMffc5yTqJgT4vAZJneUyu2GFJGiu), [`FtDfFRw8GA…K9yAAJem`](https://nearblocks.io/txns/FtDfFRw8GAaHJiAN11ZY5K3f2xmoH2rnaFX3K9yAAJem), [`ATjxHXNpwb…PUFAbPAV`](https://nearblocks.io/txns/ATjxHXNpwbKLrR5PJP1uJCCKXpz7jsquR3X5PUFAbPAV), [`84x8XDXGUo…igKEsA5R`](https://nearblocks.io/txns/84x8XDXGUoLR3kgdYDiShekLqfzxetfQydQfigKEsA5R), [`eP88kSmCM2…oAmGMquA`](https://nearblocks.io/txns/eP88kSmCM2bkRL3jPY3ehpKgAuHKd1yoP59oAmGMquA) |
+| [vault-mainnet-test](../scripts/live-checks/vault-mainnet-test.md) | NEAR | 4 | [`HtFfu1gbhP…QB49iiiY`](https://nearblocks.io/txns/HtFfu1gbhPxKv1QyBFBbbRRAGenYgdSVzwagQB49iiiY), [`ERpxJfsoLD…CjPGFhsF`](https://nearblocks.io/txns/ERpxJfsoLDhVccizgpzdaLS3mhmke3LrJhTjCjPGFhsF), [`FGnMBPSgWB…AT21s9r2`](https://nearblocks.io/txns/FGnMBPSgWBwYKia3cbAmcEHRjurZiBXhU6j7AT21s9r2), [`9sZPrcGpNa…Fn4ZrNRt`](https://nearblocks.io/txns/9sZPrcGpNau1fN25R9Xqdu9iKGMkRQvCSiHwFn4ZrNRt) |
+| [pool-sol-deploy-mainnet](../scripts/live-checks/pool-sol-deploy-mainnet.md) | Solana | 8 | [`5wGExGurax…8EM7uQPM`](https://solscan.io/tx/5wGExGuraxHFnnnobPR85vr3fBu7mW6BEgrpZWotwMZupKtdRSUj1jBExFbm7wiFeeHR8tqUUbZMAfnH8EM7uQPM), [`4J83SCt18C…XWQb1vkU`](https://solscan.io/tx/4J83SCt18CSJW4bVGKYsESAXmhqmCmsomnDnTaQrJpuv6H2sFBgHpkEzXxgvUr6LYycwhQG6cLuD8k17XWQb1vkU), [`5EtRdefacX…4ZuqpZvg`](https://solscan.io/tx/5EtRdefacXzZDpWqqaj1TQPpehoBZocvgcq7oKxn3bFvjtRvKkar9mfYH1XKbLkjfcroxGVeCWGsntuD4ZuqpZvg), [`2MDSvHYtWp…bVVHXtHG`](https://solscan.io/tx/2MDSvHYtWpu3ZFguZV4ySxWXHcZWjo6Jc2EYUoV8nWhtN8NQAYc8sdpo6nAuJkEdfphjDCXFivzAN9p5bVVHXtHG), [`23QX9RfcjL…GREVzTEb`](https://solscan.io/tx/23QX9RfcjLb271ZPWCStKA6mWoQA86o9HDSoKq727q8qRPpoKYnPiUotGJVQm4azQpBGqTayLB1UjhQpGREVzTEb), [`2gwDsZqzGQ…BD1Qemp1`](https://solscan.io/tx/2gwDsZqzGQnUsY5fDVujjcmgfdPzyaPKJRtVUSePTkJBkVHYNwQxau9c4vgvu8zwvL6SaXhwxFKFEacnBD1Qemp1), [`2XdxFtwv6h…QDu6S8kU`](https://solscan.io/tx/2XdxFtwv6hvgGreUGVKfwN5AdvCsvsHkErThG1pg86G732DqRgMLmHNi2mjMU6PUzanU4SZvsxsEhZvpQDu6S8kU), [`3CUZ2CpNwk…KCDJHTRb`](https://solscan.io/tx/3CUZ2CpNwk8DabVSSD5T62AFJ2JWy8rdU1E8A2ZWMZsYW6RLbRgNXzpQPGHsiWd6s2beD7NRt8hsJUp2KCDJHTRb) |
+| [pool-sol-mainnet-run](../scripts/live-checks/pool-sol-mainnet-run.md) | Solana | 10 | [`4kNHqZat17…pQs8scLF`](https://solscan.io/tx/4kNHqZat17nVu9Rg6NZZhBTL6BUJ4VbDsrGb9k5fXQs7rkfsrADKFuYnE618xFXp5H8udgd2wq8aJysmpQs8scLF), [`5Qn5LtHiu7…VGXtvB8Q`](https://solscan.io/tx/5Qn5LtHiu7xb7irPaPTSpcwPoreem1toPSYT3XvVBPDfH42CU3hMWmKP3AMXg3ag3qdoQb3Rnxrfo6dXVGXtvB8Q), [`32CSJ1GSPr…AXLu7Kwn`](https://solscan.io/tx/32CSJ1GSPrJScgPxyF41zuszLjosxgiDbeFWFRM5p7G6DzbxHjeFWihPjqhQqCLobXhkn3aqBD6WxmenAXLu7Kwn), [`Kdke7g2dHG…SWVHXsEP`](https://solscan.io/tx/Kdke7g2dHGa3q1FKHtFKnArybGBJRD4KU3A112iMMZatVk1jDdFgC9BBX9TkzmkbzJU34AkQUJtD744SWVHXsEP), [`3sPawpfvAd…iAMaDoQr`](https://solscan.io/tx/3sPawpfvAdoYLHa9i5MRKZVv6xEGLCmRXjJTKxEMHpNYqPMSX22QZ6eyLbdyJDNA7T6TTpWWaKamEA1LiAMaDoQr), [`3aUiLLSmj1…EjQr52bd`](https://solscan.io/tx/3aUiLLSmj1oHFot7bPLp1VewwqHZ1eNsJnTyZvLnDFKyubfqmwK6iCq7AsSXmt497Vjx8o6AxwEbRzxeEjQr52bd), [`6izGizBmwF…78jiTL8Z`](https://solscan.io/tx/6izGizBmwFmVf5HxwGtpziWLnCxWNm8kP1xLVC7LspNwHJHAhQZeWdjMQ9peq7nFVYBiZsD9CuJa7Uj78jiTL8Z), [`4HSwogMa6r…xyZANZd3`](https://solscan.io/tx/4HSwogMa6ru6c61XhXgb1zxisrFaiPWTuWmhRDsxAaW8PwsWDJNHK9ydPq7GjGW28KC2vKiyKarAqKmfxyZANZd3), [`5o9u2hP8d2…zNAhTYyF`](https://solscan.io/tx/5o9u2hP8d2Ctp2qugXoZnoqGW6u5M8pvd6RDDdvizAqhUVC9k1syg5Hs8btNasdvtpKVdKoP79PrU9JTzNAhTYyF), [`o9wLjGp3LG…r4izee3g`](https://solscan.io/tx/o9wLjGp3LGqYSc4cuyZPERy6pDuiPETGxuEvCvj6RpSWD3R6j6BpJNgyNDsWkwa92R2Rx2qLAgRVyTGr4izee3g) |
+| [pumpswap-table-mainnet-pin](../scripts/live-checks/pumpswap-table-mainnet-pin.md) | Solana | 10 | [`58Z69tiMh8…u6oCgUR7`](https://solscan.io/tx/58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7), [`2GRmRhU6Mk…zRyWnsWS`](https://solscan.io/tx/2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS), [`4NQadC4hFe…AFj5S1xr`](https://solscan.io/tx/4NQadC4hFeGY14DXKrDHw3QY5GKQL7xRp4SGwCmSTw4zRBFkAXLsAbw9CJQozpjNFafwP8SzbFY48V7pAFj5S1xr), [`5xBH4zpo24…JvSgLbBm`](https://solscan.io/tx/5xBH4zpo24UwRgjY13Zs5cH8Bn4AwKqst4rrfa2JjCMucTBZdEVJrQr3SFbd5BsZWoJUdaS7VNst77D8JvSgLbBm), [`4UWVrgfm9k…NHk9UfRo`](https://solscan.io/tx/4UWVrgfm9kgEBxLcE9Vn4NA9gbAdqqCF5VWQLSbDj4eWZFuxnP321myARtXCPSBYkGpgFbaRzz8hebTTNHk9UfRo), [`4VpWWMPccr…gf2ZQiER`](https://solscan.io/tx/4VpWWMPccrREqnANHJy4GVBe4ydhon1NTeD3Xv67ojdBAvSfZjcadespQvUKKXQ35XAQJ73VAdkDEyM3gf2ZQiER), [`2DDSKPpTRk…gK8VCH57`](https://solscan.io/tx/2DDSKPpTRkLLfB5zReYcPYLTRxzy5WcdmFYffcg5CBfswuc1EMuWGZs7wNe9aXdAezSB3TWNEL3HY4YggK8VCH57), [`BdPRSKQmqj…J1EwGpzm`](https://solscan.io/tx/BdPRSKQmqjYf3gyqREvS7FwVGvKDQsrNtzFCZX7AzE42rMVZ64WCK2HWnP2QMbnfBzcx6stbj7pw3oBJ1EwGpzm), [`3EtCjX987N…oueAThf7`](https://solscan.io/tx/3EtCjX987N8rWcB4zpZEFedTuCBa5zb6Um8hfGU9x4XRitaoPnJF4xru7ZinmJ69cLgYiBDEWnq4B4FhoueAThf7), [`2y62aNsQH2…NBfLRddV`](https://solscan.io/tx/2y62aNsQH2UvWw8pBoZZ9bkXacmKGqutrJPJ1SscNuLkjFsZgDJS6kd7oeWVmGQBtkaV5wBEUxPgDkUrNBfLRddV) |
+| [pool-evm-deploy-mainnet](../scripts/live-checks/pool-evm-deploy-mainnet.md) | Base | 7 | [`0x35e8186a…506febb0`](https://basescan.org/tx/0x35e8186a5ecb572c4fd92fa6cc400aa285764e43da46603888d460aa506febb0), [`0x2e0cba4b…c89b23c7`](https://basescan.org/tx/0x2e0cba4bfa2c24ae138ade564a027c5d83943340153dec0ad2e278c8c89b23c7), [`0xc22297be…a50aa6f6`](https://basescan.org/tx/0xc22297be884ee296ac260de7e88df8ff17ecc479417cd9b65ced0e10a50aa6f6), [`0x5d52f735…dba57b5f`](https://basescan.org/tx/0x5d52f7359745f87a2e8b288162d21728fea5a2b60a4065c3d09ba579dba57b5f), [`0xa3e8cc98…21f6689d`](https://basescan.org/tx/0xa3e8cc986d5b3f04e5fad91f8cbac395b74e97bf4f644840e451a30e21f6689d), [`0x300a42cf…127d86dc`](https://basescan.org/tx/0x300a42cfe561ee67c0ebbc0cd6eccbe1dbc33686b0e99ec7bfdc22e8127d86dc), [`0x1efa0eb8…21474f73`](https://basescan.org/tx/0x1efa0eb8f8c804d271a37ac41733fdc16a4ed71a4b0cefef78f5ad2721474f73) |
+| [pool-evm-deploy-mainnet](../scripts/live-checks/pool-evm-deploy-mainnet.md) | Robinhood Chain | 7 | [`0x431985c4…6d14ef6d`](https://robinhoodchain.blockscout.com/tx/0x431985c4749f85782a3c2623d1909ec86c1cf3bf3af838da5740ccbd6d14ef6d), [`0xb5b5c6c0…9fa88176`](https://robinhoodchain.blockscout.com/tx/0xb5b5c6c0403e94daf9cf37e5b61f8d6dc9af41d929a3ecf732898e0d9fa88176), [`0x3e187ea0…aad36efb`](https://robinhoodchain.blockscout.com/tx/0x3e187ea0166d2be18b88912235e2322ed93a90876421df654d79e300aad36efb), [`0xe938fdad…4ba30277`](https://robinhoodchain.blockscout.com/tx/0xe938fdadaaa43b57ab155ea27fe99ae94d6e498acd308f28868c1f684ba30277), [`0x13be5d3c…0c92bfbf`](https://robinhoodchain.blockscout.com/tx/0x13be5d3cde084626d25587072e8fd7a47dd532f374385f35af92a1b80c92bfbf), [`0x5fc1bf0d…e9a92a5a`](https://robinhoodchain.blockscout.com/tx/0x5fc1bf0d738c144809c639ceb2b4a0e08be310a4e9905366f5d2798ee9a92a5a), [`0x978226e3…e120bac5`](https://robinhoodchain.blockscout.com/tx/0x978226e35764b437cd542af8de4903e25604db20a8be33af5f004204e120bac5) |
+
+Count them by chain:
+
+```sh
+awk '/^## Mainnet/{f=1;next} /^## /{f=0} f && /^\| \[/' docs/proofs.md | cut -d'|' -f3 | sort | uniq -c
+```
+
+A passing run prints `7  Base`, `14  NEAR`, `7  Robinhood Chain` and `28  Solana`, the README's 56.
+
+The three private buys of the Solana pool run (rows 2, 5 and 8 of [its record](../scripts/live-checks/pool-sol-mainnet-run.md)) are the v2 buy on mainnet: one transaction in which the pool checks the proof, pays a wallet that has never been used, and that wallet buys. Read W below shows each of those wallets had no transaction before its buy.
+
+## Four reads you'll need below
+
+**Read V, the vault's state**, on two public NEAR RPCs (the README's script, without its comments):
+
+```sh
+VAULT=vault.confidential.unrlzd.near
+USDC=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1
+for RPC in https://rpc.mainnet.fastnear.com https://near.drpc.org; do
+  q() { curl -s "$RPC" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":$1}"; }
+  q "{\"request_type\":\"view_access_key_list\",\"finality\":\"final\",\"account_id\":\"$VAULT\"}" | jq -c .result.keys
+  q "{\"request_type\":\"view_code\",\"finality\":\"final\",\"account_id\":\"$VAULT\"}" | jq -r .result.hash
+  q "{\"request_type\":\"call_function\",\"finality\":\"final\",\"account_id\":\"$VAULT\",\"method_name\":\"totals\",\"args_base64\":\"e30=\"}" | jq -r '.result.result | implode'
+  q "{\"request_type\":\"call_function\",\"finality\":\"final\",\"account_id\":\"$USDC\",\"method_name\":\"ft_balance_of\",\"args_base64\":\"$(printf '{"account_id":"%s"}' "$VAULT" | base64)\"}" | jq -r '.result.result | implode'
+done
+```
+
+**Read C, the vault's code**: what the running code can call, and what it lets anyone call.
+
+```sh
+for RPC in https://rpc.mainnet.fastnear.com https://near.drpc.org; do RPC=$RPC node -e 'fetch(process.env.RPC,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"query",params:{request_type:"view_code",finality:"final",account_id:"vault.confidential.unrlzd.near"}})}).then(r=>r.json()).then(j=>{const m=new WebAssembly.Module(Buffer.from(j.result.code_base64,"base64"));console.log(JSON.stringify(WebAssembly.Module.imports(m).map(i=>i.name).filter(n=>n.startsWith("promise_batch_action"))));console.log(WebAssembly.Module.exports(m).filter(e=>e.kind==="function").map(e=>e.name).join(" "))})'; done
+```
+
+**Read S, the Solana pool's upgrade authority**, on two public Solana RPCs:
+
+```sh
+for RPC in https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com; do
+  PD=$(curl -s $RPC -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":["EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",{"encoding":"jsonParsed"}]}' | jq -r .result.value.data.parsed.info.programData)
+  curl -s $RPC -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccountInfo\",\"params\":[\"$PD\",{\"encoding\":\"jsonParsed\"}]}" | jq -c '.result.value.data.parsed | {type, authority: .info.authority}'
+done
+```
+
+**Read W, the wallets behind the three mainnet buys**: for each buy, the wallet that signed it next to the fee payer, and whether the buy is the oldest transaction that wallet has.
+
+```sh
+RPC=https://api.mainnet-beta.solana.com
+for TX in 5Qn5LtHiu7xb7irPaPTSpcwPoreem1toPSYT3XvVBPDfH42CU3hMWmKP3AMXg3ag3qdoQb3Rnxrfo6dXVGXtvB8Q 3sPawpfvAdoYLHa9i5MRKZVv6xEGLCmRXjJTKxEMHpNYqPMSX22QZ6eyLbdyJDNA7T6TTpWWaKamEA1LiAMaDoQr 4HSwogMa6ru6c61XhXgb1zxisrFaiPWTuWmhRDsxAaW8PwsWDJNHK9ydPq7GjGW28KC2vKiyKarAqKmfxyZANZd3; do
+  W=$(curl -s $RPC -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getTransaction\",\"params\":[\"$TX\",{\"encoding\":\"jsonParsed\",\"maxSupportedTransactionVersion\":0}]}" | jq -r '[.result.transaction.message.accountKeys[] | select(.signer)][1].pubkey')
+  curl -s $RPC -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getSignaturesForAddress\",\"params\":[\"$W\"]}" | jq -r --arg w "$W" --arg tx "$TX" '"\($w): first transaction is the buy: \(.result[-1].signature == $tx)"'
+  sleep 2
+done
+```
+
+## The claims
+
+| Claim in the README | Proven in | Command | A passing run prints |
+|---|---|---|---|
+| The vault has no access key: ask any NEAR RPC and you get `[]` | [contracts/vault/deployments/mainnet-v1.json](../contracts/vault/deployments/mainnet-v1.json) | Read V, line 1 | `[]` on both RPCs |
+| The code running is the code published here | `code_hash` in [mainnet-v1.json](../contracts/vault/deployments/mainnet-v1.json), the reproducible build of commit `e0623bf3` | Read V, line 2 | `C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u` on both RPCs |
+| The vault holds every dollar it owes, as its own USDC balance and not inside NEAR Intents | `totals()` in `contracts/vault/src/lib.rs`; the USDC contract's own balance for the vault | Read V, lines 3 and 4 | `{"deposited":"11879349","spent":"6403003","returned":"0"}` and `"5476346"` on both RPCs: deposited less spent less returned equals the balance. The numbers move as people deposit; the two lines always agree |
+| No owner, no upgrade path, no pause, no setter; the vault can't add a key, redeploy or delete itself | The vault's code on chain; `contracts/vault/tests/s01.rs` holds the same rule in the sandbox | Read C | `["promise_batch_action_transfer","promise_batch_action_function_call_weight"]` (it can only pay and call), then `config contract_source_metadata deposits ft_on_transfer is_known_label_root is_known_state_root label_tree labels leaves on_payout ragequit settle spends state_tree storage_prepay totals withdraw`, on both RPCs: no key, deploy or delete call, and no owner, pause or setter method |
+| Money leaves only for a proof your device makes, and only to the accounts that proof names | `contracts/vault/src/withdraw.rs`, `contracts/vault/src/tests.rs` | `cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml` (needs Rust 1.96.0) | `test result: ok. 142 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`, and no `FAILED` line in the later suites |
+| The Solana pool has no upgrade authority, so nobody can change it | [contracts/pool-solana/deployments/mainnet.json](../contracts/pool-solana/deployments/mainnet.json) | Read S, or `node scripts/live-checks/pool-sol-deploy-mainnet.mjs` | `{"type":"programData","authority":null}` on both RPCs; the live check ends `live-check pool-sol-deploy-mainnet: PASS` |
+| The Base and Robinhood Chain pools have no owner, no proxy and no pause | The source in [contracts/pool-evm/src/](../contracts/pool-evm/src/) has no owner, role, upgrade or pause; the deployed code is checked against the build in [contracts/pool-evm/deployments/](../contracts/pool-evm/deployments/) | `node scripts/live-checks/pool-evm-deploy-mainnet.mjs` | `PrivacyPoolSimple has no owner(): reverts` and `PrivacyPoolSimple's EIP-1967 admin slot is 0` on two RPCs per chain, the same for each contract beside it, ending `live-check pool-evm-deploy-mainnet: PASS` |
+| Every buy comes from a wallet that has never been used, paid from a pool every user shares | [scripts/live-checks/pool-sol-mainnet-run.md](../scripts/live-checks/pool-sol-mainnet-run.md), rows 2, 5 and 8: three buys on Solana mainnet, each paid by the pool to a new wallet | Read W | `TcYd32AdSHY5zuqSK2a7PvkDv8FQvafyTs2uS1ztkZX: first transaction is the buy: true`, then the same `true` for `8e8RsnpnL6Toqsa2Q1YPLvopDqPa3HFTdwEikCkqpQ7p` and `5Emfj9RxtcjtvDDe6CP1a2RWiG6tfURaEevb7L2m25E8` |
+| Every wallet comes from your 12 words by the published standards, so any wallet that imports a private key opens it | `packages/wallet/src/derive/keys.ts`, against the published vectors in `packages/wallet/test/vectors/a8.json` | `node --test packages/wallet/test/derive.test.ts` | `✔ WU-03 every fresh wallet W on all six tags: info, path and address, byte for byte`, then `ℹ tests 21` and `ℹ fail 0` |
+| Money can already leave to any address | Row 10 of [the Solana pool run](../scripts/live-checks/pool-sol-mainnet-run.md), a withdrawal to the address typed, and [the vault's money run](../scripts/live-checks/vault-mainnet-money.md), a withdrawal to a NEAR account | `node scripts/ci/money-gate.mjs --all` | the money gate line in the row on the 56 transactions below |
+| The app moves money in standard sizes | [packages/wallet/src/pool/ladder.ts](../packages/wallet/src/pool/ladder.ts) | `node --test packages/wallet/test/pool-ladder.test.ts` | `ℹ tests 7` and `ℹ fail 0` |
+| A Solana buy from a wallet readied ahead (v1) filled in 1.2 s median, 3.3 s p95, on a phone; the proof takes 8.3 s on an iPhone | [docs/performance.md](performance.md#solana-phone-2026-10-26), from `perf/runs/solana-phone-2026-10-26.json` and `perf/runs/proof-phone-2026-10-26.json`, each fill linked to Solscan | `node scripts/perf-table.mjs --check` | `perf-table: README.md and docs/performance.md match 14 run records` |
+| A private buy on Solana fits one transaction | `packages/kit/test/solana-pool-buy.test.ts`, and the mainnet buys in the pool run | `node --test --test-name-pattern="size table" packages/kit/test/solana-pool-buy.test.ts` | `size tag3 pump     cashback no  compressed tip no  1010 B` up to `size tag3 pumpswap cashback yes compressed tip yes 1201 B`, all under Solana's 1,232-byte limit, then `ℹ fail 0` |
+| This build trades pump.fun and PumpSwap coins on Solana, Uniswap pools on Base and Robinhood Chain, and Rhea pools on NEAR | `packages/kit/src/trade/solana/pool-buy.ts:3`, the Uniswap v3 and v4 adapters in [contracts/pool-evm/deployments/](../contracts/pool-evm/deployments/), `packages/kit/src/near/rhea.ts` | `node scripts/live-checks/pool-evm-deploy-mainnet.mjs` for the adapters the kit pins | `PASS the kit's pins are the record's` for Base and for Robinhood |
+| Orders are not in this build; the app shows Coming soon | `apps/terminal/src/routes/Screen.tsx:62-63`; the helper has no orders route | `curl -s https://ct-api.unrealized.trade/v1/health \| jq -c .parts` | `{"proxy":"up","relay":"up","intents":"up","delegate":"up","orders":"down","log":"down"}` |
+| The exit tool brings money home from the NEAR vault and the Solana pool with only the 12 words and public RPCs | `packages/exit/src/bin.ts:69-72` | `node scripts/ci/exit-no-server.mjs` | `exit-no-server: OK (42 file(s) under packages/exit/ read)`: no address or helper import of ours |
+| The terminal calls only the kit's public entry, and an import past it fails | [packages/kit/src/index.ts](../packages/kit/src/index.ts), `.dependency-cruiser.cjs`, `scripts/ci/kit-reach.mjs` | `pnpm run check:imports`, then `node --test scripts/ci/deep-import.test.mjs` | `✔ no dependency violations found` and `kit-reach: OK`, then `ℹ tests 44` and `ℹ fail 0` |
+| The kit is not on npm yet | [packages/kit/package.json](../packages/kit/package.json) | `npm view @blindfill/kit` | `npm error 404 Not Found - GET https://registry.npmjs.org/@blindfill%2fkit - Not found` |
+| The example agent runs a full cycle through the kit in 292 lines across 4 files | [examples/agent/](../examples/agent/) | `wc -l examples/agent/*.mjs examples/agent/*.js` | `292 total` |
+| Every package's tests pass from a fresh clone | Each package's `test` script | `pnpm -r --if-present --no-bail run test` | `ℹ fail 0` in every package's summary, and exit 0 |
+| 56 mainnet transactions (NEAR 14, Solana 28, Base 7, Robinhood Chain 7), each read back on two public RPCs | [docs/proofs.md](proofs.md), and each record in [scripts/live-checks/](../scripts/live-checks/) | The count under the transactions table above, then `node scripts/ci/money-gate.mjs --all`, which reads all 641 recorded transactions, test networks included, on public RPCs that rate-limit, so it runs for over half an hour | a `money-gate:` line per transaction read, ending `money-gate: PASS (56 record(s) read, <n> tx read(s))` |
+| 585 earlier transactions on test networks are listed too | [docs/proofs.md](proofs.md#earlier-runs-on-test-networks-585-base-sepolia-154-near-testnet-97-robinhood-testnet-119-solana-devnet-215) | `awk '/^## Earlier runs/{f=1} f && /^\| \[/' docs/proofs.md \| wc -l` | `585` |
+| A live check per change, replayed against its recorded good and bad answers | [scripts/live-checks/](../scripts/live-checks/) | `node --test scripts/live-checks/*.test.mjs` | `ℹ fail 0` (3,232 tests on 15 November) |
+| Every CI gate refuses its planted case | [scripts/ci/](../scripts/ci/) | `pnpm run test:gates` | `ℹ fail 0` (1,046 tests on 15 November) |
+| No secret in the tree | [.gitleaks.toml](../.gitleaks.toml) | `gitleaks dir . --config .gitleaks.toml --redact` (needs gitleaks 8.30.1) | `no leaks found` |
+| 33 research write-ups are here | [research/README.md](../research/README.md) | `ls research/proofs \| wc -l` | `33` |
+| The Pillow Auditors review found 0 Critical, 0 High, 0 Medium, 5 Low and 8 Info, and every Low is fixed on main | [research/audits/2026-11-07-pillow/](../research/audits/2026-11-07-pillow/README.md), with the report as delivered | `for c in 0beea09b0 7d70c9fd2 c7778df0e c6180177c 6d91e8511; do git merge-base --is-ancestor $c main && echo "$c is on main"; done` | five lines, `0beea09b0 is on main` through `6d91e8511 is on main` |
+| The app, the signing page and the helper are live | The README's Live now table | `for u in https://confidential.unrealized.trade https://ct-app.unrealized.trade https://ct-api.unrealized.trade/v1/health; do curl -s -o /dev/null -w "%{http_code} $u\n" $u; done` | `200` for each of the three |
+| This repository's history starts with the hackathon's first commit, on 2026-11-01 | The README's Prior work section | `git log --reverse --format='%H %aI' \| head -1` | `88f2d3eac1748ad644ec52393277b9161f992b5f 2026-11-01T00:00:34Z` |
+
+Two more checks need more than a fresh clone, and we didn't rerun them for this page. The vault's code can be rebuilt byte for byte with `node contracts/vault/scripts/deploy.mjs --verify-records`, which needs Docker, Rust 1.96.0 and cargo-near 0.22.0. Its sandbox test, which sends AddKey, DeployContract and DeleteAccount to the vault and sees each refused, runs with `contracts/vault/tests/harness/run.sh --test s01`; CI's `vault-sandbox` job runs the vault's sandbox tests on every merge queue group that touches a file they read.

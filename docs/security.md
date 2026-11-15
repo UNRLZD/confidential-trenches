@@ -16,13 +16,13 @@ Three things nobody can see, us included:
 - your keys, which exist only on your device;
 - your 12 words, which never leave it either.
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="img/who-sees-what-dark.svg"><img alt="Who sees what. Nobody can see which deposit paid for a trade, your keys or your 12 words. Anyone watching the chains sees deposits in, standard payouts out and a new wallet buying. NEAR Intents sees each leg it carries. Our helper sees IP, time, quotes, proofs and orders it carries. The hosting sees IP and which files load. The app's own team sees what the helper sees if it looks inside the machine. None of them sees a key, and none sees which deposit a proof spends." src="img/who-sees-what-light.svg" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="img/who-sees-what-dark.svg"><img alt="Who sees what. Nobody can see which deposit paid for a trade, your keys or your 12 words. Anyone watching the chains sees deposits in, standard payouts out and a new wallet buying. NEAR Intents sees each leg it carries. Our helper sees IP, time, and the quotes, proofs and trades it carries. The hosting sees IP and which files load. The app's own team sees what the helper sees if it looks inside the machine. None of them sees a key, and none sees which deposit a proof spends." src="img/who-sees-what-light.svg" width="100%"></picture>
 
 ### Anyone watching the chains
 
 They see your wallet paying in, the amount and the time. They see the vault holding a pool, standard-size payouts leaving it, and a wallet that has never been used buying a token. They watch that wallet sell and the money go back to the vault, and they see a withdrawal land at your address with its amount and time.
 
-What they can't see is which deposit paid for which payout or trade. A proof says "one of the notes on the list is mine" and leaves it there. An order stays invisible until it fills, since a signed exit is only bytes in the order sender until it lands.
+What they can't see is which deposit paid for which payout or trade. A proof says "one of the notes on the list is mine" and leaves it there.
 
 ### NEAR Intents
 
@@ -32,19 +32,19 @@ The link between a deposit and a payout is not. That link would have to come fro
 
 ### Our helper
 
-Every request shows it an IP and a time. It sees the quotes it proxies (token, size, your fresh wallet), each proof it carries with the recipient and fee, each signed deposit it submits, and each order it stores with wallet, size and trigger price.
+Every request shows it an IP and a time. It sees the quotes it proxies (token, size, your fresh wallet), each proof it carries with the recipient and fee, each signed deposit it submits, and each signed buy or sell it sends.
 
-It never gets a key to your money, your 12 words or a note secret, which means it can't tell which deposit a proof spends. A withdrawal can't be redirected by it, because the proof fixes the recipient. An order's price and destination are out of its reach too, since both sit inside the signature.
+It never gets a key to your money, your 12 words or a note secret, which means it can't tell which deposit a proof spends. A withdrawal can't be redirected by it, because the proof fixes the recipient. A buy or sell it sends can't be changed either, since the fresh wallet signs its terms.
 
 ### The hosting
 
 The company serving our pages sees each visitor's IP, browser, the files loaded and when. It also sees that a device fetched the proving files, which every signed-in device does in the background, so the download points at no one. The company running the helper's machine sees whatever the helper sees, live.
 
-The page host never sees a wallet, a quote or an order, because those calls go to the helper and to the chains, not to the site. Neither company sees a key.
+The page host never sees a wallet or a quote, because those calls go to the helper and to the chains, not to the site. Neither company sees a key.
 
 ### The app's own team
 
-We can see what the helper sees, if one of us looks inside the running machine. We hold the vendor API keys and a small gas balance, and that's all we hold.
+We can see what the helper sees, if one of us looks inside the running machine. We hold the vendor API keys and the keys to our own gas and fee accounts; none moves a user's money.
 
 Your keys, your 12 words and your note secrets are out of our sight. We have no key that moves money, so we can't move yours, and we can't add a key to the vault, change it or pause it. Trust in our code remains in one place, the signing page, and the section on what is not hidden covers it.
 
@@ -66,7 +66,7 @@ Your device makes a proof that fixes the recipient, the fee recipient and the fe
 
 If you write your own client, two things here are yours to get right. The kit already does both, so this is only for code that reads the vault directly. The kit's own notes ([packages/kit/README.md](../packages/kit/README.md)) carry these two and the pool rules beside the calls they qualify.
 
-First, find a refund note through the spend that made it. Its precommitment won't do, because the vault doesn't reserve it, and only a deposit ever writes one (`contracts/vault/src/deposit.rs:144`). Once a withdrawal lands, a stranger can deposit 1 USDC on that refund precommitment. If the payout then bounces, two notes share one precommitment, and so one nullifier, and whichever is spent first strands the other for good. We take the note at the spend's own leaf (`packages/kit/src/vault/settle.ts:17-21`), and that rule is pinned by a test (`packages/wallet/test/note-restore.test.ts:888`; audit V-02).
+First, find a refund note through the spend that made it. Its precommitment won't do, because the vault doesn't reserve it, and only a deposit ever writes one (`contracts/vault/src/deposit.rs:144`). Once a withdrawal lands, a stranger can deposit 1 USDC on that refund precommitment. If the payout then bounces, two notes share one precommitment, and so one nullifier, and whichever is spent first strands the other for good. We take the note at the spend's own leaf (`packages/kit/src/vault/settle.ts:17-21`), and that rule is pinned by a test (`packages/wallet/test/note-restore.test.ts:979`; audit V-02).
 
 Second, a USDC transfer event doesn't prove a payout arrived. NEAR keeps the logs of a receipt that failed, so when the recipient's transfer runs and the fee's transfer then fails, the logs still show USDC going to someone who was never paid. Read the vault's own `payout` event instead (`contracts/vault/src/payout.rs:150`), which says what was delivered and what came back, or the spend's status in `spends()` (audit I-1).
 
@@ -92,7 +92,7 @@ Each pool has its own crowd. A new chain's pool starts empty, so its cover is th
 
 ### Timing and amount can hint
 
-Anyone who reads the chain sees money go into the vault and standard-size payouts come out, and could try to match them by when and how much. Standard sizes narrow that, and so does readying wallets ahead of time. We don't put a number on how much. A buy from a set of wallets also shows several fresh wallets buying the same token in the same second, which watchers can group into one position and size.
+Anyone who reads the chain sees money go into the vault and standard-size payouts come out, and could try to match them by when and how much. Standard sizes narrow that. We don't put a number on how much. A buy from a set of wallets also shows several fresh wallets buying the same token in the same second, which watchers can group into one position and size.
 
 ### Our helper sees your IP and the time
 
@@ -100,7 +100,7 @@ What holds is narrower than "no one sees". The helper can't tell which deposit a
 
 ### A broken-in helper can hold things back
 
-It can drop or delay a quote, a withdrawal or an order, and withhold exits while your app is closed, so a stop may not fire. Redirecting money is the thing it can't do. If it simply stops, the exit tool brings your money home from the 12 words and public RPCs alone.
+It can drop or delay a quote, a buy, a sell or a withdrawal. Redirecting money is the thing it can't do. If it simply stops, the exit tool brings your money home from the NEAR vault and the Solana pool with the 12 words and public RPCs alone.
 
 ### The signing page is code you load from a server
 
@@ -118,4 +118,4 @@ These are read-only reads against two public NEAR RPCs. They need no account, no
 2. The published code is the running code. `view_code` returns the hash of the deployed code. It must equal `code_hash` in the vault's deploy record, [contracts/vault/deployments/mainnet-v1.json](../contracts/vault/deployments/mainnet-v1.json). `node contracts/vault/scripts/deploy.mjs --verify-records` rebuilds the vault at the commit that record names and fails unless the build has that hash. It needs Docker, Rust 1.96.0 and cargo-near 0.22.0.
 3. The vault holds what it owes. `totals()` on the vault reports what it owes. `ft_balance_of` on the USDC token for the vault's account must report the same amount.
 
-Point it at any keyless account today and line 1 passes. Point it at the vault once it's deployed and all three should. If any line fails, the vault isn't what we say it is.
+Point it at any keyless account and line 1 passes. Point it at the vault and all three pass. If any line fails, the vault isn't what we say it is.

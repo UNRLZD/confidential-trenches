@@ -2,20 +2,20 @@
 
 Private trading on any chain, at the speed of a tap.
 
-14 November 2026 · Blindfill is the engine under [Confidential Trenches](https://confidential.unrealized.trade). This paper describes the v2 design and says, part by part, what runs on mainnet today. Also as a [PDF](litepaper.pdf).
+15 November 2026 · Blindfill is the engine under [Confidential Trenches](https://confidential.unrealized.trade). This paper describes the v2 design and says, part by part, what runs on mainnet today. Also as a [PDF](litepaper.pdf).
 
-Every number below carries a tag. **Measured** means a recorded run or a read on chain, linked from [performance.md](performance.md) or [proofs.md](proofs.md). **Estimate** means arithmetic on measured parts. **Open** means not yet run.
+Every number below carries a tag. **Measured** means a recorded run, a test or a read on chain, and each one links to where it comes from: [performance.md](performance.md), [proofs.md](proofs.md), a mainnet transaction, a test or a research write-up. **Estimate** means arithmetic on measured parts. **Open** means not yet run.
 
 ## In one paragraph
 
-Blindfill puts a pool with no keys on every chain you trade on. Each pool holds money as private notes and pays out only against a proof made on your own device. A buy is proved before you tap and settles in one transaction from a wallet that has never been used. A sell drops the money back into the pool. NEAR Intents moves every dollar that changes chain, and a vault on NEAR with no access key is the cash home. Nobody can take, freeze or change the money: no pool has an admin, an upgrade path or a pause, and we hold no key to any of them.
+Blindfill puts a pool with no keys on every chain you trade on. Each pool holds money as private notes and pays out only against a proof made on your own device. A buy is proved before you tap and, on Solana, Base and Robinhood Chain, settles in one transaction from a wallet that has never been used. A sell drops the money back into the pool. NEAR Intents moves every dollar that changes chain, and a vault on NEAR with no access key is the cash home. Nobody can take, freeze or change the money: no pool has an admin, an upgrade path or a pause, and we hold no key to any of them.
 
 | | |
 |---|---|
-| **111,218** compute units | to check a real proof on Solana (measured) |
-| **919 to 1,201 bytes** | one private buy on Solana, under the 1,232-byte limit (measured) |
+| **123,255** compute units | for the Solana pool to check a real proof and pay out, in a [mainnet release](https://solscan.io/tx/o9wLjGp3LGqYSc4cuyZPERy6pDuiPETGxuEvCvj6RpSWD3R6j6BpJNgyNDsWkwa92R2Rx2qLAgRVyTGr4izee3g) (measured) |
+| **1,012 and 1,169 bytes** | the private buys on Solana mainnet, on pump.fun and PumpSwap, under the 1,232-byte limit ([the run](../scripts/live-checks/pool-sol-mainnet-run.md), measured) |
 | **8.3 s** | to make a proof on an iPhone, in the background, never at the tap (measured) |
-| **1.2 s** | median tap to filled for a Solana buy on a phone, 3.3 s at p95, 5 of 5 filled (measured) |
+| **1.2 s** | median tap to filled for a Solana buy from a wallet readied ahead, v1's way, on a phone, 3.3 s at p95, 5 of 5 filled (measured); the v2 buy is not timed on mainnet yet |
 | **56** | mainnet transactions on record, each read back on two public RPCs ([proofs.md](proofs.md)) |
 
 ## 1. The problem
@@ -32,9 +32,9 @@ v1 kept the private crowd in one place: a vault on NEAR. The coins people want s
 
 That crossing is the slow part, and it is public.
 
-- The step that fills a new wallet took **43.3 s** on chain on 1 November 2026 (measured). Since 27 October every 1Click swap runs through NEAR's private shard, which adds a shield and an unshield to each leg; runs on 19 October, before that change, took about 21 s.
-- A first buy after a deposit took about **53 s** end to end (measured, the sum of the legs).
-- Nothing faster leaves NEAR today. Relay, the fastest bridge we tested, served 59 chains when we read its list, and none of them was NEAR (measured). 1Click has no fast option.
+- The step that fills a new wallet took 21.1 s and 22.7 s on 19 October and **38.9 s and 39.0 s** on 26 October 2026 ([performance.md](performance.md#solana-intents-out-2026-10-26), measured).
+- So a buy tapped right after a deposit waited about 40 s for its wallet, on top of the swap (estimate, from those legs).
+- Nothing faster leaves NEAR today. Relay, the fastest bridge we tested, serves no NEAR ([relay-fill](../research/proofs/relay-fill/RESULT.md), measured). 1Click has no fast option.
 - Every shortcut to a few seconds either linked the deposit to the new wallet on chain or put a money key on our server. Both break the rule.
 
 So v1 could be fast by readying wallets ahead of time, or private, but holding both at once meant holding money in wallets outside the crowd. v2 stops crossing at the tap and puts a pool where the coins are.
@@ -65,19 +65,19 @@ The pool approves every deposit itself, in the same call that records it. Privac
 
 ### One EVM contract for every EVM chain
 
-The Base and Robinhood Chain pools are the same contract. Another EVM chain takes the same code when it has three things, which Base and Robinhood Chain both pass (measured):
+The Base and Robinhood Chain pools are the same contract, deployed on both ([proofs.md](proofs.md)). Another EVM chain takes the same code when it has three things, as Base and Robinhood Chain do:
 
-- the standard pairing check at its standard price (EIP-1108), so the proof verifies. On Robinhood Chain it costs 142,137 gas, read on two RPCs;
+- the standard pairing check at its standard price (EIP-1108), so the proof verifies;
 - EIP-7702, so a sell and its deposit back fit one transaction (without it, a sell takes two);
 - a NEAR Intents route, so money can come in and leave.
 
 ### The Solana pool
 
-The Solana pool is a port of the NEAR vault's Rust: the same field and tree code, the same scope, label and context, the same withdraw and deposit checks and the same test vectors. Checking a real proof costs 111,218 compute units (measured). Every past root is kept, so no proof goes stale and nobody can make one go stale; on Solana that costs 162,560 lamports per root (measured).
+The Solana pool is a port of the NEAR vault's Rust: the same field and tree code, the same scope, label and context, the same withdraw and deposit checks and the same test vectors. Checking a real proof and paying out took the pool 123,255 compute units in a [mainnet release](https://solscan.io/tx/o9wLjGp3LGqYSc4cuyZPERy6pDuiPETGxuEvCvj6RpSWD3R6j6BpJNgyNDsWkwa92R2Rx2qLAgRVyTGr4izee3g) (measured). Every past root is kept, so no proof goes stale and nobody can make one go stale; the call that adds a root pays the rent for it.
 
 ## 4. How money moves
 
-**Deposit.** From a wallet on the same chain, one transaction into the pool. From any other chain, NEAR Intents delivers to a one-time wallet whose key is on your device, and that wallet deposits for you. 1Click quoted 17 to 49 s for these legs and delivered at a median of 2.0 times its quote (measured). Your first proof is made while the deposit travels.
+**Deposit.** From a wallet on the same chain, one transaction into the pool. From any other chain, NEAR Intents delivers to a one-time wallet whose key is on your device, and that wallet deposits for you. NEAR Intents' legs took 21.1 to 41.9 s in our recorded runs ([performance.md](performance.md), measured). Your first proof is made while the deposit travels.
 
 **Buy.** This is the part v2 rebuilt.
 
@@ -85,15 +85,17 @@ The Solana pool is a port of the NEAR vault's Rust: the same field and tree code
 2. *At the tap.* W signs one transaction. The pool checks the proof and that W signed, marks the chunk spent and pays W, and in the same transaction W buys the token. The helper adds the fee and sends it. It cannot change a byte without breaking W's signature.
 3. *After.* Your device makes the next proof from what is left. Whatever W did not spend waits in W for the sell.
 
-One private buy on Solana is 919 to 1,201 bytes with W as a signer, under the 1,232-byte limit (measured). On Base the gas for one private buy comes to about $0.011 to $0.015 (estimate, at measured gas use and the gas price of the day).
+On NEAR the vault plays the pool's part: it pays W, and W then buys on Rhea, in two transactions.
+
+One private buy on Solana is 1,010 to 1,201 bytes with W as a signer in the kit's size test (`packages/kit/test/solana-pool-buy.test.ts`), and the private buys on mainnet so far were 1,012, 1,012 and 1,169 bytes ([the run](../scripts/live-checks/pool-sol-mainnet-run.md)), all under the 1,232-byte limit (measured). On Base the gas for one private buy comes to about $0.011 to $0.015 (estimate, at measured gas use and the gas price of the day).
 
 **Sell.** W sells the token and deposits everything back into the pool under a new note, in one transaction it signs itself. No proof is needed. The money is private again the moment it lands. On Base and Robinhood Chain this runs through EIP-7702.
 
 **Move between chains.** A move from the Solana pool to the Base pool goes pool, NEAR Intents, NEAR vault, NEAR Intents, pool. Each NEAR Intents leg is public as a pair, since anyone can read its status, so the stop in the NEAR vault is what keeps your Solana money and your Base money from being tied together. About 50 to 100 s, never at a tap (estimate).
 
-**Out.** A withdrawal goes from any pool to any address, or through NEAR Intents to any chain it reaches: 210 tokens on 38 chains on 1Click's list when we read it on 2 November (measured).
+**Out.** A withdrawal goes from any pool to any address, or through NEAR Intents to any chain it reaches: 231 tokens on 39 chains on [1Click's list](https://1click.chaindefuser.com/v0/tokens) when we read it on 15 November (measured).
 
-**Out with every server off.** The exit tool (`packages/exit`) brings money home with only the 12 words and public RPCs. It reads the vault's lists from two public NEAR RPCs that must agree byte for byte, rebuilds your notes from public data, makes the proof and submits the withdrawal, with no helper in the path. A CI check refuses any address or helper import of ours inside it.
+**Out with every server off.** The exit tool (`packages/exit`) brings money home from the NEAR vault and the Solana pool with only the 12 words and public RPCs. For each, it reads the lists from two public RPCs that must agree byte for byte, rebuilds your notes from public data, makes the proof and submits the withdrawal, with no helper in the path. A CI check refuses any address or helper import of ours inside it. The Base and Robinhood Chain pools are not in it yet.
 
 ## 5. What stays private, and what shows
 
@@ -101,14 +103,14 @@ One private buy on Solana is 919 to 1,201 bytes with W as a signer, under the 1,
 |---|---|---|
 | Can tell which deposit is behind a buy | No (the NEAR vault's crowd) | No (that chain's pool crowd) |
 | Can follow a wallet from one trade to the next | No, one wallet per position | No, one wallet per buy |
-| Sees a public trail from the vault to each new wallet | Yes, on NEAR | No. The pool pays W inside the buy itself |
+| Sees a public trail from the vault to each new wallet | Yes, on NEAR | No on Solana, Base and Robinhood Chain: the pool pays W inside the buy itself. Yes on NEAR, where the vault pays W |
 | Sees your total balance | No | No |
 | Can tie your money on two chains together | Partly, NEAR Intents legs are public pairs | No, moves stop in the NEAR vault |
 | Sees each buy's token and size | Yes, from a fresh wallet | Yes, from a fresh wallet, in standard sizes |
 | Can match one position's buy and sell | Yes | Yes. The sale then goes back into the pool |
 | Sees your deposit | Yes, amount and source | Yes, amount and source |
 
-**Said plainly.** A pool hides you only as well as its crowd is large, and every pool starts empty. Standard sizes make every buy look like many others. A coin's own buy and sell can always be matched, because the swap itself is public on its chain. Timing and amount can hint at a link between a deposit and a buy, which is why wallets are readied ahead and sizes are standard.
+**Said plainly.** A pool hides you only as well as its crowd is large, and every pool starts empty. Standard sizes make every buy look like many others. A coin's own buy and sell can always be matched, because the swap itself is public on its chain. Timing and amount can hint at a link between a deposit and a buy, which is why sizes are standard.
 
 ### Who can see more than an onlooker
 
@@ -128,36 +130,36 @@ The full table is in [security.md](security.md#who-sees-what).
 | Base `0xaa080e74ec99cf5c684548c77ca145edfcf899cf` and Robinhood Chain `0x9306359433127c4f3be426f6faeb00a3c41f66db` | 0xbow's Entrypoint, which held every admin role, removed | No owner, role, upgrade path or pause in the source | Read [contracts/pool-evm/src/](../contracts/pool-evm/src/) |
 
 - **The proof decides where money goes.** It names the pool, the receiving wallet, the fee cap and the deadline. On Solana W must also sign, and its signature covers every account and byte.
-- **The helper can only refuse.** If it stops, any other sender, or your device itself, can send the same transaction. If every server stops, the exit tool still works.
+- **The helper can only refuse.** If it stops, any other sender, or your device itself, can send the same transaction. If every server stops, the exit tool still brings money home from the vault and the Solana pool.
 - **Keys exist only on your device.** No server holds a key that moves money. CI scans the tree and the full history for secrets on every change.
 - **The money never rests inside NEAR Intents.** The DAO behind `intents.near` holds roles that can lock an account or move a balance, so money sits there for one hop at a time and rests in the vault and the pools.
 - **One power we can't remove:** the vault holds USDC, and Circle can pause the token or block an account, as for every USDC holder. A payout stopped that way isn't lost. Its receipt fails and the vault books the amount back as a refund note.
 
 ### How others compare
 
-Read from each product's public docs and contracts on 2 November 2026.
+Read from each product's public docs, contracts and chains on 15 November 2026.
 
 | Product | Chains | Private trades | Who can change it | When the proof is made |
 |---|---|---|---|---|
-| Privacy Pools v2 | Ethereum, Base, Robinhood Chain | Yes, one transaction via LI.FI | A 2-of-4 multisig with no delay; one key owns the swap contract | At the tap, 30 to 60 s by its own docs |
+| Privacy Pools v2 | Ethereum, Base, Robinhood Chain and four more | Yes, one transaction via LI.FI | A 2-of-4 multisig with no delay, which also owns the swap contract | At the tap, tens of seconds by its own docs |
 | Railgun | Ethereum and others | Yes, through its adapter | A proxy with an admin | At the tap, up to 30 s |
 | Veil | Solana | Yes, two steps via Jupiter | A 2-of-2 multisig; can pause | At the tap |
-| Privacy Cash | Solana, Base, Robinhood Chain | Through a wallet made on the client | Upgrade authority set | At the tap |
-| NEAR Confidential Intents | NEAR's private shard | Yes | Seven approved validators; by its terms the operator keeps trade data and may share it | No proof; trust in the operator |
-| **Blindfill v2** | NEAR, Solana, Base, Robinhood Chain | Yes, one transaction | **Nobody** | **Before the tap** |
+| Privacy Cash | Solana, Base, Robinhood Chain and two more | On Solana, through a wallet made on the client | Upgrade authority set | At the tap |
+| NEAR Confidential Intents | NEAR's private shard | Yes | Seven approved validators; by its terms Intents Technology keeps trade data and may share it | No proof; trust in the validators and Intents Technology |
+| **Blindfill v2** | NEAR, Solana, Base, Robinhood Chain | Yes: one transaction on Solana, Base and Robinhood Chain, two on NEAR | **Nobody** | **Before the tap** |
 
 ## 7. Speed, part by part
 
 | Step | Solana | Base | Robinhood Chain | Kind |
 |---|---|---|---|---|
 | Proof, made before the tap | 8.3 s median on an iPhone, off the tap path | same | same | measured |
-| Proof with the prover's own threads | 1.0 s (all threads) and 1.6 s (four) on a desktop | same | same | measured |
-| Check the proof on chain | 111,218 CU | 611,391 gas for a real Privacy Pools withdrawal on Ethereum | same contract | measured |
-| One private buy fits one transaction | 919 to 1,201 B of 1,232 B | about $0.011 to $0.015 of gas | no L1 fee | measured / estimate |
+| Proof on four threads in a desktop browser | 1.3 s median (WebKit) and 1.8 s (Chromium) | same | same | measured |
+| Check the proof on chain | 123,255 CU, payout included | 611,391 gas for a [real Privacy Pools withdrawal](https://etherscan.io/tx/0x8c80b5460a5df6417ee670d56ff6cece37d566ad7b6d04994ac658c23a7c0591) on Ethereum | same contract | measured |
+| One private buy fits one transaction | 1,012 and 1,169 B of 1,232 B on mainnet | about $0.011 to $0.015 of gas | no L1 fee | measured / estimate |
 | Ready-wallet buy, tap to filled | 1.2 s median, 3.3 s p95 (phone) | 0.9 s median, 1.3 s p95 | 1.9 s median, 4.0 s p95 | measured |
-| v1 crossing to a fresh wallet | 43.3 s | | | measured |
+| v1 crossing to a fresh wallet | up to 39.0 s | 21.2 s | | measured |
 
-The v2 buy adds the pool's checks to the same transaction a ready-wallet buy already sends, so it lands in about the same time. Every run behind these numbers is linked from [performance.md](performance.md).
+The v2 buy adds the pool's checks to the same transaction a ready-wallet buy already sends, so we expect it to land in about the same time (estimate; not yet timed on mainnet). The runs behind the timing rows are in [performance.md](performance.md); the Solana transactions are in [proofs.md](proofs.md).
 
 ## 8. Live today
 
@@ -196,7 +198,8 @@ What carries over from v1 and what is new:
 ## 10. What is still open
 
 - **Raydium and Meteora routes on Solana** (open). Private Solana buys run through the pump.fun curve and PumpSwap today.
-- **A faster proof on the phone** (open). Today's phone prover runs on one thread; the desktop numbers above show what threads give.
+- **A faster proof on the phone** (open). The 8.3 s phone proof was measured on one thread on 26 October. The prover now runs on up to four threads, one fewer than the device's cores, and the phone hasn't been measured on threads yet; the desktop numbers above show what threads give.
+- **The exit tool for the Base and Robinhood Chain pools** (open). Today it brings money home from the NEAR vault and the Solana pool.
 - **A review of the cross-chain flow** (open). Pillow Auditors reviewed the NEAR vault, the EVM pool and the Solana pool at commit `46b16ca4` on 7 November 2026 and found 0 Critical, 0 High, 0 Medium, 5 Low and 8 Info. All 5 Lows have fixes on main ([the report and each fix](../research/audits/2026-11-07-pillow/)). The kit, the device checks, the helper, the deployed exchange adapters and the sell delegate were outside that review and are next.
 - **The signing page is code you load from a server.** Builds that come out byte for byte the same, a published hash for every file and an outside check narrow that gap; they don't close it. The exit tool needs none of that page.
 - **Thin crowds at the start.** Each new chain's pool starts empty and gets better for everyone as deposits grow.
@@ -206,7 +209,7 @@ What carries over from v1 and what is new:
 - **More chains on the same contracts.** Each EVM chain with EIP-1108, EIP-7702 and a NEAR Intents route is a deploy, not a new design.
 - **Orders signed in advance, live in the app.** A stop and a take-profit signed right after a buy, held by the order sender as bytes, filling at your price or better into your own wallet.
 - **The kit on npm,** so any app installs it in one line.
-- **A hidden bag.** The bought token kept inside a per-token pool instead of W. It costs about 0.008 SOL per new token on Solana, and its crowd is only that token's holders.
+- **A hidden bag.** The bought token kept inside a per-token pool instead of W. It costs about 0.008 SOL per new token on Solana (estimate), and its crowd is only that token's holders.
 - **One crowd across every chain.** Notes that can spend on any chain. It needs a new circuit, a new setup ceremony and a way to carry roots between chains, which is the v3 project.
 
 The deeper the crowd on every chain, the better everyone's cover gets, all at once.

@@ -1,6 +1,6 @@
 # Architecture
 
-Blindfill is the engine: a vault on NEAR that nobody holds a key to, wallets whose keys exist only on your device, orders signed ahead of time, and an open kit that any app can call. Confidential Trenches is the flagship and experimental version of the UNRLZD terminal, built on that engine. Our terminal reaches Blindfill through the kit's one public entry and nowhere else, and CI fails the build the moment a file reaches past it.
+Blindfill is the engine: a vault on NEAR and a pool on each trading chain that nobody holds a key to, wallets whose keys exist only on your device, and an open kit that any app can call. Orders signed ahead of time are in its design, not in this build. Confidential Trenches is the flagship and experimental version of the UNRLZD terminal, built on that engine. Our terminal reaches Blindfill through the kit's one public entry and nowhere else, and CI fails the build the moment a file reaches past it.
 
 Technical words are explained where they first show up. The app runs on mainnet today, and anyone can run the read-only check at the end of [Security](security.md) against live NEAR.
 
@@ -14,7 +14,7 @@ Blindfill v2 runs on mainnet today with a pool on each chain you trade on, descr
 
 ### v2: a pool on every chain you trade on
 
-Crossing from the NEAR vault to a fresh wallet on another chain took 43.3 s and left a public trail, so v2 puts the private crowd where the coins are. Each trading chain has a pool with the same proof design and the same rule as the vault: no admin, no upgrade, no pause.
+Crossing from the NEAR vault to a fresh wallet on another chain took up to 39.0 s in our recorded runs ([performance.md](performance.md#solana-intents-out-2026-10-26)) and left a public trail, so v2 puts the private crowd where the coins are. Each trading chain has a pool with the same proof design and the same rule as the vault: no admin, no upgrade, no pause.
 
 | Pool | Mainnet address | What makes it keyless |
 |---|---|---|
@@ -22,7 +22,7 @@ Crossing from the NEAR vault to a fresh wallet on another chain took 43.3 s and 
 | Base | `0xaa080e74ec99cf5c684548c77ca145edfcf899cf` | The contract's source has no owner, role, upgrade or pause |
 | Robinhood Chain | `0x9306359433127c4f3be426f6faeb00a3c41f66db` | The same contract as Base |
 
-A buy is proved on your device before you tap, naming a fresh wallet but no token. At the tap the fresh wallet signs one transaction: the pool checks the proof, pays the wallet, and the wallet buys. A sell puts the money back into the pool as a new note, on Base and Robinhood Chain through EIP-7702 in one transaction. The NEAR vault stays the USDC home and NEAR's own pool, and NEAR Intents still carries every dollar that changes chain. The deploy records are in [contracts/pool-solana/deployments/](../contracts/pool-solana/deployments/) and [contracts/pool-evm/deployments/](../contracts/pool-evm/deployments/).
+A buy is proved on your device before you tap, naming a fresh wallet but no token. At the tap the fresh wallet signs one transaction: the pool checks the proof, pays the wallet, and the wallet buys. On NEAR there is no separate pool: the vault pays the fresh wallet, and the wallet then buys on Rhea, in two transactions. A sell puts the money back into the pool as a new note, on Base and Robinhood Chain through EIP-7702 in one transaction. The NEAR vault stays the USDC home and NEAR's own pool, and NEAR Intents still carries every dollar that changes chain. The deploy records are in [contracts/pool-solana/deployments/](../contracts/pool-solana/deployments/) and [contracts/pool-evm/deployments/](../contracts/pool-evm/deployments/).
 
 Blindfill is designed for any chain NEAR Intents reaches. Because of the hackathon's time, this build integrates four chains: Solana, Base, Robinhood Chain and NEAR.
 
@@ -46,7 +46,7 @@ This is the one page that handles your keys, and the one we'd most like you to t
 
 ### The kit
 
-`@blindfill/kit` is the public entry. It offers deposit, prove, ready the wallets, trade, set orders, withdraw and verify. A wallet, a bot or an AI agent calls the same entry the terminal does, with no shortcuts. The device's checks live inside it: before anything is signed, a quote is compared with your own request and with pool reads from two RPC providers, which are public servers that answer questions about a chain. A server's word on a quote is never enough, so we don't sign on it. The reach check runs in CI today with 36 deep-import tests, so an app that goes around the entry fails the build.
+`@blindfill/kit` is the public entry. It offers deposit, prove, ready the wallets, trade, withdraw and verify. A wallet, a bot or an AI agent calls the same entry the terminal does, with no shortcuts. The device's checks live inside it: before anything is signed, a quote is compared with your own request and with pool reads from two RPC providers, which are public servers that answer questions about a chain. A server's word on a quote is never enough, so we don't sign on it. The reach check runs in CI today with 44 deep-import tests, so an app that goes around the entry fails the build.
 
 ### The helper
 
@@ -55,10 +55,12 @@ This is the one page that handles your keys, and the one we'd most like you to t
 - The prices and quotes proxy keeps our vendor API keys, forwards requests and caches public data.
 - The withdrawal relayer pays the NEAR fee and storage for a withdrawal. The proof fixes the recipient, the fee recipient and the fee, so the relayer can't redirect the money or take more.
 - The deposit relayer prepays the vault's storage and submits your signed deposit. That deposit is a delegate action: a message your one-time account signs and someone else submits and pays for.
-- The order sender stores your signed exits byte for byte and sends one when its price is hit.
-- The USDC watch follows USDC's pause and blocklist events and its code hash, and holds moves while either is in doubt.
+- The pool senders pay the network fee for each buy, sell and release a fresh wallet signs, and send it to its chain. The wallet signs the terms, so a sender can't change them.
+- The USDC watch reads USDC's pause and blocklist state and its code hash, and holds moves while any of them is in doubt.
 
-The helper's accounts hold gas and storage money and nothing else. Still, break into every one and the vault stays shut. What a broken-in helper can do is delay or refuse a quote, a withdrawal or an order. That costs you time, and it's why the exit tool exists.
+The order sender is part of the design, not of this build: the helper's health page reports it as `"orders":"down"`.
+
+The helper's accounts hold our own gas, storage and fee money; none of their keys can move a user's money. Still, break into every one and the vault and the pools stay shut. What a broken-in helper can do is delay or refuse a quote, a buy, a sell or a withdrawal. That costs you time, and it's why the exit tool exists.
 
 ### The vault
 
@@ -76,9 +78,11 @@ We keep the vault's resting balance outside `intents.near`, on purpose. The DAO 
 
 Brand-new wallets on any chain NEAR Intents reaches. Each is used once: one arming funds one wallet, which makes one trade. All keys come from your 12 words on standard-shape paths and never leave the device, and any wallet that imports a private key opens them.
 
-NEAR Intents' shared payers fund a fresh wallet, so the money doesn't arrive from the vault, from you, or from a wallet that's been used before. One thing is visible from outside. A buy from a set of wallets shows up as several fresh wallets buying the same token in the same second. Watchers can group them as one position and read its size. They can't tell whose it is.
+On Solana, Base and Robinhood Chain the pool pays a fresh wallet inside the buy, so the money arrives from the shared pool, not from you or from a wallet that's been used before. On NEAR the vault pays it. One thing is visible from outside. A buy from a set of wallets shows up as several fresh wallets buying the same token in the same second. Watchers can group them as one position and read its size. They can't tell whose it is.
 
 ### Orders signed in advance
+
+Orders are Blindfill's design and not in this build: the app's order screens show Coming soon, and no exit is signed yet. This is how they are meant to work.
 
 Right after a buy fills, your device signs the exits for that wallet, a stop and a take-profit. Each sells from the wallet and pays back to the same wallet, with its minimum out fixed in the signature: the amount sold, times the trigger price, less your own slippage. So an exit fills at your price or better, or it doesn't fill.
 
@@ -90,23 +94,20 @@ Our order sender holds the signed bytes and sends one when its price is hit. The
 
 Someone inside the helper can send an exit early, and it still fills at your price or better, into your own wallet, because price and destination sit inside the signature. Until it fills, an exit exists on no chain.
 
-In this build the app's order screens show Coming soon.
-
 ### The exit tool
 
-`packages/exit` brings money home with your 12 words and public RPCs, with no server of ours. It asks two public NEAR RPCs and requires that they agree byte for byte. It rebuilds your notes from public data, makes the proof and submits the withdrawal, with no helper in the path. The demo is meant to show it: every server we run switched off, and the 12 words still withdraw.
+`packages/exit` brings money home from the NEAR vault and the Solana pool with your 12 words and public RPCs, with no server of ours. For each, it asks two public RPCs and requires that they agree byte for byte. It rebuilds your notes from public data, makes the proof and submits the withdrawal, with no helper in the path. The Base and Robinhood Chain pools are not in it yet. The demo is meant to show it: every server we run switched off, and the 12 words still withdraw.
 
 ## The life of one private buy
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="img/private-buy-dark.svg"><img alt="The life of one private buy as a timeline: deposit about 40 seconds, get ready in the background, a fresh wallet in up to 39 seconds ahead of time, the tap with a phone buy on Solana at p50 1.2 seconds and p95 3.3 seconds, the exits signed right after, and back to the vault." src="img/private-buy-light.svg" width="100%"></picture>
+How a buy runs in v2 on Solana, Base and Robinhood Chain. A buy on NEAR differs at step 4, as noted there.
 
-1. Deposit. Send USDC from any wallet on any chain NEAR Intents reaches. 1Click delivers it to a one-time NEAR account whose key your device holds. That account signs one deposit call, the deposit relayer prepays the vault's storage and submits it, and the vault adds your note's fingerprint to its list. NEAR Intents' part of this takes about 40 s. The commitment proof that goes with the note takes 0.6 s on an iPhone.
-2. Get ready. In the background your device picks notes, proves them, and has the withdrawal relayer carry each proof. The vault pays a one-use account in standard sizes. One withdraw proof takes 8.3 s on an iPhone. We make it while you browse, never at the tap.
-3. A fresh wallet. NEAR Intents carries that account's money to a new wallet on the chain you trade on. This move takes up to 39 s, so we do it ahead of time and you don't wait on it.
-4. The tap. Your device asks the proxy for a quote, checks it against your request and two RPC providers, signs the trade and sends it on several paths at once. A phone buy on Solana took 1.2 s at p50 and 3.3 s at p95 from tap to filled, over five live buys.
-5. The exits. The stop and the take-profit are signed as soon as the buy fills, and they wait with the order sender.
-6. Back. After a sell, the money returns over NEAR Intents and lands in the vault as a new note. Withdraw to any address on any chain whenever you like.
+1. Deposit. Send money from any wallet on any chain NEAR Intents reaches. 1Click delivers it to a one-time wallet whose key your device holds, on the chain whose pool it goes into, and that wallet deposits it in standard sizes, one note per size. Money into NEAR Intents took 31.9 s from NEAR and 41.9 s from Solana in our recorded runs ([performance.md](performance.md#near-intents-2026-10-19)). The commitment proof that goes with a note takes 0.6 s on an iPhone.
+2. Prove. In the background your device picks a note and proves it, naming a brand-new wallet whose key only your device holds, but no token. One withdraw proof takes 8.3 s on an iPhone. We make it while you browse, never at the tap.
+3. The tap. Your device reads the market on two RPC providers and checks the quote against your request. The fresh wallet signs one transaction, and the helper's pool sender sends it.
+4. Paid and bought. In that one transaction the pool checks the proof and pays the fresh wallet, and the wallet buys. On NEAR the vault pays the fresh wallet first, and the wallet then buys on Rhea in a second transaction. A buy from a wallet readied ahead of time, the v1 way, took 1.2 s at p50 and 3.3 s at p95 from tap to filled on a phone over five live buys; the v2 buy hasn't been timed on mainnet yet.
+5. Back. A sell puts the money back into the pool as a new note. Withdraw to any address, or through NEAR Intents to another chain, whenever you like.
 
 The proof is why step 2 happens early. It takes 8.3 s on an iPhone, and a trade can't wait that long, so the wait moved out of the tap.
 
-Checking one proof on NEAR costs 33.6 Tgas, about 0.003 NEAR. A whole withdrawal, with its update to the vault's note list, costs at most 92.6 Tgas, under 0.01 NEAR.
+Checking one proof on NEAR costs 33.6 Tgas, about 0.003 NEAR. A whole withdrawal, with its update to the vault's note list, used 82.3 Tgas of the vault's own gas at the deepest tree we measured, about 0.008 NEAR ([g1-vault-gas](../research/proofs/g1-vault-gas/RESULT.md)).
