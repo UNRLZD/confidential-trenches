@@ -48,6 +48,27 @@ test("a request to any other host is refused before it leaves, over fetch, http,
   assert.equal(r.stdout.match(/no-network: a connection to/g).length, 4);
 });
 
+// A machine with no route out fails a connection on the socket, after connect returns: the caller's error handling sees
+// it. A throw from inside connect instead reached no handler when a read was started from a timer or a callback, and
+// node --test failed its whole file ("asynchronous activity after the test ended"; the box, 15 Nov, kit and signpage).
+test("a refused connection fails on its socket as an unreachable network does: connect returns, the error event follows, a handled fetch leaves nothing uncaught", () => {
+  const r = script(`
+    import net from "node:net";
+    let uncaught = 0;
+    process.on("uncaughtException", () => uncaught++);
+    let returned = false;
+    const s = net.connect(443, "api.relay.link");
+    returned = true;
+    s.on("error", async (e) => {
+      // a read started from a timer whose caller handles the rejection, as a provider walk does
+      const late = await new Promise((res) => setTimeout(() => fetch("https://api.jup.ag/").then(() => res("REACHED"), (x) => res(String(x.cause?.message ?? x.message))), 0));
+      await new Promise((res) => setTimeout(res, 50));
+      console.log([returned, e.message.startsWith("no-network: a connection to api.relay.link"), late.startsWith("no-network: a connection to api.jup.ag"), uncaught].join(","));
+    });`);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "true,true,true,0");
+});
+
 // A request may pin its own lookup (the helper's logo fetch does: logo.ts httpsGet); the address that lookup answers is
 // where the socket goes, so that address is what the guard checks, in both of net's lookup forms (one address, or all).
 test("a name with its own lookup pinned to this machine connects, in both lookup forms and over https", () => {

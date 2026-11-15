@@ -6,6 +6,9 @@
 //
 // Allowed: a unix socket, `localhost`, 127.0.0.0/8, ::1 and ::ffff:127.x. Refused: every other host, by name before
 // any DNS lookup. The hook is net.Socket.prototype.connect, which fetch (undici), http, https, tls and net all end in.
+// A refused connection fails as on a machine with no route out: connect returns, and the socket's error event follows
+// (card fresh-clone-tests-pass: a throw from inside connect reached no handler for a read started from a timer or a
+// callback, and node --test failed the file with "asynchronous activity after the test ended").
 // A connection that brings its own `lookup` (a request pinned to an address it already checked, as the helper's logo
 // fetch does: apps/helper/src/data/logo.ts httpsGet) goes to the address that lookup answers, not to its name, so the
 // guard checks that answer instead (card fresh-clone-tests-pass): every address it gives must be this machine's.
@@ -31,6 +34,11 @@ const checkedLookup = (host, lookup) => (name, opts, cb) =>
   });
 
 const connect = net.Socket.prototype.connect;
+/** The socket fails on its next tick with the refusal, as an unreachable host's does; nothing leaves the machine. */
+const fail = (socket, host) => {
+  process.nextTick(() => socket.destroy(refuse(host)));
+  return socket;
+};
 net.Socket.prototype.connect = function (...args) {
   // net's forms: ([options], cb), (path, cb), (port, host, cb)
   const normalized = Array.isArray(args[0]);
@@ -44,9 +52,9 @@ net.Socket.prototype.connect = function (...args) {
       const checked = { ...first, lookup: checkedLookup(host ?? "localhost", first.lookup) };
       if (normalized) args[0][0] = checked;
       else args[0] = checked;
-    } else if (!isLocal(host)) throw refuse(host);
+    } else if (!isLocal(host)) return fail(this, host);
   } else if (typeof first === "number" || /^\d+$/.test(String(first))) {
-    if (typeof args[1] === "string" && !isLocal(args[1])) throw refuse(args[1]);
+    if (typeof args[1] === "string" && !isLocal(args[1])) return fail(this, args[1]);
   } // a string that is not a port is a unix socket path
   return Reflect.apply(connect, this, args);
 };
