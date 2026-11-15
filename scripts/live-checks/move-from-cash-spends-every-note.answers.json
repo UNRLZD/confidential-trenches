@@ -1,0 +1,16 @@
+{
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ePNFJ60q7wDUKtZl30nAkQHJvtaYAEJh0dqwVOh3BRKNqb42lvBIXzxqiPTQmbqv\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-ePNFJ60q7wDUKtZl30nAkQHJvtaYAEJh0dqwVOh3BRKNqb42lvBIXzxqiPTQmbqv",
+  "plan": true,
+  "move": true,
+  "dry": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-VtCu/95IT5mKGgmqs3ykK+IXPyhRVVBL25i9aNpD7J69It5ljN3fwSJ9POY1yaCd\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-VtCu/95IT5mKGgmqs3ykK+IXPyhRVVBL25i9aNpD7J69It5ljN3fwSJ9POY1yaCd",
+  "plan": false,
+  "move": false,
+  "dry": false
+ }
+}

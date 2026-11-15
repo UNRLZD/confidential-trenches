@@ -29,10 +29,12 @@
 // the move op's id in state.ops), so its flow shows the move as its own step. With nothing on its way: the pool buy's
 // own answer.
 //
-// pool.move (poolMoveKinds): the same mover's `move`, an exact amount of Cash into the Solana pool with every check
-// above, its move op written under the request's id: leaving once the quote is checked, in_transit once the vault's
-// withdraw landed, then the quote's follow op's stage (moveStageOfFollow). Every other pair is refused not_allowed for
-// now, its dry too. A buy's shortfall writes the same op under its own id (cash/<chain>/<ms>).
+// pool.move (poolMoveKinds): the same mover's `move`, an exact amount of Cash into a pool with every check above, its
+// move op written under the request's id: leaving once the quote is checked, in_transit once the vault's withdraw
+// landed, then the quote's follow op's stage (moveStageOfFollow). The amount is planned over every Cash note (card
+// move-from-cash-spends-every-note: planCashExact, one withdrawal a note), its dry, Max and Fee from that one plan, and
+// sent as a buy's parts are (sendParts: every part's quote checked before any note leaves Cash). A buy's shortfall
+// writes the same op under its own id (cash/<chain>/<ms>).
 // Nothing here logs.
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
@@ -46,6 +48,8 @@ import type { PoolAsk } from "./rules/pool.ts";
 import type { CheckedWithdraw } from "./withdraw/form.ts";
 import type { HandoffEnd } from "./withdraw/handoff.ts";
 import type { PoolToCash } from "./pool-to-cash.ts";
+import { nearestPlannable, withdrawNoteFloor } from "./pool-withdraw.ts";
+import { cashCosts, cashSendable, planCashWithdraw } from "./withdraw/checks.ts";
 
 /** How often a moved tap reads whether one tap now spends the ask. */
 export const CASH_MOVE_POLL_MS = 2_000;
@@ -327,6 +331,36 @@ export function cashMoveCost(parts: readonly CashMovePart[], fee: bigint, p: Pic
   }
   return t;
 }
+/** pool.move of exactly `usdc` out of Cash, planned over every UNSPENT note (card move-from-cash-spends-every-note: a
+ *  withdraw proof spends one note, so Cash split over notes each under the move was refused against its largest note):
+ *  `parts`, one withdrawal a note, each part its own quote of its USDC that must bring `least` of it (the pool coin's
+ *  least at the device's price, cashLamportsFor), null when no plan sends `usdc` exactly; `fee`, the relay fee a part;
+ *  `max`, every note whole less its fee, each one that gives a part (the whole of Cash); `min`, for an amount under the
+ *  least part, that least; `below` and `above`, for one no plan sends, the nearest a plan sends.
+ *  The least part (`part`) clears the request's own rule (above its fee), 1Click's least for the route (`leastIn`, read
+ *  live) and the pool's quote `floor` (its least at least the floor, as pool.address holds a quote to), so no part is
+ *  asked that its quote refuses. One note that pays it with no change or a change a later move can send (the note floor
+ *  at that least part) pays it alone, the smallest such: the larger notes stay whole. Else the Cash form's own planner
+ *  of an exact sum (withdraw/checks.ts planCashWithdraw: the fewest parts, every change 0 or above that floor), not
+ *  planCashMove, which sizes a pool coin's shortfall and may take more USDC than asked. Null with no least part. */
+export type CashExact = { fee: bigint; max: bigint; part: bigint; parts: CashMovePart[] | null; min?: bigint; below?: bigint; above?: bigint };
+export function planCashExact(notes: readonly CashNote[], fee: bigint, usdc: bigint, least: (usdc: bigint) => bigint, floor: bigint, leastIn: bigint | null): CashExact | null {
+  if (fee < 0n || usdc <= 0n) return null;
+  const part = leastWhere((u) => u > fee && u >= (leastIn ?? 0n) && least(u) >= floor);
+  if (part === null) return null;
+  const max = cashSendable(notes, fee, part);
+  const of = (plan: readonly { noteId: string; part: bigint }[]): CashMovePart[] => plan.map((x) => ({ note: x.noteId, usdc: x.part, least: least(x.part), units: least(x.part) }));
+  if (usdc > max) return { fee, max, part, parts: null };
+  if (usdc < part) return { fee, max, part, parts: null, min: part };
+  const room = withdrawNoteFloor(cashCosts(fee, part));
+  const one = [...notes]
+    .filter((n) => n.value - fee >= usdc && (n.value - fee === usdc || n.value - fee - usdc >= room))
+    .sort((x, y) => (x.value !== y.value ? (x.value < y.value ? -1 : 1) : x.id < y.id ? -1 : 1))[0];
+  if (one !== undefined) return { fee, max, part, parts: of([{ noteId: one.id, part: usdc }]) };
+  const plan = planCashWithdraw(notes, usdc, fee, part);
+  if (plan !== null) return { fee, max, part, parts: of(plan) };
+  return { fee, max, part, parts: null, ...nearestPlannable(notes, usdc, cashCosts(fee, part)) };
+}
 /** 1Click's least amount in (USDC base units) for a move of Cash into `chain`'s pool, read live: a dry quote through the
  *  helper's 1Click proxy (nothing is made, nothing sent), whose refusal names it ("Amount is too low for bridge, try at
  *  least N", 13:0xZ 15 Nov: 75,621 into SOL, 18,533 into Robinhood's ETH). One unit first; where 1Click cannot price so
@@ -482,16 +516,19 @@ export type MoveSent = Refusal | { op: string; minOut: bigint };
 export type CashMover = {
   /** Starts or joins a move for a buy's shortfall on `chain`: the op id of a move on its way for it, else null. */
   need(chain: PoolChain, short: bigint): Promise<string | null>;
-  /** Moves exactly `usdc` of Cash into `chain`'s pool under the op id `id` (pool.move): every check `need`'s move has,
-   *  the quote's least at least what `usdc` buys at the device's price less CASH_MARGIN_BPS and the least rung. */
+  /** Moves exactly `usdc` of Cash into `chain`'s pool under the op id `id` (pool.move): `plan`'s parts, every check
+   *  `need`'s move has, each part's quote's least at least what its USDC buys at the device's price less
+   *  CASH_MARGIN_BPS and the least rung; refused with nothing sent when no plan sends `usdc` (not_funded above Max,
+   *  below_min under the least part, not_allowed otherwise). */
   move(chain: PoolChain, usdc: bigint, id: string): Promise<MoveSent>;
-  /** What a move of `usdc` would give: the least it takes from a quote (cashLamportsFor) and the withdraw fee. */
-  dry(chain: PoolChain, usdc: bigint): Promise<Refusal | { out: bigint; fee: bigint }>;
-  /** What a move into `chain` is held to before anything moves (card move-sends-what-it-shows): the vault withdraw's fee,
-   *  the most one withdrawal of Cash carries (`cash`), and the least of `chain`'s coin a quote into its pool may bring
-   *  (`floor`: the pool's deposit floor, as pool.address checks it; null with no read). Cash is not checked here: a move
-   *  out of another pool brings its USDC first. */
-  bounds(chain: PoolChain): Promise<Refusal | { fee: bigint; cash: bigint; floor: bigint | null }>;
+  /** The plan `move` sends for `usdc` (planCashExact over every Cash note, read now), which pool.move.dry prices; down
+   *  when the pool's floor cannot be read now. */
+  plan(chain: PoolChain, usdc: bigint): Promise<Refusal | CashExact>;
+  /** What an onward move into `chain` is held to before anything moves (card move-sends-what-it-shows): the vault
+   *  withdraw's fee and the least of `chain`'s coin a quote into its pool may bring (`floor`: the pool's deposit floor,
+   *  as pool.address checks it; null with no read). Cash is not read here: a move out of another pool brings its USDC
+   *  first. */
+  bounds(chain: PoolChain): Promise<Refusal | { fee: bigint; floor: bigint | null }>;
   /** The least of `chain`'s coin a quote for `usdc` must bring (cashLamportsFor at the device's price); 0n with none. */
   least(chain: PoolChain, usdc: bigint): bigint;
   ways(): number;
@@ -569,11 +606,6 @@ export function cashMover(d: CashMoverDeps): CashMover {
       }
       await wait(CASH_MOVE_POLL_MS);
     }
-  };
-  // one move: the rail's quote of exactly `usdc`, held to every check, then the vault pays its deposit address
-  const send = async (chain: PoolChain, usdc: bigint, least: bigint, op: string, fee: bigint, amount: string): Promise<MoveSent> => {
-    const a = await quoteOne(chain, usdc, least, op, amount);
-    return "error" in a ? { error: a.error } : handOne(chain, a, fee);
   };
   // a move's parts (card cash-buys-spend-every-note): every part's quote first, each held to every check, and only when
   // every one passed does any note leave Cash, each part's withdrawal of its own note to its own quote's address; a part
@@ -677,14 +709,20 @@ export function cashMover(d: CashMoverDeps): CashMover {
     const sent = await sendParts(chain, parts, `cash/${chain}/${d.now()}`, fee);
     return "error" in sent ? joined : sent.op;
   };
-  // the checks every exact move shares, its own and its dry's: a price, a hand-off, a rail, Cash for it and its fee
-  const ready = async (chain: PoolChain, usdc: bigint): Promise<Refusal | { least: bigint; fee: bigint }> => {
+  // the one plan every exact move and its dry share (card move-from-cash-spends-every-note): a price, a hand-off, a
+  // rail, then `usdc` over every Cash note at the fee, the pool's floor and 1Click's least, all read now; a floor
+  // given but not read now is down (none given: no floor but each part's own quote)
+  const planned = async (chain: PoolChain, usdc: bigint): Promise<Refusal | CashExact> => {
     const p = d.price(chain);
-    const least = p === null ? 0n : cashLamportsFor(usdc, p, chain);
-    if (usdc <= 0n || least <= 0n || d.handoff === null || d.rails.length === 0) return { error: "not_allowed" };
-    const fee = await d.fee();
-    if (usdc + fee > (await d.cash())) return { error: "not_funded" };
-    return { least, fee };
+    if (p === null || usdc <= 0n || d.handoff === null || d.rails.length === 0) return { error: "not_allowed" };
+    const [fee, notes, floor, leastIn] = await Promise.all([
+      d.fee(),
+      d.notes ? d.notes() : d.cash().then((value): CashNote[] => [{ id: "", value }]),
+      d.floor ? d.floor(chain).catch(() => null) : Promise.resolve(0n),
+      d.least ? d.least(chain).catch(() => null) : Promise.resolve(null),
+    ]);
+    if (typeof floor !== "bigint") return { error: "down" };
+    return planCashExact(notes, fee, usdc, (u) => cashLamportsFor(u, p, chain), floor, leastIn) ?? { error: "not_allowed" };
   };
   // one at a time: a second need (the tap after the typing), or a move, reads the first's move as on its way
   const queued = <T>(f: () => Promise<T>, failed: T): Promise<T> => {
@@ -696,19 +734,17 @@ export function cashMover(d: CashMoverDeps): CashMover {
     need: (chain, short) => queued(() => start(chain, short), null),
     move: (chain, usdc, id) =>
       queued(async () => {
-        const r = await ready(chain, usdc);
+        const r = await planned(chain, usdc);
         if ("error" in r) return r;
-        const sent = await send(chain, usdc, r.least, id, r.fee, unitsText(usdc, USDC_DECIMALS));
+        if (r.parts === null) return { error: usdc > r.max ? "not_funded" : r.min !== undefined ? "below_min" : "not_allowed" };
+        const sent = await sendParts(chain, r.parts, id, r.fee);
         return "error" in sent ? { error: sent.error } : { op: sent.op, minOut: sent.minOut };
       }, { error: "failed" }),
-    dry: async (chain, usdc) => {
-      const r = await ready(chain, usdc).catch((): Refusal => ({ error: "failed" }));
-      return "error" in r ? r : { out: r.least, fee: r.fee };
-    },
+    plan: (chain, usdc) => planned(chain, usdc).catch((): Refusal => ({ error: "failed" })),
     bounds: async (chain) => {
       if (d.price(chain) === null || d.handoff === null || d.rails.length === 0) return { error: "not_allowed" };
-      const [fee, cash, floor] = await Promise.all([d.fee(), d.cash(), d.floor ? d.floor(chain).catch(() => null) : Promise.resolve(null)]);
-      return { fee, cash, floor: typeof floor === "bigint" ? floor : null };
+      const [fee, floor] = await Promise.all([d.fee(), d.floor ? d.floor(chain).catch(() => null) : Promise.resolve(null)]);
+      return { fee, floor: typeof floor === "bigint" ? floor : null };
     },
     least: (chain, usdc) => {
       const p = d.price(chain);
@@ -786,14 +822,14 @@ async function moveDry(mover: CashMover, toCash: PoolToCash | null, ask: { from:
   if (ask.from === "near") {
     const to = ask.to;
     const steps = CASH_TO_POOL_STEPS(to);
-    const b = await mover.bounds(to);
-    if ("error" in b) return b;
-    const max = b.cash > b.fee ? b.cash - b.fee : 0n;
-    if (ask.usdc > max) return limits(steps, max, {});
-    if (b.floor === null) return { error: "down" };
-    const floor = b.floor;
-    if (mover.least(to, ask.usdc) < floor) return limits(steps, max, { min: leastWhere((u) => mover.least(to, u) >= floor) ?? undefined });
-    return { result: { out: unitsText(mover.least(to, ask.usdc), POOL_DECIMALS[to]), fee: unitsText(b.fee, USDC_DECIMALS), steps, max: text(max) } };
+    // the plan the move sends (card move-from-cash-spends-every-note): over every Cash note, its out each part's least
+    // and its Fee a relay fee a part
+    const r = await mover.plan(to, ask.usdc);
+    if ("error" in r) return r;
+    if (r.parts === null) return limits(steps, r.max, r);
+    const out = r.parts.reduce((t, x) => t + x.least, 0n);
+    const fee = r.fee * BigInt(r.parts.length);
+    return { result: { out: unitsText(out, POOL_DECIMALS[to]), fee: unitsText(fee, USDC_DECIMALS), steps, max: text(r.max) } };
   }
   const from = ask.from;
   const to = ask.to;

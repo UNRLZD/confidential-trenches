@@ -316,7 +316,7 @@ export const MOVE_STEPS: readonly MoveStep[] = Object.freeze(["vault_out", "pool
 export type PoolMoveDry = PoolMovePriced | PoolMoveLimits;
 /** A move the page would run: `out`, `fee` and `steps` as above, and `max` (kit 1.16, card move-sends-what-it-shows):
  *  the most this move can send now, in whole units of `from`'s asset (a pool's: each note's largest part after its fees;
- *  Cash's: its largest withdrawal less the withdraw fee). */
+ *  Cash's: every note that gives a part, each whole less its withdraw fee). */
 export interface PoolMovePriced {
   out: string;
   fee: string;
