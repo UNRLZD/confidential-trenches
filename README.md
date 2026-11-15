@@ -153,7 +153,7 @@ One private buy, from the money coming in to the money going home. The step numb
 
 ## Performance
 
-Every number below comes from a run we recorded, and each row links to the transactions behind it on a public explorer, so you can check a fill yourself. Rows signed by the test script used keys the script held; so far only the Solana buy and sell were signed in a phone browser. On release day the same runs go out from a phone on mainnet, on every chain, and this table is rebuilt from those records.
+Every number below comes from a run we recorded, and each row links to the transactions behind it on a public explorer, so you can check a fill yourself. The "Where, signed by" column says who signed each run: a test script holding its own keys, or the app in a phone browser.
 
 <!-- perf-table:begin (made by scripts/perf-table.mjs from perf/runs; do not edit by hand) -->
 | Chain | What | Median / p95 | Filled | Where, signed by | Every transaction |
