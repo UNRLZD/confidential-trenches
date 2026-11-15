@@ -19,7 +19,7 @@
 // on (H2.3). The calls that waited go to a PACED vendor one per its second's share, so the end of a hold is no burst. Identical GETs
 // in flight share one call.
 import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER, HELPER_V1_PATHS, ONECLICK_USDC_ASSETS, type HelperV1Path } from "@blindfill/kit";
-import { budgetFromEnv, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
+import { budgetFromEnv, LIMIT_CLIENTS, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits } from "../limits/limits.ts";
 import { VENDOR_NAMES, VENDORS, type Upstream, type Vendor, type VendorName } from "./vendors.ts";
 
 /** H7 "body 64 KB": the kit's /v1/proxy/{vendor}/{path} row of HELPER_V1_PATHS. */
@@ -59,7 +59,7 @@ export const OWN_ROOM = 1;
  *  the lists) leave free for the devices' calls (a buy's or sell's build): they go only while BUILD_ROOM stay free (a
  *  page also on the OWN_ROOM the devices leave it), so a build that arrives after a crowd of them still goes at once.
  *  [design: 4, a device's share (PROXY_BUDGETS.jupiter.perClient): a one-leg trade's cap search and its floor rebuild;
- *  the own reads keep 6 of Free's 10 a window, 36 a minute, above their PROXY_RESERVE 34. Live run 42178532918
+ *  the own reads keep 6 of Free's 10 a window, 36 a minute (PROXY_USER_ROOM: 24 of the minute left for callers). Live run 42178532918
  *  attempt 1 (job 127762604763): S-1's build refused before its draw, its turn 5 s off, the window spent by reads.] */
 export const BUILD_ROOM = 4;
 /** Of a PACED vendor's window, the sends one device leaves to the other devices: Free's window of 10, less a page's 1
@@ -94,8 +94,8 @@ export const VENDOR_WINDOW_MS = 60_000;
  * - jupiter: "Free | 1 | 60" requests a second and a minute, on a 60-second sliding window, Swap, Price and Token
  *   requests in one bucket (developers.jup.ag/docs/api-rate-limit, read 2026-11-03 09:15Z): 60. The helper's own reads
  *   draw from it: token search at most SEARCH_PER_SPAN 16 a counted minute (data/solana/token.ts), and
- *   Discover's three lists once per 12 s refresh through a 10 s cache (data/solana/lists.ts), about 15 a minute; 34 of
- *   the 60 at most (PROXY_RESERVE), the rest for devices. Share 4: a device's trade asks /swap/v2/build at most
+ *   Discover's three lists once per 12 s refresh through a 10 s cache (data/solana/lists.ts), about 15 a minute; they
+ *   take what devices leave (PROXY_RESERVE 6 their floor, PROXY_USER_ROOM 24 left free by their background reads). Share 4: a device's trade asks /swap/v2/build at most
  *   four times a leg, every leg at once: the cap search's three builds (packages/kit/src/trade/solana/build.ts
  *   SOLANA_JUPITER_MAX_BUILDS) and one rebuild when the route's floor needs it (packages/kit/src/trade/solana/flow.ts
  *   prepareLeg). K legs ask K to 4K (3 legs too large at 40 and 32, fitting at 28, each with a floor rebuild: 12); a
@@ -118,7 +118,7 @@ export const VENDOR_WINDOW_MS = 60_000;
  *   fifth only as lent.
  */
 export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
-  jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 34, lend: true },
+  jupiter: { total: 60, perClient: 4, windowMs: VENDOR_WINDOW_MS, reserve: 6, lend: true },
   relay: { total: 50, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
   lifi: { total: 100, perClient: 2, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
   oneclick: { total: 1_000, perClient: DEPOSIT_SHEET_CALLS, windowMs: VENDOR_WINDOW_MS, reserve: 0, lend: true },
@@ -129,15 +129,25 @@ export const PROXY_BUDGETS: Readonly<Record<VendorName, BudgetLimits>> = {
 export const PROXY_MIN_SHARE: Readonly<Record<VendorName, number>> = { jupiter: 1, relay: 1, lifi: 1, oneclick: DEPOSIT_SHEET_CALLS };
 /**
  * Requests kept in each vendor's total for the helper's own reads that serve every user, which only those reads may
- * draw, whatever PROXY_BUDGET_<VENDOR> says. Jupiter: Discover's three lists once per FRESH_MS 12 s (data/solana/
- * lists.ts READS) and the token page's search. The budget counts a draw until the end of its second plus the minute
- * (limits.ts upstreamBudget), so a counted minute spans up to 61 whole seconds: lists 6 refreshes x 3 = 18, and search
- * at most SEARCH_PER_SPAN 16 in that span, however they come (data/solana/token.ts: a cold mint's at once, a refresh
- * batched), so 34.
- * Callers get 26 of Free's 60 and 566 of a Developer key's 600. Relay, LI.FI and 1Click: the helper reads none on its
- * own, so 0.
+ * draw, whatever PROXY_BUDGET_<VENDOR> says: the floor no crowd of callers takes. Card solana-buy-from-cash-quotes:
+ * trades come first, so the floor is only a page a caller waits for (the token page's cold search): OWN_ROOM a
+ * BURST_MS window, 6 a minute, as the paced lanes keep it. Before the card it was 34 (Discover's lists 18 and the
+ * search's SEARCH_PER_SPAN 16) and a hard part: callers stopped at 26 of Free's 60 while the own reads drew about 15
+ * ("jupiter turn: background" every 4 s, live 15 Nov 11:51-12:08Z), so helper live run 43710945844's S-1 and S-2 builds
+ * were refused 503 "budget" by us with Jupiter idle. Callers now get 54 of Free's 60 and 594 of a Developer key's 600;
+ * the own reads take what callers leave, their background ones only while PROXY_USER_ROOM stays free. Relay, LI.FI and
+ * 1Click: the helper reads none on its own, so 0.
  */
-export const PROXY_RESERVE: Readonly<Record<VendorName, number>> = { jupiter: 34, relay: 0, lifi: 0, oneclick: 0 };
+export const PROXY_RESERVE: Readonly<Record<VendorName, number>> = { jupiter: (OWN_ROOM * VENDOR_WINDOW_MS) / BURST_MS, relay: 0, lifi: 0, oneclick: 0 };
+/**
+ * Card solana-buy-from-cash-quotes: of each vendor's minute, what the helper's own reads nobody waits for (Discover's
+ * lists, a held page's refresh: reserved, not a caller's) leave free for callers, so a device's trade never waits for
+ * room a background read took: Jupiter's BUILD_ROOM a BURST_MS window, 24 a minute, as the paced lanes keep it. The
+ * background reads also leave what of PROXY_RESERVE the pages have not drawn, so they draw up to 30 of Free's 60 while
+ * callers are idle (the lists' 18 fit, and a held page's refresh the rest) and yield as callers draw: they are shed
+ * first, the callers never (limits.ts totalWait).
+ */
+export const PROXY_USER_ROOM: Readonly<Record<VendorName, number>> = { jupiter: (BUILD_ROOM * VENDOR_WINDOW_MS) / BURST_MS, relay: 0, lifi: 0, oneclick: 0 };
 /** The environment variable naming a vendor's budget, "<total per minute>,<per client per 10 s>". */
 export const proxyBudgetEnv = (vendor: VendorName): string => `PROXY_BUDGET_${vendor.toUpperCase()}`;
 /**
@@ -443,7 +453,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const burstMs = deps.burstMs ?? BURST_MS;
   const keys = readKeys(env);
   const forms = keyForms(keys);
-  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v], { reserve: PROXY_RESERVE[v], minShare: PROXY_MIN_SHARE[v] }), windowMs: VENDOR_WINDOW_MS, reserve: PROXY_RESERVE[v], lend: true }])) as Record<VendorName, BudgetLimits>;
+  const limits = Object.fromEntries(VENDOR_NAMES.map((v) => [v, { ...budgetFromEnv(env, proxyBudgetEnv(v), PROXY_BUDGETS[v], { reserve: PROXY_RESERVE[v], minShare: PROXY_MIN_SHARE[v] }), windowMs: VENDOR_WINDOW_MS, reserve: PROXY_RESERVE[v], userRoom: PROXY_USER_ROOM[v], lend: true, tradesFirst: true }])) as Record<VendorName, BudgetLimits>;
   const budget = upstreamBudget((v) => limits[v as VendorName], now);
   /** The most of a vendor's calls the other helpers' files may seed: the largest total this helper runs (vendorSeedMax). */
   const seedMax = vendorSeedMax(VENDOR_NAMES.map((v) => limits[v].total));
@@ -463,7 +473,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   }
   /** A draw that may reach a vendor: the peers' calls counted first, and the draw told to them once it goes. A peer
    *  file that cannot be read or written leaves this helper counting its own, as before. */
-  const drawUp = (name: VendorName, client: string | undefined, reserved: boolean): number => {
+  const drawUp = (name: VendorName, client: string | undefined, reserved: boolean, caller: boolean): number => {
     if (deps.peers) {
       try {
         seed(deps.peers.read());
@@ -471,7 +481,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
         // counted again at the next draw
       }
     }
-    const w = budget.take(name, client, 1, false, reserved);
+    // an own read nobody waits for yields PROXY_USER_ROOM to the callers (card solana-buy-from-cash-quotes)
+    const w = budget.take(name, client, 1, false, reserved, reserved && !caller);
     if (w === 0 && deps.peers) {
       try {
         deps.peers.write(calls());
@@ -520,6 +531,19 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
   const sentPage = new Map<VendorName, number[]>();
   /** Each device's sends in the window, so one device leaves the others OTHER_DEVICES_ROOM (fold 4). */
   const sentByClient = new Map<VendorName, Map<string, number[]>>();
+  /** When each device was last refused a call by the vendor's minute budget (its share, or the total it is lent past
+   *  it) at each paced vendor, LIMIT_CLIENTS devices at most: a device so refused in the window asks past what it is
+   *  served (fold 4). A turn the window has no room for yet is not the device's draw, and is not counted. */
+  const refusedAt = new Map<VendorName, Map<string, number>>();
+  const refusedNow = (name: VendorName, client: string | undefined): void => {
+    if (client === undefined || !PACED.has(name)) return;
+    const m = refusedAt.get(name) ?? new Map<string, number>();
+    m.delete(client);
+    m.set(client, now());
+    for (const [k, at] of m) if (at <= now() - burstMs || m.size > LIMIT_CLIENTS) m.delete(k);
+    else break;
+    refusedAt.set(name, m);
+  };
   /** When each paced vendor's pending wake (pump's sleep) ends: a call that arrives meanwhile still gets its turn at once
    *  when its room has one (a page past a queue of builds), and a sooner wake is set when one is needed. */
   const wakeAt = new Map<VendorName, number>();
@@ -573,6 +597,8 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     // one device's sends keep OTHER_DEVICES_ROOM of the window for the other devices (fold 4)
     const mine = lane !== 0 || w.client === undefined ? null : [...(sentByClient.get(name)?.get(w.client) ?? [])];
     const cap = Math.max(1, burst - OWN_ROOM - OTHER_DEVICES_ROOM);
+    // whether the device was refused a draw in the window (refusedAt: it asks past what it is served)
+    const refused = mine !== null && (refusedAt.get(name)?.get(w.client!) ?? -Infinity) > t - burstMs;
     // the most sends any other device has in the window
     let mostOthers = 0;
     if (mine !== null) for (const [c, v] of sentByClient.get(name) ?? []) if (c !== w.client) mostOthers = Math.max(mostOthers, v.filter((x) => x > t - burstMs).length);
@@ -590,7 +616,14 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       // reads holding their part, one device's legs took the builds' whole room: live runs 42207995804 and 42210110244,
       // S-1 refused before its send, its turn 4 s off); a lighter device is never held for the heavy one's room
       const mineIn = mine === null ? 0 : mine.filter((x) => x > f - burstMs).length;
+      // Card solana-buy-from-cash-quotes: a device refused a call in the window asks past what it is served (a heavy
+      // one); it sends at most what a trade (its share) and a first-time device's first OTHER_DEVICES_ROOM builds leave of
+      // the window, so neither waits behind it. Held only to OTHER_DEVICES_ROOM for them all, a heavy device back from its
+      // minute's hold (fewer sends in the window than a light device's trade) filled the room a first-time device's first
+      // 2 builds keep (crowd fold 4: 198.51.100.4's 2nd build at 70.2 s, once callers drew 54 of the minute)
       if (mine !== null && mineIn >= OTHER_DEVICES_ROOM && mineIn >= mostOthers) f = Math.max(f, roomIn(times, devices - OTHER_DEVICES_ROOM));
+      const heavyCap = Math.max(1, devices - OTHER_DEVICES_ROOM - limits[name].perClient);
+      if (refused && mine.length >= heavyCap) f = Math.max(f, mine[mine.length - heavyCap]! + burstMs);
       if (f < (recoverUntil.get(name) ?? -Infinity) && times.length > 0) f = Math.max(f, times.at(-1)! + burstMs / burst);
       times.push(f);
       if (lane === 1) pages.push(f);
@@ -748,7 +781,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
       if (late > 0) return budget.heldUntil(name) > now() || !PACED.has(name) ? notReady(refusals > 0 ? "429" : "held", `${name} held`, Math.max(late, heldS()), waits()) : notReady("budget", `${name} turn`, late, waits());
       if (attempt > 0) {
         // the retry reaches the vendor again, so it draws from the total too
-        if (drawUp(name, undefined, reserved) > 0) {
+        if (drawUp(name, undefined, reserved, caller) > 0) {
           const why = budget.refusedBy();
           return notReady(why.endsWith(" held") ? (refusals > 0 ? "429" : "held") : "budget", why, undefined, waits());
         }
@@ -845,7 +878,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     if (rawQuery.length > QUERY_MAX) return source(error(413, "too_large"));
     // a draw on the vendor's budget for every call that may reach it, the helper's own too; a cache hit or a call joining
     // one in flight reaches nothing and draws nothing (card chart-candles-never-429)
-    const take = (): number => drawUp(name, client, reserved);
+    const take = (): number => drawUp(name, client, reserved, caller);
     // card helper-crowd-429: a draw the share or the total refuses waits for its room, until `by` at most, and a draw the
     // vendor's hold refuses waits for the hold's end when it comes by then; a draw that goes is taken at once, with no
     // await, so a call right behind it still finds it in flight.
@@ -869,6 +902,7 @@ export function createProxy(env: Record<string, string | undefined>, deps: Deps 
     // both with the seconds until the draw would go (Retry-After)
     const refused = (wait: number): ProxyAnswer => {
       const why = budget.refusedBy();
+      if (!reserved && !why.endsWith(" held")) refusedNow(name, client);
       return why.endsWith(" share") ? throttled(wait, undefined, why) : notReady(why.endsWith(" held") ? "held" : "budget", why, wait, [`budget;dur=${Math.round(mono() - b0)}`]);
     };
     // when the draw began, for the budget's wait in Server-Timing
