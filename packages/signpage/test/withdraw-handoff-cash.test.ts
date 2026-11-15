@@ -1,5 +1,7 @@
 // The cash run and the quote's window (split from test/withdraw-handoff.test.ts, card readme-run-fits-an-agent-timeout;
 // the world in ./withdraw-handoff-world.ts).
+// Real proofs: only "the cash run sends Cash whole ...", whose relayer checks verify its first part's proof; every
+// other test reads the run's plan, notes and the quote's window, so its page proves on signalsProver.
 //   node --test test/withdraw-handoff-cash.test.ts   (from packages/signpage)
 /// <reference types="node" />
 // the world first: it loads the 1Click mock and sets __SIGN_NETWORK__ before the modules that read them (./withdraw-handoff-world.ts)

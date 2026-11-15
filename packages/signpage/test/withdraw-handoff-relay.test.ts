@@ -1,5 +1,7 @@
 // The hand-off with the real relayWithdraw, and the arrival read after it (split from test/withdraw-handoff.test.ts, card
 // readme-run-fits-an-agent-timeout; the world in ./withdraw-handoff-world.ts).
+// Real proofs: only "hand-off with the real relayWithdraw ...", the hand-off end to end with a real proof to a landed
+// change note; every other test reads the relay's outcome and the notes, so its page proves on signalsProver.
 //   node --test test/withdraw-handoff-relay.test.ts   (from packages/signpage)
 /// <reference types="node" />
 // the world first: it loads the 1Click mock and sets __SIGN_NETWORK__ before the modules that read them (./withdraw-handoff-world.ts)

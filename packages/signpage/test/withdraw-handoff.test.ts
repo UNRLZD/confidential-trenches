@@ -9,6 +9,9 @@
 //   node --test test/withdraw-handoff.test.ts   (from packages/signpage)
 // IndexedDB is fake-indexeddb; the fee_max reads are the wallet's recorded ones (wallet test/vectors/withdraw-feemax.json).
 // Test values only, never money: the notes are the public all-zero test seed's (wallet test/vectors/a8.json).
+// Real proofs: only "the hand-off proves on the page's prover ...", whose relayer checks verify the proof against the
+// pinned vkey; every other test here reads the order, notes, seed and window, so its page proves on signalsProver
+// (the reasons in ./withdraw-handoff-world.ts's header).
 /// <reference types="node" />
 // the world first: it loads the 1Click mock and sets __SIGN_NETWORK__ before the modules that read them (./withdraw-handoff-world.ts)
 import { MIN, R, RELAY_FEE, SCOPE, SEED, T, bytes, checkWithdraw, expired, feeAnswer, handoffOf, helper, leftReserved, lowerFinalTime, openNoteStore, page, pair, readTokenStorageMin, settleWith, snarkProver, testnet, tick, treesOf, withdrawFormDeps, withdrawHandoff, withdrawSettle, world, zeroed, signalsProver } from "./withdraw-handoff-world.ts";
