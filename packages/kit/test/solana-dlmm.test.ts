@@ -68,6 +68,38 @@ test("a reserve outside the band on one provider refuses the route after the one
   assert.ok("refused" in r && /reserves are outside the band, after a re-read/.test(r.refused), JSON.stringify(r));
 });
 
+test("a first read of the pair alone on one provider that names another reserve owned by the pair refuses the route (every later read honest)", async () => {
+  // any token account of a mint can be made out to the pair's address, so a list naming one passes the reserve's mint and
+  // owner check: the list must be the one the agreed pair bytes name (pair reserve_x at 152, reserve_y at 184)
+  const { base58 } = await import("@scure/base");
+  const { solanaDecodeDlmmPair } = await import("../src/trade/solana/dlmm.ts");
+  const pair = solanaDecodeDlmmPair({ owner: PA.accounts[V.pair]!.owner, data: base64.decode(PA.accounts[V.pair]!.data) });
+  const SOL = "So11111111111111111111111111111111111111112";
+  const [at, mint, real] = pair.tokenX === SOL ? [152, pair.tokenX, pair.reserveX] : [184, pair.tokenY, pair.reserveY];
+  const FAKE = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + 13) & 0xff));
+  const d = base64.decode(PA.accounts[real]!.data).slice(0, 165);
+  d.set(base58.decode(mint), 0);
+  d.set(base58.decode(V.pair), 32);
+  new DataView(d.buffer).setBigUint64(64, new DataView(d.buffer).getBigUint64(64, true) * 1_000n, true);
+  const fake = { owner: PA.accounts[real]!.owner, data: base64.encode(d) };
+  const lying = (p: Provider, head: boolean): SolanaRpc => {
+    const q: Provider = { slot: p.slot, accounts: { ...p.accounts, [FAKE]: fake } };
+    return (async (method: string, params: readonly unknown[]) => {
+      const list = params[0] as string[];
+      const lie = head && list.length === 1 && list[0] === V.pair;
+      return replay(q, (a, x) => (lie && a === V.pair ? Object.assign(x.slice(), Object.fromEntries([...base58.decode(FAKE)].map((b, i) => [at + i, b]))) : x))(method as never, params as never);
+    }) as SolanaRpc;
+  };
+  const honest = await readSolanaReferenceWhy([lying(PA, false), lying(PB, false)], buy(100_000_000n, { dlmmPairs: [V.pair] }));
+  assert.ok("reference" in honest, "refused" in honest ? honest.refused : "");
+  // provider A's first read plans the list: its lie refuses the route
+  const r = await readSolanaReferenceWhy([lying(PA, true), lying(PB, false)], buy(100_000_000n, { dlmmPairs: [V.pair] }));
+  assert.ok("refused" in r && /accounts that are not the pair's own, after a re-read/.test(r.refused), "reference" in r ? `depth ${r.reference.pools[0]!.depth}` : r.refused);
+  // provider B's first read plans nothing once A's does: its lie moves nothing
+  const rb = await readSolanaReferenceWhy([lying(PA, false), lying(PB, true)], buy(100_000_000n, { dlmmPairs: [V.pair] }));
+  assert.ok("reference" in rb && rb.reference.pools[0]!.depth.join() === honest.reference.pools[0]!.depth.join(), "refused" in rb ? rb.refused : `depth ${rb.reference.pools[0]!.depth}`);
+});
+
 test("a static byte of the pair that differs (its base factor) refuses the route", async () => {
   const r = await readSolanaReferenceWhy([replay(PA), replay(PB, (a, d) => (a === V.pair ? Object.assign(d.slice(), { [8]: d[8]! ^ 1 }) : d))], buy(100_000_000n, { dlmmPairs: [V.pair] }));
   assert.ok("refused" in r && /static bytes differ/.test(r.refused), JSON.stringify(r));

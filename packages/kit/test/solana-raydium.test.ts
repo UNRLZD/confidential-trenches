@@ -122,6 +122,107 @@ for (const v of VECTORS) {
   });
 }
 
+// Only the scan's first read of a pool lies (the read that names the pool alone, which plans the second read's account
+// list in pool.ts lookScanned); every later read on both providers is honest. Any token account of a mint can be made out
+// to a venue's program-wide authority, so a list naming one passes the vault's mint and owner check: the list must be the
+// one the agreed pool bytes name (review of 7637cce9f: E cut by 99.3% on CPMM, 85% on AMM v4 before).
+const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const AUTHORITY = { "raydium-cpmm": "GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL", "raydium-amm-v4": "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1" } as const;
+// the pool's bytes: CPMM amm_config 8, vault0 72, vault1 104, mint0 168, mint1 200, program0 232, program1 264; AMM v4
+// coin_vault 336, pc_vault 368, coin mint 400, pc mint 432 (SPL Token only)
+const LAYOUT = { "raydium-cpmm": { vaults: [72, 104], mints: [168, 200] }, "raydium-amm-v4": { vaults: [336, 368], mints: [400, 432] } } as const;
+const madeUp = (k: number) => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + k) & 0xff));
+const tokenAccount = (mint: string, owner: string, amount: bigint): string => {
+  const d = new Uint8Array(165);
+  d.set(base58.decode(mint), 0);
+  d.set(base58.decode(owner), 32);
+  new DataView(d.buffer).setBigUint64(64, amount, true);
+  d[108] = 1;
+  return base64.encode(d);
+};
+/** Provider p with `extra` accounts on the chain, the pool's bytes edited by `head` in the read that names the pool
+ *  alone, and by `every` in every read. */
+function lying(p: Provider, pool: string, extra: Record<string, Acc>, head: ((d: Uint8Array) => Uint8Array) | null, every: ((d: Uint8Array) => Uint8Array) | null = null): SolanaRpc {
+  const q: Provider = { slot: p.slot, accounts: { ...p.accounts, ...extra } };
+  return (async (method: string, params: readonly unknown[]) => {
+    const list = params[0] as string[];
+    const isHead = list.length === 1 && list[0] === pool;
+    const edit = (a: string, d: Uint8Array) => (a !== pool ? d : isHead && head ? head(d) : every ? every(d) : d);
+    return replay(q, edit)(method as never, params as never);
+  }) as SolanaRpc;
+}
+const facts = (v: Vector) => {
+  const [pa, pb] = Object.values(v.providers) as [Provider, Provider];
+  const pool = base64.decode(pa.accounts[v.pool]!.data);
+  const key = (o: number) => base58.encode(pool.subarray(o, o + 32));
+  const L = LAYOUT[v.kind];
+  const sol = key(L.mints[0]) === SOL_MINT ? 0 : 1;
+  const coin = 1 - sol;
+  const coinProgram = v.kind === "raydium-cpmm" ? key([232, 264][coin]!) : TOKEN_PROGRAM;
+  const vaultOf = (i: number) => key(L.vaults[i]!);
+  const amountOf = (addr: string) => new DataView(base64.decode(pa.accounts[addr]!.data).buffer).getBigUint64(64, true);
+  const put = (at: number, addr: string) => (d: Uint8Array) => { const c = d.slice(); c.set(base58.decode(addr), at); return c; };
+  return { pa, pb, pool, L, sol, coin, coinProgram, vaultOf, amountOf, put };
+};
+
+for (const v of VECTORS) {
+  test(`${v.kind}: a first read of the pool alone on one provider that names another SOL vault (buy) or coin vault (sell) of the venue's authority refuses the route`, async () => {
+    const f = facts(v);
+    const FAKE_SOL = madeUp(3);
+    const FAKE_COIN = madeUp(5);
+    const extra: Record<string, Acc> = {
+      [FAKE_SOL]: { owner: TOKEN_PROGRAM, data: tokenAccount(SOL_MINT, AUTHORITY[v.kind], f.amountOf(f.vaultOf(f.sol)) * 1_000n) },
+      [FAKE_COIN]: { owner: f.coinProgram, data: tokenAccount(v.mint, AUTHORITY[v.kind], f.amountOf(f.vaultOf(f.coin)) * 1_000n) },
+    };
+    const honest = [lying(f.pa, v.pool, extra, null), lying(f.pb, v.pool, extra, null)] as const;
+    for (const [side, amount, at, fake] of [["buy", 100_000_000n, f.L.vaults[f.sol]!, FAKE_SOL], ["sell", BigInt(v.sellAmount), f.L.vaults[f.coin]!, FAKE_COIN]] as const) {
+      const h = await readSolanaReferenceWhy(honest, req(v, side, amount));
+      assert.ok("reference" in h, `${side}: honest reads give no reference: ${"refused" in h ? h.refused : ""}`);
+      // provider A's first read plans the list: its lie refuses the route
+      const r = await readSolanaReferenceWhy([lying(f.pa, v.pool, extra, f.put(at, fake)), lying(f.pb, v.pool, extra, null)], req(v, side, amount));
+      assert.ok("refused" in r && /accounts that are not the pool's own, after a re-read/.test(r.refused), `${side}: ${"reference" in r ? `E ${r.reference.expectedOut} (honest ${h.reference.expectedOut})` : r.refused}`);
+      // provider B's first read plans nothing once A's does: its lie moves nothing
+      const rb = await readSolanaReferenceWhy([lying(f.pa, v.pool, extra, null), lying(f.pb, v.pool, extra, f.put(at, fake))], req(v, side, amount));
+      assert.ok("reference" in rb && rb.reference.expectedOut === h.reference.expectedOut, `${side}, B lies first: ${"refused" in rb ? rb.refused : rb.reference.expectedOut}`);
+    }
+  });
+
+  test(`${v.kind}: a first read of the pool alone on one provider that swaps its two vaults, or names another coin's mint, never hides the pool`, async () => {
+    const f = facts(v);
+    const h = await readSolanaReferenceWhy([lying(f.pa, v.pool, {}, null), lying(f.pb, v.pool, {}, null)], req(v, "buy", 100_000_000n));
+    assert.ok("reference" in h);
+    // the vaults swapped in that first read: the list names them in the other order, refused
+    const swap = (d: Uint8Array) => f.put(f.L.vaults[1]!, f.vaultOf(0))(f.put(f.L.vaults[0]!, f.vaultOf(1))(d));
+    const s = await readSolanaReferenceWhy([lying(f.pa, v.pool, {}, swap), lying(f.pb, v.pool, {}, null)], req(v, "buy", 100_000_000n));
+    assert.ok("refused" in s && /not the pool's own|another mint or owner/.test(s.refused), "refused" in s ? s.refused : "a reference");
+    // another coin's mint in provider A's first read only: provider B's first read plans the read, both agree, the same E
+    const other = (d: Uint8Array) => Object.assign(d.slice(), Object.fromEntries(Array.from({ length: 32 }, (_, i) => [f.L.mints[f.coin]! + i, 9])));
+    const once = await readSolanaReferenceWhy([lying(f.pa, v.pool, {}, other), lying(f.pb, v.pool, {}, null)], req(v, "buy", 100_000_000n));
+    assert.ok("reference" in once, `hidden by one first read: ${"refused" in once ? once.refused : ""}`);
+    assert.equal(once.reference.expectedOut, h.reference.expectedOut);
+    // in every read of provider A: the providers disagree on the pool, refused (never "no reference pool")
+    const always = await readSolanaReferenceWhy([lying(f.pa, v.pool, {}, other, other), lying(f.pb, v.pool, {}, null)], req(v, "buy", 100_000_000n));
+    assert.ok("refused" in always && /static bytes differ, after a re-read/.test(always.refused), "refused" in always ? always.refused : "a reference");
+  });
+}
+
+test("raydium-cpmm: a first read of the pool alone on one provider that names another AmmConfig (a higher fee tier) refuses the route", async () => {
+  const v = VECTORS[0]!;
+  const f = facts(v);
+  const cfgAddr = base58.encode(f.pool.subarray(8, 40));
+  const real = f.pa.accounts[cfgAddr]!;
+  const d = base64.decode(real.data).slice();
+  new DataView(d.buffer).setBigUint64(12, 100_000n, true); // trade_fee_rate 10%
+  const FAKE_CFG = madeUp(11);
+  const extra = { [FAKE_CFG]: { owner: real.owner, data: base64.encode(d) } };
+  for (const side of ["buy", "sell"] as const) {
+    const amount = side === "buy" ? 100_000_000n : BigInt(v.sellAmount);
+    const r = await readSolanaReferenceWhy([lying(f.pa, v.pool, extra, f.put(8, FAKE_CFG)), lying(f.pb, v.pool, extra, null)], req(v, side, amount));
+    assert.ok("refused" in r && /accounts that are not the pool's own, after a re-read/.test(r.refused), `${side}: ${"reference" in r ? `E ${r.reference.expectedOut}` : r.refused}`);
+  }
+});
+
 test("raydium-cpmm: a Token-2022 coin with an extension the reference does not price is no candidate; its transfer fee is priced", async () => {
   const { solanaCpmmTradeOut } = await import("../src/trade/solana/cpmm.ts");
   const pool = { ammConfig: "", vault0: "", vault1: "", mint0: "", mint1: "", program0: "", program1: "", observation: "", status: 0, fees0: 0n, fees1: 0n, openTime: 0n, creatorFeeOn: 0, creatorFeeEnabled: false };

@@ -695,6 +695,12 @@ function fail(why: string): never {
   throw new Error(why);
 }
 
+/** A scanned pool's read list is planned from one provider's earlier read of the pool alone (lookScanned): the accounts it
+ *  names must be the ones the agreed pool bytes name, or that one earlier read would choose the config, vaults or reserves
+ *  the reference prices on (any token account of a mint can be made out to a venue's authority or to a pair, so a vault's
+ *  mint and owner check alone passes another account). */
+const sameNames = (a: readonly string[], b: readonly string[] | null | undefined): boolean => !!b && a.length === b.length && a.every((x, i) => x === b[i]);
+
 /** The accounts one DLMM pair's read names, in order (solanaDlmmReadList): the pair, the mint, the Clock, both
  *  reserves, then the SOLANA_DLMM_ARRAYS bin arrays the swap walks from the active bin. */
 const DI = { pair: 0, mint: 1, clock: 2, reserveX: 3, reserveY: 4, arrays: 5 } as const;
@@ -706,7 +712,7 @@ export function solanaDlmmReadList(address: string, pair: SolanaDlmmPair, mint: 
 }
 
 /** What one DLMM pair's read pair says (the module note in dlmm.ts): not a candidate, a disagreement, or agreed. */
-function judgeDlmm(address: string, indexes: readonly number[], req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
+function judgeDlmm(address: string, list: readonly string[], indexes: readonly number[], req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
   const a = ga.read;
   const b = gb.read;
   if (!a || !b) {
@@ -723,6 +729,9 @@ function judgeDlmm(address: string, indexes: readonly number[], req: SolanaRefer
     if (!sameAcc(pa, pb, SOLANA_DLMM_PAIR_MOVING)) return { kind: "bad", why: "the DLMM pair's static bytes differ" };
     const pairs = [solanaDecodeDlmmPair(pa!), solanaDecodeDlmmPair(pb!)] as const;
     const p = pairs[0];
+    // the pair, the mint, the Clock and both reserves from the agreed bytes; the bin arrays follow from the pair and the
+    // indexes, and an index set that misses the active bin's array only finds no out (solanaDlmmSwapOut), never a lower one
+    if (!sameNames(list.slice(0, DI.arrays), solanaDlmmReadList(address, p, req.token, req.side)?.list.slice(0, DI.arrays))) return { kind: "bad", why: "the DLMM read named accounts that are not the pair's own" };
     const side = solanaDlmmSide(p, req.token);
     if (!side || p.status !== 0 || p.bitmapExtensionNeeded || !solanaDlmmModes(p, true)) return { kind: "none" };
     const ms = mints(at(A, DI.mint), at(B, DI.mint));
@@ -773,7 +782,7 @@ export function solanaCpmmReadList(address: string, pool: SolanaCpmmPool, mint: 
 }
 
 /** What one CPMM pool's read pair says (the module note in cpmm.ts): not a candidate, a disagreement, or agreed. */
-function judgeCpmm(address: string, req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
+function judgeCpmm(address: string, list: readonly string[], req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
   const a = ga.read;
   const b = gb.read;
   if (!a || !b) {
@@ -790,6 +799,7 @@ function judgeCpmm(address: string, req: SolanaReferenceRequest, ga: Got, gb: Go
     if (!sameAcc(pa, pb, SOLANA_CPMM_POOL_MOVING)) return { kind: "bad", why: "the CPMM pool's static bytes differ" };
     const pools = [solanaDecodeCpmmPool(pa!), solanaDecodeCpmmPool(pb!)] as const;
     const p = pools[0];
+    if (!sameNames(list, solanaCpmmReadList(address, p, req.token))) return { kind: "bad", why: "the CPMM read named accounts that are not the pool's own" };
     const side = solanaCpmmSide(p, req.token);
     if (!side || p.creatorFeeOn > 2) return { kind: "none" };
     if ((side.solIs0 ? p.program0 : p.program1) !== SOLANA_TOKEN_PROGRAM) return { kind: "none" };
@@ -838,7 +848,7 @@ export function solanaAmmV4ReadList(address: string, pool: SolanaAmmV4Pool, mint
 }
 
 /** What one AMM v4 pool's read pair says (the module note in amm-v4.ts): not a candidate, a disagreement, or agreed. */
-function judgeAmmV4(address: string, req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
+function judgeAmmV4(address: string, list: readonly string[], req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
   const a = ga.read;
   const b = gb.read;
   if (!a || !b) {
@@ -855,6 +865,7 @@ function judgeAmmV4(address: string, req: SolanaReferenceRequest, ga: Got, gb: G
     if (!sameAcc(pa, pb, SOLANA_AMM_V4_POOL_MOVING)) return { kind: "bad", why: "the AMM v4 pool's static bytes differ" };
     const pools = [solanaDecodeAmmV4Pool(pa!), solanaDecodeAmmV4Pool(pb!)] as const;
     const p = pools[0];
+    if (!sameNames(list, solanaAmmV4ReadList(address, p, req.token))) return { kind: "bad", why: "the AMM v4 read named accounts that are not the pool's own" };
     const side = solanaAmmV4Side(p, req.token);
     if (!side) return { kind: "none" };
     const ms = mints(at(A, AI.mint), at(B, AI.mint));
@@ -931,29 +942,30 @@ export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, Sol
     return verdict;
   };
   // a pool found by a scan (a DLMM pair, a CPMM pool, an AMM v4 pool): every such pool of a kind read first (one call per
-  // provider for them all), then each one's own read at one slot, its list planned from provider A's read of the pool,
-  // else provider B's: both reads then name the same accounts, and the judge holds both to the same static bytes
+  // provider for them all), then each one's own read at one slot, its list planned from the first provider whose read of
+  // the pool plans one (A's, else B's: one provider's read that names another mint never hides the pool), so both reads
+  // name the same accounts; the judge holds both to the same static bytes and the list to the accounts those bytes name
   type Scanned = { name: string; plural: string; prefix: string; max: number; pools: string[]; plan: (address: string, acc: SolanaPoolAccount) => { list: string[]; judge: (a: Got, b: Got) => Verdict } | null };
   const scanned: Scanned[] = [
     {
       name: "DLMM pair", plural: "DLMM pairs", prefix: "dlmm", max: SOLANA_DLMM_MAX_PAIRS, pools: [...new Set(req.dlmmPairs ?? [])],
       plan: (address, acc) => {
         const plan = solanaDlmmReadList(address, solanaDecodeDlmmPair(acc), req.token, req.side);
-        return plan && { list: plan.list, judge: (a, b) => judgeDlmm(address, plan.indexes, req, a, b) };
+        return plan && { list: plan.list, judge: (a, b) => judgeDlmm(address, plan.list, plan.indexes, req, a, b) };
       },
     },
     {
       name: "CPMM pool", plural: "CPMM pools", prefix: "raydium-cpmm", max: SOLANA_CPMM_MAX_POOLS, pools: [...new Set(req.cpmmPools ?? [])],
       plan: (address, acc) => {
         const list = solanaCpmmReadList(address, solanaDecodeCpmmPool(acc), req.token);
-        return list && { list, judge: (a, b) => judgeCpmm(address, req, a, b) };
+        return list && { list, judge: (a, b) => judgeCpmm(address, list, req, a, b) };
       },
     },
     {
       name: "AMM v4 pool", plural: "AMM v4 pools", prefix: "raydium-amm-v4", max: SOLANA_AMM_V4_MAX_POOLS, pools: [...new Set(req.ammV4Pools ?? [])],
       plan: (address, acc) => {
         const list = solanaAmmV4ReadList(address, solanaDecodeAmmV4Pool(acc), req.token);
-        return list && { list, judge: (a, b) => judgeAmmV4(address, req, a, b) };
+        return list && { list, judge: (a, b) => judgeAmmV4(address, list, req, a, b) };
       },
     },
   ];
@@ -974,7 +986,6 @@ export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, Sol
       } catch {
         return { kind: "bad", why: `the ${kind.name} is malformed` };
       }
-      if (!plan) return { kind: "none" };
     }
     if (!plan) return heads[k]!.every((h) => h.read) ? { kind: "none" } : { kind: "bad", why: `a provider gave no answer for the ${kind.name}` };
     const [a, b] = await readBoth(plan.list);
