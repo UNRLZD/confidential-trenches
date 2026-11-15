@@ -17,19 +17,30 @@ function slowDry(ms: number): Running<"pool.buy.dry"> {
   return { running: true, after, answer: () => a };
 }
 
-test("a no-note Solana dry with slow reads answers at the slowest read, not their sum", async () => {
-  const t0 = performance.now();
-  // Cash's reads as main.ts makes them, each SLOW_MS: the notes, then (with a note) the fee, floor and least
+/** Lets every promise the timers settled run on (setImmediate is not mocked). */
+const flush = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok));
+};
+
+test("a no-note Solana dry with slow reads answers at the slowest read, not their sum", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  // Cash's reads as main.ts makes them, each SLOW_MS on the test's clock: the notes, then (with a note) the fee, floor
+  // and least
   const cash = cashPlanReads(
     () => later(SLOW_MS, []),
     () => [cashFeeRead(never()), never(), never()] as const,
   ).then((x) => (tap: string) => (x.notes.length === 0 ? tap : null));
   const r = dryBesideCash(slowDry(SLOW_MS), cash);
-  await r.after;
-  const took = performance.now() - t0;
+  let done = false;
+  void r.after.then(() => void (done = true));
+  t.mock.timers.tick(SLOW_MS - 1);
+  await flush();
+  assert.equal(done, false);
+  // one SLOW_MS in: both reads are in, so the answer is (after them, in turn, it would take two)
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal(done, true, `no answer at ${SLOW_MS} ms, the slowest read`);
   assert.deepEqual(r.answer(), { result: { tap_max: "0", out: "211.011995", with_cash: "0" } });
-  // the sum is 2 * SLOW_MS; side by side it is one SLOW_MS and the timers' slack
-  assert.ok(took < SLOW_MS * 1.5, `answered in ${Math.round(took)} ms, the slowest read is ${SLOW_MS} ms`);
 });
 
 test("with no Cash note, the fee, floor and least are neither read nor waited on", async () => {
@@ -46,20 +57,27 @@ test("with no Cash note, the fee, floor and least are neither read nor waited on
   assert.equal(NO_CASH_EVM_PLAN.cost(1n), null);
 });
 
-test("with a Cash note, the fee, floor and least are read side by side and the plan waits for them", async () => {
-  const t0 = performance.now();
-  const r = await cashPlanReads(
+test("with a Cash note, the fee, floor and least are read side by side and the plan waits for them", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const plan = cashPlanReads(
     async () => [{ id: "n", value: 5_000_000n }],
     () => [cashFeeRead(later(SLOW_MS, 7n)), later(SLOW_MS, 12n), later(SLOW_MS, 3n)] as const,
   );
-  const took = performance.now() - t0;
-  assert.deepEqual(r, { notes: [{ id: "n", value: 5_000_000n }], fee: 7n, floor: 12n, leastIn: 3n });
-  assert.ok(took >= SLOW_MS - 5 && took < SLOW_MS * 1.5, `waited ${Math.round(took)} ms`);
+  let got: Awaited<typeof plan> | undefined;
+  void plan.then((x) => void (got = x));
+  await flush();
+  t.mock.timers.tick(SLOW_MS - 1);
+  await flush();
+  assert.equal(got, undefined);
+  t.mock.timers.tick(1);
+  await flush();
+  assert.deepEqual(got, { notes: [{ id: "n", value: 5_000_000n }], fee: 7n, floor: 12n, leastIn: 3n });
+  t.mock.timers.reset();
   // a failed fee read with a note is thrown, as cashPlanFee
   await assert.rejects(
     cashPlanReads(
       async () => [{ id: "n", value: 5_000_000n }],
-      () => [cashFeeRead(Promise.reject(new Error("amount"))), later(1, 12n), later(1, 3n)] as const,
+      () => [cashFeeRead(Promise.reject(new Error("amount"))), Promise.resolve(12n), Promise.resolve(3n)] as const,
     ),
     /amount/,
   );
