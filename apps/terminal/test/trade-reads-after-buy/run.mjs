@@ -15,7 +15,8 @@
 //   - the box after a buy: Bal and Max with no Cash (the pool alone, nothing typed), printed and shot (Bal beside Max
 //     needs new screen copy);
 //   - You receive and the Fee with $2 typed on every chain (card you-receive-on-every-chain), judged: Solana above one
-//     tap's own spend (a move from Cash first), Base and Robinhood under one note, NEAR from Cash, each answered as the
+//     tap's own spend (a move from Cash first), Base and Robinhood under one note and, from an empty pool, above tap_max
+//     (a move from Cash first, card evm-cash-move-brings-its-fee), NEAR from Cash, each answered as the
 //     signing page answers pool.buy.dry for it now (packages/signpage/src/pools.ts poolBuyDryKind, main.ts
 //     evmDryWithCash, near-buy.ts nearBuyDry: cost and out), on the recorded mainnet token reads of each chain
 //     (test/chains-evm, test/near-trade); never a dash, at 1440 and 390;
@@ -69,6 +70,12 @@ const FILLED = { stage: "filled", txs: [{ chain: "solana", hash: TX }] };
 const ETH_PRICE = () => ({ price: "350012345678", expo: -8, published_s: Math.floor(Date.now() / 1000), read_ms: Date.now() });
 const evmPool = (chain) => [{ chain, asset: "ETH", balance: "0.001", ready: "0.001", tap_max: "0.001", price: ETH_PRICE() }];
 const DRY_EVM = { tap_max: "0.001", cost: "0.000021", out: "10600" };
+// above tap_max (card evm-cash-move-brings-its-fee): an empty pool, $40 of Cash; the dry of a $2 ask as the signing page
+// answers it now (src/pool-buy-evm.ts evmBuyDry: evmMoveShort at a 0.000021 ETH epoch fee sizes a 0.001 ETH move, its
+// plan's fees 0.000084 ETH, plus cash-to-pool.ts evmMoveCostOf at a 0.05 USDC withdraw fee and 0.00002 ETH of deposit
+// gas, 0.000064885273888177 ETH), with_cash the 0.01 ETH rung Cash makes (withCashNote)
+const evmEmpty = (chain) => [{ chain, asset: "ETH", balance: "0", ready: "0", tap_max: "0", price: ETH_PRICE() }];
+const DRY_EVM_CASH = { tap_max: "0", with_cash: "0.01", cost: "0.000148885273888177", out: "10600" };
 // NEAR: $40 of Cash, the buy's fees 0.05 USDC and 1.2345 tokens out
 const DRY_NEAR = { tap_max: "40", cost: "0.05", out: "1.2345" };
 // name: the shell's state (made when the scene opens), its answers
@@ -77,6 +84,8 @@ const SCENES = {
   nocash: () => [signed("0"), { "pool.buy.dry": DRY, "pool.buy": FILLED }],
   base: () => [{ ...BASE, vault_balance: "40.00", pools: evmPool("base") }, { "pool.buy.dry": DRY_EVM }],
   robinhood: () => [{ ...BASE, vault_balance: "40.00", pools: evmPool("robinhood") }, { "pool.buy.dry": DRY_EVM }],
+  "base-cash": () => [{ ...BASE, vault_balance: "40.00", pools: evmEmpty("base") }, { "pool.buy.dry": DRY_EVM_CASH }],
+  "robinhood-cash": () => [{ ...BASE, vault_balance: "40.00", pools: evmEmpty("robinhood") }, { "pool.buy.dry": DRY_EVM_CASH }],
   near: () => [{ ...BASE, vault_balance: "40.00" }, { "pool.buy.dry": DRY_NEAR }],
 };
 // each chain's token page, from the recorded mainnet reads (Solana's is the shell's own)
@@ -95,11 +104,14 @@ const TOKENS = {
 };
 // the chain each scene's page is on, and what its box must draw with $2 typed: the dry's out (fmtOut) and its cost in
 // USD rounded up (0.0081 SOL at $93.01 is $0.7534; 0.000021 ETH at $3,500.12 is $0.0735; 0.05 USDC is $0.05)
-const CHAIN = { cash: "solana", nocash: "solana", base: "base", robinhood: "robinhood", near: "near" };
+// (0.000148885273888177 ETH at $3,500.12 is $0.5211)
+const CHAIN = { cash: "solana", nocash: "solana", base: "base", robinhood: "robinhood", "base-cash": "base", "robinhood-cash": "robinhood", near: "near" };
 const WANT = {
   cash: { receive: `≈ 212.34K ${ROW.symbol}`, fee: "$0.76" },
   base: { receive: `≈ 10.6K ${TOKENS.base.symbol}`, fee: "$0.08" },
   robinhood: { receive: `≈ 10.6K ${TOKENS.robinhood.symbol}`, fee: "$0.08" },
+  "base-cash": { receive: `≈ 10.6K ${TOKENS.base.symbol}`, fee: "$0.53" },
+  "robinhood-cash": { receive: `≈ 10.6K ${TOKENS.robinhood.symbol}`, fee: "$0.53" },
   near: { receive: `≈ 1.23 ${TOKENS.near.symbol}`, fee: "$0.05" },
 };
 const atOf = (scene) => (CHAIN[scene] === "solana" ? AT : `/token/${CHAIN[scene]}/${encodeURIComponent(TOKENS[CHAIN[scene]].id)}`);
@@ -261,7 +273,7 @@ try {
   for (const w of WIDTHS) {
     await fill(browser, w);
     await reads(browser, w, "nocash", "");
-    for (const scene of ["cash", "base", "robinhood", "near"]) await reads(browser, w, scene, "2");
+    for (const scene of ["cash", "base", "robinhood", "base-cash", "robinhood-cash", "near"]) await reads(browser, w, scene, "2");
   }
 } finally {
   await browser.close();
@@ -274,4 +286,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} of ${checks} checks`);
   process.exit(1);
 }
-console.log(`PASS ${checks} checks: the fill toast clear of the header's Price, 24h change and Tax at 390 and 1440, and You receive and the Fee with $2 typed on Solana, Base, Robinhood and NEAR, from the built app inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${checks} checks: the fill toast clear of the header's Price, 24h change and Tax at 390 and 1440, and You receive and the Fee with $2 typed on Solana, Base, Robinhood (under and above tap_max) and NEAR, from the built app inside the stand-in shell${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
