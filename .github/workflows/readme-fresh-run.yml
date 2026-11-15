@@ -8,7 +8,8 @@
 #   run's environment drops every name with KEY, JWT, SECRET, TOKEN or PASSWORD) and no route out after the install
 #   (every step but `git clone` and `pnpm install` runs under scripts/ci/no-network.mjs);
 # - the run exits 0, every package with a test script prints a summary, every summary reads `fail 0`, and the whole
-#   run takes under 15 minutes (its wall time is printed).
+#   run takes under 8 minutes, inside an AI agent's usual 10-minute command timeout (its wall time is printed;
+#   card readme-run-fits-an-agent-timeout).
 # The planted job first runs the same checks on a failing step, a vendor host and a browser launch in a default test:
 # each must fail, or this workflow fails.
 #
@@ -134,4 +135,4 @@ jobs:
         with:
           node-version: 24
       - name: the README's AI-agent steps, from a fresh clone
-        run: node scripts/ci/readme-fresh-run.mjs --checkout "$GITHUB_WORKSPACE" --workdir "$RUNNER_TEMP/fresh" --max-minutes 15
+        run: node scripts/ci/readme-fresh-run.mjs --checkout "$GITHUB_WORKSPACE" --workdir "$RUNNER_TEMP/fresh" --max-minutes 8

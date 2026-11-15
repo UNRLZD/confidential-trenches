@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as Kit from "../src/index.ts";
+import { onTestClock } from "./test-clock.ts";
 
 const { VAULT_CONSTANTS, VAULT_SYNC_PAGE, VaultSyncStopped, vaultSync, vaultSyncStart, vaultViewTooHeavy } = Kit;
 type Cursor = Kit.VaultSyncCursor;
@@ -541,9 +542,12 @@ test("R-03: dRPC's free-plan timeout (HTTP 408, code 30) is asked again after a 
   let busy = 0;
   const flaky: FakeOpts = { answer: (p, honest) => (p.method_name === "spends" && busy++ < 2 ? DRPC_TIMEOUT : honest) };
   const rpcs = pair(chain, {}, flaky);
-  const t0 = Date.now();
-  assert.deepEqual(await vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT) }), whole);
-  assert.ok(Date.now() - t0 >= Kit.VAULT_SYNC_BUSY_WAITS_MS[0]! + Kit.VAULT_SYNC_BUSY_WAITS_MS[1]!, "it waited before each new ask");
+  // on the test clock: it reads the waits set, never the machine's speed
+  await onTestClock(async () => {
+    const t0 = Date.now();
+    assert.deepEqual(await vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT) }), whole);
+    assert.ok(Date.now() - t0 >= Kit.VAULT_SYNC_BUSY_WAITS_MS[0]! + Kit.VAULT_SYNC_BUSY_WAITS_MS[1]!, "it waited before each new ask");
+  });
   assert.deepEqual(limits(rpcs[0], "spends"), [250, 250, 250]); // the answering side is asked with the busy one, each time
   assert.deepEqual([...new Set(limits(rpcs[1], "spends"))], [250]);
   // busy every time: asked 1 + 3 times, then the sync stops naming the RPC, the page never halved

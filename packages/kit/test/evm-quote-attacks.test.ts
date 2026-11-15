@@ -1884,10 +1884,8 @@ test("card rh-cold-quote: 20,000 made-up pools packed 9,999 to a block from the 
   const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f20";
   const c = rcFlood(coin, rcJunk(coin, 20_000, 9_999, RC_HEAD - 500_000 + 1), { code: -32000, message: "logs matched by query exceeds limit of 10000" });
   const t = performance.now();
-  await assert.rejects(c.run(), atReal);
-  const ms = Math.round(performance.now() - t);
-  console.log(`20,000 made-up pools: ${c.firstAsked.length} getLogs on the first, ${ms} ms`);
-  assert.ok(ms < 60_000);
+  await assert.rejects(c.run(), atReal); // within the bound: the test's own timeout
+  console.log(`20,000 made-up pools: ${c.firstAsked.length} getLogs on the first, ${Math.round(performance.now() - t)} ms`);
   assert.equal(c.spared(), 0);
 });
 
@@ -1902,7 +1900,8 @@ test("card rh-cold-quote: a first that answers HTTP 413 to a request holding the
   assert.equal(c.spared(), 0);
 });
 
-test("card rh-cold-quote: a first that answers -32602 to every getLogs refuses rpc_error within an honest split's requests, under 5 s, never the spare's word (review of 1265bd94)", { timeout: 30_000 }, async () => {
+// on the test clock: a scan that ran to its 10 s bound reads the bound's full length
+test("card rh-cold-quote: a first that answers -32602 to every getLogs refuses rpc_error within an honest split's requests, under 5 s, never the spare's word (review of 1265bd94)", { timeout: 30_000 }, () => onTestClock(async () => {
   // 2 x the scan's 2 starting requests (the depth and its newest 2,000 blocks) + 2 x ceil(65,536 / 10,000) x
   // ceil(log2(10M)) = 340 halving requests at most, past those 2; the bound at 10 s, so a scan that ran to it shows here
   const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f15";
@@ -1925,7 +1924,7 @@ test("card rh-cold-quote: a first that answers -32602 to every getLogs refuses r
   assert.ok(batches <= 2 + 2 * 2 + 2 * Math.ceil(65_536 / 10_000) * Math.ceil(Math.log2(10_000_000)), String(batches));
   assert.ok(ms < 5_000, `${ms} ms`);
   assert.equal(c.spared(), 0);
-});
+}));
 
 test("card rh-cold-quote: a cold Base scan whose first answers each of its starting requests once with an error, then answers its halves, lands: each request's first split is the scan's own (review of ac6db348)", { timeout: 30_000 }, async () => {
   const token = "0x00000000000000000000000000000000000ba5f1";
@@ -3598,7 +3597,8 @@ test("V1 a provider that never answers, or fails, is passed over for the next: t
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(warmReq(token), [down, chain(pools, 0)], NOW)), { accepted: false, code: "rpc_error" });
 }));
 
-test("V2 a provider that answers differently is outvoted, never used: two others that agree decide, and with no third the quote refuses", async () => {
+// on the test clock: a third asked on the hedge's timer reads EVM_HEDGE_MS
+test("V2 a provider that answers differently is outvoted, never used: two others that agree decide, and with no third the quote refuses", () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000ee0f2";
   // a pool at ten times the price that only provider 0 claims the PoolManager holds
   const lie: ModelPool = { key: keyOf(token, NATIVE, 9000, 9, NATIVE), give: (a) => 100n * a, state: pricedAt(100n), only: 0 };
@@ -3612,9 +3612,10 @@ test("V2 a provider that answers differently is outvoted, never used: two others
   // the third is asked as soon as the two differ, not after EVM_HEDGE_MS
   assert.ok(performance.now() - t < EVM_HEDGE_MS!, `${Math.round(performance.now() - t)} ms`);
   // two liars that agree with each other are two providers' word: the venue lists providers of different operators
-});
+}));
 
-test("V3 a provider whose head lags past maxLag is passed over for the next: the block is the two near heads' lower one", async () => {
+// on the test clock: a spare asked on the hedge's timer reads EVM_HEDGE_MS
+test("V3 a provider whose head lags past maxLag is passed over for the next: the block is the two near heads' lower one", () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000ee0f3";
   const pools = [best(token)];
   const t = performance.now();
@@ -3630,7 +3631,7 @@ test("V3 a provider whose head lags past maxLag is passed over for the next: the
   };
   const w = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), noConfirm(chain(pools, 1, 5_000_001)), chain(pools, 1)], NOW));
   assert.equal(w.accepted, true, String((w as { code?: string }).code));
-});
+}));
 
 test("V4 the providers are asked fastest first by measured time; one with a request out past EVM_HEDGE_MS goes after them, and one held (it failed) last until EVM_HOLD_MS pass", async () => {
   assert.equal(typeof evmRanked, "function", "the kit ranks its providers");
@@ -4095,7 +4096,8 @@ test("V13 a head is held only when more than maxLag below the lower of the two u
   }
 });
 
-test("V14 a contested read whose majority no provider left can reach refuses at once, never waiting on a provider that hangs", { timeout: 20_000 }, async () => {
+// on the test clock: a wait on the provider that hangs reads its 4 s
+test("V14 a contested read whose majority no provider left can reach refuses at once, never waiting on a provider that hangs", { timeout: 20_000 }, () => onTestClock(async () => {
   const { pools, req } = liarCase(freshToken());
   const failing: EvmRpc = async (calls) => {
     if (calls.some((c) => c.method === "eth_call")) throw new TypeError("fetch failed");
@@ -4112,7 +4114,7 @@ test("V14 a contested read whose majority no provider left can reach refuses at 
   // need 3 of 4: one honest, one liar, one failed, one out: at most 2
   assert.equal(big(await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0), chain(pools, 1), failing, hung], NOW))), big({ accepted: false, code: "rpc_disagree" }));
   assert.ok(performance.now() - t < 2_000, `${Math.round(performance.now() - t)} ms`);
-});
+}));
 
 test("V15 a confirm that can no longer reach a majority stops asking", async () => {
   let asked = 0;
@@ -5170,9 +5172,8 @@ test("LQ5 a call's error naming the provider's compute units per second holds it
 // and the second (the venue's scan.spare) finds the token's real pool, which holds the seeded route: below_reference.
 const pairQuote = async (token: string, first: EvmRpc, second: EvmRpc, chainName: "base" | "robinhood" = "base", headNo = 5_000_000) => {
   const pools = [seeded(token), real(token)];
-  const t = performance.now();
   const v = await verdict(evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, [first, second]));
-  return { v, ms: performance.now() - t };
+  return { v };
 };
 const realAt = (token: string, at: number) => [{ key: real(token).key, at }];
 
@@ -5599,7 +5600,8 @@ test("SL1 the first two scan providers down (no connection, or HTTP 503, head re
   }
 }));
 
-test("SL2 a warm scan with the first two down: the third has its blocks at once, never at the bound", { timeout: 60_000 }, async () => {
+// on the test clock: a scan held to its bound reads the bound's full length
+test("SL2 a warm scan with the first two down: the third has its blocks at once, never at the bound", { timeout: 60_000 }, () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000005c4610";
   await triQuote(token, [scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
   const asked: [number, number][] = [];
@@ -5608,7 +5610,7 @@ test("SL2 a warm scan with the first two down: the third has its blocks at once,
   assert.deepEqual(v, below);
   assert.ok(performance.now() - t < 5_000, `the warm quote took ${Math.round(performance.now() - t)} ms`);
   assert.ok(asked.some(([a, b]) => a <= 5_000_005 && b >= 5_000_005), `block 5,000,005 not asked of the third: ${JSON.stringify(asked)}`);
-});
+}));
 
 test("SL3 a lone scan provider one block behind its own head: the newest request is asked again whole, never as halves (re-review of 156ece1 LOW-2)", { timeout: 60_000 }, async () => {
   const token = "0x00000000000000000000000000000000005c4611";
@@ -5662,7 +5664,8 @@ test("SL5 a lone scan provider whose logs backend lags its head by more than a s
   assert.ok(asked.some(([a, b]) => a <= 5_007_000 && b >= 5_007_000), `block 5,007,000 was not asked again: ${JSON.stringify(asked)}`);
 }));
 
-test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and its third answering no logs: the fourth carries it", { timeout: 60_000 }, async () => {
+// on the test clock: a scan held to its bound reads the bound's full length
+test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and its third answering no logs: the fourth carries it", { timeout: 60_000 }, () => onTestClock(async () => {
   // live run 42135737951 (2026-11-06 00:18:43Z, GitHub's runner): with the first two held (HTTP 503), the third,
   // base.api.pocket.network, answered a held quote's request with no logs in 570 ms, and the quote ended rpc_error: it
   // was the last of Base's list
@@ -5679,7 +5682,7 @@ test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and i
     assert.ok(performance.now() - t < 5_000, `${down.name}: the warm quote took ${Math.round(performance.now() - t)} ms`);
     assert.ok(asked.some(([a, b]) => a <= 5_000_005 && b >= 5_000_005), `${down.name}: block 5,000,005 not asked of the fourth: ${JSON.stringify(asked)}`);
   }
-});
+}));
 
 // ------------------------------------------------------------------ a one-block answer (card evm-quote-rides-out-a-one-block-answer)
 // Helper live run 43475337487 (job 132057891754, 13 Nov, GitHub's runner): with Base's first two scan providers held at

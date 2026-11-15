@@ -1,5 +1,5 @@
 // Card readme-fresh-run: the README's "For AI agents and scripts" steps, run the way a reviewer's machine runs them.
-//   node scripts/ci/readme-fresh-run.mjs [--readme README.md] [--checkout .] [--workdir DIR] [--max-minutes 15]
+//   node scripts/ci/readme-fresh-run.mjs [--readme README.md] [--checkout .] [--workdir DIR] [--max-minutes 8]
 //
 // The commands come from README.md itself (readme-commands.mjs --agent-steps), never from a copy here, so a README edit
 // that breaks them breaks this run. The one substitution: `git clone <url>` clones --checkout (the commit under test)
@@ -9,7 +9,8 @@
 // - `git clone` and `pnpm install` may use the network, every other step may not (no-network.mjs refuses a connection
 //   to any host but this machine): the default tests must pass on a machine with no route out;
 // - the run must exit 0, every workspace package with a test script must print at least one summary, every summary
-//   must read `fail 0`, and the whole run must end within --max-minutes (15 by default). Its wall time is printed.
+//   must read `fail 0`, and the whole run must end within --max-minutes (8 by default: an AI agent's command
+//   timeout is often 10 minutes, card readme-run-fits-an-agent-timeout). Its wall time is printed.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -87,7 +88,7 @@ export async function main(argv) {
   const arg = (name, dflt) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : dflt);
   const readme = path.resolve(arg("--readme", "README.md"));
   const checkout = path.resolve(arg("--checkout", "."));
-  const maxSeconds = Number(arg("--max-minutes", "15")) * 60;
+  const maxSeconds = Number(arg("--max-minutes", "8")) * 60;
   const work = arg("--workdir", null) ? path.resolve(arg("--workdir")) : mkdtempSync(path.join(tmpdir(), "readme-fresh-run-"));
   mkdirSync(work, { recursive: true });
   const steps = agentSteps(readFileSync(readme, "utf8"));

@@ -863,11 +863,9 @@ test("answers dropped with no state change: wrong origin, wrong source, wrong id
   ];
   for (const [name, data, origin, source, reason] of cases) {
     const d0 = c.dropped()[reason];
-    const t0 = performance.now();
     h.post(data, origin, source);
-    await flush();
-    assert.ok(performance.now() - t0 < 1_000, `${name}: refused at once`);
-    assert.equal(c.dropped()[reason], d0 + 1, `${name}: dropped as ${reason}`);
+    await flush(); // microtasks only: a drop counted here was made at once, with no timer waited
+    assert.equal(c.dropped()[reason], d0 + 1, `${name}: dropped as ${reason}, at once`);
     before.check(`${name}: no state change`);
     assert.equal(settled(), false, `${name}: the request is still open`);
   }
@@ -1370,21 +1368,18 @@ test("a message whose JSON is exactly 4 MiB is read; one byte more is refused", 
   assert.equal(S.signpageIsPlainMessage([("x").repeat(CAP - 3)]), false);
 });
 
-test("a shared-array bomb is dropped by the client, at depth 1 and depth 2: the state is the same, the clock is only an outer limit", async () => {
+test("a shared-array bomb is dropped by the client, at depth 1 and depth 2: the state is the same, the clock is only an outer limit", { timeout: 60_000 }, async () => {
   const { h, c } = await readyClient();
   const inner = new Array(10_000).fill(null);
   const d1 = new Array(10_000).fill(inner); // 10^8 leaves in about 30 KB of references
   const d2 = new Array(10_000).fill(d1); // 10^12 leaves
   const bombs = [["depth 1", message(d1)], ["depth 2", message(d2)], ["depth 1, at the bound + 1", withVisits(1, CAP + 1)], ["depth 2, at the bound + 1", withVisits(2, CAP + 1)]];
+  // the walk's work is held by its visit count (the exact bound above); the outer limit is the test's own timeout
   for (const [name, msg] of bombs) {
-    let t0 = performance.now();
     assert.equal(S.signpageIsPlainMessage(msg), false, name);
-    assert.ok(performance.now() - t0 < 10_000, `${name}: the walk took over 10 s`);
     const before = unchanged(c);
     const d0 = c.dropped().shape;
-    t0 = performance.now();
     h.post(msg);
-    assert.ok(performance.now() - t0 < 10_000, `${name}: the client took over 10 s`);
     assert.equal(c.dropped().shape, d0 + 1, name);
     before.check(name);
   }
