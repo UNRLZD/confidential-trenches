@@ -53,7 +53,7 @@
  },
  "sign_good": {
   "part": "sign",
-  "sign": "http://127.0.0.1 (this commit build, packages/signpage)",
+  "sign": "http://localhost (this commit build, packages/signpage)",
   "want": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd",
   "pin": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd",
   "sha384": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd"
