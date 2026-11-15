@@ -61,7 +61,7 @@ test("pnpm's prefixed summary lines are read, and a skipped test is not a failur
   ]);
 });
 
-const GOOD = { failedStep: null, output: "packages/a test: ℹ fail 0\napps/b test: ℹ fail 0\n", expected: ["packages/a", "apps/b"], seconds: 300, maxSeconds: 900 };
+const GOOD = { failedStep: null, output: "packages/a test: ℹ fail 0\napps/b test: ℹ fail 0\n", expected: ["packages/a", "apps/b"], seconds: 300, maxSeconds: 480 };
 test("a run with a summary of fail 0 for every package with tests, in time, passes", () => {
   assert.deepEqual(problems(GOOD), []);
 });
@@ -71,8 +71,36 @@ test("each planted failure fails the run", () => {
   assert.match(problems({ ...GOOD, output: "packages/a test: ℹ fail 0\napps/b test: ℹ fail 2\n" })[0], /apps\/b: 2 failing/);
   assert.match(problems({ ...GOOD, output: "packages/a test: ℹ fail 0\n" })[0], /apps\/b: no test summary/);
   assert.match(problems({ ...GOOD, output: "all good\n" }).join("\n"), /no test summary/);
-  assert.match(problems({ ...GOOD, seconds: 901 })[0], /wall time 15m01s is over the 15m00s limit/);
+  assert.match(problems({ ...GOOD, seconds: 481 })[0], /wall time 8m01s is over the 8m00s limit/);
   assert.match(problems({ ...GOOD, output: GOOD.output + "ℹ fail 1\n" })[0], /a test run: 1 failing/);
+});
+
+// card readme-run-fits-an-agent-timeout: an AI agent's command timeout is often 10 minutes, so the workflow's run of
+// the real README is held to 8 (the runner's default), never a looser bound written into the workflow
+function freshRunBound(workflow) {
+  const lines = workflow.split("\n").filter((l) => /^\s+run: node scripts\/ci\/readme-fresh-run\.mjs --checkout /.test(l));
+  if (lines.length !== 1) throw new Error(`the workflow runs the real README ${lines.length} times, not once`);
+  const m = /--max-minutes (\S+)/.exec(lines[0]);
+  return m ? Number(m[1]) : 8;
+}
+test("the workflow holds the README's fresh run to 8 minutes; a looser bound fails", () => {
+  const wf = readFileSync(path.join(ROOT, ".github/workflows/readme-fresh-run.yml"), "utf8");
+  assert.equal(freshRunBound(wf), 8);
+  assert.equal(freshRunBound(wf.replace(/(--max-minutes) 8\b/, "$1 15")), 15, "the planted 15 is read");
+  assert.notEqual(freshRunBound(wf.replace(/(--max-minutes) 8\b/, "$1 15")), 8);
+  assert.equal(freshRunBound(wf.replace(/ --max-minutes 8\b/, "")), 8, "no flag is the runner's default, 8");
+  assert.throws(() => freshRunBound(wf.replace(/^.*run: node scripts\/ci\/readme-fresh-run\.mjs --checkout .*$/m, "")), /0 times/);
+});
+
+// sorted, `pnpm -r run test` ran the kit alone, then five packages, then the signing page alone (790 s on 4 cores);
+// the repository's .npmrc turns the sort off, so every package's tests start at once
+const unsorted = (npmrc) => npmrc.split("\n").some((l) => /^\s*sort\s*=\s*false\s*$/.test(l));
+test("the repository's .npmrc runs workspace scripts unsorted; one without the line fails", () => {
+  const npmrc = readFileSync(path.join(ROOT, ".npmrc"), "utf8");
+  assert.ok(unsorted(npmrc), ".npmrc has no sort=false line");
+  assert.equal(unsorted(npmrc.replace(/^\s*sort\s*=\s*false\s*$/m, "")), false);
+  assert.equal(unsorted(npmrc.replace(/^\s*sort\s*=\s*false\s*$/m, "sort=true")), false);
+  assert.equal(unsorted(npmrc.replace(/^\s*sort\s*=\s*false\s*$/m, "# sort=false")), false);
 });
 
 // ---- the runner itself, on a README of its own and a throwaway git checkout
@@ -108,7 +136,7 @@ test("the runner clones the checkout, follows cd, and passes a run whose summari
     const r = runner(f);
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /readme-fresh-run: PASS/);
-    assert.match(r.stdout, /wall time \d+m\d\ds \(limit 15m00s\)/);
+    assert.match(r.stdout, /wall time \d+m\d\ds \(limit 8m00s\)/);
   });
 });
 
