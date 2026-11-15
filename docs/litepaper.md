@@ -8,7 +8,7 @@ Every number below carries a tag. **Measured** means a recorded run, a test or a
 
 ## In one paragraph
 
-Blindfill puts a pool with no keys on every chain you trade on. Each pool holds money as private notes and pays out only against a proof made on your own device. A buy is proved before you tap and, on Solana, Base and Robinhood Chain, settles in one transaction from a wallet that has never been used. A sell drops the money back into the pool. NEAR Intents moves every dollar that changes chain, and a vault on NEAR with no access key is the cash home. Nobody can take, freeze or change the money: no pool has an admin, an upgrade path or a pause, and we hold no key to any of them.
+Blindfill puts a pool with no keys on every chain you trade on. Each pool holds money as private notes and pays out only against a proof made on your own device. A buy is proved before you tap and, on Solana, Base and Robinhood Chain, settles in one transaction from a wallet that has never been used. A sell drops the money back into the pool. NEAR Intents moves every dollar that changes chain, and a vault on NEAR with no access key is the cash home. Nobody can take or change the money: no pool has an admin, an upgrade path or a pause, and we hold no key to any of them. Only USDC's issuer can freeze the vault's USDC, as for any holder.
 
 | | |
 |---|---|
@@ -47,7 +47,7 @@ Six parts. The pools hold money. NEAR Intents moves money between chains. Your d
 |---|---|
 | A pool on each trading chain | Holds that chain's money as private notes. Approves every deposit itself, keeps every past root, checks proofs, and releases money only to the wallet a proof names. No admin, no upgrade, no pause. |
 | The NEAR vault | The cash home, in USDC, and NEAR's own pool. The same proof design and the same rule: no access key, no owner, no upgrade. It is also the stop that unlinks a move from one chain to another. |
-| NEAR Intents | Every dollar that changes chain: deposits from any chain it reaches, moves between pools, exits to any address. |
+| NEAR Intents | Every dollar that changes chain: deposits from another chain, moves between pools, exits to another chain. |
 | Your device | The 12 words and every key made from them, your notes, proofs made ahead of time, one fresh wallet per buy, and a check of every quote against two chain reads before it signs. |
 | The helper | Pays network fees, sends transactions it cannot alter, reads chains, serves prices. It holds API keys and a fee key, never a key that moves your money. |
 | The kit | `@blindfill/kit`, the one public entry any wallet, terminal, bot or AI agent calls. |
@@ -77,7 +77,7 @@ The Solana pool is a port of the NEAR vault's Rust: the same field and tree code
 
 ## 4. How money moves
 
-**Deposit.** From a wallet on the same chain, one transaction into the pool. From any other chain, NEAR Intents delivers to a one-time wallet whose key is on your device, and that wallet deposits for you. NEAR Intents' legs took 21.1 to 41.9 s in our recorded runs ([performance.md](performance.md), measured). Your first proof is made while the deposit travels.
+**Deposit.** Today a deposit takes USDC on NEAR, Solana or Base, SOL on Solana, or ETH on Base or Robinhood Chain, up to $1,000 a deposit in this beta; more chains join through NEAR Intents. From a wallet on the same chain, one transaction into the pool. From another chain, NEAR Intents delivers to a one-time wallet whose key is on your device, and that wallet deposits for you. NEAR Intents' legs took 21.1 to 41.9 s in our recorded runs ([performance.md](performance.md), measured). Your first proof is made while the deposit travels.
 
 **Buy.** This is the part v2 rebuilt.
 
@@ -93,9 +93,9 @@ One private buy on Solana is 1,010 to 1,201 bytes with W as a signer in the kit'
 
 **Move between chains.** A move from the Solana pool to the Base pool goes pool, NEAR Intents, NEAR vault, NEAR Intents, pool. Each NEAR Intents leg is public as a pair, since anyone can read its status, so the stop in the NEAR vault is what keeps your Solana money and your Base money from being tied together. About 50 to 100 s, never at a tap (estimate).
 
-**Out.** A withdrawal goes from any pool to any address, or through NEAR Intents to any chain it reaches: 231 tokens on 39 chains on [1Click's list](https://1click.chaindefuser.com/v0/tokens) when we read it on 15 November (measured).
+**Out.** A withdrawal goes from any pool to any address on its chain, or through NEAR Intents to NEAR, Solana, Base or Robinhood Chain. Cash in the NEAR vault goes out on NEAR for now. More destinations join through NEAR Intents, whose [1Click list](https://1click.chaindefuser.com/v0/tokens) held 231 tokens on 39 chains when we read it on 15 November (measured).
 
-**Out with every server off.** The exit tool (`packages/exit`) brings money home from the NEAR vault and the Solana pool with only the 12 words and public RPCs. For each, it reads the lists from two public RPCs that must agree byte for byte, rebuilds your notes from public data, makes the proof and submits the withdrawal, with no helper in the path. A CI check refuses any address or helper import of ours inside it. The Base and Robinhood Chain pools are not in it yet.
+**Out with every server off.** The exit tool (`packages/exit`) is built to bring money home from the NEAR vault and the Solana pool with only the 12 words and public RPCs. For each, it reads the lists from two public RPCs that must agree byte for byte, rebuilds your notes from public data, makes the proof and submits the withdrawal, with no helper in the path. A CI check refuses any address or helper import of ours inside it. Its tests replay recorded chain reads; an exit on mainnet is not on record yet. The Base and Robinhood Chain pools are not in it yet.
 
 ## 5. What stays private, and what shows
 
@@ -130,7 +130,7 @@ The full table is in [security.md](security.md#who-sees-what).
 | Base `0xaa080e74ec99cf5c684548c77ca145edfcf899cf` and Robinhood Chain `0x9306359433127c4f3be426f6faeb00a3c41f66db` | 0xbow's Entrypoint, which held every admin role, removed | No owner, role, upgrade path or pause in the source | Read [contracts/pool-evm/src/](../contracts/pool-evm/src/) |
 
 - **The proof decides where money goes.** It names the pool, the receiving wallet, the fee cap and the deadline. On Solana W must also sign, and its signature covers every account and byte.
-- **The helper can only refuse.** If it stops, any other sender, or your device itself, can send the same transaction. If every server stops, the exit tool still brings money home from the vault and the Solana pool.
+- **The helper can only refuse.** If it stops, any other sender, or your device itself, can send the same transaction. If every server stops, the exit tool is built to bring money home from the vault and the Solana pool.
 - **Keys exist only on your device.** No server holds a key that moves money. CI scans the tree and the full history for secrets on every change.
 - **The money never rests inside NEAR Intents.** The DAO behind `intents.near` holds roles that can lock an account or move a balance, so money sits there for one hop at a time and rests in the vault and the pools.
 - **One power we can't remove:** the vault holds USDC, and Circle can pause the token or block an account, as for every USDC holder. A payout stopped that way isn't lost. Its receipt fails and the vault books the amount back as a refund note.
@@ -173,7 +173,7 @@ Blindfill is designed for any chain NEAR Intents reaches, any asset with a pool 
 | Robinhood Chain pool | `0x9306359433127c4f3be426f6faeb00a3c41f66db` |
 
 - The deploy records, with build hashes and transactions, are in [contracts/vault/deployments/](../contracts/vault/deployments/), [contracts/pool-solana/deployments/](../contracts/pool-solana/deployments/) and [contracts/pool-evm/deployments/](../contracts/pool-evm/deployments/).
-- The vault read on 14 November 2026 on two public RPCs: no access key, and the USDC it holds equals what `totals()` says it owes.
+- The vault read on 14 November 2026 on two public RPCs: no access key, and the USDC it holds is at least what `totals()` says it owes, equal that day.
 - 56 mainnet transactions (14 on NEAR, 28 on Solana, 7 on Base, 7 on Robinhood Chain) are listed in [proofs.md](proofs.md), each read back on two public RPCs by the money gate in CI.
 - The research behind this design, 33 measured write-ups and 3 vault reviews, is in [research/](../research/).
 
@@ -181,7 +181,7 @@ Still to come in the app: orders signed in advance show Coming soon in this buil
 
 ## 9. For builders
 
-An app reaches all of this through one import, `@blindfill/kit`: deposit, prove, ready the wallets, trade, withdraw, verify. Confidential Trenches uses only that entry, as any outside app would, and `pnpm run check:imports` fails the build on any import past it. The repository's [examples/agent/](../examples/agent/) shows an agent running the whole cycle through the kit.
+An app reaches all of this through one import, `@blindfill/kit`: deposit, prove, ready the wallets, trade, withdraw, verify. Confidential Trenches uses only that entry, as any outside app would, and `pnpm run check:imports` fails the build on any import past it. The repository's [examples/agent/](../examples/agent/) holds an agent written to run the whole cycle through the kit; its full run on mainnet is not on record yet.
 
 What carries over from v1 and what is new:
 

@@ -1,6 +1,6 @@
 # Security
 
-We assume the worst about everyone, ourselves included, and then ask what still holds. Parts built to behave a certain way are described as the design; the one thing you can run against live NEAR today is the read-only check at the bottom.
+We assume the worst about everyone, ourselves included, and then ask what still holds. Parts built to behave a certain way are described as the design. The read-only check at the bottom runs against live NEAR today with no money, and the mainnet runs behind each part are in [proofs.md](proofs.md).
 
 ## The threat model
 
@@ -20,13 +20,13 @@ Three things nobody can see, us included:
 
 ### Anyone watching the chains
 
-They see your wallet paying in, the amount and the time. They see the vault holding a pool, standard-size payouts leaving it, and a wallet that has never been used buying a token. They watch that wallet sell and the money go back to the vault, and they see a withdrawal land at your address with its amount and time.
+They see your wallet paying in, the amount and the time. They see the vault holding a pool, standard-size payouts leaving it, and a wallet that has never been used buying a token. They watch that wallet sell and the money go back into the pool, and they see a withdrawal land at your address with its amount and time.
 
 What they can't see is which deposit paid for which payout or trade. A proof says "one of the notes on the list is mine" and leaves it there.
 
 ### NEAR Intents
 
-Each leg it carries is visible to it: the wallet paying in and the amount, each payout's amount and new wallet, a return's amount, and the leg to another chain on a withdrawal.
+Each leg it carries is visible to it: the wallet paying in from another chain and the amount, each move between a pool and the vault with its amount and both ends, and the leg to another chain on a withdrawal.
 
 The link between a deposit and a payout is not. That link would have to come from the vault, and the vault doesn't keep one. It never gets a key or your 12 words.
 
@@ -38,7 +38,7 @@ It never gets a key to your money, your 12 words or a note secret, which means i
 
 ### The hosting
 
-The company serving our pages sees each visitor's IP, browser, the files loaded and when. It also sees that a device fetched the proving files, which every signed-in device does in the background, so the download points at no one. The company running the helper's machine sees whatever the helper sees, live.
+The company serving our pages sees each visitor's IP, browser, the files loaded and when. It also sees that a device fetched the proving files, which a signed-in device does in the background when its proof queue opens, before any trade, so the download points at no one. The company running the helper's machine sees whatever the helper sees, live.
 
 The page host never sees a wallet or a quote, because those calls go to the helper and to the chains, not to the site. Neither company sees a key.
 
@@ -96,11 +96,11 @@ Anyone who reads the chain sees money go into the vault and standard-size payout
 
 ### Our helper sees your IP and the time
 
-What holds is narrower than "no one sees". The helper can't tell which deposit a proof spends, and it holds no key. Still, it could link a deposit and a withdrawal that arrive from the same IP close together in time, so the device is built to space the two apart and send them on separate connections. The helper's published code is built to keep no logs, but nothing yet proves that the running copy is the published one. With the helper off, your device calls public RPCs directly, and they see its IP next to its wallet.
+What holds is narrower than "no one sees". The helper can't tell which deposit a proof spends, and it holds no key. Still, it could link a deposit and a withdrawal that arrive from the same IP close together in time. The device doesn't space the two apart for you yet. The helper's published code is built to keep no logs, but nothing yet proves that the running copy is the published one. With the helper off, your device calls public RPCs directly, and they see its IP next to its wallet.
 
 ### A broken-in helper can hold things back
 
-It can drop or delay a quote, a buy, a sell or a withdrawal. Redirecting money is the thing it can't do. If it simply stops, the exit tool brings your money home from the NEAR vault and the Solana pool with the 12 words and public RPCs alone.
+It can drop or delay a quote, a buy, a sell or a withdrawal. Redirecting money is the thing it can't do. If it simply stops, the exit tool is built to bring your money home from the NEAR vault and the Solana pool with the 12 words and public RPCs alone. Its tests replay recorded chain reads; an exit on mainnet is not on record yet.
 
 ### The signing page is code you load from a server
 
@@ -116,6 +116,6 @@ These are read-only reads against two public NEAR RPCs. They need no account, no
 
 1. No access key. `view_access_key_list` on the vault's account must return `[]` on both RPCs.
 2. The published code is the running code. `view_code` returns the hash of the deployed code. It must equal `code_hash` in the vault's deploy record, [contracts/vault/deployments/mainnet-v1.json](../contracts/vault/deployments/mainnet-v1.json). `node contracts/vault/scripts/deploy.mjs --verify-records` rebuilds the vault at the commit that record names and fails unless the build has that hash. It needs Docker, Rust 1.96.0 and cargo-near 0.22.0.
-3. The vault holds what it owes. `totals()` on the vault reports what it owes. `ft_balance_of` on the USDC token for the vault's account must report the same amount.
+3. The vault holds what it owes. `totals()` on the vault reports what it owes: deposited, minus spent, plus returned. `ft_balance_of` on the USDC token for the vault's account must report at least that amount. The two are equal unless someone sends USDC to the vault without making a deposit.
 
 Point it at any keyless account and line 1 passes. Point it at the vault and all three pass. If any line fails, the vault isn't what we say it is.
