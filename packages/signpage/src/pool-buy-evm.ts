@@ -61,7 +61,8 @@ import { EvmBuyTapRefused, evmBuyTapReset, evmPoolBuyQuoteTap } from "../../kit/
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
-import type { ReservedMark } from "../../wallet/src/notes/store.ts";
+import type { NoteRecord, ReservedMark } from "../../wallet/src/notes/store.ts";
+import { poolBalances, type BalancePool, type LandedRelease } from "../../wallet/src/pool/balances.ts";
 import { EVM_LADDER, EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
@@ -439,6 +440,19 @@ export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint)
   }
 }
 
+/** EvmBuyDryDeps.tap on the page (main.ts): the chain's state.pools tap_max over the notes and ready proofs of one turn
+ *  of the queues' view (pool-testnet.ts readyWith), and those of the chain's pools, as the tap reads them. With no
+ *  queue open (card buy-quote-before-any-note: a fresh account, or one whose money is all Cash, has no pool note, and a
+ *  queue opens only at a pool note's landing), poolBalances gives no tap_max: one tap spends nothing of the pool now, so
+ *  "0" over no proof, and the dry prices the buy as cashFirst runs it, every wei moved from Cash. */
+export function evmDryTap(chain: "base" | "robinhood", pools: readonly BalancePool[], both: { value: readonly NoteRecord[]; ready?: readonly ReadyProof[]; open?: ReadonlySet<string>; landed?: ReadonlyMap<string, LandedRelease> }): { tapMax: string; ready: readonly ReadyProof[] } {
+  const mine = pools.filter((p) => p.chain === chain);
+  const tap = poolBalances(both.value, mine, both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
+  if (tap === undefined) return { tapMax: "0", ready: [] };
+  const ids = new Set(mine.map((p) => p.id));
+  return { tapMax: tap, ready: (both.ready ?? []).filter((r) => ids.has(r.poolId)) };
+}
+
 /** What pool.buy.dry on Base and Robinhood reads from the page. */
 export type EvmBuyDryDeps = {
   /** A trade runs, or holds a host: the dry answers busy and reads nothing. */
@@ -466,7 +480,8 @@ export type EvmBuyDryDeps = {
  *  started as soon as the plan is made, beside the Cash reads). Above tap_max (card evm-cash-move-brings-its-fee), the
  *  buy cashFirst runs after moving from Cash, sized as cashFirst sizes it (evmMoveShort at the epoch's fee): `cost` that
  *  plan's (its moved notes' relay fees at EVM_MOVE_FEE_ROOM, so the Fee never reads under) plus what `moved` says the move
- *  costs, and `out` of the whole ask; tap_max alone when the move is not priced. Never while a trade runs (busy).
+ *  costs, and `out`, one quote of the whole ask, asked at once; with the move not sized or priced (Cash cannot make it,
+ *  no epoch fee read), `out` alone. Never while a trade runs (busy).
  *  Display only: nothing is signed, written or sent; the tap plans again from its own proofs. */
 export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmBuyDryDeps): Running<"pool.buy.dry"> {
   let answer: HostAnswer<"pool.buy.dry"> | HostRefusal = { error: "failed" };
@@ -480,21 +495,30 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     const tap = evmDryAmount(got.tapMax);
     // above tap_max: the move cashFirst starts, sized by the tap's own plan over the ready proofs and the notes it brings
     const above = amount !== null && typeof tap === "bigint" && amount > tap && d.fee !== undefined && d.moved !== undefined;
+    // Cash that cannot be planned now (`rungs` null: none a move can use, card buy-quote-before-any-note) sizes no move:
+    // no Fee, and no wait on the epoch's fee
     const sized = above ? (async () => {
-      const [fee, rungs] = await Promise.all([d.fee!(), d.rungs ? d.rungs() : undefined]);
-      const m = fee === null || rungs === null ? null : evmMoveShort(got.ready, amount!, fee, rungs);
-      const moveCost = m === null ? null : await d.moved!(m.short);
+      const feeRead = d.fee!();
+      feeRead.catch(() => {});
+      const rungs = d.rungs ? await d.rungs().catch(() => null) : undefined;
+      if (rungs === null) return null;
+      const fee = await feeRead;
+      const m = fee === null ? null : evmMoveShort(got.ready, amount!, fee, rungs);
+      const moveCost = m === null ? null : await d.moved!(m.short).catch(() => null);
       return m === null || moveCost === null || moveCost < 0n ? null : { plan: m.plan, cost: evmDryCost(m.plan) + moveCost };
     })().catch(() => null) : Promise.resolve(null);
     const plan = evmDryPlan(chain, amount, got.tapMax, got.ready);
     const q = plan === null && !above ? null : d.quote();
-    const out = q === null ? Promise.resolve(null) : plan !== null ? evmDryOut(q, token, plan.amount) : sized.then((s) => (s === null ? null : evmDryOut(q, token, s.plan.amount)));
+    // above tap_max the tap swaps the whole ask (evmMoveShort's plan carries it exactly; the moved notes pay their own
+    // relay fees), so You receive is one quote of it, asked at once, whether or not Cash makes the move now (card
+    // buy-quote-before-any-note: $0 Cash still sees what the amount buys)
+    const out = q === null ? Promise.resolve(null) : evmDryOut(q, token, plan !== null ? plan.amount : amount!);
     const most = await d.withCash(got.tapMax, got.ready);
     const moved = await sized;
     const o = await out;
     const buys = plan !== null && amount !== null && plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
-    const cost = plan !== null ? evmDryCost(plan) : moved !== null ? moved.cost : null;
-    answer = { result: { tap_max: got.tapMax, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }), ...(cost === null ? {} : { cost: poolUnits(cost, ETH_DECIMALS) }), ...(o === null || (plan === null && moved === null) ? {} : { out: o }) } };
+    const cost = plan !== null ? evmDryCost(plan) : (moved?.cost ?? null);
+    answer = { result: { tap_max: got.tapMax, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }), ...(cost === null ? {} : { cost: poolUnits(cost, ETH_DECIMALS) }), ...(o === null ? {} : { out: o }) } };
     // a read that failed (the proofs' view, Cash's notes, the pool's floor, the epoch's fee: card
     // base-reads-never-starve-max) is "down", as Solana's dry answers it (pools.ts poolBuyDryKind): the box asks again
     // (the app's coinTapAgainMs), never keeps Max at a number no read gave, nor You receive at a dash for good

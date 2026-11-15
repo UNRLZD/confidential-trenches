@@ -46,10 +46,11 @@ const SIZING =
   "function Fle(e,t){return e<=0n?[]:P1(KE(_D,e).notes,t)}function P1(e,t){let n=t*Nle;return e.filter(e=>n<e).map((e,t)=>({noteId:`move#${t}`,chunk:e,fee:n}))}function F1(e,t,n,r){if(t<=0n||n<0n)return null;let{pieces:i,bound:a}=A1(e),o=e=>{let o=r===void 0?null:r(e*_D.min);if(r!==void 0&&o===null)return null;let s=o===null?Fle(e*_D.min,n):P1(o,n),c=[...i,...s];try{let e=rP({kind:`pool.buy`,chain:`base`,token:null,amount:t,slippageBps:0,decimals:0},o,s);return e.amount===t?e:null}catch(e){return null}}}";
 const MOVE =
   "function HK(e,t,n,r){let i=LK[r];if(e<=0n||t<0n||e>=1n<<127n)return null;let a=(e+i-1n)/i*i,o=KE(RK[r],a).notes.length,s=a+BigInt(o)*t,c=VK(s,n,r);return c===null?null:{left:s,notes:o,usdc:c}}function KK(e,t,n,r){let i=t>LK[r]?t-LK[r]:0n;return{of:n=>{let a=HK(n,i,e,r);return a===null||a.left<t?null:{usdc:a.usdc,least:a.left}},step:LK[r],min:LK[r],leastIn:n??0n}}function qK(e,t,n,r,i,a){let o=KK(n,r,i,a),s=r>LK[a]?r-LK[a]:0n};m=n===`solana`?YK(l,c,r-a,GK(s,d,f)):typeof d==`bigint`?qK(l,c,s,d,f,n).parts(r):null";
+// (card buy-quote-before-any-note's build: no rungs, so no wait on the fee, when Cash holds nothing a move can use)
 const DRY =
-  "s=i!==null&&typeof o==`bigint`&&i>o&&n.fee!==void 0&&n.moved!==void 0,c=s?(async()=>{let e=await n.fee(),r=e===null?null:A1(t.ready,i,e),a=r===null?null:await n.moved(r.short);return r===null||a===null||a<0n?null:{plan:r.plan,cost:E1(r.plan)+a}})():null;quote:()=>{},fee:()=>x7?.evmFeeNow(e)??Promise.resolve(null),rungs:async()=>(await g(e))?.rungs??null,moved:async t=>(await g(e))?.cost(t)??null";
+  "s=i!==null&&typeof o==`bigint`&&i>o&&n.fee!==void 0&&n.moved!==void 0,c=s?(async()=>{let e=n.fee();e.catch(()=>{});let r=n.rungs?await n.rungs().catch(()=>null):void 0;if(r===null)return null;let a=await e,o=a===null?null:P1(t.ready,i,a,r),s=o===null?null:await n.moved(o.short).catch(()=>null);return o===null||s===null||s<0n?null:{plan:o.plan,cost:M1(o.plan)+s}})().catch(()=>null):Promise.resolve(null);quote:()=>{},fee:()=>x7?.evmFeeNow(e)??Promise.resolve(null),rungs:async()=>(e=>e===null||e.top===0n?null:e.rungs)(await g(e)),moved:async t=>(await g(e))?.cost(t)??null";
 const MAX =
-  "withCash:async(t,n)=>{let[r,i]=await Promise.all([g(e),x7?.evmFeeNow(e).catch(()=>null)??null]),a=xK(t,qo.ETH);if(r===null||i===null||a===null)return null;let o=Lle(n,i,e=>r.parts(e)!==null,a+r.top,r.rungs);return cq(o>a?o:a,qo.ETH)}";
+  "withCash:async(t,n)=>{let r=x7?.evmFeeNow(e).catch(()=>null)??Promise.resolve(null),i=await g(e),a=pK(t,Po.ETH);if(i===null||a===null)return null;if(i.top===0n)return _q(a,Po.ETH);let o=await r;if(o===null)return null;let s=pue(n,o,e=>i.parts(e)!==null,a+i.top,i.rungs);return _q(s>a?s:a,Po.ETH)}";
 const all = (o = {}) => facts("", [o.tap ?? TAP, o.sizing ?? SIZING, o.move ?? MOVE, o.dry ?? DRY, o.max ?? MAX].join(";"));
 
 test("facts() reads each mark from the minified code as the build writes it, and misses each when it is broken", () => {
@@ -83,18 +84,22 @@ test("facts() reads each mark from the minified code as the build writes it, and
     ],
     dry: [
       DRY.replace("&&n.moved!==void 0", ""),
-      DRY.replace("cost:E1(r.plan)+a", "cost:a"),
+      DRY.replace("cost:M1(o.plan)+s", "cost:s"),
       DRY.replace("fee:()=>x7?.evmFeeNow(e)", "fee:()=>x7?.relayFee(e)"),
-      DRY.replace("rungs:async()=>(await g(e))?.rungs??null,", ""),
+      DRY.replace("rungs:async()=>(e=>e===null||e.top===0n?null:e.rungs)(await g(e)),", ""),
+      // rungs given whatever Cash holds (card buy-quote-before-any-note: a fresh account's dry waited on the fee)
+      DRY.replace("(e=>e===null||e.top===0n?null:e.rungs)(await g(e))", "(await g(e))?.rungs??null"),
       DRY.replace("?.cost(t)??null", "?.top??null"),
     ],
     // Cash's largest note alone (before card cash-buys-spend-every-note-evm), no epoch fee read, Cash's check dropped,
     // the size read on one move's split, another bound
     max: [
-      MAX.replace("x7?.evmFeeNow(e).catch(()=>null)??null", "null"),
-      MAX.replace("e=>r.parts(e)!==null", "e=>!0"),
-      MAX.replace(",r.rungs)", ")"),
-      MAX.replace("a+r.top", "a+zK(r,l)"),
+      MAX.replace("x7?.evmFeeNow(e).catch(()=>null)??Promise.resolve(null)", "Promise.resolve(null)"),
+      MAX.replace("e=>i.parts(e)!==null", "e=>!0"),
+      MAX.replace(",i.rungs)", ")"),
+      MAX.replace("a+i.top", "a+zK(i,l)"),
+      // with no Cash a move can use, a Max other than tap_max
+      MAX.replace("if(i.top===0n)return _q(a,Po.ETH);", "if(i.top===0n)return _q(a+1n,Po.ETH);"),
       "withCash:async(t,n)=>{let[a,o,s,c]=await Promise.all([r.available(),r.fee(),A.floor(e),x7?.evmFeeNow(e).catch(()=>null)??null]),l=i.get(e),u=bK(t,Qo.ETH);if(s===null||c===null||l==null||u===null)return null;let d=s>vD.min?s-vD.min:0n,f=M1(n,c,t=>{let n=UK(t,d,l,e);return n!==null&&n.usdc+o<=a},u+(a>o?zK(a-o,l):0n));return $K(f>u?f:u,Qo.ETH)}",
     ],
   };
