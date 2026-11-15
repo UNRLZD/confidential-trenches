@@ -760,9 +760,10 @@ test("card wallets-found-in-one-read: a finder 429 never pauses a trade: the fin
 
 test("card wallets-found-in-one-read: a provider refusing one method for good (getTokenAccountsByOwner always 429, Retry-After 10) while it answers the rest, and a trade's reads on the host going through: the list ends at the bound, nothing asked past 30 s", () => onTestClock(async () => {
   const origin = "https://one-method-429.example";
-  // a call asked past the bound, and the list's end past it with a second of room
+  // a call asked past the bound, and the list's end past it with a second of room; the clock moves in whole ms and a
+  // wait may end at the bound itself (buy-wallets.ts: refused only when it would end past `by`), so past is from 1 ms on
   let pastBound = false, late = false, past = 0;
-  const bound = setTimeout(() => (pastBound = true), HOLDINGS_THROTTLE_MAX_MS);
+  const bound = setTimeout(() => (pastBound = true), HOLDINGS_THROTTLE_MAX_MS + 1);
   const ends = setTimeout(() => (late = true), HOLDINGS_THROTTLE_MAX_MS + 1_000);
   const sol = stubFetch(origin, (m, id) => (pastBound && past++, m === "getTokenAccountsByOwner" ? too("10") : solOk(m, id)));
   // a trade's reads on the same host answer every second, as page-rpc.ts reports them to the host's lane

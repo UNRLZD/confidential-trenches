@@ -25,6 +25,7 @@ import { followPoolDepositEvm, POOL_DEPOSIT_EVM_LANDING_MS, POOL_DEPOSIT_EVM_WAI
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 
 const ENTROPY = () => new Uint8Array(16);
 const SEED = wordsToSeed64(entropyToWords(ENTROPY()));
@@ -1430,13 +1431,16 @@ test("pool-deposit-sent-end low 4 (EVM): the end's own wait ends at the sign out
   const stop = new AbortController();
   const { wait: _no, ...bare } = hostOf(ch, ns); // the page's host: no wait of its own, so the follower's is used
   const left = { notes: [{ precommitment: 1000n, value: RUNG, nonce: 0n, u: "0x" + "11".repeat(20) }], landed: false, whole: true };
-  const got = followPoolDepositEvm({ ...bare, signal: stop.signal }, left);
-  await settleMs(300); // the first read done, the 10 s wait running
-  const t0 = Date.now();
-  stop.abort();
-  const end = await Promise.race([got, settleMs(1_200).then(() => "still waiting" as const)]);
-  assert.equal(end, null, "the follow ended with the sign out");
-  assert.ok(Date.now() - t0 < 1_000, `ended ${Date.now() - t0} ms after the sign out`);
+  // on the test clock: the 10 s wait, if not cut by the sign out, reads its full length
+  await onTestClock(async () => {
+    const got = followPoolDepositEvm({ ...bare, signal: stop.signal }, left);
+    await settleMs(300); // the first read done, the 10 s wait running
+    const t0 = Date.now();
+    stop.abort();
+    const end = await Promise.race([got, settleMs(1_200).then(() => "still waiting" as const)]);
+    assert.equal(end, null, "the follow ended with the sign out");
+    assert.ok(Date.now() - t0 < 1_000, `ended ${Date.now() - t0} ms after the sign out`);
+  });
 });
 
 /** A note store whose reads fail once the run has zeroed its seed: the hand-off's store read, and nothing before it. */
