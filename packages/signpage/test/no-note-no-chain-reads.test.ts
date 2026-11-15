@@ -90,7 +90,10 @@ async function page(noteOn: "base" | "solana" | "named" | "named+solana" | null 
     // one landed note, in Base's pool or in another pool's scope (a Solana pool's), the published all-zero entropy
     // vector's (a8.json)
     const scope = noteOn === "base" ? evmPoolScopeOf(PINS.base.pool, 84532n) : SOLANA_SCOPE;
-    const ref: NoteRef = { kind: "deposit", s: scope, i: 0 };
+    // beside the named notes, index 8: a first plan takes the device's lane, 0-7 (wallet src/store/index.ts:430), so index
+    // 0 met the lane-0 PLANNED Solana note one run in 8 (card no-note-test-picks-a-free-index: release 158's queue run
+    // 43770188326, "note deposit/327953/0 is already in the store")
+    const ref: NoteRef = { kind: "deposit", s: scope, i: noteOn === "named+solana" ? 8 : 0 };
     const label = vaultLabelOf(keccak_256, scope, 1n);
     const pre = noteSecrets(wordsToSeed64(entropyToWords(new Uint8Array(16))), ref).precommitment;
     const ns = await openNoteStore(w);
