@@ -28,7 +28,8 @@
 //   - each chain's scan list has a third provider on a host of its own, and its answer to the browser's CORS preflight
 //     from the app's origin allows that origin and content-type, as does its POST's answer;
 //   - a warm-up quote ends ok, every held quote ends ok under the bound (60 s), and every held quote asked the third
-//     for logs;
+//     for logs; each mode's first quote waits out the kit's hold of the first two (KIT_HOLD_MS) and asks them before the
+//     third, and a quote that asked them 0 times started inside that hold;
 //   - every held helper read answers 200 with a JSON-RPC result list, from a provider past the first two;
 //   - every address-less Transfer read answers 200 with a JSON-RPC result list, never an error;
 //   - the deployed helper's read HISTORY_BACK blocks back answers 200 with a result list on each chain;
@@ -78,6 +79,19 @@ export const BLOCK_SPAN = 1_000n;
  *  0 getLogs", and so for 503). Past maxLag the scan either reads past the blocks before or catches up to the agreed
  *  block on the list (quote.ts scanPools). */
 export const heldGapMs = (maxLag, blockMs) => Math.ceil((maxLag ?? 0) * blockMs) + GAP_MARGIN_MS;
+/** How long the kit holds a provider that refused a connection or throttled, for every reader and every next quote
+ *  (packages/kit/src/checks/evm/pace.ts EVM_PROVIDER_HOLD_MS, quote.ts EVM_HOLD_MS; card evm-taps-meet-no-429, main
+ *  0dd39f726). A held quote that starts inside it is sent to the third at once and never asks the first two: in the
+ *  helper's live run 43722667540 (beb3ef4f8) each case's second refused and first 503 quote started 11 and 24 s after
+ *  the first refused one's last refusal and asked the first two 0 times, the third 1 getLogs, an ok quote (card
+ *  evm-rpc-spare-list-asks-in-order). It is the kit's number, not read from it: the check reaches the kit only by its
+ *  entry, which does not export it (scripts/ci/kit-reach.mjs). A kit hold longer than this fails the mode's line "met
+ *  them unheld, 0 asked them"; a shorter one only has the next quotes ask the first two again. */
+export const KIT_HOLD_MS = 30_000;
+/** The wait before a held quote, ms: `gapMs` (heldGapMs), and before a mode's first quote also past the kit's hold of
+ *  the first two (`holdUntil`, a performance.now() time: the last planted failure plus KIT_HOLD_MS) by GAP_MARGIN_MS, so
+ *  each mode's first quote meets the first two unheld and asks them before the third. */
+export const heldWaitMs = (gapMs, first, holdUntil, now) => Math.max(gapMs, first ? Math.ceil(holdUntil + GAP_MARGIN_MS - now) : 0);
 /** A chain's block time, ms, from the first provider of `list` that answers its head and the headers at the head and
  *  BLOCK_SPAN blocks before it; null when none does (the run then stops: no wait is guessed). */
 export async function blockMsOf(list, fetchFn = fetch) {
@@ -164,9 +178,14 @@ export function check(run) {
     for (const m of MODES) {
       const qs = held.filter((q) => q.mode === m);
       say(qs.length >= HELD, `${name}, first two ${m}: ${qs.length} held quotes, ${HELD} needed`);
+      // a quote inside the kit's hold of the first two (heldLeftMs, from the last planted failure) may skip them; one
+      // that met them unheld asks them before the third, and each mode has one such quote
+      const inHold = (q) => Number.isFinite(q.heldLeftMs) && q.heldLeftMs > 0;
+      const unheld = qs.filter((q) => !inHold(q));
+      say(unheld.some((q) => q.heldAsked > 0), `${name}, first two ${m}: ${unheld.length} of ${qs.length} held quotes met them unheld, ${unheld.filter((q) => q.heldAsked > 0).length} asked them (one at least wanted; none: the kit skips them unasked, or holds them past ${KIT_HOLD_MS} ms)`);
       for (const q of qs) {
         say(q.code === want && q.ms < BOUND_MS, `${name}, first two ${m}: ends ${q.code}${q.message ? `: ${q.message}` : ""} in ${q.ms} ms (${want} under ${BOUND_MS} ms wanted)`);
-        say(q.heldAsked > 0 && q.thirdLogs > 0, `${name}, first two ${m}: the first two asked ${q.heldAsked} times, the third ${q.thirdLogs} getLogs`);
+        say((q.heldAsked > 0 || inHold(q)) && q.thirdLogs > 0, `${name}, first two ${m}: the first two asked ${q.heldAsked} times${inHold(q) ? ` (${q.heldLeftMs} ms left of the kit's hold on them)` : ""}, the third ${q.thirdLogs} getLogs`);
       }
     }
   }
@@ -325,6 +344,7 @@ const holding = (real, held, mode, n) => async (u, init) => {
   const url = String(u);
   if (!held.includes(url) || mode === null) return real(u, init);
   n.heldAsked++;
+  n.failedAt = performance.now();
   if (mode === "refused") throw new TypeError("Failed to fetch");
   if (mode === "503") return new Response("No server is available to handle this request", { status: 503 });
   const body = bodyOf(init);
@@ -335,10 +355,12 @@ const holding = (real, held, mode, n) => async (u, init) => {
   return new Response(JSON.stringify(Array.isArray(JSON.parse(String(init.body))) ? answers : answers[0]), { status: 200, headers: { "content-type": "application/json" } });
 };
 
-/** One quote through the kit's public entry, the list's first two held as `mode` (null: not held). */
-async function quote(req, list, mode) {
+/** One quote through the kit's public entry, the list's first two held as `mode` (null: not held), with the ms left at
+ *  its start of the kit's hold of them (`holdUntil`, heldWaitMs), and the time of its last planted failure (failedAt,
+ *  not recorded). */
+async function quote(req, list, mode, holdUntil = 0) {
   const real = globalThis.fetch;
-  const n = { heldAsked: 0, thirdLogs: 0 };
+  const n = { heldAsked: 0, thirdLogs: 0, heldLeftMs: Math.max(0, Math.round(holdUntil - performance.now())) };
   const inner = holding(real, list.slice(0, 2), mode, n);
   globalThis.fetch = async (u, init) => {
     if (String(u) === list[2] && bodyOf(init).some((c) => c?.method === "eth_getLogs")) n.thirdLogs++;
@@ -356,7 +378,8 @@ async function quote(req, list, mode) {
   } finally {
     globalThis.fetch = real;
   }
-  return { ...(mode === null ? {} : { mode }), code, ...(message === undefined ? {} : { message }), ms: Math.round(performance.now() - t), ...(mode === null ? {} : n) };
+  const { failedAt, ...counts } = n;
+  return { ...(mode === null ? {} : { mode }), code, ...(message === undefined ? {} : { message }), ms: Math.round(performance.now() - t), ...(mode === null ? {} : counts), ...(failedAt === undefined ? {} : { failedAt }) };
 }
 
 /** The helper's caller read on `chain` with its list's first two held as `mode`: the helper's own createRpc, with the
@@ -427,12 +450,15 @@ export async function measure(venues = evmPoolVenues(), base = HELPER) {
       c.first.push(q);
       console.log(`${name} all answering ${i}: ${q.code} ${q.ms} ms${q.message ? `: ${q.message}` : ""}`);
     }
+    // the kit's hold of the first two, from the last planted failure (a performance.now() time)
+    let holdUntil = 0;
     for (const m of MODES) {
       for (let i = 0; i < HELD; i++) {
-        await new Promise((r) => setTimeout(r, c.gapMs));
-        const q = await quote(req, list, m);
+        await new Promise((r) => setTimeout(r, heldWaitMs(c.gapMs, i === 0, holdUntil, performance.now())));
+        const { failedAt, ...q } = await quote(req, list, m, holdUntil);
+        if (failedAt !== undefined) holdUntil = failedAt + KIT_HOLD_MS;
         c.held.push(q);
-        console.log(`${name} first two ${m} ${i}: ${q.code} ${q.ms} ms, first two asked ${q.heldAsked}, third getLogs ${q.thirdLogs}${q.message ? `: ${q.message}` : ""}`);
+        console.log(`${name} first two ${m} ${i}: ${q.code} ${q.ms} ms, first two asked ${q.heldAsked}${q.heldLeftMs > 0 ? ` (${q.heldLeftMs} ms left of the kit's hold)` : ""}, third getLogs ${q.thirdLogs}${q.message ? `: ${q.message}` : ""}`);
       }
     }
   }

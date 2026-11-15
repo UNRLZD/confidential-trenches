@@ -130,7 +130,9 @@ test("card evm-spare-check-reads-a-throttle-as-no-answer: run 43464263269's thro
   assert.equal(r.ok, false);
   has(r.lines, /^INCONCLUSIVE helper robinhood maker spare 4663\.rpc\.thirdweb\.com: chain id 4663, error You are using a public RPC with rate limits.*: it throttled this reader past its one retry, no answer$/);
   assert.equal(r.lines.filter((l) => /^FAIL /.test(l)).length, 0, r.lines.join("\n"));
-  assert.equal(r.lines.length, 54);
+  // 54, and since card evm-rpc-spare-list-asks-in-order one line per case and mode: whether a quote met the first two
+  // unheld and asked them
+  assert.equal(r.lines.length, 58);
 });
 
 test("card evm-spare-check-reads-a-throttle-as-no-answer: a planted wrong chain id, a list under its floor, or any other error stays FAIL beside a throttle", () => {
@@ -265,4 +267,67 @@ test("blockMsOf: the first provider answering two headers BLOCK_SPAN apart names
   assert.deepEqual(await M.blockMsOf(["https://a.example", "https://b.example", "https://c.example"], fetchFn), { url: "https://c.example", blockMs: 115 });
   assert.equal(await M.blockMsOf(["https://a.example", "https://b.example"], fetchFn), null, "no provider answered: no block time, never a guess");
   assert.equal(M.BLOCK_SPAN, 1_000n);
+});
+
+// card evm-rpc-spare-list-asks-in-order: since 0dd39f726 (card evm-taps-meet-no-429) the kit holds a scan provider that
+// refused a connection for KIT_HOLD_MS, for every reader and the next quotes. The check's second refused quote and its
+// first 503 quote started inside that hold (helper live run 43722667540, beb3ef4f8): the kit sent them to the third at
+// once, asking the first two 0 times, and the check failed them (red at 23eab91ab: four FAIL lines).
+const inHoldRun = () => Object.assign(structuredClone(A.good), { cases: structuredClone(A.heldInKitHold.cases) });
+
+test("card evm-rpc-spare-list-asks-in-order: run 43722667540's held quotes pass: the two inside the kit's hold of the first two go to the third alone, each mode's other met them unheld and asked them first", () => {
+  const r = check(inHoldRun());
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const [n, left] of [["base-hook", [18500, 5831]], ["robinhood-torch", [17400, 3305]]]) {
+    has(r.lines, new RegExp(`^PASS ${n}, first two refused: the first two asked 0 times \\(${left[0]} ms left of the kit's hold on them\\), the third 1 getLogs$`));
+    has(r.lines, new RegExp(`^PASS ${n}, first two 503: the first two asked 0 times \\(${left[1]} ms left of the kit's hold on them\\), the third 1 getLogs$`));
+    for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^PASS ${n}, first two ${m}: 1 of 2 held quotes met them unheld, 1 asked them`));
+  }
+});
+
+test("card evm-rpc-spare-list-asks-in-order: a held quote outside any hold that asks the first two 0 times fails (the run as logged, no hold read)", () => {
+  const run = inHoldRun();
+  for (const c of Object.values(run.cases)) for (const q of c.held) delete q.heldLeftMs;
+  const r = check(run);
+  assert.equal(r.ok, false);
+  for (const n of ["base-hook", "robinhood-torch"]) for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^FAIL ${n}, first two ${m}: the first two asked 0 times, the third 1 getLogs$`));
+});
+
+test("card evm-rpc-spare-list-asks-in-order: a mode with no quote that met the first two unheld and asked them fails, as does one that never asks the third", () => {
+  const held = inHoldRun();
+  for (const q of held.cases["base-hook"].held) if (q.mode === "503") Object.assign(q, { heldAsked: 0, heldLeftMs: 4000 });
+  const r = check(held);
+  assert.equal(r.ok, false);
+  has(r.lines, /^FAIL base-hook, first two 503: 0 of 2 held quotes met them unheld, 0 asked them \(one at least wanted; none: the kit skips them unasked, or holds them past 30000 ms\)$/);
+  const asks = inHoldRun();
+  for (const q of asks.cases["robinhood-torch"].held) if (q.mode === "refused") q.heldAsked = 0;
+  has(check(asks).lines, /^FAIL robinhood-torch, first two refused: 1 of 2 held quotes met them unheld, 0 asked them/);
+  const third = inHoldRun();
+  third.cases["base-hook"].held[1].thirdLogs = 0;
+  has(check(third).lines, /^FAIL base-hook, first two refused: the first two asked 0 times \(18500 ms left of the kit's hold on them\), the third 0 getLogs$/);
+});
+
+test("card evm-rpc-spare-list-asks-in-order: each mode's first held quote waits out the kit's hold of the first two; the next waits its gap", () => {
+  assert.equal(typeof M.heldWaitMs, "function", "the check waits out the kit's hold");
+  const gap = 11_500;
+  // the refused mode's first quote, no hold yet: its gap
+  assert.equal(M.heldWaitMs(gap, true, 0, 1_000_000), gap);
+  // the 503 mode's first quote, 13 s after the last refusal (the refused mode's second quote, inside the hold, ended
+  // there in run 43722667540): past the hold's end by the margin, 18.5 s, not the 11.5 s gap that started it at 24 s
+  const holdUntil = 1_000_000 + M.KIT_HOLD_MS;
+  assert.equal(M.heldWaitMs(gap, true, holdUntil, 1_000_000 + 13_000), M.KIT_HOLD_MS - 13_000 + M.GAP_MARGIN_MS);
+  assert.equal(M.heldWaitMs(gap, true, holdUntil, 1_000_000 + 13_000), 18_500);
+  // a second quote of a mode inside the hold: its gap only (the kit's held path is what it reads)
+  assert.equal(M.heldWaitMs(gap, false, holdUntil, 1_000_000 + 12_000), gap);
+  // a hold long past: the gap
+  assert.equal(M.heldWaitMs(gap, true, holdUntil, holdUntil + 60_000), gap);
+});
+
+test("card evm-rpc-spare-list-asks-in-order: the good answer recorded on this card's branch passes: each mode's first quote, past the kit's hold, asks the first two and then the third; the refused mode's second goes to the third inside the hold", () => {
+  const r = check(A.goodAsksInOrder);
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  for (const n of ["base-hook", "robinhood-torch"]) {
+    for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^PASS ${n}, first two ${m}: 2 of 2 held quotes met them unheld|^PASS ${n}, first two ${m}: 1 of 2 held quotes met them unheld, 1 asked them`));
+    has(r.lines, new RegExp(`^PASS ${n}, first two refused: the first two asked 0 times \\(\\d+ ms left of the kit's hold on them\\), the third 1 getLogs$`));
+  }
 });
