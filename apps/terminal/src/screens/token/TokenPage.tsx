@@ -611,7 +611,19 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
               )}
             </div>
           </div>
-          <div className="tkp-strip">
+          {/* the strip is drawn with the token's identity, never before it: strip-fit.ts gives way from its end while the
+              symbol and its icons need the room, and only the token's own symbol and icons say how much, so a strip drawn
+              for the loading skeleton (a 120 px line, no icons) moved right by a tile once a long symbol with its icons
+              landed (mihao, 14 Nov: Holders dropped, CLS 0.0014 at 1600). Drawn with them, the fit runs before its first
+              paint and nothing drawn moves (card mihao-opens-first). Before it, an unseen strip of the Market cap's and a
+              tile's skeletons holds the header's height, so the chart under it never moves when the strip lands. */}
+          {!v && (
+            <div className="tkp-strip" data-hold="" aria-hidden="true">
+              <div className="tkp-mc"><span className="tkp-lbl"><W id="mcLong" /></span><SkLine cls="tkp-mcval" w={120} /></div>
+              <div className="tkp-tile"><span className="tkp-lbl"><W id="price" /></span><SkLine cls="tkp-val" w={64} /></div>
+            </div>
+          )}
+          {v && <div className="tkp-strip">
             <div className="tkp-mc">
               <span className="tkp-lbl"><W id="mcLong" /></span>
               {v?.mc != null ? <span className="tkp-mcval" ref={mcRef}>{v.mc}</span> : <SkLine cls="tkp-mcval" w={120} />}
@@ -622,7 +634,7 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
             <Tile k="vol" label="vol24" value={s(v?.vol)} />
             <Tile k="liq" label={v?.curve.on ? "inCurve" : "liq"} value={s(v?.liq)} />
             <Tile k="holders" label="holders" value={s(v?.holders)} />
-          </div>
+          </div>}
         </header>
         <Chart c={c} />
         <LowerPanel row={r?.data.row ?? null} decimals={r?.data.decimals ?? null} tape={tape} />
@@ -789,7 +801,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
 }
 
 /** The token route. /token/<chain>/<id> draws that token (source.ts); a chain the terminal does not draw is the page's
- *  not-found, with no read. / draws NEARKAT on All (routes.ts OPEN_TOKEN), a chain pick's top Trending token on a pick. */
+ *  not-found, with no read. / draws mihao on All (routes.ts OPEN_TOKEN), a chain pick's top Trending token on a pick. */
 /** The phone's width (shell.css): under it, / is the Trenches list (owner 12 Nov), not the top token's page. */
 const PHONE_MEDIA = "(max-width: 767.98px)";
 
@@ -802,7 +814,7 @@ export function TokenRoute() {
   return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;
 }
 
-/** / on the shell's chain filter: All draws NEARKAT, a chain pick that chain's top Trending token (source.ts loadHome). */
+/** / on the shell's chain filter: All draws mihao (OPEN_TOKEN), a chain pick that chain's top Trending token (source.ts loadHome). */
 function TopToken() {
   const pick = usePick();
   return <TopTokenOn key={pick} pick={pick} />;

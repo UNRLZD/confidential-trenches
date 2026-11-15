@@ -41,8 +41,8 @@ const outageAt = args.indexOf("--outage");
 const OUTAGE = outageAt >= 0 ? args[outageAt + 1] : undefined;
 
 const LISTS_URL = "https://ct-api.unrealized.trade/v1/market/lists?chain=solana";
-/** NEARKAT's recorded row: the token / opens on All off the phone (card nearkat-opens-first, routes.ts OPEN_TOKEN). */
-const OPEN_READ = JSON.parse(readFileSync(path.join(APP, "test/token-source/helper-token-nearkat-2026-11-14.json"), "utf8"));
+/** mihao's recorded row: the token / opens on All off the phone (card mihao-opens-first, routes.ts OPEN_TOKEN). */
+const OPEN_READ = JSON.parse(readFileSync(path.join(APP, "test/token-source/helper-token-mihao-2026-11-14.json"), "utf8"));
 const OPEN_ROW = Object.fromEntries(OPEN_READ.fields.map((k, i) => [k, OPEN_READ.row[i]]));
 const isTokenRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/token";
 const isCandleRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/candles";
@@ -145,7 +145,7 @@ try {
       if (late) await wait(LATE.helperMs);
       await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify(answer) }).catch(() => {});
     });
-    // a listed token's page, and / on All off the phone (NEARKAT, its recorded row): answered as the helper answers a
+    // a listed token's page, and / on All off the phone (mihao, its recorded row): answered as the helper answers a
     // token it lists, its page row being Discover's own row (apps/helper/src/data/solana/token.ts), with no failed load
     await ctx.route(isTokenRead, async (r) => {
       if (late) await wait(LATE.helperMs);
@@ -155,7 +155,7 @@ try {
       const body = row && u.searchParams.get("chain") === "solana" ? { row, decimals: 6, pool: null, risk: {}, route: "ok" } : { error: "unknown token" };
       await r.fulfill({ status: row ? 200 : 404, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) }).catch(() => {});
     });
-    // NEARKAT's logo (its row says icon: true; Avatar.tsx asks GET /v1/logo/solana/<mint>): a 1 x 1 PNG, as the helper
+    // mihao's logo (its row says icon: true; Avatar.tsx asks GET /v1/logo/solana/<mint>): a 1 x 1 PNG, as the helper
     // answers a token it holds a logo for, so / draws it with no failed load
     await ctx.route(`https://ct-api.unrealized.trade/v1/logo/solana/${OPEN_ROW.token}`, (r) =>
       r.fulfill({ status: 200, headers: { "content-type": "image/png", "access-control-allow-origin": "*" }, body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4NEsPAAQ8Abv9b7JQAAAAAElFTkSuQmCC", "base64") }).catch(() => {}),

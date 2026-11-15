@@ -5,9 +5,9 @@
 // that list row (as test/token-route/run.mjs). Signed in and signed out, at 1600, 1440, 1280, 1180, 1179 and 1024 x 900:
 //   - the width mode, read off the desktop grid's first track and the rail's own box: the full rail (340 layout px) from
 //     1500 css px, the slim rail (78: the rings and the expand button) from 1180, no rail under it (and no lists read:
-//     / on All reads NEARKAT alone, card nearkat-opens-first);
+//     / on All reads mihao alone, card mihao-opens-first);
 //   - the full rail's chips as UNRLZD's rail (owner 12 Nov parity): Trending, Watchlist, New, Hot, Graduating (Trending pressed), its rows the Trending column as Discover orders it, each
-//     a link to /token/solana/<mint>, none marked on / (NEARKAT, in no list), the page's own token marked after a hop (aria-current);
+//     a link to /token/solana/<mint>, none marked on / (mihao, in no list), the page's own token marked after a hop (aria-current);
 //   - the header's strip whole in every mode (no tile cut, clear of the trade column and the rail: the design's one-row
 //     rule) and its symbol whole, /'s token's a long one (card rail-open-keeps-the-symbol-whole), no horizontal scroll, no text under 11 px, no layout shift from the first paint (CLS 0), no page error;
 //   - opening / reads the lists once, each chain's once (the rail's read; every
@@ -62,10 +62,10 @@ const TRENDING = columnRows(SNAP, "trending").map((r) => r.token);
 // 1280; card rail-open-keeps-the-symbol-whole), so every view's header holds a symbol longer than the tile steps' budget
 const LONG_SYMBOL = "Anthropic";
 for (const r of Object.values(SNAP.lists).flat()) if (r.token === TRENDING[0]) r.symbol = LONG_SYMBOL;
-// what / opens on All (card nearkat-opens-first, routes.ts OPEN_TOKEN): NEARKAT, in no list, answered from its recorded
+// what / opens on All (card mihao-opens-first, routes.ts OPEN_TOKEN): mihao, in no list, answered from its recorded
 // read; its symbol drawn as long as LONG_SYMBOL here, so / keeps a header symbol longer than the tile steps' budget
-const OPEN = "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr";
-const openRead = JSON.parse(readFileSync(path.join(APP, "test/token-source/helper-token-nearkat-2026-11-14.json"), "utf8"));
+const OPEN = "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump";
+const openRead = JSON.parse(readFileSync(path.join(APP, "test/token-source/helper-token-mihao-2026-11-14.json"), "utf8"));
 // answered without its links (site, X), as the recorded top token it replaces had none: with them the identity grows
 // past the strip's fit ~1 s after the first paint and Holders drops (a shift of ~0.002 at 1600 and 1920 on the live
 // helper too, card nearkat-opens-first's finding), a fault of the fit's own, held apart from this run's layout checks
@@ -215,7 +215,7 @@ try {
       const seen = () => JSON.stringify(reads.by);
       const { ctx, page, f, errors } = await open(browser, route, w, reads, k.name);
       const top = OPEN;
-      check(await ready(f, top), `${tag}: / did not draw NEARKAT ${top}`);
+      check(await ready(f, top), `${tag}: / did not draw mihao ${top}`);
       if (w.mode !== "hidden") await f.waitForSelector('[data-testid="token-rail"][data-state="ready"]', { timeout: 10_000 }).catch(() => {});
       await page.waitForTimeout(400);
       const p = await readPage(f);
@@ -224,7 +224,7 @@ try {
       // the mode
       if (w.mode === "hidden") {
         check(p.railW === null && tracks === 2, `${tag}: a rail under 1180 (rail ${p.railW}, tracks ${p.tracks})`);
-        check(reads.lists === 0, `${tag}: lists reads ${seen()} with no rail drawn: / on All reads NEARKAT alone`);
+        check(reads.lists === 0, `${tag}: lists reads ${seen()} with no rail drawn: / on All reads mihao alone`);
       } else {
         check(tracks === 3 && Math.abs(first - w.track) < 0.5, `${tag}: the rail's track is ${p.tracks}, want ${w.track}px first`);
         check(p.railW !== null && Math.abs(p.railW - w.track) <= 1, `${tag}: the rail is ${p.railW} wide, want ${w.track}`);
@@ -234,7 +234,7 @@ try {
         const bad = p.rows.filter((r) => r.href !== `/token/solana/${r.token}`);
         check(bad.length === 0, `${tag}: rows not linked to their token: ${bad.slice(0, 3).map((r) => `${r.token} ${r.href}`).join(" ")}`);
         const cur = p.rows.filter((r) => r.current === "page").map((r) => r.token);
-        check(cur.length === 0, `${tag}: the marked row(s) ${JSON.stringify(cur)}, want none (/ opens NEARKAT, in no list)`);
+        check(cur.length === 0, `${tag}: the marked row(s) ${JSON.stringify(cur)}, want none (/ opens mihao, in no list)`);
         if (w.mode === "full") {
           check(JSON.stringify(p.chips) === JSON.stringify(["Trending:true", "Watchlist:false", "New:false", "Hot:false", "Graduating:false"]), `${tag}: chips ${JSON.stringify(p.chips)}`);
           check(!p.expand, `${tag}: the expand button drawn on the full rail`);

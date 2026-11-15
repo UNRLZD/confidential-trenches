@@ -17,8 +17,8 @@
 // Holders the helper's holder rows with the read's count and top share, or Jupiter's count and top share and No data
 // for the rows; About's window tiles and flow bar in the trade column (the desktop) and the trade sheet (the phone).
 // On the phone / is the Trenches list (owner 12 Nov): the token states open it and tap its first row, as a trader does;
-// the lists states (loading, empty, error) are the list's own, Retry included. Off the phone (card nearkat-opens-first)
-// a token state opens /token/solana/<id>, and a lists state opens /, whose NEARKAT read answers that state.
+// the lists states (loading, empty, error) are the list's own, Retry included. Off the phone (card mihao-opens-first)
+// a token state opens /token/solana/<id>, and a lists state opens /, whose mihao read answers that state.
 // --signed-out runs the same states in the shell signed out.
 //   node apps/terminal/test/token-page/run.mjs [--shots <dir>] [--only <id,id>] [--signed-out]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -128,8 +128,8 @@ function candles(p, tf) {
 
 /** A fixture as the helper sends it now: its age kept, read at the run's clock; the route reads Solana only, so the
  *  edges token (a NEAR id, the longest text) is answered as a Solana row. */
-/** What / opens on All off the phone (card nearkat-opens-first, routes.ts OPEN_TOKEN). */
-const OPEN = "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr";
+/** What / opens on All off the phone (card mihao-opens-first, routes.ts OPEN_TOKEN). */
+const OPEN = "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump";
 
 function live(key) {
   const shift = Math.floor((Date.now() - FIXTURE_NOW_MS) / 1000);
@@ -153,7 +153,7 @@ function helperAnswer(s, url, calls) {
   if (url.pathname === "/v1/market/token") {
     calls.tokens++;
     if (!s.top) {
-      // a lists state off the phone: / on All reads NEARKAT alone (card nearkat-opens-first), so its read answers the
+      // a lists state off the phone: / on All reads mihao alone (card mihao-opens-first), so its read answers the
       // state: never ending (loading), not known (empty) or failed (error)
       if (url.searchParams.get("token") !== OPEN) return json(404, { error: "unknown token" });
       if (s.lists === "hang") return "hang";
@@ -281,8 +281,8 @@ async function openAt(browser, route, w, s, calls) {
   page.on("pageerror", (e) => errors.push(String(e)));
   const consoles = [];
   page.on("console", (m) => m.type() === "error" && consoles.push(`${m.text()} (${m.location()?.url?.split("?")[0] ?? ""})`));
-  // off the phone a token state opens the token's own address, /token/solana/<id> (/ on All opens NEARKAT, card
-  // nearkat-opens-first); the phone taps its Trenches list's first row to the same address; a lists state opens /
+  // off the phone a token state opens the token's own address, /token/solana/<id> (/ on All opens mihao, card
+  // mihao-opens-first); the phone taps its Trenches list's first row to the same address; a lists state opens /
   const at = !w.isMobile && s.top ? `token/solana/${TOKENS[s.top].token}` : "";
   await page.goto(`${APP_HOST}/${at}${s.query ?? ""}`, { waitUntil: "load" });
   let f = null;
@@ -642,7 +642,7 @@ try {
         check(back, `${tag}: Retry lost the page`);
         const read = calls.chains.slice(before).sort().join(",");
         if (!phone || !s.lists) {
-          // the token page at /token/<chain>/<id> (the phone's a row's tap away), or / on All off the phone (NEARKAT):
+          // the token page at /token/<chain>/<id> (the phone's a row's tap away), or / on All off the phone (mihao):
           // Retry reads that token again, not the lists
           check(read === "" && calls.tokens - tokensBefore === 1, `${tag}: Retry read the lists of [${read}] and the token ${calls.tokens - tokensBefore} time(s), not the token once`);
         } else {

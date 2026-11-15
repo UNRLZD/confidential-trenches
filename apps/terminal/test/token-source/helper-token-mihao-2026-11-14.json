@@ -1,5 +1,5 @@
 {
-  "read": "GET /v1/market/token?chain=solana at HELPER_HOST for the mint 6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr, NEARKAT, at 2026-11-14T17:26Z (card nearkat-opens-first: the token / opens on All), HTTP 200. The row is kept as a field list and its values, as helper-token-2026-11-03.json is",
+  "read": "GET /v1/market/token?chain=solana at HELPER_HOST for the mint 4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump, mihao, at 2026-11-14T21:50Z (card mihao-opens-first: the token / opens on All, a pump.fun coin on PumpSwap the private buy fills), HTTP 200. The row is kept as a field list and its values, as helper-token-2026-11-03.json is",
   "fields": [
     "chain",
     "token",
@@ -42,127 +42,126 @@
   ],
   "row": [
     "solana",
-    "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr",
-    "NEARKAT",
-    "NearKat",
+    "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump",
+    "mihao",
+    "ni hao cat",
     true,
     null,
     null,
-    1788741259,
-    "0.000696704842335",
-    "688709.940637",
-    "29748.2453467",
-    548,
-    517,
-    -1680,
-    "59261.4901764",
-    7662,
-    1943,
+    1792934861,
+    "0.0141094707619",
+    "13274620.6394",
+    "8386232.19212",
+    187,
+    -133,
+    -1391,
+    "1363797.83221",
+    32475,
+    1679,
     "jupiter",
-    1794677219329,
-    "ApWMt5Xnvz71nxsEVipGnobd7aAQ4MKGV3Vu8MSWNeX4",
+    1794693027093,
+    "9tH2zRYdS3X7PEcsPno3GST1EHe8GX8CSNih1pKpamAp",
     null,
-    54,
+    320,
     null,
     false,
     false,
-    "428.899464395",
-    1,
-    1,
-    "-427.510964636",
+    "49628.3151873",
+    224,
+    220,
+    "5866.70660151",
     "jupiter",
-    "stonkfun",
+    "pump.fun",
     10000,
-    "948.480873311",
+    "439529.849784",
     null,
-    172,
-    112,
-    5,
-    5
+    51618,
+    49962,
+    2666,
+    2420
   ],
   "rest": {
     "decimals": 6,
-    "pool": "G19cwhvY4teiUm3jgjrDX5RfzfCnSXe1s5upRXVmTQki",
+    "pool": "Ho1aSG6WGH1FfXdEHrK2f4Ggt1Hoxo9s5jcLMDqeyeBz",
     "risk": {
       "mint_auth": {
         "v": false,
         "src": "chain",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       },
       "freeze_auth": {
         "v": false,
         "src": "chain",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       },
       "lp": {
         "v": null,
         "src": "none",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       },
       "top10_bps": {
-        "v": 1943,
+        "v": 1679,
         "src": "chain",
-        "as_of_ms": 1794677219501
+        "as_of_ms": 1794693027308
       },
       "dev_bps": {
-        "v": 54,
+        "v": 320,
         "src": "jupiter",
-        "as_of_ms": 1794677219329
+        "as_of_ms": 1794693027093
       },
       "snipers_bps": {
         "v": null,
         "src": "none",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       },
       "holders": {
-        "v": 7662,
+        "v": 32475,
         "src": "jupiter",
-        "as_of_ms": 1794677219329
+        "as_of_ms": 1794693027093
       },
       "liq_usd": {
-        "v": "59261.4901764",
+        "v": "1363797.83221",
         "src": "jupiter",
-        "as_of_ms": 1794677219329
+        "as_of_ms": 1794693027093
       },
       "age_s": {
-        "v": 5935960,
+        "v": 1758166,
         "src": "jupiter",
-        "as_of_ms": 1794677219329
+        "as_of_ms": 1794693027093
       },
       "tax": {
         "v": {
-          "buy_bps": 300,
-          "sell_bps": 300
+          "buy_bps": 0,
+          "sell_bps": 0
         },
         "src": "chain",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       },
       "honeypot": {
         "v": null,
         "src": "none",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       },
       "insiders_bps": {
         "v": null,
         "src": "none",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       },
       "bundlers_bps": {
         "v": null,
         "src": "none",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       },
       "fresh_bps": {
         "v": null,
         "src": "none",
-        "as_of_ms": 1794677219328
+        "as_of_ms": 1794693027091
       }
     },
     "route": "unknown",
     "filling": false,
     "links": {
-      "site": "https://nearkat.xyz/",
-      "x": "https://x.com/NearKatSol"
+      "x": "https://x.com/iamnihaocat"
     }
   }
 }

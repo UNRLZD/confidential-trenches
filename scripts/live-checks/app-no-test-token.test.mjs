@@ -1,9 +1,11 @@
 // node --test scripts/live-checks/app-no-test-token.test.mjs: the live check's verdict replays recorded runs
 // (app-no-test-token.answers.json), each read by app-no-test-token.mjs collect() in headless Chromium:
-//   good: card nearkat-opens-first's build (14 Nov), served at APP_HOST's name inside the stand-in shell (--build),
-//         HELPER_HOST live, signed out: / at 1440 and /?fx=curve draw NEARKAT, read on Solana, the rail reading
+//   good: card mihao-opens-first's build (14 Nov), served at APP_HOST's name inside the stand-in shell (--build),
+//         HELPER_HOST live, signed out: / at 1440 and /?fx=curve draw mihao, read on Solana, the rail reading
 //         Solana's, Base's, Robinhood's and NEAR's lists; / at 390 draws the Trenches list on Trending, its first row
 //         the top Trending token of them all: PASS;
+//   bad_nearkat: card nearkat-opens-first's build (14 Nov), served the same way, the good answer until / on All opened
+//         mihao: / at 1440 and /?fx=curve draw NEARKAT (Meteora DLMM alone, Buy Unavailable): FAIL at the desktop loads alone;
 //   bad_top_trending: APP_HOST as deployed (13 Nov, release 126), the good answer until / on All opened NEARKAT: / at
 //         1440 draws the top Trending token: FAIL at the desktop loads alone;
 //   bad_phone_page: card app-near-trading's build (12 Nov), the good answer until the phone's / became the Trenches
@@ -35,7 +37,7 @@ const mut = (f) => {
   return judge(rec);
 };
 
-test("recorded good answer: / and /?fx=curve at 1440 draw NEARKAT, the phone's list starts with the lists' top Trending token, no fixture in the JS: PASS", () => {
+test("recorded good answer: / and /?fx=curve at 1440 draw mihao, the phone's list starts with the lists' top Trending token, no fixture in the JS: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(ANSWERS.good.loads.length, LOADS.length);
@@ -51,7 +53,7 @@ test("recorded good answer: / and /?fx=curve at 1440 draw NEARKAT, the phone's l
     assert.equal(l.shown, OPEN.mint);
     assert.equal(`${l.token.url}?chain=${l.token.chain}&token=${l.token.mint}`, TOKEN_URL(OPEN.chain, OPEN.mint));
     assert.ok(l.scripts.length > 0 && l.scripts.every((s) => s.hits === 0));
-    assert.ok(r.lines.some((x) => x.startsWith(`ok  ${l.width} ${l.path}: ready, data-token ${OPEN.chain}/${OPEN.mint} (NEARKAT) = NEARKAT, / on All's token, the rail reading every chain's lists (`)), r.lines.join("\n"));
+    assert.ok(r.lines.some((x) => x.startsWith(`ok  ${l.width} ${l.path}: ready, data-token ${OPEN.chain}/${OPEN.mint} (${l.symbol}) = mihao, / on All's token, the rail reading every chain's lists (`)), r.lines.join("\n"));
   }
 });
 
@@ -60,7 +62,15 @@ test("recorded bad answer: APP_HOST before card nearkat-opens-first, / at 1440 d
   assert.equal(r.ok, false);
   const b = bad(r.lines);
   assert.deepEqual(b.map((l) => l.split(": ")[0]), ["BAD desktop /", "BAD desktop /?fx=curve"], r.lines.join("\n"));
-  for (const l of b) assert.match(l, /data-token \S+, \/ on All opens NEARKAT solana\/6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr/);
+  for (const l of b) assert.match(l, /data-token \S+, \/ on All opens mihao solana\/4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump/);
+});
+
+test("recorded bad answer: card nearkat-opens-first's build, / at 1440 drawing NEARKAT: FAIL at the desktop loads alone", () => {
+  const r = judge(ANSWERS.bad_nearkat);
+  assert.equal(r.ok, false);
+  const b = bad(r.lines);
+  assert.deepEqual(b.map((l) => l.split(": ")[0]), ["BAD desktop /", "BAD desktop /?fx=curve"], r.lines.join("\n"));
+  for (const l of b) assert.match(l, /data-token solana\/6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr|data-token 6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr, \/ on All opens mihao/);
 });
 
 test("recorded bad answer: the build of 12 Nov, the phone's / drawing the top token's page and no list: FAIL at the phone", () => {
@@ -92,13 +102,13 @@ test("recorded bad answer: the build of 9 Nov, / reading Solana's, Base's and Ro
   for (const l of LOADS) assert.ok(bad(r.lines).some((x) => x.includes(`${l.name} ${l.path}: `) && /the page read no lists of near(;|$)/.test(x)), r.lines.join("\n"));
 });
 
-test("planted: a page token on another chain than NEARKAT's fails, so does a token read on the wrong chain", () => {
+test("planted: a page token on another chain than mihao's fails, so does a token read on the wrong chain", () => {
   const other = mut((rec) => {
     const l = rec.loads[0];
     const notTop = l.lists.find((x) => x.chain !== topOf(l.lists).chain && x.trending?.length);
     l.shown = notTop.trending[0].mint;
   });
-  assert.ok(bad(other.lines).some((l) => /^BAD desktop \/: data-token \S+, \/ on All opens NEARKAT/.test(l)), other.lines.join("\n"));
+  assert.ok(bad(other.lines).some((l) => /^BAD desktop \/: data-token \S+, \/ on All opens mihao/.test(l)), other.lines.join("\n"));
   const chain = mut((rec) => {
     rec.loads[2].token.chain = rec.loads[2].token.chain === "base" ? "solana" : "base";
   });
@@ -114,12 +124,12 @@ test("planted: one script holding a fixture id fails the JS line", () => {
   assert.ok(bad(r.lines).some((l) => /^BAD desktop \/: the served JS .*1 fixture hit/.test(l)), r.lines.join("\n"));
 });
 
-test("planted: a page token other than NEARKAT fails, and so does a page left loading", () => {
+test("planted: a page token other than mihao fails, and so does a page left loading", () => {
   const other = mut((rec) => {
     rec.loads[2].shown = rec.loads[2].lists.find((x) => x.trending?.length).trending.at(-1).mint;
   });
   assert.equal(other.ok, false);
-  assert.ok(bad(other.lines).some((l) => /^BAD desktop \/\?fx=curve: data-token \S+, \/ on All opens NEARKAT/.test(l)), other.lines.join("\n"));
+  assert.ok(bad(other.lines).some((l) => /^BAD desktop \/\?fx=curve: data-token \S+, \/ on All opens mihao/.test(l)), other.lines.join("\n"));
   const loading = mut((rec) => {
     rec.loads[0].state = "loading";
   });

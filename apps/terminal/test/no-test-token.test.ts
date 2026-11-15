@@ -230,31 +230,43 @@ test("TOKEN_URL: the helper's token read for a Solana mint, the mint encoded", (
   assert.equal(source.TOKEN_URL!("a&b=c"), "https://ct-api.unrealized.trade/v1/market/token?chain=solana&token=a%26b%3Dc");
 });
 
-// ---------------------------------------------------------------------------------------------- what / opens (card nearkat-opens-first)
-const NEARKAT = "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr";
+// ------------------------------------------------------------------------------------------------ what / opens (card mihao-opens-first)
+// mihao, a pump.fun coin trading on its PumpSwap pool, a venue the private buy fills (owner 14 Nov 21:33Z, "pump fun
+// coin"). NEARKAT, All's opener before it, trades for SOL on Meteora DLMM alone, which the private buy cannot reach: its
+// Buy drew Unavailable on the first screen. token-source/helper-token-mihao-2026-11-14.json is HELPER_HOST's answer for it.
+const MIHAO = "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump";
+const mihaoRead = JSON.parse(readFileSync(path.join(APP, "test/token-source/helper-token-mihao-2026-11-14.json"), "utf8")) as { fields: string[]; row: unknown[]; rest: Obj };
+
+test("/ on All opens a coin the private buy fills: mihao, a pump.fun coin on PumpSwap, never NEARKAT (Meteora DLMM alone)", async () => {
+  const routes = await import("../src/routes/routes.ts");
+  assert.deepEqual(routes.OPEN_TOKEN, { chain: "solana", id: MIHAO }, `/ on All opens ${routes.OPEN_TOKEN.chain}/${routes.OPEN_TOKEN.id}, not mihao`);
+  // HELPER_HOST's recorded answer for that mint: mihao, a pump.fun launch whose curve is done (its PumpSwap pool)
+  const row = tokenOf(mihaoRead).row as Obj;
+  assert.deepEqual([row.chain, row.token, row.symbol, row.launchpad, row.curve_bps], ["solana", MIHAO, "mihao", "pump.fun", 10000]);
+});
 /** What / reads on a pick: the app's own home read (loadHome), else the old rule (the top Trending token) it replaces. */
 const home = (fetchFn: typeof fetch, pick: Parameters<typeof source.loadTopToken>[1]) => {
   const s = source as typeof source & { loadHome?: typeof source.loadTopToken };
   return (s.loadHome ?? source.loadTopToken)(fetchFn, pick, allListsReader());
 };
 
-test("/ on All (a fresh open) opens NEARKAT on Solana, read by its mint alone", async () => {
-  const row = { ...token.answer.row, token: NEARKAT, symbol: "NEARKAT", name: "NearKat" };
-  // the helper answers each token read with that token's row: NEARKAT's, or the recorded top's
-  const nk = helper({ token: { ...token.answer, row } });
+test("/ on All (a fresh open) opens mihao on Solana, read by its mint alone", async () => {
+  const row = tokenOf(mihaoRead).row;
+  // the helper answers each token read with that token's row: mihao's (its recorded answer), or the recorded top's
+  const mh = helper({ token: tokenOf(mihaoRead) });
   const top = helper();
   const calls: string[] = [];
   const fetchFn: typeof fetch = (input, init) => {
     calls.push(String(input));
-    return (new URL(String(input)).searchParams.get("token") === NEARKAT ? nk : top).fetchFn(input, init);
+    return (new URL(String(input)).searchParams.get("token") === MIHAO ? mh : top).fetchFn(input, init);
   };
   const d = await home(fetchFn, "all");
-  assert.equal(d.status === "ready" && d.row.token, NEARKAT, `/ opened ${d.status === "ready" ? `${d.row.symbol} ${d.row.token}` : d.status}, not NEARKAT`);
-  assert.equal(d.status === "ready" && d.row.symbol, "NEARKAT");
-  assert.deepEqual(calls, [source.TOKEN_URL(NEARKAT, "solana")], "one token read, no lists read");
+  assert.equal(d.status === "ready" && d.row.token, MIHAO, `/ opened ${d.status === "ready" ? `${d.row.symbol} ${d.row.token}` : d.status}, not mihao`);
+  assert.equal(d.status === "ready" && d.row.symbol, row.symbol);
+  assert.deepEqual(calls, [source.TOKEN_URL(MIHAO, "solana")], "one token read, no lists read");
 });
 
-test("/ on a chain pick keeps that chain's top Trending token (NEARKAT is All's opener only)", async () => {
+test("/ on a chain pick keeps that chain's top Trending token (mihao is All's opener only)", async () => {
   for (const c of ["base", "robinhood"] as const) {
     const top = columnRows(EVM[c].lists as unknown as MarketSnapshot, "trending")[0]!;
     const { fetchFn } = helper({ evm: true });
@@ -266,7 +278,7 @@ test("/ on a chain pick keeps that chain's top Trending token (NEARKAT is All's 
   assert.equal(d.status === "ready" && d.row.token, TOP, "solana: Solana's own top");
 });
 
-test("/ on All: NEARKAT's failed read is the error state and a 404 the empty state, never another token", async () => {
+test("/ on All: mihao's failed read is the error state and a 404 the empty state, never another token", async () => {
   assert.deepEqual(await home(helper({ tokenStatus: 503 }).fetchFn, "all"), { status: "error" });
   assert.deepEqual(await home(helper({ tokenStatus: 404 }).fetchFn, "all"), { status: "empty" });
   assert.deepEqual(await home(helper().fetchFn, "all"), { status: "error" }, "a row for another mint");

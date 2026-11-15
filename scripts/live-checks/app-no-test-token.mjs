@@ -6,10 +6,10 @@
 // ui-parity-with-unrlzd, TokenPage.tsx's PHONE_MEDIA rule, so the phone's load reads the list, not a token page):
 //   - the served JS: every script APP_HOST answered the frame holds no fixture id or name ("fixture", any case: the old
 //     GlowFixtureCurve ids, the fixture source tag);
-//   - the page: main[data-route="token"] draws the page ready, and its data-token is NEARKAT (Solana mint
-//     6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr, card nearkat-opens-first: / on the chain filter's default, All);
+//   - the page: main[data-route="token"] draws the page ready, and its data-token is mihao (Solana mint
+//     4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump, card mihao-opens-first: / on the chain filter's default, All);
 //     the page (its rail) read each chain's lists at HELPER_HOST (GET /v1/market/lists?chain=<chain>);
-//   - the token read: the page read GET /v1/market/token on Solana for NEARKAT, 200, and its row is NEARKAT;
+//   - the token read: the page read GET /v1/market/token on Solana for mihao, 200, and its row is mihao;
 //   - at the phone's width, in place of the page and the token read: the Trenches list (PhoneTrenches.tsx,
 //     [data-testid="phone-trenches"]) is ready on its Trending chip, and its first row's data-key (<chain>:<id>) is that
 //     same top, never a fixture. Its lists are the last answer of each chain before the read, as the list redraws on
@@ -37,14 +37,14 @@ export const CHAINS = ["solana", "base", "robinhood", "near"];
 export const LISTS_URL = (chain) => `${HELPER_HOST}/v1/market/lists?chain=${chain}`;
 export const TOKEN_URL = (chain, mint) => `${HELPER_HOST}/v1/market/token?chain=${chain}&token=${encodeURIComponent(mint)}`;
 export const FIXTURE = /fixture/i;
-/** What / opens on All off the phone (card nearkat-opens-first, apps/terminal/src/routes/routes.ts OPEN_TOKEN): NEARKAT. */
-export const OPEN = { chain: "solana", mint: "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr" };
+/** What / opens on All off the phone (card mihao-opens-first, apps/terminal/src/routes/routes.ts OPEN_TOKEN): mihao. */
+export const OPEN = { chain: "solana", mint: "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump" };
 export const LOADS = [
   { name: "desktop", path: "/", home: "page", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", path: "/", home: "list", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "desktop", path: "/?fx=curve", home: "page", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
-/** What a recorded load's / draws: "list" (the phone's Trenches list) or "page" (NEARKAT's page). */
+/** What a recorded load's / draws: "list" (the phone's Trenches list) or "page" (mihao's page). */
 const homeOf = (l) => LOADS.find((w) => w.name === l.width && w.path === l.path)?.home ?? "page";
 const READ_MS = 25_000;
 
@@ -86,8 +86,8 @@ export function judge(rec) {
     if (unread.length) bad.push(`the page read no lists of ${unread.join(", ")}`);
     if (lists.length && !lists.some((x) => x.status === 200)) bad.push(`lists status ${lists.map((x) => `${x.chain} ${x.status}`).join(", ")}`);
     if (typeof l.shown === "string" && FIXTURE.test(l.shown)) bad.push(`data-token ${l.shown} is a fixture`);
-    // / on All opens NEARKAT off the phone (card nearkat-opens-first); the lists above are the rail's read
-    if (l.shown !== OPEN.mint) bad.push(`data-token ${l.shown ?? "none"}, / on All opens NEARKAT ${OPEN.chain}/${OPEN.mint}`);
+    // / on All opens mihao off the phone (card mihao-opens-first); the lists above are the rail's read
+    if (l.shown !== OPEN.mint) bad.push(`data-token ${l.shown ?? "none"}, / on All opens mihao ${OPEN.chain}/${OPEN.mint}`);
     if (!l.token) bad.push("the page read no token answer");
     else {
       const at = `${l.token.url}?chain=${l.token.chain}&token=${encodeURIComponent(l.token.mint)}`;
@@ -96,7 +96,7 @@ export function judge(rec) {
       if (l.token.rowMint !== OPEN.mint) bad.push(`token row ${l.token.rowMint ?? "none"}`);
     }
     if (!l.shot) bad.push("no screenshot");
-    say(bad.length === 0, `${tag}: ${bad.length ? bad.join("; ") : `ready, data-token ${OPEN.chain}/${l.shown} (${l.symbol}) = NEARKAT, / on All's token, the rail reading every chain's lists (${lists.map((x) => `${x.chain} ${x.status}`).join(", ")}), its token read 200 for that token on ${OPEN.chain}`}`);
+    say(bad.length === 0, `${tag}: ${bad.length ? bad.join("; ") : `ready, data-token ${OPEN.chain}/${l.shown} (${l.symbol}) = mihao, / on All's token, the rail reading every chain's lists (${lists.map((x) => `${x.chain} ${x.status}`).join(", ")}), its token read 200 for that token on ${OPEN.chain}`}`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }

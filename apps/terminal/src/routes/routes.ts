@@ -8,8 +8,9 @@ export type RouteId = "token" | "discover" | "portfolio" | "orders" | "profile" 
  *  helper's own chain id (06b), the id the token's id in that chain's form. "/" draws OPEN_TOKEN on All, a chain pick's top Trending token on a pick. */
 export const TOKEN_ROUTE = "/token/:chain/:id";
 
-/** The token "/" opens on All, a fresh open with no token in the address (owner 14 Nov 17:20Z): NEARKAT, a Solana mint. */
-export const OPEN_TOKEN = { chain: "solana", id: "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr" } as const satisfies { chain: MarketChain; id: string };
+/** The token "/" opens on All, a fresh open with no token in the address (owner 14 Nov 21:33Z, "pump fun coin"): mihao, a
+ *  pump.fun coin on its PumpSwap pool, a venue the private buy fills. */
+export const OPEN_TOKEN = { chain: "solana", id: "4CxjZyMNoF1p6eXHXHv1TWpS2X47CuUmLwtGe18spump" } as const satisfies { chain: MarketChain; id: string };
 
 export const ROUTES: readonly { id: RouteId; path: string }[] = [
   { id: "token", path: "/" },
