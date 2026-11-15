@@ -126,3 +126,24 @@ test("between runs the clock moves with real time from where the last run left i
   assert.ok(performance.now() - after >= 15, "the clock stood still between runs");
   await assert.rejects(onTestClock(async () => onTestClock(async () => 1)), /does not nest/);
 });
+
+// The wallet's store seals with crypto.subtle, which runs in the thread pool, outside the clock. A clock that skipped while
+// it ran fired a page's 50 ms polls and 15 s passes by the hundred on a busy machine before the store answered, and ran
+// past RUNAWAY_MS (positions-requests.test.ts on the box with 3 CPU hogs on its core, 5 of 5 red): work outside the clock
+// holds it, as work on the main thread does, so it takes no time on it.
+test("work in the thread pool holds the clock: a 1 s poll waiting on a crypto.subtle digest sees it at its first turn", async () => {
+  const [polls, ms] = await onTestClock(async () => {
+    const t = performance.now();
+    let done = false;
+    void crypto.subtle.digest("SHA-256", new Uint8Array(64 << 20)).then(() => (done = true));
+    let polls = 0;
+    while (!done) {
+      polls++;
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    return [polls, performance.now() - t];
+  });
+  assert.equal(polls, 1, `${polls} polls of 1 s while the digest ran`);
+  assert.equal(ms, 1_000);
+  assert.equal(Object.hasOwn(crypto.subtle, "digest"), false, "crypto.subtle is the real one again after the run");
+});

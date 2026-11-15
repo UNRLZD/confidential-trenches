@@ -6,7 +6,9 @@
 // due timer, never with real elapsed time, so a test reads the same times on a slow or busy machine as on a fast one.
 // Whenever nothing is left to run but timers (the next setImmediate), it jumps to the first of them: every wait is
 // still set and still ends in its turn, in order of its time, ties in the order set. Work takes no time on it: a loop
-// that checks the clock between tries sees it move only by the waits it set. node:test's mock.timers moves neither
+// that checks the clock between tries sees it move only by the waits it set. Work in the thread pool is work too: while
+// a crypto.subtle call (the wallet store's seal, a digest) is in flight the clock holds, so a busy machine's slow
+// thread pool never lets a page's polls and passes fire by the hundred before the answer lands. node:test's mock.timers moves neither
 // performance.now nor AbortSignal.timeout, which the quote reads. A test run on this clock has every answer mocked
 // (no network), so nothing it waits on is outside the clock.
 // When `run` ends, the clock runs on until every timer set in it has fired (a request's deadline, a hedge that lost, a
@@ -55,7 +57,8 @@ export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
   const g = globalThis as unknown as Record<"setTimeout" | "clearTimeout", unknown>;
   const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, timeout: AbortSignal.timeout };
   if (running) throw new Error("onTestClock does not nest: one run at a time");
-  at = READ() + ahead;
+  // whole milliseconds from the start, so a wait reads back exactly as long as it was set (no float remainder)
+  at = Math.ceil(READ() + ahead);
   running = true;
   const t0 = at;
   let driving = false, ranAway = false;
@@ -65,7 +68,28 @@ export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
   // the timers set and not yet fired or cleared, in the order they fire: by time, ties in the order set
   const queue: { due: number; id: number; fire: () => void; at: Error }[] = [];
   const live = new Set<number>();
+  // crypto.subtle calls in flight: while any is, the clock holds (`held`), and the last to settle drives it on
+  let outside = 0, held = false;
+  const subtle = globalThis.crypto.subtle as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const settle = () => {
+    if (--outside === 0 && held) (held = false), setImmediate(drive);
+  };
+  for (const m of Object.getOwnPropertyNames(Object.getPrototypeOf(subtle))) {
+    const f = subtle[m];
+    if (m === "constructor" || typeof f !== "function") continue;
+    Object.defineProperty(subtle, m, {
+      configurable: true,
+      writable: true,
+      value: (...a: unknown[]) => {
+        const p = f.apply(subtle, a);
+        outside++;
+        p.then(settle, settle);
+        return p;
+      },
+    });
+  }
   const drive = () => {
+    if (outside > 0) return void (held = true);
     let next = queue.shift();
     while (next !== undefined && !live.has(next.id)) next = queue.shift();
     if (next === undefined) return void (driving = false);
@@ -115,6 +139,7 @@ export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
   g.setTimeout = real.setTimeout;
   g.clearTimeout = real.clearTimeout;
   AbortSignal.timeout = real.timeout;
+  for (const m of Object.getOwnPropertyNames(subtle)) delete subtle[m];
   // the clock carries on from the run's time with real time; never back (the real clock has only moved on since)
   ahead = at - READ();
   running = false;
