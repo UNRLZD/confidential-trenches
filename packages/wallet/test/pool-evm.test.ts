@@ -19,7 +19,7 @@ import { SOL_LADDER } from "../src/pool/solana.ts";
 import { evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import {
   EvmLagError, EVM_LAG_WAIT_MS, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
-  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, EVM_NEWEST_REUSE_MS, EVM_POOL_LOG_PAGES_IN_FLIGHT, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
+  EVM_HOLD_REREAD_BLOCKS, EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, EVM_NEWEST_REUSE_MS, EVM_POOL_LOG_PAGES_IN_FLIGHT, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHeld, type EvmSyncHold,
 } from "../src/pool/evm.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
@@ -1852,7 +1852,8 @@ test("card evm-pool-sync-wide-pages: a held sync reads only the blocks after its
   assert.equal(later.events.length, 4);
   for (const l of [la, lb]) {
     const froms = l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
-    assert.ok(froms.length > 0 && froms.every((f) => f > 799_990), `pages from ${froms}`);
+    // its last page read again (card evm-restore-walk-keeps-its-place, EVM_HOLD_REREAD_BLOCKS), never from the deploy block
+    assert.ok(froms.length > 0 && froms.every((f) => f > 799_990 - Number(EVM_HOLD_REREAD_BLOCKS)), `pages from ${froms}`);
   }
   // a held part with one leaf changed is not the pool's: dropped, and the pool read again from its deploy block
   const bad = hold();
@@ -3010,7 +3011,8 @@ test("card evm-pool-leaves-any-source: a held tree resumes from its last block: 
   const r = await evmTreeSync({ rpcs: anySeats(c, log), pin: PIN, history: [helperSrc(c, () => assert.fail("no source asked past a held tree"))], held: hold, ...noWait }).events();
   assert.equal(r.events.length, 4);
   const froms = log.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
-  assert.ok(froms.length > 0 && froms.every((f) => f > c.finalized), `froms ${froms}`);
+  // the hold's last page read again (card evm-restore-walk-keeps-its-place, EVM_HOLD_REREAD_BLOCKS), nothing below it
+  assert.ok(froms.length > 0 && froms.every((f) => f > c.finalized - Number(EVM_HOLD_REREAD_BLOCKS)), `froms ${froms}`);
 });
 
 // review of 0b379bf4, P1-1: two URLs, or a relay of one, are one operator's word; the helper counts only in its keyed-only
@@ -3341,25 +3343,28 @@ test("review of 7eb8cfb9, P3-4: the hold's record is rewritten with new leaves o
   const move = (n: number) => ((c.head += n), (c.finalized += n));
   const s = evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait, clock: stale() });
   await s.events();
-  assert.equal(writes, 1);
+  // the first walk writes its place as it reads (card evm-restore-walk-keeps-its-place), the whole hold at its end
+  assert.ok(writes >= 1);
+  assert.equal(box.record()?.to, BigInt(c.finalized));
+  const w0 = writes;
   // 1,000 blocks on, no new leaf: no write
   move(1_000);
   await s.events();
-  assert.equal(writes, 1, "no write on a rise with no new leaf");
+  assert.equal(writes, w0, "no write on a rise with no new leaf");
   // a new deposit under the finalized block: written
   move(100);
   c.events.push({ block: c.finalized - 50, kind: "dep", leaf: BigInt(PP.commitments[1]!), label: BigInt(PP.labels[1]!) });
   await s.events();
-  assert.equal(writes, 2);
+  assert.equal(writes, w0 + 1);
   assert.equal(box.record()?.events.length, 5);
   assert.equal(box.record()?.to, BigInt(c.finalized));
   // under a day of blocks (2 s each) with no new leaf: none; a day: written
   move(43_199);
   await s.events();
-  assert.equal(writes, 2);
+  assert.equal(writes, w0 + 1);
   move(1);
   await s.events();
-  assert.equal(writes, 3);
+  assert.equal(writes, w0 + 2);
   assert.equal(box.record()?.to, BigInt(c.finalized));
 });
 
@@ -3417,15 +3422,18 @@ test("review of 39a4c67a, P3-3: the record keeps its write's own time, so a new 
   const counted: EvmSyncHold = { ...box, write: async (x) => (writes++, box.write(x)) };
   const move = (n: number) => ((c.head += n), (c.finalized += n));
   await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait }).events();
-  assert.equal(writes, 1);
+  // the first walk writes its place as it reads (card evm-restore-walk-keeps-its-place), the whole hold at its end
+  assert.ok(writes >= 1);
+  const w0 = writes;
   // a new page 1,000 blocks on (the last leaf is days older): no write
   move(1_000);
   await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait }).events();
-  assert.equal(writes, 1, "no rewrite on a new page within a day of the last write");
-  // a new page a day of blocks after the write: written
+  assert.equal(writes, w0, "no rewrite on a new page within a day of the last write");
+  // a new page a day of blocks after the write: written (its walk of the day's blocks writes its place a page's span
+  // at a time, EVM_HOLD_REREAD_BLOCKS, then the whole hold)
   move(42_200);
   await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait }).events();
-  assert.equal(writes, 2);
+  assert.ok(writes > w0);
   assert.equal(box.record()?.to, BigInt(c.finalized));
 });
 
@@ -3519,7 +3527,8 @@ test("card evm-deposit-on-mainnet: a pass's fresh sync after the pool's first de
     const queue = evmPool({ pin, ...pairs(pair(c, c, { chainId, log: la }, { chainId, log: lb })), held: hold, relayFee: async () => answer(), epochFee: feeRule([]), ...noWait });
     const t = await queue.trees(after(800_080));
     assert.equal(t.stateTree.size, 1);
-    for (const l of [la, lb]) assert.deepEqual(getLogsFrom(l), [799_991], `${network}: one page past the hold's block 799,990, none from the deploy block: ${getLogsFrom(l)}`);
+    // the hold's last page read again with the blocks past it (card evm-restore-walk-keeps-its-place), one page
+    for (const l of [la, lb]) assert.deepEqual(getLogsFrom(l), [799_991 - Number(EVM_HOLD_REREAD_BLOCKS)], `${network}: one page from the hold's last page, none from the deploy block: ${getLogsFrom(l)}`);
     // a hold of no leaf below a leaf of the pool (not the pool's): the root from the logs past it is not the pool's, so
     // it is dropped and the pool read from its deploy block, the trees the pool's
     const d = longChain([...deps(PP, [10])], 800_000);
@@ -3674,4 +3683,73 @@ test("card evm-trees-from-one-verified-source: a release field outside the root 
   assert.equal(t.stateRoot, await oneTruth(c, atMs(c)));
   assert.equal(await mk().depthAt(BigInt(AT), undefined, c.hashOf(AT)), 2, "three leaves by block 1,500,000: depth 2, never the source's 1");
   await assert.rejects(s.events(), /no two sources of two operators/);
+});
+
+// card evm-restore-walk-keeps-its-place: a fresh account's six page loads each read Base's pool from its deploy block
+// (54,325,671; 117 eth_getLogs and 26.9 s for one round, 16 Nov), since the hold was written only when a round ended and
+// a load that ended first (a reload, a closed tab, a phone asleep) threw its pages away: 201 Base eth_getLogs in the
+// walk, and the epoch fee read did not answer within 150 s under the 429s.
+const logsOf = (l: string[]) => l.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+test("card evm-restore-walk-keeps-its-place: a walk stopped mid-round keeps its place, so the reload reads on from it (its last page again), never from the deploy block; a walk done reads only the gap; on Base and Robinhood", async () => {
+  for (const [network, chainId] of [["base", 8453n], ["robinhood", 4663n]] as const) {
+    const pin: EvmPoolPin = { ...PIN, network };
+    // 600,000 blocks on seats that page 10,000 blocks at most (Pocket's "max 10001 blocks"), one page after another
+    const c = longChain(deps(PP, [10, 200_000, 550_000]), 600_000);
+    const seats = (la: string[], lb: string[], over: Over = {}) => pair(c, c, { chainId, cap: 10_000, log: la, ...over }, { chainId, cap: 10_000, log: lb });
+    // the whole walk, cold, for its count
+    const ca: string[] = [], cb: string[] = [];
+    await evmTreeSync({ rpcs: seats(ca, cb), pin, ...noWait }).events();
+    const cold = logsOf(ca).length + logsOf(cb).length;
+    // load 1: the tab closes after 30 of seat a's pages
+    const box = evmMemoryHold();
+    const stop = new AbortController();
+    let n = 0;
+    const l1a: string[] = [], l1b: string[] = [];
+    await assert.rejects(evmTreeSync({ rpcs: seats(l1a, l1b, { getLogs: () => void (++n === 30 && stop.abort(new Error("the tab closed"))) }), pin, held: box, ...noWait }).events(stop.signal));
+    await new Promise((r) => setTimeout(r, 0));
+    const placed = await box.read();
+    assert.ok(placed && placed.to > pin.fromBlock, `${network}: the place written mid-walk (${placed?.to})`);
+    // load 2: on from the place, its last page read again, never from the deploy block
+    const l2a: string[] = [], l2b: string[] = [];
+    const r = await evmTreeSync({ rpcs: seats(l2a, l2b), pin, held: box, ...noWait }).events();
+    assert.equal(r.events.length, 3, `${network}: every leaf`);
+    const froms = [...logsOf(l2a), ...logsOf(l2b)];
+    assert.ok(froms.every((f) => f > Number(placed!.to - EVM_HOLD_REREAD_BLOCKS)), `${network}: the reload read from ${Math.min(...froms)}, below the place ${placed!.to} less a page`);
+    // read twice: each sync's probes of its providers' caps (3 refused pages a seat), the page in flight at the stop,
+    // the faster seat's pages past the slower one's place, and the place's last page; from the deploy block again (as
+    // before this card) it is every page of load 1
+    const again = logsOf(l1a).length + logsOf(l1b).length + froms.length - cold;
+    assert.ok(again <= 14, `${network}: ${again} pages read twice across the reload (cold ${cold}, load 1 ${logsOf(l1a).length + logsOf(l1b).length}, load 2 ${froms.length})`);
+    assert.equal((await box.read())?.to, BigInt(c.finalized), `${network}: the walk done, its hold whole`);
+    // load 3, the walk done once: only the gap and its last page, one page a seat
+    const moved = c.finalized;
+    c.head += 1_000;
+    c.finalized += 1_000;
+    const l3a: string[] = [], l3b: string[] = [];
+    await evmTreeSync({ rpcs: seats(l3a, l3b), pin, held: box, ...noWait }).events();
+    // (a new sync learns its providers' caps again: its first pages refused at 100,000, 50,000 and 25,000 blocks)
+    for (const l of [l3a, l3b]) assert.ok(logsOf(l).length > 0 && logsOf(l).every((f) => f >= moved + 1 - Number(EVM_HOLD_REREAD_BLOCKS)) && new Set(logsOf(l)).size <= 2, `${network}: the gap only: ${logsOf(l)}`);
+    c.head -= 1_000;
+    c.finalized -= 1_000;
+  }
+});
+
+test("card evm-restore-walk-keeps-its-place: a saved place that misses a leaf past its last one (a bad save) is dropped when the seats agree on the logs past it and no source makes the pool's trees, and the pool walked again from its deploy block", async () => {
+  const c = longChain(deps(PP, [10, 400_000, 900_000]), 1_000_000);
+  const box = evmMemoryHold();
+  await evmTreeSync({ rpcs: pair(c, c), pin: PIN, held: box, ...noWait }).events();
+  const full = (await box.read())!;
+  // the place a bad save left: the first leaf only, to block 950,000 (the leaves at 400,000 and 900,000 missing)
+  let h: unknown = { network: "base", pool: full.pool, fromBlock: 1n, to: 950_000n, events: [full.events[0]!], kept: [] };
+  const bad: EvmSyncHold = { read: async () => h as never, write: async (v) => void (h = v), drop: async (to) => void ((h as EvmSyncHeld | null)?.to === to && (h = null)) };
+  const la: string[] = [];
+  const r = await evmTreeSync({ rpcs: pair(c, c, { log: la }), pin: PIN, held: bad, ...noWait }).events();
+  assert.equal(r.events.length, 3);
+  assert.ok(logsOf(la).includes(1), "walked again from the deploy block");
+  assert.deepEqual((h as EvmSyncHeld).events.map((e) => e.bytes), full.events.map((e) => e.bytes), "the record rewritten whole");
+  // a seat's refusal past the place never drops it: the round fails and the place stays
+  h = { network: "base", pool: full.pool, fromBlock: 1n, to: 950_000n, events: [full.events[0]!], kept: [] };
+  const refusing = { getLogs: ({ from }: { from: number }) => { if (from > 900_000) throw new Error("HTTP 403: RPC error -32602: forbidden"); } };
+  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, refusing, refusing), pin: PIN, held: bad, ...noWait }).events());
+  assert.equal((h as EvmSyncHeld | null)?.to, 950_000n, "kept on a refusal");
 });
