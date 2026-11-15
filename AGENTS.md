@@ -13,8 +13,8 @@ terminal is an app on it with no key of its own.
 - The user's device holds the 12 words (the backup phrase), every key derived from them, the notes (sealed records of
   what the user owns in the vault) and the proofs.
 - The kit, `@blindfill/kit`, is the one public entry to all of it, for our terminal and for any other app.
-- The helper server holds vendor API keys, relays signed messages and sends signed orders. It holds no key that can
-  move a user's money.
+- The helper server holds vendor API keys and relays signed messages; orders signed in advance are designed, not built.
+  It holds no key that can move a user's money.
 - NEAR Intents moves money in, out and across chains.
 
 For the longer read, see [docs/architecture.md](docs/architecture.md) and [docs/security.md](docs/security.md).
@@ -79,7 +79,7 @@ Run from the repository root.
 
 While working, run the narrowest test first: `node --test <file>` for one file, or
 `pnpm --filter <package> test` for one package. Run the full set before you push. Two take longer:
-`test:gates` up to a minute, and `money-gate --all` several minutes, since it reads every recorded transaction
+`test:gates` up to a minute, and `money-gate --all` over half an hour, since it reads every recorded transaction
 over public RPCs that rate-limit.
 
 ## Rules for changes
