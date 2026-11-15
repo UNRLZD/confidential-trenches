@@ -1577,7 +1577,7 @@ test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs t
   const logs = list.map((): string[] => []);
   let pocketCalls = 0;
   // read 2026-11-07 01:42-01:50Z on the pool's filter (the kit's comment at the list)
-  const caps: Record<string, (p: { from: number; to: number }) => void> = {
+  const caps: Record<string, (p: { from: number; to: number; values: number }) => void> = {
     // card firefox-restore-fast: its cap holds for several values in one position only (one value a position, any span:
     // markets' read, 15 Nov 02:20Z)
     "https://rpc.mainnet.chain.robinhood.com": ({ from, to, values }) => {
