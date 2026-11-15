@@ -88,3 +88,25 @@ test("the receive wired on a pool path or the NEAR path (card you-receive-on-eve
     assert.deepEqual(judge(facts(INDEX(js), js)).lines, [`BAD ${SAYS.wired}`], js.slice(0, 80));
   }
 });
+
+// card buy-box-quotes-before-funds: the box keeps the answer through the model's feeReadOf (an answer with out and no
+// cost is kept too), as its build spells it; the inline line above still reads
+const FEE_JS = JS.replace(
+  "if(e.ok)return void(e.result.cost!==void 0&&me({key:ae,cost:e.result.cost,...e.result.out===void 0?{}:{out:e.result.out},...M===null?{}:{amount:M}}));",
+  "if(e.ok){let t=Wh(ae,e.result,M);t!==null&&me(t);return};function Wh(e,t,n){return t.cost===void 0&&t.out===void 0?null:{key:e,...t.cost===void 0?{}:{cost:t.cost},...t.out===void 0?{}:{out:t.out},...n===null?{}:{amount:n}}}",
+);
+
+test("the answer kept through feeReadOf (card buy-box-quotes-before-funds): PASS; the out or the amount not kept, or the answer not handed to it: FAIL, ask named", () => {
+  assert.notEqual(FEE_JS, JS);
+  assert.deepEqual(judge(facts(INDEX(FEE_JS), FEE_JS)).lines, []);
+  for (const js of [
+    FEE_JS.replace(",...t.out===void 0?{}:{out:t.out}", ""),
+    FEE_JS.replace(",...n===null?{}:{amount:n}", ""),
+    FEE_JS.replace("let t=Wh(ae,e.result,M)", "let t=Xh(ae,e.result,M)"),
+    FEE_JS.replace("let t=Wh(ae,e.result,M)", "let t=Wh(ae,null,M)"),
+    FEE_JS.replace("t!==null&&me(t);", ""),
+  ]) {
+    assert.notEqual(js, FEE_JS);
+    assert.deepEqual(judge(facts(INDEX(js), js)).lines, [`BAD ${SAYS.ask}`], js.slice(0, 80));
+  }
+});

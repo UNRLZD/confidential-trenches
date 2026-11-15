@@ -38,6 +38,15 @@ const [kMaj, kMin] = parts(KIT);
 if (kMaj === undefined || kMaj < OUT_FROM[0] || (kMaj === OUT_FROM[0] && kMin < OUT_FROM[1])) throw new Error(`${KEY}: the kit's version ${KIT} is below 1.14`);
 
 const ASK = new RegExp(`\\{key:${N},cost:(${N})\\.result\\.cost,\\.\\.\\.\\1\\.result\\.out===void 0\\?\\{\\}:\\{out:\\1\\.result\\.out\\},\\.\\.\\.(${N})===null\\?\\{\\}:\\{amount:\\2\\}\\}`);
+/** The same kept through the model's feeReadOf (card buy-box-quotes-before-funds: an answer with out and no cost is
+ *  kept too), called with the dry's result: `function f(k,r,a){return r.cost===void 0&&r.out===void 0?null:{key:k,
+ *  ...r.cost===void 0?{}:{cost:r.cost},...r.out===void 0?{}:{out:r.out},...a===null?{}:{amount:a}}}`. */
+const ASK_FN = new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{return \\3\\.cost===void 0&&\\3\\.out===void 0\\?null:\\{key:\\2,\\.\\.\\.\\3\\.cost===void 0\\?\\{\\}:\\{cost:\\3\\.cost\\},\\.\\.\\.\\3\\.out===void 0\\?\\{\\}:\\{out:\\3\\.out\\},\\.\\.\\.\\4===null\\?\\{\\}:\\{amount:\\4\\}\\}\\}`);
+const askOf = (js) => {
+  if (ASK.test(js)) return true;
+  const f = ASK_FN.exec(js);
+  return f !== null && new RegExp(`if\\((${N})\\.ok\\)\\{let (${N})=${esc(f[1])}\\(${N},\\1\\.result,${N}\\);\\2!==null&&${N}\\(\\2\\)`).test(js);
+};
 /** receiveShown (group: its name). */
 const SHOWN = new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{return \\2===null\\|\\|\\3===null\\|\\|\\2\\.key!==\\3\\|\\|\\2\\.out===void 0\\|\\|\\4===null\\|\\|\\4<=0n\\?null:\\{out:\\2\\.out,pending:\\2\\.amount!==\\4\\}\\}`);
 
@@ -63,7 +72,7 @@ export function facts(index, js) {
   return {
     index,
     sha384: sha384(js),
-    ask: ASK.test(js),
+    ask: askOf(js),
     shown: shown !== null,
     wired,
     drawn,
