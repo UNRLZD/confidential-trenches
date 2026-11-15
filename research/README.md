@@ -52,6 +52,7 @@ Thirty-three write-ups are here. Eleven more (archival reads, the treasury watch
 
 | File | What it is |
 |---|---|
+| [2026-11-07-pillow/](audits/2026-11-07-pillow/) | Pillow Auditors' review of the NEAR vault, the EVM pool and the Solana pool: 0 Critical, 0 High, 0 Medium, 5 Low, 8 Info; every Low fixed on main |
 | [vault-review-contract.md](audits/vault-review-contract.md) | Review of the vault contract by a separate AI reviewer that wrote none of it |
 | [vault-review-async.md](audits/vault-review-async.md) | Review of the vault against NEAR's async rules (cross-contract calls and callbacks) |
 | [scan-final-46b16ca4.md](audits/scan-final-46b16ca4.md) | Pre-audit security scan of the contracts at commit 46b16ca4 |
