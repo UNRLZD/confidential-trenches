@@ -14,15 +14,22 @@ import { base58 } from "@scure/base";
 import {
   SOLANA_AMM_V4_AUTHORITY,
   SOLANA_AMM_V4_PROGRAM,
+  SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_CPMM_AUTHORITY,
   SOLANA_CPMM_PROGRAM,
   SOLANA_MAX_TX_BYTES,
   SOLANA_POOL_BUY_CU,
   SOLANA_SOL_MINT,
+  SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_TOKEN_PROGRAM,
   SolanaPoolBuyError,
   buildSolanaPoolBuy,
   checkSolanaPoolBuy,
+  solanaCompileV0,
+  solanaCompressPoolProof,
+  solanaEncodePoolTag3,
+  solanaPoolBuyInstructions,
+  solanaPoolReleaseAccounts,
   readSolanaRaydiumBuyVenue,
   readSolanaVenueAt,
   solanaAta,
@@ -31,8 +38,10 @@ import {
   solanaPoolSellSteps,
   solanaPoolVenueAddress,
   solanaRentMin,
+  type SolanaApiAccount,
+  type SolanaApiInstruction,
 } from "../src/index.ts";
-import { cfg, raydiumProviders, raydiumVectors, release, rent, setup, W } from "./solana-pool-buy-fx.ts";
+import { BLOCKHASH, FEE_PAYER, cfg, raydiumProviders, raydiumVectors, release, rent, setup, W, wireOf } from "./solana-pool-buy-fx.ts";
 
 const ATA = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const SYSTEM = "11111111111111111111111111111111";
@@ -43,6 +52,32 @@ const FLAGS = {
 } as const;
 const KINDS = ["raydium-cpmm", "raydium-amm-v4"] as const;
 const u64 = (d: Uint8Array, o: number) => new DataView(d.buffer, d.byteOffset).getBigUint64(o, true);
+type S = Awaited<ReturnType<typeof setup>>;
+const JITO = SOLANA_JITO_TIP_ACCOUNTS[0]!;
+/** The buy's message over any inner steps a helper might hand the device, tag 3 laid out as the builder lays it
+ *  (solana-pool-buy-attacks.test.ts's tag3): the frame, then tag 3 with the release's accounts, the tip account, then
+ *  each step's accounts in order of first use. */
+function wireWith(s: S, steps: SolanaApiInstruction[]): Uint8Array {
+  const outer: SolanaApiAccount[] = [...solanaPoolReleaseAccounts(cfg, W, FEE_PAYER, release, 6), { key: JITO, signer: false, writable: true }];
+  const indexOf = (a: SolanaApiAccount): number => {
+    let i = outer.findIndex((o) => o.key === a.key);
+    if (i < 0) i = outer.push({ ...a }) - 1;
+    else outer[i] = { key: a.key, signer: outer[i]!.signer || a.signer, writable: outer[i]!.writable || a.writable };
+    return i;
+  };
+  const inner = steps.map((x) => ({ program: indexOf({ key: x.program, signer: false, writable: false }), accounts: x.accounts.map(indexOf), data: x.data }));
+  const t3 = { program: cfg.program, accounts: outer, data: solanaEncodePoolTag3({ ...release, proof: solanaCompressPoolProof(release.proof) }, true, s.req.tip, inner) };
+  const frame = solanaPoolBuyInstructions(cfg, release, s.venue, s.req, 6, rent, JITO).slice(0, 2);
+  return wireOf(solanaCompileV0(FEE_PAYER, [...frame, t3], BLOCKHASH, [s.chain.table], [FEE_PAYER, W]).message);
+}
+/** The buy's steps with the swap's account `i` made `key` (or with `edit` applied to its accounts). */
+const bent = (s: S, edit: (a: SolanaApiAccount[]) => void): SolanaApiInstruction[] =>
+  solanaPoolBuySteps(s.venue, W, s.req.spend, s.req.minOut).map((x) => {
+    if (x.program !== SOLANA_CPMM_PROGRAM && x.program !== SOLANA_AMM_V4_PROGRAM) return x;
+    const accounts = x.accounts.map((a) => ({ ...a }));
+    edit(accounts);
+    return { ...x, accounts };
+  });
 
 for (const kind of KINDS) {
   const vec = raydiumVectors[kind];
@@ -112,6 +147,33 @@ for (const kind of KINDS) {
     assert.ok(checkSolanaPoolBuy(low.wire, cfg, release, venue, { ...req, minOut: req.minOut / 2n }, reads).results.some((r) => r.id === "QUOTE" && !r.ok));
     const pool = buildSolanaPoolBuy(cfg, release, ({ ...venue, pool: other }) as typeof venue, req, chain, { pick: () => 0 });
     assert.ok(fails(pool.wire).includes("BUY"));
+    // the coin out to another's coin account (the swap's output account: CPMM 5, AMM v4 6), every other step the device's
+    const s = await setup(kind);
+    assert.deepEqual(fails(wireWith(s, bent(s, () => {}))), [], "the honest steps through this layout pass");
+    const thief = solanaAta(base58.encode(new Uint8Array(32).fill(0x42)), vec.mint, SOLANA_TOKEN_PROGRAM);
+    const outAt = kind === "raydium-cpmm" ? 5 : 6;
+    assert.ok(fails(wireWith(s, bent(s, (a) => { a[outAt] = { ...a[outAt]!, key: thief }; }))).includes("BUY"));
+  });
+
+  test(`${kind}: the check refuses a swap with any one of its accounts another, or its two vaults in the other order`, async () => {
+    const s = await setup(kind);
+    const fails = (steps: SolanaApiInstruction[]): string[] => checkSolanaPoolBuy(wireWith(s, steps), cfg, release, s.venue, s.req, s.reads).results.filter((r) => !r.ok).map((r) => r.id);
+    // CPMM: payer 0, authority 1, config 2, pool 3, in 4, out 5, in vault 6, out vault 7, in program 8, out program 9, in
+    // mint 10, out mint 11, observation 12; AMM v4: token program 0, pool 1, authority 2, coin vault 3, pc vault 4, in 5,
+    // out 6, owner 7. W (CPMM 0, AMM v4 7) is the signer the release names; every other one bent in turn
+    const n = kind === "raydium-cpmm" ? 13 : 8;
+    const wAt = kind === "raydium-cpmm" ? 0 : 7;
+    const programAt = kind === "raydium-cpmm" ? [8, 9] : [0];
+    for (let i = 0; i < n; i++) {
+      if (i === wAt) continue;
+      // a token program's place takes the other token program, every other place another key
+      const other = programAt.includes(i) ? SOLANA_TOKEN_2022_PROGRAM : base58.encode(Uint8Array.from({ length: 32 }, (_, k) => (k * 5 + i + 1) & 0xff));
+      const f = fails(bent(s, (a) => { a[i] = { ...a[i]!, key: other }; }));
+      assert.ok(f.includes("BUY"), `account ${i} another: ${f.join(",") || "passed"}`);
+    }
+    const [v0, v1] = kind === "raydium-cpmm" ? [6, 7] : [3, 4];
+    const f = fails(bent(s, (a) => { [a[v0], a[v1]] = [{ ...a[v0]!, key: a[v1]!.key }, { ...a[v1]!, key: a[v0]!.key }]; }));
+    assert.ok(f.includes("BUY"), `the vaults swapped: ${f.join(",") || "passed"}`);
   });
 
   test(`${kind}: the sell swaps the coin into W's wrapped SOL and closes it`, async () => {

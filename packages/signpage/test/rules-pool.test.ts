@@ -1143,6 +1143,21 @@ for (const kind of ["raydium-cpmm", "raydium-amm-v4"] as const) {
     ] as const) {
       assert.throws(() => check(w), refusedAs(rule), why);
     }
+    // every account of the swap bent in turn but W (CPMM: authority 1, config 2, in and out vaults 6 and 7, the token
+    // programs 8 and 9, the mints 10 and 11, the observation 12; AMM v4: the token program 0, the authority 2, the coin and
+    // pc vaults 3 and 4), a token program's place to the other token program; and the two vaults in the other order
+    const n = kind === "raydium-cpmm" ? 13 : 8;
+    const wAt = kind === "raydium-cpmm" ? 0 : 7;
+    const programAt: number[] = kind === "raydium-cpmm" ? [8, 9] : [0];
+    for (let i = 0; i < n; i++) {
+      if (i === wAt) continue;
+      assert.throws(() => check(bend(i, programAt.includes(i) ? SOLANA_TOKEN_2022_PROGRAM : key(110 + i))), refusedAs("sell_accounts"), `account ${i} another`);
+    }
+    const [v0, v1] = kind === "raydium-cpmm" ? [6, 7] : [3, 4];
+    const swapped = steps();
+    const sa = swapped[1]!.accounts;
+    [sa[v0], sa[v1]] = [{ ...sa[v0]!, key: sa[v1]!.key }, { ...sa[v1]!, key: sa[v0]!.key }];
+    assert.throws(() => check(part(swapped)), refusedAs("sell_accounts"), "the vaults in the other order");
     // a pool the reference did not price: no floor
     assert.throws(() => check(part(steps()), PART, RESERVE, { ...venue, pool: key(95) } as SolanaPoolBuyVenue), refusedAs("floor"));
     // a wire built for another venue kind than the device read: pump's 24-byte sell is not this venue's
