@@ -20,6 +20,7 @@ import {
   coinTapAgainMs,
   coinTapKey,
   feeAskAmount,
+  feeReadOf,
   feeShown,
   type FeeRead,
   filledOut,
@@ -262,7 +263,12 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
         ask("pool.buy.dry", { chain: chain === "near" ? "near" : "solana", token, amount: feeAmount }).outcome.then(
           (o) => {
             if (!live) return;
-            if (o.ok) return void (o.result.cost !== undefined && setFeeRead({ key: feeKey, cost: o.result.cost, ...(o.result.out === undefined ? {} : { out: o.result.out }), ...(amount === null ? {} : { amount }) }));
+            // an answer with out and no cost (a move from Cash not priced now: card buy-box-quotes-before-funds) is You
+            // receive with the Fee's dash; one with neither keeps the last
+            if (o.ok) {
+              const r = feeReadOf(feeKey, o.result, amount);
+              return void (r !== null && setFeeRead(r));
+            }
             const again = coinTapAgainMs(o.error.code);
             if (again !== null && (o.error.code !== "down" || downs++ < 3)) t = setTimeout(once, again);
           },
@@ -303,7 +309,8 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
               // the page's answer is hostile: buysCents takes only an amount above 0 and below the ask
               const c = buysCents(o.result.buys, asked, p);
               if (c !== null && c < amount) return void (!busy(phaseRef.current) && setText(amountText(c)));
-              if (o.result.cost !== undefined) setFeeRead({ key: buysKey, cost: o.result.cost, ...(o.result.out === undefined ? {} : { out: o.result.out }), amount });
+              const r = feeReadOf(buysKey, o.result, amount);
+              if (r !== null) setFeeRead(r);
               return;
             }
             const again = coinTapAgainMs(o.error.code);

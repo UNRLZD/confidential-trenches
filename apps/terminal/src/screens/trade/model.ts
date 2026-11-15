@@ -413,12 +413,21 @@ export function poolView(pools: SignpageState["pools"], chain: Chain, price: Poo
  * chain's tap_max on the coin's own venue. The key names the coin and the proofs state.pools priced (its ready and
  * tap_max): an answer counts only while they are the same. On Base and Robinhood the tap_max is already the coin's (a
  * tap spends a whole chunk; withCoinTap leaves it), and the answer is asked for its with_cash (card
- * one-balance-buys-on-every-chain). Null where there is none to price (no pool on a chain Cash moves to, no proof ready).
+ * one-balance-buys-on-every-chain). Also asked with no pool note (card buy-box-quotes-before-funds: a balance of 0 and
+ * no queue, so no ready and no tap_max): the page prices the buy all from Cash (tap_max "0", with_cash, out). Null where
+ * there is none to price (no pool on a chain Cash moves to; a note whose proofs are not ready or whose queue is not
+ * running yet).
  */
 export function coinTapKey(pools: SignpageState["pools"], chain: Chain, token: string): string | null {
   const p = cashMovesTo(chain) ? poolOf(pools, chain) : null;
-  return p && token !== "" && p.ready !== undefined && p.tap_max !== undefined ? JSON.stringify([token, p.ready, p.tap_max]) : null;
+  if (!p || token === "") return null;
+  if (p.ready !== undefined && p.tap_max !== undefined) return JSON.stringify([token, p.ready, p.tap_max]);
+  return noPoolNote(p) ? JSON.stringify([token, null, null]) : null;
 }
+
+/** A pool entry with no note and no queue (card buy-box-quotes-before-funds): a balance of 0, no ready, no tap_max, as
+ *  the page lists the pool of an account whose money is all Cash, or none. */
+const noPoolNote = (p: NonNullable<SignpageState["pools"]>[number]): boolean => p.ready === undefined && p.tap_max === undefined && positive(p.balance) === false;
 
 /** state.pools with the chain's tap_max the coin's (`coinTap`, pool.buy.dry's answer for coinTapKey's coin and proofs)
  *  in place of the costliest venue's; as they are with none, or with one that is not a decimal at most the entry's
@@ -446,8 +455,16 @@ export function feeAskAmount(amount: Cents | null, price: PoolPrice | null): str
 
 /** The page's last Fee answer for a coin: its `cost`, kept until the next answer replaces it; its `out` (kit 1.14, card
  *  solana-buy-preview-complete: what the buy gets, whole tokens, at the device's own quote) and the amount it was asked
- *  for, which You receive draws. */
-export type FeeRead = { key: string; cost: string; out?: string; amount?: Cents };
+ *  for, which You receive draws. An answer with `out` and no `cost` (card buy-box-quotes-before-funds: a move from Cash
+ *  the page cannot price now, $0 Cash among them) is kept too: You receive draws it, the Fee its dash. */
+export type FeeRead = { key: string; cost?: string; out?: string; amount?: Cents };
+
+/** The FeeRead of a pool.buy.dry answer for `key` and `amount`: its cost and out as sent; null with neither, so an
+ *  answer that prices nothing never replaces the last one. */
+export function feeReadOf(key: string, result: { cost?: string; out?: string }, amount: Cents | null): FeeRead | null {
+  if (result.cost === undefined && result.out === undefined) return null;
+  return { key, ...(result.cost === undefined ? {} : { cost: result.cost }), ...(result.out === undefined ? {} : { out: result.out }), ...(amount === null ? {} : { amount }) };
+}
 
 /** You receive on a pool path (card solana-buy-preview-complete): the last answer's `out` for this coin, `pending` (drawn
  *  dimmed, as the set preview's last numbers are) while it was asked for another amount than the box holds; null (a
@@ -497,13 +514,14 @@ export const cashMovesTo = (chain: Chain): boolean => chain === "solana" || chai
 
 /** pool.buy.dry's with_cash (kit 1.15, card one-balance-buys-on-every-chain) in base units: the most one tap spends
  *  with Cash moved first. Only a plain decimal in the pool asset's
- *  units at or above the entry's tap_max (the page's answer is hostile: anything else is not used); null with no tap_max
- *  or on a chain Cash does not move to. */
+ *  units at or above the entry's tap_max (the page's answer is hostile: anything else is not used); an entry with no
+ *  pool note and no queue (card buy-box-quotes-before-funds) reads its missing tap_max as "0", never a number the page
+ *  did not send; null with no tap_max otherwise, or on a chain Cash does not move to. */
 function cashTop(pools: SignpageState["pools"], chain: Chain, withCash: string | null): bigint | null {
   const p = withCash === null || !cashMovesTo(chain) ? null : poolOf(pools, chain);
-  if (!p || p.tap_max === undefined) return null;
+  if (!p || (p.tap_max === undefined && !noPoolNote(p))) return null;
   const d = POOL_ASSET_DECIMALS[p.asset];
-  const tap = decimalToUnits(p.tap_max, d);
+  const tap = p.tap_max === undefined ? 0n : decimalToUnits(p.tap_max, d);
   const top = decimalToUnits(withCash!, d);
   return tap === null || top === null || top < tap ? null : top;
 }
@@ -552,12 +570,16 @@ export function poolBuyAsk(pools: SignpageState["pools"], chain: Chain, token: s
 }
 
 /** What a Base or Robinhood box asks pool.buy.dry the spend of (card buy-any-amount-on-every-chain): the tap's own ask
- *  for `c` (poolBuyAsk's amount, in whole ETH), so the page plans exactly what the tap would; null on any other chain
- *  (a tap there spends the ask itself) or where the tap would ask nothing. */
+ *  for `c` (poolBuyAsk's amount, in whole ETH), so the page plans exactly what the tap would; with no pool tap_max (no
+ *  pool note, card buy-box-quotes-before-funds: the whole buy moves from Cash) and no tap to ask, `c` in whole ETH, so
+ *  You receive is read before any funds; null on any other chain (a tap there spends the ask itself) or where the tap
+ *  would ask nothing. */
 export function buysAskAmount(pools: SignpageState["pools"], chain: Chain, token: string, c: Cents, price: PoolPrice | null, slippageBps: number, withCash: string | null): string | null {
   if (chain !== "base" && chain !== "robinhood") return null;
   const ask = poolBuyAsk(pools, chain, token, c, price, slippageBps, withCash);
-  return ask.ok ? ask.params.amount : null;
+  if (ask.ok) return ask.params.amount;
+  const p = poolOf(pools, chain);
+  return p && noPoolNote(p) ? feeAskAmount(c, price) : null;
 }
 
 /** The amount box's cents for pool.buy.dry's `buys` (kit 1.17, card buy-any-amount-on-every-chain: what the tap spends in

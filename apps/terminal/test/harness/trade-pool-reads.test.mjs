@@ -18,6 +18,8 @@ test("the reads the harness's states make keep the rule", () => {
   assert.equal(readsFault("rh-chunk", [dry("robinhood"), dry("robinhood", "0.001")], buy("robinhood", "0.001")), null);
   assert.equal(readsFault("sol-ready", [dry("solana"), dry("solana", "0.0014")], null), null);
   assert.equal(readsFault("vault", [], null), null);
+  // card buy-box-quotes-before-funds: a $0 Base box with no pool note asks the typed $5 in ETH, with no tap to ask
+  assert.equal(readsFault("base-fresh", [dry("base"), dry("base", "0.00142852103982636")], null, "0.00142852103982636"), null);
 });
 
 test("planted: each break of the rule FAILs", () => {
@@ -28,10 +30,15 @@ test("planted: each break of the rule FAILs", () => {
     ["base-chunk", [dry("base"), dry("base")], buy("base", "0.001"), "a second Max read"],
     ["base-other", [dry("base"), dry("base", "0.001")], buy("base", "0.000857112623895816"), "an amount read for another amount than the tap's ask"],
     ["base-over", [dry("base"), dry("base", "0.0011")], null, "an amount read with no tap to ask"],
+    ["base-fresh", [dry("base"), dry("base", "0.002")], null, "0.0014285", "an amount read for another amount than the tap's ask"],
     ["rh-chunk", [dry("robinhood"), dry("robinhood", "0.002")], buy("robinhood", "0.001"), "an amount read for another amount than the tap's ask"],
     ["sol-ready", [dry("solana"), dry("base", "0.0014")], null, "a read on another chain"],
     ["vault", [dry("solana")], null, "a read on another chain"],
     ["base-chunk", [dry("base"), buy("base", "0.001")], buy("base", "0.001"), "a read that is not pool.buy.dry"],
   ];
-  for (const [name, reads, ask, why] of cases) assert.equal(readsFault(name, reads, ask), why, `${name} ${JSON.stringify(reads)}`);
+  for (const c of cases) {
+    const [name, reads, ask] = c;
+    const [quote, why] = c.length === 5 ? [c[3], c[4]] : [null, c[3]];
+    assert.equal(readsFault(name, reads, ask, quote), why, `${name} ${JSON.stringify(reads)}`);
+  }
 });

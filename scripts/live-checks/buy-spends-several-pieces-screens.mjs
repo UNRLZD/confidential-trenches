@@ -58,10 +58,20 @@ export const SIGN_MARKS = Object.freeze({
   owed: new RegExp(`if\\(!(${N})\\.piecesOwed\\)return ${N}\\(\\);await \\1\\.piecesOwed\\.put\\(\\{address:${N}\\.address,l:${N}\\.wallet\\.l\\.toString\\(\\),j:${N}\\.wallet\\.j,primary:${N}\\.noteId,pieces:`),
   route: new RegExp(`${q("/v1/pool/solana/pieces")},\\{pool:${N},txs:${N}\\.map\\(`),
 });
+/** The box's ask for the typed amount, its answer kept through the model's feeReadOf (card buy-box-quotes-before-funds:
+ *  an answer with out and no cost is kept too): `.then(o=>{if(!live)return;if(o.ok){let r=feeReadOf(key,o.result,amount);
+ *  r!==null&&set(r);return}`, and feeReadOf keeps the cost: `function f(k,r,a){return r.cost===void 0&&r.out===void 0?
+ *  null:{key:k,...r.cost===void 0?{}:{cost:r.cost},`. */
+const ASK_READ = new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:(?:${q("solana")}|${N}===${q("near")}\\?${q("near")}:${q("solana")}),token:${N},amount:${N}\\}\\)\\.outcome\\.then\\((${N})=>\\{if\\(!${N}\\)return;if\\(\\1\\.ok\\)\\{let (${N})=(${N})\\(${N},\\1\\.result,${N}\\);\\2!==null&&${N}\\(\\2\\);return\\}`);
+const askRead = (js) => {
+  const m = ASK_READ.exec(js);
+  return m !== null && new RegExp(`function ${esc(m[3])}\\((${N}),(${N}),${N}\\)\\{return \\2\\.cost===void 0&&\\2\\.out===void 0\\?null:\\{key:\\1,\\.\\.\\.\\2\\.cost===void 0\\?\\{\\}:\\{cost:\\2\\.cost\\}`).test(js);
+};
+const ASK_INLINE = new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:(?:${q("solana")}|${N}===${q("near")}\\?${q("near")}:${q("solana")}),token:${N},amount:${N}\\}\\)\\.outcome\\.then\\(${N}=>\\{if\\(!${N}\\)return;if\\(${N}\\.ok\\)return void\\(${N}\\.result\\.cost!==void 0&&${N}\\(\\{key:${N},cost:${N}\\.result\\.cost(?:,\\.\\.\\.${N}\\.result\\.out===void 0\\?\\{\\}:\\{out:${N}\\.result\\.out\\},\\.\\.\\.${N}===null\\?\\{\\}:\\{amount:${N}\\})?\\}\\)\\)`);
 export const APP_MARKS = Object.freeze({
   // the cost kept for this coin, with (from card solana-buy-preview-complete, kit 1.14) the answer's out and the amount
-  // asked beside it
-  ask: new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:(?:${q("solana")}|${N}===${q("near")}\\?${q("near")}:${q("solana")}),token:${N},amount:${N}\\}\\)\\.outcome\\.then\\(${N}=>\\{if\\(!${N}\\)return;if\\(${N}\\.ok\\)return void\\(${N}\\.result\\.cost!==void 0&&${N}\\(\\{key:${N},cost:${N}\\.result\\.cost(?:,\\.\\.\\.${N}\\.result\\.out===void 0\\?\\{\\}:\\{out:${N}\\.result\\.out\\},\\.\\.\\.${N}===null\\?\\{\\}:\\{amount:${N}\\})?\\}\\)\\)`),
+  // asked beside it: inline, or through feeReadOf (card buy-box-quotes-before-funds)
+  ask: { test: (js) => ASK_INLINE.test(js) || askRead(js) },
   row: new RegExp(`"data-testid":${q("trade-cost")},children:\\[[^\\]]{0,160}children:${N}===null\\?${q("—")}:${N}\\(${N}\\)`),
   making: new RegExp(`${N}\\.making!==void 0&&${N}\\(${N}\\.making\\)===!0\\?${q("making")}`),
 });

@@ -16,7 +16,10 @@
 //     sends nothing and the amount field is never marked wrong;
 //   - a balance with nothing being made (ready "0", no making) and an empty pool: no Max, the button off, a tap sends nothing;
 //   - a fresh account with $0 on Solana and Base (card buy-box-quotes-before-funds: no ready, no tap_max): Max $0, an
-//     amount over it marked wrong, the button off, a tap sends nothing;
+//     amount over it marked wrong, the button off, a tap sends nothing; You receive from the page's out, the Fee a dash
+//     (no cost comes back);
+//   - an account whose money is all Cash, no pool note (the same card): Max is the page's with_cash ($46.50 on Solana,
+//     $45.50 on Base), $5 is one pool.buy of its own units, Fee and You receive as with notes;
 //   - no box names a proof (13 Nov 07:53Z: removed, the app names no proof): no proof mark, no word of proof, ready or pending;
 //   - Base (card buy-any-amount-on-every-chain): any amount up to Max is one pool.buy, as on Solana: Max's USD ($3.50)
 //     asks the whole 0.001 ETH, $3.00 asks its own ETH at the fixture's price, rounded down; over Max it is marked wrong;
@@ -89,19 +92,22 @@ const BUYS = [
   // a fresh account with $0 (card buy-box-quotes-before-funds): Max $0, so the grey Buy has its reason
   ["sol-fresh", "pool=sol-fresh&amt=5&cash=0", "pool", false, "$0 available", "Max $0", false, null],
   ["base-fresh", "pool=base-fresh&amt=5&cash=0", "pool", false, "$0 available", "Max $0", false, null],
+  // all Cash, no pool note: Max the page's with_cash, 0.5 SOL at $93.01 ($46.50) and 0.013 ETH at $3,500.12 ($45.50)
+  ["sol-cash", "pool=sol-cash&amt=5", "pool", false, "$73.18 available", "Max $46.50", true, { kind: "pool.buy", params: { chain: "solana", token: MINT, amount: "0.053757381", slippage_bps: 1000 } }],
+  ["base-cash", "pool=base-cash&amt=5", "pool", false, "$73.18 available", "Max $45.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: ethOf(500), slippage_bps: 1000 } }],
   ["vault", "amt=25", "vault", false, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
 // and on Base (card you-receive-on-every-chain), the tap's own ask's cost: 0.000021 ETH at $3,500.12 is $0.0735, $0.08;
 // a dash where the tap asks nothing (over Max)
-const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": "Fee $0.08", "base-other": "Fee $0.08", "base-over": "Fee —", "base-making": null, "sol-fresh": null, "base-fresh": null, vault: null };
+const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": "Fee $0.08", "base-other": "Fee $0.08", "base-over": "Fee —", "base-making": null, "sol-fresh": "Fee —", "base-fresh": "Fee —", "sol-cash": "Fee $0.14", "base-cash": "Fee $0.08", vault: null };
 // the amount field marked wrong: over one tap's most, on every chain; never while a proof is still making (the amount is
 // not what is wrong) or on an amount the pool can take
 // You receive on a Solana pool buy (card solana-buy-preview-complete): the dry answer's out for the typed amount (the
 // recorded curve coin's 35,294.263662 at 0.001 SOL), over the fixture's set preview, which the live source has none of
 // and on Base (card you-receive-on-every-chain), the tap's own ask's out, 10,600 tokens
-const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-nocash": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH", "base-chunk": "≈ 10.6K TORCH", "base-other": "≈ 10.6K TORCH" };
-const BAD = { "sol-ready": "false", "sol-nocash": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "false", "base-over": "true", "base-making": "false", "sol-fresh": "true", "base-fresh": "true", vault: "false" };
+const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-nocash": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH", "base-chunk": "≈ 10.6K TORCH", "base-other": "≈ 10.6K TORCH", "sol-fresh": "≈ 35.29K TORCH", "base-fresh": "≈ 10.6K TORCH", "sol-cash": "≈ 35.29K TORCH", "base-cash": "≈ 10.6K TORCH" };
+const BAD = { "sol-ready": "false", "sol-nocash": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "false", "base-over": "true", "base-making": "false", "sol-fresh": "true", "base-fresh": "true", "sol-cash": "false", "base-cash": "false", vault: "false" };
 // the presets row as data-preset:disabled:text per button: the four on every pool chain (all over one tap's most on the
 // pool, or off while no proof is ready), $100 over the vault's max
 const FOUR_OFF = "10.00:true:$10 25.00:true:$25 50.00:true:$50 100.00:true:$100";
@@ -120,8 +126,14 @@ const PRESET_ROW = {
   "base-making": FOUR_OFF,
   "sol-fresh": FOUR_OFF,
   "base-fresh": FOUR_OFF,
+  // $10 and $25 at most Max ($46.50, $45.50) and Bal; $50 and $100 over Max
+  "sol-cash": "10.00:false:$10 25.00:false:$25 50.00:true:$50 100.00:true:$100",
+  "base-cash": "10.00:false:$10 25.00:false:$25 50.00:true:$50 100.00:true:$100",
   vault: "10.00:false:$10 25.00:false:$25 50.00:false:$50 100.00:true:$100",
 };
+// the amount a Base box with no pool note asks pool.buy.dry with no tap to ask (card buy-box-quotes-before-funds): the
+// typed $5 in ETH, rounded down, so You receive is read before any funds
+const QUOTE = { "base-fresh": ethOf(500) };
 const SELLS = [
   ["sell-pool", "f=up&pool=sol", "Back to Cash", { kind: "pool.sell", params: { chain: "solana", token: MINT, share_bps: 5000, slippage_bps: 1000 } }],
   ["sell-vault", "f=up", "", { kind: "buy", params: { chain: "solana", token: MINT, side: "sell", amount: HALF_UNITS, slippage_bps: 1000 } }],
@@ -268,7 +280,7 @@ try {
         // the Fee of the typed amount on Solana, the tap's own ask's amount on Base and Robinhood (card
         // buy-any-amount-on-every-chain, buysAskAmount); nothing on another chain; never a buy
         const reads = await page.evaluate(() => window.__reads);
-        const readFault = readsFault(name, reads, ask);
+        const readFault = readsFault(name, reads, ask, QUOTE[name] ?? null);
         check(readFault === null, `${tag}: the Max and amount reads: ${readFault} ${JSON.stringify(reads)}`);
         // one tap: the ask the box's own checks passed, or nothing
         await cta.click({ force: true });
@@ -324,4 +336,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} of ${checks} checks over ${n} states`);
   process.exit(1);
 }
-console.log(`PASS ${checks} checks over ${n} states (the pool buy, over one tap, money being made spendable (busy Buy), none coming, an empty pool, Base at Max, under it and over it, the four presets on Base, the vault's buy; the pool and vault sell) at 390 and 1440, dark and light${SHOTS ? `; ${shots} shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${checks} checks over ${n} states (the pool buy, over one tap, money being made spendable (busy Buy), none coming, an empty pool, a fresh $0 account and an all-Cash one on Solana and Base, Base at Max, under it and over it, the four presets on Base, the vault's buy; the pool and vault sell) at 390 and 1440, dark and light${SHOTS ? `; ${shots} shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
