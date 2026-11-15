@@ -820,3 +820,35 @@ test("card helper-listed-charts-own-reads: a Raydium CPMM trade names its own mi
   assert.deepEqual(a.trades, [{ t_ms: TS * 1000, side: "b", usd: "34.2439758969", amt: "3264281.114937", trader: null, tx: "F1" }]);
   t.stop();
 });
+
+test("card helper-listed-charts-own-reads: a Raydium LaunchLab coin's buy reaches its tape and bar, the pool read from LaunchLab itself", async () => {
+  const V = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-venue-txs.json"), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
+  const FLOYD = "EREcNf2Uz8E3VHxqeM5jnaCtiqbgWfWYHXXZLvjTCFQt";
+  const POOL = "8rHq4DwFfgUG4m4CK4ADQZsme1byBAwVV7Bbtb3BboUW";
+  const inner = rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FLOYD]: 6 });
+  const answer = (owner: string) => async (url: string, init: RequestInit): Promise<Response> => {
+    const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
+    if (req.method === "getAccountInfo" && req.params[0] === POOL) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner, data: [V.pools[POOL]!.data, "base64"] } } }));
+    return inner(url, init);
+  };
+  const run = async (owner: string) => {
+    let on: SourceEvents | null = null;
+    const t = createSolanaTrades({ fetch: answer(owner), now: () => TS * 1000, listed: async (m) => m === FLOYD, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), tickMs: 0 });
+    await t.trades(FLOYD, 50);
+    on!.note(FLOYD, { sig: "L1", slot: 10, err: false, logs: V.txs["launchlab-buy"]!.result.meta.logMessages });
+    await settle();
+    const rows = (JSON.parse((await t.trades(FLOYD, 50)).body) as { trades: unknown[] }).trades;
+    const bars = (JSON.parse((await t.candles(FLOYD, "1s", null, 10)).body) as { candles: unknown[] }).candles;
+    t.stop();
+    return { rows, bars };
+  };
+  // 6,000,000 lamports at 93.42267796 USD per SOL for 940,352.945779 FLOYD
+  const ok = await run(RAY_LAUNCHLAB_ID);
+  assert.deepEqual(ok.rows, [{ t_ms: TS * 1000, side: "b", usd: "0.56053606776", amt: "940352.945779", trader: null, tx: "L1" }]);
+  assert.equal(ok.bars.length, 1);
+  // the same bytes in an account another program owns are no pool of LaunchLab's: no trade
+  const forged = await run("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
+  assert.deepEqual(forged.rows, []);
+  assert.equal(forged.bars.length, 0);
+});
+const RAY_LAUNCHLAB_ID = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj";

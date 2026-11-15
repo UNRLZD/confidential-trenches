@@ -20,12 +20,12 @@
 //
 // The pool venues past pump.fun (card helper-listed-charts-own-reads). Of the 88 coins off pump.fun on the helper's
 // lists at 2026-11-15 23:14Z, the newest two successful transactions of 72 ran Raydium CLMM in 27, Orca in 20, Meteora
-// DLMM in 17, Raydium CPMM in 8 (and fewer the rest). Orca, Raydium CLMM and Raydium CPMM, read here, each log their
+// DLMM in 17, Raydium CPMM in 8, Raydium LaunchLab in 2 (and fewer the rest). Orca, Raydium CLMM and CPMM each log their
 // swap event with Anchor's `emit!` only (no event CPI), so a cut log keeps the events logged before the cut
 // (`cutTrades`). The event names the pool (CPMM's also its mints), never which side is the token: a trade is told as the
 // pool's first mint sees it (`side` "b" when the trader got it, `amt` its leg, `quote` the other mint's), and the
 // reader names the token from the pool account (`poolPair`, taken only with the venue's program as its owner) and turns
-// the trade round when the token is the second mint. None of the three events carries a clock (`ts` 0: the reader
+// the trade round when the token is the second mint. None of these events carries a clock (`ts` 0: the reader
 // dates it by its block).
 //   - Orca Whirlpool whirLbMi... (github.com/orca-so/whirlpools at commit cc683ec9, 2026-10-12,
 //     programs/whirlpool/src/events.rs and state/whirlpool.rs): `Traded` (discriminator e1ca49af932ba096, sha256
@@ -46,6 +46,15 @@
 //     an input transfer fee apart), output_amount at 56 (what the pool paid, before an output transfer fee), the two
 //     transfer fees, base_input, input_mint at 81, output_mint at 113, then the fees (162 bytes). The event names its
 //     own mints (`pair`: input, then output), so no pool is read; it names no trader (`user` "").
+//   - Raydium LaunchLab LanMV9sA... (the launchpad of raydium-launchlab and letsbonk.fun coins; its official IDL,
+//     github.com/raydium-io/raydium-idl at commit e7e0c96f, 2026-05-18, raydium_launchpad/raydium_launchpad.json):
+//     `TradeEvent` (bddb7fd34ee661ee, pump.fun's discriminator too, told apart by the running program) pool_state,
+//     total_base_sell, the virtual and real reserves, amount_in u64 at 88 (what the trader paid, fees inside),
+//     amount_out at 96 (what the trader got, fees out), the four fees, trade_direction u8 at 136 (0 Buy: quote paid for
+//     base, 1 Sell), pool_status, exact_in (139 bytes). Unlike the three above it also sends the event to itself
+//     (Anchor's event CPI), so a cut log reads it from the inner instructions. No trader field. The `PoolState` account
+//     (f7ede3f5d7c3de46, as Raydium CLMM's and CPMM's: the owner tells them apart) holds base_mint at byte 205 and
+//     quote_mint at 237.
 // Every offset checked against the recorded transactions in fixtures/sol-venue-txs.json: each event's amounts equal its
 // pool's own token balance changes in the same transaction, and each pool's mints the mints of those balances.
 //
@@ -58,6 +67,7 @@ export const PUMP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 export const ORCA = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
 export const RAY_CLMM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
 export const RAY_CPMM = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C";
+export const RAY_LAUNCHLAB = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj";
 export const WSOL = "So11111111111111111111111111111111111111112";
 export const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 import { b58encode } from "./lists.ts";
@@ -65,6 +75,7 @@ import { b58encode } from "./lists.ts";
 const DEFAULT_KEY = "11111111111111111111111111111111";
 
 const DISC = {
+  /** pump.fun's `TradeEvent`, and Raydium LaunchLab's. */
   trade: "bddb7fd34ee661ee",
   buy: "67f4521f2cf57777",
   sell: "3e2f370aa503dc2a",
@@ -73,6 +84,7 @@ const DISC = {
   orcaPool: "3f95d10ce1806309",
   /** Raydium's `SwapEvent`, CLMM's and CPMM's alike. */
   clmmSwap: "40c6cde8260871e2",
+  /** Raydium's `PoolState`, CLMM's, CPMM's and LaunchLab's alike. */
   clmmPool: "f7ede3f5d7c3de46",
   /** Anchor's event-CPI tag: the first 8 bytes of an event an Anchor program sends to itself. */
   cpi: "e445a52e51cb9a1d",
@@ -101,7 +113,7 @@ export function b58data(s: string, max = 2_048): Uint8Array | null {
 }
 
 /** A venue whose pool names two mints, either one the token (the trade told as the first mint sees it). */
-export type PairVenue = "orca" | "raydium-clmm" | "raydium-cpmm";
+export type PairVenue = "orca" | "raydium-clmm" | "raydium-cpmm" | "raydium-launchlab";
 /** One trade as the venue logged it. `mint` is the token (curve) or null until the pool is read (the pool venues). */
 export type RawTrade = {
   venue: "pump" | "pumpswap" | PairVenue;
@@ -198,6 +210,18 @@ function cpmmTrade(b: Buffer): RawTrade | null {
   return { venue: "raydium-cpmm", mint: null, pool: key(b, 0), pair: { a, b: o }, side: "s", amt, quote, quoteMint: null, user: "", ts: 0 };
 }
 
+/** A Raydium LaunchLab `TradeEvent` body, told as the pool's base mint sees it, or null. */
+function launchlabTrade(b: Buffer): RawTrade | null {
+  if (b.length < 139) return null;
+  const dir = b[136];
+  if (dir !== 0 && dir !== 1) return null;
+  const paid = b.readBigUInt64LE(88);
+  const got = b.readBigUInt64LE(96);
+  if (paid <= 0n || got <= 0n) return null;
+  const [amt, quote] = dir === 0 ? [got, paid] : [paid, got];
+  return { venue: "raydium-launchlab", mint: null, pool: key(b, 0), side: dir === 0 ? "b" : "s", amt, quote, quoteMint: null, user: "", ts: 0 };
+}
+
 /** The trade an event of `program` holds (its bytes with the discriminator first), or null. */
 export function decodeEvent(program: string, data: Buffer): RawTrade | null {
   if (data.length < 8) return null;
@@ -209,6 +233,7 @@ export function decodeEvent(program: string, data: Buffer): RawTrade | null {
   if (program === ORCA && d === DISC.orcaTraded) return orcaTrade(body);
   if (program === RAY_CLMM && d === DISC.clmmSwap) return clmmTrade(body);
   if (program === RAY_CPMM && d === DISC.clmmSwap) return cpmmTrade(body);
+  if (program === RAY_LAUNCHLAB && d === DISC.trade) return launchlabTrade(body);
   return null;
 }
 
@@ -269,7 +294,7 @@ export function fromInner(result: unknown): RawTrade[] {
     if (!Array.isArray(group?.instructions)) continue;
     for (const ix of group.instructions as Ix[]) {
       const program = typeof ix.programIdIndex === "number" ? keys[ix.programIdIndex] : undefined;
-      if ((program !== PUMP && program !== PUMP_AMM) || typeof ix.data !== "string") continue;
+      if ((program !== PUMP && program !== PUMP_AMM && program !== RAY_LAUNCHLAB) || typeof ix.data !== "string") continue;
       const bytes = b58data(ix.data);
       if (bytes === null || Buffer.from(bytes.subarray(0, 8)).toString("hex") !== DISC.cpi) continue;
       const t = decodeEvent(program, Buffer.from(bytes.subarray(8)));
@@ -280,8 +305,8 @@ export function fromInner(result: unknown): RawTrade[] {
 }
 
 /**
- * A cut log's trades: the inner instructions' event CPIs (pump.fun, PumpSwap) and the log's own events of the venues
- * that only log theirs (the pair venues), which the runtime wrote before it cut the log. `f` is that log's `fromLogs`.
+ * A cut log's trades: the inner instructions' event CPIs (pump.fun, PumpSwap, LaunchLab) and the log's own events of the
+ * venues that only log theirs (Orca, Raydium CLMM and CPMM), which the runtime wrote before it cut the log. `f` is that log's `fromLogs`.
  */
 export function cutTrades(f: { trades: RawTrade[] }, result: unknown): RawTrade[] {
   return [...fromInner(result), ...f.trades.filter((t) => t.venue === "orca" || t.venue === "raydium-clmm" || t.venue === "raydium-cpmm")];
@@ -293,6 +318,7 @@ export function poolPair(venue: PairVenue, owner: unknown, data: Buffer): { a: s
   const d = data.subarray(0, 8).toString("hex");
   if (venue === "orca") return owner === ORCA && d === DISC.orcaPool && data.length >= 213 ? { a: key(data, 101), b: key(data, 181) } : null;
   if (venue === "raydium-clmm") return owner === RAY_CLMM && d === DISC.clmmPool && data.length >= 137 ? { a: key(data, 73), b: key(data, 105) } : null;
+  if (venue === "raydium-launchlab") return owner === RAY_LAUNCHLAB && d === DISC.clmmPool && data.length >= 269 ? { a: key(data, 205), b: key(data, 237) } : null;
   return null;
 }
 

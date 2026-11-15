@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { cutTrades, decodeEvent, fromInner, fromLogs, ORCA, poolMints, poolPair, PUMP, PUMP_AMM, RAY_CLMM, RAY_CPMM, USDC, WSOL, type RawTrade } from "./decode.ts";
+import { cutTrades, decodeEvent, fromInner, fromLogs, ORCA, poolMints, poolPair, PUMP, PUMP_AMM, RAY_CLMM, RAY_CPMM, RAY_LAUNCHLAB, USDC, WSOL, type RawTrade } from "./decode.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -144,4 +144,31 @@ test("Raydium CPMM: a `SwapEvent` names its own input and output mints and the p
   assert.equal(decodeEvent(RAY_CPMM, bytes.subarray(0, 8 + 144)), null);
   // a cut log keeps CPMM's logged event as it does Orca's
   assert.deepEqual(cutTrades({ trades: fromLogs(vlogs("cpmm-buy")).trades }, { meta: {}, transaction: { message: { accountKeys: [] } } }), fromLogs(vlogs("cpmm-buy")).trades);
+});
+
+test("Raydium LaunchLab: a `TradeEvent` is a trade told as the pool's base mint sees it (amount_in what the trader paid, amount_out what it got); the pool names base and quote", () => {
+  assert.equal(V.txs["launchlab-buy"]!.signature, "5GNEWxwwLV7mEJS9GZ2uuHKTmd2a4QM37EQiYzjS13hCmuKmTL8mETeDjxffkgdSarREpda8ubteaWuhLQYHb2TL");
+  // a buy: the trader paid 6,000,000 lamports (5,700,000 to the vault, 300,000 platform fee) for 940,352,945,779 base
+  assert.deepEqual(fromLogs(vlogs("launchlab-buy")), { trades: [{ venue: "raydium-launchlab", mint: null, pool: "8rHq4DwFfgUG4m4CK4ADQZsme1byBAwVV7Bbtb3BboUW", side: "b", amt: 940352945779n, quote: 6000000n, quoteMint: null, user: "", ts: 0 }], truncated: false });
+  // a sell: the vault took 934,846,646,878 base, the trader got 4,457,627 lamports
+  assert.deepEqual(fromLogs(vlogs("launchlab-sell")).trades.map((t) => [t.venue, t.side, t.amt, t.quote]), [["raydium-launchlab", "s", 934846646878n, 4457627n]]);
+  const p = pool("8rHq4DwFfgUG4m4CK4ADQZsme1byBAwVV7Bbtb3BboUW");
+  assert.equal(p.owner, RAY_LAUNCHLAB);
+  assert.deepEqual(poolPair("raydium-launchlab", p.owner, p.data), { a: "EREcNf2Uz8E3VHxqeM5jnaCtiqbgWfWYHXXZLvjTCFQt", b: WSOL });
+  // CLMM's and CPMM's pools share LaunchLab's account discriminator: the owner tells them apart
+  assert.equal(poolPair("raydium-launchlab", RAY_CLMM, p.data), null);
+  assert.equal(poolPair("raydium-clmm", RAY_LAUNCHLAB, p.data), null);
+  // LaunchLab also sends the event to itself: a cut log reads it from the inner instructions, once
+  for (const k of ["launchlab-buy", "launchlab-sell"]) {
+    assert.deepEqual(fromInner(V.txs[k]!.result), fromLogs(vlogs(k)).trades, k);
+    assert.deepEqual(cutTrades({ trades: fromLogs(vlogs(k)).trades }, V.txs[k]!.result), fromLogs(vlogs(k)).trades, k);
+  }
+  // pump.fun's TradeEvent discriminator is LaunchLab's too: each program's bytes count only under that program
+  const line = vlogs("launchlab-buy").find((l) => l.startsWith("Program data: vdt/"))!;
+  const bytes = Buffer.from(line.slice(14), "base64");
+  assert.equal(decodeEvent(PUMP, bytes), null);
+  assert.equal(decodeEvent(RAY_LAUNCHLAB, bytes.subarray(0, 8 + 138)), null);
+  const flipped = Buffer.from(bytes);
+  flipped[8 + 136] = 2; // a trade direction past Buy and Sell
+  assert.equal(decodeEvent(RAY_LAUNCHLAB, flipped), null);
 });
