@@ -319,9 +319,12 @@ export function judge(rec) {
   // Continue to their sign out; a request at no time of the run counts as signed out
   const reqs = rec.requests ?? [];
   // this tab's own sign out holds the seed until the store's lock is taken (a run holding it finishes first), so its
-  // window ends where the top window's new document begins
+  // window ends where the top window's new document begins. Another tab's sign out ends the words' window the same way
+  // (card sign-out-check-judges-at-the-hearing): the page hears the post and reloads in one task (packages/signpage/src/
+  // main.ts signedOutElsewhere), so the new document's start is its hearing; a request it sent before then is still in
+  // flight when the post is acknowledged (live run 43708088495: Robinhood's list pair), one from then on is signed out
   const held = reloads
-    ? [...(chrome ? [[st.created?.t, st.passkeyOut?.doc ?? st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.t], ...(chrome ? [[st.created2?.t, st.passkeyOut2?.doc ?? st.passkeyOut2?.t]] : [])]
+    ? [...(chrome ? [[st.created?.t, st.passkeyOut?.doc ?? st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.doc ?? st.wordsOut?.t], ...(chrome ? [[st.created2?.t, st.passkeyOut2?.doc ?? st.passkeyOut2?.t]] : [])]
     : [...(chrome ? [[st.created?.t, st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.t]];
   const signedIn = (x) => typeof x.t === "number" && held.some(([a, b]) => typeof a === "number" && typeof b === "number" && x.t >= a && x.t < b);
   const pinned = (x) => PINNED_HOSTS.includes(x.host);
