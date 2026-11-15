@@ -10,8 +10,9 @@
 //
 // The steps, in order, each logged once through deps.log with its outcome and written to the record (step, stage, code,
 // cause: deps.progress):
-//   1. payout: the vault pays the record's amount of USDC to W from the record's note (deps.payout: the first ask, or
-//      the same note's payout followed). Anything but landed, before any helper call: the run's answer is that code
+//   1. payout: the vault pays the record's amount of USDC to W from the record's notes, one withdrawal a note (deps.payout:
+//      the first ask, or the same notes' payouts followed; card near-cash-pays-any-amount). Some parts landed and the
+//      rest not: the buy goes on with what W was paid. Anything but landed, before any helper call: the run's answer is that code
 //      ("payout_<kind>"), and the money is in the vault. Unknown (it threw): answered sent with no transaction, the
 //      record left for the next load to follow.
 //   2. create: W read first (a W that exists, made by the helper or by anyone's transfer, is not created again); else a
@@ -71,9 +72,10 @@ export const NEAR_BUY_SWAP_ROUNDS = 3;
 
 export type NearBuyAsk = { token: string; amount: bigint; slippageBps: number };
 export type NearBuyStep = "payout" | "quote" | "create" | "register" | "swap" | "receive";
-/** The vault's payout to W as its hand-off ends: landed (with its transaction when the relayer named one), or another
- *  outcome's kind. */
-export type NearPayoutEnd = { kind: "landed"; tx: string | null } | { kind: string; tx?: undefined };
+/** The vault's payout to W as its hand-off ends: landed (with its transaction when the relayer named one; `txs`, every
+ *  part's that is known, for a payout of several notes; `amount`, what W was paid when it is less than the record's
+ *  ask: some parts landed and the rest went back to Cash), or another outcome's kind. */
+export type NearPayoutEnd = { kind: "landed"; tx: string | null; txs?: readonly string[]; amount?: bigint } | { kind: string; tx?: undefined; txs?: undefined; amount?: undefined };
 /** The helper's answer to POST /v1/bind's trade kind: its transactions, also with a refusal that carried some. */
 export type NearHelperAnswer = { ok: true; tx_hashes: string[] } | { ok: false; code: string; tx_hashes?: string[] };
 /** The run's answer (a plain object: a HostAnswer has a `then`, so it is never what a promise resolves to). */
@@ -202,14 +204,16 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
     return { error: "failed" };
   }
   if (begun === null) return { error: "not_allowed" };
-  const { ask, w } = begun;
+  const { w } = begun;
+  // the record's ask; its amount becomes what the payout put on W when only some of its parts landed
+  let ask = begun.ask;
   // only an implicit id of 64 hex is W: the one guard before money moves, as the record names it
   if (typeof w.id !== "string" || !IMPLICIT.test(w.id) || !askOk(deps.network, ask)) return { error: "not_allowed" };
   const txs: TxRef[] = begun.txs.map((t) => ({ chain: t.chain, hash: t.hash }));
   const near = (hashes: readonly string[]) => {
     for (const hash of hashes) if (!txs.some((t) => t.hash === hash)) txs.push({ chain: "near", hash });
   };
-  const request: NearSwapRequest = { network: deps.network, side: "buy", token: ask.token, amountIn: ask.amount, wallet: w.id, slippageBps: ask.slippageBps };
+  let request: NearSwapRequest = { network: deps.network, side: "buy", token: ask.token, amountIn: ask.amount, wallet: w.id, slippageBps: ask.slippageBps };
   let paid = false;
   let step: NearBuyStep = "payout";
   let swap = begun.swap;
@@ -252,7 +256,12 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
       await progress({ stage: "refused", code });
       return { error: code };
     }
-    if (typeof end.tx === "string" && TX_HASH.test(end.tx)) near([end.tx]);
+    near([...(end.txs ?? []), ...(typeof end.tx === "string" ? [end.tx] : [])].filter((h) => TX_HASH.test(h)));
+    // a payout of several parts of which only some reached W: the buy swaps what W was paid, never more
+    if (typeof end.amount === "bigint" && end.amount > 0n && end.amount < ask.amount) {
+      ask = { ...ask, amount: end.amount };
+      request = { ...request, amountIn: end.amount };
+    }
     paid = true;
     deps.log("payout", "payout landed");
     await progress({ stage: "sent" });

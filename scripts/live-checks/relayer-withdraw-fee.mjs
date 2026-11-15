@@ -13,7 +13,8 @@
 //     deployed commit) by wallet-mainnet-relayer-pins.mjs's loadWithdrawPins, never from the helper; a network the
 //     release names no relayer on FAILs;
 //   - relay_fee is at most the fee_max the device computes now (and P1's half of it is printed);
-//   - valid_until_block is still open at the device's agreed height and at most 100 + 30 blocks past it;
+//   - valid_until_block is still open at the device's agreed height and at most 1,200 + 30 blocks past it (the helper's
+//     window, a request's whole life since card near-cash-pays-any-amount; 100 before);
 // and another token answers 404 not_found, every answer under 1 KB with a full-sha X-Helper-Commit and APP_HOST echoed.
 // After: helper
 //   node scripts/live-checks/relayer-withdraw-fee.mjs [--base <url>] [--fastnear-mainnet <url>] [--fastnear-testnet <url>]
@@ -37,7 +38,7 @@ const FIELDS = ["relayer_account", "fee_recipient", "relay_fee", "gp", "px", "g_
 const DEC = /^(0|[1-9][0-9]{0,38})$/;
 const PX = /^(0|[1-9][0-9]{0,38})(\.[0-9]{1,39})?$/;
 const SHA = /^[0-9a-f]{40}$/;
-const WINDOW = 100;
+const WINDOW = 1_200;
 const SPREAD = 30;
 
 // The device's fee_max (wallet src/withdraw/feemax.ts withdrawFeeMax; its constants, held by this check's test to the
