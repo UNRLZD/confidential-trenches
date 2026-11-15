@@ -2,14 +2,18 @@
 // (base-reads-never-starve-max.answers.json). good: the live helper, both EVM routes 200 inside SHOWN_MS: PASS.
 // bad_busy: the live helper's base route answering 429 rate_limited (16:24:48Z): FAIL. Planted from them: a 503, a
 // JSON-RPC error, an answer past SHOWN_MS, another origin: FAIL; a route that answers nothing: INCONCLUSIVE.
-// The sign part: sign_good (this card's build served locally): PASS; sign_bad_pre_card (SIGN_HOST before this card):
+// The answers hold the helper's HTTP answers as recorded; each replays through the check's read (rpcAnswer), so the
+// judged run is what --record writes. The sign part: sign_good (this card's build served locally): PASS; sign_bad_pre_card (SIGN_HOST before this card):
 // FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CHAINS, judge, judgeSign, read, READ, SHOWN_MS, SIGN } from "./base-reads-never-starve-max.mjs";
+import { CHAINS, judge, judgeSign, METHOD, PARAMS, read, SHOWN_MS, SIGN } from "./base-reads-never-starve-max.mjs";
+import { RETRY } from "./provider-answer.mjs";
+
+RETRY.ms = 0;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "base-reads-never-starve-max.answers.json"), "utf8"));
@@ -25,7 +29,9 @@ const replay = (run) => {
     assert.ok(r, `asked ${url}`);
     assert.equal(init.method, "POST");
     assert.equal(init.headers.origin, SIGN);
-    assert.deepEqual(JSON.parse(init.body), READ);
+    const ask = JSON.parse(init.body);
+    assert.equal(ask.method, METHOD);
+    assert.deepEqual(ask.params, PARAMS);
     if (r.noAnswer !== undefined) throw new TypeError("fetch failed");
     t += r.ms;
     return new Response(r.body, { status: r.status, headers: r.headers });

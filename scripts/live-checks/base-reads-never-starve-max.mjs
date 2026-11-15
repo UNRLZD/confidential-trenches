@@ -6,7 +6,8 @@
 // packages/signpage pool-buy-evm.ts evmBuyDry); the helper's half is its route and its log (a held or refused EVM read
 // names its method and params shape, apps/helper rpc.ts rpcShape).
 // The helper part (after a helper deploy): one read of each EVM route as the positions pass's shown read asks it, with
-// Origin SIGN_HOST: POST /v1/rpc/base and /v1/rpc/robinhood, eth_call balanceOf(address 1) of Base's USDC at "latest".
+// Origin SIGN_HOST: POST /v1/rpc/base and /v1/rpc/robinhood, eth_call balanceOf(address 1) of Base's USDC at "latest",
+// through provider-answer.mjs rpcAnswer.
 // PASS only when each answers 200 a JSON-RPC result that is "0x" or one 32-byte word within SHOWN_MS of its send, with
 // Access-Control-Allow-Origin SIGN_HOST. A 429 or 503 (the helper's "every provider held", the owner's live Base page
 // of 15 Nov 16:00Z), any other status, a JSON-RPC error or a slower answer FAILs: a read that cannot answer in SHOWN_MS
@@ -24,7 +25,7 @@
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { EXIT, verdictOf } from "./provider-answer.mjs";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 import { judgeSign, pinOf, readSign } from "./withdraw-fee-busy-waits.mjs";
 
 const KEY = "base-reads-never-starve-max";
@@ -38,41 +39,28 @@ export const TIMEOUT_MS = 15_000;
 export const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const CHAINS = ["base", "robinhood"];
 /** The shown read: balanceOf(address 1), as the positions pass reads one W (positions-evm.ts), at "latest". */
-export const READ = { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: BASE_USDC, data: `0x70a08231${"1".padStart(64, "0")}` }, "latest"] };
+export const METHOD = "eth_call";
+export const PARAMS = [{ to: BASE_USDC, data: `0x70a08231${"1".padStart(64, "0")}` }, "latest"];
 const ANSWER = /^0x([0-9a-f]{64})?$/i;
 
-/** Reads each route once with Origin SIGN_HOST: { chain, status, ms, headers, body } or { chain, noAnswer }. */
+/** Reads each route once with Origin SIGN_HOST through rpcAnswer (read again once on a no-answer, as the page's reader
+ *  does): { chain, ms, ...answer } where answer is rpcAnswer's (status, acao, kept, result | error | noAnswer). */
 export async function read(base = BASE, fetchFn = fetch, clock = () => performance.now()) {
   const reads = [];
   for (const chain of CHAINS) {
     const url = `${base.replace(/\/$/, "")}/v1/rpc/${chain}`;
     const t0 = clock();
-    try {
-      const r = await fetchFn(url, { method: "POST", redirect: "manual", headers: { origin: SIGN, "content-type": "application/json", "cache-control": "no-cache" }, body: JSON.stringify(READ), signal: AbortSignal.timeout(TIMEOUT_MS) });
-      const body = await r.text();
-      const headers = {};
-      for (const k of ["retry-after", "access-control-allow-origin", "server-timing"]) {
-        const v = r.headers.get(k);
-        if (v !== null) headers[k] = v;
-      }
-      reads.push({ chain, status: r.status, ms: Math.round(clock() - t0), headers, body });
-    } catch (e) {
-      reads.push({ chain, noAnswer: `${new URL(url).host}: no answer (${e?.cause?.code ?? e?.name ?? e?.message ?? e})` });
-    }
+    const a = await rpcAnswer(url, METHOD, PARAMS, { fetchFn, timeoutMs: TIMEOUT_MS, headers: { origin: SIGN, "cache-control": "no-cache" }, redirect: "manual", keep: ["retry-after", "server-timing"] });
+    reads.push({ chain, ms: Math.round(clock() - t0), ...a });
   }
   return { base, reads };
 }
 
-const json = (t) => {
-  try {
-    return JSON.parse(t);
-  } catch {
-    return undefined;
-  }
-};
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 
-/** The check on one recorded run: { ok, quiet, verdict, lines }. */
+/** The check on one run (read's output): { ok, quiet, verdict, lines }. The helper is the subject, so its own refusal
+ *  (a 429 or 503 status: every provider held) is a FAIL, never a provider's no-answer; only no HTTP answer at all (no
+ *  status) is INCONCLUSIVE. */
 export function judge(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -84,20 +72,15 @@ export function judge(run) {
       say(false, `${tag} no read`);
       continue;
     }
-    if (r.noAnswer !== undefined) {
+    if (r.status === undefined || r.status === null) {
       quiet = true;
-      lines.push(`no-answer ${tag} ${r.noAnswer}`);
+      lines.push(`no-answer ${tag} ${r.noAnswer ?? "no HTTP answer"}`);
       continue;
     }
-    const b = json(r.body);
-    if (r.status !== 200) {
-      say(false, `${tag} answers ${r.status} ${String(r.body).slice(0, 80)} (Retry-After ${show(r.headers?.["retry-after"])}): a shown read the helper did not answer`);
-    } else {
-      const result = b?.result;
-      say(b?.jsonrpc === "2.0" && b?.id === READ.id && b?.error === undefined && typeof result === "string" && ANSWER.test(result), `${tag} 200 with a balanceOf answer: ${show(result ?? b?.error)}`);
-    }
+    if (r.status !== 200) say(false, `${tag} answers ${r.status} ${show(r.noAnswer ?? r.error)} (Retry-After ${show(r.kept?.["retry-after"] ?? undefined)}): a shown read the helper did not answer`);
+    else say(r.noAnswer === undefined && r.error === undefined && typeof r.result === "string" && ANSWER.test(r.result), `${tag} 200 with a balanceOf answer: ${show(r.result ?? r.error ?? r.noAnswer)}`);
     say(Number.isFinite(r.ms) && r.ms >= 0 && r.ms <= SHOWN_MS, `${tag} answered in ${show(r.ms)} ms, at most ${SHOWN_MS}`);
-    say(r.headers?.["access-control-allow-origin"] === SIGN, `${tag} Access-Control-Allow-Origin ${show(r.headers?.["access-control-allow-origin"])}`);
+    say(r.acao === SIGN, `${tag} Access-Control-Allow-Origin ${show(r.acao ?? undefined)}`);
   }
   const bad = lines.some((l) => l.startsWith("BAD"));
   return { ok: !bad && !quiet, quiet, verdict: verdictOf(bad, quiet), lines };
