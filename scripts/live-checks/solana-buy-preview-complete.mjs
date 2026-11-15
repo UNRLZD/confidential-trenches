@@ -36,7 +36,9 @@ const N = "[\\w$]+";
 const esc = (v) => v.replace(/\$/g, "\\$");
 
 /** The quote started before the proofs' read (groups: the quote, the amount). */
-const QUOTE = new RegExp(`(${N})=(${N})!==null&&\\2>0n\\?${N}\\(${N},\\{side:\`buy\`,token:${N},amount:\\2\\}\\)\\.catch\\(\\(\\)=>null\\):null,${N}=await ${N}\\.ready\\(\\)`);
+// (card you-receive-on-every-chain: the proofs, the venue and the rent read by one shared read, `await read(pair, token,
+// pools)`, its refusal returned as is, so the dry and cashFirst's sizing read them the same way)
+const QUOTE = new RegExp(`(${N})=(${N})!==null&&\\2>0n\\?${N}\\(${N},\\{side:\`buy\`,token:${N},amount:\\2\\}\\)\\.catch\\(\\(\\)=>null\\):null,(?:${N}=await ${N}\\.ready\\(\\)|(${N})=await ${N}\\(${N},${N},${N}\\);if\\(\`error\`in \\3\\)return \\3;)`);
 /** The best venue's pick (bestVenuePool): the quote's pools on a venue list, sorted by expected out, the first
  *  (groups: the function, the venue list). */
 const BEST = new RegExp(`(${N})=(${N})=>\\2\\?\\.pools\\.filter\\((${N})=>(${N})\\.includes\\(\\3\\.venue\\)\\)\\.sort\\(\\((${N}),(${N})\\)=>\\5\\.expectedOut>\\6\\.expectedOut\\?-1:1\\)\\[0\\]`, "g");
@@ -52,6 +54,13 @@ const outOf = (quote, best) =>
   new RegExp(
     `(${N})=${esc(best)}\\(await ${esc(quote)}\\),(${N})=\\1!==void 0&&(${N})\\.decimals!==void 0&&\\1\\.expectedOut>0n\\?${N}\\(\\1\\.expectedOut,\\3\\.decimals\\):void 0;return\\{result:\\{tap_max:${N},pieces:(${N})\\.length,cost:${N}\\(\\4\\.reduce\\([^;]*?\\)\\),\\.\\.\\.\\2===void 0\\?\\{\\}:\\{out:\\2\\}\\}\\}`,
   );
+/** The same out, written once for every answer that carries it (card you-receive-on-every-chain: the one tap's answer and
+ *  the one that moves from Cash): an async read of the best venue in that quote at the venue's decimals, awaited in the
+ *  answer (groups: the read, its pick, the venue, the awaited out). */
+const outRead = (quote, best) =>
+  new RegExp(
+    `(${N})=async\\(\\)=>\\{let (${N})=${esc(best)}\\(await ${esc(quote)}\\);return \\2!==void 0&&(${N})\\.decimals!==void 0&&\\2\\.expectedOut>0n\\?${N}\\(\\2\\.expectedOut,\\3\\.decimals\\):void 0\\};[^]*?let (${N})=await \\1\\(\\);return\\{result:\\{tap_max:${N},[^;]*?cost:${N}\\([^;]*?\\),\\.\\.\\.\\4===void 0\\?\\{\\}:\\{out:\\4\\}\\}\\}`,
+  );
 /** The mint's decimals, byte 44 after a length check (group: the decimals). */
 const DECIMALS = new RegExp(`if\\((${N})\\.data\\.length<82\\)throw Error\\(\`the mint is shorter than a mint\`\\);let (${N})=\\1\\.data\\[44\\]`);
 /** kit-v1.13's level in the version chain. */
@@ -63,7 +72,7 @@ const STRIP = new RegExp(`(${N})=\\((${N}),(${N})\\)=>\\{if\\(typeof \\3!=\`obje
 export function facts(index, js) {
   const quote = QUOTE.exec(js);
   // the out written from a pick of the best venue on the buy's venues
-  const out = quote ? [...js.matchAll(BEST)].some((b) => buyVenues(js, b[4]) && outOf(quote[1], b[1]).test(js)) : false;
+  const out = quote ? [...js.matchAll(BEST)].some((b) => buyVenues(js, b[4]) && (outOf(quote[1], b[1]).test(js) || outRead(quote[1], b[1]).test(js))) : false;
   const dec = DECIMALS.exec(js);
   const strip = STRIP.exec(js);
   // the strip is what kit-v1.13's level returns: its result returned at that level, before any other strip

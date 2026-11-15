@@ -1880,14 +1880,17 @@ for (const [name, error, coin] of [
   });
 }
 
-test("card rh-cold-quote: 20,000 made-up pools packed 9,999 to a block from the block after the real pool's quote at the real price, within the bound (review of 1277e8af, MEDIUM-C)", { timeout: 60_000 }, async () => {
+// on the test clock (card readme-run-fits-an-agent-timeout): the quote's own bounds (its scan's, its head's age) count
+// its waits alone, so a busy machine's slow work never runs them out; in real time it failed at 32.9 s on GitHub's
+// 4-core runner under the README's test line (run 43697603678), past EVM_QUOTE_MAX_AGE_MS, and passed on a quiet one
+test("card rh-cold-quote: 20,000 made-up pools packed 9,999 to a block from the block after the real pool's quote at the real price, within the bound (review of 1277e8af, MEDIUM-C)", { timeout: 60_000 }, () => onTestClock(async () => {
   const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1f20";
   const c = rcFlood(coin, rcJunk(coin, 20_000, 9_999, RC_HEAD - 500_000 + 1), { code: -32000, message: "logs matched by query exceeds limit of 10000" });
   const t = performance.now();
-  await assert.rejects(c.run(), atReal); // within the bound: the test's own timeout
-  console.log(`20,000 made-up pools: ${c.firstAsked.length} getLogs on the first, ${Math.round(performance.now() - t)} ms`);
+  await assert.rejects(c.run(), atReal); // within the bound: the quote's on the clock, the work's the test's own timeout
+  console.log(`20,000 made-up pools: ${c.firstAsked.length} getLogs on the first, ${Math.round(performance.now() - t)} ms of waits`);
   assert.equal(c.spared(), 0);
-});
+}));
 
 test("card rh-cold-quote: a first that answers HTTP 413 to a request holding the real pool's block is asked its halves, never the spare: the seeded route is refused", { timeout: 60_000 }, async () => {
   const at = RC_HEAD - 500_000;

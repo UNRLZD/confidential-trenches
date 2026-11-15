@@ -93,3 +93,34 @@ test("facts() keeps each host's index, its script's sha384 and every mark", () =
   assert.ok(Object.values(APP_MARKS).every((_, i) => Object.values(f.app)[2 + i] === true));
   assert.ok(Object.values(SIGN_MARKS).every((_, i) => Object.values(f.sign)[2 + i] === true));
 });
+
+// card you-receive-on-every-chain: the dry's cost read (src/pools.ts solanaBuyCost) and its answer; the trade box asks on
+// the NEAR path too
+const SIGN_READ = [
+  "function O2(e,t,n,r,i,a){let o=Uz(e,t),s=e=>t=>Wz(t),c=XV(o,s(a));if(c!==null)return{cost:c.reduce((e,t)=>e+t.binding.feeCap,i(c.length)),pieces:c.length};return null}",
+  "let e=O2(m,h,f,p,n,i);if(e===null)return{result:{tap_max:u}};let t=await g();return{result:{tap_max:u,...e.pieces===void 0?{}:{pieces:e.pieces},cost:D2(e.cost),...t===void 0?{}:{out:t}}}",
+].join(";");
+const SIGN_JS2 = SIGN_JS.replace("return{result:{tap_max:u,pieces:p.length,cost:KB(p.reduce((e,t)=>e+t.binding.feeCap,o(p.length)))}}", SIGN_READ);
+const APP_JS2 = APP_JS.replace("{chain:`solana`,", "{chain:n===`near`?`near`:`solana`,");
+
+test("the dry's cost read and the NEAR path's ask (card you-receive-on-every-chain): PASS; the cost without the relay fees or the tip, no pieces, another count, a cost not from the read, or the ask on another chain: FAIL, that mark named", () => {
+  assert.notEqual(SIGN_JS2, SIGN_JS);
+  assert.notEqual(APP_JS2, APP_JS);
+  assert.deepEqual(carriesOf(SIGN_MARKS, SIGN_JS2), []);
+  assert.deepEqual(carriesOf(APP_MARKS, APP_JS2), []);
+  for (const js of [
+    SIGN_JS2.replace("e+t.binding.feeCap,i(c.length)", "e,i(c.length)"),
+    SIGN_JS2.replace("e+t.binding.feeCap,i(c.length)", "e+t.binding.feeCap,0n"),
+    SIGN_JS2.replace("...e.pieces===void 0?{}:{pieces:e.pieces},", ""),
+    SIGN_JS2.replace("pieces:c.length}", "pieces:1}"),
+    SIGN_JS2.replace("cost:D2(e.cost)", "cost:D2(0n)"),
+    SIGN_JS2.replace("let e=O2(m,h,f,p,n,i)", "let e=P2(m,h,f,p,n,i)"),
+  ]) {
+    assert.notEqual(js, SIGN_JS2);
+    assert.deepEqual(carriesOf(SIGN_MARKS, js), ["dry"], js.slice(0, 80));
+  }
+  for (const js of [APP_JS2.replace("n===`near`?`near`:`solana`", "n===`near`?`near`:`base`"), APP_JS2.replace(",amount:t}", "}")]) {
+    assert.notEqual(js, APP_JS2);
+    assert.deepEqual(carriesOf(APP_MARKS, js), ["ask"], js.slice(0, 80));
+  }
+});

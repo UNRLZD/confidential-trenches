@@ -598,7 +598,9 @@ test("the helper is never ready before every pool's start check: with the warm-u
 
 /** The helper's own main on `env` (test keys only), /v1/health read every 50 ms until it exits or `boundMs` passes:
  *  its exit code (or "still running"), its stderr, and every health answer's `ready`. */
-async function startOnce(env: Record<string, string>, boundMs: number): Promise<{ code: number | string; err: string; readies: unknown[] }> {
+// `readies` (the health answers' ready, in order) is the caller's own when it hands one: a stub that waits on the helper
+// answering its health reads it, never a wall-clock window (under load the helper's own start can outlast one)
+async function startOnce(env: Record<string, string>, boundMs: number, readies: unknown[] = []): Promise<{ code: number | string; err: string; readies: unknown[] }> {
   const { spawn } = await import("node:child_process");
   const free = createServer().listen(0, "127.0.0.1");
   await new Promise((ok) => free.on("listening", ok));
@@ -611,7 +613,6 @@ async function startOnce(env: Record<string, string>, boundMs: number): Promise<
   });
   let err = "";
   c.stderr.on("data", (d) => (err += d));
-  const readies: unknown[] = [];
   let exited = false;
   const code = new Promise<number | string>((done) => {
     const timer = setTimeout(() => (c.kill("SIGKILL"), done("still running")), boundMs);
@@ -633,7 +634,9 @@ async function startOnce(env: Record<string, string>, boundMs: number): Promise<
 // for up to 90 s (pool/evm-failover.test.ts (3)); an answer that two operators give differently is refused at once
 test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently stops the start with exit 2 naming the read, and /v1/health never says ready before it", async (t) => {
   // two JSON-RPC nodes on loopback, a block every 2 s up to now; the second answers every state read with another word,
-  // each a second late, so the helper is up and answering its health while the check runs
+  // held until the helper has answered its health, so the helper is up and answering while the check runs: a held answer
+  // waits on that event, never on a fixed second the helper's own start can outlast under load
+  const seen: unknown[] = [];
   const g = BigInt(Math.floor(Date.now() / 1000)) - 2_000n;
   // two loopback addresses: an env pair must be two operators (fold B), and an IP host is its address
   const nodes = [2, 3].map((word) =>
@@ -649,7 +652,8 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
         if (method !== "eth_call") return answer({ error: { code: -32601, message: "no" } });
         const out = { result: `0x${"0".repeat(63)}${word}` };
         if (word === 2) return answer(out);
-        setTimeout(() => answer(out), 1_000);
+        const late = () => (seen.length > 0 ? answer(out) : void setTimeout(late, 50));
+        late();
       });
     }).listen(0, word === 2 ? "::1" : "127.0.0.1"),
   );
@@ -657,7 +661,7 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
   await Promise.all(nodes.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
   const urls = nodes.map((s, i) => `http://${i === 0 ? "[::1]" : "127.0.0.1"}:${(s.address() as AddressInfo).port}`);
   const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
-  const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000);
+  const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000, seen);
   assert.equal(r.code, 2, `exit ${r.code}; stderr: ${r.err}`);
   const m = /helper: POOL_EVM_RPCS_BASE_SEPOLIA: the fee's state at block \d+, (\d+) s old \(a proof's fee is read up to 600 s back\), 1 try over (\d+) s: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: \[::1\]:\d+ answers 0x0{63}2, 127\.0\.0\.1:\d+ 0x0{63}3/.exec(r.err);
   assert.ok(m !== null, r.err);
@@ -677,15 +681,18 @@ test("MEDIUM-1 a Solana pool whose configured fee is not the kit's stops the sta
   const feePayer = base58(Uint8Array.from([...seed, ...ed25519.getPublicKey(seed)]));
   const program = base58(ed25519.getPublicKey(new Uint8Array(Buffer.from(createHashOf("helper-pool-senders/server/PROGRAM"), "hex"))));
   const RENT = "2BMAAAAAAAAAAAAAAADwPzI="; // the Rent sysvar devnet and mainnet answer: fee 1,300,000
-  // the RPCs are down for the helper's first 3 s (its start read fails), then answer the rent
-  const upAt = Date.now() + 3_000;
+  // the RPCs are down until the helper has answered its health and its start read has failed at least once, then answer
+  // the rent: the window is those two events, never a fixed 3 s the helper's own start can outlast under load (a 4-CPU
+  // run with other work on the machine: the helper answered no health before the RPCs came up, so none before the exit)
+  const seen: unknown[] = [];
   let reads = 0;
+  let failed = 0;
   const stubs = [0, 1].map(() =>
     createServer((q, r) => {
       let b = "";
       q.on("data", (d) => (b += d)).on("end", () => {
         reads++;
-        if (Date.now() < upAt) return void r.writeHead(500).end();
+        if (seen.length === 0 || failed === 0) return void (failed++, r.writeHead(500).end());
         const { id } = JSON.parse(b) as { id: number };
         r.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: { owner: "Sysvar1111111111111111111111111111111111111", data: [RENT, "base64"], lamports: 1, executable: false } } }));
       });
@@ -694,7 +701,7 @@ test("MEDIUM-1 a Solana pool whose configured fee is not the kit's stops the sta
   t.after(() => stubs.forEach((s) => (s.closeAllConnections(), s.close())));
   await Promise.all(stubs.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
   const urls = stubs.map((s) => `http://127.0.0.1:${(s.address() as AddressInfo).port}`).join(",");
-  const r = await startOnce({ POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: "1400000", POOL_SOLANA_RPCS_DEVNET: urls }, 15_000);
+  const r = await startOnce({ POOL_SOLANA_PROGRAM_DEVNET: program, POOL_SOLANA_FEE_PAYER_KEY_DEVNET: feePayer, POOL_SOLANA_FEE_DEVNET: "1400000", POOL_SOLANA_RPCS_DEVNET: urls }, 15_000, seen);
   assert.equal(r.code, 2, `exit ${r.code} after ${reads} rent reads; stderr: ${r.err}`);
   assert.match(r.err, /helper: the devnet pool fee must be the kit's fee for this rent, 1300000 lamports/);
   assert.ok(r.readies.length > 0, "the helper answered its health while the check waited");

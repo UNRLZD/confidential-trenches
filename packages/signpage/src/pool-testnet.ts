@@ -93,7 +93,7 @@ import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { WITHDRAW_BOUNDARY_LAG_MS, WITHDRAW_FREE_MS, finishPoolOnward, runPoolRide, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
-import { EVM_WITHDRAW_BOUNDARY_LAG_MS, evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
+import { EVM_WITHDRAW_BOUNDARY_LAG_MS, evmEpochFeeNow, evmKeptOnwards, evmWithdrawFunds, finishEvmOnward, runEvmPoolWithdraw, type EvmFinishState, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "./pool-withdraw-evm.ts";
 import { evmPoolSend } from "./evm-send.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import type { EvmPoolIndexData, EvmPoolIndexSync } from "../../kit/src/checks/evm/pool-index.ts";
@@ -844,6 +844,10 @@ export type TestnetPool = {
   /** Base's or Robinhood's pool on this page (card evm-deposit-route-mainnet): its pin (the wallet's EVM_POOLS on the
    *  page's network) and the deposit's own pair, the reads a pool quote's floor and follow make; null with no pin. */
   evmPoolOf(chain: "base" | "robinhood"): { pin: EvmPoolPin; rpcs: readonly [EvmRpc, EvmRpc] } | null;
+  /** Base's or Robinhood's relay fee for a note proved now (card evm-cash-move-brings-its-fee): the pool's bind's
+   *  epoch fee on the pass pool's reads and fee hold (pool-withdraw-evm.ts evmEpochFeeNow), the fee a note a move from
+   *  Cash brings is proved at; null with no pool. A read that fails throws. */
+  evmFeeNow(chain: "base" | "robinhood"): Promise<bigint | null>;
   /** The deposit run's host (a new one per run): its `landed` runs the proof queue's pass. */
   host(): PoolDepositHost;
   /** The INCOMING notes finished (src/pool-deposit.ts settlePoolDeposits), one pass at a time: a signed-in load. */
@@ -2061,10 +2065,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the period fee for a deposit in sight, on the pass's hosts, into the page's one hold for the pin (evmFeeHoldOf):
   // the queue its landing opens binds on it. No queue, no notes and no seed: a queue opened here would run a pass at
   // every state read
-  const evmSightHold = async (chain: "base" | "robinhood", signal: AbortSignal): Promise<void> => {
+  // the queue's pass pool's arguments (openEvmQueue), not the queue's pool itself: no queue, no notes and no seed
+  const evmPassPoolOf = (chain: "base" | "robinhood"): Pool<EvmPoolRequest> | null => {
     const e = evmPool(chain);
-    if (e === null || signal.aborted) return;
-    // the queue's pass pool's arguments (openEvmQueue), not the queue's pool itself
+    if (e === null) return null;
     const args: Parameters<typeof walletEvmPool>[0] = {
       pin: e.pin,
       rpcs: e.passRpcs,
@@ -2076,7 +2080,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       relayFee: (ep, s) => evmPoolRelayFee(e.pin.pool, ep, s, over.fetch),
       epochFee: evmEpochFee,
     };
-    const pool = over.evmQueuePool?.(chain) ?? walletEvmPool(args);
+    return (over.evmQueuePool?.(chain) as Pool<EvmPoolRequest> | undefined) ?? walletEvmPool(args);
+  };
+  const evmSightHold = async (chain: "base" | "robinhood", signal: AbortSignal): Promise<void> => {
+    const pool = signal.aborted ? null : evmPassPoolOf(chain);
+    if (pool === null) return;
     const holdFee = (pool as Partial<Pick<EvmPoolOf, "holdFee">>).holdFee;
     if (typeof holdFee !== "function") return;
     const now = await pool.now(signal);
@@ -3601,6 +3609,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return pin === undefined || !wayOut("solana") ? { error: "not_allowed" } : deposit(ask, ctx, from);
     },
     evmPoolOf: (chain) => ((e) => (e === null ? null : (evmWarm(chain), evmSight(chain), { pin: e.pin, rpcs: e.rpcs })))(evmPool(chain)),
+    evmFeeNow: async (chain) => {
+      const pool = evmPassPoolOf(chain);
+      return pool === null ? null : (await evmEpochFeeNow(pool)).fee;
+    },
     host: () => host(),
     settle,
     stateRead,
