@@ -58,4 +58,8 @@ test("facts() reads each mark from the minified code as the build writes it, and
   assert.equal(facts(index, `${sol};${near.replace("chain===`near`", "chain===`x`")};${params};${evm}`).near, false);
   assert.equal(facts(index, `${sol};${near};${params.replace("chain:Bh", "chain:Ph")};${evm}`).near, false);
   assert.equal(facts(index, `${sol};${near};${params}`).evm, false);
+  // card evm-cash-move-brings-its-fee: `short` asked on every pool chain, after the tap read; gone, the bare gap moved
+  const every = sol.replace("l!==null&&a===`solana`&&c.short", "l!==null&&l<n.amount&&c.short");
+  assert.equal(facts(index, `${every};${near};${params};${evm}`).sol, true);
+  assert.equal(facts(index, `${every.replace("c.short?await c.short", "0?0")};${near};${params};${evm}`).sol, false);
 });
