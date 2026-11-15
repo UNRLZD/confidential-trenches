@@ -1,5 +1,5 @@
 // A deposit, buy, sell and withdraw of the Solana pool on a local copy of mainnet, with no real money.
-//   node packages/signpage/scripts/sol-mainnet-copy.mjs <out.json> [curve=<mint>] [mayhem=<mint>] [graduated=<mint>] [dlmm=<mint>]
+//   node packages/signpage/scripts/sol-mainnet-copy.mjs <out.json> [curve=<mint>] [mayhem=<mint>] [graduated=<mint>] [dlmm=<mint>] [cpmm=<mint>] [amm-v4=<mint>]
 // - Picks one coin of each kind (an open bonding curve, a Mayhem curve, a graduated PumpSwap coin) from the helper's
 //   GET /v1/market/lists?chain=solana unless given, each classified by its own accounts read on mainnet.
 // - Reads, on public mainnet RPCs only and paced (read-only: nothing is signed or sent there), every account the pool
@@ -23,6 +23,9 @@
 //   readSolanaDlmmPairs, scanned on api.mainnet-beta and Solana Vibe Station, ranked on the read pair), each pair's
 //   buy and sell accounts cloned, and it runs on a DLMM lookup table the copy makes (mainnet has none until the owner's
 //   paste of venue-table.mjs --venue dlmm), the page's finder on the copy's pair.
+// - cpmm and amm-v4 (the same card), run only when SOL_COPY_ONLY names them: a coin whose SOL pools are Raydium CPMM
+//   pools (HIGH 7ymF66Z6… unless given) or Raydium AMM v4 pools (CzLSuj… unless given), found, cloned and run as the
+//   dlmm kind is (the kit's readSolanaCpmmPools and readSolanaAmmV4Pools), each on a table of its venue the copy makes.
 // - SOL_COPY_PLANT=mayhem-drop: the Mayhem coin's buy is built with its curve read as not Mayhem, so the buy names the
 //   plain fee recipient in place of the Mayhem one; the run must fail with pump's own error.
 // - SOL_COPY_FLOW=pieces (card buy-spends-several-pieces): the curve coin only, on SOL_COPY_ENGINE (swallow by default),
@@ -51,7 +54,7 @@ import { RENT_FEATURES, clonePlan, listCandidates, pendingFeature, txRecord } fr
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
 const [OUT, ...given] = process.argv.slice(2);
-if (!OUT) throw new Error("usage: sol-mainnet-copy.mjs <out.json> [curve=<mint>] [mayhem=<mint>] [graduated=<mint>] [dlmm=<mint>]");
+if (!OUT) throw new Error("usage: sol-mainnet-copy.mjs <out.json> [curve=<mint>] [mayhem=<mint>] [graduated=<mint>] [dlmm=<mint>] [cpmm=<mint>] [amm-v4=<mint>]");
 const ONLY = (process.env.SOL_COPY_ONLY ?? "").split(",").filter(Boolean);
 const PLANT = process.env.SOL_COPY_PLANT ?? "";
 const STEPS = process.env.SOL_COPY_STEPS ?? "all"; // "buy": deposit and buy only
@@ -109,8 +112,18 @@ const many = async (keys) => {
 
 // 1. the coins
 const coins = Object.fromEntries(given.map((g) => g.split("=")).map(([k, v]) => [k, { mint: v, list: "given" }]));
-const KINDS = PIECES || PLAIN ? ["curve"] : ["curve", "mayhem", "graduated", "dlmm"].filter((k) => (ONLY.length === 0 ? k !== "dlmm" : ONLY.includes(k)));
-coins.dlmm ??= KINDS.includes("dlmm") ? { mint: "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr", list: "NEARKAT" } : undefined;
+// the kinds whose pools are found by a scan, as the page's finders find them (src/page-rpc.ts keptPoolFinders): each its
+// kit venue, its finder and its default coin (each read on mainnet 15 Nov)
+const { readSolanaDlmmPairs, solanaDlmmBitmapExtension } = await import("../../kit/src/trade/solana/dlmm.ts");
+const { readSolanaCpmmPools } = await import("../../kit/src/trade/solana/cpmm.ts");
+const { readSolanaAmmV4Pools } = await import("../../kit/src/trade/solana/amm-v4.ts");
+const SCANNED = {
+  dlmm: { venue: "dlmm", find: readSolanaDlmmPairs, coin: { mint: "6UtY9iTZMQQ5QZVrbzFnNaJntV7oySm9k97mvwnuZcxr", list: "NEARKAT" } },
+  cpmm: { venue: "raydium-cpmm", find: readSolanaCpmmPools, coin: { mint: "7ymF66Z6VhgNiwadtVhjTtT6U7iQRpSxeiRrhfufhigh", list: "HIGH" } },
+  "amm-v4": { venue: "raydium-amm-v4", find: readSolanaAmmV4Pools, coin: { mint: "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump", list: "CzLSuj" } },
+};
+const KINDS = PIECES || PLAIN ? ["curve"] : ["curve", "mayhem", "graduated", ...Object.keys(SCANNED)].filter((k) => (ONLY.length === 0 ? !Object.hasOwn(SCANNED, k) : ONLY.includes(k)));
+for (const [k, x] of Object.entries(SCANNED)) coins[k] ??= KINDS.includes(k) ? x.coin : undefined;
 let candidates = [];
 if (KINDS.some((k) => !coins[k])) {
   const lists = await (await fetch("https://ct-api.unrealized.trade/v1/market/lists?chain=solana", { headers: { origin: "https://ct.unrealized.trade" } })).json();
@@ -136,28 +149,28 @@ if (KINDS.some((k) => !coins[k])) {
 // each kind's first coin whose venue the kit builds (a curve quoted in another coin than SOL is one it does not)
 const skipped = [];
 const venues = {};
-const { readSolanaDlmmPairs, solanaDlmmBitmapExtension } = await import("../../kit/src/trade/solana/dlmm.ts");
-const { readSolanaDlmmBuyVenue } = await import("../../kit/src/trade/solana/pool-buy.ts");
+const { readSolanaVenueAt } = await import("../../kit/src/trade/solana/pool-buy.ts");
 for (const k of KINDS) {
   const list = coins[k] ? [coins[k]] : candidates.filter((r) => r.kind === k);
   coins[k] = null;
   for (const c of list) {
     try {
-      if (k === "dlmm") {
-        // every pair the page would find, each read for a buy and for a sell (a pair that refuses is left out)
+      if (Object.hasOwn(SCANNED, k)) {
+        // every pool the page would find, each read for a buy and for a sell (a pool that refuses is left out)
+        const { venue, find } = SCANNED[k];
         mainnetReads += 4;
-        const pairs = await readSolanaDlmmPairs([main[0], paced("https://public.rpc.solanavibestation.com")], main, c.mint);
+        const pools = await find([main[0], paced("https://public.rpc.solanavibestation.com")], main, c.mint);
         const read = [];
-        for (const pair of pairs) {
+        for (const pool of pools) {
           try {
-            read.push({ pair, buy: await readSolanaDlmmBuyVenue(main, c.mint, pair, "buy"), sell: await readSolanaDlmmBuyVenue(main, c.mint, pair, "sell") });
+            read.push({ pool, buy: await readSolanaVenueAt(main, venue, c.mint, pool, "buy"), sell: await readSolanaVenueAt(main, venue, c.mint, pool, "sell") });
           } catch (e) {
-            skipped.push({ kind: k, mint: c.mint, pair, why: String(e?.message ?? e).slice(0, 160) });
+            skipped.push({ kind: k, mint: c.mint, pool, why: String(e?.message ?? e).slice(0, 160) });
           }
         }
-        if (read.length === 0) throw new Error(`no DLMM pair of ${c.mint} reads for a buy and a sell`);
+        if (read.length === 0) throw new Error(`no ${venue} pool of ${c.mint} reads for a buy and a sell`);
         venues[k] = read;
-        coins[k] = { mint: c.mint, list: c.list, symbol: c.symbol ?? "", pairs: read.map((x) => x.pair) };
+        coins[k] = { mint: c.mint, list: c.list, symbol: c.symbol ?? "", pools: read.map((x) => x.pool) };
         break;
       }
       venues[k] = await readSolanaPoolBuyVenue(main, k === "graduated" ? "pumpswap" : "pump-curve", c.mint, () => 0);
@@ -190,12 +203,13 @@ const want = new Set([...DEPLOY.table_addresses, DEPLOY.table, DEPLOY.program_id
 for (const [kind, c] of Object.entries(coins)) {
   if (!c || !KINDS.includes(kind)) continue;
   const venue = venues[kind];
-  if (kind === "dlmm") {
-    // each pair's buy and sell accounts that no W changes, its bitmap extension when it has one, and the coin's mint
+  if (Object.hasOwn(SCANNED, kind)) {
+    // each pool's buy and sell accounts that no W changes, a DLMM pair's bitmap extension when it has one, and the
+    // coin's mint
     for (const v of venue) {
       const perW = DUMMY.map((w) => new Set([...keysOf(solanaPoolBuySteps(v.buy, w, 1n, 0n)), ...keysOf(solanaPoolSellSteps(v.sell, w, 1n, 1n))]));
       for (const k of perW[0]) if (perW[1].has(k)) want.add(k);
-      want.add(solanaDlmmBitmapExtension(v.pair));
+      if (kind === "dlmm") want.add(solanaDlmmBitmapExtension(v.pool));
     }
     want.add(c.mint);
     continue;
@@ -449,11 +463,12 @@ for (const kind of KINDS) {
     log(`the copy's PumpSwap table ${JSON.stringify(madeTables.pumpswap)}`);
     tables = `pump-curve=${DEPLOY.table},pumpswap=${madeTables.pumpswap.table}`;
   }
-  // a DLMM coin runs on the copy's own DLMM table, with the pump curve's pinned one
-  if (kind === "dlmm") {
-    madeTables.dlmm ??= await copyTable("dlmm");
-    log(`the copy's DLMM table ${JSON.stringify(madeTables.dlmm)}`);
-    tables = `pump-curve=${DEPLOY.table},dlmm=${madeTables.dlmm.table}`;
+  // a DLMM or Raydium coin runs on the copy's own table of its venue, with the pump curve's pinned one
+  if (Object.hasOwn(SCANNED, kind)) {
+    const v = SCANNED[kind].venue;
+    madeTables[v] ??= await copyTable(v);
+    log(`the copy's ${v} table ${JSON.stringify(madeTables[v])}`);
+    tables = `pump-curve=${DEPLOY.table},${v}=${madeTables[v].table}`;
   }
   const flow = await runNode(["packages/signpage/scripts/pool-flow-devnet.mjs", tables, c.mint, "max", flowOut], { FLOW_COPY: cfg, ...(STEPS === "buy" ? { FLOW_COPY_STOP: "buy" } : {}) });
   const f = existsSync(flowOut) ? JSON.parse(readFileSync(flowOut, "utf8")) : null;
@@ -526,7 +541,7 @@ const record = {
     "whether a block builder or a leader includes the transaction: the copy has no Jito block engine and one leader, itself; the helper's engine is a local stand-in (busy, refused, swallowing or landing the bundle) and its plain copies go to the copy",
     "the real engines' answers and their timing: the stand-in answers at once",
     "a graduated coin's buy on mainnet's own PumpSwap table: mainnet has none yet, so the copy makes one with the same list (contracts/pool-solana/scripts/venue-table.mjs's steps) from a key it funds",
-    "a DLMM coin's buy on mainnet's own DLMM table: mainnet has none until the owner's paste of venue-table.mjs --venue dlmm, so the copy makes one with the same list from a key it funds",
+    "a DLMM or Raydium coin's buy on mainnet's own table of its venue: mainnet has none until the owner's paste of venue-table.mjs --venue <venue>, so the copy makes one with the same list from a key it funds",
     "priority fee levels: the copy's only transactions are the run's own, so no fee market",
     "rate limits of real providers: the page reads the copy's one RPC under two names",
     "the helper's mainnet fee payer: the copy's fee payer is a fresh local key (the pool program binds the fee payer only through the proof's context, release.rs, so any key it signs with is accepted)",
