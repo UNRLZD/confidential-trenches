@@ -26,6 +26,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
+import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 
 const KEY = "buy-quote-before-any-note";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -39,6 +40,9 @@ export const COINS_MAX = 8;
 const ANSWER_MS = 45_000;
 const DECIMAL = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 const AGAIN = new Set(["quote_check_failed", "down", "busy", "timeout"]);
+/** The kit's hello, sent from the frame before the asks, so the page reads every answer at this kit's level (with_cash
+ *  and out in full), whatever kit the deployed terminal names. */
+const HELLO = { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION };
 
 /** The coins of `chain` in the helper's lists (trending, then graduating, then new), each once, at most COINS_MAX; on
  *  Solana pump.fun's mints first (their names end in "pump"), whose venue the page reads (src/pools.ts readCoinVenue). */
@@ -55,8 +59,9 @@ export function coinsOf(answer, chain) {
 
 /** In the APP_HOST frame: one request to the shell (the kit's envelope, v 1, its id a fresh UUID as the page's API
  *  takes only: packages/signpage/src/api.ts envelope) and its answer, or { timeout }. */
-const ASK_IN_FRAME = async ({ sign, ask, ms }) =>
+const ASK_IN_FRAME = async ({ sign, hello, ask, ms }) =>
   new Promise((done) => {
+    window.parent.postMessage(hello, sign);
     const msg = { v: 1, id: crypto.randomUUID(), ...ask };
     const t = setTimeout(() => (removeEventListener("message", on), done({ ok: false, code: "timeout" })), ms);
     function on(e) {
@@ -128,7 +133,7 @@ export async function read(sign = SIGN, fetchFn = fetch, site = null) {
         // a busy or down answer is asked again once, as the box asks again (the app's coinTapAgainMs)
         for (let i = 0; i < 2; i++) {
           const f = appFrame();
-          a = f ? await f.evaluate(ASK_IN_FRAME, { sign, ask, ms: ANSWER_MS }).catch((e) => ({ ok: false, code: `evaluate: ${String(e?.message ?? e).slice(0, 80)}` })) : a;
+          a = f ? await f.evaluate(ASK_IN_FRAME, { sign, hello: HELLO, ask, ms: ANSWER_MS }).catch((e) => ({ ok: false, code: `evaluate: ${String(e?.message ?? e).slice(0, 80)}` })) : a;
           if (a.ok || (a.code !== "busy" && a.code !== "down")) break;
           await page.waitForTimeout(3_000);
         }
