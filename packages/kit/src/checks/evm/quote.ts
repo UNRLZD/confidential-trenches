@@ -74,6 +74,7 @@ import {
 import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { evmSellReleasesAt, evmSellSentOf, type EvmReleaseLog, type EvmSellReleases, type EvmSellSent } from "../../trade/evm/sell-releases.ts";
+import { EVM_PROVIDER_HOLD_MS, evmPaceReady, evmPaceTake, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -756,6 +757,9 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
 export const EVM_HEDGE_MS = 400;
 // a provider's hold (timed, EVM_HOLD_MS), for an answer that differs from the one a quote used (review of bc189de, M-2)
 const HOLD = new WeakMap<EvmRpc, () => void>();
+// whether a provider is held now, for every reader (its ranking's hold or any reader's throttle of it: pace.ts): agreeing
+// asks a held one as a backup only where fewer than two unheld are left
+const HELD_OF = new WeakMap<EvmRpc, () => boolean>();
 function agreeing<T>(
   rpcs: readonly EvmRpc[],
   one: (rpc: EvmRpc, k: number, gate: Gated) => Promise<T>,
@@ -826,20 +830,20 @@ function agreeing<T>(
     const lateAfter = () => (first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));
     const fire = () => {
       if (done) return;
-      if (!moving) return start();
+      if (!moving) return start(true);
       // the timer runs only while a provider is left (arm; each start re-arms it), so a moved request has a next
       const ks = Array.from({ length: started }, (_, n) => started - 1 - n).filter((n) => !sentK[n] && !movedK[n] && !settledK[n]);
       const stuck = ks.find((n) => STALLED.get(list[n]!)?.() === true);
       if (stuck !== undefined) {
         movedK[stuck] = true;
-        return start();
+        return start(true);
       }
       if (ks.length > 0) return arm();
       // every request out was sent: late once the newest of them has been out lateAfter()
       const out = Array.from({ length: started }, (_, n) => n).filter((n) => sentK[n] && !settledK[n]);
       const since = performance.now() - Math.max(...out.map((n) => sentAt[n]!));
       if (out.length > 0 && since < lateAfter()) return arm(lateAfter() - since);
-      if (late?.() !== false) start();
+      if (late?.() !== false) start(true);
     };
     const arm = (ms = lateAfter()) => {
       clearTimeout(timer);
@@ -848,8 +852,20 @@ function agreeing<T>(
         (timer as { unref?: () => void }).unref?.();
       }
     };
-    const start = () => {
+    // a provider held for every reader (a throttle or a refused connection, HELD_OF) is not asked as a backup while two
+    // unheld providers are still in the round, answered or out (card evm-taps-meet-no-429: robinhood.drpc.org, held,
+    // was asked as each slow round's backup and answered 21 of its 176 posts 429, read-only run 2026-11-15 08:20Z): an
+    // unheld one later in the list goes first, else the round waits on the two; a contested round asks every provider
+    const heldK = (n: number) => HELD_OF.get(list[n]!)?.() === true;
+    const failedK: boolean[] = [];
+    const live = () => Array.from({ length: started }, (_, n) => n).filter((n) => !heldK(n) && !movedK[n] && !failedK[n]).length;
+    const start = (backup = false) => {
       if (done || started >= list.length) return;
+      if (backup && !contested && started >= 2 && heldK(started)) {
+        const j = list.findIndex((_, n) => n > started && !heldK(n));
+        if (j > started) [list[started], list[j]] = [list[j]!, list[started]!];
+        else if (live() >= 2) return arm();
+      }
       const k = started++;
       t0[k] = performance.now();
       const gate: Gated = { sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now())), moved: () => movedK[k] === true, spare: () => !done && started < list.length };
@@ -880,9 +896,10 @@ function agreeing<T>(
           // a request moved to the next provider is no failure: the next was asked in its place
           if (movedK[k]) return done ? undefined : end();
           fails++;
+          failedK[k] = true;
           failed ??= { e };
           if (done) return;
-          start();
+          start(true);
           end();
         },
       );
@@ -1550,12 +1567,13 @@ class ScanStop extends EvmQuoteError {}
  *  that is not a batch or past its size (BadAnswer). The scan asks its halves on the same provider, never the next. */
 class ScanAnswered extends EvmQuoteError {}
 /** Each scan provider that throttled (an HTTP 429, or a call's error naming its rate limit), the time until which a
- *  request with another provider behind it that the next may read alone (a warm one, or one of SCAN_ALONE blocks at
- *  most) is not sent to it, in any quote (card evm-taps-meet-no-429): as the quote's providers are held (timed,
+ *  request with another provider behind it that the next reads in one round of its own (a warm one, the head's, or
+ *  one of the next's span x parallel blocks at most) is not sent to it, in any quote (card evm-taps-meet-no-429): as the quote's providers are held (timed,
  *  EVM_HOLD_MS), so a throttled scan provider is asked once, never again after 0.5, 1 and 2 s by the quote that met it
  *  and again by each next one (rpc.mainnet.chain.robinhood.com answered 16 scan posts 429 in 6.4 s, three taps in a
- *  row, with daybreak and Pocket standing by: read-only run from the Mac, 2026-11-15 08:05Z). A request past SCAN_ALONE
- *  blocks (a cold scan's depth, which no spare reads alone) still asks it, after the gate's backoff. */
+ *  row, with daybreak and Pocket standing by: read-only run from the Mac, 2026-11-15 08:05Z). A longer request (a cold
+ *  scan's depth) still asks it, after the gate's backoff. The transport's own hold (pace.ts, any reader's throttle or
+ *  refused connection of the provider) counts as this one. */
 const SCAN_HELD = new WeakMap<EvmRpc, number>();
 /** The most blocks one getLogs of `calls` spans (0: none). */
 const scanBlocksOf = (calls: readonly EvmRpcCall[]): number =>
@@ -1563,7 +1581,7 @@ const scanBlocksOf = (calls: readonly EvmRpcCall[]): number =>
     const f = c.params[0] as { fromBlock?: unknown; toBlock?: unknown } | undefined;
     return typeof f?.fromBlock === "string" && typeof f.toBlock === "string" ? Number(f.toBlock) - Number(f.fromBlock) + 1 : Infinity;
   }));
-function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadline?: Deadline, provider?: EvmRpc): ScanGate {
+function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadline?: Deadline, provider?: EvmRpc, spareBlocks = 0): ScanGate {
   let limit = parallel;
   // the limit up to which each answer adds 1, half the limit at the last congestion; past it an answer adds 1 / limit
   let sst = parallel;
@@ -1649,11 +1667,17 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
     async ask(rpc, calls, tries, fast = false) {
       scanAsks++;
       fast &&= spareNext;
-      // a request the next may read alone: a warm one, or one of SCAN_ALONE blocks at most (the head's read, a gap since
-      // the index: Robinhood's margin alone is 7,119 blocks, past one round of daybreak's 4 x 2,000)
-      const spare = fast || (spareNext && scanBlocksOf(calls) <= SCAN_ALONE);
+      // a request the next reads in one round of its own requests (`spareBlocks`, its span x its parallel): a warm one,
+      // the head's read, or a gap since the index cut to the next's round (jobsOf: Robinhood's margin alone is 7,119
+      // blocks, past one round of daybreak's 4 x 2,000 as one scan, inside it as each request). Never more: a request of
+      // SCAN_ALONE blocks on Base's Tenderly is 100 requests at its 2 calls a second
+      const spare = fast || (spareNext && scanBlocksOf(calls) <= spareBlocks);
       // such a request goes to the next while this provider is held: nothing is sent to it
-      if (spare && provider !== undefined && (SCAN_HELD.get(provider) ?? 0) > performance.now()) throw new ScanRefused("rpc_error", "the scan provider is held after its throttle");
+      if (spare && provider !== undefined && ((SCAN_HELD.get(provider) ?? 0) > performance.now() || providerHeld(provider))) throw new ScanRefused("rpc_error", "the scan provider is held after its throttle");
+      // and while its pace has no turn free now (pace.ts): the next takes it at once instead of the tap waiting its turn
+      // (rpc.mainnet.chain.robinhood.com, the scan's first at 1 post a second, took 2 to 6 of each warm tap's posts and
+      // 1 to 4 s of its time: read-only run from the Mac, 2026-11-15 09:03Z)
+      if (spare && provider !== undefined && !providerReady(provider, calls.length)) throw new ScanRefused("rpc_error", "the scan provider's pace has no turn free now");
       // a throttle holds the provider; such a request goes to the next at once, a longer cold one waits the gate's backoff
       const held = (sent: number, afterMs: number | null) => {
         if (provider !== undefined) SCAN_HELD.set(provider, performance.now() + EVM_HOLD_MS);
@@ -2206,7 +2230,8 @@ export function evmRanked(urls: readonly string[], now: number = performance.now
   const last = quoteLastOf();
   const rank = (u: string, k: number) => {
     const s = SPEED.get(u);
-    const slow = (last.has(u) ? 3 : 0) + (s === undefined ? 0 : s.held > now ? 2 : s.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0);
+    // held: by this ranking's own measure, or by any reader's throttle of the provider (pace.ts)
+    const slow = (last.has(u) ? 3 : 0) + ((s !== undefined && s.held > now) || evmProviderHeld(u, now) ? 2 : s?.out.some((t) => now - t > EVM_HEDGE_MS) ? 1 : 0);
     return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;
   };
   return urls
@@ -2234,6 +2259,7 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): Ev
   return urls.map((u) => {
     const f = timed(u, evmJsonRpc(u, fetchFn));
     URL_OF.set(f, u);
+    HELD_OF.set(f, () => speedOf(u).held > performance.now() || evmProviderHeld(u));
     return f;
   });
 }
@@ -2284,6 +2310,8 @@ function gated(rpcsIn: readonly EvmRpc[], parallel: number, deadline?: Deadline,
       }),
     );
     STALLED.set(f as unknown as EvmRpc, () => flying > 0 && performance.now() - lastAt > 4 * EVM_HEDGE_MS);
+    const heldNow = HELD_OF.get(rpc);
+    if (heldNow !== undefined) HELD_OF.set(f as unknown as EvmRpc, heldNow);
     const hold = HOLD.get(rpc);
     if (hold !== undefined) HOLD.set(f as unknown as EvmRpc, hold);
     return f;
@@ -2918,7 +2946,7 @@ async function routeSetOf(a: {
   const t0 = performance.now();
   const firstOn = (v.scan === undefined ? [] : [v.scan, ...(v.scan.spares ?? [])])
     .slice(0, scanRpcs.length)
-    .reduceRight<ScanOn | undefined>((next, c, i) => ({ rpc: scanRpcs[i]!, gate: scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs), scanRpcs[i]!), span: c.span, parallel: c.parallel, orSpan: c.orSpan, next }), undefined);
+    .reduceRight<ScanOn | undefined>((next, c, i) => ({ rpc: scanRpcs[i]!, gate: scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs), scanRpcs[i]!, next === undefined ? 0 : next.span * next.parallel), span: c.span, parallel: c.parallel, orSpan: c.orSpan, next }), undefined);
   let scanFrom: Promise<ScanFrom> | undefined;
   // the head, read once per quote on the first; where it answers none, on the next in the list that does. The
   // requests stay on the first, the rest behind each (review of 22e29c9, B1: a head answered after 2 s sent a whole
@@ -4720,12 +4748,42 @@ const reverted = (a: unknown) => {
 // the errors of a connection that was never made (Node's net and undici: a timed-out or refused connect, an
 // unreachable network, a name that did not resolve)
 const CONNECT_ERRORS = new Set(["ETIMEDOUT", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"]);
+/** Each evmJsonRpc provider's URL: its hold (pace.ts) is read by every reader that holds the provider object. */
+const RPC_URL = new WeakMap<EvmRpc, string>();
+/** Whether `rpc`'s provider is held for every reader (a 429, a named rate limit or a refused connection, any reader's). */
+const providerHeld = (rpc: EvmRpc): boolean => {
+  const u = RPC_URL.get(rpc);
+  return u !== undefined && evmProviderHeld(u);
+};
+/** Whether a post of `calls` calls to an evmJsonRpc provider leaves now, with no wait for its pace's turn (pace.ts). */
+const providerReady = (rpc: EvmRpc, calls: number): boolean => {
+  const u = RPC_URL.get(rpc);
+  return u === undefined || evmPaceReady(u, calls);
+};
+/** How long an evmJsonRpc provider is still held for every reader, in ms (0: not held, or not an evmJsonRpc provider):
+ *  the pool index's readers, which have no other provider to ask, wait it out (pool-index.ts). */
+export const evmRpcHeldMs = (rpc: EvmRpc): number => {
+  const u = RPC_URL.get(rpc);
+  return u === undefined ? 0 : evmProviderHeldMs(u);
+};
 /** Each JSON-RPC request's time limit (the NEAR client's RPC_TIMEOUT_MS and Solana's SOLANA_CALL_TIMEOUT_MS do the same). */
 export const EVM_RPC_TIMEOUT_MS = 10_000;
 /** A provider from a JSON-RPC URL: one POST per batch, answers matched to calls by id, at most `maxBytes` read. */
 export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes = 1 << 20, timeoutMs = EVM_RPC_TIMEOUT_MS): EvmRpc {
   if (typeof url !== "string" || !/^https:\/\//.test(url)) return refuse("bad_request", "a provider URL is https");
-  return async (calls, until) => {
+  const rpc: EvmRpc = async (calls, until) => {
+    // the provider's turn at its pace, shared by every reader on the device (pace.ts); its time is not the request's
+    const turn = evmPaceTake(url, calls.length, until);
+    const give = typeof turn === "function" ? turn : await turn;
+    try {
+      return await post(calls, until);
+    } finally {
+      give();
+    }
+  };
+  RPC_URL.set(rpc, url);
+  return rpc;
+  async function post(calls: readonly EvmRpcCall[], until?: AbortSignal): Promise<unknown[]> {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));
     // a request that never returns is a refusal once its time runs out, never a quote (and a buy button) that hangs
     let res: Response;
@@ -4738,10 +4796,19 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       // fetch resource." in Firefox); a timeout or an abort is a DOMException, never this
       const cause = (e as { cause?: unknown } | null)?.cause;
       const code = (cause as { code?: unknown } | null | undefined)?.code;
-      if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT_ERRORS.has(code)))) throw new Unreachable(`no connection (${typeof code === "string" ? code : e.message})`);
+      if (e instanceof TypeError && (cause === undefined || (typeof code === "string" && CONNECT_ERRORS.has(code)))) {
+        // held for every reader: a browser reads a 429 whose CORS headers it refuses (Robinhood's own: allow-origin
+        // "*,*") as no connection
+        evmProviderHold(url);
+        throw new Unreachable(`no connection (${typeof code === "string" ? code : e.message})`);
+      }
       throw e;
     }
-    if (res.status === 429) throw new RateLimited("the provider answered 429 Too Many Requests", retryAfterMs(res.headers.get("retry-after")));
+    if (res.status === 429) {
+      const after = retryAfterMs(res.headers.get("retry-after"));
+      evmProviderHold(url, Math.max(EVM_PROVIDER_HOLD_MS, after ?? 0));
+      throw new RateLimited("the provider answered 429 Too Many Requests", after);
+    }
     // any other status outside 2xx is a failure, never an answer to read (review MED-1: robinhood-rpc.publicnode.com
     // answers a read past its state cut 403 with a JSON-RPC error inside, which was timed as a fast answer)
     if (!res.ok) {
@@ -4768,6 +4835,9 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
       const id = (a as { id?: unknown } | null)?.id;
       if (typeof id === "number" && Number.isInteger(id) && id >= 0 && id < calls.length && !byId.has(id)) byId.set(id, a);
     }
-    return calls.map((_, id) => byId.get(id) ?? null);
-  };
+    const out = calls.map((_, id) => byId.get(id) ?? null);
+    // a call's error naming the rate limit holds the provider as a 429 does
+    if (out.some(limited)) evmProviderHold(url);
+    return out;
+  }
 }
