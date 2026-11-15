@@ -24,8 +24,9 @@
 //
 // cashFirst, at a tap: a pool.buy above what one tap spends now (tap_max) asks `need` for the shortfall the page sizes
 // (Solana's solanaMoveShort, Base's and Robinhood's evmMoveShort: the notes the move brings pay their own costs) and,
-// while money is on its way, waits for it (a read each CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS at most) and
-// buys the whole ask once one tap spends it. The app is told the tap waits on the move (route { move: "cash", op }, op
+// while money is on its way, waits for it (card cash-buy-waits-for-its-move: the move's own landing, every part in the
+// pool or stopped, then the chain's landing notes and their proofs, read each CASH_MOVE_POLL_MS; no clock from the tap)
+// and buys the whole ask once one tap spends it. The app is told the tap waits on the move (route { move: "cash", op }, op
 // the move op's id in state.ops), so its flow shows the move as its own step. With nothing on its way: the pool buy's
 // own answer.
 //
@@ -39,10 +40,11 @@
 // that waits on one, public ids and the error's words only, its last step and error kept in the move's record (`last`).
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
-import { DEPOSIT_QUOTE_URL } from "../../wallet/src/deposit/quote.ts";
+import { DEPOSIT_QUOTE_DEADLINE_MS, DEPOSIT_QUOTE_URL } from "../../wallet/src/deposit/quote.ts";
 import { DEPOSIT_DRY_PLACEHOLDER, TRADE_CHAINS, type ErrorCode, type MoveStage, type PoolChain, type PoolMoveDry, type PoolStatePrice, type TradeChain, type TxRef } from "../../kit/src/signpage/messages.ts";
-import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
-import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
+import { SOL_EPOCH_MS, SOL_LADDER, SOL_PIECES } from "../../wallet/src/pool/solana.ts";
+import { EVM_EPOCH_MS, EVM_LADDER, EVM_PIECES } from "../../wallet/src/pool/evm.ts";
+import { pieceChunk, type PieceRule } from "../../wallet/src/pool/pieces.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import type { PoolAsk } from "./rules/pool.ts";
@@ -56,10 +58,12 @@ import { errorText, trace, traceAlias, traceBegin, type TraceFields, type TraceL
 
 /** How often a moved tap reads whether one tap now spends the ask. */
 export const CASH_MOVE_POLL_MS = 2_000;
-/** How long a tap waits for one tap to spend the ask: 1Click's NEAR to
- *  Solana leg measured at 38.9 s (perf/runs/solana-intents-out-2026-10-26.json), the follow's deposit from U_X and the
- *  queue's proofs of the new notes, about four times over. */
-export const CASH_MOVE_WAIT_MS = 180_000;
+/** The longest one read of what one tap spends may take while a tap waits on a move: one that does not answer by then
+ *  counts as nothing yet, and the wait reads again (card cash-buy-waits-for-its-move: the wait itself has no clock). */
+export const CASH_TAP_READ_MS = 30_000;
+/** How long past its quote's deadline a part with nothing delivered still holds a tap: the follow's own end (expired,
+ *  read on both RPCs' clocks) comes first; this is the stop when no follow writes one. */
+export const CASH_MOVE_DEADLINE_MARGIN_MS = 60_000;
 const IMPLICIT = /^[0-9a-f]{64}$/;
 
 /** The margin Cash is counted at in a tap's most (with_cash) under the device's price: 1Click's slippage (the deposit
@@ -450,7 +454,13 @@ export function expired(rec: MoveOpRecord | undefined, now: number, out?: { stag
 }
 
 /** What a move's follow op (the quote's pool_deposit op, pool-deposit-follow.ts PoolDepositOp) says, read from the store. */
-export type MoveFollow = { stage: string; final?: true; txs?: readonly TxRef[] };
+export type MoveFollow = { stage: string; final?: true; txs?: readonly TxRef[]; follow?: { deadline_ms?: unknown } };
+/** A part of a move out of Cash, at its stop (card cash-buy-waits-for-its-move): its money reached the pool (the follow's
+ *  in_pool), or it stopped with why (its withdraw failed or was not sent by its send-by, its quote's follow failed or was
+ *  refunded, its quote's deadline passed with nothing delivered, the sign out). */
+export type MoveReach = { landed: true } | { landed: false; error: string };
+/** A follow stage that says nothing reached U_X yet: past the quote's deadline, the part stops. */
+const UNDELIVERED = new Set(["quote_checked", "waiting", "expired"]);
 
 export type CashMoverDeps = {
   /** The device's price of `chain`'s pool coin (src/pool-price.ts), null past its bound. */
@@ -495,7 +505,8 @@ export type CashMoverDeps = {
   signal?: AbortSignal;
 };
 
-type Way = { chain: PoolChain; id: string; op: string; lamports: bigint; going: Promise<boolean>; since: number };
+// a part on its way: counted (coming) and joined (need) until it reaches the pool or stops (`reached`), never by a clock
+type Way = { chain: PoolChain; id: string; op: string; lamports: bigint; reached: MoveReach | null };
 
 /** A move op's stage from its follow op's (pool-deposit-follow.ts): done once the follow ended in the pool (in_pool
  *  final), into_pool while the money that reached U_X goes into the pool, refunded while 1Click's refund is carried on,
@@ -514,6 +525,11 @@ export function unitsText(x: bigint, d: number): string {
   return f ? `${t.slice(0, t.length - d)}.${f}` : t.slice(0, t.length - d);
 }
 const USDC_DECIMALS = 6;
+/** unitsText's inverse: a decimal of at most `d` fraction digits in base units; null when it is not one. */
+export function unitsOf(x: string, d: number): bigint | null {
+  const m = new RegExp(`^(0|[1-9]\\d{0,40})(?:\\.(\\d{1,${d}}))?$`).exec(x);
+  return m === null ? null : BigInt(m[1]!) * 10n ** BigInt(d) + BigInt((m[2] ?? "").padEnd(d, "0"));
+}
 
 /** A move out of Cash: refused, or on its way under its op id with the least it delivers. */
 export type MoveSent = Refusal | { op: string; minOut: bigint };
@@ -537,6 +553,10 @@ export type CashMover = {
   least(chain: PoolChain, usdc: bigint): bigint;
   ways(): number;
   coming(chain: PoolChain): bigint;
+  /** Settles once every part of the move under `op` (need's or move's op id) reached the pool or stopped (card
+   *  cash-buy-waits-for-its-move): `landed` when any part's money is in the pool, else the first stop's words. An op
+   *  this mover started no part for: stopped. */
+  landing(op: string): Promise<{ landed: boolean; error?: string }>;
   /** After a reload (main.ts, at sign-in): each move op not yet done or failed follows its quote's follow op
    *  (`<op>/1click`, the one rail) on from its last stage; nothing is quoted or withdrawn again. */
   resume(moves: readonly { id: string; rec: MoveOpRecord }[]): void;
@@ -549,6 +569,21 @@ export function cashMover(d: CashMoverDeps): CashMover {
   let ways: Way[] = [];
   let turn: Promise<unknown> = Promise.resolve();
   const tracks: Promise<void>[] = [];
+  // each part's stop, once (card cash-buy-waits-for-its-move): its way leaves `coming` then, and a tap waiting on its
+  // move (landing) hears it; `moves`, every part's stop under its move's op
+  const reachers = new Map<string, (r: MoveReach, counted: boolean) => void>();
+  const moves = new Map<string, Promise<MoveReach>[]>();
+  // `counted`: the way still counts as on its way (a mover with no follow to read: only `landed` ends it)
+  const reach = (op: string, r: MoveReach, counted = false): void => {
+    reachers.get(op)?.(r, counted);
+    reachers.delete(op);
+  };
+  const way = (chain: PoolChain, id: string, op: string, lamports: bigint, root: string): void => {
+    const w: Way = { chain, id, op, lamports, reached: null };
+    const p = new Promise<MoveReach>((r) => reachers.set(op, (x, counted) => (counted || (w.reached = x), r(x))));
+    ways.push(w);
+    moves.set(root, [...(moves.get(root) ?? []), p]);
+  };
   const put = async (id: string, rec: MoveOpRecord): Promise<void> => {
     try {
       // with a compare-and-set: the stored claim and send-by kept, and a move that ended failed (its send-by passed
@@ -595,34 +630,50 @@ export function cashMover(d: CashMoverDeps): CashMover {
     const tx: TraceFields = txs[0] ? { tx: txs[0].hash } : {};
     if (e === null || !(e.kind === "arrived" || e.kind === "landed")) {
       const error: ErrorCode = e === null ? "withdraw_failed" : `withdraw_${e.kind}`;
-      const last = trace(op, null, "end", { stage: "failed", ...tx, error: e === null ? (thrown() ?? "the vault's withdraw threw") : `the vault's withdraw ended ${e.kind}${e.kind === "fee" && "fee" in e ? ` (the relayer's fee now ${e.fee}, above the fee drawn)` : ""}` });
-      return put(op, { ...rec, stage: "failed", txs, ...(d.update ? { error } : {}), ...lastOf(last) });
+      const words = e === null ? (thrown() ?? "the vault's withdraw threw") : `the vault's withdraw ended ${e.kind}${e.kind === "fee" && "fee" in e ? ` (the relayer's fee now ${e.fee}, above the fee drawn)` : ""}`;
+      const last = trace(op, null, "end", { stage: "failed", ...tx, error: words });
+      await put(op, { ...rec, stage: "failed", txs, ...(d.update ? { error } : {}), ...lastOf(last) });
+      return reach(op, { landed: false, error: words });
     }
     const cur: MoveOpRecord = { ...rec, stage: "in_transit", txs, ...lastOf(trace(op, null, "vault_payout", { stage: e.kind, ...tx })) };
     await put(op, cur);
     return followOn(op, followId, cur);
   };
-  // the follow op's stages from `cur` on, until the move is done or failed (or the sign out)
+  // the follow op's stages from `cur` on, until the move is done or failed (or the sign out). Its stop for a tap that
+  // waits on it (card cash-buy-waits-for-its-move): its money in the pool (into_pool or done); failed or refunded; its
+  // quote's deadline past with nothing delivered; the sign out
   const followOn = async (op: string, followId: string, from: MoveOpRecord): Promise<void> => {
-    if (!d.follow) return;
+    // no follow to read: the vault's payout is the last the mover sees, and what one tap spends tells the rest
+    if (!d.follow) return reach(op, { landed: true }, true);
     let cur = from;
     const wait = d.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     while (!d.signal?.aborted) {
       // a move still leaving (a reload's: its hand-off is gone) ends at its send-by unless its claim came first
-      if (cur.stage === "leaving" && (await expire(op))) return;
+      if (cur.stage === "leaving" && (await expire(op))) return reach(op, { landed: false, error: "the vault's withdraw was not sent by its send-by" });
       const f = await d.follow(followId).catch(() => undefined);
       if (f !== undefined) {
         const stage = moveStageOfFollow(f);
         const add = (f.txs ?? []).filter((t, k, all) => typeof t?.hash === "string" && !cur.txs.some((x) => x.hash === t.hash) && all.findIndex((y) => y.hash === t.hash) === k).map((t) => ({ chain: t.chain, hash: t.hash }));
         if (stage !== cur.stage || add.length > 0) {
           cur = { ...cur, stage, txs: [...cur.txs, ...add] };
-          if (stage === "done" || stage === "failed") cur = { ...cur, ...lastOf(trace(op, null, "end", { stage, ...(stage === "failed" ? { error: `the quote's follow ended ${f.stage}` } : {}) })) };
+          if (stage === "done" || stage === "failed" || stage === "refunded") cur = { ...cur, ...lastOf(trace(op, null, "end", { stage, ...(stage === "done" ? {} : { error: `the quote's follow ended ${f.stage}` }) })) };
           await put(op, cur);
         }
+        if (stage === "into_pool" || stage === "done") reach(op, { landed: true });
+        else if (stage === "failed" || stage === "refunded") reach(op, { landed: false, error: `the quote's follow ended ${f.stage}` });
         if (stage === "done" || stage === "failed") return;
+      }
+      // its quote's deadline past with nothing delivered: the tap stops waiting on it, its words kept as the part's last
+      // step; the follow reads on (a late send is still carried into the pool or refunded)
+      const deadline = typeof f?.follow?.deadline_ms === "number" ? f.follow.deadline_ms : cur.created_ms + DEPOSIT_QUOTE_DEADLINE_MS;
+      if (reachers.has(op) && (f === undefined || UNDELIVERED.has(f.stage)) && d.now() > deadline + CASH_MOVE_DEADLINE_MARGIN_MS) {
+        const words = "the quote's deadline passed with nothing delivered";
+        keepLast(op, trace(op, null, "end", { stage: cur.stage, error: words }));
+        reach(op, { landed: false, error: words });
       }
       await wait(CASH_MOVE_POLL_MS);
     }
+    reach(op, { landed: false, error: "signed out" });
   };
   // a move's parts (card cash-buys-spend-every-note): every part's quote first, each held to every check, and only when
   // every one passed does any note leave Cash, each part's withdrawal of its own note to its own quote's address; a part
@@ -638,7 +689,7 @@ export function cashMover(d: CashMoverDeps): CashMover {
       }
       quoted.push(a);
     }
-    return quoted.map((q) => handOne(chain, q, fee))[0]!;
+    return quoted.map((q) => handOne(chain, q, fee, op))[0]!;
   };
   type Quoted = { op: string; rec: MoveOpRecord; q: CashQuote; used: string; note?: string };
   const quoteOne = async (chain: PoolChain, usdc: bigint, least: bigint, op: string, amount: string, note: string | undefined, root: string, part: number): Promise<Quoted | Refusal> => {
@@ -679,7 +730,7 @@ export function cashMover(d: CashMoverDeps): CashMover {
     await put(op, leaving);
     return { op, rec: leaving, q, used, ...(note === undefined ? {} : { note }) };
   };
-  const handOne = (chain: PoolChain, a: Quoted, fee: bigint): MoveSent => {
+  const handOne = (chain: PoolChain, a: Quoted, fee: bigint, root: string): MoveSent => {
     const { op, rec: leaving, q, used } = a;
     const rec = leaving;
     const usdc = q.amountIn;
@@ -694,21 +745,20 @@ export function cashMover(d: CashMoverDeps): CashMover {
     if (d.update) {
       let s: ReturnType<typeof setTimeout> | undefined;
       const at = new Promise<void>((r) => (s = setTimeout(r, Math.max(0, sendByOf(rec) - d.now()))));
-      void Promise.race([ended.then(() => false), at.then(() => true)]).then((due) => (clearTimeout(s), due ? expire(op) : false));
+      void Promise.race([ended.then(() => false), at.then(() => true)])
+        .then((due) => (clearTimeout(s), due ? expire(op) : false))
+        .then((ended) => ended && reach(op, { landed: false, error: "the vault's withdraw was not sent by its send-by" }));
     }
-    const going = ended.then((e) => e !== null && (e.kind === "arrived" || e.kind === "landed"));
+    way(chain, used, op, q.minOut, root);
     tracks.push(track(op, used, leaving, ended, () => thrown).catch(() => {}));
-    ways.push({ chain, id: used, op, lamports: q.minOut, going, since: d.now() });
     return { op, minOut: q.minOut };
   };
   const prune = async (): Promise<void> => {
-    // what is on its way already: a move that failed, landed, or outlived CASH_MOVE_WAIT_MS no longer counts
+    // what is on its way already: a part whose money reached the pool (its notes are the pool's now), or that stopped,
+    // or whose follow ended, no longer counts; one still on its way counts however long it takes (card
+    // cash-buy-waits-for-its-move: never dropped by a clock, so its money is never counted nowhere, nor moved twice)
     const kept: Way[] = [];
-    for (const w of ways) {
-      const settled = await Promise.race([w.going, Promise.resolve(null)]);
-      if (settled === false || d.now() - w.since > CASH_MOVE_WAIT_MS || (settled === true && (await d.landed(w.id)))) continue;
-      kept.push(w);
-    }
+    for (const w of ways) if (w.reached === null && !(await d.landed(w.id).catch(() => false))) kept.push(w);
     ways = kept;
   };
   const start = async (chain: PoolChain, short: bigint): Promise<string | null> => {
@@ -779,10 +829,24 @@ export function cashMover(d: CashMoverDeps): CashMover {
     },
     ways: () => ways.length,
     // the least of the pool's coin the moves on their way still bring (display only: a tap's most counts it)
-    coming: (chain) => ways.filter((w) => w.chain === chain && d.now() - w.since <= CASH_MOVE_WAIT_MS).reduce((a, w) => a + w.lamports, 0n),
-    resume: (moves) => {
-      // Cash's own moves only: a move out of a pool is src/pool-to-cash.ts's, its `<op>/1click` a vault deposit's op
-      for (const { id, rec } of moves) if (rec.kind === "move" && rec.from === "near" && rec.stage !== "done" && rec.stage !== "failed") tracks.push(followOn(id, `${id}/${d.rails[0] ?? "1click"}`, rec).catch(() => {}));
+    coming: (chain) => ways.filter((w) => w.chain === chain && w.reached === null).reduce((a, w) => a + w.lamports, 0n),
+    landing: async (op) => {
+      const all = await Promise.all(moves.get(op) ?? []);
+      if (all.length === 0) return { landed: false, error: "no part of this move is on its way" };
+      const stop = all.find((r): r is { landed: false; error: string } => !r.landed);
+      return all.some((r) => r.landed) ? { landed: true } : { landed: false, error: stop!.error };
+    },
+    resume: (recs) => {
+      // Cash's own moves only: a move out of a pool is src/pool-to-cash.ts's, its `<op>/1click` a vault deposit's op.
+      // One still before the pool counts as on its way again (card cash-buy-waits-for-its-move: after a reload its money
+      // is never moved twice), what its quote brings at least (`out`)
+      for (const { id, rec } of recs) {
+        if (rec.kind !== "move" || rec.from !== "near" || rec.stage === "done" || rec.stage === "failed") continue;
+        const followId = `${id}/${d.rails[0] ?? "1click"}`;
+        const out = isPoolChain(rec.to) && typeof rec.out === "string" ? unitsOf(rec.out, POOL_DECIMALS[rec.to]) : null;
+        if (isPoolChain(rec.to) && out !== null && (rec.stage === "leaving" || rec.stage === "in_transit") && !ways.some((w) => w.op === id)) way(rec.to, followId, id, out, id);
+        tracks.push(followOn(id, followId, rec).catch(() => {}));
+      }
     },
     idle: async () => {
       await turn;
@@ -941,7 +1005,16 @@ export type CashToPoolDeps = {
   short?(chain: PoolChain, token: string, amount: bigint): Promise<bigint | null>;
   /** cashMover's need: the op id of the move on its way for it, or null. */
   need(chain: PoolChain, short: bigint): Promise<string | null>;
+  /** cashMover's landing (card cash-buy-waits-for-its-move): settles once every part of the move `op` reached the pool
+   *  or stopped. */
+  moved(op: string): Promise<{ landed: boolean; error?: string }>;
+  /** Whether money is still on its way into what one tap spends on `chain` (provingOn over the page's notes and its
+   *  queues' proofs, read now): a note of the chain's pool landing, one its queue makes a proof for, or one landed that
+   *  waits for its queue's next epoch turn (`seen`: the tap's own first sight of each such note, kept between reads). */
+  proving(chain: PoolChain, seen: Map<string, number>): Promise<boolean>;
   wait(ms: number): Promise<void>;
+  /** The bound on one read of what one tap spends while a move is on its way (CASH_TAP_READ_MS unless given; tests). */
+  readMs?: number;
   now(): number;
   signal?: AbortSignal;
 };
@@ -949,20 +1022,61 @@ export type CashToPoolDeps = {
 type Inner = (ask: PoolAsk, ctx: KindContext | null) => HostRefusal | Running<"pool.buy">;
 type Answer = HostAnswer<"pool.buy"> | HostRefusal;
 
+/** How long past its chain's epoch a landed note with no proof still holds a tap's wait (card cash-buy-waits-for-its-move):
+ *  the EVM turn pass reads a period's fee EVM_TURN_PASS_MS (3 s) past its turn plus up to EVM_TURN_SPREAD_MS (2 s), then
+ *  the queue's pass starts the proof (its note HELD, `making`, from then on); twice that, for the pass's own reads. */
+export const PROOF_TURN_MARGIN_MS = 10_000;
+/** Each pool chain's queue schedule and the rule it proves a note by: its epoch (a landed note is proved at once on the
+ *  newest root, or at the latest at the next epoch's pass: wallet/src/pool/queue.ts:15-18, 543-546) and its piece rule
+ *  (queue.ts:501 usable: a note whose pieceChunk is null is never proved). */
+const PROOF_RULES: Readonly<Record<PoolChain, { epochMs: number; pieces: PieceRule }>> = {
+  solana: { epochMs: Number(SOL_EPOCH_MS), pieces: SOL_PIECES },
+  base: { epochMs: Number(EVM_EPOCH_MS), pieces: EVM_PIECES },
+  robinhood: { epochMs: Number(EVM_EPOCH_MS), pieces: EVM_PIECES },
+};
+/** A landed note's wait for its queue (provingOn's `turn`): the chain, whether its queue is open now, the tap's first
+ *  sight of each such note (written here), and the time now. */
+export type ProofTurn = { chain: PoolChain; open: boolean; seen: Map<string, number>; now: number };
+/**
+ * Money on its way into what one tap spends on a chain (CashToPoolDeps.proving, card cash-buy-waits-for-its-move): of
+ * the chain's pools' scopes, a note landing (INCOMING), one the queue makes a proof for now (`making`), or one HELD with
+ * no ready proof (a proof begun). And, with `turn`, a landed note (UNSPENT) with no ready proof while the chain's queue
+ * is open, from the tap's first sight of it until the chain's next epoch turn and PROOF_TURN_MARGIN_MS: the queue proves
+ * it then at the latest (an EVM note waits for the period's turn, UNSPENT, outside `making` and not HELD:
+ * wallet/src/pool/queue.ts:623 marks a note in flight only when its proof starts, :715 `making` is those, :589 a leaf
+ * past the newest trees "waits for the next pass"). Past that bound, or with the queue closed, or a note the queue never
+ * proves (its piece rule gives it no chunk: below the floor, queue.ts:501), or another pool's, it is not: the money is
+ * the pool's, counted once proved.
+ */
+export function provingOn(notes: readonly { id: string; scope: bigint; state: string; leaf?: { value: bigint } }[], scopes: ReadonlySet<bigint>, ready: readonly { noteId: string }[], making?: ReadonlySet<string>, turn?: ProofTurn): boolean {
+  const proved = new Set(ready.map((r) => r.noteId));
+  let on = false;
+  for (const n of notes) {
+    if (!scopes.has(n.scope) || proved.has(n.id)) continue;
+    if (n.state === "INCOMING" || making?.has(n.id) === true || n.state === "HELD") on = true;
+    else if (turn !== undefined && turn.open && n.state === "UNSPENT" && n.leaf !== undefined && pieceChunk(PROOF_RULES[turn.chain].pieces, n.leaf.value) !== null) {
+      // every such note's first sight is written on this read, not only the first one's
+      if (!turn.seen.has(n.id)) turn.seen.set(n.id, turn.now);
+      if (turn.now < turn.seen.get(n.id)! + PROOF_RULES[turn.chain].epochMs + PROOF_TURN_MARGIN_MS) on = true;
+    }
+  }
+  return on;
+}
+
 /** The tap's deps as cashFirst reads them (card buy-shows-every-step): each tap read that throws says why in a trace
  *  line; the move asked of the mover, or none, said too; and once a move is on its way, each read of what one tap
- *  spends is bounded by the wait's time left (CASH_MOVE_WAIT_MS from the move's answer) and one that throws or never
- *  answers counts as nothing yet, so the wait runs to its end and the pool buy then answers its own refusal: never a
- *  tap that fails with its money already moved, or holds past the wait, with nothing said. `last()`: the last read. */
+ *  spends is bounded by CASH_TAP_READ_MS (card cash-buy-waits-for-its-move: the wait has no clock of its own), and one
+ *  that throws or never answers counts as nothing yet, so the wait reads again: never a tap that fails with its money
+ *  already moved, or holds on one read, with nothing said. `last()`: the last read. */
 function steadyTap(d: CashToPoolDeps, t: (step: TraceStep, f?: TraceFields) => void): CashToPoolDeps & { last(): bigint } {
-  let until: number | null = null;
+  let moving = false;
   let move: string | null = null;
   let last = 0n;
   const said = (e: unknown): TraceFields => ({ ...(move === null ? {} : { move }), stage: "tap_unread", error: errorText(e) });
   return {
     ...d,
     tapMax: async (chain, token) => {
-      if (until === null) {
+      if (!moving) {
         last = await d.tapMax(chain, token).catch((e: unknown) => {
           t("move", said(e));
           throw e;
@@ -970,9 +1084,10 @@ function steadyTap(d: CashToPoolDeps, t: (step: TraceStep, f?: TraceFields) => v
         return last;
       }
       let s: ReturnType<typeof setTimeout> | undefined;
-      const late = new Promise<null>((r) => (s = setTimeout(() => r(null), Math.max(0, until! - d.now()))));
+      const ms = d.readMs ?? CASH_TAP_READ_MS;
+      const late = new Promise<null>((r) => (s = setTimeout(() => r(null), ms)));
       const got = await Promise.race([d.tapMax(chain, token).catch((e: unknown) => (t("move", said(e)), 0n)), late]).finally(() => clearTimeout(s));
-      if (got === null) t("move", said("the read of what one tap spends did not answer by the wait's end"));
+      if (got === null) t("move", said(`the read of what one tap spends did not answer in ${ms} ms`));
       last = got ?? 0n;
       return last;
     },
@@ -981,13 +1096,17 @@ function steadyTap(d: CashToPoolDeps, t: (step: TraceStep, f?: TraceFields) => v
       t("move", op === null ? { stage: "none", amount: short.toString(), error: "no move from Cash started or on its way for the shortfall" } : { move: op, amount: short.toString() });
       if (op !== null) {
         move = op;
-        until = d.now() + CASH_MOVE_WAIT_MS;
+        moving = true;
       }
       return op;
     },
     last: () => last,
   };
 }
+
+/** `p`, or null at the sign out. */
+const unlessOut = <T>(p: Promise<T>, signal?: AbortSignal): Promise<T | null> =>
+  signal === undefined ? p : signal.aborted ? Promise.resolve(null) : Promise.race([p, new Promise<null>((r) => signal.addEventListener("abort", () => r(null), { once: true }))]);
 
 /** The pool.buy kind that waits for Cash on its way: `inner` (the pool buy) once one tap spends the ask, or at once when
  *  nothing is on its way. No async function here returns an answer: a HostAnswer's `then` would make it a thenable. */
@@ -1021,13 +1140,26 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
         } catch {
           /* the app's display never stops a buy */
         }
-        const until = d.now() + CASH_MOVE_WAIT_MS;
-        while (!d.signal?.aborted && d.now() < until && (await d.tapMax(chain, token)) < ask.amount) await d.wait(CASH_MOVE_POLL_MS);
-      }
-      // what one tap spends when the wait ended, against the ask: "ready", or the wait ran out (or a sign out) short
-      if (op !== null) {
+        // the wait follows the move, never a clock from the tap (card cash-buy-waits-for-its-move): first its landing,
+        // every part in the pool or stopped (the mover's own follow of each part: its withdraw, 1Click's delivery, the
+        // follow's deposits, its quote's deadline); then, while one tap still spends less than the ask, the chain's
+        // landing notes and their proofs, until none is on its way (two reads in a row, CASH_MOVE_POLL_MS apart, so a
+        // note between its landing and its proof's start is not missed)
+        const moved = await unlessOut(d.moved(op).catch((e: unknown) => ({ landed: false, error: errorText(e) })), d.signal);
+        if (moved !== null) t("move", { move: op, stage: moved.landed ? "landed" : "stopped", ...(moved.error === undefined ? {} : { error: moved.error }) });
+        let still = 0;
+        const seen = new Map<string, number>();
+        while (moved?.landed === true && !d.signal?.aborted && (await d.tapMax(chain, token)) < ask.amount) {
+          still = (await d.proving(chain, seen).catch(() => false)) ? 0 : still + 1;
+          if (still >= 2) break;
+          await d.wait(CASH_MOVE_POLL_MS);
+        }
+        // what one tap spends when the wait ended, against the ask: "ready"; the move stopped; its money in the pool and
+        // nothing more on its way into one tap; or the sign out
         const have = d.last();
-        t("move", { move: op, stage: have >= ask.amount ? "ready" : d.signal?.aborted ? "signed_out" : "wait_over", amount: have.toString(), ...(have >= ask.amount ? {} : { error: `one tap spends ${have} of the ${ask.amount} asked after ${CASH_MOVE_WAIT_MS} ms` }) });
+        const stage = have >= ask.amount ? "ready" : d.signal?.aborted || moved === null ? "signed_out" : moved.landed ? "settled" : "stopped";
+        const why = stage === "settled" ? `one tap spends ${have} of the ${ask.amount} asked, with nothing more landing or proving` : stage === "stopped" ? (moved?.error ?? "the move stopped") : stage === "signed_out" ? "signed out" : undefined;
+        t("move", { move: op, stage, amount: have.toString(), ...(why === undefined ? {} : { error: why }) });
       }
       // the pool buy's stages as trace lines too (sent, filled, not_landed: its answer comes at its first send)
       const seen: KindContext | null = ctx === null ? null : { ...ctx, progress: (s) => (t("swap", { stage: s }), ctx.progress(s)) };

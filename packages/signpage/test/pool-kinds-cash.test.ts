@@ -27,6 +27,8 @@ function page() {
     tapMax: async () => pool,
     // the mover's need: a move on its way, which lands at once here
     need: async () => (paid.push("c".repeat(64)), (pool = 410_000_000n), "cash/solana/0"),
+    moved: async () => ({ landed: true }),
+    proving: async () => true,
     wait: async () => {},
     now: () => 0,
   };

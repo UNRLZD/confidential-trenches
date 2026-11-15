@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
-import { withCash, evmCashWei, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, evmMoveCostOf, evmMoveOf, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
+import { provingOn, withCash, evmCashWei, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, evmMoveCostOf, evmMoveOf, cashMover, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
 
 const TOKEN = "So11111111111111111111111111111111111111112";
 const ADDRESS = "a".repeat(64);
@@ -115,6 +115,8 @@ function tap(o: { taps: bigint[]; moving: boolean; any?: boolean }, _calls: Call
     any: async () => o.any ?? true,
     tapMax: async () => o.taps[Math.min(t++, o.taps.length - 1)]!,
     need: async () => (o.moving ? "cash/solana/7" : null),
+    moved: async () => ({ landed: true }),
+    proving: async () => true,
     wait: async (ms) => void (clock += ms),
     now: () => clock,
   };
@@ -173,7 +175,7 @@ test("moveCostOf: the move's withdraw fee and its 3% margin of the USDC it asks,
   assert.equal(moveCostOf(10_000_000n, 50_000n, { price: "0", expo: -8 }), null);
 });
 
-test("cashFirst: with nothing on its way the pool buy answers at once; a move that never lands is waited CASH_MOVE_WAIT_MS at most", async () => {
+test("cashFirst: with nothing on its way the pool buy answers at once; a move that stops ends the wait at once; one landed short ends once nothing more is landing or proving", async () => {
   const calls = { inner: [] as bigint[] };
   const c = ctx();
   await run(cashFirst(innerOf(calls), () => tap({ taps: [100_000_000n], moving: false }, calls))(ask(400_000_000n), c));
@@ -182,8 +184,17 @@ test("cashFirst: with nothing on its way the pool buy answers at once; a move th
   const d = tap({ taps: [100_000_000n], moving: true }, calls);
   const tm = d.tapMax;
   d.tapMax = async (c, t) => (reads++, tm(c, t));
+  d.moved = async () => ({ landed: false, error: "the quote's follow ended refunded" });
   await run(cashFirst(innerOf(calls), () => d)(ask(400_000_000n), ctx()));
-  assert.ok(reads <= CASH_MOVE_WAIT_MS / CASH_MOVE_POLL_MS + 2, `${reads} reads`);
+  assert.equal(reads, 1, "the tap's first read alone: no wait on a move that stopped");
+  // landed, its proofs made, still under the ask: two reads in a row with nothing landing or proving end it
+  reads = 0;
+  let proving = 3;
+  d.moved = async () => ({ landed: true });
+  d.proving = async () => proving-- > 0;
+  await run(cashFirst(innerOf(calls), () => d)(ask(400_000_000n), ctx()));
+  assert.equal(reads, 1 + 3 + 2, "read while proving, then twice with nothing on its way");
+  assert.deepEqual(calls.inner, [400_000_000n, 400_000_000n, 400_000_000n], "the pool buy answers its own refusal each time");
 });
 
 test("cashFirst: with no Cash to move and nothing on its way the pool buy goes straight to the flow, with no tap read and no move asked", async () => {
@@ -266,4 +277,18 @@ test("evmCashWei: the wei Cash buys at the device's ETH price, no margin, rounde
   assert.equal(evmCashWei(1n, eth), 333_333_333n, "one micro-USDC");
   assert.equal(evmCashWei(30_000_000n, { price: "0", expo: -8 }), 0n);
   assert.equal(evmCashWei(0n, eth), 0n);
+});
+
+// Card cash-buy-waits-for-its-move: what the tap's wait reads as money still on its way into one tap after the move
+// landed: a note of the chain's pools landing, one the queue makes a proof for, or one HELD with no ready proof; an
+// UNSPENT note with none is not (the queue may never prove it), nor a note of another chain's pool.
+test("provingOn: a note landing, being proved or HELD with no ready proof is on its way; UNSPENT, proved or another pool's is not", () => {
+  const sol = new Set([7n]);
+  const n = (id: string, state: string, scope = 7n) => ({ id, scope, state });
+  assert.equal(provingOn([n("a", "INCOMING")], sol, []), true);
+  assert.equal(provingOn([n("a", "HELD")], sol, []), true);
+  assert.equal(provingOn([n("a", "UNSPENT")], sol, [], new Set(["a"])), true);
+  assert.equal(provingOn([n("a", "HELD")], sol, [{ noteId: "a" }]), false, "its proof is ready: counted in one tap");
+  assert.equal(provingOn([n("a", "UNSPENT"), n("b", "SPENT")], sol, []), false);
+  assert.equal(provingOn([n("a", "INCOMING", 9n), n("b", "HELD", 9n)], sol, []), false, "another chain's pool");
 });

@@ -27,6 +27,8 @@ function tap(answer: Parameters<typeof dry>[0]) {
     any: async () => true,
     tapMax: async () => solanaTapMaxOf(dry(answer)),
     need: async () => (seen.needs++, "cash/solana/7"),
+    moved: async () => ({ landed: true }),
+    proving: async () => false,
     wait: async (ms) => void (seen.waited += ms),
     now: () => seen.waited,
   };
