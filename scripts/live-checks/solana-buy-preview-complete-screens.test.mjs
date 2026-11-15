@@ -76,3 +76,15 @@ test("the version the app's kit must name is the kit's own at this commit, never
   assert.equal(KIT, SIGNPAGE_KIT_VERSION);
   assert.ok(SAYS.hello.includes(SIGNPAGE_KIT_VERSION));
 });
+
+// card you-receive-on-every-chain: the box's state carries the rule's value on the NEAR path as well as a pool path
+const NEAR_JS = JS.replace("ge=de?kh(F,ae,M):null", "ge=de||fe===`near`?kh(F,ae,M):null");
+
+test("the receive wired on a pool path or the NEAR path (card you-receive-on-every-chain): PASS; the value never reaching the state's receive, or another rule's: FAIL, wired named", () => {
+  assert.notEqual(NEAR_JS, JS);
+  assert.deepEqual(judge(facts(INDEX(NEAR_JS), NEAR_JS)).lines, []);
+  for (const js of [NEAR_JS.replace("receive:ge", "receive:null"), NEAR_JS.replace("?kh(F,ae,M):null", "?Ah(F,ae,M):null")]) {
+    assert.notEqual(js, NEAR_JS);
+    assert.deepEqual(judge(facts(INDEX(js), js)).lines, [`BAD ${SAYS.wired}`], js.slice(0, 80));
+  }
+});
