@@ -53,9 +53,10 @@ const stopsOf = (js) => {
   const e = STOP_ERROR.exec(js)?.[1];
   if (e === undefined) return false;
   const S = esc(e);
-  const out = `(${N})=\\(\\)=>${N}\\.stopped\\?\\.\\(\\)===!0\\|\\|${N}\\.signal\\?\\.aborted===!0`;
-  // rentBack: the sign out read, then W's key: none derived after it; every sleep: stopped before and after, the host's
-  // wait or the sell lock's nap between
+  // rentBack: the sign out read (a load's pass; a sale's own rent back is the tap's run, which a sign out lets finish,
+  // card sign-out-stops-the-pages-reads), then W's key: none derived after it; every sleep: stopped before and after, the
+  // host's wait or the sell lock's nap between
+  const out = `(${N})=\\(\\)=>${N}\\.sale!==!0&&\\(${N}\\.stopped\\?\\.\\(\\)===!0\\|\\|${N}\\.signal\\?\\.aborted===!0\\)`;
   const key = new RegExp(`async function ${N}\\(${N},${N},${N}\\)\\{let ${out},${N}=\\[\\],${N}=async\\(\\)=>\\{[^}]{0,80}\\},${N}=async\\(\\)=>\\{if\\(\\1\\(\\)\\)throw ${S};let ${N}=${N}\\(await`).exec(js);
   if (!key) return false;
   const r = esc(key[1]);

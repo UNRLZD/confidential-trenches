@@ -2000,7 +2000,9 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  * rentBackOwed) holds: its own coin is never stranded, at worst its rent waits.
  */
 async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ended> {
-  const signedOut = (): boolean => h.stopped?.() === true || h.signal?.aborted === true;
+  // a sign out ends a load's pass (card pool-sell-record-never-stays-sent); a sale's own rent back is the tap's run, which
+  // a sign out lets finish (card sign-out-stops-the-pages-reads), its waits the sale's (sellRun: ended at a sign out)
+  const signedOut = (): boolean => x.sale !== true && (h.stopped?.() === true || h.signal?.aborted === true);
   const seeds: Uint8Array[] = [];
   const seed = async (): Promise<Uint8Array> => {
     const s = await h.seed64();
