@@ -103,16 +103,56 @@ export interface MoveOp {
   out?: string;
 }
 
-/** The move op with `id` in the state's ops, read field by field: null until the page sends one this app can read. */
+/** The move op with `id` in the state's ops, read field by field, as one move over its parts (wholeMove): null until
+ *  the page sends one this app can read, and while any of its parts is one it cannot. */
 export function moveOp(state: SignpageState | null | undefined, id: string | null): MoveOp | null {
   if (!state || !id) return null;
+  let head: MoveOp | null = null;
+  const under: MoveOp[] = [];
   for (const o of state.ops as readonly unknown[]) {
     const m = o as Partial<MoveOp> & { kind?: unknown };
-    if (m.id !== id || m.kind !== "move") continue;
+    if (m.kind !== "move" || typeof m.id !== "string" || (m.id !== id && !m.id.startsWith(`${id}/`))) continue;
     if (!isChain(m.from) || !isChain(m.to) || !(MOVE_STAGES as readonly unknown[]).includes(m.stage) || !Array.isArray(m.txs)) return null;
-    return m as MoveOp;
+    if (m.id === id) head = m as MoveOp;
+    else under.push(m as MoveOp);
   }
-  return null;
+  return head === null ? null : wholeMove(head, under);
+}
+
+/** What a move op carries that its one move reads. */
+type MovePiece = { readonly id: string; readonly kind: string; readonly stage: string; readonly txs: readonly TxRef[]; readonly amount?: string; readonly out?: string };
+const ENDED: ReadonlySet<string> = new Set(["done", "failed", "refunded"]);
+const PART = /^[1-9]\d*$/;
+/** The decimals' exact sum; undefined when any is missing (none is made up). */
+const sumDec = (xs: readonly (string | undefined)[]): string | undefined => {
+  if (!xs.every(dec)) return undefined;
+  const d = Math.max(0, ...xs.map((x) => x!.split(".")[1]?.length ?? 0));
+  return exact(xs.reduce((t, x) => t + decimalToUnits(x!, d)!, 0n), d);
+};
+
+/**
+ * A move as one move over its parts (card move-parts-show-as-one). A vault withdraw proof spends one note, so the
+ * signing page sends a move bigger than any one note as parts, each its own withdrawal, quote and op: the first under
+ * the move's id, the rest under `<id>/1`, `<id>/2`, ... (packages/signpage cash-to-pool.ts sendParts; a buy's move
+ * cash/<chain>/<ms>, a Move its request id). Its stage is the least advanced part's; failed if any part failed; done
+ * only when every part is; its amount and what landed the parts' sums, its txs all of theirs. A pool-to-pool Move
+ * through Cash shows its onward move's stage (pool-to-cash.ts onward, `<id>/on`, itself a move in parts): every move
+ * under its id holds its done and its failed, and its stage once its own parts have all ended. `ops` may hold any op.
+ */
+export function wholeMove<T extends MovePiece>(head: T, ops: readonly { readonly id: string; readonly kind: string }[]): T {
+  const under = ops.filter((o): o is MovePiece => o.kind === "move" && o.id.startsWith(`${head.id}/`));
+  if (under.length === 0) return head;
+  const parts = [head, ...under.filter((o) => PART.test(o.id.slice(head.id.length + 1)))];
+  const all = [head, ...under];
+  const least = (xs: readonly MovePiece[]): string | undefined =>
+    xs.filter((o) => !ENDED.has(o.stage)).map((o) => o.stage).sort((a, b) => MOVE_STAGES.indexOf(a as MoveStage) - MOVE_STAGES.indexOf(b as MoveStage))[0];
+  const stage = all.some((o) => o.stage === "failed") ? "failed" : (least(parts) ?? least(all) ?? (all.some((o) => o.stage === "refunded") ? "refunded" : "done"));
+  const txs: TxRef[] = [];
+  for (const t of parts.flatMap((o) => o.txs)) if (!txs.some((x) => x.hash === t.hash)) txs.push(t);
+  const { amount: _a, out: _o, ...rest } = head;
+  const amount = sumDec(parts.map((o) => o.amount));
+  const out = sumDec(parts.map((o) => o.out));
+  return { ...rest, stage, txs, ...(amount === undefined ? {} : { amount }), ...(out === undefined ? {} : { out }) } as unknown as T;
 }
 
 export const MOVE_CHAINS: readonly MoveChain[] = ["near", "solana", "base", "robinhood"];

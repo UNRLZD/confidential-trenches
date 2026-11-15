@@ -15,7 +15,7 @@ import { small } from "../discover/format.ts";
 import { initialsBps } from "../positions/model.ts";
 import { reasonOf, statePoolPrice, unitsToCents } from "../trade/model.ts";
 import type { Reason } from "../trade/model.ts";
-import { withoutMoveLegs } from "./move.ts";
+import { wholeMove, withoutMoveLegs } from "./move.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
@@ -959,8 +959,10 @@ export function activity(ops: readonly Operation[] | null | undefined, d: Portfo
   for (const o of withoutMoveLegs(ops ?? [])) {
     if (!SHOWN.has(o.kind)) continue;
     if (o.kind === "move") {
-      const move = { from: o.from, to: o.to, amount: o.amount ?? null, asset: TRADE_ASSET[o.from] ?? "USDC" };
-      rows.push({ id: o.id, kind: "move", stage: o.stage, at: o.created_ms ?? null, usd: null, units: null, chain: null, token: null, txs: o.txs, address: null, failed: o.stage === "failed" ? { reason: null } : null, move });
+      // one row over the move's parts, its stage the least advanced (card move-parts-show-as-one)
+      const m = wholeMove(o, ops ?? []);
+      const move = { from: m.from, to: m.to, amount: m.amount ?? null, asset: TRADE_ASSET[m.from] ?? "USDC" };
+      rows.push({ id: m.id, kind: "move", stage: m.stage, at: m.created_ms ?? null, usd: null, units: null, chain: null, token: null, txs: m.txs, address: null, failed: m.stage === "failed" ? { reason: null } : null, move });
       continue;
     }
     const moved = !NOT_MOVED.has(o.stage);
