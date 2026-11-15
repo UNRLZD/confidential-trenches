@@ -32,7 +32,9 @@ export const ENTRY_POINTS = ["0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789", "0x00
 const USER_OP_EVENT = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f";
 const BEFORE_EXECUTION = "0xbb47ee3e183a558b1a2ff0874b079f3fc5478b7454eacf2bfc5af2ff5878f972";
 const AGGREGATOR_CHANGED = "0x575ff3acadd5ab348fe1855e217e0f3678f8d767d7494c9f9fefbee2e17cca4d";
-const SWAPS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell];
+/** Every venue's Swap event (its test holds it to the helper's swaps.ts SWAP_TOPICS; card evm-tape-rows-exact added
+ *  Uniswap v2's and PancakeSwap v3's). */
+export const SWAPS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swapPancake, TOPIC.swap2, TOPIC.swapUni2, TOPIC.curveBuy, TOPIC.curveSell];
 const ADDR = /^0x[0-9a-f]{40}$/;
 const TX = /^0x[0-9a-f]{64}$/;
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
