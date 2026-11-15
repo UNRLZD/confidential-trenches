@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
-import { withCash, withCashNote, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, evmMoveCostOf, evmMoveOf, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
+import { withCash, evmCashWei, cashFirst, cashLamportsFor, cashUsdcFor, moveCostOf, evmMoveCostOf, evmMoveOf, cashMover, CASH_MOVE_POLL_MS, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashQuote, type CashRail, type CashToPoolDeps } from "../src/cash-to-pool.ts";
 
 const TOKEN = "So11111111111111111111111111111111111111112";
 const ADDRESS = "a".repeat(64);
@@ -255,13 +255,12 @@ test("withCash: tap_max plus the moves on their way plus what the largest Cash n
   assert.equal(withCash("x", 0n, 0n, 0n, p), null);
 });
 
-test("withCashNote (Base and Robinhood): the larger of the ready note and the largest rung Cash's largest note less its fee makes at the device's ETH price, 3% and one deposit's gas under; the ready note alone when Cash makes none bigger", () => {
+// card evm-cash-move-brings-its-fee: with_cash on Base and Robinhood is searched under what Cash buys with no margin
+// (pool-buy-evm.ts evmMostWithCash; the old withCashNote, the largest rung alone, is gone)
+test("evmCashWei: the wei Cash buys at the device's ETH price, no margin, rounded down; none with no price", () => {
   const eth = { price: "300000000000", expo: -8 };
-  const gas = 20_000_000_000_000n;
-  // 99.95 USDC at 3,000 USD less 3% = 0.032346 ETH, less 0.00002 gas: the largest rung under it is 0.02 ETH
-  assert.equal(withCashNote("0.005", 100_000_000n, 50_000n, eth, "base", gas), "0.02");
-  assert.equal(withCashNote("0.05", 100_000_000n, 50_000n, eth, "robinhood", gas), "0.05", "a ready note bigger than Cash makes");
-  assert.equal(withCashNote("0", 3_000_000n, 50_000n, eth, "base", gas), "0", "under the least rung: nothing");
-  assert.equal(withCashNote("0.005", 100_000_000n, 50_000n, null, "base", gas), "0.005", "no price: the ready note");
-  assert.equal(withCashNote("x", 100_000_000n, 50_000n, eth, "base", gas), null);
+  assert.equal(evmCashWei(30_000_000n, eth), 10_000_000_000_000_000n, "30 USDC at 3,000 USD: 0.01 ETH");
+  assert.equal(evmCashWei(1n, eth), 333_333_333n, "one micro-USDC");
+  assert.equal(evmCashWei(30_000_000n, { price: "0", expo: -8 }), 0n);
+  assert.equal(evmCashWei(0n, eth), 0n);
 });

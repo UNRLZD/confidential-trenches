@@ -12,7 +12,10 @@
 //   - move: the mover lands that size as whole rungs, each with one deposit's gas from U_X (src/cash-to-pool.ts
 //     evmMoveOf, read by the mover's Base and Robinhood branch);
 //   - dry: pool.buy.dry on Base and Robinhood above tap_max prices that sized plan's cost plus the move's
-//     (src/pool-buy-evm.ts evmBuyDry with main.ts's fee and moved).
+//     (src/pool-buy-evm.ts evmBuyDry with main.ts's fee and moved);
+//   - max: its with_cash (the box's Max and its bound on a typed amount) is the most one tap buys with that same move,
+//     each size priced by evmMoveOf against Cash's largest note (main.ts withCash, src/pool-buy-evm.ts evmMostWithCash),
+//     not the largest rung Cash makes.
 // What each does is held by packages/signpage/test/evm-cash-move-brings-its-fee.test.ts (the real cashFirst and mover
 // over a model of the pool: red at aa325bd01), cash-to-pool.test.ts and pool-buy-evm-dry-preview.test.ts, and the
 // terminal's harness (apps/terminal/test/trade-reads-after-buy: You receive and Fee above tap_max on Base and Robinhood).
@@ -50,6 +53,10 @@ const DRY = [new RegExp(`${N}>${N}&&(${N})\\.fee!==void 0&&\\1\\.moved!==void 0`
 /** main.ts gives the dry the pool's own epoch fee read and the move's price. */
 const DRY_DEPS = new RegExp(`fee:\\(\\)=>${N}\\?\\.evmFeeNow\\((${N})\\)\\?\\?Promise\\.resolve\\(null\\),moved:async`);
 
+/** main.ts's with_cash on Base and Robinhood: at the epoch's fee read, a move's size paid when evmMoveOf's USDC and the
+ *  withdraw fee fit Cash's largest note. */
+const maxOf = (moveOf) => new RegExp(`evmFeeNow\\(${N}\\)\\.catch\\(\\(\\)=>null\\)\\?\\?null\\][\\s\\S]{0,300}?${N}\\(${N},${N},(${N})=>\\{let (${N})=${esc(moveOf)}\\(\\1,${N},${N},${N}\\);return \\2!==null&&\\2\\.usdc\\+${N}<=${N}\\}`);
+
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
   const moveOf = MOVE_OF.exec(js)?.[1];
@@ -60,6 +67,7 @@ export function facts(index, js) {
     sizing: PIECES.test(js) && PLAN.test(js),
     move: moveOf !== undefined && moverUses(moveOf).test(js),
     dry: DRY.every((r) => r.test(js)) && DRY_DEPS.test(js),
+    max: moveOf !== undefined && maxOf(moveOf).test(js),
   };
 }
 
@@ -68,9 +76,10 @@ export const SAYS = Object.freeze({
   sizing: "the move from Cash on Base and Robinhood is not sized by the tap's own plan over the notes it brings, each paying its own relay fee",
   move: "the mover does not land the sized move as whole rungs with one deposit's gas each: part of it may never become a note the tap spends",
   dry: "Base and Robinhood: above tap_max the trade box gets no You receive or Fee for the buy that moves from Cash",
+  max: "Base and Robinhood: the box's Max with Cash is not what one tap buys with the sized move: it allows an amount the tap cannot carry, or refuses one it can",
 });
 
-/** The verdict on an answer { index, sha384, tap, sizing, move, dry }. */
+/** The verdict on an answer { index, sha384, tap, sizing, move, dry, max }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);

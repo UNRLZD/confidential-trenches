@@ -73,7 +73,7 @@ const DRY_EVM = { tap_max: "0.001", cost: "0.000021", out: "10600" };
 // above tap_max (card evm-cash-move-brings-its-fee): an empty pool, $40 of Cash; the dry of a $2 ask as the signing page
 // answers it now (src/pool-buy-evm.ts evmBuyDry: evmMoveShort at a 0.000021 ETH epoch fee sizes a 0.001 ETH move, its
 // plan's fees 0.000084 ETH, plus cash-to-pool.ts evmMoveCostOf at a 0.05 USDC withdraw fee and 0.00002 ETH of deposit
-// gas, 0.000064885273888177 ETH), with_cash the 0.01 ETH rung Cash makes (withCashNote)
+// gas, 0.000064885273888177 ETH), with_cash a stand-in of 0.01 ETH (the box reads it as Max and the ask's bound)
 const evmEmpty = (chain) => [{ chain, asset: "ETH", balance: "0", ready: "0", tap_max: "0", price: ETH_PRICE() }];
 const DRY_EVM_CASH = { tap_max: "0", with_cash: "0.01", cost: "0.000148885273888177", out: "10600" };
 // NEAR: $40 of Cash, the buy's fees 0.05 USDC and 1.2345 tokens out

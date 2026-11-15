@@ -362,6 +362,39 @@ export function evmMoveShort(ready: readonly ReadyProof[], amount: bigint, fee: 
   return { short: hi * EVM_LADDER.min, plan: at(hi)! };
 }
 
+/** The step pool.buy.dry's with_cash is read on, wei: 0.000001 ETH. */
+const EVM_WITH_CASH_STEP = 1_000_000_000_000n;
+
+/** Whether one tap of `amount` wei buys the whole ask with what Cash can move (card evm-cash-move-brings-its-fee): the
+ *  tap's own plan over the `ready` proofs alone carries it exactly, or with the notes evmMoveShort sizes for it at the
+ *  epoch's relay fee `fee`, when `pays` says Cash's largest note moves that size and its withdraw fee. */
+export function evmTapBuys(ready: readonly ReadyProof[], amount: bigint, fee: bigint, pays: (short: bigint) => boolean): boolean {
+  if (amount <= 0n) return false;
+  const { pieces, bound } = evmBuyPieces(ready);
+  try {
+    if (planEvmBuy({ kind: "pool.buy", chain: "base", token: null, amount, slippageBps: 0, decimals: 0 }, pieces, bound).amount === amount) return true;
+  } catch (e) {
+    if (!(e instanceof PoolRuleRefused)) throw e;
+  }
+  const m = evmMoveShort(ready, amount, fee);
+  return m !== null && pays(m.short);
+}
+
+/** pool.buy.dry's with_cash on Base and Robinhood (kit 1.15; card evm-cash-move-brings-its-fee), in wei: the most one
+ *  tap buys with Cash moved first, sized as cashFirst sizes it (evmTapBuys), read on EVM_WITH_CASH_STEP up to `top` (a
+ *  bound above it: the ready notes and every wei Cash's largest note buys at the device's price) by halving; 0n when
+ *  none. The box's Max and its check of a typed amount: an amount it allows, the tap carries in one move. */
+export function evmMostWithCash(ready: readonly ReadyProof[], fee: bigint, pays: (short: bigint) => boolean, top: bigint): bigint {
+  let lo = 0n;
+  let hi = top / EVM_WITH_CASH_STEP + 1n;
+  while (hi - lo > 1n) {
+    const mid = (lo + hi) / 2n;
+    if (evmTapBuys(ready, mid * EVM_WITH_CASH_STEP, fee, pays)) lo = mid;
+    else hi = mid;
+  }
+  return lo * EVM_WITH_CASH_STEP;
+}
+
 /** What pool.buy.dry quotes `out` with on Base and Robinhood: the tap's quote path (quoteOf: the page's quote, venues
  *  and index pools) on the pin's network, and the token's decimals as the tap reads them. */
 export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "decimals"> & { network: EvmPoolChain };
@@ -397,8 +430,9 @@ export type EvmBuyDryDeps = {
   trading(): boolean;
   /** state.pools' tap_max of the chain and the chain's ready proofs as the tap reads them; null signed out or with none. */
   tap(): Promise<{ tapMax: string; ready: readonly ReadyProof[] } | null>;
-  /** with_cash for that tap_max (src/cash-to-pool.ts withCashNote), null with no Cash to move; a throw fails the dry. */
-  withCash(tapMax: string): Promise<string | null>;
+  /** with_cash for that tap_max over those ready proofs (main.ts: evmMostWithCash at the epoch's fee, a move priced by
+   *  src/cash-to-pool.ts evmMoveOf against Cash's largest note), null with no Cash to move; a throw fails the dry. */
+  withCash(tapMax: string, ready: readonly ReadyProof[]): Promise<string | null>;
   /** The chain's quote host (evmDryQuote), null with no pinned pool. */
   quote(): EvmDryQuote | null;
   /** Above tap_max (card evm-cash-move-brings-its-fee): the epoch's relay fee a note the move brings is proved at (the
@@ -437,7 +471,7 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     const plan = evmDryPlan(chain, amount, got.tapMax, got.ready);
     const q = plan === null && !above ? null : d.quote();
     const out = q === null ? Promise.resolve(null) : plan !== null ? evmDryOut(q, token, plan.amount) : sized.then((s) => (s === null ? null : evmDryOut(q, token, s.plan.amount)));
-    const most = await d.withCash(got.tapMax);
+    const most = await d.withCash(got.tapMax, got.ready);
     const moved = await sized;
     const o = await out;
     const buys = plan !== null && amount !== null && plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;

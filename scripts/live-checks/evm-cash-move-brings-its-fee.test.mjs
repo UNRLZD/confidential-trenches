@@ -44,10 +44,12 @@ const MOVE =
   "function UK(e,t,n,r){let i=LK[r];if(e<=0n||t<0n||e>=1n<<127n)return null;let a=(e+i-1n)/i*i,o=qE(RK[r],a).notes.length,s=a+BigInt(o)*t,c=VK(s,n,r);return c===null?null:{left:s,notes:o,usdc:c}};if(n!==`solana`){let t=s===null?null:await e.floor?.(n).catch(()=>null),i=s===null||typeof t!=`bigint`?null:UK(r,t>LK[n]?t-LK[n]:0n,s,n);c=i?.left??r,d=i?.usdc??null}";
 const DRY =
   "s=i!==null&&typeof o==`bigint`&&i>o&&n.fee!==void 0&&n.moved!==void 0,c=s?(async()=>{let e=await n.fee(),r=e===null?null:A1(t.ready,i,e),a=r===null?null:await n.moved(r.short);return r===null||a===null||a<0n?null:{plan:r.plan,cost:E1(r.plan)+a}})():null;quote:()=>{},fee:()=>x7?.evmFeeNow(e)??Promise.resolve(null),moved:async t=>{}";
-const all = (o = {}) => facts("", [o.tap ?? TAP, o.sizing ?? SIZING, o.move ?? MOVE, o.dry ?? DRY].join(";"));
+const MAX =
+  "withCash:async(t,n)=>{let[a,o,s,c]=await Promise.all([r.available(),r.fee(),A.floor(e),x7?.evmFeeNow(e).catch(()=>null)??null]),l=i.get(e),u=bK(t,Qo.ETH);if(s===null||c===null||l==null||u===null)return null;let d=s>vD.min?s-vD.min:0n,f=M1(n,c,t=>{let n=UK(t,d,l,e);return n!==null&&n.usdc+o<=a},u+(a>o?zK(a-o,l):0n));return $K(f>u?f:u,Qo.ETH)}";
+const all = (o = {}) => facts("", [o.tap ?? TAP, o.sizing ?? SIZING, o.move ?? MOVE, o.dry ?? DRY, o.max ?? MAX].join(";"));
 
 test("facts() reads each mark from the minified code as the build writes it, and misses each when it is broken", () => {
-  assert.deepEqual(Object.fromEntries(Object.keys(SAYS).map((k) => [k, all()[k]])), { tap: true, sizing: true, move: true, dry: true });
+  assert.deepEqual(Object.fromEntries(Object.keys(SAYS).map((k) => [k, all()[k]])), { tap: true, sizing: true, move: true, dry: true, max: true });
   const broken = {
     tap: [
       // card you-receive-on-every-chain's form: the size asked on Solana alone, an EVM ask moved as its rung
@@ -59,6 +61,8 @@ test("facts() reads each mark from the minified code as the build writes it, and
     sizing: [SIZING.replace("let n=t*D1", "let n=t"), SIZING.replace("fee:n}", "fee:t}"), SIZING.replace("return e.amount===t?e:null", "return e"), SIZING.replace("filter(e=>n<e)", "filter(e=>1)")],
     move: [MOVE.replace("s=a+BigInt(o)*t", "s=a+t"), MOVE.replace("a=(e+i-1n)/i*i", "a=e"), MOVE.replace(":UK(r,", ":XX(r,"), MOVE.replace("c=i?.left??r", "c=r")],
     dry: [DRY.replace("&&n.moved!==void 0", ""), DRY.replace("cost:E1(r.plan)+a", "cost:a"), DRY.replace("fee:()=>x7?.evmFeeNow(e)", "fee:()=>x7?.relayFee(e)")],
+    // the old with_cash (withCashNote: the largest rung Cash makes), Cash's check dropped, another price of the move
+    max: [MAX.replace("x7?.evmFeeNow(e).catch(()=>null)??null", "null"), MAX.replace("n.usdc+o<=a", "!0"), MAX.replace("let n=UK(t,d,l,e)", "let n=XX(t,d,l,e)")],
   };
   for (const [k, list] of Object.entries(broken)) for (const b of list) assert.equal(all({ [k]: b })[k], false, `${k}: ${b.slice(0, 100)}`);
 });

@@ -10,7 +10,7 @@ import { test } from "node:test";
 import type { EvmPoolBuyQuote, EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_BUY_TAP_QUOTES } from "../../kit/src/trade/evm/buy-tap.ts";
-import { evmBuyDry, evmBuyPieces, evmDryCost, evmLastRouteReset, evmMovedPieces, evmMoveShort, EVM_MOVE_FEE_ROOM, type EvmBuyDryDeps, type EvmDryQuote } from "../src/pool-buy-evm.ts";
+import { evmBuyDry, evmBuyPieces, evmDryCost, evmLastRouteReset, evmMostWithCash, evmMovedPieces, evmMoveShort, evmTapBuys, EVM_MOVE_FEE_ROOM, type EvmBuyDryDeps, type EvmDryQuote } from "../src/pool-buy-evm.ts";
 import { planEvmBuy, poolUnits, type PoolAsk } from "../src/rules/pool.ts";
 
 const ETH = 10n ** 18n;
@@ -163,4 +163,19 @@ test("evmMoveShort: the least whole rungs whose notes, each at twice the epoch f
   assert.equal(withReady.plan.amount, micro(20_000n));
   assert.ok(withReady.short < micro(20_000n) && withReady.short >= micro(5_000n), String(withReady.short));
   assert.equal(evmMoveShort([], 0n, fee), null);
+});
+
+test("evmMostWithCash: the most one tap buys with Cash moved first, sized as cashFirst sizes it; every amount up to it the tap carries, the next step not", () => {
+  const fee = micro(10n);
+  // Cash pays a move of at most 0.01 ETH of rungs (its USDC and withdraw fee, as main.ts prices it)
+  const pays = (short: bigint) => short <= micro(10_000n);
+  const most = evmMostWithCash(READY, fee, pays, micro(100_000n));
+  assert.ok(evmTapBuys(READY, most, fee, pays), "the most is carried");
+  assert.ok(!evmTapBuys(READY, most + micro(1n), fee, pays), "one step more is not");
+  // more than the ready notes' 0.0147 and less than the ready notes and the whole move (0.0247): each note its own fee
+  assert.ok(most > micro(14_700n) && most < micro(24_700n), String(most));
+  // no Cash: the ready notes' own most (one bound under their sum, the band); the move's size is checked, never assumed
+  const none = evmMostWithCash(READY, fee, () => false, micro(100_000n));
+  assert.ok(none <= micro(14_700n) && none > micro(14_000n), String(none));
+  assert.equal(evmMostWithCash([], fee, () => false, micro(100_000n)), 0n);
 });
