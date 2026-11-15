@@ -63,7 +63,7 @@ import { SOL_NATIVE_MINT } from "./solana.ts";
 import { freshWallet, toChecksum } from "../derive/index.ts";
 import type { NoteRef } from "../notes/secrets.ts";
 import { refKey, type NoteStore } from "../notes/store.ts";
-import { evmRpcHex } from "./evm.ts";
+import { EVM_POOLS, evmRpcHex } from "./evm.ts";
 import { jOf } from "./queue.ts";
 import { sleepFor } from "../busy.ts";
 import { hostLane, laneFetch, ThrottleGate, type HostLane } from "../throttle.ts";
@@ -741,17 +741,48 @@ export function evmHelperRpc(origin: string, chain: "base" | "robinhood"): Solan
 /** The helper's route in its keyed-only mode (POST /v1/rpc/{chain}?keyed=only, card evm-pool-leaves-any-source, review
  *  of 0b379bf4 P1-1): answered by the helper's keyed providers alone, never its public fallback (which holds the device's
  *  own providers), else an error. Its `operator` is "helper", one operator for the pool sync's sources (evm.ts
- *  evmSourceOperator); paced on the holdings readers' queue for its URL. One reader per origin and chain. */
+ *  evmSourceOperator); paced on the holdings readers' queue for its URL, but a page of the chain's own pool's logs
+ *  (evmPoolPage) on a queue of its own at EVM_POOL_PAGES_LIMIT. One reader per origin and chain. */
 const keyedRoutes = new Map<string, SolanaRpc>();
 export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): SolanaRpc {
   const url = `${helperUrl(origin, chain)}?keyed=only`;
   let r = keyedRoutes.get(url);
   if (r === undefined) {
     const route = holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }));
-    r = Object.assign((method: string, params: readonly unknown[]) => route.rpc(method, params), { url, operator: "helper" }) as SolanaRpc;
+    // the pool's pages: the same client and fetch settings, counted on the helper's lane as every request, on a queue
+    // keyed on this function (no url, so the kit adds no limit to the route URL's queue), stopped as the route's are
+    const bare = solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch: (u, i) => laneFetch()(u, i) });
+    const pages = solanaPacedRpc((method: string, params: readonly unknown[]): Promise<unknown> => {
+      const stop = stopOf.get(params);
+      return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params);
+    }, EVM_POOL_PAGES_LIMIT);
+    const pool = EVM_POOLS[chain]?.pool.toLowerCase();
+    r = Object.assign((method: string, params: readonly unknown[]) => (evmPoolPage(pool, method, params) ? pages : route.rpc)(method, params), { url, operator: "helper" }) as SolanaRpc;
     keyedRoutes.set(url, r);
   }
   return r;
+}
+/**
+ * The helper's allowance for a page of a chain's own pool's logs on the keyed-only route (card
+ * robinhood-walk-inside-12s-with-the-pace): such a page draws nothing of the caller's share (apps/helper/src/rpc/rpc.ts:
+ * a finalized page kept, LOG_CACHE_MS, answers drawing nothing; a first ask draws POOL_LOGS_CLIENT's allowance, the
+ * chain's page share again, 30 per 10 s). At HOLDINGS_RPC_LIMIT's 2 of a method per 1,667 ms the restore's pages of the
+ * pool's life (11 on Robinhood, 100,000 doubling to 800,000 blocks) waited five windows: a sign-in on SIGN_HOST from the
+ * Mac (2026-11-15 14:2xZ, request by request) paged them 8.7 s for about 2.3 s of answers, and walked Robinhood 15.9 s
+ * after Solana. A page past the helper's finalized head (the walk's last one or two) draws the caller's share as any
+ * read: a 429 there rests the seat as any throttle (evm.ts evmPair).
+ */
+export const EVM_POOL_PAGES_LIMIT: SolanaRpcLimit = /* @__PURE__ */ Object.freeze({ windowMs: 10_000, total: 30, perMethod: 30 });
+/** A block number as the helper's page rule reads it (rpc.ts BLOCK_NUMBER). */
+const POOL_PAGE_BLOCK = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
+/** Whether a call is a page of `pool`'s logs as the helper keeps one (rpc.ts finalLogsOf): one eth_getLogs, one filter
+ *  with block numbers for both ends, no blockHash, and `pool` (lowercase) its address. */
+function evmPoolPage(pool: string | undefined, method: string, params: readonly unknown[]): boolean {
+  if (pool === undefined || method !== "eth_getLogs" || params.length !== 1) return false;
+  const f = params[0] as Record<string, unknown> | null;
+  if (typeof f !== "object" || f === null || Array.isArray(f) || Object.hasOwn(f, "blockHash")) return false;
+  const { fromBlock: a, toBlock: b, address } = f;
+  return typeof a === "string" && typeof b === "string" && POOL_PAGE_BLOCK.test(a) && POOL_PAGE_BLOCK.test(b) && BigInt(a) <= BigInt(b) && typeof address === "string" && address.toLowerCase() === pool;
 }
 
 // ---------- a W's buy, from its own history (card restore-rebuilds-buy-records) ----------
