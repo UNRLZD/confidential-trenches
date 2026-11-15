@@ -343,6 +343,23 @@ test("the window: a quote is held for FEE_QUOTE_WINDOW_BLOCKS after its block, t
   assert.equal(await reads.feeMin({ register_deposit: 1_250_000_000_000_000_000_000n } as never), 50_199n);
 });
 
+test("card near-cash-pays-any-amount: a quote holds for its request's whole life, the device's slow proof (70 s) and its last send (570 s at 0.5 s a block) included", async () => {
+  // the owner's taps on release 146 (15 Nov): quote to send took 60-70 s on the device, past a 100-block window, so every
+  // request was priced at the fee now. Here the price doubles after the quote: the held 25,100 must still decide.
+  for (const [blocks, what] of [
+    [125, "70 s at mainnet's 0.566 s a block"],
+    [1_140, "the request's deadline (600 s) less check 9's 30 s margin, at 0.5 s a block"],
+  ] as const) {
+    let w: World = { ...base(), pool: ["300000000000", "600000000000000000000000000000"] };
+    let clock = NOW;
+    const q = quoterOn(() => w, () => clock);
+    assert.equal((await q.quote(USDC)).relay_fee, "25100");
+    clock += 2_000;
+    w = { ...base(), height: base().height + blocks, ms: BigInt(clock - 1_000), pool: ["300000000000", "300000000000000000000000000000"] };
+    assert.equal((await checkWithdraw(structuredClone(fixture.request), CFG, q.reads("mainnet"))).ok, true, `${what}: the held quote decides`);
+  }
+});
+
 test("the window: a quote no longer counts once past, and a lower price now wins over a held quote", async () => {
   let w: World = base();
   let clock = NOW;
@@ -479,11 +496,12 @@ test("the open quotes outlive a restart in the durable store, and are pruned onc
   torn.close();
 });
 
-test("a loaded quote further ahead than any window can reach is pruned (a testnet reset): height + 131 is held, + 132 is not", async (t) => {
+test("a loaded quote further ahead than any window can reach is pruned (a testnet reset): height + window + 31 is held, + 32 is not", async (t) => {
   // a quote's valid_until_block is its agreed height + FEE_QUOTE_WINDOW_BLOCKS, and an agreed height at POST stands at
-  // most HEIGHT_SPREAD_MAX under one at the quote: until <= height + 130, + 1 of slack
+  // most HEIGHT_SPREAD_MAX under one at the quote: until <= height + window + 30, + 1 of slack
   const h = base().height;
-  for (const [ahead, held] of [[131, true], [132, false]] as const) {
+  const w = FEE_QUOTE_WINDOW_BLOCKS;
+  for (const [ahead, held] of [[w + 31, true], [w + 32, false]] as const) {
     const store = openDurableDir(tempDir(t), nodeFs, (d) => d);
     store.replace("fee-quotes-mainnet.json", JSON.stringify([{ until: String(h + ahead), fee: "1", register_min: RD_MIN.toString() }]));
     const fee = await quoterOn(base, () => NOW, store).reads("mainnet").feeMin(body(RD_MIN));

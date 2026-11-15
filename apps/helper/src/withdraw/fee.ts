@@ -66,12 +66,21 @@ export const FEE_POOL_TOKENS = [USDC, "wrap.near"] as const;
 export const FEE_POOL_MIN_TOKEN = 250_000_000_000n;
 /** Two providers' finals may stand this many blocks apart at most (the device's HEIGHT_SPREAD_MAX, wallet deposit/account.ts). */
 export const HEIGHT_SPREAD_MAX = 30n;
+/** The longest a withdrawal request lives: the device's cap on its deadline_ms past its block time T (wallet
+ *  withdraw/request.ts WITHDRAW_DEADLINE_MAX_MS, 600 s). The device asks the quote after it reads T. */
+export const FEE_REQUEST_LIFE_MS = 600_000;
+/** The fastest NEAR block the window is counted in: mainnet makes one each 0.566 s (224567754 to 224569370 in 915 s,
+ *  read 14 Nov 21:15Z, signpage withdraw/handoff.ts), so 0.5 s leaves room for faster blocks. */
+export const FEE_BLOCK_MS_MIN = 500;
 /**
- * A quote's life in blocks: about 58 s at NEAR's 576 ms blocks (F57, M:105), seven times the 8.3 s a withdraw proof
- * takes on the owner's iPhone (G1 proof 2, M304 D-9; W:1718), and inside check 9's 120 s send margin
- * (wallet request.ts WITHDRAW_SEND_MARGIN_MS) [design].
+ * A quote's life in blocks: the whole life of a request made on it (card near-cash-pays-any-amount), 1,200 blocks,
+ * about 680 s at mainnet's 0.566 s. The window was 100 blocks (about 57 s, seven times the 8.3 s proof of G1 on the
+ * owner's iPhone), and the owner's taps on release 146 took 60-70 s from the quote to the send (the reads before the
+ * proof on the device's paced providers, then the proof): every request was priced at the fee now, never at its quote,
+ * and the device let each one go. A request is refused past its own deadline anyway (check 9), so the quote never ends
+ * before the request it prices can. What the relayer takes on: up to ten minutes of NEAR's price against its fee.
  */
-export const FEE_QUOTE_WINDOW_BLOCKS = 100;
+export const FEE_QUOTE_WINDOW_BLOCKS = FEE_REQUEST_LIFE_MS / FEE_BLOCK_MS_MIN;
 /** One pair of reads per network per this long, however many callers ask (about one NEAR block; token-status's CACHE_MS). */
 export const FEE_CACHE_MS = 1_000;
 /**
