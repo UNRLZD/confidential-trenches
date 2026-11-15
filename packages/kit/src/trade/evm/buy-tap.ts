@@ -18,11 +18,18 @@ const REQUOTE = new Set(["below_reference", "native_first", "over_gas_floor", "n
 export const EVM_BUY_TAP_QUOTES = 3;
 const lower = (s: string): string => s.toLowerCase();
 
-/** A tap no route takes: `not_allowed` where the token's indexed pools are none a buy may take and nothing else quoted
- *  (a coin bought through another hook could have no route out), `quote_check_failed` where every route asked was
- *  refused; `last` is the kit's last refusal. */
+/** A tap no route takes, named by its cause (card base-coin-quote-check-names-its-cause: Paper on Base and NOVAAI on
+ *  Robinhood read quote_check_failed on mainnet, which names none):
+ *  - `not_allowed`: the token's market is one a buy may not take: the kit's best route for it goes through a hook the
+ *    venue does not list or pays in another asset than the native one or WETH (NOVAAI's pool behind hook 0xe5e7…f044),
+ *    or its indexed pools are none a buy may take and nothing else quoted (a coin bought through another hook could
+ *    have no route out);
+ *  - `no_reference`: no pool answers: every route asked quoted nothing and the kit's whole search found no route either
+ *    (each refusal's reference none: Paper, whose market is an Aerodrome pool, no Uniswap one);
+ *  - `quote_check_failed`: a route was refused for another reason (a partial fill, a quote under the kit's own best).
+ *  `last` is the kit's last refusal. */
 export class EvmBuyTapRefused extends Error {
-  readonly code: "not_allowed" | "quote_check_failed";
+  readonly code: "not_allowed" | "no_reference" | "quote_check_failed";
   readonly last: unknown;
   constructor(code: EvmBuyTapRefused["code"], last: unknown) {
     super(`${code}: ${last instanceof Error ? last.message : "no route the tap may take quotes"}`);
@@ -92,6 +99,10 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
     r.venue === "uniswap-v3" || ((r.currencyIn === ZERO || lower(r.currencyIn) === weth) && r.hops.every((p) => p.hooks === ZERO || evmHookListed(chain, p.hooks, p.fee, p.tickSpacing)));
   const tries = [shapes[0]!, ...shapes.slice(1).filter((r) => r.venue === "uniswap-v3").slice(0, 1)];
   let refused = false;
+  // a refusal whose reference (the kit's best route) is one this tap may not take
+  let untakeable = false;
+  // every refusal so far the kit's whole search finding no route (no_quote or no_reference, no reference)
+  let none = true;
   let lastErr: unknown = null;
   // every kit quote of the tap counts, a followed reference's too: a reference quoted again can itself be refused for
   // a better one (the pools moved between the two quotes: AERO and GOOGLc below_reference, CRCL native_first on real
@@ -110,6 +121,8 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
         const err = e as { code?: unknown; reference?: { route: EvmRoute } | null };
         if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
         const next = typeof err?.code === "string" && REQUOTE.has(err.code) && err.reference && takes(err.reference.route) ? err.reference.route : null;
+        if (err?.reference && !takes(err.reference.route)) untakeable = true;
+        if (!((err?.code === "no_quote" || err?.code === "no_reference") && !err.reference)) none = false;
         // the kit's own best route refused for another reason than a better one: its name is the tap's
         if (next === null && followed) throw e;
         if (next === null && err?.code !== "no_quote") refused = true;
@@ -123,7 +136,8 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
   }
   // a kept route that quotes no more is asked first no more
   LAST_ROUTE.delete(known);
-  throw new EvmBuyTapRefused(!refused && indexed !== null && indexed.length > 0 && v4.length === 0 ? "not_allowed" : "quote_check_failed", lastErr);
+  const hookOnly = !refused && indexed !== null && indexed.length > 0 && v4.length === 0;
+  throw new EvmBuyTapRefused(untakeable || hookOnly ? "not_allowed" : none ? "no_reference" : "quote_check_failed", lastErr);
 }
 
 /** One sync of the chain's pool index from `prev` (none: cold) on the venue's two index readers through `fetchFn`, and a

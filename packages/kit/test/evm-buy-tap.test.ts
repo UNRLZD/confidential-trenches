@@ -11,12 +11,12 @@ const spam = (n: number): EvmPoolKey[] => Array.from({ length: n }, (_, i) => ({
 const tap = (quote: (r: EvmPoolBuyQuoteRequest) => Promise<EvmPoolBuyQuote>, pools: EvmPoolKey[] | null) =>
   evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote, indexPools: () => pools });
 
-test("a token with 200 indexed pools that all quote nothing is a named refusal after three kit quotes at most", async () => {
+test("a token with 200 indexed pools that all quote nothing, with no route found anywhere, is no_reference after three kit quotes at most", async () => {
   evmBuyTapReset();
   let n = 0;
   await assert.rejects(
     tap(async () => (n++, Promise.reject(new EvmQuoteError("no_quote", "the route reverts or quotes nothing"))), spam(200)),
-    (e) => e instanceof EvmBuyTapRefused && e.code === "quote_check_failed",
+    (e) => e instanceof EvmBuyTapRefused && e.code === "no_reference",
   );
   assert.ok(n <= EVM_BUY_TAP_QUOTES && EVM_BUY_TAP_QUOTES === 3, `${n} quotes`);
 });
@@ -35,8 +35,24 @@ test("a refusal naming the kit's best route asks it once; one through a hook the
   evmBuyTapReset();
   const hooked = { venue: "uniswap-v4" as const, currencyIn: ZERO, hops: [{ currency: TOKEN, fee: 0, tickSpacing: 60, hooks: "0x0af57f6200000000000000000000000000000000", hookData: "0x" as const }] };
   const seen: string[] = [];
-  await assert.rejects(tap(async (r) => (seen.push(JSON.stringify(r.route)), Promise.reject(new EvmQuoteError("no_quote", "x", { amountOut: 1n, route: hooked }))), spam(5)), EvmBuyTapRefused);
+  // card base-coin-quote-check-names-its-cause: its name is the hook's, not_allowed (NOVAAI on Robinhood)
+  await assert.rejects(tap(async (r) => (seen.push(JSON.stringify(r.route)), Promise.reject(new EvmQuoteError("no_quote", "x", { amountOut: 1n, route: hooked }))), spam(5)), (e) => e instanceof EvmBuyTapRefused && e.code === "not_allowed");
   assert.ok(!seen.includes(JSON.stringify(hooked)) && seen.length <= 2, seen.join("\n"));
+});
+
+test("card base-coin-quote-check-names-its-cause: a route refused for another reason than no route anywhere stays quote_check_failed", async () => {
+  evmBuyTapReset();
+  await assert.rejects(
+    tap(async () => Promise.reject(new EvmQuoteError("partial_fill", "a pool runs out", null)), spam(1)),
+    (e) => e instanceof EvmBuyTapRefused && e.code === "quote_check_failed",
+  );
+  // one try no route anywhere, the other a partial fill: not every refusal is no route, so not no_reference
+  evmBuyTapReset();
+  let n = 0;
+  await assert.rejects(
+    tap(async () => Promise.reject(++n === 1 ? new EvmQuoteError("no_quote", "x") : new EvmQuoteError("partial_fill", "y", null)), spam(1)),
+    (e) => e instanceof EvmBuyTapRefused && e.code === "quote_check_failed",
+  );
 });
 
 test("a reference quoted again and refused for a better one is followed inside the bound; past it the kit's refusal is the tap's", async () => {

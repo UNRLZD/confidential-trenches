@@ -34,6 +34,9 @@ test("Activity: a refused or not-landed buy or sell is failed, with the trade bo
       op("c", "buy", "refused", "no_table_fits"),
       op("k", "buy", "refused", "venue_not_built"),
       op("l", "sell", "refused", "venue_not_built"),
+      // a Base or Robinhood buy whose coin only trades behind a hook the venue does not list or in no pool (card
+      // base-coin-quote-check-names-its-cause: the page answers venue_not_built), Unavailable as a Solana one is
+      { ...op("m", "buy", "refused", "venue_not_built"), chain: "robinhood" } as Operation,
       op("d", "sell", "refused", "something_new"),
       op("e", "buy", "refused"),
       op("f", "sell", "not_landed"),
@@ -51,6 +54,7 @@ test("Activity: a refused or not-landed buy or sell is failed, with the trade bo
     c: { reason: "unavailable" },
     k: { reason: "unavailable" },
     l: { reason: "unavailable" },
+    m: { reason: "unavailable" },
     d: { reason: null },
     e: { reason: null },
     f: { reason: "notLanded" },
