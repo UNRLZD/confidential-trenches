@@ -73,11 +73,20 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 
 /** A signed-in page whose store holds a seed and no note, or one on Base or in a Solana pool, every pool read (and each
  *  pool index sync, "index") counted by its chain. */
-async function page(noteOn: "base" | "solana" | null = null) {
+async function page(noteOn: "base" | "solana" | "named" | "named+solana" | null = null) {
   const w: WalletStore = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => w.close());
   await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
-  if (noteOn !== null) {
+  if (noteOn === "named" || noteOn === "named+solana") {
+    // a fresh account as the page leaves it at its sign-in: the deposit naming (src/deposit-name.ts nameScope) plans a
+    // PLANNED deposit note in every pool's scope, Base's, Robinhood's and Solana's, for the addresses it shows; none
+    // holds money
+    const seed = wordsToSeed64(entropyToWords(new Uint8Array(16)));
+    const ns = await openNoteStore(w);
+    for (const scope of [evmPoolScopeOf(PINS.base.pool, 84532n), evmPoolScopeOf(PINS.robinhood.pool, 46630n), SOLANA_SCOPE]) await ns.planDeposit(scope, (ref) => noteSecrets(seed, ref).precommitment);
+    ns.close();
+  }
+  if (noteOn === "base" || noteOn === "solana" || noteOn === "named+solana") {
     // one landed note, in Base's pool or in another pool's scope (a Solana pool's), the published all-zero entropy
     // vector's (a8.json)
     const scope = noteOn === "base" ? evmPoolScopeOf(PINS.base.pool, 84532n) : SOLANA_SCOPE;
@@ -132,6 +141,28 @@ test("signed in with no note anywhere: the load and the tab's focus, show and vi
   assert.deepEqual(reads.robinhood, [], "no Robinhood pool read with no Robinhood note");
   assert.deepEqual(reads.base, [], "no Base pool read with no Base note");
   assert.deepEqual(leaked.filter((u) => /robinhood|base/.test(u)), [], "no fetch to a Base or Robinhood provider");
+});
+
+// card evm-tree-reads-only-when-needed: a fresh 0-dollar passkey account on release 157 sent 1,305 Base RPC posts in
+// 264 s (1,946 eth_getLogs, publicnode 429 on 11 of 13 screens), most of them both chains' pool index, synced because the
+// deposit naming's PLANNED notes counted as money. A PLANNED deposit note is an address shown, never money: the page
+// syncs no index and reads no pool on its word, on the load or on the tab's focus, show and visibility
+test("a fresh account as its sign-in leaves it (a PLANNED deposit note in every pool's scope): no pool read and no pool index on Base or Robinhood", async () => {
+  const { t, doc, reads } = await page("named");
+  await loadAndLook(t, doc);
+  console.log(`named: base reads ${reads.base.length} (${reads.base.join(", ")}); robinhood reads ${reads.robinhood.length} (${reads.robinhood.join(", ")})`);
+  assert.deepEqual(reads.base, [], "no Base pool read nor index sync for an address the page named");
+  assert.deepEqual(reads.robinhood, [], "no Robinhood pool read nor index sync for an address the page named");
+  assert.deepEqual(leaked.filter((u) => /robinhood|base/.test(u)), [], "no fetch to a Base or Robinhood provider");
+});
+
+test("the same named account once it holds money (a Solana note beside its PLANNED ones): both chains' indexes are synced, and neither pool is read", async () => {
+  const { t, doc, reads } = await page("named+solana");
+  await loadAndLook(t, doc);
+  for (const c of ["base", "robinhood"] as const) {
+    assert.ok(reads[c].includes("index"), `${c}: its pool index is synced (${reads[c].join(", ")})`);
+    assert.deepEqual(reads[c].filter((r) => r !== "index"), [], `${c}: no pool read with only a PLANNED note there`);
+  }
 });
 
 const pool = (rs: string[]) => rs.filter((r) => r !== "index");
