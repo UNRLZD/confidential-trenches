@@ -600,3 +600,32 @@ test("release 128 planted: an open answered closes false, closes not true, an ex
   badLine(notice(clone(CLOSES), { v: 1, type: "closed", id: st.passkeyIn.openId, result: {} }), every);
   badLine(notice(setResult(clone(CLOSES), st.passkeyIn.openId, { pending: true }), { v: 1, type: "closed", id: st.passkeyIn.openId }), every);
 });
+
+// card sign-out-check-judges-at-the-hearing: another tab's sign out ends the words' window where the page heard it (the
+// top window's new document, wordsOut.doc: the page hears the post and reloads in one task), as this tab's own sign outs
+// already do. Live run 43708088495 (release 150, Firefox, phone) failed on Robinhood's list pair, sent before the page
+// heard the post and recorded after its acknowledgement (wordsOut.t). Planted on the live runs of release 128: that pair
+// at the acknowledgement or just before the hearing passes; at the hearing or after it, it fails.
+test("a Robinhood pair in flight at another tab's sign out, sent before the page heard it: PASS; sent from the hearing on: FAIL", () => {
+  const out = /^BAD signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(2 signed out: rpc\.mainnet\.chain\.robinhood\.com\/, ct-api\.unrealized\.trade\/v1\/rpc\/robinhood;/;
+  for (const [name, rec] of [["release128.firefox.phone", ANSWERS.release128.firefox.phone], ["release128.chromium.phone", ANSWERS.release128.chromium.phone]]) {
+    const st = rec.steps;
+    assert.ok(typeof st.wordsOut.doc === "number" && st.wordsOut.doc > st.wordsOut.t, `${name}: a new document after the acknowledgement`);
+    const read = [...rec.requests].reverse().find((x) => x.host === "rpc.mainnet.chain.robinhood.com" && x.t >= st.words.t && x.t < st.wordsOut.t);
+    assert.ok(read, `${name}: a Robinhood list read while the words' account was signed in`);
+    const pair = (t) => {
+      const r = clone(rec);
+      r.requests.push({ ...clone(read), t }, { ...clone(read), t, host: "ct-api.unrealized.trade", path: "/v1/rpc/robinhood" });
+      return judge(r);
+    };
+    for (const t of [st.wordsOut.t, st.wordsOut.doc - 1]) {
+      const j = pair(t);
+      assert.equal(j.ok, true, `${name} at ${t - st.wordsOut.t} ms\n${j.lines.join("\n")}`);
+    }
+    for (const t of [st.wordsOut.doc, st.wordsOut.doc + 1, st.stranger.t]) {
+      const j = pair(t);
+      assert.equal(j.ok, false, `${name} at ${t - st.wordsOut.t} ms`);
+      assert.ok(j.lines.some((l) => out.test(l)), `${name} at ${t - st.wordsOut.t} ms\n${j.lines.join("\n")}`);
+    }
+  }
+});
