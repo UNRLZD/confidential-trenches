@@ -192,7 +192,7 @@ export type EvmPoolBuyHost = {
 
 /** A refusal's `rule` (refusal-rule.ts): the fixed word naming the device rule or kit code that refused it, for the page's
  *  own record; never posted to the app. */
-export type EvmPoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed"; rule?: string };
+export type EvmPoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_built" | "failed"; rule?: string };
 
 /** The tap's read-back from the send, on the wall clock (the Solana buy's POOL_BUY_SETTLE_MS). */
 export const EVM_BUY_SETTLE_MS = 120_000;
@@ -241,12 +241,15 @@ export const evmLastRouteReset = (): void => evmBuyTapReset();
 
 /** The device's quote of the ask: the kit's buy tap quote (kit trade/evm/buy-tap.ts evmPoolBuyQuoteTap, three kit
  *  quotes at most, the token's last route, its indexed pools a buy may take, the kit's own best route) on this page's
- *  host; a tap no route takes answers its name (not_allowed, quote_check_failed). */
+ *  host. A tap no route takes: a coin whose market a buy may not take (not_allowed: behind a hook the venue does not
+ *  list) or that no pool quotes (no_reference) is one this build does not trade, venue_not_built, as a Solana coin on a
+ *  venue not built is (pool-buy.ts), which the app draws Unavailable with no Retry (card
+ *  base-coin-quote-check-names-its-cause: the same tap is refused again); any other is quote_check_failed. */
 async function quoteOf(h: EvmPoolBuyHost, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
   try {
     return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
   } catch (e) {
-    if (e instanceof EvmBuyTapRefused) return no(e.code, refusalRule(e));
+    if (e instanceof EvmBuyTapRefused) return no(e.code === "quote_check_failed" ? e.code : "venue_not_built", refusalRule(e));
     throw e;
   }
 }

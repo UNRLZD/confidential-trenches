@@ -1099,13 +1099,14 @@ test("card evm-buy-and-sell-on-mainnet: a tap asks the route that last quoted fo
   c.h.quote = async (req) => (asked.push(req.route), q);
   assert.deepEqual(await runEvmPoolBuy(c.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
   assert.deepEqual(asked, [{ venue: "uniswap-v4", currencyIn: weth, hops: [{ currency: t, fee: 0x800000, tickSpacing: 10, hooks: doppler.hooks, hookData: "0x" }] }], "one quote, the listed pool's");
-  // the index holds the token's pools, none a buy may take, and no v3 tier quotes: the page does not trade it
+  // the index holds the token's pools, none a buy may take, and no v3 tier quotes: the page does not trade it (card
+  // base-coin-quote-check-names-its-cause: venue_not_built, Unavailable in the app)
   evmLastRouteReset();
   const d = host();
   const asked2: unknown[] = [];
   d.h.indexPools = () => [unlisted];
   d.h.quote = async (req) => (asked2.push(req.route), Promise.reject(new EvmQuoteError("no_quote", "no pool")));
-  assert.deepEqual(await runEvmPoolBuy(d.h, ASK), { error: "not_allowed", rule: "no_quote" });
+  assert.deepEqual(await runEvmPoolBuy(d.h, ASK), { error: "venue_not_built", rule: "no_quote" });
   assert.equal(asked2.length, 2, "two v3 tiers only: the first shape and the fallback, three quotes a tap at most");
   assert.deepEqual(d.seen.sends, []);
   evmLastRouteReset();
@@ -1142,7 +1143,8 @@ test("card evm-buy-and-sell-on-mainnet: a tap makes 3 kit quotes at most however
   const asked: unknown[] = [];
   a.h.indexPools = () => spam;
   a.h.quote = async (req) => (asked.push(req.route), Promise.reject(new EvmQuoteError("no_quote", "the route reverts or quotes nothing")));
-  assert.deepEqual(await runEvmPoolBuy(a.h, ASK), { error: "quote_check_failed", rule: "no_quote" });
+  // no route quotes and the kit's search finds none (card base-coin-quote-check-names-its-cause): no pool, venue_not_built
+  assert.deepEqual(await runEvmPoolBuy(a.h, ASK), { error: "venue_not_built", rule: "no_quote" });
   assert.ok(asked.length <= 3, `${asked.length} quotes`);
   assert.deepEqual(a.seen.sends, []);
   evmLastRouteReset();
@@ -1155,7 +1157,8 @@ test("card evm-buy-and-sell-on-mainnet: a refusal whose reference goes through a
   const asked2: unknown[] = [];
   const unlisted: EvmPoolBuyQuote["route"] = { venue: "uniswap-v4", currencyIn: "0x0000000000000000000000000000000000000000", hops: [{ currency: t, fee: 3000, tickSpacing: 60, hooks: "0x0af57f6200000000000000000000000000000c0c", hookData: "0x" }] };
   b.h.quote = async (req) => (asked2.push(req.route), Promise.reject(new EvmQuoteError(asked2.length === 1 ? "below_reference" : "no_quote", "x", asked2.length === 1 ? { amountOut: 1n, route: unlisted } : null)));
-  assert.deepEqual(await runEvmPoolBuy(b.h, ASK), { error: "quote_check_failed", rule: "no_quote" });
+  // the kit's best route is behind that hook (card base-coin-quote-check-names-its-cause): venue_not_built
+  assert.deepEqual(await runEvmPoolBuy(b.h, ASK), { error: "venue_not_built", rule: "no_quote" });
   assert.ok(asked2.length <= 3, `${asked2.length} quotes`);
   assert.ok(!asked2.some((r) => JSON.stringify(r) === JSON.stringify(unlisted)), "the unlisted hook's route is never asked");
   evmLastRouteReset();
@@ -1208,7 +1211,8 @@ test("card buy-any-amount-on-every-chain: a leg whose quote fails before the sen
     },
   });
   const got = await runEvmPoolBuy(h, TWO);
-  assert.ok("error" in got && got.error === "quote_check_failed", JSON.stringify(got));
+  // the second leg's tap finds no route anywhere (card base-coin-quote-check-names-its-cause): venue_not_built
+  assert.ok("error" in got && got.error === "venue_not_built", JSON.stringify(got));
   assert.deepEqual(seen.takes, []);
   assert.equal(seen.sends.length, 0);
   assert.equal(held.size, 0, "the first leg's pending record removed");
