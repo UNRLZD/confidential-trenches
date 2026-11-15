@@ -105,7 +105,7 @@ function pkgCopy() {
 
 const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
 const THREAD_RULE = "/prover-thread.js\n  Content-Security-Policy: default-src 'none'; script-src 'wasm-unsafe-eval'\n";
-const WALK_RULE = "/walk-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self'\n";
+const WALK_RULE = "/walk-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'\n";
 const ZK_RULE = "/assets/zk/*\n  Cache-Control: public, max-age=31536000, immutable\n";
 
 const swap = (from, to) => {
@@ -170,10 +170,11 @@ test("other policy breaks are refused", () => {
     "no walk rule": swap(WALK_RULE, ""),
     "the walk rule twice": `${REAL}${WALK_RULE}`,
     "the walk's CSP without default-src": swap(WALK_RULE, WALK_RULE.replace("default-src 'none'; ", "")),
-    "the walk's CSP with 'wasm-unsafe-eval'": swap(WALK_RULE, WALK_RULE.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")),
-    "the walk's CSP with 'unsafe-eval'": swap(WALK_RULE, WALK_RULE.replace("script-src 'self'", "script-src 'self' 'unsafe-eval'")),
-    "the walk's CSP fetches": swap(WALK_RULE, WALK_RULE.replace("script-src 'self'", "script-src 'self'; connect-src 'self'")),
-    "the walk's CSP starts workers from data: blob:": swap(WALK_RULE, WALK_RULE.replace("script-src 'self'", "script-src 'self'; worker-src data: blob:")),
+    // card firefox-restore-fast: without 'wasm-unsafe-eval' the walk hashes on BigInt (Firefox's restore 90 s)
+    "the walk's CSP without 'wasm-unsafe-eval'": swap(WALK_RULE, WALK_RULE.replace(" 'wasm-unsafe-eval'", "")),
+    "the walk's CSP with 'unsafe-eval'": swap(WALK_RULE, WALK_RULE.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval' 'unsafe-eval'")),
+    "the walk's CSP fetches": swap(WALK_RULE, WALK_RULE.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval'; connect-src 'self'")),
+    "the walk's CSP starts workers from data: blob:": swap(WALK_RULE, WALK_RULE.replace("'wasm-unsafe-eval'", "'wasm-unsafe-eval'; worker-src data: blob:")),
     "the walk's CSP on another path": swap(WALK_RULE, WALK_RULE.replace("/walk-worker.js", "/*-worker.js")),
     "the walk rule sets a second header": swap(WALK_RULE, `${WALK_RULE}  Cross-Origin-Resource-Policy: cross-origin\n`),
     "the walk rule removes the site's CSP": swap(WALK_RULE, `${WALK_RULE}  ! Content-Security-Policy\n`),

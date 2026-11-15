@@ -11,6 +11,7 @@
 // The walk (./restore.ts walkSteps) is the only user, and every index it finds and its last one are checked again with
 // poseidon-lite (noteSecrets), so a drift between the two stops the restore instead of losing a note.
 import { C2, C3, M2, M3 } from "./poseidon-constants.ts";
+import { fieldWasm, type FieldWasm } from "./field-wasm.ts";
 
 const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const FULL_HALF = 4;
@@ -131,13 +132,155 @@ function hash(o: Sparse, inputs: readonly bigint[]): bigint {
   return s[0]!;
 }
 
-let two: Sparse | null = null;
-let three: Sparse | null = null;
+let twoS: Sparse | null = null;
+let threeS: Sparse | null = null;
 /** poseidon-lite's poseidon2, in the sparse form. */
 export function poseidon2Walk(inputs: readonly [bigint, bigint]): bigint {
-  return hash((two ??= sparse(C2, M2, 57)), inputs);
+  return hash((twoS ??= sparse(C2, M2, 57)), inputs);
 }
 /** poseidon-lite's poseidon3, in the sparse form. */
 export function poseidon3Walk(inputs: readonly [bigint, bigint, bigint]): bigint {
-  return hash((three ??= sparse(C3, M3, 56)), inputs);
+  return hash((threeS ??= sparse(C3, M3, 56)), inputs);
+}
+
+// The same hashes on BN254's field in WebAssembly (./field-wasm.ts, card firefox-restore-fast): the sparse form above,
+// round for round, each value a slot of the module's memory in Montgomery form, every sum and product reduced. Used
+// by the walk where the module compiles (fieldWasm), BigInt above where it does not.
+type SparseSlots = { o: Sparse; C: number[]; M: number[][]; k: number[]; m00: number; w: number[][]; z: number[][]; end: number[][]; after: number[]; s: number[]; x: number[]; tmp: number; acc: number };
+
+function slotsOf(f: FieldWasm, o: Sparse): SparseSlots {
+  const put = (v: bigint): number => {
+    const at = f.slot();
+    f.write(at, v);
+    return at;
+  };
+  const many = (vs: readonly bigint[]): number[] => vs.map(put);
+  return {
+    o,
+    C: many(o.C),
+    M: o.M.map(many),
+    k: many(o.k),
+    m00: put(o.m00),
+    w: o.w.map(many),
+    z: o.z.map(many),
+    end: o.end.map(many),
+    after: many(o.after),
+    s: Array.from({ length: o.t }, () => f.slot()),
+    x: Array.from({ length: o.t }, () => f.slot()),
+    tmp: f.slot(),
+    acc: f.slot(),
+  };
+}
+
+// one full round on the slots, as `full` above
+function fullW(f: FieldWasm, q: SparseSlots, constants: readonly number[]): void {
+  const t = q.o.t;
+  for (let y = 0; y < t; y++) {
+    f.add(q.s[y]!, q.s[y]!, constants[y]!);
+    f.pow5(q.s[y]!, q.s[y]!);
+  }
+  for (let y = 0; y < t; y++) f.copy(q.x[y]!, q.s[y]!);
+  for (let i = 0; i < t; i++) {
+    const row = q.M[i]!;
+    f.mul(q.acc, row[0]!, q.x[0]!);
+    for (let j = 1; j < t; j++) {
+      f.mul(q.tmp, row[j]!, q.x[j]!);
+      f.add(q.acc, q.acc, q.tmp);
+    }
+    f.copy(q.s[i]!, q.acc);
+  }
+}
+
+// `hash` above on the slots: the inputs are slots, the hash goes to slot `out`
+function hashW(f: FieldWasm, q: SparseSlots, inputs: readonly number[], out: number): void {
+  const o = q.o;
+  const t = o.t;
+  const n = t - 1;
+  f.writeSmall(q.s[0]!, 0);
+  for (let j = 0; j < n; j++) f.copy(q.s[j + 1]!, inputs[j]!);
+  for (let x = 0; x < FULL_HALF; x++) fullW(f, q, q.C.slice(x * t, x * t + t));
+  // a = s[0], u = s[1..]: the partial rounds
+  const a = q.s[0]!;
+  const na = q.acc;
+  for (let r = 0; r < o.nP; r++) {
+    f.add(a, a, q.k[r]!);
+    f.pow5(a, a);
+    const w = q.w[r]!;
+    const z = q.z[r]!;
+    f.mul(na, q.m00, a);
+    for (let j = 0; j < n; j++) {
+      f.mul(q.tmp, w[j]!, q.s[j + 1]!);
+      f.add(na, na, q.tmp);
+    }
+    for (let j = 0; j < n; j++) {
+      f.mul(q.tmp, a, z[j]!);
+      f.add(q.s[j + 1]!, q.s[j + 1]!, q.tmp);
+    }
+    f.copy(a, na);
+  }
+  // v = end u
+  for (let j = 0; j < n; j++) f.copy(q.x[j]!, q.s[j + 1]!);
+  for (let i = 0; i < n; i++) {
+    const row = q.end[i]!;
+    f.mul(q.acc, row[0]!, q.x[0]!);
+    for (let j = 1; j < n; j++) {
+      f.mul(q.tmp, row[j]!, q.x[j]!);
+      f.add(q.acc, q.acc, q.tmp);
+    }
+    f.copy(q.s[i + 1]!, q.acc);
+  }
+  fullW(f, q, q.after);
+  for (let x = FULL_HALF + o.nP + 1; x < 2 * FULL_HALF + o.nP; x++) fullW(f, q, q.C.slice(x * t, x * t + t));
+  f.copy(out, q.s[0]!);
+}
+
+// the slots the hashes take, once a thread: their constants, and the inputs and output of one hash or one index (an
+// index's work is synchronous, so walks that take turns on one thread share them)
+let slots: { two: SparseSlots; three: SparseSlots; ins: number[]; out: number; nh: number; sh: number } | null = null;
+const slotsOnce = (f: FieldWasm): NonNullable<typeof slots> =>
+  (slots ??= {
+    two: slotsOf(f, (twoS ??= sparse(C2, M2, 57))),
+    three: slotsOf(f, (threeS ??= sparse(C3, M3, 56))),
+    ins: [f.slot(), f.slot(), f.slot()],
+    out: f.slot(),
+    nh: f.slot(),
+    sh: f.slot(),
+  });
+
+/** poseidon2Walk and poseidon3Walk on the WebAssembly field, or null where it does not compile (tests). */
+export function poseidonWasm(): { poseidon2(inputs: readonly [bigint, bigint]): bigint; poseidon3(inputs: readonly [bigint, bigint, bigint]): bigint } | null {
+  const f = fieldWasm();
+  if (f === null) return null;
+  const q = slotsOnce(f);
+  const run = (h: SparseSlots, xs: readonly bigint[]): bigint => {
+    xs.forEach((x, j) => f.write(q.ins[j]!, x));
+    hashW(f, h, q.ins.slice(0, xs.length), q.out);
+    return f.read(q.out);
+  };
+  return { poseidon2: (xs) => run(q.two, xs), poseidon3: (xs) => run(q.three, xs) };
+}
+
+/**
+ * The walk's precommitment of deposit index i under the masters and scope: poseidon2(poseidon3(nullifier, scope, i),
+ * poseidon3(secret, scope, i)), as ../derive/notes.ts derives a deposit note's. On the WebAssembly field where it
+ * compiles, on BigInt otherwise; equal either way. The masters and scope are put in the module once a walk and into
+ * the shared input slots each index, so walks taking turns on one thread never read each other's.
+ */
+export function precommitmentWalker(m: { nullifier: bigint; secret: bigint }, scope: bigint): (i: number) => bigint {
+  const f = fieldWasm();
+  if (f === null) return (i) => poseidon2Walk([poseidon3Walk([m.nullifier, scope, BigInt(i)]), poseidon3Walk([m.secret, scope, BigInt(i)])]);
+  const q = slotsOnce(f);
+  const [mn, ms, sc] = [m.nullifier, m.secret, scope].map((x) => (f.write(q.out, x), f.save(q.out))) as [Uint32Array, Uint32Array, Uint32Array];
+  const [a, b, at] = q.ins as [number, number, number];
+  return (i) => {
+    if (!Number.isInteger(i) || i < 0 || i > 0xffffffff) throw new Error("an index is a u32");
+    f.writeSmall(at, i);
+    f.load(a, mn);
+    f.load(b, sc);
+    hashW(f, q.three, [a, b, at], q.nh);
+    f.load(a, ms);
+    hashW(f, q.three, [a, b, at], q.sh);
+    hashW(f, q.two, [q.nh, q.sh], q.out);
+    return f.read(q.out);
+  };
 }

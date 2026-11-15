@@ -14,7 +14,8 @@
 # thread file gets its own policy too, joined to the /* rule's: it runs wasm and loads, fetches and starts nothing.
 # The restore walks its deposit indices in Workers started from /walk-worker.js (card restore-shows-the-balance-in-seconds),
 # one pinned same-origin module made a TrustedScriptURL by the page's policy walk-worker; its own policy, joined to the
-# site's, lets it fetch and start nothing: it computes only.
+# site's, lets it fetch and start nothing: it computes only, its field arithmetic as WebAssembly it compiles from its
+# own bytes ('wasm-unsafe-eval', card firefox-restore-fast; never 'unsafe-eval').
 # Permissions-Policy denies the APP_HOST frame (and this page) every feature it does not need; the frame has no `allow`
 # attribute, so clipboard-write=(self) already keeps the clipboard API from it and the default 'self' kept fullscreen
 # from it. fullscreen=() and picture-in-picture=() (whose default is every origin) say it outright (card
@@ -48,6 +49,6 @@
 /prover-thread.js
   Content-Security-Policy: default-src 'none'; script-src 'wasm-unsafe-eval'
 /walk-worker.js
-  Content-Security-Policy: default-src 'none'; script-src 'self'
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'
 /assets/zk/*
   Cache-Control: public, max-age=31536000, immutable

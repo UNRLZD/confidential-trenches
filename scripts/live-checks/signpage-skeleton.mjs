@@ -64,9 +64,10 @@ export const CSP = [
 ];
 // the walk Worker's file and its own policy, which Pages joins to the /* rule's (card restore-shows-the-balance-in-seconds):
 // it computes only, so it may load no script but its own and fetch, start or frame nothing; deploy.mjs holds the build's
-// _headers to it
+// _headers to it. It compiles the walk's field arithmetic as WebAssembly ('wasm-unsafe-eval', card firefox-restore-fast:
+// on BigInt Firefox's restore of four pools took 90 s), never JavaScript from a string ('unsafe-eval' stays refused)
 export const WALK_PATH = "/walk-worker.js";
-export const WALK_CSP = "default-src 'none'; script-src 'self'";
+export const WALK_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'";
 // Integrity-Policy from the wallet paper's block; the rest from the app paper's SIGN_HOST column (app.md 2.3)
 export const HEADERS = {
   "integrity-policy": "blocked-destinations=(script)",
