@@ -567,6 +567,14 @@ test("a restored device: each W's buy record back from its own buy on the helper
     delete all[Ws[1]!];
     return all;
   });
+  // and W1's trades cursor, as phase 4 does: the Ws are read in a random order, so whether phase 2's run left one for W1
+  // (read to its sale) is the draw's; without it the run reads W1 from its buy whatever the draw (box, 2 of 12 runs:
+  // the run read W1's signatures and never asked s1buy)
+  await w.update("meta", "owed/trades-sol-read", (v) => {
+    const all = { ...(v as Record<string, unknown>) };
+    delete all[Ws[1]!];
+    return all;
+  });
   mode.holdTx = "s1buy";
   tp = make();
   await tp.settle();
