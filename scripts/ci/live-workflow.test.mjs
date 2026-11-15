@@ -5,7 +5,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { BUDGET_READS, SUMMARY_LINES, budgetProblems, fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
+import { BUDGET_READS, KEYED_CHAIN, checkText, KEYED_READS, SUMMARY_LINES, budgetProblems, fileProblems, liveProblems, planProblems, problems } from "./live-workflow.mjs";
 import { HOSTS, ROOT, commitProblem, enginesFor, keysOf, listOf, missingFor, planFor, reachesLauncher, usagesOf } from "./live-plan.mjs";
 
 const LIVE = readFileSync(path.join(ROOT, ".github/workflows/live.yml"), "utf8");
@@ -194,7 +194,7 @@ test("planted (live-inconclusive-rerun): a bound or a pause out of reason is ref
 });
 
 // a list file that prints `checks` with --live-runs, as the real ones do
-const listFile = (checks) => `console.log(JSON.stringify({ checks: ${JSON.stringify(checks)}, runs: Object.fromEntries(${JSON.stringify(checks)}.map((k) => [k, ["scripts/live-checks/" + k + ".mjs"]])) }));\n`;
+const listFile = (checks, serial) => `console.log(JSON.stringify({ checks: ${JSON.stringify(checks)}, ${serial === undefined ? "" : `serial: ${JSON.stringify(serial)}, `}runs: Object.fromEntries(${JSON.stringify(checks)}.map((k) => [k, ["scripts/live-checks/" + k + ".mjs"]])) }));\n`;
 
 // a copy of the repository files the plan reads, to plant a failure in
 function fixture(edit) {
@@ -218,7 +218,12 @@ test("planted: a deploy that lists a check with no file, a check without its tes
     assert.ok(has(await planProblems("helper", gone), /no-such-check, which is no file/));
     assert.ok(has(await planProblems("helper", noTest), /helper-rpc-proxy has no scripts\/live-checks\/helper-rpc-proxy\.test\.mjs/));
     assert.ok(has(await planProblems("helper", env), /helper-rpc-proxy reads the environment/));
-    assert.deepEqual(await planProblems("helper", fixture(() => {})), []);
+    // card helper-live-run-holds-its-own-load: helper-rpc-proxy reads the keyed Base and Robinhood providers, so its own
+    // job is refused (budgetProblems) and the clean copy runs it in evm-keyed
+    assert.ok(has(await planProblems("helper", fixture(() => {})), /helper-rpc-proxy reads the helper's keyed Base and Robinhood providers .* in a job of its own/));
+    const clean = fixture((r) => writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), listFile(["helper-host-health", "helper-rpc-proxy", "market-data-evm"], { "evm-keyed": ["helper-rpc-proxy", "market-data-evm"] })));
+    assert.deepEqual(await planProblems("helper", clean), []);
+    rmSync(clean, { recursive: true, force: true });
   } finally {
     for (const r of [gone, noTest, env]) rmSync(r, { recursive: true, force: true });
   }
@@ -522,8 +527,8 @@ const BUDGET_KEYS = ["solana-mint-supply-moves", "helper-token-page-cold", "mark
 
 test("the helper's plan runs the nine checks that spend the Jupiter budget as ONE matrix entry, in order, and every other check as its own", async () => {
   const plan = await planFor("helper", { commit: COMMIT });
-  const groups = plan.include.filter((e) => e.group !== "");
-  assert.equal(groups.length, 1);
+  const groups = plan.include.filter((e) => e.group !== "" && e.id === "jupiter-budget");
+  assert.deepEqual(plan.include.filter((e) => e.group !== "").map((e) => e.id), ["jupiter-budget", "evm-keyed"], "two groups: Jupiter's budget, and the keyed Base and Robinhood providers");
   assert.equal(groups[0].id, "jupiter-budget");
   assert.equal(groups[0].key, "");
   assert.equal(groups[0].args, "");
@@ -535,6 +540,26 @@ test("the helper's plan runs the nine checks that spend the Jupiter budget as ON
   assert.ok(plan.include.some((e) => e.key === "app-console-429" && e.group === ""), "app-console-429 reads a listed token's page, no Jupiter call: its own job");
   // the other hosts have no group
   for (const host of ["app", "sign"]) assert.ok((await planFor(host, { commit: COMMIT })).include.every((e) => e.group === ""), host);
+});
+
+// card helper-live-run-holds-its-own-load: the checks that read the helper's keyed Base and Robinhood providers, in order:
+// the RPC routes first, then the tapes and the chain chart
+const KEYED_KEYS = ["helper-rpc-takes-batches", "evm-pool-leaves-any-source", "evm-pool-sync-holds", "helper-base-logs-page", "helper-pool-logs-outside-the-caller-budget", "robinhood-pool-logs-on-keyed-route", "helper-rpc-proxy", "evm-rpc-spare-list", "evm-chart-opens-without-a-vendor-call", "index-evm-swaps", "helper-base-tape-reads-back", "helper-v4-hook-liquidity", "solana-trades-show-on-every-token", "robinhood-listed-tape-opens", "helper-tape-4337-trader", "helper-robinhood-capacity", "helper-robinhood-search-ahead"];
+
+test("the helper's plan runs the seventeen checks that read its keyed Base and Robinhood providers as ONE matrix entry, and KEYED_READS finds exactly them", async () => {
+  const plan = await planFor("helper", { commit: COMMIT });
+  const [g, ...more] = plan.include.filter((e) => e.id === "evm-keyed");
+  assert.equal(more.length, 0);
+  assert.equal(g.key, "");
+  assert.deepEqual(keysOf(g), KEYED_KEYS);
+  assert.match(g.name, /^evm-keyed \(17 checks, one after another\)$/);
+  for (const k of KEYED_KEYS) assert.ok(!plan.include.some((e) => e.group === "" && e.key === k), `${k} has no job of its own`);
+  const list = listOf("helper", ROOT, { commit: COMMIT, network: "mainnet" });
+  const found = list.checks.filter((k) => {
+    const t = checkText(k);
+    return !list.skipped[k] && KEYED_READS.test(t) && KEYED_CHAIN.test(t);
+  });
+  assert.deepEqual(found.sort(), [...KEYED_KEYS].sort(), "the group is exactly the checks that read a keyed Base or Robinhood route");
 });
 
 test("the real helper plan has no budget check outside the group, and every check that reads a Jupiter route is found by BUDGET_READS", async () => {
@@ -595,6 +620,53 @@ test("planted: one budget check left out of the group is refused by name, and th
     assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "calm"] }, budgetExempt: { "jup-b": "short" } })), /jup-b is exempt from the Jupiter budget group with no reason/));
     assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "jup-b"] }, budgetExempt: { "jup-b": reason } })), /jup-b is both in a serial group and exempt from it/));
     assert.ok(has(await planProblems("helper", root({ serial: { "jupiter-budget": ["jup-a", "jup-b"] }, budgetExempt: { "no-such": reason } })), /no-such is exempt from the Jupiter budget group but is no listed check/));
+  } finally {
+    for (const r of roots) rmSync(r, { recursive: true, force: true });
+  }
+});
+
+// a root whose helper list is `list`, with two checks that read the keyed Base route and a tape, one on Solana's keyed
+// route (no EVM chain named: no keyed EVM read), a Jupiter check, and one that reads both
+function keyedFixture(list) {
+  return fixture((r) => {
+    const texts = {
+      "evm-a": 'const CHAINS = { base: "0x2105" };\nawait fetch(`${base}/v1/rpc/base?keyed=only`);\n',
+      "evm-b": 'const t = await fetch(`${base}/v1/market/trades?chain=${"robinhood"}&token=0x1`);\n',
+      "sol-k": 'await fetch(`${base}/v1/rpc/solana?keyed=only`);\n',
+      "jup-a": 'const r = await fetch("/v1/proxy/jupiter/swap/v2/build");\n',
+      both: 'await fetch("/v1/proxy/jupiter/swap/v2/build");\nawait fetch(`${base}/v1/rpc/base?keyed=only`);\n',
+    };
+    for (const [k, text] of Object.entries(texts)) {
+      writeFileSync(path.join(r, `scripts/live-checks/${k}.mjs`), `//   node scripts/live-checks/${k}.mjs [--base <url>]\n${text}`);
+      writeFileSync(path.join(r, `scripts/live-checks/${k}.test.mjs`), "");
+      writeFileSync(path.join(r, `scripts/live-checks/${k}.answers.json`), "{}");
+    }
+    writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), list);
+  });
+}
+
+test("planted (card helper-live-run-holds-its-own-load): a check that reads the keyed Base or Robinhood providers outside evm-keyed is refused; in it, it passes", async () => {
+  const roots = [];
+  const problemsOf = async (checks, serial) => {
+    const r = keyedFixture(budgetList(checks, { serial }));
+    roots.push(r);
+    return planProblems("helper", r);
+  };
+  try {
+    const apart = await problemsOf(["evm-a", "evm-b", "sol-k"], {});
+    assert.ok(has(apart, /evm-a reads the helper's keyed Base and Robinhood providers .* in a job of its own: give it a `\/\/ Serial: evm-keyed <position>`/), apart.join("\n"));
+    assert.ok(has(apart, /evm-b reads the helper's keyed Base and Robinhood providers .* in a job of its own/), apart.join("\n"));
+    assert.ok(!has(apart, /sol-k reads/), "Solana's keyed route is no keyed Base or Robinhood read");
+    assert.deepEqual(await problemsOf(["evm-a", "evm-b", "sol-k"], { "evm-keyed": ["evm-a", "evm-b"] }), []);
+    const left = await problemsOf(["evm-a", "evm-b", "sol-k"], { "evm-keyed": ["evm-a", "sol-k"] });
+    assert.ok(has(left, /evm-b reads the helper's keyed/) && !has(left, /evm-a reads/), left.join("\n"));
+    // the wrong group is no way round it, either way
+    const wrong = await problemsOf(["evm-a", "evm-b", "jup-a", "sol-k"], { "jupiter-budget": ["evm-a", "jup-a"], "evm-keyed": ["evm-b", "sol-k"] });
+    assert.ok(has(wrong, /evm-a reads the helper's keyed Base and Robinhood providers .* in serial group jupiter-budget/), wrong.join("\n"));
+    const jupWrong = await problemsOf(["evm-a", "evm-b", "jup-a"], { "evm-keyed": ["evm-a", "evm-b", "jup-a"] });
+    assert.ok(has(jupWrong, /jup-a reads the helper's Jupiter budget in serial group evm-keyed: give it a `\/\/ Serial: jupiter-budget <position>`/), jupWrong.join("\n"));
+    const both = await problemsOf(["evm-a", "evm-b", "both"], { "evm-keyed": ["evm-a", "evm-b", "both"] });
+    assert.ok(has(both, /both reads both the helper's Jupiter budget and its keyed Base and Robinhood providers/), both.join("\n"));
   } finally {
     for (const r of roots) rmSync(r, { recursive: true, force: true });
   }

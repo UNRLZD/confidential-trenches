@@ -13,6 +13,7 @@
 // A 400 from the helper is its refusal: FAIL. A read the shared module calls a no-answer (a 429, a 5xx, no answer) is the
 // moment's, never the build's: INCONCLUSIVE (exit 3) naming it.
 // After: helper
+// Serial: evm-keyed 10
 //   node scripts/live-checks/helper-rpc-takes-batches.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read (each HTTP answer as
 //   it came), so the check's test can replay it.
@@ -63,7 +64,12 @@ export function judge({ reads }) {
       const fin = got.finalized?.result;
       const finOk = typeof fin?.hash === "string" && HASH.test(fin.hash) && QTY.test(fin.number ?? "");
       if (got.finalized) say(finOk, `${tag} the finalized block has a hash and number: ${cut(JSON.stringify(fin?.number ?? got.finalized.error ?? null))}`);
-      if (got.byHash) {
+      // card helper-live-run-holds-its-own-load: with no finalized block read (its read a no-answer), the read by hash
+      // asked for no block, so its answer proves nothing either way (live run 43683445143 judged that null BAD)
+      if (got.byHash && !got.finalized) {
+        quiet = true;
+        lines.push(`--  ${tag} byHash: no finalized block was read to ask by`);
+      } else if (got.byHash) {
         const h = got.byHash.result;
         say(finOk && h?.hash === fin.hash && h?.number === fin.number, `${tag} eth_getBlockByHash answers that block: ${cut(JSON.stringify(h?.number ?? got.byHash.error ?? null))}`);
       }

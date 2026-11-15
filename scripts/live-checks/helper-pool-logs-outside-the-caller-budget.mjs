@@ -13,6 +13,7 @@
 //     as its first;
 //   - each answer carries a full-sha X-Helper-Commit and echoes SIGN_HOST in Access-Control-Allow-Origin.
 // After: helper
+// Serial: evm-keyed 50
 //   node scripts/live-checks/helper-pool-logs-outside-the-caller-budget.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
