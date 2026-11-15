@@ -529,9 +529,13 @@ export function clientWindow(max: number, now: () => number = Date.now, windowMs
 export const LEND_FREE_SHARES = 2;
 /** The shares a lent caller leaves free for callers not seen yet in the vendor's window, beside one for each caller
  * seen (card helper-crowd-429 fold 4: with one, a heavy device and one user drawing inside its share refused a third
- * first-time user for up to a minute). A lone heavy device draws 26 - 3 * 4 = 14 of Jupiter's callers' part a minute. */
+ * first-time user for up to a minute). A lone heavy device, lent as a background draw (card solana-buy-from-cash-quotes),
+ * draws 60 - 6 - 24 - 3 * 4 = 18 of Jupiter's minute: the total less the cold page's floor, the callers' userRoom and
+ * the shares kept. */
 export const LEND_NEW_SHARES = 3;
-export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number; userRoom?: number; lend?: boolean };
+/** `tradesFirst` (card solana-buy-from-cash-quotes, the vendors' keys in ../proxy/proxy.ts): the reserve is a cold page's
+ *  floor and the userRoom what the own reads nobody waits for leave the callers (totalWait). */
+export type BudgetLimits = { total: number; perClient: number; windowMs?: number; reserve?: number; userRoom?: number; lend?: boolean; tradesFirst?: boolean };
 
 /**
  * A shared upstream budget per key (a chain's RPC provider, one RPC method on it, a vendor). Every call that reaches
@@ -596,15 +600,16 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     }
     return a.size - (a.has(client) ? 1 : 0);
   };
-  /** Per key: [second, requests sent in it, of them not reserved], oldest first, kept while the provider's window may
-   * still count them. */
-  const sent = new Map<string, [number, number, number][]>();
+  /** Per key: [second, requests sent in it, of them not reserved, of them a reserved read a caller waits for (a page)],
+   * oldest first, kept while the provider's window may still count them. */
+  type Sent = [number, number, number, number];
+  const sent = new Map<string, Sent[]>();
   /** Per key: the draws another helper on the same upstream made (card helper-deploy-reads-fast: the one a deploy runs
    *  beside this one, proxy/shared-calls.ts), [second, requests, requests], oldest first; counted as every draw is, and replaced
    *  whole by the next seed of the key, so a file read twice counts once. */
-  const seeded = new Map<string, [number, number, number][]>();
+  const seeded = new Map<string, Sent[]>();
   /** The key's draws in its window, ours and the seeded ones, oldest first. */
-  const windowOf = (key: string, sec: number, w: number): [number, number, number][] => {
+  const windowOf = (key: string, sec: number, w: number): Sent[] => {
     const q = sent.get(key) ?? [];
     while (q.length > 0 && q[0]![0] < sec - w) q.shift();
     const s = (seeded.get(key) ?? []).filter((b) => b[0] >= sec - w);
@@ -628,31 +633,45 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
   /** The seconds until `n` more fit (0: they fit now): every draw under the key's total, and a draw not reserved also
    * with every other such draw under the total less the reserve, so the helper's own reads always find their room. A
    * request sent in second s may still be in the provider's window until the end of second s + W, W its window in
-   * seconds. A background draw (`background`) also leaves the key's userRoom free. */
+   * seconds. A background draw not reserved also leaves the key's userRoom free. Card solana-buy-from-cash-quotes, on a
+   * `tradesFirst` key (trades first): the reserve is the floor of the reserved reads a caller waits for (`reserved` and
+   * not `background`: a cold page); a background draw (an own read nobody waits for, or a lent caller) leaves the
+   * userRoom free for the callers and what of the floor the pages have not drawn; a page past its floor goes only while
+   * the userRoom stays free. So the callers keep the userRoom against every own read, and a page its floor against the
+   * background reads and against the callers' part. */
   const totalWait = (key: string, n: number, t: number, lim: BudgetLimits, reserved: boolean, background: boolean): number => {
     const w = Math.ceil((lim.windowMs ?? windowMs) / 1000);
     const sec = Math.floor(t / 1000);
     const q = windowOf(key, sec, w);
-    const until = (i: 1 | 2, cap: number): number => {
-      let used = 0;
-      for (const b of q) used += b[i];
-      if (used + n <= cap) return 0;
-      if (n > cap) return RETRY_AFTER_MAX_S;
-      for (const b of q) {
-        used -= b[i];
-        if (used + n <= cap) return secondsUntil((b[0] + w + 1) * 1000, t);
-      }
-      return RETRY_AFTER_MAX_S;
+    const total = lim.total;
+    const floor = lim.reserve ?? 0;
+    const room = lim.userRoom ?? 0;
+    // whether n more fit beside the window's draws [all, not reserved, pages]
+    const fits = (all: number, others: number, pages: number): boolean => {
+      if (all + n > total) return false;
+      if (!reserved && others + n > total - floor - (background ? room : 0)) return false;
+      if (lim.tradesFirst !== true) return true;
+      if (background) return all + n <= total - room - Math.max(0, floor - pages);
+      return !reserved || all + n <= total - room || pages + n <= floor;
     };
-    return Math.max(until(1, lim.total), reserved ? 0 : until(2, lim.total - (lim.reserve ?? 0) - (background ? (lim.userRoom ?? 0) : 0)));
+    let [all, others, pages] = [0, 0, 0];
+    for (const b of q) (all += b[1]), (others += b[2]), (pages += b[3]);
+    if (fits(all, others, pages)) return 0;
+    if (!fits(0, 0, 0)) return RETRY_AFTER_MAX_S;
+    for (const b of q) {
+      (all -= b[1]), (others -= b[2]), (pages -= b[3]);
+      if (fits(all, others, pages)) return secondsUntil((b[0] + w + 1) * 1000, t);
+    }
+    return RETRY_AFTER_MAX_S;
   };
-  /** `reserved`: the helper's own read that may use the key's reserve; every other draw stops at total less reserve. */
-  function takeEach(draws: readonly (readonly [string, number])[], client?: string, shareOnly = false, reserved = false): Take {
+  /** `reserved`: the helper's own read that may use the key's reserve; every other draw stops at total less reserve.
+   *  `yields` (card solana-buy-from-cash-quotes): a reserved own read nobody waits for, which leaves userRoom free. */
+  function takeEach(draws: readonly (readonly [string, number])[], client?: string, shareOnly = false, reserved = false, yields = false): Take {
     const t = now();
     const want = new Map<string, number>();
     for (const [key, n] of draws) want.set(key, (want.get(key) ?? 0) + n);
     let wait = 0;
-    const background = client === undefined && !reserved;
+    const background = client === undefined && (!reserved || yields);
     for (const key of want.keys()) {
       const h = heldFor(key, t, background);
       if (h > wait) (wait = h), (refusedBy = `${key} held`);
@@ -675,7 +694,9 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
       if (heavy) {
         markLent(key, client, t);
         const keep = lim.perClient * (LEND_NEW_SHARES + activeOthers(key, client, t, lim));
-        const tk = totalWait(key, n + keep, t, lim, reserved, background);
+        // card solana-buy-from-cash-quotes: a lent caller goes behind the others as a background read does, leaving the
+        // key's userRoom free too, so the callers' larger part never lets one heavy device crowd another's trade
+        const tk = totalWait(key, n + keep, t, lim, reserved, true);
         if (tk > wait) (wait = tk), (refusedBy = `${key} ${overShare ? "share" : "total"}`);
       } else if (overShare) {
         const s = toWindowEnd(t, windowMs);
@@ -716,8 +737,9 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
       if (q === undefined) sent.set(key, (q = []));
       const last = q[q.length - 1];
       const others = reserved ? 0 : n;
-      if (last !== undefined && last[0] === sec) (last[1] += n), (last[2] += others);
-      else q.push([sec, n, others]);
+      const pages = reserved && !background ? n : 0;
+      if (last !== undefined && last[0] === sec) (last[1] += n), (last[2] += others), (last[3] += pages);
+      else q.push([sec, n, others, pages]);
     }
     return 0;
   }
@@ -735,12 +757,12 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
     seed(key: string, times: readonly number[]): void {
       const by = new Map<number, number>();
       for (const x of times) if (Number.isFinite(x)) by.set(Math.floor(x / 1000), (by.get(Math.floor(x / 1000)) ?? 0) + 1);
-      seeded.set(key, [...by].sort((a, b) => a[0] - b[0]).map(([sec, n]) => [sec, n, n]));
+      seeded.set(key, [...by].sort((a, b) => a[0] - b[0]).map(([sec, n]): Sent => [sec, n, n, 0]));
     },
     /** What refused the last refused draw (read right after it): "<key> held", "<key> share" or "<key> total". */
     refusedBy: (): string => refusedBy,
     /** One key: n requests for `client` (undefined: the helper's own read, which draws from the total only). */
-    take: (key: string, client: string | undefined, n = 1, shareOnly = false, reserved = false): Take => takeEach([[key, n]], client, shareOnly, reserved),
+    take: (key: string, client: string | undefined, n = 1, shareOnly = false, reserved = false, yields = false): Take => takeEach([[key, n]], client, shareOnly, reserved, yields),
     /** The seconds a draw on `key` must still wait for the provider's reset (`background`: a background draw); 0 when none. */
     heldFor: (key: string, background = false): Take => heldFor(key, now(), background),
     /** When the provider's reset on `key` ends, in ms on the budget's clock, for every draw; 0 when none holds it (card

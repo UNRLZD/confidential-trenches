@@ -9,7 +9,7 @@ import { after, before, test } from "node:test";
 import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
 import { start } from "../../server.ts";
 import { COLD_RESERVE, geckoBudget, PAGE_RESERVE, REFRESH_SLOT, WINDOW_MS } from "../gecko.ts";
-import { createProxy } from "../../proxy/proxy.ts";
+import { createProxy, PROXY_RESERVE } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { b58decode, pumpCurveAddress, ROW_FIELDS, toRow } from "./lists.ts";
 import {
@@ -104,7 +104,7 @@ test("fold 6 (R5c): Jupiter's batched search draws on the helper's own reserve, 
   });
   let callers = 0;
   for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await proxy.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
-  assert.equal(callers, 60 - 34, "callers' part of Jupiter Free is spent");
+  assert.equal(callers, 60 - PROXY_RESERVE.jupiter, "callers' part of Jupiter Free is spent");
   const a = await createSolanaToken(proxy, fakeRpc(), { now: () => NOW }).page(PUMP);
   assert.equal(a.status, 200, "the page is served");
   assert.deepEqual(searched, [PUMP], "its search reached Jupiter");

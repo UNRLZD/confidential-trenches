@@ -243,7 +243,7 @@ test("card helper-token-page-cold: callers ahead of refreshes: a refresh leaves 
   assert.deepEqual(proxy.calls.at(-1)!.mints, [mint(50), mint(0)], "the cold one went at once, carrying the refresh");
 });
 
-test("card helper-token-page-cold: page searches at their limit leave a swap build's call unblocked (the real proxy and its budget)", async (t) => {
+test("card helper-token-page-cold: page searches at their limit leave a swap build's call unblocked (the real proxy and its budget; card solana-buy-from-cash-quotes: the pages keep their floor, and past it yield to the trades)", async (t) => {
   clock(t);
   const searches: number[] = [];
   const proxy = createProxy({}, { burstMs: 0,
@@ -261,8 +261,8 @@ test("card helper-token-page-cold: page searches at their limit leave a swap bui
   const tok = T.createSolanaToken(proxy, rpc, { now: () => Date.now() });
   // Discover's lists at their most in the counted minute (lists.ts: 3 reads a 12 s refresh, 6 refreshes in 61 s)
   for (let i = 0; i < 18; i++) assert.equal((await settle(t, proxy.handle("jupiter", "/tokens/v2/recent", `limit=${i + 1}`, "", undefined, true))).status, 200);
-  // callers' swap builds: all of their part but one
-  const callers = PROXY_BUDGETS.jupiter.total - PROXY_RESERVE.jupiter;
+  // callers' swap builds: all the minute leaves them beside the lists and the pages' floor, but one
+  const callers = PROXY_BUDGETS.jupiter.total - 18 - PROXY_RESERVE.jupiter;
   for (let i = 0; i < callers - 1; i++) assert.equal((await settle(t, proxy.handle("jupiter", "/swap/v2/build", `q=${i}`, "", `198.51.100.${Math.floor(i / 4)}`))).status, 200, `build ${i}`);
   // a new cold mint every 400 ms for 60 s: the pages search as much as they may
   const pages: ReturnType<typeof ask>[] = [];
@@ -270,8 +270,9 @@ test("card helper-token-page-cold: page searches at their limit leave a swap bui
     pages.push(ask(tok, mint(n)));
     await run(t, 400);
   }
-  assert.equal(searches.length, SEARCH_PER_SPAN, "the page searches at their limit, and no more");
-  assert.ok(SEARCH_PER_SPAN + 18 <= PROXY_RESERVE.jupiter, "inside the helper's own reserve with the lists");
+  // the pages ask past their floor (SEARCH_PER_SPAN) and are served their floor: past it they leave the callers their room
+  assert.ok(PROXY_RESERVE.jupiter < SEARCH_PER_SPAN, "the pages ask past their floor");
+  assert.equal(searches.length, PROXY_RESERVE.jupiter, "the page searches get their floor, and no more while the trades need the rest");
   // still in the counted minute of every draw above: the last caller build goes
   const build = await settle(t, proxy.handle("jupiter", "/swap/v2/build", "q=last", "", "198.51.100.200"));
   assert.equal(build.status, 200, `a swap build is not refused behind token pages (${build.body})`);

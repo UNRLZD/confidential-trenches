@@ -342,7 +342,7 @@ export function snapshot(read: { new: Row[]; trending_5m: Row[]; trending_1h: Ro
 // ---------------------------------------------------------------------------------------------------------------
 
 type Answer = { status: number; headers: Record<string, string>; body: string };
-type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean): Promise<Answer> };
+type Proxy = { handle(vendor: string, path: string, rawQuery: string, body: string, client?: string, reserved?: boolean, waitMs?: number, caller?: boolean): Promise<Answer> };
 type Rpc = { handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved?: boolean): Promise<{ status: number; body: string }> };
 /** `retryAfterS`: a 429's wait (card helper-abuse-limits), which server.ts answers as its Retry-After. */
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
@@ -408,7 +408,9 @@ export function createSolanaLists(proxy: Proxy, rpc: Rpc, deps: { now?: () => nu
   const origins = createOrigins(rpcAccounts(rpc, true)); // rpc.ts RPC_RESERVE
 
   async function read(path: string): Promise<{ rows: Row[]; hints: Map<string, Hint>; at: number } | null> {
-    const a = await proxy.handle("jupiter", path, "limit=100", "", undefined, true); // proxy.ts PROXY_RESERVE
+    // proxy.ts PROXY_RESERVE: with no list built yet a caller waits for it (a cold page, on the reserve's floor); a held
+    // list's refresh is a background read, which leaves the devices' trades their room (card solana-buy-from-cash-quotes)
+    const a = await proxy.handle("jupiter", path, "limit=100", "", undefined, true, undefined, last === null);
     // card helper-crowd-429 fold 6: Jupiter's limit is not the caller's, so its refusal is not ready (503), never our 429
     if (a.status !== 200) return null;
     const at = Date.parse(a.headers["X-Fetched-At"] ?? "");

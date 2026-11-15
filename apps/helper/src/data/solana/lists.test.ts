@@ -17,7 +17,7 @@ import {
   READS, ROW_FIELDS, SERVED_MS, snapshot, STALE_MS, text, toRow, toRows, type Row,
 } from "./lists.ts";
 import { createOrigins, rpcAccounts } from "./origin.ts";
-import { createProxy } from "../../proxy/proxy.ts";
+import { createProxy, PROXY_RESERVE } from "../../proxy/proxy.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 
 const fx = (f: string) => readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8");
@@ -278,7 +278,7 @@ function fakes(opts: { fail?: () => boolean } = {}) {
   return { proxy, calls, now: () => t, step: (ms: number) => (t += ms) };
 }
 
-test("fold 6 (R5b, R5d): Discover's Jupiter lists and curve reads draw on the helper's own reserve: with every caller's part of Jupiter and of getMultipleAccounts spent, the lists are served whole", async () => {
+test("fold 6 (R5b, R5d): Discover's first Jupiter lists and curve reads draw on the helper's own reserve: with every caller's part of Jupiter and of getMultipleAccounts spent, the lists a caller waits for are served whole (card solana-buy-from-cash-quotes: on the cold page's floor; a held list's refresh yields to the trades)", async () => {
   const t = AS_OF;
   const jup: string[] = [];
   const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
@@ -302,7 +302,7 @@ test("fold 6 (R5b, R5d): Discover's Jupiter lists and curve reads draw on the he
   const rpc = createRpc({}, { now: () => t, fetch: (async (_u: string, i: RequestInit) => (JSON.parse(String(i.body)).id === 1 && curves.push(1), json(CURVES.answer))) as never });
   let callers = 0;
   for (let a = 0; a < 20; a++) for (let i = 0; i < 4; i++) if ((await proxy.handle("jupiter", "/swap/v2/build", `q=${a}-${i}`, "", `198.51.100.${a}`)).status === 200) callers++;
-  assert.equal(callers, 60 - 34, "callers' part of Jupiter Free is spent");
+  assert.equal(callers, 60 - PROXY_RESERVE.jupiter, "callers' part of Jupiter Free is spent");
   const gma = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "getMultipleAccounts", params: [[]] });
   let reads = 0;
   for (let a = 0; a < 4; a++) for (let i = 0; i < 16; i++) if ((await rpc.handle("solana", "application/json", gma, `198.51.100.${a}`)).status === 200) reads++;

@@ -146,3 +146,28 @@ test("card helper-crowd-429 fold 4: one heavy device drawing Jupiter as fast as 
   assert.ok(j.stats().peak <= 60, `peak ${j.stats().peak} in a sliding minute`);
   assert.ok(heavy > 0, `the heavy device still lent what is left: ${heavy}`);
 });
+
+// card solana-buy-from-cash-quotes: fold 4 held at one schedule only; at others (found by scanning the light device's
+// start and the first-time device's arrival) the code before the card refused the first-time device's 2nd build "jupiter
+// turn": the heavy device, back from its minute's hold, had fewer sends in the window than the light device's trade, so
+// it was not held, and the two left the window's last 2 to nobody else
+test("card solana-buy-from-cash-quotes: one heavy device drawing as fast as it is served, beside a light device's trade every 30 s, never holds a first-time device's first 2 builds, at any of the schedules that refused one", async () => {
+  const refused: string[] = [];
+  for (const lightFrom of [8_000, 9_000]) {
+    for (const newAt of [70_000, 72_000, 74_000]) {
+      const j = jupiterFree();
+      const p = createProxy(ENV, { fetch: j.fetch as never, now: j.clock.now, sleep: async () => {}, log: () => {} });
+      for (let ms = 0; ms < newAt + 400; ms += 200) {
+        await p.handle("jupiter", BUILD, `h=${ms}`, "", "198.51.100.1");
+        if (ms >= lightFrom && (ms - lightFrom) % 30_000 < 4 * 200) await p.handle("jupiter", BUILD, `l=${ms}`, "", "198.51.100.2");
+        if (ms >= newAt) {
+          const a = await p.handle("jupiter", BUILD, `n=${ms}`, "", "198.51.100.9");
+          if (a.status !== 200) refused.push(`light from ${lightFrom} ms, new at ${newAt} ms, build at ${ms}: ${a.status} ${a.why ?? ""}`);
+        }
+        j.clock.add(200);
+      }
+      assert.equal(j.stats().throttled, 0, "Jupiter never throttled");
+    }
+  }
+  assert.deepEqual(refused, [], "a first-time device's first 2 builds go at once");
+});

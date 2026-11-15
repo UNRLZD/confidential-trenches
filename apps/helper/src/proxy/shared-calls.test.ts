@@ -94,9 +94,12 @@ test("card helper-deploy-reads-fast: another helper's calls file is hostile inpu
   p.seed(read);
   assert.deepEqual(p.calls().jupiter, [], "the seeded calls are the others', never this helper's own");
   const q = proxyOn(j, dir, NEW);
-  // 59 seeded at t: one call left in Jupiter's 60 at t, so a second device call at t is refused before Jupiter
+  // 59 seeded at t: one call left in Jupiter's 60 at t, so a second call at t is refused before Jupiter. Card
+  // solana-buy-from-cash-quotes: both are own reads a caller waits for (a cold page), since a background own read
+  // leaves the devices their room (PROXY_USER_ROOM) and the one call left is not it
   writeFileSync(join(d, "bbbbbbbb-0000-4000-8000-000000000004.json"), at(`{"jupiter":[${Array(59).fill(t).join(",")},${t + 120_000},1.5]}`));
-  return Promise.all([call(q, "x", 0), call(q, "y", 2)]).then((got) => {
+  const page = (tag: string) => q.handle("jupiter", PATH, `query=${tag}`, "", undefined, true, undefined, true).then((a) => a.status);
+  return Promise.all([page("x0"), page("y2")]).then((got) => {
     assert.deepEqual(got.sort(), [200, 503], "the 59 well-formed calls counted, the future and fractional ones not");
     assert.equal(j.throttled(), 0);
   });

@@ -73,7 +73,8 @@ export const GT_BASE = "https://api.geckoterminal.com/api/v2";
 /** D-S6: Jupiter's search reads up to 100 mints a call; a mint's row is read again after 12 s. */
 export const SEARCH_MAX = 100;
 export const JUP_FRESH_MS = 12_000;
-/** The search's part of the helper's own Jupiter reserve (../../proxy/proxy.ts PROXY_RESERVE: 34, with the lists' 18):
+/** The search's most of the helper's own Jupiter reads (with the lists' 18, 34; ../../proxy/proxy.ts PROXY_RESERVE and
+ *  PROXY_USER_ROOM: the callers go first, a refresh yields them their room, card solana-buy-from-cash-quotes):
  *  at most this many searches in any span the proxy's budget counts as one minute (a call counts until the end of its
  *  second plus VENDOR_WINDOW_MS, ../../limits/limits.ts upstreamBudget), so the searches never take the callers' part
  *  of Jupiter's one bucket (L-01: 60 a minute on a 60 s sliding window, Swap and Token requests together,
