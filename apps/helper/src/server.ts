@@ -952,6 +952,10 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
     // the lists' tokens' pools looked for as each answer loads, not at each token's first open (card
     // helper-robinhood-search-ahead)
     lists.onAnswer?.(() => void snapshot().then((x) => (x === null ? undefined : swaps.ahead([...x.tokens]))).catch(() => undefined));
+    // card helper-listed-charts-own-reads: each listed chart's bars held ahead, the pool the lists name read once in
+    // GeckoTerminal's keyless "ahead" lane, one call a tick at most (swaps.ts warm), so a book that opens past its bound
+    // or over OPEN_MAX is served them
+    if (gecko !== undefined) setInterval(() => void snapshot().then((x) => (x === null ? null : swaps.warm(x.pools))).catch(() => undefined), AHEAD_TICK_MS).unref();
   }
   return out;
 }

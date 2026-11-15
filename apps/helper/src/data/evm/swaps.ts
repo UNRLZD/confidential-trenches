@@ -439,6 +439,13 @@ export const HEAD_SHARE_MS = TICK_MS;
 /** A book not read for this long starts a read when asked; it is served as held meanwhile, dated by its last read. */
 export const STALE_MS = 60_000;
 export const OPEN_MAX = 40;
+/** The tf the token page's chart opens on (apps/terminal/src/screens/token/candles.ts DEFAULT_TF): the listed charts
+ *  warm() holds ahead. */
+export const WARM_TF: Tf = "15m";
+/** Listed charts warm() holds at most, and how long a pool whose read failed or gave no bars waits to be tried again.
+ *  [design: the EVM lists hold 45 Base and 37 Robinhood coins (15 Nov 22:3xZ); 200 leaves room; an hour] */
+export const WARM_MAX = 200;
+export const WARM_RETRY_MS = 3_600_000;
 /** Books read at once in a tick. */
 const READ_PARALLEL = 8;
 const POOLS_MAX = 5_000;
@@ -2550,6 +2557,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return j === undefined ? undefined : holdPool(token, poolIdOf(j));
   }
 
+  /** The bars held for `token`'s pool and `tf` (its found pool's, GeckoTerminal's top pool's, or the lists' pool's),
+   *  cut at `to`, as a candles answer dated by their read; null when none are held (card helper-listed-charts-own-reads). */
+  async function heldChart(token: string, tf: Tf, to: number | null, limit: number): Promise<DataAnswer | null> {
+    const hint = await deps.hint?.(token).catch(() => null);
+    const ids = [pools.get(token)?.found?.pool.id, gtPools.get(token)?.id, hint].filter((x): x is string => typeof x === "string");
+    for (const id of new Set(ids.flatMap((x) => [x, x.toLowerCase()]))) {
+      const h = kept.get(`${id}:${tf}`);
+      const bars = (h?.bars ?? []).filter((c) => to === null || c[0] < to).slice(-limit);
+      if (h === undefined || bars.length === 0) continue;
+      const src = h.src ?? "geckoterminal";
+      return { status: 200, body: JSON.stringify({ tf, candles: bars, src, as_of_ms: h.at }), src, asOfMs: h.at };
+    }
+    return null;
+  }
   /** The last good bars per pool and tf (the newest range read): served when a read is throttled or fails. */
   const kept = new Map<string, { at: number; bars: Candle[]; src?: typeof CG_SRC }>();
   /** GeckoTerminal's bars before `before` (unix seconds; null: its newest range, one cache key however often asked),
@@ -2806,7 +2827,34 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   };
   const timed = (at: unknown, t: number, maxAgeMs: number): at is number => typeof at === "number" && Number.isFinite(at) && at <= t && t - at <= maxAgeMs;
 
+  /** When warm() last tried a pool's chart, whatever it got (bounded as the pools are). */
+  const warmed = new Map<string, number>();
+  let warming = false;
   return {
+    /**
+     * One listed chart held ahead (card helper-listed-charts-own-reads): of `listed` (each listed token to the pool its
+     * lists name), the first whose WARM_TF bars nothing holds and that was not tried within WARM_RETRY_MS is read once
+     * from GeckoTerminal in its keyless "ahead" lane (never CoinGecko's key, never a wait), so a book that opens past
+     * its bound, or not at all while OPEN_MAX are open, is served those bars (heldChart). At most one call; refused, none.
+     * Returns the pool read, or null.
+     */
+    async warm(listed: Readonly<Record<string, string>>): Promise<string | null> {
+      if (warming || deps.gecko === undefined) return null;
+      warming = true;
+      try {
+        const t = now();
+        const next = Object.entries(listed).slice(0, WARM_MAX).find(([token, pool]) => evmAddress(token) !== null && /^0x[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$/.test(pool) && kept.get(`${pool}:${WARM_TF}`) === undefined && kept.get(`${pool.toLowerCase()}:${WARM_TF}`) === undefined && t - (warmed.get(pool) ?? -Infinity) >= WARM_RETRY_MS);
+        if (next === undefined) return null;
+        const [token, pool] = next;
+        if (!(await gtTake("ahead", `${chain} bars`, undefined, 0))) return null;
+        if (warmed.size >= POOLS_MAX) warmed.delete(warmed.keys().next().value!);
+        warmed.set(pool, t);
+        await readBars(pool, token, WARM_TF, null, `${pool}:${WARM_TF}:`);
+        return pool;
+      } finally {
+        warming = false;
+      }
+    },
     /**
      * What this process holds of GeckoTerminal for the chain, as the next one takes it over (card
      * market-reads-hold-under-load, as solana/token.ts state does for Solana): the last good bars per pool and tf, the
@@ -2911,6 +2959,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const e = await openWithin(t, lane, client);
       const openMs = performance.now() - began;
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
+      // card helper-listed-charts-own-reads: a book still opening past its bound, or not opened while OPEN_MAX books are
+      // (its 429), is served the bars held for the token's pool (a book's history or GeckoTerminal's, at any age, dated
+      // by their read), never an empty chart while they answer: on the live helper at 22:41Z 38 of 45 listed Base coins
+      // and 4 of 36 Robinhood ones answered no bars past the route's 5 s
+      if (e === LATE || (typeof e === "object" && !("book" in e) && e.status === 429)) {
+        const h = await heldChart(t, tf as Tf, to, limit);
+        if (h !== null) return timed(h);
+      }
       if (e === LATE && failedLately(t)) return timed(UPSTREAM);
       if (e === LATE) {
         const at = now();
