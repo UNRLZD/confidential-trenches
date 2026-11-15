@@ -544,15 +544,15 @@ test("the helper's plan runs the nine checks that spend the Jupiter budget as ON
 
 // card helper-live-run-holds-its-own-load: the checks that read the helper's keyed Base and Robinhood providers, in order:
 // the RPC routes first, then the tapes and the chain chart
-const KEYED_KEYS = ["helper-rpc-takes-batches", "evm-pool-leaves-any-source", "evm-pool-sync-holds", "helper-base-logs-page", "helper-pool-logs-outside-the-caller-budget", "robinhood-pool-logs-on-keyed-route", "helper-rpc-proxy", "evm-rpc-spare-list", "evm-tape-from-our-index-fast", "evm-chart-opens-without-a-vendor-call", "index-evm-swaps", "helper-base-tape-reads-back", "helper-v4-hook-liquidity", "solana-trades-show-on-every-token", "robinhood-listed-tape-opens", "helper-tape-4337-trader", "evm-tape-rows-exact", "helper-robinhood-capacity", "helper-robinhood-search-ahead", "base-reads-never-starve-max"];
+const KEYED_KEYS = ["helper-rpc-takes-batches", "evm-pool-leaves-any-source", "evm-pool-sync-holds", "helper-base-logs-page", "helper-pool-logs-outside-the-caller-budget", "robinhood-pool-logs-on-keyed-route", "helper-rpc-proxy", "evm-rpc-spare-list", "evm-tape-from-our-index-fast", "evm-chart-opens-without-a-vendor-call", "index-evm-swaps", "helper-base-tape-reads-back", "helper-v4-hook-liquidity", "solana-trades-show-on-every-token", "robinhood-listed-tape-opens", "helper-tape-4337-trader", "evm-tape-rows-exact", "helper-robinhood-capacity", "helper-robinhood-search-ahead", "base-reads-never-starve-max", "evm-token-page-opens-any-coin"];
 
-test("the helper's plan runs the twenty checks that read its keyed Base and Robinhood providers as ONE matrix entry, and KEYED_READS finds exactly them", async () => {
+test("the helper's plan runs the twenty-one checks that read its keyed Base and Robinhood providers as ONE matrix entry, and KEYED_READS finds exactly them", async () => {
   const plan = await planFor("helper", { commit: COMMIT });
   const [g, ...more] = plan.include.filter((e) => e.id === "evm-keyed");
   assert.equal(more.length, 0);
   assert.equal(g.key, "");
   assert.deepEqual(keysOf(g), KEYED_KEYS);
-  assert.match(g.name, /^evm-keyed \(20 checks, one after another\)$/);
+  assert.match(g.name, /^evm-keyed \(21 checks, one after another\)$/);
   for (const k of KEYED_KEYS) assert.ok(!plan.include.some((e) => e.group === "" && e.key === k), `${k} has no job of its own`);
   const list = listOf("helper", ROOT, { commit: COMMIT, network: "mainnet" });
   const found = list.checks.filter((k) => {

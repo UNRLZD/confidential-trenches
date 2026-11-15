@@ -13,6 +13,7 @@
 // up to REREADS times, FILL_WAIT_MS apart, and passes on 200 either way. Whether the lists hold the coin at the read is
 // printed, not judged (a coin that trends again is still a coin).
 // After: helper
+// Serial: evm-keyed 190 (its chart and tape reads draw the keyed Base and Robinhood providers)
 //   node scripts/live-checks/evm-token-page-opens-any-coin.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read.
 import "../net-window.mjs";
