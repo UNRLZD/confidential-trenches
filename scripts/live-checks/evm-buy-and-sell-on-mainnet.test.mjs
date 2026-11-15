@@ -4,6 +4,8 @@
 // - bad_live_before: SIGN_HOST as served before this change (no EVM buy, no carry, no Sell typed data): FAIL.
 // - quotes_live_before: a real run of the quotes half (the tap's own quote on real mainnet, read only): FAIL, warm taps
 //   over WARM_MAX_MS, 429s, and taps that end in a refusal the tap should have followed (below_reference, native_first).
+// - quotes_named_before: a real run of the quotes half against SIGN_HOST at release 147 (the Mac, 2026-11-15 08:05Z,
+//   card evm-taps-meet-no-429): FAIL, each 429 named by its tap, host and reads (Robinhood's own scan posts).
 // And plants on the good run: a buy with no carry, a sale with no open record, no withdraw, a testnet pool, an unpinned
 // bundle: each FAIL.
 import assert from "node:assert/strict";
@@ -61,6 +63,14 @@ test("the recorded real quotes run fails: warm taps over the bound, 429s and unf
   assert.equal(v.verdict, "FAIL");
   const b = bad(v).join("\n");
   for (const part of ["[robinhood] HOOKR warm taps end within", "[robinhood] CRCL taps got 19 answers of 429: warm 2 robinhood.drpc.org 19/84","[base] AERO 0x940181a94a35a4569e4529a3cdfb74e38fd98631 ends in a quote or a true named refusal: ok,below_reference"]) assert.ok(b.includes(part), `${part}: ${b}`);
+});
+
+test("the recorded real run with named 429s fails, each 429 named by its tap, host, share and reads", () => {
+  const v = judge(A.quotes_named_before);
+  assert.equal(v.verdict, "FAIL");
+  const b = bad(v).join("\n");
+  assert.ok(b.includes("[robinhood] CASHCAT taps got 5 answers of 429: cold 0 rpc.mainnet.chain.robinhood.com 2/9 eth_getBlockByNumber+eth_getLogs x2; warm 1 rpc.mainnet.chain.robinhood.com 2/5 eth_getBlockByNumber+eth_getLogs x2"), b);
+  assert.ok(b.includes("[robinhood] RYFT taps got 4 answers of 429: cold 0 rpc.mainnet.chain.robinhood.com 3/14 eth_getBlockByNumber+eth_getLogs x3; warm 2 robinhood.drpc.org 1/2 eth_call x1"), b);
 });
 
 test("plants on the recorded quotes each fail on their own line", () => {
