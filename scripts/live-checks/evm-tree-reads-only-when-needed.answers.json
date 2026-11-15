@@ -1,30 +1,48 @@
 {
   "good": {
-    "at": "2026-11-15T21:56:47.044Z",
+    "at": "2026-11-15T23:43:52.576Z",
     "browser": "Chrome 157.0.8103.51, sandbox on",
     "signDir": "local build",
-    "ms": 166746,
+    "ms": 167097,
     "loads": 6,
     "posts": {
-      "base-rpc.publicnode.com": 264,
-      "base.rpc.blxrbdn.com": 260,
-      "rpc.mainnet.chain.robinhood.com": 113,
-      "ct-api.unrealized.trade": 120,
-      "base.api.pocket.network": 11
+      "base-rpc.publicnode.com": 240,
+      "base.rpc.blxrbdn.com": 223,
+      "rpc.mainnet.chain.robinhood.com": 116,
+      "ct-api.unrealized.trade": 108,
+      "base.api.pocket.network": 2
     },
     "methods": {
       "eth_chainId": 98,
       "eth_blockNumber": 78,
-      "eth_getBlockByNumber": 135,
-      "eth_call": 256,
-      "eth_getLogs": 201
+      "eth_getBlockByNumber": 136,
+      "eth_call": 252,
+      "eth_getLogs": 125
     },
     "logs": {
       "index": 0,
       "scan": 0,
-      "other": 201
+      "other": 125
     },
-    "refused": {}
+    "refused": {},
+    "byLoad": {
+      "base": [
+        0,
+        1,
+        3,
+        1,
+        6,
+        105
+      ],
+      "robinhood": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        9
+      ]
+    }
   },
   "liveBefore": {
     "at": "2026-11-15T21:53:59.340Z",
