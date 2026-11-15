@@ -8,10 +8,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { VaultTree } from "@blindfill/kit";
+import { HELPER_RPC_METHODS, VaultTree } from "@blindfill/kit";
 import { PoolNoLeafError, PoolReadError } from "../src/pool/pool.ts";
 import * as evm from "../src/pool/evm.ts";
-import { EVM_EPOCH_MS, EvmLagError, evmAgreedBlock, evmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
+import { EVM_EPOCH_MS, EvmLagError, evmAgreedBlock, evmHoldsAnchor, evmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolPin, type EvmRpc } from "../src/pool/evm.ts";
 
 // read off the module, so a build without it fails each case by what it reads, never at the import
 const EVM_NEWEST_REUSE_MS = evm.EVM_NEWEST_REUSE_MS;
@@ -104,6 +104,10 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
         const n = Number(BigInt(at));
         if (o.unknown?.(n, byNum++)) return null;
         return block(n);
+      }
+      case "eth_getBlockByHash": {
+        for (let k = 0; k <= c.head; k++) if (hashOf(k) === params[0]) return block(k);
+        return null;
       }
       case "eth_getLogs": {
         const p = params[0] as { address: string; topics: string[][]; fromBlock: string; toBlock: string };
@@ -301,4 +305,36 @@ test("evmAgreedBlock is one agreed read: a provider that answered seat 0's tag i
   assert.equal(pair[1].url, "https://b.example", "seat 1 never on a, which answered seat 0's tag in this read");
   release();
   assert.equal((await got).number, 100n);
+});
+
+// card helper-rpc-takes-batches: on SIGN_HOST's build Robinhood's pool pair seats the helper's keyed route (POST
+// /v1/rpc/robinhood?keyed=only, signpage pool-testnet.ts pageEvmPoolRpcs), which refuses with HTTP 400 every method off
+// the kit's HELPER_RPC_METHODS. The sync's round and a restore's anchor check asked it eth_chainId: a 400 in the page's
+// console each sign-in (live run 43651091646) that rested the seat 60 s and walked it to a slow spare. Every method the
+// pool's reads send to a seat must be on the route's list. Red at c01643233: eth_chainId refused.
+test("(card helper-rpc-takes-batches) a seat on the helper's route: the sync's round, the newest trees and a restore's anchor check send it only methods on the kit's EVM list", async () => {
+  assert.deepEqual([...HELPER_RPC_METHODS.base], [...HELPER_RPC_METHODS.robinhood], "one EVM list on both chains");
+  const listed = new Set<string>(HELPER_RPC_METHODS.robinhood);
+  const refused: string[] = [];
+  const c = chain(deps(PP, [95]), 100, 90);
+  const [a, inner] = pair(c, c);
+  // the route as the helper answers it: a method off its list is HTTP 400 method_not_allowed, nothing forwarded
+  const helper = Object.assign(
+    async (method: string, params: readonly unknown[]): Promise<unknown> => {
+      if (!listed.has(method)) {
+        refused.push(method);
+        throw Object.assign(new Error("HTTP 400"), { name: "SolanaRpcTransportError", fault: "http_400" });
+      }
+      return inner(method, params);
+    },
+    { url: "https://ct-api.example/v1/rpc/robinhood?keyed=only" },
+  ) as EvmRpc;
+  const rpcs: [EvmRpc, EvmRpc] = [a, helper];
+  const sync = evmTreeSync({ rpcs, pin: PIN, sleep: noWait, clock: () => 0 });
+  const pool = evmPool({ pin: PIN, rpcs, feeRpcs: rpcs, sync, relayFee: async () => answer(), epochFee: () => 0n, sleep: noWait });
+  await pool.now();
+  assert.equal((await pool.trees(after(95), undefined, { newest: true })).stateTree.size, 1);
+  const r = await sync.events();
+  await evmHoldsAnchor(rpcs, 8453n, r.anchor, undefined, noWait);
+  assert.deepEqual(refused, [], `methods the helper's route refuses: ${refused.join(", ")}`);
 });

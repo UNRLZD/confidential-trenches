@@ -109,6 +109,39 @@ test("an allowlisted call on each chain is forwarded to that chain's provider an
   }
 });
 
+// card helper-rpc-takes-batches: the signing page's EVM pool sync asks every seat of its pair eth_chainId (the pool's
+// chain) and eth_getBlockByHash (a leaf's block time), and Robinhood's second seat is this route (signpage
+// pool-testnet.ts pageEvmPoolRpcs). Off the list, each was a 400 in the page's console (live run 43651091646, 14 Nov
+// 23:08Z) that rested the seat and walked it to a slow spare. Both are forwarded on Base and Robinhood, alone and in a
+// JSON-RPC 2.0 batch with the sync's other reads; a batch with a method off the list is still refused whole.
+test("card helper-rpc-takes-batches: eth_chainId and eth_getBlockByHash are forwarded on base and robinhood, alone and in a batch; an unlisted method in a batch still refuses it", async () => {
+  next = { status: 200, type: JSON_T, body: echo };
+  const r = rpc();
+  const hash = "0x" + "ab".repeat(32);
+  for (const chain of ["base", "robinhood"]) {
+    for (const [method, params] of [["eth_chainId", []], ["eth_getBlockByHash", [hash, false]]] as const) {
+      seen.length = 0;
+      const a = await call(r, chain, { jsonrpc: "2.0", id: 3, method, params });
+      assert.deepEqual([a.status, seen.length], [200, 1], `${chain} ${method}`);
+      assert.deepEqual(JSON.parse(seen[0]!.body), { jsonrpc: "2.0", id: 3, method, params });
+    }
+    const batch = [
+      { jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] },
+      { jsonrpc: "2.0", id: 2, method: "eth_getBlockByNumber", params: ["finalized", false] },
+      { jsonrpc: "2.0", id: 3, method: "eth_getBlockByHash", params: [hash, false] },
+      { jsonrpc: "2.0", id: 4, method: "eth_call", params: [{ to: "0x" + "11".repeat(20), data: "0x" }, { blockHash: hash }] },
+    ];
+    seen.length = 0;
+    const b = await call(r, chain, batch);
+    assert.deepEqual([b.status, seen.length], [200, 1], `${chain} batch`);
+    assert.deepEqual(JSON.parse(seen[0]!.body), batch);
+    assert.deepEqual((JSON.parse(b.body) as { id: number }[]).map((x) => x.id), [1, 2, 3, 4]);
+    seen.length = 0;
+    const off = await call(r, chain, [...batch, { jsonrpc: "2.0", id: 5, method: "eth_getStorageAt", params: ["0x" + "11".repeat(20), "0x0", "latest"] }]);
+    assert.deepEqual([off.status, code(off), seen.length], [400, "method_not_allowed", 0], `${chain} batch with an unlisted method`);
+  }
+});
+
 test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded to SOLANA_DEVNET_RPC_URL, its key never in the answer; anything else refused before any call", async () => {
   next = { status: 200, type: JSON_T, body: echo };
   const DEV = "fake-devnet-key-0123456789abcdef";
