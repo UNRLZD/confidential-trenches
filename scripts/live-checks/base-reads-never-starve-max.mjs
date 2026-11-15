@@ -15,6 +15,7 @@
 // (withdraw-fee-busy-waits.mjs readSign and judgeSign: the served bytes are this commit's build; that the lane and the
 // answer run is the wallet's and the signing page's tests at the commit).
 // After: helper
+// Serial: evm-keyed 180
 // After: sign --part sign
 // Bundle: read sign
 //   node scripts/live-checks/base-reads-never-starve-max.mjs [--base <url>] [--record <file>]
