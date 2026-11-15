@@ -1,0 +1,17 @@
+{
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5pVFf1Iu05JqdHOkbdn8l5/WMe1Lbtn4awmKQPEIynLC+++N5Tp4BvH1mIc0PMHS\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-5pVFf1Iu05JqdHOkbdn8l5/WMe1Lbtn4awmKQPEIynLC+++N5Tp4BvH1mIc0PMHS",
+  "sol": true,
+  "evm": true,
+  "near": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-p+cyMdngRHFMuOMYFrTneI1z1NOvDC5UE+Khk5z43m5h1DW2iCbr6aqcDNmhTN9+\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-p+cyMdngRHFMuOMYFrTneI1z1NOvDC5UE+Khk5z43m5h1DW2iCbr6aqcDNmhTN9+",
+  "sol": false,
+  "evm": false,
+  "near": false
+ },
+ "evm_sample": "function D1(e){return e.whole.reduce((e,t)=>e+t.fee,0n)+(e.rest===null?0n:e.rest.piece.fee+e.bound)};r={result:{tap_max:t.tapMax,...l===null?{}:{with_cash:l},...d===null?{}:{buys:d},...o===null?{}:{cost:tF(D1(o),w1)},...u===null?{}:{out:u}}}"
+}

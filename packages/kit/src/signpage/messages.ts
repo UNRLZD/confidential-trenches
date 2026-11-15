@@ -221,9 +221,11 @@ export interface SignpageParams {
    * `amount` (kit 1.12, card buy-spends-several-pieces): a spend in whole SOL; the answer then also says how many pieces
    * a pool.buy of it spends now and what it costs for good (PoolBuyDry pieces and cost). On Base and Robinhood (kit 1.17,
    * card buy-any-amount-on-every-chain) a spend in whole ETH; the answer then also says what a pool.buy of it spends in
-   * swaps when that is less (PoolBuyDry buys). An amount that is not a decimal of the chain's asset: not_allowed.
+   * swaps when that is less (PoolBuyDry buys). On NEAR (card you-receive-on-every-chain) a spend of Cash in whole USDC,
+   * the fees inside it as a NEAR buy draws them: tap_max the Cash a buy can spend, and with an amount, cost (those fees)
+   * and out (one quote of what the buy swaps). An amount that is not a decimal of the chain's asset: not_allowed.
    */
-  "pool.buy.dry": { chain: PoolChain; token: string; amount?: string };
+  "pool.buy.dry": { chain: PoolChain | "near"; token: string; amount?: string };
   /**
    * Move `amount` of `from`'s own money to `to` (card one-balance-buys-on-every-chain; the Blindfill v2 lite paper §3-4):
    * NEAR is Cash, the vault's USDC; any other chain its pool's asset (POOL_ASSET_DECIMALS: SOL, ETH). `amount` is in

@@ -146,3 +146,19 @@ test("the tap on every pool chain (Cash to Base and Robinhood): the build's form
     all.replace("c.tapMax(a,i)", "c.tapMax(`solana`,i)"),
   ]) assert.equal(facts("", bad).tap, false, bad.slice(0, 90));
 });
+
+test("the tap with Solana's shortfall sized as pool.buy.dry prices it (card you-receive-on-every-chain): the build's form PASS; no fallback to the want, the sizing asked for another amount, the mover not asked for it, the op not told, or no wait for the ask: FAIL", () => {
+  const sized =
+    "let o=e=>a===`solana`?n.amount-e:HK(a,n.amount)?n.amount:null,s={error:`failed`};let c=t(),l=await c.any(a)?await c.tapMax(a,i).catch(()=>null):n.amount,u=l!==null&&l<n.amount&&a===`solana`&&c.short?await c.short(a,i,n.amount).catch(()=>null):null,d=l!==null&&l<n.amount?u??o(l):null,f=d===null?null:await c.need(a,d);if(f!==null){try{r?.route?.({move:`cash`,op:f})}catch{}let e=c.now()+MK;for(;!c.signal?.aborted&&c.now()<e&&await c.tapMax(a,i)<n.amount;)await c.wait(jK)}";
+  assert.equal(facts("", sized).tap, true);
+  for (const bad of [
+    sized.replace("u??o(l)", "u"),
+    sized.replace("?n.amount-e:", "?n.amount:"),
+    sized.replace("c.short(a,i,n.amount)", "c.short(a,i,n.amount-l)"),
+    sized.replace("await c.need(a,d)", "null"),
+    sized.replace("c.need(a,d)", "c.need(a,u)"),
+    sized.replace("op:f})", "op:d})"),
+    sized.replace("for(;!c.signal?.aborted&&c.now()<e&&await c.tapMax(a,i)<n.amount;)await c.wait(jK)", ""),
+    sized.replace("await c.tapMax(a,i)<n.amount;", "await c.tapMax(a,i)<0n;"),
+  ]) assert.equal(facts("", bad).tap, false, bad.slice(0, 90));
+});
