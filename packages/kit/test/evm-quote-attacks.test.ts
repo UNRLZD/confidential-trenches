@@ -5329,23 +5329,26 @@ test("SP4 a first scan provider whose rate limit would hold a warm scan's reques
 // card evm-taps-meet-no-429: one pace and one hold per provider for every reader (src/checks/evm/pace.ts)
 test("PACE1 posts to a paced provider leave at its pace across every reader: mainnet.base.org takes 12 calls at once, then 12 a second, so no second holds more than 24 (its error names 25)", { timeout: 30_000 }, () => onTestClock(async () => {
   evmPaceReset();
-  const at: number[] = [];
+  let sent = 0;
   const f = (async (_u: string, init: RequestInit) => {
-    at.push(performance.now());
+    sent++;
     const calls = JSON.parse(init.body as string) as { id: number }[];
     return new Response(JSON.stringify(calls.map((c) => ({ jsonrpc: "2.0", id: c.id, result: "0x1" }))));
   }) as unknown as typeof fetch;
+  // the pace judged on the test clock's own timers, never by reading a clock: a mark set at each time reads how many
+  // posts had left by then (the clock fires every timer in order of its time)
+  const marks = [50, 450, 550, 950, 1_050, 1_450, 1_550];
+  const by: number[] = [];
+  for (const m of marks) setTimeout(() => by.push(sent), m);
   // two readers, each its own provider object for the same URL (a quote's and the index's), 5 posts of 6 calls each
   const a = evmJsonRpc("https://mainnet.base.org", f);
   const b = evmJsonRpc("https://mainnet.base.org/", f);
   const six = Array.from({ length: 6 }, () => ({ method: "eth_blockNumber", params: [] }));
-  const t0 = performance.now();
   await Promise.all([a(six), b(six), a(six), b(six), a(six)]);
-  const ms = at.map((t) => Math.round(t - t0));
-  assert.equal(ms.length, 5);
-  // the first two at once (12 calls), each next 6 calls 0.5 s on
-  assert.ok(ms[1]! < 50 && ms[2]! >= 490 && ms[3]! >= 990 && ms[4]! >= 1_490, `sent at ${ms.join(", ")} ms`);
-  for (const t of ms) assert.ok(ms.filter((u) => u >= t && u < t + 1_000).length * 6 <= 24, `a second from ${t} ms holds more than 24 calls: ${ms.join(", ")}`);
+  await new Promise((r) => setTimeout(r, 1_600));
+  // the first two at once (12 calls), each next 6 calls 0.5 s on: 2 by 50 and 450 ms, 3 by 550 and 950, 4 by 1,050 and
+  // 1,450, 5 by 1,550; so no second holds more than 3 posts, 18 calls (24 at most)
+  assert.deepEqual(by, [2, 2, 3, 3, 4, 4, 5], `posts sent by ${marks.join(", ")} ms`);
   evmPaceReset();
 }));
 
