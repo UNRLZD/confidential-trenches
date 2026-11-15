@@ -731,8 +731,9 @@ export function evmHelperHoldings(origin: string, chain: "base" | "robinhood", t
 /**
  * The most background calls (`pass`) one EVM helper route holds in its paced queue at once, sent or waiting their
  * turn (card base-reads-never-starve-max). The queue is first come, first served at HOLDINGS_RPC_LIMIT (3 calls a
- * 1,667 ms): with no bound a pass of 20 Ws (a restore's Transfer logs, a holdings rebuild) booked 60 calls ahead, and a
- * read a screen shows waited 33 s behind them. Past the bound a pass call waits here, outside the queue, so a shown read
+ * 1,667 ms): with no bound, 18 background calls booked at once (a restore's Transfer logs and a holdings rebuild's
+ * balance reads) held a read a screen shows 10,050 ms (test/base-reads-never-starve-max.test.ts at 6c13015c8; 42 ms with
+ * the bound). Past the bound a pass call waits here, outside the queue, so a shown read
  * (evmHelperShownRpc: the positions pass's balances, which Portfolio and the sell box draw) waits behind at most this
  * many and its own window's room: one window, 1.7 s. The pace and the provider's draw are the queue's, as before.
  */
