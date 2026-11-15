@@ -60,7 +60,7 @@ test("the recorded real quotes run fails: warm taps over the bound, 429s and unf
   const v = judge(A.quotes_live_before);
   assert.equal(v.verdict, "FAIL");
   const b = bad(v).join("\n");
-  for (const part of ["[robinhood] HOOKR warm taps end within", "[robinhood] CRCL taps got 19 answers of 429", "[base] AERO 0x940181a94a35a4569e4529a3cdfb74e38fd98631 ends in a quote or a true named refusal: ok,below_reference"]) assert.ok(b.includes(part), `${part}: ${b}`);
+  for (const part of ["[robinhood] HOOKR warm taps end within", "[robinhood] CRCL taps got 19 answers of 429: warm 2 robinhood.drpc.org 19/84","[base] AERO 0x940181a94a35a4569e4529a3cdfb74e38fd98631 ends in a quote or a true named refusal: ok,below_reference"]) assert.ok(b.includes(part), `${part}: ${b}`);
 });
 
 test("plants on the recorded quotes each fail on their own line", () => {
@@ -76,6 +76,11 @@ test("plants on the recorded quotes each fail on their own line", () => {
   assert.match(q((runs) => (runs[3].ms = WARM_MAX_MS + 1)), /warm taps end within/);
   assert.match(q((runs) => (runs[1].hosts = { "x.example": { requests: 1, s429: 1 } })), /answers of 429/);
   assert.match(q((runs) => runs.pop()), /true named refusal/);
+  // each 429 is named by its tap, its host and the reads it answered (card evm-taps-meet-no-429: run 43690752769 printed
+  // only "6 answers of 429")
+  const named = q((runs) => (runs[2].hosts = { "mainnet.base.org": { requests: 9, s429: 2, s429Reads: { eth_call: 2 } }, "base.api.pocket.network": { requests: 4, s429: 0 } }));
+  assert.match(named, /taps got 2 answers of 429: warm 2 mainnet\.base\.org 2\/9 eth_call x2$/m);
+  assert.doesNotMatch(named, /pocket/);
   assert.deepEqual([...NAMED], ["not_allowed", "too_many_pools", "no_reference"]);
   const none = structuredClone(A.good);
   none.quotes = { chains: {} };
