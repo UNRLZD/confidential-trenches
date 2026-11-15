@@ -123,7 +123,11 @@ const kit: TradeKit = {
     if (kind === "pool.buy.dry") {
       window.__reads.push({ kind, params });
       const withAmount = (params as { amount?: string }).amount !== undefined;
-      if (withAmount && q.get("fee") !== "down") return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: true, result: { tap_max: "0.00172", cost: "0.0014", out: "35294.263662" } }) };
+      // on Base and Robinhood (card you-receive-on-every-chain) the tap's own ask's answer: one whole 0.001 ETH note's
+      // relay fee, 0.000021 ETH, and 10,600 tokens out
+      const evm = (params as { chain?: string }).chain !== "solana";
+      const dry = evm ? { tap_max: "0.001", cost: "0.000021", out: "10600" } : { tap_max: "0.00172", cost: "0.0014", out: "35294.263662" };
+      if (withAmount && q.get("fee") !== "down") return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: true, result: dry }) };
       return { id: `read-${window.__reads.length}`, outcome: Promise.resolve({ ok: false, error: { code: "quote_check_failed" } }) };
     }
     const id = `buy-${++n}`;

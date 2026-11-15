@@ -87,12 +87,15 @@ const BUYS = [
   ["vault", "amt=25", "vault", false, "$73.18 available", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the Fee row: on a Solana pool buy whose Max the box reads for the coin (coinTapKey), the typed amount's cost; none else
-const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": null, "base-other": null, "base-over": null, "base-making": null, vault: null };
+// and on Base (card you-receive-on-every-chain), the tap's own ask's cost: 0.000021 ETH at $3,500.12 is $0.0735, $0.08;
+// a dash where the tap asks nothing (over Max)
+const FEE = { "sol-ready": "Fee $0.14", "sol-nocash": "Fee $0.14", "sol-feedown": "Fee —", "sol-over": "Fee $0.14", "sol-making": null, "sol-load": null, "sol-none": null, "sol-empty": null, "base-chunk": "Fee $0.08", "base-other": "Fee $0.08", "base-over": "Fee —", "base-making": null, vault: null };
 // the amount field marked wrong: over one tap's most, on every chain; never while a proof is still making (the amount is
 // not what is wrong) or on an amount the pool can take
 // You receive on a Solana pool buy (card solana-buy-preview-complete): the dry answer's out for the typed amount (the
 // recorded curve coin's 35,294.263662 at 0.001 SOL), over the fixture's set preview, which the live source has none of
-const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-nocash": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH" };
+// and on Base (card you-receive-on-every-chain), the tap's own ask's out, 10,600 tokens
+const RECEIVE = { "sol-ready": "≈ 35.29K TORCH", "sol-nocash": "≈ 35.29K TORCH", "sol-over": "≈ 35.29K TORCH", "base-chunk": "≈ 10.6K TORCH", "base-other": "≈ 10.6K TORCH" };
 const BAD = { "sol-ready": "false", "sol-nocash": "false", "sol-feedown": "false", "sol-over": "true", "sol-making": "false", "sol-load": "false", "sol-none": "false", "sol-empty": "false", "base-chunk": "false", "base-other": "false", "base-over": "true", "base-making": "false", vault: "false" };
 // the presets row as data-preset:disabled:text per button: the four on every pool chain (all over one tap's most on the
 // pool, or off while no proof is ready), $100 over the vault's max
@@ -242,7 +245,8 @@ try {
         }
         await common(page, w, tag, external, dialogs);
         if (SHOTS) (await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}-${scheme}.png`) }), shots++);
-        // the Fee row (owner 12 Nov 13:40Z, card buy-spends-several-pieces): on a Solana pool buy only, the cost of the typed
+        // the Fee row (owner 12 Nov 13:40Z, card buy-spends-several-pieces): on a pool buy (Base too, card
+        // you-receive-on-every-chain), the cost of the typed
         // amount in USD, rounded up (0.0014 SOL at $93.01 is $0.1302: $0.14); a dash while it is not read
         await page.clock.runFor(300);
         const feeEl = page.locator('[data-testid="trade-cost"]');

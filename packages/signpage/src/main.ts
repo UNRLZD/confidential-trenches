@@ -69,7 +69,7 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
-import { cashMover, poolMoveKinds, solanaTapMaxOf, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { cashMover, cashUsdcFor, moveCostOf, poolMoveKinds, solanaTapMaxOf, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -90,7 +90,7 @@ import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 import type { ExitChain } from "../../kit/src/checks/oneclick-exit.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
-import { evmDryAmount, evmDryBuys } from "./pool-buy-evm.ts";
+import { evmBuyDry, evmDryQuote } from "./pool-buy-evm.ts";
 import { poolBalances } from "../../wallet/src/pool/balances.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -105,13 +105,13 @@ import { drawBackdrop, drawSealedGround, groundLogo } from "./backdrop.ts";
 import { GROUND_LOGO_SVG } from "./ground-logo.ts";
 import { SEALED } from "./frame-cover.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
-import { vaultScope } from "./withdraw/checks.ts";
+import { parseAmount, vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm, type GivenWithdraw } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
 import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawHandoff, withdrawSettle } from "./withdraw/handoff.ts";
-import { nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
+import { nearBuyDry, nearBuyKind, nearHoldingsPass, nearPositions, nearSellKind, resumeNearBuys, resumeNearSells, type NearBuyPage } from "./near-buy.ts";
 import { rheaPoolsKept } from "./near-pools.ts";
 import { nearSeatRpc, pacedNearRpc, seatsUp } from "../../wallet/src/pace.ts";
 import { proverHost } from "./prover-host.ts";
@@ -536,29 +536,49 @@ else {
   // largest ready note) and with_cash, the larger of it and the largest rung Cash makes (src/cash-to-pool.ts
   // withCashNote); before the card, and with no Cash to move, a pool.buy.dry on an EVM chain is refused not_allowed.
   // With the ask's amount (kit 1.17, card buy-any-amount-on-every-chain), a decimal of ETH, at most tap_max: `buys`, what
-  // the tap's own plan spends in swaps for it (src/pool-buy-evm.ts evmDryBuys over the same ready proofs), when below it
-  const evmDryWithCash = (chain: "base" | "robinhood", params: Record<string, unknown>): Running<"pool.buy.dry"> => {
+  // the tap's own plan spends in swaps for it (src/pool-buy-evm.ts evmDryBuys over the same ready proofs), when below it.
+  // With it (card you-receive-on-every-chain): `cost`, what that plan costs for good, and `out`, the device's own tap
+  // quote of what it swaps (src/pool-buy-evm.ts evmBuyDry); never while a trade runs, as the Solana dry
+  const evmDryWithCash = (chain: "base" | "robinhood", params: Record<string, unknown>): Running<"pool.buy.dry"> =>
+    evmBuyDry(chain, params, {
+      trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
+      tap: async () => {
+        if (!testnet || !(await fs.state()).signed_in) return null;
+        const both = await testnet.readyWith(pageNotes);
+        const pools = PAGE_POOLS.filter((p) => p.chain === chain);
+        const tap = poolBalances(both.value, pools, both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
+        if (tap === undefined) return null;
+        // the chain's queue's proofs, as the tap reads them (its pool's own list)
+        const ids = new Set(pools.map((p) => p.id));
+        return { tapMax: tap, ready: (both.ready ?? []).filter((r) => ids.has(r.poolId)) };
+      },
+      withCash: async (tap) => {
+        const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+        const form = withdrawFormDeps(vault);
+        const [cash, fee, floor] = await Promise.all([form.available(), form.fee(), evmRoute.floor(chain)]);
+        return floor === null ? null : withCashNote(tap, cash, fee, prices.get(chain), chain, floor > EVM_LADDER.min ? floor - EVM_LADDER.min : 0n);
+      },
+      quote: () => {
+        const e = testnet?.evmPoolOf(chain) ?? null;
+        return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs);
+      },
+    });
+  // NEAR (card you-receive-on-every-chain): nearBuyDry on the NEAR buy's own page, never while a trade runs
+  const nearDry = (params: Record<string, unknown>): HostRefusal | Running<"pool.buy.dry"> => {
+    const page = nearBuyPage();
+    const amount = params.amount === undefined ? null : parseAmount(params.amount);
+    if (page === null || typeof params.token !== "string" || (params.amount !== undefined && amount === null)) return { error: "not_allowed" };
+    if (buys.live() + sells.live() > 0) return { error: "busy" };
     let answer: HostAnswer<"pool.buy.dry"> | HostRefusal = { error: "failed" };
-    const amount = evmDryAmount(params.amount);
+    const token = params.token;
     const after = (async () => {
-      if (amount === undefined) return void (answer = { error: "not_allowed" });
-      if (!testnet || !(await fs.state()).signed_in) return void (answer = { error: "not_funded" });
-      const both = await testnet.readyWith(pageNotes);
-      const pools = PAGE_POOLS.filter((p) => p.chain === chain);
-      const tap = poolBalances(both.value, pools, both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
-      if (tap === undefined) return void (answer = { error: "not_funded" });
-      // the chain's queue's proofs, as the tap reads them (its pool's own list)
-      const ids = new Set(pools.map((p) => p.id));
-      const buys = evmDryBuys(chain, amount, tap, (both.ready ?? []).filter((r) => ids.has(r.poolId)));
-      const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
-      const form = withdrawFormDeps(vault);
-      const [cash, fee, floor] = await Promise.all([form.available(), form.fee(), evmRoute.floor(chain)]);
-      const most = floor === null ? null : withCashNote(tap, cash, fee, prices.get(chain), chain, floor > EVM_LADDER.min ? floor - EVM_LADDER.min : 0n);
-      answer = { result: { tap_max: tap, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }) } };
+      if (!(await fs.state()).signed_in) return void (answer = { error: "not_funded" });
+      answer = await nearBuyDry(page, token, amount);
     })().catch(() => void (answer = { error: "failed" }));
     return { running: true, after, answer: () => answer };
   };
   const dryWithCash = (params: Record<string, unknown>) => {
+    if (params.chain === "near") return nearDry(params);
     if ((params.chain === "base" || params.chain === "robinhood") && prover && typeof params.token === "string" && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null) return evmDryWithCash(params.chain, params);
     const r = poolBuyDry(params);
     if (!prover || params.chain !== "solana" || withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null) return r;
@@ -596,6 +616,8 @@ else {
       const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
       return tap === undefined ? 0n : (parsePoolUnits(tap, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) ?? 0n);
     },
+    // Solana: the shortfall pool.buy.dry prices (src/pools.ts solanaMoveShort), so the move's notes pay the rest
+    short: (chain, token, amount) => (chain === "solana" ? tapDry.short(token, amount) : Promise.resolve(null)),
     need: (chain, short) => cashMoverNow().need(chain, short),
     wait: (ms) => new Promise((res) => setTimeout(res, ms)),
     now: () => Date.now(),
@@ -656,6 +678,19 @@ else {
       return { notes: both.value, ready: both.ready, open: both.open, landed: both.landed };
     },
     trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
+    // an amount above one tap's spend (card you-receive-on-every-chain): the move from Cash cashFirst starts for it,
+    // priced on the device (src/cash-to-pool.ts moveCostOf: the withdraw's relay fee and the move's margin at the
+    // device's price); none on a page with no Cash to move
+    moved: async (short) => {
+      const p = prices.get("solana");
+      if (!prover || p === null || p === undefined || withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null) return null;
+      const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal };
+      const form = withdrawFormDeps(vault);
+      const [cash, fee] = await Promise.all([form.available(), form.fee()]);
+      // Cash's largest note pays the move and its fee, or no buy of it runs (cashMover's own bound)
+      const usdc = cashUsdcFor(short, p, "solana");
+      return usdc === null || usdc + fee > cash ? null : moveCostOf(short, fee, p, "solana");
+    },
   });
   // the same read for a moving tap (cashDeps.tapMax): never refused busy, since the tap that asks is the trade
   const tapDry = poolBuyDryKind({

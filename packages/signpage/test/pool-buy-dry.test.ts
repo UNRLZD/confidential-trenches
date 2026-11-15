@@ -15,7 +15,7 @@ import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import { poolBalances, solanaBalancePool, type BalanceProof } from "../../wallet/src/pool/balances.ts";
 import { SOL_LADDER, SOL_TIP_CAP } from "../../wallet/src/pool/solana.ts";
 import { evmBalancePool } from "../../wallet/src/pool/balances.ts";
-import { COIN_VENUE_KEEP_MS, poolBuyDryKind, readCoinVenue, withSolanaRent, type PoolBuyDryDeps } from "../src/pools.ts";
+import { COIN_VENUE_KEEP_MS, poolBuyDryKind, readCoinVenue, solanaBuyCost, solanaMovedPieces, withSolanaRent, type PoolBuyDryDeps } from "../src/pools.ts";
 import { APP_ORIGIN, signedOutState, startApi, type IncomingMessage } from "../src/api.ts";
 
 // mainnet's Rent sysvar (5,080 a byte-year, threshold 1.0), as the recorded reads hold it
@@ -342,4 +342,46 @@ test("card buy-any-amount-on-every-chain: Max is the sum of the legs, two notes 
   }
   // past Max: tap_max alone, as no buy of it passes
   assert.deepEqual(Object.keys((await at(sol(2n * one + 1n))).result), ["tap_max"]);
+});
+
+// Card you-receive-on-every-chain: an amount above one tap's spend is a buy cashFirst runs after moving the shortfall
+// from Cash. Red before the card: the answer was tap_max alone, so the box drew You receive and Fee as a dash.
+test("card you-receive-on-every-chain: above tap_max with Cash to move, out from the same quote and cost over the ready pieces, the notes the move brings and the move's own cost", async () => {
+  const TIP = 100_000n;
+  const MOVE = 7_777n; // what the page says the move costs, lamports
+  const shorts: bigint[] = [];
+  const kind = poolBuyDryKind(deps({ tip: TIP, ready: OWN, moved: async (short) => (shorts.push(short), MOVE) }));
+  const at = async (amount: string) => ((await ask(kind, { chain: "solana", token: fx.pump.mint, amount })) as { result: Record<string, unknown> }).result;
+  const tap = "0.00424652";
+  // 0.02 SOL: the own 0.01 piece's 0.00424652 and a move from Cash of the rest
+  const r = await at("0.02");
+  assert.equal(r.tap_max, tap);
+  assert.equal(r.out, await quoteOut("pump", "0.02"), "You receive: the buy's own quote, kept, never dropped");
+  assert.equal("pieces" in r, false, "a moved buy's count is no one tap's");
+  // the move is sized so its notes pay the rest with their own Ws' costs: more than the bare gap over tap_max (a 0.02
+  // note's own W spends less than 0.02), and the least such: one lamport less and the buy's legs do not pay
+  const short = shorts.at(-1)!;
+  assert.ok(short > 20_000_000n - 4_246_520n, `short ${short}`);
+  const venue = await readCoinVenue(pair("pump"), fx.pump.mint);
+  const tipOf = () => TIP;
+  const own = [{ ...ready, own: true as const }];
+  const valueOf = (id: string) => (id === held.id ? held.leaf!.value : undefined);
+  assert.notEqual(solanaBuyCost([...own, ...solanaMovedPieces(short, RENT)], valueOf, venue as never, RENT, tipOf, 20_000_000n), null);
+  assert.equal(solanaBuyCost([...own, ...solanaMovedPieces(short - 1n, RENT)], valueOf, venue as never, RENT, tipOf, 20_000_000n), null);
+  const lamports = (s: string): bigint => BigInt(s.replace(".", "").replace(/^0+/, "") || "0") * 10n ** BigInt(9 - (s.split(".")[1]?.length ?? 0));
+  // the Fee: the move's own cost and, per W the buy spends, its relay fee and the tip (the own note's and the move's)
+  const legs = solanaBuyCost([...own, ...solanaMovedPieces(short, RENT)], valueOf, venue as never, RENT, tipOf, 20_000_000n)!;
+  assert.equal(lamports(r.cost as string), MOVE + legs.cost);
+  assert.ok(legs.cost >= 2n * (FEE + TIP), `two Ws at least: ${legs.cost}`);
+  assert.ok(SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"](r));
+  // cashFirst's own size is the same (main.ts cashDeps.short: the kind's short on the same reads)
+  assert.equal(await kind.short(fx.pump.mint, 20_000_000n), short);
+  assert.equal(await kind.short(fx.pump.mint, 1_000_000n), null, "one tap pays it now: no move");
+  // a move the page cannot price (no Cash, no price): tap_max alone, never a Fee that reads under
+  const none = poolBuyDryKind(deps({ tip: TIP, ready: OWN, moved: async () => null }));
+  assert.deepEqual(Object.keys(((await ask(none, { chain: "solana", token: fx.pump.mint, amount: "0.02" })) as { result: object }).result), ["tap_max"]);
+  // at or under tap_max the move is never asked
+  const before = shorts.length;
+  assert.equal((await at("0.001")).pieces, 1);
+  assert.equal(shorts.length, before);
 });

@@ -39,9 +39,21 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 const N = "[\\w$]+";
 const Q = "[`\"']";
 const q = (w) => `${Q}${w}${Q}`;
+const esc = (v) => v.replace(/\$/g, "\\$");
 
+/** pool.buy.dry's answer: the pieces' count and their cost, the relay fees and the tip, written in the answer. */
+const DRY = new RegExp(`\\{result:\\{tap_max:${N},pieces:(${N})\\.length,cost:${N}\\(\\1\\.reduce\\(`);
+/** The same from the dry's cost read (card you-receive-on-every-chain, src/pools.ts solanaBuyCost): the answer carries
+ *  its pieces and its cost, and the read returns the set's count and its relay fees plus the tip for that count. */
+const DRY_READ = new RegExp(`let (${N})=(${N})\\(${N},${N},${N},${N},${N},${N}\\);if\\(\\1===null\\)return\\{result:\\{tap_max:${N}\\}\\};[^;]{0,40};return\\{result:\\{tap_max:${N},\\.\\.\\.\\1\\.pieces===void 0\\?\\{\\}:\\{pieces:\\1\\.pieces\\},cost:${N}\\(\\1\\.cost\\)`);
+const dryOf = (js) => {
+  const m = DRY_READ.exec(js);
+  if (m === null) return false;
+  const fn = new RegExp(`function ${esc(m[2])}\\([^)]*\\)\\{(?:(?!function )[^])*?return\\{cost:(${N})\\.reduce\\(\\((${N}),(${N})\\)=>\\2\\+\\3\\.binding\\.feeCap,${N}\\(\\1\\.length\\)\\),pieces:\\1\\.length\\}`);
+  return fn.test(js);
+};
 export const SIGN_MARKS = Object.freeze({
-  dry: new RegExp(`\\{result:\\{tap_max:${N},pieces:(${N})\\.length,cost:${N}\\(\\1\\.reduce\\(`),
+  dry: { test: (js) => DRY.test(js) || dryOf(js) },
   making: new RegExp(`\\.\\.\\.${N}===void 0\\?\\{\\}:\\{making:${N}\\((${N})\\.making,\\1\\.d\\)\\}`),
   owed: new RegExp(`if\\(!(${N})\\.piecesOwed\\)return ${N}\\(\\);await \\1\\.piecesOwed\\.put\\(\\{address:${N}\\.address,l:${N}\\.wallet\\.l\\.toString\\(\\),j:${N}\\.wallet\\.j,primary:${N}\\.noteId,pieces:`),
   route: new RegExp(`${q("/v1/pool/solana/pieces")},\\{pool:${N},txs:${N}\\.map\\(`),
@@ -49,7 +61,7 @@ export const SIGN_MARKS = Object.freeze({
 export const APP_MARKS = Object.freeze({
   // the cost kept for this coin, with (from card solana-buy-preview-complete, kit 1.14) the answer's out and the amount
   // asked beside it
-  ask: new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:${q("solana")},token:${N},amount:${N}\\}\\)\\.outcome\\.then\\(${N}=>\\{if\\(!${N}\\)return;if\\(${N}\\.ok\\)return void\\(${N}\\.result\\.cost!==void 0&&${N}\\(\\{key:${N},cost:${N}\\.result\\.cost(?:,\\.\\.\\.${N}\\.result\\.out===void 0\\?\\{\\}:\\{out:${N}\\.result\\.out\\},\\.\\.\\.${N}===null\\?\\{\\}:\\{amount:${N}\\})?\\}\\)\\)`),
+  ask: new RegExp(`${N}\\(${q("pool\\.buy\\.dry")},\\{chain:(?:${q("solana")}|${N}===${q("near")}\\?${q("near")}:${q("solana")}),token:${N},amount:${N}\\}\\)\\.outcome\\.then\\(${N}=>\\{if\\(!${N}\\)return;if\\(${N}\\.ok\\)return void\\(${N}\\.result\\.cost!==void 0&&${N}\\(\\{key:${N},cost:${N}\\.result\\.cost(?:,\\.\\.\\.${N}\\.result\\.out===void 0\\?\\{\\}:\\{out:${N}\\.result\\.out\\},\\.\\.\\.${N}===null\\?\\{\\}:\\{amount:${N}\\})?\\}\\)\\)`),
   row: new RegExp(`"data-testid":${q("trade-cost")},children:\\[[^\\]]{0,160}children:${N}===null\\?${q("—")}:${N}\\(${N}\\)`),
   making: new RegExp(`${N}\\.making!==void 0&&${N}\\(${N}\\.making\\)===!0\\?${q("making")}`),
 });
