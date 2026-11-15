@@ -202,7 +202,8 @@ export async function answer(book, chain, req, record) {
   return { jsonrpc: "2.0", id: req.id, ...kept };
 }
 
-export function serve(book, record) {
+/** Listens on `port` (FORK_RPC_PORT by default; a test passes 0, the port the OS picks, read back from server.address()). */
+export function serve(book, record, port = PORT) {
   const server = createServer((q, s) => {
     let body = "";
     q.on("data", (c) => (body += c));
@@ -216,7 +217,7 @@ export function serve(book, record) {
       }
     });
   });
-  return new Promise((ok) => server.listen(PORT, "127.0.0.1", () => ok(server)));
+  return new Promise((ok) => server.listen(port, "127.0.0.1", () => ok(server)));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

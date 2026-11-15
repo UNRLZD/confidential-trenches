@@ -6,6 +6,7 @@
 // counts the calls.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createServer } from "node:http";
 import { test } from "node:test";
 // an upstream try's bound, short here (read once, at the import)
 process.env.FORK_RPC_UPSTREAM_MS = "50";
@@ -21,6 +22,15 @@ const child = (code, env = {}) => {
   } catch (e) {
     return { ok: false, out: `${e.stdout}${e.stderr}` };
   }
+};
+/** A port another process holds while a cap case runs: its child is told that port (FORK_RPC_PORT) and still listens,
+ *  on the port the OS picks (serve's port 0, read back from server.address()), so no other process's port fails it (a
+ *  merge-queue run once failed EADDRINUSE on a port taken from the test's pid). */
+const held = async (t) => {
+  const s = createServer();
+  await new Promise((ok) => s.listen(0, "127.0.0.1", ok));
+  t.after(() => s.close());
+  return String(s.address().port);
 };
 const pins = (env) => child(`const { POOLS_FORK_BLOCKS } = await import(${JSON.stringify(MODULE)}); console.log(JSON.stringify(POOLS_FORK_BLOCKS));`, env);
 
@@ -38,22 +48,22 @@ test("planted: a fork block that is no number, not whole, or before the pool's d
   }
 });
 
-test("planted: a recording stops at the upstream cap: the request past it is refused (502) and never reaches upstream", () => {
-  const port = 41_000 + (process.pid % 2_000);
+test("planted: a recording stops at the upstream cap: the request past it is refused (502) and never reaches upstream", async (t) => {
   const code = `
     const real = globalThis.fetch;
     let upstream = 0;
     globalThis.fetch = (url, init) => url.startsWith("http://127.0.0.1:") ? real(url, init) : (upstream++, Promise.resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" }), { status: 200 })));
     const { serve, UPSTREAM_CAP } = await import(${JSON.stringify(MODULE)});
-    const server = await serve({}, true);
+    const server = await serve({}, true, 0);
+    const at = "http://127.0.0.1:" + server.address().port + "/base";
     const statuses = [];
     for (let i = 0; i <= UPSTREAM_CAP; i++) {
-      const r = await real("http://127.0.0.1:${port}/base", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: i, method: "eth_getBalance", params: ["0x" + i.toString(16).padStart(40, "0"), "0x1"] }) });
+      const r = await real(at, { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: i, method: "eth_getBalance", params: ["0x" + i.toString(16).padStart(40, "0"), "0x1"] }) });
       statuses.push(r.status === 200 ? 200 : r.status + " " + (await r.text()));
     }
     server.close();
     console.log(JSON.stringify({ cap: UPSTREAM_CAP, upstream, ok: statuses.filter((s) => s === 200).length, last: statuses.at(-1) }));`;
-  const r = child(code, { FORK_RPC_PORT: String(port) });
+  const r = child(code, { FORK_RPC_PORT: await held(t) });
   assert.ok(r.ok, r.out);
   const got = JSON.parse(r.out.trim().split("\n").at(-1));
   assert.equal(got.cap, 1_000);
@@ -127,8 +137,7 @@ test("an upstream that never answers is tried 5 times, each try bounded, then th
   assert.ok(Date.now() - at < 5_000, "bounded, not held");
 });
 
-test("planted: the cap is per upstream host: a host at 1,000 is asked nothing more while another host still answers, and a request with every host at the cap is refused (502)", () => {
-  const port = 43_000 + (process.pid % 2_000);
+test("planted: the cap is per upstream host: a host at 1,000 is asked nothing more while another host still answers, and a request with every host at the cap is refused (502)", async (t) => {
   const code = `
     process.argv.push("--book", "pools", "--");
     const real = globalThis.fetch;
@@ -143,9 +152,10 @@ test("planted: the cap is per upstream host: a host at 1,000 is asked nothing mo
     };
     const { serve, UPSTREAM_CAP } = await import(${JSON.stringify(MODULE)});
     // one host of Base's three spent to the cap first: the planted world of a run whose reads one host took
-    const server = await serve({}, true);
+    const server = await serve({}, true, 0);
+    const at = "http://127.0.0.1:" + server.address().port + "/base";
     const ask = async (i) => {
-      const r = await real("http://127.0.0.1:${port}/base", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: i, method: "eth_getBalance", params: ["0x" + i.toString(16).padStart(40, "0"), "0x1"] }) });
+      const r = await real(at, { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: i, method: "eth_getBalance", params: ["0x" + i.toString(16).padStart(40, "0"), "0x1"] }) });
       return r.status === 200 ? 200 : r.status + " " + (await r.text());
     };
     const statuses = [];
@@ -159,7 +169,7 @@ test("planted: the cap is per upstream host: a host at 1,000 is asked nothing mo
       if (full === null && n[h] === UPSTREAM_CAP) full = h;
     }
     console.log(JSON.stringify({ cap: UPSTREAM_CAP, asked, full, afterToFull: after.filter((h) => h === full).length, afterToOthers: after.length, ok: statuses.filter((s) => s === 200).length, last: statuses.at(-1) }));`;
-  const r = child(code, { FORK_RPC_PORT: String(port) });
+  const r = child(code, { FORK_RPC_PORT: await held(t) });
   assert.ok(r.ok, r.out);
   const got = JSON.parse(r.out.trim().split("\n").at(-1));
   assert.equal(got.cap, 1_000);
