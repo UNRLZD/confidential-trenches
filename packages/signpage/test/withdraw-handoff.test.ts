@@ -11,7 +11,7 @@
 // Test values only, never money: the notes are the public all-zero test seed's (wallet test/vectors/a8.json).
 /// <reference types="node" />
 // the world first: it loads the 1Click mock and sets __SIGN_NETWORK__ before the modules that read them (./withdraw-handoff-world.ts)
-import { MIN, R, RELAY_FEE, SCOPE, SEED, T, bytes, checkWithdraw, expired, feeAnswer, handoffOf, helper, leftReserved, lowerFinalTime, openNoteStore, page, pair, readTokenStorageMin, settleWith, snarkProver, testnet, tick, treesOf, withdrawFormDeps, withdrawHandoff, withdrawSettle, world, zeroed } from "./withdraw-handoff-world.ts";
+import { MIN, R, RELAY_FEE, SCOPE, SEED, T, bytes, checkWithdraw, expired, feeAnswer, handoffOf, helper, leftReserved, lowerFinalTime, openNoteStore, page, pair, readTokenStorageMin, settleWith, snarkProver, testnet, tick, treesOf, withdrawFormDeps, withdrawHandoff, withdrawSettle, world, zeroed, signalsProver } from "./withdraw-handoff-world.ts";
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { VaultTree } from "../../kit/src/vault/inputs.ts";
@@ -122,7 +122,7 @@ test("the hand-off proves on the page's prover, RESERVES the note with its reque
   const asked: string[] = [];
   let sent: WithdrawRequest | null = null;
   let waited: AbortSignal | undefined;
-  const p = page(v);
+  const p = page(v, snarkProver); // a real proof: the relayer's checks below verify it
   const h = await handoffOf(v, p, {
     rpcs: pair("testnet", asked),
     relay: async (seed, req, deps) => {
@@ -184,7 +184,7 @@ test("the seed is zeroed when the prover throws, and the note is UNSPENT again",
 test("sign out stops the relay's wait: the signal the relay gets is the page's, the note left RESERVED for the settle pass", async () => {
   const v = await world([5_000_000n]);
   const out = new AbortController();
-  const p = page(v, snarkProver, out.signal);
+  const p = page(v, signalsProver(), out.signal);
   const h = await handoffOf(v, p, {
     relay: async (_seed, _req, deps) => {
       out.abort(); // the sign out, mid-wait

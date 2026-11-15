@@ -1,6 +1,14 @@
 // The withdraw hand-off tests' world (card readme-run-fits-an-agent-timeout): what test/withdraw-handoff.test.ts held above its
 // tests, shared by its three files, so node --test runs them side by side; with 32 real proofs it was one file of 173 s
 // on a 4-CPU run, the signing page's last to start. The header below is that file's.
+// Real proofs (card readme-run-fits-an-agent-timeout): a page proves on signalsProver (wallet test/withdraw-fixture.ts),
+// the circuit's public signals worked out exactly and a placeholder proof, unless a test hands it snarkProver. Three
+// tests prove for real (four proofs), each because it reads the proof or carries it the whole way: in withdraw-handoff.test.ts "the
+// hand-off proves on the page's prover ..." (the relayer's checkWithdraw verifies the proof against the pinned vkey: the
+// hand-off end to end), in withdraw-handoff-relay.test.ts "hand-off with the real relayWithdraw ..." (the real relay to a
+// landed change note), and in withdraw-handoff-cash.test.ts "the cash run sends Cash whole ..." (checkWithdraw on the
+// first part's proof). Every other test reads the hand-off's order, notes, seed and window, never the proof's bytes;
+// with all 32 proofs real the three files took 180 s of CPU.
 // The withdraw form's reads, the hand-off kept for the card that pays the typed account, and the settle pass (card
 // signpage-withdraw-handoff): the note value over the note store, the relayer's fee bounded by the device's own fee_max,
 // and the hand-off to the wallet's withdraw path, whose request, proved for real (snarkjs 0.7.5 over the kit's pinned
@@ -44,6 +52,8 @@ const { RELEASE_WITHDRAW_RELAYER } = await import("../../wallet/src/withdraw/rel
 const { readTokenStorageMin } = await import("../../wallet/src/arming/accounts.ts");
 const { cashNotes, planCashWithdraw, vaultScope } = await import("../src/withdraw/checks.ts");
 const { cashWithdrawRun, lowerFinalTime, treesOf, withdrawFormDeps, withdrawHandoff, withdrawSettle } = await import("../src/withdraw/handoff.ts");
+// the signals-only prover: its fixture loads the kit, so after the mock as the rest
+const { signalsProver } = await import("../../wallet/test/withdraw-fixture.ts");
 
 const T = NEAR_NETWORKS.testnet;
 const SCOPE = vaultScope("testnet")!;
@@ -137,7 +147,8 @@ const snarkProver: VaultProver = {
   },
 };
 type Page = HandoffPage & { opened: Uint8Array[] };
-const page = (v: World, prover: VaultProver = snarkProver, signal?: AbortSignal): Page => {
+/** A page on `prover`: signalsProver unless the test reads the proof (snarkProver, named in the header above). */
+const page = (v: World, prover: VaultProver = signalsProver(), signal?: AbortSignal): Page => {
   const opened: Uint8Array[] = [];
   return {
     opened,
@@ -193,5 +204,5 @@ const settleWith = (v: World, relay: HandoffOver["relay"], p = page(v)) =>
   withdrawSettle(p, { network: "testnet", rpcs: pair("testnet"), priceRpcs: pair("mainnet"), fetchFn: helper(), relay, arrival: async () => Promise.reject(new Error("no arrival read in this test")) });
 
 
-export { FEE_READS, h1c, KIT, MIN, R, RELAY_FEE, RELEASE_WITHDRAW_RELAYER, SCOPE, SEED, T, bytes, cashNotes, cashWithdrawRun, checkWithdraw, expired, feeAnswer, handoffOf, helper, leftReserved, lowerFinalTime, noteCommitment, noteSecrets, openNoteStore, page, pair, planCashWithdraw, readTokenStorageMin, settleWith, snarkProver, snarkjs, testnet, tick, treesOf, vaultScope, view, withdrawFormDeps, withdrawHandoff, withdrawSettle, world, worlds, zeroed, zk };
+export { FEE_READS, h1c, KIT, MIN, R, RELAY_FEE, RELEASE_WITHDRAW_RELAYER, SCOPE, SEED, T, bytes, cashNotes, cashWithdrawRun, checkWithdraw, expired, feeAnswer, handoffOf, helper, leftReserved, lowerFinalTime, noteCommitment, noteSecrets, openNoteStore, page, pair, planCashWithdraw, readTokenStorageMin, settleWith, snarkProver, snarkjs, testnet, tick, treesOf, vaultScope, view, withdrawFormDeps, withdrawHandoff, withdrawSettle, world, worlds, zeroed, zk, signalsProver };
 export type { Page, Rec, World };
