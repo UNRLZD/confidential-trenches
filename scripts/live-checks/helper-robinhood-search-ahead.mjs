@@ -11,6 +11,7 @@
 // A cold tape past the helper's open bound answers 200 filling (card token-page-data-complete-and-fast); such a tape
 // is read again until it fills (tape-read.mjs) and FAILs still filling FILLED_MS after its first answer.
 // After: helper
+// Serial: evm-keyed 170
 //   node scripts/live-checks/helper-robinhood-search-ahead.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

@@ -11,6 +11,7 @@
 // PASS when every token answers 200 JSON { trades } with at least one row, every row well formed (t_ms, side b or s,
 // usd and amt decimal text, tx a signature), newest first, and the newest within RECENT_MS of the read; FAIL otherwise.
 // After: helper
+// Serial: evm-keyed 130
 //   node scripts/live-checks/solana-trades-show-on-every-token.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, for the test.
 import "../net-window.mjs";

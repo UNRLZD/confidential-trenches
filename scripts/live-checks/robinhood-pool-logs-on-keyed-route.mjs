@@ -21,6 +21,7 @@
 // Nov 16:3xZ): with the page's Origin a 5xx is a passing fault, so the route's upstream would never be judged. A no-answer
 // (a 429, a failed fetch, a body that is no JSON-RPC answer) after its one retry is INCONCLUSIVE, never PASS.
 // After: helper
+// Serial: evm-keyed 60
 //   node scripts/live-checks/robinhood-pool-logs-on-keyed-route.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, so the check's test
 //   can replay it.

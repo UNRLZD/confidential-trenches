@@ -20,6 +20,7 @@
 // no-answer, worded as provider-answer.mjs words it); two providers that both answer and differ stay a FAIL. A wrongly reported v4 trade is a FAIL whatever else was read. Every
 // run prints how many tapes, trades and receipts it read.
 // After: helper
+// Serial: evm-keyed 120
 //   node scripts/live-checks/helper-v4-hook-liquidity.mjs [--base <url>] [--chain base|robinhood] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

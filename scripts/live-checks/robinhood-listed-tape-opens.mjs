@@ -17,6 +17,7 @@
 // bug, a 503 a failed read), answers past ANSWER_MS, is still filling at FILLED_MS, or a lists read fails; INCONCLUSIVE
 // (exit 3) when no chain dropped one.
 // After: helper
+// Serial: evm-keyed 140
 //   node scripts/live-checks/robinhood-listed-tape-opens.mjs [--base <url>] [--wait-ms <n>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, for the test.
 import "../net-window.mjs";

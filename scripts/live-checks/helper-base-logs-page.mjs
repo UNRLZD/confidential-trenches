@@ -12,6 +12,7 @@
 //     and topics); else FAIL;
 //   - a 429 from the helper, or no answer from the reference: INCONCLUSIVE (exit 3), the moment's, never the build's.
 // After: helper
+// Serial: evm-keyed 40
 //   node scripts/live-checks/helper-base-logs-page.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read (each HTTP answer as
 //   it came), so the check's test can replay it.

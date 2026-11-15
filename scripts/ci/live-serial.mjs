@@ -18,6 +18,11 @@
 //     line holds its turn to its end, as before;
 //   - a budget that is not idle in time (jup-idle's IDLE_MAX_MS) stops the group there, the members left named as not run:
 //     something other than this run is spending the budget, and a check started now would read that.
+// The Jupiter idle read gates the jupiter-budget group alone (card helper-live-run-holds-its-own-load). A group whose
+// members' own `// Serial:` lines all name another group (evm-keyed: the helper's keyed Base and Robinhood providers,
+// helper-live-checks.mjs) runs its members back to back: being one job is what keeps their reads apart, and waiting on
+// the Jupiter budget, which the jupiter-budget job spends beside it, would only stall it. Members with no Serial line (a
+// commit older than the headers) or of different groups keep the Jupiter gate, as before.
 // Each member's output is printed as it comes, under a `=== <key>` line, so the job's log and summary hold each check's own
 // verdict line. The group ends with one line: `live-serial: PASS <n> checks` (with its inconclusive members and their
 // reasons) or `live-serial: FAIL <keys>`, and writes every member's result to the job's verdict file (live-rerun.mjs
@@ -26,7 +31,8 @@
 // in (the deployed commit's), and it writes the job's log itself (--log), its exit with no pipe after it.
 //   node <runner>/scripts/ci/live-serial.mjs --log <file> <key> <key> ...      exit 0 when no member failed or erred (a
 //   pass or an inconclusive each), 1 when one did or was not run, 2 on an error
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { waitIdle } from "./jup-idle.mjs";
 import { RERUN, isCheck, logArg, noticeLine, reasonOf, rerun, runCheck as runOnce, sink, verdictLine, verdictOf, writeVerdicts } from "./live-rerun.mjs";
@@ -38,13 +44,42 @@ export const RELEASES = Object.freeze({ "solana-mint-supply-moves": Object.freez
 /** The line a member prints once its last helper call is made. */
 export const releasedLine = (key) => `live-check ${key}: budget released`;
 
+/** The groups whose members each wait for the helper's Jupiter budget to be idle (jup-idle.mjs). */
+export const IDLE_GATED = Object.freeze(["jupiter-budget"]);
+
+/** The group a check's own header names (its first `// Serial: <group> ...` line, read as live-after.mjs headerLines
+ *  reads a header: the leading `//` lines), or null. */
+export function serialGroupOf(key, root = process.cwd()) {
+  let text;
+  try {
+    text = readFileSync(path.join(root, "scripts/live-checks", `${key}.mjs`), "utf8");
+  } catch {
+    return null;
+  }
+  for (const line of text.split("\n")) {
+    if (line.startsWith("#!")) continue;
+    if (!line.startsWith("//")) break;
+    const m = /^\/\/\s*Serial:\s*([a-z0-9-]+)/.exec(line);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** Whether `keys` wait for the Jupiter budget before each run: false only when every one names the same group and that
+ *  group is not one of IDLE_GATED. */
+export function idleGated(keys, root = process.cwd()) {
+  const groups = new Set(keys.map((k) => serialGroupOf(k, root)));
+  const [only] = groups;
+  return !(groups.size === 1 && only !== null && !IDLE_GATED.includes(only));
+}
+
 /** One run of a check under `root`, as the job runs a single one: { code, output }. `args` its arguments. */
 export function runCheck(key, root = process.cwd(), write, args = []) {
   return runOnce(key, args, root, write);
 }
 
 /**
- * Runs `keys` in order: `idle()` first for each run ({ idle, why, ... }), then `run(key, args, write)` ({ code, output }
+ * Runs `keys` in order: `idle()` first for each run ({ idle, why, ... }; `idle: null`, no wait), then `run(key, args, write)` ({ code, output }
  * or an exit code; `write(chunk)`, when given, where its output goes as it comes), again on exit 3 (live-rerun.mjs's
  * rerun, with `sleep`, `random` and `policy`). A member of `releases` (RELEASES) runs once, given its deadline (`now()`
  * at the start plus its withinMs); the next member starts once its output holds releasedLine, and what it prints after
@@ -58,6 +93,10 @@ export async function serial(keys, { idle, run, say = console.log, write = (b) =
   const background = [];
   let stopped = null;
   const gate = (key) => async (n) => {
+    if (idle === null) {
+      say(`=== ${key}: running${n > 1 ? ` (run ${n})` : ""}`);
+      return true;
+    }
     say(`=== ${key}: waiting for the helper's Jupiter budget to be idle${n > 1 ? ` (run ${n})` : ""}`);
     const g = await idle();
     if (!g.idle) {
@@ -140,7 +179,7 @@ export async function serial(keys, { idle, run, say = console.log, write = (b) =
 }
 
 /** The command line: `--log <file>` and the keys, the checks under `root`. Resolves the exit code. `idle` stands in for
- *  the helper's budget read in the tests. */
+ *  the helper's budget read in the tests; a group idleGated calls false runs with none. */
 export async function main(argv, { root = process.cwd(), idle } = {}) {
   const { log, rest: keys } = logArg(argv);
   const out = sink(log);
@@ -152,7 +191,8 @@ export async function main(argv, { root = process.cwd(), idle } = {}) {
       writeVerdicts(log, (keys.length ? keys : [""]).map((k) => ({ key: k, verdict: "error", reason: line, runs: 0 })));
       return 2;
     }
-    const r = await serial(keys, { idle: idle ?? (() => waitIdle({ log: out.say })), run: (k, args, w) => runCheck(k, root, w ?? out.write, args), say: out.say, write: out.write });
+    const gated = idleGated(keys, root);
+    const r = await serial(keys, { idle: gated ? (idle ?? (() => waitIdle({ log: out.say }))) : null, run: (k, args, w) => runCheck(k, root, w ?? out.write, args), say: out.say, write: out.write });
     writeVerdicts(log, r.results);
     for (const x of r.results) if (x.verdict === "inconclusive") out.say(noticeLine(x.key, x.reason));
     return r.ok ? 0 : 1;

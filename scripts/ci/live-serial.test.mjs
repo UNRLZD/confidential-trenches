@@ -146,6 +146,44 @@ test("an old commit's serial group runs under the workflow's runner: its checks 
   }
 });
 
+// card helper-live-run-holds-its-own-load: the Jupiter idle read gates the jupiter-budget group alone; the evm-keyed group
+// (the helper's keyed Base and Robinhood providers) runs back to back, never stalled on the budget the other job spends
+test("only the jupiter-budget group waits for the Jupiter budget: evm-keyed runs back to back, and a member with no Serial line keeps the gate", async () => {
+  const { main, idleGated, serialGroupOf } = await import("./live-serial.mjs");
+  const root = mkdtempSync(path.join(tmpdir(), "live-serial-groups-"));
+  try {
+    mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+    const check = (k, header) => writeFileSync(path.join(root, "scripts/live-checks", `${k}.mjs`), `#!/usr/bin/env node\n// ${k}\n${header}// After: helper\nconsole.log("live-check ${k}: PASS");\n`);
+    check("evm-a", "// Serial: evm-keyed 10\n");
+    check("evm-b", "// Serial: evm-keyed 20 why there\n");
+    check("jup-a", "// Serial: jupiter-budget 10\n");
+    check("jup-b", "// Serial: jupiter-budget 20\n");
+    check("plain", "");
+    assert.equal(serialGroupOf("evm-b", root), "evm-keyed");
+    assert.equal(serialGroupOf("plain", root), null);
+    assert.equal(idleGated(["evm-a", "evm-b"], root), false);
+    assert.equal(idleGated(["jup-a", "jup-b"], root), true);
+    assert.equal(idleGated(["evm-a", "plain"], root), true, "a member with no Serial line keeps the gate");
+    assert.equal(idleGated(["evm-a", "jup-a"], root), true, "members of two groups keep the gate");
+    const log = path.join(root, "group.log");
+    let reads = 0;
+    const idle = async () => (reads++, IDLE);
+    assert.equal(await main(["--log", log, "evm-a", "evm-b"], { root, idle }), 0);
+    assert.equal(reads, 0, "evm-keyed reads no Jupiter budget");
+    const text = readFileSync(log, "utf8");
+    assert.match(text, /=== evm-a: running[\s\S]*live-check evm-a: PASS[\s\S]*=== evm-b: running[\s\S]*live-check evm-b: PASS[\s\S]*live-serial: PASS 2 checks/);
+    assert.doesNotMatch(text, /Jupiter/);
+    assert.equal(await main(["--log", log, "jup-a", "jup-b"], { root, idle }), 0);
+    assert.equal(reads, 2, "jupiter-budget reads the budget before each member");
+    // a Jupiter budget never idle stops jupiter-budget, never evm-keyed
+    const busy = async () => ({ idle: false, probes: 3, waitedMs: 9, why: "busy" });
+    assert.equal(await main(["--log", log, "jup-a", "jup-b"], { root, idle: busy }), 1);
+    assert.equal(await main(["--log", log, "evm-a", "evm-b"], { root, idle: busy }), 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // card live-run-red-means-the-build: a member done with the budget lets the next start while it reads on to its deadline
 test("a released member gets its deadline, the next member starts once it prints its released line, and the group waits for it", async () => {
   const events = [];
