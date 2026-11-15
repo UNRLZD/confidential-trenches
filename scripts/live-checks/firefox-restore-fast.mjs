@@ -9,6 +9,7 @@
 //     'unsafe-eval';
 //   - /walk-worker.js's bytes carry the field module (its builder's own refusal text, which minifying keeps).
 // After: sign
+// Bundle: out response headers (the sign deploy's gate holds the build's _headers to WALK_CSP, signpage-skeleton.mjs)
 //   node scripts/live-checks/firefox-restore-fast.mjs [--answer <file>] [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
