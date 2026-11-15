@@ -664,6 +664,30 @@ export function swapFilter(pool: Pick<Pool, "venue" | "id" | "log">, from: numbe
 }
 const refFilter = (from: number, to: number, chain: EvmChain) => swapFilter({ venue: "v4", id: VENUES[chain].refPoolId }, from, to, chain);
 
+/** Initialize(uint160 sqrtPriceX96, int24 tick): the event a Uniswap v3, Slipstream or PancakeSwap v3 pool logs once,
+ *  as it is made (no indexed field: data two words). Read 2026-11-15 08:2xZ on base-rpc.publicnode.com: the newest pool
+ *  of the Uniswap v3 factory (0x10975095..., block 57678544), of the third Slipstream factory (0x94597a30..., 57699770)
+ *  and of PancakeSwap v3's (0xe9e7cf5b..., 57633808) each logged it first, one topic and two words. A v4 pool's birth is
+ *  the PoolManager's Initialize of its id (TOPIC.initialize). A v2 pair and a Pons curve log none of their own: their
+ *  read back goes on to tapeBack as before. */
+export const INITIALIZE3 = topic("Initialize(uint160,int24)");
+/** A read back's swaps filter (poolFilters' first) with the pool's own birth event in its first topic, where the venue
+ *  logs one: the same one `eth_getLogs` a span, never another. */
+export function bornFilter(pool: Pick<Pool, "venue">, f: Record<string, unknown>): Record<string, unknown> {
+  const topics = f.topics as (string | string[] | null)[];
+  const born = pool.venue === "v4" ? TOPIC.initialize : pool.venue === "v3" ? INITIALIZE3 : null;
+  if (born === null || !Array.isArray(topics) || topics.length === 0) return f;
+  const first = [topics[0]].flat().filter((x): x is string => typeof x === "string");
+  return first.includes(born) ? f : { ...f, topics: [[...first, born], ...topics.slice(1)] };
+}
+/** Whether a log is the pool's own birth: the PoolManager's Initialize of its id (v4), or the pool's Initialize(uint160,
+ *  int24) (v3, Slipstream, PancakeSwap v3), exactly as the venue logs it. */
+export function isBirth(pool: Pick<Pool, "venue" | "id">, l: Log, chain: EvmChain = "base"): boolean {
+  if (pool.venue === "v4") return l.address === VENUES[chain].poolManager && l.topics.length === 4 && l.topics[0] === TOPIC.initialize && l.topics[1] === pool.id;
+  if (pool.venue === "v3") return l.address === pool.id && l.topics.length === 1 && l.topics[0] === INITIALIZE3 && l.data.length === 2 + 64 * 2;
+  return false;
+}
+
 const TWO_192 = 1n << 192n;
 /** A swap log of the ETH price pool as the ETH price it leaves, or null: USD per ETH times 10^18 from the pool's price
  *  after the swap (sqrtPriceX96 squared over 2^192 is USDC units per wei; times 10^12 for USD per ETH; times 10^18). */
@@ -2062,10 +2086,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /**
    * One step of a short tape's read back (Entry.back; card every-cell-shows-a-value): a book whose tape holds fewer
-   * than TRADES_MAX trades reads the step before the blocks it holds, its pool's swaps (poolFilters) and the ETH
-   * price's (an ETH-quoted pool) in one agreed read, until TRADES_MAX trades or VENUES[chain].tapeBack blocks before its
-   * first read. A quiet token's tape had only the cold window's trades: 5 minutes on Base, where a token trading every
-   * few minutes opened with none. A read that fails is read again next tick; the blocks are old enough never to change.
+   * than TRADES_MAX trades reads the step before the blocks it holds, its pool's swaps (poolFilters' first) in one
+   * agreed read, then for a step that holds one the ETH price's (an ETH-quoted pool) and a hooked pool's other filters,
+   * until TRADES_MAX trades, the pool's birth, or VENUES[chain].tapeBack blocks before its first read. A quiet token's
+   * tape had only the cold window's trades: 5 minutes on Base, where a token trading every few minutes opened with none. A read that fails is read again next tick; the blocks are old enough never to change.
    */
   async function readBack(e: Entry, urls: readonly string[]): Promise<void> {
     if (e.from === undefined || e.back?.done === true) return;
@@ -2079,7 +2103,26 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const hi = back.lo - 1;
     const lo = Math.max(end, hi - V.step + 1);
     const eth = e.pool.quote.kind === "eth";
-    const logs = await agreedRange(urls, (a, b) => [...poolFilters(e.pool, a, b, chain), ...(eth ? [refFilter(a, b, chain)] : [])], lo, hi);
+    // the pool's swaps first, alone; only a step that holds one reads what prices it: the ETH price over the step (the
+    // price in force before its first swap) and a hooked pool's transfers and claims over the blocks of its swaps, the
+    // only ones hookTakes reads. A step with none costs one filter a span, not four (card evm-tape-from-our-index-fast:
+    // a cold Base tape still filling at 180 s, 92 reads for one trade's hour where 46 were the ETH price's of steps
+    // that held no trade)
+    // The same filter takes the pool's own birth (bornFilter), and the step that holds it is the last: no swap of the
+    // pool lies before it (card evm-tape-from-our-index-fast: a new list's minutes-old pools read all 12 steps of an
+    // hour they were not in, and their tapes said filling past 45 s)
+    const [main, ...rest] = poolFilters(e.pool, lo, hi, chain);
+    const swaps = await agreedRange(urls, (a, b) => [bornFilter(e.pool, { ...main!, fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` })], lo, hi);
+    const born = swaps?.some((l) => isBirth(e.pool, l, chain)) === true;
+    const found = swaps?.filter((l) => decodeSwap(e.pool, l, chain) !== null) ?? [];
+    const extra =
+      swaps == null || found.length === 0
+        ? []
+        : await Promise.all([
+            eth ? agreedRange(urls, (a, b) => refFilter(a, b, chain), lo, hi) : Promise.resolve([] as Log[]),
+            rest.length > 0 ? agreedRange(urls, (a, b) => poolFilters(e.pool, a, b, chain).slice(1), found[0]!.block, found.at(-1)!.block) : Promise.resolve([] as Log[]),
+          ]);
+    const logs = swaps == null || extra.some((x) => x == null) ? null : swaps.concat(...(extra as Log[][])).sort((a, b) => a.block - b.block || a.index - b.index);
     if (logs == null) {
       // read again at a later tick, BACK_FAILS_MAX times in a row at most: the tape is then what it holds, not filling
       const fails = (back.fails ?? 0) + 1;
@@ -2088,7 +2131,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     const all = logs.concat(back.logs);
     tradersAhead(e.pool, logs);
-    e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end };
+    e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born };
   }
   /** A short tape's read back, step after step, while its book is open and each step reads (a failed one is read again
    *  at a later tick). */

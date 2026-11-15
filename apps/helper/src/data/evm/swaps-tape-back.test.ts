@@ -24,11 +24,13 @@ const fx = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/${name}
 const PCS = fx("swaps-pancake-base.json");
 const UNI2 = fx("swaps-univ2-base.json");
 /** Base's VENUES sizes, read through the namespace so the file loads where tapeBack is missing (red at cd426e5b9). */
+/** Uniswap v3's (and Slipstream's, PancakeSwap v3's) pool event at its creation: Initialize(uint160 sqrtPriceX96, int24 tick). */
+const INIT3 = hex(keccak_256(new TextEncoder().encode("Initialize(uint160,int24)")));
 const TAPE_BACK = (VENUES.base as unknown as Record<string, number>).tapeBack ?? 18_000;
 
 /** The fake chain at `head`, the pool's confirming calls planted, its one recorded swap moved to block `at`; `asked`
  *  collects each pool logs read's first block. */
-function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number, failBefore?: number) {
+function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number, failBefore?: number, born?: number) {
   const chain = B.fakeChain();
   chain.st.head = head;
   const calls = new Map<string, string>([
@@ -41,6 +43,8 @@ function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number
   ]);
   const log = { ...p.log, blockNumber: `0x${at.toString(16)}`, blockTimestamp: `0x${B.timeOf(at).toString(16)}` };
   const asked: number[] = [];
+  // every eth_getLogs asked of any provider: its filter's address, second topic (a v4 pool's id) and first block
+  const reads: { address: string; id: string | null; from: number }[] = [];
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
     const mine = reqs.map((r): object | undefined => {
@@ -50,11 +54,16 @@ function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number
       }
       if (r.method !== "eth_getLogs") return undefined;
       const q = r.params[0] as Filter;
+      reads.push({ address: String(q.address), id: typeof q.topics?.[1] === "string" ? q.topics[1] : null, from: parseInt(q.fromBlock, 16) });
       if (q.address === p.asset0) return { result: [] };
       if (q.address === p.pool) {
         asked.push(parseInt(q.fromBlock, 16));
         if (failBefore !== undefined && parseInt(q.fromBlock, 16) < failBefore) return { error: { code: -32603, message: "internal error" } };
-        return { result: q.topics?.[0] === p.log.topics[0] && at >= parseInt(q.fromBlock, 16) && at <= parseInt(q.toBlock, 16) ? [log] : [] };
+        const t0 = [q.topics?.[0]].flat();
+        const inRange = (b: number) => b >= parseInt(q.fromBlock, 16) && b <= parseInt(q.toBlock, 16);
+        // the pool's own Initialize(uint160,int24) at `born`: its first log, none before it
+        const birth = born !== undefined && t0.includes(INIT3) && inRange(born) ? [{ address: p.pool, topics: [INIT3], data: `0x${"0".repeat(63)}1${"0".repeat(64)}`, blockNumber: `0x${born.toString(16)}`, blockTimestamp: `0x${B.timeOf(born).toString(16)}`, transactionHash: `0x${"bb".repeat(32)}`, logIndex: "0x0", blockHash: `0x${"cc".repeat(32)}`, transactionIndex: "0x0", removed: false }] : [];
+        return { result: [...birth, ...(t0.includes(p.log.topics[0]!) && inRange(at) && (born === undefined || at >= born) ? [log] : [])] };
       }
       return undefined;
     });
@@ -64,7 +73,7 @@ function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number
     return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
   };
   const s = B.open(chain, undefined, { fetch: fetch as never, pools: new Map(), hint: async () => p.pool });
-  return { s, asked };
+  return { s, asked, reads };
 }
 /** Ticks, each followed by the read back it starts settling (its own background read, never the tick's wait). */
 const ticks = async (s: ReturnType<typeof B.open>, n: number) => {
@@ -139,5 +148,46 @@ test("guard: a read back whose steps fail BACK_FAILS_MAX times in a row ends: th
   const n = asked.filter((b) => b < first).length;
   await ticks(s, 2);
   assert.equal(asked.filter((b) => b < first).length, n);
+  s.stop();
+});
+
+test("a short ETH-quoted tape reads back with the ETH price read only in the steps that hold a trade: a step with none asks its pool's swaps alone (card evm-tape-from-our-index-fast: a cold Base tape still filling at 180 s on the keyed providers' quota; red at a00fdfa56: every one of the 12 steps asked the ETH price too)", async () => {
+  const V = VENUES.base;
+  // the one trade in the first step back (as the ETH-quoted test above), so the other steps back hold none
+  const at = B.REC.firstHead + 400;
+  const head = at + V.cold + 100;
+  const { s, reads } = rig(UNI2, `${UNI2.factory} ${sel("getPair(address,address)")}${w(UNI2.asset0)}${w(UNI2.asset1)}`, head, at);
+  assert.deepEqual(await rows(s, UNI2.asset0), []);
+  await ticks(s, 4);
+  assert.equal(await filling(s, UNI2.asset0), false, "the read back is done");
+  const ref = B.REC.logs.ref.filter((x) => x.b < at).map(B.toLog).map((x) => S.decodeRef(x)).filter((x) => x !== null).at(-1)!;
+  assert.deepEqual(await rows(s, UNI2.asset0), [["b", fixed((3_577_223_829n * ref.ethUsd) / 10n ** 18n, 18), "123989.534258606247275177", UNI2.log.transactionHash]], "priced as before, at the ETH price in force before it");
+  const first = head - V.cold + 1;
+  const back = reads.filter((r) => r.from < first - V.refBack);
+  const refReads = back.filter((r) => r.id === S.REF_POOL_ID).length;
+  const poolReads = back.filter((r) => r.address === UNI2.pool).length;
+  // the step back that holds the trade: its spans of the ETH price, on the providers that agreed; the other 11 none
+  const spansAStep = Math.ceil(V.step / V.span);
+  console.log(`read back: ${back.length} eth_getLogs (${poolReads} the pool's, ${refReads} the ETH price's) over ${TAPE_BACK} blocks`);
+  assert.ok(refReads <= 3 * spansAStep, `the ETH price read in the trade's step only: ${refReads} reads, at most ${3 * spansAStep}`);
+  assert.ok(back.length <= poolReads + 3 * spansAStep, `no read back asks more than the pool's swaps and one step's ETH price: ${back.length}`);
+  s.stop();
+});
+
+test("a pool born inside the hour: its read back ends at the step that holds its own Initialize, no step before it is read (card evm-tape-from-our-index-fast: a new list's tapes read all 12 steps of an hour their pools were not in, still filling at 45 s; red at a00fdfa56: every step read)", async () => {
+  const V = VENUES.base;
+  const head = B.REC.firstHead + 200;
+  const first = head - V.cold + 1;
+  // the pool made 2,000 blocks before the first read (its second step back), its one trade 100 blocks after
+  const born = first - 2_000;
+  const at = born + 100;
+  const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, at, undefined, born);
+  assert.equal(await filling(s, PCS.asset0), true);
+  await ticks(s, 3);
+  assert.deepEqual(await rows(s, PCS.asset0), [["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash]]);
+  assert.equal(await filling(s, PCS.asset0), false, "done at its birth: not filling");
+  const back = asked.filter((b) => b < first);
+  console.log(`read back of a pool born ${first - born} blocks before the first read: ${back.length} pool reads, the oldest from block ${Math.min(...back)} (born ${born})`);
+  assert.ok(Math.min(...back) >= born - V.step, `no step read wholly before its birth: the oldest read from ${Math.min(...back)}, born ${born}`);
   s.stop();
 });
