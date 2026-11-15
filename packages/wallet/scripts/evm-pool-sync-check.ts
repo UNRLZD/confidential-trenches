@@ -74,7 +74,13 @@ function lastRound(from: number) {
 try {
   const rpcs: [EvmRpc, EvmRpc] = [bridge(0), bridge(1)];
   const sleep = a.wait ? undefined : async () => {};
-  const sync = evmTreeSync({ rpcs, pin: { network: a.network, pool: a.pool, feeRecipient: a.pool, fromBlock: BigInt(a.fromBlock) }, ...(sleep ? { sleep } : {}) });
+  // the newest block's reuse clock (EVM_NEWEST_REUSE_MS) stands still, live and replayed alike: a newest block is read
+  // again only after a lag (headAgainOnLag), never because a second of wall time passed, so a replay makes the same
+  // reads as the run it replays on any runner. On the real clock a recorded run that took over a second between a
+  // round's anchor and its root times read the newest block again, and its fast replay asked stateRootTimes at a block
+  // the run never read (card evm-trees-from-one-verified-source, Base mainnet, 15 Nov 06:32Z)
+  const clock = () => 0;
+  const sync = evmTreeSync({ rpcs, pin: { network: a.network, pool: a.pool, feeRecipient: a.pool, fromBlock: BigInt(a.fromBlock) }, clock, ...(sleep ? { sleep } : {}) });
   const at = calls.length;
   const depth = await sync.depthAt(BigInt(a.fromBlock));
   const chainIds = calls.filter((c) => c.method === "eth_chainId").map((c) => BigInt(c.result as string).toString());

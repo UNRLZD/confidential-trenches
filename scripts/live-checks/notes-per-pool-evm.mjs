@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Live check of card notes-per-pool-evm: the wallet's EVM pool sync (packages/wallet/src/pool/evm.ts) reads each
-// deployed testnet pool on two RPCs of two operators (CHAINS), and every check passes.
+// deployed mainnet pool on two RPCs of two operators (CHAINS), and every check passes.
 // The sync itself runs in packages/wallet/scripts/evm-pool-sync-check.ts, a child process (Blindfill's code stays
 // behind the kit's entry for this file; no check here is a second implementation of the sync's). This file makes
 // every network call for it, so it records or replays them.
@@ -12,16 +12,16 @@
 //     the deploy block (pages halve on a provider's range cap) rebuilt into trees equal to currentRoot,
 //     currentTreeSize, currentLabelRoot and currentLabelTreeSize at the newest anchor on both;
 //   - the cut at the pool's time: stateRootTimes and labelRootTimes of its roots are its last leaf's block time. A pool
-//     with no leaf yet prints "no leaf yet", which is not a failure (the first testnet deposit is a later card's; from
-//     then on this line must pass).
-//   node scripts/live-checks/notes-per-pool-evm.mjs [--chain base-sepolia|robinhood-testnet] [--record <file>]
+//     with no leaf yet prints "no leaf yet", which is not a failure (both mainnet pools hold leaves now, so the
+//     recorded run's line must pass).
+//   node scripts/live-checks/notes-per-pool-evm.mjs [--chain base|robinhood] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every answer read, as the good run of notes-per-pool-evm.answers.json, and its bad run: the same
 // answers with currentTreeSize one higher on both RPCs, which the sync must refuse.
 // Bounded (card notes-per-pool-evm-base-hang): the chains are read at once, each printed as it ends with its calls and
 // time, and each has CHAIN_DEADLINE_MS: a sync still going then fails, naming the call it is stuck on (the URL's host,
 // the method, the block range and its try). On 4 Nov 20:07Z the Base Sepolia run printed nothing in 20 min.
-// Runs: once, it reads no host: the wallet's pool sync at the checkout against the testnets' public RPCs; the wallet tests hold its pager
+// Runs: once, it reads no host: the wallet's pool sync at the checkout against the mainnet pools' public RPCs; the wallet tests hold its pager
 import "../net-window.mjs";
 import { spawn } from "node:child_process";
 import { STILL_CLOCK } from "./wallet-restore-transfer-rpcs.mjs";
@@ -41,35 +41,32 @@ const { keccak_256 } = req("@noble/hashes/sha3.js");
 const selector = (s) => `0x${Buffer.from(keccak_256(new TextEncoder().encode(s)).subarray(0, 4)).toString("hex")}`;
 export const VIEWS = Object.fromEntries(["SCOPE()", "currentRoot()", "currentTreeSize()", "currentLabelRoot()", "currentLabelTreeSize()", "stateRootTimes(uint256)", "labelRootTimes(uint256)"].map((s) => [selector(s), s]));
 
-// The pools and their deploy txs, from card pool-evm-deploy's run records
-// (scripts/live-checks/pool-evm-deploy.base-sepolia.json and pool-evm-deploy.robinhood-testnet.json, deployed
-// 3 Nov 05:02-05:04Z). Robinhood testnet's RPCs are the money gate's (scripts/ci/money-gate.mjs), two operators. Base
-// Sepolia's are the pair that pages the pool's logs wide, as card evm-pool-reads-throttle's SYNC (card
-// notes-per-pool-evm-base-hang): the chain makes a block every 200 ms (blocks 53,801,443 to 55,089,154 in 257,542 s on
-// sepolia.base.org, base-sepolia-rpc.publicnode.com and base-testnet.api.pocket.network alike, 6 Nov 04:35Z), and the
-// money gate's sepolia.base.org answers the pool's eth_getLogs over 200 blocks "-32614: eth_getLogs is limited to a
-// 200 range" (1,000 to 100,000 blocks, 04:35Z), so the pager's 156-block pages: 744 pages in 222 s from the pool's
-// deploy block, about 8,250 pages and 41 min for the pool's 1,285,746 blocks, 2,770 more a day (04:27-04:31Z).
-// PublicNode answered the same filter over 1,000, 10,000 and 50,000 blocks in 116-176 ms and refused 100,000 ("-32701:
-// exceed maximum block range: 50000"); Pocket answered 1,000 to 100,000 blocks in 188-265 ms (04:35Z): at the pager's
-// 10,000-block pages, about 130 pages each.
+// The mainnet pools (the wallet's pins, packages/wallet/src/pool/evm.ts, and card evm-pools-on-mainnet's) and their
+// deploy txs (evm-pool-pins.mjs deployTxOf: the PrivacyPoolSimple tx of each pool-evm-deploy-mainnet run record). Each
+// chain's RPCs are the device's seats, the first two of the kit's pool list (evmPoolProvidersOf(evmPoolVenues()[net]),
+// two operators by evmRpcOperator, read 15 Nov 06:29Z). Card evm-trees-from-one-verified-source: the run is mainnet
+// only (no test network at all); recorded 15 Nov 06:31-06:32Z, Base in 155 calls and 11.2 s, Robinhood in 690 calls
+// and 90.2 s. Base makes a block every 200 ms (blocks 54,325,671 to 57,670,020 in 668,870 s on base-rpc.publicnode.com,
+// 06:33Z); over the pool's filter from its deploy block PublicNode answered 1,000 to 50,000 blocks and refused 100,000
+// ("-32701: exceed maximum block range: 50000"), bloXroute answered 1,000 to 100,000 and refused 200,000 ("-32602: query
+// exceeds max block range 100000"), 06:33Z.
 export const CHAINS = Object.freeze({
-  "base-sepolia": Object.freeze({
-    chainId: 84532n,
-    pool: "0xb239a38af69b68e6c5c305df64985f283b5d5fe5",
-    deployTx: "0x388b62ddca5ba87084edb814e5290f097be2ff9b4ecb1dec69b5f2c567cb163a",
-    rpcs: Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"]),
+  base: Object.freeze({
+    chainId: 8453n,
+    pool: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    deployTx: "0x2e0cba4bfa2c24ae138ade564a027c5d83943340153dec0ad2e278c8c89b23c7",
+    rpcs: Object.freeze(["https://base-rpc.publicnode.com", "https://base.rpc.blxrbdn.com"]),
   }),
-  "robinhood-testnet": Object.freeze({
-    chainId: 46630n,
-    pool: "0xe5e948414a89c23e73d76cd740dacdd9364c25d5",
-    deployTx: "0x32169e3cd8f365ae90a10f43eca8f1cc32953ee9bc60e3d6cd2f3253ae3cba23",
-    rpcs: Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-sepolia-rpc.publicnode.com"]),
+  robinhood: Object.freeze({
+    chainId: 4663n,
+    pool: "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    deployTx: "0xb5b5c6c0403e94daf9cf37e5b61f8d6dc9af41d929a3ecf732898e0d9fa88176",
+    rpcs: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]),
   }),
 });
 
-/** Each chain's sync ends within this: Robinhood testnet's read took 28 s from the Mac (4 Nov 20:07Z) and Base
- * Sepolia's on its wide pair about 130 pages a side; this is over 5 times either, so the job stays under 5 min. */
+/** Each chain's sync ends within this: Robinhood mainnet's read took 90.2 s from the Mac and Base's 11.2 s (15 Nov
+ * 06:31Z); the chains run at once, so the job stays under 5 min. */
 export const CHAIN_DEADLINE_MS = 240_000;
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -109,16 +106,25 @@ export function recorder() {
 }
 
 /** A transport that answers each call with the recorded answers to that same call, in their order; past the last,
- * the last again (a block read twice by number is the same block). */
+ * the last again (a block read twice by number is the same block). A block read by number that the run never asked
+ * by number is the block of that number the same URL answered to a tag ("latest", "finalized"), when it did: the same
+ * block on that host (card evm-trees-from-one-verified-source: two seats at one head read the anchor by tag only, and
+ * the sync's reorg check on a refused round reads it by number). */
 export function replayer(log) {
   const queues = new Map();
+  const byNumber = new Map();
   for (const e of log) {
     const k = JSON.stringify([e.url, e.method, e.params]);
     if (!queues.has(k)) queues.set(k, []);
     queues.get(k).push(e);
+    if (e.method === "eth_getBlockByNumber" && !/^0x/.test(String(e.params?.[0])) && typeof e.result?.number === "string") {
+      const n = JSON.stringify([e.url, e.method, [e.result.number, ...e.params.slice(1)]]);
+      if (!byNumber.has(n)) byNumber.set(n, e);
+    }
   }
   return async (url, method, params) => {
-    const q = queues.get(JSON.stringify([url, method, params]));
+    const k = JSON.stringify([url, method, params]);
+    const q = queues.get(k) ?? (byNumber.has(k) ? [byNumber.get(k)] : undefined);
     const e = q?.length > 1 ? q.shift() : q?.[0];
     if (e === undefined) return { error: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
     return "error" in e ? { error: e.error } : { result: e.result };
