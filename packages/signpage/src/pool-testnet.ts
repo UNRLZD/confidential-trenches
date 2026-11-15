@@ -253,25 +253,34 @@ export const pageAssetHeldRpc = (signal: AbortSignal): SolanaRpc =>
  *  so a provider the device reaches itself is never named a W of it, nor two in one burst. A sale reads none of it: its
  *  finding gates its signature, so it reads on the pool's two RPCs (src/pool-sell-evm.ts planEvmSell). None in the
  *  testnet build, whose helper has no route for the chain: there the pool's two RPCs read each W, as before. */
-/** `kind` (card base-reads-never-starve-max): "pass" for a background read (the buy follow, the carry, the holdings
- *  rebuild, the deposit follow), never more than the wallet's EVM_PASS_IN_QUEUE of them in the route's queue at once;
- *  "shown" for what a screen shows (the positions pass), which waits behind at most that many. */
-export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET, kind: "pass" | "shown" = "pass"): EvmRpc | undefined => {
+export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET): EvmRpc | undefined => {
   if (testnet) return undefined;
-  const k = `${chain} ${kind}`;
-  let r = WALLET_RPCS.get(k);
+  let r = WALLET_RPCS.get(chain);
   if (r === undefined) {
-    const route = kind === "shown" ? evmHelperShownRpc(TRADE_HELPER, chain) : evmHelperRpc(TRADE_HELPER, chain);
-    WALLET_RPCS.set(k, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
+    const route = evmHelperRpc(TRADE_HELPER, chain);
+    WALLET_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
   }
   return r;
 };
-const WALLET_RPCS = new Map<string, EvmRpc>();
+const WALLET_RPCS = new Map<"base" | "robinhood", EvmRpc>();
+/** The same route for what a screen shows (card base-reads-never-starve-max): the positions pass's W balances, which
+ *  Portfolio and the sell box draw, in the route's shown lane (the wallet's evmHelperShownRpc), never behind more than
+ *  EVM_PASS_IN_QUEUE of pageEvmWalletRpc's background reads; none in the testnet build. */
+export const pageEvmShownRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET): EvmRpc | undefined => {
+  if (testnet) return undefined;
+  let r = SHOWN_RPCS.get(chain);
+  if (r === undefined) {
+    const route = evmHelperShownRpc(TRADE_HELPER, chain);
+    SHOWN_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
+  }
+  return r;
+};
+const SHOWN_RPCS = new Map<"base" | "robinhood", EvmRpc>();
 /** A positions pass's readers (src/positions-evm.ts): the pool's pass pair, and on SIGN_HOST's build the helper's route
- *  as `one`, every W's balance read on it alone, in its shown lane (pageEvmWalletRpc); the pair alone in the testnet
+ *  as `one`, every W's balance read on it alone, in its shown lane (pageEvmShownRpc); the pair alone in the testnet
  *  build. */
 export const pageEvmPassReads = (chain: "base" | "robinhood", rpcs: readonly [EvmRpc, EvmRpc], testnet: boolean = POOL_TESTNET): { rpcs: readonly [EvmRpc, EvmRpc]; one?: EvmRpc } => {
-  const one = pageEvmWalletRpc(chain, testnet, "shown");
+  const one = pageEvmShownRpc(chain, testnet);
   return one === undefined ? { rpcs } : { rpcs, one };
 };
 /** Tests only: forget this page's hold objects (EVM_HOLDS; each pool's record stays in the wallet store, as on a new

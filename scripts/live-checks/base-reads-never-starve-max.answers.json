@@ -54,9 +54,9 @@
  "sign_good": {
   "part": "sign",
   "sign": "http://localhost (this commit build, packages/signpage)",
-  "want": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd",
-  "pin": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd",
-  "sha384": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd"
+  "want": "sha384-QmCIAlrTJkz6awVvofIXtwdb1e2zaJBZHaxI6KEgV0a1cpMwtWC/Y/YOKWc3c6+a",
+  "pin": "sha384-QmCIAlrTJkz6awVvofIXtwdb1e2zaJBZHaxI6KEgV0a1cpMwtWC/Y/YOKWc3c6+a",
+  "sha384": "sha384-QmCIAlrTJkz6awVvofIXtwdb1e2zaJBZHaxI6KEgV0a1cpMwtWC/Y/YOKWc3c6+a"
  },
  "sign_bad_pre_card": {
   "part": "sign",
