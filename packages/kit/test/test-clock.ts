@@ -23,6 +23,76 @@
 // such as a provider held until a time), as after a real wait. The
 // wallet's test/pool-evm-restore.test.ts runs its helper route's pace on the same kind of clock.
 
+import { createCipheriv, createDecipheriv, createHash, generateKeySync, KeyObject } from "node:crypto";
+
+// The wallet store's seal (AES-GCM: K_wrap's generateKey, encrypt, decrypt) and the page's digests run in the thread pool,
+// whose answer lands after however many event-loop turns the machine's load lets pass: fake-indexeddb's steps run on
+// setImmediate meanwhile, so a store's work and a page's reads interleaved differently on a busy machine
+// (positions-requests.test.ts: 3 of 12 runs red with each subtle answer 0-15 ms late, none on time). On the clock these
+// are worked on the main thread, as the same AES-GCM and SHA of node:crypto, and their promise is settled when made: the
+// order of a test's work is the same on any machine. A call this does not cover (another algorithm, a key it cannot
+// read) goes to the real crypto.subtle, and the clock holds until it lands.
+const HASH: Record<string, string> = { "SHA-1": "sha1", "SHA-256": "sha256", "SHA-384": "sha384", "SHA-512": "sha512" };
+const nameOf = (a: unknown) => String(typeof a === "string" ? a : (a as { name?: unknown } | null)?.name ?? "").toUpperCase();
+const bytesOf = (b: unknown): Buffer | null =>
+  ArrayBuffer.isView(b) ? Buffer.from(b.buffer, b.byteOffset, b.byteLength) : b instanceof ArrayBuffer ? Buffer.from(b) : null;
+const out = (b: Buffer): ArrayBuffer => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+/** An AES-GCM key's secret as node:crypto holds it, or null (a key of another kind, or one without `use`). The store's
+ *  K_wrap is non-extractable by design; KeyObject.from reads it on this process's own side (its deprecation notice
+ *  for that is kept quiet, and should a later Node refuse, the call goes to the real crypto.subtle). */
+function aesKey(k: unknown, use: string): KeyObject | null {
+  const key = k as CryptoKey;
+  if (!(key instanceof CryptoKey) || key.algorithm.name !== "AES-GCM" || !key.usages.includes(use as KeyUsage)) return null;
+  const p = process as { noDeprecation?: boolean | undefined };
+  const quiet = p.noDeprecation;
+  p.noDeprecation = true;
+  try {
+    return KeyObject.from(key);
+  } catch {
+    return null;
+  } finally {
+    p.noDeprecation = quiet;
+  }
+}
+/** The calls worked on the main thread: each returns its settled promise, or undefined for the real crypto.subtle. */
+const ON_THREAD: Record<string, (...a: unknown[]) => Promise<unknown> | undefined> = {
+  digest: (alg, data) => {
+    const h = HASH[nameOf(alg)];
+    const b = bytesOf(data);
+    return h === undefined || b === null ? undefined : Promise.resolve(out(createHash(h).update(b).digest()));
+  },
+  generateKey: (alg, extractable, usages) => {
+    const a = alg as { name?: unknown; length?: unknown };
+    if (nameOf(a) !== "AES-GCM" || ![128, 192, 256].includes(Number(a.length)) || !Array.isArray(usages)) return undefined;
+    return Promise.resolve(generateKeySync("aes", { length: Number(a.length) }).toCryptoKey({ name: "AES-GCM" }, Boolean(extractable), usages as KeyUsage[]));
+  },
+  encrypt: (alg, k, data) => gcm(alg, k, data, true),
+  decrypt: (alg, k, data) => gcm(alg, k, data, false),
+};
+function gcm(alg: unknown, k: unknown, data: unknown, seal: boolean): Promise<unknown> | undefined {
+  const a = alg as { iv?: unknown; additionalData?: unknown; tagLength?: unknown };
+  const tagBytes = (a.tagLength === undefined ? 128 : Number(a.tagLength)) / 8;
+  const iv = bytesOf(a.iv), d = bytesOf(data), aad = a.additionalData === undefined ? null : bytesOf(a.additionalData);
+  if (nameOf(alg) !== "AES-GCM" || tagBytes !== 16 || iv === null || iv.length === 0 || d === null || (a.additionalData !== undefined && aad === null)) return undefined;
+  const key = aesKey(k, seal ? "encrypt" : "decrypt");
+  if (key === null) return undefined;
+  const cipher = `aes-${key.symmetricKeySize! * 8}-gcm` as "aes-256-gcm";
+  if (seal) {
+    const c = createCipheriv(cipher, key, iv, { authTagLength: 16 });
+    if (aad !== null) c.setAAD(aad);
+    return Promise.resolve(out(Buffer.concat([c.update(d), c.final(), c.getAuthTag()])));
+  }
+  if (d.length < 16) return Promise.reject(new DOMException("The provided data is too small.", "OperationError"));
+  try {
+    const c = createDecipheriv(cipher, key, iv, { authTagLength: 16 });
+    if (aad !== null) c.setAAD(aad);
+    c.setAuthTag(d.subarray(d.length - 16));
+    return Promise.resolve(out(Buffer.concat([c.update(d.subarray(0, d.length - 16)), c.final()])));
+  } catch {
+    return Promise.reject(new DOMException("The operation failed for an operation-specific reason", "OperationError"));
+  }
+}
+
 /** Ten times the longest test timeout of a test run on this clock (60 s). */
 export const RUNAWAY_MS = 600_000;
 
@@ -81,6 +151,8 @@ export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
       configurable: true,
       writable: true,
       value: (...a: unknown[]) => {
+        const now = ON_THREAD[m]?.(...a);
+        if (now !== undefined) return now;
         const p = f.apply(subtle, a);
         outside++;
         p.then(settle, settle);
