@@ -116,4 +116,6 @@ test("1Click's least is read live from its refusal of one unit, never kept in th
   assert.equal(sent.dry, true);
   assert.equal(sent.amount, "1");
   assert.equal(sent.destinationAsset, "nep141:sol.omft.near");
+  // 1Click refuses Solana's system program as a recipient ("recipient is not valid", 15 Nov 12:49Z), which names no least
+  assert.equal(sent.recipient, "So11111111111111111111111111111111111111112");
 });

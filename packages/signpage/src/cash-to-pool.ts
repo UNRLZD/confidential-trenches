@@ -306,8 +306,8 @@ export async function readOneClickLeast(chain: PoolChain, fetchFn: typeof fetch,
 }
 /** Each pool's coin, 1Click's id (as src/pool-to-cash.ts POOL_COIN_ASSET, which imports this module). */
 const POOL_COIN_ONECLICK: Readonly<Record<PoolChain, string>> = { solana: "nep141:sol.omft.near", base: "nep141:base.omft.near", robinhood: "nep141:hood.omft.near" };
-/** A dry read's recipient, an address of no one's: Solana's system program, an EVM address of ones. */
-const LEAST_RECIPIENT: Readonly<Record<PoolChain, string>> = { solana: "11111111111111111111111111111111", base: "0x1111111111111111111111111111111111111111", robinhood: "0x1111111111111111111111111111111111111111" };
+/** A dry read's recipient, an address of no one's: the wrapped-SOL mint (1Click refuses the system program as one: "recipient is not valid", 15 Nov 12:49Z), an EVM address of ones. */
+const LEAST_RECIPIENT: Readonly<Record<PoolChain, string>> = { solana: "So11111111111111111111111111111111111111112", base: "0x1111111111111111111111111111111111111111", robinhood: "0x1111111111111111111111111111111111111111" };
 const priceOf = (p: Pick<PoolStatePrice, "price" | "expo">): { n: bigint; d: bigint } | null => {
   if (typeof p.price !== "string" || !/^[1-9][0-9]{0,30}$/.test(p.price) || !Number.isInteger(p.expo) || p.expo > 0 || p.expo < -30) return null;
   return { n: BigInt(p.price), d: 10n ** BigInt(-p.expo) };
