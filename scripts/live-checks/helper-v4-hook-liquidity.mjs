@@ -39,7 +39,9 @@ const ADDR = /^0x[0-9a-f]{40}$/;
 const TX = /^0x[0-9a-f]{64}$/;
 const WORD = /^0x[0-9a-f]{64}$/;
 const ZERO_WORD = `0x${"0".repeat(64)}`;
-const OTHER_SWAPS = [TOPIC.swap3, TOPIC.swap2, TOPIC.curveBuy, TOPIC.curveSell];
+/** Every venue's Swap event but v4's (its test holds it, with swap4, to the helper's swaps.ts SWAP_TOPICS; card
+ *  evm-tape-rows-exact added Uniswap v2's and PancakeSwap v3's). */
+export const OTHER_SWAPS = [TOPIC.swap3, TOPIC.swapPancake, TOPIC.swap2, TOPIC.swapUni2, TOPIC.curveBuy, TOPIC.curveSell];
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const word = (a) => `0x${a.slice(2).padStart(64, "0")}`;
 const addr = (w) => `0x${w.slice(26)}`;

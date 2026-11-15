@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { beforeEach, test } from "node:test";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { resetPaces } from "../src/pace.ts";
 import * as P from "../src/pace.ts";
 // each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
@@ -832,19 +833,22 @@ test("two readers of one provider URL share its one pace; pacedFetch paces at th
   // FastNEAR's burst is 8: the second object's 8 reads each wait one gap
   assert.equal(v.c.waits.length, 8);
   assert.ok(v.c.waits.every((w) => Math.abs(w - 1000 / IDR.PACE.fastnear.perSec) < 1), v.c.waits.join(", "));
-  // at the transport: two pacedFetch of one URL share it, on the real clock; the ninth request waits and its signal ends it
-  resetPaces();
-  let sent = 0;
-  const f = async () => (sent++, new Response("{}"));
-  const [a, b] = [P.pacedFetch(FAST, f), P.pacedFetch(FAST, f)];
-  for (let k = 0; k < 8; k++) await (k % 2 ? a : b)(FAST);
-  const c = new AbortController();
-  setTimeout(() => c.abort(new Error("signed out")), 30);
-  const t = performance.now();
-  await assert.rejects(a(FAST, { signal: c.signal }), /^Error: signed out$/);
-  assert.equal(sent, 8);
-  assert.ok(performance.now() - t < 1_000);
-  assert.ok(P.isPacedFetch(a) && !P.isPacedFetch(f));
+  // at the transport: two pacedFetch of one URL share it, on the test clock; the ninth request waits and its signal ends
+  // it (a wait of its gap, 2.6 s, not cut by the signal reads its full length)
+  await onTestClock(async () => {
+    resetPaces();
+    let sent = 0;
+    const f = async () => (sent++, new Response("{}"));
+    const [a, b] = [P.pacedFetch(FAST, f), P.pacedFetch(FAST, f)];
+    for (let k = 0; k < 8; k++) await (k % 2 ? a : b)(FAST);
+    const c = new AbortController();
+    setTimeout(() => c.abort(new Error("signed out")), 30);
+    const t = performance.now();
+    await assert.rejects(a(FAST, { signal: c.signal }), /^Error: signed out$/);
+    assert.equal(sent, 8);
+    assert.ok(performance.now() - t < 1_000);
+    assert.ok(P.isPacedFetch(a) && !P.isPacedFetch(f));
+  });
 });
 
 test("the two providers of an id are read at once", async () => {

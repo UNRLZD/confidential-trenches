@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as Kit from "../src/index.ts";
+import { onTestClock } from "./test-clock.ts";
 
 const { VAULT_CONSTANTS, VAULT_SETTLE_GAS, VAULT_SETTLE_REFUND_ATTACH, vaultCommitment, vaultSettleCall, vaultSettleOwn } = Kit;
 type Call = Kit.VaultSettleCall;
@@ -182,14 +183,15 @@ test("a spend whose callback runs while the call waits for its own settle is sen
   assert.deepEqual(st.notes.map((n) => n.leaf.value), [REFUND, 2_000_000n]);
 });
 
-test("a spend in flight (a callback that failed stays so) is read once and reported, never waited on", async () => {
+// on the test clock: the 60 s wait, if waited, reads its full length
+test("a spend in flight (a callback that failed stays so) is read once and reported, never waited on", () => onTestClock(async () => {
   const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "in_flight", 0n)] });
   const t0 = Date.now();
   const r = await vaultSettleOwn({ vault: VAULT, scope: SCOPE, rpcs: v.rpcs, spends: [ME], send: v.send, store: store(), waitsMs: [60_000] });
   assert.ok(Date.now() - t0 < 5_000, "the call waited on a spend in flight");
   assert.deepEqual(r.outcomes, [{ nullifierHash: NF, state: "in_flight" }]);
   assert.equal(v.calls.length, 0);
-});
+}));
 
 test("a sent settle not read settled within the waits is reported sent, with nothing written", async () => {
   const v = vault({ leaves: deposits(3), labels: deposits(3), spends: [row(0, NF, R, "refund_pending", REFUND)] });

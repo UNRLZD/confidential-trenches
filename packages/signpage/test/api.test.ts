@@ -214,6 +214,26 @@ test("state polls push out no other id; answered ids are kept up to REMEMBERED_I
   assert.deepEqual(last[1], notAllowed(ids[0]!), "ids[0] was the oldest and went: a new run");
 });
 
+/** The page's request walk's work in `run`, counted instead of a real elapsed time: each array element it walks is one
+ *  call of an `every` callback, each object or array it opens one Reflect.ownKeys. Each is a visit, which spends at least
+ *  one of the budget's SIGNPAGE_MAX_REQUEST_BYTES, so one request's walk counts at most twice the budget plus one. */
+const WALK_MAX = 2 * (SIGNPAGE_MAX_REQUEST_BYTES + 1);
+async function visitsIn(run: () => Promise<void>): Promise<number> {
+  const [every, ownKeys] = [Array.prototype.every, Reflect.ownKeys];
+  let visits = 0;
+  Array.prototype.every = function (this: unknown[], f: (e: unknown, i: number, a: unknown[]) => unknown, that?: unknown) {
+    return every.call(this, (e: unknown, i: number, a: unknown[]) => (visits++, f.call(that, e, i, a)));
+  } as typeof every;
+  Reflect.ownKeys = (o: object) => (visits++, ownKeys(o));
+  try {
+    await run();
+  } finally {
+    Array.prototype.every = every;
+    Reflect.ownKeys = ownKeys;
+  }
+  return visits;
+}
+
 test("the request cap is UTF-8 bytes of the JSON, 64 KiB, checked before any field is read (A:116-117)", async () => {
   const p = page();
   const id = uuid();
@@ -236,10 +256,11 @@ test("the request cap is UTF-8 bytes of the JSON, 64 KiB, checked before any fie
     { v: 1, id, type: "buy", list: Array.from({ length: SIGNPAGE_MAX_REQUEST_BYTES + 1 }, () => 0) },
     { v: 1, id, type: "buy", node },
   ];
-  const t0 = performance.now();
-  for (const d of bad) p.send(d);
-  await p.idle();
-  assert.ok(performance.now() - t0 < 1_000, "the shared-object request is refused fast");
+  const visits = await visitsIn(async () => {
+    for (const d of bad) p.send(d);
+    await p.idle();
+  });
+  assert.ok(visits <= bad.length * WALK_MAX, `the shared-object request is refused fast: ${visits} values visited`);
   assert.equal(p.posted.length, 1, "only ready");
   const under = { v: 1, id, type: "buy", pad: "" };
   under.pad = "x".repeat(SIGNPAGE_MAX_REQUEST_BYTES - JSON.stringify(under).length);
@@ -263,10 +284,11 @@ test("a shared-reference bomb of nulls and numbers is refused fast: every value 
     { v: 1, id, type: "buy", wide },
   ];
   for (const d of bad) {
-    const t0 = performance.now();
-    p.send(d);
-    await p.idle();
-    assert.ok(performance.now() - t0 < 1_000, `refused in ${Math.round(performance.now() - t0)} ms`);
+    const visits = await visitsIn(async () => {
+      p.send(d);
+      await p.idle();
+    });
+    assert.ok(visits <= WALK_MAX, `refused after ${visits} values visited`);
   }
   assert.equal(p.posted.length, 1, "only ready");
 });

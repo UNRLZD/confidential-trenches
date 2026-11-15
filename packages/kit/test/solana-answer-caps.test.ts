@@ -60,35 +60,31 @@ test("the bomb is what it says: ~10 KB on the wire, 10 MB decoded, both caps far
   assert.ok(SOLANA_BUILD_ANSWER_MAX_BYTES * 4 < DECODED && SOLANA_ANSWER_MAX_BYTES * 4 < DECODED);
 });
 
-test("the build fetch refuses a gzip bomb as too large and cancels the body near its cap", async () => {
+// A local server on a real socket: the bound is the work done (the decoded bytes taken in, the body cancelled), and a
+// hang is held by each test's own timeout, never a real elapsed time.
+test("the build fetch refuses a gzip bomb as too large and cancels the body near its cap", { timeout: 10_000 }, async () => {
   const { origin, server } = await bombServer();
   try {
     const { f, seen } = countingFetch();
     const req = { side: "buy" as const, wallet: VOTE_PROGRAM, token: USDC_MINT, amount: 1_000_000n, slippageBps: 100 };
-    const t = performance.now();
     await assert.rejects(fetchSolanaJupiterBuild(origin, req, { fetch: f }), /the build answer is too large/);
-    const ms = performance.now() - t;
     assert.equal(seen.calls, 1, "one ask: a too-large answer is never asked again");
     assert.ok(seen.cancelled, "the reader cancelled the body");
     assert.ok(seen.bytes > SOLANA_BUILD_ANSWER_MAX_BYTES && seen.bytes <= SOLANA_BUILD_ANSWER_MAX_BYTES + SLACK, `decoded bytes taken in: ${seen.bytes}`);
-    assert.ok(ms < 2000, `${ms} ms`);
   } finally {
     server.close();
   }
 });
 
-test("the helper RPC reader refuses a gzip bomb with 'answer too large' and cancels the body near its cap", async () => {
+test("the helper RPC reader refuses a gzip bomb with 'answer too large' and cancels the body near its cap", { timeout: 10_000 }, async () => {
   const { origin, server } = await bombServer();
   try {
     const { f, seen } = countingFetch();
     const rpc = solanaHelperRpc(origin, { fetch: f });
-    const t = performance.now();
     await assert.rejects(rpc("getLatestBlockhash", [{ commitment: "confirmed" }]), /^Error: answer too large$/);
-    const ms = performance.now() - t;
     assert.equal(seen.calls, 1);
     assert.ok(seen.cancelled, "the reader cancelled the body");
     assert.ok(seen.bytes > SOLANA_ANSWER_MAX_BYTES && seen.bytes <= SOLANA_ANSWER_MAX_BYTES + SLACK, `decoded bytes taken in: ${seen.bytes}`);
-    assert.ok(ms < 2000, `${ms} ms`);
   } finally {
     server.close();
   }

@@ -76,11 +76,12 @@ test("the same split as the full search on 1000 random hands", () => {
   assert.ok(none > 100 && none < 900, `${none} of 1000 have no split: both kinds covered`);
 });
 
-test("many wallets on hand stay quick", () => {
+// the hang bound is the test's own timeout (no unit test judges real elapsed time): a split that searched every
+// combination of these 420 wallets would run past it; the turn awaited after the split lets the runner see a split that ran past it
+test("many wallets on hand stay quick", { timeout: 10_000 }, async () => {
   const big: bigint[] = [];
   for (let d = 0; d < 7; d++) for (const m of [2, 5, 10]) for (let i = 0; i < 20; i++) big.push(BigInt(m) * 100n * 10n ** BigInt(d));
-  const t = Date.now();
   const out = ladderSplit(123_456_700n, big);
   assert.ok(out && out.reduce((a, b) => a + b, 0n) === 123_456_700n);
-  assert.ok(Date.now() - t < 200, `${Date.now() - t} ms`);
+  await new Promise((r) => setImmediate(r));
 });

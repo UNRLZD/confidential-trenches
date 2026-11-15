@@ -1,0 +1,29 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-15T08:18:41.395Z",
+  "pageStatus": 200,
+  "css": [
+   {
+    "url": "/assets/style-CJ3bEjo-.css",
+    "status": 200,
+    "found": [
+     ".tkp-desk .rs-toast{top:196px}",
+     ".tkp-phone .rs-toast{top:8px}"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/",
+  "at": "2026-11-15T08:18:41.755Z",
+  "pageStatus": 200,
+  "css": [
+   {
+    "url": "/assets/style-C6Vmhhay.css",
+    "status": 200,
+    "found": []
+   }
+  ]
+ }
+}

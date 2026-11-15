@@ -14,6 +14,7 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, beforeEach, test } from "node:test";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { resetPaces } from "../../wallet/src/pace.ts";
 // each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
 beforeEach(() => resetPaces());
@@ -1114,7 +1115,9 @@ test("review P2-3: a Base or Robinhood restore's U_X reads are paced per provide
   }
 });
 
-test("measured (fold 04:33Z): each id's U_X read runs beside its NEAR read, so step 5 on a planted scope takes about as long with the U_X reads as without them", async () => {
+// on the test clock: each run's time is the waits it set (2 ms a NEAR read, 4 ms a U_X read), one after the other or
+// side by side, never the machine's speed
+test("measured (fold 04:33Z): each id's U_X read runs beside its NEAR read, so step 5 on a planted scope takes about as long with the U_X reads as without them", () => onTestClock(async () => {
   const slow = (r: NearRpc): NearRpc => ({ name: r.name, query: async (p) => (await new Promise((x) => setTimeout(x, 2)), r.query(p)) });
   const time = async (ux: PoolRestoreHost["ux"]) => {
     const n = nearOf();
@@ -1132,7 +1135,7 @@ test("measured (fold 04:33Z): each id's U_X read runs beside its NEAR read, so s
   const sequential = without + 176 * 4;
   console.log(`step 5 on a planted scope (176 ids): ${Math.round(without)} ms without U_X reads, ${Math.round(withUx)} ms with them beside the NEAR reads (one after the other: about ${Math.round(sequential)} ms)`);
   assert.ok(withUx < without * 1.3 + 100, `${withUx} vs ${without}`);
-});
+}));
 
 // ---------- review P1 of 4cdfd37d: money NEAR reads under a deposit id U_{s,i} keeps the scope from done ----------
 /** The replayed pair with U's token balance planted per provider (ft_balance_of answered at the pass's block): `plant`
@@ -1319,7 +1322,8 @@ test("a Retry reads on where the last run stopped: no id answered at the kept pa
   for (let lane = 0; lane < 8; lane++) for (const u of laneIds(SOL_SCOPE, lane, lane + 8 * 20)) assert.ok(again.has(u), `${u} asked again after a sign out`);
 });
 
-test("the run's signal reaches the reader: a sign out ends a view a provider never answers, and a provider's busy wait, at once", async () => {
+// on the test clock: the busy wait's 50 s, if not cut by the sign out, reads its full length
+test("the run's signal reaches the reader: a sign out ends a view a provider never answers, and a provider's busy wait, at once", () => onTestClock(async () => {
   for (const how of ["hangs", "busy"] as const) {
     const n = nearOf();
     // the first id (of the lane read first, the store's own), asked within the pace's burst: its views wait no slot on
@@ -1348,7 +1352,7 @@ test("the run's signal reaches the reader: a sign out ends a view a provider nev
     assert.deepEqual(w.steps, [], how);
     assert.ok(performance.now() - t < 2_000, how);
   }
-});
+}));
 
 // card evm-pool-lists-mainnet: the page's mainnet pool lists are the kit's (evmPoolProvidersOf), seats first, and the
 // restore and the deposit read them; copied so SIGN_HOST's build carries no testnet provider (build-network.test.mjs)
