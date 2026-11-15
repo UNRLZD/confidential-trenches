@@ -5325,6 +5325,68 @@ test("SP4 a first scan provider whose rate limit would hold a warm scan's reques
   assert.ok(throttled === 1 && asked.length > 0, `${throttled} throttled, ${asked.length} on the second`);
 });
 
+test("SP429 card evm-taps-meet-no-429: a first scan provider that answers a warm scan 429 with no Retry-After is asked nothing more: the request goes to the second at once, and each warm quote within the hold reads its head and blocks on the second", { timeout: 30_000 }, () => onTestClock(async () => {
+  // rpc.mainnet.chain.robinhood.com answered 16 warm-scan posts 429 in 6.4 s, three taps in a row, no Retry-After, while
+  // daybreak and Pocket stood by (read-only run from the Mac, 2026-11-15 08:05Z): each 429 was asked again after 0.5,
+  // 1 and 2 s, and each new quote asked it again
+  const token = "0x00000000000000000000000000000000005c450b";
+  let inner = scanner(5_000_010, []);
+  const posts: string[] = [];
+  const first = evmJsonRpc("https://throttles.sp7.test", (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    const logs = calls.some((c) => c.method === "eth_getLogs");
+    posts.push(logs ? "logs" : calls.map((c) => c.method).join("+"));
+    if (logs) return new Response(JSON.stringify({ jsonrpc: "2.0", error: { code: 429, message: "Too Many Requests" } }), { status: 429 });
+    return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+  }) as unknown as typeof fetch);
+  const { v, asked } = await warmPair(token, first, "robinhood");
+  assert.deepEqual(v, below);
+  // one 429, then the second at once: never asked of the first again after a backoff
+  assert.deepEqual(posts.filter((p) => p === "logs").length, 1, `the first's posts: ${posts.join(", ")}`);
+  assert.ok(asked.length > 0, "the second read nothing");
+  // the next warm quote of the token, the head 20 blocks on: its head and its blocks are the second's, the first asked nothing
+  const before = posts.length;
+  inner = scanner(5_000_030, []);
+  const second: [number, number][] = [];
+  const again = await pairQuote(token, first, scanner(5_000_030, realAt(token, 5_000_005), second), "robinhood", 5_000_030);
+  assert.deepEqual(again.v, below);
+  assert.deepEqual(posts.slice(before), [], "the held first was asked again within its hold");
+  assert.ok(second.length > 0 && second.every(([a, b]) => a === 5_000_011 && b === 5_000_030), `the second read ${JSON.stringify(second)}`);
+  // a new token's first quote within the hold, 20,000 blocks to scan (past one round of the second's, as the gap past
+  // an index and its margin is): the second reads them in its own spans, the first is asked nothing
+  const token2 = "0x00000000000000000000000000000000005c450c";
+  await pairQuote(token2, scanner(4_980_000, []), scanner(4_980_000, []), "robinhood", 4_980_000);
+  const at2 = posts.length;
+  const span2: [number, number][] = [];
+  const cold = await pairQuote(token2, first, scanner(5_000_030, realAt(token2, 4_990_000), span2), "robinhood", 5_000_030);
+  assert.deepEqual(cold.v, below);
+  assert.deepEqual(posts.slice(at2), [], "the held first was asked a cold scan's blocks within its hold");
+  assert.ok(span2.length > 0 && span2.every(([a, b]) => b - a + 1 <= 2_000), `the second read ${JSON.stringify(span2)}`);
+}));
+
+test("SP429b card evm-taps-meet-no-429: a first scan provider whose throttle a browser reads as no connection (a 429 CORS refuses) is held too: the next warm quote asks it nothing", { timeout: 30_000 }, () => onTestClock(async () => {
+  // rpc.mainnet.chain.robinhood.com answers its 429 with access-control-allow-origin "*,*": Chrome blocks it as CORS
+  // and fetch throws "Failed to fetch" (sign live run 43693987836, wallet-passkey-prf: 14 of them)
+  const token = "0x00000000000000000000000000000000005c450d";
+  let inner = scanner(5_000_010, []);
+  const posts: string[] = [];
+  const first = evmJsonRpc("https://cors.sp429b.test", (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    const logs = calls.some((c) => c.method === "eth_getLogs");
+    posts.push(logs ? "logs" : "head");
+    if (logs) throw new TypeError("Failed to fetch");
+    return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+  }) as unknown as typeof fetch);
+  const { v } = await warmPair(token, first, "robinhood");
+  assert.deepEqual(v, below);
+  assert.equal(posts.filter((p) => p === "logs").length, 1, `the first's posts: ${posts.join(", ")}`);
+  const before = posts.length;
+  inner = scanner(5_000_030, []);
+  const again = await pairQuote(token, first, scanner(5_000_030, realAt(token, 5_000_005)), "robinhood", 5_000_030);
+  assert.deepEqual(again.v, below);
+  assert.deepEqual(posts.slice(before), [], "the first was asked again within its hold");
+}));
+
 test("SP5 a first scan provider that answers a warm scan with no logs: the request goes to the second whole, never asked of the first as halves", { timeout: 30_000 }, async () => {
   // Robinhood's first answering no logs held a warm quote 9.5 to 11 s: 61 halves through its 2 at once (live check
   // evm-scan-second-provider, 2026-11-05 17:3xZ)

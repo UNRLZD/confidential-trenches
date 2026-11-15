@@ -15,7 +15,8 @@
 //   - quotes (read only, never signed or sent; skipped with --local, as on a pull request's build): each chain's pool
 //     index synced cold on its two readers and served, then the helper's top QUOTE_ROWS list rows by liquidity, each
 //     quoted by the tap's own quote (the kit's evmPoolBuyQuoteTap) once cold and WARM_RUNS times warm. Each tap ends
-//     in a quote or a refusal whose name is true (NAMED), asks at most EVM_BUY_TAP_QUOTES kit quotes, gets no 429, and
+//     in a quote or a refusal whose name is true (NAMED), asks at most EVM_BUY_TAP_QUOTES kit quotes, gets no 429 (each
+//     one named by its tap, host, share of that host's posts and the reads it answered), and
 //     each warm tap ends within WARM_MAX_MS. The index sync's limits are reported, never judged, until each
 //     chain's index ships with the release.
 // What each part does is held by the signing page's tests (test/pool-carry-evm.test.ts, test/pool-evm-trade-open.test.ts,
@@ -90,13 +91,19 @@ function judgeQuotes(qs, say) {
       const runs = Array.isArray(r.runs) ? r.runs : [];
       const ends = runs.map((u) => (u.ok ? "ok" : u.code)).join(",");
       const s429 = runs.reduce((n, u) => n + Object.values(u.hosts ?? {}).reduce((m, h) => m + (h.s429 ?? 0), 0), 0);
+      // each 429 named: the tap (its kind and place), the host, and the reads its requests asked
+      const where = runs.flatMap((u, i) =>
+        Object.entries(u.hosts ?? {})
+          .filter(([, h]) => (h.s429 ?? 0) > 0)
+          .map(([host, h]) => `${u.kind} ${i} ${host} ${h.s429}/${h.requests ?? "?"}${h.s429Reads ? ` ${Object.entries(h.s429Reads).map(([m, n]) => `${m} x${n}`).join(" ")}` : ""}`),
+      );
       const most = Math.max(0, ...runs.map((u) => u.quotes ?? Infinity));
       // a refusal as much as a quote: the user waits on either
       const warm = runs.filter((u) => u.kind === "warm").map((u) => u.ms);
       const ms = runs.map((u) => `${u.kind} ${u.ms}`).join(", ");
       say(runs.length === 1 + WARM_RUNS && runs.every((u) => u.ok === true || NAMED.includes(u.code)), `[${chain}] ${r.symbol} ${r.coin} ends in a quote or a true named refusal: ${ends || "no run"}`);
       say(most <= EVM_BUY_TAP_QUOTES, `[${chain}] ${r.symbol} asks ${most} kit quotes a tap at most (bound ${EVM_BUY_TAP_QUOTES})`);
-      say(s429 === 0, `[${chain}] ${r.symbol} taps got ${s429} answers of 429`);
+      say(s429 === 0, `[${chain}] ${r.symbol} taps got ${s429} answers of 429${where.length > 0 ? `: ${where.join("; ")}` : ""}`);
       say(warm.every((x) => x <= WARM_MAX_MS), `[${chain}] ${r.symbol} warm taps end within ${WARM_MAX_MS} ms: ${ms}`);
     }
   }
@@ -131,19 +138,26 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
   const real = globalThis.fetch;
   const counted = async (url, init) => {
     const host = new URL(typeof url === "string" ? url : url.url).host;
-    const c = (counts[host] ??= { requests: 0, calls: 0, s429: 0, logs: 0, s429Logs: 0 });
+    const c = (counts[host] ??= { requests: 0, calls: 0, s429: 0, logs: 0, s429Logs: 0, s429Reads: {} });
     c.requests++;
     let logs = false;
+    let methods = ["?"];
     try {
       const b = JSON.parse(typeof init?.body === "string" ? init.body : "null");
       c.calls += Array.isArray(b) ? b.length : b === null ? 0 : 1;
       logs = (Array.isArray(b) ? b : [b]).some((x) => x?.method === "eth_getLogs");
+      methods = (Array.isArray(b) ? b : [b]).map((x) => String(x?.method ?? "?"));
     } catch {
       c.calls++;
     }
     if (logs) c.logs++;
     const r = await fetchFn(url, init);
-    if (r.status === 429) c.s429++;
+    if (r.status === 429) {
+      c.s429++;
+      // the read a 429 answered: its methods, a batch's as one key (eth_call+eth_blockNumber)
+      const m = [...new Set(methods)].sort().join("+");
+      c.s429Reads[m] = (c.s429Reads[m] ?? 0) + 1;
+    }
     if (r.status === 429 && logs) c.s429Logs++;
     return r;
   };

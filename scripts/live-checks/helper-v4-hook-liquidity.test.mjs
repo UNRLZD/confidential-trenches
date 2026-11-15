@@ -11,9 +11,9 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
+import { SWAP_RPCS, SWAP_TOPICS as HELPER_SWAP_TOPICS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
 import { noAnswerHosts } from "../ci/live-rerun.mjs";
-import { BUDGET_MS, EXIT, judge, MAX_TOKENS, read, TOKENS } from "./helper-v4-hook-liquidity.mjs";
+import { BUDGET_MS, EXIT, judge, MAX_TOKENS, OTHER_SWAPS, read, TOKENS } from "./helper-v4-hook-liquidity.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-v4-hook-liquidity.answers.json"), "utf8"));
@@ -285,4 +285,8 @@ test("the token's decimals met by fewer than two providers: the trade is not jud
   assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
   assert.deepEqual(bad(r), []);
   assert.equal(run.decimals[coin], 18);
+});
+
+test("card evm-tape-rows-exact: a trade is judged only when no other venue's swap moves the token, every venue the helper reads (written out in the check; Uniswap v2's and PancakeSwap v3's were missing)", () => {
+  assert.deepEqual([TOPIC.swap4, ...OTHER_SWAPS].sort(), [...HELPER_SWAP_TOPICS].sort());
 });

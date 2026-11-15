@@ -9,8 +9,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { AGGREGATOR_CHANGED, BEFORE_EXECUTION, ENTRY_POINTS as HELPER_ENTRY_POINTS, USER_OP_EVENT } from "../../apps/helper/src/data/evm/index.ts";
-import { SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
-import { ENTRY_POINTS, judge, read, swapAccounts } from "./helper-tape-4337-trader.mjs";
+import { SWAP_RPCS, SWAP_TOPICS as HELPER_SWAP_TOPICS } from "../../apps/helper/src/data/evm/swaps.ts";
+import { ENTRY_POINTS, judge, read, swapAccounts, SWAPS } from "./helper-tape-4337-trader.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-tape-4337-trader.answers.json"), "utf8"));
@@ -84,8 +84,14 @@ test("swapAccounts on a real bundle of two user operations (Base tx 0xb2cabb87, 
   const { receipt } = Object.values(f.txs)[0];
   const r = { from: receipt.from, to: receipt.to, logs: receipt.logs.map((l) => ({ address: l.address, topics: l.topics, index: parseInt(l.logIndex, 16) })) };
   assert.deepEqual([...swapAccounts(r)].sort(), ["0x6ef19e98a6ceb81c3747c01662af806f8422cf2f", "0x8ef7a1b184a0aea45afd9cd0e8d85ede1fb0e8a4"]);
-  // the second operation's swap (log 73) gone: only the first's account
-  assert.deepEqual([...swapAccounts({ ...r, logs: r.logs.filter((l) => l.index !== 73) })], ["0x8ef7a1b184a0aea45afd9cd0e8d85ede1fb0e8a4"]);
+  // the second operation's swaps gone, Uniswap v3's at log 73 and PancakeSwap v3's at log 76 (counted since card
+  // evm-tape-rows-exact; with log 73 alone gone its PancakeSwap swap still names it): only the first's account
+  assert.deepEqual([...swapAccounts({ ...r, logs: r.logs.filter((l) => l.index !== 73) })].sort(), ["0x6ef19e98a6ceb81c3747c01662af806f8422cf2f", "0x8ef7a1b184a0aea45afd9cd0e8d85ede1fb0e8a4"]);
+  assert.deepEqual([...swapAccounts({ ...r, logs: r.logs.filter((l) => l.index !== 73 && l.index !== 76) })], ["0x8ef7a1b184a0aea45afd9cd0e8d85ede1fb0e8a4"]);
   // no BeforeExecution of the EntryPoint (a contract of another address logs it): no run, no account
   assert.equal(swapAccounts({ ...r, logs: r.logs.map((l) => (l.index === 44 ? { ...l, address: `0x${"2".repeat(40)}` } : l)) }).size, 0);
+});
+
+test("card evm-tape-rows-exact: the check counts every swap event the helper reads as a swap (written out in the check; Uniswap v2's and PancakeSwap v3's were missing)", () => {
+  assert.deepEqual([...SWAPS].sort(), [...HELPER_SWAP_TOPICS].sort());
 });
