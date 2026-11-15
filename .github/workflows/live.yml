@@ -27,6 +27,8 @@
 # spend one shared budget, the helper's Jupiter window, so they run one after another (scripts/ci/live-serial.mjs), each
 # once the helper's own answer says the budget is idle (scripts/ci/jup-idle.mjs), and only an INCONCLUSIVE one runs again. Run in parallel they
 # spent it between them and a page fell back to chain reads (run 42332950254 attempt 1), a red that was no fault of the code.
+# The evm-keyed group does the same for the helper's keyed Base and Robinhood providers, back to back with no idle read
+# (card helper-live-run-holds-its-own-load: run 43683445143 read six of its checks red at once, each green alone).
 #
 # The workflow reads no secret and holds the read-only token alone. A check that needs one (helper-proxy reads the vendor
 # keys the host holds) is not run: the plan lists it as skipped-needs-secret in the run's summary, which is no pass.

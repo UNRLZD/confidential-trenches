@@ -42,6 +42,7 @@
 // Each candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span in the run; a candidate whose candles still answer 429 after it is skipped as before, its waits named.
 // After: helper
+// Serial: evm-keyed 100
 //   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (a head no second provider knew yet, read again 5 times
 //   2 s apart: the providers named). --record writes the run (every answer read).

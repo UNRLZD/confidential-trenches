@@ -61,3 +61,21 @@ test("made from the good run: another chain's id, another block by hash, a missi
   const busy = edit("base", "plain", "chainId", (x) => ((x.status = 429), (x.body = '{"error":{"code":"rate_limited"}}'), x));
   assert.equal((await run(busy)).verdict, "INCONCLUSIVE");
 });
+
+// card helper-live-run-holds-its-own-load: live run 43683445143 (15 Nov 06:03Z) read [base keyed] chainId and finalized
+// 429, then asked eth_getBlockByHash with no block to ask by and judged its null answer BAD: a FAIL made of a throttle.
+// With no finalized block read, the block by hash proves nothing either way; with one read, a null answer stays a FAIL.
+test("made from the 06:03Z run: the finalized read throttled, the block by hash is not judged: INCONCLUSIVE, no BAD; read, a null block by hash: FAIL", async () => {
+  const throttle = (x) => ((x.status = 429), (x.body = '{"error":{"code":"rate_limited"}}'), x);
+  const nullBlock = (x) => ((x.body = JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(x.body).id ?? 1, result: null })), x);
+  const after = (rec) => ({ ...rec, reads: rec.reads.map((x) => (x.chain === "base" && x.route === "keyed" && x.kind === "byHash" ? nullBlock(structuredClone(x)) : x)) });
+  const busy = after({ ...A.good, reads: A.good.reads.map((x) => (x.chain === "base" && x.route === "keyed" && x.kind !== "byHash" ? throttle(structuredClone(x)) : x)) });
+  const r = await run(busy);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.deepEqual(bad(r), []);
+  assert.ok(r.lines.includes("--  [base keyed] byHash: no finalized block was read to ask by"), r.lines.join("\n"));
+  // the finalized block read, its block by hash null: the helper's answer is wrong, a FAIL as before
+  const wrong = await run(after(A.good));
+  assert.equal(wrong.verdict, "FAIL");
+  assert.deepEqual(bad(wrong), ["BAD [base keyed] eth_getBlockByHash answers that block: null"]);
+});

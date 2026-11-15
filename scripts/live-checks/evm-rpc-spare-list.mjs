@@ -39,6 +39,7 @@
 // once, then is no answer: that spare is INCONCLUSIVE, never FAIL, on each chain's maker and scan lists. A wrong chain
 // id, any other error and a list under its floor stay FAIL.
 // After: helper
+// Serial: evm-keyed 80
 //   node scripts/live-checks/evm-rpc-spare-list.mjs [--base <url>] [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (no FAIL, a spare throttled). --record writes the run, for
 // the test's replay (evm-rpc-spare-list.answers.json).

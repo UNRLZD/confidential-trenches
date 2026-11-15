@@ -122,6 +122,14 @@ export const SKIPPED = Object.fromEntries(headerOf("Skipped").map(([k, v]) => [k
 // fewer than 6 of the window's 10 sends spent, or no page in it), so an idle read for it holds for a device's build, which
 // needs fewer than 9, and a build check leaves no sends in a minute that a page check after it would read (proxy.ts freeAt).
 // Every member is one run with no arguments.
+// Card helper-live-run-holds-its-own-load: a second group, evm-keyed, holds the checks that read the helper's keyed Base
+// and Robinhood providers (live-workflow.mjs KEYED_READS: the keyed-only route, a Base or Robinhood tape, the RPC route on
+// either chain). Those few keyed URLs' seconds are paced to each company's plan (apps/helper/src/limits/limits.ts
+// KEYED_PACE) and a keyed-only read or a tape has no public endpoint to walk on to, so started together the checks spend
+// them between them: run 43683445143 (15 Nov 06:03Z, 90 jobs at once) read the keyed Base route 429 while the plain one
+// answered the same reads off its public list, and 6 such checks red; 5 of them re-run alone at 06:21-06:27Z read PASS.
+// Its members run back to back with no Jupiter idle read (live-serial.mjs idleGated), in parallel with jupiter-budget,
+// whose budget they do not touch.
 // Each member says so in its own header (card ci-stops-costing-reruns: a list every card appended to made ready branches
 // conflict): `// Serial: <group> <position> [why there]`, the group's order by position (10, 20, ...: a check that joins
 // takes a free number between two, and no other check's line changes). A position held twice, or a line with no

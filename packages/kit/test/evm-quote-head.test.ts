@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { EvmQuoteError, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
 import { EVM_HEAD_REUSE_MS, evmHeadWatch, evmPoolBuyQuoteWith, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { asRecorded, gasRoundAnswers, withMarker } from "./evm-quote-gas-fx.ts";
+import { onTestClock } from "./test-clock.ts";
 // the recordings (fixtures/evm-quote.json) were made at 6 reads an aggregate3 call, and their exchanges are matched call
 // for call: these replays send 6 a call (Robinhood's venue sends 64, card evm-buy-quote-in-window: QE9)
 evmReadsPerCall(6);
@@ -51,7 +52,7 @@ const blockMs = () => {
   return Number(BigInt(h.timestamp)) * 1000;
 };
 
-test("held head: a second quote under EVM_HEAD_REUSE_MS reads at the held block with no head read and no confirmation, only the read round", async () => {
+test("held head: a second quote under EVM_HEAD_REUSE_MS reads at the held block with no head read and no confirmation, only the read round", () => onTestClock(async () => {
   assert.equal(C.outcome.code, "ok");
   const c = chain();
   let now = C.now;
@@ -66,9 +67,9 @@ test("held head: a second quote under EVM_HEAD_REUSE_MS reads at the held block 
   assert.equal(b.block.hash, a.block.hash);
   assert.equal(b.amountOut, a.amountOut);
   assert.equal(b.minOut, a.minOut);
-});
+}));
 
-test("held head: read more than EVM_HEAD_REUSE_MS ago on the device's clock, the quote agrees on a block again, both heads and the by-number check", async () => {
+test("held head: read more than EVM_HEAD_REUSE_MS ago on the device's clock, the quote agrees on a block again, both heads and the by-number check", () => onTestClock(async () => {
   const c = chain();
   let now = C.now;
   const watch = evmHeadWatch(c.rpcs, MAX_LAG, () => now, false, () => now);
@@ -76,9 +77,9 @@ test("held head: read more than EVM_HEAD_REUSE_MS ago on the device's clock, the
   now = C.now + EVM_HEAD_REUSE_MS + 1;
   await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
   assert.equal(c.heads(), 6);
-});
+}));
 
-test("held head: a block the other provider does not confirm by number is never held; the next quote agrees on its own", async () => {
+test("held head: a block the other provider does not confirm by number is never held; the next quote agrees on its own", () => onTestClock(async () => {
   const c = chain();
   const watch = evmHeadWatch(c.rpcs, MAX_LAG, () => C.now, false, () => C.now);
   c.lie.on = true;
@@ -87,16 +88,16 @@ test("held head: a block the other provider does not confirm by number is never 
   const before = c.heads();
   await evmPoolBuyQuoteWith(request(), c.rpcs, C.now, undefined, watch);
   assert.equal(c.heads() - before, 3, "heads and confirmation read again");
-});
+}));
 
-test("held head: the kit still refuses a block more than 30 s behind the device's clock (stale_quote)", async () => {
+test("held head: the kit still refuses a block more than 30 s behind the device's clock (stale_quote)", () => onTestClock(async () => {
   const c = chain();
   let now = C.now;
   const watch = evmHeadWatch(c.rpcs, MAX_LAG, () => now, false, () => now);
   await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
   now = blockMs() + 30_001;
   await assert.rejects(evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
-});
+}));
 
 test("held head: the watch itself refuses a block more than 30 s behind the device's clock before its confirmation, so it never hands on or holds one (it has no quote's deadline)", async () => {
   const c = chain();
@@ -129,11 +130,13 @@ test("held head: kept in the background, the first quote after it reads no head"
   await new Promise((r) => setTimeout(r, 5));
   const before = c.heads();
   assert.equal(before, 3, "the background read: two heads and the confirmation");
-  await evmPoolBuyQuoteWith(request(), c.rpcs, C.now, undefined, watch);
+  // off the test clock (the watch's fixed device clock never reaches its keep's end, so its renewals never stop), and
+  // the quote on a fixed monotonic clock: pure work on recorded answers
+  await evmPoolBuyQuoteWith(request(), c.rpcs, C.now, undefined, watch, () => 0);
   assert.equal(c.heads(), before, "the quote reads at the held head");
 });
 
-test("held head (review of 4830f1f, L): timed on a clock that never steps back, so a device clock stepped back an hour cannot stretch the 5 s", async () => {
+test("held head (review of 4830f1f, L): timed on a clock that never steps back, so a device clock stepped back an hour cannot stretch the 5 s", () => onTestClock(async () => {
   const c = chain();
   let now = C.now;
   let mono = 0;
@@ -143,9 +146,9 @@ test("held head (review of 4830f1f, L): timed on a clock that never steps back, 
   mono += EVM_HEAD_REUSE_MS + 1;
   await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
   assert.equal(c.heads(), 6, "heads read again: the hold is past 5 s on the clock that never steps back");
-});
+}));
 
-test("held head: under 5 s since it was read but past 30 s by its age then plus that time, the quote agrees on a block again", async () => {
+test("held head: under 5 s since it was read but past 30 s by its age then plus that time, the quote agrees on a block again", () => onTestClock(async () => {
   const c = chain();
   const now = blockMs() + 27_000; // the device's clock stays (stepped back by what passed), so only the age bound reads again
   let mono = 0;
@@ -154,9 +157,9 @@ test("held head: under 5 s since it was read but past 30 s by its age then plus 
   mono += 4_000;
   await evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch);
   assert.equal(c.heads(), 6, "heads read again: 27 s old when read, 31 s now");
-});
+}));
 
-test("held head: a device asleep (its never-stepped-back clock paused) wakes past 30 s on its own clock, and the quote reads the heads again instead of reusing or refusing the held one", async () => {
+test("held head: a device asleep (its never-stepped-back clock paused) wakes past 30 s on its own clock, and the quote reads the heads again instead of reusing or refusing the held one", () => onTestClock(async () => {
   const c = chain();
   let now = C.now;
   let mono = 0;
@@ -167,4 +170,4 @@ test("held head: a device asleep (its never-stepped-back clock paused) wakes pas
   // the recording holds only that block, so the new read is refused too, but only after the heads are read again
   await assert.rejects(evmPoolBuyQuoteWith(request(), c.rpcs, now, undefined, watch), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
   assert.equal(c.heads(), 5, "both heads read again (the stale block is refused before its confirmation)");
-});
+}));

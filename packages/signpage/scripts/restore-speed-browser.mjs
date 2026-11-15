@@ -48,12 +48,14 @@ import { headersFor } from "../../../apps/terminal/test/harness/server.mjs";
 import { parseHeadersFile } from "../../../apps/terminal/scripts/check-deploy.ts";
 import { launchHarnessBrowser } from "../../../scripts/harness-sockets.mjs";
 import { browserLabel } from "../../../scripts/browsers.mjs";
+import { openInShell } from "../../../scripts/live-checks/open-in-shell.mjs";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { POOL_USD_FEEDS } from "../../kit/src/price/pool-usd.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { entropyToWords } from "../../wallet/src/derive/index.ts";
 import { RESTORE_GAP, RESTORE_LANES } from "../../wallet/src/notes/restore.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf } from "../../wallet/src/pool/evm.ts";
+import { SOL_MAINNET_DEPLOY } from "../../wallet/src/pool/solana.ts";
 import { vaultScope } from "../src/withdraw/checks.ts";
 import { RTT_MS, SLOT, solanaAccount, solanaAnswer } from "../test/restore-speed-pool.ts";
 
@@ -61,11 +63,8 @@ const SHIPPED_GAP = 10_000;
 const WORKER_PATH = "/walk-worker.js";
 export const CONTINUE = '#signin[data-signin="words"] button[data-action="next"]';
 export const STEP_MS = 60_000;
-/** A fixed loop of `n` steps, timed by the Worker that runs it (calibrate: 4e8 in one Worker; machineSpeed: SPEED_STEPS
- *  shared by its Workers). */
+/** A fixed loop of `n` steps, timed by the Worker that runs it (calibrate: 4e8 in one Worker). */
 export const speedLoop = (n) => `let x=0;const t=performance.now();for(let i=0;i<${n};i++)x=(x*31+i)|0;postMessage([performance.now()-t,x]);`;
-/** The steps machineSpeed shares among its Workers, as a walk shares its fixed work among them. */
-export const SPEED_STEPS = 1_600_000_000;
 const secs = (ms) => (ms === null || ms === undefined ? "-" : (ms / 1000).toFixed(2));
 
 // ------------------------------------------------------------------------------------------------ the chains' answers
@@ -360,44 +359,83 @@ async function slowWorkers(context, page, cpu, out) {
   return cdp;
 }
 
-/** The machine's speed as the walk uses it (card firefox-restore-holds-on-every-runner): SPEED_STEPS of a fixed loop
- *  shared by as many Workers at once as the walk starts (walkCores: hardwareConcurrency, 8 at most), as a pool's walk
- *  shares its fixed work among them, on a page this context serves itself (no host is reached), the slowest Worker's
- *  time; the median of `rounds`. The same code's Firefox restore took 39 s on one
- *  GitHub runner of the label ubuntu-24.04 (AWS) and 48 and 64 s on two others (Azure), 15 Nov: a bound in seconds is
- *  scaled by this time (firefox-rpc-blocked.mjs scaledBound). */
-export async function machineSpeed(browser, rounds = 3) {
+/** The gap each lane of walkSpeed's pools walks: a tenth of the shipped RESTORE_GAP, so it times a tenth of a restore's
+ *  walk. */
+export const SPEED_GAP = 1_000;
+
+/** walkSpeed's answer from its rounds: the median time, or a throw when any round's 32 lanes did not all answer that
+ *  they hashed on WebAssembly (a BigInt walk, or a Worker that named no field, never sets a bound). */
+export function speedOf(runs) {
+  const off = runs.find((r) => r.hashes.bigint > 0 || r.hashes.other > 0 || r.hashes.wasm !== 4 * RESTORE_LANES);
+  if (runs.length === 0 || off) throw new Error(`the speed walk did not hash on WebAssembly in every lane: ${JSON.stringify(off?.hashes ?? null)}`);
+  const sorted = [...runs].sort((a, b) => a.ms - b.ms);
+  return { ms: sorted[Math.floor(sorted.length / 2)].ms, workers: sorted[0].workers, runs: runs.map((r) => r.ms) };
+}
+
+/**
+ * The machine's speed at the restore's own work (card firefox-bound-times-the-walk-itself): the shipped /walk-worker.js
+ * (the signing page's build, under its own _headers, so it compiles its WebAssembly field as SIGN_HOST's does) walks
+ * four pools as a restore does, one Solana pool (each index a Poseidon precommitment and its PDA mark) and three
+ * precommitment pools (Base, the NEAR vault, Robinhood: the hashes alone), one pool after another, each pool's 8 lanes in
+ * as many Workers at once as walkCores starts (hardwareConcurrency, 8 at most), a new Worker a lane, each lane SPEED_GAP
+ * indices with nothing to find. Timed on a page this context serves itself (no host is reached), the median of `rounds`.
+ * Every lane must answer that it hashed on WebAssembly, or this throws: a BigInt walk never sets a bound.
+ * (A fixed JS integer loop, card firefox-restore-holds-on-every-runner, put an Azure runner at 1.49 times the box while
+ * its restore ran 3.4 times slower: queue run 43681047546.)
+ */
+export async function walkSpeed(browser, site, rounds = 3, gap = SPEED_GAP) {
   const context = await browser.newContext();
   try {
-    await context.route("https://speed.ct.test/**", (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>speed</title>" }));
+    const host = "speed.ct.test";
+    const walk = readFileSync(path.join(site.root, WORKER_PATH.slice(1)));
+    await context.route(`https://${host}/**`, (r) => {
+      const p = new URL(r.request().url()).pathname;
+      if (p === WORKER_PATH) {
+        const headers = Object.fromEntries(headersFor(site.rules, p));
+        headers["content-type"] = "text/javascript; charset=utf-8";
+        return r.fulfill({ status: 200, headers, body: walk });
+      }
+      return r.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>speed</title>" });
+    });
     const page = await context.newPage();
-    await page.goto("https://speed.ct.test/");
+    await page.goto(`https://${host}/`);
     const runs = [];
     for (let k = 0; k < rounds; k++)
       runs.push(
         await page.evaluate(
-          (steps) =>
-            new Promise((ok, no) => {
-              const n = Math.max(1, Math.min(8, Number.isSafeInteger(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 1));
-              const src = `let x=0;const t=performance.now();for(let i=0;i<${Math.round(steps / n)};i++)x=(x*31+i)|0;postMessage([performance.now()-t,x]);`;
-              const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
-              let left = n;
-              let worst = 0;
-              for (let i = 0; i < n; i++) {
-                const w = new Worker(url);
+          async ({ gap, lanes, program, path }) => {
+            const n = Math.max(1, Math.min(lanes, Number.isSafeInteger(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 1));
+            const hashes = { wasm: 0, bigint: 0, other: 0 };
+            const lane = (ask) =>
+              new Promise((ok, no) => {
+                const w = new Worker(path, { type: "module", name: "walk" });
                 w.onmessage = (e) => {
-                  worst = Math.max(worst, e.data[0]);
                   w.terminate();
-                  if (--left === 0) ok({ ms: worst, workers: n });
+                  if (e.data?.ok !== true) return no(new Error(`the speed walk refused: ${String(e.data?.error)}`));
+                  hashes[e.data.hash === "wasm" || e.data.hash === "bigint" ? e.data.hash : "other"] += 1;
+                  ok();
                 };
-                w.onerror = (e) => no(new Error(`the speed Worker failed: ${e.message}`));
-              }
-            }),
-          SPEED_STEPS,
+                w.onerror = (e) => (w.terminate(), no(new Error(`the speed walk Worker failed: ${e.message}`)));
+                w.postMessage(ask);
+              });
+            // public stand-ins: two masters and a scope that are no seed's, and nothing to find
+            const pool = async (match) => {
+              let next = 0;
+              await Promise.all(
+                Array.from({ length: n }, async () => {
+                  for (let l = next++; l < lanes; l = next++) await lane({ lane: l, scope: 7n, gap, reach: null, nullifier: 11n, secret: 13n, ...match });
+                }),
+              );
+            };
+            const pre = { precommitments: [] };
+            const t = performance.now();
+            for (const m of [pre, { solana: { program, marks: [] } }, pre, pre]) await pool(m);
+            return { ms: performance.now() - t, workers: n, hashes };
+          },
+          { gap, lanes: RESTORE_LANES, program: SOL_MAINNET_DEPLOY.program, path: WORKER_PATH },
         ),
       );
-    const sorted = [...runs].sort((a, b) => a.ms - b.ms);
-    return { ms: sorted[Math.floor(sorted.length / 2)].ms, workers: sorted[0].workers, runs: runs.map((r) => r.ms) };
+    return speedOf(runs);
   } finally {
     await context.close().catch(() => {});
   }
@@ -427,28 +465,6 @@ async function calibrate(browser, cpu) {
     await context.close();
   }
   return res;
-}
-
-/** Visits `url` on APP_HOST as a user does and waits for its move to SIGN_HOST's shell at the same path and query: a
- *  top-level visit replaces itself with the shell at once (apps/terminal/src/shell/in-shell.ts moveToShell, from the
- *  app's start). Firefox can report that move's commit before the visit's own, and goto then throws "interrupted by
- *  another navigation" to the shell (merge queue run 43665465254), so the wait for the shell is armed before the visit,
- *  and the visit ends at its own commit or at that move; any other error, or a move anywhere else, is thrown. The wait
- *  ends at the shell's commit, not its load: a load state read across Firefox's two reports can wait for a load that
- *  already fired, and oneRun's next step waits for the framed terminal's ready anyway. */
-export async function openInShell(page, url, timeout) {
-  const shell = new URL(url);
-  shell.hostname = REAL.sign;
-  const moved = page.waitForURL((x) => x.hostname === REAL.sign, { timeout, waitUntil: "commit" });
-  try {
-    await page.goto(url, { waitUntil: "commit" });
-  } catch (e) {
-    if (!String(e?.message).includes(`is interrupted by another navigation to "${shell.href}"`)) {
-      moved.catch(() => {});
-      throw e;
-    }
-  }
-  await moved;
 }
 
 export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeoutS, block = [], after = null }) {
@@ -491,7 +507,8 @@ export async function oneRun(browser, { engine, mode, cpu, sites, evmSpan, timeo
   const app = page.frameLocator("iframe#app");
   const vis = (sel) => app.locator(`${sel} >> visible=true`).first();
   try {
-    await openInShell(page, `https://${REAL.app}/discover`, STEP_MS);
+    // the shared visit (scripts/live-checks/open-in-shell.mjs): ends at the shell whichever commit Firefox reports first
+    await openInShell(page, `https://${REAL.app}/discover`, `https://${REAL.sign}`, STEP_MS);
     await app.locator(':root[data-signpage="ready"]').waitFor({ state: "attached", timeout: STEP_MS });
     await vis('[data-header="S1.1"] button, button[data-header="S1.1"]').click({ timeout: STEP_MS });
     await vis('.sgn-opt[data-way="wallet"]').click({ timeout: STEP_MS });

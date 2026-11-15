@@ -405,9 +405,13 @@ const C3 = () => chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf
 
 test("a dropped log or a changed leaf on one RPC is refused", async () => {
   const c = C3();
-  await assert.rejects(sync(pair(c, c, {}, { logs: (l) => l.filter((_, i) => i !== 1) })).trees(after(25)), /the two RPCs differ at log 1/);
+  // a round of events (a restore's) wants two operators' same bytes; the proof's trees take the RPC whose leaves rebuild
+  // the pool's root (card evm-trees-from-one-verified-source)
+  await assert.rejects(sync(pair(c, c, {}, { logs: (l) => l.filter((_, i) => i !== 1) })).events(), /the two RPCs differ at log 1/);
   const flip = (l: Record<string, unknown>[]) => l.map((x, i) => (i === 2 ? { ...x, data: `${(x.data as string).slice(0, 65)}${(x.data as string)[65] === "1" ? "2" : "1"}${(x.data as string).slice(66)}` } : x));
-  await assert.rejects(sync(pair(c, c, {}, { logs: flip })).trees(after(25)), /the two RPCs differ at log 2/);
+  await assert.rejects(sync(pair(c, c, {}, { logs: flip })).events(), /the two RPCs differ at log 2/);
+  const honest = await sync(pair(c, c)).trees(after(25));
+  for (const lie of [(l: Record<string, unknown>[]) => l.filter((_, i) => i !== 1), flip]) assert.equal((await sync(pair(c, c, {}, { logs: lie })).trees(after(25))).stateRoot, honest.stateRoot);
   // the same lie on both RPCs: the pool's own views refuse the trees built from it, at once (the newest block did not
   // move, so it is no reorg)
   const waits: number[] = [];
@@ -486,7 +490,7 @@ test("a range-cap error halves that RPC's page, and the sync still reads every b
   for (let i = 1; i < ok.length; i++) assert.equal(ok[i]![0], ok[i - 1]![1]! + 1);
   assert.equal(ok[ok.length - 1]![1], 5000);
   // a provider that refuses even one block is an error, never a smaller tree
-  await assert.rejects(sync(pair(c, c, { cap: 0 }, {})).trees(after(4950)), /limited to a 0 range/);
+  await assert.rejects(sync(pair(c, c, { cap: 0 }, {})).events(), /limited to a 0 range/);
 });
 
 test("a log that is not the pool's leaf event, out of order, or not of the anchor's block is refused", async () => {
@@ -1384,7 +1388,7 @@ test("a reorg one RPC sees first is a retry too; the same differing logs with no
   assert.equal(t.stateRoot, new VaultTree([...cb.events.map((e) => e.leaf)]).root);
   // RPC b's logs differ but its block 100 never moved: a lie, refused with no retry
   const c = mk(), w2: number[] = [];
-  await assert.rejects(sync(pair(c, c, {}, { logs: (l) => l.map((x, i) => (i === 4 ? { ...x, data: `0x${w64(4242n)}${(x.data as string).slice(66)}` } : x)) }), async () => void w2.push(1)).trees(after(97)), /the two RPCs differ at log 4/);
+  await assert.rejects(sync(pair(c, c, {}, { logs: (l) => l.map((x, i) => (i === 4 ? { ...x, data: `0x${w64(4242n)}${(x.data as string).slice(66)}` } : x)) }), async () => void w2.push(1)).events(), /the two RPCs differ at log 4/);
   assert.deepEqual(w2, []);
 });
 
@@ -1878,12 +1882,12 @@ test("F4 one RPC's logs past the finalized block a moment behind the other's is 
   assert.deepEqual(waits, [2000]);
   // one that stays behind never answers: refused after the retries
   const w2: number[] = [];
-  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, {}, { logs: (l) => l.filter((x) => x.blockNumber !== q(100)) }), pin: PIN, sleep: async (ms) => void w2.push(ms) }).trees(after(100)), /logs past block 90 are behind/);
+  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, {}, { logs: (l) => l.filter((x) => x.blockNumber !== q(100)) }), pin: PIN, sleep: async (ms) => void w2.push(ms) }).events(), /logs past block 90 are behind/);
   assert.equal(w2.length, EVM_LAG_TRIES - 1);
   // a prefix that lacks a finalized log (block 20, under the finalized 90) is refused at once
   const w3: number[] = [];
   const c3 = C3();
-  await assert.rejects(evmTreeSync({ rpcs: pair(c3, c3, {}, { logs: (l) => l.slice(0, -1) }), pin: PIN, sleep: async (ms) => void w3.push(ms) }).trees(after(25)), /the two RPCs differ at log 3/);
+  await assert.rejects(evmTreeSync({ rpcs: pair(c3, c3, {}, { logs: (l) => l.slice(0, -1) }), pin: PIN, sleep: async (ms) => void w3.push(ms) }).events(), /the two RPCs differ at log 3/);
   assert.deepEqual(w3, []);
 });
 
@@ -2135,7 +2139,7 @@ test("hex in either case: a case-only difference never fails agreement, any othe
   // one leaf's value changed on the other RPC, the first in upper case: refused as before
   const flip = (l: Record<string, unknown>[]) => l.map((x, i) => (i === 2 ? { ...x, data: `${(x.data as string).slice(0, 65)}${(x.data as string)[65] === "1" ? "2" : "1"}${(x.data as string).slice(66)}` } : x));
   const [a2, b2] = pair(c, c, rh, { ...rh, logs: flip });
-  await assert.rejects(s([drpc(a2), b2]), /the two RPCs differ at log 2/);
+  await assert.rejects(evmTreeSync({ rpcs: [drpc(a2), b2], pin: { ...PIN, network: "robinhood-testnet" }, ...noWait }).events(), /the two RPCs differ at log 2/);
   // a hash that differs by more than its case is another block: refused as in lower case, word for word (the newest
   // block: a leaf's block is never read, review of 39a4c67a, P2)
   const [a3, b3] = pair(c, c, rh, { ...rh, hashOf: (n) => (n === 100 ? h32("other 100") : c.hashOf(n)) });
@@ -3626,4 +3630,48 @@ test("card evm-pool-spend-binds: a fee seat that does not connect is asked once 
   const b = await p.bind(bindArgs());
   assert.equal(seen.length, 1);
   assert.equal(b.feeCap, 3n * 10n ** 13n);
+});
+
+// card evm-trees-from-one-verified-source: the proof's trees come from the first source whose
+// leaves rebuild the pool's root, read on the two seats at the anchor (the Privacy Pools client's baseline: the root
+// binds every leaf and its order). In the owner's browser only one log source answered in reach (publicnode and Pocket
+// blocked, the helper's keyed Base route 503 past 100 blocks), so a second operator's same bytes never came and no proof
+// was made. A release's other fields (a restore's, a settle's) stay two operators' word, and a one-source read never
+// enters the device's hold; a one-source round's cut and depth come from the pool's root times on the seats, never the
+// source's block numbers.
+const oneTruth = async (c: Chain, beforeMs: bigint) => (await evmTreeSync({ rpcs: pair(c, c), pin: PIN, ...noWait }).trees(beforeMs)).stateRoot;
+const AT = 1_500_000;
+const atMs = (c: Chain) => c.ts(AT) * 1000n;
+const firstOf = (c: Chain) => ({ number: BigInt(AT), hash: c.hashOf(AT), timestamp: c.ts(AT), baseFeePerGas: null });
+
+test("card evm-trees-from-one-verified-source: one source whose leaves rebuild the pool's root makes the proof's trees, the other source absent; events() still wants two operators and the hold is never written", async () => {
+  const c = anyChain();
+  const hold = evmMemoryHold();
+  const s = evmTreeSync({ rpcs: [rpc(c, { url: "https://publicnode.example", cap: 50_000 }), rpc(c, { url: "https://pocket.example", ...brokenLogs })], pin: PIN, held: hold, ...noWait });
+  const t = await s.trees(atMs(c));
+  assert.equal(t.stateRoot, await oneTruth(c, atMs(c)));
+  assert.equal(t.stateTree.size, 3);
+  assert.equal(await hold.read(), null, "one source's logs never enter the hold");
+  await assert.rejects(s.events(), /no two sources of two operators/);
+});
+
+test("card evm-trees-from-one-verified-source: a source whose leaves do not rebuild the root is dropped and the good one taken; with no good source the trees are refused", async () => {
+  const c = anyChain();
+  const forgedLeaf = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_200_000 ? word(x, 0, 4242n) : x));
+  const t = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, forgedLeaf, "https://liar.example")], ...noWait }).trees(atMs(c));
+  assert.equal(t.stateRoot, await oneTruth(c, atMs(c)));
+  await assert.rejects(evmTreeSync({ rpcs: [rpc(c, { url: "https://pocket.example", cap: 10_000, logs: pocketPruned }), rpc(c, { url: "https://liar.example", logs: forgedLeaf })], pin: PIN, ...noWait }).trees(atMs(c)), /no source's logs make the pool's trees|no two sources of two operators/);
+});
+
+test("card evm-trees-from-one-verified-source: a release field outside the root from the one source is never taken; its cut and depth come from the pool's root times, never its block numbers", async () => {
+  const c = anyChain();
+  // the only source that rebuilds the root forges a nullifier and moves the leaf of block 1,200,000 to 1,600,000
+  const lie = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : blockOf(x) === 1_200_000 ? { ...x, blockNumber: q(1_600_000), blockHash: c.hashOf(1_600_000) } : x));
+  const mk = () => evmTreeSync({ rpcs: [rpc(c, { url: "https://publicnode.example", cap: 50_000, logs: lie }), rpc(c, { url: "https://pocket.example", ...brokenLogs })], pin: PIN, ...noWait });
+  const s = mk();
+  const t = await s.trees(atMs(c), undefined, { first: firstOf(c) });
+  assert.equal(t.stateTree.size, 3, "the cut by the pool's root times: the leaf of block 1,200,000 is before the period");
+  assert.equal(t.stateRoot, await oneTruth(c, atMs(c)));
+  assert.equal(await mk().depthAt(BigInt(AT), undefined, c.hashOf(AT)), 2, "three leaves by block 1,500,000: depth 2, never the source's 1");
+  await assert.rejects(s.events(), /no two sources of two operators/);
 });

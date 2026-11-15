@@ -15,6 +15,7 @@
 // No tape saying filling while one answered short is the helper before part C: FAIL. Every tape full at its first
 // answer leaves nothing to read back: INCONCLUSIVE.
 // After: helper
+// Serial: evm-keyed 110
 //   node scripts/live-checks/helper-base-tape-reads-back.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read (each answer's
 //   status, commit, row count, filling and fault, not its rows; each tape's token as `address`), for the test's replay.

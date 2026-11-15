@@ -70,29 +70,29 @@ function patched(bad) {
 test("the good answer passes: all four venues deployed and pinned, every generation ok on both RPCs", async () => {
   const r = await run();
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.summary, "PASS (4 deployed, 0 not deployed yet, 0 not pinned yet)");
-  assert.ok(r.lines.every((l) => l.startsWith("ok   ")), r.lines.join("\n"));
+  assert.equal(r.summary, "PASS (4 deployed, 6 not deployed yet, 0 not pinned yet)");
+  assert.ok(r.lines.every((l) => l.startsWith("ok   ") || /^(mainnet|devnet) (dlmm|raydium-cpmm|raydium-amm-v4): not deployed yet$/.test(l)), r.lines.join("\n"));
   for (const want of [/^ok   mainnet pump-curve g1: the table is active, authority none \(frozen\), and holds exactly the record's list \(25 addresses, in order\)$/m, /^ok   mainnet pumpswap: pinned g1 4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc is the record's generation 1$/m, /^ok   mainnet pumpswap g1: the table is active, authority none \(frozen\), and holds exactly the record's list \(256 addresses, in order\)$/m, /^ok   mainnet pumpswap g1: the newest generation holds exactly the kit's list for this program, pool and pages \(256 addresses, in order\)$/m, /^ok   mainnet pumpswap: the state tree at \d+ is under 80 percent of generation 1 \(warns at 110592, ends at 138240\)/m, /^ok   mainnet pumpswap g1: lookup table: freeze \(authority none\) \S+ reads back succeeded/m, /^ok   devnet pumpswap g3: the newest generation holds exactly the kit's list for this program, pool and pages \(256 addresses, in order\)$/m, /^ok   devnet pumpswap: pinned g2 J1R9px8LFg597sGfaME1qf7L5WGHGnn2YL2Vs2CwaWvU is the record's generation 2$/m, /^ok   devnet pumpswap: pinned g3 3uym947bDVPRHyzmzTAV8C4p4Du6s2wRjVr4AZpYQtBH is the record's generation 3$/m, /^ok   devnet pumpswap g3: lookup table: freeze \(authority none\) \S+ reads back succeeded/m, /^ok   devnet pumpswap g2: lookup table: freeze \(authority none\) \S+ reads back succeeded/m, /^ok   devnet pumpswap: the state tree at \d+ is under 80 percent of generation 3 \(warns at 110592, ends at 138240\)/m, /^ok   mainnet pump-curve g1: lookup table: freeze \(authority none\) \S+ reads back succeeded/m])
     assert.match(r.lines.join("\n"), want);
   // the curve has no tree alarm: it fits at any tree size (packages/kit/test/solana-pool-venue-tables.test.ts)
-  assert.deepEqual(GROWS, ["pumpswap"]);
+  assert.deepEqual(GROWS, ["pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"]);
   assert.ok(!r.lines.some((l) => /pump-curve: the (state|label) tree/.test(l)));
-  assert.deepEqual(VENUES, ["pump-curve", "pumpswap"]);
+  assert.deepEqual(VENUES, ["pump-curve", "pumpswap", "dlmm", "raydium-cpmm", "raydium-amm-v4"]); // DLMM and Raydium: no table on either cluster in these answers
 });
 
 test("a venue neither recorded nor pinned is the named state not deployed yet; recorded and not pinned is deployed, not pinned yet", async () => {
   const none = noMainnetSwap();
   const r = await run(A.answers, none.records, none.pins);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-  assert.equal(r.summary, "PASS (3 deployed, 1 not deployed yet, 0 not pinned yet)");
-  assert.deepEqual(r.lines.filter((l) => l.endsWith("not deployed yet")), ["mainnet pumpswap: not deployed yet"]);
+  assert.equal(r.summary, "PASS (3 deployed, 7 not deployed yet, 0 not pinned yet)");
+  assert.deepEqual(r.lines.filter((l) => l.endsWith("not deployed yet")), ["mainnet pumpswap: not deployed yet", "mainnet dlmm: not deployed yet", "mainnet raydium-cpmm: not deployed yet", "mainnet raydium-amm-v4: not deployed yet", "devnet dlmm: not deployed yet", "devnet raydium-cpmm: not deployed yet", "devnet raydium-amm-v4: not deployed yet"]);
   assert.ok(r.lines.every((l) => l.endsWith("not deployed yet") || l.startsWith("ok   ")), r.lines.join("\n"));
   // the owner's paste before its pin commit: the record holds generation 1, the wallet pins none
   const pins = structuredClone(PINS);
   delete pins.mainnet.pumpswap;
   const u = await run(A.answers, REC, pins);
   assert.equal(u.verdict, "PASS", u.lines.join("\n"));
-  assert.equal(u.summary, "PASS (4 deployed, 0 not deployed yet, 1 not pinned yet)");
+  assert.equal(u.summary, "PASS (4 deployed, 6 not deployed yet, 1 not pinned yet)");
   assert.ok(u.lines.includes(`mainnet pumpswap g1: deployed, not pinned yet (${REC.mainnet.tables.pumpswap[0].table})`));
   // pinned and not recorded is no named state: it fails
   const pinnedOnly = noMainnetSwap({ pins: false });
@@ -105,7 +105,7 @@ for (const bad of A.bad) {
     const r = await run(p.answers, p.records);
     assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
     assert.match(failLines(r), new RegExp(bad.fails));
-    assert.equal(r.summary, "FAIL (1 of 4 deployed failing, 0 not deployed yet, 0 not pinned yet)");
+    assert.equal(r.summary, "FAIL (1 of 4 deployed failing, 6 not deployed yet, 0 not pinned yet)");
     assert.ok(r.lines.filter((l) => l.startsWith("FAIL")).every((l) => l.startsWith("FAIL mainnet pump-curve g1: ")), failLines(r));
   });
 }
@@ -130,14 +130,14 @@ test("a record generation past the pins is the named state not pinned yet, its t
   pins.devnet.pumpswap = [];
   const r = await run(A.answers, REC, pins);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-  assert.equal(r.summary, "PASS (4 deployed, 0 not deployed yet, 3 not pinned yet)");
+  assert.equal(r.summary, "PASS (4 deployed, 6 not deployed yet, 3 not pinned yet)");
   for (const k of [0, 1, 2]) assert.ok(r.lines.includes(`devnet pumpswap g${k + 1}: deployed, not pinned yet (${REC.devnet.tables.pumpswap[k].table})`));
   assert.ok(r.lines.some((l) => l.startsWith("ok   devnet pumpswap g3: the table is active")));
   // generations 2 and 3 recorded but only generation 1 pinned: the record's newer generation is named, the alarm reads the pin's
   const one = structuredClone(PINS);
   one.devnet.pumpswap = [PINS.devnet.pumpswap[0]];
   const r1 = await run(A.answers, REC, one);
-  assert.equal(r1.summary, "PASS (4 deployed, 0 not deployed yet, 2 not pinned yet)");
+  assert.equal(r1.summary, "PASS (4 deployed, 6 not deployed yet, 2 not pinned yet)");
   assert.match(r1.lines.join("\n"), /^ok   devnet pumpswap: the state tree at \d+ is under 80 percent of generation 1 \(warns at 1638, ends at 2048\)/m);
   // no pinned generation: no tree alarm to judge
   assert.ok(!r.lines.some((l) => /devnet pumpswap: the state tree/.test(l)));
@@ -234,7 +234,7 @@ test("a provider's no-answer (a 429, an empty body) is INCONCLUSIVE on its own l
     assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
     assert.equal(failLines(r), "");
     assert.match(r.lines.join("\n"), /^quiet mainnet pump-curve g1: a provider gave no answer, not judged/m);
-    assert.equal(r.summary, "INCONCLUSIVE (1 of 4 deployed not answered by both providers, 0 not deployed yet, 0 not pinned yet)");
+    assert.equal(r.summary, "INCONCLUSIVE (1 of 4 deployed not answered by both providers, 6 not deployed yet, 0 not pinned yet)");
   }
 });
 
@@ -243,10 +243,10 @@ test("neither pinned nor recorded is the named state, with no network read; a ho
   const empty = { mainnet: {}, devnet: {} };
   const r = await checkTables({ records: none, pins: empty, fetchFn: nowhere });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.lines, ["mainnet pump-curve: not deployed yet", "mainnet pumpswap: not deployed yet", "devnet pump-curve: not deployed yet", "devnet pumpswap: not deployed yet"]);
-  assert.equal(r.summary, "PASS (0 deployed, 4 not deployed yet, 0 not pinned yet)");
+  assert.deepEqual(r.lines, ["mainnet pump-curve: not deployed yet", "mainnet pumpswap: not deployed yet", "mainnet dlmm: not deployed yet", "mainnet raydium-cpmm: not deployed yet", "mainnet raydium-amm-v4: not deployed yet", "devnet pump-curve: not deployed yet", "devnet pumpswap: not deployed yet", "devnet dlmm: not deployed yet", "devnet raydium-cpmm: not deployed yet", "devnet raydium-amm-v4: not deployed yet"]);
+  assert.equal(r.summary, "PASS (0 deployed, 10 not deployed yet, 0 not pinned yet)");
   // an inherited venue name is no record row
-  assert.equal((await checkTables({ records: { mainnet: { cluster: "mainnet" }, devnet: { cluster: "devnet", tables: Object.create({ "pump-curve": [] }) } }, pins: empty, fetchFn: nowhere })).notDeployed, 4);
+  assert.equal((await checkTables({ records: { mainnet: { cluster: "mainnet" }, devnet: { cluster: "devnet", tables: Object.create({ "pump-curve": [] }) } }, pins: empty, fetchFn: nowhere })).notDeployed, 10);
   const hostile = structuredClone(REC);
   hostile.mainnet.tables["pump-curve"] = { table: TABLE };
   assert.match(failLines(await checkTables({ records: hostile, pins: PINS, fetchFn: replay(A.answers) })), /FAIL mainnet pump-curve: the record's tables entry is not a list of generations/);
@@ -271,6 +271,12 @@ test("the pins as the wallet's source writes them; a reshaped literal is an erro
   assert.throws(() => parsePins(src.replace("export const SOL_POOL_TABLES", "export const SOL_TABLES")), /not found/);
   assert.throws(() => parsePins(src.replace(/\bdevnet: Object\.freeze\(\{/, "devnet: freeze({")), /no mainnet or no devnet/);
   assert.throws(() => parsePins(src.replace(/Object\.freeze\(\["(\w+)"\]\)/, "Object.freeze([X.table])")), /not a list of address literals/);
+  // every venue the kit builds is read once pinned (a DLMM pin was skipped by a pump-only pattern); a venue it does not
+  // build is an error, never a pin the check passes over
+  const T = "4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc";
+  const withVenue = (v) => src.replace(/(\bmainnet: Object\.freeze\(\{)/, `$1 ${v}: Object.freeze(["${T}"]),`);
+  assert.deepEqual(parsePins(withVenue("dlmm")).mainnet.dlmm, [T]);
+  assert.throws(() => parsePins(withVenue('"raydium-v4"')), /raydium-v4: not a venue the kit builds/);
 });
 
 test("a missing record file is the named state; the committed records only name venues the kit builds, each a list", () => {

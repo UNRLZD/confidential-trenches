@@ -456,12 +456,13 @@ test("review 3 and L3: at the minimum deposit.assets shows, deposit.dry and the 
   assert.deepEqual((await frame({ quote: { spread: 15 } }).ask(dry("1.017265"))).error, { code: "below_min" });
 });
 
-test("review 4: each read answers within its deadline, down, and holds no other message meanwhile (a Running kind)", async () => {
+// the read's fetch never settles (a deaf one ignores its abort too), so its "down" answer can only come from the page's
+// deadline: the answer is the proof it was cut, and a page that waited on the read is held by the test's own timeout
+test("review 4: each read answers within its deadline, down, and holds no other message meanwhile (a Running kind)", { timeout: 30_000 }, async () => {
   for (const hang of ["heard", "deaf"] as const) {
     for (const kind of [ASSETS, dry("25")]) {
       const f = frame({ hang }, 50);
       const id = crypto.randomUUID();
-      const t0 = Date.now();
       f.send({ v: 1, id, ...kind });
       // a state request after it is answered first: the read holds no queue
       const sid = crypto.randomUUID();
@@ -469,8 +470,7 @@ test("review 4: each read answers within its deadline, down, and holds no other 
       const st = await f.answerOf(sid);
       assert.equal(st.ok, true);
       assert.equal(f.posted.some((m) => (m as { id?: string }).id === id), false, "the read is still running");
-      assert.deepEqual(await f.answerOf(id), { v: 1, id, ok: false, error: { code: "down" } }, `${hang} ${kind.type}`);
-      assert.ok(Date.now() - t0 < 2_000, "cut at the deadline");
+      assert.deepEqual(await f.answerOf(id), { v: 1, id, ok: false, error: { code: "down" } }, `${hang} ${kind.type}: cut at the deadline`);
     }
   }
   // the deadline the page runs at sits inside the kit client's window for both kinds

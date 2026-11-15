@@ -2189,16 +2189,18 @@ function onLanes(w: Awaited<ReturnType<typeof world>>, log: { host: number; kind
   };
   return { host, kind: reads.kind };
 }
-/** One buy tapped at the clock's now: when its amount out was told (the app's Filled) and when its end stage came. */
-async function tapOnLanes(host: Parameters<typeof poolBuyKind>[0]): Promise<{ t0: number; out: number; final: number; stages: string[] }> {
+/** One buy tapped at the clock's now: when its amount out was told (the app's Filled) and when its end stage came;
+ *  `outN`: how many reads `seen` counted when Filled came (the virtual clock gives work no time, so reads made right
+ *  after Filled share its time: the log's order, not its times, says which came before it). */
+async function tapOnLanes(host: Parameters<typeof poolBuyKind>[0], seen: () => number = () => -1): Promise<{ t0: number; out: number; outN: number; final: number; stages: string[] }> {
   const t0 = performance.now();
-  let out = -1;
+  let out = -1, outN = -1;
   const stages: string[] = [];
   let ended!: () => void;
   const end = new Promise<void>((r) => (ended = r));
-  poolBuyKind(host, passLocks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void (stages.push(s), ended()), route: (x: { out?: string }) => void (x.out !== undefined && (out = performance.now())) } as never);
+  poolBuyKind(host, passLocks)(ASK, { id: "r1", sha: "00", progress: (s: string) => void (stages.push(s), ended()), route: (x: { out?: string }) => void (x.out !== undefined && ((out = performance.now()), (outN = seen()))) } as never);
   await end;
-  return { t0, out, final: performance.now(), stages };
+  return { t0, out, outN, final: performance.now(), stages };
 }
 
 /** One buy on the lanes in `plant`'s world, on the test clock; `sale`: a sale tapped with it holds both hosts 60 s. */
@@ -2224,7 +2226,7 @@ const laneRun = (plant: Plant, sale: boolean) =>
           const off = setTimeout(() => stop(), 60_000);
           stop = () => (clearTimeout(t), clearTimeout(off), give());
         }
-        const r = await tapOnLanes(() => lanes.host);
+        const r = await tapOnLanes(() => lanes.host, () => log.length);
         stop();
         return { ...r, log };
       } finally {
@@ -2241,12 +2243,12 @@ test("card sell-right-after-a-buy: a sale holding the hosts for 60 s with its re
     assert.deepEqual(r.stages, ["filled"], "Final");
     assert.ok(r.out >= 0, "the amount out told");
     // Filled: every read before it a trade's, none waited on the budget or the floor
-    const before = r.log.filter((x) => x.at <= r.out);
+    const before = r.log.slice(0, r.outN);
     assert.ok(before.length > 0 && before.every((x) => x.kind === "trade"), "the reads to Filled are a trade's");
   }
   assert.ok(Math.abs(held.out - held.t0 - (alone.out - alone.t0)) < 50, `Filled as without the sale: ${(held.out - held.t0).toFixed(0)} ms, ${(alone.out - alone.t0).toFixed(0)} ms alone`);
   // past the sent: a pass's, on each host one per PASS_FLOOR_MS at most while the sale fills its window
-  const after = held.log.filter((x) => x.at > held.out);
+  const after = held.log.slice(held.outN);
   assert.ok(after.length > 0 && after.every((x) => x.kind === "pass"), "the reads past its sent are a pass's");
   for (const h of [0, 1]) {
     const at = after.filter((x) => x.host === h).map((x) => x.at);
@@ -2275,7 +2277,7 @@ test("card sell-right-after-a-buy: no trade holds the hosts and the page's passe
       };
       again();
       try {
-        const got = await tapOnLanes(() => lanes.host);
+        const got = await tapOnLanes(() => lanes.host, () => log.length);
         // its sent given back the hold: the passes' window filled now, so each read past it waits for room
         return { ...got, log };
       } finally {
@@ -2286,7 +2288,7 @@ test("card sell-right-after-a-buy: no trade holds the hosts and the page's passe
     }
   });
   assert.deepEqual(r.stages, ["filled"]);
-  const after = r.log.filter((x) => x.at > r.out);
+  const after = r.log.slice(r.outN);
   assert.ok(after.length > 0 && after.every((x) => x.kind === "pass"));
   assert.ok(after.every((x) => x.inWindow <= PASS_BUDGET), `inside the budget: ${after.map((x) => x.inWindow).join(", ")}`);
 });
@@ -2303,7 +2305,7 @@ test("card sell-right-after-a-buy: a read-back that sees its transaction before 
     for (const r of [alone, held]) {
       assert.deepEqual(r.stages, ["filled"], `${n}: Final`);
       assert.ok(r.out >= 0, `${n}: the amount out told`);
-      const before = r.log.filter((x) => x.at <= r.out);
+      const before = r.log.slice(0, r.outN);
       assert.ok(before.length > 0 && before.every((x) => x.kind === "trade"), `${n}: the reads to Filled are a trade's: ${before.map((x) => x.kind).join(",")}`);
       assert.ok(r.log.some((x) => x.kind === "pass"), `${n}: the reads past the land a pass's`);
     }

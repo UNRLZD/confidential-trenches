@@ -1,9 +1,10 @@
 // node --test --test-isolation=none scripts/live-checks/notes-per-pool-evm.test.mjs: card notes-per-pool-evm's live
-// check, replayed. notes-per-pool-evm.answers.json holds a real run on both testnets (good) and the same answers with
-// currentTreeSize one higher on both RPCs (bad). The wallet's own sync runs on the replay: good passes on every chain,
-// bad fails on every chain, refused by the pool's own size. Card notes-per-pool-evm-base-hang: Base Sepolia's pair, on
-// a stand-in for the chain that answers each provider's eth_getLogs with its own cap read live, pages the pool's whole
-// life at the pager's full page; and a sync with no end fails at its deadline, naming the call it is stuck on.
+// check, replayed. notes-per-pool-evm.answers.json holds a real run on both mainnet pools, Base and Robinhood (good,
+// card evm-trees-from-one-verified-source: no test network), and the same answers with currentTreeSize one higher on
+// both RPCs (bad). The wallet's own sync runs on the replay: good passes on every chain, bad fails on every chain,
+// refused by the pool's own size. Card notes-per-pool-evm-base-hang: Base's pair, on a stand-in for the chain that
+// answers each provider's eth_getLogs with its own cap read live, pages the pool's whole life at the pager's full page;
+// and a sync with no end fails at its deadline, naming the call it is stuck on.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -15,23 +16,24 @@ const A = JSON.parse(readFileSync(new URL("./notes-per-pool-evm.answers.json", i
 const PAGE = 10_000;
 /** The pool sync's first page on each provider since that card (evm.ts EVM_POOL_LOG_PAGE_BLOCKS). */
 const FIRST = 100_000;
-/** The Base Sepolia pool's deploy block, and its time (sepolia.base.org, publicnode, Pocket alike, 6 Nov 04:35Z). */
-const DEPLOY_BLOCK = 53_801_443, DEPLOY_TIME = 1_793_682_157;
-/** Base Sepolia's head at the read below (sepolia.base.org, 6 Nov 04:35Z): the pool's life is 1,287,712 blocks. */
-const HEAD = 55_089_154;
-/** Each Base Sepolia provider's answer to the pool's eth_getLogs over its cap, read live 6 Nov 04:35Z over 1,000,
- * 10,000, 50,000 and 100,000 blocks from the deploy block; Pocket and Tenderly answered all four. */
+/** The Base mainnet pool's deploy block, and its time (base-rpc.publicnode.com and base.rpc.blxrbdn.com alike, 15 Nov
+ * 06:33Z). */
+const DEPLOY_BLOCK = 54_325_671, DEPLOY_TIME = 1_794_055_509;
+/** Base's head at the read below (base-rpc.publicnode.com, 15 Nov 06:33Z): the pool's life is 3,344,350 blocks. */
+const HEAD = 57_670_020;
+/** Each Base seat's answer to the pool's eth_getLogs over its cap, read live 15 Nov 06:33Z over 1,000, 10,000, 50,000,
+ * 100,000 and 200,000 blocks from the deploy block. */
 const CAPS = {
-  "sepolia.base.org": [200, "RPC error -32614: eth_getLogs is limited to a 200 range"],
-  "base-sepolia-rpc.publicnode.com": [50_000, "RPC error -32701: exceed maximum block range: 50000"],
+  "base-rpc.publicnode.com": [50_000, "RPC error -32701: exceed maximum block range: 50000"],
+  "base.rpc.blxrbdn.com": [100_000, "RPC error -32602: query exceeds max block range 100000"],
 };
 
-/** A stand-in for Base Sepolia at HEAD, a block every 200 ms, with the pool and none of its leaves: each provider's
+/** A stand-in for Base at HEAD, a block every 200 ms, with the pool and none of its leaves: each provider's
  * eth_getLogs over its cap (CAPS) refused in its own words, every other read answered alike on every host, the deploy
  * receipt and SCOPE() as the recorded run read them. `hold(host, method)`: a call that never answers. `pages`: each
  * host's eth_getLogs calls. */
 function standIn(hold = () => false) {
-  const rec = A.good["base-sepolia"];
+  const rec = A.good.base;
   const receipt = rec.find((e) => e.method === "eth_getTransactionReceipt" && e.result).result;
   const scopeSel = Object.keys(VIEWS).find((k) => VIEWS[k] === "SCOPE()");
   const scope = rec.find((e) => e.method === "eth_call" && e.params[0].data === scopeSel && e.result).result;
@@ -42,7 +44,7 @@ function standIn(hold = () => false) {
     if (hold(h, method)) return new Promise(() => {});
     switch (method) {
       case "eth_getTransactionReceipt": return { result: receipt };
-      case "eth_chainId": return { result: "0x14a34" };
+      case "eth_chainId": return { result: "0x2105" };
       case "eth_getBlockByNumber": return { result: block(params[0] === "latest" ? HEAD : params[0] === "finalized" ? HEAD - 6_000 : Number(BigInt(params[0]))) };
       case "eth_getBlockByHash": return { result: block(Number(BigInt(params[0]))) };
       case "eth_call": return { result: params[0].data === scopeSel ? scope : `0x${"0".repeat(64)}` };
@@ -70,10 +72,10 @@ test("the recorded good run passes on both chains, through the sync's every step
     // both pools hold leaves now: the cut at the pool's time is read on both
     assert.match(r.lines[5], /the cut before \d+ ms \([1-9]\d* state, [1-9]\d* label leaves\): stateRootTimes\(\d+\) and labelRootTimes\(\d+\)/);
   }
-  // the Base Sepolia run read the pool's life at the pager's full page on each provider
-  const span = Number(BigInt(A.good["base-sepolia"].find((e) => e.method === "eth_getBlockByNumber" && e.params[0] === "latest").result.number)) - DEPLOY_BLOCK + 1;
-  for (const u of CHAINS["base-sepolia"].rpcs) {
-    const n = A.good["base-sepolia"].filter((e) => e.method === "eth_getLogs" && e.url === u).length;
+  // the Base run read the pool's life at the pager's full page on each provider
+  const span = Number(BigInt(A.good.base.find((e) => e.method === "eth_getBlockByNumber" && e.params[0] === "latest").result.number)) - DEPLOY_BLOCK + 1;
+  for (const u of CHAINS.base.rpcs) {
+    const n = A.good.base.filter((e) => e.method === "eth_getLogs" && e.url === u).length;
     assert.ok(n <= Math.ceil(span / PAGE) + 10, `${u}: ${n} pages for ${span} blocks`);
   }
 });
@@ -91,35 +93,70 @@ test("the recorded bad run (currentTreeSize one higher on both RPCs) fails on bo
 });
 
 test("a replay with one RPC's answer missing is a failure, never a pass", async () => {
-  const log = A.good["robinhood-testnet"];
+  const log = A.good.robinhood;
   const i = log.findIndex((e) => e.method === "eth_call");
-  const r = await check("robinhood-testnet", replayer(log.filter((_, j) => j !== i)), { wait: false });
+  const r = await check("robinhood", replayer(log.filter((_, j) => j !== i)), { wait: false });
   assert.equal(r.ok, false);
 });
 
-test("Base Sepolia's pair pages the pool's whole life at the pager's full page, each provider under its own cap", async () => {
+test("the sync's reads are the recorded run's, fast or slow: every eth_call answered past the newest block's reuse window", async () => {
+  // card evm-trees-from-one-verified-source: on the real reuse clock a run slower than EVM_NEWEST_REUSE_MS (1 s) between
+  // a round's anchor and its root times read the newest block again, so its fast replay asked stateRootTimes at a block
+  // the run never read ("no recorded answer to eth_call ... 0x4b278d9c", Base mainnet 15 Nov 06:32Z); the sync's child
+  // keeps that clock still, so how long an answer takes never changes what is read
+  const count = (calls) => calls.reduce((m, e) => m.set(JSON.stringify([e.url, e.method, e.params]), (m.get(JSON.stringify([e.url, e.method, e.params])) ?? 0) + 1), new Map());
+  const want = [...count(A.good.base)].sort();
+  for (const ms of [0, 1_100]) {
+    const r0 = replayer(A.good.base);
+    const asked = [];
+    const t = async (url, method, params) => {
+      asked.push({ url, method, params });
+      const a = await r0(url, method, params);
+      if (ms > 0 && method === "eth_call") await new Promise((r) => setTimeout(r, ms));
+      return a;
+    };
+    const r = await check("base", t, { wait: false });
+    assert.equal(r.ok, true, r.lines.join("\n"));
+    assert.deepEqual([...count(asked)].sort(), want, `answers held ${ms} ms: the reads differ from the run's`);
+  }
+});
+
+test("the replayer answers a block by number from the same URL's tag read of that block, and nothing else", async () => {
+  const log = A.good.base;
+  const tagged = log.find((e) => e.method === "eth_getBlockByNumber" && e.params[0] === "latest");
+  const n = tagged.result.number;
+  assert.ok(!log.some((e) => e.method === "eth_getBlockByNumber" && e.params[0] === n && e.url === tagged.url), "the run read the anchor by tag only");
+  const r = replayer(log);
+  assert.deepEqual(await r(tagged.url, "eth_getBlockByNumber", [n, false]), { result: tagged.result });
+  const other = CHAINS.robinhood.rpcs[0];
+  assert.match((await r(other, "eth_getBlockByNumber", [n, false])).error, /^no recorded answer/);
+  assert.match((await r(tagged.url, "eth_getBlockByNumber", [`0x${(BigInt(n) + 1_000_000n).toString(16)}`, false])).error, /^no recorded answer/);
+  assert.match((await r(tagged.url, "eth_getBlockByNumber", [n, true])).error, /^no recorded answer/);
+});
+
+test("Base's pair pages the pool's whole life at the pager's full page, each provider under its own cap", async () => {
   // card notes-per-pool-evm-base-hang: on sepolia.base.org's 200-block cap the pager's pages were 156 blocks, about
   // 8,250 for the pool's 1,287,712 blocks (41 min at the 0.3 s a page read live); the check printed nothing in 20 min
   const { transport, pages } = standIn();
-  const r = await check("base-sepolia", transport, { wait: false });
+  const r = await check("base", transport, { wait: false });
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.match(r.lines[5], /no leaf yet/);
   const budget = Math.ceil((HEAD - DEPLOY_BLOCK + 1) / PAGE) + 10;
-  for (const u of CHAINS["base-sepolia"].rpcs) {
+  for (const u of CHAINS.base.rpcs) {
     const n = pages.get(new URL(u).host) ?? 0;
     assert.ok(n > 0 && n <= budget, `${new URL(u).host}: ${n} eth_getLogs pages, over ${budget} (${[...pages].map(([h, k]) => `${h} ${k}`).join(", ")})`);
   }
 });
 
 test("a sync with no end fails at its deadline, naming the call it is stuck on: the host only, the method, the range and the try", async () => {
-  const pocket = new URL(CHAINS["base-sepolia"].rpcs[1]).host;
-  const { transport } = standIn((h, method) => h === pocket && method === "eth_getLogs");
+  const second = new URL(CHAINS.base.rpcs[1]).host;
+  const { transport } = standIn((h, method) => h === second && method === "eth_getLogs");
   const t0 = Date.now();
-  const r = await check("base-sepolia", transport, { wait: false, deadlineMs: 3_000 });
+  const r = await check("base", transport, { wait: false, deadlineMs: 3_000 });
   assert.equal(r.ok, false);
   assert.ok(Date.now() - t0 < 15_000, `ended after ${Date.now() - t0} ms`);
-  const want = `stuck on eth_getLogs ${DEPLOY_BLOCK}..${DEPLOY_BLOCK + FIRST - 1} (${FIRST} blocks) on ${pocket}, try 1, no answer in `;
-  assert.match(r.lines.at(-1), /^base-sepolia: no end in 3\.0 s \(\d+ calls\): /);
+  const want = `stuck on eth_getLogs ${DEPLOY_BLOCK}..${DEPLOY_BLOCK + FIRST - 1} (${FIRST} blocks) on ${second}, try 1, no answer in `;
+  assert.match(r.lines.at(-1), /^base: no end in 3\.0 s \(\d+ calls\): /);
   assert.ok(r.lines.at(-1).includes(want), r.lines.at(-1));
   assert.ok(!/https?:\/\//.test(r.lines.at(-1)), r.lines.at(-1));
 });

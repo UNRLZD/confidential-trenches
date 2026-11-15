@@ -18,6 +18,7 @@
 // SIGN_HOST's connect-src naming each public source is signpage-skeleton's (its pin, POOL_HISTORY).
 // Pure reads of public RPCs and the helper's route through provider-answer.mjs: no key, no write.
 // After: helper
+// Serial: evm-keyed 30
 //   node scripts/live-checks/evm-pool-sync-holds.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (provider-answer.mjs EXIT)
 // --record writes every answer read as the good run of evm-pool-sync-holds.answers.json, and the bad run: the good

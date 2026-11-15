@@ -30,20 +30,25 @@ const sleep = async (ms: number): Promise<void> => {
 const entries = (h: string) => h.split(", ").map((e) => e.split(";")[0]);
 const dur = (h: string, name: string) => Number(/dur=(\d+)/.exec(h.split(", ").find((e) => e.split(";")[0] === name) ?? "")?.[1] ?? NaN);
 
+/** The mints of each read the RPC path has been asked, in order (the cold-page test waits on its second mint's). */
+const rpcAsked: string[][] = [];
 /** The RPC path as rpc.ts answers it: PUMP's mint account, with that read's timing entries. */
 const rpc = {
   async handle(_c: string, _ct: string | undefined, body: string) {
     const r = JSON.parse(body) as { params: [string[], { encoding: string }] };
     const keys = r.params[0];
+    rpcAsked.push(keys);
     await sleep(20);
     if (r.params[1].encoding === "base64") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 464517653 }, value: keys.map(() => null) } }) };
     const rec = FX.tokens[PUMP].accounts;
     return { status: 200, body: JSON.stringify({ ...rec, result: { ...rec.result, value: keys.map(() => rec.result.value[0]) } }), timing: ["rpc-wait;dur=300", 'rpc;dur=20;desc="solana"'] };
   },
 };
-/** Jupiter's search, answering after `lat` ms; with `gate`, the first search also waits for it to open. */
-const proxyOf = (lat: number, gate?: Promise<void>) => ({
+/** Jupiter's search, answering after `lat` ms; with `gate`, the first search also waits for it to open. `searches`
+ *  gets each search's mints as it is sent. */
+const proxyOf = (lat: number, gate?: Promise<void>, searches: string[][] = []) => ({
   async handle(_v: string, _p: string, q: string) {
+    searches.push(new URLSearchParams(q).get("query")!.split(","));
     if (gate !== undefined) await gate, (gate = undefined);
     await sleep(lat);
     const mints = new URLSearchParams(q).get("query")!.split(",");
@@ -54,15 +59,24 @@ const proxyOf = (lat: number, gate?: Promise<void>) => ({
 test("card helper-ready-page-warm: a cold page's answer names each wait: the lists, the RPC read's wait and send, Jupiter's search turn and search, the launch read; served again from what is held it says cache (red at 787f2a4: no timing)", async () => {
   let open!: () => void;
   const gate = new Promise<void>((ok) => (open = ok));
-  const tok = T.createSolanaToken(proxyOf(60, gate) as never, rpc as never);
-  // the second mint is asked while the first's search is out (held out until the second has waited 15 ms, so no slow
-  // timer lets it return first), so it goes in the next search
+  const searches: string[][] = [];
+  const tok = T.createSolanaToken(proxyOf(60, gate, searches) as never, rpc as never);
+  // the second mint is asked once the first's search is out, and that search is held until the second has joined the
+  // queue and waited 15 ms, so it goes in the next search: the order is the test's, never a race of real timers, so a
+  // busy machine cannot put both mints in one search (box, packages side by side, 15 Nov: jup-wait;dur=0)
   const pa = tok.page(mint(1));
-  await sleep(15);
+  const turn = () => new Promise((ok) => setImmediate(ok));
+  for (let i = 0; i < 10_000 && searches.length === 0; i++) await turn();
+  assert.deepEqual(searches, [[mint(1)]], "the first mint's search is out");
   const pb = tok.page(mint(2));
+  // its lists read, then its RPC read and its place in the search queue, asked side by side
+  for (let i = 0; i < 10_000 && !rpcAsked.some((k) => k.includes(mint(2))); i++) await turn();
+  assert.ok(rpcAsked.some((k) => k.includes(mint(2))), "the second mint's read is out");
+  await turn();
   await sleep(15);
   open();
   const [a, b] = await Promise.all([pa, pb]);
+  assert.deepEqual(searches, [[mint(1)], [mint(2)]], "the second mint went in the next search");
   assert.equal(a.status, 200);
   const h = (a as { timing?: string }).timing ?? "";
   assert.deepEqual(entries(h), ["lists", "rpc-wait", "rpc", "jup-wait", "jup", "launch", "read"], h);

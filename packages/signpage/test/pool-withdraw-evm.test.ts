@@ -8,7 +8,8 @@ import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
-import { evmPoolContextOf, evmPoolScopeOf } from "../../wallet/src/pool/evm.ts";
+import { evmPair, evmPoolContextOf, evmPoolScopeOf } from "../../wallet/src/pool/evm.ts";
+import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { VaultTree } from "../../kit/src/vault/inputs.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
@@ -27,7 +28,7 @@ import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "../src/
 import { EVM_SELL_LAG_BLOCKS } from "../src/pool-sell-evm.ts";
 import { EVM_BUY_LOG_SPAN } from "../src/evm-send.ts";
 import { EVM_LIFE_MS } from "../../wallet/src/pool/evm.ts";
-import { evmToRefused, evmWithdrawCosts, evmWithdrawMinPart, finishEvmOnward, onwardReceipt, runEvmPoolWithdraw, EVM_ONWARD_TIP, EVM_ONWARD_L1_BYTES, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "../src/pool-withdraw-evm.ts";
+import { evmReleaseOf, evmToRefused, evmWithdrawCosts, evmWithdrawMinPart, finishEvmOnward, onwardReceipt, runEvmPoolWithdraw, EVM_ONWARD_TIP, EVM_ONWARD_L1_BYTES, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "../src/pool-withdraw-evm.ts";
 import { EVM_ONWARD_GAS, evmOnwardCodeGas, withdrawNoteFloor } from "../src/rules/pool.ts";
 
 const LIB = new URL("../../../contracts/pool-evm/script/testnet-run-lib.mjs", import.meta.url).href;
@@ -1300,4 +1301,50 @@ test("(card move-sends-or-says-why) a note the page's queue holds whose drop nev
   assert.deepEqual([world.chain.sends, world.chain.sent.length], [0, 0], "nothing sent");
   const n = await world.notes.get(world.noteId);
   assert.deepEqual([n?.state, n?.attempt], ["HELD", held], "the note as the queue holds it");
+});
+
+// card evm-trees-from-one-verified-source: the owner's Firefox (14 Nov) answers no call to publicnode or Pocket, and
+// mainnet.base.org pages no logs (its `logs: false`), so the page's Base list [publicnode, blxrbdn, Pocket,
+// mainnet.base.org, the helper's keyed route] has two log-serving operators left: blxrbdn and the helper's keyed route
+const ownersList = (helper: Side, o: { helperLogs?: () => boolean } = {}) => {
+  const out = (host: string) => Object.assign(async () => {
+    throw new SolanaRpcTransportError("network", "NetworkError when attempting to fetch resource.", 1, host);
+  }, { url: `https://${host}` });
+  const side = releaseSide();
+  const named = (s: Side, url: string, logs: () => boolean = () => true) => {
+    const rpc = rpcOf(s, []);
+    const call = async (method: string, params: unknown[] = []) => {
+      if (method === "eth_getLogs" && !logs()) throw new SolanaRpcTransportError("http_5xx", "HTTP 503", 1, new URL(url).host);
+      return rpc(method, params);
+    };
+    return Object.assign(call, { url });
+  };
+  return [
+    out("base-rpc.publicnode.com"),
+    named(side, "https://base.rpc.blxrbdn.com"),
+    out("base.api.pocket.network"),
+    Object.assign(named(side, "https://mainnet.base.org"), { logs: false }),
+    named(helper, "https://ct-api.unrealized.trade/v1/rpc/base?keyed=only", o.helperLogs),
+  ];
+};
+test("card evm-trees-from-one-verified-source: the release read-back walks a seat off a member that pages no logs to the next log-serving operator, two operators agreeing: in the owner's case blxrbdn and the helper's keyed route read the release as W's", async () => {
+  const rpcs = evmPair(ownersList(releaseSide()) as never);
+  const v = await evmReleaseOf({ rpcs, pin: BASE_PIN } as never, pendingOf(BIG_CAP), W, [null, null]);
+  assert.deepEqual(v, { end: "mine", tx: REL, block: 0xf0n });
+});
+test("card evm-trees-from-one-verified-source: with one log-serving operator left (the helper's keyed route 503 to a wide log page, as live before card helper-base-logs-page) the read-back is never one source's word and never ends the part: no verdict, read again on the clock, and 'mine' on the same pair once a second operator answers", async (t) => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => now);
+  let helperUp = false;
+  const rpcs = evmPair(ownersList(releaseSide(), { helperLogs: () => helperUp }) as never);
+  const stops: [bigint | null, bigint | null] = [null, null];
+  for (let round = 0; round < 6; round++) {
+    const v = await evmReleaseOf({ rpcs, pin: BASE_PIN } as never, pendingOf(BIG_CAP), W, stops).catch(() => "threw" as const);
+    assert.ok(v === null || v === "threw", `round ${round}: no verdict on one operator's logs (${JSON.stringify(v)})`);
+    now += 2_000; // EVM_WITHDRAW_WAIT_MS: the run's next read
+  }
+  helperUp = true;
+  now += 60_000; // the helper's rest (EVM_SPARE_REST_MS) over
+  const v = await evmReleaseOf({ rpcs, pin: BASE_PIN } as never, pendingOf(BIG_CAP), W, stops);
+  assert.deepEqual(v, { end: "mine", tx: REL, block: 0xf0n });
 });

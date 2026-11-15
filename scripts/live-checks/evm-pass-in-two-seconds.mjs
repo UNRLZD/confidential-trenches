@@ -14,7 +14,8 @@
 //   - cut (evmTreeSync trees and evmPool trees): a period's cut is the round's leaves below the held first block
 //     (`events.findIndex(e=>e.block>=first.number)`), the pool handing the sync that block;
 //   - newest (evmTreeSync trees): a newest read takes the last round when its anchor is at or past the caller's now;
-//   - depth (evmTreeSync depthAt): the depth at a block the last round found at its height is that round's, no read.
+//   - depth (evmTreeSync depthAt): the depth at a block the last round found at its height is that round's, no read,
+//     when that round stands on two operators' logs (card evm-trees-from-one-verified-source).
 // After: sign
 // Bundle: read sign
 //   node scripts/live-checks/evm-pass-in-two-seconds.mjs [--local] [--record <file>]
@@ -42,20 +43,24 @@ const HELD = new RegExp(`let (${N})=(${N})\\.get\\((${N})\\)\\?\\.block\\?\\?awa
 const HELD_READ = new RegExp(`(${N})\\?\\.hash===(${N})\\.hash&&(${N})\\?\\.hash===\\2\\.hash\\?\\2\\.block:null`);
 /** evmPool now: `async now(e){let t=await a.now(e);return typeof t==\`bigint\`&&t>0n&&d.get(t-t%fw,e).catch(()=>{}),t}`. */
 const FEE = new RegExp(`async now\\((${N})\\)\\{let (${N})=await ${N}\\.now\\(\\1\\);return typeof \\2==\`bigint\`&&\\2>0n&&${N}\\.get\\(\\2-\\2%${N},\\1\\)\\.catch\\(\\(\\)=>\\{\\}\\),\\2\\}`);
-/** The round's early pages, a later round's tail of one page's span: `D=E(_w,C),M=null;d&&!p&&!m&&w.number>u&&
- *  w.number-u<=10000n&&(M=IT(t,y,b,u+1n,{fin:D,anchor:w},v,l.length,C,c),M.catch(()=>{}));let[P,F,I,L,R,z]=await
- *  Promise.all([D,`. */
-const BATCHED = new RegExp(`(${N})=${N}\\(${N},(${N})\\),(${N})=null;${N}&&!${N}&&!${N}&&(${N})\\.number>(${N})&&\\4\\.number-\\5<=10000n&&\\(\\3=(${N})\\(${N},${N},${N},\\5\\+1n,\\{fin:\\1,anchor:\\4\\},${N},${N}\\.length,\\2,${N}\\),\\3\\.catch\\(\\(\\)=>\\{\\}\\)\\);let\\[${N}(?:,${N}){5}\\]=await Promise\\.all\\(\\[\\1,`);
+/** The round's early pages, a later round's tail of one page's span, past the round's base (card
+ *  evm-trees-from-one-verified-source: the held logs, or for a root round the last one-source round's leaves):
+ *  `L=E(yE,C),R=null;d&&!p&&!m&&T.number>N.to&&T.number-N.to<=10000n&&(R=BD(t,y,b,N.to+1n,{fin:L,anchor:T},v,
+ *  N.events.length,C,c),R.catch(()=>{}));let[z,B,ee,te,ne,re]=await Promise.all([L,`. */
+const BATCHED = new RegExp(`(${N})=${N}\\(${N},(${N})\\),(${N})=null;${N}&&!${N}&&!${N}&&(${N})\\.number>(${N})\\.to&&\\4\\.number-\\5\\.to<=10000n&&\\(\\3=(${N})\\(${N},${N},${N},\\5\\.to\\+1n,\\{fin:\\1,anchor:\\4\\},${N},\\5\\.events\\.length,\\2,${N}\\),\\3\\.catch\\(\\(\\)=>\\{\\}\\)\\);let\\[${N}(?:,${N}){5}\\]=await Promise\\.all\\(\\[\\1,`);
 /** The sync's cut below the first block: `let t=i.events.findIndex(e=>e.block>=r.number);t<0&&(t=i.events.length);`. */
 const CUT = new RegExp(`let (${N})=(${N})\\.events\\.findIndex\\((${N})=>\\3\\.block>=(${N})\\.number\\);\\1<0&&\\(\\1=\\2\\.events\\.length\\);`);
 /** evmPool trees: `async trees(e,t,n){let r=n?.newest===!0?void 0:c.get(e);if(r===void 0)return a.trees(e,t,n);try{return
  *  await a.trees(e,t,{...n,first:r.block})}catch(i){if(!(i instanceof rT)||!await u(e,r,t))throw i;return a.trees(e,t,n)}}`
  *  (the search only when nothing is held, or the held block was replaced). */
 const HANDS = new RegExp(`async trees\\((${N}),(${N}),(${N})\\)\\{let (${N})=\\3\\?\\.newest===!0\\?void 0:${N}\\.get\\(\\1\\);if\\(\\4===void 0\\)return (${N})\\.trees\\(\\1,\\2,\\3\\);try\\{return await \\5\\.trees\\(\\1,\\2,\\{\\.\\.\\.\\3,first:\\4\\.block\\}\\)\\}catch\\((${N})\\)\\{if\\(!\\(\\6 instanceof ${N}\\)\\|\\|!await (${N})\\(\\1,\\4,\\2\\)\\)throw \\6;return \\5\\.trees\\(\\1,\\2,\\3\\)\\}\\}`);
-/** trees' newest read: `let i=n?.newest===!0&&O!==null&&O.anchor.timestamp*1000n>=e-1n?O:await P(t,r);`. */
-const NEWEST = new RegExp(`let (${N})=(${N})\\?\\.newest===!0&&(${N})!==null&&\\3\\.anchor\\.timestamp\\*1000n>=(${N})-1n\\?\\3:await (${N})\\((${N}),(${N})\\);`);
-/** depthAt: `let i=O;if(r!==void 0&&i!==null&&i.firsts.has(\`${e}:${r}\`))return Promise.resolve(`. */
-const DEPTH = new RegExp(`let (${N})=${N};if\\((${N})!==void 0&&\\1!==null&&\\1\\.firsts\\.has\\(\`\\$\\{(${N})\\}:\\$\\{\\2\\}\`\\)\\)return Promise\\.resolve\\(`);
+/** trees' newest read, the root round's (card evm-trees-from-one-verified-source): `let i=n?.newest===!0&&O!==null&&
+ *  O.anchor.timestamp*1000n>=e-1n?O:await F(t,r,\`root\`);`. */
+const NEWEST = new RegExp(`let (${N})=(${N})\\?\\.newest===!0&&(${N})!==null&&\\3\\.anchor\\.timestamp\\*1000n>=(${N})-1n\\?\\3:await (${N})\\((${N}),(${N}),\`root\`\\);`);
+/** depthAt, on a round of two operators' logs (card evm-trees-from-one-verified-source: a one-source round's depth comes
+ *  from the pool's root times): `let i=O;if(r!==void 0&&i!==null&&i.two&&i.firsts.has(\`${e}:${r}\`))return
+ *  Promise.resolve(`. */
+const DEPTH = new RegExp(`let (${N})=${N};if\\((${N})!==void 0&&\\1!==null&&\\1\\.two&&\\1\\.firsts\\.has\\(\`\\$\\{(${N})\\}:\\$\\{\\2\\}\`\\)\\)return Promise\\.resolve\\(`);
 
 /** What the check keeps of SIGN_HOST's build: its pin and sha384, and each part found exactly once. */
 export function pageFacts(index, js) {

@@ -37,7 +37,10 @@
 //     of a commit older than the runners still runs (review of 9eaf059a, P2-2);
 //   - the helper's plan puts every check that reads the helper's Jupiter budget (BUDGET_READS: a Jupiter proxy path, a
 //     build, a Solana token page) in a serial group, one matrix entry, or lists it exempt with the reason: two such checks
-//     in separate jobs spend one shared window between them and a page reads chain (run 42332950254 attempt 1);
+//     in separate jobs spend one shared window between them and a page reads chain (run 42332950254 attempt 1); that
+//     group is jupiter-budget, and every check that reads the helper's keyed Base and Robinhood providers (KEYED_READS)
+//     is in evm-keyed (card helper-live-run-holds-its-own-load: run 43683445143 read 6 such checks red at once, each
+//     green run alone);
 //   - every check each host's plan runs exists, with its test and its recorded answers, and none reads the
 //     environment (a check that needs a secret has a `// Skipped:` header line, never run); each run gives every flag its check's
 //     usage line needs (live-plan's planFor refuses a run that lacks one).
@@ -332,6 +335,20 @@ export async function rerunProblems(impl = { single: (k, o) => rerun(k, [], o), 
  *  (Jupiter's own keyless search, outside the helper), spends none of the helper's. */
 export const BUDGET_READS = /\/v1\/proxy\/jupiter|swap\/v2\/build|fetchSolanaJupiter|SolanaBuildRoom|runSolanaTrade|\/v1\/market\/token\?chain=solana/;
 
+/** The serial group each shared budget's checks run in, one after another. */
+export const JUPITER_GROUP = "jupiter-budget";
+export const KEYED_GROUP = "evm-keyed";
+
+/** What marks a live check as one that reads the helper's keyed Base and Robinhood providers (card
+ *  helper-live-run-holds-its-own-load): a read on the keyed-only route, a Base or Robinhood tape, or the helper's RPC route
+ *  on either chain (its keyed URLs first, apps/helper/src/rpc/rpc.ts listOf), with the chain named (KEYED_CHAIN). Every
+ *  such read draws the same few keyed URLs' seconds (rpc.ts pacer: dRPC 8 calls a second a key, QuickNode 7, limits.ts
+ *  KEYED_PACE), and a keyed-only read or a tape has no public endpoint to walk on to: run 43683445143 (15 Nov 06:03Z)
+ *  read 90 checks at once and the keyed Base route answered 429 while the plain one answered the same reads off its
+ *  public list; five of those checks re-run alone read PASS. */
+export const KEYED_READS = /keyed=only|\/v1\/market\/trades\?chain=(?:base|robinhood|\$\{)|\/v1\/rpc\/(?:base|robinhood|\$\{|["'`])/;
+export const KEYED_CHAIN = /["'](?:base|robinhood)["']|chain=(?:base|robinhood)\b|\/v1\/rpc\/(?:base|robinhood)\b|\b(?:base|robinhood): *["']0x/;
+
 const filesUnder = (dir, test) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile() && test(e.name)).map((e) => path.join(e.parentPath ?? e.path, e.name)) : []);
 
 /** The problems with the checks one host's plan runs. */
@@ -365,6 +382,25 @@ export async function planProblems(host, root = ROOT) {
   return p;
 }
 
+/** A live check's text and that of every script under scripts/ it imports, as one. */
+export function checkText(k, root = ROOT) {
+  const seen = new Set();
+  let text = "";
+  const walk = (f) => {
+    const abs = path.resolve(root, f);
+    if (seen.has(abs) || !existsSync(abs)) return;
+    seen.add(abs);
+    const t = readFileSync(abs, "utf8");
+    text += `${t}\n`;
+    for (const m of t.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)["'](\.{1,2}\/[^"']+\.mjs)["']/g)) {
+      const next = path.join(path.dirname(f), m[1]);
+      if (next.startsWith("scripts/")) walk(next);
+    }
+  };
+  walk(path.join("scripts/live-checks", `${k}.mjs`));
+  return text;
+}
+
 /**
  * Card helper-live-jup-serial: on the helper's plan, every check whose source (and the scripts it imports) matches
  * BUDGET_READS is a member of a serial group, so it runs one after another with the others in one job, or is in the
@@ -381,6 +417,7 @@ export function budgetProblems(host, plan, root = ROOT) {
     return [`${host}: ${e.message}`];
   }
   const grouped = new Set(plan.include.filter((e) => e.group).flatMap(keysOf));
+  const groupOf = new Map(plan.include.filter((e) => e.group).flatMap((e) => keysOf(e).map((k) => [k, e.id])));
   for (const [k, why] of Object.entries(list.budgetExempt)) {
     if (!list.checks.includes(k)) p.push(`${host}: ${k} is exempt from the Jupiter budget group but is no listed check`);
     else if (typeof why !== "string" || why.trim().length < 20) p.push(`${host}: ${k} is exempt from the Jupiter budget group with no reason (at least 20 characters)`);
@@ -388,20 +425,21 @@ export function budgetProblems(host, plan, root = ROOT) {
   }
   for (const e of plan.include) {
     for (const k of keysOf(e)) {
-      if (grouped.has(k) || Object.hasOwn(list.budgetExempt, k)) continue;
-      const seen = new Set();
-      const reads = (f) => {
-        const abs = path.resolve(root, f);
-        if (seen.has(abs) || !existsSync(abs)) return false;
-        seen.add(abs);
-        const text = readFileSync(abs, "utf8");
-        if (BUDGET_READS.test(text)) return true;
-        return [...text.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)["'](\.{1,2}\/[^"']+\.mjs)["']/g)].some((m) => {
-          const next = path.join(path.dirname(f), m[1]);
-          return next.startsWith("scripts/") && reads(next);
-        });
-      };
-      if (reads(path.join("scripts/live-checks", `${k}.mjs`))) p.push(`${host}: ${k} reads the helper's Jupiter budget (${BUDGET_READS.source.replace(/\\\//g, "/")}) in a job of its own: give it a \`// Serial: <group> <position>\` header line so it runs one after another with the others (scripts/ci/helper-live-checks.mjs SERIAL_GROUPS), or a \`// Budget-exempt: <reason>\` line with the reason it spends none`);
+      const text = checkText(k, root);
+      const jupiter = BUDGET_READS.test(text) && !Object.hasOwn(list.budgetExempt, k);
+      const keyed = KEYED_READS.test(text) && KEYED_CHAIN.test(text);
+      const at = groupOf.get(k);
+      if (jupiter && keyed) {
+        p.push(`${host}: ${k} reads both the helper's Jupiter budget and its keyed Base and Robinhood providers: a check is in one serial group, so split it in two`);
+        continue;
+      }
+      if (keyed && at !== KEYED_GROUP) {
+        p.push(`${host}: ${k} reads the helper's keyed Base and Robinhood providers (${KEYED_READS.source.replace(/\\\//g, "/")}) ${at === undefined ? "in a job of its own" : `in serial group ${at}`}: give it a \`// Serial: ${KEYED_GROUP} <position>\` header line so it runs one after another with the others (scripts/ci/helper-live-checks.mjs SERIAL_GROUPS)`);
+        continue;
+      }
+      if (!jupiter || at === JUPITER_GROUP) continue;
+      if (at !== undefined) p.push(`${host}: ${k} reads the helper's Jupiter budget in serial group ${at}: give it a \`// Serial: ${JUPITER_GROUP} <position>\` header line instead`);
+      else p.push(`${host}: ${k} reads the helper's Jupiter budget (${BUDGET_READS.source.replace(/\\\//g, "/")}) in a job of its own: give it a \`// Serial: <group> <position>\` header line so it runs one after another with the others (scripts/ci/helper-live-checks.mjs SERIAL_GROUPS), or a \`// Budget-exempt: <reason>\` line with the reason it spends none`);
     }
   }
   return p;

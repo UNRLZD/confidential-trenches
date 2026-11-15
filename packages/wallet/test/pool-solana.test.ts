@@ -2660,11 +2660,11 @@ test("sol-marks-scale fold 1 RV-C2 (point 3): a runaway lister (real marks, made
   const c1 = { n: 0 };
   const t0 = Date.now();
   const out = await rvOut(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: rvRunaway(chain, rvPrng(13), c1), rpcs: [honest, rvRpc("https://c.example", rvAt(chain, 700), rvStat())], gap: 4, lagWait: rvInstant, signal: AbortSignal.timeout(3_000) }));
-  const ms1 = Date.now() - t0;
+  const t1 = Date.now(); // printed only: the assert below counts the lister's calls
   const b = await reservedDeposit0(l0);
   const c2 = { n: 0 };
   const settle = await solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, lister: rvRunaway(chain, rvPrng(14), c2), rpcs: [rvRpc("https://a.example", rvAt(chain, 700), rvStat()), rvRpc("https://c.example", rvAt(chain, 700), rvStat())], lagWait: rvInstant, signal: AbortSignal.timeout(3_000) }).then((x) => x.kind, (e: Error) => `refused: ${e.message}`);
-  console.log(`# RV-C2 runaway: restore ${out} after ${ms1} ms (${c1.n} of its calls); settle ${settle} (${c2.n} of its calls)`);
+  console.log(`# RV-C2 runaway: restore ${out} after ${t1 - t0} ms (${c1.n} of its calls); settle ${settle} (${c2.n} of its calls)`);
   assert.match(out, /^refused: rpc [01]: listed mark \S+ is not on it$/, "the restore ran until the signal");
   assert.match(settle, /^refused: rpc [01]: listed mark \S+ is not on it$/, "the settle ran until the signal");
   assert.deepEqual([c1.n, c2.n], [1, 1], "refused at the runaway's first bucket");

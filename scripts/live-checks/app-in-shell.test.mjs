@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_HOST, ENGINES, frameErrors, judge, KINDS, MOVE_TO, PATH, SIGN_HOST, WIDTHS } from "./app-in-shell.mjs";
+import { APP_HOST, ENGINES, frameErrors, judge, KINDS, MOVE_TO, openApp, PATH, SIGN_HOST, WIDTHS } from "./app-in-shell.mjs";
 import { consoleLine } from "./console-errors.mjs";
 import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
@@ -334,4 +334,47 @@ test("harness: a planted state the kit's client refuses or cuts throws at harnes
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// card app-in-shell-visit-race: the run's visit (openApp) against each way the browser can end it. Firefox reported the
+// app's move to SIGN_HOST before the visit's own commit in merge queue runs 43665465254 and 43669414912, and main's bare
+// goto made that a failed run, so a good deploy's check failed and undid it.
+const VISIT = APP_HOST + PATH;
+const SHELL_AT = SIGN_HOST + PATH;
+const interruptedBy = (to) => () => {
+  throw new Error(`page.goto: Navigation to "${VISIT}" is interrupted by another navigation to "${to}"\nCall log:\n  - navigating to "${VISIT}", waiting until "commit"`);
+};
+// a page whose goto ends as `goto` does and whose address reaches `at` (null: never, the wait times out)
+const visitPage = (goto, at) => ({
+  goto: async () => goto(),
+  waitForURL: async (match, { timeout }) => {
+    if (at && match(new URL(at))) return;
+    throw new Error(`page.waitForURL: Timeout ${timeout}ms exceeded.`);
+  },
+});
+
+test("planted: the shell's commit reported before the visit's (Firefox) ends the visit at the shell, where main's goto threw", async () => {
+  const p = visitPage(interruptedBy(SHELL_AT), SHELL_AT);
+  // main's two lines (app-in-shell.mjs:292 at b1c340561)
+  await assert.rejects(async () => {
+    await p.goto(VISIT, { waitUntil: "commit" });
+    await p.waitForURL((u) => u.origin === SIGN_HOST, { timeout: 8_000 }).catch(() => {});
+  }, /is interrupted by another navigation to/);
+  await openApp(p);
+});
+
+test("the visit's commit reported first (Chrome, WebKit) ends the visit at the shell", async () => {
+  await openApp(visitPage(() => null, SHELL_AT));
+});
+
+test("planted: a visit interrupted by a move anywhere but the shell at PATH is the run's error", async () => {
+  for (const to of [`${SIGN_HOST}${MOVE_TO}`, `${SIGN_HOST}/discover`, VISIT, `https://evil.example${PATH}`])
+    await assert.rejects(openApp(visitPage(interruptedBy(to), SHELL_AT)), (e) => e.message.includes(`another navigation to "${to}"`));
+});
+
+test("planted: a failed visit is the run's error; a shell that never commits is left to the frame reads, as on main", async () => {
+  await assert.rejects(openApp(visitPage(() => {
+    throw new Error("page.goto: NS_ERROR_CONNECTION_REFUSED");
+  }, null)), /NS_ERROR_CONNECTION_REFUSED/);
+  await openApp(visitPage(() => null, null));
 });

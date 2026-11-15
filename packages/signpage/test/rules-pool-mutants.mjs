@@ -38,6 +38,9 @@ const FLOORT = "Solana sell: a deposit back under the sale's note floor";
 const WD = "Solana withdraw: another pool program";
 const BUY = "Solana buy: the kit's tag 3";
 const SELL = "Solana sell:";
+const DLMMT = "Solana sell on a DLMM pair";
+const RAYV4 = "Solana sell on a Raydium AMM v4 pool";
+const RAYC = "Solana sell on a Raydium CPMM pool";
 const EBUY = "EVM buy:";
 const EWD = "EVM withdraw:";
 const ESELL = "EVM sell and authorization";
@@ -179,10 +182,24 @@ export const MUTANTS = [
   ['if (sell.length !== want.length) return refuse("sell");', "", SELL],
   // the sell's accounts from the device's venue, never the wire (card sol-pool-buys-mayhem-coins): the rule unasked, or
   // the fee recipient it holds the wire to taken from the wire itself
-  ['if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', "", SELL],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', "", SELL],
   ["const want = solanaPoolSellSteps(venue, ctx.wallet, ask.amount, minOut);", 'const want = solanaPoolSellSteps(venue.kind === "pump-curve" ? { ...venue, feeRecipient: venueIx.accounts[1]!.key } : venue, ctx.wallet, ask.amount, minOut);', SELL],
   // the review of 6eb64bdb: one account the wire names, the curve's creator vault (its sell's account 8), taken as the rule's own
-  ['if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts.map((a, j) => (j === 8 && g.accounts[8] ? { ...a, key: g.accounts[8].key } : a)))) return refuse("sell_accounts");', SELL],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts.map((a, j) => (j === 8 && g.accounts[8] ? { ...a, key: g.accounts[8].key } : a)), all)) return refuse("sell_accounts");', SELL],
+  // card solana-buy-reaches-raydium-and-meteora: a DLMM sell held to its own reading: the venue read for a sell, its
+  // swap2 (28 bytes) found as the venue's, each key's privileges as the whole expected message gives them (W pays), and
+  // every swap2 account the device's own venue names (its bin arrays, W's coin in and wSOL out, the token programs)
+  ['if (venue.kind === "dlmm" && venue.side !== "sell") return refuse("venue");', "", DLMMT],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', DLMMT],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : [24, 16];', RAYV4],
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 1] : [24, 16];', RAYV4],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', DLMMT],
+  // the review of 7637cce9f: a CPMM sell's min out read at another offset (its amount at 8), and one CPMM or AMM v4 swap
+  // account taken from the wire (CPMM's observation 12, AMM v4's token program 0)
+  ['const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : [24, 16];', 'const [sellLen, minAt] = venue.kind === "dlmm" ? [28, 16] : venue.kind === "raydium-amm-v4" ? [17, 9] : venue.kind === "raydium-cpmm" ? [24, 8] : [24, 16];', RAYC],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.program === "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C" ? w.accounts.map((a, j) => (j === 12 && g.accounts[j] ? { ...a, key: g.accounts[j].key } : a)) : w.accounts, all)) return refuse("sell_accounts");', RAYC],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.program === "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8" ? w.accounts.map((a, j) => (j === 0 && g.accounts[j] ? { ...a, key: g.accounts[j].key } : a)) : w.accounts, all)) return refuse("sell_accounts");', RAYV4],
+  ['if (!sameList(g.accounts, w.accounts, all)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.program === "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo" ? w.accounts.map((a, j) => (j >= 16 && g.accounts[j] ? { ...a, key: g.accounts[j].key } : a)) : w.accounts, all)) return refuse("sell_accounts");', DLMMT],
   ['if (back !== solanaNoteOf(minOut - reserve)) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
   // card every-lamport-can-move: the deposit back on the grid, never the exact lamport amount
   ["if (back !== solanaNoteOf(minOut - reserve))", "if (back !== minOut - reserve)", SELL],

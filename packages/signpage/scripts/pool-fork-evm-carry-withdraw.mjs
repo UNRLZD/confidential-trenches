@@ -27,7 +27,8 @@
 //   4. the carry: U_X topped up to the floor, the same follow carries it into the pool (pool.deposit from U_X), the note
 //      shows in the balance once its block is final (blocks mined as above), the follow ends once the deposit reads final
 //      on both of the pool's RPCs;
-//   4a. the deposit is the pool's first leaf (the pool's size 0 before it, 1 at its block): the page's state shows a ready
+//   4a. the deposit is the pool's newest leaf (its size one more at its block; 0 before it on an empty pool, the mainnet
+//      pool's own leaves before it at a later fork block): the page's state shows a ready
 //      proof for it inside its first minute (read, no tap), a withdraw tapped inside that minute ends sent, and a second
 //      withdraw of the change note at depth 1 ends sent, with what the page shows between the two (balance, the form's
 //      Max, the refusal's words);
@@ -62,7 +63,7 @@ import { anvilFetch } from "../../../contracts/pool-evm/test/fork-anvil.mjs";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
-const USAGE = "usage: pool-fork-evm-carry-withdraw.mjs <base|robinhood> <out.json> --slots <n> [--plain]";
+const USAGE = "usage: pool-fork-evm-carry-withdraw.mjs <base|robinhood> <out.json> --slots <n> [--plain] [--owners-case]";
 const [CHAIN, OUT] = process.argv.slice(2);
 const PLAIN = process.argv.includes("--plain");
 const SLOTS_AT = process.argv.indexOf("--slots");
@@ -211,11 +212,37 @@ const lagged = async (body) => {
   const one = (c) => ({ ...c, params: Array.isArray(c?.params) ? JSON.parse(JSON.stringify(c.params).replaceAll('"latest"', JSON.stringify(behind))) : c?.params });
   return { body: JSON.stringify(Array.isArray(b) ? b.map(one) : one(b)), behind };
 };
+// --owners-case (card evm-trees-from-one-verified-source): the owner's Firefox with strict tracking protection (14 Nov
+// 11:44Z, scripts/firefox-rpc-blocked.mjs OWNERS_CASE): every publicnode and Pocket host never connects ("NetworkError
+// when attempting to fetch resource."), and the helper's keyed Base route answers HTTP 503 {"error":{"code":"upstream"}}
+// to an eth_getLogs over 100 blocks (read live 15 Nov 01:20Z; ranges of 1, 10 and 100 blocks answered)
+// From the step after restore A: the owner's profile was restored and its pool synced into the device's hold before
+// their browser met these blocks; a fresh restore there reads the pool's events on two operators, which with these
+// blocks only the helper's keyed route past 100 blocks would make (card helper-base-logs-page)
+const OWNERS = process.argv.includes("--owners-case");
+let ownersOn = false;
+const ownersBlocked = (host) => ownersOn && /(^|\.)publicnode\.com$|(^|\.)pocket\.network$/.test(host);
+// CT_KEYED_WIDE=1: the keyed Base route answers wide pages (as once card helper-base-logs-page lands), the blocks kept
+const KEYED_WIDE = process.env.CT_KEYED_WIDE === "1";
+const ownersKeyed503 = (u, body) => {
+  if (!ownersOn || KEYED_WIDE || CHAIN !== "base" || !u.pathname.startsWith("/v1/rpc/base") || typeof body !== "string") return false;
+  const b = JSON.parse(body);
+  return (Array.isArray(b) ? b : [b]).some((c) => c?.method === "eth_getLogs" && /^0x[0-9a-f]+$/i.test(c.params?.[0]?.fromBlock ?? "") && /^0x[0-9a-f]+$/i.test(c.params?.[0]?.toBlock ?? "") && BigInt(c.params[0].toBlock) - BigInt(c.params[0].fromBlock) + 1n > 100n);
+};
+const ownersRefused = {};
 let batches = 0;
 globalThis.fetch = async (input, init) => {
   const u = new URL(String(input instanceof Request ? input.url : input));
   if (u.origin === ANVIL && typeof init?.body === "string") return toAnvil(init);
   if (u.origin === ANVIL || (route.local !== null && u.origin === route.local)) return realFetch(input, init);
+  if (ownersBlocked(u.host)) {
+    ownersRefused[u.host] = (ownersRefused[u.host] ?? 0) + 1;
+    throw new TypeError("NetworkError when attempting to fetch resource.");
+  }
+  if (route.helper.has(u.origin) && ownersKeyed503(u, init?.body)) {
+    ownersRefused[`helper${u.pathname}`] = (ownersRefused[`helper${u.pathname}`] ?? 0) + 1;
+    return new Response(JSON.stringify({ error: { code: "upstream" } }), { status: 503, headers: { "content-type": "application/json" } });
+  }
   if (route.fork.has(u.host)) {
     const batch = ++batches;
     const ms = methodsOf(init?.body);
@@ -257,7 +284,7 @@ const { evmAddress } = await import("../../wallet/src/derive/keys.ts");
 const { depositKey, depositRecordOf, openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore, readNotes } = await import("../../wallet/src/notes/store.ts");
 const { writeRestored } = await import("../../wallet/src/notes/restore.ts");
-const { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_POOLS, evmPoolScopeOf, evmTreeSync } = await import("../../wallet/src/pool/evm.ts");
+const { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_POOLS, evmPair, evmPoolScopeOf, evmTreeSync } = await import("../../wallet/src/pool/evm.ts");
 const { PoolNoLeafError } = await import("../../wallet/src/pool/pool.ts");
 const { evmRestoreNotes } = await import("../../wallet/src/pool/evm-restore.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
@@ -379,7 +406,11 @@ const sideRpc = async (method, params) => {
 // gives it a buffer it never wipes: wiping KEY here would zero the sender's key ("invalid private key" at its first send)
 const sender = evmPoolSender({ network: CHAIN, pool: PIN.pool, senderKey: KEY, feeRecipient: PIN.feeRecipient, log: (line) => log("helper sender", { line }) }, [sideRpc, (m, p) => sideRpc(m, p)]);
 await anvil("anvil_setBalance", [sender.sender, "0xde0b6b3a7640000"]);
-const rpcRoute = createRpc({ [CHAIN === "base" ? "BASE_RPC_URL" : "ROBINHOOD_RPC_URL"]: ANVIL }, { log: (line) => log("helper rpc", { line }) });
+// the fork named as a keyed provider: a URL with no key in it is a public endpoint to the helper (operator.ts isKeyless),
+// which ?keyed=only never asks, so the route answered every call 503 upstream and the page's keyed seat was never a log
+// operator on the fork (the owner's-case read-back of 15 Nov 02:35Z: blxrbdn alone, 19 of 19 keyed log pages 503). The
+// query's value is no secret: the fetch hook sends every call to the fork's origin as it is
+const rpcRoute = createRpc({ [CHAIN === "base" ? "BASE_RPC_URL" : "ROBINHOOD_RPC_URL"]: `${ANVIL}/?fork=keyed` }, { log: (line) => log("helper rpc", { line }) });
 const helperLines = [];
 // the helper's handler answers a sender's throw 500 {"error":"internal"} and logs nothing (server.ts .catch): the run
 // keeps the throw's message and frames, so a 500 has its cause in the record (the Base run of 13 Nov 00:40Z: no cause)
@@ -476,7 +507,7 @@ const restoreInto = async (ns) => {
 // for; the fork block and the book its answers were recorded into (fork-rpc.mjs FORK_RPC_BOOK_FILE), to replay it offline
 const SCRIPT = new URL(import.meta.url);
 const run = { commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), dirty: execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).trim() !== "", scriptSha256: createHash("sha256").update(readFileSync(SCRIPT)).digest("hex"), forkBlock: POOLS_FORK_BLOCKS[CHAIN], book: process.env.FORK_RPC_BOOK_FILE ?? null };
-const record = { by: "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs", run, providers: { delays: HOST_DELAYS, delayMedianMs: DELAY_MEDIAN, lagHost: LAG_HOST, intoMs: Number(process.env.CT_DEPOSIT_INTO_MS ?? 0), heldNote: process.env.CT_HELD_NOTE === "1" }, chain: CHAIN, pool: PIN.pool, anvil: ANVIL, slots: SLOTS, helperSender: sender.sender, steps: [], txs: [], helperCalls, helperLines, refusedHosts: {}, plain: PLAIN };
+const record = { by: "packages/signpage/scripts/pool-fork-evm-carry-withdraw.mjs", run, providers: { delays: HOST_DELAYS, delayMedianMs: DELAY_MEDIAN, lagHost: LAG_HOST, ownersCase: OWNERS, keyedWide: KEYED_WIDE, ownersRefused, intoMs: Number(process.env.CT_DEPOSIT_INTO_MS ?? 0), heldNote: process.env.CT_HELD_NOTE === "1" }, chain: CHAIN, pool: PIN.pool, anvil: ANVIL, slots: SLOTS, helperSender: sender.sender, steps: [], txs: [], helperCalls, helperLines, refusedHosts: {}, plain: PLAIN };
 const failures = [];
 const step = (name, o, ok) => {
   record.steps.push({ name, atMs: Date.now() - t0, ok, ...o });
@@ -554,6 +585,7 @@ await guard("restore A", async () => {
   const bal = await balanceOf(A.w);
   step("restore A", { ms: Date.now() - s, block: r.block, notes: await statesOf(A.w), balance: bal }, true);
 });
+ownersOn = OWNERS;
 let uxNamer = null;
 // review of 584af1495, P2-2, CT_HELD_NOTE=1: a note of this device already in the pool and ready when the measured
 // deposit lands, so the queue's pass holds the period's fee and the landing's pass binds on that held fee (the chain's
@@ -591,7 +623,9 @@ const ux = await guard("U_X named", async () => {
   step("U_X named", { index: rec?.index, u: rec?.evm, refundId: rec?.id }, typeof rec?.evm === "string" && !used);
   return rec;
 });
-const floor = await readEvmPoolFloor(pageEvmPoolRpcs(CHAIN), PIN);
+// on the pool's pair as the page reads it (src/main.ts: the pool's `rpcs`, an evmPair whose seats walk the list), never
+// the list's first two as they stand (a seat that never connects, --owners-case, was then the read's end)
+const floor = await readEvmPoolFloor(evmPair(pageEvmPoolRpcs(CHAIN)), PIN);
 log("floor", { floor, ladderMin: EVM_LADDER.min });
 // when the page is first asked for the pool (the warm read of its history starts then: pool-testnet.ts evmWarm)
 let poolOfFirstMs = null;
@@ -729,10 +763,13 @@ const tap = async (pool, op, amount) => {
   const funds = await wd.funds(to.to);
   let m = checkPoolAmount(CHAIN, amount, funds);
   // a fixed amount the notes cannot make whole (the fees at the fork block set the notes' values: Robinhood run 7's one
-  // note of 2.887e14 made 7.8e13 or 2.18e14, not 1e14) is asked as the nearest lower amount the screen offers for it
-  if (!m.ok && m.code === "unplannable" && typeof m.below === "bigint" && m.below > 0n) {
-    plannedAs[op] = { asked: amount, below: m.below, above: m.above ?? null };
-    m = checkPoolAmount(CHAIN, fmt18(m.below), funds);
+  // note of 2.887e14 made 7.8e13 or 2.18e14, not 1e14) is asked as the nearest lower amount the screen offers for it;
+  // with none lower, the nearest higher one (card evm-trees-from-one-verified-source: the standard sizes plan a note of
+  // the least rung only whole, so 0.0001 of it answered unplannable with `above` alone, 979,555,198,654,428 wei, Base
+  // mainnet copy of 15 Nov 01:02Z)
+  if (!m.ok && m.code === "unplannable" && ((typeof m.below === "bigint" && m.below > 0n) || typeof m.above === "bigint")) {
+    plannedAs[op] = { asked: amount, below: m.below ?? null, above: m.above ?? null };
+    m = checkPoolAmount(CHAIN, fmt18(typeof m.below === "bigint" && m.below > 0n ? m.below : m.above), funds);
   }
   if (!m.ok) throw new Error(`the amount is refused: ${JSON.stringify(m, big)}`);
   if (typeof wd.handoff !== "function") throw new Error("the screen has no run for this chain");
@@ -845,7 +882,7 @@ await guard("first leaf: a ready proof inside its first minute", async () => {
   const at = found === null ? Date.now() : readyAt.get(depNote.id).at;
   const windows = depAtMs === null ? null : windowMax(depAtMs - 10_000, at, depAtMs);
   const deployPages = depAtMs === null ? null : hostSends.filter((x) => x.m === "eth_getLogs" && x.from !== undefined && BigInt(x.from) === PIN.fromBlock && x.at > depAtMs - 10_000 && x.at <= at).length;
-  step("first leaf: a ready proof inside its first minute", { ...first, reads, pushReads, hostWindowMax: windows, deployPages, poolOfFirstMs: poolOfFirstMs === null || depAtMs === null ? null : poolOfFirstMs - depAtMs, readyMsAfterDeposit: found === null ? null : at - depAtMs, root: found?.root ?? null, proofEpochStartMs: found?.epochStartMs ?? null, deadlineMs: found?.deadlineMs ?? null }, found !== null && sizeBefore === (HELD ? 1 : 0) && sizeAtDep === sizeBefore + 1 && at - depAtMs < EPOCH && found.root === "newest" && found.epochStartMs === BigInt(epochOf(depAtMs)));
+  step("first leaf: a ready proof inside its first minute", { ...first, reads, pushReads, hostWindowMax: windows, deployPages, poolOfFirstMs: poolOfFirstMs === null || depAtMs === null ? null : poolOfFirstMs - depAtMs, readyMsAfterDeposit: found === null ? null : at - depAtMs, root: found?.root ?? null, proofEpochStartMs: found?.epochStartMs ?? null, deadlineMs: found?.deadlineMs ?? null }, found !== null && (!HELD || sizeBefore >= 1) && sizeAtDep === sizeBefore + 1 && at - depAtMs < EPOCH && found.root === "newest" && found.epochStartMs === BigInt(epochOf(depAtMs)));
   // card evm-first-proof-inside-ten-seconds: the proof ready inside READY_MS of the deposit's block, every pool host sent
   // at most HOST_WINDOW_BOUND requests (each of a batch counted) in any 10 s window from 10 s before that block to the
   // proof, and no log read from the pool's deploy block among them
@@ -877,7 +914,7 @@ await guard("withdraw: the first leaf, tapped inside its first minute", async ()
   txsOf(o.op, "withdraw first leaf");
   const got = (await toBalance()) - toWas;
   const noLeaf = await noLeafRead(o.op, epochOf(tapChainMs));
-  step("withdraw: the first leaf, tapped inside its first minute", { ...first, sizeAtTap: size, depthAtTap: depthOfSize(size), tapChainMs, tapEpochStartMs: epochOf(tapChainMs), tapMsAfterDeposit: tapChainMs - depAtMs, runMs, sentMs: seenAt.wfirst.wallMs - s, end, ...o, arrived: got, asked: ready.amount, noLeaf }, end === "sent" && got === ready.amount && sizeAtDep === 1 && epochOf(tapChainMs) === epochOf(depAtMs) && noLeaf.cut === "no_leaf" && noLeaf.boundStateRoot !== null && noLeaf.boundStateRoot === noLeaf.poolRootAtDeposit);
+  step("withdraw: the first leaf, tapped inside its first minute", { ...first, sizeAtTap: size, depthAtTap: depthOfSize(size), tapChainMs, tapEpochStartMs: epochOf(tapChainMs), tapMsAfterDeposit: tapChainMs - depAtMs, runMs, sentMs: seenAt.wfirst.wallMs - s, end, ...o, arrived: got, asked: ready.amount, noLeaf }, end === "sent" && got === ready.amount && sizeAtDep === sizeBefore + 1 && epochOf(tapChainMs) === epochOf(depAtMs) && noLeaf.cut === (sizeBefore === 0 ? "no_leaf" : "a leaf") && noLeaf.boundStateRoot !== null && noLeaf.boundStateRoot === noLeaf.poolRootAtDeposit);
 });
 await guard("withdraw: the second, at depth 1", async () => {
   const AMOUNT = "0.0001";
@@ -917,7 +954,7 @@ await guard("withdraw: the second, at depth 1", async () => {
   const o = await opOf("wsecond");
   txsOf(o.op, "withdraw second");
   const got = (await toBalance()) - toWas;
-  step("withdraw: the second, at depth 1", { changeShownMs, windowRows, sizeAtTap: size, depthAtTap: depthOfSize(size), runMs, sentMs: seenAt.wsecond.wallMs - s, end, ...o, arrived: got, asked: ready.amount }, end === "sent" && got === ready.amount && depthOfSize(size) === 1);
+  step("withdraw: the second, at depth 1", { changeShownMs, windowRows, sizeAtTap: size, depthAtTap: depthOfSize(size), runMs, sentMs: seenAt.wsecond.wallMs - s, end, ...o, arrived: got, asked: ready.amount }, end === "sent" && got === ready.amount && depthOfSize(size) >= 1);
 });
 const inPoolMs = stageAt.in_pool === undefined ? null : stageAt.in_pool - carryAt;
 // the follow's end reads the deposit final on both RPCs

@@ -50,7 +50,17 @@
 //                           not { jsonrpc: "2.0", id, method, params? } with an integer or string id and object or array
 //                           params, and a method off the list in any request of a batch.
 import { AsyncLocalStorage } from "node:async_hooks";
-import { evmPoolVenues, HELPER_SOLANA_BLOCK_HEADER } from "@blindfill/kit";
+import {
+  evmPoolVenues,
+  HELPER_SOLANA_BLOCK_HEADER,
+  SOLANA_AMM_V4_PROGRAM,
+  SOLANA_CPMM_PROGRAM,
+  SOLANA_DLMM_PROGRAM,
+  SOLANA_SOL_MINT,
+  solanaAmmV4PoolScan,
+  solanaCpmmPoolScan,
+  solanaDlmmPairScan,
+} from "@blindfill/kit";
 import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_CLIENTS, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
@@ -686,6 +696,32 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
 }
 
 /**
+ * getProgramAccounts of a coin's SOL pools only as the kit's pool scans (card solana-buy-reaches-raydium-and-meteora):
+ * Meteora DLMM (solanaDlmmPairScan, readSolanaDlmmPairs), Raydium CPMM (solanaCpmmPoolScan, readSolanaCpmmPools) and
+ * Raydium AMM v4 (solanaAmmV4PoolScan, readSolanaAmmV4Pools), which the signing page sends: the pools of one coin and
+ * wSOL, by the pool's size and both mints, addresses only, the coin on either side. The request must equal that
+ * program's scan for its two mints, key for key, one of them wSOL and the other another 32-byte address; one mint alone,
+ * no size, any bytes of the pools or any other filter would sweep the program on the keyed provider's quota. Anything
+ * else is refused before any call. Route A only (the solana route), as every scan there.
+ */
+const POOL_SCANS: Readonly<Record<string, (x: string, y: string) => readonly unknown[]>> = Object.freeze({
+  [SOLANA_DLMM_PROGRAM]: solanaDlmmPairScan,
+  [SOLANA_CPMM_PROGRAM]: solanaCpmmPoolScan,
+  [SOLANA_AMM_V4_PROGRAM]: solanaAmmV4PoolScan,
+});
+function poolScanAllowed(r: Record<string, unknown>): boolean {
+  const p = r.params;
+  if (!Array.isArray(p) || p.length !== 2 || typeof p[0] !== "string" || !Object.hasOwn(POOL_SCANS, p[0]) || !isPlain(p[1])) return false;
+  const f = p[1].filters;
+  if (!Array.isArray(f) || f.length !== 3) return false;
+  const mint = (x: unknown): string | null => (isPlain(x) && isPlain(x.memcmp) && typeof x.memcmp.bytes === "string" && x.memcmp.bytes.length <= 44 && base58Bytes(x.memcmp.bytes)?.length === 32 ? x.memcmp.bytes : null);
+  const x = mint(f[1]);
+  const y = mint(f[2]);
+  if (x === null || y === null || x === y || (x !== SOLANA_SOL_MINT && y !== SOLANA_SOL_MINT)) return false;
+  return JSON.stringify(p) === JSON.stringify(POOL_SCANS[p[0]]!(x, y));
+}
+
+/**
  * getBlock only as a header read (card buy-spends-several-pieces): the signing page reads the finalized height of one
  * block, the one a found W's latest transaction is in (packages/signpage/src/pool-sell.ts foundQuiet), as params exactly
  * [slot, the kit's HELPER_SOLANA_BLOCK_HEADER] (finalized, json, transactionDetails none, rewards false,
@@ -730,7 +766,7 @@ function check(chain: RpcChain, r: unknown, scan: readonly string[] = []): Recor
   if (!((typeof id === "number" && Number.isSafeInteger(id)) || (typeof id === "string" && id.length <= ID_MAX))) return undefined;
   if (typeof r.method !== "string" || !RPC_METHODS[chain].includes(r.method)) return undefined;
   if (Object.hasOwn(r, "params") && !isPlain(r.params) && !Array.isArray(r.params)) return undefined;
-  if (r.method === "getProgramAccounts" && !scanAllowed(r, scan)) return undefined;
+  if (r.method === "getProgramAccounts" && !scanAllowed(r, scan) && !(chain === "solana" && poolScanAllowed(r))) return undefined;
   if (r.method === "getBlock" && !blockHeaderAllowed(r)) return undefined;
   const out: Record<string, unknown> = { jsonrpc: "2.0", id, method: r.method };
   if (Object.hasOwn(r, "params")) out.params = r.params;

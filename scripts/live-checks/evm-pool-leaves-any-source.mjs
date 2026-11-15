@@ -18,6 +18,7 @@
 // INCONCLUSIVE; a sync refused on logs whose trees are not the pool's, or with every provider answering, FAILs.
 // Pure reads of public RPCs and the helper's route: no key, no write.
 // After: helper
+// Serial: evm-keyed 20
 //   node scripts/live-checks/evm-pool-leaves-any-source.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (provider-answer.mjs EXIT)
 // --record writes every answer read, as the good run of evm-pool-leaves-any-source.answers.json, and the bad run: the
