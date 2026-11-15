@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LEND_NEW_SHARES } from "../limits/limits.ts";
 import * as proxyModule from "./proxy.ts";
-import { ANSWER_MAX, createProxy, PROXY_BODY_MAX, PROXY_RESERVE, PROXY_USER_ROOM, readKeys, resetMs, WAIT_MAX_MS } from "./proxy.ts";
+import { ANSWER_MAX, createProxy, PROXY_BODY_MAX, PROXY_RESERVE, readKeys, resetMs, WAIT_MAX_MS } from "./proxy.ts";
 // read off the module, so this file still loads at a base without it
 const QUEUE_POLL_MS = (proxyModule as unknown as { QUEUE_POLL_MS?: number }).QUEUE_POLL_MS ?? 250;
 // read off the module, so this file still loads at a base without them and its tests fail on the behaviour (red runs)
@@ -265,9 +265,9 @@ test("each vendor is one budget callers draw from fairly: a heavy caller is lent
   const p = createProxy({ ...ENV, ...WIDE }, { burstMs: 0, fetch: f.fetch, now: () => (c.add(1), c.now()), sleep: async () => {} });
   // past its share the heavy caller is lent from the idle total (lend) while a share stays free for the next caller
   const part = PROXY_VENDOR_MAX - PROXY_BUDGETS.jupiter!.reserve!;
-  // fold 4: three shares stay free for callers not seen yet; card solana-buy-from-cash-quotes: and a lent caller, as
-  // a background read, leaves the devices' PROXY_USER_ROOM (trades first)
-  const lent = part - PROXY_USER_ROOM.jupiter - LEND_NEW_SHARES * PROXY_CLIENT_MAX;
+  // fold 4: three shares stay free for callers not seen yet (card solana-buy-from-cash-quotes: a lent caller alone in
+  // the window yields no PROXY_USER_ROOM; beside another caller it does, crowd.test.ts)
+  const lent = part - LEND_NEW_SHARES * PROXY_CLIENT_MAX;
   for (let i = 0; i < lent; i++) assert.equal((await p.handle("jupiter", "/swap/v2/build", `n=${i}`, "", "heavy")).status, 200, `build ${i}`);
   const h = await p.handle("jupiter", "/swap/v2/build", "n=x", "", "heavy");
   assert.equal(h.status, 429);

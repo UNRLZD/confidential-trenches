@@ -529,9 +529,8 @@ export function clientWindow(max: number, now: () => number = Date.now, windowMs
 export const LEND_FREE_SHARES = 2;
 /** The shares a lent caller leaves free for callers not seen yet in the vendor's window, beside one for each caller
  * seen (card helper-crowd-429 fold 4: with one, a heavy device and one user drawing inside its share refused a third
- * first-time user for up to a minute). A lone heavy device, lent as a background draw (card solana-buy-from-cash-quotes),
- * draws 60 - 6 - 24 - 3 * 4 = 18 of Jupiter's minute: the total less the cold page's floor, the callers' userRoom and
- * the shares kept. */
+ * first-time user for up to a minute). A lone heavy device draws 54 - 3 * 4 = 42 of Jupiter's callers' part a minute,
+ * less what the own reads drew; beside another caller it also leaves the userRoom (card solana-buy-from-cash-quotes). */
 export const LEND_NEW_SHARES = 3;
 /** `tradesFirst` (card solana-buy-from-cash-quotes, the vendors' keys in ../proxy/proxy.ts): the reserve is a cold page's
  *  floor and the userRoom what the own reads nobody waits for leave the callers (totalWait). */
@@ -693,10 +692,13 @@ export function upstreamBudget(limitsOf: (key: string) => BudgetLimits, now: () 
       const heavy = lim.lend === true && client !== undefined && !shareOnly && (overShare || drawnBy(key, client, t, lim) + n > (lentIn(key, client, t, lim) ? lim.perClient : Math.min(LEND_FREE_SHARES * lim.perClient, Math.ceil((lim.total - (lim.reserve ?? 0)) / 2))));
       if (heavy) {
         markLent(key, client, t);
-        const keep = lim.perClient * (LEND_NEW_SHARES + activeOthers(key, client, t, lim));
-        // card solana-buy-from-cash-quotes: a lent caller goes behind the others as a background read does, leaving the
-        // key's userRoom free too, so the callers' larger part never lets one heavy device crowd another's trade
-        const tk = totalWait(key, n + keep, t, lim, reserved, true);
+        const others = activeOthers(key, client, t, lim);
+        const keep = lim.perClient * (LEND_NEW_SHARES + others);
+        // card solana-buy-from-cash-quotes: beside another caller with a draw in the vendor's window, a lent caller goes
+        // behind the callers as a background read does, leaving the key's userRoom free too, so one heavy device never
+        // crowds another's trade (crowd folds 3 and 4); alone, it is served while the vendor has room (a live check's
+        // runner: local solana-jupiter-build runs 2 and 3 at 006fc4d25, our 503 "budget" with Jupiter idle)
+        const tk = totalWait(key, n + keep, t, lim, reserved, background || others > 0);
         if (tk > wait) (wait = tk), (refusedBy = `${key} ${overShare ? "share" : "total"}`);
       } else if (overShare) {
         const s = toWindowEnd(t, windowMs);
