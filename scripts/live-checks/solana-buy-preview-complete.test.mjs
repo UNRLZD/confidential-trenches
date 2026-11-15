@@ -87,3 +87,33 @@ test("the minified lines this card's build spells: PASS; each one changed so its
     assert.deepEqual(judge(facts(INDEX(js), js)).lines, want.map((m) => `BAD ${SAYS[m]}`), `${mark}: ${js.slice(0, 80)}`);
   }
 });
+
+// card you-receive-on-every-chain: the proofs read by one shared read, and the out written once as an awaited read for
+// both answers that carry it (one tap's, and the one that moves from Cash)
+const SHARED = JS.replace(
+  ",l=await e.ready();",
+  ",l=await a(o,s,r);if(`error`in l)return l;",
+).replace(
+  "let y=_z(await c),b=y!==void 0&&u.decimals!==void 0&&y.expectedOut>0n?WV(y.expectedOut,u.decimals):void 0;return{result:{tap_max:f,pieces:v.length,cost:A2(v.reduce((e,t)=>e+t.binding.feeCap,n(v.length))),...b===void 0?{}:{out:b}}}};",
+  "let g=async()=>{let e=_z(await c);return e!==void 0&&u.decimals!==void 0&&e.expectedOut>0n?WV(e.expectedOut,u.decimals):void 0};if(i<=d){let e=O2(m,h,u,p,n,i);if(e===null)return{result:{tap_max:f}};let t=await g();return{result:{tap_max:f,...e.pieces===void 0?{}:{pieces:e.pieces},cost:A2(e.cost),...t===void 0?{}:{out:t}}}}",
+);
+
+test("the shared read and the awaited out (card you-receive-on-every-chain): PASS; the quote after the read, from another pick, with no decimals, off another quote, or no out: FAIL, that mark named", () => {
+  assert.notEqual(SHARED, JS);
+  assert.deepEqual(judge(facts(INDEX(SHARED), SHARED)).lines, []);
+  const cuts = [
+    ["quote", SHARED.replace(",l=await a(o,s,r);", ";await 0;let l=await a(o,s,r);")],
+    ["quote", SHARED.replace(".catch(()=>null)", "")],
+    ["out", SHARED.replace("let e=_z(await c)", "let e=vz(await c)")],
+    ["out", SHARED.replace("WV(e.expectedOut,u.decimals)", "String(e.expectedOut)")],
+    ["out", SHARED.replace("_z(await c)", "_z(await z)")],
+    ["out", SHARED.replace(",...t===void 0?{}:{out:t}", "")],
+    ["out", SHARED.replace("let t=await g();", "let t=await h();")],
+  ];
+  for (const [mark, js] of cuts) {
+    assert.notEqual(js, SHARED, mark);
+    const r = judge(facts(INDEX(js), js));
+    assert.equal(r.ok, false, `${mark}: ${js.slice(0, 80)}`);
+    assert.ok(r.lines.includes(`BAD ${SAYS[mark]}`), `${mark}: ${r.lines.join(" | ")}`);
+  }
+});

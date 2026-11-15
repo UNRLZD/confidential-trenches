@@ -112,6 +112,21 @@ function cashUsdcExact(units: bigint, p: Pick<PoolStatePrice, "price" | "expo">,
   return (num + den - 1n) / den;
 }
 
+/** What a move of Cash for `short` base units of `chain`'s pool coin costs for good (card you-receive-on-every-chain: a
+ *  buy above one tap's spend moves it first, cashFirst), in that coin's base units at the device's price, rounded up so
+ *  a Fee never reads under: the vault withdraw's relay `fee` (USDC) and the margin the move asks Cash at
+ *  (CASH_MARGIN_BPS of cashUsdcFor's USDC: 1Click's slippage and fees and the follow's deposit costs, with room). The
+ *  rest of the USDC arrives in the pool as the user's own. Null with no price or no shortfall. */
+export function moveCostOf(short: bigint, fee: bigint, p: Pick<PoolStatePrice, "price" | "expo">, chain: PoolChain = "solana"): bigint | null {
+  const usdc = cashUsdcFor(short, p, chain);
+  const px = priceOf(p);
+  if (usdc === null || px === null || fee < 0n) return null;
+  const margin = (usdc * CASH_MARGIN_BPS + 10_000n + CASH_MARGIN_BPS - 1n) / (10_000n + CASH_MARGIN_BPS);
+  const num = (fee + margin) * px.d * 10n ** BigInt(POOL_DECIMALS[chain]);
+  const den = px.n * 10n ** 6n;
+  return (num + den - 1n) / den;
+}
+
 /** USDC (6 decimals) a move asks for `short` base units of `chain`'s pool coin (lamports on Solana, wei on Base and
  *  Robinhood) at the device's price: the shortfall plus the ladder's least rung, plus CASH_MARGIN_BPS, rounded up; null
  *  with no price or no shortfall. */
@@ -606,6 +621,10 @@ export type CashToPoolDeps = {
    *  solanaTapMaxOf; Base and Robinhood: the largest ready note, state.pools' tap_max); 0n when none. Throws when the
    *  coin's venue is not read: the tap then moves nothing from Cash. */
   tapMax(chain: PoolChain, token: string): Promise<bigint>;
+  /** Solana (card you-receive-on-every-chain): the least shortfall a move must bring so one tap pays `amount` (src/pools.ts
+   *  solanaMoveShort: each note the move brings is its own W, with its own relay fee, tip and rent), the size
+   *  pool.buy.dry prices; null: `amount` less tapMax. */
+  short?(chain: PoolChain, token: string, amount: bigint): Promise<bigint | null>;
   /** cashMover's need: the op id of the move on its way for it, or null. */
   need(chain: PoolChain, short: bigint): Promise<string | null>;
   wait(ms: number): Promise<void>;
@@ -631,7 +650,9 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
       // a tap read that throws (Solana: the coin's venue not read, solanaTapMaxOf) moves nothing from Cash: the pool buy
       // reads the venue itself and answers its refusal at once
       const now = (await d.any(chain)) ? await d.tapMax(chain, token).catch(() => null) : ask.amount;
-      const short = now !== null && now < ask.amount ? want(now) : null;
+      // Solana: sized as pool.buy.dry prices it, so the notes the move brings pay the rest with their own Ws' costs
+      const sized = now !== null && now < ask.amount && chain === "solana" && d.short ? await d.short(chain, token, ask.amount).catch(() => null) : null;
+      const short = now !== null && now < ask.amount ? (sized ?? want(now)) : null;
       const op = short === null ? null : await d.need(chain, short);
       if (op !== null) {
         try {

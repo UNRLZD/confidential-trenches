@@ -1525,3 +1525,30 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
   if (out.written.length > 0) log(`near holdings: ${out.written.length} record(s) rebuilt`);
   return out;
 }
+
+/**
+ * pool.buy.dry on NEAR (card you-receive-on-every-chain): what a NEAR buy of `amount` USDC of Cash (base units, the
+ * ask's own: the fees inside it) would get and cost, from the device's own reads before any signature. `tap_max`: the
+ * Cash a buy can spend now (the free UNSPENT notes of the vault's scope, as the buy's own pick reads them). With an
+ * amount: the buy's own plan (planCashSpend over those notes at the page's fee, as the buy plans it); `cost`, what it
+ * draws in fees (the ask less what W swaps), in whole USDC; `out`, one quote of what W swaps (the kit's rheaQuote on the
+ * page's pair, its amountOut: the venue's fees and the token's buy fee taken off), in whole tokens at the token's
+ * decimals; left out when that read fails. No plan: tap_max alone. Signs nothing, writes nothing, sends nothing.
+ */
+export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "fee" | "rpcs" | "pools" | "decimals">, token: string, amount: bigint | null, quote: NearBuyDeps["quote"] = async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) })): Promise<{ result: { tap_max: string; cost?: string; out?: string } } | { error: "not_allowed" | "not_funded" }> {
+  const scope = vaultScope(page.network);
+  if (scope === null) return { error: "not_allowed" };
+  const free = (await (await page.notes()).list()).filter((n): n is NoteRecord & { leaf: NonNullable<NoteRecord["leaf"]> } => n.scope === scope && n.state === "UNSPENT" && n.leaf !== undefined);
+  const usdc = (u: bigint) => unitsOf(u, 6);
+  const tap = usdc(free.reduce((t, n) => t + n.leaf.value, 0n));
+  if (amount === null || amount <= 0n) return { result: { tap_max: tap } };
+  const fee = await page.fee();
+  const plan = planCashSpend(free.map((n) => ({ id: n.id, value: n.leaf.value })), amount, fee);
+  if (plan === null || plan.length === 0) return { result: { tap_max: tap } };
+  const swapped = plan.reduce((t, p) => t + p.part, 0n);
+  const out = await Promise.all([quote({ side: "buy", token, amountIn: swapped }), page.decimals ? page.decimals(token) : readNearDecimals(page.network, page.rpcs(), token)]).then(
+    ([q, d]) => (q.token === token && q.side === "buy" && q.amountIn === swapped && q.amountOut > 0n ? unitsOf(q.amountOut, d) : undefined),
+    () => undefined,
+  );
+  return { result: { tap_max: tap, cost: usdc(amount - swapped), ...(out === undefined ? {} : { out }) } };
+}

@@ -51,8 +51,9 @@ const pinned = (index) => {
 /** What the check keeps of the reads: the index, the served script's sha384, and the marks read from it. */
 export function facts(index, js) {
   const shown = SHOWN.exec(js);
-  // the box's state: `<v>=<onPool>?receiveShown(read,key,amount):null`, returned as its receive
-  const wiredM = shown ? new RegExp(`(?:^|[^\\w$.])(${N})=${N}\\?${esc(shown[1])}\\(${N},${N},${N}\\):null`).exec(js) : null;
+  // the box's state: `<v>=<onPool>?receiveShown(read,key,amount):null`, returned as its receive (card
+  // you-receive-on-every-chain: on the NEAR path too, `<onPool>||<path>===`near``)
+  const wiredM = shown ? new RegExp(`(?:^|[^\\w$.])(${N})=${N}(?:\\|\\|${N}===\`near\`)?\\?${esc(shown[1])}\\(${N},${N},${N}\\):null`).exec(js) : null;
   const wired = wiredM !== null && new RegExp(`[,{]receive:${esc(wiredM[1])}[,}]`).test(js);
   // the view: `<r>=<t>.receive,<p>=<r>===null?...:<r>.pending,<e>=<r>===null?...:`≈ ${fmt(<r>.out)} ${sym}``, drawn in
   // trade-receive with the pending mark
