@@ -1,6 +1,7 @@
 // node --test scripts/live-checks/evm-token-page-opens-any-coin.test.mjs: the live check replays recorded answers
 // (evm-token-page-opens-any-coin.answers.json). good: apps/helper at card/evm-token-page-opens-any-coin run on a Mac
-// against the real DexScreener, GeckoTerminal and public RPCs: PASS. bad_deployed: the deployed helper f166289d0 before
+// against the real DexScreener, GeckoTerminal and public RPCs: PASS; good_lists_down, the final commit's run with
+// Robinhood's lists 503 at the read: PASS. bad_deployed: the deployed helper f166289d0 before
 // the card, MOW's and DEGEN's page and holders 404 and DEGEN's chart and tape 404: FAIL. Made from the good answer: a
 // coin's page 404 or 503, a page for another token, a chart that is not a list of bars, an address that is no coin
 // answered 200, no CORS echo: each FAIL. The lists' bodies are cut to each row's token, the one field the check reads.
@@ -60,6 +61,12 @@ test("good: the branch helper's recorded run PASSes, both coins on no list at th
   assert.deepEqual(bad(r), []);
   assert.equal(r.ok, true);
   for (const c of COINS) assert.ok(r.lines.includes(`--  ${c.chain} ${c.symbol}: on no list at the read`), c.symbol);
+});
+
+test("good_lists_down: the final branch helper with Robinhood's lists 503 still opens MOW: PASS", async () => {
+  const r = await run(A.good_lists_down.run);
+  assert.deepEqual(bad(r), []);
+  assert.ok(r.lines.includes("--  robinhood MOW: lists answered 503"));
 });
 
 test("bad_deployed: the helper before the card (the coins' page and holders 404) FAILs, naming each", async () => {

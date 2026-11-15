@@ -356,6 +356,359 @@
    ]
   }
  },
+ "good_lists_down": {
+  "note": "apps/helper at card/evm-token-page-opens-any-coin 9584d7a46 run on a Mac (no vendor keys), 2026-11-15 20:44Z: Robinhood lists 503 (GeckoTerminal keyless budget on the Mac), MOW page, holders, chart and tape 200 regardless: PASS",
+  "run": {
+   "base": "http://127.0.0.1:8799",
+   "readAt": "2026-11-15T20:43:53.124Z",
+   "coins": {
+    "robinhood": {
+     "lists": {
+      "at": "2026-11-15T20:43:53.125Z",
+      "ms": 17,
+      "status": 503,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "29",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sun, 15 Nov 2026 20:43:53 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d"
+      },
+      "body": "{\"error\":{\"code\":\"upstream\"}}"
+     },
+     "token": {
+      "at": "2026-11-15T20:43:53.143Z",
+      "ms": 777,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "1700",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sun, 15 Nov 2026 20:43:53 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "total;dur=775",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-15T20:43:53.592Z",
+       "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+       "x-helper-source": "dexscreener"
+      },
+      "body": "{\"row\":{\"chain\":\"robinhood\",\"token\":\"0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa\",\"symbol\":\"MOW\",\"name\":\"MowCat\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1790956630,\"price_usd\":\"0.1547\",\"mc_usd\":\"154733203\",\"vol_24h_usd\":\"8236575.31\",\"chg_5m_bps\":null,\"chg_1h_bps\":null,\"chg_24h_bps\":182,\"liq_usd\":\"15474358.35\",\"holders\":null,\"top10_bps\":null,\"src\":\"dexscreener\",\"as_of_ms\":1794775433592,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"0\",\"buys_5m\":0,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"0\",\"chg_4h_bps\":null,\"buys_24h\":372,\"sells_24h\":373,\"buys_1h\":0,\"sells_1h\":0},\"decimals\":null,\"pool\":null,\"risk\":{\"mint_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794775433918},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794775433918},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775433592},\"top10_bps\":{\"v\":1318,\"src\":\"goplus\",\"as_of_ms\":1794775433918},\"dev_bps\":{\"v\":237,\"src\":\"goplus\",\"as_of_ms\":1794775433918},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775433592},\"holders\":{\"v\":11153,\"src\":\"goplus\",\"as_of_ms\":1794775433918},\"liq_usd\":{\"v\":\"15474358.35\",\"src\":\"geckoterminal\",\"as_of_ms\":1794775433592},\"age_s\":{\"v\":3818803,\"src\":\"geckoterminal\",\"as_of_ms\":1794775433592},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794775433918},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794775433918},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775433592},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775433592},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775433592}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+     },
+     "holders": {
+      "at": "2026-11-15T20:43:53.919Z",
+      "ms": 1,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "80",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sun, 15 Nov 2026 20:43:53 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-15T20:43:53.920Z",
+       "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+       "x-helper-source": "none"
+      },
+      "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794775433920}"
+     },
+     "candles": [
+      {
+       "at": "2026-11-15T20:43:53.921Z",
+       "ms": 3140,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-length": "243",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Sun, 15 Nov 2026 20:43:57 GMT",
+        "keep-alive": "timeout=65",
+        "server-timing": "evm-open;dur=3138, evm-queue;dur=3430;desc=\"8 posts: pace 1514 ms, in flight 1916 ms\", total;dur=3139",
+        "vary": "Origin",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-15T20:43:55.564Z",
+        "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"tf\":\"1m\",\"candles\":[[1794775380,\"0.156498397371088855558850817867\",\"0.156498397371088855558850817867\",\"0.156498397371088855558850817867\",\"0.156498397371088855558850817867\",\"0\"]],\"src\":\"chain\",\"own_from_s\":1794775380,\"as_of_ms\":1794775435564}"
+      }
+     ],
+     "trades": [
+      {
+       "at": "2026-11-15T20:43:57.060Z",
+       "ms": 1,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-length": "52",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Sun, 15 Nov 2026 20:43:57 GMT",
+        "keep-alive": "timeout=65",
+        "server-timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+        "vary": "Origin",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-15T20:43:55.564Z",
+        "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"trades\":[],\"src\":\"chain\",\"as_of_ms\":1794775435564}"
+      }
+     ]
+    },
+    "base": {
+     "lists": {
+      "at": "2026-11-15T20:43:57.062Z",
+      "ms": 2,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-encoding": "gzip",
+       "content-length": "4135",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sun, 15 Nov 2026 20:43:57 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin, Accept-Encoding",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-15T20:41:52.785Z",
+       "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"base\",\"lists\":{\"new\":[{\"token\":\"0x9d0fbeec2228ccd56826d432babad933f2bed32b\"},{\"token\":\"0x5f764e465792e235c4e81213a4cab66e8f22a19d\"},{\"token\":\"0x6c49299681cfb553f723cfd35ce187bca3664b07\"},{\"token\":\"0x30ed926b12d3a3f8e55cb87a6fc8591a7a0bba85\"},{\"token\":\"0x238c6ccc87c22c16952380b093c0d0e3b0c56b43\"},{\"token\":\"0xfa70e723ec586c627a3dcca486b8a949c0e1d5b9\"},{\"token\":\"0x06c635edbe6c8aed57b650bcaaad036d211809aa\"},{\"token\":\"0x2566622e996db50071279ee877b42598afb45294\"},{\"token\":\"0x3070bf762f49d77d8bbf08aa3e6343024ddb96af\"},{\"token\":\"0x15e774fed93c078e304d4edf0df6088d4b1660ec\"},{\"token\":\"0x323b0fa737fee3ce5928fef1619c52cb5bb9a083\"},{\"token\":\"0x07438ac8f117dcf9bfa710c5fd47554febde490e\"},{\"token\":\"0x0241db4350483b78f31856ab294474cb624ae83e\"},{\"token\":\"0xe0f6c3c619477839d6bc275548bb79fb0896cccc\"},{\"token\":\"0x2041df9196e32ce484990111d2229f4ada6d203c\"},{\"token\":\"0xb200000000000000000000c97bbf7c4b14281504\"},{\"token\":\"0x4446ec5aaad6ba8f730dd8f4e21e3e5bb184f73e\"},{\"token\":\"0x8a55a52d3d654e821bbef37e9302c2238c78cccc\"},{\"token\":\"0xee9e4a5a44faa31636278399a865f7ea6da79e11\"},{\"token\":\"0x7ad3a21f5cc614dd822e1948166fe29213596a22\"}],\"trending\":[{\"token\":\"0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2\"},{\"token\":\"0xef5997c2cf2f6c138196f8a6203afc335206b3c1\"},{\"token\":\"0xed664536023d8e4b1640c394777d34abaff1df8f\"},{\"token\":\"0x22af33fe49fd1fa80c7149773dde5890d3c76f3b\"},{\"token\":\"0xc0634090f2fe6c6d75e61be2b949464abb498973\"},{\"token\":\"0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf\"},{\"token\":\"0x9d0e8f5b25384c7310cb8c6ae32c8fbeb645d083\"},{\"token\":\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\"},{\"token\":\"0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00\"},{\"token\":\"0xb2000000000000000000007b9fcbd005511acbd5\"},{\"token\":\"0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee\"},{\"token\":\"0xb20000000000000000000078ee7ce2fe4908108c\"},{\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\"},{\"token\":\"0xb2000000000000000000004884b426556b92883d\"},{\"token\":\"0xe014d2a4da6e450f21b5050120d291e63c8940fd\"},{\"token\":\"0x311935cd80b76769bf2ecc9d8ab7635b2139cf82\"},{\"token\":\"0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380\"},{\"token\":\"0x6985884c4392d348587b19cb9eaaf157f13271cd\"}],\"trending_5m\":[{\"token\":\"0xc0634090f2fe6c6d75e61be2b949464abb498973\"},{\"token\":\"0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380\"},{\"token\":\"0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2\"},{\"token\":\"0xaeade897ee383ae4de2915a002db5fa4b11ca36c\"},{\"token\":\"0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00\"},{\"token\":\"0x0241db4350483b78f31856ab294474cb624ae83e\"},{\"token\":\"0x42069babe14fb1802c5cb0f50bb9d2ad6fef55e2\"},{\"token\":\"0x10f52295e129817e8e4b28da0dab067321ec2222\"},{\"token\":\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\"},{\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\"},{\"token\":\"0x29cc30f9d113b356ce408667aa6433589cecbdca\"},{\"token\":\"0xb20000000000000000000078ee7ce2fe4908108c\"},{\"token\":\"0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf\"},{\"token\":\"0xb2000000000000000000007b9fcbd005511acbd5\"},{\"token\":\"0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee\"},{\"token\":\"0x624e2e7fdc8903165f64891672267ab0fcb98831\"},{\"token\":\"0x6985884c4392d348587b19cb9eaaf157f13271cd\"}],\"trending_1h\":[{\"token\":\"0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2\"},{\"token\":\"0xef5997c2cf2f6c138196f8a6203afc335206b3c1\"},{\"token\":\"0xed664536023d8e4b1640c394777d34abaff1df8f\"},{\"token\":\"0x22af33fe49fd1fa80c7149773dde5890d3c76f3b\"},{\"token\":\"0xc0634090f2fe6c6d75e61be2b949464abb498973\"},{\"token\":\"0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf\"},{\"token\":\"0x9d0e8f5b25384c7310cb8c6ae32c8fbeb645d083\"},{\"token\":\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\"},{\"token\":\"0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00\"},{\"token\":\"0xb2000000000000000000007b9fcbd005511acbd5\"},{\"token\":\"0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee\"},{\"token\":\"0xb20000000000000000000078ee7ce2fe4908108c\"},{\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\"},{\"token\":\"0xb2000000000000000000004884b426556b92883d\"},{\"token\":\"0xe014d2a4da6e450f21b5050120d291e63c8940fd\"},{\"token\":\"0x311935cd80b76769bf2ecc9d8ab7635b2139cf82\"},{\"token\":\"0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380\"},{\"token\":\"0x6985884c4392d348587b19cb9eaaf157f13271cd\"}],\"graduating\":[]},\"as_of_ms\":1794775312785}",
+      "note": "body cut to each row token, the one field the check reads"
+     },
+     "token": {
+      "at": "2026-11-15T20:43:57.064Z",
+      "ms": 702,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "1692",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sun, 15 Nov 2026 20:43:57 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "total;dur=701",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-15T20:43:57.132Z",
+       "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+       "x-helper-source": "dexscreener"
+      },
+      "body": "{\"row\":{\"chain\":\"base\",\"token\":\"0x4ed4e862860bed51a9570b96d89af5e1b0efefed\",\"symbol\":\"DEGEN\",\"name\":\"Degen\",\"icon\":true,\"venue\":null,\"label\":null,\"created_s\":1704655845,\"price_usd\":\"0.0007162\",\"mc_usd\":\"25673295\",\"vol_24h_usd\":\"50328.7\",\"chg_5m_bps\":19,\"chg_1h_bps\":57,\"chg_24h_bps\":7,\"liq_usd\":\"204227.9\",\"holders\":null,\"top10_bps\":null,\"src\":\"dexscreener\",\"as_of_ms\":1794775437132,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"0.09\",\"buys_5m\":0,\"sells_5m\":2,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"470.96\",\"chg_4h_bps\":null,\"buys_24h\":523,\"sells_24h\":859,\"buys_1h\":14,\"sells_1h\":10},\"decimals\":null,\"pool\":null,\"risk\":{\"mint_auth\":{\"v\":true,\"src\":\"goplus\",\"as_of_ms\":1794775437280},\"freeze_auth\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794775437280},\"lp\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775437132},\"top10_bps\":{\"v\":6294,\"src\":\"goplus\",\"as_of_ms\":1794775437280},\"dev_bps\":{\"v\":0,\"src\":\"goplus\",\"as_of_ms\":1794775437280},\"snipers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775437132},\"holders\":{\"v\":1182896,\"src\":\"goplus\",\"as_of_ms\":1794775437280},\"liq_usd\":{\"v\":\"204227.9\",\"src\":\"geckoterminal\",\"as_of_ms\":1794775437132},\"age_s\":{\"v\":90119592,\"src\":\"geckoterminal\",\"as_of_ms\":1794775437132},\"tax\":{\"v\":{\"buy_bps\":0,\"sell_bps\":0},\"src\":\"goplus\",\"as_of_ms\":1794775437280},\"honeypot\":{\"v\":false,\"src\":\"goplus\",\"as_of_ms\":1794775437280},\"insiders_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775437132},\"bundlers_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775437132},\"fresh_bps\":{\"v\":null,\"src\":\"none\",\"as_of_ms\":1794775437132}},\"route\":\"unknown\",\"filling\":false,\"links\":{}}"
+     },
+     "holders": {
+      "at": "2026-11-15T20:43:57.766Z",
+      "ms": 1,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "80",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sun, 15 Nov 2026 20:43:57 GMT",
+       "keep-alive": "timeout=65",
+       "server-timing": "total;dur=0",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-15T20:43:57.766Z",
+       "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+       "x-helper-source": "none"
+      },
+      "body": "{\"holders\":[],\"total\":null,\"top_bps\":null,\"src\":\"none\",\"as_of_ms\":1794775437766}"
+     },
+     "candles": [
+      {
+       "at": "2026-11-15T20:43:57.767Z",
+       "ms": 2386,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-length": "260",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Sun, 15 Nov 2026 20:44:00 GMT",
+        "keep-alive": "timeout=65",
+        "server-timing": "evm-open;dur=2385, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=2386",
+        "vary": "Origin",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-15T20:44:00.152Z",
+        "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"tf\":\"1m\",\"candles\":[[1794775320,\"0.000712770485983424496457755092\",\"0.000712770485983424496457755092\",\"0.00071277025140481948159706287\",\"0.00071277025140481948159706287\",\"0.099372679381952721\"]],\"src\":\"chain\",\"own_from_s\":1794775320,\"as_of_ms\":1794775440152}"
+      }
+     ],
+     "trades": [
+      {
+       "at": "2026-11-15T20:44:00.153Z",
+       "ms": 1,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-length": "507",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Sun, 15 Nov 2026 20:44:00 GMT",
+        "keep-alive": "timeout=65",
+        "server-timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+        "vary": "Origin",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-15T20:44:00.152Z",
+        "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"trades\":[{\"t_ms\":1794775352000,\"side\":\"s\",\"usd\":\"0.06055483916799258\",\"amt\":\"84.957023737513312256\",\"trader\":\"0x257b01e8c858c2dc27cd7f4883127a47fd147767\",\"tx\":\"0xdd1139361ae0f93568ed452713c51dcb64b444bfbfa9ce66230cab7a2a50b510\"},{\"t_ms\":1794775351000,\"side\":\"s\",\"usd\":\"0.038817840213960141\",\"amt\":\"54.460504436294590464\",\"trader\":\"0xb38e981476ab83792bcec725c8247bedcbdc8c56\",\"tx\":\"0x777d4f809ef6d3576ea69645e5ab515126b758a2c42ff3e43a859138bc3f4bb6\"}],\"filling\":true,\"src\":\"chain\",\"as_of_ms\":1794775440152}"
+      },
+      {
+       "at": "2026-11-15T20:44:05.157Z",
+       "ms": 1,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-length": "507",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Sun, 15 Nov 2026 20:44:05 GMT",
+        "keep-alive": "timeout=65",
+        "server-timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+        "vary": "Origin",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-15T20:44:04.188Z",
+        "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"trades\":[{\"t_ms\":1794775352000,\"side\":\"s\",\"usd\":\"0.06055483916799258\",\"amt\":\"84.957023737513312256\",\"trader\":\"0x257b01e8c858c2dc27cd7f4883127a47fd147767\",\"tx\":\"0xdd1139361ae0f93568ed452713c51dcb64b444bfbfa9ce66230cab7a2a50b510\"},{\"t_ms\":1794775351000,\"side\":\"s\",\"usd\":\"0.038817840213960141\",\"amt\":\"54.460504436294590464\",\"trader\":\"0xb38e981476ab83792bcec725c8247bedcbdc8c56\",\"tx\":\"0x777d4f809ef6d3576ea69645e5ab515126b758a2c42ff3e43a859138bc3f4bb6\"}],\"filling\":true,\"src\":\"chain\",\"as_of_ms\":1794775444188}"
+      },
+      {
+       "at": "2026-11-15T20:44:10.159Z",
+       "ms": 1,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-length": "730",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Sun, 15 Nov 2026 20:44:10 GMT",
+        "keep-alive": "timeout=65",
+        "server-timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+        "vary": "Origin",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-15T20:44:09.190Z",
+        "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"trades\":[{\"t_ms\":1794775352000,\"side\":\"s\",\"usd\":\"0.06055483916799258\",\"amt\":\"84.957023737513312256\",\"trader\":\"0x257b01e8c858c2dc27cd7f4883127a47fd147767\",\"tx\":\"0xdd1139361ae0f93568ed452713c51dcb64b444bfbfa9ce66230cab7a2a50b510\"},{\"t_ms\":1794775351000,\"side\":\"s\",\"usd\":\"0.038817840213960141\",\"amt\":\"54.460504436294590464\",\"trader\":\"0xb38e981476ab83792bcec725c8247bedcbdc8c56\",\"tx\":\"0x777d4f809ef6d3576ea69645e5ab515126b758a2c42ff3e43a859138bc3f4bb6\"},{\"t_ms\":1794774932000,\"side\":\"s\",\"usd\":\"4.288022200954360726\",\"amt\":\"6004.876936833396459828\",\"trader\":\"0x64be223532c408b1c6d8067b3c2cb18dff77144d\",\"tx\":\"0x3f0a4c034ed117bf28ed3ea4fa38ba851ba3bcb9327bff66cc2bd792d7eff280\"}],\"filling\":true,\"src\":\"chain\",\"as_of_ms\":1794775449190}"
+      },
+      {
+       "at": "2026-11-15T20:44:15.162Z",
+       "ms": 4,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-length": "1402",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Sun, 15 Nov 2026 20:44:15 GMT",
+        "keep-alive": "timeout=65",
+        "server-timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+        "vary": "Origin",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-15T20:44:15.005Z",
+        "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"trades\":[{\"t_ms\":1794775352000,\"side\":\"s\",\"usd\":\"0.06055483916799258\",\"amt\":\"84.957023737513312256\",\"trader\":\"0x257b01e8c858c2dc27cd7f4883127a47fd147767\",\"tx\":\"0xdd1139361ae0f93568ed452713c51dcb64b444bfbfa9ce66230cab7a2a50b510\"},{\"t_ms\":1794775351000,\"side\":\"s\",\"usd\":\"0.038817840213960141\",\"amt\":\"54.460504436294590464\",\"trader\":\"0xb38e981476ab83792bcec725c8247bedcbdc8c56\",\"tx\":\"0x777d4f809ef6d3576ea69645e5ab515126b758a2c42ff3e43a859138bc3f4bb6\"},{\"t_ms\":1794774932000,\"side\":\"s\",\"usd\":\"4.288022200954360726\",\"amt\":\"6004.876936833396459828\",\"trader\":\"0x64be223532c408b1c6d8067b3c2cb18dff77144d\",\"tx\":\"0x3f0a4c034ed117bf28ed3ea4fa38ba851ba3bcb9327bff66cc2bd792d7eff280\"},{\"t_ms\":1794774833000,\"side\":\"s\",\"usd\":\"52.729474143981598949\",\"amt\":\"73807.865157432196108538\",\"trader\":\"0x0dcdc1aebdcbd699bfe192cf69d75cc11a1b8c80\",\"tx\":\"0x376b7a63bb193f7c988ec8c66e48d975cef9ed48cb730df0693f752906114a49\"},{\"t_ms\":1794774649000,\"side\":\"b\",\"usd\":\"74.339820226286573437\",\"amt\":\"103855.926018997338969193\",\"trader\":\"0x0dcdc1aebdcbd699bfe192cf69d75cc11a1b8c80\",\"tx\":\"0x63fcfb8f311c4999795b51eca513d13858042dd25554c4ded03c1a22c2cd0c1f\"},{\"t_ms\":1794774649000,\"side\":\"s\",\"usd\":\"0.022985632971373917\",\"amt\":\"32.313402751554371584\",\"trader\":\"0xa44a0665bca9b801ca283ea9d9a3c8cc110bb071\",\"tx\":\"0xa51ee89deb6515539fc24530b8d20f251a5dc16f68bec8106e28019f53061e24\"}],\"filling\":true,\"src\":\"chain\",\"as_of_ms\":1794775455005}"
+      }
+     ]
+    }
+   },
+   "not": [
+    {
+     "chain": "base",
+     "address": "0x0000000000000000000000000000000000000001",
+     "read": {
+      "at": "2026-11-15T20:44:15.166Z",
+      "ms": 428,
+      "status": 404,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "30",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sun, 15 Nov 2026 20:44:15 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     }
+    },
+    {
+     "chain": "robinhood",
+     "address": "0x12",
+     "read": {
+      "at": "2026-11-15T20:44:15.595Z",
+      "ms": 1,
+      "status": 404,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-length": "30",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Sun, 15 Nov 2026 20:44:15 GMT",
+       "keep-alive": "timeout=65",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "9584d7a4609483fd42e9c10d161a35efec38b87d"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     }
+    }
+   ]
+  }
+ },
  "bad_deployed": {
   "note": "the deployed helper f166289d0 (release 156), 2026-11-15 20:32Z: MOW and DEGEN page and holders 404, DEGEN candles and tape 404: FAIL",
   "run": {
