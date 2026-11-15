@@ -82,6 +82,7 @@ import { isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, T
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
+import { exactRow, receiptFacts, type Facts } from "./vendor-rows.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -345,8 +346,12 @@ const INDEX_FOLLOW_MS = 5_000;
  *  rpc-robinhood.blockmachine.io serves without a key (-32002 "served for the most recent 5000 blocks only", read
  *  2026-11-05 03:3xZ)] */
 const INDEX_SLACK = 500;
+/** Every venue's swap event a tape reads (decodeSwap): the one list the live checks judge receipts by too (card
+ *  evm-tape-rows-exact: index-evm-swaps knew no Uniswap v2 or PancakeSwap v3 Swap, so a Base trade on a v2 pair the
+ *  helper served exactly, tx 0xf11eeadb in live run 43689580591, read as no pool). */
+export const SWAP_TOPICS: readonly string[] = [TOPIC.swap4, TOPIC.swap3, TOPIC.swapPancake, TOPIC.swap2, TOPIC.swapUni2, TOPIC.curveBuy, TOPIC.curveSell];
 /** The swap events the index holds: every venue's a tape reads (swapFilter, refFilter). */
-const INDEX_TOPICS = [TOPIC.swap4, TOPIC.swap3, TOPIC.swapPancake, TOPIC.swap2, TOPIC.swapUni2, TOPIC.curveBuy, TOPIC.curveSell, ...POOL_CALLS];
+const INDEX_TOPICS = [...SWAP_TOPICS, ...POOL_CALLS];
 
 /** Providers whose logs carry no block time on a chain timed by them (Robinhood): their logs are timed by their own
  *  `eth_getBlockByNumber` of each log's block, and count for a swap's time only where another provider logged the same. */
@@ -2334,14 +2339,23 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Its tape (card solana-trades-show-on-every-token, the Solana fix in every path: Base's SOGNI, 116k USD a day on an
    *  Aerodrome USDT pool our reads do not price, answered an empty tape on main 204ee6b8a, 14 Nov 17:3xZ): its top
    *  pool's newest trades (CoinGecko's keyed API first, else GeckoTerminal's), held TAPE_FRESH_MS, src theirs, dated by
-   *  their read; refused or failed with nothing held, the empty tape marked filling, so the page reads again. */
+   *  their read; refused or failed with nothing held, the empty tape marked filling, so the page reads again.
+   *  Each row is served only as its transaction's receipt shows it (vendor-rows.ts, card evm-tape-rows-exact): the
+   *  token's exact move for the vendor's float, the user operation's account for a bundle's bundler; a row whose
+   *  receipt is not read by `until` waits (the answer `filling`, read again by the page), one the receipt does not show
+   *  is never served. */
   const gtTapes = new Map<string, { at: number; rows: TapeRow[]; src: ChartSrc }>();
-  async function noneTrades(token: string, limit: number): Promise<DataAnswer> {
+  async function noneTrades(token: string, limit: number, lane: Lane, until: number): Promise<DataAnswer> {
     const none = empty({ trades: [] });
     if (deps.gecko === undefined) return none;
     const held = gtTapes.get(token);
-    const serve = (h: { at: number; rows: TapeRow[]; src: ChartSrc }): DataAnswer => ({ status: 200, body: JSON.stringify({ trades: h.rows.slice(0, limit), src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at });
-    const owed = (): DataAnswer => (held !== undefined ? serve(held) : empty({ trades: [], filling: true }));
+    const serve = async (h: { at: number; rows: TapeRow[]; src: ChartSrc }): Promise<DataAnswer> => {
+      const rows = h.rows.slice(0, limit);
+      await within(lanes.run(lane, () => exacting(token, rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
+      const { trades, waiting } = exactOf(token, rows);
+      return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at };
+    };
+    const owed = async (): Promise<DataAnswer> => (held !== undefined ? serve(held) : empty({ trades: [], filling: true }));
     if (held !== undefined && now() - held.at < TAPE_FRESH_MS) return serve(held);
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
@@ -2369,6 +2383,61 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (gtTapes.size >= POOLS_MAX) gtTapes.delete(gtTapes.keys().next().value!);
     gtTapes.set(token, h);
     return serve(h);
+  }
+  /** Each vendor row's receipt facts (vendor-rows.ts), by "token tx": "none" when two providers gave its receipt and it
+   *  shows no successful transaction of that hash; bounded as the traders are. */
+  const vendorFacts = new Map<string, Facts | "none">();
+  /** A token's decimals read at an agreed head (the token's own decimals(), two providers alike), for its vendor rows. */
+  const vendorDecimals = new Map<string, number>();
+  /** The decimals of `token` and the receipts of `txs` not held, read once each however many callers ask. */
+  async function exacting(token: string, txs: string[]): Promise<void> {
+    if (!vendorDecimals.has(token)) {
+      const head = await agreedHead();
+      if (head === null) return;
+      const [d] = await callsAgreed(head.n, [{ to: token, data: SEL.decimals }]);
+      const n = d !== undefined && /^0x[0-9a-f]{64}$/.test(d) ? Number(BigInt(d)) : NaN;
+      if (!Number.isInteger(n) || n > 77) return;
+      if (vendorDecimals.size >= POOLS_MAX) vendorDecimals.delete(vendorDecimals.keys().next().value!);
+      vendorDecimals.set(token, n);
+    }
+    const ask = [...new Set(txs)].filter((t) => !vendorFacts.has(`${token} ${t}`));
+    if (ask.length === 0) return;
+    const got = await agreed<Facts | "none">(
+      rpcs,
+      ask.length,
+      async (u, idx, patient) => {
+        const r = await batchTo(u, idx.map((i) => ({ method: "eth_getTransactionReceipt", params: [ask[i]] })), patient);
+        return idx.map((i, k) => {
+          const x = r?.[k];
+          // no receipt yet (a provider behind the vendor) is no answer; one that shows no trade of the hash is "none"
+          if (!x?.ok || x.result === null || typeof x.result !== "object") return null;
+          return receiptFacts(x.result, ask[i]!, token, V.poolManager) ?? "none";
+        });
+      },
+      (a, b) => JSON.stringify(a) === JSON.stringify(b),
+      false,
+    );
+    ask.forEach((t, i) => {
+      const f = got[i];
+      if (f == null) return;
+      if (vendorFacts.size >= TRADERS_MAX) vendorFacts.delete(vendorFacts.keys().next().value!);
+      vendorFacts.set(`${token} ${t}`, f);
+    });
+  }
+  /** The vendor's rows as their receipts show them, in the vendor's order; `waiting` when a row's receipt or the
+   *  token's decimals are not read yet. */
+  function exactOf(token: string, rows: TapeRow[]): { trades: TapeRow[]; waiting: boolean } {
+    const d = vendorDecimals.get(token);
+    let waiting = d === undefined;
+    const trades: TapeRow[] = [];
+    if (d !== undefined)
+      for (const r of rows) {
+        const f = vendorFacts.get(`${token} ${r.tx}`);
+        if (f === undefined) waiting = true;
+        const x = f === undefined || f === "none" ? null : exactRow(r.side, r.amt, d, f);
+        if (x !== null) trades.push({ ...r, amt: x.amt, trader: x.trader });
+      }
+    return { trades, waiting };
   }
   /** One GeckoTerminal read, its call already taken: the JSON, null on a 404, undefined on a 429 (the budget told), else
    *  "failed". */
@@ -2835,7 +2904,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         const trades = (held === undefined ? [] : tapeOf(held, limit)).map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
         return timed({ status: 200, body: JSON.stringify({ trades, filling: true, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
       }
-      if (e === "none") return timed(await noneTrades(t, limit));
+      if (e === "none") return timed(await noneTrades(t, limit, lane, until));
       if (!("book" in e)) return timed(e);
       const rows = tapeOf(e, limit);
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));

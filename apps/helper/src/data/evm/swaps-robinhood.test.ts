@@ -4,6 +4,7 @@
 // swaps are timed by the block times two providers logged alike, never by a clock; the curve is found from the Pons
 // factory's own record; no read asks more than the 100 blocks the keyless providers take.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
 import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, toLog, URLS } from "../../../test/evm-swaps/robinhood.ts";
@@ -568,6 +569,19 @@ test("fold 8: a book's trader lookups start once its first logs are read, alongs
   assert.ok(JSON.parse(a.body).trades.every((t: { trader: string | null }) => t.trader !== null), "every trade has its trader");
 });
 
+/** `chain`'s fetch, with eth_getTransactionReceipt answered from recorded mainnet receipts (fixtures/vendor-rows-receipts.json;
+ *  null for one not recorded, as a provider behind answers) and counted in `asked`. */
+function withReceipts(f: (url: string, init: RequestInit) => Promise<Response>, receipts: Record<string, unknown>) {
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body ?? "null")) as { id: number; method: string; params: unknown[] }[] | null;
+    if (!Array.isArray(reqs) || !reqs.every((r) => r.method === "eth_getTransactionReceipt")) return f(url, init);
+    asked.push(...reqs.map((r) => r.params[0] as string));
+    return new Response(JSON.stringify(reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, result: receipts[r.params[0] as string] ?? null }))), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return { fetch, asked };
+}
+
 test("card solana-trades-show-on-every-token: a listed token our reads find no pool of (Base SOGNI on an Aerodrome USDT pool, recorded) answers its top pool's trades for the token, newest first, src geckoterminal, never an empty tape; held TAPE_FRESH_MS", async () => {
   const { readFileSync } = await import("node:fs");
   const { geckoBudget } = await import("../gecko.ts");
@@ -577,10 +591,12 @@ test("card solana-trades-show-on-every-token: a listed token our reads find no p
   const answer = { data: R.trades.map(({ id, legs, ...a }) => ({ id, type: "trade", attributes: { ...a, from_token_address: legs.from[0], from_token_amount: legs.from[1], to_token_address: legs.to[0], to_token_amount: legs.to[1] } })) };
   const chain = fakeChain();
   chain.st.head = REC.lastHead;
+  // card evm-tape-rows-exact: each row as its receipt shows it (recorded on Base, two providers alike)
+  const rec = withReceipts(chain.fetch, (JSON.parse(readFileSync(new URL("./fixtures/vendor-rows-receipts.json", import.meta.url), "utf8")) as { sogni: Record<string, unknown> }).sogni);
   const clock = { t: Date.parse("2026-11-14T17:30:00Z") };
   const gtUrls: string[] = [];
   const fetch = async (url: string, init: RequestInit) => {
-    if (!url.startsWith(GT_BASE)) return chain.fetch(url, init);
+    if (!url.startsWith(GT_BASE)) return rec.fetch(url, init);
     gtUrls.push(url);
     if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: R.pool } }] }), { status: 200 });
     if (url.includes(`/pools/${R.pool}/trades?token=${R.coin}`)) return new Response(JSON.stringify(answer), { status: 200 });
@@ -595,14 +611,60 @@ test("card solana-trades-show-on-every-token: a listed token our reads find no p
   assert.equal(j.filling, undefined);
   assert.equal(j.trades.length, 6);
   const first = R.trades[0]!;
-  assert.deepEqual(j.trades[0], { t_ms: Date.parse(first.block_timestamp as string), side: "s", usd: j.trades[0]!.usd, amt: first.legs.from[1].replace(/0+$/, "").replace(/\.$/, ""), trader: (first.tx_from_address as string).toLowerCase(), tx: (first.tx_hash as string).toLowerCase() });
+  // the vendor's float 49434.9741586189 served as the token's exact move in its receipt
+  assert.deepEqual(j.trades[0], { t_ms: Date.parse(first.block_timestamp as string), side: "s", usd: j.trades[0]!.usd, amt: "49434.974158618859129157", trader: (first.tx_from_address as string).toLowerCase(), tx: (first.tx_hash as string).toLowerCase() });
   assert.match(j.trades[0]!.usd, /^\d+(\.\d{1,18})?$/);
   assert.ok(j.trades.slice(1).every((r) => r.side === "b"), "the recorded buys");
   assert.ok(j.trades.every((r, i) => i === 0 || r.t_ms <= j.trades[i - 1]!.t_ms));
   assert.equal((JSON.parse((await s.trades(R.coin, 2)).body) as { trades: unknown[] }).trades.length, 2);
   const calls = gtUrls.length;
+  const receipts = rec.asked.length;
+  assert.equal(receipts, 12, "each row's receipt read once on each of two providers, which must give it alike");
   clock.t += TAPE_FRESH_MS - 1;
   await s.trades(R.coin, 50);
   assert.equal(gtUrls.length, calls, "held while fresh");
+  assert.equal(rec.asked.length, receipts, "a receipt read is held: never read again");
   s.stop();
+});
+
+test("card evm-tape-rows-exact: a vendor row is served as its receipt shows it, the exact move of the token for the vendor's float and a bundle's user operation account for its bundler (Robinhood FOBMAS, live runs 43689567273 and 43689580591); a row whose receipt is not read waits, filling", async () => {
+  const { geckoBudget } = await import("../gecko.ts");
+  const { GT_BASE } = await import("./lists.ts");
+  const F = JSON.parse(readFileSync(new URL("./fixtures/vendor-rows-receipts.json", import.meta.url), "utf8")) as { robinhood: { coin: string; rows: { tx: string; side: "b" | "s"; amt: string; vendorTrader: string }[]; receipts: Record<string, unknown> } };
+  const { coin: token, rows } = F.robinhood;
+  const pool = "0x276782ac0abddcf6f6da1f4f33ea5ecf87d1e13c46567a253a25b57f20e1ed56";
+  const fobo = "0x000de658153f47f23e92973c8eb1e89762703676";
+  // the vendor's answer for the two recorded rows (GeckoTerminal's shape) and a third whose receipt no provider has
+  const late = `0x${"5a".repeat(32)}`;
+  const vendor = [...rows, { tx: late, side: "b" as const, amt: "1.5", vendorTrader: `0x${"77".repeat(20)}` }];
+  const answer = {
+    data: vendor.map((r, i) => ({
+      id: `robinhood_${i}`,
+      type: "trade",
+      attributes: { block_number: 114_800_000 - i, block_timestamp: "2026-11-15T07:20:00Z", tx_hash: r.tx, tx_from_address: r.vendorTrader, kind: r.side === "b" ? "buy" : "sell", volume_in_usd: "1.5", from_token_address: r.side === "b" ? fobo : token, from_token_amount: r.side === "b" ? "9" : r.amt, to_token_address: r.side === "b" ? token : fobo, to_token_amount: r.side === "b" ? r.amt : "9" },
+    })),
+  };
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const rec = withReceipts(chain.fetch, F.robinhood.receipts);
+  const clock = { t: Date.parse("2026-11-15T07:30:00Z") };
+  const fetch = async (url: string, init: RequestInit) => {
+    if (!url.startsWith(GT_BASE)) return rec.fetch(url, init);
+    if (url.includes("/pools?page=1")) return new Response(JSON.stringify({ data: [{ attributes: { address: pool } }] }), { status: 200 });
+    if (url.includes(`/pools/${pool}/trades?token=${token}`)) return new Response(JSON.stringify(answer), { status: 200 });
+    return new Response("{}", { status: 404 });
+  };
+  const s = open(chain, clock, { pools: new Map(), fetch: fetch as never, gecko: geckoBudget(() => clock.t) });
+  const a = await s.trades(token, 50);
+  s.stop();
+  assert.equal(a.status, 200, a.body);
+  const j = JSON.parse(a.body) as { trades: { amt: string; trader: string | null; tx: string; side: string }[]; filling?: boolean };
+  assert.deepEqual(
+    j.trades.map((r) => [r.tx.slice(0, 10), r.side, r.amt, r.trader]),
+    [
+      ["0xd2f5c29d", "b", "458642.37766139650870616", "0xd22e3afceed111eef9336ea0fe7533566d55e7b7"],
+      ["0x444e524c", "s", "82417.41435946235", "0x596c04b0d855049b2c45618099ff36de36214112"],
+    ],
+  );
+  assert.equal(j.filling, true, "the row whose receipt no provider gave waits, and the page reads again");
 });

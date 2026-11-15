@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { HEADER_TIMED, SWAP_RPCS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
+import { HEADER_TIMED, SWAP_RPCS, SWAP_TOPICS as HELPER_SWAP_TOPICS, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
 import * as check from "./index-evm-swaps.mjs";
 import { candlesFault, CANDLES_PATH, judge, read, TRADES_PATH, tradesFault, units } from "./index-evm-swaps.mjs";
 import { candlesReader } from "./candles-read.mjs";
@@ -86,6 +86,26 @@ test("read() asks the helper and the providers what the check judges: the replay
   for (const k of ["candles", "trades"]) delete again.reads[k].ms;
   assert.deepEqual(again.chain, A.good.chain);
   assert.deepEqual(judge(again).lines, judge(A.good).lines);
+});
+
+test("card evm-tape-rows-exact: a Base trade on a Uniswap v2 pair (0x448a311f's pair 0xa1c7fdff, recorded) is judged on its pool and passes; the check before the card found no pool in its receipts", () => {
+  const r = run(A.base_univ2);
+  assert.deepEqual(bad(r), []);
+  assert.equal(r.ok, true);
+  assert.ok(r.lines.some((l) => l.includes('share a pool: ["0xa1c7fdff4183914725aab884f5badde1fc2f9e55"]')));
+  assert.ok(r.lines.some((l) => /\d+ of \d+ sampled trades carry a Transfer of the token for exactly their amt/.test(l)));
+});
+
+test("card evm-tape-rows-exact: the same v2 tape with every amt one unit off its Transfer fails", () => {
+  const rec = structuredClone(A.base_univ2);
+  body(rec, "trades", (b) => b.trades.forEach((t) => (t.amt = t.amt.replace(/\d$/, (d) => String((Number(d) + 1) % 10)))));
+  const r = run(rec);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.includes("0 of 5 sampled trades carry a Transfer of the token for exactly their amt")), bad(r).join("\n"));
+});
+
+test("card evm-tape-rows-exact: the check knows every swap event the helper reads (written out in the check; Uniswap v2's and PancakeSwap v3's were missing)", () => {
+  assert.deepEqual([...check.SWAP_TOPICS].sort(), [...HELPER_SWAP_TOPICS].sort());
 });
 
 test("the deployed helper before this card fails", async () => {
@@ -647,9 +667,9 @@ const [BUSY, SIDE] = ["0x498581ff718922c3f8e6a244956af099b2652b2b:0xeae6a45e7b72
 /** PENNY's run with `n` more swap transactions of pool `key` inside the window, its logs read as the busiest's if so. */
 const withSwaps = (key, n) => {
   const rec = structuredClone(PENNY);
-  const s = rec.chain.shared.find((x) => x.key === key);
+  const s = rec.chain.shared.find((x) => x.pool === key);
   for (let i = 0; i < n; i++) s.logs.push({ blockNumber: hex(s.to - i), transactionHash: `0x${(i + 1).toString(16).padStart(64, "a")}` });
-  rec.chain.poolLogs = rec.chain.shared.find((x) => x.key === check.sharedCounts(rec.chain.shared, [BUSY, SIDE])[0].key);
+  rec.chain.poolLogs = rec.chain.shared.find((x) => x.pool === check.sharedCounts(rec.chain.shared, [BUSY, SIDE])[0].key);
   return rec;
 };
 
@@ -664,7 +684,7 @@ test("card helper-live-run-green-after-122: sampled trades that share two pools 
 test("card helper-live-run-green-after-122: the same tape PASSES where its own pool is the busier: the verdict follows the busier pool, never the receipts' log order", () => {
   const rec = withSwaps(SIDE, 1);
   // the one swap added is the tape's own trade's transaction: on the tape, nothing missing
-  rec.chain.shared.find((x) => x.key === SIDE).logs[0].transactionHash = JSON.parse(rec.reads.trades.body).trades[0].tx;
+  rec.chain.shared.find((x) => x.pool === SIDE).logs[0].transactionHash = JSON.parse(rec.reads.trades.body).trades[0].tx;
   const r = run(rec);
   assert.deepEqual(bad(r), []);
   assert.ok(r.lines.some((l) => l.includes(`judged on the busiest over the window, ${SIDE} 1 swap transaction, ${BUSY} 0 swap transactions`)), r.lines.join("\n"));
@@ -688,14 +708,14 @@ test("card helper-live-run-green-after-122: read() reads each shared key's logs 
     const req = JSON.parse(init.body);
     if (req.method !== "eth_getLogs") return replay(rec)(url, init);
     const q = req.params[0];
-    const s = rec.chain.shared.find((x) => x.key === `${q.address}:${q.topics[1]}`);
+    const s = rec.chain.shared.find((x) => x.pool === `${q.address}:${q.topics[1]}`);
     assert.ok(s, `${q.address} ${q.topics[1]}`);
     const [lo, hi] = [Number.parseInt(q.fromBlock, 16), Number.parseInt(q.toBlock, 16)];
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: s.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= lo && Number.parseInt(l.blockNumber, 16) <= hi).map((l) => ({ ...l, logIndex: "0x0" })) }), { status: 200 });
   };
   const again = await read("https://ct-api.unrealized.trade", rec.coin, f, undefined, "base", candlesReader(), async () => undefined);
-  assert.deepEqual(again.chain.shared.map((x) => [x.key, x.logs.length]), [[BUSY, 2], [SIDE, 0]]);
-  assert.equal(again.chain.poolLogs.key, BUSY);
+  assert.deepEqual(again.chain.shared.map((x) => [x.pool, x.logs.length]), [[BUSY, 2], [SIDE, 0]]);
+  assert.equal(again.chain.poolLogs.pool, BUSY);
 });
 
 test("card charts-say-coingecko: a Base chart from CoinGecko's paid plan before our first bar (recorded good_coingecko, X-Helper-Source chain,coingecko) PASSES; the same chart named by the vendor alone, or by a name the helper never gives, FAILs", () => {

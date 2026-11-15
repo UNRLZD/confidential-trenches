@@ -73,7 +73,10 @@ const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/;
 const DEC = /^\d+(\.\d+)?$/;
 const ADDR = /^0x[0-9a-f]{40}$/;
 const TX = /^0x[0-9a-f]{64}$/;
-const SWAP_TOPICS = [TOPIC.swap2, TOPIC.swap3, TOPIC.swap4, TOPIC.curveBuy, TOPIC.curveSell];
+/** Every venue's Swap event, written out here (its test holds it to the helper's swaps.ts SWAP_TOPICS): Uniswap v2's
+ *  and PancakeSwap v3's were missing, so a Base trade on a v2 pair read as no pool (card evm-tape-rows-exact: tx
+ *  0xf11eeadb, pool 0x3ad0473a, live run 43689580591). */
+export const SWAP_TOPICS = [TOPIC.swap2, TOPIC.swapUni2, TOPIC.swap3, TOPIC.swapPancake, TOPIC.swap4, TOPIC.curveBuy, TOPIC.curveSell];
 /**
  * ERC-4337 (card helper-deploy-reads-fast fold): a transaction sent to an EntryPoint is a bundle, whose `from` is the
  * bundler that paid the gas; each user operation's logs run from the EntryPoint's BeforeExecution, SignatureAggregatorChanged
@@ -227,7 +230,7 @@ export function freshAt(r, at, runAt, bound) {
 /**
  * The check on one run: { base, coin, readAt, reads: { candles, trades }, chain }, each read { at, ms, status, headers,
  * body } (at: its request's time), and chain what `read` took from the providers: { heads: [n..], headsAt, decimals,
- * receipts: { [tx]: receipt | null }, poolLogs: { key, from, to, logs } | null }.
+ * receipts: { [tx]: receipt | null }, poolLogs: { pool, from, to, logs } | null }.
  */
 export function judge(run) {
   const net = run.net ?? "base";
@@ -394,7 +397,7 @@ export function judge(run) {
   const oldestBlock = net === "base" ? blockOf(oldestT / 1000) : Infinity;
   const last = head - MARGIN[net];
   const timed = net === "base" || (isObj(pl) && Number.isSafeInteger(timeOf(pl.from)) && Array.isArray(pl.logs) && pl.logs.every((l) => Number.isSafeInteger(l.t)));
-  say(isObj(pl) && pl.key === pool && pl.to === last && pl.from <= oldestBlock && Array.isArray(pl.logs) && timed, `the pool's Swap logs read on two agreeing providers over blocks ${show(pl?.from)} to ${show(pl?.to)}${net === "base" ? "" : `, from ${show(timeOf(pl?.from))} s, every log with its block time`}`);
+  say(isObj(pl) && pl.pool === pool && pl.to === last && pl.from <= oldestBlock && Array.isArray(pl.logs) && timed, `the pool's Swap logs read on two agreeing providers over blocks ${show(pl?.from)} to ${show(pl?.to)}${net === "base" ? "" : `, from ${show(timeOf(pl?.from))} s, every log with its block time`}`);
   if (isObj(pl) && Array.isArray(pl.logs) && timed) {
     const onTape = new Set(trades.trades.map((t) => t.tx));
     const from = Math.max(pl.from, net === "base" ? oldestBlock + 1 : pl.from); // the oldest trade's block may hold more swaps than the tape
@@ -407,13 +410,13 @@ export function judge(run) {
   return withReads(run, lines);
 }
 
-/** Each shared key's swap transactions over the run's window (c.shared: [{ key, from, to, logs }] as read() reads them),
+/** Each shared key's swap transactions over the run's window (c.shared: [{ pool, from, to, logs }] as read() reads them),
  *  busiest first (ties: the order the keys came in), or null when the run read none; a key with no read is left out. */
 export function sharedCounts(shared, keys) {
   if (!Array.isArray(shared)) return null;
   const out = [];
   for (const [i, key] of keys.entries()) {
-    const s = shared.find((x) => isObj(x) && x.key === key && Array.isArray(x.logs));
+    const s = shared.find((x) => isObj(x) && x.pool === key && Array.isArray(x.logs));
     if (s !== undefined) out.push({ key, i, txs: new Set(s.logs.map((l) => l.transactionHash)).size });
   }
   return out.sort((a, b) => b.txs - a.txs || a.i - b.i).map(({ key, txs }) => ({ key, txs }));
@@ -598,7 +601,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
         if (!Array.isArray(logs)) return null;
         all.push(...logs);
       }
-      return { key: pool, from, to: last, logs: all.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, ...(net === "base" ? {} : { t: l.t }) })) };
+      return { pool, from, to: last, logs: all.map((l) => ({ blockNumber: l.blockNumber, transactionHash: l.transactionHash, ...(net === "base" ? {} : { t: l.t }) })) };
     };
     if (common.length === 1) run.chain.poolLogs = await poolLogsOf(common[0]);
     else {
@@ -609,7 +612,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
         if (got !== null) run.chain.shared.push(got);
       }
       const busiest = sharedCounts(run.chain.shared, common)?.[0]?.key;
-      run.chain.poolLogs = run.chain.shared.find((x) => x.key === busiest) ?? null;
+      run.chain.poolLogs = run.chain.shared.find((x) => x.pool === busiest) ?? null;
     }
   }
   if (net !== "base") {
