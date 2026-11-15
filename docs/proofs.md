@@ -11,7 +11,7 @@ Read on 2026-11-14 at 22:45Z, on `rpc.mainnet.fastnear.com` and `near.drpc.org`,
 | Access keys on `vault.confidential.unrlzd.near` | `[]` |
 | Code hash | `C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u`, the `code_hash` in [contracts/vault/deployments/mainnet-v1.json](../contracts/vault/deployments/mainnet-v1.json) |
 | `totals()` | deposited 11879349, spent 6403003, returned 0 (USDC, 6 decimals) |
-| USDC held by the vault | 5476346, equal to deposited minus spent minus returned |
+| USDC held by the vault | 5476346, equal to deposited minus spent plus returned, what the vault owes |
 
 The deployed code is the reproducible build of commit `e0623bf3`. Two builds on GitHub Actions (run 42355216946) and one on the team's Mac produced the same sha256 `a4a2af6960d93e5187271cf401ffe0e1a6f1ae5da0af1d82b1250eee313e87fc`, 230130 bytes. The deploy transaction is [`jZhfysps9zTyVUjoBKJmKJ2VKG3g6fnF8ooYrBQm6RG`](https://nearblocks.io/txns/jZhfysps9zTyVUjoBKJmKJ2VKG3g6fnF8ooYrBQm6RG).
 

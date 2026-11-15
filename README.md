@@ -10,11 +10,11 @@ Private trading that nobody can rob, not even us
 
 Blindfill sits under any wallet, terminal, trading bot or AI agent, and one import, `@blindfill/kit`, makes its users strangers on chain.
 Every chain NEAR Intents reaches can join, with fresh wallets of its own and the same private balance.
-We built it so any market with a pool on chain can trade privately, from memecoins to stock tokens. Money can already leave to any address.
+We built it so any market with a pool on chain can trade privately, from memecoins to stock tokens; this build reaches pump.fun, PumpSwap, Uniswap and Rhea pools. Money can already leave to any address on NEAR, Solana, Base or Robinhood Chain.
 
 [The app](https://confidential.unrealized.trade) | [The vault on NEAR](https://nearblocks.io/address/vault.confidential.unrlzd.near) | [Proofs](docs/proofs.md) | [Research and audits](research/README.md) | [Architecture](docs/architecture.md) | [Security](docs/security.md)
 
-Every claim on this page comes with a command you can run to check it: [docs/judges.md](docs/judges.md).
+The main claims on this page each come with a command you can run to check them: [docs/judges.md](docs/judges.md).
 
 Blindfill is the engine. Its vault on NEAR has no key, and its wallets live on your device, where each one carries a single trade. Apps plug in through one public entry, `@blindfill/kit`.
 
@@ -30,7 +30,7 @@ Private trading today asks you to trust someone with your money or your history,
 
 ### Nobody can take the money
 
-The vault has no access key, no owner, no upgrade path and no pause. Ask any NEAR RPC for its keys and you'll get `[]`. Money leaves only for a proof your device makes, and it goes only to the accounts named in that proof.
+The vault has no access key, no owner, no upgrade path and no pause. Ask any NEAR RPC for its keys and you'll get `[]`. Money leaves only for a proof your device makes, and it goes only to the accounts named in that proof. The one trust left is the signing page, which loads from our domain; the [security page](docs/security.md#the-signing-page-is-code-you-load-from-a-server) says how we narrow it.
 
 ### No record ties a trade to you
 
@@ -42,7 +42,7 @@ Your device makes its proofs in the background, so a buy paid from the pool on i
 
 ### Any chain, one balance
 
-Blindfill is built for any chain NEAR Intents reaches and any token with a pool there, all from one private balance. Money comes in from any chain NEAR Intents reaches. This build trades pump.fun and PumpSwap coins on Solana, Uniswap pools on Base and Robinhood Chain, and Rhea pools on NEAR.
+Blindfill is built for any chain NEAR Intents reaches and any token with a pool there, all from one private balance. Today money comes in as USDC on NEAR, Solana or Base, SOL on Solana, or ETH on Base or Robinhood Chain; more chains join through NEAR Intents. This build trades pump.fun and PumpSwap coins on Solana, Uniswap pools on Base and Robinhood Chain, and Rhea pools on NEAR. Its private buys on mainnet are recorded on Solana so far; on Base, Robinhood Chain and NEAR the mainnet buys on record ran from a test script before the build (Performance below).
 
 ### Orders with no key on our side
 
@@ -50,7 +50,7 @@ Orders are in Blindfill's design and not in this build: the app's order screens 
 
 ### Out with only your 12 words
 
-Switch off every server we run and the exit tool still brings your money home from the NEAR vault and the Solana pool, using your 12 words and public RPCs.
+The exit tool is built so that, with every server we run switched off, it still brings your money home from the NEAR vault and the Solana pool, using your 12 words and public RPCs. Its tests replay recorded chain reads; an exit on mainnet is not on record yet.
 
 ## Try it
 
@@ -66,15 +66,15 @@ The live app, signed out, read on 2026-11-14:
 
 ### For people
 
-You need a phone or a computer, and money in any wallet.
+You need a phone or a computer, and USDC, SOL or ETH in a wallet you already use.
 
 1. Open [confidential.unrealized.trade](https://confidential.unrealized.trade).
 2. Sign in with Face ID, a passkey or a wallet you already use.
 3. Save your 12 words.
-4. Deposit from any wallet, on any chain NEAR Intents reaches.
+4. Deposit USDC from NEAR, Solana or Base, SOL from Solana, or ETH from Base or Robinhood Chain, up to $1,000 a deposit in this beta.
 5. Buy a pump.fun or PumpSwap coin on Solana, a token with a Uniswap pool on Base or Robinhood Chain, or one with a Rhea pool on NEAR. Open the trade on a block explorer: the buyer is a wallet that has never been used.
 6. Tap Verify.
-7. Withdraw to any address.
+7. Withdraw to any address on NEAR, Solana, Base or Robinhood Chain.
 
 ### Check it yourself, with no money
 
@@ -99,9 +99,9 @@ done
 |---|---|
 | 1 | `[]` on both RPCs |
 | 2 | `C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u`, the `code_hash` of the reproducible build of commit `e0623bf3` in [contracts/vault/deployments/mainnet-v1.json](contracts/vault/deployments/mainnet-v1.json) |
-| 3 | the USDC balance equals what `totals()` says the vault owes |
+| 3 | the USDC balance is at least what `totals()` says the vault owes: deposited, minus spent, plus returned |
 
-Read on 2026-11-14 at 22:45Z, both RPCs answered `[]`, `C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u`, `{"deposited":"11879349","spent":"6403003","returned":"0"}` and `"5476346"`: 11879349 minus 6403003 is 5476346.
+Read on 2026-11-14 at 22:45Z, both RPCs answered `[]`, `C5fk3Fr9XZwSeDbu9Nc6pTMpYrWiKgBXVzJaK2mAzG3u`, `{"deposited":"11879349","spent":"6403003","returned":"0"}` and `"5476346"`: 11879349 minus 6403003 is 5476346, so the balance equals what it owes. It can only be higher if someone sends USDC to the vault without making a deposit.
 
 ### For AI agents and scripts
 
@@ -134,7 +134,7 @@ The terminal calls only `@blindfill/kit`'s public entry, as any wallet, bot or a
 ## Proofs
 
 - **56 mainnet transactions** recorded by the changes that moved money: NEAR 14, Solana 28, Base 7, Robinhood Chain 7. Each links to its explorer in [docs/proofs.md](docs/proofs.md), and `node scripts/ci/money-gate.mjs --all` reads every one back on two public RPCs. 585 earlier transactions on test networks are listed there too.
-- **The vault's own state**, read on two public RPCs: no access key, the code hash of its reproducible build, and a USDC balance equal to what it owes ([docs/proofs.md](docs/proofs.md#the-vault-read-on-two-public-near-rpcs)).
+- **The vault's own state**, read on two public RPCs: no access key, the code hash of its reproducible build, and a USDC balance at least what it owes, equal on 14 Nov ([docs/proofs.md](docs/proofs.md#the-vault-read-on-two-public-near-rpcs)).
 - **A live check per change**, in [scripts/live-checks/](scripts/live-checks/), run against the deployed hosts after every deploy.
 - **Research proofs** from before the build: 33 measured runs here and 11 more in the private research repository, such as a Privacy Pools withdrawal proof checked by a NEAR contract with its gas measured, proofs made on a phone, a phone-browser Solana trade, and the full money loop with real money. See [research/](research/README.md).
 - **The Pillow Auditors review** of the NEAR vault, the EVM pool and the Solana pool (7 Nov 2026): 0 Critical, 0 High, 0 Medium, 5 Low, 8 Info, and every Low fixed on main. The report and the commit that fixes each Low are in [research/audits/2026-11-07-pillow/](research/audits/2026-11-07-pillow/README.md).
@@ -146,15 +146,15 @@ One private buy in v2, from the money coming in to the money going home. The ste
 
 | Step | What you do | What happens underneath | Measured |
 |---|---|---|---|
-| 1 Deposit | Send money from any wallet | NEAR Intents carries it into the pool on the chain you trade on, or into the vault on NEAR. Your device writes private notes in standard sizes. | 31.9 s from NEAR and 41.9 s from Solana into NEAR Intents |
+| 1 Deposit | Send USDC, SOL or ETH from a wallet on NEAR, Solana, Base or Robinhood Chain | NEAR Intents carries it into the pool on the chain you trade on, or into the vault on NEAR. Your device writes private notes in standard sizes. | 31.9 s from NEAR and 41.9 s from Solana into NEAR Intents |
 | 2 Prove | Nothing | Your device proves it owns a note without saying which, and names a brand-new wallet whose key lives only on your device. The proof fixes where the money goes, so the helper carrying it can't redirect a cent. | 8.3 s on an iPhone, in the background |
 | 3 Pay | Tap Buy | Your device checks the quote against two chain reads. The new wallet signs one transaction, and in it the pool checks the proof and pays the wallet. | |
 | 4 Buy | Nothing | In that same transaction the wallet buys, from a wallet with no history. On NEAR the vault pays the wallet first, then the wallet buys. | v2 buy not timed on mainnet yet; a buy from a wallet readied ahead (v1) took 1.2 s median, 3.3 s p95, on a phone |
-| 5 Come back | Sell, or withdraw | A sell puts the money back into the pool as a new note. A withdrawal goes to any address, or through NEAR Intents to another chain. | |
+| 5 Come back | Sell, or withdraw | A sell puts the money back into the pool as a new note. A withdrawal from a pool goes to any address on its chain, or through NEAR Intents to NEAR, Solana, Base or Robinhood Chain. Cash in the NEAR vault goes out on NEAR for now. | |
 
 ## Performance
 
-Every number below comes from a run we recorded, and each row links to the transactions behind it on a public explorer, so you can check a fill yourself. The "Where, signed by" column says who signed each run: a test script holding its own keys, or the app in a phone browser.
+Every number below comes from a run we recorded. Each row that sent transactions lists them in [docs/performance.md](docs/performance.md), with a public explorer link on every mainnet chain, so you can check a fill yourself; the proof timings sent none, and the testnet gas rows name theirs without a link. The "Where, signed by" column says who signed each run: a test script holding its own keys, or the app in a phone browser.
 
 <!-- perf-table:begin (made by scripts/perf-table.mjs from perf/runs; do not edit by hand) -->
 | Chain | What | Median / p95 | Filled | Where, signed by | Every transaction |
@@ -193,7 +193,7 @@ Medians round to the nearest 0.1 s. A p95 always rounds up.
   <img alt="How Blindfill and Confidential Trenches fit together: apps call @blindfill/kit; your device holds the keys and notes, proves before the tap and checks every quote; helpers hold no money keys; on chain nothing has a key: the NEAR vault holds the USDC and a pool on Solana, Base and Robinhood Chain pays only the wallet a proof names; a fresh wallet is paid by the pool and buys in one transaction, and a sell goes back into the pool; NEAR Intents moves every dollar that changes chain; the exit tool needs only the 12 words." src="assets/architecture-light.svg" width="640">
 </picture>
 
-Every box and arrow is explained in [docs/architecture.md](docs/architecture.md), and every party's view in [docs/security.md](docs/security.md). Blindfill v2 is live on mainnet with a pool that has no keys on each chain you trade on, so a buy on Solana, Base or Robinhood Chain settles in one transaction on its own chain: see the [v2 lite paper](docs/litepaper.md).
+Every box and arrow is explained in [docs/architecture.md](docs/architecture.md), and every party's view in [docs/security.md](docs/security.md). Blindfill v2 is live on mainnet with a pool that has no keys on each chain you trade on, so a private buy on Solana, Base or Robinhood Chain is one transaction on its own chain; on mainnet those buys are recorded on Solana so far. See the [v2 lite paper](docs/litepaper.md).
 
 ## How this differs
 
@@ -202,7 +202,7 @@ We put the same six questions to each kind of private trading product on the mar
 | | Terminals that split trades over managed wallets | Private balances run by an operator | Shielded pools on one chain | Blindfill |
 |---|---|---|---|---|
 | Who can tie a trade to you | The operator | The operator | Timing and amount | Nobody holds the link. Timing and amount can hint. |
-| Who can move or freeze the money | The operator | The operator, or a DAO | An upgrade key, in some | Nobody. The vault has no key. |
+| Who can move or freeze the money | The operator | The operator, or a DAO | An upgrade key, in some | Nobody can move it: the vault and the pools have no key. USDC's issuer can freeze the vault's USDC, as for any holder. |
 | Tokens minutes old | Yes, in public | No, a fixed list | Some | Yes, from a wallet never used |
 | Chains to trade on | Several, in public | Many, inside one network | One | Any chain NEAR Intents reaches, from one balance (four in this build) |
 | Wait at the tap | None | None | A shielding wait, in some | None when the money is already in that chain's pool. The proof is made before you tap. |
@@ -227,9 +227,9 @@ Two hints remain. On chain, the size and time of a move can suggest a link, and 
 | Part | What it does |
 |---|---|
 | The vault | A NEAR contract that holds everyone's USDC in one pool. Money leaves only for a proof made on the owner's device from their 12 words, and goes only to the accounts that proof names. It ports Privacy Pools v1, whose code is audited and open source, to NEAR, with its admin parts removed: the vault approves every deposit itself. Its balance rests on NEAR beside NEAR Intents, never inside it. |
-| Fresh wallets | Brand-new wallets on any chain NEAR Intents reaches, each one used once, all from the same 12 words. Keys never leave the device, and any wallet that imports a private key opens them. |
+| Fresh wallets | Brand-new wallets on any chain NEAR Intents reaches, each one used once, all from the same 12 words. Keys never leave the device. They come from the 12 words by published standards, so they can be rebuilt outside the app; a key export screen is not built yet. |
 | Orders signed in advance | Blindfill's design, not in this build. Stops and limit sells are signed on the device with the price written in. A helper sends each one when its price is hit; it fills only at that price or better, into the user's own wallet. When one of a pair fills, the other cancels on its own. |
-| The kit | `@blindfill/kit`, one public entry for any app: deposit, prove, ready the wallets, trade, withdraw, verify. The example agent in `examples/agent/` runs a full cycle through it in 292 lines across 4 files. |
+| The kit | `@blindfill/kit`, one public entry for any app: deposit, prove, ready the wallets, trade, withdraw, verify. The example agent in `examples/agent/` is written to run a full cycle through it (deposit, buy on NEAR, sell, withdraw) in 292 lines across 4 files. Its Confirm guard has tests; a full run on mainnet is not on record yet. |
 | The terminal | The UNRLZD trading terminal, rebuilt on the kit. It calls only the kit's public entry, as any outside app would, and holds no key: a separate signing page on its own address signs every request. |
 | Helper servers | Show prices and charts and carry signed messages. They hold API keys and the keys to our own gas and fee accounts, never a key to users' money. |
 
@@ -274,6 +274,27 @@ Research and proofs from before Nov 1 are in `UNRLZD/confidential-trenches-proof
 
 The UNRLZD trading terminal existed before the hackathon as a separate product. This repository's history starts with the hackathon's first commit, [`88f2d3e`](https://github.com/UNRLZD/confidential-trenches/commit/88f2d3eac1748ad644ec52393277b9161f992b5f) on 2026-11-01 00:00Z, and [everything built since](https://github.com/UNRLZD/confidential-trenches/compare/88f2d3eac1748ad644ec52393277b9161f992b5f...main) is the hackathon's work.
 
+## Hackathon entry
+
+- Tracks entered: Privacy & Private AI (`privacy`), Unstoppable DeFi (`defi`) and Open Innovation (`open`).
+- The code is written with an AI assistant, under the team's direction and review. Every change lands through its own tests and the CI gates above.
+
+## Built with
+
+| What | Where it is used | Licence |
+|---|---|---|
+| Privacy Pools v1 core (0xbow), tag v1.3.0 | The vault, the Solana pool and the EVM pool are ports of it; its circuits and setup files are in `packages/kit/zk/` unchanged | Apache-2.0 ([contracts/vault/NOTICE](contracts/vault/NOTICE), [contracts/pool-evm/NOTICE](contracts/pool-evm/NOTICE)) |
+| snarkjs 0.7.5 (iden3) | Inside the built prover worker the signing page serves, `prover-worker.js`, which makes the whole file GPL-3.0-or-later | GPL-3.0-or-later ([packages/kit/src/prover/build.mjs](packages/kit/src/prover/build.mjs)) |
+| `WithdrawalVerifier.sol` | The EVM pool's proof check, generated by snarkJS and kept unchanged as a separate contract | GPL-3.0 ([contracts/pool-evm/NOTICE](contracts/pool-evm/NOTICE)) |
+| circomlib 2.0.5 (iden3) | Built into Privacy Pools' circuit and key files | GPL-3.0 at that version, LGPL-3.0 today ([packages/kit/zk/NOTICE](packages/kit/zk/NOTICE)) |
+| zk-kit LeanIMT 2.0.0 (PSE, Ethereum Foundation) | Ported into the vault's and the Solana pool's tree code, and used unchanged in the EVM pool | MIT ([contracts/vault/NOTICE](contracts/vault/NOTICE), [contracts/pool-solana/NOTICE](contracts/pool-solana/NOTICE)) |
+| light-poseidon 0.4.1 and groth16-solana 0.2.0 (Light Protocol) | The vault's hash constants and dependency; the shape of the Solana pool's proof check, with no code copied | Apache-2.0 ([contracts/vault/NOTICE](contracts/vault/NOTICE), [contracts/pool-solana/NOTICE](contracts/pool-solana/NOTICE)) |
+| poseidon-solidity 0.0.5 | Called by the EVM pool at its standard deployment | MIT ([contracts/pool-evm/NOTICE](contracts/pool-evm/NOTICE)) |
+| web3icons (0xa3k5) | The chain and venue marks in the terminal | MIT ([apps/terminal/src/shell/loop/NOTICE](apps/terminal/src/shell/loop/NOTICE)) |
+| Package dependencies | Every other library, pinned in `pnpm-lock.yaml` | Each its own |
+
+Services the build calls: NEAR Intents and its 1Click API (money between chains), Relay, Jupiter and LI.FI (quotes, through the helper), GeckoTerminal, CoinGecko and DexScreener (market data), Helius and public RPCs on each chain (chain reads), and Cloudflare Pages (hosting the app and the signing page). None of them holds a key to users' money.
+
 ## License
 
-Apache-2.0, see [LICENSE](LICENSE).
+Apache-2.0, see [LICENSE](LICENSE), except the third-party files above, which keep their own licences.

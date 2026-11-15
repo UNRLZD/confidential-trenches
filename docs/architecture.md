@@ -36,7 +36,7 @@ A note is a sealed record that says "this much is mine". Only your 12 words can 
 
 ### The signing page
 
-`confidential.unrealized.trade` is the signing page, on its own address. Keys are made there and stay there. The terminal runs inside it, in a frame served from `ct-app.unrealized.trade`. Because the browser treats the two addresses as separate places, the terminal can't read the page's storage. It sends the page requests such as "buy this" or "withdraw there". Anything that needs your full attention opens as a page of its own on this address: the passkey prompt, the screen that shows your 12 words, key export, the address for an outside withdrawal.
+`confidential.unrealized.trade` is the signing page, on its own address. Keys are made there and stay there. The terminal runs inside it, in a frame served from `ct-app.unrealized.trade`. Because the browser treats the two addresses as separate places, the terminal can't read the page's storage. It sends the page requests such as "buy this" or "withdraw there". Anything that needs your full attention opens as a page of its own on this address: the passkey prompt, the screen that shows your 12 words, the address for an outside withdrawal. A key export screen will open the same way; it is not built yet.
 
 This is the one page that handles your keys, and the one we'd most like you to test. A release is built to come out byte for byte the same when built twice, with every file hashed and an outside check that compares what's served with the release. The exit tool below needs none of it.
 
@@ -70,13 +70,13 @@ Its code is a port of Privacy Pools v1, whose code is audited and open source. W
 
 ### NEAR Intents
 
-`intents.near` and its quoting service 1Click move every dollar: in from any chain NEAR Intents reaches, out to fresh wallets, back to the vault after a sell, and out to any address.
+`intents.near` and its quoting service 1Click move every dollar that changes chain: a deposit from another chain, a move between a pool and the vault, and a withdrawal to another chain. Today that is NEAR, Solana, Base and Robinhood Chain; more chains join through NEAR Intents.
 
 We keep the vault's resting balance outside `intents.near`, on purpose. The DAO behind `intents.near` holds roles that can lock an account, force-move a balance or force a withdrawal, and it can replace the contract's code. So the vault keeps its USDC as its own balance on the USDC token contract, and money sits inside `intents.near` for one hop at a time while it travels.
 
 ### Fresh wallets
 
-Brand-new wallets on any chain NEAR Intents reaches. Each is used once: one arming funds one wallet, which makes one trade. All keys come from your 12 words on standard-shape paths and never leave the device, and any wallet that imports a private key opens them.
+Brand-new wallets on any chain NEAR Intents reaches. Each is used once: one wallet makes one buy and its sell. All keys come from your 12 words on standard-shape paths and never leave the device, so they can be rebuilt outside the app; a key export screen is not built yet.
 
 On Solana, Base and Robinhood Chain the pool pays a fresh wallet inside the buy, so the money arrives from the shared pool, not from you or from a wallet that's been used before. On NEAR the vault pays it. One thing is visible from outside. A buy from a set of wallets shows up as several fresh wallets buying the same token in the same second. Watchers can group them as one position and read its size. They can't tell whose it is.
 
@@ -96,17 +96,17 @@ Someone inside the helper can send an exit early, and it still fills at your pri
 
 ### The exit tool
 
-`packages/exit` brings money home from the NEAR vault and the Solana pool with your 12 words and public RPCs, with no server of ours. For each, it asks two public RPCs and requires that they agree byte for byte. It rebuilds your notes from public data, makes the proof and submits the withdrawal, with no helper in the path. The Base and Robinhood Chain pools are not in it yet. The demo is meant to show it: every server we run switched off, and the 12 words still withdraw.
+`packages/exit` is built to bring money home from the NEAR vault and the Solana pool with your 12 words and public RPCs, with no server of ours. For each, it asks two public RPCs and requires that they agree byte for byte. It rebuilds your notes from public data, makes the proof and submits the withdrawal, with no helper in the path. Its tests replay recorded chain reads; an exit on mainnet is not on record yet. The Base and Robinhood Chain pools are not in it yet. The demo is meant to show it: every server we run switched off, and the 12 words still withdraw.
 
 ## The life of one private buy
 
 How a buy runs in v2 on Solana, Base and Robinhood Chain. A buy on NEAR differs at step 4, as noted there.
 
-1. Deposit. Send money from any wallet on any chain NEAR Intents reaches. 1Click delivers it to a one-time wallet whose key your device holds, on the chain whose pool it goes into, and that wallet deposits it in standard sizes, one note per size. Money into NEAR Intents took 31.9 s from NEAR and 41.9 s from Solana in our recorded runs ([performance.md](performance.md#near-intents-2026-10-19)). The commitment proof that goes with a note takes 0.6 s on an iPhone.
+1. Deposit. Send USDC from NEAR, Solana or Base, SOL from Solana, or ETH from Base or Robinhood Chain, up to $1,000 a deposit in this beta. 1Click delivers it to a one-time wallet whose key your device holds, on the chain whose pool it goes into, and that wallet deposits it in standard sizes, one note per size. Money into NEAR Intents took 31.9 s from NEAR and 41.9 s from Solana in our recorded runs ([performance.md](performance.md#near-intents-2026-10-19)). A deposit needs no proof.
 2. Prove. In the background your device picks a note and proves it, naming a brand-new wallet whose key only your device holds, but no token. One withdraw proof takes 8.3 s on an iPhone. We make it while you browse, never at the tap.
 3. The tap. Your device reads the market on two RPC providers and checks the quote against your request. The fresh wallet signs one transaction, and the helper's pool sender sends it.
 4. Paid and bought. In that one transaction the pool checks the proof and pays the fresh wallet, and the wallet buys. On NEAR the vault pays the fresh wallet first, and the wallet then buys on Rhea in a second transaction. A buy from a wallet readied ahead of time, the v1 way, took 1.2 s at p50 and 3.3 s at p95 from tap to filled on a phone over five live buys; the v2 buy hasn't been timed on mainnet yet.
-5. Back. A sell puts the money back into the pool as a new note. Withdraw to any address, or through NEAR Intents to another chain, whenever you like.
+5. Back. A sell puts the money back into the pool as a new note. Withdraw from a pool to any address on its chain, or through NEAR Intents to NEAR, Solana, Base or Robinhood Chain, whenever you like. Cash in the NEAR vault goes out on NEAR for now.
 
 The proof is why step 2 happens early. It takes 8.3 s on an iPhone, and a trade can't wait that long, so the wait moved out of the tap.
 
