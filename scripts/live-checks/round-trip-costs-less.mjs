@@ -132,7 +132,8 @@ export const MARKS = Object.freeze({
       R`,mints:(${I})\.mints,wait:(${I}),sale:!0,`,
       R`(${I})\.ok\.signed\.length>0&&await (${I})\(\);for\(let (${I}) of \1\.ok\.signed\)await ${esc(g.sd)}\(`,
       R`;await (${I})\(\);let (${I})=(${I})\.planned\?\?\(await (${I})\.store\.add\(`,
-      R`catch\((${I})\)\{if\(\1===(${I})\|\|\1===(${I})\)throw \1;(${I})=\1,(${I})\((${I}),` + "`fault`",
+      // (card pool-sell-record-never-stays-sent: a sign out's stop is never a fault either)
+      R`catch\((${I})\)\{if\(\1===(${I})\|\|\1===(${I})(?:\|\|\1===${I})?\)throw \1;(${I})=\1,(${I})\((${I}),` + "`fault`",
       // W's own last send kept on its record (its own gap never holds it)
       R`(${I})=(${I})\.spaced\?\?(${I});await (${I})\.owed\?\.put\(`,
     ],
@@ -169,7 +170,8 @@ export const MARKS = Object.freeze({
     re(R`(?<nm>${I})=` + "`ct-pool/trade`" + R`,(?<dt>${I})=\((${I}),(${I})\)=>\3\?\3\.request\(\k<nm>,\{mode:` + "`shared`" + R`\},\4\):\4\(\),(?<tr>${I})=async\((${I}),(${I})=(${I})\)=>\{try\{let (${I})=\6\?\.query;return\(\(\9===void 0\?void 0:await (${I})\(\9\.call\(\6\),\7,` + "`the lock manager's query`" + R`\)\)\?\.held\?\?\[\]\)\.some\((${I})=>\11\.name===\k<nm>\)\}catch\{return!0\}\}`),
     (g) => [
       // read before each W's pass, after the gap between passes: the run ends with the Ws left
-      R`>0&&await ${I}\(${I}\+${I}\(${I}\)\),await ${esc(g.tr)}\(${I},${I}\.storeMs\?\?[\w$.]+\)\)\{${I}=!0(?:,${I}\.held\?\.\(\))?;break\}`,
+      // (card pool-sell-record-never-stays-sent: the list stops at a sign out after the gap, before the lock read)
+      R`>0&&await ${I}\(${I}\+${I}\(${I}\)\),(?:${I}\(\)\)return!0;if\()?await ${esc(g.tr)}\(${I},${I}\.storeMs\?\?[\w$.]+\)\)\{${I}=!0(?:,${I}\.held\?\.\(\))?;break\}`,
       // the Solana buy's and sell's whole runs
       R`return ${esc(g.dt)}\((${I}),\(\)=>\1\.request\(${I},\{mode:` + "`shared`" + R`\},async\(\)=>\{let ${I}=${I}=${I}\(\);try\{`,
       R`return ${esc(g.dt)}\((${I}),\(\)=>\1\.request\(${I},\{mode:` + "`shared`" + R`\},async\(\)=>\{try\{await \1\.request\(`,
