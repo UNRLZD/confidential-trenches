@@ -61,7 +61,7 @@ import { proverGate } from "../../wallet/src/pool/prover-gate.ts";
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { proofFront, type ProofFront } from "./proof-front.ts";
-import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, TRADE_STORE_MS, within, type TradeStore } from "./trade.ts";
+import { SOLANA_PUBLIC_SEAT, TRADE_HELPER, TRADE_STORE_MS, timedStore, within, type TradeStore } from "./trade.ts";
 import { SOL_EPOCH_MS, SOL_LIFE_MS, SOL_PIECES, SOL_POOL_TABLES, SOL_POOLS, solanaNow, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest, type SolanaPoolVenueName } from "../../wallet/src/pool/solana.ts";
 import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, solanaSettleSpent, solanaSettleSpentSet, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
@@ -2939,8 +2939,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (again && !stop.aborted) statePass();
     });
   };
-  // the dead pending sell records are settled once per page load, not on every state read (a re-ask settles its own)
-  let deadSettled = false;
   // the rent backs (card round-trip-costs-less): backsSchedule
   const backs = backsSchedule();
   // a tap's ride (card every-lamport-can-move T3, review P2-1 of 1d3b96d9c): booked at a time drawn after the tap, on the
@@ -3176,6 +3174,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // notes landed opens the queue, and each read while it is open makes the epoch's proofs again, one pass at a
         // time; a settle that throws or waits (a deposit run, a sell's verdict, a buy's owed pieces) never holds them back
         if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) statePass();
+        // a sell request whose page closed before its run ended, this tab's at its load or another tab's that died
+        // since (card pool-sell-record-never-stays-sent, the re-review at 29c72ffe P3-4: settled once per load, a second
+        // tab's dead record locked every Sell until a reload): at every state read, first, on no RPC, so no settle that
+        // waits or fails holds it back, as main.ts settles a dead trade (trade.ts tradeSettleDue). Its unrun legs are
+        // refused "failed" (nothing was sent for them), and its id is never id_reused for good
+        if (locks) await within(page.store(), TRADE_STORE_MS, "the wallet store").then((ops) => settleDeadSellOps(timedStore(ops, TRADE_STORE_MS), locks)).catch(() => {});
         if (settling) return await settling;
         if (mine.some((n) => n.state === "INCOMING")) {
           const coming = new Set(mine.filter((n) => n.state === "INCOMING" && n.ref.kind === "deposit").map((n) => n.id));
@@ -3196,11 +3200,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // a note a settle step landed (INCOMING -> UNSPENT) is proved too: one more pass after the running one
         if (mine.some((n) => n.state === "INCOMING") && (open !== null || (await readNotes(await page.store())).some((n) => n.scope === scope && n.state === "UNSPENT"))) statePass();
         await finishOnward();
-        // a sell request whose page closed before it signed: refused "failed", so its id is never id_reused for good
-        if (locks && !deadSettled) {
-          await settleDeadSellOps(await page.store(), locks);
-          deadSettled = true;
-        }
         // the rent backs a closed page or a provider's fault left owed (card sol-buy-rent-back), and every W of the
         // account's another browser left (card round-trip-costs-less): at the load's first state read, then on a state
         // read past the run's backoff while one is left to try, after the sells settle, in the background (it reads,

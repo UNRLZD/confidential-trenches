@@ -7472,3 +7472,86 @@ test("P3 3: a W at the floor stays marked and listed at its rest across taps; no
   assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
   assert.equal(w.c.accounts.get(W.address)!.lamports, onW, "W keeps its lamports");
 });
+
+// Card pool-sell-record-never-stays-sent (1), the re-review of pool-sell-share-across-wallets at 29c72ffe, P2: a sale
+// whose deposit failed WrongAccount is built again, and its leg stayed "sent" on the failed signature, which no settle
+// reads again (its note went back to PLANNED). A page closed before the rebuilt sale signed left the record "sent" for
+// good after any number of loads, and the app's Sell buttons with it.
+test("a sale built again after WrongAccount writes its leg back to pending with no tx, so a page closed before the rebuilt sale signs leaves a record the next load ends", async () => {
+  const w = await world({ ...HALF, wrongAccountOnce: true, leaves: 1023 }, halfW());
+  let sent = false;
+  let reached!: () => void;
+  const closed = new Promise<void>((r) => (reached = r));
+  // the first attempt runs as it comes; the rebuilt one's first read of W's token account never answers: the page closed
+  const gate = (rpc: SolanaRpc): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      if (method === "sendTransaction") sent = true;
+      else if (sent && namesIn(method, params, ATA)) {
+        reached();
+        return new Promise(() => {});
+      }
+      return rpc(method, params);
+    }) as SolanaRpc;
+  (w.host as { rpcs: unknown }).rpcs = [gate(w.c.rpcs[0]), gate(w.c.rpcs[1])];
+  void (poolSellKind(kindHost(w), fakeLocks())(ASK, ctxOf("rb", "aa")) as KindAnswer);
+  await closed;
+  const live = (await w.store.get("ops", "rb")) as Rec;
+  // three loads: a new page each, its own locks (the closed page's are gone with it), the bare RPCs
+  for (let load = 0; load < 3; load++) {
+    const fresh = fakeLocks();
+    await settleDeadSellOps(w.store as unknown as TradeStore, fresh);
+    await settlePoolSells(loadHostOf(w) as never, fresh);
+  }
+  const rec = (await w.store.get("ops", "rb")) as Rec;
+  assert.equal(rec.stage, "refused", `after three loads: ${JSON.stringify(rec.legs)}`);
+  assert.deepEqual(rec.legs.map((l) => [l.stage, l.tx, l.code ?? null]), [["refused", null, "failed"]]);
+  assert.equal(opOf("rb", rec as never)!.stage, "refused");
+  // while the rebuilt sale read, its record named no signature
+  assert.deepEqual(live.legs.map((l) => [l.stage, l.tx]), [["pending", null]], "the rebuilt leg names no signature");
+  assert.deepEqual(live.txs, []);
+  assert.equal(w.c.deposits.filter((d) => !d.sweep).length, 0, "nothing moved");
+});
+
+// Card pool-sell-record-never-stays-sent (3), the re-review at 29c72ffe, P3-2: a rent back resumed at a load waited out
+// a provider's throttle (up to 10 s a wait, READ_WAIT) on a plain timer and never asked whether the session signed out,
+// so a sign out waited for it, and its next try read and could sign after it.
+test("a sign out during a resumed rent back's throttle wait cuts the wait and ends the pass: nothing more read, nothing signed, W owed for the next load", async () => {
+  const plant: Plant = { ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }], throttle: { on: "read", n: 1_000_000 } };
+  const w = await world(plant);
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.equal(w.told.at(-1)?.state, "gave_up", "the sale's own rent back met the throttle");
+  delete plant.throttle;
+  // the next load: provider B answers 429 to the teardown's read of W's accounts
+  const b: SolanaRpc = (async (method: string, params: readonly unknown[]) => {
+    if (namesIn(method, params, ATA)) throw new SolanaRpcTransportError("http_429", "HTTP 429", 4, "rpc1.example");
+    return w.c.rpcs[1](method, params);
+  }) as SolanaRpc;
+  const out = new AbortController();
+  let stopped = false;
+  const waits: number[] = [];
+  const told = w.told.length;
+  const seeds = w.seeds.length;
+  const loaded = loadedOf(w, AMOUNT, {
+    rpcs: [w.c.rpcs[0], b],
+    signal: out.signal,
+    stopped: () => stopped,
+    // the first wait is the throttle's: the sign out comes during it, and the wait itself never ends on its own
+    wait: (ms: number) => {
+      waits.push(ms);
+      stopped = true;
+      out.abort();
+      return new Promise<void>(() => {});
+    },
+  });
+  const sendsBefore = w.c.calls.filter((c) => c.method === "sendTransaction").length;
+  const run = resumeRentBacks(loaded, fakeLocks()).then((more) => ({ more }));
+  const got = await Promise.race([run, new Promise<"held">((r) => setTimeout(() => r("held"), 1_500))]);
+  assert.notEqual(got, "held", `the sign out waited for the rent back: waits ${waits.join(", ")}`);
+  assert.equal(waits.length, 1, `one wait, cut: ${waits.join(", ")}`);
+  assert.equal(w.seeds.length, seeds, "no key derived after the sign out");
+  assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, sendsBefore, "nothing sent");
+  assert.ok(w.told.slice(told).some((t) => t.step === "rent_back" && t.state === "gave_up" && /sign out/.test(t.detail)), JSON.stringify(w.told.slice(told)));
+  assert.ok(w.owed.get(W.address), "W still owed");
+  assert.equal(w.c.accounts.has(ATA), true, "nothing closed");
+});
