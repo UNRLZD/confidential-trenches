@@ -277,7 +277,7 @@ The UNRLZD trading terminal existed before the hackathon as a separate product. 
 ## Hackathon entry
 
 - Tracks entered: Privacy & Private AI (`privacy`), Unstoppable DeFi (`defi`) and Open Innovation (`open`).
-- The code is written with an AI assistant, Claude by Anthropic, under the team's direction and review. Every change lands through its own tests and the CI gates above.
+- The code is written with an AI assistant, under the team's direction and review. Every change lands through its own tests and the CI gates above.
 
 ## Built with
 
