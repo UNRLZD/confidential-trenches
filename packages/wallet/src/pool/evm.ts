@@ -1055,11 +1055,73 @@ export function evmPoolLogPager(): EvmLogPager {
  * spare, 55 pages one after another): evmPair counts each part's call open to its provider, so no walk of either seat
  * lands on a provider the other side asked or holds (pool-evm-narrow-seat-walks.test.ts counts it).
  */
+/**
+ * The providers that answer a log read over any span when each topic position holds one value (card
+ * firefox-restore-fast): rpc.mainnet.chain.robinhood.com refuses the pool's filter (three topics in one position) past
+ * 100,000 blocks, "query spans 200000 blocks ..., but only 100000 are allowed for this request; ... or send one value
+ * per position", and answered the Robinhood pool's whole 6.19M-block life in one call of one topic (292 ms; markets,
+ * card evm-reads-paced, 15 Nov 02:20Z), so its restore read 62 pages there and drew its 429s (4 a first sign-in on
+ * main). base-rpc.publicnode.com refuses past 50,000 blocks with one topic too, so Base keeps paging.
+ */
+export const EVM_LOG_ONE_VALUE_WIDE: ReadonlySet<string> = new Set(["rpc.mainnet.chain.robinhood.com"]);
+
+/** The filter's one topic position of several values, on a provider of EVM_LOG_ONE_VALUE_WIDE: one filter per value
+ *  (the other positions as they are), or null (the read pages as before). */
+export function oneValueFilters(rpc: EvmRpc, filter: EvmLogFilter): EvmLogFilter[] | null {
+  const url = (rpc as { url?: unknown }).url;
+  let host: string;
+  try {
+    host = typeof url === "string" ? new URL(url).hostname : "";
+  } catch {
+    return null;
+  }
+  if (!EVM_LOG_ONE_VALUE_WIDE.has(host)) return null;
+  const many = filter.topics.flatMap((t, i) => (Array.isArray(t) && t.length > 1 ? [i] : []));
+  if (many.length !== 1 || filter.topics.some((t, i) => i !== many[0] && Array.isArray(t) && t.length !== 1)) return null;
+  const at = many[0]!;
+  return (filter.topics[at] as readonly string[]).map((v) => ({ ...filter, topics: filter.topics.map((t, i) => (i === at ? v : t)) }));
+}
+
+/** from..to in one call a value (oneValueFilters), all at once, their logs in block order; null on any refusal, throttle,
+ *  answer out of shape or two logs at one place (the read then pages as before, from `from`). */
+async function oneValueLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filters: readonly EvmLogFilter[], decode: EvmLogDecode<E>, from: bigint, to: bigint, signal?: AbortSignal): Promise<E[] | null> {
+  let got: E[][];
+  try {
+    got = await Promise.all(
+      filters.map(async (f, n) => {
+        const r = await rpc("eth_getLogs", [{ ...f, fromBlock: tag(from), toBlock: tag(to) }]);
+        if (!Array.isArray(r)) throw new Error("not a list");
+        return r.map((g, i) => decode(g, from, to, `rpc ${k}: log ${i} of value ${n}, ${from}..${to}`));
+      }),
+    );
+  } catch {
+    signal?.throwIfAborted();
+    return null;
+  }
+  const out = got.flat().sort((a, b) => (a.block !== b.block ? (a.block < b.block ? -1 : 1) : a.logIndex < b.logIndex ? -1 : a.logIndex > b.logIndex ? 1 : 0));
+  for (let i = 1; i < out.length; i++) {
+    const a = out[i - 1]!, b = out[i]!;
+    if (b.block === a.block && (b.logIndex === a.logIndex || b.blockHash !== a.blockHash)) return null;
+  }
+  return out;
+}
+
 async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, progress?: { to: bigint; logs: E[] }, part?: LogReadState): Promise<E[]> {
   const { max, slowHalves } = pager.rules;
   const parts = part === undefined && progress === undefined ? (pager.rules.inFlight ?? 1) : 1;
   // `progress`: the pages read so far, kept by a caller whose read may be stopped (evmTreeSync's sources)
   const out: E[] = progress?.logs ?? [];
+  // card firefox-restore-fast: on a provider that answers any span one value a position, the whole read in one call a
+  // value, before any page; any refusal and it pages as before
+  const filters = part === undefined ? oneValueFilters(rpc, filter) : null;
+  if (filters !== null && from <= to) {
+    const wide = await oneValueLogs(rpc, k, filters, decode, from, to, signal);
+    if (wide !== null) {
+      out.push(...wide);
+      if (progress) progress.to = to;
+      return out;
+    }
+  }
   // a part of a spread read (spreadLogs) starts from the read's own ceiling and widest, so its probes are the read's
   let refused: bigint | null = part?.refused ?? null;
   // full pages read in a row since the ceiling was set, and how many it holds for: doubled when the size refused is the
