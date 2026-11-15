@@ -12,9 +12,11 @@
 // The recorded answers: good, this card's helper quoter on the live mainnet pair (fee.ts createFeeQuoter at the card's
 // branch) and its SIGN_HOST build (scripts/signpage-built.mjs); bad, HELPER_HOST and SIGN_HOST as served at release 146.
 // After: helper sign
+// Bundle: out it reads HELPER_HOST's quote and the pair's final height, past the build
 //   node scripts/live-checks/near-cash-pays-any-amount.mjs [--record <file>] [--answer <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2.
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (a provider of the pair answered nothing).
 import "../net-window.mjs";
+import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -57,12 +59,16 @@ export function judge(a) {
   return { ok: lines.length === 0, lines };
 }
 
-/** The higher of the pair's final heights. */
+/** A read the check cannot judge on: fewer than two providers answered (provider-answer.mjs: INCONCLUSIVE, exit 3). */
+export class Inconclusive extends Error {}
+
+/** The higher of the pair's final heights, both providers answering (provider-answer.mjs rpcAnswer). */
 export async function finalHeight(fetchFn = fetch) {
   const hs = await Promise.all(
     PAIR.map(async (url) => {
-      const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "block", params: { finality: "final" } }) });
-      const h = (await r.json())?.result?.header?.height;
+      const a = await rpcAnswer(url, "block", { finality: "final" }, { fetchFn });
+      if (a.noAnswer !== undefined) throw new Inconclusive(a.noAnswer);
+      const h = a.result?.header?.height;
       if (!Number.isSafeInteger(h)) throw new Error(`${url}: no final height`);
       return h;
     }),
@@ -97,7 +103,11 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     console.log(v.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
     process.exit(v.ok ? 0 : 1);
   } catch (e) {
+    if (e instanceof Inconclusive) {
+      console.log(`--  ${e.message}: INCONCLUSIVE ${KEY}`);
+      process.exit(EXIT.INCONCLUSIVE);
+    }
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
-    process.exit(2);
+    process.exit(EXIT.ERROR);
   }
 }

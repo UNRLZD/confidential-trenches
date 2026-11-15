@@ -48,7 +48,7 @@ test("read() asks HELPER_HOST's fee quote, the pair's two finals, SIGN_HOST's / 
     asked.push(url);
     if (url.startsWith(HELPER)) return new Response(JSON.stringify({ valid_until_block: 2_200 }));
     if (url.startsWith(SIGN)) return new Response(url.endsWith("/app.js") ? `x${MARK}` : A.good.index);
-    return new Response(JSON.stringify({ result: { header: { height: 1_000 } } }));
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { header: { height: 1_000 } } }));
   };
   const a = await read(fetchFn);
   assert.deepEqual(asked, [`${HELPER}/v1/withdraw/fee?token=${USDC}`, "https://rpc.mainnet.fastnear.com", "https://near.drpc.org", `${SIGN}/`, `${SIGN}/app.js`]);
