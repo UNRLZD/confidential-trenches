@@ -1,33 +1,38 @@
 // `run` with setTimeout, clearTimeout, AbortSignal.timeout and performance.now on a clock of the test's own (card
 // fresh-run-margin). A quote's waits (a scan's naps between tries, its hold, its bound, a request's deadline) are set
 // with setTimeout or AbortSignal.timeout and measured with performance.now, so a test of them waited them out in real
-// time: N2, J2, B5 and the like spent 5 to 16 s each idle. Here the clock runs as the real one does, and whenever
-// nothing is left to run but timers (the next setImmediate), it jumps to the first of them: every wait is still set and
-// still ends in its turn, in order of its time, ties in the order set, and only the idle time is skipped. Work runs in
-// real time, so a loop that checks the clock between tries sees it move as it would. node:test's mock.timers moves
-// neither performance.now nor AbortSignal.timeout, which the quote reads. A test run on this clock has every answer
-// mocked (no network), so nothing it waits on is outside the clock.
+// time: N2, J2, B5 and the like spent 5 to 16 s each idle. Here the clock is virtual, as node:test's mock.timers and
+// sinon's fake timers are (card test-clock-runs-on-virtual-time): inside a run it moves only when it skips to the next
+// due timer, never with real elapsed time, so a test reads the same times on a slow or busy machine as on a fast one.
+// Whenever nothing is left to run but timers (the next setImmediate), it jumps to the first of them: every wait is
+// still set and still ends in its turn, in order of its time, ties in the order set. Work takes no time on it: a loop
+// that checks the clock between tries sees it move only by the waits it set. node:test's mock.timers moves neither
+// performance.now nor AbortSignal.timeout, which the quote reads. A test run on this clock has every answer mocked
+// (no network), so nothing it waits on is outside the clock.
 // When `run` ends, the clock runs on until every timer set in it has fired (a request's deadline, a hedge that lost, a
 // mocked answer's delay), so no work of the test reaches the tests after it; a timer still set at RUNAWAY_MS (work that
-// never ends) fails the test, naming where each was set. A run whose clock passes RUNAWAY_MS fails, as it would at its
-// test's timeout in real time. A clear of a timer set outside the clock goes to the real clearTimeout.
+// never ends) fails the test, naming where each was set. A run whose clock passes RUNAWAY_MS of its own time fails, as
+// it would at its test's timeout in real time; a busy machine's slow work never brings it closer.
 // Date.now skips with it: the head watch keeps a head fresh until a Date.now time, and stops there as it does in real
 // time. Date.now is the whole milliseconds of the same clock, so it is always an integer, never runs back, and shows a
-// skipped wait at least as long as it was set (skipped time is whole milliseconds, a timer fires at or after its time). The clock never runs back: once a run has skipped idle time, performance.now and Date.now stay that far ahead
-// for the rest of the process (a quote's state keeps times it read, such as a provider held until a time), as after a
-// real wait. The
+// skipped wait exactly as long as it was set, a fraction rounded up (a timer fires at its time). The clock never runs
+// back: between runs, performance.now and Date.now move with real time from where the last run left them, so once a
+// run has skipped idle time they stay that far ahead for the rest of the process (a quote's state keeps times it read,
+// such as a provider held until a time), as after a real wait. The
 // wallet's test/pool-evm-restore.test.ts runs its helper route's pace on the same kind of clock.
 
 /** Ten times the longest test timeout of a test run on this clock (60 s). */
 export const RUNAWAY_MS = 600_000;
 
 const READ = performance.now.bind(performance);
-// the idle time every run so far has skipped, whole milliseconds: performance.now reads the real clock plus it, from the
-// first run on
-let skipped = 0;
+// Inside a run the clock reads `at`, moved only to the time of each timer it fires. Between runs it reads the real
+// clock plus `ahead`: how far the runs so far have put it ahead, so it carries on from where the last run left it.
+let at = 0;
+let running = false;
+let ahead = 0;
 // timer ids are the process's, never reused: a late clear of an earlier run's timer never takes out a later one's
 let id = 0;
-const now = () => READ() + skipped;
+const now = () => (running ? at : READ() + ahead);
 const DATE = Date.now.bind(Date);
 // Date.now on the clock: the wall time at the first run, rounded up so it never reads below the real one then, moved on by
 // the clock; set once, so it never runs back across runs
@@ -49,7 +54,10 @@ class Timer {
 export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
   const g = globalThis as unknown as Record<"setTimeout" | "clearTimeout", unknown>;
   const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, timeout: AbortSignal.timeout };
-  const t0 = now();
+  if (running) throw new Error("onTestClock does not nest: one run at a time");
+  at = READ() + ahead;
+  running = true;
+  const t0 = at;
   let driving = false, ranAway = false;
   let runaway: (e: Error) => void = () => {};
   const stopped = new Promise<never>((_, no) => (runaway = no));
@@ -61,12 +69,12 @@ export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
     let next = queue.shift();
     while (next !== undefined && !live.has(next.id)) next = queue.shift();
     if (next === undefined) return void (driving = false);
-    if (Math.max(now(), next.due) - t0 > RUNAWAY_MS) {
+    if (Math.max(at, next.due) - t0 > RUNAWAY_MS) {
       queue.unshift(next);
       return void ((driving = false), (ranAway = true), runaway(new Error(`the test clock ran away: past ${RUNAWAY_MS} ms`)));
     }
     live.delete(next.id);
-    skipped += Math.max(0, Math.ceil(next.due - now()));
+    if (next.due > at) at = next.due;
     setImmediate(drive);
     next.fire();
   };
@@ -107,6 +115,9 @@ export async function onTestClock<T>(run: () => Promise<T>): Promise<T> {
   g.setTimeout = real.setTimeout;
   g.clearTimeout = real.clearTimeout;
   AbortSignal.timeout = real.timeout;
+  // the clock carries on from the run's time with real time; never back (the real clock has only moved on since)
+  ahead = at - READ();
+  running = false;
   queue.length = 0;
   live.clear();
   if (!out.ok) throw out.e;

@@ -83,3 +83,46 @@ test("a clear of a timer set outside the clock reaches it; a clear of a cleared 
   });
   assert.equal(later, true);
 });
+
+// card test-clock-runs-on-virtual-time: the clock moves only by the waits it skips, never by real elapsed time, so a test
+// reads the same times on a slow or busy machine (a judge's laptop, packages run side by side) as on a fast one
+test("work takes no time on the clock: 50 ms of real work between two reads reads 0 ms, and a wait after it reads exactly its length", async () => {
+  const busy = (ms: number) => {
+    const end = process.hrtime.bigint() + BigInt(ms * 1e6);
+    while (process.hrtime.bigint() < end);
+  };
+  const [work, wait, day] = await onTestClock(async () => {
+    const t = performance.now();
+    const d = Date.now();
+    busy(50);
+    const work = performance.now() - t;
+    await new Promise((r) => setTimeout(r, 1_000));
+    busy(20);
+    return [work, performance.now() - t, Date.now() - d];
+  });
+  assert.equal(work, 0, `real work moved the clock ${work} ms`);
+  assert.equal(wait, 1_000, `a 1 s wait read ${wait} ms`);
+  assert.equal(day, 1_000, `Date.now moved ${day} ms`);
+});
+
+test("a run is bounded by its own time, not the machine's: 590 s of waits with real work between them never runs away", async () => {
+  const ms = await onTestClock(async () => {
+    const t = performance.now();
+    for (let i = 0; i < 59; i++) {
+      const end = process.hrtime.bigint() + 1_000_000n; // 1 ms of real work a wait
+      while (process.hrtime.bigint() < end);
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+    return performance.now() - t;
+  });
+  assert.equal(ms, 590_000);
+});
+
+test("between runs the clock moves with real time from where the last run left it, never back; runs do not nest", async () => {
+  const end = await onTestClock(async () => (await new Promise((r) => setTimeout(r, 60_000)), performance.now()));
+  const after = performance.now();
+  assert.ok(after >= end, `the clock ran back: ${after} after ${end}`);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(performance.now() - after >= 15, "the clock stood still between runs");
+  await assert.rejects(onTestClock(async () => onTestClock(async () => 1)), /does not nest/);
+});
