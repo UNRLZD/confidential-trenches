@@ -3587,3 +3587,31 @@ test("card evm-deposit-on-mainnet: a reorg under the seats' read of a hold of no
     d.hashOf = hashOf;
   }
 });
+
+// card evm-pool-spend-binds: in the owner's browser two of the Base fee list's four operators never connect (Firefox's
+// strict protection, publicnode and Pocket: "CORS request did not succeed"). The fee read's walk is the retry across
+// operators, so a seat that does not connect is asked once and its side walks on at once; asked again inside the seat
+// (the pool read's throttle waits, 1 + 2 + 4 s), two such seats spent the walk's whole 8 s and the period's fee was never
+// read: "no two operators answered in 8000 ms (side 1: base-rpc.publicnode.com ...; base.api.pocket.network ...)", the
+// mainnet probe of 15 Nov 01:16Z and 01:24Z (packages/signpage/scripts/evm-pass-reads-mainnet.mjs --owners-case).
+test("card evm-pool-spend-binds: a fee seat that does not connect is asked once and the walk reaches the next operator inside its budget", async () => {
+  const c = { ...CB(), head: 31 };
+  let ms = 0;
+  const hits = new Map<string, number>();
+  const dead = (url: string): EvmRpc =>
+    Object.assign(async () => {
+      hits.set(url, (hits.get(url) ?? 0) + 1);
+      throw new SolanaRpcTransportError("network", "no connection", 1, new URL(url).host);
+    }, { url });
+  const fees = [rpc(c, { url: "https://mainnet.base.org" }), dead("https://base-rpc.publicnode.com"), dead("https://base.api.pocket.network"), rpc(c, { url: "https://base.gateway.tenderly.co" })];
+  const seen: unknown[] = [];
+  // the pool read's waits pass on the walk's clock, as they do on a device
+  const sleep = async (w: number) => void (ms += w);
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, feeRead: { now: () => ms }, relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep });
+  await p.holdFee(EPOCH);
+  assert.deepEqual([...hits.values()], [1, 1], "each seat that does not connect asked once");
+  assert.equal(seen.length, 0);
+  const b = await p.bind(bindArgs());
+  assert.equal(seen.length, 1);
+  assert.equal(b.feeCap, 3n * 10n ** 13n);
+});
