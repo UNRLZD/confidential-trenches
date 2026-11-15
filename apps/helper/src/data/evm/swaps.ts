@@ -202,6 +202,11 @@ export type Venues = {
    *  one step a tick, in the background, so a token quiet for longer than the cold window still opens with its last
    *  trades. */
   tapeBack: number;
+  /** The blocks one step of that read back reads (readBack). */
+  backStep: number;
+  /** A read back is asked of the providers that serve old blocks wide (BACK_SPAN) only, two of them agreeing: the others
+   *  take a day's blocks in a hundred reads or more, or serve the newest blocks alone. */
+  backOnly: boolean;
   /** A provider this many blocks behind the other is passed over for the third. */
   lagMax: number;
 };
@@ -239,6 +244,8 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     // empty tape on the live helper 2026-11-14 05:0xZ; REVVY's 31 swaps and PEACEFROG's 32 over the hour before all lay
     // past the five-minute window, its newest 4,660 and 7,578 blocks back, read on base-rpc.publicnode.com 05:1xZ)
     tapeBack: 18_000,
+    backStep: 1_500,
+    backOnly: false,
     lagMax: 50,
   },
   // Robinhood makes about 10 blocks a second (10,000 blocks over 1,024 s, 2026-11-03 19:1xZ): a step of 3,000 blocks is
@@ -269,10 +276,13 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     cold: 3_000,
     step: 3_000,
     refBack: 1_000,
-    // none: every Robinhood tape is read through the chain's swap index (fold 6, INDEX_RPCS), which holds the cold window
-    // and no further, so a read back is a token's own logs on its 100-block providers (480 reads for the recorded
-    // stretch of swaps-robinhood.test.ts fold 6), the cost that made its cold window one step (above)
-    tapeBack: 0,
+    // a day (card helper-listed-charts-own-reads: MOW answered no trades with 745 over the day, its newest 12 minutes
+    // back, 15 Nov 23:1xZ): the chain's swap index (fold 6, INDEX_RPCS) holds the cold window and no further, so a read
+    // back is the token's own logs, in steps of 10,000 blocks (17 minutes) on the providers that serve old blocks
+    // (BACK_SPAN: pocket one read a step, daybreak five), until TRADES_MAX trades
+    tapeBack: 864_000,
+    backStep: 10_000,
+    backOnly: true,
     lagMax: 50,
   },
 };
@@ -369,6 +379,24 @@ const WIDE_SPAN: Readonly<Record<string, number>> = {
   "https://rpc-robinhood.blockmachine.io": 1_000,
   "https://robinhood.daybreak-rpc.network": 1_000,
   "https://rpc.mainnet.chain.robinhood.com": 1_000,
+};
+
+/** The most blocks one `eth_getLogs` of a read back (readBack, older than the index holds) asks of a provider that serves
+ *  old blocks (card helper-listed-charts-own-reads, read 2026-11-15 23:2x-23:3xZ from the Mac, MOW's v4 pool's swaps):
+ *  robinhood.api.pocket.network 747 logs over the day's 864,000 blocks in 3.1 s, then "max 10001 blocks" from another of
+ *  its nodes, 10,000 blocks 20,000, 400,000 and 800,000 back in 0.2-1.8 s, each log with its block time;
+ *  robinhood.daybreak-rpc.network 2,000 at most, the same three in 0.2-0.5 s, timed; rpc.mainnet.chain.robinhood.com 747
+ *  over the day in 571 ms, untimed (HEADER_TIMED: a block header a swap's block, one post a second); keyless
+ *  rpc-robinhood.blockmachine.io serves the newest 5,000 blocks only and robinhood.drpc.org refuses any range of old
+ *  blocks ("ranges over 10000 blocks"). [design: what each answered every time; pocket and daybreak agree a step with
+ *  their own times, the chain's own the third] */
+/** The providers that answer a pool's swaps over a whole tapeBack in one read (readBack's locate), in order: the chain's
+ *  own, 747 logs over the day in 571 ms (read above). */
+const BACK_LOCATE: readonly string[] = ["https://rpc.mainnet.chain.robinhood.com"];
+const BACK_SPAN: Readonly<Record<string, number>> = {
+  "https://robinhood.api.pocket.network": 10_000,
+  "https://robinhood.daybreak-rpc.network": 2_000,
+  "https://rpc.mainnet.chain.robinhood.com": 10_000,
 };
 
 /** Requests per JSON-RPC batch each provider takes: the maker read's (lists.ts BATCH_MAX: drpc's free plan 3), and
@@ -966,6 +994,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
+  /** The providers a read back is asked of (VENUES backOnly), and whether a tape reads back at all: two of them at least. */
+  const backRpcs = rpcs.filter((u) => BACK_SPAN[u] !== undefined);
+  const canBack = VENUES[chain].tapeBack > 0 && (!VENUES[chain].backOnly || backRpcs.length >= 2);
   const headerTimed = deps.headerTimed ?? HEADER_TIMED;
   const V = VENUES[chain];
   // a swap is timed by its log's own block time, which two providers must give alike (sameLogs with times)
@@ -1390,8 +1421,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Each filter's logs as `u` answers them, null where it did not. A provider that takes wider ranges (WIDE_SPAN) is
    *  asked fewer, wider reads: a run of the same filter over adjacent ranges is joined up to its span, and the answer
    *  split back by block, so each filter is still compared with the other provider's answer for that range alone. */
-  async function logsOf(u: string, fs: Record<string, unknown>[], patient = false): Promise<(Log[] | null)[]> {
-    const max = WIDE_SPAN[u] ?? V.span;
+  async function logsOf(u: string, fs: Record<string, unknown>[], patient = false, back = false): Promise<(Log[] | null)[]> {
+    const max = (back ? BACK_SPAN[u] : undefined) ?? WIDE_SPAN[u] ?? V.span;
     const at = (f: Record<string, unknown>): [number, number] => [hexInt(f.fromBlock) ?? -1, hexInt(f.toBlock) ?? -1];
     const rest = (f: Record<string, unknown>) => JSON.stringify({ ...f, fromBlock: null, toBlock: null });
     const groups: { f: Record<string, unknown>; from: number; to: number; of: number[] }[] = [];
@@ -1415,12 +1446,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
 
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
-  function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false): Promise<(Log[] | null)[]> {
+  function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false, back = false): Promise<(Log[] | null)[]> {
     return agreed<Log[]>(
       urls,
       filters.length,
       async (u, idx, patient) => {
-        const got = await logsOf(u, idx.map((i) => filters[i]!), patient);
+        const got = await logsOf(u, idx.map((i) => filters[i]!), patient, back);
         return headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
       },
       (a, b) => sameLogs(a, b, true),
@@ -1452,7 +1483,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  is newer than the index's by up to INDEX_FOLLOW_MS, and the index's catch-up under a crowd took 2 s a read,
    *  2026-11-05 02:36Z); the index's first read, when nothing is held yet, is every caller's. The other filters (a hook's
    *  transfers), and a range behind the index, are read for this filter alone (card helper-robinhood-capacity fold 6). */
-  async function agreedRange(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number): Promise<Log[] | null> {
+  /** `back`: a read back (readBack), its spans joined up to BACK_SPAN on the providers that serve old blocks that wide. */
+  async function agreedRange(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number, back = false): Promise<Log[] | null> {
+    if (back) return V.backOnly ? agreedRangeOwn(backRpcs.filter((u) => usable([u]).length > 0), filter, from, to, true, true) : agreedRangeOwn(urls, filter, from, to, false, true);
     if (index === null || from > to) return agreedRangeOwn(urls, filter, from, to);
     const fs = [filter(from, to)].flat();
     const held = fs.filter((f) => index.indexes(f));
@@ -1471,10 +1504,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (ahead === null || rest === null) return null;
     return [...got, ...ahead, ...rest].sort((a, b) => a.block - b.block || a.index - b.index);
   }
-  async function agreedRangeOwn(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number, only = false): Promise<Log[] | null> {
+  async function agreedRangeOwn(urls: readonly string[], filter: (lo: number, hi: number) => Record<string, unknown> | Record<string, unknown>[], from: number, to: number, only = false, back = false): Promise<Log[] | null> {
     // each filter's spans one after another, so a wide provider joins them (logsOf); the logs back in block order
     const per = spans(from, to).map(([lo, hi]) => [filter(lo, hi)].flat());
-    const parts = await agreedLogs(urls, per.length === 0 ? [] : per[0]!.flatMap((_, k) => per.map((fs) => fs[k]!)), only);
+    const parts = await agreedLogs(urls, per.length === 0 ? [] : per[0]!.flatMap((_, k) => per.map((fs) => fs[k]!)), only, back);
     return parts.some((x) => x == null) ? null : (parts as Log[][]).flat().sort((a, b) => a.block - b.block || a.index - b.index);
   }
 
@@ -1913,7 +1946,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  `lo`, their logs (the pool's and the ETH price's), the book they fold into (only its tape is served: the bars
    *  before ours are CoinGecko's or GeckoTerminal's), and whether the read back is done (TRADES_MAX trades held, or
    *  VENUES[chain].tapeBack blocks read). */
-  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number };
+  /** `located`: a backOnly chain's (VENUES) one wide read of the whole tapeBack done (locate). */
+  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -2105,6 +2139,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    */
   async function readBack(e: Entry, urls: readonly string[]): Promise<void> {
     if (e.from === undefined || e.back?.done === true) return;
+    if (!canBack) {
+      e.back = { lo: e.from, logs: [], tape: null, done: true };
+      return;
+    }
     const back = e.back ?? { lo: e.from, logs: [], tape: null, done: false };
     const end = Math.max(0, e.from - V.tapeBack);
     const held = e.book.tape(TRADES_MAX).length + (back.tape?.tape(TRADES_MAX).length ?? 0);
@@ -2112,8 +2150,22 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       e.back = { ...back, done: true };
       return;
     }
+    // a backOnly chain first reads the whole day at once on one provider that serves it (BACK_LOCATE), its pool's swaps
+    // only, untimed: none, and the tape is done in one post; else the agreed steps start at the newest swap it names,
+    // never at the blocks with none between. A read it gets wrong costs a step read, never a trade the tape shows: every
+    // trade shown is still the agreed steps'.
+    if (V.backOnly && back.located !== true) {
+      const at = await locate(e, end, back.lo - 1);
+      if (at === undefined) {
+        const fails = (back.fails ?? 0) + 1;
+        e.back = { ...back, fails, done: fails >= BACK_FAILS_MAX };
+        return;
+      }
+      e.back = at === null ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at + 1 };
+      return;
+    }
     const hi = back.lo - 1;
-    const lo = Math.max(end, hi - V.step + 1);
+    const lo = Math.max(end, hi - V.backStep + 1);
     const eth = e.pool.quote.kind === "eth";
     // the pool's swaps first, alone; only a step that holds one reads what prices it: the ETH price over the step (the
     // price in force before its first swap) and a hooked pool's transfers and claims over the blocks of its swaps, the
@@ -2124,15 +2176,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // pool lies before it (card evm-tape-from-our-index-fast: a new list's minutes-old pools read all 12 steps of an
     // hour they were not in, and their tapes said filling past 45 s)
     const [main, ...rest] = poolFilters(e.pool, lo, hi, chain);
-    const swaps = await agreedRange(urls, (a, b) => [bornFilter(e.pool, { ...main!, fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` })], lo, hi);
+    const swaps = await agreedRange(urls, (a, b) => [bornFilter(e.pool, { ...main!, fromBlock: `0x${a.toString(16)}`, toBlock: `0x${b.toString(16)}` })], lo, hi, true);
     const born = swaps?.some((l) => isBirth(e.pool, l, chain)) === true;
     const found = swaps?.filter((l) => decodeSwap(e.pool, l, chain) !== null) ?? [];
     const extra =
       swaps == null || found.length === 0
         ? []
         : await Promise.all([
-            eth ? agreedRange(urls, (a, b) => refFilter(a, b, chain), lo, hi) : Promise.resolve([] as Log[]),
-            rest.length > 0 ? agreedRange(urls, (a, b) => poolFilters(e.pool, a, b, chain).slice(1), found[0]!.block, found.at(-1)!.block) : Promise.resolve([] as Log[]),
+            eth ? agreedRange(urls, (a, b) => refFilter(a, b, chain), lo, hi, true) : Promise.resolve([] as Log[]),
+            rest.length > 0 ? agreedRange(urls, (a, b) => poolFilters(e.pool, a, b, chain).slice(1), found[0]!.block, found.at(-1)!.block, true) : Promise.resolve([] as Log[]),
           ]);
     const logs = swaps == null || extra.some((x) => x == null) ? null : swaps.concat(...(extra as Log[][])).sort((a, b) => a.block - b.block || a.index - b.index);
     if (logs == null) {
@@ -2145,6 +2197,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     tradersAhead(e.pool, logs);
     e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born };
   }
+  /** The newest block in `lo` to `hi` that holds a swap of `e`'s pool, as BACK_LOCATE answers one read of the whole
+   *  range: null when none or no such provider is free (held: the tape is then what it holds, read back again at its
+   *  next open, never filling while the provider is held), undefined when it did not answer. */
+  async function locate(e: Entry, lo: number, hi: number): Promise<number | null | undefined> {
+    if (lo > hi) return null;
+    const [main] = poolFilters(e.pool, lo, hi, chain);
+    const u = BACK_LOCATE.find((x) => rpcs.includes(x) && usable([x]).length > 0);
+    if (u === undefined || main === undefined) return null;
+    const r = await batchTo(u, [{ method: "eth_getLogs", params: [{ ...main, fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }] }]);
+    const logs = r?.[0]?.ok ? parseLogs((r[0] as { result: unknown }).result) : null;
+    if (logs === null) return undefined;
+    const blocks = logs.filter((l) => l.block >= lo && l.block <= hi && decodeSwap(e.pool, l, chain) !== null).map((l) => l.block);
+    return blocks.length === 0 ? null : Math.max(...blocks);
+  }
   /** A short tape's read back, step after step, while its book is open and each step reads (a failed one is read again
    *  at a later tick). */
   async function backAll(e: Entry, urls: readonly string[]): Promise<void> {
@@ -2154,9 +2220,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (e.back === undefined || (e.back.lo === lo && !e.back.done)) return;
     }
   }
+  /** A read book's read back started, once (backAll): its own background read, never a caller's or the tick's wait. */
+  function backFrom(e: Entry, urls: readonly string[]): void {
+    if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, urls)).finally(() => (e.backing = undefined));
+  }
   /** Whether a book's tape is still reading back (readBack): the answer says `filling`, so the page shows it loading,
    *  not empty, and reads it again every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it is done. */
-  const backing = (e: Entry): boolean => V.tapeBack > 0 && e.from !== undefined && e.back?.done !== true && tapeOf(e, TRADES_MAX).length < TRADES_MAX;
+  const backing = (e: Entry): boolean => canBack && e.from !== undefined && e.back?.done !== true && tapeOf(e, TRADES_MAX).length < TRADES_MAX;
   /** A book's tape, then the trades read back before it (readBack): newest first, at most `limit`. */
   function tapeOf(e: Entry, limit: number): ReturnType<Book["tape"]> {
     const own = e.book.tape(limit);
@@ -2171,6 +2241,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     e.first ??= (async () => {
       const head = await agreedHead();
       if (head !== null) await readBook(e, head.with, head, Promise.resolve(true)).catch(() => false);
+      // a short tape reads back at once, not at the tick after (a tick of a dozen books took a minute to reach it)
+      if (head !== null) backFrom(e, head.with);
     })().finally(() => {
       e.first = undefined;
     });
@@ -2224,7 +2296,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
     // then each read book whose tape is short reads back (readBack): its own background read, never the tick's wait, so
     // a tick's period and forward reads are as they were; one read back a book at a time
-    for (const e of due) if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, head.with)).finally(() => (e.backing = undefined));
+    for (const e of due) backFrom(e, head.with);
     await refReady;
   }
   function start(): Promise<void> {
