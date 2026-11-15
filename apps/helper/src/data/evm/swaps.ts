@@ -2205,9 +2205,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const [main] = poolFilters(e.pool, lo, hi, chain);
     const u = BACK_LOCATE.find((x) => rpcs.includes(x) && usable([x]).length > 0);
     if (u === undefined || main === undefined) return null;
-    const r = await batchTo(u, [{ method: "eth_getLogs", params: [{ ...main, fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }] }]);
-    const logs = r?.[0]?.ok ? parseLogs((r[0] as { result: unknown }).result) : null;
-    if (logs === null) return undefined;
+    // one value per topic position: the chain's own RPC takes 100,000 blocks at most for a filter with several in one
+    // ("send one value per position", read from the helper 2026-11-15 23:4xZ), so each event its own filter, one batch
+    const topics = (main.topics ?? []) as (string | string[] | null)[];
+    const firsts = [topics[0]].flat().filter((x): x is string => typeof x === "string");
+    const r = await batchTo(u, (firsts.length > 0 ? firsts : [null]).map((t0) => ({ method: "eth_getLogs", params: [{ ...main, ...(t0 === null ? {} : { topics: [t0, ...topics.slice(1)] }), fromBlock: `0x${lo.toString(16)}`, toBlock: `0x${hi.toString(16)}` }] })));
+    const got = (r ?? []).map((x) => (x?.ok ? parseLogs((x as { result: unknown }).result) : null));
+    if (r === null || got.length === 0 || got.some((x) => x === null)) return undefined;
+    const logs = (got as Log[][]).flat();
     const blocks = logs.filter((l) => l.block >= lo && l.block <= hi && decodeSwap(e.pool, l, chain) !== null).map((l) => l.block);
     return blocks.length === 0 ? null : Math.max(...blocks);
   }
