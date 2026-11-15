@@ -803,3 +803,20 @@ test("card helper-listed-charts-own-reads: a listed coin off pump.fun (SPYx, Ray
   assert.deepEqual(reads.sort(), ["Af6Rt3zE8ZCFPtSQEePvAHfqpdqzsYA6H3bzY7P3tgCt", "BS9uyGV6XmNnPkM4f3xgxCdQEaFv7RSKs6fwrpvYHxfL", "HWZk6MfN28mYqDN1igNETjN2kueEryL33oVgt92Wkv6N"]);
   t.stop();
 });
+
+test("card helper-listed-charts-own-reads: a Raydium CPMM trade names its own mints (no pool read), turned round for the token as the output, priced in its quote coin", async () => {
+  const V = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-venue-txs.json"), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }> };
+  const FCAT = "2YPWT4QK1Why57mxBZGwBAFckBC4nLwEAL2t6CcCQtvw";
+  const WXMR = "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp";
+  let on: SourceEvents | null = null;
+  // the rpc answers the SOL price and the two mints only: a pool read would throw
+  const t = createSolanaTrades({ fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FCAT]: 6, [WXMR]: 12 }), now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
+  assert.equal((await t.trades(FCAT, 50)).status, 200);
+  on!.note(FCAT, { sig: "F1", slot: 10, err: false, logs: V.txs["cpmm-buy-fee"]!.result.meta.logMessages });
+  await settle();
+  const a = JSON.parse((await t.trades(FCAT, 50)).body) as { trades: unknown[]; src: string };
+  assert.equal(a.src, "chain");
+  // the pool paid 3,264,281.114937 FCAT for 0.114146586323 of its quote coin at 300 USD; CPMM's event names no trader
+  assert.deepEqual(a.trades, [{ t_ms: TS * 1000, side: "b", usd: "34.2439758969", amt: "3264281.114937", trader: null, tx: "F1" }]);
+  t.stop();
+});

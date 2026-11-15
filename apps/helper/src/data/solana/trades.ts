@@ -39,10 +39,10 @@
 // launched against FRONTIER, DOGE or PUMP: 2 of 3 curve coins and 1 of 3 PumpSwap coins on the lists read 11 Nov
 // 15:10Z) at that coin's own USD price, `quoteUsd` (its Discover or Jupiter row, read every REF_MS while a token quoted
 // in it is open) and its decimals from its mint account. The pool venues past pump.fun (card
-// helper-listed-charts-own-reads: Orca Whirlpool and Raydium CLMM, where the listed coins off pump.fun trade most,
-// decode.ts) are read the same way: the
-// pool account names the two mints (taken only with that venue's program as its owner), the token is either one and
-// the other is the quote, priced as above; their events carry no clock, so a trade is dated by its block (a walk's
+// helper-listed-charts-own-reads: Orca Whirlpool, Raydium CLMM and Raydium CPMM, where the listed coins off pump.fun
+// trade most, decode.ts) are read the same way: the pool account (or CPMM's own event) names the two mints (a pool
+// taken only with that venue's program as its owner), the token is either one and the other is the quote, priced as
+// above; their events carry no clock, so a trade is dated by its block (a walk's
 // transaction its blockTime, a stream's the second it arrived: measured p95 1.78 s after the block, above). A venue not
 // decoded yet keeps GeckoTerminal's bars and tape for its coins.
 // Every REPORT_MS the log says how many open tokens have an empty tape and why (a quote with no price, or no trade of
@@ -517,7 +517,7 @@ export function createSolanaTrades(deps: {
         if (t.mint === mint) out.push(t);
         continue;
       }
-      const p = await poolOf(t);
+      const p = t.pair ?? (await poolOf(t));
       if (p === null || p.a === p.b) continue;
       if (p.a === mint) out.push({ ...t, mint, quoteMint: p.b });
       // PumpSwap: the base mint only, as before
@@ -909,7 +909,7 @@ export function createSolanaTrades(deps: {
       if (!("mint" in e)) return e;
       const rows = e.book === null ? [] : e.book.tape(limit);
       // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora, the other launchpads: a
-      // token not on the pump.fun curve, PumpSwap, Orca or Raydium CLMM) is served its top pool's trades (token.ts tape),
+      // token not on the pump.fun curve, PumpSwap, Orca, Raydium CLMM or CPMM) is served its top pool's trades (token.ts tape),
       // never an empty tape for a token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0
       // rows, src chain, while their pools traded)
       if (rows.length === 0 && deps.tape !== undefined) return poolTape(mint, limit, e);

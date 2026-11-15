@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { cutTrades, decodeEvent, fromInner, fromLogs, ORCA, poolMints, poolPair, PUMP, PUMP_AMM, RAY_CLMM, USDC, WSOL, type RawTrade } from "./decode.ts";
+import { cutTrades, decodeEvent, fromInner, fromLogs, ORCA, poolMints, poolPair, PUMP, PUMP_AMM, RAY_CLMM, RAY_CPMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -124,4 +124,24 @@ test("Raydium CLMM: a `SwapEvent` is a trade told as the pool's token 0 sees it,
   const line = vlogs("clmm-buy").find((l) => l.startsWith("Program data: QMbN"))!;
   assert.equal(decodeEvent(ORCA, Buffer.from(line.slice(14), "base64")), null);
   assert.equal(decodeEvent(RAY_CLMM, Buffer.from(line.slice(14), "base64").subarray(0, 100)), null);
+});
+
+test("Raydium CPMM: a `SwapEvent` names its own input and output mints and the pool-side amounts (transfer fees apart)", () => {
+  assert.equal(V.txs["cpmm-buy"]!.signature, "4oKbTj5LtH7wtKDM5euLG6EjrZ9SDKffro4WNHfWes65E6CBsxZ6r8Qv3dW5Mah9WpfjFfsNxSBnqZxhTnT29ATE");
+  // told as the input mint sees it: the trader paid it (a sell of it). The pool took 186,367 of AoHVuF... (the trader
+  // paid 192,131, the rest a token-2022 transfer fee) and paid 461,944 STONK
+  const f = fromLogs(vlogs("cpmm-buy"));
+  // the route's first hop is the CPMM pool, its second a Raydium CLMM pool (the STONK on into USDC)
+  assert.deepEqual(f.trades.map((x) => x.venue), ["raydium-cpmm", "raydium-clmm"]);
+  assert.deepEqual({ trades: f.trades.slice(0, 1), truncated: f.truncated }, { trades: [{ venue: "raydium-cpmm", mint: null, pool: "63QdCBr47JyM7jjtbYFY3iwdhmUQupe4v4uCEGbhAzvT", pair: { a: "AoHVuFNKTAEUc5aiC8HLWUWytNC3nkJ4jcnjyFQaiCJg", b: "6GmAFSYs4gk3FDao5FzzySQpPZaWsa4rUJHacpMpUNgx" }, side: "s", amt: 186367n, quote: 461944n, quoteMint: null, user: "", ts: 0 }], truncated: false });
+  // the pool paid 3,264,281,114,937 FCAT, the trader got that less the 97,928,433,449 output transfer fee
+  const t = fromLogs(vlogs("cpmm-buy-fee")).trades;
+  assert.deepEqual(t.map((x) => [x.venue, x.pair, x.side, x.amt, x.quote]), [["raydium-cpmm", { a: "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp", b: "2YPWT4QK1Why57mxBZGwBAFckBC4nLwEAL2t6CcCQtvw" }, "s", 114146586323n, 3264281114937n]]);
+  // under another program, or cut short, no trade
+  const line = vlogs("cpmm-buy").find((l) => l.startsWith("Program data: QMbN"))!;
+  const bytes = Buffer.from(line.slice(14), "base64");
+  assert.equal(decodeEvent(RAY_CLMM, bytes), null, "CLMM's SwapEvent shares the discriminator: CPMM's 162 bytes are short of CLMM's 197, no trade");
+  assert.equal(decodeEvent(RAY_CPMM, bytes.subarray(0, 8 + 144)), null);
+  // a cut log keeps CPMM's logged event as it does Orca's
+  assert.deepEqual(cutTrades({ trades: fromLogs(vlogs("cpmm-buy")).trades }, { meta: {}, transaction: { message: { accountKeys: [] } } }), fromLogs(vlogs("cpmm-buy")).trades);
 });

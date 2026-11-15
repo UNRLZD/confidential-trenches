@@ -20,25 +20,32 @@
 //
 // The pool venues past pump.fun (card helper-listed-charts-own-reads). Of the 88 coins off pump.fun on the helper's
 // lists at 2026-11-15 23:14Z, the newest two successful transactions of 72 ran Raydium CLMM in 27, Orca in 20, Meteora
-// DLMM in 17, Raydium CPMM in 8 (and fewer the rest). Orca and Raydium CLMM, read here, each log their swap event with
-// Anchor's `emit!` only (no event CPI), so a
-// cut log keeps the events logged before the cut (`cutTrades`). The event names the pool, never which side is the
-// token: a trade is told as the pool's first mint sees it (`side` "b" when the trader got it, `amt` its leg, `quote`
-// the other mint's), and the reader names the token from the pool account (`poolPair`, taken only with the venue's
-// program as its owner) and turns the trade round when the token is the second mint. Neither event carries a clock
-// (`ts` 0: the reader dates it by its block).
+// DLMM in 17, Raydium CPMM in 8 (and fewer the rest). Orca, Raydium CLMM and Raydium CPMM, read here, each log their
+// swap event with Anchor's `emit!` only (no event CPI), so a cut log keeps the events logged before the cut
+// (`cutTrades`). The event names the pool (CPMM's also its mints), never which side is the token: a trade is told as the
+// pool's first mint sees it (`side` "b" when the trader got it, `amt` its leg, `quote` the other mint's), and the
+// reader names the token from the pool account (`poolPair`, taken only with the venue's program as its owner) and turns
+// the trade round when the token is the second mint. None of the three events carries a clock (`ts` 0: the reader
+// dates it by its block).
 //   - Orca Whirlpool whirLbMi... (github.com/orca-so/whirlpools at commit cc683ec9, 2026-10-12,
 //     programs/whirlpool/src/events.rs and state/whirlpool.rs): `Traded` (discriminator e1ca49af932ba096, sha256
 //     "event:Traded") whirlpool, a_to_b bool at 32, pre/post sqrt price u128, input_amount u64 at 65, output_amount at
-//     73, then the transfer and LP/protocol fees (113 bytes); the input is the trader's whole payment (fees inside), the
-//     output what the pool paid. No trader field: `user` is "". The `Whirlpool` account (3f95d10ce1806309) holds
+//     73, then the transfer and LP/protocol fees (113 bytes); the input is what the pool took (its LP and protocol fees
+//     inside), the output what it paid. No trader field: `user` is "". The `Whirlpool` account (3f95d10ce1806309) holds
 //     token_mint_a at byte 101 and token_mint_b at 181.
 //   - Raydium CLMM CAMMCzo5... (github.com/raydium-io/raydium-clmm at commit 6d7a0f82, 2026-10-27,
 //     programs/amm/src/states/pool.rs `SwapEvent`; raydium-io/raydium-idl e7e0c96f raydium_clmm.json for the
 //     discriminator 40c6cde8260871e2): pool_state, sender at 32, token_account_0, token_account_1, amount_0 u64 at 128,
 //     transfer_fee_0, amount_1 at 144, transfer_fee_1, zero_for_one bool at 160 (token 0 paid in), then price, liquidity,
-//     tick and the fees (the mainnet event is 213 bytes; the fields read end at 161). The `PoolState` account
-//     (f7ede3f5d7c3de46) holds token_mint_0 at byte 73 and token_mint_1 at 105.
+//     tick and the fees (the IDL's fields end at 197 and are required; the mainnet event is 213 bytes). The
+//     `PoolState` account (f7ede3f5d7c3de46) holds token_mint_0 at byte 73 and token_mint_1 at 105.
+//   - Raydium CPMM CPMMoo8L... (github.com/raydium-io/raydium-cp-swap at commit 3d691227, 2026-11-01,
+//     programs/cp-swap/src/states/events.rs `SwapEvent`, logged by instructions/swap_base_input.rs and
+//     swap_base_output.rs with `emit!`; the same discriminator 40c6cde8260871e2 as CLMM's, told apart by the running
+//     program): pool_id, input_vault_before, output_vault_before, input_amount u64 at 48 (what the pool's vault got,
+//     an input transfer fee apart), output_amount at 56 (what the pool paid, before an output transfer fee), the two
+//     transfer fees, base_input, input_mint at 81, output_mint at 113, then the fees (162 bytes). The event names its
+//     own mints (`pair`: input, then output), so no pool is read; it names no trader (`user` "").
 // Every offset checked against the recorded transactions in fixtures/sol-venue-txs.json: each event's amounts equal its
 // pool's own token balance changes in the same transaction, and each pool's mints the mints of those balances.
 //
@@ -50,6 +57,7 @@ export const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 export const PUMP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 export const ORCA = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
 export const RAY_CLMM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
+export const RAY_CPMM = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C";
 export const WSOL = "So11111111111111111111111111111111111111112";
 export const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 import { b58encode } from "./lists.ts";
@@ -63,6 +71,7 @@ const DISC = {
   pool: "f19a6d0411b16dbc",
   orcaTraded: "e1ca49af932ba096",
   orcaPool: "3f95d10ce1806309",
+  /** Raydium's `SwapEvent`, CLMM's and CPMM's alike. */
   clmmSwap: "40c6cde8260871e2",
   clmmPool: "f7ede3f5d7c3de46",
   /** Anchor's event-CPI tag: the first 8 bytes of an event an Anchor program sends to itself. */
@@ -92,7 +101,7 @@ export function b58data(s: string, max = 2_048): Uint8Array | null {
 }
 
 /** A venue whose pool names two mints, either one the token (the trade told as the first mint sees it). */
-export type PairVenue = "orca" | "raydium-clmm";
+export type PairVenue = "orca" | "raydium-clmm" | "raydium-cpmm";
 /** One trade as the venue logged it. `mint` is the token (curve) or null until the pool is read (the pool venues). */
 export type RawTrade = {
   venue: "pump" | "pumpswap" | PairVenue;
@@ -105,6 +114,8 @@ export type RawTrade = {
   quote: bigint;
   /** The quote's mint: WSOL for SOL. For PumpSwap, null until the pool is read. */
   quoteMint: string | null;
+  /** A pair venue's two mints when its event names them (Raydium CPMM: input, then output); otherwise the pool is read. */
+  pair?: { a: string; b: string };
   /** The trader, or "" when the event names none (Orca). */
   user: string;
   /** The event's own clock, unix seconds; 0 when the event has none (the pair venues: the reader dates it by its block). */
@@ -167,13 +178,24 @@ function orcaTrade(b: Buffer): RawTrade | null {
 
 /** A Raydium CLMM `SwapEvent` body, told as token 0 sees it, or null. */
 function clmmTrade(b: Buffer): RawTrade | null {
-  if (b.length < 161) return null;
+  if (b.length < 197) return null; // every field of the IDL's event, through tick
   const zeroForOne = b[160];
   if (zeroForOne !== 0 && zeroForOne !== 1) return null;
   const amt = b.readBigUInt64LE(128);
   const quote = b.readBigUInt64LE(144);
   if (amt <= 0n || quote <= 0n) return null;
   return { venue: "raydium-clmm", mint: null, pool: key(b, 0), side: zeroForOne === 1 ? "s" : "b", amt, quote, quoteMint: null, user: key(b, 32), ts: 0 };
+}
+
+/** A Raydium CPMM `SwapEvent` body, told as its input mint sees it (the trader paid it), or null. */
+function cpmmTrade(b: Buffer): RawTrade | null {
+  if (b.length < 162) return null;
+  const amt = b.readBigUInt64LE(48);
+  const quote = b.readBigUInt64LE(56);
+  const a = key(b, 81);
+  const o = key(b, 113);
+  if (amt <= 0n || quote <= 0n || a === o) return null;
+  return { venue: "raydium-cpmm", mint: null, pool: key(b, 0), pair: { a, b: o }, side: "s", amt, quote, quoteMint: null, user: "", ts: 0 };
 }
 
 /** The trade an event of `program` holds (its bytes with the discriminator first), or null. */
@@ -186,6 +208,7 @@ export function decodeEvent(program: string, data: Buffer): RawTrade | null {
   if (program === PUMP_AMM && d === DISC.sell) return ammTrade(body, "s");
   if (program === ORCA && d === DISC.orcaTraded) return orcaTrade(body);
   if (program === RAY_CLMM && d === DISC.clmmSwap) return clmmTrade(body);
+  if (program === RAY_CPMM && d === DISC.clmmSwap) return cpmmTrade(body);
   return null;
 }
 
@@ -261,7 +284,7 @@ export function fromInner(result: unknown): RawTrade[] {
  * that only log theirs (the pair venues), which the runtime wrote before it cut the log. `f` is that log's `fromLogs`.
  */
 export function cutTrades(f: { trades: RawTrade[] }, result: unknown): RawTrade[] {
-  return [...fromInner(result), ...f.trades.filter((t) => t.venue === "orca" || t.venue === "raydium-clmm")];
+  return [...fromInner(result), ...f.trades.filter((t) => t.venue === "orca" || t.venue === "raydium-clmm" || t.venue === "raydium-cpmm")];
 }
 
 /** A pair venue's pool account's two mints (first, second), or null unless `owner` is that venue's program and the data
