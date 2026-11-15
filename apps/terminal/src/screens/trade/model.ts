@@ -422,8 +422,12 @@ export function coinTapKey(pools: SignpageState["pools"], chain: Chain, token: s
   const p = cashMovesTo(chain) ? poolOf(pools, chain) : null;
   if (!p || token === "") return null;
   if (p.ready !== undefined && p.tap_max !== undefined) return JSON.stringify([token, p.ready, p.tap_max]);
-  return p.ready === undefined && p.tap_max === undefined && positive(p.balance) === false ? JSON.stringify([token, null, null]) : null;
+  return noPoolNote(p) ? JSON.stringify([token, null, null]) : null;
 }
+
+/** A pool entry with no note and no queue (card buy-box-quotes-before-funds): a balance of 0, no ready, no tap_max, as
+ *  the page lists the pool of an account whose money is all Cash, or none. */
+const noPoolNote = (p: NonNullable<SignpageState["pools"]>[number]): boolean => p.ready === undefined && p.tap_max === undefined && positive(p.balance) === false;
 
 /** state.pools with the chain's tap_max the coin's (`coinTap`, pool.buy.dry's answer for coinTapKey's coin and proofs)
  *  in place of the costliest venue's; as they are with none, or with one that is not a decimal at most the entry's
@@ -511,11 +515,11 @@ export const cashMovesTo = (chain: Chain): boolean => chain === "solana" || chai
 /** pool.buy.dry's with_cash (kit 1.15, card one-balance-buys-on-every-chain) in base units: the most one tap spends
  *  with Cash moved first. Only a plain decimal in the pool asset's
  *  units at or above the entry's tap_max (the page's answer is hostile: anything else is not used); an entry with no
- *  tap_max (no pool note, card buy-box-quotes-before-funds) is "0", never a number the page did not send; null on a
- *  chain Cash does not move to. */
+ *  pool note and no queue (card buy-box-quotes-before-funds) reads its missing tap_max as "0", never a number the page
+ *  did not send; null with no tap_max otherwise, or on a chain Cash does not move to. */
 function cashTop(pools: SignpageState["pools"], chain: Chain, withCash: string | null): bigint | null {
   const p = withCash === null || !cashMovesTo(chain) ? null : poolOf(pools, chain);
-  if (!p) return null;
+  if (!p || (p.tap_max === undefined && !noPoolNote(p))) return null;
   const d = POOL_ASSET_DECIMALS[p.asset];
   const tap = p.tap_max === undefined ? 0n : decimalToUnits(p.tap_max, d);
   const top = decimalToUnits(withCash!, d);
@@ -574,7 +578,8 @@ export function buysAskAmount(pools: SignpageState["pools"], chain: Chain, token
   if (chain !== "base" && chain !== "robinhood") return null;
   const ask = poolBuyAsk(pools, chain, token, c, price, slippageBps, withCash);
   if (ask.ok) return ask.params.amount;
-  return coinTapKey(pools, chain, token) !== null && poolOf(pools, chain)?.tap_max === undefined ? feeAskAmount(c, price) : null;
+  const p = poolOf(pools, chain);
+  return p && noPoolNote(p) ? feeAskAmount(c, price) : null;
 }
 
 /** The amount box's cents for pool.buy.dry's `buys` (kit 1.17, card buy-any-amount-on-every-chain: what the tap spends in
