@@ -385,11 +385,13 @@ async function calibrate(browser, cpu) {
  *  top-level visit replaces itself with the shell at once (apps/terminal/src/shell/in-shell.ts moveToShell, from the
  *  app's start). Firefox can report that move's commit before the visit's own, and goto then throws "interrupted by
  *  another navigation" to the shell (merge queue run 43665465254), so the wait for the shell is armed before the visit,
- *  and the visit ends at its own commit or at that move; any other error, or a move anywhere else, is thrown. */
+ *  and the visit ends at its own commit or at that move; any other error, or a move anywhere else, is thrown. The wait
+ *  ends at the shell's commit, not its load: a load state read across Firefox's two reports can wait for a load that
+ *  already fired, and oneRun's next step waits for the framed terminal's ready anyway. */
 export async function openInShell(page, url, timeout) {
   const shell = new URL(url);
   shell.hostname = REAL.sign;
-  const moved = page.waitForURL((x) => x.hostname === REAL.sign, { timeout });
+  const moved = page.waitForURL((x) => x.hostname === REAL.sign, { timeout, waitUntil: "commit" });
   try {
     await page.goto(url, { waitUntil: "commit" });
   } catch (e) {

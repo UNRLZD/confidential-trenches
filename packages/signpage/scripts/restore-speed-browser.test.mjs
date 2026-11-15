@@ -17,7 +17,8 @@ const interrupted = (to) => () => {
 // a page whose goto ends as `goto` does and whose address reaches `at` (null: never, the wait times out)
 const page = (goto, at) => ({
   goto: async () => goto(),
-  waitForURL: async (match, { timeout }) => {
+  waitForURL: async (match, { timeout, waitUntil }) => {
+    assert.equal(waitUntil, "commit", "the wait ends at the shell's commit");
     if (at && match(new URL(at))) return;
     throw new Error(`page.waitForURL: Timeout ${timeout}ms exceeded.`);
   },
