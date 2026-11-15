@@ -69,7 +69,7 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
-import { cashMover, cashUsdcFor, moveCostOf, poolMoveKinds, solanaTapMaxOf, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { cashMover, cashUsdcFor, evmMoveCostOf, evmMoveOf, moveCostOf, poolMoveKinds, solanaTapMaxOf, withCash, withCashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -90,7 +90,7 @@ import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 import type { ExitChain } from "../../kit/src/checks/oneclick-exit.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, poolBuyDryKind, rentOnce, withDepositWallets, withPools, withSolanaRent } from "./pools.ts";
-import { evmBuyDry, evmDryQuote } from "./pool-buy-evm.ts";
+import { evmBuyDry, evmDryQuote, evmMoveShort } from "./pool-buy-evm.ts";
 import { poolBalances } from "../../wallet/src/pool/balances.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -562,6 +562,21 @@ else {
         const e = testnet?.evmPoolOf(chain) ?? null;
         return e === null ? null : evmDryQuote(chain, e.pin, e.rpcs);
       },
+      // above tap_max (card evm-cash-move-brings-its-fee): the move cashFirst starts, sized at the epoch's relay fee
+      // (src/pool-buy-evm.ts evmMoveShort) and priced on the device (src/cash-to-pool.ts evmMoveCostOf: the withdraw's fee,
+      // the move's margin and every deposit's gas at the device's price), only when Cash's largest note pays it
+      fee: () => testnet?.evmFeeNow(chain) ?? Promise.resolve(null),
+      moved: async (short) => {
+        const p = prices.get(chain);
+        if (p === null || p === undefined) return null;
+        const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal };
+        const form = withdrawFormDeps(vault);
+        const [cash, fee, floor] = await Promise.all([form.available(), form.fee(), evmRoute.floor(chain)]);
+        if (floor === null) return null;
+        const gas = floor > EVM_LADDER.min ? floor - EVM_LADDER.min : 0n;
+        const m = evmMoveOf(short, gas, p, chain);
+        return m === null || m.usdc + fee > cash ? null : evmMoveCostOf(short, gas, fee, p, chain);
+      },
     });
   // NEAR (card you-receive-on-every-chain): nearBuyDry on the NEAR buy's own page, never while a trade runs
   const nearDry = (params: Record<string, unknown>): HostRefusal | Running<"pool.buy.dry"> => {
@@ -616,8 +631,16 @@ else {
       const tap = poolBalances(both.value, PAGE_POOLS.filter((p) => p.chain === chain), both.ready, both.open, both.landed).find((e) => e.chain === chain)?.tap_max;
       return tap === undefined ? 0n : (parsePoolUnits(tap, POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[chain]]) ?? 0n);
     },
-    // Solana: the shortfall pool.buy.dry prices (src/pools.ts solanaMoveShort), so the move's notes pay the rest
-    short: (chain, token, amount) => (chain === "solana" ? tapDry.short(token, amount) : Promise.resolve(null)),
+    // the shortfall pool.buy.dry prices, so the move's notes pay the rest with their own costs: Solana's
+    // (src/pools.ts solanaMoveShort); Base's and Robinhood's (card evm-cash-move-brings-its-fee: src/pool-buy-evm.ts
+    // evmMoveShort over the chain's ready proofs as the tap reads them, at the epoch's relay fee)
+    short: async (chain, token, amount) => {
+      if (chain === "solana") return tapDry.short(token, amount);
+      if (!testnet) return null;
+      const [both, fee] = await Promise.all([testnet.readyWith(pageNotes), testnet.evmFeeNow(chain)]);
+      const ids = new Set(PAGE_POOLS.filter((p) => p.chain === chain).map((p) => p.id));
+      return fee === null ? null : (evmMoveShort((both.ready ?? []).filter((r) => ids.has(r.poolId)), amount, fee)?.short ?? null);
+    },
     need: (chain, short) => cashMoverNow().need(chain, short),
     wait: (ms) => new Promise((res) => setTimeout(res, ms)),
     now: () => Date.now(),

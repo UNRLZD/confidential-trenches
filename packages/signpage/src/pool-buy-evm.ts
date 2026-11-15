@@ -62,7 +62,8 @@ import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmP
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import type { ReservedMark } from "../../wallet/src/notes/store.ts";
-import { EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EVM_LADDER, EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -308,6 +309,59 @@ export function evmDryCost(plan: EvmBuyPlan): bigint {
   return plan.whole.reduce((s, p) => s + p.fee, 0n) + (plan.rest === null ? 0n : plan.rest.piece.fee + plan.bound);
 }
 
+/** How far over the epoch's relay fee a note a move from Cash brings is priced (card evm-cash-move-brings-its-fee): the
+ *  note is proved after it lands, an epoch or more after the tap read the fee, and the fee follows the base fee; twice
+ *  it, as an EIP-1559 max fee is twice the base fee, so a fee that rises meanwhile still leaves one tap the ask. */
+export const EVM_MOVE_FEE_ROOM = 2n;
+/** The most rungs of the least size a move's search reads (evmMoveShort): 2^40 x 0.001 ETH, far past any Cash. */
+const EVM_MOVE_STEPS_MAX = 1n << 40n;
+
+/** The notes a move from Cash that lands `short` wei of rungs brings into the pool (the follow deposits what reaches
+ *  U_X as the largest rung it carries, one deposit each: ladderSplit's rungs), each its own piece proved at `fee`
+ *  EVM_MOVE_FEE_ROOM over; a rung that fee would eat is no piece (evmBuyPieces' rule). */
+export function evmMovedPieces(short: bigint, fee: bigint): EvmBuyPiece[] {
+  if (short <= 0n) return [];
+  const at = fee * EVM_MOVE_FEE_ROOM;
+  return ladderSplit(EVM_LADDER, short).notes.filter((chunk) => at < chunk).map((chunk, i) => ({ noteId: `move#${i}`, chunk, fee: at }));
+}
+
+/** The least move from Cash, in wei of rungs it lands (a whole number of the least rung, so every wei of it is a note),
+ *  so that one tap of `amount` wei buys the whole ask (card evm-cash-move-brings-its-fee): the tap's own plan (planEvmBuy
+ *  over evmBuyPieces of the chain's `ready` proofs, as runEvmPoolBuy plans it) with the notes the move brings
+ *  (evmMovedPieces at the epoch's relay fee `fee`), each its own whole pool buy or the rest's W, carries `amount`
+ *  exactly; with that plan. By doubling then halving over the least rung's count (a valid size either way: the plan is
+ *  read on it), as solanaMoveShort sizes Solana's. Null when no move up to EVM_MOVE_STEPS_MAX rungs does. One path:
+ *  cashFirst's move (main.ts cashDeps.short) and pool.buy.dry's cost and out above tap_max (evmBuyDry) both size by it. */
+export function evmMoveShort(ready: readonly ReadyProof[], amount: bigint, fee: bigint): { short: bigint; plan: EvmBuyPlan } | null {
+  if (amount <= 0n || fee < 0n) return null;
+  const { pieces, bound } = evmBuyPieces(ready);
+  const at = (steps: bigint): EvmBuyPlan | null => {
+    const moved = evmMovedPieces(steps * EVM_LADDER.min, fee);
+    const all = [...pieces, ...moved];
+    // the bound the tap keeps beside a rest: the dearest piece's fee, the moved ones' among them
+    const b = all.reduce((m, p) => (p.fee > m ? p.fee : m), bound);
+    try {
+      const plan = planEvmBuy({ kind: "pool.buy", chain: "base", token: null, amount, slippageBps: 0, decimals: 0 }, all, b);
+      return plan.amount === amount ? plan : null;
+    } catch (e) {
+      if (e instanceof PoolRuleRefused) return null;
+      throw e;
+    }
+  };
+  let hi = 1n;
+  while (at(hi) === null) {
+    if (hi >= EVM_MOVE_STEPS_MAX) return null;
+    hi *= 2n;
+  }
+  let lo = 0n;
+  while (hi - lo > 1n) {
+    const mid = (lo + hi) / 2n;
+    if (at(mid) !== null) hi = mid;
+    else lo = mid;
+  }
+  return { short: hi * EVM_LADDER.min, plan: at(hi)! };
+}
+
 /** What pool.buy.dry quotes `out` with on Base and Robinhood: the tap's quote path (quoteOf: the page's quote, venues
  *  and index pools) on the pin's network, and the token's decimals as the tap reads them. */
 export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "decimals"> & { network: EvmPoolChain };
@@ -347,12 +401,21 @@ export type EvmBuyDryDeps = {
   withCash(tapMax: string): Promise<string | null>;
   /** The chain's quote host (evmDryQuote), null with no pinned pool. */
   quote(): EvmDryQuote | null;
+  /** Above tap_max (card evm-cash-move-brings-its-fee): the epoch's relay fee a note the move brings is proved at (the
+   *  pool's bind's, read on the device), null with no read. None: an amount above tap_max answers tap_max alone. */
+  fee?(): Promise<bigint | null>;
+  /** What a move from Cash that lands `short` wei of rungs costs for good, in wei (main.ts: cash-to-pool.ts
+   *  evmMoveCostOf at the device's price, the pool's floor and the withdraw's fee); null when Cash cannot move it. */
+  moved?(short: bigint): Promise<bigint | null>;
 };
 
 /** pool.buy.dry on Base and Robinhood: tap_max and with_cash; with the ask's `amount` at most tap_max (kit 1.17),
  *  `buys` when the plan spends less (evmDryBuys), `cost` (evmDryCost) and `out` (evmDryOut of the plan's swapped total,
- *  started as soon as the plan is made, beside the Cash reads). Never while a trade runs (busy). Display only: nothing
- *  is signed, written or sent; the tap plans again from its own proofs. */
+ *  started as soon as the plan is made, beside the Cash reads). Above tap_max (card evm-cash-move-brings-its-fee), the
+ *  buy cashFirst runs after moving from Cash, sized as cashFirst sizes it (evmMoveShort at the epoch's fee): `cost` that
+ *  plan's (its moved notes' relay fees at EVM_MOVE_FEE_ROOM, so the Fee never reads under) plus what `moved` says the move
+ *  costs, and `out` of the whole ask; tap_max alone when the move is not priced. Never while a trade runs (busy).
+ *  Display only: nothing is signed, written or sent; the tap plans again from its own proofs. */
 export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmBuyDryDeps): Running<"pool.buy.dry"> {
   let answer: HostAnswer<"pool.buy.dry"> | HostRefusal = { error: "failed" };
   const amount = evmDryAmount(params.amount);
@@ -362,13 +425,24 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     if (d.trading()) return void (answer = { error: "busy" });
     const got = await d.tap();
     if (got === null) return void (answer = { error: "not_funded" });
+    const tap = evmDryAmount(got.tapMax);
+    // above tap_max: the move cashFirst starts, sized by the tap's own plan over the ready proofs and the notes it brings
+    const above = amount !== null && typeof tap === "bigint" && amount > tap && d.fee !== undefined && d.moved !== undefined;
+    const sized = above ? (async () => {
+      const fee = await d.fee!();
+      const m = fee === null ? null : evmMoveShort(got.ready, amount!, fee);
+      const moveCost = m === null ? null : await d.moved!(m.short);
+      return m === null || moveCost === null || moveCost < 0n ? null : { plan: m.plan, cost: evmDryCost(m.plan) + moveCost };
+    })().catch(() => null) : Promise.resolve(null);
     const plan = evmDryPlan(chain, amount, got.tapMax, got.ready);
-    const q = plan === null ? null : d.quote();
-    const out = plan === null || q === null ? Promise.resolve(null) : evmDryOut(q, token, plan.amount);
+    const q = plan === null && !above ? null : d.quote();
+    const out = q === null ? Promise.resolve(null) : plan !== null ? evmDryOut(q, token, plan.amount) : sized.then((s) => (s === null ? null : evmDryOut(q, token, s.plan.amount)));
     const most = await d.withCash(got.tapMax);
+    const moved = await sized;
     const o = await out;
     const buys = plan !== null && amount !== null && plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
-    answer = { result: { tap_max: got.tapMax, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }), ...(plan === null ? {} : { cost: poolUnits(evmDryCost(plan), ETH_DECIMALS) }), ...(o === null ? {} : { out: o }) } };
+    const cost = plan !== null ? evmDryCost(plan) : moved !== null ? moved.cost : null;
+    answer = { result: { tap_max: got.tapMax, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }), ...(cost === null ? {} : { cost: poolUnits(cost, ETH_DECIMALS) }), ...(o === null || (plan === null && moved === null) ? {} : { out: o }) } };
   })().catch(() => void (answer = { error: "failed" }));
   return { running: true, after, answer: () => answer };
 }
