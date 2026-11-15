@@ -14,7 +14,7 @@ import { EvmQuoteError, evmIsDeviceQuote, evmPoolBuyQuote, type EvmPoolBuyQuote,
 import { EVM_QUOTE_MAX_KEYS, evmBuyRevertedPoolsWith, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolSellQuoteWith, evmSellRevertedPoolsWith, type EvmPoolSellQuote, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 // as namespaces: the red run before card evm-route-parity reads them where evmSellRouteOf and evmSellRouteCheck are not
 import * as quoteMod from "../src/checks/evm/quote.ts";
-import { evmPaceReset, evmProviderHeld, evmProviderHold } from "../src/checks/evm/pace.ts";
+import { evmPaceReset, evmPaceTake, evmProviderHeld, evmProviderHold } from "../src/checks/evm/pace.ts";
 import * as sellMod from "../src/trade/evm/sell-unpinned.ts";
 import { evmQuotedBuy, evmQuotedSell } from "../src/trade/evm/quoted.ts";
 const { evmSellRouteOf } = quoteMod as unknown as { evmSellRouteOf: (r: EvmRoute) => import("../src/trade/evm/sell-unpinned.ts").EvmSellRoute };
@@ -5462,6 +5462,30 @@ test("SP429b card evm-taps-meet-no-429: a first scan provider whose throttle a b
   const again = await pairQuote(token, first, scanner(5_000_030, realAt(token, 5_000_005)), "robinhood", 5_000_030);
   assert.deepEqual(again.v, below);
   assert.deepEqual(posts.slice(before), [], "the first was asked again within its hold");
+}));
+
+test("PACE4 card evm-taps-meet-no-429: a warm scan request whose first provider's pace has no turn free goes to the next at once, never waiting its turn", { timeout: 30_000 }, () => onTestClock(async () => {
+  // rpc.mainnet.chain.robinhood.com, the scan's first, paced at 1 post a second, took 2 to 6 of each warm tap's posts and
+  // 1 to 4 s of its time (read-only run from the Mac, 2026-11-15 09:03Z)
+  evmPaceReset();
+  const token = "0x00000000000000000000000000000000005c4511";
+  const url = "https://rpc.mainnet.chain.robinhood.com";
+  const inner = scanner(5_000_010, []);
+  let firstLogs = 0;
+  const first = evmJsonRpc(url, (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    if (calls.some((c) => c.method === "eth_getLogs")) firstLogs++;
+    return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+  }) as unknown as typeof fetch);
+  await pairQuote(token, scanner(5_000_000, []), scanner(5_000_000, []), "robinhood");
+  // another reader on the device (the index, a quote) spent the provider's turns just now
+  for (const g of await Promise.all([evmPaceTake(url, 1), evmPaceTake(url, 1)])) (g as () => void)();
+  const asked: [number, number][] = [];
+  const { v } = await pairQuote(token, first, scanner(5_000_010, realAt(token, 5_000_005), asked), "robinhood", 5_000_010);
+  evmPaceReset();
+  assert.deepEqual(v, below);
+  assert.equal(firstLogs, 0, "the first was sent a warm getLogs it waited its turn for");
+  assert.ok(asked.length > 0, "the second was asked nothing");
 }));
 
 test("SP5 a first scan provider that answers a warm scan with no logs: the request goes to the second whole, never asked of the first as halves", { timeout: 30_000 }, async () => {

@@ -74,7 +74,7 @@ import {
 import { EVM_POOL_MIN_DEPOSIT, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads } from "../../trade/evm/pool-fee.ts";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_SELL_SIM, evmHookListed, evmPoolBuildSimSellUnpinned, evmPoolSellFeeMax, evmPoolSellTip, evmSellCallData, evmSellRouteCheck, evmSellRouteOf as evmSignedSellRouteOf, type EvmSellRoute, type EvmSellSim, type EvmV4SellRoute } from "../../trade/evm/sell-unpinned.ts";
 import { evmSellReleasesAt, evmSellSentOf, type EvmReleaseLog, type EvmSellReleases, type EvmSellSent } from "../../trade/evm/sell-releases.ts";
-import { EVM_PROVIDER_HOLD_MS, evmPaceTake, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
+import { EVM_PROVIDER_HOLD_MS, evmPaceReady, evmPaceTake, evmProviderHeld, evmProviderHeldMs, evmProviderHold } from "./pace.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -1674,6 +1674,10 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
       const spare = fast || (spareNext && scanBlocksOf(calls) <= spareBlocks);
       // such a request goes to the next while this provider is held: nothing is sent to it
       if (spare && provider !== undefined && ((SCAN_HELD.get(provider) ?? 0) > performance.now() || providerHeld(provider))) throw new ScanRefused("rpc_error", "the scan provider is held after its throttle");
+      // and while its pace has no turn free now (pace.ts): the next takes it at once instead of the tap waiting its turn
+      // (rpc.mainnet.chain.robinhood.com, the scan's first at 1 post a second, took 2 to 6 of each warm tap's posts and
+      // 1 to 4 s of its time: read-only run from the Mac, 2026-11-15 09:03Z)
+      if (spare && provider !== undefined && !providerReady(provider, calls.length)) throw new ScanRefused("rpc_error", "the scan provider's pace has no turn free now");
       // a throttle holds the provider; such a request goes to the next at once, a longer cold one waits the gate's backoff
       const held = (sent: number, afterMs: number | null) => {
         if (provider !== undefined) SCAN_HELD.set(provider, performance.now() + EVM_HOLD_MS);
@@ -4750,6 +4754,11 @@ const RPC_URL = new WeakMap<EvmRpc, string>();
 const providerHeld = (rpc: EvmRpc): boolean => {
   const u = RPC_URL.get(rpc);
   return u !== undefined && evmProviderHeld(u);
+};
+/** Whether a post of `calls` calls to an evmJsonRpc provider leaves now, with no wait for its pace's turn (pace.ts). */
+const providerReady = (rpc: EvmRpc, calls: number): boolean => {
+  const u = RPC_URL.get(rpc);
+  return u === undefined || evmPaceReady(u, calls);
 };
 /** How long an evmJsonRpc provider is still held for every reader, in ms (0: not held, or not an evmJsonRpc provider):
  *  the pool index's readers, which have no other provider to ask, wait it out (pool-index.ts). */

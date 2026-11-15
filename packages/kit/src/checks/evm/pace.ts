@@ -101,6 +101,17 @@ function pump(l: Lane, p: EvmPace): void {
   l.timer = setTimeout(() => ((l.timer = null), pump(l, p)), Math.max(1, Math.ceil(((a.need - l.tokens) / p.perS) * 1000)));
 }
 
+/** Whether a post of `calls` calls to `url` would leave now, with no wait for its turn (an unpaced provider: always). */
+export function evmPaceReady(url: string, calls: number, now: number = performance.now()): boolean {
+  const key = evmProviderKey(url);
+  const p = EVM_PACE[key];
+  if (p === undefined) return true;
+  const l = LANES.get(key);
+  if (l === undefined) return true;
+  const tokens = Math.min(p.burst, l.tokens + ((now - l.at) / 1000) * p.perS);
+  return l.queue.length === 0 && (p.inflight === undefined || l.out < p.inflight) && tokens >= Math.min(p.burst, p.unit === "post" ? 1 : Math.max(1, calls));
+}
+
 /** Waits for `url`'s turn for a post of `calls` calls at its pace (an unpaced provider: at once), first come first
  *  served; the answer gives the post's place back once it settles. A post of more units than the burst waits for a full
  *  bucket and spends it. `signal` ends the wait with its reason. */
