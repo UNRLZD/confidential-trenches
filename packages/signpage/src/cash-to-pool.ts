@@ -35,7 +35,8 @@
 // move-from-cash-spends-every-note: planCashExact, one withdrawal a note), its dry, Max and Fee from that one plan, and
 // sent as a buy's parts are (sendParts: every part's quote checked before any note leaves Cash). A buy's shortfall
 // writes the same op under its own id (cash/<chain>/<ms>).
-// Nothing here logs.
+// Nothing here logs but the trace (./trace.ts, card buy-shows-every-step): one line per step of a move and of a buy
+// that waits on one, public ids and the error's words only, its last step and error kept in the move's record (`last`).
 import { HELPER_FETCH_INIT } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { DEPOSIT_QUOTE_URL } from "../../wallet/src/deposit/quote.ts";
@@ -50,6 +51,8 @@ import type { HandoffEnd } from "./withdraw/handoff.ts";
 import type { PoolToCash } from "./pool-to-cash.ts";
 import { nearestPlannable, withdrawNoteFloor } from "./pool-withdraw.ts";
 import { cashCosts, cashSendable, planCashWithdraw } from "./withdraw/checks.ts";
+import type { HandoffMark } from "./withdraw/handoff.ts";
+import { errorText, trace, traceAlias, traceBegin, type TraceFields, type TraceLast, type TraceStep } from "./trace.ts";
 
 /** How often a moved tap reads whether one tap now spends the ask. */
 export const CASH_MOVE_POLL_MS = 2_000;
@@ -410,7 +413,7 @@ type Refusal = { error: ErrorCode };
 /** A move op's record. A move out of a pool (src/pool-to-cash.ts, card move-sends-or-says-why) also keeps `send_by_ms`,
  *  the time its source release must have been claimed by; `claimed_ms`, the run's claim, written by compare-and-set right
  *  before anything leaves the device; and `error`, the refusal a move that failed before it sent ends with. */
-export type MoveOpRecord = { kind: "move"; from: TradeChain; to: TradeChain; stage: MoveStage; txs: TxRef[]; amount: string; out?: string; created_ms: number; cash?: string; send_by_ms?: number; claimed_ms?: number; error?: ErrorCode };
+export type MoveOpRecord = { kind: "move"; from: TradeChain; to: TradeChain; stage: MoveStage; txs: TxRef[]; amount: string; out?: string; created_ms: number; cash?: string; send_by_ms?: number; claimed_ms?: number; error?: ErrorCode; last?: TraceLast };
 /** How long a move has, from its tap, to start sending (card move-sends-or-says-why). Out of a pool: its quote (one
  *  1Click round trip and its keyless tell), then a withdraw part's reads, its wait for an epoch's root (one 60 s epoch
  *  and WITHDRAW_BOUNDARY_LAG_MS 30 s), its proof (6.7 s on a laptop, several times that on a phone) and its bind, about
@@ -468,8 +471,9 @@ export type CashMoverDeps = {
   least?(chain: PoolChain): Promise<bigint | null>;
   /** The vault's hand-off (withdrawHandoff); null where the network names no vault or relayer. `note`, when given, is the
    *  note the withdrawal spends (a part's, planCashMove); none: the request's own pick. `claim`, when given, is awaited
-   *  right before its note goes RESERVED (wallet withdraw/request.ts): a throw ends it with nothing sent. */
-  handoff: ((w: CheckedWithdraw, drawnFee: bigint, note?: string, claim?: () => Promise<void>) => Promise<HandoffEnd>) | null;
+   *  right before its note goes RESERVED (wallet withdraw/request.ts): a throw ends it with nothing sent. `mark` hears its
+   *  proof start and end and its relay's send (the trace, card buy-shows-every-step). */
+  handoff: ((w: CheckedWithdraw, drawnFee: bigint, note?: string, claim?: () => Promise<void>, mark?: HandoffMark) => Promise<HandoffEnd>) | null;
   /** The quote's floor on a pool (pool.address's: on an EVM pool its least rung plus one deposit's gas, on Solana the
    *  rung, one deposit's cost and the rent U_X keeps; read now), null with no read: a note made for an EVM tap is quoted
    *  at the rung plus that gas, and a move's dry is held to it (bounds). */
@@ -549,7 +553,7 @@ export function cashMover(d: CashMoverDeps): CashMover {
     try {
       // with a compare-and-set: the stored claim and send-by kept, and a move that ended failed (its send-by passed
       // unclaimed) never written back to a live stage
-      if (d.update) await d.update(id, (v) => (v?.stage === "failed" && rec.stage !== "failed" ? undefined : { ...rec, ...(v?.claimed_ms === undefined ? {} : { claimed_ms: v.claimed_ms }), ...(v?.send_by_ms === undefined || rec.send_by_ms !== undefined ? {} : { send_by_ms: v.send_by_ms }) }));
+      if (d.update) await d.update(id, (v) => (v?.stage === "failed" && rec.stage !== "failed" ? undefined : { ...rec, ...(v?.claimed_ms === undefined ? {} : { claimed_ms: v.claimed_ms }), ...(v?.send_by_ms === undefined || rec.send_by_ms !== undefined ? {} : { send_by_ms: v.send_by_ms }), ...(v?.last === undefined || rec.last !== undefined ? {} : { last: v.last }) }));
       else await d.put?.(id, rec);
     } catch {
       /* a write that fails costs the display, never the move */
@@ -577,12 +581,24 @@ export function cashMover(d: CashMoverDeps): CashMover {
     const now = d.now();
     return (await d.update(id, (v) => (v?.send_by_ms === undefined ? undefined : (expired(v, now) ?? undefined))).catch(() => undefined)) !== undefined;
   };
-  // the move op's stages after the hand-off: in_transit once the vault's withdraw landed, then the follow op's
-  const track = async (op: string, followId: string, rec: MoveOpRecord, ended: Promise<HandoffEnd | null>): Promise<void> => {
+  // the trace's last line of a part's op, kept in its record alone (card buy-shows-every-step): a compare-and-set of
+  // that one field, so a line never steps a stage back
+  const keepLast = (id: string, last: TraceLast): void => {
+    if (d.update) void d.update(id, (v) => (v === undefined || v.kind !== "move" ? undefined : { ...v, last })).catch(() => {});
+  };
+  const lastOf = (last: TraceLast): { last?: TraceLast } => (d.update ? { last } : {});
+  // the move op's stages after the hand-off: in_transit once the vault's withdraw landed, then the follow op's. A
+  // hand-off that ends any other way, or throws (`thrown`, its words), fails the move with why: withdraw_<its end>
+  const track = async (op: string, followId: string, rec: MoveOpRecord, ended: Promise<HandoffEnd | null>, thrown: () => string | undefined = () => undefined): Promise<void> => {
     const e = await ended;
     const txs: TxRef[] = e !== null && "tx" in e && typeof e.tx === "string" ? [{ chain: "near", hash: e.tx }] : [];
-    if (e === null || !(e.kind === "arrived" || e.kind === "landed")) return put(op, { ...rec, stage: "failed", txs });
-    const cur: MoveOpRecord = { ...rec, stage: "in_transit", txs };
+    const tx: TraceFields = txs[0] ? { tx: txs[0].hash } : {};
+    if (e === null || !(e.kind === "arrived" || e.kind === "landed")) {
+      const error: ErrorCode = e === null ? "withdraw_failed" : `withdraw_${e.kind}`;
+      const last = trace(op, null, "end", { stage: "failed", ...tx, error: e === null ? (thrown() ?? "the vault's withdraw threw") : `the vault's withdraw ended ${e.kind}${e.kind === "fee" && "fee" in e ? ` (the relayer's fee now ${e.fee}, above the fee drawn)` : ""}` });
+      return put(op, { ...rec, stage: "failed", txs, ...(d.update ? { error } : {}), ...lastOf(last) });
+    }
+    const cur: MoveOpRecord = { ...rec, stage: "in_transit", txs, ...lastOf(trace(op, null, "vault_payout", { stage: e.kind, ...tx })) };
     await put(op, cur);
     return followOn(op, followId, cur);
   };
@@ -600,6 +616,7 @@ export function cashMover(d: CashMoverDeps): CashMover {
         const add = (f.txs ?? []).filter((t, k, all) => typeof t?.hash === "string" && !cur.txs.some((x) => x.hash === t.hash) && all.findIndex((y) => y.hash === t.hash) === k).map((t) => ({ chain: t.chain, hash: t.hash }));
         if (stage !== cur.stage || add.length > 0) {
           cur = { ...cur, stage, txs: [...cur.txs, ...add] };
+          if (stage === "done" || stage === "failed") cur = { ...cur, ...lastOf(trace(op, null, "end", { stage, ...(stage === "failed" ? { error: `the quote's follow ended ${f.stage}` } : {}) })) };
           await put(op, cur);
         }
         if (stage === "done" || stage === "failed") return;
@@ -614,7 +631,7 @@ export function cashMover(d: CashMoverDeps): CashMover {
     const quoted: Quoted[] = [];
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i]!;
-      const a = await quoteOne(chain, p.usdc, p.least, i === 0 ? op : `${op}/${i}`, unitsText(p.usdc, USDC_DECIMALS), p.note === "" ? undefined : p.note);
+      const a = await quoteOne(chain, p.usdc, p.least, i === 0 ? op : `${op}/${i}`, unitsText(p.usdc, USDC_DECIMALS), p.note === "" ? undefined : p.note, op, i);
       if ("error" in a) {
         for (const q of quoted) await put(q.op, { ...q.rec, stage: "failed", ...(d.update ? { error: a.error } : {}) });
         return { error: a.error };
@@ -624,7 +641,10 @@ export function cashMover(d: CashMoverDeps): CashMover {
     return quoted.map((q) => handOne(chain, q, fee))[0]!;
   };
   type Quoted = { op: string; rec: MoveOpRecord; q: CashQuote; used: string; note?: string };
-  const quoteOne = async (chain: PoolChain, usdc: bigint, least: bigint, op: string, amount: string, note?: string): Promise<Quoted | Refusal> => {
+  const quoteOne = async (chain: PoolChain, usdc: bigint, least: bigint, op: string, amount: string, note: string | undefined, root: string, part: number): Promise<Quoted | Refusal> => {
+    // the trace's time 0 and the part's ids (its op, its follow's) read as the move's, part `part`
+    traceBegin(root);
+    traceAlias(op, root, part);
     // the move's record, leaving with its send_by_ms, written before its quote is asked (card move-sends-or-says-why):
     // from the tap on, the app follows an op that ends, never a request with nothing behind it
     const now = d.now();
@@ -647,12 +667,15 @@ export function cashMover(d: CashMoverDeps): CashMover {
       })(),
       late,
     ]).finally(() => clearTimeout(t));
+    traceAlias(used, root, part);
     if ("error" in q || !IMPLICIT.test(q.address) || q.amountIn !== usdc || q.minOut < least) {
       const error = "error" in q ? q.error : "quote_check_failed";
-      await put(op, { ...rec, stage: "failed", ...(d.update ? { error } : {}) });
+      const why = "error" in q ? `the quote was refused: ${q.error}` : !IMPLICIT.test(q.address) ? "the quote's deposit address is not a NEAR implicit account" : q.amountIn !== usdc ? `the quote takes ${q.amountIn}, not the ${usdc} asked` : `the quote's least out ${q.minOut} is under the ${least} the move needs`;
+      const last = trace(op, null, "quote", { quote: used, ...("address" in q && typeof q.address === "string" ? { address: q.address } : {}), error: why });
+      await put(op, { ...rec, stage: "failed", ...(d.update ? { error } : {}), ...lastOf(last) });
       return { error };
     }
-    const leaving: MoveOpRecord = { ...rec, out: unitsText(q.minOut, POOL_DECIMALS[chain]) };
+    const leaving: MoveOpRecord = { ...rec, out: unitsText(q.minOut, POOL_DECIMALS[chain]), ...lastOf(trace(op, null, "quote", { quote: used, address: q.address, amount: unitsText(q.minOut, POOL_DECIMALS[chain]) })) };
     await put(op, leaving);
     return { op, rec: leaving, q, used, ...(note === undefined ? {} : { note }) };
   };
@@ -661,7 +684,11 @@ export function cashMover(d: CashMoverDeps): CashMover {
     const rec = leaving;
     const usdc = q.amountIn;
     const claim = claimOf(op);
-    const ended = d.handoff!({ recipient: q.address, amount: usdc }, fee, a.note, ...(claim ? [claim] : [])).catch(() => null);
+    // the hand-off's steps as trace lines, each kept as the part's last (a hand-off that hangs shows where); its throw's
+    // words kept for the failed move's line
+    let thrown: string | undefined;
+    const mark: HandoffMark = (step, f) => keepLast(op, trace(op, null, step, f ?? {}));
+    const ended = d.handoff!({ recipient: q.address, amount: usdc }, fee, a.note, claim, mark).catch((x: unknown) => ((thrown = errorText(x)), null));
     // the send-by while the hand-off runs: a hand-off that has not claimed by then ends the move failed, not_sent, and
     // its claim is refused after it
     if (d.update) {
@@ -670,7 +697,7 @@ export function cashMover(d: CashMoverDeps): CashMover {
       void Promise.race([ended.then(() => false), at.then(() => true)]).then((due) => (clearTimeout(s), due ? expire(op) : false));
     }
     const going = ended.then((e) => e !== null && (e.kind === "arrived" || e.kind === "landed"));
-    tracks.push(track(op, used, leaving, ended).catch(() => {}));
+    tracks.push(track(op, used, leaving, ended, () => thrown).catch(() => {}));
     ways.push({ chain, id: used, op, lamports: q.minOut, going, since: d.now() });
     return { op, minOut: q.minOut };
   };
@@ -922,6 +949,46 @@ export type CashToPoolDeps = {
 type Inner = (ask: PoolAsk, ctx: KindContext | null) => HostRefusal | Running<"pool.buy">;
 type Answer = HostAnswer<"pool.buy"> | HostRefusal;
 
+/** The tap's deps as cashFirst reads them (card buy-shows-every-step): each tap read that throws says why in a trace
+ *  line; the move asked of the mover, or none, said too; and once a move is on its way, each read of what one tap
+ *  spends is bounded by the wait's time left (CASH_MOVE_WAIT_MS from the move's answer) and one that throws or never
+ *  answers counts as nothing yet, so the wait runs to its end and the pool buy then answers its own refusal: never a
+ *  tap that fails with its money already moved, or holds past the wait, with nothing said. `last()`: the last read. */
+function steadyTap(d: CashToPoolDeps, t: (step: TraceStep, f?: TraceFields) => void): CashToPoolDeps & { last(): bigint } {
+  let until: number | null = null;
+  let move: string | null = null;
+  let last = 0n;
+  const said = (e: unknown): TraceFields => ({ ...(move === null ? {} : { move }), stage: "tap_unread", error: errorText(e) });
+  return {
+    ...d,
+    tapMax: async (chain, token) => {
+      if (until === null) {
+        last = await d.tapMax(chain, token).catch((e: unknown) => {
+          t("move", said(e));
+          throw e;
+        });
+        return last;
+      }
+      let s: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<null>((r) => (s = setTimeout(() => r(null), Math.max(0, until! - d.now()))));
+      const got = await Promise.race([d.tapMax(chain, token).catch((e: unknown) => (t("move", said(e)), 0n)), late]).finally(() => clearTimeout(s));
+      if (got === null) t("move", said("the read of what one tap spends did not answer by the wait's end"));
+      last = got ?? 0n;
+      return last;
+    },
+    need: async (chain, short) => {
+      const op = await d.need(chain, short);
+      t("move", op === null ? { stage: "none", amount: short.toString(), error: "no move from Cash started or on its way for the shortfall" } : { move: op, amount: short.toString() });
+      if (op !== null) {
+        move = op;
+        until = d.now() + CASH_MOVE_WAIT_MS;
+      }
+      return op;
+    },
+    last: () => last,
+  };
+}
+
 /** The pool.buy kind that waits for Cash on its way: `inner` (the pool buy) once one tap spends the ask, or at once when
  *  nothing is on its way. No async function here returns an answer: a HostAnswer's `then` would make it a thenable. */
 export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
@@ -934,8 +1001,12 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
     // evm-cash-move-brings-its-fee), and the tap answers its own refusal at once
     const want = (now: bigint): bigint | null => (chain === "solana" ? ask.amount - now : null);
     let answer: Answer = { error: "failed" };
+    // the buy's trace lines (card buy-shows-every-step), under the request's id: the move it waits on, the wait's end,
+    // the pool buy's answer and the end
+    const t = (step: TraceStep, f: TraceFields = {}): void => void (ctx ? trace(ctx.id, null, step, f) : undefined);
+    if (ctx) traceBegin(ctx.id);
     const after = (async () => {
-      const d = deps();
+      const d = steadyTap(deps(), t);
       // a tap read that throws (Solana: the coin's venue not read, solanaTapMaxOf) moves nothing from Cash: the pool buy
       // reads the venue itself and answers its refusal at once
       const now = (await d.any(chain)) ? await d.tapMax(chain, token).catch(() => null) : ask.amount;
@@ -953,11 +1024,29 @@ export function cashFirst(inner: Inner, deps: () => CashToPoolDeps): Inner {
         const until = d.now() + CASH_MOVE_WAIT_MS;
         while (!d.signal?.aborted && d.now() < until && (await d.tapMax(chain, token)) < ask.amount) await d.wait(CASH_MOVE_POLL_MS);
       }
-      const r = inner(ask, ctx);
-      if (!("after" in r)) return void (answer = r);
+      // what one tap spends when the wait ended, against the ask: "ready", or the wait ran out (or a sign out) short
+      if (op !== null) {
+        const have = d.last();
+        t("move", { move: op, stage: have >= ask.amount ? "ready" : d.signal?.aborted ? "signed_out" : "wait_over", amount: have.toString(), ...(have >= ask.amount ? {} : { error: `one tap spends ${have} of the ${ask.amount} asked after ${CASH_MOVE_WAIT_MS} ms` }) });
+      }
+      // the pool buy's stages as trace lines too (sent, filled, not_landed: its answer comes at its first send)
+      const seen: KindContext | null = ctx === null ? null : { ...ctx, progress: (s) => (t("swap", { stage: s }), ctx.progress(s)) };
+      const r = inner(ask, seen);
+      if (!("after" in r)) {
+        answer = r;
+        t("swap", { error: r.error });
+        return void t("end", { stage: "refused", error: r.error });
+      }
       await r.after;
       answer = r.answer() ?? { error: "failed" };
-    })().catch(() => void (answer = { error: "failed" }));
+      const a = answer as Partial<{ result: { stage: string; txs?: readonly { hash: string }[] }; error: string }>;
+      const tx = a.result?.txs?.[0]?.hash;
+      t("swap", a.result ? { stage: a.result.stage, ...(tx ? { tx } : {}) } : { error: a.error ?? "no answer" });
+      t("end", a.result ? { stage: a.result.stage, ...(tx ? { tx } : {}) } : { stage: "refused", error: a.error ?? "no answer" });
+    })().catch((e: unknown) => {
+      answer = { error: "failed" };
+      t("end", { stage: "failed", error: errorText(e) });
+    });
     return { running: true, after, answer: () => answer };
   };
 }

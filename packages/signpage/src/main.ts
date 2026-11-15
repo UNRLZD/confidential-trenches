@@ -392,7 +392,7 @@ else {
       least: (chain) => oneClickLeastNow(chain),
       // the move's claim reaches the request, right before its note goes RESERVED (card move-sends-or-says-why); a
       // part's note withdraws exactly as planned (`exact`: the drawn fee), so a note moved whole leaves no change
-      handoff: handoff && ((w, fee, note, claim) => handoff(w, fee, note, note !== undefined, claim)),
+      handoff: handoff && ((w, fee, note, claim, mark) => handoff(w, fee, note, note !== undefined, claim, mark)),
       // a pool's quote floor, the same read pool.address checks against: an EVM pool's least rung plus one deposit's gas;
       // Solana's rung, one deposit's cost and the rent U_X keeps, its fee read for a message by the pool's pinned fee
       // payer (a deposit's fee is the same for any one signer, and the read names no account of the user's)
