@@ -1,0 +1,16 @@
+{
+ "bad_live_before": {
+  "from": "SIGN_HOST live, 2026-11-15 12:5xZ, before the card (release on main); 1Click through the helper proxy",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-W5XNKVD7Rv3D/79Z10KJ6OedVTp3ex63OVND4SBtpCvxkc1cRjpWi/I1Rb3wQJOc\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-W5XNKVD7Rv3D/79Z10KJ6OedVTp3ex63OVND4SBtpCvxkc1cRjpWi/I1Rb3wQJOc",
+  "mark": false,
+  "oneclick": "{\"message\":\"Amount is too low for bridge, try at least 75582\",\"correlationId\":\"ec5a642a-b4fc-46ed-b6f1-62ccaefb5275\",\"timestamp\":\"2026-11-15T12:50:09.482Z\",\"path\":\"/v0/quote\"}"
+ },
+ "good_built": {
+  "from": "packages/signpage/scripts/build-app.mjs --out at the card branch, 2026-11-15 12:5xZ; 1Click answer as read live in the same run",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-MBuhAfm1Oxf8U7Qb3HoDDlepSplEHWbl0A/7ebcAh9npImG2HHzi28scOe5/gQq+\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-MBuhAfm1Oxf8U7Qb3HoDDlepSplEHWbl0A/7ebcAh9npImG2HHzi28scOe5/gQq+",
+  "mark": true,
+  "oneclick": "{\"message\":\"Amount is too low for bridge, try at least 75582\",\"correlationId\":\"ec5a642a-b4fc-46ed-b6f1-62ccaefb5275\",\"timestamp\":\"2026-11-15T12:50:09.482Z\",\"path\":\"/v0/quote\"}"
+ }
+}
