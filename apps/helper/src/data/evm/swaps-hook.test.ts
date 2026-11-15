@@ -8,8 +8,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, type Event } from "../candles.ts";
-import { createSwaps, decodeRef, decodeSwap, hookOf, hookTakes, poolFilters, ROBINHOOD_VENUES, TOPIC, traderLeg, v4Key, type Log, type Pool } from "./swaps.ts";
+import { createSwaps, decodeRef, decodeSwap, hookOf, hooksOf, hookTakes, poolFilters, ROBINHOOD_VENUES, TOPIC, traderLeg, v4Key, type Log, type Pool } from "./swaps.ts";
 
 type RecLog = { a: string; t: string[]; d: string; b: number; i: number; tx: string; ts: number };
 type Fix = { head: number; headTime: number; receipts: Record<string, { from: string; status: string; logs: RecLog[] }>; ref: RecLog[] };
@@ -186,6 +187,31 @@ test("card market-reads-hold-under-load: a swap the pool's own hook sends (its f
   };
   assert.deepEqual(bars.candles, rebuild(logs));
   assert.notDeepEqual(bars.candles, rebuild(txLogs), "the hook's swap moves the bars' volume");
+});
+
+test("card evm-tape-rows-exact: hooksOf names a pool's hook whatever its flags; Base pool 0x014dd010...'s real key (it hashes to the id) names hook 0x0469a4bd, whose address carries afterSwap and beforeSwap and no return delta, so hookOf names none", () => {
+  const w = (h: string) => h.replace(/^0x/, "").padStart(64, "0");
+  const HOOK2 = "0x0469a4bd3724dc86c9542f4694c976da13c450c0";
+  // read from Base tx 0x95ac6c34's logs (two providers alike, 2026-11-15 10:4xZ): currency0 0x11111111..., the coin, the
+  // dynamic fee flag 0x800000, tick spacing 200, the hook
+  const key = `0x${w("0x1111111111166b7fe7bd91427724b487980afc69")}${w("0x238d92a5c5c4fadaac17577c0bfbb87d61764599")}${w((0x800000).toString(16))}${w((200).toString(16))}${w(HOOK2)}`;
+  assert.equal(`0x${Buffer.from(keccak_256(Buffer.from(key.slice(2), "hex"))).toString("hex")}`, "0x014dd010a204a2a67b3c31f3614e8a1167321531d36dc05d07eb0b2156aa8125");
+  assert.equal(hookOf(key), undefined);
+  assert.equal(hooksOf(key), HOOK2);
+  assert.equal(hooksOf(`${key.slice(0, 2 + 64 * 4)}${"0".repeat(64)}`), undefined);
+  assert.equal(hooksOf("0x12"), undefined);
+});
+
+test("card evm-tape-rows-exact: a swap the pool's own hook sends is off the tape when its hook carries no return-delta flag too (Pool.hooks; Base tx 0x95ac6c34's Swap log 18, sent by hook 0x0469a4bd after the trader's sell)", async () => {
+  const [tx] = Object.entries(FIX.receipts).find(([t]) => truth.get(t)!.side === "s")!;
+  const swap = txLogs.find((l) => l.tx === tx && l.t[0] === TOPIC.swap4 && l.t[1] === ID)!;
+  const own: RecLog = { ...swap, i: swap.i + 1000, t: [swap.t[0]!, swap.t[1]!, `0x${HOOK.slice(2).padStart(64, "0")}`] };
+  const { hook: _, ...plain } = POOL;
+  const s = createSwaps("robinhood", { fetch: fakeChain([...txLogs, own]), now: () => 1_000_000, listed: async () => true, rpcs: ["https://a.test", "https://b.test"], pools: new Map([[COIN, { pool: { ...plain, hooks: HOOK }, decimals: 18 }]]), tickMs: 0 });
+  const tape = JSON.parse((await s.trades(COIN, 50)).body);
+  s.stop();
+  assert.equal(tape.trades.length, 5, "the five traders' trades, not the hook's");
+  assert.equal(tape.trades.filter((t: { tx: string }) => t.tx === tx).length, 1);
 });
 
 test("card market-reads-hold-under-load: the book keeps a swap marked off the tape in its bars and out of its tape", () => {

@@ -611,6 +611,11 @@ export type Pool = {
   /** A v4 pool's hook when its address carries a return-delta flag (hookOf): the hook may then take from or add to
    *  what the swapper pays or gets, after the `Swap` log is written. */
   hook?: string;
+  /** A v4 pool's hook contract, whatever its flags (hooksOf): a swap it sends itself is its own, never a trader's (v4
+   *  calls no hook for it), so it is in the bars and off the tape. A hook with no return-delta flag sends them too: the
+   *  pool 0x014dd010...'s hook 0x0469a4bd (afterSwap and beforeSwap, no return delta) swapped 27.607... of its own
+   *  liquidity in Base tx 0x95ac6c34's sell (Swap log 18). */
+  hooks?: string;
   /** A hooked v4 pool's: the token's other v4 pools the discovery found, whose swaps are read with this pool's only so
    *  hookTakes can tell a sender that swapped the token once in the transaction (card helper-v4-hook-liquidity). */
   siblings?: readonly string[];
@@ -636,6 +641,19 @@ export function hookOf(key: string): string | undefined {
   const h = `0x${key.slice(2 + 64 * 4 + 24)}`;
   return (BigInt(h) & (BEFORE_SWAP_DELTA | AFTER_SWAP_DELTA)) !== 0n ? h : undefined;
 }
+
+/** The hook contract of a v4 PoolKey (abi-encoded, its fifth word) whatever its flags, or undefined for none. */
+export function hooksOf(key: string): string | undefined {
+  if (!/^0x[0-9a-f]{320}$/.test(key)) return undefined;
+  const h = `0x${key.slice(2 + 64 * 4 + 24)}`;
+  return BigInt(h) === 0n ? undefined : h;
+}
+
+/** Whether a v4 swap log is its pool's own hook's (Pool.hooks, else Pool.hook): in the bars, off the tape. */
+const ownSwap = (pool: Pool, l: Log): boolean => {
+  const by = pool.hooks ?? pool.hook;
+  return pool.venue === "v4" && by !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === by;
+};
 
 /** The `eth_getLogs` filters for a pool's trades over blocks `from` to `to`: its swaps, and for a pool with a hook
  *  (Pool.hook) the token's transfers and the PoolManager's ERC-6909 claims of the token, which show what each swap's
@@ -1574,8 +1592,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const tokenIs0 = c0 === token;
     if (!tokenIs0 && c1 !== token) return null;
     const quote = quoteOf(tokenIs0 ? c1 : c0, true);
-    const hook = hookOf(k);
-    return quote === null ? null : { venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }) };
+    const [hook, hooks] = [hookOf(k), hooksOf(k)];
+    return quote === null ? null : { venue: "v4", id, token, tokenIs0, quote, ...(hook === undefined ? {} : { hook }), ...(hooks === undefined ? {} : { hooks }) };
   }
   /** The Pons curves the factories' records of the token name (a record of another token, or not live, names none). */
   const curvePools = (token: string, recs: readonly (string | undefined)[]): Pool[] =>
@@ -2016,7 +2034,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // a swap the pool's own hook sends (its fees sold in its own pool) is no trader's trade: in the bars, off the tape
       // (card market-reads-hold-under-load: Base tx 0xa1782de0's log 0x33, the hook 0x0469a4bd selling 555.17 of its
       // fees after the trader's 69,395.86 sell, was on the tape as a second sell of the trader's)
-      const own = e.pool.hook !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === e.pool.hook;
+      const own = ownSwap(e.pool, l);
       events.push({ ...s, t, ...(got === undefined ? {} : { got }), ...(own ? { tape: false as const } : {}) });
     }
     let merged: Event[] = events;
@@ -2077,7 +2095,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = sw === null ? null : timeOf(l);
       if (sw === null || t === null) continue;
       const got = traderLeg(sw, takes.get(`${l.tx}:${l.index}`));
-      const own = e.pool.hook !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === e.pool.hook;
+      const own = ownSwap(e.pool, l);
       events.push({ ...sw, t, ...(got === undefined ? {} : { got }), ...(own ? { tape: false as const } : {}) });
     }
     if (events.length > 0) b.ingest(events[0]!.block, events, events.at(-1)!.block);
@@ -2454,7 +2472,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           const x = r?.[k];
           // no receipt yet (a provider behind the vendor) is no answer; one that shows no trade of the hash is "none"
           if (!x?.ok || x.result === null || typeof x.result !== "object") return null;
-          return receiptFacts(x.result, ask[i]!, token, V.poolManager) ?? "none";
+          return receiptFacts(x.result, ask[i]!, token, V.poolManager, SWAP_TOPICS) ?? "none";
         });
       },
       (a, b) => JSON.stringify(a) === JSON.stringify(b),
