@@ -27,16 +27,24 @@ const feeOf = (network: string) => evmPoolFee({ gas: evmPoolGas(2), gasPrice: GW
 
 type Call = { host: string; method: string; at: number };
 type Refuse = (host: string, method: string, ageS: number, at: number) => { status: number; body: object } | null;
+/** The machine's fetch, put back by the file's last test. Until then a read made after its test ended (its chain gone)
+ *  lands here, never on a real provider, and that last test fails naming it (card fresh-clone-tests-pass: a wait (4b)
+ *  let go ran its reads after the test, on Robinhood's mainnet RPCs, refused on a machine with no route out). */
+const REAL_FETCH = globalThis.fetch;
+const late: string[] = [];
+const afterItsTest = (async (u: string | URL) => {
+  late.push(new URL(String(u)).host);
+  throw new Error("a read after its test ended");
+}) as typeof fetch;
 /**
  * The chain at the test's clock: the newest block is the one of the clock's second (or `stalled`'s), a block past it is
  * null, and a state read at a block `refuse` names for its host and age is refused as the pruned providers refuse it.
  */
 function chain(t: TestContext, refuse: Refuse, at: { T: number; stalled?: number }): Call[] {
   const calls: Call[] = [];
-  const real = globalThis.fetch;
   const realNow = Date.now;
   t.after(() => {
-    globalThis.fetch = real;
+    globalThis.fetch = afterItsTest;
     Date.now = realNow;
   });
   Date.now = () => at.T;
@@ -334,14 +342,19 @@ test("(4b) review P3-2: Base's fee read in the start's period, Robinhood's only 
   const sleep = (ms: number) => new Promise<void>((go) => pending.push({ ms, go }));
   const gate = S.readyGate(Promise.resolve(), S.poolsChecked(new Map(), new Map([...senders].map(([k, s]) => [k, { ready: () => s.ready(sleep) }])), () => {}));
   // three periods on: each wait the test lets go moves the clock to its end
+  let waiting = 0;
   for (let k = 0; k < 40 && at.T < E + 240_000; k++) {
     for (let i = 0; i < 10_000 && pending.length === 0 && !gate.ready(); i++) await new Promise((r) => setImmediate(r));
     assert.equal(gate.ready(), false, `ready at second ${(at.T - E) / 1000}, Base holding no fee for that period`);
+    waiting = pending.length;
     const w = pending.shift()!;
     at.T += w.ms;
     w.go();
   }
   assert.ok(at.T >= E + 240_000);
+  // the wait let go last reads its period's fee: the test ends once that check waits again, its reads made on this chain
+  for (let i = 0; i < 10_000 && pending.length < waiting; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(pending.length, waiting, "every check waiting again, no read in flight");
   assert.deepEqual([await senders.get(RH)!.held(E + 60_000), await senders.get(BASE)!.held(E + 60_000)], [true, false], "Robinhood holds the next period's fee, Base none");
   // and while the check runs, the pool routes answer the coded 503 (review P3-5), never a read
   // both checks passed: each pool's routes read as they do after a start (Base's fee read fails: the route's 503 upstream)
@@ -365,4 +378,11 @@ test("review of f86e1c27 P3-1: Robinhood whole, Base's fee's state unreadable: R
   assert.deepEqual((await senders.get(BASE)!.carry({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
   assert.deepEqual((await senders.get(BASE)!.sell({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
   assert.notDeepEqual((await senders.get(RH)!.sell({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
+});
+
+// last in the file: every test above ends with its reads done, so none reaches a provider after its chain is gone
+test("no read outlives its test: a pool check's wait let go has made its reads before the test ends", async () => {
+  for (let i = 0; i < 100; i++) await new Promise((r) => setImmediate(r));
+  globalThis.fetch = REAL_FETCH;
+  assert.deepEqual(late, []);
 });
