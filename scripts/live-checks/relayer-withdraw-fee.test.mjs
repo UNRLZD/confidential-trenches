@@ -56,6 +56,9 @@ test("made from the good run: another relayer, a fee over fee_max, a closed wind
   assert.equal(judge(withBody(g, "testnet", (b) => ({ ...b, relay_fee: (max + 1n).toString() })), RELEASE_RELAYER).ok, false);
   assert.equal(judge(withBody(g, "testnet", (b) => ({ ...b, relay_fee: max.toString() })), RELEASE_RELAYER).ok, true, "a fee at fee_max is the device's to take");
   assert.equal(judge(withBody(g, "mainnet", (b) => ({ ...b, valid_until_block: Number(g.device.mainnet.height) - 1 })), RELEASE_RELAYER).ok, false);
+  // card near-cash-pays-any-amount: the window is 1,200 blocks, a request's whole life; 30 more of the providers' spread
+  assert.equal(judge(withBody(g, "mainnet", (b) => ({ ...b, valid_until_block: Number(g.device.mainnet.height) + 1_230 })), RELEASE_RELAYER).ok, true, "the window's last block");
+  assert.equal(judge(withBody(g, "mainnet", (b) => ({ ...b, valid_until_block: Number(g.device.mainnet.height) + 1_231 })), RELEASE_RELAYER).ok, false, "past any window");
   assert.equal(judge(withBody(g, "mainnet", ({ g_w, ...b }) => b), RELEASE_RELAYER).ok, false);
   assert.equal(judge({ ...g, reads: g.reads.map((x) => (x.asked === OTHER ? { ...x, status: 200 } : x)) }, RELEASE_RELAYER).ok, false);
   assert.equal(judge(g, { mainnet: null, testnet: RELEASE_RELAYER.testnet }).ok, false);

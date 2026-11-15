@@ -1,0 +1,18 @@
+{
+ "_good": "this branch: helper fee.ts createFeeQuoter on the live mainnet pair and its SIGN_HOST build (near-cash-pays-any-amount.record.ts, 15 Nov 01:2xZ)",
+ "good": {
+  "quote": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"150816\",\"gp\":\"100000000\",\"px\":\"3.004396879372\",\"g_w\":\"92505000000000\",\"valid_until_block\":224596359}",
+  "height": 224595161,
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Ycwjh1A2dhG6X8uBw9lOmC8B6l1VWXPdP5oITE2txVslE+9VC6eLg6DjxA9a+lsZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-Ycwjh1A2dhG6X8uBw9lOmC8B6l1VWXPdP5oITE2txVslE+9VC6eLg6DjxA9a+lsZ",
+  "planned": true
+ },
+ "_bad": "HELPER_HOST and SIGN_HOST as served at release 146 (read 15 Nov 01:21Z)",
+ "bad": {
+  "quote": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"151086\",\"gp\":\"100000000\",\"px\":\"3.009794298223\",\"g_w\":\"92505000000000\",\"valid_until_block\":224595185}",
+  "height": 224595087,
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-8idfWizj58fsGb6xOb6OTUFT8oerQma3sZ8Lo+G8i5iS5ielEStuxHkkIVwPz3Wu\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-8idfWizj58fsGb6xOb6OTUFT8oerQma3sZ8Lo+G8i5iS5ielEStuxHkkIVwPz3Wu",
+  "planned": false
+ }
+}
