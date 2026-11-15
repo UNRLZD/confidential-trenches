@@ -100,6 +100,17 @@ function tabDoc(shown = true, focus = true) {
   return d;
 }
 const tick = () => new Promise((r) => setTimeout(r, 5));
+/** Ticks until `check` holds, failing with `what` past `ms` of real time (card readme-run-fits-an-agent-timeout): a tab's
+ *  queue opens and proves on the wallet store's IndexedDB steps and crypto.subtle's thread pool, which a busy machine
+ *  slows in real time, so a fixed count of ticks ran out before B's queues opened on GitHub's 4-core runner (merge queue
+ *  run 43697698008, "B opened its queues"). The bound is the test's own; a queue that never opens still fails. */
+async function until(check: () => Promise<boolean>, what: string, ms = 20_000): Promise<void> {
+  const end = performance.now() + ms;
+  while (!(await check())) {
+    if (performance.now() > end) assert.fail(`${what}: not within ${ms} ms`);
+    await tick();
+  }
+}
 
 test("the front: a shown tab with focus takes it from any other; a shown tab without focus only when it is free; a hidden tab gives it back", async () => {
   const { locks, holder } = originLocks();
@@ -312,12 +323,17 @@ async function rig(chain: EvmChain, network: "robinhood-testnet" | "base-sepolia
     };
     return Object.assign(t, { buy });
   };
+  const proved = async (t: ReturnType<typeof tab>) => ((await t.readyWith(async () => null)).ready ?? []).filter((x) => x.noteId === r.id).map((x) => x.chunk);
+  /** The tab's proofs of the return note, once its state reads have had it proved: 6 state reads at least, as many as
+   *  its queue takes to prove it within until's bound. */
   const chunks = async (t: ReturnType<typeof tab>) => {
     for (let i = 0; i < 6; i++) {
       await t.stateRead();
       await tick();
     }
-    return ((await t.readyWith(async () => null)).ready ?? []).filter((x) => x.noteId === r.id).map((x) => x.chunk);
+    // a state read more each tick until it is proved; past until's bound the caller's assertion names what it got
+    await until(async () => (await proved(t)).length > 0 || (await t.stateRead(), false), "the tab proved the return note").catch(() => {});
+    return proved(t);
   };
   return { ns, r, tab, chunks };
 }
@@ -385,7 +401,7 @@ for (const [chain, network, chainId] of [["robinhood", "robinhood-testnet", 4663
     assert.equal((await ns.get(r.id))!.state, "RESERVED", "A's take went through");
     h.end?.();
     // then A closes its queues and B holds them
-    for (let i = 0; i < 4; i++) await tick();
+    await until(async () => (await B.readyWith(async () => null)).ready !== undefined, "B opened its queues");
     assert.equal((await A.readyWith(async () => null)).ready, undefined, "A gave the queues up after its take");
     assert.notEqual((await B.readyWith(async () => null)).ready, undefined, "B opened its queues");
   });

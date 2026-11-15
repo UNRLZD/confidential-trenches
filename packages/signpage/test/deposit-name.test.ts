@@ -406,9 +406,11 @@ test("one pool's naming that fails leaves the others named", async () => {
 // The buy holds the seed lock shared to its Final; its note writes post "changed", the page names the deposit again,
 // and every naming asked the seed lock exclusive. Web Locks grant in request order (Node's navigator.locks, as a
 // browser's), so the sell's shared request queued behind that exclusive one, itself waiting for the buy.
-/** Polls (no clock) until `f` holds or `n` turns of the event loop pass; whether it held. */
-const until = async (f: () => Promise<boolean>, n = 2_000): Promise<boolean> => {
-  for (let i = 0; i < n; i++) {
+/** Polls each turn of the event loop until `f` holds or `ms` of real time pass; whether it held. Bounded by time, not by
+ *  turns (card readme-run-fits-an-agent-timeout): the naming's IndexedDB steps and crypto.subtle work land in real time,
+ *  and on a loaded 4-core machine 2,000 turns passed in 259 ms before they did ("assert.ok(settled)"). */
+const until = async (f: () => Promise<boolean>, ms = 20_000): Promise<boolean> => {
+  for (const end = performance.now() + ms; performance.now() < end; ) {
     if (await f()) return true;
     await new Promise((r) => setImmediate(r));
   }

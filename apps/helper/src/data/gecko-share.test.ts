@@ -8,7 +8,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { start } from "../server.ts";
-import { createEvmLists, GT_BASE, GT_READS, STALE_MS, TICK_MS } from "./evm/lists.ts";
+import { clockOf, createEvmLists, EVM_CHAINS, GT_BASE, GT_READS, LIST_KEYS, STALE_MS, TICK_MS, toRows } from "./evm/lists.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_PER_CLIENT, REFRESH_URGENT_MS, WINDOW_MS } from "./gecko.ts";
 import { createSolanaToken } from "./solana/token.ts";
 
@@ -25,9 +25,33 @@ for (const c of ["base", "robinhood"]) {
 /** Five Solana mints, each a different token page. */
 const MINTS = ["Q1vecEMQEgDyrw1txmBgFwUrkeQurqkEe1bGMzFpump", "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", "So11111111111111111111111111111111111111112", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"];
 
-/** One clock, one GeckoTerminal (5 a minute, then 429 "0"), RPC providers down (makers stay unread), and a server with
- *  the token page and both EVM chains' lists on one budget, as the helper's main builds them. */
-async function world(handover?: unknown) {
+/** Each chain's listed tokens with their makers read already (none: no launchpad), as a warm helper's file carries them
+ *  (createEvmLists' restore). A maker is read on RPC providers, never on GeckoTerminal, so the budget a world shares is
+ *  the same with them; without them each 12 s tick of a simulated two hours asked every provider again, down, for the
+ *  same tokens, a third of the chart tests' time (card readme-run-fits-an-agent-timeout). */
+const SETTLED = Object.fromEntries(
+  EVM_CHAINS.map((c) => {
+    const tokens = new Set(LIST_KEYS.flatMap((k) => [...toRows(c, JSON.parse(LISTS[`${GT_BASE}/networks/${c}/${GT_READS[k]}`]!), NOW)!.created.keys()]));
+    return [c, { makers: [...tokens].map((t) => [t, null]), clock: clockOf(c) }];
+  }),
+);
+
+/** GeckoTerminal never asked past its limit: at no second of the run more than 5 calls in the WINDOW_MS before it. One
+ *  pass over the calls in time order, two pointers for the window (O(seconds + calls)). */
+function withinLimit(gt: readonly { at: number }[], from: number, to: number): void {
+  const at = gt.map((x) => x.at).sort((a, b) => a - b);
+  let lo = 0, hi = 0;
+  for (let s = from; s < to; s += 1_000) {
+    while (hi < at.length && at[hi]! <= s) hi++;
+    while (lo < hi && s - at[lo]! >= WINDOW_MS) lo++;
+    assert.ok(hi - lo <= 5, "GeckoTerminal never asked past its limit");
+  }
+}
+
+/** One clock, one GeckoTerminal (5 a minute, then 429 "0"), RPC providers down (makers stay unread, unless `settled`
+ *  hands each list's makers in as read), and a server with the token page and both EVM chains' lists on one budget, as
+ *  the helper's main builds them. */
+async function world(handover?: unknown, settled = false) {
   const clock = { now: NOW };
   const gt: { at: number; kind: "lists" | "page" }[] = [];
   const doFetch = async (url: string): Promise<Response> => {
@@ -47,6 +71,7 @@ async function world(handover?: unknown) {
   const token = createSolanaToken(down as never, down as never, { now, fetch: doFetch as never, gecko: budget });
   if (handover !== undefined) token.restore(handover);
   const lists = { base: createEvmLists("base", budget, { fetch: doFetch as never, now }), robinhood: createEvmLists("robinhood", budget, { fetch: doFetch as never, now }) };
+  if (settled) for (const c of EVM_CHAINS) assert.equal(lists[c].restore(SETTLED[c]), false, "makers alone: every list is still read from GeckoTerminal");
   const server = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, token, undefined, undefined, lists);
   await new Promise<void>((ok) => server.on("listening", () => ok()));
   const port = (server.address() as AddressInfo).port;
@@ -132,7 +157,7 @@ test("a helper started while a token page is open still serves its lists: a list
     await w.candles(MINTS[1]!, tfs[(i + 1) % 6]);
   }
   for (const c of ["base", "robinhood"]) assert.equal((await w.listsAnswer(c)).status, 200, `${c} lists after ${(w.clock.now - NOW) / 1000} s`);
-  for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+  withinLimit(w.gt, NOW, w.clock.now);
 });
 
 /** A token page left open: its 1m chart (the fixture's bars are GeckoTerminal's minute bars) read every `everyMs` for `forMs` while both chains' lists tick every 12 s (as
@@ -152,7 +177,7 @@ async function heldChart(w: Awaited<ReturnType<typeof world>>, everyMs: number, 
     await w.lists.robinhood.tick();
     w.clock.now += 12_000;
   }
-  for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+  withinLimit(w.gt, NOW, w.clock.now);
   return ages;
 }
 
@@ -161,7 +186,7 @@ const CADENCES = [60_000, 360_000, 1_080_000];
 
 test("card helper-chart-fresh: a chart read every 60 s, 6 min or 18 min while both chains' lists keep the budget busy is never served bars REFRESH_URGENT_MS old (live 14:03Z and 14:21Z: PUMP's 1h bars from 12:55:51Z, the lists keeping the window at the refresh lane's room)", async (t) => {
   for (const every of CADENCES) {
-    const w = await world();
+    const w = await world(undefined, true);
     t.after(w.close);
     await w.lists.base.tick();
     await w.lists.robinhood.tick();
@@ -182,7 +207,7 @@ test("card helper-chart-fresh: a chart handed over at a swap, its bars 40 minute
     at = NOW;
     const handed = JSON.parse(JSON.stringify(old.state()));
     assert.equal(handed.kept.length, 1, "the bars are handed over");
-    const w = await world(handed);
+    const w = await world(handed, true);
     t.after(w.close);
     await w.lists.base.tick();
     await w.lists.robinhood.tick();
@@ -195,7 +220,7 @@ test("card helper-chart-fresh: a chart handed over at a swap, its bars 40 minute
 test("card helper-chart-fresh: a held chart past REFRESH_URGENT_MS and a cold token's first open in the same window, both EVM lists ticking: both answered 200, the held one fresh, no 429 (app-console-429's crowd outcome holds with the stale-chart fix)", async (t) => {
   // each offset puts the two reads at another point of the lists' 12 s ticks and the budget's window
   for (const offset of [0, 12_000, 24_000, 36_000, 48_000, 60_000]) {
-    const w = await world();
+    const w = await world(undefined, true);
     t.after(w.close);
     // normal load: both chains' lists ticking ten minutes, every list read
     for (let i = 0; i < 50; i++) {
@@ -215,7 +240,7 @@ test("card helper-chart-fresh: a held chart past REFRESH_URGENT_MS and a cold to
     assert.equal(cold.status, 200, `offset ${offset / 1000} s: the cold first open answered ${cold.status} ${cold.body}`);
     assert.equal(held.status, 200, `offset ${offset / 1000} s: held ${held.status}`);
     assert.ok(w.clock.now - (JSON.parse(held.body) as { as_of_ms: number }).as_of_ms < REFRESH_URGENT_MS, `offset ${offset / 1000} s: the held chart is read fresh`);
-    for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+    withinLimit(w.gt, NOW, w.clock.now);
   }
 });
 
@@ -223,7 +248,7 @@ test("card app-faults-seen-on-122: both chains' lists, 40 minutes under token pa
   // each order is the order the two chains' 12 s timers fire in: the chain that ticks first takes a freed call first
   // and a page read every 4 s or every second: either way pages take every call the budget lets them
   for (const [order, every] of [[["base", "robinhood"], 4_000], [["robinhood", "base"], 4_000], [["base", "robinhood"], 1_000]] as const) {
-    const w = await world();
+    const w = await world(undefined, true);
     t.after(w.close);
     const seen = new Set<string>();
     const worst = { base: 0, robinhood: 0 };
@@ -247,6 +272,6 @@ test("card app-faults-seen-on-122: both chains' lists, 40 minutes under token pa
       }
     }
     assert.deepEqual([...seen].sort(), ["base", "robinhood"], `order ${order.join(",")}, a page every ${every / 1000} s: both chains' lists were read`);
-    for (let s = NOW; s < w.clock.now; s += 1_000) assert.ok(w.gt.filter((x) => x.at <= s && s - x.at < WINDOW_MS).length <= 5, "GeckoTerminal never asked past its limit");
+    withinLimit(w.gt, NOW, w.clock.now);
   }
 });
