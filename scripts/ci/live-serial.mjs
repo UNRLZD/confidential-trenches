@@ -35,7 +35,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { waitIdle } from "./jup-idle.mjs";
-import { RERUN, isCheck, logArg, noticeLine, reasonOf, rerun, runCheck as runOnce, sink, verdictLine, verdictOf, writeVerdicts } from "./live-rerun.mjs";
+import { RERUN, isCheck, keepRecord, logArg, noticeLine, reasonOf, recordFile, rerun, runCheck as runOnce, sink, verdictLine, verdictOf, writeVerdicts } from "./live-rerun.mjs";
 
 /** The members that say when they are done with the budget, and the flag that gives each its deadline (epoch ms): the
  *  group's start plus withinMs. solana-mint-supply-moves: its burn reads end by then, so the group, and the helper's
@@ -73,9 +73,10 @@ export function idleGated(keys, root = process.cwd()) {
   return !(groups.size === 1 && only !== null && !IDLE_GATED.includes(only));
 }
 
-/** One run of a check under `root`, as the job runs a single one: { code, output }. `args` its arguments. */
-export function runCheck(key, root = process.cwd(), write, args = []) {
-  return runOnce(key, args, root, write);
+/** One run of a check under `root`, as the job runs a single one: { code, output }. `args` its arguments, `record` the
+ *  file its record goes to when it takes one (live-rerun.mjs runCheck). */
+export function runCheck(key, root = process.cwd(), write, args = [], record = null) {
+  return runOnce(key, args, root, write, record);
 }
 
 /**
@@ -192,8 +193,10 @@ export async function main(argv, { root = process.cwd(), idle } = {}) {
       return 2;
     }
     const gated = idleGated(keys, root);
-    const r = await serial(keys, { idle: gated ? (idle ?? (() => waitIdle({ log: out.say }))) : null, run: (k, args, w) => runCheck(k, root, w ?? out.write, args), say: out.say, write: out.write });
+    const r = await serial(keys, { idle: gated ? (idle ?? (() => waitIdle({ log: out.say }))) : null, run: (k, args, w) => runCheck(k, root, w ?? out.write, args, recordFile(log, k)), say: out.say, write: out.write });
     writeVerdicts(log, r.results);
+    // card live-runs-keep-what-a-fail-needs: a member that FAILED or erred keeps its record beside the log
+    for (const x of r.results) keepRecord(recordFile(log, x.key), x.key, x.verdict, out.say, "live-serial");
     for (const x of r.results) if (x.verdict === "inconclusive") out.say(noticeLine(x.key, x.reason));
     return r.ok ? 0 : 1;
   } catch (e) {

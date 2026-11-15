@@ -5,6 +5,12 @@
 // its reason on every run, so a check that never judges is seen, never hidden. The run is red when a check FAILED or
 // erred, when one was not run, or when a planned job left no verdict (it ended before its runner wrote one: a crash, a
 // cancel, a timeout); never for an inconclusive one alone.
+// A re-run (card live-runs-keep-what-a-fail-needs) leaves a job one verdict file per attempt it ran in, each naming its
+// attempt (`attempt`, GITHUB_RUN_ATTEMPT) and in its own artifact, verdict-<id>-attempt-<n>. Each job's verdict is its
+// newest attempt's file, read whole: never an older attempt's in its place. A file that cannot be read or names no
+// attempt, or two files for one attempt, keep the job red. Run 43708092717 read attempt 1's FAIL of two checks whose
+// attempt 2 passed: both attempts' artifacts bore one name, and download-artifact keeps one artifact of a name, the
+// highest artifact id (@actions/artifact filterLatest), which was attempt 1's.
 //   node scripts/ci/live-verdicts.mjs --dir <folder of verdict files> --matrix <the plan's matrix JSON> [--summary <file>]
 //   exit 0 when no check failed, erred or went unrun and every job left its verdict; 1 otherwise; 2 on bad arguments.
 // Every line starts `live-verdicts: `, so a run's list reads from the CLI as
@@ -15,23 +21,44 @@ import { fileURLToPath } from "node:url";
 
 const KNOWN = new Set(["pass", "fail", "inconclusive", "error", "not_run"]);
 
-/** The verdicts of `ids` (the plan's job ids) from `files` ({ <id>: text | undefined }): { lines, ok, counts }. */
-export function judge(ids, files) {
-  const results = [];
-  const missing = [];
-  for (const id of ids) {
-    const text = files[id];
-    if (text === undefined) {
-      missing.push({ id, why: "it ended before its runner wrote one (a crash, a cancel or a timeout)" });
-      continue;
-    }
+/** The newest attempt's verdict of a job from its files' texts (one per attempt it ran in): { got, attempt, aside } or
+ *  { why } when no file can be read as the job's verdict. */
+export function newest(texts) {
+  const read = [];
+  for (const text of texts) {
     let got;
     try {
       got = JSON.parse(text);
     } catch {
-      missing.push({ id, why: "its verdict file is not JSON" });
+      return { why: "its verdict file is not JSON" };
+    }
+    if (!Number.isSafeInteger(got?.attempt) || got.attempt < 1) return { why: `its verdict file names no attempt (${JSON.stringify(got?.attempt) ?? "none"})` };
+    read.push(got);
+  }
+  read.sort((x, y) => y.attempt - x.attempt);
+  if (read.length > 1 && read[0].attempt === read[1].attempt) return { why: `two verdict files for attempt ${read[0].attempt}` };
+  return { got: read[0], attempt: read[0].attempt, aside: read.slice(1).map((x) => x.attempt) };
+}
+
+/** The verdicts of `ids` (the plan's job ids) from `files` ({ <id>: [text] | text | undefined }, a text per attempt):
+ *  { lines, ok, counts }. */
+export function judge(ids, files) {
+  const results = [];
+  const missing = [];
+  const read = [];
+  for (const id of ids) {
+    const texts = files[id] === undefined ? [] : [files[id]].flat();
+    if (texts.length === 0) {
+      missing.push({ id, why: "it ended before its runner wrote one (a crash, a cancel or a timeout)" });
       continue;
     }
+    const n = newest(texts);
+    if (n.why) {
+      missing.push({ id, why: n.why });
+      continue;
+    }
+    const got = n.got;
+    if (n.aside.length) read.push(`job ${id}: attempt ${n.attempt}'s verdict read, attempt ${n.aside.join(", ")}'s set aside`);
     const list = Array.isArray(got?.results) ? got.results : null;
     if (!list || list.length === 0) {
       missing.push({ id, why: "its verdict file names no check" });
@@ -46,7 +73,7 @@ export function judge(ids, files) {
   const of = (v) => results.filter((r) => r.verdict === v);
   const counts = { passed: of("pass").length, failed: of("fail").length, inconclusive: of("inconclusive").length, errors: of("error").length, notRun: of("not_run").length, noVerdict: missing.length };
   const ok = counts.failed === 0 && counts.errors === 0 && counts.notRun === 0 && counts.noVerdict === 0;
-  const lines = [`${results.length} checks in ${ids.length} jobs: ${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.errors} errors, ${counts.notRun} not run${counts.noVerdict ? `, ${counts.noVerdict} jobs with no verdict` : ""}`];
+  const lines = [`${results.length} checks in ${ids.length} jobs: ${counts.passed} passed, ${counts.failed} failed, ${counts.inconclusive} inconclusive, ${counts.errors} errors, ${counts.notRun} not run${counts.noVerdict ? `, ${counts.noVerdict} jobs with no verdict` : ""}`, ...read];
   for (const r of of("inconclusive")) lines.push(`inconclusive ${r.key}: ${r.reason}`);
   for (const r of of("fail")) lines.push(`failed ${r.key}: ${r.reason}`);
   for (const r of of("error")) lines.push(`error ${r.key}: ${r.reason}`);
@@ -64,13 +91,14 @@ export function idsOf(matrix) {
   return ids;
 }
 
-/** The verdict files under `dir` by job id (`<id>.verdict.json`, at any depth). */
+/** The verdict files under `dir` by job id, every attempt's (`<id>.verdict.json` at any depth: download-artifact puts
+ *  each artifact in a folder named after it, or a lone one at the top): { <id>: [text] }. */
 export function filesIn(dir) {
   const out = {};
   if (!existsSync(dir)) return out;
   for (const e of readdirSync(dir, { recursive: true, withFileTypes: true })) {
     const m = e.isFile() && /^([a-z0-9][a-z0-9-]*)\.verdict\.json$/.exec(e.name);
-    if (m) out[m[1]] = readFileSync(path.join(e.parentPath ?? e.path, e.name), "utf8");
+    if (m) (out[m[1]] ??= []).push(readFileSync(path.join(e.parentPath ?? e.path, e.name), "utf8"));
   }
   return out;
 }

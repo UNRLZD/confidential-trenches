@@ -17,6 +17,7 @@
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (each quote's time and outcome) to <file>, for the
 // test's replay (evm-quote-warm-round.answers.json);
 // --only measures those cases alone (a run to look at, never a pass: the cases left out fail).
+// Record: each quote's time and outcome; a live run that fails keeps it beside its log
 // Reads only: no key, no transaction, no money moves.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";

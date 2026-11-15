@@ -755,12 +755,13 @@ test("planted (review P2-1): six ways to turn a red check job green are each ref
 // review of 9eaf059a, P2-2: the runner comes from the workflow's own commit; only the check comes from the deployed one
 test("planted (review P2-2): a runner taken from the deployed commit, or a runner checkout that lacks a file, is refused", async () => {
   const { RUNNER_FILES } = await gate();
-  assert.deepEqual(RUNNER_FILES, ["scripts/ci/jup-idle.mjs", "scripts/ci/live-rerun.mjs", "scripts/ci/live-serial.mjs", "scripts/live-checks/helper-token-page-cold.mjs", "scripts/net-window.mjs"]);
+  assert.deepEqual(RUNNER_FILES, ["scripts/ci/jup-idle.mjs", "scripts/ci/live-after.mjs", "scripts/ci/live-rerun.mjs", "scripts/ci/live-serial.mjs", "scripts/live-checks/helper-token-page-cold.mjs", "scripts/net-window.mjs"]);
   const checkout = /runner checkout is not the one the gate holds/;
   assert.ok(has(plant(RUN_LINE, RUN_LINE.replace(".live-runner/", "")), /single-check step is not the one the gate holds/), "the deployed commit's runner");
   assert.ok(has(plant(SERIAL_LINE, SERIAL_LINE.replace(".live-runner/", "")), /serial step is not the one the gate holds/), "the deployed commit's serial runner");
   assert.ok(has(plant("          ref: ${{ github.workflow_sha }}\n", "          ref: ${{ inputs.commit }}\n"), checkout), "the runner checked out at the deployed commit");
   assert.ok(has(plant("            scripts/ci/jup-idle.mjs\n", ""), checkout), "a file the runners import left out");
+  assert.ok(has(plant("            scripts/ci/live-after.mjs\n", ""), checkout), "the header reader live-rerun.mjs imports (card live-runs-keep-what-a-fail-needs) left out");
   assert.ok(has(plant("          path: .live-runner\n", "          path: runner\n"), checkout), "another folder");
   assert.ok(has(plant("          sparse-checkout-cone-mode: false\n", ""), checkout), "cone mode, which reads the patterns as folders");
 });
@@ -805,4 +806,19 @@ test("planted (live-run-red-means-the-build): a live job that skips the verdicts
   assert.ok(has(liveProblems(noDownload), /the live job does not download every check job's verdict artifact/));
   const oldReader = LIVE.replace("          ref: ${{ github.workflow_sha }}\n          path: .live-verdicts", "          ref: ${{ inputs.commit }}\n          path: .live-verdicts");
   assert.ok(has(liveProblems(oldReader), /checkout of the verdicts' reader is not the one the gate holds/));
+});
+
+// card live-runs-keep-what-a-fail-needs: run 43708092717's attempt 2 read attempt 1's FAILs (one artifact name for both
+// attempts, download-artifact keeping the highest id of a name); and a failed check's record goes up with its log
+test("planted (live-runs-keep-what-a-fail-needs): a verdict artifact named alike in every attempt, verdicts merged into one folder, or a record left out of a check's artifact is refused", () => {
+  assert.deepEqual(liveProblems(LIVE), []);
+  const oneName = LIVE.replace("name: verdict-${{ matrix.id }}-attempt-${{ github.run_attempt }}", "name: verdict-${{ matrix.id }}");
+  assert.notEqual(oneName, LIVE);
+  assert.ok(has(liveProblems(oneName), /the check job does not upload its verdict file/));
+  const merged = LIVE.replace("          path: ${{ runner.temp }}/verdicts\n", "          path: ${{ runner.temp }}/verdicts\n          merge-multiple: true\n");
+  assert.notEqual(merged, LIVE);
+  assert.ok(has(liveProblems(merged), /merges the verdict artifacts into one folder/));
+  const noRecord = LIVE.replace("            ${{ runner.temp }}/live/*.record.json\n", "");
+  assert.notEqual(noRecord, LIVE);
+  assert.ok(has(liveProblems(noRecord), /does not upload a failed check's record/));
 });

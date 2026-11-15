@@ -62,6 +62,7 @@
 //   node scripts/live-checks/signpage-shell.mjs --engine chromium|firefox --live [--width phone|desktop] [--record <file>]
 //     the deployed SIGN_HOST, with APP_HOST answered by APP_PAGE
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
+// Record: what the run read, each request with what it asks and when; a live run that fails keeps it beside its log
 // No money; the account is the published test vector's, thrown away with the profile. Since card
 // sign-live-checks-read-a-pinned-page the page pins the mainnet Solana pool, so live, signed in, it reads that pool, its
 // price and the restore's first reads on PINNED_HOSTS (the helper, the Solana pair, the NEAR pair, and since release

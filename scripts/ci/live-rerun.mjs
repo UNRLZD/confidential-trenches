@@ -26,11 +26,19 @@
 // The runner writes the job's log itself (--log): the check's stdout and stderr through one pipe, in the order written,
 // and its own lines, each also printed as it comes. Its exit is the check's last code, with no pipe or tee after it that
 // could change it (review of 9eaf059a, P2-1).
+// Card live-runs-keep-what-a-fail-needs: the verdict file names the run's attempt (GITHUB_RUN_ATTEMPT), so the live job
+// reads a re-run's newest verdict of each job (scripts/ci/live-verdicts.mjs); and a check whose header holds a
+// `// Record: <what it holds>` line, and whose usage line for its arguments takes `[--record <file>]`, is given one beside
+// the log (`<id>.record.json`), removed before each run and kept only when the run ends FAIL or ERROR, so a red run shows
+// what the check read and when (live.yml uploads it with the log). The header line is the check's word that its --record
+// only writes what the run read: some checks' --record records their answers instead and judges differently
+// (evm-sell-delegate-v2-pinned's ends in an error when SIGN_HOST's bundle passes), so none is given one unasked.
 //   node <runner>/scripts/ci/live-rerun.mjs --log <file> <key> [args...]      the check's own exit code, after the reruns
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, realpathSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { headerLines } from "./live-after.mjs";
 
 const KEY = /^[a-z][a-z0-9-]*$/;
 
@@ -100,10 +108,52 @@ export function noticeLine(key, reason) {
 
 /** The job's verdict file beside its log (`<id>.log` -> `<id>.verdict.json`), which the live job reads. */
 export const verdictFile = (log) => (log ? `${log.replace(/\.log$/, "")}.verdict.json` : null);
-/** Writes `results` ([{ key, verdict, reason, runs }]) to the verdict file of `log`, when there is one. */
-export function writeVerdicts(log, results) {
+/** The run's attempt: GITHUB_RUN_ATTEMPT (1, then one more for each re-run), 1 when it is not set. */
+export function attemptOf(env = process.env) {
+  const n = Number(env.GITHUB_RUN_ATTEMPT);
+  return Number.isSafeInteger(n) && n >= 1 ? n : 1;
+}
+/** Writes `results` ([{ key, verdict, reason, runs }]) and the run's attempt to the verdict file of `log`, when there is
+ *  one. */
+export function writeVerdicts(log, results, attempt = attemptOf()) {
   const f = verdictFile(log);
-  if (f) writeFileSync(f, `${JSON.stringify({ results })}\n`);
+  if (f) writeFileSync(f, `${JSON.stringify({ attempt, results })}\n`);
+}
+
+/** The record a check run writes for the job, beside its log: `<id>.log` -> `<id>.record.json`, a serial group's member
+ *  `<id>.<key>.record.json`; null with no log. */
+export const recordFile = (log, member) => (log ? `${log.replace(/\.log$/, "")}${member ? `.${member}` : ""}.record.json` : null);
+
+const flags = (t) => (t.match(/(?<![\w-])--[a-z][a-z0-9-]*/g) ?? []);
+/**
+ * Whether `key`'s check (its source `text`) takes `--record <file>` when run with `args`: its header holds a
+ * `// Record: <what it holds>` line, and one of its usage lines (`//   node scripts/live-checks/<key>.mjs ...`, the
+ * note after three spaces left out) holds `[--record <file>]`, names every flag of `args` and needs none they lack (a
+ * flag outside [...]). A record that is a recorded answer (`[--record <file> --as good|bad]`) or a run that names its
+ * own is not this one.
+ */
+export function takesRecord(text, key, args) {
+  const given = args.filter((a) => a.startsWith("--")).map((a) => a.split("=")[0]);
+  if (given.includes("--record") || !headerLines(String(text), "Record").some(Boolean)) return false;
+  const head = new RegExp(`^//\\s+node scripts/live-checks/${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.mjs(?=\\s|$)(.*)$`);
+  return String(text).split("\n").some((line) => {
+    const m = head.exec(line);
+    if (!m) return false;
+    const form = m[1].split(/ {3,}/)[0];
+    if (!/\[--record <(?:file|f)>\]/.test(form)) return false;
+    let need = form;
+    for (let prev; prev !== need; ) [prev, need] = [need, need.replace(/\[[^[\]]*\]/g, " ")];
+    const named = flags(form);
+    return flags(need).every((f) => given.includes(f)) && given.every((f) => named.includes(f));
+  });
+}
+
+/** Keeps `file` (a check's record) when the run ended FAIL or ERROR, and says so through `say`; removes it otherwise. */
+export function keepRecord(file, key, verdict, say, by = "live-rerun") {
+  if (!file) return;
+  if (verdict === "fail" || verdict === "error") {
+    if (existsSync(file)) say(`${by} ${key}: its record kept: ${path.basename(file)}`);
+  } else rmSync(file, { force: true });
 }
 
 const named = (hosts) => (hosts.length ? hosts.join(", ") : "none named in its output (its INCONCLUSIVE lines above say why)");
@@ -171,9 +221,18 @@ export const isCheck = (key, root) => KEY.test(key) && existsSync(path.join(root
 /**
  * One run of `root`'s scripts/live-checks/<key>.mjs with `args`: its stdout and stderr through one pipe (`sh -c 'exec
  * node … 2>&1'`, the arguments passed as the shell's positional ones, never parsed), each chunk to `write` as it comes.
- * Resolves { code, output }.
+ * With `record` (a file) and a check that takes one with `args` (takesRecord), `--record <record>` is added, the file
+ * from a run before removed first. Resolves { code, output }.
  */
-export function runCheck(key, args = [], root = process.cwd(), write = (b) => process.stdout.write(b)) {
+export function runCheck(key, args = [], root = process.cwd(), write = (b) => process.stdout.write(b), record = null) {
+  if (record) {
+    rmSync(record, { force: true });
+    let text = "";
+    try {
+      text = readFileSync(path.join(root, "scripts/live-checks", `${key}.mjs`), "utf8");
+    } catch {}
+    if (takesRecord(text, key, args)) args = [...args, "--record", record];
+  }
   return new Promise((resolve) => {
     const chunks = [];
     const child = spawn("/bin/sh", ["-c", 'exec "$0" "$@" 2>&1', process.execPath, path.join("scripts/live-checks", `${key}.mjs`), ...args], { cwd: root, stdio: ["ignore", "pipe", "inherit"] });
@@ -195,8 +254,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     out.close();
     process.exit(2);
   }
-  const r = await rerun(key, args, { run: (k, a) => runCheck(k, a, root, out.write), say: out.say });
+  const r = await rerun(key, args, { run: (k, a) => runCheck(k, a, root, out.write, recordFile(log)), say: out.say });
   writeVerdicts(log, [{ key, verdict: r.verdict, reason: r.reason, runs: r.runs }]);
+  keepRecord(recordFile(log), key, r.verdict, out.say);
   if (r.verdict === "inconclusive") out.say(noticeLine(key, r.reason));
   out.say(`live-rerun ${key}: ${r.verdict.toUpperCase()}${r.reason ? `: ${r.reason}` : ""}`);
   out.close();

@@ -3,13 +3,13 @@
 // are the gate's (scripts/ci/live-workflow.mjs RERUN_CASES); these hold the pause, the names and the process run.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { EXIT, RETRY, classify, rpcAnswer } from "../live-checks/provider-answer.mjs";
-import { INCONCLUSIVE, RERUN, noAnswerHosts, pauseMs, reasonOf, rerun, runCheck, verdictFile, verdictOf } from "./live-rerun.mjs";
+import { INCONCLUSIVE, RERUN, attemptOf, noAnswerHosts, pauseMs, reasonOf, recordFile, rerun, runCheck, takesRecord, verdictFile, verdictOf } from "./live-rerun.mjs";
 
 test("the code run again is provider-answer.mjs's INCONCLUSIVE, and the bound is three runs", () => {
   assert.equal(INCONCLUSIVE, EXIT.INCONCLUSIVE);
@@ -185,6 +185,91 @@ test("the process run: an inconclusive check's job exits 0 with a notice and a v
     const killed = run("killed");
     assert.equal(killed.status, 2, "a check killed by a signal (no code) is an ERROR: red");
     assert.equal(killed.verdict.verdict, "error");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// card live-runs-keep-what-a-fail-needs: the verdict file names its attempt, so the live job reads a re-run's newest; a
+// check that FAILs keeps the record of what it read beside its log (the sign-out check's requests in time, signpage-shell)
+test("the verdict file names the run's attempt (GITHUB_RUN_ATTEMPT), 1 when none is set", () => {
+  assert.equal(attemptOf({ GITHUB_RUN_ATTEMPT: "2" }), 2);
+  assert.equal(attemptOf({}), 1);
+  assert.equal(attemptOf({ GITHUB_RUN_ATTEMPT: "x" }), 1);
+  const root = mkdtempSync(path.join(tmpdir(), "live-rerun-attempt-"));
+  try {
+    mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+    writeFileSync(path.join(root, "scripts/live-checks/ok.mjs"), 'console.log("live-check ok: PASS");\n');
+    const log = path.join(root, "ok.log");
+    const r = spawnSync(process.execPath, [RUNNER_PATH, "--log", log, "ok"], { cwd: root, encoding: "utf8", env: { ...process.env, GITHUB_RUN_ATTEMPT: "3" } });
+    assert.equal(r.status, 0);
+    assert.equal(JSON.parse(readFileSync(verdictFile(log), "utf8")).attempt, 3);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const usage = (key, ...forms) => ["// Record: what the run read", ...forms.map((f) => `//   node scripts/live-checks/${key}.mjs${f ? ` ${f}` : ""}`)].join("\n");
+test("a check is given --record only where the usage line its arguments meet takes [--record <file>]", () => {
+  assert.equal(takesRecord(usage("k", "[--url <origin>] [--record <file>]"), "k", []), true);
+  assert.equal(takesRecord(usage("k", "[--url <origin>] [--record <file>]"), "k", ["--url", "https://x"]), true);
+  assert.equal(takesRecord(usage("k", "[--url <origin>] [--record <file>]", "--harness [--build <dir>] ...   the hosts answered locally"), "k", ["--harness"]), false, "a flag the record's line does not name");
+  assert.equal(takesRecord(usage("k", "--host sign|app [--record <file>]", "--answer <file> --list <file>   a recorded answer"), "k", ["--host", "sign"]), true);
+  assert.equal(takesRecord(usage("k", "--host sign|app [--record <file>]"), "k", []), false, "a flag the line needs and the run lacks");
+  assert.equal(takesRecord(usage("k", "[--record <file> --as good|bad]"), "k", []), false, "a record that is a recorded answer");
+  assert.equal(takesRecord(usage("k", "[--answer <file>]"), "k", []), false);
+  assert.equal(takesRecord(usage("k", "[--record <file>]"), "k", ["--record", "x"]), false, "a run that names its own");
+  assert.equal(takesRecord(usage("k", "--engine webkit|chromium [--width phone|desktop] [--record <file>]"), "k", ["--engine=webkit"]), true);
+  assert.equal(takesRecord(usage("other", "[--record <file>]"), "k", []), false, "another check's line");
+  assert.equal(takesRecord(usage("k", "[--record <file>]").replace("// Record: what the run read\n", ""), "k", []), false, "a check whose header says no Record");
+  assert.equal(takesRecord(`// Record:\n${usage("k", "[--record <file>]").replace("// Record: what the run read\n", "")}`, "k", []), false, "an empty Record line");
+  assert.equal(takesRecord(`import x from "y";\n${usage("k", "[--record <file>]")}`, "k", []), false, "a Record line below the header");
+  // the real checks: the sign-out check's live run takes one, a replay form and a recorded answer do not
+  const real = (k) => readFileSync(fileURLToPath(new URL(`../live-checks/${k}.mjs`, import.meta.url)), "utf8");
+  assert.equal(takesRecord(real("signpage-shell"), "signpage-shell", ["--engine", "chromium", "--live"]), true);
+  assert.equal(takesRecord(real("app-shell"), "app-shell", ["--harness"]), false);
+  assert.equal(takesRecord(real("evm-buy-gas-floor"), "evm-buy-gas-floor", []), false);
+  for (const k of ["app-chart-live", "evm-quote-warm-round", "evm-pool-index"]) assert.equal(takesRecord(real(k), k, []), true, k);
+  // its --record records answers and judges differently: no Record line, so the live run gives it none
+  assert.equal(takesRecord(real("evm-sell-delegate-v2-pinned"), "evm-sell-delegate-v2-pinned", []), false);
+  assert.equal(recordFile("/t/live/app-shell.log"), "/t/live/app-shell.record.json");
+  assert.equal(recordFile("/t/live/evm-keyed.log", "evm-pool-index"), "/t/live/evm-keyed.evm-pool-index.record.json");
+  assert.equal(recordFile(null), null);
+});
+
+test("planted (live-runs-keep-what-a-fail-needs): a FAIL or an ERROR keeps its record beside its log; a pass, an inconclusive or a check that takes none leaves none", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "live-rerun-record-"));
+  try {
+    mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+    const writes = (key, tail) => `${usage(key, "[--url <origin>] [--record <file>]", "--answer <file>   a recorded answer")}\nimport { writeFileSync } from "node:fs";\nconst a = process.argv; const i = a.indexOf("--record");\nif (i >= 0) writeFileSync(a[i + 1], JSON.stringify({ requests: [{ at: 1, url: "x" }] }));\n${tail}\n`;
+    const put = (k, body) => writeFileSync(path.join(root, `scripts/live-checks/${k}.mjs`), body);
+    put("rec-fail", writes("rec-fail", 'console.log("live-check rec-fail: FAIL (a read after sign-out)"); process.exit(1);'));
+    put("rec-err", writes("rec-err", 'console.log("live-check rec-err: ERROR: x"); process.exit(2);'));
+    put("rec-pass", writes("rec-pass", 'console.log("live-check rec-pass: PASS");'));
+    put("rec-own-inc", writes("rec-own-inc", 'console.log("live-check rec-own-inc: INCONCLUSIVE (no event)"); process.exit(2);'));
+    put("rec-stale", `${usage("rec-stale", "[--record <file>]")}\nthrow new Error("before it wrote any");\n`);
+    put("no-rec", `${usage("no-rec", "[--url <origin>]", "--answer <file>")}\nif (process.argv.includes("--record")) { console.log("live-check no-rec: FAIL (given --record)"); process.exit(1); }\nconsole.log("live-check no-rec: FAIL (its own)"); process.exit(1);\n`);
+    const run = (k) => {
+      const log = path.join(root, `${k}.log`);
+      const r = spawnSync(process.execPath, [RUNNER_PATH, "--log", log, k], { cwd: root, encoding: "utf8" });
+      return { status: r.status, out: r.stdout, record: existsSync(recordFile(log)) ? JSON.parse(readFileSync(recordFile(log), "utf8")) : null, verdict: JSON.parse(readFileSync(verdictFile(log), "utf8")).results[0] };
+    };
+    const f = run("rec-fail");
+    assert.equal(f.status, 1);
+    assert.deepEqual(f.record, { requests: [{ at: 1, url: "x" }] }, "a FAIL keeps what it read");
+    assert.match(f.out, /^live-rerun rec-fail: its record kept: rec-fail\.record\.json$/m);
+    assert.deepEqual(run("rec-err").record, { requests: [{ at: 1, url: "x" }] }, "an ERROR keeps it too");
+    const p = run("rec-pass");
+    assert.equal(p.status, 0);
+    assert.equal(p.record, null, "a pass keeps none");
+    assert.equal(run("rec-own-inc").record, null, "an inconclusive keeps none");
+    writeFileSync(path.join(root, "rec-stale.record.json"), '{"stale":true}');
+    const stale = run("rec-stale");
+    assert.equal(stale.status, 1);
+    assert.equal(stale.record, null, "a run before this one's record is never kept as this one's");
+    const no = run("no-rec");
+    assert.equal(no.verdict.reason, "live-check no-rec: FAIL (its own)", "a check whose usage takes no --record is given none");
+    assert.equal(no.record, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
