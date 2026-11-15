@@ -22,7 +22,7 @@ import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPositionsPass } from "../src/positions-evm.ts";
 import { passMemo } from "../src/positions.ts";
 import { planEvmSell } from "../src/pool-sell-evm.ts";
-import { MAINNET_EVM_FEE_RPCS, MAINNET_POOL_HISTORY, MAINNET_POOL_RPCS, pageEvmPassReads, pageEvmWalletRpc } from "../src/pool-testnet.ts";
+import { MAINNET_EVM_FEE_RPCS, MAINNET_POOL_HISTORY, MAINNET_POOL_RPCS, pageEvmPassReads, pageEvmShownRpc, pageEvmWalletRpc } from "../src/pool-testnet.ts";
 import { TRADE_HELPER } from "../src/trade.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
@@ -265,7 +265,9 @@ test("the page's pass readers: on SIGN_HOST's build the pool pair and the helper
   for (const chain of ["base", "robinhood"] as const) {
     const main = pageEvmPassReads(chain, pair);
     assert.equal(main.rpcs, pair);
-    assert.equal(main.one, pageEvmWalletRpc(chain));
+    // the positions read what Portfolio and the sell box show: the route's shown lane (card base-reads-never-starve-max)
+    assert.equal(main.one, pageEvmShownRpc(chain));
+    assert.notEqual(main.one, pageEvmWalletRpc(chain));
     assert.equal(main.one?.url, `${TRADE_HELPER}/v1/rpc/${chain}`);
     const test = pageEvmPassReads(chain, pair, true);
     assert.deepEqual(Object.keys(test), ["rpcs"]);

@@ -827,9 +827,10 @@ test("card helper-rpc-hold-queued: a send waiting for a keyed provider's second 
   assert.equal(sent.length, 10, `${sent.length} sent: the waiting send went out after the provider's 429`);
   const last = all[10]!;
   assert.equal(last.status, 429);
-  assert.equal(last.why, "base held");
+  // card base-reads-never-starve-max: an EVM read's refusal and hold lines name its method and params shape
+  assert.equal(last.why, "base held eth_blockNumber[]");
   assert.ok(Number(last.headers?.["Retry-After"]) >= 28, `Retry-After ${last.headers?.["Retry-After"]}: the hold's seconds`);
-  assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), ["rpc hold base caller 30 s"]);
+  assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), ["rpc hold base caller 30 s eth_blockNumber[]"]);
 });
 
 // -- card evm-rpc-spare-list: a caller's read on an EVM chain reaches any listed provider that answers ----------------

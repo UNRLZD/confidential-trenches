@@ -71,7 +71,7 @@ import { lateBuyEnd, POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, PoolSendRefused, pool
 import { heldWs, ownWs } from "./pool-found.ts";
 import { boughtSincePass, keptHeldOf, type StoreWs } from "./pool-sell-dry.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, legCause, owedRentBacks, poolSellKind, POOL_RENT_BACK_SPACE_MAX_MS, READS_NONE, rentBackGapDrawn, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type OwedRentBack, type PoolSellKindHost } from "./pool-sell.ts";
-import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
+import { derivedBuyWallets, evmHelperKeyedRpc, evmHelperRpc, evmHelperShownRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptListed, keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, solanaAssetHeld, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LIFE_MS, EVM_POOLS, evmFeeHold, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmFeeHold, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -263,10 +263,24 @@ export const pageEvmWalletRpc = (chain: "base" | "robinhood", testnet: boolean =
   return r;
 };
 const WALLET_RPCS = new Map<"base" | "robinhood", EvmRpc>();
+/** The same route for what a screen shows (card base-reads-never-starve-max): the positions pass's W balances, which
+ *  Portfolio and the sell box draw, in the route's shown lane (the wallet's evmHelperShownRpc), never behind more than
+ *  EVM_PASS_IN_QUEUE of pageEvmWalletRpc's background reads; none in the testnet build. */
+export const pageEvmShownRpc = (chain: "base" | "robinhood", testnet: boolean = POOL_TESTNET): EvmRpc | undefined => {
+  if (testnet) return undefined;
+  let r = SHOWN_RPCS.get(chain);
+  if (r === undefined) {
+    const route = evmHelperShownRpc(TRADE_HELPER, chain);
+    SHOWN_RPCS.set(chain, (r = Object.assign((method: string, params: readonly unknown[]) => route(method, params), { url: `${TRADE_HELPER}/v1/rpc/${chain}` }) as EvmRpc));
+  }
+  return r;
+};
+const SHOWN_RPCS = new Map<"base" | "robinhood", EvmRpc>();
 /** A positions pass's readers (src/positions-evm.ts): the pool's pass pair, and on SIGN_HOST's build the helper's route
- *  as `one`, every W's balance read on it alone; the pair alone in the testnet build. */
+ *  as `one`, every W's balance read on it alone, in its shown lane (pageEvmShownRpc); the pair alone in the testnet
+ *  build. */
 export const pageEvmPassReads = (chain: "base" | "robinhood", rpcs: readonly [EvmRpc, EvmRpc], testnet: boolean = POOL_TESTNET): { rpcs: readonly [EvmRpc, EvmRpc]; one?: EvmRpc } => {
-  const one = pageEvmWalletRpc(chain, testnet);
+  const one = pageEvmShownRpc(chain, testnet);
   return one === undefined ? { rpcs } : { rpcs, one };
 };
 /** Tests only: forget this page's hold objects (EVM_HOLDS; each pool's record stays in the wallet store, as on a new
