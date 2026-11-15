@@ -166,8 +166,8 @@ export type NearBuyPage = {
   seed64(): Promise<Uint8Array>;
   /** The seed's shared lock (WALLET_SEED_LOCK): a sign out waits for a signature. */
   seedLock<T>(fn: () => Promise<T>): Promise<T>;
-  /** The vault payout's fee as the withdraw form draws it (withdrawFormDeps().fee). */
-  fee(): Promise<bigint>;
+  /** The vault payout's fee as the withdraw form draws it (withdrawFormDeps().fee); with `amount`, of a payout of it. */
+  fee(amount?: bigint): Promise<bigint>;
   /** withdrawHandoff(page) on the page's network; null where it names no vault or relayer. */
   handoff: ((w: { recipient: string; amount: bigint }, drawnFee: bigint, note?: string, exact?: boolean) => Promise<HandoffEnd>) | null;
   /** withdrawSettle(page): the RESERVED notes followed to their end. */
@@ -1533,7 +1533,9 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
  * amount: the buy's own plan (planCashSpend over those notes at the page's fee, as the buy plans it); `cost`, what it
  * draws in fees (the ask less what W swaps), in whole USDC; `out`, one quote of what W swaps (the kit's rheaQuote on the
  * page's pair, its amountOut: the venue's fees and the token's buy fee taken off), in whole tokens at the token's
- * decimals; left out when that read fails. No plan: tap_max alone. Signs nothing, writes nothing, sends nothing.
+ * decimals; left out when that read fails. Cash that cannot pay it (card buy-quote-before-any-note: $0 or less than
+ * the amount): `out` of what one note of the amount would swap, no `cost`; an amount no plan pays at all (at most twice
+ * the fee): tap_max alone. Signs nothing, writes nothing, sends nothing.
  */
 export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "fee" | "rpcs" | "pools" | "decimals">, token: string, amount: bigint | null, quote: NearBuyDeps["quote"] = async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) })): Promise<{ result: { tap_max: string; cost?: string; out?: string } } | { error: "not_allowed" | "not_funded" }> {
   const scope = vaultScope(page.network);
@@ -1542,13 +1544,19 @@ export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "
   const usdc = (u: bigint) => unitsOf(u, 6);
   const tap = usdc(free.reduce((t, n) => t + n.leaf.value, 0n));
   if (amount === null || amount <= 0n) return { result: { tap_max: tap } };
-  const fee = await page.fee();
-  const plan = planCashSpend(free.map((n) => ({ id: n.id, value: n.leaf.value })), amount, fee);
+  // no Cash note (card buy-quote-before-any-note): the payout fee of a withdrawal of the amount itself, as no note sizes
+  // the quote; a fee that amount cannot carry, or a read that fails, is tap_max alone
+  const fee = free.length > 0 ? await page.fee() : await page.fee(amount).catch(() => null);
+  if (fee === null) return { result: { tap_max: tap } };
+  const own = planCashSpend(free.map((n) => ({ id: n.id, value: n.leaf.value })), amount, fee);
+  // Cash that cannot pay it ($0, or less: card buy-quote-before-any-note): You receive still, as the same buy from one
+  // note of the amount would swap (its payout's fee off), and no Fee, which Cash's own notes would set
+  const plan = own !== null && own.length > 0 ? own : planCashSpend([{ id: "cash", value: amount }], amount, fee);
   if (plan === null || plan.length === 0) return { result: { tap_max: tap } };
   const swapped = plan.reduce((t, p) => t + p.part, 0n);
   const out = await Promise.all([quote({ side: "buy", token, amountIn: swapped }), page.decimals ? page.decimals(token) : readNearDecimals(page.network, page.rpcs(), token)]).then(
     ([q, d]) => (q.token === token && q.side === "buy" && q.amountIn === swapped && q.amountOut > 0n ? unitsOf(q.amountOut, d) : undefined),
     () => undefined,
   );
-  return { result: { tap_max: tap, cost: usdc(amount - swapped), ...(out === undefined ? {} : { out }) } };
+  return { result: { tap_max: tap, ...(plan === own ? { cost: usdc(amount - swapped) } : {}), ...(out === undefined ? {} : { out }) } };
 }

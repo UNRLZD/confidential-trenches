@@ -179,7 +179,8 @@ export type PoolBuyDryDeps = {
  * Above tap_max (card you-receive-on-every-chain), a buy cashFirst runs after moving a shortfall from Cash: with
  * `moved`, `out` from the same quote and `cost` the same sum over the ready pieces and the notes the move brings
  * (solanaMoveShort: the least move whose notes, each its own W, pay the rest), plus what `moved` says the move costs;
- * tap_max alone when the move is not priced, so the Fee never reads under.
+ * no `cost` when the move is not priced, so the Fee never reads under, and `out` still. With no queue open (card
+ * buy-quote-before-any-note: no pool note yet), tap_max "0" over no proof: the whole ask is that moved buy.
  */
 /** A SOL decimal (at most 9 fraction digits, 30 digits whole) in lamports; undefined when it is not one. */
 const lamportsOf = (x: unknown): bigint | undefined => {
@@ -281,11 +282,14 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): PoolBuyDryKind {
     } catch (e) {
       return { error: e instanceof SolanaRpcTransportError ? "down" : "quote_check_failed" };
     }
-    const tap = poolBalances(got.notes, withSolanaRent(sol, rent, venue, tipOf), got.ready, got.open, got.landed)[0]?.tap_max;
-    if (tap === undefined) return { error: "not_funded" };
+    // no queue open (card buy-quote-before-any-note: a fresh account, or one whose money is all Cash, has no pool note,
+    // and a queue opens only at a pool note's landing): poolBalances gives no tap_max, and one tap spends nothing of the
+    // pool now, so "0" over no proof, and the buy is priced as cashFirst runs it, every lamport moved from Cash
+    const counted = poolBalances(got.notes, withSolanaRent(sol, rent, venue, tipOf), got.ready, got.open, got.landed)[0]?.tap_max;
+    const tap = counted ?? "0";
     const ids = new Set(sol.map((p) => p.id));
     const byId = new Map(got.notes.map((n) => [n.id, n]));
-    const live: DryPiece[] = (got.ready ?? []).filter((r) => {
+    const live: DryPiece[] = counted === undefined ? [] : (got.ready ?? []).filter((r) => {
       const n = byId.get(r.noteId);
       return ids.has(r.poolId) && n !== undefined && heldBy(n, r.attempt);
     });
@@ -317,13 +321,16 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): PoolBuyDryKind {
       return { result: { tap_max: tap, ...(c.pieces === undefined ? {} : { pieces: c.pieces }), cost: solOf(c.cost), ...(out === undefined ? {} : { out }) } };
     }
     // above one tap's spend (card you-receive-on-every-chain): the buy cashFirst runs after moving the shortfall from
-    // Cash, sized as cashFirst sizes it (solanaMoveShort) and priced by `moved`; no pieces count (it is no one tap's)
+    // Cash, sized as cashFirst sizes it (solanaMoveShort) and priced by `moved`; no pieces count (it is no one tap's).
+    // `out` is that buy's swap of the whole ask (the move's notes pay their own costs), so it is given whether or not
+    // Cash holds the move now (card buy-quote-before-any-note: $0 Cash still sees what the amount buys); `cost` only
+    // when `moved` prices the move, so the Fee never reads under. A page with no `moved` (no Cash path): tap_max alone
     if (!d.moved) return { result: { tap_max: tap } };
     const m = solanaMoveShort(live, valueOf, venue, rent, tipOf, amount, tapL);
-    const moveCost = m === null ? null : await d.moved(m.short).catch(() => null);
-    if (m === null || moveCost === null || moveCost < 0n) return { result: { tap_max: tap } };
+    if (m === null) return { result: { tap_max: tap } };
+    const moveCost = await d.moved(m.short).catch(() => null);
     const out = await outOf();
-    return { result: { tap_max: tap, cost: solOf(m.cost + moveCost), ...(out === undefined ? {} : { out }) } };
+    return { result: { tap_max: tap, ...(moveCost === null || moveCost < 0n ? {} : { cost: solOf(m.cost + moveCost) }), ...(out === undefined ? {} : { out }) } };
   };
   const short = async (token: string, amount: bigint): Promise<bigint | null> => {
     const sol = d.pools.filter((p) => p.chain === "solana");

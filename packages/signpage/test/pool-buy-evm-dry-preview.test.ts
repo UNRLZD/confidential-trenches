@@ -10,8 +10,9 @@ import { test } from "node:test";
 import type { EvmPoolBuyQuote, EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_BUY_TAP_QUOTES } from "../../kit/src/trade/evm/buy-tap.ts";
-import { evmBuyDry, evmBuyPieces, evmDryCost, evmLastRouteReset, evmMostWithCash, evmMovedPieces, evmMoveShort, evmTapBuys, EVM_MOVE_FEE_ROOM, type EvmBuyDryDeps, type EvmDryQuote } from "../src/pool-buy-evm.ts";
+import { evmBuyDry, evmBuyPieces, evmDryCost, evmDryTap, evmLastRouteReset, evmMostWithCash, evmMovedPieces, evmMoveShort, evmTapBuys, EVM_MOVE_FEE_ROOM, type EvmBuyDryDeps, type EvmDryQuote } from "../src/pool-buy-evm.ts";
 import { planEvmBuy, poolUnits, type PoolAsk } from "../src/rules/pool.ts";
+import { evmBalancePool, evmTapSpendOf } from "../../wallet/src/pool/balances.ts";
 
 const ETH = 10n ** 18n;
 const micro = (n: bigint) => (n * ETH) / 1_000_000n;
@@ -141,11 +142,14 @@ test("above tap_max: cost is the sized plan's plus the move's, out one quote of 
   assert.deepEqual(a, { result: { tap_max: "0.0147", with_cash: "0.05", cost: poolUnits(evmDryCost(sized.plan) + micro(300n), 18), out: "123.456789" } });
   assert.deepEqual(shorts, [sized.short], "the move priced is the one cashFirst sizes");
   assert.deepEqual(asked.map((r) => r.amountIn), [micro(50_000n)], "one quote of the whole ask");
-  for (const [name, over] of [["no fee read", { fee: async () => null, moved: async () => micro(300n) }], ["Cash cannot move it", { fee: async () => fee, moved: async () => null }], ["the fee read fails", { fee: async () => { throw new Error("rpc"); }, moved: async () => micro(300n) }]] as const) {
+  // no move sized or priced (card buy-quote-before-any-note): no Fee, never one that reads under; You receive still,
+  // one quote of the same whole ask, which the tap swaps whatever the move's size
+  for (const [name, over] of [["no fee read", { fee: async () => null, moved: async () => micro(300n) }], ["the fee read fails", { fee: async () => { throw new Error("rpc"); }, moved: async () => micro(300n) }], ["no Cash to plan (rungs null), the fee never answers", { fee: () => new Promise<bigint>(() => {}), moved: async () => micro(300n), rungs: async () => null }], ["Cash cannot move it", { fee: async () => fee, moved: async () => null }], ["Cash's plan makes no rungs", { fee: async () => fee, moved: async () => micro(300n), rungs: async () => () => null }], ["the move's price fails", { fee: async () => fee, moved: async () => { throw new Error("price"); } }]] as const) {
     evmLastRouteReset();
-    const none: Asked = [];
-    const b = await run({ chain: "base", token: COIN, amount: "0.05" }, deps({ quoteHost: quoteHost(none, good), ...(over as Partial<EvmBuyDryDeps>) }));
-    assert.deepEqual(b, { result: { tap_max: "0.0147", with_cash: "0.05" } }, name);
+    const one: Asked = [];
+    const b = await run({ chain: "base", token: COIN, amount: "0.05" }, { ...deps({ quoteHost: quoteHost(one, good), ...(over as Partial<EvmBuyDryDeps>) }), ...("rungs" in over ? { rungs: over.rungs } : {}) });
+    assert.deepEqual(b, { result: { tap_max: "0.0147", with_cash: "0.05", out: "123.456789" } }, name);
+    assert.deepEqual(one.map((r) => r.amountIn), [micro(50_000n)], name);
   }
 });
 
@@ -203,3 +207,40 @@ for (const chain of ["base", "robinhood"] as const) {
     }
   });
 }
+
+// Card buy-quote-before-any-note: a fresh account, or one whose money is all Cash, has no pool note, so no proof queue
+// is open (it opens at a pool note's landing) and state.pools has no tap_max. Red before: the page's tap read (main.ts)
+// gave null, so the dry answered not_funded: no You receive and no Max for the buy cashFirst runs from Cash.
+test("card buy-quote-before-any-note: no queue open: tap 0 over no proof; the dry prices the whole ask as the moved buy, with_cash its Max; $0 Cash: out alone", async () => {
+  const pool = evmBalancePool("evm:base:p", "base", 33n, evmTapSpendOf);
+  const other = evmBalancePool("evm:rh:p", "robinhood", 44n, evmTapSpendOf);
+  // a fresh account: no note, no queue; a closed queue over a ready proof: none of it counts
+  for (const both of [{ value: [] }, { value: [], ready: [READY[0]!], open: new Set<string>() }]) assert.deepEqual(evmDryTap("base", [pool, other], both), { tapMax: "0", ready: [] });
+  // an open queue: state.pools' tap_max and the chain's own proofs only
+  const mine = { ...READY[0]!, poolId: pool.id } as Ready;
+  const theirs = { ...READY[1]!, poolId: other.id } as Ready;
+  const n = { id: "n1", scope: 33n, state: "HELD", attempt: "a", ref: { kind: "deposit", s: 33n, i: 0 }, leaf: { value: micro(10_000n), label: 1n, commitment: 1n, leafIndex: 0n } } as never;
+  const open = evmDryTap("base", [pool, other], { value: [n], ready: [mine, theirs], open: new Set([pool.id, other.id]) });
+  assert.deepEqual(open.ready, [mine]);
+  assert.equal(open.tapMax, "0.0099");
+  // the dry over that read: every wei of the ask moved from Cash, sized as cashFirst sizes it (evmMoveShort over none)
+  const fee = micro(10n);
+  const sized = evmMoveShort([], micro(20_000n), fee)!;
+  assert.equal(sized.plan.amount, micro(20_000n));
+  const fresh = async () => evmDryTap("base", [pool], { value: [] });
+  evmLastRouteReset();
+  const asked: Asked = [];
+  const shorts: bigint[] = [];
+  const a = await run({ chain: "base", token: COIN, amount: "0.02" }, deps({ tap: fresh, withCash: async (tap) => (assert.equal(tap, "0"), "0.04"), quoteHost: quoteHost(asked, good), fee: async () => fee, moved: async (s) => (shorts.push(s), micro(300n)) }));
+  assert.deepEqual(a, { result: { tap_max: "0", with_cash: "0.04", cost: poolUnits(evmDryCost(sized.plan) + micro(300n), 18), out: "123.456789" } });
+  assert.deepEqual(shorts, [sized.short]);
+  assert.deepEqual(asked.map((r) => r.amountIn), [micro(20_000n)], "one quote of the whole ask");
+  // $0 Cash: Max 0 and You receive of the typed amount as that Cash buy, no Fee
+  evmLastRouteReset();
+  const none: Asked = [];
+  const b = await run({ chain: "base", token: COIN, amount: "0.02" }, deps({ tap: fresh, withCash: async () => "0", quoteHost: quoteHost(none, good), fee: async () => fee, moved: async () => null }));
+  assert.deepEqual(b, { result: { tap_max: "0", with_cash: "0", out: "123.456789" } });
+  assert.deepEqual(none.map((r) => r.amountIn), [micro(20_000n)]);
+  // no amount: Max alone
+  assert.deepEqual(await run({ chain: "base", token: COIN }, deps({ tap: fresh, withCash: async () => "0" })), { result: { tap_max: "0", with_cash: "0" } });
+});

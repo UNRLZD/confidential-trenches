@@ -65,9 +65,31 @@ test("NEAR: a quote that fails gives the Fee and no out; no amount, or one Cash 
   const asked: bigint[] = [];
   assert.deepEqual(await nearBuyDry(page as never, X, 2_000_000n, quoteOf(asked, null)), { result: { tap_max: "3", cost: "0.05" } });
   assert.deepEqual(await nearBuyDry(page as never, X, null, quoteOf(asked, 1n)), { result: { tap_max: "3" } });
-  assert.deepEqual(await nearBuyDry(page as never, X, 5_000_000n, quoteOf(asked, 1n)), { result: { tap_max: "3" } });
-  assert.deepEqual(asked, [1_950_000n], "no quote without a plan");
+  // more than Cash holds (card buy-quote-before-any-note): You receive of the same buy, no Fee
+  assert.deepEqual(await nearBuyDry(page as never, X, 5_000_000n, quoteOf(asked, 1n)), { result: { tap_max: "3", out: "0.000001" } });
+  // an amount no plan pays (at most twice the fee): tap_max alone, no quote
+  assert.deepEqual(await nearBuyDry(page as never, X, 100_000n, quoteOf(asked, 1n)), { result: { tap_max: "3" } });
+  assert.deepEqual(asked, [1_950_000n, 4_950_000n], "one quote a planned buy");
   // a quote for another amount or token than W swaps is no out
   const other = async (a: { side: "buy" | "sell"; token: string; amountIn: bigint }) => ({ side: a.side, token: "y.near", amountIn: a.amountIn, amountOut: 7n }) as RheaQuote;
   assert.deepEqual(await nearBuyDry(page as never, X, 2_000_000n, other), { result: { tap_max: "3", cost: "0.05" } });
+});
+
+// Card buy-quote-before-any-note: a fresh account has no Cash note, so no plan pays the amount. Red before: tap_max
+// alone, so the box's You receive drew a dash until money landed.
+test("card buy-quote-before-any-note: $0 Cash: tap_max 0 and out one quote of what the buy would swap, its payout's fee off; no Fee", async () => {
+  const ns = await cash([]);
+  const asked: bigint[] = [];
+  // the payout's fee of a withdrawal of the amount itself: with no note, Cash's largest (0) sizes no fee quote
+  const fees: (bigint | undefined)[] = [];
+  const page = { network: NETWORK, notes: async () => ns, fee: async (amount?: bigint) => (fees.push(amount), FEE), rpcs: () => { throw new Error("no rpc"); }, pools: async () => [], decimals: async () => 18 };
+  const a = await nearBuyDry(page as never, X, 2_000_000n, quoteOf(asked, 1_234_500_000_000_000_000n));
+  assert.deepEqual(a, { result: { tap_max: "0", out: "1.2345" } });
+  assert.deepEqual(fees, [2_000_000n]);
+  // a fee that amount cannot carry (askWithdrawFee refuses it), or a read that fails: tap_max alone, never "failed"
+  const refused = { ...page, fee: async () => { throw new Error("relay_fee: at or above the amount"); } };
+  assert.deepEqual(await nearBuyDry(refused as never, X, 2_000_000n, quoteOf(asked, 1n)), { result: { tap_max: "0" } });
+  assert.deepEqual(asked, [1_950_000n], "the same swap a $2 Cash note's buy makes");
+  assert.ok(SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"]((a as { result: unknown }).result));
+  assert.deepEqual(await nearBuyDry(page as never, X, null, quoteOf(asked, 1n)), { result: { tap_max: "0" } });
 });

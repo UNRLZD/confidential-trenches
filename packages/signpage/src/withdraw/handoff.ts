@@ -180,11 +180,12 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
     rpcs: over.rpcs ?? [pacedNearRpc(net.fastnear[0]), pacedNearRpc(net.drpc)],
     cash,
     available,
-    async fee() {
+    async fee(amount?: bigint) {
       ownPair(n);
       if (relayer === null) throw new Error(`the release names no withdrawal relayer on ${network}`);
-      // the quote is asked for the most one withdrawal can carry: askWithdrawFee refuses a fee at or above it
-      const most = await available();
+      // the quote is asked for the most one withdrawal can carry: askWithdrawFee refuses a fee at or above it; with
+      // `amount` (card buy-quote-before-any-note: a preview for a user with no Cash note), for a withdrawal of it
+      const most = amount ?? (await available());
       const [quote, cap] = await Promise.all([
         askWithdrawFee({ token: net.usdc, relayer, amount: most, fetchFn }),
         readTokenStorageMin(network, rpcs).then((registerDeposit) => readWithdrawFeeMax({ network, rpcs, priceRpcs, registerDeposit })),

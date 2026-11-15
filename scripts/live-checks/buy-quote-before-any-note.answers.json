@@ -1,0 +1,254 @@
+{
+ "_note": "good: this card build (packages/signpage/scripts/build-app.mjs --out) served at SIGN_HOST name, APP_HOST and HELPER_HOST live, a new passkey account, 2026-11-15T21:40:14.044Z: every chain tap_max \"0\", with_cash \"0\" or none, an out. bad: SIGN_HOST live before this card (release of main 0322a1322), the same steps, 2026-11-15T21:20:40.288Z: Solana, Base and Robinhood not_funded, NEAR failed (Cash fee read refused with no note).",
+ "good": {
+  "sign": "https://confidential.unrealized.trade",
+  "source": "build bqban-site at SIGN_HOST's name",
+  "at": "2026-11-15T21:40:14.044Z",
+  "browser": "Chrome 157.0.8103.51, sandbox on",
+  "signedIn": true,
+  "lists": {
+   "solana": {
+    "status": 200,
+    "coins": [
+     "61V8vBaqAGMpgDQi4JcAwo1dmBGHsyhzodcPqnEVpump",
+     "6AJcP7wuLwmRYLBNbi825wgguaPsWzPBEHcHndpRpump",
+     "9fhCmrogx9isgeyqX7m6CnwcxPdqq1UZN9zyFJx5pump",
+     "Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump",
+     "HsprHxBRgiVaQdRf3TnKNuZZtaX9JUSPgMFdAkk6pump",
+     "9cmXfuC26anZtH9AUWVzpUxU1UJ7PPogYxftYTepump",
+     "8dbLrW3ZTTu4qeAKYYBjuuSSAPhMvABwUes3eWoXpump",
+     "98kfF7rmsg1QDUEoCqNE7g7M1FdrTt92TEp2CLzypump"
+    ]
+   },
+   "base": {
+    "status": 200,
+    "coins": [
+     "0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2",
+     "0x304b826a47a5e6cb2766ad9069f670651c9f847d",
+     "0xef5997c2cf2f6c138196f8a6203afc335206b3c1",
+     "0xc0634090f2fe6c6d75e61be2b949464abb498973",
+     "0xed664536023d8e4b1640c394777d34abaff1df8f",
+     "0xe014d2a4da6e450f21b5050120d291e63c8940fd",
+     "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+     "0xb2000000000000000000007b9fcbd005511acbd5"
+    ]
+   },
+   "robinhood": {
+    "status": 200,
+    "coins": [
+     "0x39dbed3a2bd333467115de45665cc57f813c4571",
+     "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+     "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111",
+     "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+     "0x4db7374e966097be94c6680d49156d580f097bbf",
+     "0x75d874378ae31b33ab9e7a40b4dca96134221111",
+     "0x9c87b4cfa21266d1638f437c96dbe1012cb81111",
+     "0xedbf91223639800bcd5756815caf908df3b890be"
+    ]
+   },
+   "near": {
+    "status": 200,
+    "coins": [
+     "batman-4.nearlytrade.near",
+     "prl.omft.near",
+     "qtc.omft.near",
+     "qcat-3.nearlytrade.near",
+     "token.rhealab.near",
+     "mihaocat-2.nearlytrade.near",
+     "aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near",
+     "zec.omft.near"
+    ]
+   }
+  },
+  "asks": [
+   {
+    "chain": "solana",
+    "coin": "61V8vBaqAGMpgDQi4JcAwo1dmBGHsyhzodcPqnEVpump",
+    "amount": "0.05",
+    "ok": false,
+    "code": "quote_check_failed"
+   },
+   {
+    "chain": "solana",
+    "coin": "6AJcP7wuLwmRYLBNbi825wgguaPsWzPBEHcHndpRpump",
+    "amount": "0.05",
+    "ok": false,
+    "code": "quote_check_failed"
+   },
+   {
+    "chain": "solana",
+    "coin": "9fhCmrogx9isgeyqX7m6CnwcxPdqq1UZN9zyFJx5pump",
+    "amount": "0.05",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "with_cash": "0"
+    }
+   },
+   {
+    "chain": "solana",
+    "coin": "Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump",
+    "amount": "0.05",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "with_cash": "0"
+    }
+   },
+   {
+    "chain": "solana",
+    "coin": "HsprHxBRgiVaQdRf3TnKNuZZtaX9JUSPgMFdAkk6pump",
+    "amount": "0.05",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "out": "486.947635",
+     "with_cash": "0"
+    }
+   },
+   {
+    "chain": "base",
+    "coin": "0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2",
+    "amount": "0.002",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "with_cash": "0",
+     "out": "44557.93553901584469822"
+    }
+   },
+   {
+    "chain": "robinhood",
+    "coin": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "amount": "0.002",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "with_cash": "0"
+    }
+   },
+   {
+    "chain": "robinhood",
+    "coin": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "amount": "0.002",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "with_cash": "0"
+    }
+   },
+   {
+    "chain": "robinhood",
+    "coin": "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111",
+    "amount": "0.002",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "with_cash": "0"
+    }
+   },
+   {
+    "chain": "robinhood",
+    "coin": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+    "amount": "0.002",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "with_cash": "0",
+     "out": "139.23678065251735157"
+    }
+   },
+   {
+    "chain": "near",
+    "coin": "batman-4.nearlytrade.near",
+    "amount": "5",
+    "ok": true,
+    "result": {
+     "tap_max": "0",
+     "out": "13217.810117439128590187"
+    }
+   }
+  ]
+ },
+ "bad": {
+  "sign": "https://confidential.unrealized.trade",
+  "at": "2026-11-15T21:20:40.288Z",
+  "browser": "Chrome 157.0.8103.51, sandbox on",
+  "signedIn": true,
+  "lists": {
+   "solana": {
+    "status": 200,
+    "coins": [
+     "4B8CdHPZ8ng1CtMP2Jk2W8wGAwJ5nJnap1deVsz2pump",
+     "H74CYmXgMkYHYuSRsZt6RJb4NYp2u72Vw8BS5huApump",
+     "6AJcP7wuLwmRYLBNbi825wgguaPsWzPBEHcHndpRpump",
+     "Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump"
+    ]
+   },
+   "base": {
+    "status": 200,
+    "coins": [
+     "0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2",
+     "0xef5997c2cf2f6c138196f8a6203afc335206b3c1",
+     "0x304b826a47a5e6cb2766ad9069f670651c9f847d",
+     "0xed664536023d8e4b1640c394777d34abaff1df8f"
+    ]
+   },
+   "robinhood": {
+    "status": 200,
+    "coins": [
+     "0x39dbed3a2bd333467115de45665cc57f813c4571",
+     "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+     "0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111",
+     "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18"
+    ]
+   },
+   "near": {
+    "status": 200,
+    "coins": [
+     "batman-4.nearlytrade.near",
+     "prl.omft.near",
+     "qtc.omft.near",
+     "qcat-3.nearlytrade.near"
+    ]
+   }
+  },
+  "asks": [
+   {
+    "chain": "solana",
+    "coin": "4B8CdHPZ8ng1CtMP2Jk2W8wGAwJ5nJnap1deVsz2pump",
+    "amount": "0.05",
+    "ok": false,
+    "code": "quote_check_failed"
+   },
+   {
+    "chain": "solana",
+    "coin": "H74CYmXgMkYHYuSRsZt6RJb4NYp2u72Vw8BS5huApump",
+    "amount": "0.05",
+    "ok": false,
+    "code": "not_funded"
+   },
+   {
+    "chain": "base",
+    "coin": "0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2",
+    "amount": "0.002",
+    "ok": false,
+    "code": "not_funded"
+   },
+   {
+    "chain": "robinhood",
+    "coin": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "amount": "0.002",
+    "ok": false,
+    "code": "not_funded"
+   },
+   {
+    "chain": "near",
+    "coin": "batman-4.nearlytrade.near",
+    "amount": "5",
+    "ok": false,
+    "code": "failed"
+   }
+  ]
+ }
+}
