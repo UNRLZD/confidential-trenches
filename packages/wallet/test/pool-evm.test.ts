@@ -113,7 +113,9 @@ type Over = {
   cap?: number;
   logs?: (l: Record<string, unknown>[], p?: { from: number; to: number }) => Record<string, unknown>[];
   /** before an eth_getLogs page is answered: may throw (a provider's error), may wait (ms, a slow page) */
-  getLogs?: (p: { from: number; to: number }) => void | number;
+  /** `values`: how many topics the call's one topic position holds (3, the pool's filter; 1, one event a call on a
+   *  provider of EVM_LOG_ONE_VALUE_WIDE, card firefox-restore-fast) */
+  getLogs?: (p: { from: number; to: number; values: number }) => void | number;
   /** before an eth_call is answered, by its data: may throw */
   call?: (data: string) => void;
   /** the chain fee oracle's answer (Base's GasPriceOracle, kit pool-fee.ts) by selector, at block n: 7,917 wei of L1
@@ -168,15 +170,20 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
         return null;
       }
       case "eth_getLogs": {
-        const p = params[0] as { address: string; topics: string[][]; fromBlock: string; toBlock: string };
+        const p = params[0] as { address: string; topics: (string | string[])[]; fromBlock: string; toBlock: string };
         assert.equal(p.address, POOL.toLowerCase());
-        assert.deepEqual(p.topics, [[TOPIC.dep, TOPIC.wd, TOPIC.buy]]);
+        // the pool's filter, or one of its three events alone (card firefox-restore-fast)
+        const values = Array.isArray(p.topics[0]) ? p.topics[0] : [p.topics[0]!];
+        assert.equal(p.topics.length, 1);
+        if (values.length === 1) assert.ok([TOPIC.dep, TOPIC.wd, TOPIC.buy].includes(values[0]!), "one of the pool's events");
+        else assert.deepEqual(values, [TOPIC.dep, TOPIC.wd, TOPIC.buy]);
         const from = Number(BigInt(p.fromBlock)), to = Number(BigInt(p.toBlock));
         if (o.cap !== undefined && to - from + 1 > o.cap) throw new Error(`RPC error -32614: eth_getLogs is limited to a ${o.cap} range`);
-        const slow = o.getLogs?.({ from, to });
+        const slow = o.getLogs?.({ from, to, values: values.length });
         if (typeof slow === "number") await new Promise((r) => setTimeout(r, slow));
         const all = (o.logs ?? ((x) => x))(rawLogs(c), { from, to });
-        return [...all.filter((l) => Number(BigInt(l.blockNumber as string)) >= from && Number(BigInt(l.blockNumber as string)) <= to), ...(o.extra?.({ from, to }) ?? [])];
+        const asked = values.length === 1 ? (l: { topics?: unknown }) => Array.isArray(l.topics) && l.topics[0] === values[0] : () => true;
+        return [...all.filter((l) => asked(l) && Number(BigInt(l.blockNumber as string)) >= from && Number(BigInt(l.blockNumber as string)) <= to), ...(values.length === 1 ? [] : (o.extra?.({ from, to }) ?? []))];
       }
       case "eth_call": {
         const [{ to, data }, { blockHash }] = params as [{ to: string; data: string }, { blockHash: string }];
@@ -1570,9 +1577,11 @@ test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs t
   const logs = list.map((): string[] => []);
   let pocketCalls = 0;
   // read 2026-11-07 01:42-01:50Z on the pool's filter (the kit's comment at the list)
-  const caps: Record<string, (p: { from: number; to: number }) => void> = {
-    "https://rpc.mainnet.chain.robinhood.com": ({ from, to }) => {
-      if (to - from + 1 > 100_000) throw new Error(`RPC error -32602: query spans ${to - from + 1} blocks (${from} to ${to}), but only 100000 are allowed for this request; narrow the block range, or send one value per position`);
+  const caps: Record<string, (p: { from: number; to: number; values: number }) => void> = {
+    // card firefox-restore-fast: its cap holds for several values in one position only (one value a position, any span:
+    // markets' read, 15 Nov 02:20Z)
+    "https://rpc.mainnet.chain.robinhood.com": ({ from, to, values }) => {
+      if (values > 1 && to - from + 1 > 100_000) throw new Error(`RPC error -32602: query spans ${to - from + 1} blocks (${from} to ${to}), but only 100000 are allowed for this request; narrow the block range, or send one value per position`);
     },
     "https://robinhood.api.pocket.network": ({ from, to }) => {
       const k = ++pocketCalls;
@@ -1593,7 +1602,10 @@ test("card robinhood-mainnet-rpcs: the kit's Robinhood mainnet pool list syncs t
   // then halved, 10,001 on every third call)
   assert.equal(pocket!.length, 2, `pocket: ${pocket}`);
   assert.ok(spare!.length > 0 && spare!.every((s) => s <= 800_000), `globalstake: ${spare}`);
-  assert.ok(own!.every((s) => s <= 800_000) && own!.filter((s) => s > 100_000).length <= 2 + Math.ceil(own!.length / EVM_LOG_CEILING_PAGES), `own: ${own}`);
+  // card firefox-restore-fast: Robinhood's own reads the pool's whole range in one call an event, three calls a read
+  // (before it, 100,000-block pages of the three events at once)
+  assert.ok(own!.length % 3 === 0 && own!.every((s) => s > 800_000), `own: ${own}`);
+  assert.ok(logs[0]!.filter((x) => x.startsWith("eth_getLogs")).every((x) => !x.includes(`"topics":[[`)), "one value a call");
 });
 
 test("card evm-pool-lists-mainnet: the kit's Base mainnet pool list syncs the pool on two operators, each paged under its own cap in its own words (PublicNode's 50,000; bloXroute's 100,000 since card first-sign-in-reads-fast-on-live), Pocket's 10,001 a spare, blastapi's 10 blocks never a seat", async () => {

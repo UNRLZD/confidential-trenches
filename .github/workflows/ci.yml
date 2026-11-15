@@ -693,7 +693,9 @@ jobs:
         with:
           engines: firefox
       - name: the terminal and the signing page in Firefox with Strict tracking protection, each RPC host the page reads failed in turn (restore, balance, a Move's dry run)
-        run: pnpm --filter terminal build && node packages/signpage/scripts/firefox-rpc-blocked.mjs
+        # card firefox-restore-fast: the walk's field in WebAssembly ended the restore at 20-23 s on 4 cores (68 s on
+        # BigInt), so the bound is 45 s, half the 90 s the BigInt walk needed
+        run: pnpm --filter terminal build && node packages/signpage/scripts/firefox-rpc-blocked.mjs --bound 45
 
   # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
   # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset. The one

@@ -14,7 +14,7 @@
 // when the restore sheet draws a balance and ends (done, nothing or offline) inside the bound, and nothing the run did
 // not model was asked.
 //
-//   node packages/signpage/scripts/firefox-rpc-blocked.mjs [--bound <s>] [--hosts <a,b> | --owners-case] [--record <file>]
+//   node packages/signpage/scripts/firefox-rpc-blocked.mjs [--bound <s> (BOUND_S)] [--hosts <a,b> | --owners-case] [--record <file>]
 // Reads only: the models answer reads, and no send has an answer. PASS exit 0, FAIL exit 1, error exit 2.
 import { realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -23,6 +23,9 @@ import { buildSignpage, defaultSites, HOSTS, REAL, TERMINAL } from "../../../app
 import { launchHarnessBrowser } from "../../../scripts/harness-sockets.mjs";
 import { browserLabel, FIREFOX_STRICT } from "../../../scripts/browsers.mjs";
 import { line, oneRun, siteTable, workerRouted } from "./restore-speed-browser.mjs";
+
+/** The bound on the balance drawn and the restore's end, in seconds (--bound overrides it). */
+export const BOUND_S = 45;
 
 /** The owner's case: every host of the two providers whose answers his Firefox never got. */
 export const OWNERS_CASE = (h) => /(^|\.)publicnode\.com$|(^|\.)pocket\.network$/.test(h);
@@ -68,7 +71,9 @@ async function main() {
     const i = process.argv.indexOf(k);
     return i > 0 ? process.argv[i + 1] : d;
   };
-  const boundS = Number(opt("--bound", "90"));
+  // card firefox-restore-fast: 45 s (the walk's field in WebAssembly ended the restore at 20-23 s on 4 cores of the
+  // heavy box, 67.5-67.9 s on BigInt before it; firefox-rpc-blocked.test.mjs replays both runs)
+  const boundS = Number(opt("--bound", String(BOUND_S)));
   const only = opt("--hosts", null)?.split(",").filter(Boolean) ?? null;
   const ownersCase = process.argv.includes("--owners-case");
   const signRoot = buildSignpage();
