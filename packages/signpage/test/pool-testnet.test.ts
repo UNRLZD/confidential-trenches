@@ -1095,31 +1095,48 @@ test("a state read settles a sell a closed page left INCOMING (the review of sig
   assert.deepEqual(await states(ns), ["INCOMING"]);
 });
 
-// The second re-review of signpage-pool-sell (low): a dead "pending" sell record is settled once per page load, not by
-// reading every ops record on every state read.
-test("a state read refuses a dead pending sell record once per page load, never reading the ops records again on the next state reads", async () => {
+// The second re-review of signpage-pool-sell (low) had the dead sell records settled once per page load; card
+// pool-sell-record-never-stays-sent (4), the re-review of pool-sell-share-across-wallets at 29c72ffe, P3-4: a second tab
+// that died after this page's load left its record open, and every Sell button locked until a reload. The settle runs
+// at every state read, as main.ts settles a dead trade (trade.ts tradeSettleDue), on no RPC.
+test("a state read refuses a dead pending sell record, and a later state read ends one a second tab left after this page's load", async () => {
   const { w } = await wallet();
-  let opsKeys = 0;
-  const counted = new Proxy(w, {
-    get(t, k, r) {
-      const v = Reflect.get(t, k, r);
-      if (k === "keys") return (st: string) => (st === "ops" && opsKeys++, v.call(t, st));
-      return typeof v === "function" ? v.bind(t) : v;
-    },
-  });
   const rpc = async () => {
     throw new Error("offline");
   };
-  const t = testnetPool({ store: async () => counted, seed64: async () => SEED64.slice() }, { rpcs: [rpc, rpc], prover: { vault: signalsProver(), stop: () => {} } });
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, rpc], prover: { vault: signalsProver(), stop: () => {} } });
   await w.put("ops", "z1", { kind: "sell", pool: "sol", sha: "cc", stage: "pending", txs: [], created_ms: 1 });
   await t.stateRead();
   assert.deepEqual(await w.get("ops", "z1"), { kind: "sell", pool: "sol", sha: "cc", stage: "refused", code: "failed", txs: [], created_ms: 1 });
-  const once = opsKeys;
-  // once for the dead sells, once for a withdraw's onward send still owed (card signpage-pool-withdraw-form)
-  assert.equal(once, 2);
+  // another tab's share sell, after this page's first read: one sale filled, the next never ran, and that tab died (its
+  // request's lock gone with it). A record with a signature, so no trade settle ends it (trade.ts settleTradeOps)
+  const legs = [{ wallet: "X", units: "3", tx: "sigX", stage: "filled" }, { wallet: "W", units: "5", tx: null, stage: "pending" }];
+  await w.put("ops", "z2", { kind: "sell", pool: "sol", sha: "cc", stage: "sent", txs: [{ chain: "solana", hash: "sigX" }], created_ms: 2, legs });
   await t.stateRead();
-  await t.stateRead();
-  assert.equal(opsKeys, once, "read once per page load");
+  const z2 = (await w.get("ops", "z2")) as { stage: string; legs: { stage: string; code?: string }[] };
+  assert.equal(z2.stage, "part_filled");
+  assert.deepEqual(z2.legs.map((l) => [l.stage, l.code ?? null]), [["filled", null], ["refused", "failed"]]);
+});
+
+// Card pool-sell-record-never-stays-sent, the note from the sell's merge (10 Nov 05:48Z): another tab's sign out
+// (signedOut) stopped the Solana settle but not the sell host, whose stopped counted this tab's sign out alone. Both stop
+// it now (card sign-out-stops-the-pages-reads, e8b41f515: stopReads); held here for the sell host and its rent backs.
+test("another tab's sign out stops the Solana sell host as this tab's does: stopped reads true and its signal is aborted", async () => {
+  for (const out of ["signingOut", "signedOut"] as const) {
+    const { w } = await wallet();
+    const rpc = async () => {
+      throw new Error("offline");
+    };
+    const made: { sell?: () => { stopped?(): boolean; signal?: AbortSignal; end?(): void } } = {};
+    const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, rpc], prover: { vault: signalsProver(), stop: () => {} }, tradeKinds: { sell: ((h: never) => ((made.sell = h), () => ({ error: "not_allowed" }))) as never } } as never);
+    const h = made.sell!();
+    assert.equal(h.stopped?.(), false, out);
+    if (out === "signingOut") t.signingOut();
+    else await t.signedOut();
+    assert.equal(h.stopped?.(), true, out);
+    assert.equal(h.signal?.aborted, true, out);
+    h.end?.();
+  }
 });
 
 // The card signpage-pool-flow-run, run 6: the helper's busy answer to a send is told apart from a failure, with its wait.

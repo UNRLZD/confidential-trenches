@@ -129,6 +129,10 @@ export type PoolSellHost = {
   signed?(signature: string): Promise<void> | void;
   /** The transaction was sent: W's signature. */
   sent?(signature: string): void;
+  /** The sale is built again (its deposit failed WrongAccount on both RPCs, nothing moved): awaited before the new
+   *  attempt's first read, and not swallowed, so the request's record names no signature that is gone (card
+   *  pool-sell-record-never-stays-sent: a page closed before the rebuilt sale signed left the record "sent" for good). */
+  rebuilt?(): Promise<void> | void;
   /** The sale read back on both RPCs as this very transaction, succeeded (card trades-and-balance-fast): the sale and its
    *  deposit back are one transaction, so the sale filled; its note's settle (the mark at finalized) follows. */
   landed?(signature: string): void;
@@ -828,6 +832,9 @@ async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBu
       }
     }
     if (!later.rebuild || i >= POOL_SELL_REBUILDS) return a;
+    // the failed attempt's signature off the request's record before the new one reads (a write that fails throws:
+    // nothing is built again, the sale refused)
+    await h.rebuilt?.();
     forgetYoung(h.rpcs);
     i++;
   }
@@ -1035,6 +1042,8 @@ export type LegHooks = {
   signed?(i: number, signature: string): Promise<void> | void;
   /** Leg `i` was sent. */
   sent?(i: number, signature: string): void;
+  /** Leg `i` is built again: its failed attempt's signature is gone (awaited; a throw builds nothing again). */
+  rebuilt?(i: number): Promise<void> | void;
   /** Leg `i` read back on both RPCs as its very transaction, succeeded (PoolSellHost.landed). */
   landed?(i: number, signature: string): void;
   /** Leg `i` ended (its stage, or its refusal before it signed). */
@@ -1165,6 +1174,11 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
         open();
         hooks.sent?.(i, signature);
         h.sent?.(signature);
+      },
+      // the leg's record only: the run's own view of it stays in flight, as the rebuilt sale sends again
+      rebuilt: async () => {
+        await hooks.rebuilt?.(i);
+        await h.rebuilt?.();
       },
       landed: (signature: string) => {
         hooks.landed?.(i, signature);
@@ -1986,6 +2000,9 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  * rentBackOwed) holds: its own coin is never stranded, at worst its rent waits.
  */
 async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ended> {
+  // a sign out ends a load's pass (card pool-sell-record-never-stays-sent); a sale's own rent back is the tap's run, which
+  // a sign out lets finish (card sign-out-stops-the-pages-reads), its waits the sale's (sellRun: ended at a sign out)
+  const signedOut = (): boolean => x.sale !== true && (h.stopped?.() === true || h.signal?.aborted === true);
   const seeds: Uint8Array[] = [];
   const seed = async (): Promise<Uint8Array> => {
     const s = await h.seed64();
@@ -1994,6 +2011,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
   };
   // W's key, from the seed, right before it signs: it must be the W every byte was built and checked for
   const keyOf = async (): Promise<Uint8Array> => {
+    // a sign out asked during the pass: no key is derived and nothing signs
+    if (signedOut()) throw STOPPED;
     const fw = freshWallet(await seed(), "sol", x.w.l, x.w.j);
     for (const s of seeds) s.fill(0);
     if (fw.address !== x.w.address) {
@@ -2020,10 +2039,13 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
   // a found W's token accounts: on a pair that answers getTokenAccountsByOwner (card
   // found-wallet-sweep-reads-on-a-pair-that-answers: the page's public seat answers none on mainnet)
   const tokens = h.tokenRpcs ?? rpcs;
-  // every sleep of the pass: the sell lock let go for it and taken again only if it is free
+  // every sleep of the pass: the sell lock let go for it and taken again only if it is free; a sign out ends the pass
+  // (card pool-sell-record-never-stays-sent: x.wait is cut by the sign out's signal, a throttle's wait included)
   const wait = async (ms: number): Promise<void> => {
-    if (!hold) return x.wait(ms);
-    if (!(await hold.nap(ms))) throw BUSY;
+    if (signedOut()) throw STOPPED;
+    if (!hold) await x.wait(ms);
+    else if (!(await hold.nap(ms))) throw BUSY;
+    if (signedOut()) throw STOPPED;
   };
   const reads = h.reads ?? POOL_SELL_POLL_READS;
   const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
@@ -2075,10 +2097,11 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     for (let i = 0, pause = 0, last: unknown = null; i < POOL_RENT_BACK_TRIES && (i === 0 || clock() < deadline); i++) {
       // a provider's fault doubles the wait on the rule; any other failure waits its first step
       if (i > 0) await wait(waitsOn(last) ? (pause = throttleWaitMs(pause, afterOf(last), READ_WAIT)) : READ_WAIT.firstMs);
+      if (signedOut()) throw STOPPED;
       try {
         return { ok: await f() };
       } catch (e) {
-        if (e === BUSY || e === HELD) throw e;
+        if (e === BUSY || e === HELD || e === STOPPED) throw e;
         last = e;
         tell(step, "fault", faultOf(e));
       }
@@ -2329,7 +2352,7 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     return end("sent", sw.one.signature);
   } catch (e) {
     // the sell has landed; what is not closed or swept stays on W, owed, and its note, if sent, settles at the next read
-    return end("gave_up", e === BUSY ? "a sell took the sell lock between tries: W waits for the next load" : e === HELD ? "spaced: another of the device's Ws closed or swept within the gap, or this load's one did: W waits" : faultOf(e));
+    return end("gave_up", e === BUSY ? "a sell took the sell lock between tries: W waits for the next load" : e === HELD ? "spaced: another of the device's Ws closed or swept within the gap, or this load's one did: W waits" : e === STOPPED ? "a sign out: W waits for the next load" : faultOf(e));
   } finally {
     for (const s of seeds) s.fill(0);
   }
@@ -2576,7 +2599,9 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
   const program = h.pin.program;
   const { pool, scope } = solanaPoolOf(program);
   const rpcs = h.rpcs;
-  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  // every wait of the list and its passes ends at a sign out (its signal), a provider's throttle wait included
+  const wait = (ms: number): Promise<void> => waitUnless(h.wait, ms, h.signal);
+  const signedOut = (): boolean => h.stopped?.() === true || h.signal?.aborted === true;
   // the account's own Ws, derived with nothing read; those listed empty, read under these rules already
   let wallets: readonly ListedBuyWallet[] | null = null;
   let fault: unknown = null;
@@ -2671,6 +2696,8 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
     // for the one W in flight, and the rest of the list waits for the next run
     let passed = 0;
     for (const address of todo) {
+      // a sign out: the rest of the list waits for the next load, each record kept as it is
+      if (signedOut()) return true;
       // the record as it is now: a sell meanwhile may have written W's again or dropped it; a W of the account's with
       // none, its first pass's record
       const f = found.find((x) => x.address === address);
@@ -2694,6 +2721,7 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
         continue;
       }
       if (passed++ > 0) await wait(POOL_RENT_BACK_GAP_MS + randomBelow(POOL_RENT_BACK_GAP_MS));
+      if (signedOut()) return true;
       // a pool buy or sell between its tap and its end, in any tab (POOL_TRADE_LOCK; review P2-1 of 024e8a89d): this W's
       // pass and the rest wait for a later run, so no W's close or sweep goes beside a trade
       if (await tradeRunning(locks, h.storeMs ?? TRADE_STORE_MS)) {
@@ -2847,6 +2875,8 @@ type Ended = { end: RentBackEnd; steady: boolean };
 const BUSY = new Error("a sell took the sell lock");
 /** A leftover pass held by the spacing (resumeRentBacks, RentBackSpacing): it ends before it would send. */
 const HELD = new Error("a leftover pass held by the spacing");
+/** A pass that met a sign out (PoolSellHost.stopped or its signal): it ends at once, nothing more read or signed. */
+const STOPPED = new Error("a sign out");
 /** Any page that is open: a deposit then opens none (the cheapest deposit, for the floor end's steadiness). */
 const OPEN = 1n << 62n;
 /** The sell lock as a rent back holds it: let go for each sleep, taken again only if it is free (false: a sell has it). */
@@ -3088,6 +3118,15 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
                   write({ stage: "sent", txs: legTxs() });
                   if (!answer || sentAnswer(answer)) answer = { result: { stage: "sent", txs: legTxs() } };
                   give();
+                },
+                // a sale built again after WrongAccount (nothing moved): its leg back to pending with no signature,
+                // awaited and not swallowed, so a page closed before the rebuilt sale signs leaves a record the
+                // dead-record settle ends (settleDead), never a leg "sent" on a signature no settle reads again
+                rebuilt: async (i) => {
+                  await writes;
+                  setLeg(i, { tx: null, stage: "pending" });
+                  op.txs = legTxs();
+                  await ops.put("ops", ctx.id, snap());
                 },
                 landed: (i) => {
                   landed.add(i);
