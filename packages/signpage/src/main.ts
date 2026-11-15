@@ -68,7 +68,7 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
-import { cashMover, cashMoveCost, evmCashPlan, planCashMove, poolMoveKinds, readOneClickLeast, solanaMoveModel, solanaTapMaxOf, unitsText, withCash, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { cashMover, cashMoveCost, evmCashPlan, planCashMove, poolMoveKinds, provingOn, readOneClickLeast, solanaMoveModel, solanaTapMaxOf, unitsText, withCash, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -667,6 +667,18 @@ else {
       return fee === null || plan === null ? null : (evmMoveShort((both.ready ?? []).filter((r) => ids.has(r.poolId)), amount, fee, plan.rungs)?.short ?? null);
     },
     need: (chain, short) => cashMoverNow().need(chain, short),
+    // the tap's wait follows the move (card cash-buy-waits-for-its-move): every part in the pool or stopped, then the
+    // chain's landing notes and their proofs as the state reads them (src/cash-to-pool.ts provingOn)
+    moved: (op) => cashMoverNow().landing(op),
+    proving: async (chain, seen) => {
+      if (!testnet) return false;
+      const both = await testnet.readyWith(pageNotes);
+      const pools = PAGE_POOLS.filter((p) => p.chain === chain);
+      const ids = new Set(pools.map((p) => p.id));
+      // a landed note waits for its queue's next epoch turn only while that queue is open (a hidden tab's are closed)
+      const open = pools.some((p) => both.open.has(p.id));
+      return provingOn(both.value, new Set(pools.map((p) => p.scope)), (both.ready ?? []).filter((r) => ids.has(r.poolId)), both.making, { chain, open, seen, now: Date.now() });
+    },
     wait: (ms) => new Promise((res) => setTimeout(res, ms)),
     now: () => Date.now(),
     signal: withdrawWait.signal,

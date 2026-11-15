@@ -11,7 +11,8 @@
 //   - follow: each 1Click status read of the quote's deposit address, 1Click's first sight of the deposit, the money at
 //     the one-time wallet, each pool deposit from it, a round that threw;
 //   - tap: the buy's wait on the move, never ended by one read that throws or never answers, and its end said
-//     (wait_over, tap_unread).
+//     (tap_unread; card cash-buy-waits-for-its-move: each read bounded on its own, the wait ending settled when the
+//     move's money is in and nothing more lands or proves, its fixed wait_over clock gone).
 // What each line carries and never carries is held by packages/signpage/test/buy-shows-every-step.test.ts, the tap's
 // wait by test/tap-wait-bad-read.test.ts (red at 23eab91ab). The recorded answers are facts() over this card's build
 // (packages/signpage/scripts/build-app.mjs --out, good) and over SIGN_HOST as served before the card (bad).
@@ -36,7 +37,7 @@ const ALLOW = /\{tx:([\w$]+),address:\1,quote:\1,move:\1,status:([\w$]+),stage:\
 const REDACT = "/\\d{30,}|[0-9a-fA-F]{64,}|[1-9A-HJ-NP-Za-km-z]{80,}/g";
 const MOVE = ["`proof_start`", "`proof_done`", "`relay_sent`", "`vault_payout`", "`withdraw_failed`:`withdraw_${"];
 const FOLLOW = ["(`status`,{address:", "(`intents`,{address:", "(`arrived`,{address:", "(`pool_deposit`,{address:", "(`follow`,{stage:`round_failed`,error:"];
-const TAP = ["`tap_unread`", "`wait_over`", "did not answer by the wait's end"];
+const TAP = ["`tap_unread`", "with nothing more landing or proving", "the read of what one tap spends did not answer in ${"];
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
@@ -55,7 +56,7 @@ export const SAYS = Object.freeze({
   trace: "the signing page writes no [ct-trace] line from the allowlist: a buy that stops says nothing on the device, or a line could carry a field that is not public",
   move: "a move from Cash does not trace its proof, its relay and the vault's payout, or a failed move keeps no why in its record",
   follow: "the move's follow does not trace 1Click's status reads, the money at the one-time wallet and each pool deposit",
-  tap: "the buy's wait on the move is ended by one bad read, or holds past its time, with nothing said",
+  tap: "the buy's wait on the move is ended by one bad read, or holds on one read, with nothing said",
 });
 
 /** The verdict on an answer { index, sha384, trace, move, follow, tap }. */

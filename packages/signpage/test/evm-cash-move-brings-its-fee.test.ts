@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
-import { cashFirst, cashMover, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashToPoolDeps } from "../src/cash-to-pool.ts";
+import { cashFirst, cashMover, CASH_MOVE_POLL_MS, type CashMoverDeps, type CashToPoolDeps } from "../src/cash-to-pool.ts";
 import * as evm from "../src/pool-buy-evm.ts";
 import { planEvmBuy, PoolRuleRefused, type PoolAsk } from "../src/rules/pool.ts";
 import { EVM_LADDER } from "../../wallet/src/pool/evm.ts";
@@ -69,6 +69,8 @@ async function tapFromCash(chain: "base" | "robinhood", amount: bigint, ready: R
     tapMax: async () => pool.ready.reduce((s, p) => s + (p.chunk - p.binding.feeCap), 0n),
     ...(sizing ? { short: async (_c: unknown, _t: unknown, a: bigint) => sizing(pool.ready, a, FEE)?.short ?? null } : {}),
     need: (c, s) => m.need(c, s),
+    moved: (op) => m.landing(op),
+    proving: async () => false,
     wait: async (ms) => void (clock += ms),
     now: () => clock,
   };
@@ -106,7 +108,7 @@ for (const [name, chain, amount, ready] of [
     const t = await tapFromCash(chain, amount, [...ready]);
     assert.deepEqual(t.answer, { result: { stage: "filled", txs: [], bought: String(amount) } }, `the whole ask bought, never refused or less (Cash moved ${t.paid.length} time(s), the tap waited ${t.waited} ms)`);
     assert.equal(t.paid.length, 1, "Cash moved once");
-    assert.ok(t.waited !== null && t.waited < CASH_MOVE_WAIT_MS, `the tap went on once the move landed, not at its bound (waited ${t.waited} ms)`);
+    assert.ok(t.waited !== null && t.waited <= CASH_MOVE_POLL_MS, `the tap went on once the move landed (waited ${t.waited} ms)`);
     assert.deepEqual(t.routes, [{ move: "cash", op: `cash/${chain}/1000` }]);
   });
 }

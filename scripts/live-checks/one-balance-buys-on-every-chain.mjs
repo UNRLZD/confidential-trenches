@@ -9,7 +9,9 @@
 //     a NEAR implicit account as its deposit address (/^[0-9a-f]{64}$/), the USDC asked as its amount in, at least the
 //     shortfall as its min out;
 //   - tap: a pool.buy whose ask is above one tap's spend asks the mover for the shortfall, tells the app the move runs
-//     ({ move: "cash" }, the flow's own step), and waits for it before the buy;
+//     ({ move: "cash" }, the flow's own step), and waits for it before the buy (card cash-buy-waits-for-its-move: on the
+//     move's own landing, by its op, then while one tap spends less than the ask on the chain's notes landing or
+//     proving, two idle reads its end; never a fixed clock from the tap);
 //   - max: pool.buy.dry's answer carries with_cash beside tap_max;
 //   - level: a kit-v1.14 app is read at its own level and sent pool.buy.dry with with_cash left out (its schema
 //     refuses the whole answer for it);
@@ -67,8 +69,9 @@ const TAP_ALL = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.
 // (card you-receive-on-every-chain: Solana's shortfall is first asked of `short`, sized as pool.buy.dry prices it so the
 // notes the move brings pay the rest with their own Ws' costs, and falls back to the want; the mover asked for it, the
 // move op told, then the wait for the tap to reach the ask; card evm-cash-move-brings-its-fee: `short` asked on every
-// pool chain, Base's and Robinhood's sized by evmMoveShort, with no want to fall back to there)
-const TAP_SIZED = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.tapMax\\(\\3,(${N})\\)(?:\\.catch\\(\\(\\)=>null\\))?:(${N})\\.amount,(${N})=\\1!==null&&\\1<\\5\\.amount&&(?:\\3===\`solana\`&&)?\\2\\.short\\?await \\2\\.short\\(\\3,\\4,\\5\\.amount\\)\\.catch\\(\\(\\)=>null\\):null,(${N})=\\1!==null&&\\1<\\5\\.amount\\?\\6\\?\\?(${N})\\(\\1\\):null,(${N})=\\7===null\\?null:await \\2\\.need\\(\\3,\\7\\);if\\(\\9!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\9\\}\\)\\}catch\\{\\}let (${N})=\\2\\.now\\(\\)\\+${N};for\\(;!\\2\\.signal\\?\\.aborted&&\\2\\.now\\(\\)<\\10&&await \\2\\.tapMax\\(\\3,\\4\\)<\\5\\.amount;\\)await \\2\\.wait\\(${N}\\)\\}`);
+// pool chain, Base's and Robinhood's sized by evmMoveShort, with no want to fall back to there; card
+// cash-buy-waits-for-its-move: the wait is the move's landing by its op, then the proofs' wait, not a clock from the tap)
+const TAP_SIZED = new RegExp(`(${N})=await (${N})\\.any\\((${N})\\)\\?await \\2\\.tapMax\\(\\3,(${N})\\)(?:\\.catch\\(\\(\\)=>null\\))?:(${N})\\.amount,(${N})=\\1!==null&&\\1<\\5\\.amount&&(?:\\3===\`solana\`&&)?\\2\\.short\\?await \\2\\.short\\(\\3,\\4,\\5\\.amount\\)\\.catch\\(\\(\\)=>null\\):null,(${N})=\\1!==null&&\\1<\\5\\.amount\\?\\6\\?\\?(${N})\\(\\1\\):null,(${N})=\\7===null\\?null:await \\2\\.need\\(\\3,\\7\\);if\\(\\9!==null\\)\\{try\\{${N}\\?\\.route\\?\\.\\(\\{move:\`cash\`,op:\\9\\}\\)\\}catch\\{\\}let (${N})=await ${N}\\(\\2\\.moved\\(\\9\\)\\.catch\\(${N}=>\\(\\{landed:!1,error:${N}\\(${N}\\)\\}\\)\\),\\2\\.signal\\);[^;]{0,200};let (${N})=0,(${N})=new Map;for\\(;\\10\\?\\.landed===!0&&!\\2\\.signal\\?\\.aborted&&await \\2\\.tapMax\\(\\3,\\4\\)<\\5\\.amount&&\\(\\11=await \\2\\.proving\\(\\3,\\12\\)\\.catch\\(\\(\\)=>!1\\)\\?0:\\11\\+1,!\\(\\11>=2\\)\\);\\)await \\2\\.wait\\(${N}\\)`);
 const tapAll = (js) => {
   const all = TAP_ALL.exec(js);
   const sized = all === null ? TAP_SIZED.exec(js) : null;

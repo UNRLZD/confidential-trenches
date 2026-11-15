@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/buy-shows-every-step.test.mjs: the live check's verdict replays recorded answers
 // (buy-shows-every-step.answers.json), each facts() over a tree's index.html and app.js:
-//   good: this card's branch, built with packages/signpage/scripts/build-app.mjs --out: the index pins the bundle, and
-//         the bundle writes the [ct-trace] lines of a move, its follow and the tap: PASS;
+//   good: this card's branch, built with packages/signpage/scripts/build-app.mjs --out (re-recorded on card
+//         cash-buy-waits-for-its-move's build, whose tap's wait ends settled, not wait_over): the index pins the bundle,
+//         and the bundle writes the [ct-trace] lines of a move, its follow and the tap: PASS;
 //   bad:  SIGN_HOST as served on 15 Nov 2026 before the card (release 153, no trace): FAIL on every mark.
 // Planted from the minified code the build writes: each mark broken alone FAILs.
 import assert from "node:assert/strict";
@@ -41,7 +42,7 @@ const MOVE =
   "try{b(`proof_start`);let t=await Efe({});b(`proof_done`);g=y(T);b(`relay_sent`)}finally{};let n=s===null?`withdraw_failed`:`withdraw_${s.kind}`;let f={...r,stage:`in_transit`,txs:l,...c(IK(t,null,`vault_payout`,{stage:s.kind,...d}))}";
 const FOLLOW =
   "l||i(`status`,{address:e.address,status:o});(a=!0,i(`intents`,{address:e.address,status:o.status}));o||i(`arrived`,{address:e.u,amount:y.toString()});i(`pool_deposit`,{address:e.u,amount:a.toString(),stage:o});i(`follow`,{stage:`round_failed`,error:OK(e)})";
-const TAP = "c(`move`,{move:p,stage:`tap_unread`,error:`the read of what one tap spends did not answer by the wait's end`});c(`move`,{stage:r?`ready`:`wait_over`})";
+const TAP = "return u===null&&t(`move`,a(`the read of what one tap spends did not answer in ${c} ms`));stage:`tap_unread`,error:errorText(e);u=s===`settled`?`one tap spends ${o} of the ${n.amount} asked, with nothing more landing or proving`:void 0";
 const all = (o = {}) => facts("", [o.trace ?? TRACE, o.move ?? MOVE, o.follow ?? FOLLOW, o.tap ?? TAP].join(";"));
 
 test("facts() reads each mark from the minified code as the build writes it, and misses each when it is broken", () => {
@@ -72,8 +73,8 @@ test("facts() reads each mark from the minified code as the build writes it, and
     ],
     tap: [
       { tap: TAP.replace("`tap_unread`", "`unread`") },
-      { tap: TAP.replace("did not answer by the wait's end", "failed") },
-      { tap: TAP.replace("`wait_over`", "`over`") },
+      { tap: TAP.replace("did not answer in ${c}", "failed") },
+      { tap: TAP.replace("with nothing more landing or proving", "short") },
     ],
   };
   for (const [k, list] of Object.entries(broken)) {

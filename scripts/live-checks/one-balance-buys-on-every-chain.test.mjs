@@ -149,7 +149,7 @@ test("the tap on every pool chain (Cash to Base and Robinhood): the build's form
 
 test("the tap with Solana's shortfall sized as pool.buy.dry prices it (card you-receive-on-every-chain): the build's form PASS; no fallback to the want, the sizing asked for another amount, the mover not asked for it, the op not told, or no wait for the ask: FAIL", () => {
   const sized =
-    "let o=e=>a===`solana`?n.amount-e:HK(a,n.amount)?n.amount:null,s={error:`failed`};let c=t(),l=await c.any(a)?await c.tapMax(a,i).catch(()=>null):n.amount,u=l!==null&&l<n.amount&&a===`solana`&&c.short?await c.short(a,i,n.amount).catch(()=>null):null,d=l!==null&&l<n.amount?u??o(l):null,f=d===null?null:await c.need(a,d);if(f!==null){try{r?.route?.({move:`cash`,op:f})}catch{}let e=c.now()+MK;for(;!c.signal?.aborted&&c.now()<e&&await c.tapMax(a,i)<n.amount;)await c.wait(jK)}";
+    "let o=e=>a===`solana`?n.amount-e:HK(a,n.amount)?n.amount:null,s={error:`failed`};let c=t(),l=await c.any(a)?await c.tapMax(a,i).catch(()=>null):n.amount,u=l!==null&&l<n.amount&&a===`solana`&&c.short?await c.short(a,i,n.amount).catch(()=>null):null,d=l!==null&&l<n.amount?u??o(l):null,f=d===null?null:await c.need(a,d);if(f!==null){try{r?.route?.({move:`cash`,op:f})}catch{}let e=await kq(c.moved(f).catch(e=>({landed:!1,error:EK(e)})),c.signal);e!==null&&p(`move`,{move:f,stage:e.landed?`landed`:`stopped`,...e.error===void 0?{}:{error:e.error}});let m=0,s=new Map;for(;e?.landed===!0&&!c.signal?.aborted&&await c.tapMax(a,i)<n.amount&&(m=await c.proving(a,s).catch(()=>!1)?0:m+1,!(m>=2));)await c.wait(jK)";
   assert.equal(facts("", sized).tap, true);
   for (const bad of [
     sized.replace("u??o(l)", "u"),
@@ -158,14 +158,18 @@ test("the tap with Solana's shortfall sized as pool.buy.dry prices it (card you-
     sized.replace("await c.need(a,d)", "null"),
     sized.replace("c.need(a,d)", "c.need(a,u)"),
     sized.replace("op:f})", "op:d})"),
-    sized.replace("for(;!c.signal?.aborted&&c.now()<e&&await c.tapMax(a,i)<n.amount;)await c.wait(jK)", ""),
-    sized.replace("await c.tapMax(a,i)<n.amount;", "await c.tapMax(a,i)<0n;"),
+    sized.replace("let e=await kq(c.moved(f).catch(e=>({landed:!1,error:EK(e)})),c.signal);e!==null&&p(`move`,{move:f,stage:e.landed?`landed`:`stopped`,...e.error===void 0?{}:{error:e.error}});let m=0,s=new Map;for(;e?.landed===!0&&!c.signal?.aborted&&await c.tapMax(a,i)<n.amount&&(m=await c.proving(a,s).catch(()=>!1)?0:m+1,!(m>=2));)await c.wait(jK)", ""),
+    sized.replace("await c.tapMax(a,i)<n.amount&&", "await c.tapMax(a,i)<0n&&"),
+    // card cash-buy-waits-for-its-move: the wait not on this move's landing, no proofs' wait, or the fixed clock from the tap
+    sized.replace("c.moved(f)", "c.moved(d)"),
+    sized.replace("(m=await c.proving(a,s).catch(()=>!1)?0:m+1,!(m>=2))", "!0"),
+    sized.replace("let e=await kq(c.moved(f).catch(e=>({landed:!1,error:EK(e)})),c.signal);e!==null&&p(`move`,{move:f,stage:e.landed?`landed`:`stopped`,...e.error===void 0?{}:{error:e.error}});let m=0,s=new Map;for(;e?.landed===!0&&!c.signal?.aborted&&await c.tapMax(a,i)<n.amount&&(m=await c.proving(a,s).catch(()=>!1)?0:m+1,!(m>=2));)await c.wait(jK)", "let e=c.now()+MK;for(;!c.signal?.aborted&&c.now()<e&&await c.tapMax(a,i)<n.amount;)await c.wait(jK)}"),
   ]) assert.equal(facts("", bad).tap, false, bad.slice(0, 90));
 });
 
 test("the tap sized on every pool chain (card evm-cash-move-brings-its-fee: `short` asked on Base and Robinhood too, no rung want there): the build's form PASS; each planted break FAIL", () => {
   const every =
-    "o=e=>a===`solana`?n.amount-e:null,s={error:`failed`};let c=t(),l=await c.any(a)?await c.tapMax(a,i).catch(()=>null):n.amount,u=l!==null&&l<n.amount&&c.short?await c.short(a,i,n.amount).catch(()=>null):null,d=l!==null&&l<n.amount?u??o(l):null,f=d===null?null:await c.need(a,d);if(f!==null){try{r?.route?.({move:`cash`,op:f})}catch{}let e=c.now()+AK;for(;!c.signal?.aborted&&c.now()<e&&await c.tapMax(a,i)<n.amount;)await c.wait(kK)}";
+    "o=e=>a===`solana`?n.amount-e:null,s={error:`failed`};let c=t(),l=await c.any(a)?await c.tapMax(a,i).catch(()=>null):n.amount,u=l!==null&&l<n.amount&&c.short?await c.short(a,i,n.amount).catch(()=>null):null,d=l!==null&&l<n.amount?u??o(l):null,f=d===null?null:await c.need(a,d);if(f!==null){try{r?.route?.({move:`cash`,op:f})}catch{}let e=await kq(c.moved(f).catch(e=>({landed:!1,error:EK(e)})),c.signal);e!==null&&p(`move`,{move:f,stage:e.landed?`landed`:`stopped`,...e.error===void 0?{}:{error:e.error}});let m=0,s=new Map;for(;e?.landed===!0&&!c.signal?.aborted&&await c.tapMax(a,i)<n.amount&&(m=await c.proving(a,s).catch(()=>!1)?0:m+1,!(m>=2));)await c.wait(kK)";
   assert.equal(facts("", `let ${every}`).tap, true);
   for (const bad of [
     every.replace("u??o(l)", "u"),
@@ -175,7 +179,9 @@ test("the tap sized on every pool chain (card evm-cash-move-brings-its-fee: `sho
     every.replace("await c.need(a,d)", "null"),
     every.replace("c.need(a,d)", "c.need(a,u)"),
     every.replace("op:f})", "op:d})"),
-    every.replace("for(;!c.signal?.aborted&&c.now()<e&&await c.tapMax(a,i)<n.amount;)await c.wait(kK)", ""),
-    every.replace("await c.tapMax(a,i)<n.amount;", "await c.tapMax(a,i)<0n;"),
+    every.replace("for(;e?.landed===!0&&!c.signal?.aborted&&await c.tapMax(a,i)<n.amount&&(m=await c.proving(a,s).catch(()=>!1)?0:m+1,!(m>=2));)await c.wait(kK)", ""),
+    every.replace("await c.tapMax(a,i)<n.amount&&", "await c.tapMax(a,i)<0n&&"),
+    every.replace("!(m>=2)", "!0"),
+    every.replace("let e=await kq(c.moved(f).catch(e=>({landed:!1,error:EK(e)})),c.signal);e!==null&&p(`move`,{move:f,stage:e.landed?`landed`:`stopped`,...e.error===void 0?{}:{error:e.error}});let m=0,s=new Map;for(;e?.landed===!0&&!c.signal?.aborted&&await c.tapMax(a,i)<n.amount&&(m=await c.proving(a,s).catch(()=>!1)?0:m+1,!(m>=2));)await c.wait(kK)", "let e=c.now()+AK;for(;!c.signal?.aborted&&c.now()<e&&await c.tapMax(a,i)<n.amount;)await c.wait(kK)}"),
   ]) assert.equal(facts("", `let ${bad}`).tap, false, bad.slice(0, 90));
 });

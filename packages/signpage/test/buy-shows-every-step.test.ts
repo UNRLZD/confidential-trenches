@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import type { HostRefusal, KindContext, Running } from "../src/api.ts";
-import { cashFirst, cashMover, CASH_MOVE_WAIT_MS, type CashMoverDeps, type CashToPoolDeps, type MoveOpRecord } from "../src/cash-to-pool.ts";
+import { cashFirst, cashMover, type CashMoverDeps, type CashToPoolDeps, type MoveOpRecord } from "../src/cash-to-pool.ts";
 import { followPoolQuote, tracedFollow } from "../src/pool-deposit-follow.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
 import { trace, traceAlias, traceBegin, traceTo, TRACE_TAG } from "../src/trace.ts";
@@ -192,6 +192,8 @@ function tap(reads: (() => Promise<bigint>)[]): CashToPoolDeps & { clock: () => 
     any: async () => true,
     tapMax: () => reads[Math.min(k++, reads.length - 1)]!(),
     need: async () => "cash/solana/7",
+    moved: async () => ({ landed: true }),
+    proving: async () => true,
     wait: async (ms) => void (clock += ms),
     now: () => clock,
     clock: () => clock,
@@ -211,26 +213,26 @@ test("the tap's wait: a read of what one tap spends that throws (the dry down on
   assert.deepEqual(calls, [400_000_000n], "the pool buy ran for the whole ask");
   assert.equal((a as { result?: { stage: string } }).result?.stage, "sent");
   const buy = got.filter((l) => l.op === "buy-1");
-  assert.deepEqual(buy.map((l) => `${l.step}:${l.stage ?? ""}`), ["move:", "move:tap_unread", "move:tap_unread", "move:ready", "swap:sent", "swap:sent", "end:sent"]);
+  assert.deepEqual(buy.map((l) => `${l.step}:${l.stage ?? ""}`), ["move:", "move:landed", "move:tap_unread", "move:tap_unread", "move:ready", "swap:sent", "swap:sent", "end:sent"]);
   assert.equal(buy[0]!.move, "cash/solana/7");
-  assert.equal(buy[1]!.error, "down");
+  assert.equal(buy[2]!.error, "down");
   assert.equal(buy.at(-1)!.tx, "3PQYp7SEuisBKEPBMtPkVNFwkAexB3FcKb2F8ari1cWEQ6yHXWNVv8Xx1avEUqXyKKfcD3fVhJJgGKNUd8UBdZCf");
 });
 
-test("the tap's wait: a read that never answers holds the tap no longer than CASH_MOVE_WAIT_MS; the pool buy then answers, and the line says the wait ran out short", BOUND, async () => {
+test("the tap's wait: reads that never answer each count as nothing after their bound; with nothing landing or proving the pool buy then answers, and the line says the wait ended short", BOUND, async () => {
   const calls: bigint[] = [];
-  // the first read under the ask; then the wait's last 5 ms, and a read that never answers
-  let clock = 0;
-  const d: CashToPoolDeps = { any: async () => true, tapMax: async () => (clock === 0 ? 100_000_000n : new Promise<bigint>(() => {})), need: async () => "cash/solana/7", wait: async (ms) => void (clock += clock === 0 ? CASH_MOVE_WAIT_MS - 5 : ms), now: () => clock };
+  // the first read under the ask, then reads that never answer
+  let k = 0;
+  const d: CashToPoolDeps = { any: async () => true, tapMax: async () => (k++ === 0 ? 100_000_000n : new Promise<bigint>(() => {})), need: async () => "cash/solana/7", moved: async () => ({ landed: true }), proving: async () => false, wait: async () => {}, now: () => 0, readMs: 5 };
   const got = await lines(async () => {
-    // the first read under the ask, then one that never answers: the wait's last 5 ms
     const r = cashFirst(inner(calls), () => d)(ask(400_000_000n), ctx());
     await answerOf(r);
   });
   assert.deepEqual(calls, [400_000_000n]);
-  const over = got.find((l) => l.op === "buy-1" && l.stage === "wait_over");
+  const over = got.find((l) => l.op === "buy-1" && l.stage === "settled");
   assert.ok(over, JSON.stringify(got));
-  assert.match(String(over!.error), /one tap spends 0 of the 400000000 asked/);
+  assert.match(String(over!.error), /one tap spends 0 of the 400000000 asked, with nothing more landing or proving/);
+  assert.equal(got.filter((l) => l.op === "buy-1" && l.stage === "tap_unread").length, 2, "each read that never answered says so");
 });
 
 // --- the follow of the move's quote
