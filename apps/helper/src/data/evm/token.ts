@@ -7,8 +7,9 @@
 //     maker read tagged on chain and the chain it is listed on, for a token the chain's lists served (lists.ts listed);
 //     any other token's row is DexScreener's (named.ts, card evm-token-page-opens-any-coin: a coin opened from a search,
 //     a shared link or a position held after it left trending), its launchpad the same maker read (lists.ts maker),
-//     waited for INFO_WAIT_MS beside the info. 404 only for an address DexScreener names no pool for (a typo, a wallet);
-//     503 while it cannot be read. The candles and the tape share the gate (server.ts evmSwapsFromEnv).
+//     waited for beside the info, both within INFO_WAIT_MS of the request's start. 404 only for an address DexScreener
+//     names no pool for (a typo, a wallet); 503 while it cannot be read. The candles and the tape share the gate
+//     (server.ts evmKnown).
 //   - decimals, the holder count and the top 10 share: GeckoTerminal's keyless `networks/<net>/tokens/<address>/info`
 //     (api.geckoterminal.com/docs/index.html, "tokens/{address}/info", read 2026-11-09 01:50Z: `decimals`,
 //     `holders.count`, `holders.distribution_percentage.top_10` and `holders.last_updated` for a Base and a Robinhood
@@ -212,10 +213,10 @@ export function createEvmToken(
     const created = n.row.created_s;
     return { row: n.row, maker: typeof created === "number" ? deps.lists.maker?.(token, created) : undefined };
   }
-  /** The row with its launchpad, when its maker read answers within INFO_WAIT_MS (lists.ts maker keeps it). */
-  async function tagged(r: { row: Row; maker?: Promise<string | null | undefined> }): Promise<Row> {
+  /** The row with its launchpad, when its maker read answers within `waitMs` (lists.ts maker keeps it). */
+  async function tagged(r: { row: Row; maker?: Promise<string | null | undefined> }, waitMs: number): Promise<Row> {
     if (r.maker === undefined) return r.row;
-    const pad = await within(r.maker.catch(() => undefined), INFO_WAIT_MS);
+    const pad = await within(r.maker.catch(() => undefined), waitMs);
     return typeof pad === "string" ? { ...r.row, launchpad: pad } : r.row;
   }
 
@@ -328,12 +329,16 @@ export function createEvmToken(
     async page(token: string, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
+      const began = performance.now();
       const found = await rowOf(t, client);
       if (found === undefined) return UPSTREAM;
       if (found === null) return NOT_FOUND;
       const { held, read } = infoOf(t, client);
       const risk = deps.goplus?.risk(chain, t) ?? Promise.resolve(null);
-      const [row, info] = await Promise.all([tagged(found), held !== undefined ? usable(held) : read === undefined ? null : within(read, INFO_WAIT_MS).then(usable)]);
+      // the first reads are waited for INFO_WAIT_MS from the request's start, so a coin DexScreener had to name first
+      // (rowOf) still answers inside the page's second, its info and tag held for the next read
+      const wait = Math.max(0, INFO_WAIT_MS - (performance.now() - began));
+      const [row, info] = await Promise.all([tagged(found, wait), held !== undefined ? usable(held) : read === undefined ? null : within(read, wait).then(usable)]);
       const page = toPage(row, info, deps.kept?.(t), await risk);
       return { status: 200, body: JSON.stringify(page), src: row.src === "dexscreener" ? "dexscreener" : "geckoterminal", asOfMs: row.as_of_ms as number };
     },
