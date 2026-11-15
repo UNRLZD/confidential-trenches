@@ -13,7 +13,7 @@ import { noteSecrets } from "../src/notes/secrets.ts";
 import { checkedWalk, RESTORE_LANES, slices, walkLaneYielding, type LaneWalk } from "../src/notes/restore.ts";
 import { solanaMarkOf } from "../src/pool/solana-restore.ts";
 import { SOL_MAINNET_DEPLOY } from "../src/pool/solana.ts";
-import { answerWalk, solanaPreMarkOf, WALK_LANE_MAX_MS, walkCores, walkLanes, type WalkPort } from "../src/restore/walk.ts";
+import { answerWalk, countingHashes, solanaPreMarkOf, WALK_LANE_MAX_MS, walkCores, walkLanes, type WalkHashes, type WalkPort } from "../src/restore/walk.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16))); // the published all-zero entropy vector (a8.json)
 const M = d.masters(SEED, "deposit");
@@ -148,4 +148,43 @@ test("the Worker's ask: the masters and the match, never the seed; a Solana ask 
   assert.equal(walkCores(0), 1);
   assert.equal(walkCores(64), 8);
   assert.equal(walkCores(3), 3);
+});
+
+// card firefox-restore-holds-on-every-runner: a Firefox run on GitHub's runners took 39 s on one and 64 s on another, and
+// nothing said whether its walk hashed on WebAssembly or fell back to BigInt. Each Worker's answer now names its field,
+// and the page counts them (countingHashes, said by src/pool-restore.ts in one line the Firefox gate reads).
+test("a walk Worker's answer names the field it hashed on, and the page counts each answer by it", async () => {
+  const base = { lane: 1, scope: SCOPE, gap: GAP, reach: null, nullifier: M.nullifier, secret: M.secret, precommitments: PRE };
+  const a = answerWalk(base);
+  assert.equal(a.ok, true);
+  assert.equal((a as { hash?: unknown }).hash, "wasm");
+  const plainWorker = (noWasm: boolean) => (): WalkPort => {
+    const w = new Worker(new URL("./walk-worker-node.mjs", import.meta.url), { workerData: { noWasm } });
+    live.push(w);
+    return {
+      postMessage: (m) => w.postMessage(m),
+      addEventListener: (type, f) => void w.on(type, type === "message" ? (data: unknown) => f({ data }) : () => f({})),
+      terminate: () => void w.terminate(),
+    };
+  };
+  const has = (p: bigint): boolean => PRE.includes(p);
+  for (const [noWasm, field] of [[false, "wasm"], [true, "bigint"]] as const) {
+    const n: WalkHashes = { wasm: 0, bigint: 0 };
+    const lanes = await walkLanes({ m: M, scope: SCOPE, match: { kind: "pre", precommitments: PRE }, gap: GAP, slice: slices(), spawn: countingHashes(plainWorker(noWasm), n), cores: 4 });
+    // the same walks either way, and every lane's Worker counted under the field it hashed on
+    assert.deepEqual(lanes, await onPage(has));
+    assert.deepEqual(n, { wasm: field === "wasm" ? RESTORE_LANES : 0, bigint: field === "bigint" ? RESTORE_LANES : 0 });
+  }
+  // a refusal, or an answer that names no field, is counted under neither
+  const n: WalkHashes = { wasm: 0, bigint: 0 };
+  const fake = (data: unknown) => (): WalkPort => {
+    let f: ((e: { data?: unknown }) => void) | null = null;
+    return { postMessage: () => queueMicrotask(() => f?.({ data })), addEventListener: (t, g) => void (t === "message" && (f = g)), terminate: () => {} };
+  };
+  for (const data of [{ ok: false, error: "no" }, { ok: true, walk: {} }, { ok: true, walk: {}, hash: "fast" }]) {
+    const w = countingHashes(fake(data), n)();
+    w.postMessage(null);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  assert.deepEqual(n, { wasm: 0, bigint: 0 });
 });
