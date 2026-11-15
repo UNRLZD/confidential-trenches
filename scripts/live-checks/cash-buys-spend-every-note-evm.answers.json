@@ -1,0 +1,34 @@
+{
+ "bad_live_before": {
+  "from": "SIGN_HOST live, 2026-11-15 13:38Z, before the card (release on main); 1Click through the helper proxy, read as the card page reads it",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-VO027X7pOV8KkzsAvniF97eFS98+FsoTxGIvcalw0g9KIlbRfUN6l7ouXeDGvnWb\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-VO027X7pOV8KkzsAvniF97eFS98+FsoTxGIvcalw0g9KIlbRfUN6l7ouXeDGvnWb",
+  "mark": false,
+  "oneclick": {
+   "base": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"57e0f1ab-b824-435f-a41f-0e2792b479a1\",\"timestamp\":\"2026-11-15T13:38:01.987Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Amount is too low for bridge, try at least 1042\",\"correlationId\":\"8e0f47ed-91d0-4e49-9752-eaaeaf6e5928\",\"timestamp\":\"2026-11-15T13:38:03.307Z\",\"path\":\"/v0/quote\"}"
+   ],
+   "robinhood": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"85b6633b-03e7-4e17-a81c-88672ec1a122\",\"timestamp\":\"2026-11-15T13:38:03.620Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Amount is too low for bridge, try at least 18558\",\"correlationId\":\"803a9702-a01e-4cdc-9dad-e173f527a1d1\",\"timestamp\":\"2026-11-15T13:38:04.670Z\",\"path\":\"/v0/quote\"}"
+   ]
+  }
+ },
+ "good_built": {
+  "from": "packages/signpage/scripts/build-app.mjs --out at the card branch, 2026-11-15 13:4xZ; 1Click answers as read live in the bad run",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oK9D0EXfu5jvQ/cdpJOgahur0oVkPswhp4eJwZfaPRqKwtUZ3lBh+kPuNQzWZ9/c\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-oK9D0EXfu5jvQ/cdpJOgahur0oVkPswhp4eJwZfaPRqKwtUZ3lBh+kPuNQzWZ9/c",
+  "mark": true,
+  "oneclick": {
+   "base": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"57e0f1ab-b824-435f-a41f-0e2792b479a1\",\"timestamp\":\"2026-11-15T13:38:01.987Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Amount is too low for bridge, try at least 1042\",\"correlationId\":\"8e0f47ed-91d0-4e49-9752-eaaeaf6e5928\",\"timestamp\":\"2026-11-15T13:38:03.307Z\",\"path\":\"/v0/quote\"}"
+   ],
+   "robinhood": [
+    "{\"message\":\"Failed to get quote\",\"correlationId\":\"85b6633b-03e7-4e17-a81c-88672ec1a122\",\"timestamp\":\"2026-11-15T13:38:03.620Z\",\"path\":\"/v0/quote\"}",
+    "{\"message\":\"Amount is too low for bridge, try at least 18558\",\"correlationId\":\"803a9702-a01e-4cdc-9dad-e173f527a1d1\",\"timestamp\":\"2026-11-15T13:38:04.670Z\",\"path\":\"/v0/quote\"}"
+   ]
+  }
+ }
+}

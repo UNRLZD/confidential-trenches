@@ -323,10 +323,18 @@ const EVM_MOVE_STEPS_MAX = 1n << 40n;
  *  U_X as the largest rung it carries, one deposit each: ladderSplit's rungs), each its own piece proved at `fee`
  *  EVM_MOVE_FEE_ROOM over; a rung that fee would eat is no piece (evmBuyPieces' rule). */
 export function evmMovedPieces(short: bigint, fee: bigint): EvmBuyPiece[] {
-  if (short <= 0n) return [];
-  const at = fee * EVM_MOVE_FEE_ROOM;
-  return ladderSplit(EVM_LADDER, short).notes.filter((chunk) => at < chunk).map((chunk, i) => ({ noteId: `move#${i}`, chunk, fee: at }));
+  return short <= 0n ? [] : evmRungPieces(ladderSplit(EVM_LADDER, short).notes, fee);
 }
+/** The pieces a move's landed `rungs` make (evmMovedPieces' rule, for rungs a move of several parts lands: card
+ *  cash-buys-spend-every-note-evm, each part's one-time address deposits its own rungs). */
+function evmRungPieces(rungs: readonly bigint[], fee: bigint): EvmBuyPiece[] {
+  const at = fee * EVM_MOVE_FEE_ROOM;
+  return rungs.filter((chunk) => at < chunk).map((chunk, i) => ({ noteId: `move#${i}`, chunk, fee: at }));
+}
+/** The rungs a move from Cash that lands `short` wei of rungs brings, as Cash's notes make it (card
+ *  cash-buys-spend-every-note-evm: cash-to-pool.ts evmCashPlan's rungs, each part's own ladderSplit), null when Cash
+ *  cannot make it. None given: one move's ladderSplit of `short`. */
+export type EvmMoveRungs = (short: bigint) => readonly bigint[] | null;
 
 /** The least move from Cash, in wei of rungs it lands (a whole number of the least rung, so every wei of it is a note),
  *  so that one tap of `amount` wei buys the whole ask (card evm-cash-move-brings-its-fee): the tap's own plan (planEvmBuy
@@ -335,11 +343,15 @@ export function evmMovedPieces(short: bigint, fee: bigint): EvmBuyPiece[] {
  *  exactly; with that plan. By doubling then halving over the least rung's count (a valid size either way: the plan is
  *  read on it), as solanaMoveShort sizes Solana's. Null when no move up to EVM_MOVE_STEPS_MAX rungs does. One path:
  *  cashFirst's move (main.ts cashDeps.short) and pool.buy.dry's cost and out above tap_max (evmBuyDry) both size by it. */
-export function evmMoveShort(ready: readonly ReadyProof[], amount: bigint, fee: bigint): { short: bigint; plan: EvmBuyPlan } | null {
+export function evmMoveShort(ready: readonly ReadyProof[], amount: bigint, fee: bigint, rungs?: EvmMoveRungs): { short: bigint; plan: EvmBuyPlan } | null {
   if (amount <= 0n || fee < 0n) return null;
   const { pieces, bound } = evmBuyPieces(ready);
   const at = (steps: bigint): EvmBuyPlan | null => {
-    const moved = evmMovedPieces(steps * EVM_LADDER.min, fee);
+    // the rungs the move lands as Cash's notes make it (rungs): a move of several parts lands each part's own split,
+    // more and smaller notes than one move's, each its own relay fee
+    const landed = rungs === undefined ? null : rungs(steps * EVM_LADDER.min);
+    if (rungs !== undefined && landed === null) return null;
+    const moved = landed === null ? evmMovedPieces(steps * EVM_LADDER.min, fee) : evmRungPieces(landed, fee);
     const all = [...pieces, ...moved];
     // the bound the tap keeps beside a rest: the dearest piece's fee, the moved ones' among them
     const b = all.reduce((m, p) => (p.fee > m ? p.fee : m), bound);
@@ -371,7 +383,7 @@ const EVM_WITH_CASH_STEP = 1_000_000_000_000n;
 /** Whether one tap of `amount` wei buys the whole ask with what Cash can move (card evm-cash-move-brings-its-fee): the
  *  tap's own plan over the `ready` proofs alone carries it exactly, or with the notes evmMoveShort sizes for it at the
  *  epoch's relay fee `fee`, when `pays` says Cash's largest note moves that size and its withdraw fee. */
-export function evmTapBuys(ready: readonly ReadyProof[], amount: bigint, fee: bigint, pays: (short: bigint) => boolean): boolean {
+export function evmTapBuys(ready: readonly ReadyProof[], amount: bigint, fee: bigint, pays: (short: bigint) => boolean, rungs?: EvmMoveRungs): boolean {
   if (amount <= 0n) return false;
   const { pieces, bound } = evmBuyPieces(ready);
   try {
@@ -379,7 +391,7 @@ export function evmTapBuys(ready: readonly ReadyProof[], amount: bigint, fee: bi
   } catch (e) {
     if (!(e instanceof PoolRuleRefused)) throw e;
   }
-  const m = evmMoveShort(ready, amount, fee);
+  const m = evmMoveShort(ready, amount, fee, rungs);
   return m !== null && pays(m.short);
 }
 
@@ -387,12 +399,12 @@ export function evmTapBuys(ready: readonly ReadyProof[], amount: bigint, fee: bi
  *  tap buys with Cash moved first, sized as cashFirst sizes it (evmTapBuys), read on EVM_WITH_CASH_STEP up to `top` (a
  *  bound above it: the ready notes and every wei Cash's largest note buys at the device's price) by halving; 0n when
  *  none. The box's Max and its check of a typed amount: an amount it allows, the tap carries in one move. */
-export function evmMostWithCash(ready: readonly ReadyProof[], fee: bigint, pays: (short: bigint) => boolean, top: bigint): bigint {
+export function evmMostWithCash(ready: readonly ReadyProof[], fee: bigint, pays: (short: bigint) => boolean, top: bigint, rungs?: EvmMoveRungs): bigint {
   let lo = 0n;
   let hi = top / EVM_WITH_CASH_STEP + 1n;
   while (hi - lo > 1n) {
     const mid = (lo + hi) / 2n;
-    if (evmTapBuys(ready, mid * EVM_WITH_CASH_STEP, fee, pays)) lo = mid;
+    if (evmTapBuys(ready, mid * EVM_WITH_CASH_STEP, fee, pays, rungs)) lo = mid;
     else hi = mid;
   }
   return lo * EVM_WITH_CASH_STEP;
@@ -444,6 +456,9 @@ export type EvmBuyDryDeps = {
   /** What a move from Cash that lands `short` wei of rungs costs for good, in wei (main.ts: cash-to-pool.ts
    *  evmMoveCostOf at the device's price, the pool's floor and the withdraw's fee); null when Cash cannot move it. */
   moved?(short: bigint): Promise<bigint | null>;
+  /** The rungs a move lands as Cash's notes make it (card cash-buys-spend-every-note-evm: main.ts, cash-to-pool.ts
+   *  evmCashPlan), so the move is sized on them; null: Cash cannot be planned now (no move); none: one move's split. */
+  rungs?(): Promise<EvmMoveRungs | null>;
 };
 
 /** pool.buy.dry on Base and Robinhood: tap_max and with_cash; with the ask's `amount` at most tap_max (kit 1.17),
@@ -466,8 +481,8 @@ export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmB
     // above tap_max: the move cashFirst starts, sized by the tap's own plan over the ready proofs and the notes it brings
     const above = amount !== null && typeof tap === "bigint" && amount > tap && d.fee !== undefined && d.moved !== undefined;
     const sized = above ? (async () => {
-      const fee = await d.fee!();
-      const m = fee === null ? null : evmMoveShort(got.ready, amount!, fee);
+      const [fee, rungs] = await Promise.all([d.fee!(), d.rungs ? d.rungs() : undefined]);
+      const m = fee === null || rungs === null ? null : evmMoveShort(got.ready, amount!, fee, rungs);
       const moveCost = m === null ? null : await d.moved!(m.short);
       return m === null || moveCost === null || moveCost < 0n ? null : { plan: m.plan, cost: evmDryCost(m.plan) + moveCost };
     })().catch(() => null) : Promise.resolve(null);
