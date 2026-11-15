@@ -14,7 +14,7 @@
 //   - at 1440 the toast covers no control of the main column either (the chart's control row);
 //   - the box after a buy: Bal and Max with no Cash (the pool alone, nothing typed), and with Cash, You receive and the
 //     Fee with $2 typed, above one tap's own spend; their lines are printed and shot for the card's report, not judged
-//     (not fixed here: the dash's root is the signing page's answer, Bal beside Max the owner's words);
+//     (not fixed here: the dash's root is the signing page's answer, and Bal beside Max needs new screen copy);
 // Per state: app-shell's rules (no text under 11 px, a phone tap box of 44 px, no horizontal scroll, no CSP violation),
 // no page error, no dialog.
 //   node apps/terminal/test/trade-reads-after-buy/run.mjs [--build <dir>] [--shots <dir>]     PASS exit 0, FAIL exit 1
