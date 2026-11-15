@@ -242,7 +242,7 @@ export const evmLastRouteReset = (): void => evmBuyTapReset();
 /** The device's quote of the ask: the kit's buy tap quote (kit trade/evm/buy-tap.ts evmPoolBuyQuoteTap, three kit
  *  quotes at most, the token's last route, its indexed pools a buy may take, the kit's own best route) on this page's
  *  host; a tap no route takes answers its name (not_allowed, quote_check_failed). */
-async function quoteOf(h: EvmPoolBuyHost, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
+async function quoteOf(h: Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools">, network: EvmPoolChain, token: string, amountIn: bigint, slippageBps: number): Promise<EvmPoolBuyQuote> {
   try {
     return await evmPoolBuyQuoteTap({ chain: network, token, amountIn, slippageBps }, { quote: h.quote, venues: h.venues, indexPools: h.indexPools ?? (() => null) });
   } catch (e) {
@@ -280,17 +280,97 @@ export function evmDryAmount(x: unknown): bigint | null | undefined {
  *  amount itself, with no amount, over tapMax (a tap that moves Cash first), or when the planner refuses. Display only:
  *  the tap plans again from its own proofs. */
 export function evmDryBuys(chain: Chain, amount: bigint | null, tapMax: string, ready: readonly ReadyProof[]): string | null {
+  const plan = evmDryPlan(chain, amount, tapMax, ready);
+  return plan !== null && amount !== null && plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
+}
+
+/** The tap's own plan of an ask of `amount` wei at most `tapMax` (evmDryBuys' bounds), over evmBuyPieces of `ready`:
+ *  null with no amount, over tapMax, or when the planner refuses. */
+function evmDryPlan(chain: Chain, amount: bigint | null, tapMax: string, ready: readonly ReadyProof[]): EvmBuyPlan | null {
   const tap = evmDryAmount(tapMax);
   if (amount === null || amount <= 0n || typeof tap !== "bigint" || amount > tap) return null;
   const { pieces, bound } = evmBuyPieces(ready);
-  let plan: EvmBuyPlan;
   try {
-    plan = planEvmBuy({ kind: "pool.buy", chain, token: null, amount, slippageBps: 0, decimals: 0 }, pieces, bound);
+    return planEvmBuy({ kind: "pool.buy", chain, token: null, amount, slippageBps: 0, decimals: 0 }, pieces, bound);
   } catch (e) {
     if (e instanceof PoolRuleRefused) return null;
     throw e;
   }
-  return plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
+}
+
+/** pool.buy.dry's `cost` on Base and Robinhood (card you-receive-on-every-chain), wei: what the tap's plan spends that no
+ *  swap gets. Each whole piece's relay fee (its binding's feeCap, the most the sender may take from the release); a
+ *  rest leg's piece's relay fee and `bound`, the most W's own buy may cost (rules/pool.ts checkEvmWBuy refuses a fee
+ *  bound over it). Not in it: the carry of the rest W's change back into the pool (pool-carry-evm.ts, priced at that
+ *  send's own base fee) and a tail under the least rung, which goes on to Cash (w-tails.ts): neither is known before
+ *  W's buy lands. */
+export function evmDryCost(plan: EvmBuyPlan): bigint {
+  return plan.whole.reduce((s, p) => s + p.fee, 0n) + (plan.rest === null ? 0n : plan.rest.piece.fee + plan.bound);
+}
+
+/** What pool.buy.dry quotes `out` with on Base and Robinhood: the tap's quote path (quoteOf: the page's quote, venues
+ *  and index pools) on the pin's network, and the token's decimals as the tap reads them. */
+export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "decimals"> & { network: EvmPoolChain };
+
+/** The page's kit quote of a buy (evmBuyHost's and the dry's): the helper's pools of the token from the PoolManager's
+ *  first block asked beside it (evm-served.ts), then the kit's evmPoolBuyQuote. */
+const pageQuote = (fetchFn?: typeof fetch) => (req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote> => (evmServedAsk(laneFetch(fetchFn), TRADE_HELPER, req.chain, req.token), evmPoolBuyQuote(req));
+/** The token's decimals as a buy reads them: the page's kept read on both pool RPCs, no wait (pool-kinds.ts keptTokenDecimals). */
+const pageDecimals = (chain: Chain, rpcs: readonly [EvmRpc, EvmRpc]) => (token: string): Promise<number> => keptTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 });
+
+/** The dry's quote host on the page: the buy's own quote and decimals (evmBuyHost) on the chain's pinned pool. */
+export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch): EvmDryQuote {
+  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn), indexPools: evmPoolIndexPools, decimals: pageDecimals(chain, rpcs) };
+}
+
+/** pool.buy.dry's `out` on Base and Robinhood: one tap quote (quoteOf, three kit quotes at most, no retry) of `amountIn`
+ *  wei, its expected out before slippage in whole units of the token at its decimals as the tap reads them, read beside
+ *  the quote. Null when either read fails, or the quote is not of this token, chain and amount, or gives nothing. */
+export async function evmDryOut(h: EvmDryQuote, token: string, amountIn: bigint): Promise<string | null> {
+  try {
+    const [q, decimals] = await Promise.all([quoteOf(h, h.network, token, amountIn, 0), h.decimals(token)]);
+    if (q.chain !== h.network || typeof q.token !== "string" || lower(q.token) !== lower(token) || q.amountIn !== amountIn) return null;
+    if (typeof q.amountOut !== "bigint" || q.amountOut <= 0n || !Number.isInteger(decimals) || decimals < 0 || decimals > TOKEN_DECIMALS_MAX) return null;
+    return poolUnits(q.amountOut, decimals);
+  } catch {
+    return null;
+  }
+}
+
+/** What pool.buy.dry on Base and Robinhood reads from the page. */
+export type EvmBuyDryDeps = {
+  /** A trade runs, or holds a host: the dry answers busy and reads nothing. */
+  trading(): boolean;
+  /** state.pools' tap_max of the chain and the chain's ready proofs as the tap reads them; null signed out or with none. */
+  tap(): Promise<{ tapMax: string; ready: readonly ReadyProof[] } | null>;
+  /** with_cash for that tap_max (src/cash-to-pool.ts withCashNote), null with no Cash to move; a throw fails the dry. */
+  withCash(tapMax: string): Promise<string | null>;
+  /** The chain's quote host (evmDryQuote), null with no pinned pool. */
+  quote(): EvmDryQuote | null;
+};
+
+/** pool.buy.dry on Base and Robinhood: tap_max and with_cash; with the ask's `amount` at most tap_max (kit 1.17),
+ *  `buys` when the plan spends less (evmDryBuys), `cost` (evmDryCost) and `out` (evmDryOut of the plan's swapped total,
+ *  started as soon as the plan is made, beside the Cash reads). Never while a trade runs (busy). Display only: nothing
+ *  is signed, written or sent; the tap plans again from its own proofs. */
+export function evmBuyDry(chain: Chain, params: Record<string, unknown>, d: EvmBuyDryDeps): Running<"pool.buy.dry"> {
+  let answer: HostAnswer<"pool.buy.dry"> | HostRefusal = { error: "failed" };
+  const amount = evmDryAmount(params.amount);
+  const token = params.token;
+  const after = (async () => {
+    if (amount === undefined || typeof token !== "string") return void (answer = { error: "not_allowed" });
+    if (d.trading()) return void (answer = { error: "busy" });
+    const got = await d.tap();
+    if (got === null) return void (answer = { error: "not_funded" });
+    const plan = evmDryPlan(chain, amount, got.tapMax, got.ready);
+    const q = plan === null ? null : d.quote();
+    const out = plan === null || q === null ? Promise.resolve(null) : evmDryOut(q, token, plan.amount);
+    const most = await d.withCash(got.tapMax);
+    const o = await out;
+    const buys = plan !== null && amount !== null && plan.amount < amount ? poolUnits(plan.amount, ETH_DECIMALS) : null;
+    answer = { result: { tap_max: got.tapMax, ...(most === null ? {} : { with_cash: most }), ...(buys === null ? {} : { buys }), ...(plan === null ? {} : { cost: poolUnits(evmDryCost(plan), ETH_DECIMALS) }), ...(o === null ? {} : { out: o }) } };
+  })().catch(() => void (answer = { error: "failed" }));
+  return { running: true, after, answer: () => answer };
 }
 
 /** One pool.buy on an EVM chain: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). The plan's legs
@@ -724,12 +804,12 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     },
     seed64: page.seed64,
     // the helper's pools of the token from the PoolManager's first block, asked beside the quote (evm-served.ts)
-    quote: (req) => (evmServedAsk(laneFetch(page.fetch), TRADE_HELPER, req.chain, req.token), evmPoolBuyQuote(req)),
+    quote: pageQuote(page.fetch),
     indexPools: evmPoolIndexPools,
     build: evmPoolBuildQuoted,
     // the page's kept decimals (pool-kinds.ts keptTokenDecimals: read on both RPCs and kept, so a sell after it reads none);
     // no wait here: this read falls between the buy's quote check and W's signature, and fails fast as the heads read does
-    decimals: (token) => keptTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 }),
+    decimals: pageDecimals(chain, rpcs),
     send: (body) => evmPoolSend(TRADE_HELPER, body, page.fetch),
     settle: page.settle,
     // the pending write, before anything leaves, refuses a W that already has a holding (another tab's run of the same

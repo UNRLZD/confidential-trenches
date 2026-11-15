@@ -1,0 +1,127 @@
+// Card you-receive-on-every-chain: the trade box's "You receive" and "Fee" on Base and Robinhood. pool.buy.dry on these
+// chains answers, with an amount at most tap_max, `cost` (what the tap's own plan costs for good: each planned whole
+// piece's relay fee, and for a rest leg its piece's relay fee and the bound the plan keeps for W's own buy) and `out`
+// (the device's own quote of the plan's swapped total through the tap's quote path, quoteOf, in whole token units at the
+// token's decimals as the tap reads them; left out when that quote fails or is not the one asked). Never while a trade
+// runs (busy). Red before this card: no evmBuyDry or evmDryCost in src/pool-buy-evm.ts.
+//   node --test test/pool-buy-evm-dry-preview.test.ts      (from packages/signpage)
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import type { EvmPoolBuyQuote, EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { EVM_BUY_TAP_QUOTES } from "../../kit/src/trade/evm/buy-tap.ts";
+import { evmBuyDry, evmBuyPieces, evmDryCost, evmLastRouteReset, type EvmBuyDryDeps, type EvmDryQuote } from "../src/pool-buy-evm.ts";
+import { planEvmBuy, type PoolAsk } from "../src/rules/pool.ts";
+
+const ETH = 10n ** 18n;
+const micro = (n: bigint) => (n * ETH) / 1_000_000n;
+type Ready = Parameters<typeof evmBuyPieces>[0][number];
+const proof = (noteId: string, chunk: bigint, feeCap: bigint): Ready =>
+  ({ noteId, attempt: "a", poolId: "base-eth", wallet: { chain: "evm", l: 1n, j: 0, path: "", address: "0x01" }, chunk, root: "epoch", binding: { feeCap } }) as unknown as Ready;
+// two notes: 0.01 ETH at a 0.0001 ETH relay fee, 0.005 ETH at 0.0002: spends 0.0099 and 0.0048, Max 0.0147, bound 0.0002
+const READY = [proof("n1", micro(10_000n), micro(100n)), proof("n2", micro(5_000n), micro(200n))];
+// a token address of the test's own (twenty 0x12 bytes): the quote is a stub, nothing reads the chain
+const COIN = `0x${"12".repeat(20)}`;
+const OUT = 123_456_789n; // 123.456789 of a 6-decimal token
+
+type Asked = EvmPoolBuyQuoteRequest[];
+/** The tap's quote path's host: `answer` decides each kit quote; every request is kept. */
+const quoteHost = (asked: Asked, answer: (req: EvmPoolBuyQuoteRequest) => EvmPoolBuyQuote, decimals = async () => 6): EvmDryQuote => ({
+  network: "base",
+  venues: evmPoolVenues(),
+  indexPools: () => null,
+  decimals,
+  quote: async (req) => {
+    asked.push(req);
+    return answer(req);
+  },
+});
+const good = (req: EvmPoolBuyQuoteRequest): EvmPoolBuyQuote =>
+  ({ chain: req.chain, token: req.token, amountIn: req.amountIn, route: req.route, block: { number: 1n, hash: "0x00", timestamp: 1n }, amountOut: OUT, minOut: OUT, reference: null }) as unknown as EvmPoolBuyQuote;
+const deps = (over: Partial<EvmBuyDryDeps> & { quoteHost?: EvmDryQuote | null } = {}): EvmBuyDryDeps & { reads: string[] } => {
+  const reads: string[] = [];
+  return {
+    reads,
+    trading: over.trading ?? (() => false),
+    tap: over.tap ?? (async () => (reads.push("tap"), { tapMax: "0.0147", ready: READY })),
+    withCash: over.withCash ?? (async () => (reads.push("cash"), "0.05")),
+    quote: () => (over.quoteHost === undefined ? null : over.quoteHost),
+  };
+};
+/** The dry's answer once it settles (unknown: a HostAnswer's `then` is no async function's return type). */
+const run = (params: Record<string, unknown>, d: EvmBuyDryDeps): Promise<unknown> => {
+  const r = evmBuyDry("base", params, d);
+  assert.equal(r.running, true);
+  return r.after.then(() => r.answer() as unknown);
+};
+
+test("evmDryCost: each whole piece's relay fee; a rest leg's piece's relay fee and the bound the plan keeps for W's own buy", () => {
+  const { pieces, bound } = evmBuyPieces(READY);
+  const plan = (amount: bigint) => planEvmBuy({ kind: "pool.buy", chain: "base", token: COIN, amount, slippageBps: 0, decimals: 0 } as PoolAsk, pieces, bound);
+  assert.equal(evmDryCost(plan(micro(9_900n))), micro(100n), "one whole note");
+  assert.equal(evmDryCost(plan(micro(14_700n))), micro(300n), "both whole");
+  assert.equal(evmDryCost(plan(micro(1_000n))), micro(400n), "a rest on n2: its fee and the bound");
+  assert.equal(evmDryCost(plan(micro(14_600n))), micro(500n), "n1 whole, the rest on n2 (the band, buys 0.0145)");
+});
+
+test("pool.buy.dry on base under tap_max: cost from the plan, out from one quote of the plan's swapped total at the token's decimals", async () => {
+  evmLastRouteReset();
+  const asked: Asked = [];
+  const a = await run({ chain: "base", token: COIN, amount: "0.0099" }, deps({ quoteHost: quoteHost(asked, good) }));
+  assert.deepEqual(a, { result: { tap_max: "0.0147", with_cash: "0.05", cost: "0.0001", out: "123.456789" } });
+  assert.equal(asked.length, 1, "one kit quote");
+  assert.equal(asked[0]!.amountIn, micro(9_900n));
+  assert.equal(asked[0]!.token, COIN);
+  // the band: the plan swaps 0.0145, which is what the one quote asks for
+  evmLastRouteReset();
+  const band: Asked = [];
+  const b = await run({ chain: "base", token: COIN, amount: "0.0146" }, deps({ quoteHost: quoteHost(band, good) }));
+  assert.deepEqual(b, { result: { tap_max: "0.0147", with_cash: "0.05", buys: "0.0145", cost: "0.0005", out: "123.456789" } });
+  assert.deepEqual(band.map((r) => r.amountIn), [micro(14_500n)]);
+});
+
+test("a quote that fails, or is not the one asked, or decimals that fail: cost and no out; never more than the tap's quotes", async () => {
+  evmLastRouteReset();
+  const down: Asked = [];
+  const a = await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ quoteHost: quoteHost(down, () => { throw Object.assign(new Error("rpc"), { code: "rpc_error" }); }) }));
+  assert.deepEqual(a, { result: { tap_max: "0.0147", with_cash: "0.05", cost: "0.0004" } });
+  assert.equal(down.length, 1, "no retry on a provider error");
+  // every route refused: the tap's bound, then no out
+  evmLastRouteReset();
+  const refused: Asked = [];
+  const b = await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ quoteHost: quoteHost(refused, () => { throw Object.assign(new Error("no"), { code: "no_quote", reference: null }); }) }));
+  assert.deepEqual(b, { result: { tap_max: "0.0147", with_cash: "0.05", cost: "0.0004" } });
+  assert.ok(refused.length <= EVM_BUY_TAP_QUOTES, `${refused.length} quotes`);
+  // hostile answers: another amount, another token, nothing out
+  for (const bad of [(r: EvmPoolBuyQuoteRequest) => ({ ...good(r), amountIn: r.amountIn + 1n }), (r: EvmPoolBuyQuoteRequest) => ({ ...good(r), token: "0x0000000000000000000000000000000000000001" }), (r: EvmPoolBuyQuoteRequest) => ({ ...good(r), amountOut: 0n })]) {
+    evmLastRouteReset();
+    const c = await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ quoteHost: quoteHost([], bad as (r: EvmPoolBuyQuoteRequest) => EvmPoolBuyQuote) }));
+    assert.deepEqual(c, { result: { tap_max: "0.0147", with_cash: "0.05", cost: "0.0004" } });
+  }
+  // the token's decimals not read: no out
+  evmLastRouteReset();
+  const d = await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ quoteHost: quoteHost([], good, async () => { throw new Error("decimals"); }) }));
+  assert.deepEqual(d, { result: { tap_max: "0.0147", with_cash: "0.05", cost: "0.0004" } });
+  // no pool to quote on: cost alone
+  const e = await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ quoteHost: null }));
+  assert.deepEqual(e, { result: { tap_max: "0.0147", with_cash: "0.05", cost: "0.0004" } });
+});
+
+test("no amount, zero, or over tap_max: no plan, no quote, no cost", async () => {
+  for (const amount of [undefined, "0", "0.05"]) {
+    const asked: Asked = [];
+    const a = await run({ chain: "base", token: COIN, ...(amount === undefined ? {} : { amount }) }, deps({ quoteHost: quoteHost(asked, good) }));
+    assert.deepEqual(a, { result: { tap_max: "0.0147", with_cash: "0.05" } }, String(amount));
+    assert.equal(asked.length, 0);
+  }
+});
+
+test("never while a trade runs: busy, with no read; an amount that is no ETH decimal: not_allowed; signed out: not_funded", async () => {
+  const d = deps({ trading: () => true, quoteHost: quoteHost([], good) });
+  assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.001" }, d), { error: "busy" });
+  assert.deepEqual(d.reads, []);
+  assert.deepEqual(await run({ chain: "base", token: COIN, amount: "1e3" }, deps()), { error: "not_allowed" });
+  assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ tap: async () => null })), { error: "not_funded" });
+  assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.001" }, deps({ withCash: async () => { throw new Error("cash"); } })), { error: "failed" });
+  assert.deepEqual(await run({ chain: "base", token: COIN, amount: "0.0099" }, deps({ withCash: async () => null })), { result: { tap_max: "0.0147", cost: "0.0001" } });
+});
