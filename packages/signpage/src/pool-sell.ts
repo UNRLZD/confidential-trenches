@@ -65,9 +65,9 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { simulateSolanaTeardown, solanaCompileV0, solanaTeardownChecked } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_RENT_SYSVAR, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { readSolanaDlmmBuyVenue, readSolanaPoolBuyVenue, readSolanaRent, SOLANA_RENT_SYSVAR, SolanaPoolBuyError, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_QUOTE_MAX_AGE_SLOTS, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaPoolBuyVenue, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
-import { solanaDecodeTokenAccount, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
+import { solanaDecodeTokenAccount, type SolanaPoolVenue, type SolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
 import { SOLANA_MAX_TX_BYTES, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
 import { SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_CU_PRICE_MAX, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
@@ -786,10 +786,14 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
   };
 };
 
+/** The venue a sale's reference chose: its kind and the address it priced (pump's curve, the PumpSwap pool, the DLMM
+ *  pair; a coin may have several DLMM pairs, so the kind alone never names the venue). */
+export type VenuePick = { kind: SolanaPoolVenue; address: string };
 /** A later leg's venue: the one it read at its turn when that is the venue its own reference chose (the leg before it
- *  chose it too), else the chosen venue read now; a guess not taken is never used, its failure never this sale's. */
-export function legVenue<V>(guess: { kind: "pump-curve" | "pumpswap"; read: Promise<V> } | null, chose: "pump-curve" | "pumpswap", venueOf: (kind: "pump-curve" | "pumpswap") => Promise<V>): Promise<V> {
-  if (guess?.kind === chose) return guess.read;
+ *  chose it too: the same kind at the same address), else the chosen venue read now; a guess not taken is never used,
+ *  its failure never this sale's. */
+export function legVenue<V>(guess: { pick: VenuePick; read: Promise<V> } | null, chose: VenuePick, venueOf: (pick: VenuePick) => Promise<V>): Promise<V> {
+  if (guess && guess.pick.kind === chose.kind && guess.pick.address === chose.address) return guess.read;
   guess?.read.catch(() => {});
   return venueOf(chose);
 }
@@ -1017,7 +1021,9 @@ export const poolSellUnits = (total: bigint, ask: Pick<PoolAsk, "amount" | "shar
  *  own quote on the same reads. A provider's fault is thrown (pageReference). */
 export async function poolSellReference(rpcs: Rpcs, token: string, amount: bigint): Promise<{ reference: SolanaReference; best: SolanaReference["pools"][number] } | null> {
   const reference = await pageReference(rpcs, { side: "sell", token, amount });
-  const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+  // every venue the sale builds: pump's curve, PumpSwap, and a Meteora DLMM pair the page's finder named (card
+  // solana-buy-reaches-raydium-and-meteora: a coin bought on its pair sells there)
+  const best = reference?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap" || p.venue === "dlmm").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
   return reference && best ? { reference, best } : null;
 }
 
@@ -1137,7 +1143,7 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
   // prices on after it (sellRun)
   let turn: Promise<void> = Promise.resolve();
   // the venue the last leg's reference chose, so a leg after it reads that venue beside its own reference
-  const venues: { kind?: "pump-curve" | "pumpswap" } = {};
+  const venues: { pick?: VenuePick } = {};
   const shared: Early = { ...(first.program === undefined ? {} : { program: first.program }), ...(first.rent ? { rent: first.rent } : {}), ...(first.sizes ? { sizes: first.sizes } : {}) };
   const runs = plan.legs.map((l, i) => {
     const later: Later = {};
@@ -1229,7 +1235,7 @@ async function noteFor(h: Pick<PoolSellHost, "settled" | "stopped">, rpcs: Rpcs,
 
 /** A leg's turn (sellAll): `opened` once the leg before it sent or ended (none for the first leg); `venues`, the venue the
  *  last leg's reference chose, which a leg after it reads beside its own reference and keeps only when its own chose it. */
-type LegTurn = { opened?: Promise<void>; venues: { kind?: "pump-curve" | "pumpswap" }; spent?: () => boolean; inFlight?: () => boolean };
+type LegTurn = { opened?: Promise<void>; venues: { pick?: VenuePick }; spent?: () => boolean; inFlight?: () => boolean };
 
 /** A refused simulation's program error line (the last log line that names an error), made safe, or nothing. */
 const simError = (v: { logs?: unknown } | null | undefined): string => {
@@ -1298,17 +1304,18 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
       forgetYoung(rpcs);
     }
     asked = true;
-    const venueOf = (kind: "pump-curve" | "pumpswap") => readSolanaPoolBuyVenue(rpcs, kind, token, ...(h.pick ? [h.pick] : []));
+    // a DLMM pair is read at the address the reference priced, for a sell (its bin arrays walked toward SOL)
+    const venueOf = (pick: VenuePick): Promise<SolanaPoolBuyVenue> => (pick.kind === "dlmm" ? readSolanaDlmmBuyVenue(rpcs, token, pick.address, "sell") : readSolanaPoolBuyVenue(rpcs, pick.kind, token, ...(h.pick ? [h.pick] : [])));
     // after its turn, a leg after the first asks all of them in one round: the blockhash (its check on RPC 1 as soon as
     // RPC 0 answered), the deposit's pages at the sizes read before the turn, and the venue the last leg chose
     let first: Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number }> | null = null;
     let depositP: ReturnType<typeof depositHeld> | null = null;
-    let guess: { kind: "pump-curve" | "pumpswap"; read: Promise<SolanaPoolBuyVenue> } | null = null;
+    let guess: { pick: VenuePick; read: Promise<SolanaPoolBuyVenue> } | null = null;
     if (opened) {
       first = quiet(blockhashRead(rpcs));
       depositP = quiet(Promise.all([sizesP, noteP]).then(([s, n]) => depositHeld(rpcs, program, pool, s, be32(n.precommitment), wait)));
-      const kind = turn!.venues.kind;
-      if (kind) guess = { kind, read: quiet(venueOf(kind)) };
+      const pick = turn!.venues.pick;
+      if (pick) guess = { pick, read: quiet(venueOf(pick)) };
     }
     // the reads side by side (card pool-sell-legs-side-by-side), in three rounds, each on both RPCs; a read the sell
     // made earlier in this very attempt, with no wait since (`early`, sellAll's), is taken, never asked again:
@@ -1335,8 +1342,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     const pre = be32(precommitment);
     if (!quoted) return no("quote_check_failed");
     const { reference, best } = quoted;
-    const chose = best.venue as "pump-curve" | "pumpswap";
-    if (turn) turn.venues.kind = chose;
+    const chose: VenuePick = { kind: best.venue, address: best.address };
+    if (turn) turn.venues.pick = chose;
     // 2. after the reference (the quote's age counts from it): its venue (a leg after the first: the one read beside its
     //    reference when the reference chose it, else read now), the device's blockhash and slot on RPC 0, and the
     //    lamports the deposit's mark and both pages hold with the pool's sizes (depositHeld); the blockhash's check on
@@ -1692,13 +1699,19 @@ export const SOLANA_POOL_SELL_CU_MIN = Number(SOLANA_POOL_SELL_PRIORITY);
 /** Whether a sell on `kind` (a `cashback` coin's or not) has room under 1,232 bytes for the compute budget: its largest
  *  form, the six-account deposit with Token-2022, every account its own, compiled with the budget. The sale and the
  *  preview both decide on it, so You receive counts the priority exactly where the sale pays it. A PumpSwap cashback
- *  coin's sell has none (it compiles to 1,268 bytes with it). */
-export function solanaSellBudgetFits(kind: "pump-curve" | "pumpswap", cashback: boolean): boolean {
+ *  coin's sell has none (it compiles to 1,268 bytes with it).
+ *  A DLMM sell (card solana-buy-reaches-raydium-and-meteora): its largest form, a Token-2022 coin with the three bin
+ *  arrays dlmmSwap names at most, every account its own, no lookup table, measured compiled (wire bytes): the sell
+ *  alone 779, with the budget 831; with the six-account deposit 989, with the budget 1,041; with the eight-account
+ *  deposit 1,055, with the budget 1,107. An SPL Token coin's is 32 bytes less, one bin array 66 less. */
+export function solanaSellBudgetFits(kind: SolanaPoolVenue, cashback: boolean): boolean {
   const key = (k: number): string => base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? k : i === 1 ? 0xb5 : 3)));
   const v: SolanaPoolBuyVenue =
     kind === "pump-curve"
       ? { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, curve: key(2), creator: key(3), feeRecipient: key(4), cashback, buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) }
-      : { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, pool: key(2), baseVault: key(3), quoteVault: key(4), coinCreator: key(6), cashback, protocolFeeRecipient: key(7), buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) };
+      : kind === "pumpswap"
+        ? { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 165, pool: key(2), baseVault: key(3), quoteVault: key(4), coinCreator: key(6), cashback, protocolFeeRecipient: key(7), buybackFeeRecipients: [key(5)], buybackFeeRecipient: key(5) }
+        : { kind, mint: key(1), tokenProgram: SOLANA_TOKEN_2022_PROGRAM, tokenAccountSize: 182, cashback: false, side: "sell", pair: key(2), tokenX: key(1), tokenY: SOLANA_SOL_MINT, reserveX: key(3), reserveY: key(4), oracle: key(6), binArrays: [key(15), key(16), key(17)] };
   const w = key(8);
   const deposit = { program: key(9), accounts: [key(10), w, key(11), key(12), key(13), SOLANA_SYSTEM_PROGRAM].map((k, i) => ({ key: k, signer: i === 1, writable: i !== 5 })), data: new Uint8Array(1 + 8 + 32) };
   const budget = budgetIxs({ limit: SOLANA_POOL_CU_LIMIT_MAX, price: SOLANA_CU_PRICE_MAX });

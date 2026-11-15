@@ -16,7 +16,8 @@ import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/sol
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
-import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
+import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, dlmmProviders, dlmmVector, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
+import { SOLANA_DLMM_PROGRAM } from "../../kit/src/trade/solana/dlmm.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
 export const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
@@ -27,9 +28,12 @@ W.secretKey.fill(0);
 export const PIN = { program: PROGRAM, feePayer: FEE_PAYER };
 export const { scope: SCOPE } = solanaPoolOf(PROGRAM);
 export type Venue = "pump" | "pumpswap";
+/** A venue the chain below can serve: the recorded pump venues, or NEARKAT's Meteora DLMM pair B8BH6ZKr… as two mainnet
+ *  providers answered it (packages/kit/test/vectors/nearkat-dlmm.json; card solana-buy-reaches-raydium-and-meteora). */
+export type WorldVenue = Venue | "dlmm";
 /** Each recorded venue's mint, its read (a Token-2022 mint on both), W's token account under it, the reference both
  *  providers give for exactly this sell and the floor the run's min out comes from. */
-export const VF = {} as Record<Venue, { mint: string; mintRead: { owner: string; data: [string, string] }; ata: string; slot: number; minOut: bigint }>;
+export const VF = {} as Record<WorldVenue, { mint: string; mintRead: { owner: string; data: [string, string] }; ata: string; slot: number; minOut: bigint }>;
 export const MINT = fx.pump.mint as string;
 /** 4,000,000 tokens (6 decimals): the recorded curve gives about 0.11 SOL for them. */
 export const AMOUNT = 4_000_000_000_000n;
@@ -76,6 +80,51 @@ for (const v of ["pump", "pumpswap"] as const) {
   const ref = (await readSolanaReference(providers(v), { side: "sell", token: mint, amount: AMOUNT }))!;
   VF[v] = { mint, mintRead, ata: solanaAta(W.address, mint, mintRead.owner), slot: ref.slot! + 2, minOut: (ref.pools[0]!.expectedOut * BigInt(10_000 - SLIPPAGE)) / 10_000n };
 }
+/** What a DLMM world's W holds and sells: 100,000 NEARKAT (6 decimals), about 0.82 SOL on the recorded pair (the pump
+ *  venues' 4,000,000 tokens would walk past the bin arrays the vector holds). */
+export const DLMM_AMOUNT = 100_000_000_000n;
+/** The transfer fees withheld on W's NEARKAT account: its buy's transfer in left them there (NEARKAT charges 3%), and
+ *  Token-2022 refuses CloseAccount while any remain. */
+export const DLMM_WITHHELD = 3_092_783_505n;
+{
+  const v0 = Object.values(dlmmVector.providers)[0]!;
+  const mint = dlmmVector.mint;
+  const m = v0.accounts[mint]!;
+  const ref = (await readSolanaReference(dlmmProviders(), { side: "sell", token: mint, amount: DLMM_AMOUNT, dlmmPairs: [dlmmVector.pair] }))!;
+  VF.dlmm = { mint, mintRead: { owner: m.owner, data: [m.data, "base64"] }, ata: solanaAta(W.address, mint, m.owner), slot: ref.slot! + 2, minOut: (ref.pools.find((p) => p.venue === "dlmm")!.expectedOut * BigInt(10_000 - SLIPPAGE)) / 10_000n };
+}
+/** DLMM's swap2 (the kit's dlmmSwap): its discriminator; amount_in at 8 and min_amount_out at 16, as pump's sell. */
+const SWAP2 = [65, 75, 63, 76, 235, 91, 91, 136];
+/** A venue's sell by its data: pump's and PumpSwap's sell(amount, min_out), 24 bytes; DLMM's swap2, 28. */
+export const sellData = (d: Uint8Array): boolean => d.length === 24 || (d.length === 28 && SWAP2.every((b, i) => d[i] === b));
+/** W's Token-2022 account of a transfer-fee coin as the ATA program makes it (182 bytes, the venue read's
+ *  tokenAccountSize): the 165-byte base, account type 2, ImmutableOwner (7, empty), then TransferFeeAmount (2, its
+ *  withheld u64). */
+export const feeTokenAccount = (amount: bigint, withheld: bigint, mint = VF.dlmm.mint, owner = W.address): Uint8Array => {
+  const d = new Uint8Array(182);
+  d.set(tokenAccount(amount, 1, mint, owner));
+  d[165] = 2;
+  const dv = new DataView(d.buffer);
+  dv.setUint16(166, 7, true);
+  dv.setUint16(168, 0, true);
+  dv.setUint16(170, 2, true);
+  dv.setUint16(172, 8, true);
+  dv.setBigUint64(174, withheld, true);
+  return d;
+};
+/** A Token-2022 account's withheld transfer fees (its TransferFeeAmount extension), 0 with none. */
+export const withheldOf = (d: Uint8Array): bigint => {
+  if (d.length <= 165 || d[165] !== 2) return 0n;
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  for (let o = 166; o + 4 <= d.length; ) {
+    const type = dv.getUint16(o, true);
+    const len = dv.getUint16(o + 2, true);
+    if (type === 2 && len === 8) return dv.getBigUint64(o + 4, true);
+    if (type === 0) break;
+    o += 4 + len;
+  }
+  return 0n;
+};
 
 export type Acc = { owner: string; lamports: number; data: Uint8Array };
 /** A native (WSOL) SPL Token account of `owner` holding `amount` wrapped. */
@@ -114,7 +163,7 @@ export type Plant = {
   /** the units each simulation answers it used (none when not given) */
   units?: number;
   /** the recorded venue the sell goes to (pump's curve when not given) */
-  venue?: Venue;
+  venue?: WorldVenue;
   /** a landed sell pays W this many lamports above its min out (card partial-sell-pays-all-into-cash: the venue paid
    *  above the floor; 0 when not given) */
   paysOver?: bigint;
@@ -229,6 +278,8 @@ export type Plant = {
 export function chain(plant: Plant = {}) {
   const v = plant.venue ?? "pump";
   const { mint, mintRead, ata } = VF[v];
+  // W's token account holding `amount`: on the DLMM pair a NEARKAT account, its buy's transfer fees withheld on it
+  const held = (amount: bigint): Uint8Array => (v === "dlmm" ? feeTokenAccount(amount, DLMM_WITHHELD) : tokenAccount(amount, 1, mint));
   const accounts = new Map<string, Acc>();
   const pool = new Uint8Array(2179);
   pool.set(enc.encode("bfpool01"));
@@ -253,7 +304,7 @@ export function chain(plant: Plant = {}) {
   }
   accounts.set(fx.rent.account, { owner: fx.rent.answers[0].owner, lamports: 1, data: base64.decode(fx.rent.answers[0].data) });
   accounts.set(mint, { owner: mintRead.owner, lamports: 1, data: base64.decode(mintRead.data[0]) });
-  accounts.set(ata, { owner: mintRead.owner, lamports: plant.ataLamports ?? 1, data: tokenAccount(plant.held ?? AMOUNT, 1, mint) });
+  accounts.set(ata, { owner: mintRead.owner, lamports: plant.ataLamports ?? 1, data: held(plant.held ?? (v === "dlmm" ? DLMM_AMOUNT : AMOUNT)) });
   for (const o of plant.others ?? []) {
     const x = freshWallet(SEED64, "sol", o.l, o.j);
     x.secretKey.fill(0);
@@ -400,6 +451,20 @@ export function chain(plant: Plant = {}) {
         on.set(to2, move(t, owed));
         continue;
       }
+      if (program === TOKEN_2022 && ix.data.length === 2 && ix.data[0] === 26 && ix.data[1] === 4) {
+        // HarvestWithheldTokensToMint: each source account's withheld transfer fees moved to the mint named first
+        const [mintAt, ...sources] = keys as [string, ...string[]];
+        if (on.get(mintAt)?.owner !== TOKEN_2022) throw new Error("InvalidAccountData");
+        for (const at of sources) {
+          const t = on.get(at);
+          if (!t || t.owner !== TOKEN_2022 || base58.encode(t.data.subarray(0, 32)) !== mintAt) throw new Error("MintMismatch");
+          if (withheldOf(t.data) === 0n) continue;
+          const d = Uint8Array.from(t.data);
+          new DataView(d.buffer).setBigUint64(174, 0n, true);
+          on.set(at, { ...t, data: d });
+        }
+        continue;
+      }
       if ((program === SOLANA_TOKEN_PROGRAM || program === TOKEN_2022) && ix.data.length === 9 && ix.data[0] === 8) {
         // Burn(amount): the owner signs, the account's mint is the mint named, the amount at most what it holds
         const [at, mint, owner] = keys as [string, string, string];
@@ -421,6 +486,8 @@ export function chain(plant: Plant = {}) {
         const a = on.get(close);
         const native = a && new DataView(a.data.buffer, a.data.byteOffset + 109, 4).getUint32(0, true) === 1;
         if (!a || (!native && new DataView(a.data.buffer, a.data.byteOffset + 64, 8).getBigUint64(0, true) !== 0n)) throw new Error("NonNativeHasBalance");
+        // Token-2022 refuses to close an account still holding withheld transfer fees (TransferFeeAmount::closable)
+        if (program === TOKEN_2022 && withheldOf(a.data) !== 0n) throw new Error("AccountHasWithheldTransferFees");
       } else if ((program === SOLANA_PUMP_PROGRAM || program === SOLANA_PUMP_AMM_PROGRAM) && ix.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i]) && ix.data.length === 8) {
         [close, to] = [keys[1]!, keys[0]!];
         if (keys[0] !== signer || on.get(close)?.owner !== program) throw new Error("ConstraintSeeds");
@@ -450,7 +517,11 @@ export function chain(plant: Plant = {}) {
     const keys = ix.accounts.map((i) => m.staticKeys[i]!);
     // a sell with no deposit back (card sol-sell-deposit-back-floor): the venue's sell alone, its whole min out to W,
     // which pays the fee and what the sell makes; W ends at 0 or rent-exempt
-    const venueSell = m.instructions.find((x) => x.data.length === 24 && (m.staticKeys[x.programIndex] === SOLANA_PUMP_PROGRAM || m.staticKeys[x.programIndex] === SOLANA_PUMP_AMM_PROGRAM));
+    const venueSell = m.instructions.find((x) => sellData(x.data) && (m.staticKeys[x.programIndex] === SOLANA_PUMP_PROGRAM || m.staticKeys[x.programIndex] === SOLANA_PUMP_AMM_PROGRAM || m.staticKeys[x.programIndex] === SOLANA_DLMM_PROGRAM));
+    // a DLMM sell makes W's wrapped-SOL account before swap2 fills it (the kit's dlmm sell steps), so W pays that rent up
+    // front, after its fee, and has it back at the CloseAccount: a W short of it fails the create
+    const dlmmSell = m.instructions.find((x) => sellData(x.data) && m.staticKeys[x.programIndex] === SOLANA_DLMM_PROGRAM);
+    if (dlmmSell && BigInt(accounts.get(signer)?.lamports ?? 0) - feeOf(m) < rentMin(165)) throw new Error("InsufficientFunds");
     if (venueSell && !m.instructions.some((x) => m.staticKeys[x.programIndex] === PROGRAM)) {
       const sold = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 8, 8).getBigUint64(0, true);
       let got = new DataView(venueSell.data.buffer, venueSell.data.byteOffset + 16, 8).getBigUint64(0, true) + (plant.paysOver ?? 0n);
@@ -495,7 +566,7 @@ export function chain(plant: Plant = {}) {
     }
     const cost = feeOf(m) + rentsOf(pre) + paid;
     // the venue's sell first: what W gets, less the cashback accounts it makes at W's cost
-    const sellIx = m.instructions.find((x) => x.data.length === 24);
+    const sellIx = m.instructions.find((x) => sellData(x.data));
     let gets = 0n;
     if (sellIx) {
       gets = new DataView(sellIx.data.buffer, sellIx.data.byteOffset + 16, 8).getBigUint64(0, true) + (plant.paysOver ?? 0n);
@@ -510,8 +581,8 @@ export function chain(plant: Plant = {}) {
     if (dry) return;
     for (const x of sends) accounts.set(x.to, { ...(accounts.get(x.to) ?? { owner: "11111111111111111111111111111111", data: new Uint8Array(0), lamports: 0 }), lamports: (accounts.get(x.to)?.lamports ?? 0) + Number(x.v) });
     deposit(pre, value);
-    // the venue's sell (pump's and PumpSwap's sell(amount, min_out), 24 data bytes): W's tokens out, its min out in
-    const sell = m.instructions.find((x) => x.data.length === 24);
+    // the venue's sell (pump's and PumpSwap's sell(amount, min_out), 24 data bytes; DLMM's swap2, 28): W's tokens out, its min out in
+    const sell = m.instructions.find((x) => sellData(x.data));
     let got = 0n;
     if (sell) {
       sellLanded = true;
@@ -552,10 +623,14 @@ export function chain(plant: Plant = {}) {
         new DataView(d.buffer).setBigUint64(address === ammVol ? 74 : 90, 12_742_862n, true);
         return { owner: address === ammVol ? SOLANA_PUMP_AMM_PROGRAM : SOLANA_PUMP_PROGRAM, lamports: Number(solanaRentMin(rent, 137)), data: [base64.encode(d), "base64"], executable: false, rentEpoch: 0, space: 137 };
       }
-      const held = accounts.get(address);
-      if (!held) return null;
-      const a = plant.mapOn ? plant.mapOn(p, address, held) : held;
-      const data = p === 1 && address === ata && plant.heldOn1 !== undefined ? tokenAccount(plant.heldOn1, 1, mint) : a.data;
+      const got = accounts.get(address);
+      if (!got) {
+        // the DLMM pair's own accounts (pair, reserves, oracle, bin arrays, Clock) as this provider answered them
+        const x = v === "dlmm" ? Object.values(dlmmVector.providers)[p]!.accounts[address] : undefined;
+        return x ? { owner: x.owner, lamports: 1, data: [x.data, "base64"], executable: false, rentEpoch: 0, space: base64.decode(x.data).length } : null;
+      }
+      const a = plant.mapOn ? plant.mapOn(p, address, got) : got;
+      const data = p === 1 && address === ata && plant.heldOn1 !== undefined ? held(plant.heldOn1) : a.data;
       return { owner: a.owner, lamports: a.lamports, data: [base64.encode(data), "base64"], executable: false, rentEpoch: 0, space: data.length };
     };
     const ctx = { context: { slot: VF[v].slot } };
@@ -572,7 +647,7 @@ export function chain(plant: Plant = {}) {
       }
       switch (method) {
         case "getMultipleAccounts": {
-          const recorded = fx[v].reads[p][JSON.stringify(params[0])];
+          const recorded = v === "dlmm" ? undefined : fx[v].reads[p][JSON.stringify(params[0])];
           if (recorded && plant.mayhem) {
             const r = structuredClone(recorded) as { value: ({ owner: string; data: [string, string] } | null)[] };
             for (const a of r.value) {
@@ -688,11 +763,11 @@ export function chain(plant: Plant = {}) {
             return sig;
           }
           // a teardown frame: no deposit and no venue sell (card every-lamport-can-move: a full sell carries no deposit)
-          if (plant.teardownFails && !tearFailed && !txs.has(sig) && !sm.instructions.some((x) => sm.staticKeys[x.programIndex] === PROGRAM || x.data.length === 24)) {
+          if (plant.teardownFails && !tearFailed && !txs.has(sig) && !sm.instructions.some((x) => sm.staticKeys[x.programIndex] === PROGRAM || sellData(x.data))) {
             tearFailed = true;
             if (plant.teardownFails === "dust") {
               const t = accounts.get(ata)!;
-              accounts.set(ata, { ...t, data: tokenAccount(1n, 1, mint) });
+              accounts.set(ata, { ...t, data: held(1n) });
             } else {
               txs.set(sig, { tx, err: { InstructionError: [0, "planted"] } });
               return sig;
@@ -723,7 +798,7 @@ export function chain(plant: Plant = {}) {
             heightAt.set(VF[v].slot + 1, plant.finalHeight ?? 1_000);
           }
           if (!txs.has(sig) && plant.lands !== false) {
-            if (plant.dustBeforeSell !== undefined && !frontDone && sm.instructions.some((x) => x.data.length === 24 && sm.staticKeys[x.programIndex] !== PROGRAM)) {
+            if (plant.dustBeforeSell !== undefined && !frontDone && sm.instructions.some((x) => sellData(x.data) && sm.staticKeys[x.programIndex] !== PROGRAM)) {
               frontDone = true;
               const t = accounts.get(ata)!;
               const d = t.data.slice();
@@ -741,10 +816,10 @@ export function chain(plant: Plant = {}) {
               });
               txs.set(sig, { tx, err: null, post });
               // after the sell landed, with its deposit back or without one (kept on W): the venue's sell is in it
-              if (plant.dustAfterFill !== undefined && !dustDone && sm.instructions.some((x) => x.data.length === 24 && sm.staticKeys[x.programIndex] !== PROGRAM)) {
+              if (plant.dustAfterFill !== undefined && !dustDone && sm.instructions.some((x) => sellData(x.data) && sm.staticKeys[x.programIndex] !== PROGRAM)) {
                 dustDone = true;
                 const t = accounts.get(ata)!;
-                accounts.set(ata, { ...t, data: tokenAccount(plant.dustAfterFill, 1, mint) });
+                accounts.set(ata, { ...t, data: held(plant.dustAfterFill) });
               }
             } catch (e) {
               // the program's WrongAccount (Custom 22) at the deposit, the last instruction: W pays its fee, nothing else moves
@@ -770,11 +845,11 @@ export function chain(plant: Plant = {}) {
           if (plant.txNone) return null;
           if (plant.metaJunk && sent) return { slot: VF[v].slot, transaction: [base64.encode(sent), "base64"], meta: "x" };
           const t = txs.get(params[0] as string);
-          if (t && plant.unfinalSell && (params[1] as { commitment?: string } | undefined)?.commitment === "finalized" && solanaDecodeMessage(t.tx.subarray(65)).instructions.some((x) => x.data.length === 24)) return null;
+          if (t && plant.unfinalSell && (params[1] as { commitment?: string } | undefined)?.commitment === "finalized" && solanaDecodeMessage(t.tx.subarray(65)).instructions.some((x) => sellData(x.data))) return null;
           if (t && plant.unreadTeardown) {
             const tm = solanaDecodeMessage(t.tx.subarray(65));
             // a teardown frame: no deposit and no venue sell (card every-lamport-can-move: a full sell carries no deposit)
-            if (!tm.instructions.some((x) => tm.staticKeys[x.programIndex] === PROGRAM || x.data.length === 24)) return null;
+            if (!tm.instructions.some((x) => tm.staticKeys[x.programIndex] === PROGRAM || sellData(x.data))) return null;
           }
           return t ? { slot: VF[v].slot, transaction: [base64.encode(t.tx), "base64"], meta: { err: t.err, ...(t.post && !plant.noPostBalances ? { postTokenBalances: p === 1 && plant.postDiffers ? t.post.map((e) => ({ ...(e as object), uiTokenAmount: { amount: "9", decimals: 6 } })) : t.post } : {}) } } : null;
         }
