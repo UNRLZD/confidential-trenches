@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { TRADES_MAX as HELPER_TRADES_MAX } from "../../apps/helper/src/data/evm/swaps.ts";
-import { APP, BOUND_MS, bodyFault, judge, OPEN, POLL_MS, readRun, TRADES_MAX } from "./evm-tape-from-our-index-fast.mjs";
+import { APP, BOUND_MS, bodyFault, judge, OPEN, POLL_MS, readRun, TRADES_MAX, WARM_MS } from "./evm-tape-from-our-index-fast.mjs";
 import { FILLED_MS } from "./tape-read.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-tape-from-our-index-fast.answers.json", import.meta.url), "utf8"));
@@ -56,10 +56,13 @@ test("warm_live: every tape open before the check's first read (evm-open 0 ms), 
   const warmShort = A.warm_live.tapes.filter((t) => t.answers[0].n < TRADES_MAX);
   assert.ok(warmShort.length > 0 && A.warm_live.tapes.every((t) => t.answers[0].open === 0));
   assert.ok(r.lines.some((l) => l.startsWith("N/A every short tape open before this check's first read") && warmShort.every((t) => l.includes(t.address))), r.lines.join("\n"));
+  // a held book's open read 1 ms on this branch's helper (15 Nov 15:08:51Z, 0x734be42b, opened twice before): still warm
+  const one = { ...A.warm_live, tapes: A.warm_live.tapes.map((t) => ({ ...t, answers: t.answers.map((a, i) => (i === 0 ? { ...a, open: WARM_MS - 9 } : a)) })) };
+  assert.equal(judge(one).verdict, "INCONCLUSIVE", judge(one).lines.join("\n"));
 });
 
 test("planted from warm_live: a short tape opened cold, or naming no open, done at its first answer with no filling: FAIL", () => {
-  for (const open of [215, null, undefined]) {
+  for (const open of [WARM_MS, 215, null, undefined]) {
     const run = { ...A.warm_live, tapes: A.warm_live.tapes.map((t) => (t.answers[0].n < TRADES_MAX ? { ...t, answers: t.answers.map((a, i) => (i === 0 ? { ...a, open } : a)) } : t)) };
     const r = judge(run);
     assert.equal(r.verdict, "FAIL", `open ${open}\n${r.lines.join("\n")}`);

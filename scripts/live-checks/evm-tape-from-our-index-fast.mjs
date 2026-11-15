@@ -14,9 +14,9 @@
 // It passes only when every answer is 200 JSON in the tape's fields {trades, src, as_of_ms[, filling: true]} with rows
 // {t_ms, side, usd, amt, trader, tx}, X-Helper-Commit a full sha; each tape ends within BOUND_MS, never holding fewer
 // trades than at its first answer; and at least one tape said filling and then ended (a read back seen end to end).
-// A tape still filling at BOUND_MS: FAIL. A short tape opened cold (its first answer's Server-Timing evm-open over 0 ms,
-// or none) that never said filling: FAIL. Every tape full at its first answer, or open before this check's first read
-// (evm-open 0 ms: its read back, if any, was another reader's), leaves nothing to read back: INCONCLUSIVE. Card
+// A tape still filling at BOUND_MS: FAIL. A short tape opened cold (its first answer's Server-Timing evm-open WARM_MS or
+// more, or none) that never said filling: FAIL. Every tape full at its first answer, or open before this check's first
+// read (evm-open under WARM_MS: its read back, if any, was another reader's), leaves nothing to read back: INCONCLUSIVE. Card
 // evm-keyed-checks-hold-steady: helper live run 43722667540 attempt 1 (15 Nov 14:16Z) opened the four tapes
 // helper-base-tape-reads-back had opened a minute before, two of them short and done at their first answer (5 trades
 // at 135 ms, 1 at 389 ms), and FAILed with no read back to see.
@@ -38,6 +38,9 @@ export const APP = "https://ct-app.unrealized.trade";
 export const TRADES_MAX = 50;
 /** The page's read again of a filling tape (trades.ts TRADES_POLL_MS): a test holds it. */
 export const POLL_MS = 3_000;
+/** An open this short (evm-open, ms) found the tape's book held: an open of a book not held reads a provider first. [design:
+ *  10 ms; a held book's open read 0 and 1 ms (15 Nov 15:01Z to 15:09Z, deployed and local), a cold one 383 to 8,001 ms.] */
+export const WARM_MS = 10;
 /** Tapes opened at once: the first OPEN / 2 of new and of trending_1h. */
 export const OPEN = 4;
 /** How long a cold tape may fill: the listed tape's bound (tape-read.mjs FILLED_MS, robinhood-listed-tape-opens; a test holds them equal). */
@@ -149,8 +152,8 @@ export function judge(run) {
     say(last.n !== null && first.n !== null && last.n >= first.n, `${token}: never fewer trades than at its first answer (${first.n} then ${last.n})`);
   }
   const back = tapes.some(({ answers }) => answers.some((a) => a.filling) && answers.at(-1)?.filling === false && answers.at(-1)?.fault === null);
-  // a tape open before this check's first read (evm-open 0 ms) has read back, if it had to, for another reader
-  const warm = (answers) => answers[0]?.open === 0;
+  // a tape open before this check's first read (evm-open under WARM_MS) has read back, if it had to, for another reader
+  const warm = (answers) => Number.isSafeInteger(answers[0]?.open) && answers[0].open < WARM_MS;
   const coldShort = tapes.filter(({ answers }) => (answers[0]?.n ?? 0) < TRADES_MAX && !warm(answers));
   const allFull = tapes.length > 0 && tapes.every(({ answers }) => (answers[0]?.n ?? 0) >= TRADES_MAX);
   const warmShort = tapes.filter(({ answers }) => (answers[0]?.n ?? 0) < TRADES_MAX && warm(answers)).map((t) => t.address);
@@ -158,7 +161,7 @@ export function judge(run) {
     back || (tapes.length > 0 && coldShort.length === 0 ? null : false),
     back ? "a short tape said filling, then ended: read back seen end to end"
     : allFull ? "every tape full at its first answer: nothing to read back"
-    : tapes.length > 0 && coldShort.length === 0 ? `every short tape open before this check's first read (evm-open 0 ms: ${warmShort.join(", ")}), the rest full at its first answer: nothing of its own to read back`
+    : tapes.length > 0 && coldShort.length === 0 ? `every short tape open before this check's first read (evm-open under ${WARM_MS} ms: ${warmShort.join(", ")}), the rest full at its first answer: nothing of its own to read back`
     : "no tape said filling while a tape opened cold answered short: no read back",
   );
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("N/A")) ? "INCONCLUSIVE" : "PASS";
