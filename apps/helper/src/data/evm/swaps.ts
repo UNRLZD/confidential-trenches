@@ -77,7 +77,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
-import { operatorOf } from "../../rpc/rpc.ts";
+import { KEYED_LOGS_SPAN, operatorOf } from "../../rpc/rpc.ts";
 import { isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
@@ -288,6 +288,34 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
 // blocks and more (code 35 "ranges over 10000 blocks are not supported on free plan") and 429s bursts; base-pokt.nodies.app
 // takes 50 blocks at most (-32001) and 429s bursts; 1rpc.io, base.meowrpc.com, base.llamarpc.com, base.lava.build,
 // base.api.onfinality.io, api.zan.top, endpoints.omniatech.io and base.blockpi.network (no key) refused or failed every read.
+/** Swap read providers that answer a log read only up to this many blocks, and refuse any wider one: a wider read is
+ *  not sent them (agreedLogs). base-pokt.nodies.app: -32001 "Block range too large: maximum allowed is 50 blocks on your
+ *  current plan" (49 blocks answered, 51 and 1,000 refused, from the Mac 2026-11-15 10:38Z), so each read back step's
+ *  1,000-block spans asked it first and met its refusal, then waited for the next provider's pace (card
+ *  evm-tape-from-our-index-fast: four cold Base tapes on the public providers, 10:4xZ). */
+export const LOG_SPAN_CAP: Readonly<Record<string, number>> = { "https://base-pokt.nodies.app": 50 };
+/** The keyed companies' log span caps (rpc.ts KEYED_LOGS_SPAN: a QuickNode trial 5 blocks, dRPC's free keys 100), by
+ *  the company that runs a URL (rpc.ts operatorOf, dRPC's lb.drpc.live folded in): a keyed URL is a secret, so its
+ *  company names it. */
+const COMPANY_LOGS_SPAN: Readonly<Record<string, number | undefined>> = { "quiknode.pro": KEYED_LOGS_SPAN.quicknode, "drpc.org": KEYED_LOGS_SPAN.drpc };
+/** A provider's log span cap, or undefined for none known. */
+const logSpanCap = (u: string): number | undefined => {
+  if (Object.hasOwn(LOG_SPAN_CAP, u)) return LOG_SPAN_CAP[u];
+  try {
+    return COMPANY_LOGS_SPAN[operatorOf(u)];
+  } catch {
+    return undefined;
+  }
+};
+/** The providers of `urls` a log read of `filters` is not sent: those that refuse every log read (LOGS_REFUSED), and
+ *  those whose span cap (LOG_SPAN_CAP, a keyed company's KEYED_LOGS_SPAN) is below the widest filter's span. The swap
+ *  reads sent their 1,000-block spans to the helper's keyed QuickNode and dRPC URLs as well, which refuse past 5 and
+ *  100 blocks, spending those accounts' pace and day on refusals (card evm-tape-from-our-index-fast). */
+export function logSkip(filters: readonly Record<string, unknown>[], urls: readonly string[] = []): ReadonlySet<string> {
+  const widest = Math.max(0, ...filters.map((f) => parseInt(String(f.toBlock), 16) - parseInt(String(f.fromBlock), 16) + 1).filter((n) => Number.isSafeInteger(n)));
+  const capped = [...new Set([...Object.keys(LOG_SPAN_CAP), ...urls])].filter((u) => (logSpanCap(u) ?? Infinity) < widest);
+  return capped.length === 0 ? LOGS_REFUSED : new Set([...LOGS_REFUSED, ...capped]);
+}
 export const SWAP_RPCS: Readonly<Record<EvmChain, readonly string[]>> = {
   // base.drpc.org is left out: it answers none of the reads' ranges (250 blocks and more) and 429s about one a second.
   // mainnet.base.org, Base's own, answers the heads, calls and the traders' lookups (20 eth_getTransactionByHash a
@@ -1421,8 +1449,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return out;
   }
 
-  /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
+  /** For each filter, its logs when two providers return the same ones; null where they do not agree. A provider whose
+   *  log span cap (LOG_SPAN_CAP) is below the widest filter's span is not asked: it only refuses. */
   function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false): Promise<(Log[] | null)[]> {
+    const skip = logSkip(filters, [...urls, ...rpcs]);
     return agreed<Log[]>(
       urls,
       filters.length,
@@ -1433,7 +1463,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       (a, b) => sameLogs(a, b, true),
       true,
       only,
-      LOGS_REFUSED,
+      skip,
     );
   }
 
@@ -2160,6 +2190,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (e.back === undefined || (e.back.lo === lo && !e.back.done)) return;
     }
   }
+  /** A read book whose tape is short reads back (readBack) from the moment its read ends: its first read's (firstRead) or
+   *  a tick's, its own background read, never a caller's or the tick's wait, so a tick's period and forward reads are as
+   *  they were; one read back a book at a time. It started only once a whole tick had read every open book, and a tick
+   *  over a few cold books on paced providers took 10 s and more (card evm-tape-from-our-index-fast: four cold Base
+   *  tapes on the public providers from a Mac, 2026-11-15 10:4xZ: the first read back step 25 s after its tape opened,
+   *  the tapes done at 41.6 to 50.3 s, past the 45 s a listed tape is held to). */
+  function startBack(e: Entry, urls: readonly string[]): void {
+    if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, urls)).finally(() => (e.backing = undefined));
+  }
   /** Whether a book's tape is still reading back (readBack): the answer says `filling`, so the page shows it loading,
    *  not empty, and reads it again every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it is done. */
   const backing = (e: Entry): boolean => V.tapeBack > 0 && e.from !== undefined && e.back?.done !== true && tapeOf(e, TRADES_MAX).length < TRADES_MAX;
@@ -2176,7 +2215,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   function firstRead(e: Entry): Promise<void> {
     e.first ??= (async () => {
       const head = await agreedHead();
-      if (head !== null) await readBook(e, head.with, head, Promise.resolve(true)).catch(() => false);
+      if (head !== null) {
+        await readBook(e, head.with, head, Promise.resolve(true)).catch(() => false);
+        startBack(e, head.with);
+      }
     })().finally(() => {
       e.first = undefined;
     });
@@ -2227,10 +2269,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the open books, READ_PARALLEL at a time: one after another a tick over a dozen tokens outlasts several blocks; a
     // book whose first read is in flight (firstRead) is that read's
     const due = [...books.values()].filter((e) => e.first === undefined);
-    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false)));
-    // then each read book whose tape is short reads back (readBack): its own background read, never the tick's wait, so
-    // a tick's period and forward reads are as they were; one read back a book at a time
-    for (const e of due) if (e.readAt !== null && e.from !== undefined && e.back?.done !== true && e.backing === undefined) e.backing = lanes.run(newLane(false), () => backAll(e, head.with)).finally(() => (e.backing = undefined));
+    // each read book whose tape is short then reads back (startBack) as soon as its own read ends, never at the tick's
+    for (let i = 0; i < due.length; i += READ_PARALLEL) await Promise.all(due.slice(i, i + READ_PARALLEL).map((e) => readBook(e, head.with, head, refReady).catch(() => false).then(() => startBack(e, head.with))));
     await refReady;
   }
   function start(): Promise<void> {
@@ -2295,6 +2335,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           if (apply(e, found.seed.from, found.seed.to, found.seed.headN, found.seed.logs)) e.from = found.seed.from;
         }
         books.set(token, e);
+        // a seeded book is read: its read back starts now (startBack), not at the next tick's end
+        if (e.readAt !== null) {
+          const seeded = e;
+          void agreedHead().then((h) => h !== null && startBack(seeded, h.with)).catch(() => undefined);
+        }
       }
     }
     e.touched = now();

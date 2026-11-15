@@ -41,6 +41,20 @@ test("bad_live: the deployed helper 0d308d3bc, a short tape still filling at BOU
   assert.ok(bad(r).length > 0 && bad(r).every((l) => / still filling at \d+ ms/.test(l)), r.lines.join("\n"));
 });
 
+test("planted as the deployed a1c2c6ca6 read (helper live run 43702430864): two short tapes still filling at the bound, the other two done at their first answer; FAIL, each slow tape named, and the read back line says no filling tape ended (never that none said filling)", () => {
+  const slow = (t) => ({ ...t, answers: t.answers.map((a, i) => ({ ...a, filling: true, n: Math.min(a.n ?? 0, 23), t: Math.round((i * BOUND_MS) / Math.max(1, t.answers.length - 1)) })) });
+  const quick = (t) => ({ ...t, answers: [{ ...t.answers.at(-1), t: 513, filling: false, n: Math.min(t.answers.at(-1).n, 23) }] });
+  const run = { ...A.good, tapes: A.good.tapes.map((t, i) => (i < 2 ? slow(t) : quick(t))) };
+  const r = judge(run);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  const b = bad(r);
+  assert.equal(b.filter((l) => / still filling at 45000 ms \(read back\)$/.test(l)).length, 2, b.join("\n"));
+  assert.ok(b.includes(`BAD no tape that said filling ended within ${BOUND_MS} ms: no read back seen end to end`), b.join("\n"));
+  // a run where no short tape said filling keeps its own line
+  const never = judge({ ...A.good, tapes: A.good.tapes.map((t) => ({ ...t, answers: t.answers.map((a) => ({ ...a, filling: false, n: Math.min(a.n ?? 0, 3) })) })) });
+  assert.ok(bad(never).includes("BAD no tape said filling while a tape answered short: no read back"), never.lines.join("\n"));
+});
+
 test("planted from the good answer: FAIL, or INCONCLUSIVE when nothing was short", () => {
   for (const [what, run, want, verdict = "FAIL"] of [
     ["a tape still filling at its end", tapeOf(A.good, short, (t) => ({ ...t, answers: t.answers.map((a) => ({ ...a, filling: true })) })), /still filling/],
