@@ -18,12 +18,38 @@
 // reads the log line, and the log is the one the stream sends. A log the runtime cut short ("Log truncated") is
 // reported, so the caller reads that transaction's inner instructions instead (`fromInner`).
 //
+// The pool venues past pump.fun (card helper-listed-charts-own-reads). Of the 88 coins off pump.fun on the helper's
+// lists at 2026-11-15 23:14Z, the newest two successful transactions of 72 ran Raydium CLMM in 27, Orca in 20, Meteora
+// DLMM in 17, Raydium CPMM in 8 (and fewer the rest). Orca and Raydium CLMM, read here, each log their swap event with
+// Anchor's `emit!` only (no event CPI), so a
+// cut log keeps the events logged before the cut (`cutTrades`). The event names the pool, never which side is the
+// token: a trade is told as the pool's first mint sees it (`side` "b" when the trader got it, `amt` its leg, `quote`
+// the other mint's), and the reader names the token from the pool account (`poolPair`, taken only with the venue's
+// program as its owner) and turns the trade round when the token is the second mint. Neither event carries a clock
+// (`ts` 0: the reader dates it by its block).
+//   - Orca Whirlpool whirLbMi... (github.com/orca-so/whirlpools at commit cc683ec9, 2026-10-12,
+//     programs/whirlpool/src/events.rs and state/whirlpool.rs): `Traded` (discriminator e1ca49af932ba096, sha256
+//     "event:Traded") whirlpool, a_to_b bool at 32, pre/post sqrt price u128, input_amount u64 at 65, output_amount at
+//     73, then the transfer and LP/protocol fees (113 bytes); the input is the trader's whole payment (fees inside), the
+//     output what the pool paid. No trader field: `user` is "". The `Whirlpool` account (3f95d10ce1806309) holds
+//     token_mint_a at byte 101 and token_mint_b at 181.
+//   - Raydium CLMM CAMMCzo5... (github.com/raydium-io/raydium-clmm at commit 6d7a0f82, 2026-10-27,
+//     programs/amm/src/states/pool.rs `SwapEvent`; raydium-io/raydium-idl e7e0c96f raydium_clmm.json for the
+//     discriminator 40c6cde8260871e2): pool_state, sender at 32, token_account_0, token_account_1, amount_0 u64 at 128,
+//     transfer_fee_0, amount_1 at 144, transfer_fee_1, zero_for_one bool at 160 (token 0 paid in), then price, liquidity,
+//     tick and the fees (the mainnet event is 213 bytes; the fields read end at 161). The `PoolState` account
+//     (f7ede3f5d7c3de46) holds token_mint_0 at byte 73 and token_mint_1 at 105.
+// Every offset checked against the recorded transactions in fixtures/sol-venue-txs.json: each event's amounts equal its
+// pool's own token balance changes in the same transaction, and each pool's mints the mints of those balances.
+//
 // Display only: nothing here feeds a signature. Every value is hostile input: a line counts only with the program at
 // the top of the invoke stack the same logs build, an event only with its exact discriminator and a length that holds
 // every field read, an amount only > 0.
 
 export const PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
 export const PUMP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
+export const ORCA = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
+export const RAY_CLMM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
 export const WSOL = "So11111111111111111111111111111111111111112";
 export const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 import { b58encode } from "./lists.ts";
@@ -35,6 +61,10 @@ const DISC = {
   buy: "67f4521f2cf57777",
   sell: "3e2f370aa503dc2a",
   pool: "f19a6d0411b16dbc",
+  orcaTraded: "e1ca49af932ba096",
+  orcaPool: "3f95d10ce1806309",
+  clmmSwap: "40c6cde8260871e2",
+  clmmPool: "f7ede3f5d7c3de46",
   /** Anchor's event-CPI tag: the first 8 bytes of an event an Anchor program sends to itself. */
   cpi: "e445a52e51cb9a1d",
 } as const;
@@ -61,9 +91,11 @@ export function b58data(s: string, max = 2_048): Uint8Array | null {
   return Uint8Array.from([...new Array<number>(zeros).fill(0), ...bytes]);
 }
 
-/** One trade as the venue logged it. `mint` is the token (curve) or null until the pool is read (PumpSwap). */
+/** A venue whose pool names two mints, either one the token (the trade told as the first mint sees it). */
+export type PairVenue = "orca" | "raydium-clmm";
+/** One trade as the venue logged it. `mint` is the token (curve) or null until the pool is read (the pool venues). */
 export type RawTrade = {
-  venue: "pump" | "pumpswap";
+  venue: "pump" | "pumpswap" | PairVenue;
   mint: string | null;
   pool: string | null;
   side: "b" | "s";
@@ -73,8 +105,9 @@ export type RawTrade = {
   quote: bigint;
   /** The quote's mint: WSOL for SOL. For PumpSwap, null until the pool is read. */
   quoteMint: string | null;
+  /** The trader, or "" when the event names none (Orca). */
   user: string;
-  /** The event's own clock, unix seconds. */
+  /** The event's own clock, unix seconds; 0 when the event has none (the pair venues: the reader dates it by its block). */
   ts: number;
 };
 
@@ -120,6 +153,29 @@ function ammTrade(b: Buffer, side: "b" | "s"): RawTrade | null {
   return { venue: "pumpswap", mint: null, pool: key(b, 112), side, amt, quote, quoteMint: null, user: key(b, 144), ts: Number(b.readBigInt64LE(0)) };
 }
 
+/** An Orca `Traded` body, told as mint A sees it, or null. */
+function orcaTrade(b: Buffer): RawTrade | null {
+  if (b.length < 113) return null;
+  const aToB = b[32];
+  if (aToB !== 0 && aToB !== 1) return null;
+  const input = b.readBigUInt64LE(65);
+  const output = b.readBigUInt64LE(73);
+  if (input <= 0n || output <= 0n) return null;
+  const [amt, quote] = aToB === 1 ? [input, output] : [output, input];
+  return { venue: "orca", mint: null, pool: key(b, 0), side: aToB === 1 ? "s" : "b", amt, quote, quoteMint: null, user: "", ts: 0 };
+}
+
+/** A Raydium CLMM `SwapEvent` body, told as token 0 sees it, or null. */
+function clmmTrade(b: Buffer): RawTrade | null {
+  if (b.length < 161) return null;
+  const zeroForOne = b[160];
+  if (zeroForOne !== 0 && zeroForOne !== 1) return null;
+  const amt = b.readBigUInt64LE(128);
+  const quote = b.readBigUInt64LE(144);
+  if (amt <= 0n || quote <= 0n) return null;
+  return { venue: "raydium-clmm", mint: null, pool: key(b, 0), side: zeroForOne === 1 ? "s" : "b", amt, quote, quoteMint: null, user: key(b, 32), ts: 0 };
+}
+
 /** The trade an event of `program` holds (its bytes with the discriminator first), or null. */
 export function decodeEvent(program: string, data: Buffer): RawTrade | null {
   if (data.length < 8) return null;
@@ -128,6 +184,8 @@ export function decodeEvent(program: string, data: Buffer): RawTrade | null {
   if (program === PUMP && d === DISC.trade) return pumpTrade(body);
   if (program === PUMP_AMM && d === DISC.buy) return ammTrade(body, "b");
   if (program === PUMP_AMM && d === DISC.sell) return ammTrade(body, "s");
+  if (program === ORCA && d === DISC.orcaTraded) return orcaTrade(body);
+  if (program === RAY_CLMM && d === DISC.clmmSwap) return clmmTrade(body);
   return null;
 }
 
@@ -196,6 +254,23 @@ export function fromInner(result: unknown): RawTrade[] {
     }
   }
   return out;
+}
+
+/**
+ * A cut log's trades: the inner instructions' event CPIs (pump.fun, PumpSwap) and the log's own events of the venues
+ * that only log theirs (the pair venues), which the runtime wrote before it cut the log. `f` is that log's `fromLogs`.
+ */
+export function cutTrades(f: { trades: RawTrade[] }, result: unknown): RawTrade[] {
+  return [...fromInner(result), ...f.trades.filter((t) => t.venue === "orca" || t.venue === "raydium-clmm")];
+}
+
+/** A pair venue's pool account's two mints (first, second), or null unless `owner` is that venue's program and the data
+ *  is its pool account. */
+export function poolPair(venue: PairVenue, owner: unknown, data: Buffer): { a: string; b: string } | null {
+  const d = data.subarray(0, 8).toString("hex");
+  if (venue === "orca") return owner === ORCA && d === DISC.orcaPool && data.length >= 213 ? { a: key(data, 101), b: key(data, 181) } : null;
+  if (venue === "raydium-clmm") return owner === RAY_CLMM && d === DISC.clmmPool && data.length >= 137 ? { a: key(data, 73), b: key(data, 105) } : null;
+  return null;
 }
 
 /** A PumpSwap `Pool` account's mints (its base64 data), or null when it is not one. */

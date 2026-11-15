@@ -38,8 +38,13 @@
 // A token's trades are priced in their quote: SOL (Pyth, above), USDC (one dollar), or any other quote coin (a coin
 // launched against FRONTIER, DOGE or PUMP: 2 of 3 curve coins and 1 of 3 PumpSwap coins on the lists read 11 Nov
 // 15:10Z) at that coin's own USD price, `quoteUsd` (its Discover or Jupiter row, read every REF_MS while a token quoted
-// in it is open) and its decimals from its mint account. Every other venue (Raydium, Meteora, Orca, the lists' other
-// launchpads) is card index-sol-trades-2: its trades are not read and the token's candles keep GeckoTerminal's bars.
+// in it is open) and its decimals from its mint account. The pool venues past pump.fun (card
+// helper-listed-charts-own-reads: Orca Whirlpool and Raydium CLMM, where the listed coins off pump.fun trade most,
+// decode.ts) are read the same way: the
+// pool account names the two mints (taken only with that venue's program as its owner), the token is either one and
+// the other is the quote, priced as above; their events carry no clock, so a trade is dated by its block (a walk's
+// transaction its blockTime, a stream's the second it arrived: measured p95 1.78 s after the block, above). A venue not
+// decoded yet keeps GeckoTerminal's bars and tape for its coins.
 // Every REPORT_MS the log says how many open tokens have an empty tape and why (a quote with no price, or no trade of
 // a venue we read in the transactions that named the token), never which tokens.
 //
@@ -49,7 +54,7 @@
 import { change4h, createBook, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
 import { type DataAnswer } from "./token.ts";
-import { fromInner, fromLogs, poolMints, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
+import { cutTrades, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 import { CREDITS, type Slot } from "../../rpc/slot.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -389,7 +394,7 @@ export function createSolanaTrades(deps: {
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? TRADES_RPCS;
   const entries = new Map<string, Entry>();
-  const pools = new Map<string, Promise<{ base: string; quote: string } | null>>();
+  const pools = new Map<string, Promise<{ a: string; b: string } | null>>();
   const traders = new Map<string, string>(); // signature -> the trade's user, kept after the trade settles
   let seq = 0;
   let solUsd: { slot: number; v: bigint } | null = null;
@@ -430,6 +435,9 @@ export function createSolanaTrades(deps: {
     throw new Error(`${method}: no provider answered`);
   }
 
+  /** A getTransaction answer's block time, unix seconds, or null. */
+  const blockTime = (r: Record<string, unknown>): number | null => (Number.isSafeInteger(r.blockTime) && (r.blockTime as number) > 0 ? (r.blockTime as number) : null);
+
   async function account(key: string): Promise<{ owner: unknown; data: Buffer; slot: number } | null> {
     const r = (await rpc("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed" }])) as Record<string, unknown>;
     const v = r?.value as Record<string, unknown> | null;
@@ -447,14 +455,24 @@ export function createSolanaTrades(deps: {
     for (const e of entries.values()) if (e.quoteMint === null || e.quoteMint === WSOL) e.refs.set(a.slot, v);
   }
 
-  /** A PumpSwap pool's mints, read once (a burst of trades on one pool shares the read; a failed read is not kept). */
-  function poolOf(pool: string): Promise<{ base: string; quote: string } | null> {
-    const kept = pools.get(pool);
+  /** A pool's two mints (PumpSwap: base, quote), read once (a burst of trades on one pool shares the read; a failed
+   *  read is not kept), taken only with the trade's own venue program as the pool account's owner. */
+  function poolOf(t: RawTrade): Promise<{ a: string; b: string } | null> {
+    const k = `${t.venue}:${t.pool!}`;
+    const kept = pools.get(k);
     if (kept !== undefined) return kept;
-    const read = account(pool).then((a) => (a !== null && a.owner === PUMP_AMM ? poolMints(a.data) : null));
+    const venue = t.venue;
+    const read = account(t.pool!).then((a) => {
+      if (a === null) return null;
+      if (venue === "pumpswap") {
+        const p = a.owner === PUMP_AMM ? poolMints(a.data) : null;
+        return p === null ? null : { a: p.base, b: p.quote };
+      }
+      return venue === "orca" || venue === "raydium-clmm" ? poolPair(venue, a.owner, a.data) : null;
+    });
     if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);
-    pools.set(pool, read);
-    read.catch(() => pools.delete(pool));
+    pools.set(k, read);
+    read.catch(() => pools.delete(k));
     return read;
   }
 
@@ -488,16 +506,22 @@ export function createSolanaTrades(deps: {
   /** A quote the book can price: SOL, USDC, or another coin with its decimals and a USD price read. */
   const priced = (q: string | null): boolean => q === WSOL || q === USDC || (q !== null && quotes.get(q)?.decimals != null && quotes.get(q)?.usd != null);
 
-  /** The trades of one transaction for `mint`, with the token named and the quote checked; PumpSwap pools read. */
-  async function forMint(mint: string, trades: RawTrade[]): Promise<RawTrade[]> {
+  /** The trades of one transaction for `mint`, with the token named and the quote checked; pools read. A pair venue's
+   *  trade (told as the pool's first mint sees it) is turned round when the token is the second; an event with no clock
+   *  takes `blockS`, the transaction's block time. */
+  async function forMint(mint: string, trades: RawTrade[], blockS: number): Promise<RawTrade[]> {
     const out: RawTrade[] = [];
-    for (const t of trades) {
+    for (const raw of trades) {
+      const t = raw.ts > 0 ? raw : { ...raw, ts: blockS };
       if (t.venue === "pump") {
         if (t.mint === mint) out.push(t);
         continue;
       }
-      const p = await poolOf(t.pool!);
-      if (p !== null && p.base === mint) out.push({ ...t, mint, quoteMint: p.quote });
+      const p = await poolOf(t);
+      if (p === null || p.a === p.b) continue;
+      if (p.a === mint) out.push({ ...t, mint, quoteMint: p.b });
+      // PumpSwap: the base mint only, as before
+      else if (p.b === mint && t.venue !== "pumpswap") out.push({ ...t, mint, quoteMint: p.a, side: t.side === "b" ? "s" : "b", amt: t.quote, quote: t.amt });
     }
     // another quote coin: its decimals and price read before the trade is held, so the first tape is priced
     for (const q of new Set(out.map((t) => t.quoteMint))) if (q !== null && q !== WSOL && q !== USDC && deps.quoteUsd !== undefined && !priced(q)) await readQuote(q);
@@ -507,10 +531,12 @@ export function createSolanaTrades(deps: {
   /** A transaction's trades: from its log, or its inner instructions when the log was cut. */
   async function txTrades(mint: string, sig: string, logs: unknown): Promise<RawTrade[] | null> {
     const f = fromLogs(logs);
-    if (!f.truncated) return forMint(mint, f.trades);
+    // a stream transaction's block time is the second it arrived (the stream sends none)
+    const arrived = Math.floor(now() / 1000);
+    if (!f.truncated) return forMint(mint, f.trades, arrived);
     const r = (await rpc("getTransaction", [sig, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
     if (r === null) return null;
-    return forMint(mint, fromInner(r));
+    return forMint(mint, cutTrades(f, r), blockTime(r) ?? arrived);
   }
 
   /** Holds a transaction's trades, its place `order` (taken when it arrived, before any read it waited on). */
@@ -518,7 +544,8 @@ export function createSolanaTrades(deps: {
     if (e.held.has(sig) || (e.book !== null && slot <= e.book.settledTo)) return;
     if (e.held.size >= HELD_MAX) return;
     e.held.set(sig, { slot, seq: order, t: trades });
-    if (trades[0] !== undefined) {
+    // an event that names no trader (Orca) leaves the row's trader null
+    if (trades[0] !== undefined && trades[0].user !== "") {
       if (traders.size >= HELD_MAX) traders.delete(traders.keys().next().value!);
       traders.set(sig, trades[0].user);
     }
@@ -621,7 +648,8 @@ export function createSolanaTrades(deps: {
           e.seen++;
           const meta = (r.meta ?? {}) as Record<string, unknown>;
           const f = fromLogs(meta.logMessages);
-          hold(e, s.signature, s.slot, s.order, await forMint(e.mint, f.truncated ? fromInner(r) : f.trades));
+          const bt = blockTime(r) ?? Math.floor(now() / 1000);
+          hold(e, s.signature, s.slot, s.order, await forMint(e.mint, f.truncated ? cutTrades(f, r) : f.trades, bt));
         }),
       );
       if (round !== undefined) {
@@ -880,10 +908,10 @@ export function createSolanaTrades(deps: {
       const e = await open(mint);
       if (!("mint" in e)) return e;
       const rows = e.book === null ? [] : e.book.tape(limit);
-      // a token with no trade of a venue this tape decodes (Raydium, Meteora, Orca, the other launchpads: every token
-      // not on the pump.fun curve or PumpSwap) is served its top pool's trades (token.ts tape), never an empty tape for a
-      // token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0 rows, src chain, while
-      // their pools traded)
+      // a token with no trade of a venue this tape decodes (Raydium's other pools, Meteora, the other launchpads: a
+      // token not on the pump.fun curve, PumpSwap, Orca or Raydium CLMM) is served its top pool's trades (token.ts tape),
+      // never an empty tape for a token that trades (card solana-trades-show-on-every-token: NEARKAT and BONK answered 0
+      // rows, src chain, while their pools traded)
       if (rows.length === 0 && deps.tape !== undefined) return poolTape(mint, limit, e);
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traders.get(r.tx) ?? null, tx: r.tx }));

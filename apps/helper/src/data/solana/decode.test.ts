@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { decodeEvent, fromInner, fromLogs, poolMints, PUMP, PUMP_AMM, WSOL, type RawTrade } from "./decode.ts";
+import { cutTrades, decodeEvent, fromInner, fromLogs, ORCA, poolMints, poolPair, PUMP, PUMP_AMM, RAY_CLMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as {
@@ -13,11 +13,13 @@ const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"
   pools: Record<string, { owner: string; data: string }>;
 };
 const logs = (k: string): string[] => F.txs[k]!.result.meta.logMessages;
+/** The pump.fun and PumpSwap trades of a recorded transaction (a route may also cross a pool venue: Orca, below). */
+const pumps = (t: RawTrade[]): RawTrade[] => t.filter((x) => x.venue === "pump" || x.venue === "pumpswap");
 const one = (k: string): RawTrade => {
   const f = fromLogs(logs(k));
   assert.equal(f.truncated, false);
-  assert.equal(f.trades.length, 1);
-  return f.trades[0]!;
+  assert.equal(pumps(f.trades).length, 1);
+  return pumps(f.trades)[0]!;
 };
 
 test("pump.fun curve buy and sell (SOL quote): mint, side, token and SOL legs, user, time", () => {
@@ -47,7 +49,7 @@ test("PumpSwap buy and sell: pool, side, base and quote legs, user; the pool acc
 });
 
 test("the inner-instruction event CPI decodes to the same trades as the log, for every recorded transaction", () => {
-  for (const k of Object.keys(F.txs)) assert.deepEqual(fromInner(F.txs[k]!.result), fromLogs(logs(k)).trades, k);
+  for (const k of Object.keys(F.txs)) assert.deepEqual(fromInner(F.txs[k]!.result), pumps(fromLogs(logs(k)).trades), k);
 });
 
 test("an event line counts only while its own program is running: the same bytes logged by another program are ignored", () => {
@@ -71,4 +73,55 @@ test("a cut log, a broken invoke stack and hostile lines are reported, never dec
   const zero = Buffer.from(logs("pump-buy").find((l) => l.startsWith("Program data: vdt/"))!.slice(14), "base64");
   zero.fill(0, 8 + 40, 8 + 48); // token_amount 0
   assert.equal(decodeEvent(PUMP, zero), null);
+});
+
+// Venues past pump.fun (card helper-listed-charts-own-reads), recorded 2026-11-15 23:2xZ (fixtures/sol-venue-txs.json):
+// the newest successful transactions of coins on the helper's lists, each event checked against the pool's own token
+// balance changes in the same transaction.
+const V = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-venue-txs.json"), "utf8")) as typeof F;
+const vlogs = (k: string): string[] => V.txs[k]!.result.meta.logMessages;
+const pool = (a: string) => ({ owner: V.pools[a]!.owner, data: Buffer.from(V.pools[a]!.data, "base64") });
+
+test("Orca Whirlpool: a `Traded` event is a trade told as the pool's mint A sees it, the pool naming A and B", () => {
+  assert.equal(V.txs["orca-buy"]!.signature, "5eGN7iUzj3BTnmd97GNd6noiXqzvQJKmk2yqFvx9r8HD9oPUnTQN2rrxEQjmJpHx6XESNcz1v4i5GM7bFq5FKPbH");
+  const f = fromLogs(vlogs("orca-buy"));
+  assert.equal(f.truncated, false);
+  // b to a: the pool paid 25,103 of mint A (SKHY) and took 2,008,725 of mint B (its balances in the same transaction)
+  assert.deepEqual(f.trades, [{ venue: "orca", mint: null, pool: "EBJyPRtXTiUtjKZ5JDNLPmdjTyat48jEpmSD5VDLrHyq", side: "b", amt: 25103n, quote: 2008725n, quoteMint: null, user: "", ts: 0 }]);
+  const p = pool("EBJyPRtXTiUtjKZ5JDNLPmdjTyat48jEpmSD5VDLrHyq");
+  assert.equal(p.owner, ORCA);
+  assert.deepEqual(poolPair("orca", p.owner, p.data), { a: "SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3", b: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh" });
+  // the pool taken only from its own program and with its own discriminator
+  assert.equal(poolPair("orca", RAY_CLMM, p.data), null);
+  assert.equal(poolPair("raydium-clmm", ORCA, p.data), null);
+  assert.equal(poolPair("orca", ORCA, Buffer.alloc(653)), null);
+});
+
+test("Orca Whirlpool: a log the runtime cut keeps the trades it logged before the cut (an event Orca logs, never sends to itself)", () => {
+  const f = fromLogs(vlogs("orca-cut"));
+  assert.equal(f.truncated, true);
+  const cut = cutTrades(f, V.txs["orca-cut"]!.result);
+  // the pool JUP/USDC paid 242,083 JUP for 63,886 USDC
+  assert.deepEqual(cut, [{ venue: "orca", mint: null, pool: "4Ui9QdDNuUaAGqCPcDSp191QrixLzQiLxJ1Gnqvz3szP", side: "b", amt: 242083n, quote: 63886n, quoteMint: null, user: "", ts: 0 }]);
+  assert.deepEqual(poolPair("orca", ORCA, pool("4Ui9QdDNuUaAGqCPcDSp191QrixLzQiLxJ1Gnqvz3szP").data), { a: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", b: USDC });
+  // a pump event CPI in the inner instructions still comes from them: the recorded pump transactions, cut, read the same
+  for (const k of Object.keys(F.txs)) assert.deepEqual(cutTrades({ trades: [] }, F.txs[k]!.result), pumps(fromLogs(logs(k)).trades), k);
+  // a recorded PumpSwap route also crosses an Orca pool, whose event is in the log only
+  assert.deepEqual(fromLogs(logs("pumpswap-sell")).trades.map((t) => t.venue), ["pumpswap", "orca"]);
+});
+
+test("Raydium CLMM: a `SwapEvent` is a trade told as the pool's token 0 sees it, its sender the trader; the pool names token 0 and 1", () => {
+  assert.equal(V.txs["clmm-buy"]!.signature, "mLRvbN2p3pp4ygRfziJSxbvzJiyqZbwCWxpFV21g5vLS7U2Nd8o9cSbNbUN2gtrMAVvtUwkpNEJAQcf5ynWgRGv");
+  // zero for one: the trader paid 2,082,875,407 lamports of token 0 (SOL) for 19,699,205 of token 1 (SPYx)
+  assert.deepEqual(fromLogs(vlogs("clmm-buy")), { trades: [{ venue: "raydium-clmm", mint: null, pool: "BS9uyGV6XmNnPkM4f3xgxCdQEaFv7RSKs6fwrpvYHxfL", side: "s", amt: 2082875407n, quote: 19699205n, quoteMint: null, user: "4GQeEya6ZTwvXre4Br6ZfDyfe2WQMkcDz2QbkJZazVqS", ts: 0 }], truncated: false });
+  const p = pool("BS9uyGV6XmNnPkM4f3xgxCdQEaFv7RSKs6fwrpvYHxfL");
+  assert.equal(p.owner, RAY_CLMM);
+  assert.deepEqual(poolPair("raydium-clmm", p.owner, p.data), { a: WSOL, b: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W" });
+  // a route through two pools: SOL into CLMM SOL/Xs3eBt, then Xs3eBt into an Orca pool for AMZN
+  assert.deepEqual(fromLogs(vlogs("clmm-sol-in")).trades.map((t) => [t.venue, t.pool, t.side, t.amt, t.quote]), [["raydium-clmm", "HWZk6MfN28mYqDN1igNETjN2kueEryL33oVgt92Wkv6N", "s", 10000000n, 268947n], ["orca", "Af6Rt3zE8ZCFPtSQEePvAHfqpdqzsYA6H3bzY7P3tgCt", "s", 268947n, 2688n]]);
+  assert.deepEqual(poolPair("raydium-clmm", RAY_CLMM, pool("HWZk6MfN28mYqDN1igNETjN2kueEryL33oVgt92Wkv6N").data), { a: WSOL, b: "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg" });
+  // the same event bytes under another program are no trade
+  const line = vlogs("clmm-buy").find((l) => l.startsWith("Program data: QMbN"))!;
+  assert.equal(decodeEvent(ORCA, Buffer.from(line.slice(14), "base64")), null);
+  assert.equal(decodeEvent(RAY_CLMM, Buffer.from(line.slice(14), "base64").subarray(0, 100)), null);
 });
