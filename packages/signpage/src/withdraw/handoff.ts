@@ -99,6 +99,9 @@ export type HandoffOver = {
 
 /** What a tap's hand-off ends in: the relay's outcome (with the relayer's tx hash of a landing, when it named one), or a
  *  fresh quote above the fee the form drew (nothing proved). */
+/** The hand-off's steps a caller may hear (the trace, card buy-shows-every-step): the proof's start and end, and the
+ *  relay's send. Public facts only: no key, note or proof is handed over. */
+export type HandoffMark = (step: "proof_start" | "proof_done" | "relay_sent", f?: { tx?: string }) => void;
 export type HandoffEnd = { kind: RelayOutcome["kind"] | ArrivalOutcome["kind"]; tx?: string } | { kind: "fee"; fee: bigint };
 
 // The release pair (card near-buy-works-on-live): FastNEAR's seat is the helper's keyed route (NEAR_NETWORKS seat), its
@@ -199,7 +202,7 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
  * (relayWithdraw takes its one derivation before its first await, relay.ts); the relay's wait ends on sign out or at
  * HANDOFF_WAIT_MAX_MS, its note left RESERVED with its request for the settle pass (withdrawSettle).
  */
-export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedWithdraw, drawnFee: bigint, note?: string, exact?: boolean, claim?: () => Promise<void>) => Promise<HandoffEnd>) | null {
+export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w: CheckedWithdraw, drawnFee: bigint, note?: string, exact?: boolean, claim?: () => Promise<void>, mark?: HandoffMark) => Promise<HandoffEnd>) | null {
   const n = netOf(over);
   const { network, net, rpcs, priceRpcs, relayer, scope, fetchFn } = n;
   if (net.vault === null || scope === null || relayer === null) return null;
@@ -212,7 +215,7 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
   // `exact`: the request pays the drawn fee (at or above the quote, the relayer takes any fee at or above its fee_min),
   // so a part planned at that fee withdraws exactly what the plan says; else the quote's fee
   // `claim`: a move's claim on its send-by (cash-to-pool.ts), awaited right before the note goes RESERVED
-  return async (w, drawnFee, note, exact = false, claim) => {
+  return async (w, drawnFee, note, exact = false, claim, mark) => {
     if (typeof drawnFee !== "bigint") throw new Error("drawnFee: not a bigint");
     ownPair(n);
     // card near-buy-works-on-live: the quote is asked last, after the trees and the block time, right before the proof;
@@ -222,14 +225,22 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
     // (fee_too_low), which would hold the note RESERVED until its deadline with nothing paid
     for (let tryNo = 1; ; tryNo++) {
       // the last try's stale quote ends it as a fee end: the note UNSPENT, nothing sent, the fee asked again on a tap
-      const end = await once(w, drawnFee, note, exact, claim).catch((e: unknown): HandoffEnd | null => {
+      const end = await once(w, drawnFee, note, exact, claim, mark).catch((e: unknown): HandoffEnd | null => {
         if (!(e instanceof QuoteStale)) throw e;
         return tryNo < HANDOFF_QUOTE_TRIES ? null : { kind: "fee", fee: e.fee };
       });
       if (end !== null) return end;
     }
   };
-  async function once(w: CheckedWithdraw, drawnFee: bigint, note: string | undefined, exact: boolean, claim: (() => Promise<void>) | undefined): Promise<HandoffEnd> {
+  async function once(w: CheckedWithdraw, drawnFee: bigint, note: string | undefined, exact: boolean, claim: (() => Promise<void>) | undefined, mark?: HandoffMark): Promise<HandoffEnd> {
+    // a caller's mark never stops the hand-off
+    const step = (s: Parameters<HandoffMark>[0]): void => {
+      try {
+        mark?.(s);
+      } catch {
+        /* the trace only */
+      }
+    };
     const [trees, ns] = await Promise.all([sync(), blockNs()]);
     const quote = await askWithdrawFee({ token: net.usdc, relayer: relayer!, amount: w.amount, fetchFn });
     if (quote.relayFee > drawnFee) return { kind: "fee", fee: quote.relayFee };
@@ -245,6 +256,7 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
       await claim?.();
     };
     try {
+      step("proof_start");
       const req = await withdrawRequest({
         seed64: seed,
         notes,
@@ -266,7 +278,9 @@ export function withdrawHandoff(page: HandoffPage, over: HandoffOver = {}): ((w:
         ...(note === undefined ? {} : { note }),
         claim: fresh,
       });
+      step("proof_done");
       going = relay(seed, req, { notes, network, rpcs, priceRpcs, fetchFn, signal });
+      step("relay_sent");
     } finally {
       seed.fill(0);
     }
