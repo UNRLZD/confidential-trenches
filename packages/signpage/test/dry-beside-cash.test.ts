@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Running } from "../src/api.ts";
-import { cashFeeRead, cashPlanReads, dryBesideCash, NO_CASH_EVM_PLAN } from "../src/cash-to-pool.ts";
+import { cashFeeRead, cashPlanReads, dryBesideCash, evmDryCashReads, NO_CASH_EVM_PLAN } from "../src/cash-to-pool.ts";
 
 const SLOW_MS = 300;
 const later = <T>(ms: number, v: T): Promise<T> => new Promise((ok) => setTimeout(() => ok(v), ms));
@@ -91,4 +91,37 @@ test("a dry that is refused, or Cash's reads that fail, give no with_cash", asyn
   const b = dryBesideCash(slowDry(1), Promise.resolve(null));
   await b.after;
   assert.deepEqual(b.answer(), { result: { tap_max: "0", out: "211.011995" } });
+});
+
+test("a Base or Robinhood dry with Cash reads the epoch fee beside the plan's slow floor: the slower of the two, never their sum", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let notesRead = 0;
+  let feesRead = 0;
+  const cash = evmDryCashReads(
+    async () => (notesRead++, [{ id: "n", value: 5_000_000n }]),
+    // the plan over the notes waits on the pool's floor read (Robinhood's took 27-30 s), SLOW_MS here
+    (notes) => later(SLOW_MS, { top: notes.length }),
+    () => (feesRead++, later(SLOW_MS, 9n)),
+  );
+  let got: unknown;
+  // as the dry asks them: with_cash starts the fee then waits the plan, the move's sizing asks both again
+  void Promise.all([cash.fee(), cash.plan(), cash.plan(), cash.fee()]).then((x) => void (got = x));
+  await flush();
+  t.mock.timers.tick(SLOW_MS - 1);
+  await flush();
+  assert.equal(got, undefined);
+  t.mock.timers.tick(1);
+  await flush();
+  assert.deepEqual(got, [9n, { top: 1 }, { top: 1 }, 9n], `no answer at ${SLOW_MS} ms, the slower of the floor and the fee`);
+  // one read of the notes, one fee read, however many deps ask
+  assert.equal(notesRead, 1);
+  assert.equal(feesRead, 1);
+});
+
+test("a Base or Robinhood dry with no Cash note reads no epoch fee", async () => {
+  let feesRead = 0;
+  const cash = evmDryCashReads(async () => [], async (notes) => notes.length, () => (feesRead++, never<bigint | null>()));
+  assert.equal(await cash.fee(), null);
+  assert.equal(await cash.plan(), 0);
+  assert.equal(feesRead, 0);
 });

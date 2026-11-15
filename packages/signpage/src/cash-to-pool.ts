@@ -122,6 +122,21 @@ export async function cashPlanReads<F, L>(notes: () => Promise<readonly CashNote
   return { notes: all, fee: cashPlanFee(all, read), floor, leastIn };
 }
 
+/** One Base or Robinhood dry's reads over Cash (card buy-quote-before-any-note, round 2): Cash's notes read once (the
+ *  device's own store); from that one read, the plan over them (its fee, floor and least) and, only with a note, the
+ *  epoch's fee, side by side, so a dry with Cash waits for the slower of the two, never their sum (Robinhood's floor
+ *  read took 27-30 s on 16 Nov), and one with none reads no fee. Each read once per dry, however many deps ask it. */
+export function evmDryCashReads<P>(notes: () => Promise<readonly CashNote[]>, plan: (notes: readonly CashNote[]) => Promise<P>, fee: () => Promise<bigint | null>): { plan: () => Promise<P>; fee: () => Promise<bigint | null> } {
+  let read: Promise<readonly CashNote[]> | undefined;
+  let planRead: Promise<P> | undefined;
+  let feeRead: Promise<bigint | null> | undefined;
+  const notesOnce = () => (read ??= notes());
+  return {
+    plan: () => (planRead ??= notesOnce().then(plan)),
+    fee: () => (feeRead ??= notesOnce().then((n) => (n.length === 0 ? null : fee()))),
+  };
+}
+
 /** A plan over no Cash note (cashPlanReads with none): no part, no rung, no cost, nothing on top of the tap. */
 export const NO_CASH_EVM_PLAN: EvmCashPlan = Object.freeze({ parts: () => null, rungs: () => null, cost: () => null, top: 0n });
 

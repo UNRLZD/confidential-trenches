@@ -62,17 +62,20 @@ const planOf = (model) => new RegExp(`function (${N})\\((${N}),(${N}),(${N}),(${
 const moverUses = (plan) => new RegExp(`typeof (${N})==\`bigint\`\\?${esc(plan)}\\((${N}),(${N}),(${N}),\\1,(${N}),(${N})\\)\\.parts\\((${N})\\):null`);
 /** pool.buy.dry above tap_max: the sized plan's cost plus the move's, only with a fee read and a priced move. */
 const DRY = [new RegExp(`${N}>${N}&&(${N})\\.fee!==void 0&&\\1\\.moved!==void 0`), new RegExp(`\\{plan:(${N})\\.plan,cost:${N}\\(\\1\\.plan\\)\\+${N}\\}`)];
+/** The dry's reads over Cash (src/cash-to-pool.ts evmDryCashReads, card buy-quote-before-any-note round 2): the notes
+ *  read once; the plan from that read, and the epoch fee beside it only with a note, never after the plan (group 1:
+ *  its name). */
+const CASH_READS = new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{let (${N}),(${N}),(${N}),(${N})=\\(\\)=>\\5\\?\\?=\\2\\(\\);return\\{plan:\\(\\)=>\\6\\?\\?=\\8\\(\\)\\.then\\(\\3\\),fee:\\(\\)=>\\7\\?\\?=\\8\\(\\)\\.then\\((${N})=>\\9\\.length===0\\?null:\\4\\(\\)\\)\\}\\}`);
 /** main.ts gives the dry the pool's own epoch fee read, and the rungs and price of the move from one plan of Cash's
- *  notes per dry (card cash-buys-spend-every-note-evm; one plan read, card buy-quote-before-any-note round 2); no rungs
- *  when Cash holds nothing a move can use (plan.top 0: card buy-quote-before-any-note), so the dry sizes no move, and
- *  the epoch fee is read only for a plan that moves something, so a fresh account's dry neither reads nor waits on it.
- *  Groups: 2 the dry's one plan read, 5 its fee read. */
-const DRY_DEPS = new RegExp(`let (${N}),(${N})=\\(\\)=>\\1\\?\\?=(${N})\\((${N})\\),(${N})=async\\(\\)=>\\(await \\2\\(\\)\\.catch\\(\\(\\)=>null\\)\\)\\?\\.top===0n\\?null:await ${N}\\?\\.evmFeeNow\\(\\4\\)\\?\\?null;[\\s\\S]{0,2000}?fee:\\5,rungs:async\\(\\)=>\\((${N})=>\\6===null\\|\\|\\6\\.top===0n\\?null:\\6\\.rungs\\)\\(await \\2\\(\\)\\),moved:async (${N})=>\\(await \\2\\(\\)\\)\\?\\.cost\\(\\7\\)\\?\\?null`);
+ *  notes per dry (card cash-buys-spend-every-note-evm), both through those reads; no rungs when Cash holds nothing a
+ *  move can use (plan.top 0: card buy-quote-before-any-note), so the dry sizes no move and waits on no fee. Groups: 4
+ *  the dry's plan read, 5 its fee read. */
+const dryDepsOf = (reads) => new RegExp(`let (${N})=${esc(reads)}\\(\\(\\)=>${N}\\(\\)\\.cash\\(\\),(${N})=>${N}\\((${N}),\\2\\),\\(\\)=>${N}\\?\\.evmFeeNow\\(\\3\\)\\?\\?Promise\\.resolve\\(null\\)\\),(${N})=\\1\\.plan,(${N})=\\1\\.fee;[\\s\\S]{0,2000}?fee:\\5,rungs:async\\(\\)=>\\((${N})=>\\6===null\\|\\|\\6\\.top===0n\\?null:\\6\\.rungs\\)\\(await \\4\\(\\)\\),moved:async (${N})=>\\(await \\4\\(\\)\\)\\?\\.cost\\(\\7\\)\\?\\?null`);
 
 /** main.ts's with_cash on Base and Robinhood: at the epoch's fee read, a move's size paid when Cash's notes make it (card
  *  cash-buys-spend-every-note-evm: the plan's parts), sized on the rungs they land, searched under the plan's top; with
  *  no Cash a move can use (the plan's top 0: card buy-quote-before-any-note), tap_max itself, waiting on no fee. The
- *  plan and the fee are the dry's own reads (DRY_DEPS' groups 2 and 5). */
+ *  plan and the fee are the dry's own reads (dryDepsOf's groups 4 and 5). */
 const maxOf = (plan, fee) => new RegExp(`withCash:async\\(${N},(${N})\\)=>\\{let (${N})=${esc(fee)}\\(\\)\\.catch\\(\\(\\)=>null\\),(${N})=await ${esc(plan)}\\(\\),(${N})=${N}\\(${N},${N}\\.ETH\\);if\\(\\3===null\\|\\|\\4===null\\)return null;if\\(\\3\\.top===0n\\)return ${N}\\(\\4,${N}\\.ETH\\);let (${N})=await \\2;if\\(\\5===null\\)return null;let ${N}=${N}\\(\\1,\\5,(${N})=>\\3\\.parts\\(\\6\\)!==null,\\4\\+\\3\\.top,\\3\\.rungs\\)`);
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
@@ -80,7 +83,8 @@ export function facts(index, js) {
   const moveOf = MOVE_OF.exec(js)?.[1];
   const model = moveOf === undefined ? undefined : modelOf(moveOf).exec(js)?.[1];
   const plan = model === undefined ? undefined : planOf(model).exec(js)?.[1];
-  const deps = DRY_DEPS.exec(js);
+  const reads = CASH_READS.exec(js)?.[1];
+  const deps = reads === undefined ? null : dryDepsOf(reads).exec(js);
   return {
     index,
     sha384: sha384(js),
@@ -88,7 +92,7 @@ export function facts(index, js) {
     sizing: PIECES.test(js) && PLAN.test(js) && RUNGS_SIZED.test(js),
     move: plan !== undefined && moverUses(plan).test(js),
     dry: DRY.every((r) => r.test(js)) && deps !== null,
-    max: deps !== null && maxOf(deps[2], deps[5]).test(js),
+    max: deps !== null && maxOf(deps[4], deps[5]).test(js),
   };
 }
 
