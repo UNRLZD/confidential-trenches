@@ -100,6 +100,79 @@ test("a first read of the pair alone on one provider that names another reserve 
   assert.ok("reference" in rb && rb.reference.pools[0]!.depth.join() === honest.reference.pools[0]!.depth.join(), "refused" in rb ? rb.refused : `depth ${rb.reference.pools[0]!.depth}`);
 });
 
+// card dlmm-pair-never-priced-at-zero: the read list's bin arrays are planned from one provider's first read of the pair
+// alone. A first read whose active_id (i32 at 76) is moved plans bin arrays that miss the ones the agreed read walks; the
+// kit plans them again from the agreed read and never prices the pair at 0 (before: +70 bins on a buy, or -70 on a
+// sell, walked nothing, priced the pair 0, and the route answered "no pool pays out for this amount").
+const moveActive = (d: Uint8Array, bins: number): Uint8Array => {
+  const c = d.slice();
+  const v = new DataView(c.buffer);
+  v.setInt32(76, v.getInt32(76, true) + bins, true);
+  return c;
+};
+/** A provider whose first read of the pair alone moves its active_id by `bins`; every later read honest. */
+const headMoves = (p: Provider, bins: number): SolanaRpc => {
+  let first = true;
+  return (async (method: string, params: readonly unknown[]) => {
+    const list = params[0] as string[];
+    const head = first && list.length === 1 && list[0] === V.pair;
+    if (head) first = false;
+    return replay(p, (a, d) => (head && a === V.pair ? moveActive(d, bins) : d))(method as never, params as never);
+  }) as SolanaRpc;
+};
+const sell = (amount: bigint) => ({ side: "sell" as const, token: V.mint, amount, amounts: [amount / 10n] });
+const E = (r: Awaited<ReturnType<typeof readSolanaReferenceWhy>>) => ("reference" in r ? [r.reference.expectedOut, ...r.reference.expectedOuts] : r.refused);
+
+test("a first read on provider A that moves the pair's active bin by +70 or -70 still gets the honest out, buy and sell", async () => {
+  for (const req of [buy(100_000_000n, { dlmmPairs: [V.pair] }), buy(5_000_000_000n, { dlmmPairs: [V.pair] }), { ...sell(10_000_000_000n), dlmmPairs: [V.pair] }]) {
+    const honest = E(await readSolanaReferenceWhy([replay(PA), replay(PB)], req));
+    assert.ok(Array.isArray(honest) && honest[0]! > 0n, `${req.side} ${req.amount}: no honest reference: ${String(honest)}`);
+    for (const bins of [70, -70]) {
+      const got = E(await readSolanaReferenceWhy([headMoves(PA, bins), replay(PB)], req));
+      assert.deepEqual(got, honest, `${req.side} ${req.amount}, first read moved ${bins} bins`);
+    }
+  }
+});
+
+test("the other first-read moves (-140, -35, +35, +140) and the same move on provider B give the honest out", async () => {
+  for (const req of [buy(100_000_000n, { dlmmPairs: [V.pair] }), { ...sell(10_000_000_000n), dlmmPairs: [V.pair] }]) {
+    const honest = E(await readSolanaReferenceWhy([replay(PA), replay(PB)], req));
+    for (const bins of [-140, -35, 35, 140]) assert.deepEqual(E(await readSolanaReferenceWhy([headMoves(PA, bins), replay(PB)], req)), honest, `${req.side} A ${bins}`);
+    for (const bins of [70, -70]) assert.deepEqual(E(await readSolanaReferenceWhy([replay(PA), headMoves(PB, bins)], req)), honest, `${req.side} B ${bins}`);
+  }
+});
+
+test("the active bin moving into another bin array between the first read and the pair's own read still prices the pair", async () => {
+  // both providers' pair reads after their first one sit in the bin array behind the walk, as a pool that moved: a buy
+  // (walking up) at -491 (array -8, one bin past -7's lower edge), a sell (walking down) at -421 (array -6's first bin);
+  // each walk takes the bin arrays a swap from there names, read with the pair's other accounts at one slot
+  const moved = (p: Provider, bins: number): SolanaRpc => {
+    let first = true;
+    return (async (method: string, params: readonly unknown[]) => {
+      const list = params[0] as string[];
+      const head = first && list.length === 1 && list[0] === V.pair;
+      if (head) first = false;
+      return replay(p, (a, d) => (!head && a === V.pair ? moveActive(d, bins) : d))(method as never, params as never);
+    }) as SolanaRpc;
+  };
+  for (const [req, bins] of [[buy(100_000_000n, { dlmmPairs: [V.pair] }), -15], [{ ...sell(10_000_000_000n), dlmmPairs: [V.pair] }, 55]] as const) {
+    const r = await readSolanaReferenceWhy([moved(PA, bins), moved(PB, bins)], req);
+    assert.ok("reference" in r && r.reference.expectedOut > 0n && r.reference.pools[0]!.venue === "dlmm", `${req.side}: ${"refused" in r ? r.refused : ""}`);
+  }
+});
+
+test("a pair whose active bin leaves the bin arrays read on every read is refused after the re-read, never priced at 0", async () => {
+  // provider A answers every pair read with a new active bin, one bin array further each time: a re-plan never catches it
+  let n = 0;
+  const running: SolanaRpc = (async (method: string, params: readonly unknown[]) => {
+    const list = params[0] as string[];
+    const k = list.includes(V.pair) ? ++n : n;
+    return replay(PA, (a, d) => (a === V.pair ? moveActive(d, 70 * k) : d))(method as never, params as never);
+  }) as SolanaRpc;
+  const r = await readSolanaReferenceWhy([running, replay(PB)], buy(100_000_000n, { dlmmPairs: [V.pair] }));
+  assert.ok("refused" in r && /active bin left the bin arrays read, after a re-read/.test(r.refused), JSON.stringify(E(r), (_k, v) => (typeof v === "bigint" ? String(v) : v)));
+});
+
 test("a static byte of the pair that differs (its base factor) refuses the route", async () => {
   const r = await readSolanaReferenceWhy([replay(PA), replay(PB, (a, d) => (a === V.pair ? Object.assign(d.slice(), { [8]: d[8]! ^ 1 }) : d))], buy(100_000_000n, { dlmmPairs: [V.pair] }));
   assert.ok("refused" in r && /static bytes differ/.test(r.refused), JSON.stringify(r));

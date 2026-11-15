@@ -578,8 +578,9 @@ function mints(a: SolanaPoolAccount | null, b: SolanaPoolAccount | null): readon
   return m;
 }
 
-// What one read pair says of one candidate: not a candidate, a disagreement or a malformed account, or agreed.
-type Verdict = { kind: "none" } | { kind: "bad"; why: string } | { kind: "ok"; candidate: SolanaAgreedCandidate };
+// What one read pair says of one candidate: not a candidate, a disagreement or a malformed account, or agreed; "replan"
+// (a DLMM pair only, judgeDlmm): the read's bin arrays are not the ones the agreed pair walks, so read it again on `list`.
+type Verdict = { kind: "none" } | { kind: "bad"; why: string } | { kind: "ok"; candidate: SolanaAgreedCandidate } | { kind: "replan"; list: string[]; judge: (a: Got, b: Got) => Verdict };
 /** Indexes into each venue's own read (solanaPoolAddresses curveList and poolList). */
 const CI = { mint: 0, curve: 1, pumpGlobal: 2, pumpFeeConfig: 3, baseT: 4, baseT22: 5 } as const;
 const PI = { mint: 0, pool: 1, ammGlobalConfig: 2, ammFeeConfig: 3, baseT: 4, baseT22: 5, quote: 6 } as const;
@@ -711,8 +712,11 @@ export function solanaDlmmReadList(address: string, pair: SolanaDlmmPair, mint: 
   return { list: [address, mint, SOLANA_CLOCK_SYSVAR, pair.reserveX, pair.reserveY, ...indexes.map((i) => solanaDlmmBinArray(address, i))], indexes };
 }
 
-/** What one DLMM pair's read pair says (the module note in dlmm.ts): not a candidate, a disagreement, or agreed. */
-function judgeDlmm(address: string, list: readonly string[], indexes: readonly number[], req: SolanaReferenceRequest, ga: Got, gb: Got): Verdict {
+/** What one DLMM pair's read pair says (the module note in dlmm.ts): not a candidate, a disagreement, or agreed; or,
+ *  when the read's bin arrays miss any of the SOLANA_DLMM_ARRAYS a swap from either provider's agreed active bin names
+ *  (the list was planned from one provider's earlier read, card dlmm-pair-never-priced-at-zero), "replan" with those
+ *  arrays, read once more; still missing on that read (`replanned`), a disagreement. */
+function judgeDlmm(address: string, list: readonly string[], indexes: readonly number[], req: SolanaReferenceRequest, ga: Got, gb: Got, replanned = false): Verdict {
   const a = ga.read;
   const b = gb.read;
   if (!a || !b) {
@@ -729,11 +733,23 @@ function judgeDlmm(address: string, list: readonly string[], indexes: readonly n
     if (!sameAcc(pa, pb, SOLANA_DLMM_PAIR_MOVING)) return { kind: "bad", why: "the DLMM pair's static bytes differ" };
     const pairs = [solanaDecodeDlmmPair(pa!), solanaDecodeDlmmPair(pb!)] as const;
     const p = pairs[0];
-    // the pair, the mint, the Clock and both reserves from the agreed bytes; the bin arrays follow from the pair and the
-    // indexes, and an index set that misses the active bin's array only finds no out (solanaDlmmSwapOut), never a lower one
+    // the pair, the mint, the Clock and both reserves from the agreed bytes; the bin arrays follow from the pair (their
+    // addresses are its PDAs, each array's own pair and index checked below) and stay out of this check, since active_id
+    // moves between two honest reads
     if (!sameNames(list.slice(0, DI.arrays), solanaDlmmReadList(address, p, req.token, req.side)?.list.slice(0, DI.arrays))) return { kind: "bad", why: "the DLMM read named accounts that are not the pair's own" };
     const side = solanaDlmmSide(p, req.token);
     if (!side || p.status !== 0 || p.bitmapExtensionNeeded || !solanaDlmmModes(p, true)) return { kind: "none" };
+    // each provider's read walks the bin arrays a swap from its own active bin names (pool-buy's binArrays), all of them in
+    // this read; when one is missing, the walk would find no out and the pair would be priced at 0: plan the arrays from
+    // both agreed reads and read again (at most 2 × SOLANA_DLMM_ARRAYS arrays)
+    const swapForY = solanaDlmmSwapForY(req.side, side.solIsX);
+    const own = [solanaDlmmArrayIndexes(pairs[0].activeId, swapForY), solanaDlmmArrayIndexes(pairs[1].activeId, swapForY)] as const;
+    if (!own.every((ixs) => ixs.every((ix) => indexes.includes(ix)))) {
+      if (replanned) return { kind: "bad", why: "the DLMM pair's active bin left the bin arrays read" };
+      const want = [...new Set([...own[0], ...own[1]])];
+      const next = [...list.slice(0, DI.arrays), ...want.map((ix) => solanaDlmmBinArray(address, ix))];
+      return { kind: "replan", list: next, judge: (a2, b2) => judgeDlmm(address, next, want, req, a2, b2, true) };
+    }
     const ms = mints(at(A, DI.mint), at(B, DI.mint));
     if (typeof ms === "string") return { kind: "bad", why: ms };
     const coinFlag = side.solIsX ? p.tokenYFlag : p.tokenXFlag;
@@ -763,7 +779,10 @@ function judgeDlmm(address: string, list: readonly string[], indexes: readonly n
       }));
     const amounts = req.amounts ?? [];
     const one = (k: 0 | 1, r: (SolanaPoolAccount | null)[]): SolanaCandidateRead => {
-      const arrays = arraysOf(r);
+      const read = arraysOf(r);
+      const arrays = new Map(own[k].map((ix) => [ix, read.get(ix) ?? null] as const));
+      // every array the walk may enter is read, so a null walk is an amount those arrays cannot fill (or one past the
+      // pair's bin range): the swap would fail too, and the pair pays nothing for it
       const out = (x: bigint) => solanaDlmmTradeOut(pairs[k], arrays, req.side, x, side.solIsX, fees[k], clocks[k].unixTimestamp) ?? 0n;
       return { depth: side.solIsX ? xs[k] : ys[k], out: out(req.amount), spotOut: null, outs: amounts.map(out) };
     };
@@ -988,8 +1007,14 @@ export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, Sol
       }
     }
     if (!plan) return heads[k]!.every((h) => h.read) ? { kind: "none" } : { kind: "bad", why: `a provider gave no answer for the ${kind.name}` };
-    const [a, b] = await readBoth(plan.list);
-    const verdict = plan.judge(a, b);
+    let [a, b] = await readBoth(plan.list);
+    let verdict = plan.judge(a, b);
+    // a list planned from one provider's earlier read that the agreed read does not walk: planned again from that read
+    if (verdict.kind === "replan") {
+      [a, b] = await readBoth(verdict.list);
+      verdict = verdict.judge(a, b);
+      if (verdict.kind === "replan") verdict = { kind: "bad", why: `the ${kind.name}'s read list moved twice` };
+    }
     if (verdict.kind === "ok" && a.read && b.read) slots.push(a.read.slot, b.read.slot);
     return verdict;
   };
