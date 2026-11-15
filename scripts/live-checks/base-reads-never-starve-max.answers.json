@@ -1,0 +1,68 @@
+{
+ "_note": "good: the live helper at 6c13015c8, 15 Nov 16:24:35Z from the Mac, both routes 200 inside SHOWN_MS. bad_busy: the live helper 16:24:48Z, base answering 429 rate_limited Retry-After 2 (a burst of 34 shown reads past the caller share, 30 answered), beside the good run robinhood read. sign_good: this card build served locally (packages/signpage index.html and public/app.js). sign_bad_pre_card: SIGN_HOST at 16:2xZ, another build.",
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "reads": [
+   {
+    "chain": "base",
+    "status": 200,
+    "ms": 685,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=29;desc=\"public\""
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x00000000000000000000000000000000000000000000000000000000147b1308\"}\n"
+   },
+   {
+    "chain": "robinhood",
+    "status": 200,
+    "ms": 670,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=30;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x\"}"
+   }
+  ]
+ },
+ "bad_busy": {
+  "base": "https://ct-api.unrealized.trade",
+  "reads": [
+   {
+    "chain": "base",
+    "status": 429,
+    "ms": 813,
+    "headers": {
+     "retry-after": "2",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "body": "{\"error\":{\"code\":\"rate_limited\"}}"
+   },
+   {
+    "chain": "robinhood",
+    "status": 200,
+    "ms": 670,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=30;desc=\"ROBINHOOD_RPC_URL\""
+    },
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x\"}"
+   }
+  ]
+ },
+ "sign_good": {
+  "part": "sign",
+  "sign": "http://127.0.0.1 (this commit build, packages/signpage)",
+  "want": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd",
+  "pin": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd",
+  "sha384": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd"
+ },
+ "sign_bad_pre_card": {
+  "part": "sign",
+  "sign": "https://confidential.unrealized.trade",
+  "want": "sha384-UXCxYF7raevmMWhzVHbyzoYKkWoE/HVJYeOZnqXqsmgDZSw7a6Dhs6B9H5uGylkd",
+  "pin": "sha384-Ts1K2bZnHe1TH9EufcJZTgRrzJ4J1bCmMrz6TQdyDh5+56i3yBxZ38Y4Lak6Qudm",
+  "sha384": "sha384-Ts1K2bZnHe1TH9EufcJZTgRrzJ4J1bCmMrz6TQdyDh5+56i3yBxZ38Y4Lak6Qudm"
+ }
+}
