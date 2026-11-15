@@ -406,7 +406,11 @@ const sideRpc = async (method, params) => {
 // gives it a buffer it never wipes: wiping KEY here would zero the sender's key ("invalid private key" at its first send)
 const sender = evmPoolSender({ network: CHAIN, pool: PIN.pool, senderKey: KEY, feeRecipient: PIN.feeRecipient, log: (line) => log("helper sender", { line }) }, [sideRpc, (m, p) => sideRpc(m, p)]);
 await anvil("anvil_setBalance", [sender.sender, "0xde0b6b3a7640000"]);
-const rpcRoute = createRpc({ [CHAIN === "base" ? "BASE_RPC_URL" : "ROBINHOOD_RPC_URL"]: ANVIL }, { log: (line) => log("helper rpc", { line }) });
+// the fork named as a keyed provider: a URL with no key in it is a public endpoint to the helper (operator.ts isKeyless),
+// which ?keyed=only never asks, so the route answered every call 503 upstream and the page's keyed seat was never a log
+// operator on the fork (the owner's-case read-back of 15 Nov 02:35Z: blxrbdn alone, 19 of 19 keyed log pages 503). The
+// query's value is no secret: the fetch hook sends every call to the fork's origin as it is
+const rpcRoute = createRpc({ [CHAIN === "base" ? "BASE_RPC_URL" : "ROBINHOOD_RPC_URL"]: `${ANVIL}/?fork=keyed` }, { log: (line) => log("helper rpc", { line }) });
 const helperLines = [];
 // the helper's handler answers a sender's throw 500 {"error":"internal"} and logs nothing (server.ts .catch): the run
 // keeps the throw's message and frames, so a 500 has its cause in the record (the Base run of 13 Nov 00:40Z: no cause)
