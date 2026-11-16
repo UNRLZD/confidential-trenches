@@ -50,9 +50,11 @@ test("a check that names devnetPin only in a comment, or not at all, is not read
   assert.deepEqual(pinProblems(["c", "d"], tree({ "c.mjs": `${CLEAN}${comment}`, "d.mjs": "export const y = 2;\n", "d.answers.json": JSON.stringify({ good: { deployment: OLD } }) })), []);
 });
 
-test("the repo: the listed checks that read the devnet pin are these five, each judged on today's pin, each recording on today's pool", () => {
+// card live-checks-read-mainnet-only: no listed check reads a test network (scripts/ci/live-mainnet-only.mjs refuses
+// devnetPin in one); the five that read the devnet pin read the mainnet pin now, or run once
+test("the repo: no listed check reads the devnet pin, and none is judged on another pin", () => {
   const { keys, read } = readListed();
   const reading = keys.filter((k) => /\bdevnetPin\b/.test(read(`${k}.mjs`) ?? "")).sort();
-  assert.deepEqual(reading, ["pool-buy-send-fast", "pool-deposits", "signpage-pool-flow", "signpage-pool-notes", "signpage-pool-withdraw-form"]);
+  assert.deepEqual(reading, []);
   assert.deepEqual(pinProblems(keys, read), []);
 });

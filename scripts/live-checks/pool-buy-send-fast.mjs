@@ -22,6 +22,8 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const KEY = "pool-buy-send-fast";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -44,9 +46,10 @@ export const poolReads = (pin) => [
   { method: "getFeeForMessage", params: [FEE_MESSAGE, { commitment: "confirmed" }] },
   { method: "getProgramAccounts", params: [pin.program, { encoding: "base64", commitment: "finalized", filters: [{ dataSize: 1 }] }], refused: true },
 ];
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 /** The mainnet pool's program and pool: its deploy record (contracts/pool-solana/deployments/mainnet.json). */
 export function mainnetPin() {
-  const record = JSON.parse(readFileSync(new URL("../../contracts/pool-solana/deployments/mainnet.json", import.meta.url), "utf8"));
+  const record = JSON.parse(readFileSync(path.join(ROOT, "contracts/pool-solana/deployments/mainnet.json"), "utf8"));
   return { program: record.program_id, pool: record.pool, record };
 }
 /** The helper's mainnet route, the one route read. */

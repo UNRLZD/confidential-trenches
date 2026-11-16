@@ -136,7 +136,7 @@ export async function boundsAt(urls, token, fetchFn = fetch) {
   }
 }
 
-export async function read(base = BASE, { fetchFn = fetch, pools = solanaPools() } = {}) {
+export async function read(base = BASE, { fetchFn = fetch, pools = solanaPools(), rentRpcs = RENT_RPCS } = {}) {
   const get = async (url, init = {}) => {
     const r = await fetchFn(url, { ...init, redirect: "error", headers: { origin: APP, ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20_000) });
     return { readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(r.headers), body: (await r.text()).slice(0, 2_000) };
@@ -151,11 +151,11 @@ export async function read(base = BASE, { fetchFn = fetch, pools = solanaPools()
     const fee = await get(`${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`);
     const f = json(fee.body);
     const posts = [];
-    if (fee.status === 200 && DEC.test(f?.fee ?? "") && B58.test(f?.program ?? "") && B58.test(f?.fee_payer ?? "") && RENT_RPCS[f?.cluster]) {
+    if (fee.status === 200 && DEC.test(f?.fee ?? "") && B58.test(f?.program ?? "") && B58.test(f?.fee_payer ?? "") && Object.hasOwn(rentRpcs, f?.cluster ?? "")) {
       const cfg = { program: f.program, pool, feePayer: f.fee_payer };
       // a recent blockhash of the cluster, so the simulation runs the program instead of stopping at the blockhash
-      const bh = (await rpc(RENT_RPCS[f.cluster][0], "getLatestBlockhash", [{ commitment: "finalized" }], fetchFn))?.value?.blockhash;
-      if (typeof bh !== "string" || !B58.test(bh)) throw new Error(`getLatestBlockhash on ${RENT_RPCS[f.cluster][0]}: no blockhash`);
+      const bh = (await rpc(rentRpcs[f.cluster][0], "getLatestBlockhash", [{ commitment: "finalized" }], fetchFn))?.value?.blockhash;
+      if (typeof bh !== "string" || !B58.test(bh)) throw new Error(`getLatestBlockhash on ${rentRpcs[f.cluster][0]}: no blockhash`);
       for (const [asked] of SOLANA_PLANTS) {
         const wire = plant({ ...cfg, relayFee: asked === "zero_fee" ? 0n : BigInt(f.fee), blockhash: b58decode(bh) });
         posts.push({ asked, ...(await get(`${base}/v1/pool/solana/send`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pool, tx: wire.toString("base64") }) })) });

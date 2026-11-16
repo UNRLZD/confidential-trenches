@@ -16,6 +16,11 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { judge, PIN, read } from "./relayer-cost-guards.mjs";
 import { TOKENS } from "./relayer-withdraw-fee.mjs";
+import { RENT_RPCS } from "./helper-pool-senders.mjs";
+
+// The recorded Solana pool is the devnet one: replays read its cluster on the devnet pair; the live check reads
+// mainnet alone (RENT_RPCS), card live-checks-read-mainnet-only.
+const RPCS = { ...RENT_RPCS, devnet: ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"] };
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "relayer-cost-guards.answers.json"), "utf8"));
@@ -111,8 +116,13 @@ test("read() asks mainnet USDC's quote (no testnet token) with Origin APP_HOST a
     if (body.method === "block") return Response.json({ result: { header: { height: b.block_height } } });
     return Response.json({ result: { block_height: b.block_height, block_hash: b.block_hash, result: [...Buffer.from(b.result)] } });
   };
-  const run = await read("https://ct-api.unrealized.trade", { fetchFn, pools: { devnet: pool, mainnet: null } });
+  const run = await read("https://ct-api.unrealized.trade", { fetchFn, pools: { devnet: pool, mainnet: null }, rentRpcs: RPCS });
   assert.deepEqual(asked, ["fee 172086", "blockhash", "send 0", "send 1300000"]);
   assert.deepEqual(Object.keys(run.near), ["mainnet"]);
   assert.equal(judge(run).ok, true, judge(run).lines.join("\n"));
+  // the live defaults read no devnet cluster: the same devnet pool gets no blockhash read and no post, and fails
+  asked.length = 0;
+  const live = await read("https://ct-api.unrealized.trade", { fetchFn, pools: { devnet: pool, mainnet: null } });
+  assert.deepEqual(asked, ["fee 172086"]);
+  assert.equal(judge(live).ok, false);
 });
