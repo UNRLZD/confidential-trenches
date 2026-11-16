@@ -474,9 +474,9 @@ test("a request's id is known at once and is the id posted, so progress events c
   assert.deepEqual(seen, [[id, "filled"]]);
 });
 
-// -------------------------------------------------------------------------------------------- the twenty-eight kinds
-test("every kind of the twenty-eight has a fixture, and only the twenty-eight do", () => {
-  assert.equal(SIGNPAGE_KINDS.length, 28);
+// -------------------------------------------------------------------------------------------- the twenty-nine kinds
+test("every kind of the twenty-nine has a fixture, and only the twenty-nine do", () => {
+  assert.equal(SIGNPAGE_KINDS.length, 29);
   assert.deepEqual(Object.keys(FIXTURES).sort(), [...SIGNPAGE_KINDS].sort());
 });
 
@@ -1424,6 +1424,8 @@ test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none
     "pool.buy.dry": 10_000,
     // a move (card one-balance-buys-on-every-chain): the rail's quote round trip, as pool.address; its dry the device's reads
     "pool.move": 15_000, "pool.move.dry": 10_000,
+    // a pool coin's row (card deposit-list-reads-fast): the pool's floor on its RPCs, as deposit.assets
+    "deposit.coin": 15_000,
   });
 });
 

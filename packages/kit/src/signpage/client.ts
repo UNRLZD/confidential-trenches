@@ -102,9 +102,12 @@ export const SIGNPAGE_TIMEOUT_MS = {
   "pool.sell": 10_000,
   "pool.withdraw": 5_000,
   // the deposit sheet's reads (card kit-deposit-assets-dry): each waits for the helper's 1Click round trips, as
-  // deposit.quote does (deposit.assets asks the token list, then one dry quote per asset at once)
+  // deposit.quote does (deposit.assets asks the token list and one dry quote per asset, all at once: card
+  // deposit-list-reads-fast)
   "deposit.assets": 15_000,
   "deposit.dry": 15_000,
+  // a pool coin's row (card deposit-list-reads-fast): the pool's floor on its RPCs, within the page's read deadline
+  "deposit.coin": 15_000,
   // a pool's deposit address (card pool-deposit-address): with an origin asset, the helper's 1Click round trip, as
   // deposit.quote
   "pool.address": 15_000,

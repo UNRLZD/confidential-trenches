@@ -72,5 +72,6 @@ export const FIXTURES = {
   "pool.buy.dry": { params: { chain: "solana", token: "Tok" }, result: { tap_max: "0.00337192" } },
   "pool.move": { params: { from: "near", to: "solana", amount: "25.5" }, result: { stage: "leaving", txs: [] } },
   "pool.move.dry": { params: { from: "near", to: "solana", amount: "25.5" }, result: { out: "0.31", fee: "0.05", steps: [{ step: "vault_out", chain: "near" }, { step: "intents", chain: "solana" }, { step: "pool_in", chain: "solana" }] } },
+  "deposit.coin": { params: { chain: "robinhood" }, result: { asset: { origin_asset: "nep141:hood.omft.near", chain: "robinhood", symbol: "ETH", decimals: 18, min: "0.00105", max_usd: "1000" } } },
 } satisfies { [K in SignpageKind]: { params: SignpageParams[K]; result: SignpageResults[K] } };
 
