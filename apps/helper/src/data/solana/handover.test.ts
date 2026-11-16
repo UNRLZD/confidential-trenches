@@ -450,3 +450,44 @@ test("card helper-restart-fresh fold: the Trending column's third row as Discove
   const cold = await tok.candles(PUMP, "1m", null, 24);
   assert.equal(cold.status, 200, `a cold chart beside the ahead call: ${cold.body.slice(0, 80)}`);
 });
+
+// card helper-listed-charts-own-reads round 3: no chart answer waits on a vendor while bars are held. The warm live run
+// of 16 Nov 00:33Z answered Solana's listed charts p50 1,528 ms, p95 4,241 ms: a held chart's re-read waited on
+// GeckoTerminal's answer before it was served. Bars held within GT_SERVE_MS now answer within HELD_WAIT_MS and the read
+// goes on. Bars held past it are never served while the read can still answer (round 5): helper live run 43794383970
+// (job 133059871935, two minutes after a swap) was served PUMP's bars read at 01:21:19Z at 02:54:22Z, X-Fetched-At 93
+// minutes old and `filling` beside its bars, which the page draws as the chart (it reads again only a filling chart with
+// no bars, apps/terminal/src/screens/token/candles.ts loadCandles). They wait for the read, as before round 3, and serve
+// only when it is refused or fails (stale-if-error, card helper-candles-never-refuse-a-listed-coin).
+test("card helper-listed-charts-own-reads: with a call free and GeckoTerminal slow (1.5 s), bars held within GT_SERVE_MS answer at once and the read goes on; bars held past it wait for the read, never served as the chart with their old read time", async () => {
+  let t = NOW;
+  const now = () => t;
+  const gt = gecko();
+  const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+  assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
+  const st = JSON.parse(JSON.stringify(old.state()));
+  // GeckoTerminal's answers come 1.5 s on; `answered` counts those that came
+  let answered = 0;
+  const slow = async (url: string) => (await new Promise((go) => setTimeout(go, 1_500)), answered++, gt.fetch(url));
+  for (const late of [2 * 60_000, 16 * 60_000, 93 * 60_000]) {
+    t = NOW + late;
+    const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: slow as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
+    next.restore(st);
+    const n = answered;
+    const a = await next.candles(PUMP, "1m", null, 24);
+    const body = JSON.parse(a.body);
+    assert.equal(a.status, 200);
+    assert.deepEqual(Object.keys(body), ["tf", "candles", "src", "as_of_ms"], "06b's Candles fields, no `filling` beside bars");
+    assert.ok(body.candles.length > 0);
+    if (late <= GT_SERVE_MS) {
+      assert.equal(answered, n, `held bars ${late / 60_000} min old: the answer waited on the vendor's`);
+      assert.equal(a.asOfMs, NOW, "the held bars, dated by their read");
+      // the read goes on: past the pools' freshness its top pool is read first, then its bars, 1.5 s each
+      await new Promise((go) => setTimeout(go, 3_200));
+      assert.equal((await next.candles(PUMP, "1m", null, 24)).asOfMs, t, "the read went on: the next answer is the fresh bars");
+    } else {
+      assert.ok(answered > n, `held bars ${late / 60_000} min old were served before the read answered`);
+      assert.equal(a.asOfMs, t, `held bars ${late / 60_000} min old: the answer is the fresh read, not bars dated ${late / 60_000} min back`);
+    }
+  }
+});

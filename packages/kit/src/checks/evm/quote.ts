@@ -102,6 +102,10 @@ export type EvmPoolBuyQuoteRequest = {
    *  evmBuyRevertedPools or evmSellRevertedPools proved at fault for a reverted trade. A route through any of them is no
    *  route: the quote's own refuses below_reference, and no other is a reference. */
   banned?: readonly string[];
+  /** (optional) true: the quote is a background read's (the page's pool.buy.dry), never a tap's: each of its posts takes
+   *  its provider's turn after every trade's waiting there and leaves that provider's `keep` (pace.ts), so a tap asked
+   *  meanwhile never waits behind it. It changes nothing the quote reads or checks. */
+  later?: boolean;
 };
 
 /** A v4 pool's key, as the PoolManager's Initialize event gives it (currency0 below currency1). */
@@ -1185,6 +1189,10 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
 // the pinned providers' held heads, one per chain, made at a chain's first quote (no top-level call: the kit's index
 // reaches the signing page's bundle)
 const WATCHES = new Map<EvmPoolChain, EvmHeadWatch>();
+/** The hash of the block a quote on `chain` would read at now with no read of its own (the held head while fresh,
+ *  evmHeadWatch peek), or null (card evm-warm-tap-ends-inside-two-seconds: the buy tap holds a route's refusal for
+ *  that block alone). Not in the index. */
+export const evmHeldHead = (chain: EvmPoolChain): string | null => WATCHES.get(chain)?.peek(Date.now())?.hash ?? null;
 
 const v3Direct = (weth: string, token: string, fee: number): EvmV3Route => ({ venue: "uniswap-v3", tokens: [weth, token], fees: [fee] });
 const v4Direct = (from: string, to: string, [fee, tickSpacing]: readonly [number, number]): EvmV4Route => ({
@@ -1438,6 +1446,11 @@ const PLANS = new Map<string, { ts: bigint; reads: Read[]; scans: { cs: string[]
 export const EVM_WARM_RANGE_S = 60n;
 /** The most tokens whose reads are kept, the oldest dropped first. */
 const PLANS_MAX = 64;
+/** Per chain, token and amount, the routes whose swap fit the last buy quote read or used, and its block's time: the
+ *  next quote within EVM_WARM_RANGE_S reads them again at its own block beside its first round (evmPoolBuyQuoteWith). */
+const FITS = new Map<string, { ts: bigint; routes: EvmRoute[] }>();
+/** The most fit routes kept a token: one round's worth (a warm Robinhood AI quote asked 15). */
+const EVM_FITS_KEPT = 32;
 const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null, r.state ?? null, r.tx ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
 const SCAN_TOKENS = 4096;
 const SCAN_MAX_LOGS = 10_000;
@@ -2184,6 +2197,7 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   // each field read once (review of 4830f1f, L: a getter could name one chain for the held head and another for the reads)
   const pools = req.pools;
   const banned = req.banned;
+  const later = req.later === true;
   const asked: EvmPoolBuyQuoteRequest = { chain: req.chain, token: req.token, amountIn: req.amountIn, slippageBps: req.slippageBps, route: req.route, ...(pools === undefined ? {} : { pools }), ...(banned === undefined ? {} : { banned }) };
   const { chain } = asked;
   const v = venue(chain);
@@ -2192,7 +2206,7 @@ export async function evmPoolBuyQuote(req: EvmPoolBuyQuoteRequest): Promise<EvmP
   let watch = WATCHES.get(chain);
   if (watch === undefined) WATCHES.set(chain, (watch = evmHeadWatch(() => evmProviders(evmRanked(p), fetch), v.maxLag)));
   // a scan's answer is a list of logs, bounded by the scan provider's own cap per request (16 MiB read at most)
-  return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch), Date.now(), scansOf(v.scan), watch);
+  return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch, later), Date.now(), scansOf(v.scan, later), watch);
 }
 
 // Each pinned provider's measured speed (card evm-quote-warm-round): its time to answer a batch, an average that weighs
@@ -2258,8 +2272,9 @@ export function evmRanked(urls: readonly string[], now: number = performance.now
 
 /** Each provider evmProviders made, its URL: the gate takes the venue's in-flight pin for it (gated). */
 const URL_OF = new WeakMap<EvmRpc, string>();
-/** Providers from https URLs on different hosts, at least two, each timed for evmRanked. */
-export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): EvmRpc[] {
+/** Providers from https URLs on different hosts, at least two, each timed for evmRanked; `later`: a background read's
+ *  (evmJsonRpc). */
+export function evmProviders(urls: readonly string[], fetchFn: typeof fetch, later = false): EvmRpc[] {
   if (!Array.isArray(urls) || urls.length < 2) return refuse("bad_request", "two provider URLs at least");
   const hosts = urls.map((u) => {
     let h: string;
@@ -2273,7 +2288,7 @@ export function evmProviders(urls: readonly string[], fetchFn: typeof fetch): Ev
   });
   if (new Set(hosts).size !== hosts.length) return refuse("bad_request", "two providers are on one host");
   return urls.map((u) => {
-    const f = timed(u, evmJsonRpc(u, fetchFn));
+    const f = timed(u, evmJsonRpc(u, fetchFn, undefined, undefined, later));
     URL_OF.set(f, u);
     HELD_OF.set(f, () => speedOf(u).held > performance.now() || evmProviderHeld(u));
     return f;
@@ -2356,12 +2371,14 @@ async function readAgreed(confirm: () => Promise<void>, rpcs: readonly EvmRpc[],
  *  per request (16 MiB read at most). One rpc per URL for this module's life, so a throttle's hold (SCAN_HELD) outlives
  *  the quote that met it; each request takes the global fetch as it is sent. */
 const SCAN_RPCS = new Map<string, EvmRpc>();
-const scanRpcOf = (u: string): EvmRpc => {
-  let r = SCAN_RPCS.get(u);
-  if (r === undefined) SCAN_RPCS.set(u, (r = evmJsonRpc(u, ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)) as typeof fetch, 16 << 20)));
+// a background read's scan its own rpc per URL (`later`); a throttle either meets holds the provider for both (pace.ts)
+const scanRpcOf = (u: string, later = false): EvmRpc => {
+  const k = later ? `later ${u}` : u;
+  let r = SCAN_RPCS.get(k);
+  if (r === undefined) SCAN_RPCS.set(k, (r = evmJsonRpc(u, ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)) as typeof fetch, 16 << 20, undefined, later)));
   return r;
 };
-const scansOf = (s: EvmPoolVenue["scan"]): EvmRpc[] | undefined => (s === undefined ? undefined : [s.url, ...(s.spares ?? []).map((x) => x.url)].map(scanRpcOf));
+const scansOf = (s: EvmPoolVenue["scan"], later = false): EvmRpc[] | undefined => (s === undefined ? undefined : [s.url, ...(s.spares ?? []).map((x) => x.url)].map((u) => scanRpcOf(u, later)));
 
 /** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
  *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
@@ -2413,6 +2430,19 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     return fitReads.get(r)!;
   };
   let ownFit = -1;
+  // The last quote's swap-fit reads for this token and amount (card evm-warm-tap-ends-inside-two-seconds): within
+  // EVM_WARM_RANGE_S of its block, each is read again at this quote's own block beside the first round (used only once
+  // that round's block confirmation passed: bestFits runs after routeSet), so a warm quote's
+  // best route that fits needs no round of its own (its fit reads ran a fourth round, about 250 to 600 ms of a warm
+  // Robinhood AI tap, mainnet from the Mac 2026-11-15 23:5xZ). Each is the same read bestFits would send (fitRead at
+  // the agreed block's hash), on both providers as every read is; what it answers is used only as bestFits would use it
+  const fitsKey = `${chain}:${lower(token)}:${amountIn}`;
+  const fitsKept = FITS.get(fitsKey);
+  // read beside the first round, never in it: a read only this quote's reuse asks never refuses the quote (an answer
+  // that fails or differs leaves its fit unknown, and bestFits asks it as before)
+  let fitsEarly: Promise<{ reads: Read[]; a: Answer[] } | null> = Promise.resolve(null);
+  // the routes whose fits this quote read or used, kept for the next quote (bestFits)
+  const fitsUsed = new Map<string, EvmRoute>();
   const wethStart = !startsNative(route);
   const firstOut = route.venue === "uniswap-v3" ? route.tokens[1]! : route.hops[0]!.currency;
   const firstHop: { at: number; twice: number }[] = [];
@@ -2444,6 +2474,17 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     atBlock: (b) => {
       fitAt = b.hash;
       if (fitOf(route) !== null) ownFit = reads.push(fitOf(route)!) - 1;
+      if (fitsKept !== undefined && b.timestamp >= fitsKept.ts && b.timestamp - fitsKept.ts <= EVM_WARM_RANGE_S) {
+        const sent = new Set(ownFit >= 0 ? [reads[ownFit]!.data] : []);
+        const early: Read[] = [];
+        for (const r of fitsKept.routes) {
+          const x = fitOf(r);
+          if (x === null || sent.has(x.data)) continue;
+          sent.add(x.data);
+          early.push(x);
+        }
+        if (early.length > 0) fitsEarly = readBoth(rpcs, b.hash, early, v.reads).then((a) => ({ reads: early, a }), () => null);
+      }
     },
     beforeFound: () => {
       if (v.nativeFirst && wethStart && v.v4 !== undefined && lower(firstOut) !== lower(token)) {
@@ -2530,9 +2571,15 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   if (ownFit >= 0) fit.set(reads[ownFit]!.data, out(ownFit) !== null);
   const fits = (r: EvmRoute) => {
     const x = fitOf(r);
-    return x === null ? false : fit.get(x.data);
+    if (x === null) return false;
+    const f = fit.get(x.data);
+    if (f !== undefined && r !== route) fitsUsed.set(x.data, r);
+    return f;
   };
   const bestFits = async (lists: readonly { l: readonly Filled[]; band: (c: Filled) => boolean }[]) => {
+    // the early fits, read at this quote's own block (fitOf builds each at its hash): answered as this reads them
+    const early = await fitsEarly;
+    if (early !== null) early.reads.forEach((r, i) => fit.has(r.data) || fit.set(r.data, early.a[i]!.kind === "out"));
     for (let round = 0; ; round++) {
       const ask = new Map<string, Read>();
       for (const { l, band } of lists) {
@@ -2540,9 +2587,18 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
         if (b === null || fits(b.route) !== undefined) continue;
         const unknown = l.filter((c) => fits(c.route) === undefined);
         const first = unknown.filter(band);
-        for (const c of round === 0 && first.length > 0 ? first : unknown) ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
+        for (const c of round === 0 && first.length > 0 ? first : unknown) {
+          ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
+          if (c.route !== route) fitsUsed.set(fitOf(c.route)!.data, c.route);
+        }
       }
-      if (ask.size === 0) return lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
+      if (ask.size === 0) {
+        const r = lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
+        FITS.delete(fitsKey);
+        FITS.set(fitsKey, { ts: block.timestamp, routes: [...fitsUsed.values()].slice(0, EVM_FITS_KEPT) });
+        while (FITS.size > PLANS_MAX) FITS.delete(FITS.keys().next().value!);
+        return r;
+      }
       const asked = [...ask.values()];
       const a = await readBoth(rpcs, block.hash, asked, v.reads);
       asked.forEach((r, i) => fit.set(r.data, a[i]!.kind === "out"));
@@ -4766,6 +4822,8 @@ const reverted = (a: unknown) => {
 const CONNECT_ERRORS = new Set(["ETIMEDOUT", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"]);
 /** Each evmJsonRpc provider's URL: its hold (pace.ts) is read by every reader that holds the provider object. */
 const RPC_URL = new WeakMap<EvmRpc, string>();
+/** The evmJsonRpc providers whose posts are a background read's (pace.ts `later`). */
+const RPC_LATER = new WeakSet<EvmRpc>();
 /** Whether `rpc`'s provider is held for every reader (a 429, a named rate limit or a refused connection, any reader's). */
 const providerHeld = (rpc: EvmRpc): boolean => {
   const u = RPC_URL.get(rpc);
@@ -4774,7 +4832,7 @@ const providerHeld = (rpc: EvmRpc): boolean => {
 /** Whether a post of `calls` to an evmJsonRpc provider leaves now, with no wait for its pace's turn (pace.ts). */
 const providerReady = (rpc: EvmRpc, calls: readonly EvmRpcCall[]): boolean => {
   const u = RPC_URL.get(rpc);
-  return u === undefined || evmPaceReady(u, calls);
+  return u === undefined || evmPaceReady(u, calls, performance.now(), RPC_LATER.has(rpc));
 };
 /** How long an evmJsonRpc provider is still held for every reader, in ms (0: not held, or not an evmJsonRpc provider):
  *  the pool index's readers, which have no other provider to ask, wait it out (pool-index.ts). */
@@ -4784,12 +4842,14 @@ export const evmRpcHeldMs = (rpc: EvmRpc): number => {
 };
 /** Each JSON-RPC request's time limit (the NEAR client's RPC_TIMEOUT_MS and Solana's SOLANA_CALL_TIMEOUT_MS do the same). */
 export const EVM_RPC_TIMEOUT_MS = 10_000;
-/** A provider from a JSON-RPC URL: one POST per batch, answers matched to calls by id, at most `maxBytes` read. */
-export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes = 1 << 20, timeoutMs = EVM_RPC_TIMEOUT_MS): EvmRpc {
+/** A provider from a JSON-RPC URL: one POST per batch, answers matched to calls by id, at most `maxBytes` read;
+ *  `later`: its posts are a background read's, which take their turn at the provider's pace after every trade's
+ *  (pace.ts). */
+export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes = 1 << 20, timeoutMs = EVM_RPC_TIMEOUT_MS, later = false): EvmRpc {
   if (typeof url !== "string" || !/^https:\/\//.test(url)) return refuse("bad_request", "a provider URL is https");
   const rpc: EvmRpc = async (calls, until) => {
     // the provider's turn at its pace, shared by every reader on the device (pace.ts); its time is not the request's
-    const turn = evmPaceTake(url, calls, until);
+    const turn = evmPaceTake(url, calls, until, later);
     const give = typeof turn === "function" ? turn : await turn;
     try {
       return await post(calls, until);
@@ -4798,6 +4858,7 @@ export function evmJsonRpc(url: string, fetchFn: typeof fetch = fetch, maxBytes 
     }
   };
   RPC_URL.set(rpc, url);
+  if (later) RPC_LATER.add(rpc);
   return rpc;
   async function post(calls: readonly EvmRpcCall[], until?: AbortSignal): Promise<unknown[]> {
     const body = JSON.stringify(calls.map((c, id) => ({ jsonrpc: "2.0", id, method: c.method, params: c.params })));

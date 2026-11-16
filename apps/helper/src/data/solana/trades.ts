@@ -51,9 +51,9 @@
 // Display only: nothing here feeds a signature. Every provider value is hostile: bounded answers, decoders that check
 // every byte they read (decode.ts), PumpSwap pools taken only when the PumpSwap program owns them and their base mint
 // is the token, bounded books, subscriptions and caches.
-import { change4h, createBook, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
+import { change4h, createBook, joinBars, TF_SECONDS, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
-import { type DataAnswer } from "./token.ts";
+import { HELD_WAIT_MS, type DataAnswer } from "./token.ts";
 import { cutTrades, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 import { CREDITS, type Slot } from "../../rpc/slot.ts";
 
@@ -86,6 +86,21 @@ export const REF_MS = 5_000;
 export const REF_STALE_S = 120;
 export const IDLE_MS = 60_000;
 export const OPEN_MAX = 40;
+/** Card helper-listed-charts-own-reads round 3: a listed coin whose history answers no bars (404, an empty list) or is
+ *  refused or still filling has its own signatures read back before its walk's oldest, in COLD_PAGE pages, until the
+ *  bars a chart asked for, the coin's first signature, BACK_SPAN_S or BACK_TX_MAX transactions. GTA6 (2gVNeu8d...pump)
+ *  on 16 Nov 00:37Z: a month old, 1,557 trades a day on PumpSwap, no top pool on GeckoTerminal and an empty OHLCV for its
+ *  pool; the deployed helper answered it 1 bar, src chain, from the walk's newest COLD_SIGS. [design: a day, the
+ *  handover's KEPT_HANDOVER_MS; a chart of a coin older than that opens on a day of its own bars] */
+export const BACK_SPAN_S = 86_400;
+/** The transactions one read back reads at most. [design: 3,000, about two of GTA6's days; at TX_PARALLEL a time on the
+ *  public endpoints a few minutes of background reads, its chart filling meanwhile] */
+export const BACK_TX_MAX = 3_000;
+/** Read backs at once across every token, so a burst of listed coins (a deploy's live run opens 194 at once) never takes
+ *  the public endpoints from the walks' and callers' reads. [design: two of the walks' TX_PARALLEL] */
+export const BACK_PARALLEL = 2;
+/** A read back's place in a slot: below the walks' and the stream's (a counter from 1), never a clash of order. */
+const BACK_INDEX = 1e12;
 export const REPORT_MS = 60_000;
 const QUOTES_MAX = 200;
 export const TRADES_MAX = 50;
@@ -354,7 +369,13 @@ type Entry = {
   /** Transactions the stream or a walk gave for this token, and how many held a trade of it (the log's why). */
   seen: number;
   traded: number;
+  /** The oldest signature the first walk read (the read back starts before it), null when it listed none; undefined
+   *  until the first walk listed its signatures. */
+  oldest?: string | null;
+  /** Its own signatures read back (BACK_SPAN_S), or undefined when none was asked. */
+  back?: Back;
 };
+type Back = { before: string | null; events: Swap[]; book: Book | null; done: boolean; txs: number; n: number; want: { tf: Tf; limit: number } };
 
 export function createSolanaTrades(deps: {
   fetch?: Fetch;
@@ -640,6 +661,8 @@ export function createSolanaTrades(deps: {
       .filter((s) => ok(s) && !e.held.has(s.signature))
       .slice(cold ? -COLD_SIGS : 0)
       .map((s) => ({ ...s, order: ++seq }));
+    // the read back starts before the oldest the first walk reads (its older page's signatures not read included)
+    if (cold) e.oldest = todo[0]?.signature ?? sigs[0]?.signature ?? null;
     for (let k = todo.length; k > 0; k -= TX_PARALLEL) {
       await Promise.all(
         todo.slice(Math.max(0, k - TX_PARALLEL), k).map(async (s) => {
@@ -815,6 +838,122 @@ export function createSolanaTrades(deps: {
     return e;
   }
 
+  /** The quote a book of `q` is priced in, and its USD price in force (none for USDC), or null while it has none. */
+  function quoteCfg(q: string): { quote: { kind: "usd" | "eth"; decimals: number }; ref: bigint | null } | null {
+    if (q === WSOL) return solUsd === null ? null : { quote: { kind: "eth", decimals: 9 }, ref: solUsd.v };
+    if (q === USDC) return { quote: { kind: "usd", decimals: 6 }, ref: null };
+    const k = quotes.get(q);
+    return k?.decimals == null || k.usd == null ? null : { quote: { kind: "eth", decimals: k.decimals }, ref: k.usd };
+  }
+  /** The read back's trades folded into a book of their own, priced at the quote's price in force now: the price of
+   *  the walk's own first trades, the one a past price is not read for. */
+  function backBook(e: Entry, b: Back): void {
+    const cfg = e.quoteMint === null ? null : quoteCfg(e.quoteMint);
+    if (cfg === null || b.events.length === 0) return;
+    const sorted = b.events.slice().sort((x, y) => x.block - y.block || x.index - y.index);
+    const swaps = sorted.filter((ev, k) => k === 0 || ev.block !== sorted[k - 1]!.block || ev.index !== sorted[k - 1]!.index);
+    const events: Event[] = cfg.ref === null ? swaps : [{ kind: "ref", block: swaps[0]!.block, index: -1, ethUsd: cfg.ref }, ...swaps];
+    const book = createBook({ decimals: e.decimals, quote: cfg.quote });
+    book.ingest(events[0]!.block, events, events.at(-1)!.block);
+    b.book = book;
+  }
+  /** One read back (BACK_SPAN_S): pages of COLD_PAGE signatures before the oldest read, each successful one's
+   *  transaction read TX_PARALLEL at a time and its trades held, the book built after each page; a page that fails is
+   *  asked again a second on, three times at most. */
+  async function readBack(e: Entry): Promise<void> {
+    const b = e.back!;
+    const floor = Math.floor(now() / 1000) - BACK_SPAN_S;
+    const ok = (x: { err: unknown }): boolean => x.err === null || x.err === undefined;
+    let fails = 0;
+    while (entries.get(e.mint) === e && !b.done) {
+      let page: unknown;
+      try {
+        page = await rpc("getSignaturesForAddress", [e.mint, { limit: COLD_PAGE, commitment: "confirmed", ...(b.before === null ? {} : { before: b.before }) }]);
+      } catch {
+        if (++fails >= 3) return;
+        await new Promise((r) => setTimeout(r, 1_000).unref?.());
+        continue;
+      }
+      if (!Array.isArray(page)) return;
+      const sigs = (page as Record<string, unknown>[])
+        .filter((x) => typeof x?.signature === "string" && Number.isSafeInteger(x.slot))
+        .map((x) => ({ signature: x.signature as string, slot: x.slot as number, err: x.err, t: Number.isSafeInteger(x.blockTime) ? (x.blockTime as number) : null }));
+      if (sigs.length > 0) b.before = sigs.at(-1)!.signature;
+      const todo = sigs.filter(ok).map((x) => ({ ...x, n: ++b.n }));
+      // a transaction not read (every provider held or failing) is asked again a second on, three times; still unread,
+      // the read back ends at the newest one, its older trades dropped, so the bars read back have no hole in them
+      const one = async (x: (typeof todo)[number]): Promise<boolean> => {
+        const r = (await rpc("getTransaction", [x.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]).catch(() => null)) as Record<string, unknown> | null;
+        if (r === null) return false;
+        const f = fromLogs(((r.meta ?? {}) as Record<string, unknown>).logMessages);
+        const got = await forMint(e.mint, f.truncated ? cutTrades(f, r) : f.trades, blockTime(r) ?? x.t ?? Math.floor(now() / 1000));
+        let i = 0;
+        for (const t of got) {
+          if (t.quoteMint !== e.quoteMint) continue;
+          b.events.push({ kind: "swap", block: x.slot, index: BACK_INDEX - x.n * 8 + Math.min(i++, 7), tx: x.signature, t: t.ts, side: t.side, amt: t.amt, quote: t.quote });
+        }
+        return true;
+      };
+      let hole: number | null = null;
+      for (let k = 0; k < todo.length && b.txs < BACK_TX_MAX && entries.get(e.mint) === e && hole === null; k += TX_PARALLEL) {
+        let chunk = todo.slice(k, Math.min(k + TX_PARALLEL, k + BACK_TX_MAX - b.txs));
+        b.txs += chunk.length;
+        for (let attempt = 0; chunk.length > 0; attempt++) {
+          const read = await Promise.all(chunk.map(one));
+          chunk = chunk.filter((_, j) => !read[j]);
+          if (chunk.length === 0) break;
+          if (attempt === 2) {
+            hole = Math.min(...chunk.map((x) => x.n));
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 1_000).unref?.());
+        }
+      }
+      if (hole !== null) {
+        const n = hole;
+        b.events = b.events.filter((ev) => Math.ceil((BACK_INDEX - ev.index) / 8) < n);
+        b.done = true;
+      }
+      backBook(e, b);
+      const oldestT = sigs.at(-1)?.t ?? null;
+      const enough = b.book !== null && b.book.candles(b.want.tf, null, b.want.limit).length >= b.want.limit;
+      if (sigs.length < COLD_PAGE || b.txs >= BACK_TX_MAX || (oldestT !== null && oldestT < floor) || enough) b.done = true;
+    }
+  }
+  let backs = 0;
+  const backQueue: Entry[] = [];
+  /** Starts the queued read backs, BACK_PARALLEL at once. */
+  function startBacks(): void {
+    while (backs < BACK_PARALLEL && backQueue.length > 0) {
+      const e = backQueue.shift()!;
+      if (entries.get(e.mint) !== e || e.back === undefined) continue;
+      backs++;
+      void readBack(e)
+        .catch(() => undefined)
+        .finally(() => {
+          e.back!.done = true;
+          backs--;
+          startBacks();
+        });
+    }
+  }
+  /** Asks `e`'s read back once (a read back done is not asked again while the token stays open); the widest chart asked
+   *  for sets when it has read enough. */
+  function wantBack(e: Entry, tf: Tf, limit: number): void {
+    if (e.back !== undefined) {
+      if (!e.back.done && TF_SECONDS[tf] * limit > TF_SECONDS[e.back.want.tf] * e.back.want.limit) e.back.want = { tf, limit };
+      return;
+    }
+    if (e.oldest === undefined || e.book === null || e.quoteMint === null) return;
+    e.back = { before: e.oldest, events: [], book: null, done: e.oldest === null, txs: 0, n: 0, want: { tf, limit } };
+    if (e.back.done) return;
+    if (backQueue.length < OPEN_MAX) backQueue.push(e);
+    else e.back.done = true;
+    startBacks();
+  }
+  /** Whether `e`'s read back is still reading. */
+  const backing = (e: Entry): boolean => e.back !== undefined && !e.back.done;
+
   const opening = new Map<string, Promise<Entry | DataAnswer>>();
   async function open(mint: string): Promise<Entry | DataAnswer> {
     // a first read in flight is joined before the entry is looked at: first() holds the entry from its mint read on, but
@@ -863,7 +1002,21 @@ export function createSolanaTrades(deps: {
       if (mint === null || !(TFS as readonly string[]).includes(tf) || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       // a mint the lists do not hold has no bars of ours: its candles are the history source's own answer, as before
       if (!entries.has(mint) && deps.history !== undefined && (await deps.listed(mint)) !== true) return deps.history(mint, tf, to, limit, client);
-      const e = await open(mint);
+      const opening = open(mint);
+      // card helper-listed-charts-own-reads round 3: a walk still opening (its first round waits up to COLD_WAIT_MS) and
+      // the history's bars held answer now, filling, and the walk goes on; the page reads a filling chart again 2 s on
+      // (warm live run of 16 Nov 00:33Z: Solana's listed charts p95 4,241 ms)
+      const quick = <T,>(p: Promise<T>) => Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+      if (deps.history !== undefined && tf !== "1s" && (await quick(opening)) === null) {
+        const h = await quick(deps.history(mint, tf, to, limit, client).catch(() => null));
+        const hb = h?.status === 200 ? (JSON.parse(h.body) as { candles?: Candle[]; filling?: boolean }) : null;
+        if (h != null && (hb?.candles?.length ?? 0) > 0) {
+          opening.catch(() => undefined);
+          const src = h.src ?? "geckoterminal";
+          return { ...h, body: JSON.stringify({ tf, candles: hb!.candles!.slice(-limit), src, filling: true, as_of_ms: h.asOfMs ?? now() }), src };
+        }
+      }
+      const e = await opening;
       // card helper-candles-never-refuse-a-listed-coin: a token whose walk cannot open (OPEN_MAX walks open, its 429; or
       // nothing held yet, 503) is served the history source's chart, held ahead for every listed coin off our venues
       // (token.ts ahead), as a token off the lists is, never a refusal while those bars answer
@@ -874,32 +1027,39 @@ export function createSolanaTrades(deps: {
       }
       const own: Candle[] = e.book === null ? [] : e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book === null ? null : e.book.ownFrom(tf as Tf);
-      let bars = own;
+      // our own reads: the read back's bars (wantBack) before the walk's, one bar where a bucket holds both
+      const backBars = tf === "1s" || e.back?.book == null ? [] : e.back.book.candles(tf as Tf, to, limit);
+      const mine = joinBars(backBars, own).slice(-limit);
+      let bars = mine;
       let src = "chain";
       // the history before our first bar refused, failed or itself still filling: the answer says filling, so the page
       // reads it again while that read goes on, never a short chart drawn as the coin's whole (one rule with swaps.ts
       // candles, card helper-listed-charts-own-reads)
       let short = false;
-      if (own.length < limit && tf !== "1s" && deps.history !== undefined) {
+      if (mine.length < limit && tf !== "1s" && deps.history !== undefined) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // with no bars of ours the history's newest range is asked as such (`to` null: one cache key, not one per second)
         const h = await deps.history(mint, tf, ownFrom === null ? to : before, limit, client).catch(() => UPSTREAM);
         // nothing of ours and no history to serve: the history's 429 or 503, so the page retries, never an empty chart
         // while its fill is owed (card evm-chart-opens-without-a-vendor-call: live run 42995547054 read an empty 200
         // for sUSDai's 1h at 09:29:51Z, 101 bars at 09:50Z; one rule with the EVM chains' candles, swaps.ts)
-        if (own.length === 0 && h.status !== 200 && h.status !== 404) return h;
         const hb = h.status === 200 ? (JSON.parse(h.body) as { candles?: Candle[]; filling?: boolean }) : null;
         short = (h.status !== 200 && h.status !== 404) || hb?.filling === true;
-        const old = (hb?.candles ?? []).filter((c) => c[0] < before);
+        const old = (hb?.candles ?? []).filter((c) => c[0] < (backBars.length > 0 ? Math.min(backBars[0]![0], before) : before));
+        // no bars before ours from the history (none, 404, refused or filling): our own signatures are read back
+        if (old.length === 0) wantBack(e, tf as Tf, limit);
+        if (mine.length === 0 && h.status !== 200 && h.status !== 404) return h;
         if (old.length > 0) {
-          bars = old.concat(own).slice(-limit);
+          bars = old.concat(mine).slice(-limit);
+          // the history came in and fills the chart: the read back is not needed
+          if (bars.length >= limit && e.back !== undefined) e.back.done = true;
           src = `chain,${h!.src ?? "geckoterminal"}`;
         }
       }
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
-      if (short && bars.length < limit) body.filling = true;
+      if ((short || backing(e)) && bars.length < limit) body.filling = true;
       body.as_of_ms = at;
       return { status: 200, body: JSON.stringify(body), src, asOfMs: at };
     },

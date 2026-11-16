@@ -16,6 +16,8 @@ import { ASK, COST, POOL, TO, closers, world } from "./pool-withdraw-world.ts";
 after(() => closers.forEach((c) => c()));
 
 const AFTER_MS = 2_000;
+/** The exit's deposit address on Solana (a quote's, as the exit answers it). */
+const DEPOSIT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 const throttle = (): SolanaRpcTransportError => new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc.example", AFTER_MS);
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 40; i++) await new Promise((ok) => setImmediate(ok));
@@ -79,16 +81,68 @@ test("a part's pool read throttled once before it signs: the part is made again 
 test("the exit's deposit address busy once (HTTP 429): asked again after the wait, the run pays the address", async (t) => {
   const c = clock(t);
   const wd = await world([30_000_000n], { wait: c.wait });
-  const DEPOSIT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
-  let asked = 0;
-  const exit = async (): Promise<string> => {
-    if (asked++ === 0) throw new ReadBusy(429);
+  const refunds: string[] = [];
+  const exit = async (w: string): Promise<string> => {
+    if (refunds.push(w) === 1) throw new ReadBusy(429);
     return DEPOSIT;
   };
   const { v: a } = await c.drive(runPoolWithdraw({ ...wd.host, exit }, ASK, TO, 2_000_000n, COST));
   assert.equal(a.stage, "sent", a.cause);
-  assert.equal(asked, 2);
+  assert.equal(refunds.length, 2);
+  assert.equal(refunds[1], refunds[0], "asked again with the same W: no quote names a W the withdraw does not use");
   assert.equal(wd.balance.get(DEPOSIT), 2_000_000n);
+});
+
+test("the exit's busy answer with a Retry-After of 3 s: the run waits those 3 s (the page's one rule, as a provider's), then asks again", async (t) => {
+  const c = clock(t);
+  const wd = await world([30_000_000n], { wait: c.wait });
+  let asked = 0;
+  const exit = async (): Promise<string> => {
+    if (asked++ === 0) throw new ReadBusy(429, 3_000);
+    return DEPOSIT;
+  };
+  const { v: a } = await c.drive(runPoolWithdraw({ ...wd.host, exit }, ASK, TO, 2_000_000n, COST));
+  assert.equal(a.stage, "sent", a.cause);
+  assert.deepEqual(c.waits, [3_000]);
+});
+
+test("the exit answered, then To's check throttled: the run waits, checks the same address again and pays it; the exit asked once", async (t) => {
+  const c = clock(t);
+  const wd = await world([30_000_000n], { wait: c.wait });
+  const refunds: string[] = [];
+  const exit = async (w: string): Promise<string> => (refunds.push(w), DEPOSIT);
+  let n = 0;
+  const rpcs = faulty(wd.host.rpcs, (p, m, params) => (p === 0 && m === "getAccountInfo" && params[0] === DEPOSIT && n++ === 0 ? throttle() : null));
+  const { v: a } = await c.drive(runPoolWithdraw({ ...wd.host, rpcs, exit }, ASK, TO, 2_000_000n, COST));
+  assert.equal(a.stage, "sent", a.cause);
+  assert.equal(n > 1, true, "To checked again after the wait");
+  assert.ok(c.waits.includes(AFTER_MS), c.waits.join(","));
+  assert.equal(refunds.length, 1, `the exit asked ${refunds.length} times: an abandoned quote names a W`);
+  assert.equal(wd.balance.get(DEPOSIT), 2_000_000n);
+});
+
+test("a part throttled after it held its note, whose free then fails: the run stops at once naming the failed free, never a wait for a note it holds", async (t) => {
+  const c = clock(t);
+  const wd = await world([30_000_000n], { wait: c.wait });
+  let n = 0;
+  const rpcs = faulty(wd.host.rpcs, (p, m, params) => (p === 1 && m === "getAccountInfo" && params[0] === POOL && n++ === 0 ? throttle() : null));
+  const ns = await wd.host.notes();
+  let frees = 0;
+  const notes = async () =>
+    new Proxy(ns, {
+      get: (o, k) =>
+        k === "move"
+          ? (id: string, from: string, to: string, x: unknown) =>
+              from === "HELD" && to === "UNSPENT" && frees++ === 0 ? Promise.reject(new Error("the note store is closed")) : (o.move as (...a: unknown[]) => unknown).call(o, id, from, to, x)
+          : Reflect.get(o, k, o),
+    });
+  const { v: a, ms } = await c.drive(runPoolWithdraw({ ...wd.host, rpcs, notes } as typeof wd.host, ASK, TO, 2_000_000n, COST));
+  assert.equal(a.stage, "stopped");
+  assert.match(a.cause ?? "", /^Error free\b/, `the cause names the failed free: ${a.cause}`);
+  assert.equal(wd.binds.length, 1, "the part never made again");
+  assert.equal(wd.releases.length, 0);
+  assert.deepEqual(c.waits, [], "no wait");
+  assert.ok(ms < 1_000, `${ms} ms`);
 });
 
 test("throttled for good: the waits double to their 30 s bound, then the run stops with nothing bound or sent", async (t) => {
@@ -129,10 +183,13 @@ test("a sign out during the wait ends it: stopped, nothing bound, before the Ret
   assert.ok(ms < AFTER_MS, `the wait outlived the sign out (${ms} ms)`);
 });
 
-test("the exit's 1Click ask answered 429 or 503 is busy (ReadBusy), a 400 still refused", async () => {
+test("the exit's 1Click ask answered 429 or 503 is busy (ReadBusy), a 400 or a 404 still refused", async () => {
   const { poolExit, PoolExitRefused } = await import("../src/pool-exit.ts");
   const ready = { chain: "solana", dest: "base", to: "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", amount: 100_000_000n, maxFee: 1n } as const;
-  const answering = (status: number) => ({ network: "mainnet", price: () => null, now: () => 1_800_000_000_000, fetch: (async () => new Response("{}", { status, headers: { "content-type": "application/json" } })) as typeof fetch });
-  for (const status of [429, 503]) await assert.rejects(poolExit(answering(status), ready)!(TO), (e: unknown) => e instanceof ReadBusy);
-  await assert.rejects(poolExit(answering(404), ready)!(TO), (e: unknown) => e instanceof PoolExitRefused && !(e instanceof ReadBusy));
+  const answering = (status: number, after?: string) => ({ network: "mainnet", price: () => null, now: () => 1_800_000_000_000, fetch: (async () => new Response("{}", { status, headers: { "content-type": "application/json", ...(after === undefined ? {} : { "retry-after": after }) } })) as typeof fetch });
+  for (const status of [429, 503]) await assert.rejects(poolExit(answering(status), ready)!(TO), (e: unknown) => e instanceof ReadBusy && e.afterMs === null);
+  // its Retry-After carried, in seconds or as an HTTP date on the exit's clock
+  await assert.rejects(poolExit(answering(429, "3"), ready)!(TO), (e: unknown) => e instanceof ReadBusy && e.afterMs === 3_000);
+  await assert.rejects(poolExit(answering(503, new Date(1_800_000_004_000).toUTCString()), ready)!(TO), (e: unknown) => e instanceof ReadBusy && e.afterMs === 4_000);
+  for (const status of [400, 404]) await assert.rejects(poolExit(answering(status), ready)!(TO), (e: unknown) => e instanceof PoolExitRefused && !(e instanceof ReadBusy), `HTTP ${status}`);
 });

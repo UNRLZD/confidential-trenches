@@ -73,6 +73,16 @@ export function heldFault(asked, b) {
   return null;
 }
 
+/** What a candles 200 the kit takes no bars from held, for its line, so a failing run names the helper's path (live run
+ *  43785080982 job 133030981593: Robinhood DELTA "answers 200, the kit takes 0 hourly bars" said no more, and the
+ *  helper's log went with its container): its bars, `filling`, `src` and `tf`. */
+export function chartShape(text) {
+  const b = parse(text);
+  if (!isObj(b)) return "the body is not a JSON object";
+  const n = Array.isArray(b.candles) ? `${b.candles.length} bars` : `candles ${show(b.candles)}`;
+  return `the answer holds ${n}, filling ${show(b.filling)}, src ${show(b.src)}, tf ${show(b.tf)}`;
+}
+
 /** A fetch that answers one recorded read, so the kit's own parse judges what the helper sent. */
 const answering = (r) => async () => new Response(r.body, { status: r.status, headers: r.headers });
 
@@ -103,7 +113,7 @@ export async function judge(run) {
     for (const t of asked) {
       const k = c.candles?.[t] ?? { status: 0, headers: {}, body: "" };
       const bars = k.status === 200 ? await readHeldHistory(run.base, { chain, token: t }, answering(k)) : [];
-      const line = `${chain}: GET ${READS.candles(chain, t)} answers ${k.status}${waitsText(k)}, the kit takes ${bars.length} hourly bars`;
+      const line = `${chain}: GET ${READS.candles(chain, t)} answers ${k.status}${waitsText(k)}, the kit takes ${bars.length} hourly bars${k.status === 200 && bars.length === 0 ? ` (${chartShape(k.body)})` : ""}`;
       // an EVM token the lists do not carry has no history from the helper (its swap reads open only listed tokens):
       // the value line holds it at its present price, so its candles are reported, not required
       if (t === OFF_LIST[chain]) lines.push(`--  ${line} (off the lists: not required)`);

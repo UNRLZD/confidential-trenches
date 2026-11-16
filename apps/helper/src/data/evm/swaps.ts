@@ -75,11 +75,11 @@
 // opposite signs; counts, ranges and the books are bounded.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { BUCKETS_MAX, change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
+import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
-import { isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
+import { HELD_WAIT_MS, isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
@@ -2703,7 +2703,17 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (nothing || old) wantBars(e.pool.id, e.pool.token, tf, before, k, false, now());
       return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
     }
-    const got = await readBars(e.pool.id, e.pool.token, tf, before, k);
+    const reading = readBars(e.pool.id, e.pool.token, tf, before, k);
+    // card helper-listed-charts-own-reads round 3: bars held answer within HELD_WAIT_MS and the read goes on, so no
+    // answer waits on GeckoTerminal while they serve (the warm live run of 16 Nov 00:33Z: Base's listed charts p95
+    // 4,997 ms, Robinhood's 3,042 ms); one rule with the Solana charts (../solana/token.ts candles)
+    // only bars still served as fresh race the read: the newest range held past GT_SERVE_MS, served alone as the chart,
+    // waits for it (round 5, one rule with ../solana/token.ts candles); history before a time is closed bars at any age
+    const got = nothing || old ? await reading : await Promise.race([reading, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+    if (got === null) {
+      void reading.then((g) => g === "throttled" && old && wantBars(e.pool.id, e.pool.token, tf, before, k, false, now())).catch(() => undefined);
+      return fallback(UPSTREAM);
+    }
     if (got === "throttled" && (nothing || old)) wantBars(e.pool.id, e.pool.token, tf, before, k, false, now());
     return Array.isArray(got) ? got : fallback(got === "throttled" ? wait("geckoterminal 429") : UPSTREAM);
   }
@@ -3039,7 +3049,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // names their wait (Server-Timing)
       const lane = newLane(true);
       const began = performance.now();
-      const e = await openWithin(t, lane, client);
+      const opening = openWithin(t, lane, client);
+      // card helper-listed-charts-own-reads round 3: a book still opening and bars held for the token's pool answer now,
+      // and the open goes on (warm live run of 16 Nov 00:33Z: Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms).
+      // Only bars still served as fresh (read within GT_SERVE_MS) answer so, as they are, dated by their read; older ones
+      // wait for the open, never drawn as the chart with an old read time (round 5: helper live run 43794383970 served a
+      // Solana chart read 93 minutes before, two minutes after a swap). One rule with ../solana/token.ts candles.
+      const early = await Promise.race([opening, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+      if (early === null) {
+        const h = await heldChart(t, tf as Tf, to, limit);
+        if (h !== null && h.asOfMs !== undefined && now() - h.asOfMs <= GT_SERVE_MS) {
+          void opening.catch(() => undefined);
+          return withTiming(h, laneTiming(lane, performance.now() - began));
+        }
+      }
+      const e = early ?? (await opening);
       const openMs = performance.now() - began;
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
       // card helper-listed-charts-own-reads: a book still opening past its bound, or not opened while OPEN_MAX books are
@@ -3060,7 +3084,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (offScale(e, t)) return timed(await noneCandles(t, tf as Tf, to, limit, client));
       const own = e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book.ownFrom(tf as Tf);
-      let bars: Candle[] = own;
+      // card helper-listed-charts-own-reads round 4: the trades the tape read back before the book's first read
+      // (readBack) are bars of ours too, joined before the book's (../candles.ts joinBars, the Solana read back's rule),
+      // and while that read goes on the answer says filling: a cold coin's first chart is our bars or a true filling,
+      // never an empty chart because the book's first window held no trade (live run 43785080982 job 133030981593:
+      // Robinhood DELTA answered 200 with no bars two minutes after a restart; it charts 1,000 hourly bars)
+      const mine = joinBars(e.back?.tape?.candles(tf as Tf, to, limit) ?? [], own).slice(-limit);
+      let bars: Candle[] = mine;
       let src = "chain";
       // the history before our first bar refused or failed with none held: the answer says filling, so the page reads it
       // again while the queued read fills it (geckoBars), never a short chart drawn as the coin's whole (card
@@ -3068,8 +3098,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // 1m bar, src chain, after 9 reads over 90 s)
       let short = false;
       // a range we do not hold: bars before our first
-      if (own.length < limit) {
+      if (mine.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
+        const below = mine.length > 0 ? Math.min(mine[0]![0], before) : before;
         // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
         // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed),
         // and a quiet pool's bars of ours are its mark (markQuiet). With no bar of ours to serve, a refused read is
@@ -3077,18 +3108,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         // again, never a 200 with no bars for a token that has them (card market-reads-hold-under-load: Base
         // 0xfbb75a59's 1h answered 200 [] at 19:55Z; card evm-chart-opens-without-a-vendor-call: live run 42995547054)
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before, false, client);
-        if (own.length === 0 && !Array.isArray(got)) return timed(got);
+        if (mine.length === 0 && !Array.isArray(got)) return timed(got);
         short = !Array.isArray(got);
-        const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
+        const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < below);
         if (old.length > 0) {
-          bars = old.concat(own).slice(-limit);
+          bars = old.concat(mine).slice(-limit);
           src = `chain,${Array.isArray(got) ? srcOf(got) : "geckoterminal"}`;
         }
       }
       const at = e.readAt ?? now();
       const body: Record<string, unknown> = { tf, candles: bars, src };
       if (own.length > 0) body.own_from_s = own[0]![0];
-      if (short && bars.length < limit) body.filling = true;
+      if ((short || backing(e)) && bars.length < limit) body.filling = true;
       body.as_of_ms = at;
       return timed({ status: 200, body: JSON.stringify(body), src, asOfMs: at });
     },

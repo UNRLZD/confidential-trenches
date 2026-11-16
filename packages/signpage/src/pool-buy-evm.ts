@@ -416,14 +416,15 @@ export function evmMostWithCash(ready: readonly ReadyProof[], fee: bigint, pays:
 export type EvmDryQuote = Pick<EvmPoolBuyHost, "quote" | "venues" | "indexPools" | "decimals"> & { network: EvmPoolChain };
 
 /** The page's kit quote of a buy (evmBuyHost's and the dry's): the helper's pools of the token from the PoolManager's
- *  first block asked beside it (evm-served.ts), then the kit's evmPoolBuyQuote. */
-const pageQuote = (fetchFn?: typeof fetch) => (req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote> => (evmServedAsk(laneFetch(fetchFn), TRADE_HELPER, req.chain, req.token), evmPoolBuyQuote(req));
+ *  first block asked beside it (evm-served.ts), then the kit's evmPoolBuyQuote; `later`, the dry's: a background read,
+ *  each of its posts after every tap's waiting at its provider (kit pace.ts). */
+const pageQuote = (fetchFn?: typeof fetch, later = false) => (req: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote> => (evmServedAsk(laneFetch(fetchFn), TRADE_HELPER, req.chain, req.token), evmPoolBuyQuote(later ? { ...req, later } : req));
 /** The token's decimals as a buy reads them: the page's kept read on both pool RPCs, no wait (pool-kinds.ts keptTokenDecimals). */
 const pageDecimals = (chain: Chain, rpcs: readonly [EvmRpc, EvmRpc]) => (token: string): Promise<number> => keptTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc], { waits: 0 });
 
 /** The dry's quote host on the page: the buy's own quote and decimals (evmBuyHost) on the chain's pinned pool. */
 export function evmDryQuote(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], fetchFn?: typeof fetch): EvmDryQuote {
-  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn), indexPools: evmPoolIndexPools, decimals: pageDecimals(chain, rpcs) };
+  return { network: pin.network, venues: evmPoolVenues(), quote: pageQuote(fetchFn, true), indexPools: evmPoolIndexPools, decimals: pageDecimals(chain, rpcs) };
 }
 
 /** pool.buy.dry's `out` on Base and Robinhood: one tap quote (quoteOf, three kit quotes at most, no retry) of `amountIn`

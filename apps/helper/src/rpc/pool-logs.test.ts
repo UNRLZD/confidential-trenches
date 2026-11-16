@@ -25,6 +25,9 @@ const POOL = "0xaa080e74ec99cf5c684548c77ca145edfcf899cf";
 const FROM = 54_325_671;
 /** The finalized head: 30,000 blocks of pool life, 300 of dRPC's pages, three times what the route's pages reach. */
 let FINAL = FROM + 29_999;
+/** Every provider's head read refused (429), as on 16 Nov when dRPC's keys were held; and URLs that refuse everything. */
+let HEAD_DOWN = false;
+const DOWN = new Set<string>();
 const A = `0x${"a1".repeat(32)}`;
 const B = `0x${"b2".repeat(32)}`;
 const hex = (n: number): string => `0x${n.toString(16)}`;
@@ -47,6 +50,7 @@ function world(override?: (url: string, from: number, to: number, fill: boolean)
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     const req = JSON.parse(String(init.body)) as { id: unknown; method: string; params: unknown[] };
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    if (DOWN.has(url) || (HEAD_DOWN && req.method === "eth_getBlockByNumber")) return new Response("{}", { status: 429, headers: { "retry-after": "30", "content-type": "application/json" } });
     if (req.method === "eth_getBlockByNumber") return json({ jsonrpc: "2.0", id: req.id, result: { number: hex(FINAL), hash: `0x${"ab".repeat(32)}` } });
     if (req.method !== "eth_getLogs") return json({ jsonrpc: "2.0", id: req.id, result: "0x1" });
     const f = req.params[0] as { fromBlock: string; toBlock: string; topics?: string[][] };
@@ -222,4 +226,173 @@ test("the cold fill, named: Base's pool on 16 Nov is 36,480 pages of 100 blocks,
   assert.equal(POOL_FILL_PER_S, 6);
   assert.equal(Math.round(pages / POOL_FILL_PER_S! / 60), 101);
   assert.ok(pages * 20 < 0.04 * 3 * 7_000_000);
+});
+
+test("the fill never costs a caller a 429: callers at 140 reads a 10 s on Base's keyed route (its total 155) from six addresses, each under its share, while the store fills, are all answered; the fill draws none of the route's total and still moves", async () => {
+  FINAL = FROM + 29_999;
+  // a fake clock whose timers fire only as the test moves it (the fill and the callers wait on the same clock)
+  let clock = 1_800_000_000_000;
+  const timers: { at: number; ok: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((ok) => void timers.push({ at: clock + Math.max(0, ms), ok }));
+  const w = world();
+  const r = createRpc(BASE_ENV, { ...w.deps, now: () => clock, sleep });
+  const turns = async (n: number) => {
+    for (let i = 0; i < n; i++) await new Promise((ok) => setImmediate(ok));
+  };
+  const step = async (ms: number) => {
+    clock += ms;
+    for (const t of timers.filter((x) => x.at <= clock)) timers.splice(timers.indexOf(t), 1), t.ok();
+    await turns(3);
+  };
+  const cold = read(r, wideBody(1, FROM, FINAL));
+  for (let i = 0; i < 50 && !w.fills().length; i++) await step(10);
+  assert.equal(resultOf(await cold).error?.code, -32602);
+  assert.ok(w.fills().length > 0, "the fill started");
+  const pages0 = w.fills().length;
+  const answers: Promise<{ status: number; body: string }>[] = [];
+  const clients = ["203.0.113.21", "203.0.113.22", "203.0.113.23", "203.0.113.24", "203.0.113.25", "203.0.113.26"];
+  for (let s = 0; s < 30; s++) {
+    // 14 reads in each second, spread over it, each client 14 / 6 a second (about 23 a 10 s, under its share of 30)
+    for (let k = 0; k < 14; k++) {
+      answers.push(r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: s * 100 + k, method: "eth_blockNumber", params: [] }), clients[(s * 14 + k) % clients.length], false, true));
+      await step(70);
+    }
+    await step(20);
+  }
+  for (let i = 0; i < 400; i++) await step(10);
+  const got = await Promise.all(answers);
+  const refused = got.map((a, i) => [i, a.status, a.body] as const).filter(([, s]) => s !== 200);
+  assert.deepEqual(refused.slice(0, 5), [], `${refused.length} of ${got.length} caller reads refused`);
+  assert.ok(w.fills().length - pages0 >= 100, `the fill moved on meanwhile (${w.fills().length - pages0} pages in 30 s)`);
+});
+
+/** A fake clock whose timers fire only as the test moves it: a helper on it stands still (as if stopped) between steps. */
+function scheduler() {
+  let clock = 1_800_000_000_000;
+  const timers: { at: number; ok: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((ok) => void timers.push({ at: clock + Math.max(0, ms), ok }));
+  const step = async (ms: number) => {
+    clock += ms;
+    for (const t of timers.filter((x) => x.at <= clock)) timers.splice(timers.indexOf(t), 1), t.ok();
+    for (let i = 0; i < 3; i++) await new Promise((ok) => setImmediate(ok));
+  };
+  return { now: () => clock, sleep, step };
+}
+const FILLING = /^pool logs kept to block (\d+)$/;
+
+// live 16 Nov 02:48-03:12Z (run 43794383970): the fill's 429s held dRPC's keys, the helper's own head read was held with
+// them, and the store's part was skipped: the whole-range read got the route's bare cap, no `data`, which the check reads
+// as FAIL. A whole-range pool read never answers a range error without the store's progress
+test("a whole-range pool read never answers a bare range cap: the helper's head read refused (its keys held), the store's progress is still named", async () => {
+  FINAL = FROM + 29_999;
+  const w = world();
+  const r = createRpc(BASE_ENV, w.deps);
+  await read(r, wideBody(1, FROM, FINAL));
+  assert.match(await w.filled(), /covered to 54355670$/);
+  // the head moves 20,000 blocks on and the helper can no longer read it
+  FINAL += 20_000;
+  w.tick(20_000);
+  HEAD_DOWN = true;
+  try {
+    const a = resultOf(await read(r, wideBody(2, FROM, FINAL)));
+    assert.equal(a.error?.code, -32602, JSON.stringify(a).slice(0, 300));
+    assert.match(a.error!.message, /maximum block range: 10000$/, "the route's reach, in the words the wallet reads");
+    assert.equal(a.error?.data, `pool logs kept to block ${FROM + 29_999}`, "the filling shape: how far the store is");
+    // within the store: answered from it, head read or not
+    const n = w.sent.length;
+    assert.deepEqual(resultOf(await read(r, wideBody(3, FROM, FROM + 29_999))).result, logsIn(FROM, FROM + 29_999));
+    assert.equal(w.sent.length, n, "from the store alone");
+  } finally {
+    HEAD_DOWN = false;
+  }
+});
+
+test("a provider's own range cap on the tail past the store is never passed through: the route's cap in the filling shape", async () => {
+  FINAL = FROM + 29_999;
+  // the tail within the route's reach, but every provider answers a caller's page of it with its own cap, at 200
+  const w2 = world((_url, _from, _to, fill) => (fill ? undefined : new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "query exceeds max block range 50" } }), { status: 200, headers: { "content-type": "application/json" } })));
+  const r2 = createRpc(BASE_ENV, w2.deps);
+  await read(r2, wideBody(1, FROM, FINAL));
+  await w2.filled();
+  FINAL += 250;
+  w2.tick(20_000);
+  const b = resultOf(await read(r2, wideBody(4, FROM, FINAL)));
+  assert.equal(b.error?.code, -32602, JSON.stringify(b).slice(0, 300));
+  assert.match(b.error!.message, /^eth_getLogs range too wide, maximum block range: 50$/, "the provider's span in the route's words, never its own");
+  assert.equal(b.error?.data, `pool logs kept to block ${FROM + 29_999}`);
+});
+
+// live 16 Nov: about 80 "rpc hold base drpc.live background 1 s pool-logs" lines a minute, each holding the key for every
+// caller, and callers refused "every provider held". A fill's own 429 slows the fill alone
+test("the fill's 429 never holds a provider for callers: with every dRPC key refusing the fill and QuickNode out, a caller's read is still answered by dRPC, and the fill backs off that key", async () => {
+  FINAL = FROM + 29_999;
+  const clock = scheduler();
+  const refusedFill = new Map<string, number>();
+  const w = world((url, _f, _t, fill) => {
+    if (!fill) return undefined;
+    // each key's first refusal asks 30 s, the rest 1 s (dRPC's own words on 16 Nov)
+    const k = (refusedFill.get(url) ?? 0) + 1;
+    refusedFill.set(url, k);
+    return new Response("{}", { status: 429, headers: { "retry-after": k === 1 ? "30" : "1", "content-type": "application/json" } });
+  });
+  const r = createRpc(BASE_ENV, { ...w.deps, now: clock.now, sleep: clock.sleep });
+  DOWN.add(QN);
+  try {
+    const cold = read(r, wideBody(1, FROM, FINAL));
+    for (let i = 0; i < 100 && refusedFill.size < 3; i++) await clock.step(50);
+    assert.equal(refusedFill.size, 3, "the fill was refused on all three keys");
+    await clock.step(10);
+    const a = read(r, JSON.stringify({ jsonrpc: "2.0", id: 7, method: "eth_blockNumber", params: [] }));
+    for (let i = 0; i < 40; i++) await clock.step(25);
+    const got = await a;
+    assert.equal(got.status, 200, `the caller's read: ${got.status} ${got.body}`);
+    // the fill backs off each key: over 60 s each is asked far fewer times than the pace would allow
+    for (let i = 0; i < 600; i++) await clock.step(100);
+    for (const u of DR) assert.ok((refusedFill.get(u) ?? 0) <= 12, `${u.slice(-30)} asked ${refusedFill.get(u)} times in 60 s while refusing`);
+    assert.ok(w.lines.some((l) => /^rpc hold base drpc\.test background \d+ s pool-logs$/.test(l)));
+    void cold;
+  } finally {
+    DOWN.delete(QN);
+  }
+});
+
+test("the store's progress survives a restart: a helper stopped mid-fill leaves the file, the next one starts warm from it, names it while filling and pages on from the block after, never a page again", async () => {
+  FINAL = FROM + 99_999; // 1,000 pages, about 167 s at the pace: past POOL_WRITE_MS, so the file is written mid-fill
+  const dir = mkdtempSync(join(tmpdir(), "pool-logs-"));
+  const env = { ...BASE_ENV, HELPER_STORE_DIR: dir };
+  const file = join(dir, "rpc-pool-logs", "base.json");
+  const coveredOf = (): number => {
+    try {
+      return Number(BigInt((JSON.parse(readFileSync(file, "utf8")) as { covered: string }).covered));
+    } catch {
+      return -1;
+    }
+  };
+  // the first helper: fills until its file holds part of the pool, then stands still (stopped)
+  const c1 = scheduler();
+  const w1 = world();
+  const r1 = createRpc(env, { ...w1.deps, now: c1.now, sleep: c1.sleep });
+  const cold = read(r1, wideBody(1, FROM, FINAL));
+  for (let i = 0; i < 3_000 && coveredOf() < FROM; i++) await c1.step(100);
+  assert.equal(resultOf(await cold).error?.data, `pool logs kept to block ${FROM - 1}`);
+  const kept = coveredOf();
+  assert.ok(kept > FROM && kept < FINAL, `the file holds part of the pool (${kept})`);
+  // the second helper on the same directory
+  const c2 = scheduler();
+  const w2 = world();
+  const r2 = createRpc(env, { ...w2.deps, now: c2.now, sleep: c2.sleep });
+  const mid = read(r2, wideBody(2, FROM, FINAL));
+  for (let i = 0; i < 20; i++) await c2.step(10);
+  assert.equal(resultOf(await mid).error?.data, `pool logs kept to block ${kept}`, "while filling: the filling shape, from the file");
+  assert.ok(!w2.lines.includes("rpc pool-logs base no store kept"), "the file was read");
+  for (let i = 0; i < 6_000 && !w2.lines.some((l) => l.startsWith("rpc pool-logs base covered to")); i++) await c2.step(100);
+  assert.ok(w2.lines.includes(`rpc pool-logs base covered to ${FINAL}`), w2.lines.slice(-3).join("\n"));
+  const pages = w2.fills();
+  assert.equal(pages[0]!.from, kept + 1, "resumed at the block after the file's");
+  for (let i = 1; i < pages.length; i++) assert.equal(pages[i]!.from, pages[i - 1]!.to + 1, "page after page, none asked twice");
+  assert.equal(coveredOf(), FINAL, "and the file holds it all");
+  const n = w2.sent.length;
+  const whole = await read(r2, wideBody(3, FROM, FINAL));
+  assert.deepEqual(resultOf(whole).result, logsIn(FROM, FINAL), "once full: the range");
+  assert.equal(w2.sent.length, n);
 });

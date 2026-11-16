@@ -198,3 +198,33 @@ test("card helper-listed-charts-own-reads: bars of ours with the history before 
   assert.ok(b.candles.length >= 300, `${b.candles.length} bars`);
   assert.equal(b.filling, undefined, "full: not filling");
 });
+
+// card helper-listed-charts-own-reads round 3: no chart answer waits on GeckoTerminal while bars are held (the warm live
+// run of 16 Nov 00:33Z: Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms). One rule with the Solana charts.
+test("card helper-listed-charts-own-reads: with a call free and GeckoTerminal slow (1.5 s), a chart's held bars answer at once and the read goes on; the next answer is the fresh read", async () => {
+  let slow = false;
+  // GeckoTerminal's slow answers come 1.5 s on; `answered` counts those that came
+  let answered = 0;
+  const answer = (async () => {
+    if (slow) await new Promise((go) => setTimeout(go, 1_500)), answered++;
+    return new Response(BARS, { status: 200 });
+  }) as unknown as (url: string) => Response;
+  const { s, clock, gt } = cold(answer);
+  const first = await s.candles(ICNT, "1h", null, 500);
+  assert.equal(first.status, 200, first.body);
+  assert.ok(JSON.parse(first.body).candles.length > 0);
+  clock.t += 2 * 3_600_000; // past every freshness of the bars held
+  slow = true;
+  const n = gt.length;
+  const a = await s.candles(ICNT, "1h", null, 500);
+  assert.equal(a.status, 200, a.body);
+  assert.equal(answered, 0, "the held bars' answer waited on GeckoTerminal's");
+  assert.deepEqual(JSON.parse(a.body).candles, JSON.parse(first.body).candles, "the held bars");
+  assert.equal(gt.length, n + 1, "the read goes on");
+  await new Promise((go) => setTimeout(go, 1_700));
+  slow = false;
+  const n2 = gt.length;
+  const b = await s.candles(ICNT, "1h", null, 500);
+  assert.equal(b.status, 200);
+  assert.equal(gt.length, n2, "the next answer is the read that went on, with no call of its own");
+});

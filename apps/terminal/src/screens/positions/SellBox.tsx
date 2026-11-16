@@ -4,7 +4,7 @@ import { cents, shareOf, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
 import { busy, dryAgainMs, unavailable } from "../trade/model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "../trade/States.tsx";
-import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount } from "./model.ts";
+import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount, sellDryTag, sellQuoting } from "./model.ts";
 import { useSellKit } from "./source.tsx";
 import type { Sell, SellPreview } from "./source.tsx";
 import { OrderTabs, OrdersSoon } from "../trade/OrderTabs.tsx";
@@ -78,6 +78,9 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const [text, setText] = useState(whole ? "100" : initialPercent);
   // the last answer and the amount it was for: a preview, or none (a dash: the page refused, or its reads could not be had)
   const [preview, setPreview] = useState<{ amount: string; p: SellPreview | null } | null>(null);
+  // the preview in flight (sellDryTag), from its ask until its answer, a refusal asked no more or a new token or amount:
+  // You receive says Quoting meanwhile, as the buy box's (card sell-box-says-quoting)
+  const [asking, setAsking] = useState<string | null>(null);
   // each share's last number, by token and amount, with when it came (PREVIEW_KEEP_MS)
   const recent = useRef(new Map<string, { p: SellPreview; at: number }>());
   const [tab, setTab] = useState<OrderTab>("market");
@@ -105,6 +108,9 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
     let t: ReturnType<typeof setTimeout>;
     let downs = 0;
     let gaveUp = 0;
+    const tag = sellDryTag(row.token, amount);
+    const done = () => setAsking((x) => (x === tag ? null : x));
+    setAsking(tag);
     const ask = (first: boolean): void =>
       void sellPreview({ chain: row.chain, token: row.token, amount, share_bps: bps, slippage_bps: slippageBps }).then(
         (a) => {
@@ -113,21 +119,27 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
           if (a.ok) {
             recent.current.set(key, { p: a.preview, at: s.now() });
             setPreview({ amount, p: a.preview });
-            return;
+            return done();
           }
           const timedOut = a.code === "client_timeout" ? dryAgainMs(a.code, gaveUp++) : null;
           const again = NOT_YET.has(a.code) ? PREVIEW_BUSY_MS : a.code === "down" && downs++ === 0 ? PREVIEW_AGAIN_MS : timedOut;
           if (again !== null) t = setTimeout(() => ask(false), again);
+          else done();
           if (first && (NOT_NOW.has(a.code) || a.code === "not_funded")) return;
           const kept = NOT_NOW.has(a.code) ? recent.current.get(key) : undefined;
           setPreview({ amount, p: kept && s.now() - kept.at <= PREVIEW_KEEP_MS ? kept.p : null });
         },
-        () => live && setPreview({ amount, p: null }),
+        () => {
+          if (!live) return;
+          setPreview({ amount, p: null });
+          done();
+        },
       );
     t = setTimeout(() => ((asked.current = true), ask(true)), asked.current ? PREVIEW_SETTLE_MS : 0);
     return () => {
       live = false;
       clearTimeout(t);
+      done();
     };
   }, [sellPreview, row.chain, row.token, amount, bps, slippageBps, running]);
 
@@ -142,6 +154,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const last = preview?.p ?? null;
   const pending = last !== null && (shown === null || running);
   const outC = (shown ?? last) ? cents((shown ?? last)!.out_usd) : null;
+  const quoting = sellQuoting(outC !== null, row.token, amount, asking);
   const share = bps === null ? null : shareOf(row, bps);
   const now = s.now();
   const state = stateId(s.phase, now, "sell") ?? (noRoute ? "S8.33" : "S8.29");
@@ -205,7 +218,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
       </div>
       <div className="trb-receive">
         <span><W id="receive" /></span>
-        <span data-pending={pending || undefined} data-testid="sell-receive">{outC === null ? "—" : `≈ ${usd(outC)}`}</span>
+        <span data-pending={pending || undefined} data-testid="sell-receive">{outC !== null ? `≈ ${usd(outC)}` : quoting ? <W id="quoting" /> : "—"}</span>
       </div>
       <div className="trb-warn" data-testid="sell-line">
         {s.phase.k === "ended" ? (

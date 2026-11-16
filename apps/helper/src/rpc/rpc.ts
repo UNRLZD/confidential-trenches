@@ -217,12 +217,14 @@ const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
 export const POOL_LOGS_CLIENT = "pool-logs";
 /**
  * The pool store's fill (card helper-keyed-logs-serve-a-whole-pool-range, pool-logs.ts): the pages it sends a second on a
- * chain, all its providers together, one at a time. Each page is a background read: it draws on the chain's total as the
- * helper's own reads do (callers keep userRoomOf, half), and on its provider's pace and day under CALLER_ROOM (limits.ts
- * take), never a caller's share; a provider's 429 or throttle holds that provider for every path, as any read's does.
- * [design: 6: under Base's background room on its summed total (155 a 10 s, half of it 7.7 a second), and 2 a second on
- * each of the three dRPC keys, a quarter of their 8 (limits.ts KEYED_PACE), so the market-data reads on the same keys
- * keep the rest. Base's pool from its deploy block (54,325,671) to the finalized head of 16 Nov (about 57,973,600) is
+ * chain, all its providers together, one at a time. A page draws nothing of the route's total (the chain's /v1/rpc
+ * budget, keyedBudget and summedTotal: KEYED_ROUTE_SHARE of each key's pace, which is the callers'), so a fill never
+ * costs a caller a 429: on 16 Nov 01:14-01:53Z (release with PR 865) its 6 a second were 60 of Base's 155 a 10 s, and
+ * callers had 95 left. It draws only its provider's pace and day as a background read (limits.ts take): under
+ * CALLER_ROOM of the bucket, and none for CALLER_HOLD_MS after a caller's draw there, so it takes only the room callers
+ * leave, from the keys' other half (KEYED_ROUTE_SHARE); a provider's 429 or throttle holds that provider for every path,
+ * as any read's does. [design: 6: 2 a second on each of the three dRPC keys, a quarter of their 8 (limits.ts
+ * KEYED_PACE), so the market-data reads on that other half keep the rest. Base's pool from its deploy block (54,325,671) to the finalized head of 16 Nov (about 57,973,600) is
  * 36,480 pages of dRPC's 100 blocks: about 101 min and 729,600 CU (20 a call, KEYED_COST) once, of the three keys'
  * 21,000,000 a day; then 4,320 pages a day as the chain grows (a block every 200 ms, read 16 Nov 00:1xZ on
  * base-rpc.publicnode.com: 100,000 blocks in 20,000 s), 12 min of fill and 86,400 CU. With HELPER_STORE_DIR set the
@@ -236,6 +238,11 @@ export const POOL_FILL_FAILS = 20;
 /** How often a running fill writes its store to HELPER_STORE_DIR (and once when it ends). [design: a minute: 360 pages
  *  at most are read again after a crash.] */
 export const POOL_WRITE_MS = 60_000;
+/** A provider's refusal of a fill page (its 429 or rate error) holds that provider for the fill alone, never for a
+ *  caller: the wait it names or 2^k s, whichever is longer, k its refusals of the fill in a row less its pages served
+ *  since, at most this many. [design: live 16 Nov 02:50-03:17Z the fill's 429s held dRPC's keys for every caller, about
+ *  80 times a minute, and callers were refused "every provider held"; 8: at most 256 s between asks.] */
+export const POOL_BACK_MAX = 8;
 /** A request the finalized-logs cache may keep (LOG_CACHE_ENTRIES): one eth_getLogs, one filter with numbers for both ends
  *  and no blockHash; its key (the chain and the exact params as sent), its toBlock, and whether its address is the
  *  chain's pool (`pool`, the kit's pin, lowercase), alone. Anything else: null. */
@@ -1089,14 +1096,26 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const hexOf = (n: bigint): string => `0x${n.toString(16)}`;
   /** One page of the pool's logs, `a` to `b`, from `url` as a background read: its checked logs (poolPage); a wait in
    *  ms (the provider held, out of room, or the chain's total spent); null when it did not serve the page. */
+  const fillBacks = new Map<string, { until: number; k: number }>();
+  /** A provider's refusal of a fill page (POOL_BACK_MAX): the fill's own wait on it, in ms, and its hold line. */
+  const fillBack = (c: RpcChain, url: string, s: number): number => {
+    const b = fillBacks.get(url) ?? { until: 0, k: 0 };
+    b.k = Math.min(b.k + 1, POOL_BACK_MAX);
+    const wait = Math.max(s, 2 ** b.k);
+    b.until = now() + wait * 1000;
+    fillBacks.set(url, b);
+    log(`rpc hold ${c} ${companyOf(new URL(url).host)} background ${wait} s pool-logs`);
+    return wait * 1000;
+  };
   const fillSend = async (c: RpcChain, url: string, pool: string, a: bigint, b: bigint): Promise<PoolLog[] | number | null> => {
     if (holdsAll.dayOut(url, 1)) return null;
+    const back = (fillBacks.get(url)?.until ?? 0) - now();
+    if (back > 0) return back;
     const held = holdsAll.heldMs(url);
     if (held > 0) return held;
+    // the provider's pace only, as a background read: never the route's total (/v1/rpc's callers'), see POOL_FILL_PER_S
     const room = holdsAll.take(url, 1, true);
     if (room > 0) return room;
-    const wait = budget.takeEach([[c, 1]], undefined);
-    if (wait > 0) return wait * 1000;
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: pool, fromBlock: hexOf(a), toBlock: hexOf(b) }] });
     let r: Response;
     let text: string | undefined;
@@ -1104,10 +1123,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
       if (r.status === 429) {
         await r.body?.cancel();
-        const s = upstreamRetryAfterS(r.headers, now());
-        holdsAll.hold(url, s);
-        log(`rpc hold ${c} ${companyOf(new URL(url).host)} background ${s} s pool-logs`);
-        return Math.max(1, holdsAll.heldMs(url));
+        return fillBack(c, url, upstreamRetryAfterS(r.headers, now()));
       }
       text = await readAnswer(r);
     } catch {
@@ -1123,12 +1139,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
     if (planSpent(answer)) return null;
     const limited = evmLimited(c, answer);
-    if (limited > 0) {
-      holdsAll.hold(url, limited);
-      log(`rpc hold ${c} ${companyOf(new URL(url).host)} background ${limited} s pool-logs`);
-      return Math.max(1, holdsAll.heldMs(url));
-    }
-    return isPlain(answer) && !Object.hasOwn(answer, "error") ? poolPage(answer.result, pool, a, b) : null;
+    if (limited > 0) return fillBack(c, url, limited);
+    const page = isPlain(answer) && !Object.hasOwn(answer, "error") ? poolPage(answer.result, pool, a, b) : null;
+    const fb = fillBacks.get(url);
+    if (page !== null && fb !== undefined && fb.k > 0) fb.k--;
+    return page;
   };
   /**
    * The pool's fill (POOL_FILL_PER_S): from what the store covers to the chain's finalized head as the helper reads it,
@@ -1306,10 +1321,13 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         const final = await finalized(c, logs.to, own);
         const who = final && logs.pool && client !== undefined ? `${POOL_LOGS_CLIENT} ${client}` : client;
         // card helper-keyed-logs-serve-a-whole-pool-range: the pinned pool's finalized range, from its deploy block on, in
-        // the caller's address and topics alone: the part the store covers from the store, the rest past it as before
+        // the caller's address and topics alone: the part the store covers from the store, the rest past it as before.
+        // The store holds finalized blocks alone, so its part needs no head read: live 16 Nov the head read was held
+        // with dRPC's keys and the store was skipped (run 43794383970). Any range cap on such a read is the route's, in
+        // the filling shape (poolCap), and starts the fill
         const req = out as Record<string, unknown>;
         const filter = (req.params as unknown[])[0] as Record<string, unknown>;
-        const topics = final && logs.pool && Object.keys(filter).every((k) => k === "address" || k === "topics" || k === "fromBlock" || k === "toBlock") ? topicsOf(filter.topics) : null;
+        const topics = logs.pool && Object.keys(filter).every((k) => k === "address" || k === "topics" || k === "fromBlock" || k === "toBlock") ? topicsOf(filter.topics) : null;
         const s = topics === null ? undefined : storeOf(c);
         if (s !== undefined && topics !== null && logs.from >= s.from) {
           if (s.started && logs.to > s.covered) fillPool(c, own);
@@ -1319,9 +1337,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
             if (logs.to > s.covered) {
               const tf = s.covered + 1n;
               const tail = { ...req, params: [{ ...filter, fromBlock: hexOf(tf) }] };
-              const tr = await logsRead(c, own, tail, JSON.stringify(tail), methods, tf, logs.to, who, reserved, by);
-              if (tr.capped) return storeCap(tr.a, s.covered);
-              const ta = tr.a;
+              const ta = await logsRead(c, own, tail, JSON.stringify(tail), methods, tf, logs.to, who, reserved, by);
+              const cap = poolCap(id, ta, s.covered);
+              if (cap !== undefined) return (fillPool(c, own), cap);
               let answer: unknown;
               try {
                 answer = parse(ta.body);
@@ -1329,7 +1347,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
                 return ta;
               }
               if (ta.status !== 200 || !isPlain(answer) || Object.hasOwn(answer, "error") || !Array.isArray(answer.result)) return ta;
-              logCachePut(`${c} ${JSON.stringify(tail.params)}`, ta);
+              if (final) logCachePut(`${c} ${JSON.stringify(tail.params)}`, ta);
               rest = answer.result.map((x) => JSON.stringify(x));
             } else {
               const t = traces.getStore();
@@ -1339,12 +1357,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
             if (Buffer.byteLength(body) <= RPC_ANSWER_MAX) return { status: 200, body };
           }
         }
-        const { a, capped } = await logsRead(c, own, req, forward, methods, logs.from, logs.to, who, reserved, by);
-        // a range wider than the route's pages reach: the store starts filling, for the next read
-        if (capped && s !== undefined && topics !== null && logs.from >= s.from) {
-          fillPool(c, own);
-          return storeCap(a, s.covered);
-        }
+        const a = await logsRead(c, own, req, forward, methods, logs.from, logs.to, who, reserved, by);
+        // a range wider than the route's pages reach, or a provider's: the store starts filling, for the next read
+        const cap = s !== undefined && topics !== null && logs.from >= s.from ? poolCap(id, a, s.covered) : undefined;
+        if (cap !== undefined) return (fillPool(c, own), cap);
         if (final) logCachePut(logs.key, a);
         return a;
       }
@@ -1372,22 +1388,35 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
 
   /** The route's range cap on a pool read, saying how far the pool store is (`data`: "pool logs kept to block N"), so its
    *  live check reads a store still filling apart from a route that has none; the cap's words stay the wallet's. */
-  const storeCap = (a: Answer, covered: bigint): Answer => ({ ...a, body: a.body.replace(/"message":("[^"]*")\}\}$/, (_m, msg: string) => `"message":${msg},"data":${JSON.stringify(`pool logs kept to block ${covered}`)}}}`) });
+  /** A pool read's answer when it is a range cap (evmRangeCap), the route's own (pagedLogs) or a provider's: the route's
+   *  cap in the filling shape, how far the store is in `data`. A cap naming a span names it in the route's words (the
+   *  wallet's), never a provider's; one naming none (on results or size) keeps its code and words. Else undefined. */
+  const poolCap = (id: unknown, a: Answer, covered: bigint): Answer | undefined => {
+    let answer: unknown;
+    try {
+      answer = parse(a.body);
+    } catch {
+      return undefined;
+    }
+    const e = isPlain(answer) ? answer.error : undefined;
+    const named = evmRangeCap(e);
+    if (named === null) return undefined;
+    const { code, message } = named > 0n ? { code: LOGS_CAP_CODE, message: `eth_getLogs range too wide, maximum block range: ${named}` } : (e as { code: unknown; message: string });
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id, error: { code, message, data: `pool logs kept to block ${covered}` } }) };
+  };
 
   /**
    * A finalized-or-not eth_getLogs on the keyed-only route (card helper-base-logs-page): sent whole only to the providers
    * whose span covers it; when none does, or those that do all failed it (503), the narrower ones read it in pages
-   * (pagedLogs). `capped`: the pages it needs are past the route's page cap (pagesMaxOf), so its answer is the cap.
+   * (pagedLogs).
    */
-  async function logsRead(c: RpcChain, own: readonly string[], req: Record<string, unknown>, forward: string, methods: string[], from: bigint, to: bigint, who: string | undefined, reserved: boolean, by: number): Promise<{ a: Answer; capped: boolean }> {
+  async function logsRead(c: RpcChain, own: readonly string[], req: Record<string, unknown>, forward: string, methods: string[], from: bigint, to: bigint, who: string | undefined, reserved: boolean, by: number): Promise<Answer> {
     const span = to - from + 1n;
     const whole = own.filter((u) => covers(u, span));
     const narrow = own.filter((u) => !covers(u, span));
-    let a = whole.length > 0 ? await callList(c, whole, forward, methods, who, reserved, by) : UPSTREAM();
-    if (narrow.length === 0 || a.status !== 503) return { a, capped: false };
-    const w = narrow.reduce((m, u) => (logsSpanByUrl.get(u)! > m ? logsSpanByUrl.get(u)! : m), 0n);
-    a = await pagedLogs(c, narrow, req, from, to, who, reserved, by);
-    return { a, capped: w > 0n && (span + w - 1n) / w > BigInt(pagesMaxOf(c)) };
+    const a = whole.length > 0 ? await callList(c, whole, forward, methods, who, reserved, by) : UPSTREAM();
+    if (narrow.length === 0 || a.status !== 503) return a;
+    return pagedLogs(c, narrow, req, from, to, who, reserved, by);
   }
 
   /**

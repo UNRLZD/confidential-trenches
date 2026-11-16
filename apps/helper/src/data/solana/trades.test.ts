@@ -8,7 +8,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { fromLogs } from "./decode.ts";
-import { createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { joinBars } from "../candles.ts";
+import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -882,4 +883,167 @@ test("card helper-listed-charts-own-reads: bars of ours with the history before 
   const full = JSON.parse((await t.candles(MINT, "1m", null, 500)).body);
   t.stop();
   assert.deepEqual([full.candles.length, full.src, full.filling], [3, "chain,geckoterminal", undefined]);
+});
+
+// card helper-listed-charts-own-reads round 3: a listed coin with no vendor bars charts from its own signatures read back.
+// GTA6 (2gVNeu8d...pump), read 16 Nov 00:37Z: a month old, 1,557 trades a day on PumpSwap, GeckoTerminal names no top
+// pool and its pool's OHLCV is empty, and the deployed helper answered 1 bar, src chain, not filling: our walk reads the
+// newest COLD_SIGS transactions only. The recorded hour (315 trades in six minutes) stands in for its day: the history
+// answers 404 (no pool), the walk holds the newest 30, and the read back takes the rest.
+test("card helper-listed-charts-own-reads: a listed coin whose history answers 404 (GTA6's shape) reads its own signatures back: filling while it reads, then every minute of the recorded hour, src chain", async () => {
+  const H = JSON.parse(gunzipSync(readFileSync(path.join(HERE, "fixtures/sol-trades-hour.json.gz"))).toString()) as {
+    mint: string; decimals: number; pyth: { slot: number; data: string }; txs: { sig: string; slot: number; err: boolean; logs?: string[] }[];
+  };
+  const p = Buffer.from(H.pyth.data, "base64");
+  const pub = Number(p.readBigInt64LE(93));
+  const list = H.txs.slice().reverse().map((x) => ({ signature: x.sig, slot: x.slot, err: x.err ? { InstructionError: [0, { Custom: 1 }] } : null }));
+  const txs = Object.fromEntries(H.txs.filter((x) => !x.err).map((x) => [x.sig, { slot: x.slot, meta: { logMessages: x.logs ?? [] } }]));
+  const asked: Record<string, unknown>[] = [];
+  const sigs = (q: Record<string, unknown>) => {
+    asked.push(q);
+    const from = q.before === undefined ? 0 : list.findIndex((s) => s.signature === q.before) + 1;
+    return list.slice(from, from + (q.limit as number));
+  };
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs, txs, price: p.readBigInt64LE(73), pub, slot: H.pyth.slot }, { [H.mint]: H.decimals }),
+    now: () => pub * 1000,
+    listed: async (m) => m === H.mint,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }),
+    tickMs: 0,
+  });
+  const all = new Set(H.txs.filter((x) => !x.err).flatMap((x) => fromLogs(x.logs).trades).filter((x) => x.mint === H.mint).map((x) => Math.floor(x.ts / 60) * 60));
+  const first = JSON.parse((await t.candles(H.mint, "1m", null, 500)).body);
+  assert.equal(first.src, "chain");
+  assert.ok(first.candles.length < all.size, `the walk's newest ${first.candles.length} minutes of ${all.size}`);
+  assert.equal(first.filling, true, "its own signatures still being read back: filling, never a short chart as the coin's whole");
+  let last = first;
+  for (let i = 0; i < 50 && last.filling === true; i++) {
+    await settle();
+    last = JSON.parse((await t.candles(H.mint, "1m", null, 500)).body);
+  }
+  t.stop();
+  assert.deepEqual([last.src, last.filling, last.candles.length], ["chain", undefined, all.size], "every minute that held a trade, read back to the coin's first signature");
+  assert.deepEqual(last.candles.map((c: number[]) => c[0]), [...all].sort((a, b) => a - b));
+  assert.ok(asked.some((q) => q.limit === 1_000 && q.before !== undefined), "read back in COLD_PAGE pages before the walk's oldest");
+});
+
+test("card helper-listed-charts-own-reads: a read back is bounded: BACK_TX_MAX transactions at most, and no page past BACK_SPAN_S; one read back per open token, never asked again once done", async () => {
+  // 6,000 a second apart: BACK_TX_MAX; 60 s apart, the day ends past the walk's 30 at the 1,440th: its page (the second
+  // of 1,000) is the last, 2,000 read back
+  for (const [n, age, wantTx] of [[6_000, 1, BACK_TX_MAX], [6_000, 60, 2_000]] as const) {
+    // n successful signatures, newest first, `age` seconds apart (blockTime as getSignaturesForAddress answers it)
+    const f = botFlood(n, () => true);
+    const timed = f.list.map((x, i) => ({ ...x, blockTime: TS - i * age }));
+    const sigs = (q: Record<string, unknown>) => (f.sigs(q), timed.slice(q.before === undefined ? 0 : timed.findIndex((x) => x.signature === q.before) + 1).slice(0, q.limit as number));
+    let tx = 0;
+    const base = rpcFetch({ sigs, txs: f.txs, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+    const t = createSolanaTrades({
+      fetch: async (url: string, init: RequestInit) => ((JSON.parse(String(init.body)) as { method: string }).method === "getTransaction" && tx++, base(url, init)),
+      now: () => TS * 1000,
+      listed: async (m) => m === MINT,
+      rpcs: ["https://rpc.test"],
+      source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+      history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }),
+      tickMs: 0,
+    });
+    let a = JSON.parse((await t.candles(MINT, "1d", null, 500)).body);
+    for (let i = 0; i < 400 && a.filling === true; i++) {
+      await settle();
+      a = JSON.parse((await t.candles(MINT, "1d", null, 500)).body);
+    }
+    const after = tx;
+    await t.candles(MINT, "1d", null, 500);
+    await settle();
+    t.stop();
+    assert.equal(a.filling, undefined, "done reading back");
+    assert.ok(BACK_SPAN_S / 60 < COLD_SIGS + 2_000);
+    assert.equal(after - COLD_SIGS, wantTx, `${n} signatures ${age} s apart: transactions read back`);
+    assert.equal(tx, after, "a read back done is not asked again");
+  }
+});
+
+test("card helper-listed-charts-own-reads: bars read back join ours, one bar where a bucket holds both (its open the older's, its close ours, high, low and volume of both)", () => {
+  const older: [number, string, string, string, string, string][] = [[60, "1", "2", "1", "1.5", "10"], [120, "1.5", "3", "1.2", "2", "5.5"]];
+  const ours: [number, string, string, string, string, string][] = [[120, "2.1", "2.5", "0.9", "2.4", "1.25"], [180, "2.4", "2.4", "2.4", "2.4", "1"]];
+  assert.deepEqual(joinBars(older, ours), [[60, "1", "2", "1", "1.5", "10"], [120, "1.5", "3", "0.9", "2.4", "6.75"], [180, "2.4", "2.4", "2.4", "2.4", "1"]]);
+  assert.deepEqual(joinBars([], ours), ours);
+  assert.deepEqual(joinBars(older, []), older);
+  assert.deepEqual(joinBars([[60, "1", "1", "1", "1", "1"]], [[120, "2", "2", "2", "2", "2"]]), [[60, "1", "1", "1", "1", "1"], [120, "2", "2", "2", "2", "2"]]);
+});
+
+test("card helper-listed-charts-own-reads: a transaction a read back cannot read (every provider failing, three times) ends it at the newest one, its older trades dropped: the bars read back have no hole", async () => {
+  const H = JSON.parse(gunzipSync(readFileSync(path.join(HERE, "fixtures/sol-trades-hour.json.gz"))).toString()) as {
+    mint: string; decimals: number; pyth: { slot: number; data: string }; txs: { sig: string; slot: number; err: boolean; logs?: string[] }[];
+  };
+  const p = Buffer.from(H.pyth.data, "base64");
+  const pub = Number(p.readBigInt64LE(93));
+  const list = H.txs.slice().reverse().map((x) => ({ signature: x.sig, slot: x.slot, err: x.err ? { InstructionError: [0, { Custom: 1 }] } : null }));
+  const txs = Object.fromEntries(H.txs.filter((x) => !x.err).map((x) => [x.sig, { slot: x.slot, meta: { logMessages: x.logs ?? [] } }]));
+  const sigs = (q: Record<string, unknown>) => list.slice(q.before === undefined ? 0 : list.findIndex((s) => s.signature === q.before) + 1).slice(0, q.limit as number);
+  // the successful transaction 200th from the newest never reads
+  const lost = list.filter((x) => x.err === null)[200]!;
+  const base = rpcFetch({ sigs, txs, price: p.readBigInt64LE(73), pub, slot: H.pyth.slot }, { [H.mint]: H.decimals });
+  const t = createSolanaTrades({
+    fetch: async (url: string, init: RequestInit) => (String(init.body).includes(lost.signature) ? new Response("down", { status: 503 }) : base(url, init)),
+    now: () => pub * 1000,
+    listed: async (m) => m === H.mint,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }),
+    tickMs: 0,
+  });
+  let last = JSON.parse((await t.candles(H.mint, "1m", null, 500)).body);
+  assert.equal(last.filling, true);
+  for (let i = 0; i < 400 && last.filling !== undefined; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+    last = JSON.parse((await t.candles(H.mint, "1m", null, 500)).body);
+  }
+  const tape = JSON.parse((await t.trades(H.mint, 50)).body);
+  t.stop();
+  assert.equal(last.filling, undefined, "the read back ended");
+  // the volume of the bars is exactly every trade newer than the unread transaction in the signature list's order
+  const at = list.findIndex((x) => x.signature === lost.signature);
+  const newer = new Set(list.slice(0, at).map((x) => x.signature));
+  const trades = H.txs.filter((x) => !x.err && newer.has(x.sig)).flatMap((x) => fromLogs(x.logs).trades).filter((x) => x.mint === H.mint);
+  const solUsd = p.readBigInt64LE(73) * 10n ** 10n;
+  const vol = trades.reduce((sum, x) => sum + (x.quote * solUsd) / 10n ** 9n, 0n);
+  const scale = (v: string): bigint => BigInt(v.replace(".", "")) * 10n ** BigInt(18 - (v.split(".")[1]?.length ?? 0));
+  assert.equal(last.candles.reduce((sum: bigint, c: string[]) => sum + scale(c[5]!), 0n), vol, "every trade newer than the unread one, none older");
+  assert.ok(tape.trades.length > 0);
+});
+
+// card helper-listed-charts-own-reads round 3: a listed coin's first chart read waits on no read while bars are held.
+// The warm live run of 16 Nov 00:33Z: Solana's listed charts p50 1,528 ms, p95 4,241 ms; a first read waited for its
+// walk's first round (COLD_WAIT_MS 3 s) before the history's bars, held, were served.
+test("card helper-listed-charts-own-reads: a listed coin's first chart read with its walk still reading answers the history's held bars at once, filling, then ours joined once the walk is in", async () => {
+  let walked = false;
+  let release = () => undefined as void;
+  const gate = new Promise<void>((r) => (release = r));
+  const fast = rpcFetch({ sigs: () => [{ signature: BUY.signature, slot: 465_000_000, err: null }], txs: { [BUY.signature]: BUY.result }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const held = [[TS - 7_200, "1", "1", "1", "1", "5"], [TS - 3_600, "1", "1", "1", "1", "5"]];
+  const t = createSolanaTrades({
+    fetch: async (url, init) => {
+      if (JSON.parse(String(init.body)).method === "getSignaturesForAddress") await gate, (walked = true);
+      return fast(url, init);
+    },
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => ({ status: 200, body: JSON.stringify({ tf: "1h", candles: held, src: "coingecko", as_of_ms: TS * 1000 - 60_000 }), src: "coingecko", asOfMs: TS * 1000 - 60_000 }),
+    // the first read's bound, as COLD_WAIT_MS is, 0.5 s here
+    coldWait: () => new Promise((r) => setTimeout(r, 500)),
+    tickMs: 0,
+  });
+  const first = JSON.parse((await t.candles(MINT, "1h", null, 500)).body);
+  assert.equal(walked, false, "answered before the walk read a signature");
+  assert.deepEqual([first.candles, first.src, first.filling], [held, "coingecko", true], "the history's held bars, filling while our walk reads");
+  release();
+  await settle();
+  const next = JSON.parse((await t.candles(MINT, "1h", null, 500)).body);
+  t.stop();
+  assert.equal(next.src, "chain,coingecko");
+  assert.equal(next.candles.length, 3, "the history's two and our walk's one");
 });

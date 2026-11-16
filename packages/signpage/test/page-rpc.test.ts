@@ -569,3 +569,39 @@ test("the mainnet build's Solana reads: the lister is the helper's marks route; 
     [`${TRADE_HELPER}/v1/rpc/solana`, "getMultipleAccounts"],
   ]);
 });
+
+// card evm-warm-tap-ends-inside-two-seconds: the page's own EVM reads take the provider's one lane on the device, the
+// kit's (kit pace.ts): a pass's read as a background read's, so the page's passes and the kit's quotes, scans and index
+// share base-rpc.publicnode.com's one bucket, and a pass never goes ahead of a trade's read or into the units it keeps.
+test("a page read of base-rpc.publicnode.com takes the kit's lane for the provider: a pass waits once the kit's reads left only the trades' units, a trade's read goes at once", () => onTestClock(async () => {
+  const { evmPaceReset, evmPaceTake } = await import("../../kit/src/checks/evm/pace.ts");
+  const real = globalThis.fetch;
+  resetHostLanes();
+  evmPaceReset();
+  const sent: string[] = [];
+  globalThis.fetch = (async (_u: string | URL | Request, init?: RequestInit) => {
+    const { id, method } = JSON.parse(String(init?.body)) as { id: string; method: string };
+    sent.push(method);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: [] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const url = "https://base-rpc.publicnode.com";
+    // the kit's reads spent the bucket down to 100 units of 2,500 (a getLogs post takes 20, a pass leaves 120)
+    for (let i = 0; i < 120; i++) (await evmPaceTake(url, [{ method: "eth_getLogs" }]))();
+    const by: number[] = [];
+    setTimeout(() => by.push(sent.length), 1);
+    const pass = lanedRpc(url, { kind: "pass" })("eth_getLogs", [{}]);
+    const trade = lanedRpc(url, { kind: "trade" })("eth_call", [{}, "latest"]);
+    await trade;
+    // the pass's turn comes once 140 units are in: 40 more at 36 a second, 1.11 s
+    setTimeout(() => by.push(sent.length), 1_100);
+    setTimeout(() => by.push(sent.length), 1_200);
+    await pass;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(by, [1, 1, 2], "reads sent by 1, 1,100 and 1,200 ms");
+    assert.deepEqual(sent, ["eth_call", "eth_getLogs"]);
+  } finally {
+    globalThis.fetch = real;
+    evmPaceReset();
+  }
+}));

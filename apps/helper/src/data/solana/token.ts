@@ -147,7 +147,7 @@ export const HOLDERS_FIELDS = ["holders", "total", "top_bps", "src", "as_of_ms"]
 export type Holders = { holders: Holder[]; total: number | null; top_bps: number | null; src: string; as_of_ms: number };
 export type Candle = [number, string, string, string, string, string];
 export const CANDLES_FIELDS = ["tf", "candles", "src", "as_of_ms"] as const;
-export type Candles = { tf: Tf; candles: Candle[]; src: string; as_of_ms: number };
+export type Candles = { tf: Tf; candles: Candle[]; src: string; filling?: true; as_of_ms: number };
 
 /** The burn address SPL tokens are sent to (the incinerator). */
 const INCINERATOR = "1nc1nerator11111111111111111111111111111111";
@@ -563,6 +563,10 @@ export const OWN_LAUNCHPAD = "pump.fun";
 export const LISTED_AHEAD_MAX = 300;
 /** How often the server asks for one re-read ahead (server.ts); each ask makes at most one GeckoTerminal call. */
 export const AHEAD_TICK_MS = 5_000;
+/** How long a chart read waits for the vendor before the bars held answer and the read goes on (card
+ *  helper-listed-charts-own-reads round 3). [design: 50 ms: a fresh hit, a read the budget refuses or one joining an
+ *  answer resolve in-process within it; a vendor's HTTP answer takes 300 ms or more.] */
+export const HELD_WAIT_MS = 50;
 
 /** A read cached per key: fresh within `freshMs` of our own read; a failed refresh serves the last good one while its
  *  data is under STALE_MS old; one read per key at a time. `client`, the caller whose request makes the read, draws
@@ -1463,11 +1467,31 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         const body: Candles = { tf: tf as Tf, candles: held.slice(-limit), src, as_of_ms: have!.at };
         return { status: 200, body: JSON.stringify(body), src, asOfMs: have!.at };
       }
-      let a = await bars.get(`${mint}:${tf}:${to ?? ""}`, client);
-      if (a.status === 200) {
+      const settle = (r: DataAnswer): DataAnswer => {
         // the last good bars of this mint and tf (the newest range read), whatever range was asked
-        keep(k, JSON.parse(a.body) as Candle[], a.asOfMs!, a.src);
-      } else if (a.status === 429 || a.status === 503) {
+        if (r.status === 200) keep(k, JSON.parse(r.body) as Candle[], r.asOfMs!, r.src);
+        return r;
+      };
+      const reading = bars.get(`${mint}:${tf}:${to ?? ""}`, client).then(settle);
+      // card helper-listed-charts-own-reads round 3: bars held answer within HELD_WAIT_MS and the read goes on, so no
+      // answer waits on a vendor while they serve (the warm live run of 16 Nov 00:33Z: Solana's listed charts p95
+      // 4,241 ms). Only bars still served as fresh race the read: bars past GT_SERVE_MS, or not reaching `to`, wait for it
+      // and serve only when it is refused or fails (below), never as the chart dated by an old read (round 5: helper live
+      // run 43794383970, job 133059871935, two minutes after a swap, served PUMP's bars read 93 minutes before, X-Fetched-At
+      // theirs, with `filling` beside them, which the page draws as the chart: candles.ts loadCandles reads again only a
+      // filling chart with no bars)
+      const ahead = kept.get(k);
+      const fresh = ahead !== undefined && (to === null ? now() - ahead.at <= GT_SERVE_MS : ahead.at >= to * 1000);
+      const cut0 = !fresh ? [] : ahead.bars.filter((c) => to === null || c[0] < to);
+      const got = cut0.length === 0 ? await reading : await Promise.race([reading, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+      if (got === null) {
+        reading.catch(() => undefined);
+        const src = ahead!.src ?? "geckoterminal";
+        const body: Candles = { tf: tf as Tf, candles: cut0.slice(-limit), src, as_of_ms: ahead!.at };
+        return { status: 200, body: JSON.stringify(body), src, asOfMs: ahead!.at };
+      }
+      let a = got;
+      if (a.status === 429 || a.status === 503) {
         // GeckoTerminal throttled or down: its last good bars, cut at `to`, read time theirs, at any age (card
         // helper-candles-never-refuse-a-listed-coin, stale-if-error: past GT_SERVE_MS this answered the 429, and the page
         // drew an empty chart for a coin whose bars were held); the newest range refused by the budget is queued
