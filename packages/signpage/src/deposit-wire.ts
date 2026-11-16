@@ -21,7 +21,7 @@ import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
 import type { SignpageResults } from "../../kit/src/signpage/messages.ts";
 import type { Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
 import { depositQuoteKind, type DepositQuoteKindContext } from "./rules/deposit-quote.ts";
-import { depositAssetsKind, depositDryKind, type DepositReadAnswer, type DepositReadContext } from "./rules/deposit-dry.ts";
+import { depositAssetsKind, depositCoinKind, depositDryKind, type DepositReadAnswer, type DepositReadContext } from "./rules/deposit-dry.ts";
 import type { Status } from "./state.ts";
 import { poolCoinChain, type OriginRefund, type PoolDepositChain } from "../../wallet/src/deposit/quote.ts";
 
@@ -139,7 +139,7 @@ export const DEPOSIT_READ_DEADLINE_MS = 14_000;
  * nav and an open kind are answered while the helper's round trips run. Its result or its code; a read that threw, or
  * that the deadline cut, is "down" (not kept, so the same request again runs again).
  */
-function running<K extends "deposit.assets" | "deposit.dry">(
+function running<K extends "deposit.assets" | "deposit.dry" | "deposit.coin">(
   run: (ctx: DepositReadContext) => Promise<DepositReadAnswer<SignpageResults[K]>>,
   deps: DepositReadContext,
   deadlineMs: number,
@@ -166,6 +166,7 @@ function running<K extends "deposit.assets" | "deposit.dry">(
 export function depositReadHosts(deps: Omit<DepositReadContext, "signal"> & { deadlineMs?: number; stop?: () => AbortSignal } = {}): {
   "deposit.assets": () => Running<"deposit.assets">;
   "deposit.dry": (params: Record<string, unknown>) => Running<"deposit.dry">;
+  "deposit.coin": (params: Record<string, unknown>) => Running<"deposit.coin">;
 } {
   const ms = deps.deadlineMs ?? DEPOSIT_READ_DEADLINE_MS;
   // review P3 of card helper-says-why-a-vendor-refused: a deposit.dry ends the one before it (the sheet keeps only the
@@ -182,5 +183,7 @@ export function depositReadHosts(deps: Omit<DepositReadContext, "signal"> & { de
       dry = new AbortController();
       return running<"deposit.dry">((ctx) => depositDryKind(params, ctx), { ...deps, signal: stopped(dry.signal) }, ms);
     },
+    // a pool coin's row (card deposit-list-reads-fast): each chain's own read, beside deposit.assets
+    "deposit.coin": (params) => running<"deposit.coin">((ctx) => depositCoinKind(params, ctx), { ...deps, signal: stopped() }, ms),
   };
 }

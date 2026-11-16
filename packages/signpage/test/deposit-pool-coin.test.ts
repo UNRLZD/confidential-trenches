@@ -1,8 +1,9 @@
 // Each pool takes its own coin (card deposit-takes-each-pools-own-coin; owner 13 Nov 08:12Z: the sheet offered USDC
 // alone, so ETH could not go to Base or Robinhood): SOL into the Solana pool, ETH into the Base and Robinhood pools, as a
 // plain send to U_X from any outside wallet, no 1Click quote and no swap.
-// - deposit.assets lists SOL on Solana, ETH on Base and ETH on Robinhood after the USDC rows, each at the pool's floor
-//   read now (src/rules/deposit-dry.ts); a floor that does not answer, or is slow, leaves its row out, never the list.
+// - deposit.coin answers SOL on Solana, ETH on Base and ETH on Robinhood, one read per chain beside deposit.assets' USDC
+//   rows (card deposit-list-reads-fast), each at the pool's floor read now (src/rules/deposit-dry.ts); a floor that does
+//   not answer is not_available for its own row, never the list.
 // - pool.address answers the pool's own coin with U_X as the deposit address and asks 1Click and the helper nothing
 //   (src/pool-deposit-address.ts); under the floor below_min, over the cap above_max, nothing handed to the follow.
 // - the follow carries what lands at U_X and asks 1Click nothing for it (src/pool-deposit-follow.ts).
@@ -16,7 +17,7 @@ import { COLLECTOR, NEAR_USDC, NOW, SOL_USDC, mockKey, signAnswer, type Answer }
 const { ONECLICK_USDC_ASSETS } = await import("../../kit/src/checks/oneclick.ts");
 const { SIGNPAGE_RESULT_SCHEMAS } = await import("../../kit/src/signpage/schema.ts");
 const { HELPER_BIND_DEPOSIT_CAP } = await import("../../kit/src/helper/v1.ts");
-const { DEPOSIT_TOKENS_URL, depositAssetsKind } = await import("../src/rules/deposit-dry.ts");
+const { DEPOSIT_TOKENS_URL, depositAssetsKind, depositCoinKind } = await import("../src/rules/deposit-dry.ts");
 const { POOL_FLOOR_PLACEHOLDER, poolAddressHost, poolQuotePricing } = await import("../src/pool-deposit-address.ts");
 const { followPoolQuote } = await import("../src/pool-deposit-follow.ts");
 const { POOL_DEPOSIT_DESTINATION } = await import("../../wallet/src/deposit/quote.ts");
@@ -72,57 +73,60 @@ function helper(tokens: { status?: number } = {}) {
 const FLOORS = { solana: 13_586_400n, base: 1_200_000_000_000_000n, robinhood: 1_050_000_000_000_000n } as const;
 const opts = { now: () => NOW, sleep: async () => {} };
 
-// ----------------------------------------------------------------------------------------------- deposit.assets
-test("deposit.assets: SOL on Solana, ETH on Base and ETH on Robinhood after the three USDC rows, each at its pool's floor read now", async () => {
+// ------------------------------------------------------------------------------------ deposit.assets, deposit.coin
+// Card deposit-list-reads-fast (QA walk item 11: the sheet opened cold filled in 3.9 s: the token list, then the probes,
+// then up to 2 s for the floors, one after another): deposit.assets lists the USDC rows alone, its list and probes asked
+// at once; each pool's own coin is deposit.coin's, one read per chain, so each row is drawn as its own floor lands.
+const coins = (poolFloor: (chain: "solana" | "base" | "robinhood", signal?: AbortSignal) => Promise<bigint | null>) =>
+  Promise.all((["solana", "base", "robinhood"] as const).map((chain) => depositCoinKind({ chain }, { ...opts, poolFloor })));
+test("deposit.coin: SOL on Solana, ETH on Base and ETH on Robinhood, each at its pool's floor read now; 1Click asked nothing", async () => {
   const h = helper();
   const asked: string[] = [];
-  const got = await depositAssetsKind({ ...opts, fetch: h.fetch, poolFloor: async (chain) => (asked.push(chain), FLOORS[chain]) });
-  assert.ok(got.ok, JSON.stringify(got));
-  const rows = got.result.assets;
-  assert.deepEqual(rows.map((r) => `${r.symbol} ${r.chain} ${r.origin_asset}`), [
-    `USDC near ${NEAR_USDC}`, `USDC solana ${SOL_USDC}`, `USDC base ${BASE_USDC}`,
-    `SOL solana ${SOL}`, `ETH base ${BASE_ETH}`, `ETH robinhood ${HOOD_ETH}`,
-  ]);
-  assert.deepEqual(rows.slice(3).map((r) => [r.decimals, r.min, r.max_usd]), [
+  const got = await coins(async (chain) => (asked.push(chain), FLOORS[chain]));
+  const rows = got.map((g) => (assert.ok(g.ok, JSON.stringify(g)), g.result.asset));
+  assert.deepEqual(rows.map((r) => `${r.symbol} ${r.chain} ${r.origin_asset}`), [`SOL solana ${SOL}`, `ETH base ${BASE_ETH}`, `ETH robinhood ${HOOD_ETH}`]);
+  assert.deepEqual(rows.map((r) => [r.decimals, r.min, r.max_usd]), [
     [9, "0.013587", dec6(HELPER_BIND_DEPOSIT_CAP)], [18, "0.0012", dec6(HELPER_BIND_DEPOSIT_CAP)], [18, "0.00105", dec6(HELPER_BIND_DEPOSIT_CAP)],
   ]);
-  assert.deepEqual(asked.sort(), ["base", "robinhood", "solana"]);
-  // 1Click is asked nothing for a pool's own coin: the token list and one probe per USDC row only
-  assert.deepEqual(h.sent.filter((s) => s !== "tokens").sort(), [...ONECLICK_USDC_ASSETS].sort());
-  assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.assets"](got.result), true, "the kit's client takes it");
+  assert.deepEqual(asked, ["solana", "base", "robinhood"]);
+  assert.deepEqual(h.sent, [], "1Click is asked nothing for a pool's own coin");
+  for (const g of got) assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.coin"]((g as { result: unknown }).result), true, "the kit's client takes it");
 });
 
-test("deposit.assets: a floor finer than six decimals is shown rounded up to six, never under the floor (the 09:27Z live floors)", async () => {
+test("deposit.coin: a floor finer than six decimals is shown rounded up to six, never under the floor (the 09:27Z live floors)", async () => {
   // as read live at 09:27:49Z: 0.0135864 SOL, 0.001021041255599516 ETH on Base, 0.001052642294848 ETH on Robinhood; an
   // 18-decimal Min ran into the address screen's Expires cell at 390 px
   const live = { solana: 13_586_400n, base: 1_021_041_255_599_516n, robinhood: 1_052_642_294_848_000n } as const;
-  const got = await depositAssetsKind({ ...opts, fetch: helper().fetch, poolFloor: async (chain) => live[chain] });
-  assert.ok(got.ok, JSON.stringify(got));
-  const rows = got.result.assets.slice(3);
+  const rows = (await coins(async (chain) => live[chain])).map((g) => (g as { result: { asset: { min: string; decimals: number } } }).result.asset);
   assert.deepEqual(rows.map((r) => r.min), ["0.013587", "0.001022", "0.001053"]);
   // each min still takes the plain send: at or over the floor the host reads
   rows.forEach((r, i) => assert.ok(BigInt(r.min.replace(".", "").replace(/^0+/, "")) * 10n ** BigInt(r.decimals - (r.min.split(".")[1] ?? "").length) >= Object.values(live)[i]!));
 });
 
-test("deposit.assets: a pool whose floor throws, answers null or is not back when the probes are is left out; the USDC rows stand", { timeout: 5_000 }, async () => {
-  // the hang bound is the test's own timeout: a floor that never answers never holds the list
-  const h = helper();
-  const got = await depositAssetsKind({ ...opts, fetch: h.fetch, poolFloor: async (chain) => {
+test("deposit.coin: a floor that throws, answers null (no pool open) or none given is not_available; another chain not_allowed", async () => {
+  const got = await coins(async (chain) => {
     if (chain === "solana") throw new TypeError("fetch failed");
     if (chain === "base") return null;
-    return new Promise<bigint>(() => {}); // never answers
-  } });
-  assert.ok(got.ok, JSON.stringify(got));
-  assert.deepEqual(got.result.assets.map((r) => r.symbol), ["USDC", "USDC", "USDC"]);
+    return 0n;
+  });
+  assert.deepEqual(got, [{ ok: false, code: "not_available" }, { ok: false, code: "not_available" }, { ok: false, code: "not_available" }]);
+  assert.deepEqual(await depositCoinKind({ chain: "solana" }, opts), { ok: false, code: "not_available" });
+  assert.deepEqual(await depositCoinKind({ chain: "near" }, { ...opts, poolFloor: async () => 1n }), { ok: false, code: "not_allowed" });
 });
 
-// Card deposit-list-reads-fast (QA walk item 11: the sheet opened cold filled in 3.9 s, the token list, then the probes,
-// then up to 2 s for the floors, one after another)
+test("deposit.assets reads no pool floor and lists the three USDC rows alone, whatever the floors (they are deposit.coin's)", async () => {
+  const asked: string[] = [];
+  const got = await depositAssetsKind({ ...opts, fetch: helper().fetch, poolFloor: async (chain) => (asked.push(chain), FLOORS[chain]) });
+  assert.ok(got.ok, JSON.stringify(got));
+  assert.deepEqual(got.result.assets.map((r) => `${r.symbol} ${r.chain}`), ["USDC near", "USDC solana", "USDC base"]);
+  assert.deepEqual(asked, []);
+});
+
 /** `n` turns of the event loop: room for every read the code sends at once to go out, with no clock read. */
 const turns = async (n: number) => {
   for (let i = 0; i < n; i++) await new Promise<void>((ok) => setImmediate(ok));
 };
-test("deposit.assets asks the token list, every probe and every pool's floor at once: each probe and floor goes out before the list answers", { timeout: 5_000 }, async () => {
+test("deposit.assets asks the token list and every probe at once: each probe goes out before the list answers", { timeout: 5_000 }, async () => {
   const order: string[] = [];
   let probesOut!: () => void;
   const allOut = new Promise<void>((ok) => (probesOut = ok));
@@ -139,15 +143,14 @@ test("deposit.assets asks the token list, every probe and every pool's floor at 
     }
     return h.fetch(url, init);
   }) as typeof fetch;
-  const got = await depositAssetsKind({ ...opts, fetch: fetchFn, poolFloor: async (chain) => (order.push(`floor ${chain}`), FLOORS[chain]) });
+  const got = await depositAssetsKind({ ...opts, fetch: fetchFn });
   assert.ok(got.ok, JSON.stringify(got));
   const answered = order.indexOf("tokens answered");
   assert.ok(answered > 0, order.join(", "));
-  assert.deepEqual(order.slice(0, answered).filter((o) => o !== "tokens asked").sort(), [
-    ...ONECLICK_USDC_ASSETS.map((id) => `probe ${id}`), "floor base", "floor robinhood", "floor solana",
-  ].sort(), `asked before the list answered: ${order.slice(0, answered).join(", ")}`);
-  // the list and every check as before: the six rows, each probe sent once
-  assert.deepEqual(got.result.assets.map((r) => `${r.symbol} ${r.chain}`), ["USDC near", "USDC solana", "USDC base", "SOL solana", "ETH base", "ETH robinhood"]);
+  assert.deepEqual(order.slice(0, answered).filter((o) => o !== "tokens asked").sort(), ONECLICK_USDC_ASSETS.map((id) => `probe ${id}`).sort(),
+    `asked before the list answered: ${order.slice(0, answered).join(", ")}`);
+  // every check as before: the three rows, each probe sent once
+  assert.deepEqual(got.result.assets.map((r) => `${r.symbol} ${r.chain}`), ["USDC near", "USDC solana", "USDC base"]);
   assert.deepEqual(h.sent.filter((s) => s !== "tokens").sort(), [...ONECLICK_USDC_ASSETS].sort());
 });
 
@@ -178,12 +181,6 @@ test("deposit.assets: a token list refused answers its own code and ends the pro
   }) as typeof fetch });
   assert.ok(got.ok, JSON.stringify(got));
   assert.deepEqual(got.result.assets.map((r) => r.origin_asset), [NEAR_USDC, BASE_USDC]);
-});
-
-test("deposit.assets with no pool floor given (the read before this card): the USDC rows alone, exactly", async () => {
-  const got = await depositAssetsKind({ ...opts, fetch: helper().fetch });
-  assert.ok(got.ok);
-  assert.deepEqual(got.result.assets.map((r) => `${r.symbol} ${r.chain}`), ["USDC near", "USDC solana", "USDC base"]);
 });
 
 test("deposit.assets: 1Click busy still answers busy for the whole list, as before (the USDC rows' retry)", async () => {

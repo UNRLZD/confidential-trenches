@@ -139,7 +139,7 @@ export const isPlainSend = (chain: PoolChain, origin: unknown): boolean =>
  */
 export const POOL_PLAIN_SEND_TIME_S: Readonly<Record<PoolChain, number>> = Object.freeze({ solana: 30, base: 20, robinhood: 20 });
 
-/** The public Solana key a floor read with no U_X prices its deposit message by (deposit.assets, signed out): the
+/** The public Solana key a floor read with no U_X prices its deposit message by (deposit.coin, signed out): the
  *  base58 of sha256("blindfill:pool-floor:placeholder"), a key nobody holds. A message's fee is per signature, so the
  *  payer does not move it (readSolanaPoolCosts). */
 export const POOL_FLOOR_PLACEHOLDER = "2KesqqvtnrxmqFzTKDWNt2WyP4bA2pJqJbrJDZppE6aT";
