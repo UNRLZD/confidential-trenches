@@ -74,6 +74,10 @@ class El extends EventTarget {
   insertBefore(n: El, ref: El) {
     const i = this.children.indexOf(ref);
     this.children.splice(i < 0 ? this.children.length : i, 0, n);
+    // a frame the shell adds after its first (a typed screen's close) loads on its own, as a browser's does, and its new
+    // document says hello as the kit does after the ready; the shell posts to a frame only from its load on (card
+    // signpage-tab-title-and-origin), the test loads the first itself
+    if (n instanceof Frame && ++framesAdded > 1) queueMicrotask(() => (n.dispatchEvent(new Event("load")), send({ type: "hello", kit: SIGNPAGE_KIT_VERSION })));
   }
   remove() {
     const i = doc.body.children.indexOf(this);
@@ -91,6 +95,7 @@ class El extends EventTarget {
 }
 const posted: { v: number; id?: string; ok?: boolean; error?: { code: string } }[] = [];
 const frameWindow = { postMessage: (m: (typeof posted)[number]) => void posted.push(m) };
+let framesAdded = 0;
 class Frame extends El {
   src = "";
   contentWindow = frameWindow;
