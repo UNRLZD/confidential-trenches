@@ -10,39 +10,49 @@ import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import * as dry from "../src/pool-buy-evm.ts";
 
 const TOKEN = "0x00000000000000000000000000000000000c0001";
-const hostOf = (indexed: () => Promise<boolean>, at: number[], t0: number) => ({
+// judged on the test clock's own timers, never by reading a clock: each mark set at a time reads how many quotes had
+// been asked by then
+const hostOf = (indexed: () => Promise<boolean>, q: { asked: number }) => ({
   network: "robinhood" as const,
   venues: evmPoolVenues(),
   indexPools: () => null,
   decimals: async () => 18,
   quote: async () => {
-    at.push(Math.round(performance.now() - t0));
+    q.asked++;
     throw Object.assign(new Error("no route"), { code: "no_quote" });
   },
   indexed,
 });
+const marks = (q: { asked: number }, at: number[]) => {
+  const by: number[] = [];
+  for (const m of at) setTimeout(() => by.push(q.asked), m);
+  return by;
+};
+const past = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("DRYIX1 the dry's quote is asked once the chain's index sync it started ends, never before it", { timeout: 30_000 }, () => onTestClock(async () => {
-  const at: number[] = [];
-  const t0 = performance.now();
-  let asked = 0;
-  const h = hostOf(() => (asked++, new Promise<boolean>((r) => setTimeout(() => r(true), 3_000))), at, t0);
+  const q = { asked: 0 };
+  let started = 0;
+  const by = marks(q, [2_999, 3_001]);
+  const h = hostOf(() => (started++, new Promise<boolean>((r) => setTimeout(() => r(true), 3_000))), q);
   assert.equal(await dry.evmDryOut(h as never, TOKEN, 10n ** 15n), null);
-  assert.equal(asked, 1, "the dry did not start the chain's index");
-  assert.ok(at.length > 0 && at[0] === 3_000, `the first quote was asked at ${at[0]} ms, not when the index was served (3,000 ms)`);
+  await past(10);
+  assert.equal(started, 1, "the dry did not start the chain's index");
+  assert.ok(by[0] === 0 && by[1]! > 0, `quotes asked by 2,999 and 3,001 ms: ${by.join(", ")} (none before the index is served at 3,000 ms, then the quote)`);
 }));
 
 test("DRYIX2 an index sync that does not end within EVM_DRY_INDEX_WAIT_MS holds the dry no longer: its quote is asked then, as with no index", { timeout: 60_000 }, () => onTestClock(async () => {
   const wait = (dry as unknown as { EVM_DRY_INDEX_WAIT_MS?: number }).EVM_DRY_INDEX_WAIT_MS;
   assert.equal(typeof wait, "number", "pool-buy-evm.ts has no EVM_DRY_INDEX_WAIT_MS");
-  const at: number[] = [];
-  const t0 = performance.now();
-  const h = hostOf(() => new Promise<boolean>(() => {}), at, t0);
-  await dry.evmDryOut(h as never, TOKEN, 10n ** 15n);
-  assert.equal(at[0], wait);
+  const q = { asked: 0 };
+  const by = marks(q, [wait! - 1, wait! + 1]);
+  await dry.evmDryOut(hostOf(() => new Promise<boolean>(() => {}), q) as never, TOKEN, 10n ** 15n);
+  await past(10);
+  assert.ok(by[0] === 0 && by[1]! > 0, `quotes asked by ${wait! - 1} and ${wait! + 1} ms: ${by.join(", ")}`);
   // a sync that fails at once (another tab's, a partial one): asked at once
-  const at2: number[] = [];
-  const t1 = performance.now();
-  await dry.evmDryOut(hostOf(() => Promise.reject(new Error("no lock")), at2, t1) as never, TOKEN, 10n ** 15n);
-  assert.equal(at2[0], 0);
+  const q2 = { asked: 0 };
+  const by2 = marks(q2, [1]);
+  await dry.evmDryOut(hostOf(() => Promise.reject(new Error("no lock")), q2) as never, TOKEN, 10n ** 15n);
+  await past(10);
+  assert.ok(by2[0]! > 0, "no quote asked by 1 ms");
 }));
