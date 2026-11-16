@@ -48,13 +48,15 @@ export interface Bar {
   volume: number;
 }
 
-/** `own`: the answer's newest bars are the helper's own chain reads (it names `own_from_s`). `held`: the helper
- *  answered for the token (200, no bars yet), so its bars can still come; a 404 is a token it draws no candles for. */
+/** `own`: the answer's newest bars are the helper's own chain reads (it names `own_from_s`). `filling`: the answer's
+ *  bars are what the helper holds while it still reads the token's older ones (06b `filling`), so the chart is read in
+ *  full again (followCandles); present only when true. `held`: the helper answered for the token (200, no bars yet), so
+ *  its bars can still come; a 404 is a token it draws no candles for. */
 export type CandleData =
   | { status: "loading" }
   | { status: "error" }
   | { status: "empty"; gecko: boolean; held: boolean }
-  | { status: "ready"; tf: ChartTf; bars: Bar[]; gecko: boolean; precision: number; own: boolean };
+  | { status: "ready"; tf: ChartTf; bars: Bar[]; gecko: boolean; precision: number; own: boolean; filling?: true };
 export type ReadyCandles = Extract<CandleData, { status: "ready" }>;
 
 const DECIMAL = /^\d+(\.\d+)?$/;
@@ -110,7 +112,8 @@ export function toCandleData(body: unknown, tf: ChartTf, headerSrc: string | nul
   }
   const gecko = isGecko(src);
   const own = Number.isSafeInteger(body.own_from_s) && (body.own_from_s as number) > 0;
-  return bars.length === 0 ? { status: "empty", gecko, held: true } : { status: "ready", tf, bars, gecko, precision: pricePrecision(bars), own };
+  if (bars.length === 0) return { status: "empty", gecko, held: true };
+  return { status: "ready", tf, bars, gecko, precision: pricePrecision(bars), own, ...(body.filling === true ? { filling: true as const } : {}) };
 }
 
 /** How long a first read keeps reading after a 429 (the helper's GeckoTerminal budget is shared by every page:
@@ -137,7 +140,8 @@ export const FILL_WAIT_MS = 2_000;
 
 /** One candle read: the bars, the empty state when the helper holds none (an answer of no bars, or a 404 for a token or
  *  chain it draws no candles for), else the error state. A 429 is read again after its Retry-After, and an answer of no
- *  bars marked `filling` after FILL_WAIT_MS, until THROTTLE_SPAN_S is waited, then is the error state (Retry reads again). */
+ *  bars marked `filling` after FILL_WAIT_MS, until THROTTLE_SPAN_S is waited, then is the error state (Retry reads again).
+ *  An answer with bars marked `filling` is drawn at once, and its follow reads it in full again (followCandles). */
 export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf, fetchFn: typeof fetch = fetch, wait: (ms: number) => Promise<void> = sleep): Promise<CandleData> {
   try {
     for (let waited = 0; ; ) {
@@ -228,7 +232,7 @@ export function foldBars(bars: readonly Bar[], fresh: readonly Bar[], tf: ChartT
   return bars.slice(0, cut).concat(fresh);
 }
 
-type Newest = { bars: Bar[]; gecko: boolean; own: boolean } | { failed: true; waitMs: number | null };
+type Newest = { bars: Bar[]; gecko: boolean; own: boolean; filling: boolean } | { failed: true; waitMs: number | null };
 
 /** One read of the newest `limit` bars: the bars, or a failure (any status but 200, an answer toCandleData refuses, a
  *  throw) with a 429's Retry-After in ms. Never throws, never logs. */
@@ -242,7 +246,7 @@ export async function readNewest(chain: MarketChain, token: string, tf: ChartTf,
     }
     const d = toCandleData(await r.json(), tf, r.headers.get(HELPER_SOURCE_HEADER));
     if (d === null) return { failed: true, waitMs: null };
-    return d.status === "ready" ? { bars: d.bars, gecko: d.gecko, own: d.own } : { bars: [], gecko: d.gecko, own: false };
+    return d.status === "ready" ? { bars: d.bars, gecko: d.gecko, own: d.own, filling: d.filling === true } : { bars: [], gecko: d.gecko, own: false, filling: false };
   } catch {
     return { failed: true, waitMs: null };
   }
@@ -279,7 +283,13 @@ const laterReal = (fn: () => void, ms: number): (() => void) => {
  * not read the token's book yet; its newest bars would be GeckoTerminal's) is folded like any other and the next read
  * is a full one AWAY_MS later (the helper keeps GeckoTerminal's newest range a minute, so it reads GeckoTerminal at
  * most once a minute for it), and live reads resume once the helper's own bars are back. A chart whose first answer
- * names none of them starts that way: its first read is a full one AWAY_MS later. Returns the stop.
+ * names none of them starts that way: its first read is a full one AWAY_MS later. While the last full answer (or the
+ * first one) says `filling`, its bars are the helper's so far and more are being read (the helper's held bars or a
+ * history read still owed, apps/helper/src/data/evm/swaps.ts and solana/trades.ts candles): the full read is due AWAY_MS
+ * after the last instead of RESYNC_MS, the live reads go on between, and RESYNC_MS is back once a full answer no
+ * longer says filling (card app-chart-fills-in-its-history: a chart first drawn with 2 bars waited a minute for its
+ * whole history). A live read's answer never sets it: a read of the newest LIVE_LIMIT bars says nothing of the older
+ * ones. Returns the stop.
  */
 export function followCandles(chain: MarketChain, token: string, ready: ReadyCandles, onBars: (r: ReadyCandles) => void, deps: FollowDeps = {}): () => void {
   const now = deps.now ?? Date.now;
@@ -289,6 +299,8 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
   let lastFull = now();
   /** The last answer had none of the helper's own bars: the next read is a full one. */
   let away = !ready.own;
+  /** The last full answer said filling: the next full read is due AWAY_MS after it. */
+  let filling = ready.filling === true;
   let fails = 0;
   let stopped = false;
   let cancel: () => void = () => undefined;
@@ -307,7 +319,7 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     if (stopped) return;
     if (hidden()) return next(LIVE_MS);
     const sent = now();
-    const full = fails > 0 || away || sent - lastFull >= RESYNC_MS;
+    const full = fails > 0 || away || sent - lastFull >= (filling ? AWAY_MS : RESYNC_MS);
     reading = true;
     const got = await readNewest(chain, token, cur.tf, full ? CANDLES_LIMIT : cur.tf === "1s" ? LIVE_LIMIT_1S : LIVE_LIMIT, deps.fetchFn);
     reading = false;
@@ -315,10 +327,14 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     if ("failed" in got) return failed(got.waitMs);
     const bars = foldBars(cur.bars, got.bars, cur.tf);
     if (bars === null) return failed(null);
-    if (full) lastFull = sent;
+    if (full) {
+      lastFull = sent;
+      filling = got.filling;
+    }
     fails = 0;
     if (bars !== cur.bars) {
-      cur = { ...cur, bars, gecko: cur.gecko || got.gecko, precision: pricePrecision(bars) };
+      // the first answer's `filling` is not handed on: the follow keeps its own (above)
+      cur = { status: "ready", tf: cur.tf, bars, gecko: cur.gecko || got.gecko, precision: pricePrecision(bars), own: cur.own };
       onBars(cur);
     }
     away = !got.own;
