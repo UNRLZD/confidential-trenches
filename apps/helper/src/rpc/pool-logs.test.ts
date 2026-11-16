@@ -27,6 +27,8 @@ const FROM = 54_325_671;
 let FINAL = FROM + 29_999;
 /** Every provider's head read refused (429), as on 16 Nov when dRPC's keys were held; and URLs that refuse everything. */
 let HEAD_DOWN = false;
+/** The next this many head reads refused (429), one per provider asked: a head read that fails, then answers. */
+let HEAD_FAILS = 0;
 const DOWN = new Set<string>();
 const A = `0x${"a1".repeat(32)}`;
 const B = `0x${"b2".repeat(32)}`;
@@ -50,7 +52,7 @@ function world(override?: (url: string, from: number, to: number, fill: boolean)
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     const req = JSON.parse(String(init.body)) as { id: unknown; method: string; params: unknown[] };
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-    if (DOWN.has(url) || (HEAD_DOWN && req.method === "eth_getBlockByNumber")) return new Response("{}", { status: 429, headers: { "retry-after": "30", "content-type": "application/json" } });
+    if (DOWN.has(url) || (req.method === "eth_getBlockByNumber" && (HEAD_DOWN || (HEAD_FAILS > 0 && HEAD_FAILS-- > 0)))) return new Response("{}", { status: 429, headers: { "retry-after": "30", "content-type": "application/json" } });
     if (req.method === "eth_getBlockByNumber") return json({ jsonrpc: "2.0", id: req.id, result: { number: hex(FINAL), hash: `0x${"ab".repeat(32)}` } });
     if (req.method !== "eth_getLogs") return json({ jsonrpc: "2.0", id: req.id, result: "0x1" });
     const f = req.params[0] as { fromBlock: string; toBlock: string; topics?: string[][] };
@@ -280,6 +282,27 @@ function scheduler() {
   return { now: () => clock, sleep, step };
 }
 const FILLING = /^pool logs kept to block (\d+)$/;
+
+// card base-reads-never-throttled (E2): live 16 Nov 12:2xZ the helper's finalized-head read met dRPC's code 15 on
+// every key, and the fill read a head of 0 and ended ("covered to" its start), so the store stood still until a device
+// read past it came. A failed head read is read again at its next turn (FINAL_HEAD_MS) and the fill goes on to the head
+test("the fill never ends on a failed head read: every provider's head read refused three walks running, then answered; the fill reaches the head with no second device read", async () => {
+  FINAL = FROM + 29_999;
+  HEAD_FAILS = 12; // three walks of the four keyed URLs
+  try {
+    const w = world();
+    const r = createRpc(BASE_ENV, w.deps);
+    const cold = resultOf(await read(r, wideBody(1, FROM, FINAL)));
+    assert.equal(cold.error?.code, -32602, "cold: the route's cap, and the fill starts");
+    const devices = w.callers().length;
+    assert.match(await w.filled(), /covered to 54355670$/, `the fill reaches the head (${w.lines.filter((l) => l.startsWith("rpc pool-logs")).join(" | ")})`);
+    assert.equal(HEAD_FAILS, 0, "every planted refusal was met");
+    assert.equal(w.callers().length, devices, "no device read restarted it");
+    assert.equal(w.fills().length, 300, "300 pages, each asked once");
+  } finally {
+    HEAD_FAILS = 0;
+  }
+});
 
 // live 16 Nov 02:48-03:12Z (run 43794383970): the fill's 429s held dRPC's keys, the helper's own head read was held with
 // them, and the store's part was skipped: the whole-range read got the route's bare cap, no `data`, which the check reads

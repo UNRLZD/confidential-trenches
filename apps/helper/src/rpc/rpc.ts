@@ -1070,8 +1070,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   };
   /** The chain's own pool, as the kit pins it (lowercase), for POOL_LOGS_CLIENT; undefined off the EVM chains. */
   const poolOf = (c: RpcChain): string | undefined => (EVM_CHAINS.has(c) ? (evmPoolVenues() as Readonly<Record<string, { pool?: string } | undefined>>)[c]?.pool?.toLowerCase() : undefined);
-  // each EVM chain's finalized head as the helper last read it (0n: none yet), when, and the read in flight
-  const finalHeads = new Map<RpcChain, { n: bigint; at: number; reading?: Promise<void> }>();
+  // each EVM chain's finalized head as the helper last read it (0n: none yet), when, the read in flight, and whether
+  // the last read failed (no head named), which the fill waits out instead of ending (card base-reads-never-throttled)
+  const finalHeads = new Map<RpcChain, { n: bigint; at: number; reading?: Promise<void>; failed?: boolean }>();
   /** Whether block `to` is finalized on `c`, by the helper's own read of the head on `providers` (the chain's keyed
    *  URLs): read again only when `to` is past the head held and FINAL_HEAD_MS has passed since the last read, one read at
    *  a time, outside the caller's trace and share (the chain's total, as the helper's own reads). A head only rises. */
@@ -1084,11 +1085,14 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       head.at = now();
       // the helper's own head read, no caller's: its hold lines name it so (card base-reads-never-starve-max)
       const forward = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["finalized", false] });
+      head.failed = true;
       head.reading = traces.run({ waitMs: 0, shape: `helper ${rpcShape(JSON.parse(forward))}` }, async () => {
         const a = await callList(c, providers, forward, ["eth_getBlockByNumber"], undefined, false, now() + WALK_MS);
         if (a.status !== 200) return;
         const n = (JSON.parse(a.body) as { result?: { number?: unknown } | null }).result?.number;
-        if (typeof n === "string" && BLOCK_NUMBER.test(n) && BigInt(n) > head.n) head.n = BigInt(n);
+        if (typeof n !== "string" || !BLOCK_NUMBER.test(n)) return;
+        head.failed = false;
+        if (BigInt(n) > head.n) head.n = BigInt(n);
       })
         .catch(() => undefined)
         .finally(() => (head.reading = undefined));
@@ -1205,8 +1209,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       const covered0 = s.covered;
       for (;;) {
         await finalized(c, s.covered + 1n, own);
-        const head = finalHeads.get(c)?.n ?? 0n;
-        if (s.covered >= head) break;
+        const h = finalHeads.get(c);
+        const head = h?.n ?? 0n;
+        if (s.covered >= head) {
+          // at the head as read: the fill ends. A head read that failed (every provider held or refusing, as dRPC's
+          // code 15 on 16 Nov) is read again at its next turn instead, so the store never stands still waiting for a
+          // device's read past it (card base-reads-never-throttled)
+          if (h?.failed !== true) break;
+          await fillSleep(FINAL_HEAD_MS);
+          continue;
+        }
         const list = wide ? whole : paged;
         if (list.length === 0) break;
         const a = s.covered + 1n;
