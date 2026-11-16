@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createBook, TFS, type Event } from "../candles.ts";
-import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, toLog, URLS } from "../../../test/evm-swaps/robinhood.ts";
+import { CURVE_TOKEN, fakeChain, KNOWN, MAG, open, POOL_CURVE, POOL_MAG, REC, timeAt, toLog, URLS } from "../../../test/evm-swaps/robinhood.ts";
 import { decodeRef, decodeSwap, ROBINHOOD_VENUES, TOPIC, VENUES, type Pool } from "./swaps.ts";
 
 function rebuild(pool: Pool, upTo: number) {
@@ -668,4 +668,94 @@ test("card evm-tape-rows-exact: a vendor row is served as its receipt shows it, 
     ],
   );
   assert.equal(j.filling, true, "the row whose receipt no provider gave waits, and the page reads again");
+});
+
+test("card evm-pool-search-stable: a graduated Pons coin's main pool is its v4 pool, named by the factory's own record, never its curve, whatever the window's transfers and with or without a hint naming the curve", async () => {
+  // ZOLVA's record (phase PoolCreated: poolFee 0, tickSpacing 200, native ETH) and its graduated pool's 24 newest swaps,
+  // read 16 Nov 22:50Z on rpc.mainnet.chain.robinhood.com, the record and every swap alike on robinhood.daybreak-rpc.network
+  // (fixtures/swaps-robinhood-graduated.json); the swaps moved into the recording's last cold window, in order, so they
+  // are priced by its ETH pool. The window's transfers are none (the fake chain's), as ZOLVA's are in a quiet five minutes
+  // (the newest swap 10,936 blocks before the head read): no transfer names the pool, only the record does.
+  const G = JSON.parse(readFileSync(new URL("./fixtures/swaps-robinhood-graduated.json", import.meta.url), "utf8")) as { coin: string; pool: string; record: string; logs: { b: number; i: number; tx: string; t: string[]; d: string; a: string }[] };
+  const curve = `0x${G.record.slice(2 + 64 + 24, 2 + 128)}`;
+  const [b0, b1] = [G.logs[0]!.b, G.logs.at(-1)!.b];
+  // after the recording's first ETH price, inside its last cold window
+  const lo = Math.max(REC.lastHead - VENUES.robinhood.cold + 1, Math.min(...REC.logs.ref.map((l) => l.b)) + 1);
+  // each in a block of its own that holds no recorded log, so the chain's order stays whole
+  const taken = new Set([...REC.logs.curve, ...REC.logs.v4, ...REC.logs.ref].map((l) => l.b));
+  let last = lo - 1;
+  const moved = G.logs.map((l) => {
+    let b = Math.max(last + 1, lo + Math.round(((l.b - b0) * (REC.lastHead - lo - 30)) / (b1 - b0)));
+    while (taken.has(b)) b++;
+    return { ...l, b: (last = b) };
+  });
+  assert.ok(last <= REC.lastHead);
+  for (const hint of [null, curve]) {
+    const chain = fakeChain();
+    chain.st.head = REC.lastHead;
+    let curveReads = 0;
+    const local = (r: { method: string; params: unknown[] }): unknown => {
+      if (r.method === "eth_call") {
+        const q = r.params[0] as { to: string; data: string };
+        return q.to === ROBINHOOD_VENUES.ponsV2 && q.data === `0x3cf28b5a${G.coin.slice(2).padStart(64, "0")}` ? G.record : undefined;
+      }
+      if (r.method !== "eth_getLogs") return undefined;
+      const q = r.params[0] as { address?: string; topics: (string | string[] | null)[]; fromBlock: string; toBlock: string };
+      if (q.address === curve) return curveReads++, [];
+      if (q.address !== ROBINHOOD_VENUES.poolManager || ![q.topics[1]].flat().includes(G.pool)) return undefined;
+      const [from, to] = [parseInt(q.fromBlock, 16), parseInt(q.toBlock, 16)];
+      return moved.filter((l) => l.b >= from && l.b <= to).map((l) => ({ address: l.a, topics: l.t, data: l.d, blockNumber: `0x${l.b.toString(16)}`, logIndex: `0x${l.i.toString(16)}`, transactionHash: l.tx, blockTimestamp: `0x${timeAt(l.b).toString(16)}`, removed: false }));
+    };
+    const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+      const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
+      if (!Array.isArray(reqs)) return chain.fetch(url, init);
+      const mine = reqs.map((r) => local(r));
+      const rest = reqs.filter((_, i) => mine[i] === undefined);
+      const fwd = rest.length === 0 ? [] : ((await (await chain.fetch(url, { ...init, body: JSON.stringify(rest) })).json()) as { id: number }[]);
+      const out = reqs.map((r, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: r.id, result: mine[i] } : fwd.find((x) => x.id === r.id)));
+      return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const s = open(chain, undefined, { fetch, pools: new Map(), ...(hint === null ? {} : { hint: async () => hint }) });
+    const r = await s.trades(G.coin, 50);
+    s.stop();
+    assert.equal(r.status, 200, r.body);
+    const tape = JSON.parse(r.body) as { trades: { tx: string }[] };
+    // the hook's own swaps (its buybacks, 2 of the 24) are no one's trade (hookTakes)
+    const trades = moved.filter((l) => `0x${l.t[2]!.slice(26)}` !== "0xe5e702641ea86f4ae6cc3cdaed2b886f976be044");
+    assert.equal(trades.length, 22);
+    assert.deepEqual(tape.trades.map((t) => t.tx).sort(), trades.map((l) => l.tx).sort(), `hint ${hint}: the graduated pool's 22 trades are the tape`);
+    assert.equal(curveReads, 0, `hint ${hint}: the curve a graduated coin left is never read`);
+  }
+});
+
+test("card evm-pool-search-stable: the list's pool, confirmed on chain, stands when the discovery finds only pools with no swap in the window (verify): no swap is no evidence of another main pool", async () => {
+  // the coin's CL pool the lists name (fold 7's rig, confirmed by its factory); its Pons record names a curve (not
+  // graduated) with no swap, the only pool the discovery finds in a window with no transfer. Before, verify took the curve
+  // ("the list's pool ... is not the main pool") and the tape read it: ZOLVA's DexScreener pool lost to its curve so,
+  // 0 trades on the deployed helper's reader with the server's hint (8-coin burst, 16 Nov 22:57Z)
+  const coin = `0x${"39".repeat(20)}`;
+  const pool = `0x${"f2".repeat(20)}`;
+  const curve = `0x${"c7".repeat(20)}`;
+  const w = (a: string) => a.slice(2).padStart(64, "0");
+  const record = `0x${w(coin)}${w(curve)}${"0".repeat(64 * 12)}${(1).toString(16).padStart(64, "0")}`;
+  const chain = fakeChain();
+  chain.st.head = REC.lastHead;
+  const cl = withCl(chain, coin, pool, pool);
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: { to?: string; data?: string }[] }[];
+    const mine = reqs.map((r) => (r.method === "eth_call" && r.params[0]?.to === ROBINHOOD_VENUES.ponsV2 && r.params[0]?.data === `0x3cf28b5a${w(coin)}` ? record : undefined));
+    if (mine.every((m) => m === undefined)) return cl.fetch(url, init);
+    const rest = reqs.filter((_, i) => mine[i] === undefined);
+    const fwd = rest.length === 0 ? [] : ((await (await cl.fetch(url, { ...init, body: JSON.stringify(rest) })).json()) as { id: number }[]);
+    return new Response(JSON.stringify(reqs.map((r, i) => (mine[i] !== undefined ? { jsonrpc: "2.0", id: r.id, result: mine[i] } : fwd.find((x) => x.id === r.id)))), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const lines: string[] = [];
+  const s = open(chain, undefined, { fetch, pools: new Map(), hint: async () => pool, log: (l) => lines.push(l) });
+  const r = await s.trades(coin, 50);
+  assert.equal(r.status, 200, r.body);
+  // the search ahead the hinted open started (verify): done before the next look
+  await s.ahead([coin]);
+  assert.ok(cl.asked.transfers > 0, "the discovery ran");
+  assert.deepEqual(lines.filter((l) => l.includes("is not the main pool")), [], "the list's pool stands");
+  s.stop();
 });
