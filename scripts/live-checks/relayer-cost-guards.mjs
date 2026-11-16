@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card relayer-cost-guards (audit V-03 and I-6): no user can make HELPER_HOST's relayers pay for a
 // transaction that earns no fee. It moves no money: it reads, and posts two Solana releases the helper refuses.
-//   NEAR, for mainnet USDC and the testnet token: the token's storage_balance_bounds().min on two RPCs of two operators
+//   NEAR, for mainnet USDC (NEAR mainnet only: card live-checks-read-mainnet-only): the token's storage_balance_bounds().min on two RPCs of two operators
 //   (relayer-withdraw-fee's PAIRS) at one final block, the same bytes on both, and GET /v1/withdraw/fee for the token
 //   with Origin APP_HOST. It passes only while that minimum equals the pinned REGISTER_DEPOSIT_MAX of this checkout
 //   (apps/helper/src/withdraw/fee.ts; live.yml checks out the deployed commit), the one register_deposit the relayer
@@ -55,14 +55,15 @@ const json = (t) => {
 };
 
 /**
- * The check on one recorded run: { commit?, near: { mainnet, testnet }, solana: [{ pool, fee, posts }] }, each NEAR
- * entry { bounds: [{ rpc, block_height, block_hash, result }] x2 or { error }, quote: { status, headers, body } }.
+ * The check on one recorded run: { commit?, near: { mainnet }, solana: [{ pool, fee, posts }] }, each NEAR entry
+ * { bounds: [{ rpc, block_height, block_hash, result }] x2 or { error }, quote: { status, headers, body } }. `tokens`
+ * names the NEAR networks judged (relayer-withdraw-fee's TOKENS: mainnet).
  */
-export function judge(run, pin = PIN) {
+export function judge(run, pin = PIN, tokens = TOKENS) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const answers = [];
-  for (const network of ["mainnet", "testnet"]) {
+  for (const network of Object.keys(tokens)) {
     const tag = `[near ${network}]`;
     const n = run.near?.[network];
     const q = n?.quote;
@@ -141,7 +142,7 @@ export async function read(base = BASE, { fetchFn = fetch, pools = solanaPools()
     return { readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(r.headers), body: (await r.text()).slice(0, 2_000) };
   };
   const near = {};
-  for (const network of ["mainnet", "testnet"]) {
+  for (const network of Object.keys(TOKENS)) {
     const quote = await get(`${base}/v1/withdraw/fee?token=${encodeURIComponent(TOKENS[network])}`);
     near[network] = { quote, bounds: await boundsAt(PAIRS[network], TOKENS[network], fetchFn) };
   }

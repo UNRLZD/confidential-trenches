@@ -2,7 +2,8 @@
 // Live check of card relayer-near-trade: HELPER_HOST, at the deployed commit, carries POST /v1/bind's trade kind (a
 // fresh NEAR wallet W's Rhea classic buy or sell, apps/helper/src/bind/trade.ts) on every network it carries deposits
 // for, and refuses a W the vault never paid before anything is spent. It reads GET /v1/health with Origin APP_HOST (200,
-// X-Helper-Commit the commit asked for, the `bind` networks), then, for each carried network, POSTs a trade for a W made
+// X-Helper-Commit the commit asked for, the `bind` networks), then, for NEAR mainnet when carried (the only network it
+// probes: card live-checks-read-mainnet-only, a listed check reads no test network), POSTs a trade for a W made
 // fresh for this run (64 random hex: no account, no payout) with no delegate: the creation path reads W absent, then no
 // vault payout to W, and answers 409 no_payout with no transaction. A helper before this card answers 400 bad_shape (the
 // body is not a deposit). Nothing is signed and nothing is sent: the probe holds no delegate, and a W no payout reached
@@ -35,18 +36,10 @@ export const PROBE_TRADES = {
       { pool: 6458, token_in: "wrap.near", token_out: "token.rhealab.near" },
     ],
   },
-  testnet: {
-    side: "buy",
-    token: "wrap.testnet",
-    amount_in: "1000000",
-    slippage_bps: 100,
-    venue_out: "1",
-    hops: [{ pool: 0, token_in: "bf-usdc-20261101t022248.testnet", token_out: "wrap.testnet" }], // gitleaks:allow (a public account id)
-  },
 };
 
 /** The trade body for `wallet` on `network`: no delegate, so the helper's creation path runs, and only its reads. */
-export const probeBody = (network, wallet) => JSON.stringify({ trade: { network, wallet, ...PROBE_TRADES[network] }, signed_delegates: [] });
+export const probeBody = (network, wallet, trades = PROBE_TRADES) => JSON.stringify({ trade: { network, wallet, ...trades[network] }, signed_delegates: [] });
 
 const json = (s) => {
   try {
@@ -82,45 +75,45 @@ export function carryProbe(token, deposit, flip = false) {
 }
 /** A registration's deposit for the probes: 0.00125 N, the storage minimum of both probe tokens. */
 const PROBE_DEPOSIT = 1_250_000_000_000_000_000_000n;
-const carryBody = (network, c) => JSON.stringify({ trade: { network, wallet: c.wallet, ...PROBE_TRADES[network] }, signed_delegates: [c.delegate] });
+const carryBody = (network, c, trades) => JSON.stringify({ trade: { network, wallet: c.wallet, ...trades[network] }, signed_delegates: [c.delegate] });
 
 /**
  * One run: health, then per network health lists as carried one trade probe (no delegate) and two carry probes (a
  * signed delegate for an absent W, and one with a flipped signature), each answer kept as read.
  */
-export async function read(base = BASE, fetchFn = fetch, commit = "", wallet = randomBytes(32).toString("hex")) {
+export async function read(base = BASE, fetchFn = fetch, commit = "", wallet = randomBytes(32).toString("hex"), trades = PROBE_TRADES) {
   const root = base.replace(/\/$/, "");
   const h = await fetchFn(`${root}/v1/health`, { redirect: "manual", headers: { origin: APP }, signal: AbortSignal.timeout(15_000) });
   const healthBody = (await h.text()).slice(0, 4096);
   const health = { status: h.status, commit: h.headers.get("x-helper-commit"), body: healthBody };
   const bind = json(healthBody)?.bind;
-  const nets = bind !== null && typeof bind === "object" ? Object.keys(PROBE_TRADES).filter((n) => n in bind) : [];
+  const nets = bind !== null && typeof bind === "object" ? Object.keys(trades).filter((n) => n in bind) : [];
   const probes = {};
   for (const n of nets) {
-    const r = await fetchFn(`${root}/v1/bind`, { method: "POST", redirect: "manual", headers: { origin: APP, "content-type": "application/json" }, body: probeBody(n, wallet), signal: AbortSignal.timeout(30_000) });
+    const r = await fetchFn(`${root}/v1/bind`, { method: "POST", redirect: "manual", headers: { origin: APP, "content-type": "application/json" }, body: probeBody(n, wallet, trades), signal: AbortSignal.timeout(30_000) });
     probes[n] = { status: r.status, body: (await r.text()).slice(0, 1024) };
   }
   const carries = {};
   for (const n of nets) {
     carries[n] = {};
     for (const [kind, flip] of [["signed", false], ["flipped", true]]) {
-      const c = carryProbe(PROBE_TRADES[n].token, PROBE_DEPOSIT, flip);
-      const r = await fetchFn(`${root}/v1/bind`, { method: "POST", redirect: "manual", headers: { origin: APP, "content-type": "application/json" }, body: carryBody(n, c), signal: AbortSignal.timeout(30_000) });
+      const c = carryProbe(trades[n].token, PROBE_DEPOSIT, flip);
+      const r = await fetchFn(`${root}/v1/bind`, { method: "POST", redirect: "manual", headers: { origin: APP, "content-type": "application/json" }, body: carryBody(n, c, trades), signal: AbortSignal.timeout(30_000) });
       carries[n][kind] = { wallet: c.wallet, status: r.status, body: (await r.text()).slice(0, 1024) };
     }
   }
   return { base, commit, wallet, readAt: new Date().toISOString(), health, probes, carries };
 }
 
-/** The check on one recorded run. */
-export function judge(run) {
+/** The check on one recorded run, probing the networks `trades` names (NEAR mainnet live). */
+export function judge(run, trades = PROBE_TRADES) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   say(run.health?.status === 200, `GET /v1/health: ${run.health?.status} (want 200)`);
   say(typeof run.commit === "string" && SHA.test(run.commit) && run.health?.commit === run.commit, `X-Helper-Commit ${run.health?.commit} is the deployed commit ${run.commit || "(no --commit)"}`);
   say(IMPLICIT.test(run.wallet ?? ""), `the probe's W is a 64-hex id made for this run (${run.wallet})`);
   const nets = Object.keys(run.probes ?? {});
-  say(nets.length > 0 && nets.every((n) => n in PROBE_TRADES), `trade probes on the carried networks: ${nets.join(", ") || "none (health lists no bind carry)"}`);
+  say(nets.length > 0 && nets.every((n) => n in trades), `trade probes on the carried networks: ${nets.join(", ") || "none (health lists no bind carry)"}`);
   for (const n of nets) {
     const p = run.probes[n];
     const b = json(p.body);
