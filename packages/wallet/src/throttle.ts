@@ -26,25 +26,15 @@
 // - The gate's time is performance.now, which a wall clock set back or on cannot move; left() is held to the longest
 //   wait the bounds allow, whatever the clock given says.
 
-/** The first pause after a throttle that names no longer Retry-After. */
-export const THROTTLE_PAUSE_FIRST_MS = 1_000;
-/** The longest pause the doubling reaches. */
-export const THROTTLE_PAUSE_MAX_MS = 10_000;
-/** The longest Retry-After honoured: the helper's own window (apps/helper/src/rpc/rpc.ts, up to 10 s). */
-export const THROTTLE_RETRY_AFTER_MAX_MS = 10_000;
+// throttleWaitMs, its bounds and their constants live in the kit (../../kit/src/throttle.ts) since card
+// restore-waits-out-a-near-throttle, so the kit's own vault reads (vault/sync.ts) wait on the same rule; given on here
+// unchanged.
+import { THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, throttleWaitMs, type ThrottleBounds } from "../../kit/src/throttle.ts";
+export { THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, throttleWaitMs, type ThrottleBounds };
 /** How long a provider is open with no throttle before its last pause is forgotten: the public Solana providers' window
  *  (solana.com's 100 per 10 s; api.devnet's 40 a connection in 10 s, run 9's x-ratelimit-conn-limit). */
 export const THROTTLE_QUIET_MS = 10_000;
 
-export type ThrottleBounds = { readonly firstMs: number; readonly maxMs: number; readonly afterMaxMs: number; readonly quietMs?: number };
-export const THROTTLE_BOUNDS: ThrottleBounds = /* @__PURE__ */ Object.freeze({ firstMs: THROTTLE_PAUSE_FIRST_MS, maxMs: THROTTLE_PAUSE_MAX_MS, afterMaxMs: THROTTLE_RETRY_AFTER_MAX_MS });
-
-/** The wait after a throttle, given the pause before it (0: none) and the provider's Retry-After in ms (any value). */
-export function throttleWaitMs(prevMs: number, afterMs: unknown, b: ThrottleBounds = THROTTLE_BOUNDS): number {
-  const pause = Number.isFinite(prevMs) && prevMs > 0 ? Math.min(prevMs * 2, b.maxMs) : b.firstMs;
-  const after = typeof afterMs === "number" && Number.isFinite(afterMs) && afterMs > 0 ? Math.min(afterMs, b.afterMaxMs) : 0;
-  return Math.max(pause, after);
-}
 
 /** One provider's throttle state on one route (see the header). `now` is the clock (tests replace it). */
 export class ThrottleGate {
