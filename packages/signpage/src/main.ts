@@ -68,7 +68,7 @@ import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { onPoolChain, POOL_COIN_ASSET, poolToCash, pricedPoolCoin, type PoolToCashDeps } from "./pool-to-cash.ts";
-import { cashFeeRead, cashMover, cashMoveCost, cashPlanFee, evmCashPlan, planCashMove, poolMoveKinds, provingOn, readOneClickLeast, solanaMoveModel, solanaTapMaxOf, unitsText, withCash, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
+import { NO_CASH_EVM_PLAN, cashFeeRead, cashMover, cashMoveCost, cashPlanReads, dryBesideCash, evmCashPlan, evmDryCashReads, planCashMove, poolMoveKinds, provingOn, readOneClickLeast, solanaMoveModel, solanaTapMaxOf, unitsText, withCash, type CashNote, type CashToPoolDeps, type MoveFollow, type MoveOpRecord } from "./cash-to-pool.ts";
 import { formatUnits as formatPoolUnits, parseUnits as parsePoolUnits } from "./withdraw/pool-form.ts";
 import { quotesStop } from "./quotes-stop.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
@@ -557,16 +557,30 @@ else {
   // a Base or Robinhood move out of Cash as the mover plans it (card cash-buys-spend-every-note-evm: src/cash-to-pool.ts
   // evmCashPlan over every Cash note, at the pool's quote floor and 1Click's least read now), which the tap's sizing, its
   // Fee and its Max all read; null with no price, prover or floor read
-  const evmCashPlanNow = async (chain: "base" | "robinhood") => {
+  const evmCashForm = () => withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover!.vault, signal: withdrawWait.signal });
+  // over Cash's `notes` as read: with none, no floor, fee or least read (card buy-quote-before-any-note, round 2), a
+  // plan that moves nothing
+  const evmCashPlanOf = async (chain: "base" | "robinhood", notes: readonly CashNote[]) => {
     const p = prices.get(chain);
     if (!prover || p === null || p === undefined) return null;
-    const form = withdrawFormDeps({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal });
-    const [notes, read, floor, leastIn] = await Promise.all([form.cash(), cashFeeRead(form.fee()), evmRoute.floor(chain), oneClickLeastNow(chain)]);
-    const fee = cashPlanFee(notes, read);
-    return floor === null ? null : evmCashPlan(notes, fee, p, floor, leastIn, chain);
+    const form = evmCashForm();
+    const r = await cashPlanReads(async () => notes, () => [cashFeeRead(form.fee()), evmRoute.floor(chain), oneClickLeastNow(chain)] as const);
+    if (r.notes.length === 0) return NO_CASH_EVM_PLAN;
+    return r.floor === null ? null : evmCashPlan(r.notes, r.fee, p, r.floor, r.leastIn, chain);
   };
-  const evmDryWithCash = (chain: "base" | "robinhood", params: Record<string, unknown>): Running<"pool.buy.dry"> =>
-    evmBuyDry(chain, params, {
+  const evmCashPlanNow = async (chain: "base" | "robinhood") => (prover ? evmCashPlanOf(chain, await evmCashForm().cash()) : null);
+  const evmDryWithCash = (chain: "base" | "robinhood", params: Record<string, unknown>): Running<"pool.buy.dry"> => {
+    // one read of Cash's notes per dry (card buy-quote-before-any-note, round 2): the plan over them, which with_cash,
+    // the move's rungs and its cost all read, and beside it the epoch's fee, only with a Cash note (none on a fresh
+    // account: no read, no wait), never after the plan's floor read (src/cash-to-pool.ts evmDryCashReads)
+    const cash = evmDryCashReads(
+      () => evmCashForm().cash(),
+      (notes) => evmCashPlanOf(chain, notes),
+      () => testnet?.evmFeeNow(chain) ?? Promise.resolve(null),
+    );
+    const planNow = cash.plan;
+    const feeNow = cash.fee;
+    return evmBuyDry(chain, params, {
       trading: () => buys.live() + sells.live() > 0 || (dryPair() ?? []).some((r) => r.url !== undefined && hostLane(r.url).trading()),
       tap: async () => {
         if (!testnet || !(await fs.state()).signed_in) return null;
@@ -580,8 +594,8 @@ else {
       // alone
       // alone; with no Cash a move can use (plan.top 0: card buy-quote-before-any-note), tap_max with no wait on the fee
       withCash: async (tap, ready) => {
-        const feeRead = testnet?.evmFeeNow(chain).catch(() => null) ?? Promise.resolve(null);
-        const plan = await evmCashPlanNow(chain);
+        const feeRead = feeNow().catch(() => null);
+        const plan = await planNow();
         const tapWei = parsePoolUnits(tap, POOL_ASSET_DECIMALS.ETH);
         if (plan === null || tapWei === null) return null;
         if (plan.top === 0n) return unitsText(tapWei, POOL_ASSET_DECIMALS.ETH);
@@ -598,11 +612,12 @@ else {
       // (src/pool-buy-evm.ts evmMoveShort over the rungs its parts land, `rungs`) and priced on the device (card
       // cash-buys-spend-every-note-evm: src/cash-to-pool.ts evmCashPlan's cost, each part's withdraw fee and margin and
       // every deposit's gas at the device's price), only when Cash's notes make it
-      fee: () => testnet?.evmFeeNow(chain) ?? Promise.resolve(null),
+      fee: feeNow,
       // none with no Cash a move can use (card buy-quote-before-any-note): no move to size, so no wait on the epoch fee
-      rungs: async () => ((p) => (p === null || p.top === 0n ? null : p.rungs))(await evmCashPlanNow(chain)),
-      moved: async (short) => (await evmCashPlanNow(chain))?.cost(short) ?? null,
+      rungs: async () => ((p) => (p === null || p.top === 0n ? null : p.rungs))(await planNow()),
+      moved: async (short) => (await planNow())?.cost(short) ?? null,
     });
+  };
   // NEAR (card you-receive-on-every-chain): nearBuyDry on the NEAR buy's own page, never while a trade runs
   const nearDry = (params: Record<string, unknown>): HostRefusal | Running<"pool.buy.dry"> => {
     const page = nearBuyPage();
@@ -622,25 +637,15 @@ else {
     if ((params.chain === "base" || params.chain === "robinhood") && prover && typeof params.token === "string" && withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) !== null) return evmDryWithCash(params.chain, params);
     const r = poolBuyDry(params);
     if (!prover || params.chain !== "solana" || withdrawHandoff({ store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault }) === null) return r;
-    let extra: string | null = null;
-    const after = r.after.then(async () => {
-      const a = r.answer();
-      if (a === null || !("result" in a)) return;
-      const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal };
-      const form = withdrawFormDeps(vault);
-      // every Cash note (card cash-buys-spend-every-note), at the pool's quote floor and 1Click's least read now
-      const [notes, read, floor, leastIn] = await Promise.all([form.cash(), cashFeeRead(form.fee()), moveFloor("solana").catch(() => null), oneClickLeastNow("solana")]);
-      const fee = cashPlanFee(notes, read);
-      extra = withCash(a.result.tap_max, cashMoverNow().coming("solana"), notes, fee, prices.get("solana"), floor, leastIn);
-    }).catch(() => {});
-    return {
-      running: true as const,
-      after,
-      answer: () => {
-        const a = r.answer();
-        return a !== null && "result" in a && extra !== null ? { ...a, result: { ...a.result, with_cash: extra } } : a;
-      },
-    };
+    const vault = { store: () => open(), notes: async () => openNoteStore(await open()), seed64: () => openSeed64(), prover: prover.vault, signal: withdrawWait.signal };
+    const form = withdrawFormDeps(vault);
+    // every Cash note (card cash-buys-spend-every-note), at the pool's quote floor and 1Click's least read now, read
+    // beside the dry, never after it (card buy-quote-before-any-note, round 2); none of those with no Cash note
+    const cash = cashPlanReads(() => form.cash(), () => [cashFeeRead(form.fee()), moveFloor("solana").catch(() => null), oneClickLeastNow("solana")] as const).then(
+      (x) => (tap: string) => withCash(tap, cashMoverNow().coming("solana"), x.notes, x.fee, prices.get("solana"), x.floor, x.leastIn),
+      () => null,
+    );
+    return dryBesideCash(r, cash);
   };
   const cashDeps = (): CashToPoolDeps => ({
     // Cash's largest note (the note store, on the device) or a move on its way to the chain
@@ -752,10 +757,11 @@ else {
       const form = withdrawFormDeps(vault);
       // the move cashMover makes for it (card cash-buys-spend-every-note): its parts over every Cash note, each its own
       // relay fee and margin, or no buy of it runs
-      const [notes, read, floor, leastIn] = await Promise.all([form.cash(), cashFeeRead(form.fee()), moveFloor("solana").catch(() => null), oneClickLeastNow("solana")]);
-      const fee = cashPlanFee(notes, read);
-      const parts = planCashMove(notes, fee, short, solanaMoveModel(p, floor, leastIn));
-      return parts === null ? null : cashMoveCost(parts, fee, p, "solana");
+      // with no Cash note, no move and no floor, fee or least read (card buy-quote-before-any-note, round 2)
+      const r = await cashPlanReads(() => form.cash(), () => [cashFeeRead(form.fee()), moveFloor("solana").catch(() => null), oneClickLeastNow("solana")] as const);
+      if (r.notes.length === 0) return null;
+      const parts = planCashMove(r.notes, r.fee, short, solanaMoveModel(p, r.floor, r.leastIn));
+      return parts === null ? null : cashMoveCost(parts, r.fee, p, "solana");
     },
   });
   // the same read for a moving tap (cashDeps.tapMax): never refused busy, since the tap that asks is the trade
