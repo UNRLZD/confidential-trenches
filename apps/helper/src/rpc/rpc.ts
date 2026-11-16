@@ -281,12 +281,12 @@ const planSpent = (answer: unknown): boolean =>
 /** The most of a provider's 429 body read for its hold line (refusalOf). [design: 512 bytes: dRPC's refusal is about 80.] */
 const REFUSAL_READ_MAX = 512;
 /**
- * A provider's 429 as its hold line names it (card base-reads-never-throttled): " code <n>", its JSON-RPC error's code
+ * A provider's 429 as its log names it (card base-reads-never-throttled): " code <n>", its JSON-RPC error's code
  * (dRPC's 31 is its rate, its table's other codes a plan or a key's limit: DRPC_PLAN_CODES' source), a whole number of at
  * most 6 digits; else "". At most REFUSAL_READ_MAX bytes are read and the rest cancelled; no word of the body is kept, so
- * a hostile one never reaches the log. And on a shared rate, " pace <n>/s", the pace the refusal left it at.
+ * a hostile one never reaches the log. And for a caller's refusal on a shared rate, " pace <n>/s", the pace it left.
  */
-async function refusalOf(r: Response, holds: ProviderHolds, url: string): Promise<string> {
+async function refusalOf(r: Response, holds?: ProviderHolds, url?: string): Promise<string> {
   let text = "";
   try {
     const reader = r.body?.getReader();
@@ -304,7 +304,7 @@ async function refusalOf(r: Response, holds: ProviderHolds, url: string): Promis
     text = "";
   }
   const code = /"code"\s*:\s*(-?\d{1,6})\b/.exec(text)?.[1];
-  const pace = holds.paceNow?.(url);
+  const pace = url === undefined ? undefined : holds?.paceNow?.(url);
   return `${code === undefined ? "" : ` code ${code}`}${pace === undefined ? "" : ` pace ${pace}/s`}`;
 }
 /** Past a hold's end, the wait's margin: Node's timers and Date.now() round to whole ms, so a wait of exactly the
@@ -1180,11 +1180,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     let text: string | undefined;
     try {
       r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
-      if (r.status === 429) {
-        const s = upstreamRetryAfterS(r.headers, now());
-        holdsAll.hold(url, s);
-        return fillBack(c, url, s, await refusalOf(r, holdsAll, url));
-      }
+      if (r.status === 429) return fillBack(c, url, upstreamRetryAfterS(r.headers, now()), await refusalOf(r));
       text = await readAnswer(r);
     } catch {
       return null;
@@ -1199,10 +1195,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     }
     if (planSpent(answer)) return null;
     const limited = evmLimited(c, answer);
-    // card base-reads-never-throttled: the provider's refusal is its limit's, whoever drew it, so it holds the provider
-    // (on a shared rate, every URL of it, limits.ts RATE_BACK_MAX_S) for every path: a caller's read goes to the next
-    // provider in that time instead of into the same refusal
-    if (limited > 0) return holdsAll.hold(url, limited), fillBack(c, url, limited);
+    if (limited > 0) return fillBack(c, url, limited);
     const page = isPlain(answer) && !Object.hasOwn(answer, "error") ? poolPage(answer.result, pool, a, b) : null;
     const fb = fillBacks.get(url);
     if (page !== null && fb !== undefined && fb.k > 0) fb.k--;
@@ -1674,7 +1667,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
             const s = upstreamRetryAfterS(r.headers, now());
             holds.hold(url, s);
             const why = await refusalOf(r, holds, url);
-            log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${Math.max(s, Math.ceil(holds.heldMs(url) / 1000))} s${shapeTail()}${why}`);
+            log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${s} s${shapeTail()}`);
+            // the hold it took (a shared rate's backoff, limits.ts RATE_BACK_MAX_S), what the provider said and the pace it
+            // left, on a line of its own (the hold line names the provider's wait and ends with the read's shape)
+            const heldS = Math.ceil(holds.heldMs(url) / 1000);
+            if (why !== "" || heldS > s) log(`rpc refusal ${c} ${companyOf(new URL(url).host)} held ${heldS} s${why}`);
             soonestMs = Math.min(soonestMs, holds.heldMs(url));
             continue;
           }
@@ -1706,7 +1703,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         const limited = evmLimited(c, answer);
         if (limited > 0) {
           holds.hold(url, limited);
-          log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${Math.max(limited, Math.ceil(holds.heldMs(url) / 1000))} s${shapeTail()}`);
+          log(`rpc hold ${c} ${companyOf(new URL(url).host)} caller ${limited} s${shapeTail()}`);
+          const heldS = Math.ceil(holds.heldMs(url) / 1000);
+          if (heldS > limited) log(`rpc refusal ${c} ${companyOf(new URL(url).host)} held ${heldS} s`);
           soonestMs = Math.min(soonestMs, holds.heldMs(url));
           continue;
         }
