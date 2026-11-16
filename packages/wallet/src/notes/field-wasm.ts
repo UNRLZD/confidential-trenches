@@ -204,8 +204,9 @@ export const DOT_MAX = 4;
  * 2^29 and values under 2p, a column holds at most 9 k products and 9 of m p, each under 2^58, plus a carry under 2^35:
  * under 45 * 2^58 < 2^64 for k = 4. On inputs under 2p a column reaches about 2^62.2 for k = 2, 2^62.7 for k = 3 and
  * 2^63.1 for k = 4 (card walk-program-checked-before-use: a BigInt replay of these sums on the heaviest inputs; the raw
- * words of test/poseidon-walk.test.ts hold the answers on them): past i64's signed range, so every column step is unsigned (add, mul and and wrap mod 2^64, the
- * shift is shr_u) and none may be a signed shift, compare or division. The answer, (sum + m p) / R, is under
+ * words of test/poseidon-walk.test.ts hold the answers on them). That is past i64's signed range, so every column step
+ * is unsigned: i64.add, i64.mul and i64.and wrap mod 2^64, the shift is shr_u, and none may be a signed shift, compare
+ * or division. The answer, (sum + m p) / R, is under
  * (4 k p^2 + R p) / R = p (1 + 4 k p / R) < 2p for k <= 4, as R > 2^7 p. All inputs are read before r is written, so r
  * may be any of them.
  */
