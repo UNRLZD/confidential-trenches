@@ -630,9 +630,10 @@ export const HELPER_BIND_ONWARD_CODES = [
 deepFreeze(HELPER_BIND_ONWARD_CODES);
 
 /**
- * A trade of a fresh NEAR wallet W on Rhea classic (card relayer-near-trade): the device's own request and the quote's
- * hops and venue output (the kit's rheaQuote), which the helper runs the kit's nearSwapCheck against, never trusting
- * them for anything else. W is a 64-hex implicit id whose key exists only on the device.
+ * A trade of a fresh NEAR wallet W on Rhea classic (card relayer-near-trade) or Rhea DCL (card near-dcl-helper-relay):
+ * the device's own request and the quote's hops and venue output (the kit's rheaQuote or dclQuote), which the helper
+ * runs the kit's nearSwapCheck or dclSwapCheck against, never trusting them for anything else. W is a 64-hex implicit
+ * id whose key exists only on the device.
  */
 export interface HelperNearTrade {
   network: "mainnet" | "testnet";
@@ -645,10 +646,14 @@ export interface HelperNearTrade {
   amount_in: HelperDecimal;
   /** The user's slippage on what the exchange pays, 1 to 9,999 bps. */
   slippage_bps: number;
-  /** What the quote's last hop pays (RheaQuote.venueOut): the floor is taken from it. */
+  /** What the quote's last hop pays (RheaQuote.venueOut, DclQuote.venueOut): the floor is taken from it. */
   venue_out: HelperDecimal;
-  /** The quote's hops, one or two. */
-  hops: { pool: number; token_in: HelperNearAccount; token_out: HelperNearAccount }[];
+  /**
+   * The quote's hops, one or two, all on one exchange: `pool` a Rhea classic pool's number (RheaQuote.hops), or a Rhea
+   * DCL pool id "<lower token>|<higher token>|<fee>" (DclQuote.poolIds, in the Swap's order: USDC to wrap.near to the
+   * token on two hops, each hop naming its own token_in and token_out). A mix of the two is refused.
+   */
+  hops: { pool: number | string; token_in: HelperNearAccount; token_out: HelperNearAccount }[];
 }
 
 /**

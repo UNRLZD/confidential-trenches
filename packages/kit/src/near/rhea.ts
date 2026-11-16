@@ -333,8 +333,8 @@ export async function answer(rpc: NearRpc, params: Obj, signal?: AbortSignal): P
   return { height: r.block_height as number, hash: r.block_hash, bytes: Uint8Array.from(bytes as number[]), failed: false, error: "" };
 }
 
-/** The token's code hash at the block on both providers (its global contract's hash when it runs one). */
-async function accountCode(rpcs: readonly [NearRpc, NearRpc], token: string, height: number, signal: AbortSignal | undefined, same: (what: string, x: Answer, y: Answer) => void): Promise<string> {
+/** The token's code hash at the block on both providers (its global contract's hash when it runs one; shared with dcl.ts). */
+export async function accountCode(rpcs: readonly [NearRpc, NearRpc], token: string, height: number, signal: AbortSignal | undefined, same: (what: string, x: Answer, y: Answer) => void): Promise<string> {
   const read = async (rpc: NearRpc): Promise<{ at: Answer; code: string }> => {
     let a: unknown;
     try {

@@ -69,6 +69,9 @@ export { nearPairNetwork, nearPairRule, type NearNetwork } from "./near/networks
 // a quote on Rhea classic from the pools' own views on two NEAR providers at one block, with the token's own fee
 export { NEAR_RHEA, rheaQuote, RheaQuoteRefused, type RheaHop, type RheaQuote, type RheaQuoteArgs, type RheaRefusalCode } from "./near/rhea.ts";
 export type { NearTokenFee } from "./near/token-fee.ts";
+// a quote on Rhea DCL from its own quote view on two NEAR providers at one block, and the Swap W signs for it, which the
+// helper's trade carry checks again (card near-dcl-route)
+export { DCL_QUOTE_POOLS_MAX, dclPoolOf, dclQuote, dclSwapCalls, dclSwapCheck, dclSwapMsg, NEAR_DCL, type DclQuote, type DclQuoteArgs, type DclSwapArgs } from "./near/dcl.ts";
 // the calls a fresh NEAR wallet signs for a Rhea classic trade and their checks, which the helper's trade carry runs
 // again on what it is asked to carry (card relayer-near-trade)
 export { NEAR_SWAP_GAS, NEAR_SWAP_STORAGE_MAX, nearSwapCalls, nearSwapCheck, nearSwapFloor, nearSwapMsg, NearSwapRefused, type NearSwapArgs, type NearSwapCall, type NearSwapRefusalCode, type NearSwapRequest } from "./trade/near/swap.ts";
