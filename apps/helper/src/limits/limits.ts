@@ -221,10 +221,20 @@ export const HOST_PACE_MS: Readonly<Record<string, number>> = { "api.unrealized.
  * 03:59-04:33Z (helper.sh docker logs, `rpc hold base drpc.live`); a key's 16 in a second at most is under 25, so the
  * limit those 429s hit is the keys' together, not one key's. The keyless robinhood.drpc.org keeps its own pace
  * (PROVIDER_PACE): no read shows dRPC counting a keyless public node with the keys, and the pool senders' withdraw reads
- * on it are timed at that pace (pool/evm.test.ts review M-3). [design: 20 calls a second, 4 at once: at most 24 in any
- * second, one under the 25.]
+ * on it are timed at that pace (pool/evm.test.ts review M-3).
+ * Measured from the helper's box on 16 Nov 16:22-16:30Z (card base-reads-never-throttled; eth_blockNumber on one Base
+ * key, counts only), the free plan's real limit is a budget per calendar minute, not 25 a second: 1 a second for 20 s
+ * and 2 a second for 20 s all answered, then 3 a second was refused (HTTP 429, code 15 "You reached free plan rate
+ * limit, please upgrade", no Retry-After) from the 63rd call of that minute until the minute turned (16:23:43-16:24:00);
+ * 5 a second, 22 of 101 answered; once a minute's budget was spent (the helper's own reads after its redeploy), the
+ * second key was refused in the same minute too (16:30:10). That is the free plan's 50,000,000 CU a 30 days spread by
+ * the minute: 1,157 CU, 57.9 calls at dRPC's 20 CU a call (KEYED_COST). The 20 a second paced before was 20 times it.
+ * [design: 0.8 calls a second, 12 at once: at most 60 in any calendar minute from the helper's IP, the three keys
+ * together, under the 62 measured; the 12 so a page of the device's pool sync (6 reads at once) finds the quarter of it
+ * the pool fill leaves callers (CALLER_ROOM) and the rest within its deadline; callers' reads past it wait in our queue
+ * (rpc.ts callList), never dRPC's 429. More rate is a paid plan or another keyed operator.]
  */
-export const DRPC_IP_PACE = { perS: 20, burst: 4, unit: "call", rate: "drpc-ip" } as const satisfies Pace;
+export const DRPC_IP_PACE = { perS: 0.8, burst: 12, unit: "call", rate: "drpc-ip" } as const satisfies Pace;
 export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
   "https://rpc-robinhood.blockmachine.io": { perS: 0.5, burst: 25, unit: "call" },
