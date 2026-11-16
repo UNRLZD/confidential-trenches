@@ -13,7 +13,7 @@ import { createRpc } from "../../rpc/rpc.ts";
 import { CALLER_ROOM, PROVIDER_PACE, providerHolds } from "../../limits/limits.ts";
 import { HEADER_TIMED, SWAP_RPCS, type Pool } from "./swaps.ts";
 
-const [DAYBREAK, BLOCKMACHINE, POCKET, DRPC, , CHAIN_RPC] = SWAP_RPCS.robinhood as [string, string, string, string, string, string];
+const [DAYBREAK, BLOCKMACHINE, POCKET, DRPC, BLOCKVECTRA, CHAIN_RPC] = SWAP_RPCS.robinhood as [string, string, string, string, string, string];
 const WIDE = [DAYBREAK, BLOCKMACHINE, POCKET, CHAIN_RPC];
 const HOOK = `0x${"5".repeat(36)}0044`; // an afterSwap hook with its return-delta flag (swaps.ts hookOf)
 
@@ -84,7 +84,7 @@ test("the pace: a bucket per provider, background reads leaving CALLER_ROOM of i
   assert.equal(h.room("https://unpaced.test"), 1);
 });
 
-test("card helper-robinhood-capacity fold 2: 12 cold tokens at once, hooked v4 pools among them, against providers that refuse past their read limits: all 12 answer 200 and no provider refuses once; drpc (100 blocks a read) is the last resort", async () => {
+test("card helper-robinhood-capacity fold 2: 12 cold tokens at once, hooked v4 pools among them, against providers that refuse past their read limits: all 12 answer 200 and no provider refuses once; blockvectra is never asked and drpc (100 blocks a read) at most a quarter as often as the wide ones", async () => {
   const r = rig();
   const clock = runClock;
   // five hooked v4 pools (two eth_getLogs a span: swaps and the hook's transfers), the curve, six tokens with no pool
@@ -101,8 +101,10 @@ test("card helper-robinhood-capacity fold 2: 12 cold tokens at once, hooked v4 p
   assert.deepEqual(got.map((a) => a.status), tokens.map(() => 200), got.map((a) => a.body.slice(0, 60)).join("\n"));
   for (const t of [...hooked, CURVE_TOKEN]) assert.ok(JSON.parse(got[tokens.indexOf(t)]!.body).trades.length > 0, `${t}: a tape`);
   assert.equal(r.refused.size, 0, `refused: ${show(r.refused)} (eth_getLogs ${show(r.logs)})`);
+  // blockvectra (a narrow window that 429s) none; drpc (100 blocks a read) at most a quarter of the wide providers' reads
   const drpc = r.logs.get(DRPC) ?? 0;
   const wide = WIDE.reduce((n, u) => n + (r.logs.get(u) ?? 0), 0);
+  assert.equal(r.logs.get(BLOCKVECTRA) ?? 0, 0, `blockvectra eth_getLogs (${show(r.logs)})`);
   assert.ok(drpc <= wide / 4, `drpc ${drpc} eth_getLogs, the wide providers ${wide} (${show(r.logs)})`);
   assert.ok(ms < 15_000, `${Math.round(ms)} ms`);
 });

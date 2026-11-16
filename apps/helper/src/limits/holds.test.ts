@@ -30,9 +30,10 @@ test("card helper-robinhood-capacity: one hold per provider: a 429 the swap read
   // with the paces on this frozen clock its 2-post bucket ranked it last for every read, and the sender lookups, which
   // gave it a share by free budget and met its 429, now go to the providers expected to answer first)
   const holds = providerHolds(() => clock.t, {});
-  // the swap reads meet the chain's own RPC's 429 (it is asked first here)
+  // the swap reads meet the chain's own RPC's 429 (it is asked first here: read as not header-timed, since a header-timed
+  // provider is asked a head last and never in an ordinary log read's first two, card robinhood-trades-finish-filling)
   const r = rig([CHAIN_RPC]);
-  const s = open(r.chain, clock, { pools: new Map(), rpcs: [CHAIN_RPC, ...WIDE], headerTimed: HEADER_TIMED, fetch: r.fetch as never, holds });
+  const s = open(r.chain, clock, { pools: new Map(), rpcs: [CHAIN_RPC, ...WIDE], headerTimed: new Set(), fetch: r.fetch as never, holds });
   assert.equal((await s.trades(CURVE_TOKEN, 50)).status, 200);
   s.stop();
   assert.ok(holds.heldFor(CHAIN_RPC) >= 29, `held ${holds.heldFor(CHAIN_RPC)} s`);
