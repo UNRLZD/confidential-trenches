@@ -189,7 +189,9 @@ test(`hostile pages are never kept: another address, a block outside the page, l
   const n = w.sent.length;
   assert.deepEqual(resultOf(await read(r, wideBody(2, FROM, bad - 1))).result, logsIn(FROM, bad - 1));
   assert.equal(w.sent.length, n);
-  assert.equal(resultOf(await read(r, wideBody(3, FROM, FINAL))).error?.code, -32602, "the rest past the route's reach: its cap");
+  const rest = resultOf(await read(r, wideBody(3, FROM, FINAL)));
+  assert.equal(rest.error?.code, -32602, "the rest past the route's reach: its cap");
+  assert.equal(rest.error?.data, `pool logs kept to block ${bad - 1}`, "naming how far the store is");
 });
 
 test("HELPER_STORE_DIR: a restart starts warm from the store's file (no upstream log read); a file tampered with is not read", async () => {

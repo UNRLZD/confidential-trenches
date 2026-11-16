@@ -1319,7 +1319,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
             if (logs.to > s.covered) {
               const tf = s.covered + 1n;
               const tail = { ...req, params: [{ ...filter, fromBlock: hexOf(tf) }] };
-              const ta = (await logsRead(c, own, tail, JSON.stringify(tail), methods, tf, logs.to, who, reserved, by)).a;
+              const tr = await logsRead(c, own, tail, JSON.stringify(tail), methods, tf, logs.to, who, reserved, by);
+              if (tr.capped) return storeCap(tr.a, s.covered);
+              const ta = tr.a;
               let answer: unknown;
               try {
                 answer = parse(ta.body);
@@ -1341,9 +1343,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         // a range wider than the route's pages reach: the store starts filling, for the next read
         if (capped && s !== undefined && topics !== null && logs.from >= s.from) {
           fillPool(c, own);
-          // the cap says how far the store is (its live check reads a store still filling apart from a route that has none)
-          const kept = `pool logs kept to block ${s.covered}`;
-          return { ...a, body: a.body.replace(/"message":("[^"]*")\}\}$/, (_m, msg: string) => `"message":${msg},"data":${JSON.stringify(kept)}}}`) };
+          return storeCap(a, s.covered);
         }
         if (final) logCachePut(logs.key, a);
         return a;
@@ -1369,6 +1369,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if ((EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) || (c !== "solana" && walks(c))) return callList(c, listOf(c), forward, methods, client, reserved, by);
     return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved, by);
   }
+
+  /** The route's range cap on a pool read, saying how far the pool store is (`data`: "pool logs kept to block N"), so its
+   *  live check reads a store still filling apart from a route that has none; the cap's words stay the wallet's. */
+  const storeCap = (a: Answer, covered: bigint): Answer => ({ ...a, body: a.body.replace(/"message":("[^"]*")\}\}$/, (_m, msg: string) => `"message":${msg},"data":${JSON.stringify(`pool logs kept to block ${covered}`)}}}`) });
 
   /**
    * A finalized-or-not eth_getLogs on the keyed-only route (card helper-base-logs-page): sent whole only to the providers
