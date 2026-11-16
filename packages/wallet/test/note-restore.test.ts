@@ -14,7 +14,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, refKey, type Leaf, type NoteRecord } from "../src/notes/store.ts";
-import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, restoreNotes, restorePages, walkLane, walkLaneOf, walkLaneYielding, writeRestored, type NoteRestore, type Slices } from "../src/notes/restore.ts";
+import { checkedLane, checkedWalk, type LaneWalk, RESTORE_GAP, RESTORE_LANES, restoreNotes, restorePages, walkLane, walkLaneOf, walkLaneYielding, writeRestored, type NoteRestore, type Slices } from "../src/notes/restore.ts";
 import type { VaultDepositRow, VaultSpendRow } from "@blindfill/kit";
 import { openWalletStore } from "../src/store/index.ts";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
@@ -449,7 +449,7 @@ test("the gap rule counts within one lane: a lane's note after gap - 1 misses is
 // card wallet-restore-id-reader: the reach step 5's walk-end error names. The walk reads to it before its gap counts, so a
 // note past a run of gap misses (ids with history and no note) is found once the user restores with that reach; and a
 // walk handed in must have read gap past its reach, so a Worker that ignored the reach stops the restore.
-test("a reach: the walk reads to it before its gap counts, and a walk handed in must end gap past it", () => {
+test("a reach: the walk reads to it before its gap counts, and a walk handed in must end gap past it (one that does not is walked again)", () => {
   const lane = 3;
   const at = (pos: number) => sec({ kind: "deposit", s: SCOPE, i: lane + 8 * pos }).precommitment;
   const far = new Set([at(0), at(1 + TEST_GAP)]); // TEST_GAP misses between: past the walk's end
@@ -471,7 +471,9 @@ test("a reach: the walk reads to it before its gap counts, and a walk handed in 
   assert.deepEqual(fine.laneWalked, walks.map((w) => w.last));
   assert.equal(fine.laneWalked[lane], lane + 8 * 2 * TEST_GAP);
   const short = walks.map((w, l) => (l === lane ? walkLane(SEED, SCOPE, l, () => false, TEST_GAP) : w));
-  assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach, lanes: short }), new RegExp(`lane 3: the walk ended at ${lane + 8 * (TEST_GAP - 1)}, not ${lane + 8 * 2 * TEST_GAP} \\(gap ${TEST_GAP} past its last note or its reach ${lane + 8 * TEST_GAP}\\)`));
+  assert.throws(() => checkedWalk(short[lane]!, lane, SEED, SCOPE, TEST_GAP, reach[lane]!), new RegExp(`lane 3: the walk ended at ${lane + 8 * (TEST_GAP - 1)}, not ${lane + 8 * 2 * TEST_GAP} \\(gap ${TEST_GAP} past its last note or its reach ${lane + 8 * TEST_GAP}\\)`));
+  // card restore-walk-rewalks-a-bad-lane: the restore walks that lane again, to its reach and gap past it
+  assert.deepEqual(restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach, lanes: short }), fine);
   assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, reach: [1] }), /reach: one per lane/);
 });
 
@@ -766,7 +768,7 @@ test("twins from a stranger: a deposit on our pending refund R and a refund on o
   }
 });
 
-test("the walk handed in from outside (the proof pool's workers) gives the same restore; another lane's index is refused", async () => {
+test("the walk handed in from outside (the proof pool's workers) gives the same restore; another lane's index is refused and the lane walked again", async () => {
   const w = verifierOrder(rng(5));
   const v = w.v.views();
   const inline = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP });
@@ -783,12 +785,15 @@ test("the walk handed in from outside (the proof pool's workers) gives the same 
   const copy = () => lanes.map((x) => ({ ...x, found: [...x.found] }));
   const wrong = copy();
   wrong[0]!.found.push(1); // lane 1's index in lane 0's walk
-  assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: wrong }), /not this lane's/);
+  assert.throws(() => checkedWalk(wrong[0]!, 0, SEED, SCOPE, TEST_GAP, null), /not this lane's/);
+  assert.deepEqual(restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: wrong }), restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes }), "lane 0 walked again");
   assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: lanes.slice(1) }), /one walk per lane/);
   assert.equal(restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes }).notes.length, inline.notes.length);
 });
 
-test("a walk handed in that stopped early, or walked another scope or seed, stops the restore (never fewer notes quietly)", async () => {
+// card restore-walk-rewalks-a-bad-lane: such a walk was a stopped restore; it is now refused (checkedWalk) and its lane
+// walked again on BigInt, so the restore is the one an honest walk gives, never fewer notes
+test("a walk handed in that stopped early, or walked another scope or seed, is refused and its lane walked again: the honest restore, never fewer notes quietly", async () => {
   const w = verifierOrder(rng(7));
   const v = w.v.views();
   const pages = pagesOf(w.v);
@@ -796,22 +801,19 @@ test("a walk handed in that stopped early, or walked another scope or seed, stop
   // a lane handed in empty (D1b): it ends at the lane's first index, not gap past its notes
   const honest = Array.from({ length: 8 }, (_, lane) => walkLane(SEED, SCOPE, lane, (p) => pages.deposits.some((r) => r.precommitment === p), TEST_GAP));
   const emptied = honest.map((x, lane) => (lane === used ? { found: [], last: lane, lastPrecommitment: sec({ kind: "deposit", s: SCOPE, i: lane }).precommitment } : x));
-  assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: emptied }), /the walk ended at/);
-  // a walk with a smaller gap than the restore's stops before gap misses past its last note
-  await assert.rejects(
-    restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, scope, _gap, ps) => walkLane(SEED, scope, lane, (p) => ps.has(p), TEST_GAP - 1) }),
-    /the walk ended at/,
-  );
+  assert.throws(() => checkedWalk(emptied[used]!, used, SEED, SCOPE, TEST_GAP, null), /the walk ended at/);
+  const want = restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: honest });
+  assert.ok(want.notes.length > 0, "the fixture has notes");
+  assert.deepEqual(restorePages(SEED, SCOPE, pages, { gap: TEST_GAP, lanes: emptied }), want, "the emptied lane walked again");
+  const inline = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP });
+  // a walk with a smaller gap than the restore's ends before gap misses past its last note
+  assert.deepEqual(await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, scope, _gap, ps) => walkLane(SEED, scope, lane, (p) => ps.has(p), TEST_GAP - 1) }), inline, "a smaller gap");
   // a walk wired to another token's scope (D1c), or to another seed: no note, a whole walk, the wrong last precommitment
   const otherScope = vaultScopeOf(keccak_256, VAULT, "usdc.other.testnet");
-  await assert.rejects(
-    restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, _scope, gap, ps) => walkLane(SEED, otherScope, lane, (p) => ps.has(p), gap) }),
-    /last precommitment is not this seed's and scope's/,
-  );
-  await assert.rejects(
-    restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, scope, gap, ps) => walkLane(OTHER, scope, lane, (p) => ps.has(p), gap) }),
-    /last precommitment is not this seed's and scope's/,
-  );
+  assert.throws(() => checkedWalk(walkLane(SEED, otherScope, used, () => false, TEST_GAP), used, SEED, SCOPE, TEST_GAP, null), /last precommitment is not this seed's and scope's/);
+  assert.throws(() => checkedWalk(walkLane(OTHER, SCOPE, used, () => false, TEST_GAP), used, SEED, SCOPE, TEST_GAP, null), /last precommitment is not this seed's and scope's/);
+  assert.deepEqual(await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, _scope, gap, ps) => walkLane(SEED, otherScope, lane, (p) => ps.has(p), gap) }), inline, "another scope");
+  assert.deepEqual(await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v), gap: TEST_GAP, walk: async (lane, scope, gap, ps) => walkLane(OTHER, scope, lane, (p) => ps.has(p), gap) }), inline, "another seed");
 });
 
 test("the vault's config on both RPCs: a wrong token or scope is refused, the two final heights come back", async () => {
@@ -1139,29 +1141,59 @@ test("the yielded walk is the synchronous one: all 8 lanes, notes at the gap's e
   assert.deepEqual(await walkLaneYielding(W_M, W_SCOPE, 2, wHas, W_GAP, 2 + 8 * 20, undefined, everyStep()), walkLaneOf(W_M, W_SCOPE, 2, wHas, W_GAP, 2 + 8 * 20), "lane 2 with a reach");
 });
 
-test("planted: laneOf takes a lane's walk only when it is a whole walk on this seed and scope; any other stops the restore", () => {
+// card restore-walk-rewalks-a-bad-lane: checkedWalk refuses each planted walk below with its reason, and checkedLane,
+// which the restores take a lane's walk from, walks such a lane again once on BigInt: the restore gets the whole walk,
+// never fewer notes and never a stop for a walk it could make itself
+const drive = <T>(g: Generator<void, T, Uint8Array>, seed: (step: number) => Uint8Array = () => SEED): { value: T; steps: number } => {
+  let steps = 0;
+  for (let r = g.next(seed(0)); ; r = g.next(seed(++steps))) if (r.done) return { value: r.value, steps };
+};
+test("planted: checkedWalk takes a lane's walk only when it is a whole walk on this seed and scope; checkedLane walks any other again once on BigInt and gets the whole walk", () => {
   const good = wLanes();
-  for (let lane = 0; lane < RESTORE_LANES; lane++) assert.equal(laneOf(good, lane, SEED, W_SCOPE, W_GAP), good[lane], `lane ${lane} as walked`);
+  const check = (lanes: readonly LaneWalk[], lane: number, gap = W_GAP): unknown => checkedWalk(lanes[lane]!, lane, SEED, W_SCOPE, gap, null);
+  const whole = (lane: number, gap = W_GAP) => {
+    const w = walkLaneOf(W_M, W_SCOPE, lane, wHas, gap);
+    return { ...w, end: w.last };
+  };
+  for (let lane = 0; lane < RESTORE_LANES; lane++) {
+    assert.deepEqual(check(good, lane), { found: good[lane]!.found, end: good[lane]!.last }, `lane ${lane} as walked`);
+    const taken = drive(checkedLane(good, lane, W_SCOPE, wHas, W_GAP, null));
+    assert.deepEqual(taken.value, whole(lane), `lane ${lane} taken as handed in`);
+    assert.equal(taken.steps, 1, `lane ${lane}: no walk again`);
+  }
   const with_ = (lane: number, w: Partial<LaneWalk>): LaneWalk[] => good.map((x, k) => (k === lane ? { ...x, ...w } : x));
-  // one owned index left out (the lane's last note): the walk claims to end gap misses past the note before it
-  assert.throws(() => laneOf(with_(7, { found: [7, 47] }), 7, SEED, W_SCOPE, W_GAP), /lane 7: the walk ended at 135, not 95/);
-  // every lane empty, each walk's end left as it was: the lanes with notes stop it
   const empty = good.map((x) => ({ ...x, found: [] }));
-  assert.throws(() => laneOf(empty, 0, SEED, W_SCOPE, W_GAP), /lane 0: the walk ended at 96, not 40/);
-  assert.throws(() => laneOf(empty, 3, SEED, W_SCOPE, W_GAP), /lane 3: the walk ended/);
-  // another seed's masters, on a lane with no note (its end the same): only the last precommitment tells it
   const other = wLanes(d.masters(OTHER, "deposit"));
   assert.equal(other[2]!.last, good[2]!.last);
-  assert.throws(() => laneOf(other, 2, SEED, W_SCOPE, W_GAP), /lane 2: the walk's last precommitment is not this seed's and scope's/);
-  // another scope, the same
-  assert.throws(() => laneOf(wLanes(W_M, W_SCOPE + 1n), 2, SEED, W_SCOPE, W_GAP), /lane 2: the walk's last precommitment is not this seed's and scope's/);
-  // a wrong last, either way
-  assert.throws(() => laneOf(with_(2, { last: good[2]!.last + 8 }), 2, SEED, W_SCOPE, W_GAP), /lane 2: the walk ended at/);
-  assert.throws(() => laneOf(with_(2, { last: good[2]!.last - 8 }), 2, SEED, W_SCOPE, W_GAP), /lane 2: the walk ended at/);
-  // an index of another lane, indices out of order, a seventh walk
-  assert.throws(() => laneOf(with_(0, { found: [0, 9] }), 0, SEED, W_SCOPE, W_GAP), /lane 0: the walk's indices are not this lane's, ascending/);
-  assert.throws(() => laneOf(with_(0, { found: [48, 0] }), 0, SEED, W_SCOPE, W_GAP), /lane 0: the walk's indices are not this lane's, ascending/);
-  assert.throws(() => laneOf(good.slice(0, 7), 0, SEED, W_SCOPE, W_GAP), /lanes: 7 walks, not 8/);
-  // at another gap than walked: the end is not the gap's
-  assert.throws(() => laneOf(good, 2, SEED, W_SCOPE, W_GAP + 1), /lane 2: the walk ended at/);
+  const planted: [string, LaneWalk[], number, RegExp, number?][] = [
+    // one owned index left out (the lane's last note): the walk claims to end gap misses past the note before it
+    ["a note left out", with_(7, { found: [7, 47] }), 7, /lane 7: the walk ended at 135, not 95/],
+    // every lane empty, each walk's end left as it was: the lanes with notes stop it
+    ["lane 0 emptied", empty, 0, /lane 0: the walk ended at 96, not 40/],
+    ["lane 3 emptied", empty, 3, /lane 3: the walk ended/],
+    // another seed's masters, on a lane with no note (its end the same): only the last precommitment tells it
+    ["another seed", other, 2, /lane 2: the walk's last precommitment is not this seed's and scope's/],
+    // another scope, the same
+    ["another scope", wLanes(W_M, W_SCOPE + 1n), 2, /lane 2: the walk's last precommitment is not this seed's and scope's/],
+    // a wrong last, either way
+    ["last past its end", with_(2, { last: good[2]!.last + 8 }), 2, /lane 2: the walk ended at/],
+    ["last short of its end", with_(2, { last: good[2]!.last - 8 }), 2, /lane 2: the walk ended at/],
+    // an index of another lane, indices out of order
+    ["another lane's index", with_(0, { found: [0, 9] }), 0, /lane 0: the walk's indices are not this lane's, ascending/],
+    ["out of order", with_(0, { found: [48, 0] }), 0, /lane 0: the walk's indices are not this lane's, ascending/],
+    // at another gap than walked: the end is not the gap's
+    ["another gap", good, 2, /lane 2: the walk ended at/, W_GAP + 1],
+  ];
+  for (const [what, lanes, lane, refused, gap = W_GAP] of planted) {
+    assert.throws(() => check(lanes, lane, gap), refused, what);
+    const taken = drive(checkedLane(lanes, lane, W_SCOPE, wHas, gap, null));
+    assert.deepEqual(taken.value, whole(lane, gap), `${what}: the whole walk, walked again`);
+    // the walk again yields after each index, so the page's slices hold
+    assert.ok(taken.steps > gap, `${what}: ${taken.steps} steps`);
+  }
+  // a seventh walk is the caller's mistake, refused before any walk
+  assert.throws(() => drive(checkedLane(good.slice(0, 7), 0, W_SCOPE, wHas, W_GAP, null)), /lanes: 7 walks, not 8/);
+  // a second failure stops, as one did before: here the seed changes under the walk again (its last index checked on
+  // another seed's), and there is no third walk
+  assert.throws(() => drive(checkedLane(empty, 0, W_SCOPE, wHas, W_GAP, null), (step) => (step < 3 ? SEED : OTHER)), /lane 0: the walk's last precommitment is not this seed's and scope's/);
 });

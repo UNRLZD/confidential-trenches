@@ -54,7 +54,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { SOLANA_POOL_SPENT_MARK_LEN, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
 import { masters } from "../derive/index.ts";
-import { laneOf, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, walkLane, withSeed } from "../notes/restore.ts";
+import { checkedLane, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, withSeed } from "../notes/restore.ts";
 import { walkLanes, type WalkPort } from "../restore/walk.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
@@ -409,9 +409,9 @@ function* solanaRestoreSteps(a: Omit<SolanaRestoreArgs, "seed64">): Generator<vo
   };
 
   for (let lane = 0; lane < RESTORE_LANES; lane++) {
-    // a walk handed in is held to a whole walk's end on this seed and scope (laneOf) before a note is taken from it
-    seed64 = yield;
-    const w = a.lanes ? laneOf(a.lanes, lane, seed64, scope, a.gap ?? RESTORE_GAP) : walkLane(seed64, scope, lane, (P) => markOf(P) !== undefined, a.gap ?? RESTORE_GAP);
+    // a walk, handed in or walked here, is held to a whole walk's end on this seed and scope before a note is taken from
+    // it, and walked again once on BigInt where it is not (checkedLane, card restore-walk-rewalks-a-bad-lane)
+    const w = yield* checkedLane(a.lanes, lane, scope, (P) => markOf(P) !== undefined, a.gap ?? RESTORE_GAP, null);
     for (const i of w.found) if (!(yield* asDeposit({ kind: "deposit", s: scope, i }))) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
   }
 
@@ -579,7 +579,7 @@ export async function solanaRestoreNotes(a: {
           const lanes: LaneWalk[] = [];
           const slice = slices(a.signal, a.now);
           // the 8 lanes in the page's walk Workers when it gives them (../restore/walk.ts walkLanes), each matched on the
-          // pool's precommitment marks; every walk checked again by laneOf below before a note is taken
+          // pool's precommitment marks; every walk checked again by checkedLane below before a note is taken
           lanes.push(...(await walkLanes({ m, scope, match: { kind: "solana", program: a.program, marks: [...walked.pre.keys()] }, gap: a.gap ?? RESTORE_GAP, ...(a.signal ? { signal: a.signal } : {}), slice, ...(a.walkers ? { spawn: a.walkers } : {}) })));
           // then the notes a slice at a time: one short use of the seed a slice (WALK_SLICE_MS of work), the event loop a
           // turn and the signal checked between slices

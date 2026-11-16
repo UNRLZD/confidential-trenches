@@ -20,9 +20,10 @@
 //   public: a set of precommitments (an EVM pool, the vault), or the Solana pool's precommitment marks, each an address
 //   the pool program derives from the precommitment (a PDA, computed in the Worker as solana-restore.ts solanaMarkOf).
 // - Every walk a Worker hands back is checked on the page before a note is taken from it, as any walk handed in is
-//   (../notes/restore.ts checkedWalk, through each pool's laneOf): the lane's own indices, ascending; its last index
+//   (../notes/restore.ts checkedWalk, through each pool's checkedLane): the lane's own indices, ascending; its last index
 //   the one a whole walk reads to; that index's precommitment recomputed from the seed. A walk that ends short, or on
-//   the wrong index, stops the restore with its lane named. What the check cannot see: a walk that reaches its end
+//   the wrong index, is walked again once on the page on BigInt (checkedLane), and one that fails again stops the
+//   restore with its lane named. What the check cannot see: a walk that reaches its end
 //   but leaves out a note found on the way (a middle index) passes it. That is why a Worker runs only the page's own
 //   file, /walk-worker.js from this origin (its bytes pinned by the release list, started through the Trusted Types
 //   policy walk-worker), the same walk code the page runs; walk-lanes.test.ts holds the Workers' walks equal to the
@@ -198,7 +199,7 @@ export function walkCores(n: number | undefined = (globalThis as { navigator?: {
  * A pool's 8 lane walks (see the top): with `spawn`, each lane in a Worker, `cores` of them at a time; a lane whose
  * Worker cannot start, fails or gives no answer within WALK_LANE_MAX_MS (`wait`, the timer, injected in tests) walks on
  * the page (walkLaneYielding on `slice`); without `spawn`, every lane on the page, as
- * before. The walks in lane order, unchecked: the pool's restore checks each (laneOf) before it takes a note.
+ * before. The walks in lane order, unchecked: the pool's restore checks each (checkedLane) before it takes a note.
  */
 export async function walkLanes(a: { m: { nullifier: bigint; secret: bigint }; scope: bigint; match: WalkMatch; gap: number; signal?: AbortSignal; slice: Slices; spawn?: () => WalkPort; cores?: number; wait?: (ms: number, ended: AbortSignal) => Promise<void> }): Promise<LaneWalk[]> {
   a.signal?.throwIfAborted();

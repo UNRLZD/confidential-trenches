@@ -15,7 +15,9 @@
 //   walk in (restoreNotes `walk`, which is given the lane, scope and gap the restore checks; restorePages `lanes`). A
 //   walk handed in must name its lane's own indices, ascending, each one matched again here, and the last index it read
 //   with that index's precommitment, recomputed here: so a walk on another scope or seed, or one that stopped before
-//   `gap` misses past its last note, stops the restore instead of returning fewer notes.
+//   `gap` misses past its last note, is never taken. Such a lane is walked again once, here, on BigInt alone (checkedLane,
+//   card restore-walk-rewalks-a-bad-lane: a fast walk that answers wrong costs time, never the restore), and a walk
+//   that fails again stops the restore instead of returning fewer notes.
 // - Every note found is followed: its nullifier hash into the spends; for a withdrawal (l, j) of ours (l its label, j 0
 //   for the first note of a label, k + 1 for change note k): change note j, which must be the leaf the spend names
 //   unless the spend is a ragequit (context 0, which inserts no change); the refund note once settle has written it (a
@@ -45,7 +47,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { nearPairNetwork, nearPairRule } from "../deposit/account.ts";
 import { CHAINS, type Chain, masters, type SecondId } from "../derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "./secrets.ts";
-import { precommitmentWalker } from "./poseidon-walk.ts";
+import { poseidon2Walk, poseidon3Walk, precommitmentWalker } from "./poseidon-walk.ts";
 import { refKey, type Landed, type Leaf, type NoteRecord, type NoteState, type NoteStore } from "./store.ts";
 
 /** Indices of one lane in a row with no note before the deposit index walk stops (wallet.md l.271-272). */
@@ -222,12 +224,28 @@ export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigi
   for (let r = steps.next(); ; r = steps.next()) if (r.done) return r.value;
 }
 
-/** Lane `lane` of 8 walks handed in, held to a whole walk of that lane on this seed and scope (checkedWalk), or the restore stops. */
-export function laneOf(lanes: readonly LaneWalk[], lane: number, seed64: Uint8Array, scope: bigint, gap: number = RESTORE_GAP): LaneWalk {
-  if (!Array.isArray(lanes) || lanes.length !== RESTORE_LANES) throw new Error(`lanes: ${String(lanes?.length)} walks, not ${RESTORE_LANES}`);
-  const w = lanes[lane]!;
-  checkedWalk(w, lane, seed64, scope, gap, null);
-  return w;
+/**
+ * The walk a restore takes notes from for one lane (card restore-walk-rewalks-a-bad-lane): lane `lane` of the 8 walks
+ * handed in (`lanes`) or the lane walked here (walkLane), held to checkedWalk. One that fails it (a fast walk that answered wrong
+ * on some index, a Worker's walk cut short or on another seed or scope) is walked once more, here, on BigInt alone
+ * (poseidon2Walk and poseidon3Walk, no WebAssembly), and held to checkedWalk again: a second failure stops the restore,
+ * as one did before. Each step is handed the seed, as restorePagesSteps' are, and the walk again yields after every
+ * index, so the page that drives it keeps its slices (a lane of RESTORE_GAP indices on BigInt is seconds of work).
+ */
+export function* checkedLane(lanes: readonly LaneWalk[] | undefined, lane: number, scope: bigint, has: (precommitment: bigint) => boolean, gap: number, reach: number | null): Generator<void, LaneWalk & { end: number }, Uint8Array> {
+  if (lanes !== undefined && (!Array.isArray(lanes) || lanes.length !== RESTORE_LANES)) throw new Error(`lanes: ${String(lanes?.length)} walks, not ${RESTORE_LANES}`);
+  let seed64: Uint8Array = yield;
+  try {
+    const w = lanes ? lanes[lane]! : walkLane(seed64, scope, lane, has, gap, reach);
+    return { ...w, ...checkedWalk(w, lane, seed64, scope, gap, reach) };
+  } catch {
+    const m = masters(seed64, "deposit");
+    const precommitment = (i: number): bigint => poseidon2Walk([poseidon3Walk([m.nullifier, scope, BigInt(i)]), poseidon3Walk([m.secret, scope, BigInt(i)])]);
+    const steps = walkSteps(m, scope, lane, has, gap, reach, precommitment);
+    let r = steps.next();
+    for (; !r.done; r = steps.next()) seed64 = yield;
+    return { ...r.value, ...checkedWalk(r.value, lane, seed64, scope, gap, reach) };
+  }
 }
 
 /**
@@ -293,7 +311,7 @@ export function slices(signal?: AbortSignal, now: () => number = sliceClock): Sl
 }
 
 // the walk itself, one index a step: walkLaneOf runs it through, walkLaneYielding a slice at a time
-function* walkSteps(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number, reach: number | null): Generator<void, LaneWalk, void> {
+function* walkSteps(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number, reach: number | null, hash?: (i: number) => bigint): Generator<void, LaneWalk, void> {
   if (!Number.isInteger(lane) || lane < 0 || lane >= RESTORE_LANES) throw new Error("a lane is 0-7");
   if (!Number.isSafeInteger(gap) || gap < 1) throw new Error("gap is a count above 0");
   if (reach !== null && (!Number.isSafeInteger(reach) || reach < lane || reach > U32 || reach % RESTORE_LANES !== lane)) throw new Error(`reach: not an index of lane ${lane}`);
@@ -306,8 +324,9 @@ function* walkSteps(m: { nullifier: bigint; secret: bigint }, scope: bigint, lan
   let lastPrecommitment = 0n;
   // poseidon-lite's hashes in their sparse form (./poseidon-walk.ts), on BN254's field in WebAssembly where it compiles
   // (card firefox-restore-fast: Firefox's BigInt made a four-pool restore 90 s), equal on every input; a hit and the
-  // last index are checked again with poseidon-lite (noteSecrets), so a drift stops the restore
-  const precommitment = precommitmentWalker(m, scope);
+  // last index are checked again with poseidon-lite (noteSecrets), so a drift is walked again on BigInt (`hash`,
+  // checkedLane) or stops the restore
+  const precommitment = hash ?? precommitmentWalker(m, scope);
   for (let i = lane, misses = 0; misses < gap && i <= U32; i += RESTORE_LANES) {
     last = i;
     lastPrecommitment = precommitment(i);
@@ -401,10 +420,9 @@ export function* restorePagesSteps(scope: bigint, pages: RestorePagesArgs[1], op
   const laneHighest: (number | null)[] = [];
   const laneWalked: number[] = [];
   for (let lane = 0; lane < RESTORE_LANES; lane++) {
-    const seed64: Uint8Array = yield;
-    const w = opts.lanes ? opts.lanes[lane]! : walkLane(seed64, scope, lane, (P) => byP.has(P), gap, reach[lane]!);
-    // a walk run elsewhere is held to a whole walk's end on this seed and scope; each index the vault holds (asDeposit below)
-    const { found, end } = checkedWalk(w, lane, seed64, scope, gap, reach[lane]!);
+    // each walk is held to a whole walk's end on this seed and scope, walked again once on BigInt where it is not
+    // (checkedLane); each index the vault holds (asDeposit below)
+    const { found, end } = yield* checkedLane(opts.lanes, lane, scope, (P) => byP.has(P), gap, reach[lane]!);
     for (const i of found) {
       const ref: NoteRef = { kind: "deposit", s: scope, i };
       if (!(yield* asDeposit(ref))) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
