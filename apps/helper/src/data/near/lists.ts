@@ -14,7 +14,9 @@
 //   - volume: `get_pool_volumes` (each token's cumulative in and out since the pool began) now, an hour back and a day
 //     back, the wNEAR legs' difference in USD at NEAR's price now; price change: the same pool's price an hour and a
 //     day back (`get_pools` at those blocks);
-//   - symbol, name and decimals: the token's own `ft_metadata` (NEP-148), read once a token.
+//   - symbol, name and decimals: the token's own `ft_metadata` (NEP-148), read once a token;
+//   - Rhea DCL's pools (dclv2.ref-labs.near, card near-dcl-route): `get_metadata`'s pool_count, then `list_pools` in pages
+//     of DCL_PAGE at the same block, every DCL_REFRESH_MS, for the routes the device's DCL quote takes (routesOf).
 // No view gives a pool's launch time, holders, buys and sells, or a launchpad: those fields are null, as on a chain whose
 // source lacks them. Lists: `new` the newest main pools by pool id (Rhea numbers pools in creation order), `trending`
 // (= `trending_1h`) the most hour volume, each at most LIST_MAX; `trending_5m` and `graduating` are empty (no 5 min
@@ -49,12 +51,23 @@ export const PRICE_REFRESH_MS = 60_000;
  *  page reads, ~340 calls; every 10 min that is about one call every 2 s over two providers, and FastNEAR's free RPC
  *  refused a heavier pace (views.ts HOST_GAP_MS). An hour's volume is then up to 10 min behind its row's price]. */
 export const VOL_REFRESH_MS = 600_000;
+/** Rhea DCL's exchange, whose pools the device's NEAR quote also routes through (packages/kit/src/near/dcl.ts). */
+export const DCL = "dclv2.ref-labs.near";
+/** DCL pools a `list_pools` page holds [design: 500 answered in 0.4 to 0.7 s and about 360 KB from a Mac, 2026-11-16
+ *  08:3xZ, 14 pages for 6,665 pools]. */
+export const DCL_PAGE = 500;
+/** DCL's pools are read again this often [design: a route comes and goes with a pool's liquidity, slower than a price;
+ *  14 pages every 10 min keeps the paced providers' load near today's (views.ts HOST_GAP_MS)]. A failed read keeps the
+ *  last good one and is asked again at the next refresh. */
+export const DCL_REFRESH_MS = VOL_REFRESH_MS;
 const PARALLEL = 4;
 const META_MAX = 4_000;
 const HOUR_S = 3_600;
 const DAY_S = 86_400;
 
 export type Pool = { id: number; tokens: [string, string]; amounts: [bigint, bigint] };
+/** A DCL pool a NEAR quote may route through: its id, its two tokens (lower first) and each one's total in the pool. */
+export type DclPool = { id: string; tokens: [string, string]; amounts: [bigint, bigint] };
 /** A token's main pool: its id, the token's and wNEAR's amounts in it, and wNEAR's place in its two tokens. */
 export type Main = { pool: number; amt: bigint; wnear: bigint; w: number };
 export type Meta = { symbol: string; name: string; decimals: number };
@@ -81,6 +94,25 @@ export function parsePools(answer: unknown, from: number): Pool[] | null {
   return out;
 }
 
+/**
+ * A `list_pools` page's DCL pools a device's quote takes (packages/kit/src/near/dcl.ts dclQuote): Running, with no
+ * whitelist and no tax, the id its own tokens and fee, each total a digit string; null when the page is not a list.
+ */
+export function parseDclPools(answer: unknown): DclPool[] | null {
+  if (!Array.isArray(answer) || answer.length > DCL_PAGE) return null;
+  const out: DclPool[] = [];
+  for (const p of answer) {
+    const o = obj(p);
+    const [x, y] = [nearAccount(o.token_x), nearAccount(o.token_y)];
+    const fee = o.fee;
+    if (x === null || y === null || !(x < y) || !Number.isSafeInteger(fee) || (fee as number) <= 0 || (fee as number) >= 1_000_000) continue;
+    if (o.pool_id !== `${x}|${y}|${fee}` || o.state !== "Running" || o.whitelist !== null || o.tax !== null) continue;
+    if (typeof o.total_x !== "string" || typeof o.total_y !== "string" || !DIGITS.test(o.total_x) || !DIGITS.test(o.total_y)) continue;
+    out.push({ id: o.pool_id, tokens: [x, y], amounts: [BigInt(o.total_x), BigInt(o.total_y)] });
+  }
+  return out;
+}
+
 /** Each token's main pool with wNEAR, and NEAR's USD price (times 10^VALUE_SCALE) from the deepest stablecoin pool. */
 export function mainsOf(pools: readonly Pool[]): { mains: Map<string, Main>; nearUsd: bigint | null } {
   const mains = new Map<string, Main>();
@@ -103,15 +135,17 @@ export function mainsOf(pools: readonly Pool[]): { mains: Map<string, Main>; nea
 
 /**
  * Each token's deepest route the device's NEAR buy quotes (card near-listed-coin-quotes): the kit's rheaQuote reads Rhea
- * classic SIMPLE_POOLs only, joining the token to USDC directly or through wNEAR (packages/kit/src/near/rhea.ts, its
- * candidates packages/signpage/src/near-pools.ts rheaCandidates), so a route is the token's simple pool with wNEAR or
- * with USDC, both reserves above 0, valued at twice that side in USD (times 10^VALUE_SCALE; a wNEAR side only once
- * NEAR's price is read). A token held only elsewhere (Rhea DCL, a launchpad's curve, a stable pool) has none: on
- * 2026-11-16 30 of the 57 NEAR coins the engine listed traded only on DCL, hoodl-95275b.launchpad.justhoot.near among them.
+ * classic SIMPLE_POOLs, joining the token to USDC directly or through wNEAR (packages/kit/src/near/rhea.ts, its
+ * candidates packages/signpage/src/near-pools.ts rheaCandidates), and the kit's dclQuote Rhea DCL's pools the same two ways
+ * (packages/kit/src/near/dcl.ts; card near-dcl-route: on 2026-11-16 30 of the 57 NEAR coins the engine listed traded only
+ * on DCL, hoodl-95275b.launchpad.justhoot.near among them). So a route is the token's simple pool or DCL pool with wNEAR
+ * or with USDC, both sides above 0, valued at twice that side in USD (times 10^VALUE_SCALE; a wNEAR side only once NEAR's
+ * price is read); a DCL pool's side is its total of that token (parseDclPools). A token held only elsewhere (a
+ * launchpad's curve, a stable pool) has none.
  */
-export function routesOf(pools: readonly Pool[], nearUsd: bigint | null): Map<string, bigint> {
+export function routesOf(pools: readonly Pool[], nearUsd: bigint | null, dcl: readonly DclPool[] = []): Map<string, bigint> {
   const out = new Map<string, bigint>();
-  for (const p of pools) {
+  for (const p of [...pools, ...dcl]) {
     if (p.amounts[0] <= 0n || p.amounts[1] <= 0n) continue;
     for (const k of [0, 1] as const) {
       const other = p.tokens[1 - k]!;
@@ -203,6 +237,9 @@ export function createNearLists(deps: NearDeps = {}) {
   let last: ListsAnswer | null = null;
   let running: Promise<void> | null = null;
   let windowsAt = 0;
+  /** the last good read of DCL's pools, and when it was asked */
+  let dcl: DclPool[] = [];
+  let dclAt = -Infinity;
 
   async function readPools(at: At, from: readonly string[]): Promise<Pool[]> {
     const n = await view(fetchFn, REF, "get_number_of_pools", {}, at, from);
@@ -211,6 +248,19 @@ export function createNearLists(deps: NearDeps = {}) {
     const pages = await each(starts, async (s) => {
       const p = parsePools(await view(fetchFn, REF, "get_pools", { from_index: s, limit: PAGE }, at, from), s);
       if (p === null) throw new Error("get_pools: not a list");
+      return p;
+    });
+    return pages.flat();
+  }
+
+  /** Every DCL pool a quote takes, at `at`. */
+  async function readDcl(at: At, from: readonly string[]): Promise<DclPool[]> {
+    const n = Number(obj(await view(fetchFn, DCL, "get_metadata", {}, at, from)).pool_count);
+    if (!Number.isSafeInteger(n) || n < 0 || n > POOLS_MAX) throw new Error("DCL pool count out of range");
+    const starts = Array.from({ length: Math.ceil(n / DCL_PAGE) }, (_, i) => i * DCL_PAGE);
+    const pages = await each(starts, async (s) => {
+      const p = parseDclPools(await view(fetchFn, DCL, "list_pools", { from_index: s, limit: DCL_PAGE }, at, from));
+      if (p === null) throw new Error("list_pools: not a list");
       return p;
     });
     return pages.flat();
@@ -342,9 +392,12 @@ export function createNearLists(deps: NearDeps = {}) {
 
   async function refresh(): Promise<void> {
     const head = await block(fetchFn, { finality: "final" }, rpcs);
-    const pools = await readPools({ block_id: head.height }, rpcs);
+    // DCL's pools when due; a failed read keeps the last good one and is asked again at the next refresh
+    const dclDue = now() - dclAt >= DCL_REFRESH_MS;
+    const [pools, dclRead] = await Promise.all([readPools({ block_id: head.height }, rpcs), dclDue ? readDcl({ block_id: head.height }, rpcs).catch(() => null) : Promise.resolve(null)]);
+    if (dclRead !== null) [dcl, dclAt] = [dclRead, now()];
     const { mains, nearUsd } = mainsOf(pools);
-    const s: Scan = { height: head.height, t_ms: head.t_ms, mains, nearUsd, routes: routesOf(pools, nearUsd) };
+    const s: Scan = { height: head.height, t_ms: head.t_ms, mains, nearUsd, routes: routesOf(pools, nearUsd, dcl) };
     const c = candidates(s);
     const tokens = [...new Set([...c.newest, ...c.deepest])];
     await each(tokens, metaOf);
