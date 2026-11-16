@@ -62,9 +62,10 @@ test("GET /v1/market/trades?chain=base: the tape newest first in the frozen fiel
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["access-control-allow-origin"], APP);
   const b = JSON.parse(r.body);
-  // whole_ms: how far back the tape holds every trade (card token-stats-count-every-trade), a whole ms up to the read
+  // whole_ms: how far back the tape holds every trade (card token-stats-count-every-trade): a whole ms, at or before the
+  // second after its oldest row (the fake's clock is not the chain's, so it is not held to as_of_ms)
   assert.deepEqual(Object.keys(b), ["trades", "whole_ms", "src", "as_of_ms"]);
-  assert.ok(Number.isSafeInteger(b.whole_ms) && b.whole_ms >= 0 && b.whole_ms <= b.as_of_ms + 60_000, String(b.whole_ms));
+  assert.ok(Number.isSafeInteger(b.whole_ms) && b.whole_ms >= 0 && b.whole_ms <= b.trades.at(-1).t_ms + 1_000, `${b.whole_ms} ${b.trades.at(-1).t_ms}`);
   assert.equal(b.trades.length, 20);
   for (const t of b.trades) {
     assert.deepEqual(Object.keys(t), ["t_ms", "side", "usd", "amt", "trader", "tx"]);
