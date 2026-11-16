@@ -1,0 +1,283 @@
+{
+ "note": "Read on 16 Nov 2026 by app-chart-fills-in-its-history.mjs collect() in a headless Chromium, HELPER_HOST live, kept as trim() keeps a record. bad: APP_HOST as deployed before this card; a cold Base coin first drawn with 2 bars and filling, its full reads 60 s apart, filled only at 135 s. good: this card at 428d940ab, built and served in the stand-in shell (--build apps/terminal/dist); a cold Base coin first drawn with 2 bars and filling, its full reads 45 to 46 s apart, filled at 96 s.",
+ "good": {
+  "source": "harness: the build apps/terminal/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-16T04:04:26.074Z",
+  "browser": "156.0.8078.79",
+  "candidates": 280,
+  "picks": [
+   {
+    "chain": "base",
+    "token": "<token>",
+    "loads": [
+     {
+      "width": "desktop",
+      "opened": "https://ct-app.unrealized.trade/token/base/<token>",
+      "chart": "ready",
+      "last": "1794801600000:0.0000033325461407015393",
+      "origin": 1794801867028.1,
+      "originEnd": 1794801867028.1,
+      "startedAt": 1794801866641,
+      "endedAt": 1794801965524,
+      "sends": [
+       {
+        "at_ms": 1794801868913,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801916869,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801962185,
+        "limit": "500"
+       }
+      ],
+      "answers": [
+       {
+        "at_ms": 1794801870819,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": true,
+        "own": true
+       },
+       {
+        "at_ms": 1794801917140,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": true,
+        "own": true
+       },
+       {
+        "at_ms": 1794801962452,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": false,
+        "own": true
+       }
+      ],
+      "errors": [],
+      "footer": {
+       "conn": "on",
+       "block": "223500162",
+       "ms": 98565
+      },
+      "shot": "0-0-desktop.png"
+     },
+     {
+      "width": "phone",
+      "opened": "https://ct-app.unrealized.trade/token/base/<token>",
+      "chart": "ready",
+      "last": "1794801600000:0.0000033325461407015393",
+      "origin": 1794801867053.1,
+      "originEnd": 1794801867053.1,
+      "startedAt": 1794801866798,
+      "endedAt": 1794801965525,
+      "sends": [
+       {
+        "at_ms": 1794801868406,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801916618,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801962224,
+        "limit": "500"
+       }
+      ],
+      "answers": [
+       {
+        "at_ms": 1794801870811,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": true,
+        "own": true
+       },
+       {
+        "at_ms": 1794801916875,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": true,
+        "own": true
+       },
+       {
+        "at_ms": 1794801962475,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": false,
+        "own": true
+       }
+      ],
+      "errors": [],
+      "footer": {
+       "conn": "wait",
+       "block": "",
+       "ms": 98534
+      },
+      "shot": "0-1-phone.png"
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "source": "live",
+  "at": "2026-11-16T04:02:04.266Z",
+  "browser": "156.0.8078.79",
+  "candidates": 287,
+  "picks": [
+   {
+    "chain": "base",
+    "token": "<token>",
+    "loads": [
+     {
+      "width": "desktop",
+      "opened": "https://ct-app.unrealized.trade/token/base/<token>",
+      "chart": "ready",
+      "last": "1794801600000:0.000001670824921317162",
+      "origin": 1794801725884.3,
+      "originEnd": 1794801725884.3,
+      "startedAt": 1794801724582,
+      "endedAt": 1794801863283,
+      "sends": [
+       {
+        "at_ms": 1794801728121,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801735369,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801799378,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801859820,
+        "limit": "500"
+       }
+      ],
+      "answers": [
+       {
+        "at_ms": 1794801733369,
+        "limit": "500",
+        "status": 200,
+        "bars": 0,
+        "filling": true,
+        "own": false
+       },
+       {
+        "at_ms": 1794801738516,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": true,
+        "own": true
+       },
+       {
+        "at_ms": 1794801799615,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": true,
+        "own": true
+       },
+       {
+        "at_ms": 1794801860058,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": false,
+        "own": true
+       }
+      ],
+      "errors": [],
+      "footer": {
+       "conn": "on",
+       "block": "224764192",
+       "ms": 137445
+      },
+      "shot": "0-0-desktop.png"
+     },
+     {
+      "width": "phone",
+      "opened": "https://ct-app.unrealized.trade/token/base/<token>",
+      "chart": "ready",
+      "last": "1794801600000:0.000001670824921317162",
+      "origin": 1794801725887.7,
+      "originEnd": 1794801725887.7,
+      "startedAt": 1794801724656,
+      "endedAt": 1794801863032,
+      "sends": [
+       {
+        "at_ms": 1794801728110,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801735368,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801799007,
+        "limit": "500"
+       },
+       {
+        "at_ms": 1794801859710,
+        "limit": "500"
+       }
+      ],
+      "answers": [
+       {
+        "at_ms": 1794801733368,
+        "limit": "500",
+        "status": 200,
+        "bars": 0,
+        "filling": true,
+        "own": false
+       },
+       {
+        "at_ms": 1794801738484,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": true,
+        "own": true
+       },
+       {
+        "at_ms": 1794801799237,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": true,
+        "own": true
+       },
+       {
+        "at_ms": 1794801859936,
+        "limit": "500",
+        "status": 200,
+        "bars": 2,
+        "filling": false,
+        "own": true
+       }
+      ],
+      "errors": [],
+      "footer": {
+       "conn": "wait",
+       "block": "",
+       "ms": 137185
+      },
+      "shot": "0-1-phone.png"
+     }
+    ]
+   }
+  ]
+ }
+}

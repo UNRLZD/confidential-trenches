@@ -12,7 +12,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { AWAY_MS, CANDLES_LIMIT, LIVE_BACKOFF_MAX_MS, LIVE_LIMIT, LIVE_MS, RESYNC_MS, TIMEOUT_MS, followCandles, followFrom, foldBars, toCandleData } from "../src/screens/token/candles.ts";
+import { AWAY_MS, CANDLES_LIMIT, LIVE_BACKOFF_MAX_MS, LIVE_LIMIT, LIVE_MS, RESYNC_MS, TIMEOUT_MS, followCandles, followFrom, foldBars, loadCandles, toCandleData } from "../src/screens/token/candles.ts";
 import type { Bar, ChartTf, ReadyCandles } from "../src/screens/token/candles.ts";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "chart-live");
@@ -326,6 +326,61 @@ test("the start: a first answer of the helper's own bars is followed live from t
   const { waits, limits } = await followed(start, []);
   assert.deepEqual(waits, [LIVE_MS, LIVE_MS, LIVE_MS]);
   assert.deepEqual(limits, Array(3).fill(String(LIVE_LIMIT)));
+});
+
+// Card app-chart-fills-in-its-history: an answer with bars and `filling` true (the helper still reading the coin's older
+// bars: apps/helper/src/data/evm/swaps.ts and solana/trades.ts candles, bars held answered at HELD_WAIT_MS or a history
+// read still owed) is drawn at once and followed live, and its chart is read in full again AWAY_MS on, every AWAY_MS
+// while a full answer says filling, never sooner; at main its first full read was RESYNC_MS on, a 2-bar chart drawn for
+// a minute while the helper held the whole one.
+const fillingChart = async (wholeFilling: number) => {
+  const c = clock();
+  const t0 = c.now();
+  const full: number[] = [];
+  let fulls = 0;
+  const fetchFn = (async (u: string) => {
+    const limit = new URL(u).searchParams.get("limit")!;
+    if (limit !== String(CANDLES_LIMIT)) return answer(200, own([row(5, "1.4")]));
+    full.push(c.now() - t0);
+    // the first read (loadCandles) and the next `wholeFilling` full reads still say filling
+    const still = fulls++ <= wholeFilling;
+    return still ? answer(200, { ...own([row(4, "1.3"), row(5, "1.4")]), filling: true }) : answer(200, own([row(1, "1"), row(2, "1.1"), row(3, "1.2"), row(4, "1.3"), row(5, "1.4")]));
+  }) as typeof fetch;
+  const first = await loadCandles("base", "0xab", "1m", fetchFn, async () => assert.fail("a filling answer with bars is drawn at once"));
+  const got: ReadyCandles[] = [];
+  followFrom("base", "0xab", "1m", first, (r) => got.push(r), { fetchFn, now: c.now, later: c.later, hidden: () => false });
+  while (c.now() - t0 < 4 * RESYNC_MS) await c.tick();
+  return { first, full: full.slice(1), got };
+};
+
+test("a filling answer with 2 bars, then a whole answer: drawn at once, read in full AWAY_MS on, and drawn as the whole chart", async () => {
+  const { first, full, got } = await fillingChart(0);
+  assert.equal(first.status, "ready");
+  assert.equal(first.status === "ready" && first.bars.length, 2, "the 2 bars held are drawn at once");
+  assert.equal(full[0], AWAY_MS, "the first full read is AWAY_MS on");
+  const whole = got.find((r) => r.bars.length === 5);
+  assert.ok(whole, "the whole chart is drawn");
+  assert.deepEqual(got.at(-1)!.bars.map((b) => b.close), [1, 1.1, 1.2, 1.3, 1.4], "the whole chart stays drawn");
+  assert.deepEqual(full.slice(1, 3), [AWAY_MS + RESYNC_MS, AWAY_MS + 2 * RESYNC_MS], "once a full answer no longer says filling, the full read is every RESYNC_MS again");
+});
+
+test("a chart still filling: read in full every AWAY_MS while a full answer says filling, never sooner, then every RESYNC_MS", async () => {
+  const { full, got } = await fillingChart(2);
+  assert.deepEqual(full.slice(0, 4), [AWAY_MS, 2 * AWAY_MS, 3 * AWAY_MS, 3 * AWAY_MS + RESYNC_MS]);
+  for (let i = 1; i < full.length; i++) assert.ok(full[i]! - full[i - 1]! >= AWAY_MS, `full reads ${full[i - 1]} and ${full[i]} at least AWAY_MS apart`);
+  assert.equal(got.at(-1)!.bars.length, 5);
+});
+
+test("a filling answer of the helper's own bars stays live between its full reads", async () => {
+  const c = clock();
+  const limits: string[] = [];
+  const fetchFn = (async (u: string) => {
+    limits.push(new URL(u).searchParams.get("limit")!);
+    return answer(200, own([row(2, "1.1")]));
+  }) as typeof fetch;
+  followCandles("base", "0xab", { ...start, filling: true }, () => undefined, { fetchFn, now: c.now, later: c.later, hidden: () => false });
+  for (let i = 0; i < AWAY_MS / LIVE_MS; i++) assert.equal(await c.tick(), LIVE_MS);
+  assert.deepEqual(limits, [...Array(AWAY_MS / LIVE_MS - 1).fill(String(LIVE_LIMIT)), String(CANDLES_LIMIT)]);
 });
 
 // The away read keeps the helper's book of the token open: the helper drops a book no read touched for its IDLE_MS (60 s,
