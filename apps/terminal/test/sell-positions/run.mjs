@@ -457,7 +457,8 @@ try {
     {
       const { ctx, page, external, dialogs } = await open(browser, w, "up", "&kit=live");
       const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
-      check((await text("sell-receive")) === "—", `@${w.name} live: You receive before the first answer "${await text("sell-receive")}"`);
+      // asked at once on open: Quoting until the page answers (card sell-box-says-quoting, as the buy box)
+      check((await text("sell-receive")) === "Quoting", `@${w.name} live: You receive before the first answer "${await text("sell-receive")}", want Quoting`);
       await page.clock.runFor(490); // the open (10 ms) + 490: asked at once on open, the page answers 200 ms later
       const receive = await settle(() => text("sell-receive"), "≈ $108.00");
       check(receive === "≈ $108.00", `@${w.name} live: You receive "${receive}" 500 ms after the Sell side opened, want ≈ $108.00 (0.72 SOL at $150)`);
@@ -497,7 +498,7 @@ try {
       const { ctx, page } = await open(browser, w, "up", "&kit=live&dry=busy");
       const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
       await page.clock.runFor(490);
-      check((await text("sell-receive")) === "—", `@${w.name} live busy: You receive "${await text("sell-receive")}" before the second ask`);
+      check((await text("sell-receive")) === "Quoting", `@${w.name} live busy: You receive "${await text("sell-receive")}" before the second ask, want Quoting (asked again)`);
       await page.clock.runFor(3_200);
       const got = await settle(() => text("sell-receive"), "≈ $108.00");
       check(got === "≈ $108.00", `@${w.name} live busy: You receive "${got}" after the second ask`);
@@ -514,7 +515,7 @@ try {
       const input = page.locator('[data-testid="sell-box"] .trb-input');
       await input.fill("25");
       await page.clock.runFor(3_700); // settle, busy, 3 s, busy again
-      check((await settle(() => text("sell-receive"), "—")) === "—", `@${w.name} busyafter: 25%, never read, "${await text("sell-receive")}", want —`);
+      check((await settle(() => text("sell-receive"), "Quoting")) === "Quoting", `@${w.name} busyafter: 25%, never read and asked again each second, "${await text("sell-receive")}", want Quoting`);
       await input.fill("50");
       await page.clock.runFor(3_700);
       check((await settle(() => text("sell-receive"), "≈ $108.00")) === "≈ $108.00", `@${w.name} busyafter: back to 50% inside 10 s "${await text("sell-receive")}", want its own number`);
@@ -527,7 +528,7 @@ try {
       const { ctx, page } = await open(browser, w, "up", `&kit=live&dry=${dry}&n=4`);
       const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
       await page.clock.runFor(490);
-      check((await text("sell-receive")) === "—", `@${w.name} ${code} x4: You receive "${await text("sell-receive")}" before any number`);
+      check((await text("sell-receive")) === "Quoting", `@${w.name} ${code} x4: You receive "${await text("sell-receive")}" before any number, want Quoting`);
       await page.clock.runFor(5_000);
       const got = await settle(() => text("sell-receive"), "≈ $108.00");
       const at = await page.evaluate(() => window.__dryAt);
@@ -543,6 +544,34 @@ try {
       const at = await page.evaluate(() => window.__dryAt);
       check(at.length === 2 && at[1] - at[0] >= 3_000, `@${w.name} down: ${at.length} asks ${JSON.stringify(at.slice(1).map((x, i) => x - at[i]))} apart in 10 s, want 2, 3 s apart`);
       check(norm(await page.locator('[data-testid="sell-receive"]').innerText()) === "—", `@${w.name} down: want the dash`);
+      await ctx.close();
+    }
+    // card sell-box-says-quoting: a preview the kit client ended at its 10 s (client_timeout: the page still pricing it)
+    // is asked again at once and You receive says Quoting the whole time, then the number; one that never answers is
+    // asked DRY_TRIES (3) more times and ends on the dash
+    {
+      const { ctx, page } = await open(browser, w, "up", "&kit=live&dry=late&n=2");
+      const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
+      await page.clock.runFor(5_000);
+      check((await text("sell-receive")) === "Quoting", `@${w.name} late: You receive "${await text("sell-receive")}" 5 s into the first ask, want Quoting`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `live-quoting-${w.name}.png`), fullPage: true });
+      await page.clock.runFor(10_000);
+      check((await text("sell-receive")) === "Quoting", `@${w.name} late: You receive "${await text("sell-receive")}" in the second ask, want Quoting`);
+      await page.clock.runFor(5_500);
+      const got = await settle(() => text("sell-receive"), "≈ $108.00");
+      check(got === "≈ $108.00", `@${w.name} late: You receive "${got}" after two client timeouts and an answer, want the number`);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `live-quoted-${w.name}.png`), fullPage: true });
+      check((await page.evaluate(() => window.__dry.length)) === 3, `@${w.name} late: asked ${await page.evaluate(() => window.__dry.length)} times, want 3`);
+      await ctx.close();
+    }
+    {
+      const { ctx, page } = await open(browser, w, "up", "&kit=live&dry=late&n=99");
+      const text = async (id) => norm(await page.locator(`[data-testid="${id}"]`).innerText());
+      await page.clock.runFor(35_000);
+      check((await text("sell-receive")) === "Quoting", `@${w.name} late x4: You receive "${await text("sell-receive")}" in the fourth ask, want Quoting`);
+      await page.clock.runFor(10_000);
+      check((await settle(() => text("sell-receive"), "—")) === "—", `@${w.name} late x4: You receive "${await text("sell-receive")}" after 4 client timeouts, want the dash`);
+      check((await page.evaluate(() => window.__dry.length)) === 4, `@${w.name} late x4: asked ${await page.evaluate(() => window.__dry.length)} times, want 4 (1 + DRY_TRIES)`);
       await ctx.close();
     }
     // devnet run 11: a share typed just before the tap was asked 152 ms after it, while the sale ran. Nothing is asked

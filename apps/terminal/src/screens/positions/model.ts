@@ -91,6 +91,16 @@ export function sellAmount(amount: string, bps: number, decimals: number | null 
   return part === 0n ? null : fromUnits(part, scale);
 }
 
+/** The sell preview's dry tag (card sell-box-says-quoting; the buy box's trade/model.ts dryTag for the sell's amount, a
+ *  decimal of the token): the token and the amount asked; null with no amount. */
+export const sellDryTag = (token: string, amount: string | null): string | null => (amount === null ? null : `${token}|${amount}`);
+
+/** The sell box's You receive says Quoting as the buy box's does (trade/model.ts quotingShown): no number to draw and the
+ *  preview for this token and amount asked and not ended (`asking`, its sellDryTag; null with none in flight). */
+export function sellQuoting(numberShown: boolean, token: string, amount: string | null, asking: string | null): boolean {
+  return !numberShown && asking !== null && asking === sellDryTag(token, amount);
+}
+
 /** The box's typed percent ("50", "12.5", "0.01") as basis points, more than 0 and at most 100; anything else null. */
 export function parsePercent(s: string): number | null {
   const m = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(s);

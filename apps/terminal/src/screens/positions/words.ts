@@ -27,6 +27,8 @@ export const WORDS = {
   tpsl: TR.tpsl,
   soon: TR.soon,
   receive: TR.receive,
+  // card sell-box-says-quoting: the buy box's entry (the deposit sheet's approved word), not a new one
+  quoting: TR.quoting,
   route: TR.route,
   slippage: TR.slippage,
   network: TR.network,
