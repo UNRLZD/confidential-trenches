@@ -1382,7 +1382,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // `only`: none but `urls` (the index's chain-wide read, which the others refuse); `skip`: never these; `third`: never
     // in the first two while two others can be asked, and the first asked after them for a request they left without
     // two alike, whether they disagree or one has not answered (agreedLogs: the header-timed providers). Eight cold tapes
-    // in the helper's container 16 Nov: 46 of its 48 such asks were for an answer missing, none for a disagreement; a
+    // in the helper's container 16 Nov: all 46 of its such asks were for an answer missing, none for a disagreement; a
     // miss sent to the next ranked instead took drpc past a quarter of the wide providers' reads (swaps-pace fold 2)
     const asked = askOrder(urls, wideFirst, n, only, skip);
     const others = third === undefined ? asked : asked.filter((u) => !third.has(u));
