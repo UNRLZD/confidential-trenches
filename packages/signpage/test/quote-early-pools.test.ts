@@ -4,6 +4,7 @@
 // provider's whole half of the same scan; the finder itself (a tap's reference) still waits for both providers' union.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { keptPools, pageReference, type PoolFinders } from "../src/page-rpc.ts";
 
@@ -30,7 +31,8 @@ const scanner = (url: string, ms: number, calls: string[]): SolanaRpc =>
   );
 
 test("a coin's early pools come with the faster provider's half of the scan; the finder still waits for both", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const calls: string[] = [];
   const pair = [scanner("https://slow.example", SLOW_MS, calls), scanner("https://fast.example", FAST_MS, calls)] as const;
   const find = keptPools("cpmmPools", () => pair, () => pair);
@@ -51,7 +53,8 @@ test("a coin's early pools come with the faster provider's half of the scan; the
 });
 
 test("an early list is none when the scan fails before any provider's half is whole, as a failed finder", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const calls: string[] = [];
   const bad: SolanaRpc = Object.assign(() => Promise.resolve({ value: [{ pubkey: "not an address" }] }), { url: "https://bad.example" });
   const find = keptPools("cpmmPools", () => [bad, scanner("https://slow.example", SLOW_MS, calls)] as const, () => [bad, bad] as const);
@@ -67,7 +70,8 @@ test("an early list is none when the scan fails before any provider's half is wh
 });
 
 test("a dry's reference reads each kind's early pools; a tap's waits for the finder itself", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   // two providers that hold no pool of the coin: the reference is none, read at once
   const empty = (url: string): SolanaRpc => Object.assign(async (_m: string, p: readonly unknown[]) => ({ context: { slot: 1 }, value: (p[0] as unknown[]).map(() => null) }), { url });
   const rpcs = [empty("https://a.example"), empty("https://b.example")] as const;
