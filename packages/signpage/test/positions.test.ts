@@ -862,7 +862,7 @@ test("card wallets-found-in-one-read, the page: a sell that reads only the Ws it
     const paced: HoldingsReader = { chain: "sol", read: (address) => new Promise((done) => queue.push({ address, done: () => (read.push(address), done(held())) })) };
     // answers every read asked until `f` holds
     const answer = async (f: () => boolean | Promise<boolean>) => {
-      for (let i = 0; i < 40 && !(await f()); i++) {
+      for (const end = performance.now() + UNTIL_BOUND_MS; !(await f()) && performance.now() < end; ) {
         if (queue.length > 0) queue.shift()!.done();
         await tick();
       }
@@ -923,7 +923,7 @@ test("card wallets-found-in-one-read, the page: a sale tapped while a pass reads
         }),
     };
     const answer = async (f: () => boolean | Promise<boolean>) => {
-      for (let i = 0; i < 80 && !(await f()); i++) {
+      for (const end = performance.now() + UNTIL_BOUND_MS; !(await f()) && performance.now() < end; ) {
         if (queue.length > 0) queue.shift()!.done();
         await tick();
       }
@@ -958,7 +958,8 @@ test("card wallets-found-in-one-read, the page: a sale tapped while a pass reads
     tp.flow(ask, { id: "s2", sha: "00", progress: () => {} } as never);
     await until(() => list !== null);
     const got = await list!;
-    // (4) the pass the sale fed: S as read after the kept pass, never the kept pass's 2
+    // (4) the pass the sale fed: S as read after the kept pass, never the kept pass's 2; it ends in its kept write
+    await until(async () => (await keptAmount()) === now);
     await new Promise((r) => setTimeout(r, 50));
     assert.equal((await shown())?.amount, now, "Portfolio holds the newer read");
     assert.equal((await shown())?.wallets.includes(S), left !== null, "a W sold in full stays gone");
@@ -1178,7 +1179,7 @@ test("the page: a pool buy answered early as sent (its fill read later) is recor
   assert.equal(await w.get("ops", "pb2"), undefined, "sent is no end: nothing written yet");
   progress("filled");
   progress("filled");
-  for (let i = 0; i < 200 && (await w.get("ops", "pb2")) === undefined; i++) await new Promise((r) => setTimeout(r, 5));
+  await until(async () => (await w.get("ops", "pb2")) !== undefined);
   const op = (await w.get("ops", "pb2")) as { stage: string; txs: unknown[] };
   assert.deepEqual([op.stage, op.txs], ["filled", [{ chain: "solana", hash: "SigS" }]]);
   assert.deepEqual(posted, ["filled", "filled"], "the app still gets every progress the run posts");
@@ -1623,6 +1624,7 @@ test("P1-1: a sign out lets go of the buys this page ran: after the next sign-in
   // the same account signs in again: W's buy mint is in its store, the finder lists W without the token
   const reads = c.calls.finder;
   await until(async () => (await tp.positions()) !== null && c.calls.finder > reads);
+  await until(async () => ((await tp.positions()) ?? [0]).length === 0);
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(await tp.positions(), []);
   assert.equal(timers.length, 0, "a whole pass: no buy of this sign-in waits on the finder");
@@ -2128,6 +2130,7 @@ test("t03: a buy that ended not landed is not looked for: the finder not listing
   await until(() => told);
   progress("not_landed");
   await until(() => c.calls.finder > reads0);
+  await until(async () => ((await tp.positions()) ?? [0]).length === 0);
   await new Promise((r) => setTimeout(r, 60));
   assert.deepEqual(await tp.positions(), []);
   assert.equal(timers.length, 0, "not landed: nothing to look for");
