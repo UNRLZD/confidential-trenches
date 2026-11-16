@@ -291,6 +291,42 @@ test("planted: the newest list is picked by N, not by text (release-1000 after r
   }
 });
 
+test("planted (card app-deploy-refuses-an-unlisted-build): a newest list that cannot be read refuses either deploy, never a throw past it; APP_HOST's part is held like SIGN_HOST's", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ct-releases-"));
+  // a stand-in APP_HOST build: _headers and one page
+  const app = mkdtempSync(join(tmpdir(), "ct-app-build-"));
+  try {
+    writeFileSync(join(app, "_headers"), "/*\n  X-Content-Type-Options: nosniff\n");
+    writeFileSync(join(app, "index.html"), "<!doctype html>");
+    const put = (text) => {
+      writeFileSync(join(dir, "release-1.json"), text);
+      return { "release-1": sha256(text) };
+    };
+    // (an APP_HOST part with no list of files: only APP_HOST reads it; SIGN_HOST's read of it is "not in the list" below)
+    for (const [what, text, hosts] of [["no JSON", "{ not json\n", ["APP_HOST", "SIGN_HOST"]], ["null", "null\n", ["APP_HOST", "SIGN_HOST"]], ["no hosts", "{}\n", ["APP_HOST", "SIGN_HOST"]], ["a part with no files", '{"hosts":{"APP_HOST":{"files":7}}}\n', ["APP_HOST"]]]) {
+      const ledger = put(text);
+      for (const [host, built] of hosts.map((h) => [h, app])) {
+        const p = unreleasedProblems(built, dir, ledger, host);
+        assert.equal(p.length, 1, `${what} ${host}: ${p.join("\n")}`);
+        assert.match(p[0], /^release-1 cannot be read \(.+\): cut release-2 on a branch from origin\/main's head/, `${what} ${host}`);
+      }
+    }
+    // the list names this APP_HOST build: none; one byte off: the file, the list and APP_HOST named
+    const listed = `${JSON.stringify(makeList("release-1", { APP_HOST: app }, null), null, 1)}\n`;
+    const ledger = put(listed);
+    assert.deepEqual(unreleasedProblems(app, dir, ledger, "APP_HOST"), []);
+    assert.deepEqual(unreleasedProblems(app, dir, ledger, "SIGN_HOST").map((l) => l.split(": cut")[0]), ["release-1, the newest release, is not this SIGN_HOST build (SIGN_HOST: not in the list)"]);
+    writeFileSync(join(app, "index.html"), "<!doctype html> ");
+    const p = unreleasedProblems(app, dir, ledger, "APP_HOST");
+    assert.equal(p.length, 1, p.join("\n"));
+    assert.ok(p[0].startsWith("release-1, the newest release, is not this APP_HOST build (APP_HOST /: the build's "), p[0]);
+    assert.throws(() => unreleasedProblems(app, dir, ledger, "OTHER_HOST"), /OTHER_HOST: no such host/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(app, { recursive: true, force: true });
+  }
+});
+
 test("planted: a list not in the ledger, and a ledger entry whose list is gone, fail; a written release is never written again", () => {
   const dir = releasesCopy();
   try {

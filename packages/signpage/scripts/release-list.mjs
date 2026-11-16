@@ -363,17 +363,29 @@ export function ledgerProblems(dir = RELEASES, ledger = RELEASED) {
 }
 
 /**
- * Problems with serving the SIGN_HOST build folder `built` (deploy.mjs build()) as a release (empty = none): the
- * ledger's, and every way the newest list's SIGN_HOST part is not that build. What the sign deploy is held to.
+ * Problems with serving the build folder `built` on `host` as a release (empty = none): the ledger's, a newest list that
+ * cannot be read, and every way the newest list's `host` part is not that build (every file, every header, the _headers
+ * file). What the sign deploy (SIGN_HOST, deploy.mjs build()) and the terminal deploy (APP_HOST, apps/terminal/scripts/
+ * deploy.mjs build(), card app-deploy-refuses-an-unlisted-build) are held to.
  */
-export function unreleasedProblems(built, dir = RELEASES, ledger = RELEASED) {
+export function unreleasedProblems(built, dir = RELEASES, ledger = RELEASED, host = "SIGN_HOST") {
   const p = ledgerProblems(dir, ledger);
   const newest = newestRelease(dir);
   if (!newest) return p;
   const next = `release-${Number(newest.slice(8)) + 1}`;
-  const listed = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
-  for (const l of diffLists(makeList(newest, { SIGN_HOST: built }, null), listed))
-    p.push(`${newest}, the newest release, is not this SIGN_HOST build (${l}): cut ${next} on a branch from origin/main's head (node packages/signpage/scripts/release-list.mjs ${next}, its row in RELEASED), push and merge it, then deploy main at that merge`);
+  const cut = `cut ${next} on a branch from origin/main's head (node packages/signpage/scripts/release-list.mjs ${next}, its row in RELEASED), push and merge it, then deploy main at that merge`;
+  if (!Object.hasOwn(HOSTS, host)) throw new Error(`${host}: no such host (${Object.keys(HOSTS).join(", ")})`);
+  const fresh = makeList(newest, { [host]: built }, null);
+  let diff;
+  try {
+    // a list that is no JSON, or JSON with no hosts object, is one the deploy cannot read: refused, never a throw past it
+    const listed = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
+    if (listed === null || typeof listed !== "object" || listed.hosts === null || typeof listed.hosts !== "object") throw new Error("no hosts in it");
+    diff = diffLists(fresh, listed);
+  } catch (e) {
+    return [...p, `${newest} cannot be read (${`${e?.message ?? e}`.split("\n")[0]}): ${cut}`];
+  }
+  for (const l of diff) p.push(`${newest}, the newest release, is not this ${host} build (${l}): ${cut}`);
   return p;
 }
 
