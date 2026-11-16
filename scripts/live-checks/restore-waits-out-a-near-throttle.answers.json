@@ -1,0 +1,26 @@
+{
+  "good": {
+    "note": "this card's build of packages/signpage at 61c993f0d (build-app)",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-J9iX1fc9sawaPKvXa71Gqe+R2yC24HVPt3+AesLs3iXRZ13imTRqV7IgJhkb/ehB\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-J9iX1fc9sawaPKvXa71Gqe+R2yC24HVPt3+AesLs3iXRZ13imTRqV7IgJhkb/ehB",
+    "rule": true,
+    "wait": true,
+    "kinds": true,
+    "wired": {
+      "sync": true,
+      "config": true
+    }
+  },
+  "bad": {
+    "note": "the base f5a25bd23 build (build-app)",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-+3rJ2P4goRSVN0FQWWSNAS5MR6sFpsvvH65OM1GHWE/x/vCzQ4KZfDAG+66nRBEp\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-+3rJ2P4goRSVN0FQWWSNAS5MR6sFpsvvH65OM1GHWE/x/vCzQ4KZfDAG+66nRBEp",
+    "rule": true,
+    "wait": false,
+    "kinds": false,
+    "wired": {
+      "sync": false,
+      "config": false
+    }
+  }
+}
