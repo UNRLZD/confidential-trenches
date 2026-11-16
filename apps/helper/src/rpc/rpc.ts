@@ -264,8 +264,20 @@ function finalLogsOf(chain: RpcChain, r: Record<string, unknown>, pool: string |
 /** A send's timeout with `left` ms of its walk's time left: RPC_TIMEOUT_MS at most, whole ms (AbortSignal.timeout refuses
  *  a fraction, and the clock is a monotonic one in fractional ms). */
 const sendMs = (left: number): number => Math.max(1, Math.floor(Math.min(RPC_TIMEOUT_MS, left)));
-/** A JSON-RPC answer (one, or a batch) whose error says the provider's plan is spent (slot.ts CREDITS). */
-const planSpent = (answer: unknown): boolean => (Array.isArray(answer) ? answer : [answer]).some((a) => CREDITS.test(String((a as { error?: { message?: unknown } } | null)?.error?.message ?? "")));
+/** dRPC's codes for a spent plan (card drpc-over-quota-falls-over), from its own error table
+ *  (github.com/drpcorg/drpc-agent-skills skills/drpc-rpc/errors.md, commit ccb130ef 2026-04-06, read 2026-11-16 07:05Z):
+ *  "10 | 403 | User balance exceeded", "24 | 403 | Daily key limit exceeded", "52 | 403 | Subscription limit exceeded",
+ *  "53 | 403 | Free monthly limit reached". As a 403 the walk already takes a keyed URL as down; dRPC also answers its
+ *  own codes inside a 200 (its NEAR throttle, code 15: card restore-waits-out-a-near-throttle), where none of CREDITS'
+ *  words is in them, so the code alone marks it. A keyed provider of another company with one of these codes is only
+ *  asked past for that read. */
+export const DRPC_PLAN_CODES: ReadonlySet<number> = new Set([10, 24, 52, 53]);
+/** A JSON-RPC answer (one, or a batch) whose error says the provider's plan is spent (slot.ts CREDITS, DRPC_PLAN_CODES). */
+const planSpent = (answer: unknown): boolean =>
+  (Array.isArray(answer) ? answer : [answer]).some((a) => {
+    const e = (a as { error?: { message?: unknown; code?: unknown } } | null)?.error;
+    return CREDITS.test(String(e?.message ?? "")) || (typeof e?.code === "number" && DRPC_PLAN_CODES.has(e.code));
+  });
 /** Past a hold's end, the wait's margin: Node's timers and Date.now() round to whole ms, so a wait of exactly the
  *  hold's length can wake 1 ms inside it (seen on the box: every caller of a crowd woke inside a 1 s hold). */
 const HOLD_MARGIN_MS = 5;
