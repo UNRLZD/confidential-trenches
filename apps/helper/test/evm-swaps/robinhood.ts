@@ -101,6 +101,11 @@ export function fakeChain() {
         if (c.data === "0x313ce567") return ok(`0x${(18).toString(16).padStart(64, "0")}`);
         return { jsonrpc: "2.0", id: r.id, error: { code: -32000, message: "execution reverted" } };
       }
+      // a transaction's receipt: the recorded logs of that transaction (the swap's own, no other contract's)
+      if (r.method === "eth_getTransactionReceipt") {
+        const logs = sources.flatMap((s) => s.logs).filter((l) => l.tx === r.params[0]);
+        return ok(logs.length === 0 ? null : { transactionHash: r.params[0], status: "0x1", logs: logs.sort((x, y) => x.i - y.i).map((l) => wire(l, f)) });
+      }
       if (r.method === "eth_getTransactionByHash") st.seq.push(`tx ${r.params[0]}`);
       if (r.method === "eth_getTransactionByHash") return ok({ hash: r.params[0], from: `0x${(r.params[0] as string).slice(26, 66)}` });
       return { jsonrpc: "2.0", id: r.id, error: { code: -32601, message: "no" } };

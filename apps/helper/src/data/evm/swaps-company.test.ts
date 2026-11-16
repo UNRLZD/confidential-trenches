@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeChain, ICNT, open, REC } from "../../../test/evm-swaps/base.ts";
 import * as rpcModule from "../../rpc/rpc.ts";
+import * as serverModule from "../../server.ts";
 import { evmSwapRpcs } from "../../server.ts";
 import { PROVIDER_PACE, providerHolds } from "../../limits/limits.ts";
 
@@ -18,8 +19,12 @@ const env = {
   BASE_RPC_URL_DRPC_3: "https://lb.drpc.live/base/CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCkey3",
 };
 
-/** The tape of ICNT with `down` (a host part) answering 503, and every log read that answered, by host. */
-async function tape(down: (url: string) => boolean) {
+// read off the module, so this file loads at a base without it and the spares test fails on the behaviour (red runs)
+const { evmSwapSpares } = serverModule as unknown as { evmSwapSpares?: (env: Record<string, string>, c: string) => string[] };
+
+/** The tape of ICNT with `down` (a host part) answering 503, and every log read that answered, by host. `spares`: the
+ *  keyed URLs the server names spares (evmSwapSpares). */
+async function tape(down: (url: string) => boolean, spares = false) {
   const chain = fakeChain();
   chain.st.head = REC.firstHead + 200;
   const asked: { url: string; methods: string[] }[] = [];
@@ -29,11 +34,11 @@ async function tape(down: (url: string) => boolean) {
     return chain.fetch(url, init);
   };
   const holds = providerHolds(() => performance.timeOrigin + performance.now(), { ...PROVIDER_PACE, ...keyedPaces(env) });
-  const s = open(chain, { t: 5_000_000 }, { rpcs: evmSwapRpcs(env, "base"), fetch: fetch as never, holds });
+  const s = open(chain, { t: 5_000_000 }, { rpcs: evmSwapRpcs(env, "base"), ...(spares ? { spares: evmSwapSpares?.(env, "base") ?? [] } : {}), fetch: fetch as never, holds });
   try {
     const r = await s.trades(ICNT, 50);
     const logHosts = asked.filter((a) => a.methods.includes("eth_getLogs") && !down(a.url)).map((a) => new URL(a.url).host);
-    return { r, logHosts };
+    return { r, logHosts, asked };
   } finally {
     s.stop();
   }
@@ -81,4 +86,16 @@ test("review M1: the agreed head is two companies' too: dRPC's keys reporting a 
   }
   assert.ok(tos.length > 0, "logs were read");
   assert.ok(Math.max(...tos) <= chain.st.head - LAG, `logs read to block ${Math.max(...tos)}, dRPC's head alone (the others' is ${chain.st.head - LAG})`);
+});
+
+// card robinhood-trades-finish-filling: a tape is display data. Live 16 Nov 17:56Z, on helper 6df1ca4e2, a keyed Base
+// eth_getLogs (/v1/rpc ?keyed=only) was refused "every provider held" by our own pace, the keys' one bucket of 62 calls a
+// minute (limits.ts DRPC_IP_PACE) also carrying the swap reads, which rank dRPC's keys first in the list
+test("the swap reads ask Base's public providers before the keyed dRPC spares: with every provider answering, no read goes to a key", async () => {
+  assert.deepEqual(evmSwapSpares?.(env, "base"), Object.values(env), "the keyed URLs of the swap list");
+  const { r, asked } = await tape(() => false, true);
+  assert.equal(r.status, 200, r.body.slice(0, 200));
+  assert.ok(((JSON.parse(r.body) as { trades?: unknown[] }).trades ?? []).length > 0, "the tape's trades");
+  const keyed = asked.filter((a) => a.url.includes("drpc.live"));
+  assert.equal(keyed.length, 0, `${keyed.length} reads to dRPC's keys: ${keyed.slice(0, 3).map((a) => a.methods.join(",")).join(" | ")}`);
 });

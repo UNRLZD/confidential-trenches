@@ -935,6 +935,7 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       holds,
       keyed,
       rpcs: evmSwapRpcs(env, chain),
+      spares: evmSwapSpares(env, chain),
       index: INDEX_RPCS[chain],
       // every token an answer of the last SERVED_MS held, not only the newest answer's: a user taps what they read, and a
       // refresh between drops tokens (card robinhood-listed-tape-opens); and any token DexScreener names a pool for, as
@@ -970,6 +971,12 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
 export function evmSwapRpcs(env: Record<string, string | undefined>, chain: "base" | "robinhood"): string[] {
   const own = chain === "base" ? env.BASE_RPC_URL : undefined;
   return [...new Set([...(own === undefined || own === "" ? [] : [own]), ...keyedSpares(env, chain), ...SWAP_RPCS[chain]])];
+}
+/** The keyed URLs of evmSwapRpcs, which the swap reads ask only after every public one (swaps.ts `spares`, card
+ *  robinhood-trades-finish-filling): a tape, a chart and a discovery are display data, and a key's bucket (dRPC's one
+ *  for every key, 62 calls a minute) is the keyed callers', the device's reads of what it signs. */
+export function evmSwapSpares(env: Record<string, string | undefined>, chain: "base" | "robinhood"): string[] {
+  return evmSwapRpcs(env, chain).filter((u) => !SWAP_RPCS[chain].includes(u));
 }
 
 /**
