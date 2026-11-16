@@ -1,20 +1,22 @@
-// node --test apps/helper/src/rpc/drpc-ip.test.ts (card helper-base-keyed-holds-under-load): dRPC's free tier names 25
-// RPS (drpc.org/docs/howitworks/ratelimiting, read 2026-11-16 04:35Z), and from the helper's one IP its three keys draw
-// that rate together. Paced per key (8 a second, 8 at once each), a live run's paged log read and the pool fill sent
-// dRPC up to 48 in one second: dRPC answered 429, the keys were held, QuickNode's Base day was spent, and callers got
-// the helper's own 429 "every provider held" (16 Nov 03:59-04:33Z, run 43801531833). Here a fake dRPC refuses any call
-// past 25 in a second across its keys, and under a live run's load (callers each second, a 10,000-block paged read, the
-// pool fill) it must never refuse one, every caller is answered and the fill still moves. Fake clock and timers; the
+// node --test apps/helper/src/rpc/drpc-ip.test.ts (cards helper-base-keyed-holds-under-load, base-reads-never-throttled):
+// from the helper's one IP, dRPC's free plan answers a budget of calls per calendar minute, the three keys together.
+// Measured from the helper's box 16 Nov 16:22-16:30Z (limits.ts DRPC_IP_PACE): 62 calls answered in a minute, then 429
+// code 15 "You reached free plan rate limit" until the minute turned. Paced at 20 a second, the pool fill and callers
+// spent each minute's budget in seconds and callers met dRPC's 429 for the rest of it (live run 43891883180, 16 Nov
+// 15:23Z: "[base keyed] eth_getLogs answers 429 (Retry-After "1")", three times). Here a fake dRPC refuses any call past
+// 62 in a calendar minute across its keys; under a caller's reads and bursts below that, with the pool fill drawing what
+// callers leave, it must never refuse one, and every caller is answered inside its deadline. Fake clock and timers; the
 // URLs are made up, the keys planted strings.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createRpc, keyedPaces } from "./rpc.ts";
+import { DRPC_IP_PACE } from "../limits/limits.ts";
 
 const QN = "https://name-two.base-mainnet.quiknode.test/plantedBASEqn00key123456789abcd/";
 const DR = [1, 2, 3].map((n) => `https://lb.drpc.test/base/plantedBASEdr${n}key123456789abcd`);
 const ENV: Record<string, string> = { BASE_RPC_URL_QUICKNODE: QN, BASE_RPC_URL_DRPC_1: DR[0]!, BASE_RPC_URL_DRPC_2: DR[1]!, BASE_RPC_URL_DRPC_3: DR[2]! };
-/** dRPC's free rate, the doc's words: 25 calls in a second from one IP, every key and keyless URL together. */
-const DRPC_RPS = 25;
+/** dRPC's free plan from the helper's IP as measured: 62 calls answered in a calendar minute, every key together. */
+const DRPC_PER_MINUTE = 62;
 const POOL = "0xaa080e74ec99cf5c684548c77ca145edfcf899cf";
 const FROM = 54_325_671;
 const FINAL = FROM + 49_999;
@@ -30,10 +32,11 @@ function world() {
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     const req = JSON.parse(String(init.body)) as { id: unknown; method: string; params: unknown[] };
     if (DR.includes(url)) {
-      // dRPC: past 25 in the last second from this IP, its 429 (no Retry-After, as live)
-      const inSecond = drpcAt.filter((t) => t > clock - 1000).length;
+      // dRPC: past 62 in this calendar minute from this IP, its 429 code 15 (no Retry-After, as live)
+      const minute = Math.floor(clock / 60_000);
+      const inMinute = drpcAt.filter((t) => Math.floor(t / 60_000) === minute).length;
       drpcAt.push(clock);
-      if (inSecond >= DRPC_RPS) return refused.push(clock), json({ jsonrpc: "2.0", id: req.id, error: { code: 429, message: "Too many request, try again later" } }, 429);
+      if (inMinute >= DRPC_PER_MINUTE) return refused.push(clock), json({ jsonrpc: "2.0", id: req.id, error: { code: 15, message: "You reached free plan rate limit, please upgrade to paid plan" } }, 429);
     }
     if (req.method === "eth_getBlockByNumber") return json({ jsonrpc: "2.0", id: req.id, result: { number: hex(FINAL), hash: `0x${"ab".repeat(32)}` } });
     if (req.method !== "eth_getLogs") return json({ jsonrpc: "2.0", id: req.id, result: "0x1" });
@@ -55,47 +58,47 @@ function world() {
 }
 const logs = (id: number, from: number, to: number, address: string, topics: unknown = [["0x" + "a1".repeat(32)]]) => JSON.stringify({ jsonrpc: "2.0", id, method: "eth_getLogs", params: [{ address, topics, fromBlock: hex(from), toBlock: hex(to) }] });
 
-test("dRPC's three keys draw one bucket for the helper's IP, at most 25 calls in any second, each key's day still its own account's", () => {
+test("dRPC's three keys draw one bucket for the helper's IP, at most the measured minute's budget in any calendar minute, each key's day still its own account's", () => {
   const paces = Object.entries(keyedPaces(ENV)).filter(([u]) => DR.includes(u)).map(([, p]) => p);
   assert.equal(paces.length, 3, "each key is paced");
   assert.equal(new Set(paces.map((p) => p.group)).size, 3, "three accounts' days");
-  // a bucket's worst second: full at its start, then its refill
+  // a bucket's worst calendar minute: full at its start, then its refill
   const buckets = new Map(paces.map((p) => [p!.rate ?? p!.group ?? "", p!]));
-  const worst = [...buckets.values()].reduce((n, p) => n + p.burst + p.perS, 0);
-  assert.ok(worst <= DRPC_RPS, `${worst} calls in the worst second from the helper's IP (${buckets.size} buckets), dRPC names 25`);
+  const worst = [...buckets.values()].reduce((n, p) => n + p.burst + p.perS * 60, 0);
+  assert.ok(worst <= DRPC_PER_MINUTE, `${worst} calls in the worst minute from the helper's IP (${buckets.size} buckets), dRPC answered 62`);
 });
 
-test("under a live run's load on Base's keyed route, dRPC is never sent past its 25 a second: no 429, every caller answered, the 10,000-block reads served, and the fill moves on what callers leave", async () => {
+test("callers on Base's keyed route under dRPC's minute budget, with the pool fill: dRPC never refuses one, every caller is answered inside its deadline, the excess held in our queue", async () => {
   const w = world();
   // the fill starts on a whole-range pool read
   const cold = w.r.handle("base", "application/json", logs(1, FROM, FINAL, POOL, [["0x" + "a1".repeat(32)]]), "203.0.113.9", false, true);
   for (let i = 0; i < 20 && w.fills.length === 0; i++) await w.step(50);
   await cold;
-  assert.ok(w.fills.length > 0, "the fill started");
-  const answers: { what: string; a: Promise<{ status: number; body: string; why?: string }> }[] = [];
-  // a live run's pages and checks from a dozen addresses, each under its share
-  const clients = Array.from({ length: 12 }, (_, i) => `203.0.113.${21 + i}`);
+  const answers: { what: string; t: number; a: Promise<{ status: number; body: string; why?: string }> }[] = [];
   const other = "0x1111111111111111111111111111111111111111";
-  for (let s = 0; s < 30; s++) {
-    // each 15 s a check's 10,000-block read of another address (100 of dRPC's pages, helper-base-logs-page's shape)
-    if (s % 15 === 0) answers.push({ what: `paged ${s}`, a: w.r.handle("base", "application/json", logs(500 + s, FINAL - 9_999, FINAL, other), `203.0.113.${100 + s}`, false, true) });
-    // and 6 callers' reads a second, a block, a call and a finalized-head batch of 3 (10 calls, 100 of the route's 135 a
-    // 10 s), from a dozen addresses
-    for (let k = 0; k < 6; k++) {
-      const id = s * 100 + k;
-      const body = k % 3 === 0 ? JSON.stringify({ jsonrpc: "2.0", id, method: "eth_blockNumber", params: [] }) : k % 3 === 1 ? JSON.stringify({ jsonrpc: "2.0", id, method: "eth_call", params: [{ to: other, data: "0x70a08231" }, "latest"] }) : JSON.stringify([1, 2, 3].map((j) => ({ jsonrpc: "2.0", id: id * 10 + j, method: j === 1 ? "eth_chainId" : "eth_getBlockByNumber", params: j === 1 ? [] : ["finalized", false] })));
-      answers.push({ what: `caller ${s}.${k}`, a: w.r.handle("base", "application/json", body, clients[(s * 6 + k) % clients.length]!, false, true) });
-      await w.step(150);
+  // two minutes: a caller's read every 3 s from its own address, and each 30 s a page of six 100-block log reads at once
+  // (the device's pool sync), 32 calls a minute
+  for (let s = 0; s < 120; s++) {
+    if (s % 3 === 0) {
+      const body = s % 2 === 0 ? JSON.stringify({ jsonrpc: "2.0", id: s, method: "eth_blockNumber", params: [] }) : JSON.stringify({ jsonrpc: "2.0", id: s, method: "eth_call", params: [{ to: other, data: "0x70a08231" }, "latest"] });
+      answers.push({ what: `caller ${s}`, t: w.now(), a: w.r.handle("base", "application/json", body, `203.0.113.${21 + (s % 12)}`, false, true) });
     }
-    await w.step(100);
+    if (s % 30 === 0) for (let k = 0; k < 6; k++) answers.push({ what: `page ${s}.${k}`, t: w.now(), a: w.r.handle("base", "application/json", logs(1_000 + s * 10 + k, FINAL - 999 + k * 100, FINAL - 900 + k * 100, other), `203.0.113.${60 + k}`, false, true) });
+    for (let i = 0; i < 10; i++) await w.step(100);
   }
-  for (let i = 0; i < 300; i++) await w.step(10);
+  for (let i = 0; i < 100; i++) await w.step(100);
   const got = await Promise.all(answers.map(async (x) => ({ what: x.what, ...(await x.a) })));
-  assert.deepEqual(w.refused.length, 0, `dRPC refused ${w.refused.length} of ${w.drpcAt.length} calls (its 25 a second passed)`);
+  assert.deepEqual(w.refused.length, 0, `dRPC refused ${w.refused.length} of ${w.drpcAt.length} calls (its 62 a minute passed)`);
   const bad = got.filter((g) => g.status !== 200 || /"error"/.test(g.body));
   assert.deepEqual(bad.slice(0, 12).map((g) => `${g.what}: ${g.status} ${g.why ?? ""} ${g.body.slice(0, 120)}`), [], `${bad.length} of ${got.length} reads not answered`);
-  const peak = Math.max(...w.drpcAt.map((t) => w.drpcAt.filter((x) => x >= t && x < t + 1000).length));
-  assert.ok(peak <= DRPC_RPS, `${peak} dRPC calls in one second`);
-  assert.ok(w.fills.length >= 30, `the fill moved meanwhile (${w.fills.length} pages in 30 s)`);
+  assert.ok(w.fills.length > 0, `the fill moved meanwhile (${w.fills.length} pages)`);
   assert.ok(!w.lines.some((l) => l.includes("planted")), "no key in a log line");
+});
+
+test("a paid dRPC plan's pace is RPC_PACE_DRPC, \"<calls a second>,<at once>\"; empty is the free plan's; any other value stops the start, naming it", () => {
+  const drpc = (env: Record<string, string>) => Object.entries(keyedPaces({ ...ENV, ...env })).filter(([u]) => DR.includes(u)).map(([, p]) => [p.perS, p.burst, p.rate]);
+  assert.deepEqual(drpc({}), DR.map(() => [DRPC_IP_PACE.perS, DRPC_IP_PACE.burst, "drpc-ip"]));
+  assert.deepEqual(drpc({ RPC_PACE_DRPC: "" }), DR.map(() => [DRPC_IP_PACE.perS, DRPC_IP_PACE.burst, "drpc-ip"]));
+  assert.deepEqual(drpc({ RPC_PACE_DRPC: "90.5,20" }), DR.map(() => [90.5, 20, "drpc-ip"]), "still the one bucket for the IP");
+  for (const bad of ["fast", "0,4", "20", "20,0", "-1,4", "20,4,1"]) assert.throws(() => keyedPaces({ ...ENV, RPC_PACE_DRPC: bad }), /RPC_PACE_DRPC/, bad);
 });
