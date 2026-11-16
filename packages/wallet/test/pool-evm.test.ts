@@ -3112,16 +3112,16 @@ test("card fresh-walk-reads-each-range-once: a wide read the wide source's own s
 test("card fresh-walk-reads-each-range-once: a run of the wide read stands on the first seat that gives its same bytes; the walk waits on no slow seat", async () => {
   const c = anyChain();
   const wl: string[] = [];
-  const fl: string[] = [];
-  const fast = rpc(c, { url: "https://publicnode.example", cap: 50_000, log: fl });
-  // slow on the finalized blocks the runs are in; the tail past them is the seats' agreed read, as any round's
-  const slow = rpc(c, { url: "https://pocket.example", cap: 10_000, getLogs: ({ to }) => (to <= c.finalized ? 3_000 : undefined) });
-  const t0 = Date.now();
+  // slow on the finalized blocks the runs are in (the tail past them is the seats' agreed read, as any round's); its run
+  // pages answered, counted as they come
+  let slowRuns = 0;
+  const fast = rpc(c, { url: "https://publicnode.example", cap: 50_000 });
+  const slow = rpc(c, { url: "https://pocket.example", cap: 10_000, getLogs: ({ to }) => (to <= c.finalized ? 300 : undefined), logs: (l, p) => (p !== undefined && p.to <= c.finalized && slowRuns++, l) });
   const r = await evmTreeSync({ rpcs: [fast, slow], pin: PIN, history: [wideSrc(c, wl)], ...noWait }).events();
-  const ms = Date.now() - t0;
+  const answered = slowRuns;
   assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
   assert.equal(getLogs(wl).length, 1, "one wide call");
-  assert.ok(ms < 3_000, `the walk waited ${ms} ms on the slow seat`);
+  assert.equal(answered, 0, "the walk waited on the slow seat's run pages");
 });
 
 // the other provider asked for a run stops once one agreed: Robinhood's own RPC reads one event a call (three calls a run,
