@@ -2,13 +2,10 @@
 // (app-pages-open-right.answers.json), each read on 16 Nov by app-pages-open-right.mjs collect() in headless Chromium,
 // the stand-in shell signed in:
 //   good: this card's build at APP_HOST's name (--harness --build): every page opens at its top, Back puts Trenches back,
-//         the paths with nothing to draw keep their address and link to Trenches, Portfolio's Deposit opens the
-//         sheet, no Account row filled: PASS;
+//         the paths with nothing to draw keep their address and link to Trenches, no Account row filled: PASS;
 //   bad:  the build before this card (main at 6df1ca4e2, --harness --build): the token page and Portfolio open where
-//         the last page was scrolled, an unknown path goes to "/", the bad tokens have no way back, Portfolio has no
-//         Deposit on the desktop, Sign out is filled under the pointer: FAIL.
-// A first build drew Deposit as the deposit sheet's own `.dep` (a class clash): a full-width bar over the top bar, its
-// element still Withdraw's sibling; the check reads the boxes, so such a Deposit is not beside Withdraw.
+//         the last page was scrolled, an unknown path goes to "/", the bad tokens have no way back, Sign out is filled
+//         under the pointer: FAIL.
 // Planted from the good run: each of those one at a time, a run that never scrolled, a missing width.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -31,7 +28,7 @@ const fails = (r, re) => {
   assert.ok(bad(r).some((l) => re.test(l)), r.lines.join("\n"));
 };
 
-test("recorded good answer: pages open at their top, Back keeps Trenches, a way back from nowhere, Deposit, no filled row: PASS", () => {
+test("recorded good answer: pages open at their top, Back keeps Trenches, a way back from nowhere, no filled row: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   for (const w of ["phone", "desktop"]) assert.deepEqual(run(ANSWERS.good, w).nowhere.map((x) => x.path), NOWHERE);
@@ -48,7 +45,6 @@ test("recorded bad answer: the build before this card: FAIL on every item", () =
   has(/^BAD desktop \/nope\/not-a-route: the address moved to \//);
   has(/^BAD phone \/token\/eth\/abc: no way back/);
   has(/^BAD desktop \/token\/solana\/notarealmint: no way back/);
-  has(/^BAD desktop Portfolio Deposit: no Deposit on Portfolio/);
   has(/^BAD phone Account rows, .*acct-signout filled/);
 });
 
@@ -73,12 +69,6 @@ test("planted: nowhere with no state, no link, a moved address or a link that la
   fails(mut((rec) => (at(rec, "desktop", "/token/eth/abc").home = null)), /^BAD desktop \/token\/eth\/abc: no way back \(no link\)/);
   fails(mut((rec) => (at(rec, "phone", "/token/solana/notarealmint").landed = "/token/solana/notarealmint")), /its link landed on \/token\/solana\/notarealmint/);
   fails(mut((rec) => (run(rec, "desktop").nowhere = run(rec, "desktop").nowhere.filter((x) => x.path !== "/token/eth/abc"))), /^BAD desktop \/token\/eth\/abc: not read/);
-});
-
-test("planted: no desktop Deposit, one away from Withdraw, or one that opens no sheet fails", () => {
-  fails(mut((rec) => (run(rec, "desktop").deposit.drawn = false)), /^BAD desktop Portfolio Deposit: no Deposit on Portfolio/);
-  fails(mut((rec) => (run(rec, "desktop").deposit.besideWithdraw = false)), /Deposit is not beside Withdraw/);
-  fails(mut((rec) => (run(rec, "desktop").deposit.sheet = null)), /its tap opens nothing, not the deposit sheet/);
 });
 
 test("planted: a filled Account row, no rows or no Sign out fails", () => {

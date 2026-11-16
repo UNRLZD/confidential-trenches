@@ -1,7 +1,7 @@
 {
  "good": {
   "check": "app-pages-open-right",
-  "at": "2026-11-16T19:29:53.925Z",
+  "at": "2026-11-16T20:10:55.075Z",
   "source": "harness, terminal build this card's tree (dist), the stand-in shell signed in",
   "browser": "157.0.8103.51",
   "runs": [
@@ -121,18 +121,13 @@
       "landed": "/",
       "landedRoute": "token"
      }
-    ],
-    "deposit": {
-     "drawn": true,
-     "besideWithdraw": true,
-     "sheet": "deposit"
-    }
+    ]
    }
   ]
  },
  "bad": {
   "check": "app-pages-open-right",
-  "at": "2026-11-16T19:12:10.283Z",
+  "at": "2026-11-16T20:10:27.896Z",
   "source": "harness, terminal build main at 6df1ca4e2 (dist), the stand-in shell signed in",
   "browser": "157.0.8103.51",
   "runs": [
@@ -252,12 +247,7 @@
       "landed": null,
       "landedRoute": null
      }
-    ],
-    "deposit": {
-     "drawn": false,
-     "besideWithdraw": false,
-     "sheet": null
-    }
+    ]
    }
   ]
  }

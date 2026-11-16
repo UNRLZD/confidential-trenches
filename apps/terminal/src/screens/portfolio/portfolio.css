@@ -33,7 +33,6 @@
 .pf .tgl.on { background: var(--acc); }
 .pf .tgl.on::after { transform: translateX(10px); background: #0a0a0a; }
 .pf .btn2 { height: 34px; padding: 0 14px; border-radius: 9px; background: var(--bg-raised); border: 1px solid var(--border-strong); color: var(--text-1); font: 600 13px var(--font-ui); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.pf .btn2.pf-dep { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
 .pf .pill2 { height: 22px; padding: 0 7px; border-radius: 6px; font: 500 12px var(--font-num); display: inline-flex; align-items: center; }
 .pf .pill2.g { background: var(--tint-acc); color: var(--acc); } .pf .pill2.r { background: var(--tint-sell); color: var(--sell); }
 .pf .cpill { height: 24px; padding: 0 8px; border-radius: 7px; font: 500 13px var(--font-num); display: inline-flex; align-items: center; }

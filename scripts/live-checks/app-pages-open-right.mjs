@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Live check of card app-pages-open-right: every page opens at its top, a path with nothing to draw has a way back, the
-// desktop Portfolio has Deposit, and no Account row is drawn filled. APP_HOST's terminal is framed by the stand-in for
-// SIGN_HOST's shell that sends app-portfolio-mount's fixed signed-in account (no check can sign a real account in).
+// Live check of card app-pages-open-right: every page opens at its top, a path with nothing to draw has a way back, and
+// no Account row is drawn filled. APP_HOST's terminal is framed by the stand-in for SIGN_HOST's shell that sends
+// app-portfolio-mount's fixed signed-in account (no check can sign a real account in).
 // Headless Chromium at 400 x 844 (phone, dpr 2, touch; 400 x 520 in the harness, HARNESS_PHONE_H) and 1440 x 900
 // (desktop, dpr 1) reads:
 //   - phone: Trenches ("/") scrolled down, a tap on a row opens its token page at the top (scrollY 0), and Back puts the
@@ -9,12 +9,13 @@
 //   - both: an unknown path (/nope/not-a-route) stays at its address and draws the not-found state with a link to
 //     Trenches ("/"), and a bad token (/token/eth/abc, /token/solana/notarealmint) draws the token page's empty state
 //     with the same link; each link tapped lands on "/";
-//   - desktop: Portfolio draws Deposit beside Withdraw, and a tap on it opens the deposit sheet;
 //   - phone: the Account tab's rows, with the pointer left over Sign out (a tap point keeps :hover on a touch screen),
 //     each drawn with no fill.
-// QA walk 16 Nov 18:00Z, items 4, 8, 17 and 18. Item 16 (a token's Trades with no rows) is not read here: its skeleton
-// is the helper's cold read still going (`filling`), which ends with rows or the empty state (measured 16 Nov 18:3xZ on
-// the deployed app: 20.2 s to No data, 3.1 s and 22.2 s to rows), a time this app's deploy does not set.
+// QA walk 16 Nov 18:00Z, items 4, 8 and 18. Item 17 (Deposit on the desktop Portfolio) is no fault: R5's lock
+// (design/proto/portfolio-1440.html at design-lock-r5) puts Deposit in the header, and it is there. Item 16 (a token's
+// Trades with no rows) is not read here: its skeleton is the helper's cold read still going (`filling`), which ends
+// with rows or the empty state (measured 16 Nov 18:3xZ on the deployed app: 20.2 s to No data, 3.1 s and 22.2 s to
+// rows), a time this app's deploy does not set.
 // A screenshot of each step is kept.
 // After: app
 // Bundle: out a browser
@@ -100,15 +101,6 @@ export function judge(rec) {
       else if (!a.rows.some((x) => x.control === "acct-signout")) aBad.push("no Sign out row");
       if (filled.length) aBad.push(`${filled.map((x) => `${x.control} filled ${x.fill}`).join(", ")} with no tap`);
       say(aBad.length === 0, `${n} Account rows, the pointer left over Sign out (hover ${a?.hover ?? "?"}): ${aBad.length ? aBad.join("; ") : `${a.rows.length} rows, none filled`}`);
-    } else {
-      const d = r.deposit;
-      const dBad = !d ? ["not read"] : [];
-      if (d) {
-        if (!d.drawn) dBad.push("no Deposit on Portfolio");
-        else if (!d.besideWithdraw) dBad.push("Deposit is not beside Withdraw");
-        if (d.drawn && d.sheet !== "deposit") dBad.push(`its tap opens ${d.sheet ?? "nothing"}, not the deposit sheet`);
-      }
-      say(dBad.length === 0, `${n} Portfolio Deposit: ${dBad.length ? dBad.join("; ") : "beside Withdraw, opens the deposit sheet"}`);
     }
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
@@ -257,36 +249,8 @@ async function runOne(browser, w, shots, route, harness) {
         await page.close();
       }
     } else {
-      // Portfolio's Deposit beside Withdraw, and its tap
-      const { page, f } = await open(ctx, "/portfolio");
+      const { page, f } = await open(ctx, "/");
       run.framed = f !== null && originOf(page.url()) === SIGN_HOST;
-      if (f) {
-        await f.waitForSelector("[data-screen='portfolio']:not([data-state='S10.1'])", { timeout: READY_MS }).catch(() => {});
-        await f.waitForTimeout(SETTLE_MS);
-        const d = await f.evaluate(() => {
-          const shown = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
-          const dep = [...document.querySelectorAll("[data-screen='portfolio'] [data-control='deposit']")].find(shown);
-          const wd = [...document.querySelectorAll("[data-screen='portfolio'] [data-control='withdraw']")].find(shown);
-          // beside: the same row as Withdraw (their boxes overlap in height) and next to it, not merely its DOM sibling
-          const a = dep?.getBoundingClientRect();
-          const b = wd?.getBoundingClientRect();
-          const row = !!a && !!b && a.top < b.bottom && b.top < a.bottom && Math.abs(a.right - b.left) < 24 && a.width < 200;
-          return { drawn: !!dep, besideWithdraw: !!dep && !!wd && dep.parentElement === wd.parentElement && row };
-        });
-        await page.screenshot({ path: path.join(shots, `${w.name}-portfolio.png`) });
-        let sheet = null;
-        if (d.drawn) {
-          await vis(f, "[data-screen='portfolio'] [data-control='deposit']").click({ timeout: 3_000 }).catch(() => {});
-          sheet = await f
-            .locator("[data-sheet='deposit']")
-            .filter({ visible: true })
-            .first()
-            .waitFor({ timeout: 4_000 })
-            .then(() => "deposit", () => null);
-          await page.screenshot({ path: path.join(shots, `${w.name}-portfolio-deposit.png`) });
-        }
-        run.deposit = { ...d, sheet };
-      }
       await page.close();
     }
     for (const at of NOWHERE) run.nowhere.push(await readNowhere(ctx, at, shots, w));
