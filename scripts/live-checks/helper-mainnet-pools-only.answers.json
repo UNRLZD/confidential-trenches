@@ -1,0 +1,111 @@
+{
+ "note": "bad: a READ of the live helper (https://ct-api.unrealized.trade, 6194790b7) at 2026-11-16T14:55:36.201Z by this check, before the card: it serves every test pool (200). good: made, NOT a read: the bad run with each test pool's fee answer set to the helper's own answer for a pool it does not carry, 404 {\"error\":{\"code\":\"not_found\"}} (apps/helper/src/server.ts), the health read kept; the first helper deploy of the card is its real read.",
+ "good": {
+  "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+  "run": {
+   "at": "2026-11-16T14:55:36.201Z",
+   "base": "https://ct-api.unrealized.trade",
+   "health": {
+    "status": 200,
+    "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+    "body": "{\"ok\":true,\"commit\":\"6194790b71f03faf7e8bf4e6063c1d9adc7095b9\",\"release\":168,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 held\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+   },
+   "fees": [
+    {
+     "chain": "evm",
+     "network": "base-sepolia",
+     "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+     "answer": {
+      "status": 404,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     }
+    },
+    {
+     "chain": "evm",
+     "network": "robinhood-testnet",
+     "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+     "answer": {
+      "status": 404,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     }
+    },
+    {
+     "chain": "solana",
+     "network": "devnet",
+     "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+     "answer": {
+      "status": 404,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     }
+    },
+    {
+     "chain": "solana",
+     "network": "devnet",
+     "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+     "answer": {
+      "status": 404,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"error\":{\"code\":\"not_found\"}}"
+     }
+    }
+   ]
+  }
+ },
+ "bad": {
+  "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+  "run": {
+   "at": "2026-11-16T14:55:36.201Z",
+   "base": "https://ct-api.unrealized.trade",
+   "health": {
+    "status": 200,
+    "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+    "body": "{\"ok\":true,\"commit\":\"6194790b71f03faf7e8bf4e6063c1d9adc7095b9\",\"release\":168,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 held\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+   },
+   "fees": [
+    {
+     "chain": "evm",
+     "network": "base-sepolia",
+     "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794840900000,\"block\":\"0x38d5994\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     }
+    },
+    {
+     "chain": "evm",
+     "network": "robinhood-testnet",
+     "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xed9fac860e6bc5e932455232eedca8b71c44da4d\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1794840900000,\"block\":\"0x92f9aa0\",\"fee\":\"40000000000000\",\"step\":\"10000000000000\"}"
+     }
+    },
+    {
+     "chain": "solana",
+     "network": "devnet",
+     "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb\",\"epoch_ms\":60000,\"epoch_start_ms\":1794840900000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+     }
+    },
+    {
+     "chain": "solana",
+     "network": "devnet",
+     "pool": "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ\",\"pool\":\"2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr\",\"fee_payer\":\"9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb\",\"epoch_ms\":60000,\"epoch_start_ms\":1794840900000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+     }
+    }
+   ]
+  }
+ }
+}
