@@ -49,4 +49,8 @@ test("planted in a bundle: each mark broken in place FAILs", () => {
   assert.equal(at(js.replace("e.exit&&(n=await e.exit(E[0].w)),", "")).runs, 1, "the Solana run never asks");
   assert.equal(at(js.replace("e.exit&&(n=await e.exit(S[0])),", "")).runs, 1, "the EVM run never asks");
   assert.equal(at(js.replace("e.exit(S[0])", "e.exit(S[1])")).runs, 1, "a refund to another W than the first");
+  // the Solana To step's kept answer (card pool-buy-waits-out-a-throttle: asked once a run, its retries reuse it)
+  const kept = js.replace("e.exit&&(n=await e.exit(E[0].w)),", "e.exit&&(n=i.to??=await e.exit(E[0].w)),");
+  assert.equal(at(kept).runs, 2, "the kept answer still asked with the first W");
+  assert.equal(at(kept.replace("i.to??=await e.exit(E[0].w)", "i.to??=await e.exit(E[1].w)")).runs, 1, "a kept answer for another W than the first");
 });
