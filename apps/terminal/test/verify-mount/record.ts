@@ -1,9 +1,9 @@
 // Records what Verify's live read sends and gets, for the tests to answer from: liveVerify (src/screens/verify/live.ts)
 // on the release's pair, every request and its answer kept by the RPC's URL and the request's params; only what the RPCs
 // answered is stored. Test data only, never shipped. Run by hand:
-//   node apps/terminal/test/verify-mount/record.ts            testnet: answers.json (test/verify-mount.test.ts, run.mjs)
-//   node apps/terminal/test/verify-mount/record.ts mainnet    mainnet: answers-mainnet.json (the in-shell harness's
-//                                                             mainnet RPC answers, scripts/live-checks/app-in-shell.mjs)
+//   node apps/terminal/test/verify-mount/record.ts            testnet: answers.json (test/verify-mount.test.ts)
+//   node apps/terminal/test/verify-mount/record.ts mainnet    mainnet: answers-mainnet.json (run.mjs, and the in-shell
+//                                                             harness's mainnet RPC answers, scripts/live-checks/app-in-shell.mjs)
 import { writeFileSync } from "node:fs";
 import { liveVerify } from "../../src/screens/verify/live.ts";
 import { VERIFY_RELEASES } from "../../src/screens/verify/release.ts";

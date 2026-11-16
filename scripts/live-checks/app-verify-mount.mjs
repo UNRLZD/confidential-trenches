@@ -27,7 +27,7 @@
 //     the deployed hosts: APP_HOST/verify as it is served; --network is the network its build names (the deploy passes
 //     it, read from the build's _headers; mainnet when not given)
 //   node scripts/live-checks/app-verify-mount.mjs --harness [--build <dir>] [--network testnet|mainnet] ...
-//     a local build (VITE_NEAR_NETWORK=testnet pnpm --filter terminal build) on the hosts' real names, answered by
+//     a local build (pnpm --filter terminal build: mainnet) on the hosts' real names, answered by
 //     Playwright's route from local files with the stand-in shell of app-in-shell.mjs; the release's two NEAR RPCs are
 //     the real ones, reached over the network (route.continue), so the reads are live (mainnet when not given)
 //     PASS exit 0, FAIL exit 1, error exit 2
