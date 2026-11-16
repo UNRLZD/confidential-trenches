@@ -145,7 +145,9 @@ test("a page's JSON-RPC error is the read's answer, with the caller's id; a page
   const r = createRpc(BASE_ENV, { fetch: p.fetch as never, log: () => undefined });
   const a = await read(r, logsBody(21, from, from + 4_999));
   assert.equal(a.status, 200);
-  assert.deepEqual(JSON.parse(a.body), { jsonrpc: "2.0", id: 21, error: { code: -32005, message: "query returned more than 10000 results" } });
+  // the pinned pool's read (card helper-keyed-logs-serve-a-whole-pool-range): its words and code kept, with how far the
+  // pool's store is (it names no span, so none is put in its mouth)
+  assert.deepEqual(JSON.parse(a.body), { jsonrpc: "2.0", id: 21, error: { code: -32005, message: "query returned more than 10000 results", data: "pool logs kept to block 54325670" } });
 
   const q = providers(BASE_SPANS, (_url, f) => (f === bad ? new Response("bad gateway", { status: 502 }) : undefined));
   const r2 = createRpc(BASE_ENV, { fetch: q.fetch as never, log: () => undefined });
