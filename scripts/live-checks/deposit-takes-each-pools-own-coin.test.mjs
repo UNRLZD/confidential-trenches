@@ -35,7 +35,7 @@ test("recorded bad answer: main's page lists the USDC rows alone: FAIL, naming e
   const v = judge(A.bad);
   assert.equal(v.verdict, "FAIL");
   assert.equal(EXIT[v.verdict], 1);
-  assert.deepEqual(v.lines, POOL_COINS.map((c) => `BAD deposit.assets ${c.symbol} on ${c.chain} (${c.id}) is not listed`));
+  assert.deepEqual(v.lines, POOL_COINS.map((c) => `BAD ${c.symbol} on ${c.chain} (${c.id}) is neither deposit.coin's answer nor listed in deposit.assets`));
 });
 
 test("units: exact base units, or null", () => {
@@ -69,4 +69,31 @@ test("planted on good: each way the rows can be wrong: FAIL each", () => {
     "no answer": (a) => (a.log = a.log.filter((m) => m.data?.id !== a.ids.assets)),
   };
   for (const [name, f] of Object.entries(cases)) assert.equal(plant(f).verdict, "FAIL", name);
+});
+
+// card deposit-list-reads-fast: each pool coin's row is its chain's own deposit.coin, deposit.assets the USDC rows alone
+test("planted on good, moved to deposit.coin: the rows as deposit.coin answers PASS; a refused or wrong one, or one listed in both, FAIL", () => {
+  const coinForm = () => {
+    const a = structuredClone(A.good);
+    const all = rows(a);
+    answerOf(a).result.assets = all.filter((x) => x.symbol === "USDC");
+    const origin = a.log.find((m) => m.data?.id === a.ids.assets).origin;
+    a.ids.coins = {};
+    for (const c of POOL_COINS) {
+      const id = `coin-${c.chain}`;
+      a.ids.coins[c.chain] = id;
+      a.log.push({ fromParent: true, origin, data: { v: 1, id, ok: true, result: { asset: all.find((x) => x.origin_asset === c.id) } } });
+    }
+    return a;
+  };
+  assert.equal(judge(coinForm()).verdict, "PASS", judge(coinForm()).lines.join("\n"));
+  const refused = coinForm();
+  refused.log.find((m) => m.data?.id === "coin-robinhood").data = { v: 1, id: "coin-robinhood", ok: false, error: { code: "not_available" } };
+  assert.deepEqual(judge(refused).lines, [`BAD ETH on robinhood (${POOL_COINS[2].id}) is neither deposit.coin's answer (refused "not_available") nor listed in deposit.assets`]);
+  const both = coinForm();
+  answerOf(both).result.assets.push(both.log.find((m) => m.data?.id === "coin-base").data.result.asset);
+  assert.deepEqual(judge(both).lines, ["BAD ETH on base is both deposit.coin's answer and a deposit.assets row: listed twice"]);
+  const tiny = coinForm();
+  tiny.log.find((m) => m.data?.id === "coin-solana").data.result.asset = { ...tiny.log.find((m) => m.data?.id === "coin-solana").data.result.asset, min: "0.001" };
+  assert.equal(judge(tiny).verdict, "FAIL");
 });

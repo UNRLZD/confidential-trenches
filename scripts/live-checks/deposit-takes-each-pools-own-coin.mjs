@@ -2,8 +2,10 @@
 // Live check of card deposit-takes-each-pools-own-coin on SIGN_HOST (https://confidential.unrealized.trade): each pool
 // takes its own coin from any outside wallet, so the deposit sheet offers SOL on Solana, ETH on Base and ETH on
 // Robinhood beside the USDC rows. What it holds, on the served page, signed out (the sheet's first read):
-//   - deposit.assets lists SOL on solana (nep141:sol.omft.near, 9 decimals), ETH on base (nep141:base.omft.near, 18) and
-//     ETH on robinhood (nep141:hood.omft.near, 18), each once, after every USDC row, each with max_usd "1000" and a min
+//   - the page answers SOL on solana (nep141:sol.omft.near, 9 decimals), ETH on base (nep141:base.omft.near, 18) and
+//     ETH on robinhood (nep141:hood.omft.near, 18), each as its chain's own deposit.coin (card deposit-list-reads-fast:
+//     one read per chain, so no row waits on another), or, from a page before that card, in deposit.assets once each
+//     after every USDC row; each with max_usd "1000" and a min
 //     that is the pool's floor read now, rounded up to six decimals: above the pool's least rung (0.01 SOL, 0.001 ETH: one
 //     deposit from U_X costs a fee, and on Solana the rent U_X keeps) and under two rungs;
 //   - no request the page sends to the helper's 1Click proxy names a pool's own coin: 1Click is asked nothing for a
@@ -74,15 +76,22 @@ export function judge(a) {
     const lastUsdc = list.reduce((k, x, i) => (x?.symbol === "USDC" ? i : k), -1);
     if (lastUsdc < 0) bad("deposit.assets lists no USDC row: the rows that work today are gone");
     for (const c of POOL_COINS) {
+      const label = `${c.symbol} on ${c.chain}`;
+      // deposit.coin's own answer for the chain (card deposit-list-reads-fast), else deposit.assets' row (a page before it)
+      const coinId = a?.ids?.coins?.[c.chain];
+      const coin = coinId ? (a?.log ?? []).find((m) => m.fromParent && m.origin === signOrigin && m.data?.id === coinId)?.data : null;
+      let x = coin?.ok === true ? coin.result?.asset : null;
+      if (x && x.origin_asset !== c.id) bad(`deposit.coin ${label}: origin_asset ${show(x.origin_asset)}, want ${show(c.id)}`);
       const at = ids.indexOf(c.id);
-      const label = `deposit.assets ${c.symbol} on ${c.chain}`;
-      if (at < 0) {
-        bad(`${label} (${c.id}) is not listed`);
-        continue;
-      }
-      if (ids.lastIndexOf(c.id) !== at) bad(`${label} is listed twice`);
-      if (at < lastUsdc) bad(`${label} is listed before a USDC row, want after them`);
-      const x = list[at];
+      if (!x) {
+        if (at < 0) {
+          bad(`${label} (${c.id}) is neither deposit.coin's answer${coin ? ` (refused ${show(coin.error?.code)})` : ""} nor listed in deposit.assets`);
+          continue;
+        }
+        if (ids.lastIndexOf(c.id) !== at) bad(`deposit.assets ${label} is listed twice`);
+        if (at < lastUsdc) bad(`deposit.assets ${label} is listed before a USDC row, want after them`);
+        x = list[at];
+      } else if (at >= 0) bad(`${label} is both deposit.coin's answer and a deposit.assets row: listed twice`);
       if (x.chain !== c.chain) bad(`${label}: chain ${show(x.chain)}, want ${show(c.chain)}`);
       if (x.symbol !== c.symbol) bad(`${label}: symbol ${show(x.symbol)}, want ${show(c.symbol)}`);
       if (x.decimals !== c.decimals) bad(`${label}: decimals ${show(x.decimals)}, want ${c.decimals}`);
