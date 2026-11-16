@@ -627,10 +627,15 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
             at[k] = n;
             continue;
           }
+          // a log page with no answer in time goes up when it names no span or is wider than this provider answered in
+          // full: the pager takes it back to that width there (readLogs). A page of a span it never answered, or no wider
+          // than it did (card sign-in-restore-never-stalls: Pocket silent to the Base pool's first page held the walk
+          // 86 s, asked 7 times, the helper's route free behind it), is a throttle to the seat: that provider rested and
+          // the page asked of a free one at once; with none free the error goes up as before
           if (capped) {
             capOf[i] = cap;
             restUntil[i] = 0; // it answers: no longer resting
-          } else if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
+          } else if (t === null || (t.kind === "slow" && method === "eth_getLogs" && (span === null || (answered[i] !== null && span > answered[i]!)))) throw e;
           else {
             restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
             named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
