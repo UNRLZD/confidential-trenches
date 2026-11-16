@@ -95,7 +95,6 @@ export const NOT_MOVED = Object.freeze([
   // check, money-gate.mjs readTx, ...)
   "delete-refund-readback.mjs",
   "evm-selldelegate-exact-debit.mjs",
-  "helper-evm-sender.mjs",
   "helper-sender-fee-proof.mjs",
   "money-gate-testnet.mjs",
   "pool-deposits.mjs",
