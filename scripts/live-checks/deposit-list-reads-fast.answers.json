@@ -1,0 +1,158 @@
+{
+ "good": {
+  "at": "2026-11-16T20:18:13.058Z",
+  "browser": "Chrome 157.0.8103.51, sandbox on",
+  "sign": "local build",
+  "widths": {
+   "phone": {
+    "width": "phone",
+    "opened": true,
+    "fillMs": 878,
+    "askedMs": 58,
+    "answer": {
+     "at": 772,
+     "ok": true,
+     "rows": [
+      "USDC near",
+      "USDC solana",
+      "USDC base"
+     ],
+     "code": null
+    },
+    "tokens": {
+     "start": 3,
+     "end": 436
+    },
+    "probes": [
+     {
+      "start": 3,
+      "end": 447
+     },
+     {
+      "start": 3,
+      "end": 716
+     },
+     {
+      "start": 3,
+      "end": 772
+     }
+    ]
+   },
+   "desktop": {
+    "width": "desktop",
+    "opened": true,
+    "fillMs": 887,
+    "askedMs": 86,
+    "answer": {
+     "at": 725,
+     "ok": true,
+     "rows": [
+      "USDC near",
+      "USDC solana",
+      "USDC base"
+     ],
+     "code": null
+    },
+    "tokens": {
+     "start": 2,
+     "end": 389
+    },
+    "probes": [
+     {
+      "start": 2,
+      "end": 469
+     },
+     {
+      "start": 3,
+      "end": 701
+     },
+     {
+      "start": 3,
+      "end": 725
+     }
+    ]
+   }
+  },
+  "note": "this card's build (924fd4bd2) served at SIGN_HOST's name, --sign-dir"
+ },
+ "bad": {
+  "at": "2026-11-16T20:17:52.029Z",
+  "browser": "Chrome 157.0.8103.51, sandbox on",
+  "sign": "local build",
+  "widths": {
+   "phone": {
+    "width": "phone",
+    "opened": true,
+    "fillMs": 3901,
+    "askedMs": 65,
+    "answer": {
+     "at": 3335,
+     "ok": true,
+     "rows": [
+      "USDC near",
+      "USDC solana",
+      "USDC base",
+      "SOL solana",
+      "ETH base"
+     ],
+     "code": null
+    },
+    "tokens": {
+     "start": 2,
+     "end": 460
+    },
+    "probes": [
+     {
+      "start": 460,
+      "end": 799
+     },
+     {
+      "start": 460,
+      "end": 1334
+     },
+     {
+      "start": 460,
+      "end": 1325
+     }
+    ]
+   },
+   "desktop": {
+    "width": "desktop",
+    "opened": true,
+    "fillMs": 3448,
+    "askedMs": 98,
+    "answer": {
+     "at": 3137,
+     "ok": true,
+     "rows": [
+      "USDC near",
+      "USDC solana",
+      "USDC base",
+      "SOL solana",
+      "ETH base"
+     ],
+     "code": null
+    },
+    "tokens": {
+     "start": 2,
+     "end": 407
+    },
+    "probes": [
+     {
+      "start": 407,
+      "end": 732
+     },
+     {
+      "start": 407,
+      "end": 1136
+     },
+     {
+      "start": 408,
+      "end": 1105
+     }
+    ]
+   }
+  },
+  "note": "the build before (0e9f11dc8) served at SIGN_HOST's name, --sign-dir"
+ }
+}

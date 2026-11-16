@@ -16,7 +16,7 @@ import { COLLECTOR, NEAR_USDC, NOW, SOL_USDC, mockKey, signAnswer, type Answer }
 const { ONECLICK_USDC_ASSETS } = await import("../../kit/src/checks/oneclick.ts");
 const { SIGNPAGE_RESULT_SCHEMAS } = await import("../../kit/src/signpage/schema.ts");
 const { HELPER_BIND_DEPOSIT_CAP } = await import("../../kit/src/helper/v1.ts");
-const { DEPOSIT_FLOOR_GRACE_MS, DEPOSIT_TOKENS_URL, depositAssetsKind } = await import("../src/rules/deposit-dry.ts");
+const { DEPOSIT_TOKENS_URL, depositAssetsKind } = await import("../src/rules/deposit-dry.ts");
 const { POOL_FLOOR_PLACEHOLDER, poolAddressHost, poolQuotePricing } = await import("../src/pool-deposit-address.ts");
 const { followPoolQuote } = await import("../src/pool-deposit-follow.ts");
 const { POOL_DEPOSIT_DESTINATION } = await import("../../wallet/src/deposit/quote.ts");
@@ -104,8 +104,8 @@ test("deposit.assets: a floor finer than six decimals is shown rounded up to six
   rows.forEach((r, i) => assert.ok(BigInt(r.min.replace(".", "").replace(/^0+/, "")) * 10n ** BigInt(r.decimals - (r.min.split(".")[1] ?? "").length) >= Object.values(live)[i]!));
 });
 
-test("deposit.assets: a pool whose floor throws, answers null or is not back DEPOSIT_FLOOR_GRACE_MS after the probes is left out; the USDC rows stand", { timeout: DEPOSIT_FLOOR_GRACE_MS + 5_000 }, async () => {
-  // the hang bound is the test's own timeout: a floor that never answers holds the list forever without the grace
+test("deposit.assets: a pool whose floor throws, answers null or is not back when the probes are is left out; the USDC rows stand", { timeout: 5_000 }, async () => {
+  // the hang bound is the test's own timeout: a floor that never answers never holds the list
   const h = helper();
   const got = await depositAssetsKind({ ...opts, fetch: h.fetch, poolFloor: async (chain) => {
     if (chain === "solana") throw new TypeError("fetch failed");
@@ -114,6 +114,70 @@ test("deposit.assets: a pool whose floor throws, answers null or is not back DEP
   } });
   assert.ok(got.ok, JSON.stringify(got));
   assert.deepEqual(got.result.assets.map((r) => r.symbol), ["USDC", "USDC", "USDC"]);
+});
+
+// Card deposit-list-reads-fast (QA walk item 11: the sheet opened cold filled in 3.9 s, the token list, then the probes,
+// then up to 2 s for the floors, one after another)
+/** `n` turns of the event loop: room for every read the code sends at once to go out, with no clock read. */
+const turns = async (n: number) => {
+  for (let i = 0; i < n; i++) await new Promise<void>((ok) => setImmediate(ok));
+};
+test("deposit.assets asks the token list, every probe and every pool's floor at once: each probe and floor goes out before the list answers", { timeout: 5_000 }, async () => {
+  const order: string[] = [];
+  let probesOut!: () => void;
+  const allOut = new Promise<void>((ok) => (probesOut = ok));
+  const h = helper();
+  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url) === DEPOSIT_TOKENS_URL) {
+      order.push("tokens asked");
+      // the list answers once the three probes are out, or after 50 turns when they wait on it
+      await Promise.race([allOut, turns(50)]);
+      order.push("tokens answered");
+    } else {
+      order.push(`probe ${(JSON.parse(String(init?.body)) as OneClickRequest).originAsset}`);
+      if (order.filter((o) => o.startsWith("probe")).length === ONECLICK_USDC_ASSETS.length) probesOut();
+    }
+    return h.fetch(url, init);
+  }) as typeof fetch;
+  const got = await depositAssetsKind({ ...opts, fetch: fetchFn, poolFloor: async (chain) => (order.push(`floor ${chain}`), FLOORS[chain]) });
+  assert.ok(got.ok, JSON.stringify(got));
+  const answered = order.indexOf("tokens answered");
+  assert.ok(answered > 0, order.join(", "));
+  assert.deepEqual(order.slice(0, answered).filter((o) => o !== "tokens asked").sort(), [
+    ...ONECLICK_USDC_ASSETS.map((id) => `probe ${id}`), "floor base", "floor robinhood", "floor solana",
+  ].sort(), `asked before the list answered: ${order.slice(0, answered).join(", ")}`);
+  // the list and every check as before: the six rows, each probe sent once
+  assert.deepEqual(got.result.assets.map((r) => `${r.symbol} ${r.chain}`), ["USDC near", "USDC solana", "USDC base", "SOL solana", "ETH base", "ETH robinhood"]);
+  assert.deepEqual(h.sent.filter((s) => s !== "tokens").sort(), [...ONECLICK_USDC_ASSETS].sort());
+});
+
+test("deposit.assets never waits on a pool's floor: with every floor still out (no timer runs), the USDC rows are the answer", { timeout: 5_000 }, async (t) => {
+  // setTimeout mocked and never ticked: a wait for the floors on a timer never ends, and the hang bound fails it
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const got = await depositAssetsKind({ ...opts, fetch: helper().fetch, poolFloor: () => new Promise<bigint>(() => {}) });
+  assert.ok(got.ok, JSON.stringify(got));
+  assert.deepEqual(got.result.assets.map((r) => `${r.symbol} ${r.chain}`), ["USDC near", "USDC solana", "USDC base"]);
+});
+
+test("deposit.assets: a token list refused answers its own code and ends the probes still out; an unlisted asset's busy probe is not the list's", async () => {
+  const signals: AbortSignal[] = [];
+  const h = helper({ status: 429 });
+  const busy = await depositAssetsKind({ ...opts, fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url) !== DEPOSIT_TOKENS_URL) signals.push(init!.signal!);
+    return h.fetch(url, init);
+  }) as typeof fetch });
+  assert.deepEqual(busy, { ok: false, code: "busy" });
+  assert.equal(signals.length, ONECLICK_USDC_ASSETS.length);
+  assert.ok(signals.every((s) => s.aborted), "every probe ended with the list's refusal");
+  // Solana's USDC left out of 1Click's list: its probe's 429 is dropped unread, the other two rows stand
+  const listed = TOKENS.filter((t) => t.assetId !== SOL_USDC);
+  const got = await depositAssetsKind({ ...opts, fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url) === DEPOSIT_TOKENS_URL) return new Response(JSON.stringify(listed), { status: 200, headers: { "content-type": "application/json" } });
+    if ((JSON.parse(String(init?.body)) as OneClickRequest).originAsset === SOL_USDC) return new Response("{}", { status: 429 });
+    return helper().fetch(url, init);
+  }) as typeof fetch });
+  assert.ok(got.ok, JSON.stringify(got));
+  assert.deepEqual(got.result.assets.map((r) => r.origin_asset), [NEAR_USDC, BASE_USDC]);
 });
 
 test("deposit.assets with no pool floor given (the read before this card): the USDC rows alone, exactly", async () => {

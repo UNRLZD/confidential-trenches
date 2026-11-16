@@ -180,9 +180,11 @@ test("deposit.assets through the frame, signed out: the three assets as 1Click l
     ],
   });
   assert.equal(SIGNPAGE_RESULT_SCHEMAS["deposit.assets"](a.result), true, "the kit's client takes it");
-  // the token list, then one dry quote per asset, each to the placeholder: nothing of the user's
+  // the token list and one dry quote per asset, asked at once (card deposit-list-reads-fast), each quote to the
+  // placeholder: nothing of the user's
   assert.deepEqual(f.sent.map((s) => s.method), ["POST", "POST", "POST", "POST"]);
-  for (const s of f.sent.slice(1)) {
+  assert.equal(f.sent.filter((s) => s.url === DEPOSIT_TOKENS_URL).length, 1);
+  for (const s of f.sent.filter((x) => x.url !== DEPOSIT_TOKENS_URL)) {
     assert.equal(s.body!.dry, true);
     assert.equal(s.body!.recipient, DEPOSIT_DRY_PLACEHOLDER);
     assert.equal(s.body!.refundTo, DEPOSIT_DRY_PLACEHOLDER);
