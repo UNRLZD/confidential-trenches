@@ -20,11 +20,16 @@ const EVM = ["zora", "clanker", "doppler", "flaunch", "virtuals", "pons", "bags"
  *  GayPad and token0, also served, have none (NO_LOGO). tkn: served from 14 Nov 10:35Z (app live run 43585050672); shore:
  *  served on 16 Nov 00:17Z (app live run 43779504700, test/pads/lists-near-2026-11-16.json). */
 const NEAR = ["hoot", "nearlytrade", "qlyphs", "memecooking", "nearpaid", "tkn", "shore"];
+/** Card near-pads-every-logo: every other pad the engine registers (test/pads/launchpads-near-2026-11-14.json) whose own
+ *  site serves its mark (read 16 Nov 01:1xZ); the rest are NO_LOGO, each with the read that found none (pads.ts). */
+const NEAR_REGISTRY = ["shardsmarket", "nearpad", "nearrr", "nearafun", "chipfi", "tknx", "jumplab", "nearfun", "revshare", "kelytra"];
 const NAMES: Record<string, string> = {
   "pump.fun": "pump.fun", stonkfun: "StonkFun", "raydium-launchlab": "LaunchLab", Raydium: "Raydium", "met-dbc": "Meteora", "letsbonk.fun": "bonk.fun",
   metadao: "MetaDAO", "jup-studio": "Jupiter Studio", "bags.fun": "Bags", grainpad: "grainpad", zora: "Zora", clanker: "Clanker", doppler: "Doppler",
   flaunch: "Flaunch", virtuals: "Virtuals", pons: "Pons", bags: "Bags", torch: "Torch",
   hoot: "Hoot", nearlytrade: "Nearly.trade", qlyphs: "Qlyphs", memecooking: "meme.cooking", nearpaid: "NearPaid", tkn: "TKN", shore: "Shore",
+  shardsmarket: "Shards Market", nearpad: "NearPad", nearrr: "nearrr.fun", nearafun: "neara.fun", chipfi: "chipfi", tknx: "TKN Plus", jumplab: "Jump Token Laboratory",
+  nearfun: "NearFun", revshare: "RevShare", kelytra: "Kelytra",
 };
 
 /** A logo the table names: a file in src/screens/market/logos, a real PNG of 64 px or less or an SVG with no script. */
@@ -52,19 +57,23 @@ function missingPads(lists: Record<string, { launchpad: string | null }[]>): str
 }
 
 test("every id served on 3 Nov (Solana, EVM) and 14 Nov (NEAR) maps to its pad's own name and a logo file in the app, with its source cited", () => {
-  for (const id of [...SOLANA, ...EVM, ...NEAR]) {
+  for (const id of [...SOLANA, ...EVM, ...NEAR, ...NEAR_REGISTRY]) {
     const p = padOf(id);
     assert.ok(p, `${id} has no row`);
     assert.equal(p.name, NAMES[id], id);
     assert.equal(logoFault(p.logo), null, `${id}: ${logoFault(p.logo)}`);
     assert.match(p.src, /^https:\/\//, `${id}: source not cited`);
   }
-  assert.deepEqual(Object.keys(PADS).sort(), [...SOLANA, ...EVM, ...NEAR].sort(), "a row with no test, or a test id with no row");
+  assert.deepEqual(Object.keys(PADS).sort(), [...SOLANA, ...EVM, ...NEAR, ...NEAR_REGISTRY].sort(), "a row with no test, or a test id with no row");
 });
 
 test("null, undefined, an unknown id, an Object prototype key and a pad with no cited logo draw no launchpad badge", () => {
   for (const id of [null, undefined, "", "unknown-pad", "PUMP.FUN", "__proto__", "toString", "constructor", ...NO_LOGO]) assert.equal(padOf(id), null, String(id));
-  assert.deepEqual(NO_LOGO, ["spawn", "gaypad", "token0"]);
+  assert.deepEqual([...NO_LOGO].sort(), [
+    "spawn", "gaypad", "token0",
+    "umbrafun", "intear", "wholemarket", "portalpad", "onetokenhub", "nucleusbroker", "shardpad", "terminalpad", "rheameme", "npad", "dragonpad",
+    "tknprimitives", "runeshot", "nearbased", "patata", "nira", "vista", "nearmemefun",
+  ].sort());
 });
 
 test("every chain a row can carry has its mark, with its source cited; an unknown chain none", () => {
@@ -133,11 +142,7 @@ test("the EVM factory table's pads all have rows", { skip: !existsSync(EVM_SRC) 
 /** Registry pads that no list served when it was recorded (10:45Z), each still owed its row (a cited logo) or its NO_LOGO
  *  reason: the live check app-launchpad-badges still fails the deploy the moment a list serves one. This list only
  *  shrinks: a pad that gets its row or NO_LOGO entry must leave it. */
-const NEAR_OWED = [
-  "shardsmarket", "nearpad", "umbrafun", "nearrr", "nearafun", "intear", "wholemarket", "portalpad", "onetokenhub", "nucleusbroker", "shardpad",
-  "terminalpad", "rheameme", "chipfi", "npad", "dragonpad", "tknx", "tknprimitives", "runeshot", "jumplab", "nearbased", "nearfun",
-  "revshare", "patata", "nira", "vista", "nearmemefun", "kelytra",
-];
+const NEAR_OWED: string[] = []; // card near-pads-every-logo: every registry pad has its row or its NO_LOGO reason
 
 /** The engine's registered pad ids that the table has no row, NO_LOGO entry or owed entry for. */
 function unregistered(slugs: string[]): string[] {

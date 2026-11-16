@@ -52,12 +52,42 @@ export const PADS: Readonly<Record<string, Pad>> = {
   // 00:29Z); shore.markets is its site ("Launch your token on Shore") and the engine's registry names it. The UNRLZD
   // registry's shore.svg is Shore's older mark: this is the one its site serves now.
   shore: { name: "Shore", logo: at("shore.svg"), src: "https://shore.markets/favicon.svg (fetched 2026-11-16)" },
+  // Card near-pads-every-logo: the rest of the engine's registry (GET api.unrealized.trade/v1/launchpads), each mark the
+  // one its own site declares in its <link rel=icon>, fetched 2026-11-16 01:0x-01:1xZ. The site is the registry's
+  // `website`, its code naming the pad's factory where it does (in brackets), or as noted.
+  shardsmarket: { name: "Shards Market", logo: at("shardsmarket.png"), src: "https://shards.market/apple-icon.png (180 px, cut to 64; its code names factory.shardsmarket.near)" },
+  nearpad: { name: "NearPad", logo: at("nearpad.svg"), src: "https://nearpad.family/app-icon-192.svg (its tokens are <id>.nearpadfamily.near)" },
+  nearrr: { name: "nearrr.fun", logo: at("nearrr.png"), src: "https://nearrr.fun/apple-touch-icon.png (180 px, cut to 48 to stay under 8 KB; its code names nearrr-fun.near)" },
+  nearafun: { name: "neara.fun", logo: at("nearafun.png"), src: "https://neara.fun/favicon.png (64 px as served)" },
+  chipfi: { name: "chipfi", logo: at("chipfi.svg"), src: "https://www.chipfi.fun/favicon.svg?v=4 (its code names chipfi.near)" },
+  // tkn.homes serves one mark for both of its factories; its code names tknx.near "TKN Plus"
+  tknx: { name: "TKN Plus", logo: at("tkn.png"), src: "https://tkn.homes/apple-touch-icon.png (as tkn's; its code: {\"tknx.near\":\"TKN Plus\",\"tkn.near\":\"TKN\"})" },
+  // the registry names no site: Jump DeFi's app serves the Token Laboratory (its route /token-launcher)
+  jumplab: { name: "Jump Token Laboratory", logo: at("jumplab.png"), src: "https://app.jumpdefi.xyz/favicon.ico (its largest image, 48 px)" },
+  nearfun: { name: "NearFun", logo: at("nearfun.svg"), src: "https://nearfun.io/icons/favicon.svg (its code names factoryId nearfunio.near)" },
+  revshare: { name: "RevShare", logo: at("revshare.png"), src: "https://revshare.fun/icons/apple-touch-icon.png (180 px, cut to 64)" },
+  kelytra: { name: "Kelytra", logo: at("kelytra.png"), src: "https://kelytra.com/assets/kelytra-logo-400.png (400 px, cut to 64)" },
 };
 
 /** Pads the lists name whose own brand files could not be found or cited: they draw no badge until they can. GayPad
  *  (factory gaypad.j1-racing.near) and token0 (token0.near) have no site of their own: gaypad.xyz is a parked lander
- *  and gaypad.fun answers "Offline" (read 14 Nov 06:3xZ), token0 has none (the UNRLZD registry's research). */
-export const NO_LOGO: readonly string[] = ["spawn", "gaypad", "token0"];
+ *  and gaypad.fun answers "Offline" (read 14 Nov 06:3xZ), token0 has none (the UNRLZD registry's research).
+ *  Card near-pads-every-logo, read 16 Nov 01:0x-01:1xZ (the registry's `website`, else the site the UNRLZD registry cites):
+ *  - its site is down: shardpad (shardpad.com), nearbased (nearbased.app) and umbrafun (umbrapad.app) answer 402
+ *    DEPLOYMENT_DISABLED, npad (www.npadapp.com) 404 DEPLOYMENT_NOT_FOUND, runeshot (runeshot.io, which runemine.com
+ *    links as the RuneShot platform) 522, nira (nira.lol) no answer in 25 s twice, nucleusbroker (www.nucleus.broker)
+ *    does not resolve;
+ *  - no site found that its own code ties to the pad: intear (intear.tech is a placeholder page with no icon),
+ *    rheameme (rhea.finance's code names no meme launchpad), onetokenhub (onetokenhub.xyz names no NEAR account),
+ *    nearmemefun (nearmeme.fun is a prelaunch page naming no NEAR account), patata (patata.fun names no NEAR account);
+ *  - no site at all: wholemarket, portalpad, terminalpad, dragonpad, tknprimitives and vista (none in the registry, none
+ *    in the UNRLZD registry's research). */
+export const NO_LOGO: readonly string[] = [
+  "spawn", "gaypad", "token0",
+  "shardpad", "nearbased", "umbrafun", "npad", "runeshot", "nira", "nucleusbroker",
+  "intear", "rheameme", "onetokenhub", "nearmemefun", "patata",
+  "wholemarket", "portalpad", "terminalpad", "dragonpad", "tknprimitives", "vista",
+];
 
 const ROBINHOOD: ChainMark = { name: "Robinhood", logo: at("robinhood.png"), src: "https://robinhood.com/us/en/rh_favicon_120.png", inset: 0 };
 
@@ -113,6 +143,19 @@ export const PAD_RING: Readonly<Record<string, RingColor | "neutral">> = {
   memecooking: { l: 0.58, c: 0.18, h: 139 }, // 0.56 0.17 140
   nearpaid: { l: 0.88, c: 0.1, h: 211 }, // 0.88 0.10 211
   tkn: { l: 0.56, c: 0.1, h: 270 }, // 0.45 0.10 270 (sampled from tkn.png, lifted to the 0.56 floor)
+  // card near-pads-every-logo: each sampled in Chrome from its file in ./logos (128 px, opaque pixels, the 30° window of
+  // most chroma), lifted to the 0.56 and 0.10 floors, then moved by the least OKLab step that clears every rule against
+  // every pad already in this table (shore included), placed in this order
+  shardsmarket: { l: 0.56, c: 0.1, h: 114 }, // 0.48 0.09 154
+  nearpad: { l: 0.92, c: 0.17, h: 120 }, // 0.92 0.17 120
+  nearrr: { l: 0.63, c: 0.12, h: 132 }, // 0.49 0.09 146
+  nearafun: { l: 0.8, c: 0.1, h: 190 }, // 0.80 0.07 188
+  chipfi: { l: 0.56, c: 0.24, h: 298 }, // 0.54 0.18 284
+  tknx: { l: 0.58, c: 0.11, h: 227 }, // 0.44 0.09 269 (tkn.png, as tkn's)
+  jumplab: { l: 0.56, c: 0.1, h: 318 }, // 0.38 0.08 313
+  nearfun: { l: 0.74, c: 0.15, h: 23 }, // 0.72 0.17 50
+  revshare: { l: 0.64, c: 0.15, h: 243 }, // 0.53 0.15 253
+  kelytra: { l: 0.59, c: 0.1, h: 70 }, // 0.51 0.09 136
   shore: { l: 0.75, c: 0.14, h: 299 }, // 0.73 0.14 277 (the chroma-weighted 30° peak of shore.svg's ring; 0.024 from zora, moved by the least OKLab step that clears every rule)
   "bags.fun": "neutral", // white on black
   bags: "neutral", // white on black

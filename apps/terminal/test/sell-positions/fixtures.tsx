@@ -21,7 +21,8 @@
 // SellKitProvider, as the app does (card app-sell-shows-what-you-receive): the box's preview is the live source's, the
 // stub's request answering pool.sell.dry at 200 ms (0.72 SOL out, 0.000005 network, no fee; ?dry=refuse:
 // quote_check_failed; ?dry=busy: busy first, then the numbers; ?dry=busyafter: the numbers first, then busy; ?dry=busyfor,
-// unfunded or downfor with &n=N: busy, not_funded or down for the first N asks, then the numbers) at the page's pool price
+// unfunded or downfor with &n=N: busy, not_funded or down for the first N asks, then the numbers; ?dry=late&n=N: the first
+// N asks ended by the kit client at its 10 s, client_timeout, as a page still pricing them leaves them) at the page's pool price
 // of $150 a SOL, with the pool in the state; each ask is in window.__dry, its time (Date.now) in window.__dryAt.
 // ?w=1 names one one-time wallet for the position (W1W), so the sell's flow shows it (card sell-box-works-like-the-buy-box);
 // ?logo=1 gives the box the coin's logo (the helper's /v1/logo, which run.mjs answers itself), ?logo=none a coin with
@@ -161,6 +162,7 @@ const kit: TradeKit = {
       // each share its own number: 0.72 SOL at 50%, in proportion
       const out = ((72 * share) / 5_000 / 100).toFixed(4);
       const answer = dry === "refuse" ? { ok: false, error: { code: "quote_check_failed" } } : code ? { ok: false, error: { code } } : busy ? { ok: false, error: { code: "busy" } } : { ok: true, result: { out, min_out: "0", network: "0.000005", fee_bps: 0 } };
+      if (dry === "late" && first) return { id: `dry-${window.__dry.length}`, outcome: new Promise((r) => setTimeout(() => r({ ok: false, error: { code: "client_timeout" } }), 10_000)) };
       return { id: `dry-${window.__dry.length}`, outcome: new Promise((r) => setTimeout(() => r(answer), 200)) };
     }
     const id = `sell-${++n}`;

@@ -53,9 +53,11 @@ test("the live source in src gives the preview (no fixture needed); with none to
   assert.doesNotMatch(src, /createContext<SellKit>\(\{ sellPreview: null \}\)/, "the default is no longer a null preview");
   assert.match(src, /askSellPreview\(/);
   const box = readFileSync(new URL("../src/screens/positions/SellBox.tsx", import.meta.url), "utf8");
+  const words = readFileSync(new URL("../src/screens/positions/words.ts", import.meta.url), "utf8");
   // the word, or its id: the box's own gate on the trade box's Unavailable phase (model.ts unavailable) is not one
   assert.doesNotMatch(box, /Unavailable|"unavailable"/, "an unread value shows a dash (owner 10 Nov)");
-  assert.match(box, /data-testid="sell-receive">\{outC === null \? "—" : `≈ \$\{usd\(outC\)\}`\}<\/span>/);
-  const words = readFileSync(new URL("../src/screens/positions/words.ts", import.meta.url), "utf8");
+  // the number, else Quoting while its preview is asked (card sell-box-says-quoting), else the dash
+  assert.match(box, /data-testid="sell-receive">\{outC !== null \? `≈ \$\{usd\(outC\)\}` : quoting \? <W id="quoting" \/> : "—"\}<\/span>/);
+  assert.match(words, /quoting: TR\.quoting,/, "Quoting is the buy box's entry, not a new word");
   assert.doesNotMatch(words, /unavailable/, "no new word on the sell box");
 });

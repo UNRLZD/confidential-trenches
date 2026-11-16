@@ -79,7 +79,7 @@ import { BUCKETS_MAX, change4h, createBook, fixed, PRICE_SCALE, TFS, type Book, 
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
-import { isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
+import { HELD_WAIT_MS, isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
@@ -2703,7 +2703,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (nothing || old) wantBars(e.pool.id, e.pool.token, tf, before, k, false, now());
       return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
     }
-    const got = await readBars(e.pool.id, e.pool.token, tf, before, k);
+    const reading = readBars(e.pool.id, e.pool.token, tf, before, k);
+    // card helper-listed-charts-own-reads round 3: bars held answer within HELD_WAIT_MS and the read goes on, so no
+    // answer waits on GeckoTerminal while they serve (the warm live run of 16 Nov 00:33Z: Base's listed charts p95
+    // 4,997 ms, Robinhood's 3,042 ms); one rule with the Solana charts (../solana/token.ts candles)
+    const got = nothing ? await reading : await Promise.race([reading, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+    if (got === null) {
+      void reading.then((g) => g === "throttled" && old && wantBars(e.pool.id, e.pool.token, tf, before, k, false, now())).catch(() => undefined);
+      return fallback(UPSTREAM);
+    }
     if (got === "throttled" && (nothing || old)) wantBars(e.pool.id, e.pool.token, tf, before, k, false, now());
     return Array.isArray(got) ? got : fallback(got === "throttled" ? wait("geckoterminal 429") : UPSTREAM);
   }
@@ -3039,7 +3047,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // names their wait (Server-Timing)
       const lane = newLane(true);
       const began = performance.now();
-      const e = await openWithin(t, lane, client);
+      const opening = openWithin(t, lane, client);
+      // card helper-listed-charts-own-reads round 3: a book still opening and bars held for the token's pool answer now,
+      // filling, and the open goes on; the page reads a filling chart again 2 s on (warm live run of 16 Nov 00:33Z:
+      // Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms). One rule with the Solana charts (../solana/trades.ts).
+      const early = await Promise.race([opening, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+      if (early === null) {
+        const h = await heldChart(t, tf as Tf, to, limit);
+        if (h !== null) {
+          void opening.catch(() => undefined);
+          const body = JSON.parse(h.body) as Record<string, unknown>;
+          return withTiming({ ...h, body: JSON.stringify({ ...body, filling: true }) }, laneTiming(lane, performance.now() - began));
+        }
+      }
+      const e = early ?? (await opening);
       const openMs = performance.now() - began;
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
       // card helper-listed-charts-own-reads: a book still opening past its bound, or not opened while OPEN_MAX books are
