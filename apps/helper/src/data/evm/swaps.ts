@@ -1380,8 +1380,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  nothing at once), is ranked when it is asked, by expected answer time with the requests still left (fold 4). */
   async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true, only = false, skip?: ReadonlySet<string>, third?: ReadonlySet<string>): Promise<(A | null)[]> {
     // `only`: none but `urls` (the index's chain-wide read, which the others refuse); `skip`: never these; `third`: never
-    // in the first two while two others can be asked, and the first tie-break when those two disagree (agreedLogs: the
-    // header-timed providers)
+    // in the first two while two others can be asked, and the first asked after them for a request they left without
+    // two alike, whether they disagree or one has not answered (agreedLogs: the header-timed providers). Eight cold tapes
+    // in the helper's container 16 Nov: 46 of its 48 such asks were for an answer missing, none for a disagreement; a
+    // miss sent to the next ranked instead took drpc past a quarter of the wide providers' reads (swaps-pace fold 2)
     const asked = askOrder(urls, wideFirst, n, only, skip);
     const others = third === undefined ? asked : asked.filter((u) => !third.has(u));
     const order = third === undefined || others.length < 2 ? asked : [...others.slice(0, 2), ...asked.filter((u) => third.has(u)), ...others.slice(2)];
