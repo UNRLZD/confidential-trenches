@@ -8,7 +8,8 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { IDBFactory } from "fake-indexeddb";
 import { SIGNPAGE_PARAM_SCHEMAS, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
-import type { RheaQuote } from "../../kit/src/near/rhea.ts";
+import { RheaQuoteRefused, type RheaQuote } from "../../kit/src/near/rhea.ts";
+import { WithdrawRelayRefused } from "../../wallet/src/withdraw/relay.ts";
 import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../../wallet/src/store/index.ts";
@@ -42,7 +43,7 @@ async function cash(values: bigint[]): Promise<NoteStore> {
 }
 const quoteOf = (asked: bigint[], out: bigint | null) => async (a: { side: "buy" | "sell"; token: string; amountIn: bigint }): Promise<RheaQuote> => {
   asked.push(a.amountIn);
-  if (out === null) throw new Error("no quote");
+  if (out === null) throw new RheaQuoteRefused("no-pool", "no simple pool joins USDC to the token");
   return { side: a.side, token: a.token, amountIn: a.amountIn, amountOut: out } as RheaQuote;
 };
 
@@ -86,10 +87,32 @@ test("card buy-quote-before-any-note: $0 Cash: tap_max 0 and out one quote of wh
   const a = await nearBuyDry(page as never, X, 2_000_000n, quoteOf(asked, 1_234_500_000_000_000_000n));
   assert.deepEqual(a, { result: { tap_max: "0", out: "1.2345" } });
   assert.deepEqual(fees, [2_000_000n]);
-  // a fee that amount cannot carry (askWithdrawFee refuses it), or a read that fails: tap_max alone, never "failed"
-  const refused = { ...page, fee: async () => { throw new Error("relay_fee: at or above the amount"); } };
+  // a fee that amount cannot carry (askWithdrawFee refuses it): tap_max alone, never "failed"
+  const refused = { ...page, fee: async () => { throw new WithdrawRelayRefused("fee", "relay_fee: at or above the amount"); } };
   assert.deepEqual(await nearBuyDry(refused as never, X, 2_000_000n, quoteOf(asked, 1n)), { result: { tap_max: "0" } });
   assert.deepEqual(asked, [1_950_000n], "the same swap a $2 Cash note's buy makes");
   assert.ok(SIGNPAGE_RESULT_SCHEMAS["pool.buy.dry"]((a as { result: unknown }).result));
   assert.deepEqual(await nearBuyDry(page as never, X, null, quoteOf(asked, 1n)), { result: { tap_max: "0" } });
+});
+
+// Card near-quote-blackdragon: release 165's sign run 43832638554 (job 133181648165) asked a fresh account's NEAR dry of
+// blackdragon.tkn.near and got tap_max alone, no out, though the coin quotes from its Rhea pools (4276 with wNEAR: the
+// device's rheaQuote answered out at 08:46Z, and the live page answered out on the box at 08:49Z). The page reads a fault
+// of its providers as the coin's "no out": with dRPC answering 429, the live page answered blackdragon and prl.omft.near
+// tap_max alone in 11 ms (08:51Z). Red before: { result: { tap_max } } for each fault below, so the box drew You receive as
+// a dash and never asked again, and the live check FAILed a provider's moment as a coin with no quote.
+test("card near-quote-blackdragon: a read that failed is down (the box asks again); only the chain's own refusal is no out", async () => {
+  const ns = await cash([]);
+  const page = { network: NETWORK, notes: async () => ns, fee: async () => FEE, rpcs: () => { throw new Error("no rpc"); }, pools: async () => [], decimals: async () => 18 };
+  const throwing = (e: Error) => async (): Promise<RheaQuote> => { throw e; };
+  for (const code of ["rpc", "disagree", "lag"] as const) assert.deepEqual(await nearBuyDry(page as never, X, 2_000_000n, throwing(new RheaQuoteRefused(code, "a provider"))), { error: "down" }, code);
+  // a transport fault (the pair's HTTP 429, a timeout) and the token's decimals read failing
+  assert.deepEqual(await nearBuyDry(page as never, X, 2_000_000n, throwing(new Error("near.drpc.org: HTTP 429"))), { error: "down" });
+  const noDecimals = { ...page, decimals: async () => { throw new Error("ft_metadata: HTTP 503"); } };
+  assert.deepEqual(await nearBuyDry(noDecimals as never, X, 2_000_000n, quoteOf([], 1n)), { error: "down" });
+  // the payout's fee read failing with no Cash note (not the relayer's "fee" refusal)
+  const noFee = { ...page, fee: async () => { throw new Error("rpc.mainnet.fastnear.com: HTTP 429"); } };
+  assert.deepEqual(await nearBuyDry(noFee as never, X, 2_000_000n, quoteOf([], 1n)), { error: "down" });
+  // the chain's own refusals, alike on both providers: no out, as before
+  for (const code of ["no-pool", "liquidity", "frozen", "paused", "pool", "input"] as const) assert.deepEqual(await nearBuyDry(page as never, X, 2_000_000n, throwing(new RheaQuoteRefused(code, "the chain"))), { result: { tap_max: "0" } }, code);
 });

@@ -46,7 +46,7 @@
 //   at one rebuilt W a page load.
 import { HELPER_BIND_RECORD_WALLETS_MAX, HELPER_BIND_TRADE_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindRecord, type HelperBindRecordRequest, type HelperBindRecordState, type HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/near/networks.ts";
-import { NEAR_RHEA, rheaQuote } from "../../kit/src/near/rhea.ts";
+import { NEAR_RHEA, rheaQuote, RheaQuoteRefused, type RheaRefusalCode } from "../../kit/src/near/rhea.ts";
 import { nearFeeBuyerReceives, nearTokenFeeView, type NearTokenFee } from "../../kit/src/near/token-fee.ts";
 import { vaultSync, vaultSyncStart, type VaultSpendRow } from "../../kit/src/vault/sync.ts";
 import { readNearHeld, readNearSwapPair, readNearSwapWallet, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
@@ -58,6 +58,7 @@ import { nearSwapWallet, signNearSwapDelegates } from "../../wallet/src/near/swa
 import type { NoteRecord, NoteStore } from "../../wallet/src/notes/store.ts";
 import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { withdrawArrival, type ArrivalArgs, type ArrivalOutcome } from "../../wallet/src/withdraw/arrival.ts";
+import { WithdrawRelayRefused } from "../../wallet/src/withdraw/relay.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import type { WalletStore } from "../../wallet/src/store/index.ts";
 import { bindRpc, type BindRpc } from "../../wallet/src/deposit/bind.ts";
@@ -1526,6 +1527,10 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
   return out;
 }
 
+/** The quote refusals that are the coin's own on chain, read alike on both providers at one block: no out for it. Every
+ *  other (a provider's fault: rpc, disagree, lag, or a read that threw) is a read that failed (nearBuyDry). */
+export const COIN_OWN_REFUSALS: ReadonlySet<RheaRefusalCode> = new Set(["input", "paused", "frozen", "no-pool", "pool", "liquidity"]);
+
 /**
  * pool.buy.dry on NEAR (card you-receive-on-every-chain): what a NEAR buy of `amount` USDC of Cash (base units, the
  * ask's own: the fees inside it) would get and cost, from the device's own reads before any signature. `tap_max`: the
@@ -1533,11 +1538,15 @@ export async function nearHoldingsPass(page: NearBuyPage, reads: NearHoldingsRea
  * amount: the buy's own plan (planCashSpend over those notes at the page's fee, as the buy plans it); `cost`, what it
  * draws in fees (the ask less what W swaps), in whole USDC; `out`, one quote of what W swaps (the kit's rheaQuote on the
  * page's pair, its amountOut: the venue's fees and the token's buy fee taken off), in whole tokens at the token's
- * decimals; left out when that read fails. Cash that cannot pay it (card buy-quote-before-any-note: $0 or less than
+ * decimals; left out when the chain refuses the quote. Cash that cannot pay it (card buy-quote-before-any-note: $0 or less than
  * the amount): `out` of what one note of the amount would swap, no `cost`; an amount no plan pays at all (at most twice
- * the fee): tap_max alone. Signs nothing, writes nothing, sends nothing.
+ * the fee): tap_max alone. A read that failed (card near-quote-blackdragon: a provider's fault in the quote, the token's
+ * decimals or, with no Cash note, the payout's fee) is "down", as the other chains' dries answer it, so the box asks
+ * again: before, it read as the coin's own "no out", and release 165's sign run 43832638554 drew none for
+ * blackdragon.tkn.near, which quotes from its Rhea pools. No out stays only for a quote the chain refuses
+ * (COIN_OWN_REFUSALS: no pool, no liquidity, ...). Signs nothing, writes nothing, sends nothing.
  */
-export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "fee" | "rpcs" | "pools" | "decimals">, token: string, amount: bigint | null, quote: NearBuyDeps["quote"] = async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) })): Promise<{ result: { tap_max: string; cost?: string; out?: string } } | { error: "not_allowed" | "not_funded" }> {
+export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "fee" | "rpcs" | "pools" | "decimals">, token: string, amount: bigint | null, quote: NearBuyDeps["quote"] = async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) })): Promise<{ result: { tap_max: string; cost?: string; out?: string } } | { error: "not_allowed" | "not_funded" | "down" }> {
   const scope = vaultScope(page.network);
   if (scope === null) return { error: "not_allowed" };
   const free = (await (await page.notes()).list()).filter((n): n is NoteRecord & { leaf: NonNullable<NoteRecord["leaf"]> } => n.scope === scope && n.state === "UNSPENT" && n.leaf !== undefined);
@@ -1545,8 +1554,16 @@ export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "
   const tap = usdc(free.reduce((t, n) => t + n.leaf.value, 0n));
   if (amount === null || amount <= 0n) return { result: { tap_max: tap } };
   // no Cash note (card buy-quote-before-any-note): the payout fee of a withdrawal of the amount itself, as no note sizes
-  // the quote; a fee that amount cannot carry, or a read that fails, is tap_max alone
-  const fee = free.length > 0 ? await page.fee() : await page.fee(amount).catch(() => null);
+  // the quote; a fee that amount cannot carry is tap_max alone, a read that fails down
+  let fee: bigint | null;
+  try {
+    fee = free.length > 0 ? await page.fee() : await page.fee(amount);
+  } catch (e) {
+    // with no Cash note, a fee the amount cannot carry (the relayer's fee at or above it) is tap_max alone
+    if (free.length === 0 && e instanceof WithdrawRelayRefused && e.code === "fee") fee = null;
+    else if (free.length === 0) return { error: "down" };
+    else throw e;
+  }
   if (fee === null) return { result: { tap_max: tap } };
   const own = planCashSpend(free.map((n) => ({ id: n.id, value: n.leaf.value })), amount, fee);
   // Cash that cannot pay it ($0, or less: card buy-quote-before-any-note): You receive still, as the same buy from one
@@ -1554,9 +1571,12 @@ export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "
   const plan = own !== null && own.length > 0 ? own : planCashSpend([{ id: "cash", value: amount }], amount, fee);
   if (plan === null || plan.length === 0) return { result: { tap_max: tap } };
   const swapped = plan.reduce((t, p) => t + p.part, 0n);
-  const out = await Promise.all([quote({ side: "buy", token, amountIn: swapped }), page.decimals ? page.decimals(token) : readNearDecimals(page.network, page.rpcs(), token)]).then(
-    ([q, d]) => (q.token === token && q.side === "buy" && q.amountIn === swapped && q.amountOut > 0n ? unitsOf(q.amountOut, d) : undefined),
-    () => undefined,
-  );
+  let out: string | undefined;
+  try {
+    const [q, d] = await Promise.all([quote({ side: "buy", token, amountIn: swapped }), page.decimals ? page.decimals(token) : readNearDecimals(page.network, page.rpcs(), token)]);
+    out = q.token === token && q.side === "buy" && q.amountIn === swapped && q.amountOut > 0n ? unitsOf(q.amountOut, d) : undefined;
+  } catch (e) {
+    if (!(e instanceof RheaQuoteRefused && COIN_OWN_REFUSALS.has(e.code))) return { error: "down" };
+  }
   return { result: { tap_max: tap, ...(plan === own ? { cost: usdc(amount - swapped) } : {}), ...(out === undefined ? {} : { out }) } };
 }
