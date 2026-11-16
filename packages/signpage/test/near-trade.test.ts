@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { NEAR_NETWORKS } from "../../kit/src/near/networks.ts";
 import { NEAR_RHEA, type RheaQuote } from "../../kit/src/near/rhea.ts";
+import { dclSwapCheck, NEAR_DCL, type DclQuote } from "../../kit/src/near/dcl.ts";
 import { NEAR_TOKEN_NO_FEE, type NearTokenFee } from "../../kit/src/near/token-fee.ts";
 import { nearSwapFloor, type NearSwapCall } from "../../kit/src/trade/near/swap.ts";
 import type { NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
@@ -17,6 +18,8 @@ import { checkNearBuyRequest, NearTradeRefused } from "../src/rules/near-trade.t
 import { NEAR_BUY_READ_TRIES, NEAR_BUY_SENDS, nearBuyFlow, type NearBuyAnswer, type NearBuyBegun, type NearBuyDeps, type NearBuyProgress } from "../src/near-trade.ts";
 
 const USDC = NEAR_NETWORKS.mainnet.usdc;
+/** card near-dcl-route: a DCL buy's path, USDC to wNEAR to the token, in the Swap's order (both ids lower|higher|fee) */
+const DCL_PATH = [`${USDC}|wrap.near|100`, "token.rhealab.near|wrap.near|10000"];
 const EXCHANGE = NEAR_RHEA.mainnet.exchange;
 const TOKEN = "token.rhealab.near";
 const W = "ab".repeat(32);
@@ -55,6 +58,8 @@ type World = {
   registersAnyway?: boolean;
   /** a refused swap round landed its swap all the same (its claim failed after it): the token on W */
   swapLandsAnyway?: boolean;
+  /** card near-dcl-route: each quote asked with DCL's candidates is Rhea DCL's (DCL pays more), two pools through wNEAR */
+  dcl?: boolean;
 };
 
 /** Fake deps over one W: the chain as the fakes keep it, and every call in order. */
@@ -64,7 +69,7 @@ function world(o: World = {}) {
   const records: NearBuyProgress[] = [];
   const chain = { exists: false, registered: false, nonce: 40n, usdc: 0n, token: 0n, height: 1_000, ...o.start };
   const outs = o.outs ?? [5_000_000n, 5_100_000n, 4_900_000n];
-  const quotes: RheaQuote[] = [];
+  const quotes: (RheaQuote | DclQuote)[] = [];
   const sends: Record<Round, number> = { create: 0, register: 0, swap: 0 };
   const deps: NearBuyDeps = {
     network: "mainnet",
@@ -115,6 +120,27 @@ function world(o: World = {}) {
     quote: async (a) => {
       ev.push(["quote", { ...a }]);
       const venueOut = outs[Math.min(quotes.length, outs.length - 1)]!;
+      if (o.dcl && a.dclPools !== undefined && a.dclPools.length > 0) {
+        const d: DclQuote = {
+          venue: "dcl",
+          network: "mainnet",
+          exchange: NEAR_DCL.mainnet.exchange,
+          height: ++chain.height,
+          blockHash: `block${quotes.length}`,
+          side: "buy",
+          token: TOKEN,
+          tokenIn: USDC,
+          tokenOut: TOKEN,
+          amountIn: AMOUNT,
+          venueIn: AMOUNT,
+          poolIds: DCL_PATH,
+          venueOut,
+          amountOut: venueOut,
+          fee: o.fee ?? NEAR_TOKEN_NO_FEE,
+        };
+        quotes.push(d);
+        return d;
+      }
       const q: RheaQuote = {
         network: "mainnet",
         exchange: EXCHANGE,
@@ -163,7 +189,7 @@ const names = (ev: Ev[]) => ev.map((e) => e[0]);
 const helperBodies = (ev: Ev[]) => ev.filter((e) => e[0] === "helper").map((e) => e[1] as HelperBindTradeRequest);
 const signs = (ev: Ev[]) => ev.filter((e) => e[0] === "sign");
 const methodOf = (b: HelperBindTradeRequest) => (b.signed_delegates.length === 0 ? "create" : (JSON.parse(atob(b.signed_delegates[0]!)) as { method: string }).method);
-const tradeOf = (q: RheaQuote) => ({
+const tradeOf = (q: RheaQuote | DclQuote) => ({
   network: "mainnet",
   side: "buy",
   token: TOKEN,
@@ -171,7 +197,7 @@ const tradeOf = (q: RheaQuote) => ({
   amount_in: AMOUNT.toString(),
   slippage_bps: SLIPPAGE,
   venue_out: q.venueOut.toString(),
-  hops: q.hops.map((x) => ({ pool: x.pool, token_in: x.tokenIn, token_out: x.tokenOut })),
+  hops: (q as RheaQuote).hops.map((x) => ({ pool: x.pool, token_in: x.tokenIn, token_out: x.tokenOut })),
 });
 const sent = (a: NearBuyAnswer | null) => {
   assert.ok(a !== null && "result" in a && a.result.stage === "sent", JSON.stringify(a, (_, v) => (typeof v === "bigint" ? String(v) : v)));
@@ -189,7 +215,7 @@ test("the route for the app: W at once, then Rhea and the pool the swap signs ag
   assert.equal(out.decimals, 6);
   assert.ok(BigInt(out.out) > 0n);
   const units = (BigInt(out.out) / 1_000_000n).toString() + (BigInt(out.out) % 1_000_000n === 0n ? "" : `.${(BigInt(out.out) % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "")}`);
-  assert.deepEqual(told, [{ wallet: W }, { venue: "Rhea", pool: String(quotes[2]!.hops[0]!.pool) }, { out: units }]);
+  assert.deepEqual(told, [{ wallet: W }, { venue: "Rhea", pool: String((quotes[2] as RheaQuote).hops[0]!.pool) }, { out: units }]);
 });
 
 test("the decimals not read: the buy is still filled, no amount told and no fill on the record; a route that throws stops nothing", async () => {
@@ -236,7 +262,11 @@ test("the happy path: the record first, the payout, create, the registration alo
   // the swap's pair: W, the quote, and the baseline of the token at the same block (deps.pair; this world's fake reads
   // them in that order)
   assert.deepEqual(names(ev), ["begin", "payout", "read", "quote", "helper", "read", "read", "quote", "sign", "helper", "read", "read", "quote", "read", "sign", "helper", "read"]);
-  for (const e of ev.filter((x) => x[0] === "quote")) assert.deepEqual(e[1], { side: "buy", token: TOKEN, amountIn: AMOUNT });
+  // the buy's first quote asked with the device's DCL candidates beside Rhea classic; it is classic's in this world, so
+  // each later read is pinned to classic and asks no DCL pool (card near-dcl-route)
+  const quoteAsks = ev.filter((x) => x[0] === "quote").map((e) => e[1]);
+  assert.deepEqual(quoteAsks[0], { side: "buy", token: TOKEN, amountIn: AMOUNT, dclPools: [100, 400, 2000, 10000].map((f) => `${TOKEN}|wrap.near|${f}`).concat([100, 400, 2000, 10000].map((f) => `${USDC}|wrap.near|${f}`)) });
+  for (const e of quoteAsks.slice(1)) assert.deepEqual(e, { side: "buy", token: TOKEN, amountIn: AMOUNT });
   const [create, register, swap] = helperBodies(ev);
   assert.deepEqual(create, { trade: tradeOf(quotes[0]!), signed_delegates: [] });
   const [regSign, swapSign] = signs(ev);
@@ -668,4 +698,61 @@ test("P3-5 the swap's pair asked for its baseline and answered without one: read
   sent(await run(deps));
   assert.equal(signs(ev).length, 0);
   assert.deepEqual(log.at(-1), ["swap", "read_failed"]);
+});
+
+test("card near-dcl-route: a buy DCL pays more for is one Swap into dclv2.ref-labs.near, W's registration on the token alone before it; every quote asked with the device's 8 DCL candidates; the wire's hops DCL's pool ids; the route names DCL's first pool", async () => {
+  const { deps, ev, quotes } = world({ dcl: true });
+  const told: unknown[] = [];
+  deps.route = (r) => void told.push(r);
+  deps.decimals = async () => 6;
+  const a = await run(deps);
+  assert.ok(a !== null && "result" in a && a.result.stage === "filled", JSON.stringify(a, (_, v) => (typeof v === "bigint" ? String(v) : v)));
+  // every quote the run asked carries the device's own candidates: the token and USDC each with wNEAR at 4 fees
+  const asked = ev.filter((e) => e[0] === "quote").map((e) => (e[1] as { dclPools?: string[] }).dclPools);
+  assert.ok(asked.length >= 2);
+  for (const ids of asked) assert.deepEqual(ids, [100, 400, 2000, 10000].map((f) => `token.rhealab.near|wrap.near|${f}`).concat([100, 400, 2000, 10000].map((f) => `${USDC}|wrap.near|${f}`)));
+  // the creation, the registration and the swap each name DCL's two pools as the wire's hops
+  const bodies = helperBodies(ev);
+  assert.deepEqual(bodies.map(methodOf), ["create", "storage_deposit", "ft_transfer_call"]);
+  for (const b of bodies)
+    assert.deepEqual(b.trade.hops, [
+      { pool: DCL_PATH[0], token_in: USDC, token_out: "wrap.near" },
+      { pool: DCL_PATH[1], token_in: "wrap.near", token_out: TOKEN },
+    ]);
+  // the swap W signs: USDC's own ft_transfer_call into DCL with the Swap msg and the device's minimum, no claim
+  const [regSign, swapSign] = signs(ev);
+  const reg = regSign![1] as NearSwapCall[];
+  assert.deepEqual(reg.map((c) => [c.receiver_id, c.actions[0].FunctionCall.method_name]), [[TOKEN, "storage_deposit"]]);
+  const swap = swapSign![1] as NearSwapCall[];
+  assert.equal(swap.length, 1);
+  assert.equal(swap[0]!.receiver_id, USDC);
+  const args = swap[0]!.actions[0].FunctionCall.args as { receiver_id: string; amount: string; msg: string };
+  assert.equal(args.receiver_id, NEAR_DCL.mainnet.exchange);
+  assert.equal(args.amount, AMOUNT.toString());
+  const q = quotes.at(-1) as DclQuote;
+  assert.deepEqual(JSON.parse(args.msg), { Swap: { pool_ids: DCL_PATH, output_token: TOKEN, min_output_amount: nearSwapFloor(q.venueOut, SLIPPAGE).toString(), skip_unwrap_near: true } });
+  // the kit's own DCL check holds what the run built (W registered by then)
+  dclSwapCheck(swap, { network: "mainnet", side: "buy", token: TOKEN, amountIn: AMOUNT, wallet: W, slippageBps: SLIPPAGE }, { quote: q, storageMin: STORAGE_MIN, registered: true });
+  assert.deepEqual(told.slice(0, 2), [{ wallet: W }, { venue: "Rhea", pool: DCL_PATH[0] }]);
+});
+
+test("card near-dcl-route: the buy stays on its first quote's venue: every pair after the creation's quote asks that venue alone; a pinned read answered on the other venue is quote_check_failed, nothing signed", async () => {
+  const { deps, ev } = world({ dcl: true });
+  const asks: { venue?: string; dclPools?: readonly string[] }[] = [];
+  const pair = deps.pair;
+  deps.pair = (a) => (asks.push({ ...a }), pair(a));
+  const a = await run(deps);
+  assert.ok(a !== null && "result" in a && a.result.stage === "filled");
+  assert.ok(asks.length >= 2);
+  for (const x of asks) assert.equal(x.venue, "dcl");
+  assert.equal(signs(ev).length, 2);
+  // the creation's quote is DCL's; every later read answers Rhea classic's (a binding that drops the pin): refused
+  const w2 = world({ dcl: true });
+  const quote = w2.deps.quote;
+  let n = 0;
+  w2.deps.quote = (q) => (n++ === 0 ? quote(q) : quote({ side: q.side, token: q.token, amountIn: q.amountIn }));
+  const b = await run(w2.deps);
+  assert.equal(signs(w2.ev).length, 0, "nothing signed");
+  assert.ok(b !== null && "result" in b && b.result.stage === "sent");
+  assert.equal(w2.records.at(-1)!.code, "quote_check_failed");
 });

@@ -5,9 +5,9 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
-import { chgBps, createNearLists, liqOf, LIQ_MIN_USD, mainsOf, NEAR_USDC, parsePools, priceOf, priceText, routed, routesOf, toMeta, usdText, wnearFlow } from "./lists.ts";
+import { chgBps, createNearLists, DCL, DCL_PAGE, liqOf, LIQ_MIN_USD, mainsOf, NEAR_USDC, parseDclPools, parsePools, priceOf, priceText, routed, routesOf, toMeta, usdText, wnearFlow } from "./lists.ts";
 import { createNearToken } from "./token.ts";
-import { HOLD_MS, HOST_GAP_MS, nearAccount, NEAR_RPCS, PAST_RPCS, pacedFetch, WAIT_MAX_MS } from "./views.ts";
+import { HOLD_MS, HOST_GAP_MS, nearAccount, NEAR_RPCS, PAST_RPCS, pacedFetch, WAIT_MAX_MS, type Fetch } from "./views.ts";
 import { fixtureFetch } from "./fixtures/replay.ts";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/rhea-reads-2026-11-11.json", import.meta.url), "utf8")) as { rpc: { body: { params: Record<string, unknown> }; view?: unknown; answer?: { result: unknown } }[] };
@@ -80,6 +80,89 @@ test("routesOf and routed (card near-listed-coin-quotes): a token's deepest simp
   );
   // NEAR's price not read: a wNEAR side has no value yet, a USDC side does
   assert.deepEqual([...routesOf(pools.slice(1), null).keys()], ["u.near"]);
+});
+
+// Real list_pools rows of dclv2.ref-labs.near at block 224793179 (2026-11-16), cut to the fields parseDclPools reads: the
+// coin the brief names, USDC's pool with wNEAR, a pool only intents solvers may swap on, and two with a tax.
+const DCL_ROWS = [
+  { pool_id: `${NEAR_USDC}|wrap.near|100`, token_x: NEAR_USDC, token_y: "wrap.near", fee: 100, state: "Running", whitelist: null, tax: null, total_x: "142651254670", total_y: "114068661317357015486379478535" },
+  { pool_id: "wrap.near|zec.omft.near|2000", token_x: "wrap.near", token_y: "zec.omft.near", fee: 2000, state: "Running", whitelist: ["solver-ref-2.near", "staging-ref-solver.near", "intents.near", "solver-ref.near", "staging-intents.near"], tax: null, total_x: "88989585951610525642843", total_y: "8128" },
+  { pool_id: "hoodl-95275b.launchpad.justhoot.near|wrap.near|10000", token_x: "hoodl-95275b.launchpad.justhoot.near", token_y: "wrap.near", fee: 10000, state: "Running", whitelist: null, tax: null, total_x: "485631530547428477511380890", total_y: "1327645331391975859841593638" },
+  { pool_id: "inear.nearonhq.near|wrap.near|400", token_x: "inear.nearonhq.near", token_y: "wrap.near", fee: 400, state: "Running", whitelist: null, tax: { creator: "nearon-pool.near", tax_rate: 5, protocol_portion: 2000 }, total_x: "2003151688450364096671363859", total_y: "1597302042690295440572089719" },
+  { pool_id: `${NEAR_USDC}|credit.nearon-stg.near|100`, token_x: NEAR_USDC, token_y: "credit.nearon-stg.near", fee: 100, state: "Running", whitelist: null, tax: { creator: "nearon-stg.near", tax_rate: 10, protocol_portion: 2000 }, total_x: "165170", total_y: "237566165396532848135285" },
+];
+const HOODL = "hoodl-95275b.launchpad.justhoot.near";
+
+test("parseDclPools (card near-dcl-route): the DCL pools the device's DCL quote takes: Running, no whitelist, no tax, the id its own tokens and fee", () => {
+  const ok = parseDclPools(DCL_ROWS)!;
+  assert.deepEqual(ok.map((p) => p.id), [`${NEAR_USDC}|wrap.near|100`, `${HOODL}|wrap.near|10000`]);
+  assert.deepEqual(ok[1], { id: `${HOODL}|wrap.near|10000`, tokens: [HOODL, "wrap.near"], amounts: [485631530547428477511380890n, 1327645331391975859841593638n] });
+  const row = DCL_ROWS[2]!;
+  for (const bad of [
+    { ...row, state: "Paused" },
+    { ...row, pool_id: `${HOODL}|wrap.near|400` }, // not its own fee
+    { ...row, token_x: "wrap.near", token_y: HOODL, pool_id: `wrap.near|${HOODL}|10000` }, // not lower first
+    { ...row, token_x: "Bad.near" },
+    { ...row, total_y: "1e30" },
+    { ...row, fee: 0, pool_id: `${HOODL}|wrap.near|0` },
+  ])
+    assert.deepEqual(parseDclPools([bad]), [], JSON.stringify(bad).slice(0, 80));
+  assert.equal(parseDclPools({ not: "a list" }), null);
+  assert.equal(parseDclPools(Array(DCL_PAGE + 1).fill({})), null);
+});
+
+test("routesOf counts a DCL route (card near-dcl-route): a coin only on DCL routes at twice its DCL pool's wNEAR side, so it comes back on the lists", () => {
+  const N = 10n ** 24n;
+  const classic = [{ id: 1, tokens: [NEAR_USDC, "wrap.near"] as [string, string], amounts: [3_000_000_000n, 1000n * N] as [bigint, bigint] }]; // $3 a NEAR
+  const { nearUsd } = mainsOf(classic);
+  const dcl = parseDclPools(DCL_ROWS)!;
+  // before this card: classic pools only, the DCL coin has no route
+  assert.equal(routed({ routes: routesOf(classic, nearUsd) }, HOODL), false);
+  const r = routesOf(classic, nearUsd, dcl);
+  // 1,327.6 wNEAR in the pool, twice that at $3
+  assert.equal(r.get(HOODL), (2n * 1327645331391975859841593638n * nearUsd!) / 10n ** 24n);
+  assert.equal(routed({ routes: r }, HOODL), true);
+  // a taxed or whitelisted pool is no route; a classic route is unchanged by DCL's
+  for (const t of ["inear.nearonhq.near", "zec.omft.near", "credit.nearon-stg.near"]) assert.equal(r.has(t), false, t);
+  assert.equal(routesOf(classic, nearUsd).get("wrap.near"), (2n * 3_000_000_000n * 10n ** 18n) / 10n ** 6n);
+});
+
+test("createNearLists reads DCL's pools at the scan's block and routes their coins; a failed DCL read keeps the last good one", async () => {
+  const calls: string[] = [];
+  const base = fixtureFetch(calls);
+  let dclUp = true;
+  const dclAsks: Record<string, unknown>[] = [];
+  const bytes = (v: unknown) => [...Buffer.from(JSON.stringify(v))];
+  const fetch: Fetch = async (url, init) => {
+    const b = JSON.parse(String(init.body)) as { params: Record<string, unknown> };
+    if (b.params.account_id !== DCL) return base(url, init);
+    dclAsks.push(b.params);
+    if (!dclUp) return new Response(JSON.stringify({ error: "down" }), { status: 500 });
+    const a = JSON.parse(Buffer.from(String(b.params.args_base64), "base64").toString());
+    const v = b.params.method_name === "get_metadata" ? { state: "Running", pool_count: String(DCL_PAGE + 2) } : a.from_index === 0 ? DCL_ROWS : [];
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { result: bytes(v) } }));
+  };
+  let t = 1e12;
+  const lists = createNearLists({ fetch, now: () => t });
+  assert.equal((await lists.get()).status, 200);
+  const s = lists.scan()!;
+  assert.equal(routed(s, HOODL), true);
+  assert.equal(routed(s, "inear.nearonhq.near"), false);
+  // two pages, both at the scan's block
+  assert.deepEqual(dclAsks.map((p) => [p.method_name, p.block_id]), [["get_metadata", s.height], ["list_pools", s.height], ["list_pools", s.height]]);
+  // DCL down at its next read: the next scan keeps the last good DCL read, so the coin keeps its route
+  dclUp = false;
+  t += 10 * 60_000;
+  const asked = dclAsks.length;
+  // warm() runs a refresh unless one is under way (the first scan's hour and day reads may still be): asked until a new scan lands
+  for (let i = 0; i < 5_000 && lists.scan() === s; i++) {
+    lists.warm()();
+    await new Promise((ok) => setImmediate(ok));
+  }
+  assert.notEqual(lists.scan(), s, "a new scan");
+  assert.equal(dclAsks[asked]?.method_name, "get_metadata", "DCL was asked again");
+  assert.equal(routed(lists.scan()!, HOODL), true);
+  assert.ok(calls.length > 0);
 });
 
 test("toMeta: hostile metadata bounded or refused", () => {

@@ -46,10 +46,12 @@
 //   at one rebuilt W a page load.
 import { HELPER_BIND_RECORD_WALLETS_MAX, HELPER_BIND_TRADE_CODES, HELPER_CODE_STATUS, HELPER_FETCH_INIT, type HelperBindRecord, type HelperBindRecordRequest, type HelperBindRecordState, type HelperBindTradeRequest } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/near/networks.ts";
-import { NEAR_RHEA, rheaQuote, RheaQuoteRefused, type RheaRefusalCode } from "../../kit/src/near/rhea.ts";
+import { NEAR_RHEA, RheaQuoteRefused, type RheaQuote, type RheaRefusalCode } from "../../kit/src/near/rhea.ts";
 import { nearFeeBuyerReceives, nearTokenFeeView, type NearTokenFee } from "../../kit/src/near/token-fee.ts";
 import { vaultSync, vaultSyncStart, type VaultSpendRow } from "../../kit/src/vault/sync.ts";
-import { readNearHeld, readNearSwapPair, readNearSwapWallet, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
+import { nearQuote, readNearHeld, readNearSwapPair, readNearSwapWallet, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
+import { NEAR_DCL, type DclQuote } from "../../kit/src/near/dcl.ts";
+import { dclCandidates } from "./near-pools.ts";
 import type { BuyRoute, TxRef } from "../../kit/src/signpage/messages.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { RELEASE_BIND_URL, SEND_TIMEOUT_MS } from "../../wallet/src/deposit/delegate.ts";
@@ -65,7 +67,7 @@ import { bindRpc, type BindRpc } from "../../wallet/src/deposit/bind.ts";
 import type { HostRefusal, KindContext, Running } from "./api.ts";
 import { nearReturnMove, nearSellFlow, nearSellNote, type NearMoveEnd, type NearSellDeps, type NearSellStep } from "./near-sell.ts";
 import type { NearSellAsk } from "./rules/near-trade.ts";
-import { nearBuyFlow, runNearBuy, type NearBuyAsk, type NearBuyBegun, type NearBuyDeps, type NearBuyProgress, type NearHeldState, type NearHelperAnswer, type NearPair, type NearPairAsk, type NearPayoutEnd } from "./near-trade.ts";
+import { nearBuyFlow, runNearBuy, type NearBuyAsk, type NearBuyBegun, type NearBuyDeps, type NearBuyProgress, type NearHeldState, type NearHelperAnswer, type NearPair, type NearPairAsk, type NearPayoutEnd, type NearQuoteAsk } from "./near-trade.ts";
 import { nearView } from "./near-pools.ts";
 import { nearWCallOf, nearWCallToken } from "./near-w-calls.ts";
 import { pacedNearRpc } from "../../wallet/src/pace.ts";
@@ -191,6 +193,8 @@ export type NearBuyPage = {
   tokenFee?(token: string): Promise<NearTokenFee>;
   /** The quote's candidate pools (near-pools.ts rheaPoolsKept). */
   pools(token: string): Promise<number[]>;
+  /** Rhea DCL's candidates worth quoting for the token (near-pools.ts dclPoolsKept); absent: every candidate the flow asks. */
+  dclKept?(token: string): Promise<string[]>;
   locks?: LockManager;
   fetchFn?: typeof fetch;
   wait?: (ms: number) => Promise<void>;
@@ -199,26 +203,42 @@ export type NearBuyPage = {
 };
 
 /** What the NEAR reads need of the page. */
-type NearReadsPage = Pick<NearBuyPage, "network" | "rpcs" | "pools" | "readWallet">;
+type NearReadsPage = Pick<NearBuyPage, "network" | "rpcs" | "pools" | "readWallet" | "dclKept">;
 /** The NEAR buy's and sell's reads of W and the quote on the page's pair, bound once for both flows (card
  *  near-quote-under-the-pace; test/near-reads-count.test.ts counts each step's reads on them). */
 export function nearReads(page: NearReadsPage): Pick<NearBuyDeps, "readWallet" | "quote" | "pair" | "held"> {
   return {
     readWallet: (a) => readW(page, a),
-    quote: async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) }),
+    quote: async (a) => quoteOf(page, a),
     pair: (a) => pairOf(page, a),
     held: (a) => heldOf(page, a),
   };
 }
 const readW = (page: NearReadsPage, a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState> =>
   page.readWallet ? page.readWallet(a) : readNearSwapWallet({ network: page.network, rpcs: page.rpcs(), ...a });
+/** The quote on the page's pair (the kit's nearQuote): Rhea classic's candidate pools (page.pools) and the flow's DCL
+ *  candidates (`dclPools`, made on the device), the venue that pays more (card near-dcl-route). */
+const quoteOf = async (page: NearReadsPage, a: NearQuoteAsk): Promise<RheaQuote | DclQuote> => {
+  const [pools, dcl] = await Promise.all([page.pools(a.token), dclOf(page, a)]);
+  return nearQuote({ network: page.network, rpcs: page.rpcs(), side: a.side, token: a.token, amountIn: a.amountIn, pools, ...dcl });
+};
+/** The DCL candidates a quote asks: the flow's (`dclPools`, made on the device) that the session's read found on DCL
+ *  (page.dclKept): a token not on DCL asks DCL nothing. None asked, or the pair pinned to classic: none. */
+const dclOf = async (page: NearReadsPage, a: NearQuoteAsk & { venue?: "classic" | "dcl" }): Promise<{ dclPools?: readonly string[] }> => {
+  if (a.dclPools === undefined || a.venue === "classic") return {};
+  if (!page.dclKept) return { dclPools: a.dclPools };
+  const kept = await page.dclKept(a.token);
+  return { dclPools: a.dclPools.filter((id) => kept.includes(id)) };
+};
 /** W and the quote at one block: the kit's readNearSwapPair on rpcs(). A page given its own W read (page.readWallet)
- *  has that read, then the quote, and its baseline from W's read of the other side. */
+ *  has that read, then the quote, and its baseline from W's read of the other side. `venue` (cards near-dcl-sell,
+ *  near-dcl-route): "dcl" quotes DCL's candidates alone (no classic pools), "classic" Rhea classic's alone (no DCL
+ *  candidates); none, both, the venue that pays more. */
 const pairOf = async (page: NearReadsPage, a: NearPairAsk): Promise<NearPair> => {
-  const pools = await page.pools(a.token);
-  if (!page.readWallet) return readNearSwapPair({ network: page.network, rpcs: page.rpcs(), wallet: a.wallet, side: a.side, token: a.token, amountIn: a.amountIn, pools, ...(a.baseline === undefined ? {} : { baseline: a.baseline }) });
+  const [pools, dcl] = await Promise.all([a.venue === "dcl" ? [] : page.pools(a.token), dclOf(page, a)]);
+  if (!page.readWallet) return readNearSwapPair({ network: page.network, rpcs: page.rpcs(), wallet: a.wallet, side: a.side, token: a.token, amountIn: a.amountIn, pools, ...dcl, ...(a.baseline === undefined ? {} : { baseline: a.baseline }) });
   const state = await page.readWallet({ wallet: a.wallet, side: a.side, token: a.token });
-  const quote = await rheaQuote({ network: page.network, rpcs: page.rpcs(), side: a.side, token: a.token, amountIn: a.amountIn, pools });
+  const quote = await nearQuote({ network: page.network, rpcs: page.rpcs(), side: a.side, token: a.token, amountIn: a.amountIn, pools, ...dcl });
   const other = a.side === "buy" ? "sell" : "buy";
   if (a.baseline === undefined) return { state, quote };
   if (a.baseline !== (a.side === "buy" ? a.token : NEAR_NETWORKS[page.network].usdc)) throw new Error("a baseline of the token W receives only");
@@ -1194,10 +1214,13 @@ async function coinFloor(page: NearBuyPage, token: string, buyMin: bigint, sellI
   const fee = page.tokenFee
     ? await page.tokenFee(token)
     : page.network === "mainnet" && nearTokenFeeView(token) !== null
-      ? (await rheaQuote({ network: page.network, rpcs: page.rpcs(), side: "buy", token, amountIn: VAULT_CONSTANTS.MIN_DEPOSIT, pools: await page.pools(token) })).fee
+      ? (await quoteOf(page, { side: "buy", token, amountIn: VAULT_CONSTANTS.MIN_DEPOSIT, dclPools: dclCandidates(page.network, token) })).fee
       : null;
   if (fee !== null) {
-    f = fee.unknown ? (buyMin * BigInt(10_000 - NEAR_FEE_WIDEST_BPS)) / 10_000n : nearFeeBuyerReceives(fee, NEAR_RHEA[page.network].exchange, buyMin);
+    // the fee is the token's whichever venue quoted it; a fee scoped to one venue (card near-dcl-route: a coin bought on
+    // Rhea classic or on DCL) is taken on whichever leaves the least, so W's own coin is never under its floor
+    const venues = [NEAR_RHEA[page.network].exchange, ...(page.network in NEAR_DCL ? [NEAR_DCL[page.network as keyof typeof NEAR_DCL].exchange] : [])];
+    f = fee.unknown ? (buyMin * BigInt(10_000 - NEAR_FEE_WIDEST_BPS)) / 10_000n : venues.map((v) => nearFeeBuyerReceives(fee, v, buyMin)).reduce((x, y) => (y < x ? y : x));
   }
   if (f < 1n) f = 1n;
   return sellIn !== null && sellIn > f ? sellIn : f;
@@ -1546,7 +1569,7 @@ export const COIN_OWN_REFUSALS: ReadonlySet<RheaRefusalCode> = new Set(["input",
  * blackdragon.tkn.near, which quotes from its Rhea pools. No out stays only for a quote the chain refuses
  * (COIN_OWN_REFUSALS: no pool, no liquidity, ...). Signs nothing, writes nothing, sends nothing.
  */
-export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "fee" | "rpcs" | "pools" | "decimals">, token: string, amount: bigint | null, quote: NearBuyDeps["quote"] = async (a) => rheaQuote({ network: page.network, rpcs: page.rpcs(), ...a, pools: await page.pools(a.token) })): Promise<{ result: { tap_max: string; cost?: string; out?: string } } | { error: "not_allowed" | "not_funded" | "down" }> {
+export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "fee" | "rpcs" | "pools" | "decimals">, token: string, amount: bigint | null, quote: NearBuyDeps["quote"] = (a) => quoteOf(page, a)): Promise<{ result: { tap_max: string; cost?: string; out?: string } } | { error: "not_allowed" | "not_funded" | "down" }> {
   const scope = vaultScope(page.network);
   if (scope === null) return { error: "not_allowed" };
   const free = (await (await page.notes()).list()).filter((n): n is NoteRecord & { leaf: NonNullable<NoteRecord["leaf"]> } => n.scope === scope && n.state === "UNSPENT" && n.leaf !== undefined);
@@ -1573,7 +1596,7 @@ export async function nearBuyDry(page: Pick<NearBuyPage, "network" | "notes" | "
   const swapped = plan.reduce((t, p) => t + p.part, 0n);
   let out: string | undefined;
   try {
-    const [q, d] = await Promise.all([quote({ side: "buy", token, amountIn: swapped }), page.decimals ? page.decimals(token) : readNearDecimals(page.network, page.rpcs(), token)]);
+    const [q, d] = await Promise.all([quote({ side: "buy", token, amountIn: swapped, dclPools: dclCandidates(page.network, token) }), page.decimals ? page.decimals(token) : readNearDecimals(page.network, page.rpcs(), token)]);
     out = q.token === token && q.side === "buy" && q.amountIn === swapped && q.amountOut > 0n ? unitsOf(q.amountOut, d) : undefined;
   } catch (e) {
     if (!(e instanceof RheaQuoteRefused && COIN_OWN_REFUSALS.has(e.code))) return { error: "down" };

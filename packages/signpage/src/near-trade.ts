@@ -46,9 +46,10 @@
 import { HELPER_BIND_TRADE_CODES, type HelperBindTradeRequest, type HelperNearTrade } from "../../kit/src/helper/v1.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../kit/src/near/networks.ts";
 import type { RheaQuote, RheaQuoteArgs } from "../../kit/src/near/rhea.ts";
+import { dclSwapCalls, NEAR_DCL, type DclQuote } from "../../kit/src/near/dcl.ts";
 import { nearFeeBuyerReceives } from "../../kit/src/near/token-fee.ts";
 import { NEAR_SWAP_SLIPPAGE_MAX_BPS, nearSwapCalls, nearSwapFloor, type NearSwapCall, type NearSwapRequest } from "../../kit/src/trade/near/swap.ts";
-import type { NearSwapWalletArgs, NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
+import { isDclQuote, type NearSwapWalletArgs, type NearSwapWalletState } from "../../kit/src/trade/near/wallet.ts";
 import type { BuyRoute, SignpageResults, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { NEAR_SWAP_READ_AGE_MAX, type SignedNearSwapDelegate } from "../../wallet/src/near/swap-delegate.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -56,6 +57,7 @@ import { SIGNPAGE_ROUTE_OUT } from "../../kit/src/signpage/schema.ts";
 import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { unitsOf } from "./pool-buy.ts";
 import { legCause } from "./pool-sell.ts";
+import { dclCandidates } from "./near-pools.ts";
 
 /** The most reads of W in one wait (W to read existing, its registration to read back, the swap's result), and the most
  *  tries of one fresh pair (W's read and the quote). */
@@ -106,10 +108,24 @@ export type NearBuyProgress = {
   fill?: { out: string; decimals: number };
 };
 
-/** What one pair read asks: the side, the token and the amount quoted, and the token whose balance of W's is the baseline. */
-export type NearPairAsk = Pick<RheaQuoteArgs, "side" | "token" | "amountIn"> & { wallet: string; baseline?: string };
-/** W and the quote at one block (the kit's NearSwapPair). */
-export type NearPair = { state: NearSwapWalletState; quote: RheaQuote; baseline?: bigint };
+/** What a quote asks: the side, the token and the amount quoted, and Rhea DCL's candidate pool ids made on the device
+ *  (near-pools.ts dclCandidates, never a server's list) to quote beside Rhea classic (cards near-dcl-sell, near-dcl-route). */
+export type NearQuoteAsk = Pick<RheaQuoteArgs, "side" | "token" | "amountIn"> & { dclPools?: readonly string[] };
+/** What one pair read asks: the quote's ask, W, and the token whose balance of W's is the baseline. `venue`: the pair read
+ *  on that venue alone ("dcl": DCL's candidates and no classic pools; "classic": no DCL candidates). */
+export type NearPairAsk = NearQuoteAsk & { wallet: string; baseline?: string; venue?: "classic" | "dcl" };
+/** W and the quote at one block (the kit's NearSwapPair): the quote Rhea classic's, or Rhea DCL's when DCL pays more. */
+export type NearPair = { state: NearSwapWalletState; quote: RheaQuote | DclQuote; baseline?: bigint };
+
+/** The wire's hops of a quote (card near-dcl-route, the buy's and the sell's): a classic quote's own; a DCL quote's pool
+ *  ids in the Swap's order, each hop naming its own tokens (through wrapped NEAR on two pools). */
+export function nearTradeHops(network: NearNetwork, q: RheaQuote | DclQuote): HelperNearTrade["hops"] {
+  if (!isDclQuote(q)) return q.hops.map((h) => ({ pool: h.pool, token_in: h.tokenIn, token_out: h.tokenOut }));
+  if (!(network in NEAR_DCL)) throw new Error(`no DCL on ${network}`);
+  const wrap = NEAR_DCL[network as keyof typeof NEAR_DCL].wrap;
+  const ends = q.poolIds.length === 1 ? [q.tokenIn, q.tokenOut] : [q.tokenIn, wrap, q.tokenOut];
+  return q.poolIds.map((pool, i) => ({ pool, token_in: ends[i]!, token_out: ends[i + 1]! }));
+}
 /** W's light read: the fields of NearSwapWalletState the waits read. */
 export type NearHeldState = Pick<NearSwapWalletState, "account" | "height" | "held" | "registered">;
 
@@ -126,8 +142,8 @@ export type NearBuyDeps = {
   helper(body: HelperBindTradeRequest): Promise<NearHelperAnswer>;
   /** The kit's readNearSwapWallet with the network and its pair bound. */
   readWallet(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearSwapWalletState>;
-  /** The kit's rheaQuote with the network, its pair and the candidate pools bound. */
-  quote(a: Pick<RheaQuoteArgs, "side" | "token" | "amountIn">): Promise<RheaQuote>;
+  /** The kit's nearQuote with the network, its pair and Rhea classic's candidate pools bound (`dclPools`: DCL's beside them). */
+  quote(a: NearQuoteAsk): Promise<RheaQuote | DclQuote>;
   /** The kit's readNearSwapPair with the network, its pair and the candidate pools bound: W read and the quote at one
    *  block (`baseline`: W's balance of that token at the same block). */
   pair(a: NearPairAsk): Promise<NearPair>;
@@ -136,7 +152,7 @@ export type NearBuyDeps = {
   held?(a: Pick<NearSwapWalletArgs, "wallet" | "side" | "token">): Promise<NearHeldState>;
   /** The wallet's signNearSwapDelegates with the seed and W's indexes bound (the binding derives W from them, the same
    *  W as `w.id`). */
-  sign(given: readonly NearSwapCall[], request: NearSwapRequest, quote: RheaQuote, state: NearSwapWalletState, bound: string | null): Awaitable<SignedNearSwapDelegate[]>;
+  sign(given: readonly NearSwapCall[], request: NearSwapRequest, quote: RheaQuote | DclQuote, state: NearSwapWalletState, bound: string | null): Awaitable<SignedNearSwapDelegate[]>;
   wait(ms: number): Promise<void>;
   /** One line per step: the step and its outcome, in short public words (no key, no amount, no address). */
   log(step: NearBuyStep, outcome: string): void;
@@ -291,15 +307,26 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
     // W (buy side) and a quote of the request's own at ONE block (deps.pair); asked again, bounded, when it throws (a
     // provider lagging or busy) or W's read does not yet show what `want` waits for. `baseline`: the token's balance of W's
     // at the same block
-    const fresh = async (want: (s: NearSwapWalletState) => boolean, baseline?: string): Promise<{ s: NearSwapWalletState; q: RheaQuote; base?: bigint }> => {
+    // Rhea DCL's candidates for this token, made here from the token alone (card near-dcl-route). The buy's first quote
+    // asks both venues and takes the one that pays more; every later read is pinned to that venue (`venue`): it asks
+    // that venue's reads alone (about 11 fewer of each provider a read than both, on the paced seat), and a buy never
+    // registers for one venue's quote and swaps on the other's.
+    const dclPools = dclCandidates(deps.network, ask.token);
+    let venue: "classic" | "dcl" | undefined;
+    const pin = (q: RheaQuote | DclQuote): boolean => {
+      const v = isDclQuote(q) ? "dcl" : "classic";
+      if (venue === undefined) venue = v;
+      return venue === v;
+    };
+    const fresh = async (want: (s: NearSwapWalletState) => boolean, baseline?: string): Promise<{ s: NearSwapWalletState; q: RheaQuote | DclQuote; base?: bigint }> => {
       let thrown: unknown;
       for (let i = 0; i < NEAR_BUY_READ_TRIES; i++) {
         if (i > 0) await deps.wait(NEAR_BUY_READ_WAIT_MS);
         let s: NearSwapWalletState;
-        let q: RheaQuote;
+        let q: RheaQuote | DclQuote;
         let base: bigint | undefined;
         try {
-          ({ state: s, quote: q, baseline: base } = await deps.pair({ side: "buy", token: ask.token, amountIn: ask.amount, wallet: w.id, ...(baseline === undefined ? {} : { baseline }) }));
+          ({ state: s, quote: q, baseline: base } = await deps.pair({ side: "buy", token: ask.token, amountIn: ask.amount, wallet: w.id, ...(venue === "classic" ? {} : { dclPools }), ...(venue === undefined ? {} : { venue }), ...(baseline === undefined ? {} : { baseline }) }));
         } catch (e) {
           thrown = e;
           continue;
@@ -308,6 +335,8 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
         // a provider that has not caught up with the registration: both read again
         if (!want(s)) continue;
         if (q.network !== deps.network || q.side !== "buy" || q.token !== ask.token || q.amountIn !== ask.amount) return fail("quote_check_failed");
+        // a read pinned to the buy's venue answered on the other: not the buy's quote
+        if (!pin(q)) return fail("quote_check_failed");
         if (baseline !== undefined && typeof base !== "bigint") return fail("read_failed");
         // one moment: the quote at or after W's state and close to it (one block from deps.pair), else both read again
         if (!(Number.isSafeInteger(q.height) && q.height >= s.height && q.height - s.height <= NEAR_SWAP_READ_AGE_MAX)) continue;
@@ -316,7 +345,7 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
       }
       return fail("quote_check_failed", thrown);
     };
-    const tradeOf = (q: RheaQuote): HelperNearTrade => ({
+    const tradeOf = (q: RheaQuote | DclQuote): HelperNearTrade => ({
       network: deps.network,
       side: "buy",
       token: ask.token,
@@ -324,7 +353,7 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
       amount_in: ask.amount.toString(),
       slippage_bps: ask.slippageBps,
       venue_out: q.venueOut.toString(),
-      hops: q.hops.map((h) => ({ pool: h.pool, token_in: h.tokenIn, token_out: h.tokenOut })),
+      hops: nearTradeHops(deps.network, q),
     });
     // one body to the helper, sent again (bounded) while its answer is a "not yet" or none; `goOn`: codes after which the
     // run reads on instead of ending. Its transactions kept, a refusal's too.
@@ -363,7 +392,7 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
     // first call's nonce; null for a registration round whose fresh read finds W registered already (a provider that
     // caught up): nothing to sign. `spent`: a nonce W's key holds already (a failed swap's), read again until it does
     // `baseline`: the token read at the pair's block (the swap's first round). Never signed for a W short of the amount.
-    const signedRound = async (registered: boolean, spent = -1n, baseline?: string): Promise<{ q: RheaQuote; s: NearSwapWalletState; base?: bigint; body: HelperBindTradeRequest; count: number; nonce: bigint } | null> => {
+    const signedRound = async (registered: boolean, spent = -1n, baseline?: string): Promise<{ q: RheaQuote | DclQuote; s: NearSwapWalletState; base?: bigint; body: HelperBindTradeRequest; count: number; nonce: bigint } | null> => {
       const { s, q, base } = await fresh((x) => (!registered || x.registered) && x.nonce >= spent, baseline);
       if (!registered && s.registered) return null;
       // the payout's USDC is W's in full (the vault takes its fee from the note on top of the amount): less is not swapped
@@ -371,7 +400,10 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
       let calls: NearSwapCall[];
       let signed: SignedNearSwapDelegate[];
       try {
-        calls = nearSwapCalls({ quote: q, wallet: w.id, slippageBps: ask.slippageBps, registered, storageMin: s.storageMin, lostfound: s.lostfound }, request);
+        // each venue's own calls: DCL's Swap has no lost-found claim (a DCL payout W could not take is never W's to claim)
+        calls = isDclQuote(q)
+          ? dclSwapCalls({ quote: q, wallet: w.id, slippageBps: ask.slippageBps, registered, storageMin: s.storageMin }, request)
+          : nearSwapCalls({ quote: q, wallet: w.id, slippageBps: ask.slippageBps, registered, storageMin: s.storageMin, lostfound: s.lostfound }, request);
       } catch (e) {
         return fail("quote_check_failed", e);
       }
@@ -414,6 +446,7 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
     }
     if (!exists) {
       const { q } = await quoteOnly(deps, ask, fail);
+      pin(q);
       // a W the helper finds there already answers 200 with no tx: W is there as it is, and the reads go on
       const code = await send({ trade: tradeOf(q), signed_delegates: [] }, [0, 1], new Set(["wallet_created", "wallet_exists"]));
       deps.log("create", code ?? "wallet created");
@@ -452,8 +485,8 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
         if (r === null) return fail("not_registered"); // a swap round is signed only once W reads registered
         if (before === null) before = r.base!;
         // the venue and the pool the device checked and signs against (its first hop)
-        const hop = r.q.hops[0];
-        if (hop !== undefined) tell({ venue: "Rhea", pool: String(hop.pool) });
+        const pool = isDclQuote(r.q) ? r.q.poolIds[0] : r.q.hops[0]?.pool;
+        if (pool !== undefined) tell({ venue: "Rhea", pool: String(pool) });
         // the floor of the pair the round signs and the baseline, in the record before the swap leaves: a stop after the
         // send finds them, and a resume reads what W received against them
         swap = { floor: nearFeeBuyerReceives(r.q.fee, r.q.exchange, nearSwapFloor(r.q.venueOut, ask.slippageBps)), before };
@@ -536,13 +569,13 @@ export async function runNearBuy(deps: NearBuyDeps, asked: NearBuyAsk): Promise<
 }
 
 /** A quote alone (the creation's trade), asked again while it throws, bounded; one not of the ask's own is refused. */
-async function quoteOnly(deps: NearBuyDeps, ask: NearBuyAsk, fail: (code: string, e?: unknown) => never): Promise<{ q: RheaQuote }> {
+async function quoteOnly(deps: NearBuyDeps, ask: NearBuyAsk, fail: (code: string, e?: unknown) => never): Promise<{ q: RheaQuote | DclQuote }> {
   let thrown: unknown;
   for (let i = 0; i < NEAR_BUY_READ_TRIES; i++) {
     if (i > 0) await deps.wait(NEAR_BUY_READ_WAIT_MS);
-    let q: RheaQuote;
+    let q: RheaQuote | DclQuote;
     try {
-      q = await deps.quote({ side: "buy", token: ask.token, amountIn: ask.amount });
+      q = await deps.quote({ side: "buy", token: ask.token, amountIn: ask.amount, dclPools: dclCandidates(deps.network, ask.token) });
     } catch (e) {
       thrown = e;
       continue;
