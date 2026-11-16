@@ -144,8 +144,9 @@ export function poseidon3Walk(inputs: readonly [bigint, bigint, bigint]): bigint
 }
 
 // The same hashes on BN254's field in WebAssembly (./field-wasm.ts, card firefox-restore-fast): the sparse form above,
-// round for round, each value a slot of the module's memory in Montgomery form, every sum and product reduced. Used
-// by the walk where the module compiles (fieldWasm), BigInt above where it does not.
+// round for round, each value a slot of the module's memory in Montgomery form, every sum and product kept under 2p
+// and reduced to its residue only when read (FieldWasm.read). Used by the walk where the module compiles (fieldWasm),
+// BigInt above where it does not.
 type SparseSlots = { o: Sparse; C: number[]; M: number[][]; k: number[]; m00: number; w: number[][]; z: number[][]; end: number[][]; after: number[]; s: number[]; x: number[]; tmp: number; acc: number };
 
 function slotsOf(f: FieldWasm, o: Sparse): SparseSlots {
@@ -273,7 +274,11 @@ function recorder(zero: number): { rec: FieldWasm; ops: FieldOp[] } {
 
 // the index's three hashes as one program, compiled once a thread (card first-sign-in-fast-from-any-region): from the
 // slots `mn`, `ms`, `sc` and `at` (the masters, the scope, the index) to `out`; null where it does not compile, and
-// the walk makes the same steps one call at a time
+// the walk makes the same steps one call at a time. Card walk-program-checked-before-use: as fieldWasm checks its
+// known answers, the program makes one known index (KNOWN) before its first use and is null when its answer is not
+// poseidon2Walk's and poseidon3Walk's, so an engine that runs it wrong costs the walk speed, never its restore (one
+// index on BigInt a thread, at its start).
+const KNOWN = { nullifier: P - 1n, secret: (P - 1n) / 2n, scope: P - 2n, i: 0xffffffff } as const;
 let indexRun: { run: () => void; mn: number; ms: number; sc: number; at: number } | null | undefined;
 const indexRunOnce = (f: FieldWasm, q: NonNullable<typeof slots>): typeof indexRun => {
   if (indexRun !== undefined) return indexRun;
@@ -285,7 +290,14 @@ const indexRunOnce = (f: FieldWasm, q: NonNullable<typeof slots>): typeof indexR
     hashW(rec, q.three, [mn, sc, at], q.nh);
     hashW(rec, q.three, [ms, sc, at], q.sh);
     hashW(rec, q.two, [q.nh, q.sh], q.out);
-    indexRun = { run: f.program(ops), mn, ms, sc, at };
+    const run = f.program(ops);
+    f.write(mn, KNOWN.nullifier);
+    f.write(ms, KNOWN.secret);
+    f.write(sc, KNOWN.scope);
+    f.writeSmall(at, KNOWN.i);
+    run();
+    const i = BigInt(KNOWN.i);
+    if (f.read(q.out) === poseidon2Walk([poseidon3Walk([KNOWN.nullifier, KNOWN.scope, i]), poseidon3Walk([KNOWN.secret, KNOWN.scope, i])])) indexRun = { run, mn, ms, sc, at };
   } catch {
     indexRun = null;
   }
@@ -297,7 +309,8 @@ const indexRunOnce = (f: FieldWasm, q: NonNullable<typeof slots>): typeof indexR
  * poseidon3(secret, scope, i)), as ../derive/notes.ts derives a deposit note's. On the WebAssembly field where it
  * compiles, on BigInt otherwise; equal either way. The masters and scope are put in the module once a walk and into
  * the shared input slots each index, so walks taking turns on one thread never read each other's. On the field, an
- * index is one call into WebAssembly (indexRunOnce), its three hashes made inside it.
+ * index is one call into WebAssembly (indexRunOnce), its three hashes made inside it, once the program answers its
+ * known index right; one call a step otherwise.
  */
 export function precommitmentWalker(m: { nullifier: bigint; secret: bigint }, scope: bigint): (i: number) => bigint {
   const f = fieldWasm();

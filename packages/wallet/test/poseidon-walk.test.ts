@@ -16,7 +16,7 @@ import { poseidon2 } from "poseidon-lite/poseidon2";
 import { poseidon3 } from "poseidon-lite/poseidon3";
 import { C2, C3, M2, M3 } from "../src/notes/poseidon-constants.ts";
 import { poseidon2Walk, poseidon3Walk, poseidonWasm, precommitmentWalker } from "../src/notes/poseidon-walk.ts";
-import { fieldWasm, fieldWasmBytes } from "../src/notes/field-wasm.ts";
+import { FIELD_BYTES, fieldProgramBytes, fieldWasm, fieldWasmBytes } from "../src/notes/field-wasm.ts";
 import { checkedWalk, walkLaneOf } from "../src/notes/restore.ts";
 import { noteSecrets } from "../src/notes/secrets.ts";
 import { masters } from "../src/derive/index.ts";
@@ -232,7 +232,10 @@ test("card first-sign-in-fast-from-any-region: the field's product, sum, fifth p
     s = (s * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);
     return s % P;
   };
-  const values = [0n, 1n, 2n, P - 1n, P - 2n, (P - 1n) / 2n, ...Array.from({ length: 300 }, next)];
+  // -R^-1: held at its highest it is 2p - 1, the largest value the module holds (card walk-program-checked-before-use)
+  const top = P - pow(R, P - 2n);
+  assert.equal([...held(top, true)].reduce((v, w, j) => v + (BigInt(w) << BigInt(29 * j)), 0n), 2n * P - 1n);
+  const values = [0n, 1n, 2n, P - 1n, P - 2n, (P - 1n) / 2n, top, ...Array.from({ length: 300 }, next)];
   for (const [k, x] of values.entries()) {
     const y = values[(k * 7 + 3) % values.length]!;
     for (const hx of [false, true]) for (const hy of [false, true]) {
@@ -266,3 +269,175 @@ test("card first-sign-in-fast-from-any-region: the field's product, sum, fifth p
   assert.throws(() => f.program([["dot", r, a, b]]), /no known function/);
   assert.throws(() => f.dot(a, [a, b]), /none of them/);
 });
+
+// Card walk-program-checked-before-use: an independent review of the field (06:27Z) planted a cut of the dots' column
+// sums at 2^62, and every test above passed it: their inputs are random or x R mod p + p, so a column stays near 2^61,
+// while on the heaviest inputs under 2p a dot of 4 reaches 2^63.1 (src/notes/field-wasm.ts sosBody). Here the inputs
+// are those heaviest ones, and each answer is held to Montgomery's exact words, (S + ((-S p^-1) mod R) p) / R, not
+// only to its residue.
+test("card walk-program-checked-before-use: at the top of the 64-bit headroom (8 limbs of 2^29 - 1 and the top limb at its largest under 2p, 2p - 1, p) the product, square, sum, fifth power and dots of 2 to 4 are Montgomery's exact words", () => {
+  const f = fieldWasm();
+  assert.ok(f, "the module compiles in node");
+  const R = 1n << 261n;
+  const TWO_P = 2n * P;
+  const MASK = (1n << 29n) - 1n;
+  const LOW = (1n << 232n) - 1n;
+  const TOP = (TWO_P - 1n) >> 232n;
+  // p^-1 mod 2^261 (Newton's iteration doubles the bits each step: 9 steps reach 512)
+  let pInv = 1n;
+  for (let k = 0; k < 9; k++) pInv = (pInv * (2n - P * pInv)) & (R - 1n);
+  assert.equal((P * pInv) & (R - 1n), 1n);
+  const mont = (S: bigint): bigint => {
+    const t = S + (((-S * pInv) % R) + R) % R * P;
+    assert.equal(t % R, 0n);
+    return t / R;
+  };
+  const words = (v: bigint): Uint32Array => Uint32Array.from({ length: 9 }, (_, j) => Number((v >> BigInt(29 * j)) & MASK));
+  const value = (w: Uint32Array): bigint => [...w].reduce((v, x, j) => v + (BigInt(x) << BigInt(29 * j)), 0n);
+  // the heaviest: every lower limb at 2^29 - 1 under the top's largest with them (TOP - 1, as TOP << 232 | LOW > 2p - 1),
+  // 2p - 1 (the top limb at TOP), p; then seeded ones of lower limbs mostly 2^29 - 1
+  const heavy = ((TOP - 1n) << 232n) | LOW;
+  const edges = [heavy, TWO_P - 1n, P, TWO_P - 2n, heavy - 1n];
+  for (const e of edges) assert.ok(e < TWO_P);
+  let s = 0x243f6a8885a308d3n;
+  const r64 = (): bigint => {
+    s ^= (s << 13n) & 0xffffffffffffffffn;
+    s ^= s >> 7n;
+    s ^= (s << 17n) & 0xffffffffffffffffn;
+    return s;
+  };
+  const seeded = (): bigint => {
+    for (;;) {
+      let v = 0n;
+      for (let j = 0; j < 8; j++) v |= (r64() % 10n < 8n ? MASK : r64() & MASK) << BigInt(29 * j);
+      v |= (r64() % 2n ? TOP : TOP - 1n) << 232n;
+      if (v < TWO_P) return v;
+    }
+  };
+  const ins = Array.from({ length: 8 }, () => f.slot());
+  const out = Array.from({ length: 6 }, () => f.slot());
+  const run = f.program([
+    ["mul", out[0]!, ins[0]!, ins[1]!],
+    ["sqr", out[1]!, ins[0]!],
+    ["dot", out[2]!, ...ins.slice(0, 4)],
+    ["dot", out[3]!, ...ins.slice(0, 6)],
+    ["dot", out[4]!, ...ins],
+    ["pow5", out[5]!, ins[0]!],
+  ]);
+  const at = f.slot();
+  const exact = (what: string, slot: number, want: bigint, x: readonly bigint[]): void => {
+    const got = f.save(slot);
+    assert.ok(got.every((w) => w < 2 ** 29), `${what}: a limb past 29 bits on ${x}`);
+    assert.equal(value(got), want, `${what} on ${x}`);
+  };
+  const dot = (x: readonly bigint[], k: number): bigint => mont(x.slice(0, 2 * k).reduce((acc, v, j) => (j % 2 ? acc : acc + v * x[j + 1]!), 0n));
+  const pow5 = (a: bigint): bigint => mont(mont(mont(a * a) ** 2n) * a);
+  const tuples: bigint[][] = [];
+  // every pair of edges, as each of the four pairs of a dot (the heaviest columns), and every edge on its own
+  for (const a of edges) for (const b of edges) tuples.push([a, b, a, b, a, b, a, b]);
+  for (let k = 0; k < 400; k++) tuples.push(k % 4 === 0 ? new Array<bigint>(8).fill(seeded()) : Array.from({ length: 8 }, seeded));
+  for (const x of tuples) {
+    x.forEach((v, j) => f.load(ins[j]!, words(v)));
+    run();
+    exact("program mul", out[0]!, mont(x[0]! * x[1]!), x);
+    exact("program sqr", out[1]!, mont(x[0]! * x[0]!), x);
+    exact("program dot of 2", out[2]!, dot(x, 2), x);
+    exact("program dot of 3", out[3]!, dot(x, 3), x);
+    exact("program dot of 4", out[4]!, dot(x, 4), x);
+    exact("program pow5", out[5]!, pow5(x[0]!), x);
+    f.mul(at, ins[0]!, ins[1]!);
+    exact("field mul", at, mont(x[0]! * x[1]!), x);
+    f.add(at, ins[0]!, ins[1]!);
+    exact("field add", at, x[0]! + x[1]! >= TWO_P ? x[0]! + x[1]! - TWO_P : x[0]! + x[1]!, x);
+    f.pow5(at, ins[0]!);
+    exact("field pow5", at, pow5(x[0]!), x);
+  }
+});
+
+test("card walk-program-checked-before-use: a program is refused a slot among the module's fixed ones (pow5's scratch, R^2, 1, read's and dot's)", () => {
+  const first = 5 * FIELD_BYTES;
+  for (const fixed of [0, 1, 2, 3, 4].map((k) => k * FIELD_BYTES)) {
+    assert.throws(() => fieldProgramBytes([["copy", first, fixed]]), /no known function or slot/, `copy from ${fixed}`);
+    assert.throws(() => fieldProgramBytes([["mul", fixed, first, first]]), /no known function or slot/, `mul to ${fixed}`);
+    assert.throws(() => fieldProgramBytes([["dot", first, first, first, fixed, first]]), /no known function or slot/, `dot of ${fixed}`);
+  }
+  assert.ok(new WebAssembly.Module(fieldProgramBytes([["copy", first, first + FIELD_BYTES]]) as BufferSource), "the first free slot is a program's");
+});
+
+// A fresh process whose WebAssembly is patched before the walk's first use (after its imports): `mode` "refused" refuses to compile any
+// module that imports (only a program does: the field compiles), "noop" makes a program's run do nothing, "flip" runs
+// it and then flips the low bit of every word it wrote (an engine that runs it wrong). The walk must then answer
+// poseidon-lite's precommitments one call a step (more than 4 calls an index), find the lane's note and pass
+// checkedWalk; `programRuns` counts the program's runs (at most its one known index).
+function walkWithProgram(mode: "refused" | "noop" | "flip"): { walkHash: string; same: boolean[]; found: number[]; checked: unknown; perIndex: number; programRuns: number } {
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  // the imports first: node's own TypeScript loader runs on WebAssembly too, and the patches are for the walk's alone
+  const code = `
+    const w = await import(${JSON.stringify(path.join(here, "../src/notes/poseidon-walk.ts"))});
+    const r = await import(${JSON.stringify(path.join(here, "../src/notes/restore.ts"))});
+    const { noteSecrets } = await import(${JSON.stringify(path.join(here, "../src/notes/secrets.ts"))});
+    const { masters } = await import(${JSON.stringify(path.join(here, "../src/derive/index.ts"))});
+    const mode = ${JSON.stringify(mode)};
+    const RealModule = WebAssembly.Module;
+    const RealInstance = WebAssembly.Instance;
+    const imports = RealModule.imports;
+    if (mode === "refused") {
+      WebAssembly.Module = function (b) {
+        const m = new RealModule(b);
+        if (imports(m).length) throw new EvalError("refused (test)");
+        return m;
+      };
+      WebAssembly.Module.imports = imports;
+    }
+    let calls = 0;
+    let programRuns = 0;
+    WebAssembly.Instance = function (m, i) {
+      const inst = new RealInstance(m, i);
+      const exports = {};
+      for (const [k, v] of Object.entries(inst.exports)) exports[k] = typeof v === "function" ? (...a) => (calls++, v(...a)) : v;
+      if (imports(m).length && mode !== "refused") {
+        const mem = new Uint32Array(i.env.mem.buffer);
+        const real = inst.exports.run;
+        exports.run = () => {
+          calls++;
+          programRuns++;
+          if (mode === "noop") return;
+          const before = mem.slice();
+          real();
+          for (let w = 0; w < mem.length; w++) if (mem[w] !== before[w]) mem[w] ^= 1;
+        };
+      }
+      return { exports };
+    };
+    const P = ${P}n;
+    const ref = (n, s, sc, i) => w.poseidon2Walk([w.poseidon3Walk([n, sc, BigInt(i)]), w.poseidon3Walk([s, sc, BigInt(i)])]);
+    const walk = w.precommitmentWalker({ nullifier: 11n, secret: 22n }, 33n);
+    walk(0);
+    calls = 0;
+    walk(1);
+    const perIndex = calls;
+    // the program's own known index (src/notes/poseidon-walk.ts KNOWN) and others, two walkers taking turns
+    const other = w.precommitmentWalker({ nullifier: P - 1n, secret: (P - 1n) / 2n }, P - 2n);
+    const same = [0, 7, 19, 323, 0xffffffff].flatMap((i) => [walk(i) === ref(11n, 22n, 33n, i), other(i) === ref(P - 1n, (P - 1n) / 2n, P - 2n, i)]);
+    // an all-zero seed64: a test value, no wallet's
+    const seed64 = new Uint8Array(64);
+    const mine = noteSecrets(seed64, { kind: "deposit", s: 12345n, i: 27 }).precommitment;
+    const lane = r.walkLaneOf(masters(seed64, "deposit"), 12345n, 3, (p) => p === mine, 6);
+    console.log(JSON.stringify({ walkHash: w.walkHash(), same, found: lane.found, checked: r.checkedWalk(lane, 3, seed64, 12345n, 6, null), perIndex, programRuns }));
+  `;
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout.trim().split("\n").pop()!);
+}
+
+for (const mode of ["refused", "noop", "flip"] as const) {
+  test(`card walk-program-checked-before-use: a program that ${mode === "refused" ? "does not compile (the field does)" : mode === "noop" ? "does nothing" : "answers wrong (each word it writes off by one bit)"} leaves the walk on the field's own calls, and the walk finishes with poseidon-lite's answers`, () => {
+    const r = walkWithProgram(mode);
+    assert.equal(r.walkHash, "wasm", "the field itself is still used");
+    assert.deepEqual(r.same, new Array(10).fill(true), "every precommitment is poseidon-lite's");
+    assert.deepEqual(r.found, [27]);
+    assert.deepEqual(r.checked, { found: [27], end: 27 + 8 * 6 });
+    assert.ok(r.perIndex > 4, `an index made ${r.perIndex} calls: the program was used`);
+    assert.equal(r.programRuns, mode === "refused" ? 0 : 1, "the program ran its known index only");
+  });
+}

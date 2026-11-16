@@ -25,8 +25,10 @@
 //   its /walk-worker.js, public/_headers). Where it cannot be, fieldWasm() answers null and the walk hashes on BigInt
 //   as before (./poseidon-walk.ts): slower, never different.
 // - Its answers are held equal to poseidon-lite's (test/poseidon-walk.test.ts), and fieldWasm() checks one known
-//   product before it answers, so a broken module is never used. The walk checks every hit and its last index again
-//   with poseidon-lite (./restore.ts checkedWalk), so a drift stops the restore instead of losing a note.
+//   product before it answers, so a broken module is never used; the walk's program is checked the same way, on one
+//   known index, before its first use (./poseidon-walk.ts indexRunOnce, card walk-program-checked-before-use), and
+//   one that answers wrong leaves the walk on the module's own calls. The walk checks every hit and its last index
+//   again with poseidon-lite (./restore.ts checkedWalk), so a drift stops the restore instead of losing a note.
 
 const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const LIMBS = 9;
@@ -111,7 +113,8 @@ const D = (j: number): number => C + 4 + j; // t - p's limbs
 const BR = C + 4 + LIMBS; // a borrow
 const I64_LOCALS = BR - 2;
 
-/** t0..t8 (29-bit limbs, `top` the carry past them) minus p, kept when t >= p, stored at r. */
+/** t0..t8 (29-bit limbs, `top` the carry past them) minus n (`n` the limbs of what is taken off: add passes 2p's),
+ *  kept when t >= n, stored at r. */
 function reduceStore(c: Code, n: bigint[], top: number): void {
   c.c64(0n).set(BR);
   for (let j = 0; j < LIMBS; j++) {
@@ -138,7 +141,7 @@ function carry(c: Code): void {
 // (each under 2^58, so after the 9 steps no sum passes 9 * 2^59 < 2^63), m making t0 a multiple of 2^29, then shifts
 // t down a limb, carrying t0's high part into the new t0. Values are kept under 2p, never subtracted down to p: with
 // a, b < 2p the product (ab + mp) / R is under (4p^2 + Rp) / R = p (1 + 4p / R) < 2p, as R = 2^261 > 2^7 p; only
-// readField reduces a value to its residue.
+// read (FieldWasm.read) reduces a value to its residue.
 function mulBody(): number[] {
   const n = limbsOf(P);
   const ninv = n0Inv();
@@ -199,8 +202,12 @@ export const DOT_MAX = 4;
  * Montgomery's separated form: the 17 columns of the products first (a square's cross products once, doubled), then
  * the reduction a limb at a time, each limb's m times p added and its high part carried to the next. With limbs under
  * 2^29 and values under 2p, a column holds at most 9 k products and 9 of m p, each under 2^58, plus a carry under 2^35:
- * under 45 * 2^58 < 2^64 for k = 4. The answer, (sum + m p) / R, is under (4 k p^2 + R p) / R = p (1 + 4 k p / R) < 2p
- * for k <= 4, as R > 2^7 p. All inputs are read before r is written, so r may be any of them.
+ * under 45 * 2^58 < 2^64 for k = 4. On inputs under 2p a column reaches about 2^62.2 for k = 2, 2^62.7 for k = 3 and
+ * 2^63.1 for k = 4 (card walk-program-checked-before-use: a BigInt replay of these sums on the heaviest inputs; the raw
+ * words of test/poseidon-walk.test.ts hold the answers on them): past i64's signed range, so every column step is unsigned (add, mul and and wrap mod 2^64, the
+ * shift is shr_u) and none may be a signed shift, compare or division. The answer, (sum + m p) / R, is under
+ * (4 k p^2 + R p) / R = p (1 + 4 k p / R) < 2p for k <= 4, as R > 2^7 p. All inputs are read before r is written, so r
+ * may be any of them.
  */
 function sosBody(np: number, k: number | "sqr"): number[] {
   const n = limbsOf(P);
@@ -288,14 +295,15 @@ export function fieldWasmBytes(): Uint8Array {
 
 /** A program's module (FieldWasm.program): it imports the field's memory as env.mem and nothing else, and exports
  *  `run`, which makes `ops`' calls in order. Its own mul, add, pow5 and sqr are the field module's bodies; copy moves a
- *  slot's words; dot2 to dot4 are sosBody's. A slot outside the memory, or a step of no known function, is refused. */
+ *  slot's words; dot2 to dot4 are sosBody's. A slot outside the memory or among the module's fixed ones (pow5's
+ *  scratch, R^2, 1, read's and dot's: below FIRST_FREE), or a step of no known function, is refused. */
 export function fieldProgramBytes(ops: readonly FieldOp[]): Uint8Array {
   const run = new Code();
   for (const op of ops) {
     const args = op.slice(1) as number[];
     const pairs = (args.length - 1) / 2;
     const fn = op[0] === "mul" || op[0] === "add" ? (args.length === 3 ? FN[op[0]] : undefined) : op[0] === "pow5" || op[0] === "sqr" || op[0] === "copy" ? (args.length === 2 ? FN[op[0]] : undefined) : op[0] === "dot" && Number.isInteger(pairs) && pairs >= 2 && pairs <= DOT_MAX ? FN.dot2 + pairs - 2 : undefined;
-    if (fn === undefined || !args.every((x) => Number.isInteger(x) && x >= 0 && x % 4 === 0 && x + FIELD_BYTES <= PAGES * 65_536)) throw new Error("field program: a step of no known function or slot");
+    if (fn === undefined || !args.every((x) => Number.isInteger(x) && x >= FIRST_FREE && x % 4 === 0 && x + FIELD_BYTES <= PAGES * 65_536)) throw new Error("field program: a step of no known function or slot");
     for (const x of args) run.c32(x);
     run.call(fn);
   }
