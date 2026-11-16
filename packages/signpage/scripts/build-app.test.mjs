@@ -8,7 +8,8 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writ
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bundle, bundleModuleProblems, check, copyServed, outputFiles, outsideTsconfigs, SERVED, sha384, walkSourceProblems } from "./build-app.mjs";
+import { createHash } from "node:crypto";
+import { bundle, bundleModuleProblems, check, copyServed, EVM_INDEX_CHAINS, EVM_INDEX_PINS, outputFiles, outsideTsconfigs, SERVED, sha384, walkSourceProblems } from "./build-app.mjs";
 import { SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
@@ -128,7 +129,7 @@ test("a stale or hand-edited walk worker is caught", async () => {
   }
 });
 
-test("the deploy build serves the six setup files at /assets/zk/<sha256>.<ext> and the licence texts, as pinned", () => {
+test("the deploy build serves the six setup files at /assets/zk/<sha256>.<ext>, the licence texts and the pool index snapshots, as pinned", () => {
   const zk = SERVED.filter((s) => s.to.startsWith("assets/zk/"));
   assert.equal(zk.length, 6);
   for (const [name, pin] of Object.entries(ZK_SETUP_FILES)) {
@@ -139,7 +140,19 @@ test("the deploy build serves the six setup files at /assets/zk/<sha256>.<ext> a
     "licenses/LGPL-3.0.txt",
     "licenses/Apache-2.0.txt",
     "licenses/zk-NOTICE.txt",
+    "evm-index/base.json",
+    "evm-index/robinhood.json",
   ]);
+  // each snapshot carries its pin (data/evm-index/pins.json, written with it by scripts/evm-index-snapshot.mjs), and the
+  // committed file is that pin
+  const pins = JSON.parse(readFileSync(EVM_INDEX_PINS, "utf8"));
+  assert.deepEqual(Object.keys(pins), [...EVM_INDEX_CHAINS]);
+  for (const c of EVM_INDEX_CHAINS) {
+    const s = SERVED.find((e) => e.to === `evm-index/${c}.json`);
+    assert.deepEqual({ bytes: s.bytes, sha256: s.sha256 }, pins[c], c);
+    const b = readFileSync(s.from);
+    assert.deepEqual({ bytes: b.length, sha256: createHash("sha256").update(b).digest("hex") }, pins[c], `${c}: the committed snapshot is not its pin (run scripts/evm-index-snapshot.mjs, which writes both)`);
+  }
   const d = mkdtempSync(join(tmpdir(), "ct-signpage-served-"));
   try {
     copyServed(d);
@@ -164,6 +177,20 @@ test("copyServed refuses a setup file whose size or sha256 is not its pin, and w
     ]) {
       writeFileSync(join(src, name), body);
       const list = SERVED.map((s) => (s.to.endsWith(`${pin.sha256}.zkey`) ? { ...s, from: join(src, name) } : s));
+      assert.throws(() => copyServed(d, list), want, what);
+      assert.deepEqual(readdirSync(d), [], what);
+    }
+    // a pool index snapshot that is not its pin is refused the same way
+    const snap = SERVED.find((s) => s.to === "evm-index/robinhood.json");
+    const real2 = readFileSync(snap.from);
+    const flipped2 = Buffer.from(real2);
+    flipped2[flipped2.length >> 1] ^= 1;
+    for (const [what, body, want] of [
+      ["a snapshot one byte changed", flipped2, new RegExp(`evm-index/robinhood\\.json: sha256 [0-9a-f]{64}, pinned ${snap.sha256}`)],
+      ["a snapshot one byte longer", Buffer.concat([real2, Buffer.from("\n")]), new RegExp(`evm-index/robinhood\\.json: ${snap.bytes + 1} B, pinned ${snap.bytes} B`)],
+    ]) {
+      writeFileSync(join(src, "robinhood.json"), body);
+      const list = SERVED.map((s) => (s === snap ? { ...s, from: join(src, "robinhood.json") } : s));
       assert.throws(() => copyServed(d, list), want, what);
       assert.deepEqual(readdirSync(d), [], what);
     }

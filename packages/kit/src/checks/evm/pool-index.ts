@@ -486,3 +486,71 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   const whole = error === null && gapsOf(read, from, n).length === 0;
   return done({ index, coversThrough: whole ? n : null, pools: whole ? [...(old?.pools ?? []), ...fresh] : null, error });
 }
+
+/** The index as the sign release ships it (card robinhood-quote-answers-cold: packages/signpage/data/evm-index/
+ *  <chain>.json, made by scripts/evm-index-snapshot.mjs with this same sync on the venue's two readers): the stored
+ *  index with each pool as [currency0, currency1, fee, tickSpacing, hooks, block], its id left out (the key's keccak,
+ *  computed again on load). Robinhood's 38,732 pools are 6.05 MB so, 1.15 MB gzipped, where the stored form with ids is
+ *  11.55 MB and 2.66 MB (2026-11-16 03:42Z). A fresh device's cold Robinhood quote, with no index, sent 20 to 100+ deep
+ *  getLogs posts to rpc.mainnet.chain.robinhood.com at its pace of about one a second and ended stale_quote, 6 of 8
+ *  coins (box run 03:24Z); a sync from the snapshot reads only the blocks past it. */
+export type EvmPoolIndexSnapshot = Omit<EvmPoolIndexData, "pools"> & { readonly pools: readonly (readonly [string, string, number, number, string, number])[] };
+export const evmPoolIndexSnapshotOf = (ix: EvmPoolIndexData): EvmPoolIndexSnapshot => ({
+  v: ix.v,
+  chainId: ix.chainId,
+  poolManager: ix.poolManager,
+  from: ix.from,
+  through: ix.through,
+  head: ix.head,
+  spans: ix.spans,
+  pools: ix.pools.map((p) => [p.key.currency0, p.key.currency1, p.key.fee, p.key.tickSpacing, p.key.hooks, p.block] as const),
+});
+const isAddr = (x: unknown): x is string => typeof x === "string" && /^0x[0-9a-f]{40}$/.test(x);
+const isBlock = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+/** A shipped snapshot read back as the index it is, or null where any field is not that shape: another chain or
+ *  PoolManager, spans not disjoint and in order within [from, through], a head below through, a pool row of other
+ *  fields, an address not lower-case hex, currency0 not below currency1, a fee past 24 bits, a tick spacing outside
+ *  1..32767, a pool outside every span, one pool twice, or more than `cap` pools. It is the release's own file, from
+ *  the same origin and list as the page's code, and still never trusted past its shape: every pool a quote takes from
+ *  it is read on both providers at the agreed block like any candidate. */
+export function evmPoolIndexFromSnapshot(x: unknown, want: { readonly chainId: number; readonly poolManager: string; readonly cap: number }): EvmPoolIndexData | null {
+  const s = x as Partial<Record<keyof EvmPoolIndexSnapshot, unknown>> | null;
+  if (typeof s !== "object" || s === null || Array.isArray(s) || s.v !== 1 || s.chainId !== want.chainId || s.poolManager !== want.poolManager.toLowerCase()) return null;
+  const { from, through, head, spans, pools } = s;
+  if (!isBlock(from) || !isBlock(through) || through < from) return null;
+  const h = head as { number?: unknown; hash?: unknown } | null;
+  if (typeof h !== "object" || h === null || !isBlock(h.number) || h.number < through || !isHash(h.hash)) return null;
+  if (!Array.isArray(spans) || !Array.isArray(pools) || pools.length > want.cap) return null;
+  const sp: [number, number][] = [];
+  for (const e of spans) {
+    if (!Array.isArray(e) || e.length !== 2 || !isBlock(e[0]) || !isBlock(e[1]) || e[0] > e[1] || e[0] < from || e[1] > through) return null;
+    if (sp.length > 0 && e[0] <= sp[sp.length - 1]![1] + 1) return null;
+    sp.push([e[0], e[1]]);
+  }
+  const inSpan = (n: number) => {
+    let lo = 0;
+    let hi = sp.length - 1;
+    while (lo <= hi) {
+      const m = (lo + hi) >> 1;
+      if (n < sp[m]![0]) hi = m - 1;
+      else if (n > sp[m]![1]) lo = m + 1;
+      else return true;
+    }
+    return false;
+  };
+  const seen = new Set<string>();
+  const out: EvmIndexedPool[] = [];
+  for (const r of pools) {
+    if (!Array.isArray(r) || r.length !== 6) return null;
+    const [c0, c1, fee, tickSpacing, hooks, block] = r as unknown[];
+    if (!isAddr(c0) || !isAddr(c1) || !isAddr(hooks) || BigInt(c0) >= BigInt(c1)) return null;
+    if (typeof fee !== "number" || !Number.isInteger(fee) || fee < 0 || fee > U24 || typeof tickSpacing !== "number" || !Number.isInteger(tickSpacing) || tickSpacing < 1 || tickSpacing > 32767) return null;
+    if (!isBlock(block) || !inSpan(block)) return null;
+    const key: EvmPoolKey = Object.freeze({ currency0: c0, currency1: c1, fee, tickSpacing, hooks });
+    const id = evmPoolIdOf(key);
+    if (seen.has(id)) return null;
+    seen.add(id);
+    out.push(Object.freeze({ id, key, block }));
+  }
+  return { v: 1, chainId: want.chainId, poolManager: want.poolManager.toLowerCase(), from, through, head: { number: h.number, hash: (h.hash as string).toLowerCase() }, spans: sp, pools: out };
+}

@@ -24,6 +24,8 @@ export const SIGN_BUILD_CONFIG = Object.freeze([
 export const SIGN_BUILD_INPUTS = Object.freeze([
   "packages/signpage/src",
   "packages/signpage/public",
+  // the pool index snapshots build-app.mjs SERVED copies to /evm-index/ (card robinhood-quote-answers-cold)
+  "packages/signpage/data",
   "packages/wallet/src",
   "packages/kit/src",
   "packages/kit/zk",
