@@ -53,9 +53,14 @@ function providers(spans: Record<string, number>, override?: (url: string, from:
     }
     const f = req.params[0] as { fromBlock: string; toBlock: string; address: string; topics: unknown };
     assert.equal(f.address, POOL, "the caller's filter kept");
-    assert.deepEqual(f.topics, TOPICS, "the caller's topics kept");
     const from = Number(BigInt(f.fromBlock));
     const to = Number(BigInt(f.toBlock));
+    // card helper-keyed-logs-serve-a-whole-pool-range: the pool store's fill asks the pool's address alone (pool-logs.ts)
+    if (f.topics === undefined) {
+      sent.push({ url, method: "fill", from, to });
+      return json({ jsonrpc: "2.0", id: req.id, result: [] });
+    }
+    assert.deepEqual(f.topics, TOPICS, "the caller's topics kept");
     sent.push({ url, method: req.method, from, to });
     const o = override?.(url, from, to, req.id);
     if (o !== undefined) return o;
@@ -121,7 +126,10 @@ test(`past ${PAGES_MAX} pages a read is refused before any send with a JSON-RPC 
   assert.equal(evmRangeCap(body.error), BigInt(max), "the helper's own cap reader names the span");
   // the page's (packages/wallet/src/pool/evm.ts capSpanOf, CAP_SPANS): the same forms
   assert.equal(/max(?:imum)? block range:? (\d{1,12})/i.exec(body.error.message)?.[1], String(max));
-  assert.equal(p.logs().length, 0, "no log read sent");
+  assert.equal(p.logs().length, 0, "no log read of the caller's sent");
+  // card helper-keyed-logs-serve-a-whole-pool-range: a pool range past the pages' reach starts the pool store's fill
+  for (let i = 0; i < 1_000 && !p.sent.some((s) => s.method === "fill"); i++) await new Promise((ok) => setImmediate(ok));
+  assert.ok(p.sent.some((s) => s.method === "fill"), "the pool store's fill started");
   // exactly the cap is served
   const ok = await read(r, logsBody(12, FINAL - 50_000, FINAL - 50_000 + max - 1));
   assert.equal(ok.status, 200);

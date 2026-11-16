@@ -65,6 +65,7 @@ import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, 
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, type Slot, type SlotName } from "./slot.ts";
 import { companyOf, isKeyless, keyTag, operatorOf, providerName } from "./operator.ts";
+import { emptyStore, POOL_LOGS_FROM, poolFile, poolPage, type PoolLog, type PoolStore, storeAppend, storeLogs, topicsOf } from "./pool-logs.ts";
 // re-exported: the names other modules import from here (operator.ts is the leaf the token watch imports alone)
 export { companyOf, operatorOf, providerName };
 
@@ -214,6 +215,26 @@ const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
  * total, so callers together never pass the providers' plan.
  */
 export const POOL_LOGS_CLIENT = "pool-logs";
+/**
+ * The pool store's fill (card helper-keyed-logs-serve-a-whole-pool-range, pool-logs.ts): the pages it sends a second on a
+ * chain, all its providers together, one at a time. Each page is a background read: it draws on the chain's total as the
+ * helper's own reads do (callers keep userRoomOf, half), and on its provider's pace and day under CALLER_ROOM (limits.ts
+ * take), never a caller's share; a provider's 429 or throttle holds that provider for every path, as any read's does.
+ * [design: 6: under Base's background room on its summed total (155 a 10 s, half of it 7.7 a second), and 2 a second on
+ * each of the three dRPC keys, a quarter of their 8 (limits.ts KEYED_PACE), so the market-data reads on the same keys
+ * keep the rest. Base's pool from its deploy block (54,325,671) to the finalized head of 16 Nov (about 57,973,600) is
+ * 36,480 pages of dRPC's 100 blocks: about 101 min and 729,600 CU (20 a call, KEYED_COST) once, of the three keys'
+ * 21,000,000 a day; then about 432 pages a day as the chain grows (a block every 2 s). With HELPER_STORE_DIR set the
+ * store is kept there, so a restart starts warm. Robinhood's first keyed URL (ROBINHOOD_RPC_URL, Alchemy, no span named)
+ * takes the whole range in one page.]
+ */
+export const POOL_FILL_PER_S = 6;
+/** The fill stops after this many pages in a row no provider served (down, refused, out of its day); the next pool read
+ *  past what is kept starts it again. [design: 20, about 3 s of pages at POOL_FILL_PER_S.] */
+export const POOL_FILL_FAILS = 20;
+/** How often a running fill writes its store to HELPER_STORE_DIR (and once when it ends). [design: a minute: 360 pages
+ *  at most are read again after a crash.] */
+export const POOL_WRITE_MS = 60_000;
 /** A request the finalized-logs cache may keep (LOG_CACHE_ENTRIES): one eth_getLogs, one filter with numbers for both ends
  *  and no blockHash; its key (the chain and the exact params as sent), its toBlock, and whether its address is the
  *  chain's pool (`pool`, the kit's pin, lowercase), alone. Anything else: null. */
@@ -1044,6 +1065,144 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     return to <= h.n;
   };
 
+  // card helper-keyed-logs-serve-a-whole-pool-range: each pinned pool's store (pool-logs.ts), read from HELPER_STORE_DIR
+  // at its first use; `started` once a fill ran or a file held it, so only then a read past it starts the fill again
+  const storeDir = env.HELPER_STORE_DIR ?? "";
+  const stores = new Map<RpcChain, PoolStore & { started: boolean }>();
+  const fills = new Map<RpcChain, Promise<void>>();
+  /** The chain's pool store: only the kit's pinned pool with a deploy block named (POOL_LOGS_FROM); else undefined. */
+  const storeOf = (c: RpcChain): (PoolStore & { started: boolean }) | undefined => {
+    const pool = poolOf(c);
+    const from = POOL_LOGS_FROM[c];
+    if (pool === undefined || from === undefined) return undefined;
+    let s = stores.get(c);
+    if (s === undefined) {
+      const kept = poolFile(storeDir, c)?.read(pool, from) ?? null;
+      if (kept === null && storeDir !== "") log(`rpc pool-logs ${c} no store kept`);
+      stores.set(c, (s = { ...(kept ?? emptyStore(pool, from)), started: kept !== null && kept.covered >= from }));
+    }
+    return s;
+  };
+  // the fill's waits: the test's clock, else a timer that never keeps the process up
+  const fillSleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms).unref()));
+  const hexOf = (n: bigint): string => `0x${n.toString(16)}`;
+  /** One page of the pool's logs, `a` to `b`, from `url` as a background read: its checked logs (poolPage); a wait in
+   *  ms (the provider held, out of room, or the chain's total spent); null when it did not serve the page. */
+  const fillSend = async (c: RpcChain, url: string, pool: string, a: bigint, b: bigint): Promise<PoolLog[] | number | null> => {
+    if (holdsAll.dayOut(url, 1)) return null;
+    const held = holdsAll.heldMs(url);
+    if (held > 0) return held;
+    const room = holdsAll.take(url, 1, true);
+    if (room > 0) return room;
+    const wait = budget.takeEach([[c, 1]], undefined);
+    if (wait > 0) return wait * 1000;
+    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: pool, fromBlock: hexOf(a), toBlock: hexOf(b) }] });
+    let r: Response;
+    let text: string | undefined;
+    try {
+      r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
+      if (r.status === 429) {
+        await r.body?.cancel();
+        const s = upstreamRetryAfterS(r.headers, now());
+        holdsAll.hold(url, s);
+        log(`rpc hold ${c} ${companyOf(new URL(url).host)} background ${s} s pool-logs`);
+        return Math.max(1, holdsAll.heldMs(url));
+      }
+      text = await readAnswer(r);
+    } catch {
+      return null;
+    }
+    if (r.status !== 200 || text === undefined || !/^application\/([a-z0-9.+-]+\+)?json\s*(;|$)/i.test(r.headers.get("content-type") ?? "")) return null;
+    if ((formsByUrl.get(url) ?? []).some((f) => Buffer.from(text, "utf8").includes(f))) return null;
+    let answer: unknown;
+    try {
+      answer = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (planSpent(answer)) return null;
+    const limited = evmLimited(c, answer);
+    if (limited > 0) {
+      holdsAll.hold(url, limited);
+      log(`rpc hold ${c} ${companyOf(new URL(url).host)} background ${limited} s pool-logs`);
+      return Math.max(1, holdsAll.heldMs(url));
+    }
+    return isPlain(answer) && !Object.hasOwn(answer, "error") ? poolPage(answer.result, pool, a, b) : null;
+  };
+  /**
+   * The pool's fill (POOL_FILL_PER_S): from what the store covers to the chain's finalized head as the helper reads it,
+   * page by page in block order, each page kept only when it follows what is covered. A provider of no known span
+   * (KEYED_LOGS_SPAN: Robinhood's Alchemy) is asked the whole rest in one page first; else, or once it fails, pages of
+   * the widest known span to the providers of that span in turn. One fill a chain at a time; it ends at the head, past
+   * POOL_FILL_FAILS pages in a row unserved, or at the store's bound (POOL_LOGS_BYTES), and a pool read past what is
+   * kept starts it again.
+   */
+  const fillPool = (c: RpcChain, own: readonly string[]): void => {
+    const s = storeOf(c);
+    if (s === undefined || fills.has(c)) return;
+    s.started = true;
+    const file = poolFile(storeDir, c);
+    const save = (): void => {
+      try {
+        file?.write(s);
+      } catch {
+        log(`rpc pool-logs ${c} store not written`);
+      }
+    };
+    const whole = own.filter((u) => !logsSpanByUrl.has(u));
+    const w = own.reduce((m, u) => ((logsSpanByUrl.get(u) ?? 0n) > m ? logsSpanByUrl.get(u)! : m), 0n);
+    const paged = w > 0n ? own.filter((u) => logsSpanByUrl.get(u) === w) : [];
+    const run = (async () => {
+      let wide = whole.length > 0;
+      let fails = 0;
+      let turn = 0;
+      let last = -Infinity;
+      let waits = 0;
+      let soonest = Infinity;
+      let wrote = now();
+      const covered0 = s.covered;
+      for (;;) {
+        await finalized(c, s.covered + 1n, own);
+        const head = finalHeads.get(c)?.n ?? 0n;
+        if (s.covered >= head) break;
+        const list = wide ? whole : paged;
+        if (list.length === 0) break;
+        const a = s.covered + 1n;
+        const b = wide || a + w - 1n > head ? head : a + w - 1n;
+        const gap = last + 1000 / POOL_FILL_PER_S - now();
+        if (gap > 0) await fillSleep(gap);
+        last = now();
+        const got = await fillSend(c, list[turn++ % list.length]!, s.pool, a, b);
+        // a provider held or out of room: the next one is asked; every one of them waiting, the soonest wait is slept
+        if (typeof got === "number") {
+          soonest = Math.min(soonest, got);
+          if (++waits >= list.length) {
+            await fillSleep(Math.max(soonest, 1000 / POOL_FILL_PER_S));
+            (waits = 0), (soonest = Infinity);
+          }
+          continue;
+        }
+        (waits = 0), (soonest = Infinity);
+        if (got === null) {
+          if (wide) wide = false;
+          else if (++fails >= POOL_FILL_FAILS) break;
+          continue;
+        }
+        fails = 0;
+        if (!storeAppend(s, a, b, got)) {
+          log(`rpc pool-logs ${c} store full at block ${a}`);
+          break;
+        }
+        if (now() - wrote >= POOL_WRITE_MS) (save(), (wrote = now()));
+      }
+      if (s.covered > covered0) save();
+      log(`rpc pool-logs ${c} covered to ${s.covered}`);
+    })()
+      .catch(() => undefined)
+      .finally(() => fills.delete(c));
+    fills.set(c, run);
+  };
+
   async function readAnswer(r: Response): Promise<string | undefined> {
     if (Number(r.headers.get("content-length") ?? "0") > RPC_ANSWER_MAX) return undefined;
     if (!r.body) return "";
@@ -1145,13 +1304,46 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         // ask then draws on its own allowance (POOL_LOGS_CLIENT), any other on the caller's share as before
         const final = await finalized(c, logs.to, own);
         const who = final && logs.pool && client !== undefined ? `${POOL_LOGS_CLIENT} ${client}` : client;
-        // card helper-base-logs-page: sent whole only to the providers whose span covers it; when none does, or those
-        // that do all failed it (503), the narrower ones read it in pages (pagedLogs)
-        const span = logs.to - logs.from + 1n;
-        const whole = own.filter((u) => covers(u, span));
-        const narrow = own.filter((u) => !covers(u, span));
-        let a = whole.length > 0 ? await callList(c, whole, forward, methods, who, reserved, by) : UPSTREAM();
-        if (narrow.length > 0 && a.status === 503) a = await pagedLogs(c, narrow, out as Record<string, unknown>, logs.from, logs.to, who, reserved, by);
+        // card helper-keyed-logs-serve-a-whole-pool-range: the pinned pool's finalized range, from its deploy block on, in
+        // the caller's address and topics alone: the part the store covers from the store, the rest past it as before
+        const req = out as Record<string, unknown>;
+        const filter = (req.params as unknown[])[0] as Record<string, unknown>;
+        const topics = final && logs.pool && Object.keys(filter).every((k) => k === "address" || k === "topics" || k === "fromBlock" || k === "toBlock") ? topicsOf(filter.topics) : null;
+        const s = topics === null ? undefined : storeOf(c);
+        if (s !== undefined && topics !== null && logs.from >= s.from) {
+          if (s.started && logs.to > s.covered) fillPool(c, own);
+          if (logs.from <= s.covered) {
+            const kept = storeLogs(s, logs.from, logs.to < s.covered ? logs.to : s.covered, topics);
+            let rest: string[] = [];
+            if (logs.to > s.covered) {
+              const tf = s.covered + 1n;
+              const tail = { ...req, params: [{ ...filter, fromBlock: hexOf(tf) }] };
+              const ta = (await logsRead(c, own, tail, JSON.stringify(tail), methods, tf, logs.to, who, reserved, by)).a;
+              let answer: unknown;
+              try {
+                answer = parse(ta.body);
+              } catch {
+                return ta;
+              }
+              if (ta.status !== 200 || !isPlain(answer) || Object.hasOwn(answer, "error") || !Array.isArray(answer.result)) return ta;
+              logCachePut(`${c} ${JSON.stringify(tail.params)}`, ta);
+              rest = answer.result.map((x) => JSON.stringify(x));
+            } else {
+              const t = traces.getStore();
+              if (t !== undefined) t.cached = true;
+            }
+            const body = `{"jsonrpc":"2.0","id":${JSON.stringify(id)},"result":[${[...kept, ...rest].join(",")}]}`;
+            if (Buffer.byteLength(body) <= RPC_ANSWER_MAX) return { status: 200, body };
+          }
+        }
+        const { a, capped } = await logsRead(c, own, req, forward, methods, logs.from, logs.to, who, reserved, by);
+        // a range wider than the route's pages reach: the store starts filling, for the next read
+        if (capped && s !== undefined && topics !== null && logs.from >= s.from) {
+          fillPool(c, own);
+          // the cap says how far the store is (its live check reads a store still filling apart from a route that has none)
+          const kept = `pool logs kept to block ${s.covered}`;
+          return { ...a, body: a.body.replace(/"message":("[^"]*")\}\}$/, (_m, msg: string) => `"message":${msg},"data":${JSON.stringify(kept)}}}`) };
+        }
         if (final) logCachePut(logs.key, a);
         return a;
       }
@@ -1175,6 +1367,22 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (c === "solana" && keyed && !slot.useKeyed()) return solanaRest(forward, methods, client, reserved, by);
     if ((EVM_CHAINS.has(c) && deps.holds !== undefined && (deps.pinned?.[c]?.length ?? 0) > 0) || (c !== "solana" && walks(c))) return callList(c, listOf(c), forward, methods, client, reserved, by);
     return call(c, upstreams[c].url, upstreams[c].forms, forward, methods, client, reserved, by);
+  }
+
+  /**
+   * A finalized-or-not eth_getLogs on the keyed-only route (card helper-base-logs-page): sent whole only to the providers
+   * whose span covers it; when none does, or those that do all failed it (503), the narrower ones read it in pages
+   * (pagedLogs). `capped`: the pages it needs are past the route's page cap (pagesMaxOf), so its answer is the cap.
+   */
+  async function logsRead(c: RpcChain, own: readonly string[], req: Record<string, unknown>, forward: string, methods: string[], from: bigint, to: bigint, who: string | undefined, reserved: boolean, by: number): Promise<{ a: Answer; capped: boolean }> {
+    const span = to - from + 1n;
+    const whole = own.filter((u) => covers(u, span));
+    const narrow = own.filter((u) => !covers(u, span));
+    let a = whole.length > 0 ? await callList(c, whole, forward, methods, who, reserved, by) : UPSTREAM();
+    if (narrow.length === 0 || a.status !== 503) return { a, capped: false };
+    const w = narrow.reduce((m, u) => (logsSpanByUrl.get(u)! > m ? logsSpanByUrl.get(u)! : m), 0n);
+    a = await pagedLogs(c, narrow, req, from, to, who, reserved, by);
+    return { a, capped: w > 0n && (span + w - 1n) / w > BigInt(pagesMaxOf(c)) };
   }
 
   /**
