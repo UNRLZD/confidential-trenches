@@ -806,17 +806,18 @@ test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana 
   assert.match(sellHost, /\n {6}signal,\n/, "the host's own signal the same stop");
   assert.equal([...src.matchAll(/ signal: solanaStop\.signal,/g)].length, 1, "the buy host's");
   assert.equal([...src.matchAll(/outSignal: \(\) => solanaStop\.signal,/g)].length, 1);
-  // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1)
-  assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 1);
+  // the Solana deposit host's stop: its waits between attempts end at a sign out's tap (review of f0e7bd38, P2-1); and the
+  // withdraw host's, ending a step's wait after a provider's throttle (card pool-buy-waits-out-a-throttle)
+  assert.equal([...src.matchAll(/ stop: solanaStop\.signal,/g)].length, 2);
   // the state read's pass: its one more pass after it never runs past a sign out
   assert.equal([...src.matchAll(/const stop = solanaStop\.signal;\n {4}passing = proofs\(\)/g)].length, 1);
   // the buy's carried change, proved on the stop (card buy-spends-its-change-in-the-same-tap)
   assert.equal([...src.matchAll(/\.proveFor\(c\.id, to, solanaStop\.signal\)/g)].length, 1);
   // the exit's quote ask (card pool-withdraws-to-any-chain, src/pool-exit.ts): the stop as the ask leaves, read then
   assert.equal([...src.matchAll(/ stop: \(\) => solanaStop\.signal,\n {2}\};/g)].length, 1);
-  // every read of the stop: the six takes, the buy host's, its carry proof's, outSignal, the deposit host's stop, the state
-  // pass's and the exit's
-  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 12);
+  // every read of the stop: the six takes, the buy host's, its carry proof's, outSignal, the deposit host's stop, the
+  // withdraw host's stop, the state pass's and the exit's
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 13);
   // the settle pair: the page's two seats, the helper's with the window-long retry
   assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
   assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY, kind\)\)\]/);
