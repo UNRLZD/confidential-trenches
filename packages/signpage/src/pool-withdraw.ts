@@ -413,7 +413,7 @@ const toRefused = (to: string, pin: SolanaPoolPin, pool: string, ws: readonly st
 /** A step's faults that wait: the page client's transport fault (read-waits.ts waitsOn: a 429, a 5xx, a JSON-RPC
  *  throttle, no answer in time) and the exit's busy deposit address (ReadBusy). Any other error ends the run at once. */
 const stepWaitsOn = (e: unknown): boolean => waitsOn(e) || e instanceof ReadBusy;
-/** One step of a withdraw, its plan (planStep) or one part up to its signature (onePart), made again from its first
+/** One step of a withdraw, its plan (planStep), its To (toStep) or one part up to its signature (onePart), made again from its first
  *  read after a fault that waits, on the page's one rule (read-waits.ts readWaits: from 1 s, doubling, at most 10 s, a
  *  Retry-After honoured to 10 s), each step its own bound (no wait that would end past 30 s from the step's start; then
  *  the fault ends the run, nothing of the step signed). A fault once the step's transaction is signed (`at.signed`) is
@@ -435,10 +435,10 @@ async function stepWaited<T>(h: Pick<PoolWithdrawHost, "wait" | "now" | "stop">,
   }
 }
 
-/** A withdraw's plan step: its costs read on both RPCs, the plan over the notes, the Max fee's check, then To (the exit's
- *  deposit address for another chain) checked before any note moves. Nothing in it is signed, so a provider's throttle
- *  makes it again from its first read (stepWaited). */
-async function planStep(h: PoolWithdrawHost, to: string, amount: bigint, maxFee: bigint) {
+/** A withdraw's plan step: its costs read on both RPCs, the plan over the notes, the Max fee's check and the plan's Ws.
+ *  Nothing in it is signed and no exit is asked in it, so a provider's throttle makes it again from its first read
+ *  (stepWaited). */
+async function planStep(h: PoolWithdrawHost, amount: bigint, maxFee: bigint) {
   const { scope } = solanaPoolOf(h.pin.program);
   const pool = solanaPoolAccount(h.pin.program);
   const rent = await readSolanaRent(h.rpcs);
@@ -474,11 +474,18 @@ async function planStep(h: PoolWithdrawHost, to: string, amount: bigint, maxFee:
     }
     return out;
   });
-  // another chain: To is the checked quote's deposit address on this chain, its refund the first W
-  if (h.exit) to = await h.exit(spends[0]!.w);
-  if (toRefused(to, h.pin, pool, spends.map((x) => x.w))) stop("to");
+  return { pool, fee, wFee, notes, plan, wCap, ws: spends.map((x) => x.w) };
+}
+
+/** A withdraw's To step, once the plan's Ws are known: another chain's To is the exit's deposit address on this chain,
+ *  its refund the plan's first W, asked once a run (`asked` keeps the answer, so a throttled check after it never asks
+ *  again; a retry asks no other W, since the plan is never made again past this point: an abandoned quote never names
+ *  a W the withdraw does not use); then To checked on both RPCs before any note moves. */
+async function toStep(h: PoolWithdrawHost, to: string, pool: string, ws: readonly string[], asked: { to?: string }): Promise<string> {
+  if (h.exit) to = asked.to ??= await h.exit(ws[0]!);
+  if (toRefused(to, h.pin, pool, ws)) stop("to");
   await checkTo(h, to);
-  return { pool, fee, wFee, notes, plan, wCap, dest: to };
+  return to;
 }
 
 /** One withdraw of `amount` (base units arriving at `to`), `to` the address typed on this page and checked there, and
@@ -493,9 +500,10 @@ export async function runPoolWithdraw(h: PoolWithdrawHost, ask: PoolAsk, to: str
   try {
     if (ask.kind !== "pool.withdraw" || ask.chain !== "solana") stop("kind");
     if (typeof maxFee !== "bigint" || maxFee < 0n) stop("max_fee");
-    // the plan, its costs and To, read again from the first read after a provider's throttle (stepWaited)
-    const { pool, fee, wFee, notes, plan, wCap, dest } = await stepWaited(h, () => planStep(h, to, amount, maxFee));
-    to = dest;
+    // the plan and its costs, then To, each read again from its first read after a provider's throttle (stepWaited)
+    const { pool, fee, wFee, notes, plan, wCap, ws } = await stepWaited(h, () => planStep(h, amount, maxFee));
+    const asked: { to?: string } = {};
+    to = await stepWaited(h, () => toStep(h, to, pool, ws, asked));
     // from here to the run's end no queue in any tab takes a planned note (each part refreshes the record's deadline)
     if (h.keepOut) await h.keepOut(plan.map((x) => x.noteId), keepSpan(h.pool));
     for (const [i, p] of plan.entries()) {

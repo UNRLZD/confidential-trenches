@@ -16,6 +16,8 @@ import { ASK, COST, POOL, TO, closers, world } from "./pool-withdraw-world.ts";
 after(() => closers.forEach((c) => c()));
 
 const AFTER_MS = 2_000;
+/** The exit's deposit address on Solana (a quote's, as the exit answers it). */
+const DEPOSIT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 const throttle = (): SolanaRpcTransportError => new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc.example", AFTER_MS);
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 40; i++) await new Promise((ok) => setImmediate(ok));
@@ -79,15 +81,30 @@ test("a part's pool read throttled once before it signs: the part is made again 
 test("the exit's deposit address busy once (HTTP 429): asked again after the wait, the run pays the address", async (t) => {
   const c = clock(t);
   const wd = await world([30_000_000n], { wait: c.wait });
-  const DEPOSIT = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
-  let asked = 0;
-  const exit = async (): Promise<string> => {
-    if (asked++ === 0) throw new ReadBusy(429);
+  const refunds: string[] = [];
+  const exit = async (w: string): Promise<string> => {
+    if (refunds.push(w) === 1) throw new ReadBusy(429);
     return DEPOSIT;
   };
   const { v: a } = await c.drive(runPoolWithdraw({ ...wd.host, exit }, ASK, TO, 2_000_000n, COST));
   assert.equal(a.stage, "sent", a.cause);
-  assert.equal(asked, 2);
+  assert.equal(refunds.length, 2);
+  assert.equal(refunds[1], refunds[0], "asked again with the same W: no quote names a W the withdraw does not use");
+  assert.equal(wd.balance.get(DEPOSIT), 2_000_000n);
+});
+
+test("the exit answered, then To's check throttled: the run waits, checks the same address again and pays it; the exit asked once", async (t) => {
+  const c = clock(t);
+  const wd = await world([30_000_000n], { wait: c.wait });
+  const refunds: string[] = [];
+  const exit = async (w: string): Promise<string> => (refunds.push(w), DEPOSIT);
+  let n = 0;
+  const rpcs = faulty(wd.host.rpcs, (p, m, params) => (p === 0 && m === "getAccountInfo" && params[0] === DEPOSIT && n++ === 0 ? throttle() : null));
+  const { v: a } = await c.drive(runPoolWithdraw({ ...wd.host, rpcs, exit }, ASK, TO, 2_000_000n, COST));
+  assert.equal(a.stage, "sent", a.cause);
+  assert.equal(n > 1, true, "To checked again after the wait");
+  assert.ok(c.waits.includes(AFTER_MS), c.waits.join(","));
+  assert.equal(refunds.length, 1, `the exit asked ${refunds.length} times: an abandoned quote names a W`);
   assert.equal(wd.balance.get(DEPOSIT), 2_000_000n);
 });
 
@@ -129,10 +146,10 @@ test("a sign out during the wait ends it: stopped, nothing bound, before the Ret
   assert.ok(ms < AFTER_MS, `the wait outlived the sign out (${ms} ms)`);
 });
 
-test("the exit's 1Click ask answered 429 or 503 is busy (ReadBusy), a 400 still refused", async () => {
+test("the exit's 1Click ask answered 429 or 503 is busy (ReadBusy), a 400 or a 404 still refused", async () => {
   const { poolExit, PoolExitRefused } = await import("../src/pool-exit.ts");
   const ready = { chain: "solana", dest: "base", to: "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", amount: 100_000_000n, maxFee: 1n } as const;
   const answering = (status: number) => ({ network: "mainnet", price: () => null, now: () => 1_800_000_000_000, fetch: (async () => new Response("{}", { status, headers: { "content-type": "application/json" } })) as typeof fetch });
   for (const status of [429, 503]) await assert.rejects(poolExit(answering(status), ready)!(TO), (e: unknown) => e instanceof ReadBusy);
-  await assert.rejects(poolExit(answering(404), ready)!(TO), (e: unknown) => e instanceof PoolExitRefused && !(e instanceof ReadBusy));
+  for (const status of [400, 404]) await assert.rejects(poolExit(answering(status), ready)!(TO), (e: unknown) => e instanceof PoolExitRefused && !(e instanceof ReadBusy), `HTTP ${status}`);
 });
