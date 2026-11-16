@@ -1,0 +1,92 @@
+{
+ "good": {
+  "note": "the helper serving and ready on its mainnet pools, read 16 Nov after the failed 13:4xZ redeploy, judged for the commit it runs",
+  "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+  "run": {
+   "at": "2026-11-16T14:25:13.332Z",
+   "base": "https://ct-api.unrealized.trade",
+   "health": {
+    "status": 200,
+    "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+    "body": "{\"ok\":true,\"commit\":\"6194790b71f03faf7e8bf4e6063c1d9adc7095b9\",\"release\":168,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+   },
+   "fees": [
+    {
+     "chain": "solana",
+     "network": "mainnet",
+     "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1794839100000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+     }
+    },
+    {
+     "chain": "evm",
+     "network": "base",
+     "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794839100000,\"block\":\"0x378ba26\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     }
+    },
+    {
+     "chain": "evm",
+     "network": "robinhood",
+     "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794839100000,\"block\":\"0x6e76923\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+     }
+    }
+   ]
+  }
+ },
+ "bad": {
+  "note": "the same host after the 13:4xZ redeploy of 80f48ad9a, whose helper was never ready (its robinhood-testnet pool check refused): the host still answers the commit before it",
+  "commit": "80f48ad9aabd5c76810f6608a3c431c96db4383f",
+  "run": {
+   "at": "2026-11-16T14:25:13.332Z",
+   "base": "https://ct-api.unrealized.trade",
+   "health": {
+    "status": 200,
+    "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+    "body": "{\"ok\":true,\"commit\":\"6194790b71f03faf7e8bf4e6063c1d9adc7095b9\",\"release\":168,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+   },
+   "fees": [
+    {
+     "chain": "solana",
+     "network": "mainnet",
+     "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1794839100000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+     }
+    },
+    {
+     "chain": "evm",
+     "network": "base",
+     "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794839100000,\"block\":\"0x378ba26\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     }
+    },
+    {
+     "chain": "evm",
+     "network": "robinhood",
+     "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+     "answer": {
+      "status": 200,
+      "commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9",
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794839100000,\"block\":\"0x6e76923\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+     }
+    }
+   ]
+  }
+ }
+}

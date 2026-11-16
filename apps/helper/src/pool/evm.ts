@@ -216,6 +216,7 @@ import {
 } from "@blindfill/kit";
 import { epochStartOf, everyEpoch, POOL_EPOCH_MS, type EpochTimer } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
+import { isMainnetEvm } from "./mainnet-only.ts";
 import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, type ProviderHolds } from "../limits/limits.ts";
 import { companyOf, KEYED_PROVIDER, readUpstreams } from "../rpc/rpc.ts";
 
@@ -2422,9 +2423,11 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
         await s0.ready(sleep).catch((e: Error) => Promise.reject(new Error(`${names[4]}: ${scrub(e.message)}`)));
         // this pool's routes serve once its own check passed (review of f86e1c27, P3-1: one chain's unreadable fee never
         // holds another's routes); review P3-2: ready at a moment every pool of this helper holds the running period's
-        // fee, never one pool's fee of a period gone by while another's is read
+        // fee, never one pool's fee of a period gone by while another's is read. Card
+        // helper-ready-never-waits-on-a-testnet-pool: the pools of its own kind only, mainnet or test (pool/mainnet-only.ts),
+        // so a mainnet pool's check never waits on a test network's fee
         start = "passed";
-        await untilFeesHeld([...out.values()], Date.now, sleep);
+        await untilFeesHeld([...out.values()].filter((o) => isMainnetEvm(o.network) === isMainnetEvm(network)), Date.now, sleep);
       },
     };
     if (pin !== undefined && s.sellSender !== null && pin.toLowerCase() !== s.sellSender) throw new Error(`${sellName} is not the key of the kit's pinned sell sender for ${network} (${pin})`);
