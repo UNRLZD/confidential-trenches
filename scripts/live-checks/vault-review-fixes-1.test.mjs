@@ -1,5 +1,9 @@
 // node --test scripts/live-checks/vault-review-fixes-1.test.mjs: the live check replays recorded runs
-// (vault-review-fixes-1.answers.json). good: the deployed helper on 2026-11-06, mainnet answering 404 (no relayer quoted
+// (vault-review-fixes-1.answers.json). The live check reads NEAR mainnet only (card live-checks-read-mainnet-only).
+// good_mainnet: the deployed helper on 2026-11-16 (a real run, the check's own --record), mainnet quoting
+// fees.unrlzd.near, registered on mainnet USDC and not blocklisted on FastNEAR and dRPC: PASS. Made from it (marked
+// "made"): the fee account unregistered (storage_balance_of null on both): FAIL. The two-network recordings below were
+// read when the check read NEAR testnet too; they replay under WITH_TESTNET, the networks they were read on. good: the deployed helper on 2026-11-06, mainnet answering 404 (no relayer quoted
 // there yet) and testnet quoting f-2b700409.bf-vt-20261102t071444.testnet, registered on the testnet token and not
 // blocklisted on FastNEAR and dRPC: PASS. bad: a stand-in helper quoting a fee account never registered, every RPC
 // answer the real testnet's: FAIL. Each block answer is recorded as its header's height and hash, the two fields
@@ -10,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check } from "./vault-review-fixes-1.mjs";
+import { check, PAIRS, TOKENS } from "./vault-review-fixes-1.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "vault-review-fixes-1.answers.json"), "utf8"));
@@ -26,7 +30,10 @@ function replay(answers) {
     return new Response(a.text, { status: a.status });
   };
 }
-const run = (rec, edit = (x) => x) => check({ base: rec.base, fetchFn: replay(rec.answers.map((a) => edit(structuredClone(a)))) });
+/** The networks the two-network recordings were read on: mainnet and the testnet token the check read before. */
+const WITH_TESTNET = { tokens: { ...TOKENS, testnet: "bf-usdc-20261101t022248.testnet" }, pairs: { ...PAIRS, testnet: ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"] } }; // gitleaks:allow (a public account id)
+const run = (rec, edit = (x) => x) => check({ base: rec.base, fetchFn: replay(rec.answers.map((a) => edit(structuredClone(a)))), ...WITH_TESTNET });
+const runMainnet = (rec, edit = (x) => x) => check({ base: rec.base, fetchFn: replay(rec.answers.map((a) => edit(structuredClone(a)))) });
 const bads = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const view = (a, m) => a.request?.method === "query" && a.request.params.method_name === m;
 const withResult = (a, v) => {
@@ -35,14 +42,30 @@ const withResult = (a, v) => {
   return { ...a, text: JSON.stringify(j) };
 };
 
-test("recorded good run: the deployed helper's testnet fee account registered and not blocklisted on both RPCs, mainnet not quoted: PASS", async () => {
+test("recorded good run on mainnet: fees.unrlzd.near registered on mainnet USDC and not blocklisted on both RPCs: PASS", async () => {
+  assert.deepEqual(Object.keys(TOKENS), ["mainnet"]);
+  const r = await runMainnet(A.good_mainnet);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(r.lines.filter((l) => l.startsWith("ok  [mainnet]")).length, 2);
+  assert.ok(!r.lines.some((l) => /testnet/.test(l)));
+});
+
+test("made from the mainnet good run: the fee account unregistered (storage_balance_of null on both), mainnet not quoted: each FAIL", async () => {
+  const r = await runMainnet(A.good_mainnet, (a) => (view(a, "storage_balance_of") ? withResult(a, null) : a));
+  assert.equal(r.ok, false);
+  assert.deepEqual(bads(r).map((l) => l.replace(/block \d+/, "block H")), ["BAD [mainnet] storage_balance_of(fees.unrlzd.near) on 17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1 at block H: null on both RPCs: not registered, the token refuses its fee"]);
+  const none = await runMainnet(A.good, (a) => a);
+  assert.deepEqual(bads(none), ["BAD no network quoted a relayer: no fee account read"], "the old good run's mainnet half quotes nothing");
+});
+
+test("recorded good run (two networks): the deployed helper's testnet fee account registered and not blocklisted on both RPCs, mainnet not quoted: PASS", async () => {
   const r = await run(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith("na  [mainnet]")));
   assert.equal(r.lines.filter((l) => l.startsWith("ok  [testnet]")).length, 2);
 });
 
-test("recorded bad run: a fee account never registered on the token: FAIL", async () => {
+test("recorded bad run (two networks): a fee account never registered on the token: FAIL", async () => {
   const r = await run(A.bad_unregistered);
   assert.equal(r.ok, false);
   assert.deepEqual(bads(r).map((l) => l.replace(/block \d+/, "block H")), ["BAD [testnet] storage_balance_of(f-unregistered.bf-vt-20261102t071444.testnet) on bf-usdc-20261101t022248.testnet at block H: null on both RPCs: not registered, the token refuses its fee"]);
