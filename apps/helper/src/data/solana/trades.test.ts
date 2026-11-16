@@ -454,7 +454,10 @@ test("card helper-live-bars-no-503: a held token's tape and live candles (limit 
     ms += step; // the page's reads keep the token open (IDLE_MS); no fold runs while the stream's gap is unread
     const a = await t.trades(MINT, 50);
     assert.equal(a.status, 200, `${ms - readAt} ms after the last read: ${a.status} ${a.body}`);
-    assert.equal(a.body, tape0.body, "the held tape, as_of_ms its last read");
+    // the held tape, as_of_ms its last read; while the gap is unread it claims no reach (card token-stats-count-every-trade)
+    const { whole_ms, ...held } = JSON.parse(tape0.body) as Record<string, unknown>;
+    assert.equal(whole_ms, 0, "the walk listed the mint's every signature");
+    assert.deepEqual(JSON.parse(a.body), held, "the held tape, as_of_ms its last read, and no reach while a gap is unread");
     assert.equal(a.asOfMs, readAt);
     const c = await t.candles(MINT, "1m", null, 2);
     assert.equal(c.status, 200, c.body);
@@ -1046,4 +1049,24 @@ test("card helper-listed-charts-own-reads: a listed coin's first chart read with
   t.stop();
   assert.equal(next.src, "chain,coingecko");
   assert.equal(next.candles.length, 3, "the history's two and our walk's one");
+});
+
+// card token-stats-count-every-trade: the tape's reach (whole_ms), from which the page counts a window's buys, sells and
+// volume. The 16 Nov reads it answers: BUMBA, a new pump.fun coin whose first walk lists every signature it has (reach 0,
+// every window the tape's), and READ GAS's tape against a Jupiter row that lagged it.
+test("card token-stats-count-every-trade: the first walk's reach: 0 from the mint's first signature, else the second after its oldest read or a transaction it could not read", async () => {
+  const sigsOf = (n: number) => Array.from({ length: n }, (_, i) => ({ signature: `s${i}`, slot: 465_000_100 - i, err: null, blockTime: TS - 100 - i }));
+  const txs = (n: number, missing: number[] = []) => Object.fromEntries(sigsOf(n).filter((_, i) => !missing.includes(i)).map((x) => [x.signature, { ...BUY.result, slot: x.slot, blockTime: x.blockTime }]));
+  const reach = async (c: Chain) => {
+    const s = setup(c);
+    await s.t.trades(MINT, 50);
+    await settle();
+    return (JSON.parse((await s.t.trades(MINT, 50)).body) as { whole_ms?: number }).whole_ms;
+  };
+  // BUMBA: five signatures, the whole list: every trade since the mint's first
+  assert.equal(await reach({ sigs: () => sigsOf(5), txs: txs(5), price: 9_342_267_796n, pub: TS, slot: 100 }), 0);
+  // a full first page (COLD_SIGS): every trade from the second after its oldest
+  assert.equal(await reach({ sigs: (p) => (p.before === undefined ? sigsOf(COLD_SIGS) : []), txs: txs(COLD_SIGS), price: 9_342_267_796n, pub: TS, slot: 100 }), (TS - 100 - (COLD_SIGS - 1)) * 1000 + 1000);
+  // the whole list, one transaction not read: a trade may be missing at its second, so the reach is past it
+  assert.equal(await reach({ sigs: () => sigsOf(5), txs: txs(5, [3]), price: 9_342_267_796n, pub: TS, slot: 100 }), (TS - 103) * 1000 + 1000);
 });

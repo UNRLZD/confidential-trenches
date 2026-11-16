@@ -264,3 +264,18 @@ test("engineHolders: Ref's pool contracts are no holders, in the list or the top
   assert.equal(h.top_bps, 291 + 268);
   assert.equal(h.total, 31);
 });
+
+test("card token-stats-count-every-trade: the engine's tape claims every trade after its oldest (whole_ms), at any limit; a row dropped as malformed claims none", async () => {
+  const near = engineFirst(rhea([]), engine());
+  const full = JSON.parse((await near.trades.trades(T, 50)).body) as { trades: { t_ms: number }[]; whole_ms?: number };
+  assert.equal(full.whole_ms, full.trades.at(-1)!.t_ms + 1_000);
+  // the page asks 50; a shorter ask still names the reach of the whole list read
+  assert.equal((JSON.parse((await near.trades.trades(T, 2)).body) as { whole_ms?: number }).whole_ms, full.whole_ms);
+  // one row of the engine's answer with no transaction hash: a trade the tape lacks, so no reach
+  const raw = JSON.parse(fx("trades")) as { trades: Record<string, unknown>[] };
+  raw.trades[2]!.txHash = 7;
+  const bad = createEngineNear({ fetch: async (url) => (url.endsWith("/trades") ? new Response(JSON.stringify(raw), { status: 200 }) : new Response(fx(ROUTES[url.slice(ENGINE.length)] ?? "token"), { status: 200 })), now: () => AT });
+  const t = JSON.parse((await engineFirst(rhea([]), bad).trades.trades(T, 50)).body) as { trades: unknown[]; whole_ms?: number };
+  assert.equal(t.trades.length, full.trades.length - 1);
+  assert.equal(t.whole_ms, undefined);
+});

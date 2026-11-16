@@ -381,7 +381,14 @@ export function createEngineNear(deps: EngineDeps = {}) {
       const h = await tradeReads(t.row.token as string, () => get(`/token/${encodeURIComponent(t.row.token as string)}/trades`));
       const rows = h === null || h.v === undefined ? null : engineTape(h.v, d, limit);
       if (h === null || rows === null) return null;
-      return { status: 200, body: JSON.stringify({ trades: rows, src: SRC, as_of_ms: h.at }), src: SRC, asOfMs: h.at };
+      // the engine indexes every NEAR block: its newest trades hold every one after their oldest (card
+      // token-stats-count-every-trade), when each row of its answer was read (a row dropped as malformed is a trade the
+      // tape lacks, so no reach is claimed)
+      const listed = obj(h.v).trades;
+      const all = engineTape(h.v, d, Number.MAX_SAFE_INTEGER);
+      const oldest = Array.isArray(listed) && all !== null && all.length === listed.length ? all.at(-1)?.t_ms : undefined;
+      const whole = oldest === undefined ? {} : { whole_ms: oldest + 1_000 };
+      return { status: 200, body: JSON.stringify({ trades: rows, ...whole, src: SRC, as_of_ms: h.at }), src: SRC, asOfMs: h.at };
     },
     async candles(id: string, tf: string, to: number | null, limit: number): Promise<DataAnswer | null> {
       if (!Object.hasOwn(TF_SECONDS, tf)) return NOT_FOUND;

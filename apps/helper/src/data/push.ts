@@ -80,10 +80,12 @@ function refuse(socket: Duplex, commit: string, status: number, reason: string, 
 }
 
 /** The tape's rows as one string, so a change is seen whatever else the answer carries (its as_of_ms moves each read). */
-function rowsOf(body: string): string | null {
+export function rowsOf(body: string): string | null {
   try {
-    const t = (JSON.parse(body) as { trades?: unknown }).trades;
-    return Array.isArray(t) ? JSON.stringify(t) : null;
+    // the rows, and what the page counts them by (card token-stats-count-every-trade): a tape whose filling ends or whose
+    // reach (whole_ms) moves is sent again with the same rows
+    const b = JSON.parse(body) as { trades?: unknown; filling?: unknown; whole_ms?: unknown };
+    return Array.isArray(b.trades) ? JSON.stringify([b.trades, b.filling ?? null, b.whole_ms ?? null]) : null;
   } catch {
     return null;
   }

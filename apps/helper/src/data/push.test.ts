@@ -9,6 +9,7 @@ import type { AddressInfo, Socket } from "node:net";
 import { test } from "node:test";
 import { HELPER_CORS } from "@blindfill/kit";
 import { start } from "../server.ts";
+import { rowsOf } from "./push.ts";
 import { createSolanaTrades } from "./solana/trades.ts";
 
 const COMMIT = "a".repeat(40);
@@ -323,4 +324,13 @@ test("card solana-trades-show-on-every-token: a Solana token Discover's lists do
   const got = await fetch(`http://127.0.0.1:${port}/v1/market/trades?chain=solana&token=${MINT}`, { headers: { origin: APP } });
   assert.equal(got.status, 200);
   assert.deepEqual(((await got.json()) as { trades: unknown[] }).trades, rows);
+});
+
+test("card token-stats-count-every-trade: a tape whose filling ends or whose reach moves is pushed again with the same rows; the same answer is not", () => {
+  const body = (o: Record<string, unknown>) => JSON.stringify({ trades: [{ t_ms: 1_000, side: "b", usd: "1", amt: "1", trader: null, tx: "a" }], src: "chain", as_of_ms: 5, ...o });
+  assert.equal(rowsOf(body({ whole_ms: 0 })), rowsOf(body({ whole_ms: 0, as_of_ms: 9 })), "a later read of the same tape");
+  assert.notEqual(rowsOf(body({ filling: true })), rowsOf(body({})), "filling ended");
+  assert.notEqual(rowsOf(body({ whole_ms: 2_000 })), rowsOf(body({ whole_ms: 0 })), "the reach moved");
+  assert.notEqual(rowsOf(body({})), rowsOf(body({ whole_ms: 0 })), "a reach claimed");
+  assert.equal(rowsOf("{"), null);
 });
