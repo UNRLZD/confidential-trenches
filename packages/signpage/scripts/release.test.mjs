@@ -327,6 +327,37 @@ test("planted (card app-deploy-refuses-an-unlisted-build): a newest list that ca
   }
 });
 
+test("--unreleased <dir> --host app: exit 0 when the newest list names the build, 1 with the lines when not, 2 on a bad argument; --print --build lists a folder", () => {
+  const app = mkdtempSync(join(tmpdir(), "ct-app-build-"));
+  const dir = mkdtempSync(join(tmpdir(), "ct-releases-"));
+  try {
+    writeFileSync(join(app, "_headers"), "/*\n  X-Content-Type-Options: nosniff\n");
+    writeFileSync(join(app, "index.html"), "<!doctype html>");
+    const printed = listMain(["--print", "--host", "app", "--build", app]);
+    assert.equal(printed.code, 0, printed.err?.join("\n"));
+    const list = JSON.parse(printed.out[0]);
+    assert.deepEqual(Object.keys(list.hosts), ["APP_HOST"]);
+    assert.deepEqual(list.hosts.APP_HOST.files.map((f) => f.path), ["/"]);
+    const text = `${JSON.stringify({ ...list, release: "release-1" }, null, 1)}\n`;
+    writeFileSync(join(dir, "release-1.json"), text);
+    const ledger = join(tmp, "unreleased-ledger.json");
+    writeFileSync(ledger, JSON.stringify({ "release-1": sha256(text) }));
+    const args = ["--unreleased", app, "--host", "app", "--releases", dir, "--ledger", ledger];
+    assert.deepEqual(listMain(args), { code: 0, out: ["release-1, the newest release, names this APP_HOST build"] });
+    writeFileSync(join(app, "index.html"), "<!doctype html> ");
+    const no = listMain(args);
+    assert.equal(no.code, 1);
+    assert.ok(no.err[0].startsWith("release-1, the newest release, is not this APP_HOST build (APP_HOST /: "), no.err.join("\n"));
+    for (const bad of [["--unreleased", app], ["--unreleased", app, "--host", "web"], ["--unreleased", "--host", "app"], ["--unreleased", app, "--host", "app", "--releases", dir], ["--print", "--build", app], [...args, "--x"]]) assert.equal(listMain(bad).code, 2, bad.join(" "));
+    assert.equal(listMain(["--unreleased", app, "--host", "app", "--releases", dir, "--ledger", join(tmp, "no-such-ledger.json")]).code, 2);
+    // a build folder that cannot be listed is no answer (2), never a pass
+    assert.equal(listMain(["--unreleased", join(tmp, "no-such-build"), "--host", "app", "--releases", dir, "--ledger", ledger]).code, 2);
+  } finally {
+    rmSync(app, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("planted: a list not in the ledger, and a ledger entry whose list is gone, fail; a written release is never written again", () => {
   const dir = releasesCopy();
   try {

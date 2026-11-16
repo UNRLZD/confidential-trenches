@@ -183,15 +183,24 @@ const steps = ({ head = "abc123", status = "", from = BUILD, problems = [] as st
 };
 const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
 
-// card app-deploy-refuses-an-unlisted-build: the release lists a deploy is held to, a test's stand-ins ({ dir, ledger }
-// as release-list.mjs reads them): release-1 lists `from` as APP_HOST's part (the build the deploy makes from BUILD,
-// unless a test says otherwise), its row in the ledger as written. `text` replaces the list's bytes (an unreadable list).
-const { makeList } = await import("../../../packages/signpage/scripts/release-list.mjs");
-const lists = ({ from = BUILD as string | null, text = null as string | null, host = "APP_HOST" } = {}) => {
+// card app-deploy-refuses-an-unlisted-build: the release lists a deploy is held to, a test's stand-ins ({ dir, ledger }:
+// a releases folder and a ledger JSON file, as release-list.mjs --unreleased reads them): release-1 lists `from` as
+// `host`'s part (the build the deploy makes from BUILD, unless a test says otherwise), written by release-list.mjs
+// --print --build (run, not imported: this file is outside packages/), its row in the ledger as written. `text`
+// replaces the list's bytes (an unreadable list), `ledger` the ledger.
+const RELEASE_LIST = join(HERE, "..", "..", "..", "packages", "signpage", "scripts", "release-list.mjs");
+const lists = ({ from = BUILD, text = null as string | null, host = "app", ledger = null as Record<string, string> | null } = {}) => {
   const dir = mkdtempSync(join(tmpdir(), "deploy-releases-"));
-  const body = text ?? `${JSON.stringify(makeList("release-1", { [host]: from }, null), null, 1)}\n`;
+  let body = text;
+  if (body === null) {
+    const r = spawnSync(process.execPath, [RELEASE_LIST, "--print", "--host", host, "--build", from], { encoding: "utf8", maxBuffer: 64 << 20 });
+    assert.equal(r.status, 0, r.stderr);
+    body = `${JSON.stringify({ ...JSON.parse(r.stdout), release: "release-1" }, null, 1)}\n`;
+  }
   writeFileSync(join(dir, "release-1.json"), body);
-  return { dir, ledger: { "release-1": createHash("sha256").update(body).digest("hex") } };
+  const file = join(dir, "ledger.json");
+  writeFileSync(file, JSON.stringify(ledger ?? { "release-1": createHash("sha256").update(body).digest("hex") }));
+  return { dir, ledger: file };
 };
 const LISTED = lists();
 
@@ -434,7 +443,7 @@ test("a deploy whose APP_HOST serves exactly the build it uploaded (/ and its ma
 // would have seen it. The deploy now holds its build to the newest list's APP_HOST part, file for file and header for
 // header, with the _headers file, before any token is read or a byte uploaded (release-list.mjs unreleasedProblems,
 // the sign deploy's own comparer).
-const unlisted = async (opts: { edit?: (dir: string) => void; released?: { dir: string; ledger: Record<string, string> } | {}; env?: Record<string, string>; argv?: string[] } = {}) => {
+const unlisted = async (opts: { edit?: (dir: string) => void; released?: { dir: string; ledger: string } | {}; env?: Record<string, string>; argv?: string[] } = {}) => {
   const { deploy } = await import("./deploy.mjs");
   const from = mkdtempSync(join(tmpdir(), "deploy-unlisted-"));
   cpSync(BUILD, from, { recursive: true });
@@ -480,12 +489,14 @@ test("planted: one byte, one header or the _headers file unlike the list's, or a
 });
 
 test("planted: no release list, a list it cannot read, a list with no APP_HOST part, or one edited after it was written refuses the deploy", async () => {
-  const none = { dir: mkdtempSync(join(tmpdir(), "deploy-releases-")), ledger: {} };
+  const none = { dir: mkdtempSync(join(tmpdir(), "deploy-releases-")), ledger: "" };
+  none.ledger = join(none.dir, "..", `${none.dir.split("/").at(-1)}-ledger.json`);
+  writeFileSync(none.ledger, "{}");
   const cases: [string, object, RegExp][] = [
     ["no list", none, /^REFUSED no release list$/],
     ["an unreadable list", lists({ text: "{ not json\n" }), /^REFUSED release-1 cannot be read \(.+\): /],
-    ["a list with no APP_HOST part", lists({ host: "SIGN_HOST" }), /^REFUSED release-1, the newest release, is not this APP_HOST build \(APP_HOST: not in the list\)/],
-    ["an edited list", { ...lists(), ledger: { "release-1": "0".repeat(64) } }, /^REFUSED release-1 was edited after it was written/],
+    ["a list with no APP_HOST part", lists({ host: "sign" }), /^REFUSED release-1, the newest release, is not this APP_HOST build \(APP_HOST: not in the list\)/],
+    ["an edited list", lists({ ledger: { "release-1": "0".repeat(64) } }), /^REFUSED release-1 was edited after it was written/],
   ];
   for (const [what, released, re] of cases) {
     const { r, s, said } = await unlisted({ released });
