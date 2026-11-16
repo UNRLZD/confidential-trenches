@@ -355,6 +355,27 @@ export function usd(s: string): string {
   return `$${i.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${(f + "00").slice(0, 2)}`;
 }
 
+/**
+ * The minimum as the Min line draws it (card app-money-sheets-read-right, QA walk item 13: "Min 1.015576 USDC"): USDC at
+ * most 2 decimals, its cents; any other coin 2 significant digits (an ETH floor of 0.00052 is not 0.01). Always rounded
+ * up, so the minimum drawn is never under the one the quote is held to; the comparisons keep the exact `min`.
+ */
+export function minShown(min: string, symbol: string): string {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(min);
+  if (!m) return min;
+  const [, i = "0", f = ""] = m;
+  const lead = /^0*$/.test(i) ? (/^0*/.exec(f)?.[0].length ?? 0) : 0;
+  const keep = symbol === "USDC" || lead === 0 ? 2 : lead + 2;
+  if (f.length <= keep) {
+    const t = f.replace(/0+$/, "");
+    return t ? `${i}.${t}` : i;
+  }
+  const up = /[1-9]/.test(f.slice(keep)) ? 1n : 0n;
+  const v = (BigInt(i + f.slice(0, keep)) + up).toString().padStart(keep + 1, "0");
+  const fr = v.slice(v.length - keep).replace(/0+$/, "");
+  return fr ? `${v.slice(0, v.length - keep)}.${fr}` : v.slice(0, v.length - keep);
+}
+
 /** The asset picker's rows: each symbol once, in the list's order. */
 export function symbolsOf(assets: readonly Asset[]): string[] {
   return [...new Set(assets.map((a) => a.symbol))];

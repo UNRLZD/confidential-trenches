@@ -1,6 +1,7 @@
 // The app's Withdraw form on fixtures (run.mjs; card withdraw-in-app-to-any-chain): the app's own DepositSheet on its
 // Withdraw segment, fed through DepositSourceProvider instead of the kit and SIGN_HOST, opened as a pool row opens it
-// (DepositSheetProvider openWithdraw with the row's chain). ?from=<chain> names the row (none: the first place with money).
+// (DepositSheetProvider openWithdraw with the row's chain). ?from=<chain> names the row (none: the first place with money);
+// ?empty holds nothing anywhere.
 // The state holds money in Cash and in all three pools. Every hop is recorded in window.__calls and answered ok, as the
 // shell's ok when SIGN_HOST's Confirm is up. Test only.
 import type { SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
@@ -41,7 +42,9 @@ declare global {
 window.__calls = [];
 
 const from = new URLSearchParams(location.search).get("from");
-const snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v1", state: STATE, stale: false };
+// ?empty: an account that holds nothing (card app-money-sheets-read-right): Cash's tile with its 0
+const empty = new URLSearchParams(location.search).has("empty");
+const snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v1", state: empty ? { ...STATE, vault_balance: "0", pools: [] } : STATE, stale: false };
 const src: DepositSource = {
   snapshot,
   moneyOn: true,

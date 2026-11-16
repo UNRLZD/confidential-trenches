@@ -6,6 +6,7 @@
 // (design/proto/assets/app.js and private.js at design-lock-r5; a label R5 draws through P.dc is R5's draft copy and stays
 // a draft here), and the owner's picks in docs/owner-decisions.md (the Nov 2 words page: owner 2 Nov 06:08Z, all
 // approved).
+import { WORDS as PF } from "../portfolio/words.ts";
 
 export interface Word {
   text: string;
@@ -34,6 +35,9 @@ export const WORDS = {
   // card withdraw-in-app-to-any-chain: the label over where the money arrives, the deposit's own To (the row of where it
   // leaves has no label: the app has no picked word for it, proposed to the owner in the card's hand-back)
   to: ok("To", "owner 8 Nov 07:55Z, kept (src/screens/deposit/words.ts to): the label over where the money goes"),
+  // card app-money-sheets-read-right (QA walk item 12): the label over the places the money leaves, Portfolio's Move's
+  // own From beside To (a draft there, drawn here as one)
+  from: PF.from,
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
