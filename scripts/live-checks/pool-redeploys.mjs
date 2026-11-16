@@ -1,6 +1,6 @@
 // The testnet pool sets a later card redeployed whole, and the record naming a testnet's current pool: the one list,
-// read by pool-evm-deploy.mjs (poolRecordName, poolFile) and scripts/ci/helper-live-checks.mjs (evmPoolRecord). It
-// imports only node: modules, so the live plan's fixtures copy this file alone.
+// read by pool-evm-deploy.mjs (poolRecordName, poolFile); the helper's live list reads no testnet pool (card
+// helper-mainnet-pools-only). It imports only node: modules.
 // Runs: once, no check: a module the checks share (the list of testnet pool redeploys)
 import { existsSync } from "node:fs";
 import path from "node:path";
