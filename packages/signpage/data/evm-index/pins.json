@@ -1,0 +1,10 @@
+{
+ "base": {
+  "bytes": 672436,
+  "sha256": "ecf9f8baea23e0d773b3acccca3cd5839b99d99e8b9b88e20f86bb6747499cc8"
+ },
+ "robinhood": {
+  "bytes": 6047325,
+  "sha256": "087f3c1017457be2d0b2eab03b1b94b6c6442fa1bae0acf35968a900021b3480"
+ }
+}

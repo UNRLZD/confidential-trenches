@@ -3,12 +3,14 @@
 // index on the venue's two index readers, the same sync the device runs (kit trade/evm/buy-tap.ts evmPoolIndexRefresh,
 // checks/evm/pool-index.ts: every span proven on both readers), written to data/evm-index/<chain>.json in the
 // snapshot's compact form (evmPoolIndexSnapshotOf) and read back through the page's own check (evmPoolIndexFromSnapshot)
-// before it is written. The build copies them to /evm-index/<chain>.json (build-app.mjs SERVED), so the release list pins
-// their bytes; a device with no kept index starts its sync from the snapshot at its first EVM coin quote and reads only
+// before it is written, with its size and sha256 in data/evm-index/pins.json. The build copies them to
+// /evm-index/<chain>.json (build-app.mjs SERVED), refusing one that is not its pin, so the release list pins their
+// bytes; a device with no kept index starts its sync from the snapshot at its first EVM coin quote and reads only
 // the blocks past it.
 // Read-only: nothing is signed or sent. Run it at each release cut, then commit the files.
 //   node packages/signpage/scripts/evm-index-snapshot.mjs [--chain base|robinhood ...]   exit 0 written, 1 a sync failed
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolIndexRefresh } from "../../kit/src/trade/evm/buy-tap.ts";
@@ -16,6 +18,7 @@ import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolIndexFromSnapshot, evmPoolIndexSnapshotOf } from "../../kit/src/checks/evm/pool-index.ts";
 
 const OUT = join(dirname(dirname(fileURLToPath(import.meta.url))), "data", "evm-index");
+const PINS = join(OUT, "pins.json");
 const asked = process.argv.flatMap((a, i, all) => (all[i - 1] === "--chain" ? [a] : []));
 const chains = asked.length > 0 ? asked : ["base", "robinhood"];
 let failed = 0;
@@ -40,7 +43,12 @@ for (const chain of chains) {
     failed++;
     continue;
   }
-  writeFileSync(join(OUT, `${chain}.json`), text + "\n");
+  const bytes = Buffer.from(text + "\n");
+  writeFileSync(join(OUT, `${chain}.json`), bytes);
+  // its pin, which the build holds the served copy to (build-app.mjs SERVED, copyServed; deploy.mjs checkProver)
+  const pins = existsSync(PINS) ? JSON.parse(readFileSync(PINS, "utf8")) : {};
+  pins[chain] = { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  writeFileSync(PINS, JSON.stringify(Object.fromEntries(Object.keys(pins).sort().map((k) => [k, pins[k]])), null, 1) + "\n");
   console.log(`evm-index-snapshot: ${chain} ${sync.index.pools.length} pools through block ${sync.index.through}, ${text.length} bytes, ${Math.round(performance.now() - t0)} ms`);
 }
 process.exit(failed > 0 ? 1 : 0);
