@@ -1,0 +1,52 @@
+{
+ "good": {
+  "base": "in-process:branch",
+  "commit": "17e93aa0a2b0583b35efbb54b4190e5c553abb49",
+  "wallet": "caadb9551d3ebc9490e48ee433220fc09bfd965e19749bdd47ddf3b759717d0e",
+  "readAt": "2026-11-16T09:09:50.801Z",
+  "health": {
+   "status": 200,
+   "commit": "17e93aa0a2b0583b35efbb54b4190e5c553abb49",
+   "body": "{\"ok\":true,\"commit\":\"17e93aa0a2b0583b35efbb54b4190e5c553abb49\",\"bind\":{\"mainnet\":\"recorded in process\"}}"
+  },
+  "probes": {
+   "dcl": {
+    "status": 409,
+    "body": "{\"error\":{\"code\":\"no_payout\"}}"
+   },
+   "classic_first": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   "dcl_first": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   }
+  }
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "commit": "4528a8a0ca82491e31e5bf712d934a29b862087e",
+  "wallet": "1d4598976fd07ca2ae73da536eb097fb5d6f4127f157dff6374058da9c47546d",
+  "readAt": "2026-11-16T09:08:48.032Z",
+  "health": {
+   "status": 200,
+   "commit": "4528a8a0ca82491e31e5bf712d934a29b862087e",
+   "body": "{\"ok\":true,\"commit\":\"4528a8a0ca82491e31e5bf712d934a29b862087e\",\"release\":164,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com answers\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 held\",\"drpc.live key2 held\",\"drpc.live key3 held\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+  },
+  "probes": {
+   "dcl": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   "classic_first": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   "dcl_first": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   }
+  }
+ }
+}
