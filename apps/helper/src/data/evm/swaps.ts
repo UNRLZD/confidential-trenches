@@ -1454,12 +1454,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
 
   /** For each filter, its logs when two providers return the same ones; null where they do not agree. */
   function agreedLogs(urls: readonly string[], filters: Record<string, unknown>[], only = false, back = false): Promise<(Log[] | null)[]> {
+    // the requests a header-timed provider answered with more blocks than its pace times within the read's wait: never
+    // asked of it again in this read (card robinhood-trades-finish-filling: live 16 Nov 15:5xZ, the chain's own RPC was
+    // asked a busy ETH price's 931 logs three times in one read, the first pair, again as a wide provider and first in
+    // the patient round, and timed none, 8 s of a 14 s step)
+    const untimed = new Set<number>();
     return agreed<Log[]>(
       urls,
       filters.length,
       async (u, idx, patient) => {
-        const got = await logsOf(u, idx.map((i) => filters[i]!), patient, back);
-        return headerTimed.has(u) ? timedByHeaders(u, got, patient) : got;
+        if (!headerTimed.has(u)) return logsOf(u, idx.map((i) => filters[i]!), patient, back);
+        const ask = idx.filter((i) => !untimed.has(i));
+        const out: (Log[] | null)[] = idx.map(() => null);
+        if (ask.length === 0) return out;
+        const got = await logsOf(u, ask.map((i) => filters[i]!), patient, back);
+        const timed = await timedByHeaders(u, got, patient);
+        if (timed.over) ask.forEach((i, k) => got[k] != null && got[k]!.length > 0 && untimed.add(i));
+        ask.forEach((i, k) => (out[idx.indexOf(i)] = timed.logs[k]!));
+        return out;
       },
       (a, b) => sameLogs(a, b, true),
       true,
@@ -1471,9 +1483,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** A header-timed provider's logs (it logs no block time) timed by its own headers of their blocks; an answer with a
    *  block it gives no time for is no answer. Its times count only where another provider logged the same (agreedLogs'
    *  sameLogs with times), so a header for the wrong block or a 0 is no agreement. */
-  async function timedByHeaders(u: string, got: (Log[] | null)[], patient = false): Promise<(Log[] | null)[]> {
+  /** `over`: its blocks are more than the provider's pace answers headers for within the read's wait (headersWithin),
+   *  so none is asked and every answer with a log is no answer. */
+  async function timedByHeaders(u: string, got: (Log[] | null)[], patient = false): Promise<{ logs: (Log[] | null)[]; over: boolean }> {
     const blocks = [...new Set(got.flatMap((g) => (g ?? []).map((l) => l.block)))];
-    if (blocks.length === 0) return got;
+    if (blocks.length === 0) return { logs: got, over: false };
+    if (blocks.length > headersWithin(u, patient)) return { logs: got.map((g) => (g === null || g.length === 0 ? g : null)), over: true };
     const r = await batchTo(u, blocks.map((n) => ({ method: "eth_getBlockByNumber", params: [`0x${n.toString(16)}`, false] })), patient);
     const times = new Map<number, number>();
     blocks.forEach((n, i) => {
@@ -1481,8 +1496,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const t = hexInt(b.timestamp);
       if (t !== null) times.set(n, t); // checked as any logged time is: alike with another provider's, never 0 (apply)
     });
-    return got.map((g) => (g === null || g.some((l) => !times.has(l.block)) ? null : g.map((l) => ({ ...l, t: times.get(l.block)! }))));
+    return { logs: got.map((g) => (g === null || g.some((l) => !times.has(l.block)) ? null : g.map((l) => ({ ...l, t: times.get(l.block)! })))), over: false };
   }
+  /** The most block headers `u`'s pace can answer within a read's wait (paceFor's): its burst and what it refills in
+   *  the wait, a batch a post where it counts posts; more than this are never all answered in time. */
+  const headersWithin = (u: string, patient: boolean): number => {
+    const p = holds.paceOf(u);
+    if (p === undefined) return Infinity;
+    const units = Math.floor(p.burst + (p.perS * (patient ? PACE_PATIENT_MS : PACE_WAIT_MAX_MS)) / 1_000);
+    return p.unit === "post" ? units * batchOf(u) : units;
+  };
 
   /** One filter's logs over blocks `from` to `to`, read in spans the providers take: null when any span is not agreed.
    *  The filters of the swap events the chain's index holds (index.ts) are answered from it up to its newest block, and
