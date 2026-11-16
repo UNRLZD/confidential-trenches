@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // Live check of card buy-box-quotes-before-funds: a fresh account with $0 opens a token's page, types an amount in the
-// buy box, and the box shows a quote and says why Buy is off. On Solana, Base and Robinhood its Max line reads Max $0
+// buy box, and the box shows a quote and offers Deposit. On Solana, Base and Robinhood its Max line reads Max $0
 // (the box's model.ts poolMax: Bal $0 is a Max of $0, as the page lists a fresh account's pools with no ready and no
-// tap_max), the amount is marked over it, and Buy is off; on those and on NEAR the box asks the signing page's
+// tap_max) and the amount is marked over it; on every chain the main button is the Deposit offer (card
+// app-money-sheets-read-right, trade/model.ts offersDeposit: Deposit, data-offer="deposit", on), never a Buy that can be
+// tapped, and its tap opens the deposit sheet and sends no buy (card buy-box-check-reads-the-deposit-offer: the check
+// read Buy off, which 922 made the offer); on those and on NEAR the box asks the signing page's
 // pool.buy.dry with the amount (half 2: model.ts coinTapKey and buysAskAmount ask it with no pool note) and draws the
 // answer's out as You receive, with the Fee row shown (its dash when no cost comes back).
 // Headless Chromium (scripts/browsers.mjs, sandbox on) opens SIGN_HOST top-level with a CDP virtual authenticator (PRF),
@@ -12,9 +15,10 @@
 // Solana), at most COINS_MAX, until one's box draws a quote; a coin the page cannot quote (its answers refused
 // quote_check_failed, down or busy, or ok with no out) goes on to the next. The frames' pool.buy.dry messages are kept
 // (asked by the box, answered by the page) so the verdict tells the box's fault from the page's: every coin of a chain
-// unquoted by the page is INCONCLUSIVE for that chain. It never presses Buy, Sell, Withdraw or Confirm: the account is
-// new and holds nothing, and the seed stays in the browser's temporary profile, deleted on close. The answer keeps the
-// box's texts and the dry messages (public values) only.
+// unquoted by the page is INCONCLUSIVE for that chain. Each coin's Deposit is tapped once after the read, and the buys
+// APP_HOST posts SIGN_HOST from then are kept (none is the pass). It never presses Get address, Sell, Withdraw or
+// Confirm: the account is new and holds nothing, and the seed stays in the browser's temporary profile, deleted on close.
+// The answer keeps the box's texts, the tap's facts and the dry messages (public values) only.
 //   --app-dir <dir>: APP_HOST's requests answered from a local build (pnpm --filter terminal build's dist).
 //   --site <dir>: SIGN_HOST's requests answered from a signing page build (packages/signpage/scripts/build-app.mjs
 //   --out <dir>). Either is how an answer is recorded before a deploy. Neither carries the host's headers.
@@ -60,8 +64,11 @@ export const quoted = (receive) => typeof receive === "string" && /^≈\s*[0-9]/
 /** A dry answer that priced the amount: ok with an out above 0. */
 const outOf = (d) => (d?.ok === true && typeof d.result?.out === "string" && DECIMAL.test(d.result.out) && /[1-9]/.test(d.result.out) ? d.result.out : null);
 
-/** The verdict on one coin's read { coin, box: { balance, max, receive, fee, bad, ctaOff }, dry: [{ amount, ok, result | code }] }:
- *  the lines it fails on, or [] when it keeps every fact. */
+/** The buy requests APP_HOST posts SIGN_HOST: a tap that sends one of these spends money. */
+const BUYS = new Set(["buy", "pool.buy"]);
+
+/** The verdict on one coin's read { coin, box: { balance, max, receive, fee, bad, cta: { text, offer, disabled } },
+ *  tap: { opened, sent }, dry: [{ amount, ok, result | code }] }: the lines it fails on, or [] when it keeps every fact. */
 function coinLines(chain, c) {
   const lines = [];
   const b = c.box ?? {};
@@ -71,7 +78,13 @@ function coinLines(chain, c) {
     if (b.max !== "Max $0") lines.push(`BAD ${tag}: the line above Buy reads ${JSON.stringify(b.max)}, want "Max $0"`);
     if (b.bad !== "true") lines.push(`BAD ${tag}: the amount 5 is not marked over Max`);
   }
-  if (b.ctaOff !== true) lines.push(`BAD ${tag}: Buy is not off`);
+  const cta = b.cta ?? {};
+  if (cta.disabled === false && cta.offer !== "deposit") lines.push(`BAD ${tag}: the main button ${JSON.stringify(cta.text ?? null)} is on with $0, a buy that can be tapped; want the Deposit offer`);
+  else if (cta.text !== "Deposit" || cta.offer !== "deposit" || cta.disabled !== false) lines.push(`BAD ${tag}: the main button reads ${JSON.stringify(cta.text ?? null)}, data-offer ${JSON.stringify(cta.offer ?? null)}, ${cta.disabled === false ? "on" : "off"}; want the Deposit offer: Deposit, data-offer "deposit", on`);
+  else {
+    if (c.tap?.opened !== true) lines.push(`BAD ${tag}: the Deposit tap did not open the deposit sheet`);
+    if (!Array.isArray(c.tap?.sent) || c.tap.sent.length > 0) lines.push(`BAD ${tag}: the Deposit tap sent ${JSON.stringify(c.tap?.sent ?? null)}, want no buy`);
+  }
   if (typeof b.fee !== "string" || !/^Fee/.test(b.fee)) lines.push(`BAD ${tag}: no Fee row`);
   if (!(c.dry ?? []).some((d) => d.amount !== undefined)) lines.push(`BAD ${tag}: the box asked no quote of the amount`);
   else if ((c.dry ?? []).some((d) => d.amount !== undefined && outOf(d) !== null) && !quoted(b.receive)) lines.push(`BAD ${tag}: the page answered an out, You receive reads ${JSON.stringify(b.receive)}`);
@@ -97,7 +110,7 @@ export function judge(a) {
       continue;
     }
     if (quoted(c.box?.receive)) {
-      lines.push(`ok ${chain} ${c.coin}: Bal $0, ${POOL_CHAINS.has(chain) ? "Max $0, the amount marked, " : ""}Buy off, You receive ${c.box.receive}, ${c.box.fee}`);
+      lines.push(`ok ${chain} ${c.coin}: Bal $0, ${POOL_CHAINS.has(chain) ? "Max $0, the amount marked, " : ""}You receive ${c.box.receive}, ${c.box.fee}, Deposit on and its tap opens the deposit sheet, no buy sent`);
       continue;
     }
     // the box asked and drew no quote because the page priced none: a refusal no coin's own read explains is the page's
@@ -118,17 +131,20 @@ export function judge(a) {
 const BOX = () => {
   const t = (id) => document.querySelector(`[data-testid="${id}"]`)?.textContent?.replace(/\s+/g, " ").trim() ?? null;
   const cta = document.querySelector('[data-testid="trade-cta"]');
-  return { balance: t("trade-balance"), max: t("trade-max"), receive: t("trade-receive"), fee: t("trade-cost"), bad: document.querySelector(".trb-amount")?.getAttribute("data-bad") ?? null, ctaOff: cta ? cta.disabled : null };
+  return { balance: t("trade-balance"), max: t("trade-max"), receive: t("trade-receive"), fee: t("trade-cost"), bad: document.querySelector(".trb-amount")?.getAttribute("data-bad") ?? null, cta: cta ? { text: cta.textContent.replace(/\s+/g, " ").trim(), offer: cta.getAttribute("data-offer"), disabled: cta.disabled } : null };
 };
 
-/** In every frame: SIGN_HOST's frame keeps the pool.buy.dry asks APP_HOST posts it, APP_HOST's the answers to them. */
-const WATCH = ({ app, sign }) => {
+/** In every frame: SIGN_HOST's frame keeps the pool.buy.dry asks APP_HOST posts it, and its buys (`buys`), APP_HOST's
+ *  the answers to them. */
+const WATCH = ({ app, sign, buys }) => {
   window.__dry = [];
+  window.__buys = [];
   addEventListener(
     "message",
     (e) => {
       const d = e.data;
       if (!d || d.v !== 1 || typeof d.id !== "string") return;
+      if (e.origin === app && location.origin === sign && buys.includes(d.type)) window.__buys.push({ type: d.type, at: Date.now() });
       if (e.origin === app && location.origin === sign && d.type === "pool.buy.dry") window.__dry.push({ id: d.id, at: Date.now(), chain: d.chain, coin: d.token, ...(d.amount === undefined ? {} : { amount: d.amount }) });
       else if (e.origin === sign && location.origin === app && "ok" in d) window.__dry.push({ id: d.id, at: Date.now(), ok: d.ok, ...(d.ok ? { result: d.result } : { code: d.error?.code ?? null }) });
     },
@@ -166,7 +182,7 @@ export async function read({ appDir = null, site = null, fetchFn = fetch } = {})
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     if (appDir) await routeDir(ctx, APP, path.resolve(appDir));
     if (site) await routeDir(ctx, SIGN, path.resolve(site));
-    await ctx.addInitScript(WATCH, { app: APP, sign: SIGN });
+    await ctx.addInitScript(WATCH, { app: APP, sign: SIGN, buys: [...BUYS] });
     const page = await ctx.newPage();
     const cdp = await ctx.newCDPSession(page);
     await cdp.send("WebAuthn.enable");
@@ -225,7 +241,16 @@ export async function read({ appDir = null, site = null, fetchFn = fetch } = {})
           const ans = answered.get(id);
           return { ...ask, ...(ans ? { ok: ans.ok, ms: ans.at - t0, ...(ans.ok ? { result: ans.result } : { code: ans.code }) } : { ok: false, code: "no answer" }) };
         });
-        coins.push({ coin, box, dry });
+        // the Deposit offer's tap: the deposit sheet opens in APP_HOST's frame, and no buy is posted from the tap on
+        let tap = null;
+        if (box.cta?.offer === "deposit" && box.cta.disabled === false) {
+          const t0 = await page.evaluate(() => Date.now());
+          await f.locator('[data-testid="trade-cta"]').first().click({ timeout: 5_000 }).catch(() => {});
+          const opened = await f.waitForSelector('[data-sheet="deposit"]', { timeout: 5_000 }).then(() => true, () => false);
+          await page.waitForTimeout(1_500);
+          tap = { opened, sent: (await page.evaluate(() => window.__buys ?? [])).filter((b) => b.at >= t0).map((b) => b.type) };
+        }
+        coins.push({ coin, box, tap, dry });
         if (quoted(box.receive)) break;
       }
       chains[chain] = { coins };
