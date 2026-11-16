@@ -182,22 +182,34 @@ test("the warm file carries the EVM market state and gives each chain its own ba
 
 // card helper-listed-charts-own-reads round 3: a chart's first read waits on no chain read while bars are held (the warm
 // live run of 16 Nov 00:33Z: Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms, the book's open the wait). One
-// rule with the Solana charts (../solana/trades.ts candles).
-test("card helper-listed-charts-own-reads: a deploy's first chart read whose book is still opening (the chain 1.5 s slow) answers the bars handed over at once, filling, and the open goes on", async () => {
-  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+// rule with the Solana charts (../solana/token.ts candles). Round 5: only bars held within GT_SERVE_MS answer so, as 06b's
+// Candles with no `filling` beside them; bars read longer ago wait for the open (helper live run 43794383970 served a
+// Solana chart read 93 minutes before, two minutes after a swap, X-Fetched-At theirs).
+test("card helper-listed-charts-own-reads: a deploy's first chart read whose book is still opening (the chain 1.5 s slow) answers bars handed over within GT_SERVE_MS at once and the open goes on; bars read longer ago wait for the open", async () => {
+  const start = Date.parse("2026-11-02T13:53:00Z");
+  const clock = { t: start };
   const old = swapsPart(clock);
   const first = await old.s.candles(old.NOPOOL, "1m", null, 60);
   old.s.stop();
   assert.ok(JSON.parse(first.body).candles.length > 0);
   const handed = JSON.parse(JSON.stringify(old.s.state()));
-  clock.t += 120_000;
-  const next = swapsPart(clock, true, true);
-  assert.equal(next.s.restore(handed), true);
-  const c = await next.s.candles(next.NOPOOL, "1m", null, 60);
-  assert.equal(next.answered(), 0, "the answer waited on the chain's");
-  assert.equal(c.status, 200, c.body);
-  assert.deepEqual(JSON.parse(c.body).candles, JSON.parse(first.body).candles);
-  assert.equal(JSON.parse(c.body).filling, true, "the book still opening: filling, so the page reads again");
-  await new Promise((go) => setTimeout(go, 4_000));
-  next.s.stop();
+  for (const late of [120_000, 16 * 60_000]) {
+    clock.t = start + late;
+    const next = swapsPart(clock, true, true);
+    assert.equal(next.s.restore(handed), true);
+    const c = await next.s.candles(next.NOPOOL, "1m", null, 60);
+    assert.equal(c.status, 200, c.body);
+    if (late <= GT_SERVE_MS) {
+      assert.equal(next.answered(), 0, "the answer waited on the chain's");
+      assert.deepEqual(Object.keys(JSON.parse(c.body)), ["tf", "candles", "src", "as_of_ms"], "06b's Candles, no `filling` beside bars");
+      assert.deepEqual(JSON.parse(c.body).candles, JSON.parse(first.body).candles, "the bars handed over");
+      assert.equal(c.asOfMs, start, "dated by their read");
+    } else {
+      assert.ok(next.answered() > 0, "bars read 16 minutes before were served before the chain answered");
+      // the open past its bound (OPEN_BOUND_MS, the chain this slow) is served what is held, dated by its read, as before
+      assert.equal(JSON.parse(c.body).filling, undefined, "no `filling` beside bars");
+    }
+    await new Promise((go) => setTimeout(go, 4_000));
+    next.s.stop();
+  }
 });
