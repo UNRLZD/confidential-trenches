@@ -131,7 +131,10 @@ const hex = (n) => `0x${n.toString(16)}`;
 export const CANDLE_SOURCES = ["chain", "chain,geckoterminal", "chain,coingecko"];
 /** The first thing wrong with a Candles answer, or null. */
 export function candlesFault(c) {
-  if (!isObj(c) || !same(Object.keys(c), ["tf", "candles", "src", "own_from_s", "as_of_ms"])) return `keys ${show(isObj(c) ? Object.keys(c) : c)}`;
+  // `filling` true: a chart whose older bars the helper still reads (apps/helper/src/data/evm/swaps.ts candles), set
+  // right before as_of_ms; never false
+  const keys = isObj(c) && c.filling === true ? ["tf", "candles", "src", "own_from_s", "filling", "as_of_ms"] : ["tf", "candles", "src", "own_from_s", "as_of_ms"];
+  if (!isObj(c) || !same(Object.keys(c), keys)) return `keys ${show(isObj(c) ? Object.keys(c) : c)}`;
   if (c.tf !== "1m" || !CANDLE_SOURCES.includes(c.src) || !Number.isSafeInteger(c.as_of_ms)) return `tf ${show(c.tf)}, src ${show(c.src)}`;
   if (!Array.isArray(c.candles) || c.candles.length === 0 || c.candles.length > 60) return `candles ${Array.isArray(c.candles) ? c.candles.length : "not a list"}`;
   for (const [i, b] of c.candles.entries()) {

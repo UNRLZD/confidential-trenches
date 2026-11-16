@@ -148,6 +148,18 @@ test("wire faults fail: an extra candles field, a missing own_from_s, a bar whos
   assert.equal(candlesFault(JSON.parse(A.good.reads.candles.body)), null);
 });
 
+// the helper's 1m answer while its read back goes on (apps/helper/src/data/evm/swaps.ts candles): `filling: true`, set
+// right before as_of_ms; live 16 Nov a Base chart that answered so was refused as "keys"
+test("a chart still filling passes: filling true right before as_of_ms; false, another value or another place fails", () => {
+  const good = JSON.parse(A.good.reads.candles.body);
+  const { as_of_ms, ...rest } = good;
+  assert.equal(candlesFault({ ...rest, filling: true, as_of_ms }), null, "filling true before as_of_ms");
+  assert.notEqual(candlesFault({ ...rest, filling: false, as_of_ms }), null, "filling false is never sent");
+  assert.notEqual(candlesFault({ ...rest, filling: "yes", as_of_ms }), null, "a value not true");
+  assert.notEqual(candlesFault({ ...rest, as_of_ms, filling: true }), null, "after as_of_ms");
+  assert.notEqual(candlesFault({ filling: true, ...good }), null, "first");
+});
+
 test("tape faults fail: oldest first, a bad side, an extra field, a trader that is not an address, a tape over 50", () => {
   for (const [what, fn] of [
     ["oldest first", (b) => b.trades.reverse()],
