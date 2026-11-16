@@ -213,6 +213,26 @@ try {
       await ctx.close();
     }
 
+    // a $0 account's Deposit in the sheet (card deposit-sheet-reads-right-on-phone): the tap closes the trade sheet, then
+    // opens the deposit sheet, so one sheet and one grab handle are drawn; nothing is sent
+    {
+      const tag = `Deposit from the sheet @${w.name}`;
+      const { ctx, page, external, dialogs } = await open(browser, w, "f=ready&pool=sol-fresh&cash=0");
+      if (await openSheet(tag, page)) {
+        const label = await settle(async () => norm(await cta(page).innerText()), "Deposit");
+        check(label === "Deposit", `${tag}: button "${label}", want "Deposit"`);
+        await cta(page).click();
+        const open = await settle(() => sheet(page).getAttribute("data-open"), "false");
+        check(open === "false", `${tag}: the trade sheet still open over the deposit sheet (data-open ${open})`);
+        check((await page.locator('[data-testid="deposit-open"]').getAttribute("data-open")) === "true", `${tag}: the deposit sheet did not open`);
+        check((await page.locator(".tsh-grab").filter({ visible: true }).count()) === 0, `${tag}: the trade sheet's grab handle still drawn`);
+        check((await page.evaluate(() => window.__calls)).length === 0, `${tag}: a buy sent`);
+        check(external.length === 0 && dialogs.length === 0, `${tag}: external requests ${external.join(" ")}, dialogs ${dialogs.join(" ")}`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `deposit-from-sheet-${w.name}.png`) });
+      }
+      await ctx.close();
+    }
+
     // the token page: a preset filled in the open sheet; the page's toast (TradeToast) is clear of the sheet's head row
     {
       const tag = `token page toast over the open sheet @${w.name}`;
