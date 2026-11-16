@@ -1,0 +1,22 @@
+{
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-AROvg/daDiF5C2uUod32TskXQ851dWNMimVoKWM8CWAKZDrgEl/InfVmjWI2CTai\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-AROvg/daDiF5C2uUod32TskXQ851dWNMimVoKWM8CWAKZDrgEl/InfVmjWI2CTai",
+    "faults": true,
+    "plan": true,
+    "part": true,
+    "signed": true,
+    "free": true,
+    "stop": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0mhWd8F00UZpcI/0OGlxu3uIIoREmJuXYy7Xp3CA3V6BUZim6acjcN3hmL+jD7M+\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-0mhWd8F00UZpcI/0OGlxu3uIIoREmJuXYy7Xp3CA3V6BUZim6acjcN3hmL+jD7M+",
+    "faults": false,
+    "plan": false,
+    "part": false,
+    "signed": false,
+    "free": false,
+    "stop": false
+  }
+}
