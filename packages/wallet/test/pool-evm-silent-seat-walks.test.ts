@@ -22,17 +22,20 @@ const planted = (): EvmLogRow[] => {
 };
 
 type Fake = EvmRpc & { calls: number };
-/** A provider of the planted logs; `answer` says what a page of `span` blocks gets: the logs (null), an error to throw. */
-function provider(url: string, answer: (span: bigint) => Error | null): Fake {
+// every provider's calls together: a read past this many is a loop, refused so the test ends
+let total = 0;
+const LOOP = 3000;
+/** A provider of the planted logs; `answer` says what the `n`th page, `span` blocks ending at `to`, gets: the logs (null), an error to throw. */
+function provider(url: string, answer: (span: bigint, to: bigint, n: number) => Error | null): Fake {
   const logs = planted();
   const f = Object.assign(
     async (method: string, params: readonly unknown[]): Promise<unknown> => {
       if (method !== "eth_getLogs") throw new Error(`no ${method} here`);
-      f.calls++;
+      if (++total > LOOP) throw new Error(`a loop: past ${LOOP} calls`);
       const p = params[0] as { fromBlock: string; toBlock: string };
       const from = BigInt(p.fromBlock);
       const to = BigInt(p.toBlock);
-      const e = answer(to - from + 1n);
+      const e = answer(to - from + 1n, to, f.calls++);
       if (e !== null) throw e;
       return logs.filter((l) => l.block >= from && l.block <= to).map((l) => ({ ...l }));
     },
@@ -69,4 +72,27 @@ test("card sign-in-restore-never-stalls: a page wider than its provider answered
   const logs = await read([narrowing, wide], waits);
   assert.deepEqual(logs.map((l) => l.block), planted().map((l) => l.block), "every log once, in order");
   assert.deepEqual(waits, [], `the read waited ${waits.join(", ")} ms`);
+});
+
+test("card sign-in-restore-never-stalls: a log page refused by the helper never walks its seat onto a member that pages no logs, so the read ends", async () => {
+  // release 166's and 167's builds, run from the Mac on 16 Nov 11:47Z with no fault, held the restore at "reading" past
+  // 240 s as CI's run 43854843328 did: the helper's keyed route kept Base pool logs only to block 57,497,470 (it answers
+  // a wider page past it with -32602 "maximum block range: 10000", read 11:59Z), and the seat walked off its refusal onto
+  // mainnet.base.org (logs: false), so each next page went to the helper at mainnet.base.org's page size, 800,000 and
+  // 400,000 blocks in turn, 3 a second without end
+  const KEPT = 57_497_470n;
+  total = 0;
+  const publicnode = provider("https://base-rpc.publicnode.com", (span) => (span > 50_000n ? new Error("RPC error -32701: exceed maximum block range: 50000") : null));
+  const bloxroute = provider("https://base.rpc.blxrbdn.com", () => null);
+  const pocket = provider("https://base.api.pocket.network", (_s, _t, n) => (n === 0 ? null : new Error("HTTP 429")));
+  const logless = Object.assign(provider("https://mainnet.base.org", () => new Error("HTTP 429: RPC error -32011: request limit reached")), { logs: false });
+  const helper = Object.assign(
+    provider("https://ct-api.unrealized.trade/v1/rpc/base?keyed=only", (span, to) => (to > KEPT && span > 10_000n ? new Error("RPC error -32602: eth_getLogs range too wide, maximum block range: 10000") : null)),
+    { operator: "helper" },
+  );
+  const waits: number[] = [];
+  const logs = await read([publicnode, bloxroute, pocket, logless, helper], waits);
+  assert.deepEqual(logs.map((l) => l.block), planted().map((l) => l.block), "every log once, in order");
+  assert.equal(logless.calls, 0, "the member that pages no logs is never asked for a page");
+  assert.ok(total <= 200, `the read took ${total} calls`);
 });
