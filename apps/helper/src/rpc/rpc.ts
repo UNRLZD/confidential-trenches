@@ -184,7 +184,8 @@ export const KEYED_LOGS_SPAN: Readonly<Partial<Record<KeyedProvider, number>>> =
 /**
  * The most pages one eth_getLogs on the keyed-only route is split into (card helper-base-logs-page): a range wider than
  * every keyed provider's span (KEYED_LOGS_SPAN) is read in pages of the widest one's span, sent to the providers of that
- * span, and joined in order as one answer. Past this many pages (or the chain's 10 s total, when smaller) the read is
+ * span, and joined in order as one answer. Past this many pages (or the chain's 10 s total, or the pages the providers'
+ * pace serves inside a send's wait, pagesServed, when smaller: 13 on dRPC's free plan) the read is
  * refused before any send with a JSON-RPC range cap naming the span served (LOGS_CAP_CODE: "maximum block range: N", a
  * form the page's pager reads, packages/wallet/src/pool/evm.ts CAP_SPANS), so the page asks narrower ranges. Each
  * caller's paged reads draw on their own allowance, this many pages a 10 s window (logsKey), never the caller's share.
@@ -1511,6 +1512,20 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * span that is served (LOGS_CAP_CODE), the first before any send. The pages draw the caller's paged allowance
    * (logsKey), all at once; refused, the caller's 429.
    */
+  /** The pages `list` serves with no send waiting past PACE_MAX_MS (card base-reads-never-throttled): each pace's bucket
+   *  once (dRPC's keys share one, DRPC_IP_PACE) and what refills it in that wait; a provider of no pace bounds nothing.
+   *  Live 16 Nov 17:33Z, on dRPC's free pace (12 at once, 0.8 a second: 13 pages), a pool read 16 min of Base past the
+   *  store was paged under the chain's total, spent the keys' bucket and still answered 503: past this many pages the
+   *  read is the range cap before any send, and the bucket stays the callers'. */
+  const pagesServed = (list: readonly string[]): number => {
+    const buckets = new Map<string, number>();
+    for (const u of list) {
+      const p = holdsAll.paceOf(u);
+      if (p === undefined) return Infinity;
+      buckets.set(p.rate ?? u, Math.floor(p.burst + (p.perS * PACE_MAX_MS) / 1000));
+    }
+    return [...buckets.values()].reduce((n, k) => n + k, 0);
+  };
   async function pagedLogs(c: RpcChain, providers: readonly string[], req: Record<string, unknown>, from: bigint, to: bigint, client: string | undefined, reserved: boolean, by: number): Promise<Answer> {
     const id = JSON.stringify(req.id);
     const capAnswer = (blocks: bigint, why: string): Answer => ({ status: 200, body: `{"jsonrpc":"2.0","id":${id},"error":{"code":${LOGS_CAP_CODE},"message":"${why}, maximum block range: ${blocks}"}}` });
@@ -1518,7 +1533,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const list = providers.filter((u) => logsSpanByUrl.get(u) === w);
     if (w <= 0n || list.length === 0) return UPSTREAM();
     const n = Number((to - from + w) / w);
-    const max = pagesMaxOf(c);
+    const max = Math.min(pagesMaxOf(c), pagesServed(list));
     if (n > max) return capAnswer(BigInt(max) * w, "eth_getLogs range too wide");
     const wait = budget.takeEach([[logsKey(c), n]], client, false, reserved);
     if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
