@@ -21,7 +21,7 @@ import type { Holdings, HoldingsReader } from "../../wallet/src/pool/buy-wallets
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, positionsPass, type FoundWallet } from "../src/positions.ts";
+import { POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_RETRY_MS, positionsPass, type FoundWallet } from "../src/positions.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
 import { BUY_MINTS_KEY, planPoolSell, runPoolSell, type PoolSellHost } from "../src/pool-sell.ts";
 import { poolSellDry } from "../src/pool-sell-dry.ts";
@@ -45,9 +45,51 @@ const W = ((): string => {
 })();
 const closers: (() => void)[] = [];
 after(() => closers.forEach((f) => f()));
+// Card sell-preview-test-waits-on-events: a wait here is on an event, never on a clock. What a wait reads changes only on
+// one of these, and each nudges every wait to read again: the page's own change event (its watch: a positions pass that
+// showed or listed a row), a write to the test's wallet store (sentWallet), and this file's fakes (the finder's reads,
+// the buy's tell, the held keep). The old wait gave up after 400 x 5 ms of wall clock, which a runner at
+// --test-concurrency=6 under load passed with the page still working (merge queue run 43940404841, "the pass lists W's
+// token"). A wait whose event never comes fails at the page's own longest bound, a positions round of retries
+// (POSITIONS_RETRIES x POSITIONS_RETRY_MS), naming what it waited for; that timer keeps no process alive.
+const nudges = new Set<() => void>();
+const nudge = (): void => {
+  for (const f of [...nudges]) f();
+};
+const UNTIL_BOUND_MS = POSITIONS_RETRIES * POSITIONS_RETRY_MS;
 const until = async (f: () => boolean | Promise<boolean>, what = "the condition") => {
-  for (let i = 0; i < 400 && !(await f()); i++) await new Promise((r) => setTimeout(r, 5));
-  assert.ok(await f(), what);
+  if (await f()) return;
+  await new Promise<void>((done, fail) => {
+    let reading = false;
+    let again = false;
+    const end = (e?: unknown): void => {
+      nudges.delete(read);
+      clearTimeout(bound);
+      if (e === undefined) done();
+      else fail(e);
+    };
+    // one read at a time; a nudge during one reads once more after it
+    const read = (): void => {
+      if (reading) return void (again = true);
+      reading = true;
+      void (async () => {
+        try {
+          do {
+            again = false;
+            if (await f()) return end();
+          } while (again);
+        } catch (e) {
+          end(e);
+        } finally {
+          reading = false;
+        }
+      })();
+    };
+    const bound = setTimeout(() => void Promise.resolve(f()).then((ok) => end(ok ? undefined : new assert.AssertionError({ message: `${what}: no event made it hold within the page's own bound, ${UNTIL_BOUND_MS} ms` })), end), UNTIL_BOUND_MS);
+    (bound as { unref?: () => void }).unref?.();
+    nudges.add(read);
+    read();
+  });
 };
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 
@@ -55,6 +97,17 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 async function sentWallet(): Promise<WalletStore> {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => w.close());
+  // each write, once done, nudges the waits: what a wait reads of the store changes only on one
+  for (const k of ["put", "update", "delete"] as const) {
+    const op = (w[k] as (...a: unknown[]) => Promise<unknown>).bind(w);
+    (w as unknown as Record<string, unknown>)[k] = async (...a: unknown[]) => {
+      try {
+        return await op(...a);
+      } finally {
+        nudge();
+      }
+    };
+  }
   await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
   const ns = await openNoteStore(w);
   const precommitment = noteSecrets(SEED64, REF).precommitment;
@@ -81,6 +134,7 @@ function finder() {
       st.reads++;
       if (st.held !== null) {
         st.parked++;
+        nudge();
         await st.held;
         st.parked--;
       }
@@ -146,6 +200,7 @@ function buyKind() {
       h.outDecimals?.(W, 6, MINT);
       ctx.route?.({ out: OUT });
       run.told = true;
+      nudge();
     })();
     run.end = (stage) => ctx.progress(stage);
     return { running: true as const, after, answer: () => answer };
@@ -155,10 +210,13 @@ function buyKind() {
 
 type Page = ReturnType<typeof testnetPool>;
 function page(w: WalletStore, f: ReturnType<typeof finder>, rpcs: readonly [SolanaRpc, SolanaRpc], kinds: Record<string, unknown> = {}): Page {
-  return testnetPool(
+  const p = testnetPool(
     { store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
     { pin: PIN, rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => f.reader, tradeKinds: kinds, positions: { setTimer: () => {}, clearTimer: () => {} } } as never,
   );
+  // the page's own change event: a pass that showed or listed a row
+  p.watch(nudge);
+  return p;
 }
 const tapBuy = (tp: Page, id = "pb1") => tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id, sha: "00", progress: () => {}, route: () => {} } as never);
 const rowOf = async (tp: Page) => ((await tp.positions()) ?? []).find((p) => p.token === MINT);
@@ -332,14 +390,23 @@ test("item 5: a sale planned while one provider is a slot behind on W's token ac
 test("the end's records wait for the early write: a not_landed end told at once after the amount out, the early write slow, leaves no record of W", async () => {
   const w = await sentWallet();
   let slow = true;
+  // the slow early write done: from then W's record is gone only if the end took it back after it
+  let early = false;
   const slowed = new Proxy(w, {
     get(t, k, r) {
       const v = Reflect.get(t, k, r);
       if (k !== "update") return typeof v === "function" ? v.bind(t) : v;
       return async (store: string, key: string, f: (v: unknown) => unknown) => {
         // the first write of W's record waits 50 ms before its transaction
-        if (key === POSITION_COSTS_KEY && slow) (slow = false), await tick(50);
-        return t.update(store as never, key, f as never);
+        if (key !== POSITION_COSTS_KEY || !slow) return t.update(store as never, key, f as never);
+        slow = false;
+        await tick(50);
+        try {
+          return await t.update(store as never, key, f as never);
+        } finally {
+          early = true;
+          nudge();
+        }
       };
     },
   }) as WalletStore;
@@ -350,8 +417,8 @@ test("the end's records wait for the early write: a not_landed end told at once 
   await until(() => b.run.told);
   b.run.end("not_landed");
   await until(async () => (await w.get("ops", "pb1")) !== undefined, "the end's ops record");
-  await tick(120);
-  assert.equal(((await w.get("meta", POSITION_COSTS_KEY)) as Record<string, unknown> | undefined)?.[W], undefined, "W's record taken back after the early write");
+  await until(() => early, "the early write done");
+  await until(async () => ((await w.get("meta", POSITION_COSTS_KEY)) as Record<string, unknown> | undefined)?.[W] === undefined, "W's record taken back after the early write");
 });
 
 // Card app-sell-shows-what-you-receive, devnet run 116 (11 Nov): the sell box's preview answered not_funded 7.6 s past a
@@ -402,7 +469,7 @@ test("the preview right after a buy's read-back, the pass's finder read still he
   let keeps = 0;
   const put = w.put.bind(w);
   w.put = async (store, key, value) => {
-    if (store === "meta" && key === POSITIONS_KEPT_KEY) (keeps++, await keepHeld);
+    if (store === "meta" && key === POSITIONS_KEPT_KEY) (keeps++, nudge(), await keepHeld);
     return put(store, key, value);
   };
   f.st.listed = OUT_UNITS;
