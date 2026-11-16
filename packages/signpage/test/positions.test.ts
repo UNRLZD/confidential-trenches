@@ -21,7 +21,7 @@ import type { Holdings, HoldingsReader } from "../../wallet/src/pool/buy-wallets
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { keptPositions, passMemo, returningWallets, withReturning, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
+import { keptPositions, passMemo, returningWallets, withReturning, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_RETRY_MS, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordBoughtOut, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
 import { BACKS_LOAD_MAX_MS, testnetPool as makePool, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { poolKinds, type PoolRpc } from "../src/pool-kinds.ts";
@@ -637,8 +637,13 @@ function chain() {
   };
   return { amounts, rpcs: [rpc(0), rpc(1)] as const, finder, owners, calls, state };
 }
+// Card sell-preview-test-waits-on-events: a wait reads again every 5 ms until it holds, and gives up only at the page's
+// own longest bound, a positions round of retries (POSITIONS_RETRIES x POSITIONS_RETRY_MS), never at a count of the
+// clock's ticks: 400 x 5 ms gave up with the page still working on a loaded runner at --test-concurrency=6 (merge queue
+// run 43940404841, test/sell-right-after-a-buy.test.ts).
+const UNTIL_BOUND_MS = POSITIONS_RETRIES * POSITIONS_RETRY_MS;
 const until = async (f: () => boolean | Promise<boolean>) => {
-  for (let i = 0; i < 400 && !(await f()); i++) await new Promise((r) => setTimeout(r, 5));
+  for (const end = performance.now() + UNTIL_BOUND_MS; !(await f()) && performance.now() < end; ) await new Promise((r) => setTimeout(r, 5));
   assert.ok(await f());
 };
 /** W's buy record on the store, as the buy writes it. */
@@ -857,7 +862,7 @@ test("card wallets-found-in-one-read, the page: a sell that reads only the Ws it
     const paced: HoldingsReader = { chain: "sol", read: (address) => new Promise((done) => queue.push({ address, done: () => (read.push(address), done(held())) })) };
     // answers every read asked until `f` holds
     const answer = async (f: () => boolean | Promise<boolean>) => {
-      for (let i = 0; i < 40 && !(await f()); i++) {
+      for (const end = performance.now() + UNTIL_BOUND_MS; !(await f()) && performance.now() < end; ) {
         if (queue.length > 0) queue.shift()!.done();
         await tick();
       }
@@ -918,7 +923,7 @@ test("card wallets-found-in-one-read, the page: a sale tapped while a pass reads
         }),
     };
     const answer = async (f: () => boolean | Promise<boolean>) => {
-      for (let i = 0; i < 80 && !(await f()); i++) {
+      for (const end = performance.now() + UNTIL_BOUND_MS; !(await f()) && performance.now() < end; ) {
         if (queue.length > 0) queue.shift()!.done();
         await tick();
       }
@@ -953,7 +958,8 @@ test("card wallets-found-in-one-read, the page: a sale tapped while a pass reads
     tp.flow(ask, { id: "s2", sha: "00", progress: () => {} } as never);
     await until(() => list !== null);
     const got = await list!;
-    // (4) the pass the sale fed: S as read after the kept pass, never the kept pass's 2
+    // (4) the pass the sale fed: S as read after the kept pass, never the kept pass's 2; it ends in its kept write
+    await until(async () => (await keptAmount()) === now);
     await new Promise((r) => setTimeout(r, 50));
     assert.equal((await shown())?.amount, now, "Portfolio holds the newer read");
     assert.equal((await shown())?.wallets.includes(S), left !== null, "a W sold in full stays gone");
@@ -1173,7 +1179,7 @@ test("the page: a pool buy answered early as sent (its fill read later) is recor
   assert.equal(await w.get("ops", "pb2"), undefined, "sent is no end: nothing written yet");
   progress("filled");
   progress("filled");
-  for (let i = 0; i < 200 && (await w.get("ops", "pb2")) === undefined; i++) await new Promise((r) => setTimeout(r, 5));
+  await until(async () => (await w.get("ops", "pb2")) !== undefined);
   const op = (await w.get("ops", "pb2")) as { stage: string; txs: unknown[] };
   assert.deepEqual([op.stage, op.txs], ["filled", [{ chain: "solana", hash: "SigS" }]]);
   assert.deepEqual(posted, ["filled", "filled"], "the app still gets every progress the run posts");
@@ -1618,6 +1624,7 @@ test("P1-1: a sign out lets go of the buys this page ran: after the next sign-in
   // the same account signs in again: W's buy mint is in its store, the finder lists W without the token
   const reads = c.calls.finder;
   await until(async () => (await tp.positions()) !== null && c.calls.finder > reads);
+  await until(async () => ((await tp.positions()) ?? [0]).length === 0);
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(await tp.positions(), []);
   assert.equal(timers.length, 0, "a whole pass: no buy of this sign-in waits on the finder");
@@ -1640,7 +1647,10 @@ test("P3-7 (w12): a run that ended sent lets go of the decimals it told: the sam
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
   progresses[0]!("sent");
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b2", sha: "00", progress: () => {}, route: () => {} } as never);
-  await until(async () => (await w.get("meta", POSITION_COSTS_KEY)) !== undefined);
+  // the second run's end: its ops record, written after its own early write of W's record (pool-testnet.ts recordedBuy).
+  // The first run's early write (its own told decimals, 9) lands before it, so a wait for "a record of W" alone could read
+  // that one (merge queue run 43943288785, 17.6 ms); the record to judge is the one the second run left
+  await until(async () => (await w.get("ops", "b2")) !== undefined);
   assert.deepEqual(await w.get("meta", POSITION_COSTS_KEY), { [solanaWallet()]: { mint: MINT, received: "1" } }, "no decimals 9 carried from the sent run");
 });
 
@@ -2120,6 +2130,7 @@ test("t03: a buy that ended not landed is not looked for: the finder not listing
   await until(() => told);
   progress("not_landed");
   await until(() => c.calls.finder > reads0);
+  await until(async () => ((await tp.positions()) ?? [0]).length === 0);
   await new Promise((r) => setTimeout(r, 60));
   assert.deepEqual(await tp.positions(), []);
   assert.equal(timers.length, 0, "not landed: nothing to look for");
