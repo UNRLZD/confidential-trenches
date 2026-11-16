@@ -49,12 +49,13 @@ export function facts(index, js) {
   const stepOn = waitsOn === undefined ? undefined : new RegExp(`[,; ](${N})=(${N})=>${esc(waitsOn)}\\(\\2\\)\\|\\|\\2 instanceof ${esc(busy)}[,;]`).exec(js)?.[1];
   out.faults = stepOn !== undefined;
   // the step: a fresh bound per step (readWaits on the host's clock), each attempt's own signed mark, the throws, the
-  // rule's wait on the host's wait and sign out, ReadStopped after it
+  // rule's wait on the host's wait and sign out, ReadStopped after it; the faults it waits on a parameter whose default
+  // is the step's own (card evm-withdraw-waits-out-a-throttle: the EVM withdraw passes its reads' faults beside them)
   const step = new RegExp(
-    `async function (${N})\\((${N}),(${N})\\)\\{let (${N})=(${N})\\((${N})\\(\\2\\)\\);for\\(;;\\)\\{let (${N})=\\{signed:!1\\};try\\{return await \\3\\(\\7\\)\\}catch\\((${N})\\)\\{if\\(\\7\\.signed\\|\\|\\2\\.stop\\?\\.aborted\\|\\|!(${N})\\(\\8\\)\\)throw \\8;let (${N})=\\4\\.next\\(\\8\\);if\\(\\10===null\\)throw \\8;if\\(await (${N})\\(\\2\\.wait,\\10,\\2\\.stop\\),\\2\\.stop\\?\\.aborted\\)throw new ${esc(stopped)}\\}\\}\\}`,
+    `async function (${N})\\((${N}),(${N}),(${N})=(${N})\\)\\{let (${N})=(${N})\\((${N})\\(\\2\\)\\);for\\(;;\\)\\{let (${N})=\\{signed:!1\\};try\\{return await \\3\\(\\9\\)\\}catch\\((${N})\\)\\{if\\(\\9\\.signed\\|\\|\\2\\.stop\\?\\.aborted\\|\\|!\\4\\(\\10\\)\\)throw \\10;let (${N})=\\6\\.next\\(\\10\\);if\\(\\11===null\\)throw \\10;if\\(await (${N})\\(\\2\\.wait,\\11,\\2\\.stop\\),\\2\\.stop\\?\\.aborted\\)throw new ${esc(stopped)}\\}\\}\\}`,
   ).exec(js);
-  if (step === null || step[9] !== stepOn) return out;
-  const [, G, , , , R, C, , , , , U] = step;
+  if (step === null || step[5] !== stepOn) return out;
+  const [, G, , , , , , R, C, , , , U] = step;
   // readWaits (its 30 s bound and its next), the host's clock (clockOf), waitUnless (ended at an abort)
   const rule = new RegExp(`function ${esc(R)}\\((${N})=${N}\\)\\{let (${N})=\\1\\(\\),(${N})=0,(${N})=0,(${N})=!1;return\\{next\\((${N})\\)\\{[^]{0,120}?>3e4\\?\\(\\5=!0,null\\)`).test(js);
   const clock = new RegExp(`[,; ]${esc(C)}=(${N})=>\\(\\)=>Number\\(\\1\\.now\\?\\.\\(\\)\\?\\?Date\\.now\\(\\)\\)`).test(js);

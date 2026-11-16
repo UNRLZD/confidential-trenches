@@ -54,6 +54,17 @@ export const WALK = `public/${WALK_FILE}`;
 /** Its entry, relative to the signing page's package: the wallet's Worker side of the walk. */
 export const WALK_ENTRY = "../wallet/src/restore/walk-worker.ts";
 
+/** The chains whose pool index snapshot the build serves, and where they and their pins are kept. */
+export const EVM_INDEX_CHAINS = Object.freeze(["base", "robinhood"]);
+export const EVM_INDEX = join(PKG, "data", "evm-index");
+export const EVM_INDEX_PINS = join(EVM_INDEX, "pins.json");
+/** One chain's snapshot pin, { bytes, sha256 }, from pins.json; throws when it is missing or not that shape. */
+function evmIndexPin(chain) {
+  const p = JSON.parse(readFileSync(EVM_INDEX_PINS, "utf8"))[chain];
+  if (!Number.isSafeInteger(p?.bytes) || p.bytes <= 0 || typeof p?.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(p.sha256)) throw new Error(`${EVM_INDEX_PINS}: no { bytes, sha256 } pin for ${chain}`);
+  return { bytes: p.bytes, sha256: p.sha256 };
+}
+
 /**
  * What the deploy's build copies besides index.html and public/: { from, to, bytes?, sha256? }, `to` relative to the
  * build folder. The six setup files go to assets/zk/<sha256>.<ext>, each with its pin (packages/kit/src/zk/setup-files.ts);
@@ -66,6 +77,10 @@ export const SERVED = Object.freeze([
   Object.freeze({ from: join(KIT, "zk", "LICENSE-LGPL-3.0.txt"), to: "licenses/LGPL-3.0.txt" }),
   Object.freeze({ from: join(dirname(dirname(PKG)), "LICENSE"), to: "licenses/Apache-2.0.txt" }),
   Object.freeze({ from: join(KIT, "zk", "NOTICE"), to: "licenses/zk-NOTICE.txt" }),
+  // each EVM chain's pool index snapshot (card robinhood-quote-answers-cold; scripts/evm-index-snapshot.mjs writes it
+  // and its pin at the release cut): served at /evm-index/<chain>.json, read by the page at its first EVM quote, never
+  // bundled; held by its pin (data/evm-index/pins.json) as a setup file is
+  ...EVM_INDEX_CHAINS.map((c) => Object.freeze({ from: join(EVM_INDEX, `${c}.json`), to: `evm-index/${c}.json`, ...evmIndexPin(c), name: `evm-index/${c}.json` })),
 ]);
 // every file SERVED copies is one of the build's inputs, the paths the verify gate compares a release list's tree on
 const REPO = dirname(dirname(PKG));
@@ -81,7 +96,7 @@ export function pinProblems(entry, bytes, label = entry.to) {
   return got === entry.sha256 ? [] : [`${label}: sha256 ${got}, pinned ${entry.sha256}`];
 }
 
-/** Copies `list` into `out`; throws before writing anything when a setup file is not its pin. */
+/** Copies `list` into `out`; throws before writing anything when a pinned file (a setup file, a snapshot) is not its pin. */
 export function copyServed(out, list = SERVED) {
   for (const e of list) {
     if (e.sha256 === undefined) continue;

@@ -28,12 +28,14 @@ const ID = "[\\w$]+";
 const PICKER = new RegExp(`${ID}\\.dataset\\.input=\`dest\``);
 const REQUEST = new RegExp(`amount:(${ID})\\.payout\\.toString\\(\\),refundTo:\\1\\.refundTo,refundType:\`ORIGIN_CHAIN\`,recipient:\\1\\.recipient,recipientType:\`DESTINATION_CHAIN\``);
 // each run: exit asked with its first W, the answer its To (on Solana kept for the To step's retries, card
-// pool-buy-waits-out-a-throttle: `to = asked.to ??= await exit(ws[0])`), then the To refusal over that To
-const RUN = new RegExp(`(${ID})\\.exit&&\\((${ID})=(?:${ID}\\.to\\?\\?=)?await \\1\\.exit\\((${ID})\\[0\\](?:\\.w)?\\)\\),${ID}\\(\\2,\\1\\.pin,`, "g");
+// pool-buy-waits-out-a-throttle: `to = asked.to ??= await exit(ws[0])`; on EVM kept by that W across the plan step's
+// reruns, card evm-withdraw-waits-out-a-throttle: `to = asked[ws[0]] ??= await exit(ws[0])`, the key the asked W),
+// then the To refusal over that To
+const RUN = new RegExp(`(${ID})\\.exit&&\\((${ID})=(?:${ID}\\.to\\?\\?=|${ID}\\[(${ID})\\[0\\]\\]\\?\\?=)?await \\1\\.exit\\((${ID})\\[0\\](?:\\.w)?\\)\\),${ID}\\(\\2,\\1\\.pin,`, "g");
 
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), picker: PICKER.test(js), request: REQUEST.test(js), runs: (js.match(RUN) ?? []).length };
+  return { index, sha384: sha384(js), picker: PICKER.test(js), request: REQUEST.test(js), runs: [...js.matchAll(RUN)].filter((m) => m[3] === undefined || m[3] === m[4]).length };
 }
 
 /** The verdict on an answer { index, sha384, picker, request, runs }. */

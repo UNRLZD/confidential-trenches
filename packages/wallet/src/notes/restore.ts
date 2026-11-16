@@ -44,6 +44,7 @@ import {
   type VaultSyncRpc,
 } from "@blindfill/kit";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { vaultAskWaited, vaultThrottle } from "../../../kit/src/vault/throttle.ts";
 import { nearPairNetwork, nearPairRule } from "../deposit/account.ts";
 import { CHAINS, type Chain, masters, type SecondId } from "../derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "./secrets.ts";
@@ -163,7 +164,8 @@ export async function restoreNotes(a: RestoreArgs): Promise<NoteRestore> {
 export async function readConfig(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], vault: string, token: string, scope: bigint, height: number, signal?: AbortSignal): Promise<[number, number]> {
   const params = { request_type: "call_function", account_id: vault, method_name: "config", args_base64: btoa("{}"), finality: "final" };
   const one = async (rpc: VaultSyncRpc): Promise<{ bytes: string; height: number }> => {
-    const a = (await rpc.query(params, signal)) as { error?: unknown; result?: { error?: unknown; result?: unknown; block_height?: unknown } } | null;
+    // a provider's rate limit waited out on the kit's bound, as vaultSync's pages (card restore-waits-out-a-near-throttle)
+    const a = (await vaultAskWaited(() => rpc.query(params, signal), rpc.name, "config", vaultThrottle(), signal)) as { error?: unknown; result?: { error?: unknown; result?: unknown; block_height?: unknown } } | null;
     const r = a?.error === undefined ? a?.result : undefined;
     const bytes = r?.error === undefined ? r?.result : undefined;
     if (!Array.isArray(bytes) || !bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255) || !Number.isSafeInteger(r?.block_height))

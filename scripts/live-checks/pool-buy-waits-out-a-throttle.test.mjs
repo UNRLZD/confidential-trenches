@@ -55,11 +55,12 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.equal(judge(null).ok, false);
 });
 
-// the bundle's pieces as this card's build minified them (its public/app.js), each one broken in turn
+// the bundle's pieces as this card's build minified them (its public/app.js; the loop's `on` parameter as card
+// evm-withdraw-waits-out-a-throttle's build has it), each one broken in turn
 const BUSY = "var LL=class extends Error{code;afterMs;constructor(e,t=null){super(`a busy answer (HTTP ${e})`),this.name=`ReadBusy`,this.code=e===429?`http_429`:`http_5xx`,this.afterMs=t}},RL=class extends Error{constructor(){super(`signed out while the reads waited`),this.name=`ReadStopped`}};";
 const TRANSPORT = "var bu=class extends Error{fault;tries;host;afterMs;constructor(e,t,n,r,i=null){super(`${t}`),this.name=`SolanaRpcTransportError`}};";
 const RULE = "function jL(e=ML){let t=e(),n=0,r=0,i=!1;return{next(a){let o=T(n,A(a),B);return i||Math.max(e()-t,r)+o>3e4?(i=!0,null):(n=o,r+=o,o)}}}var FL=e=>()=>Number(e.now?.()??Date.now()),IL=e=>e instanceof bu;function zL(e,t,n){return n?.aborted?Promise.resolve():new Promise(r=>{})}";
-const STEP = "var $W=e=>IL(e)||e instanceof LL;async function eG(e,t){let n=jL(FL(e));for(;;){let r={signed:!1};try{return await t(r)}catch(t){if(r.signed||e.stop?.aborted||!$W(t))throw t;let i=n.next(t);if(i===null)throw t;if(await zL(e.wait,i,e.stop),e.stop?.aborted)throw new RL}}}";
+const STEP = "var $W=e=>IL(e)||e instanceof LL;async function eG(e,t,o=$W){let n=jL(FL(e));for(;;){let r={signed:!1};try{return await t(r)}catch(t){if(r.signed||e.stop?.aborted||!o(t))throw t;let i=n.next(t);if(i===null)throw t;if(await zL(e.wait,i,e.stop),e.stop?.aborted)throw new RL}}}";
 const WIRED = "let{pool:d,ws:_}=await eG(e,()=>tG(e,r,i)),v={};n=await eG(e,()=>nG(e,n,d,_,v)),e.keepOut&&0;let v=await eG(e,a=>pG(e,t,m,i,f,p,d,{to:n},e=>void(s=e),_,void 0,a));ie.address!==M.address&&FW(`wallet`),d&&(d.signed=!0);let W=RN(m,U);x({...c?{claim:c}:{},stop:u.signal},{...y},r.to,r.amount,r.maxFee);";
 const EXIT = "if(s.status===429||s.status>=500&&s.status<=599)throw new LL(s.status,Eu(s.retryAfter??null,i()));";
 const AFTER = "var EL=Object.freeze({firstMs:1e3,maxMs:1e4,afterMaxMs:1e4}),DL=()=>Date.now(),OL=e=>e instanceof bu||e instanceof LL?e.afterMs:null;";
@@ -81,6 +82,9 @@ test("facts over the bundle's pieces: every mark read; each piece broken loses i
   assert.equal(broken(",e.stop?.aborted)throw new RL", ")throw new RL").step, false);
   // every error waits
   assert.equal(broken("var $W=e=>IL(e)||e instanceof LL;", "var $W=e=>!0;").faults, false);
+  // the loop's default faults not the step's own, or the parameter not the one it tests (card evm-withdraw-waits-out-a-throttle)
+  assert.equal(broken("t,o=$W){", "t,o=e=>!0){").step, false);
+  assert.equal(broken("||!o(t))throw t;", "||!$W(t))throw t;").step, false);
   assert.equal(broken("d&&(d.signed=!0);", "").wired.signed, false);
   assert.equal(broken(",stop:u.signal}", "}").wired.stop, false);
   assert.equal(broken("=await eG(e,()=>tG(e,r,i)),", "=await tG(e,r,i),").wired.plan, false);

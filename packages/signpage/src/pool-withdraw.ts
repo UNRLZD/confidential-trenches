@@ -412,21 +412,22 @@ const toRefused = (to: string, pin: SolanaPoolPin, pool: string, ws: readonly st
 
 /** A step's faults that wait: the page client's transport fault (read-waits.ts waitsOn: a 429, a 5xx, a JSON-RPC
  *  throttle, no answer in time) and the exit's busy deposit address (ReadBusy). Any other error ends the run at once. */
-const stepWaitsOn = (e: unknown): boolean => waitsOn(e) || e instanceof ReadBusy;
+export const stepWaitsOn = (e: unknown): boolean => waitsOn(e) || e instanceof ReadBusy;
 /** One step of a withdraw, its plan (planStep), its To (toStep) or one part up to its signature (onePart), made again from its first
  *  read after a fault that waits, on the page's one rule (read-waits.ts readWaits: from 1 s, doubling, at most 10 s, a
  *  Retry-After honoured to 10 s), each step its own bound (no wait that would end past 30 s from the step's start; then
  *  the fault ends the run, nothing of the step signed). A fault once the step's transaction is signed (`at.signed`) is
  *  never made again: what is signed may land. A sign out ends the wait, ReadStopped (card
- *  pool-buy-waits-out-a-throttle: a Solana withdraw ended stopped on one provider's 429 before any signature). */
-async function stepWaited<T>(h: Pick<PoolWithdrawHost, "wait" | "now" | "stop">, f: (at: { signed: boolean }) => Promise<T>): Promise<T> {
+ *  pool-buy-waits-out-a-throttle: a Solana withdraw ended stopped on one provider's 429 before any signature). `on`: the
+ *  faults that wait, stepWaitsOn by default (the EVM withdraw's own, pool-withdraw-evm.ts). */
+export async function stepWaited<T>(h: Pick<PoolWithdrawHost, "wait" | "now" | "stop">, f: (at: { signed: boolean }) => Promise<T>, on: (e: unknown) => boolean = stepWaitsOn): Promise<T> {
   const waits = readWaits(clockOf(h));
   for (;;) {
     const at = { signed: false };
     try {
       return await f(at);
     } catch (e) {
-      if (at.signed || h.stop?.aborted || !stepWaitsOn(e)) throw e;
+      if (at.signed || h.stop?.aborted || !on(e)) throw e;
       const ms = waits.next(e);
       if (ms === null) throw e;
       await waitUnless(h.wait, ms, h.stop);

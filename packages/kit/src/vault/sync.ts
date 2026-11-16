@@ -28,10 +28,14 @@
 // - Pages any public RPC serves (review R-03): each list starts at VAULT_SYNC_PAGE rows, about 125 Tgas a view; a page
 //   an RPC refuses as too heavy is read again at half its rows on both RPCs (at most three times), so the list still
 //   reads whole, and a busy answer is asked again after a wait (VAULT_SYNC_BUSY_WAITS_MS).
+// - A provider's rate limit (HTTP 429, with or without Retry-After, or dRPC's in a 200) is waited out on the wallet's one
+//   rule and the same view asked again of it, each RPC's stretch of throttles bounded (./throttle.ts, card
+//   restore-waits-out-a-near-throttle); past the bound the sync stops ("rpc") naming the RPC and the refusal.
 // - An abort ends the sync at once, even inside a read an RPC never answers; the signal goes to the RPC's query too.
 // The kit names no provider: the caller passes two RPCs of different operators (the wallet's NEAR_NETWORKS pair).
 import { VAULT_CONSTANTS, VAULT_FIELD_P, vaultAccountId, vaultDecimal, type VaultSpendStatus } from "./shapes.ts";
 import { deepFreeze } from "../freeze.ts";
+import { vaultAskWaited, vaultThrottle, VaultThrottled, type VaultThrottle } from "./throttle.ts";
 
 /**
  * A NEAR JSON-RPC provider's `query` method: the params of one query, its whole JSON-RPC answer. The signal is the
@@ -176,10 +180,12 @@ export async function vaultSync(args: VaultSyncArgs): Promise<VaultSyncResult> {
   const lists = args.lists ?? VAULT_SYNC_LISTS;
   checkInput(vault, rpcs, cursor, lists);
 
+  // Each RPC's throttles over the whole sync (./throttle.ts): one bound a stretch, the pause kept between them.
+  const th = [vaultThrottle(), vaultThrottle()] as const;
   // The two final heights; every read after this one names the lower.
   signal?.throwIfAborted();
   const probe = call(vault, "state_tree", {}, { finality: "final" });
-  const finals = await Promise.all([answer(rpcs[0], probe, signal), answer(rpcs[1], probe, signal)]);
+  const finals = await Promise.all([answer(rpcs[0], probe, th[0], signal), answer(rpcs[1], probe, th[1], signal)]);
   if (Math.abs(finals[0].height - finals[1].height) > VAULT_SYNC_LAG_MAX)
     throw new VaultSyncStopped("lag", `the RPCs' final heights ${finals[0].height} and ${finals[1].height} are over ${VAULT_SYNC_LAG_MAX} blocks apart`);
   const height = Math.min(finals[0].height, finals[1].height);
@@ -189,7 +195,7 @@ export async function vaultSync(args: VaultSyncArgs): Promise<VaultSyncResult> {
   const read = async (method: string, a: Record<string, number>): Promise<unknown> => {
     signal?.throwIfAborted();
     const at = call(vault, method, a, { block_id: height });
-    const [x, y] = await Promise.all([answer(rpcs[0], at, signal), answer(rpcs[1], at, signal)]);
+    const [x, y] = await Promise.all([answer(rpcs[0], at, th[0], signal), answer(rpcs[1], at, th[1], signal)]);
     if (x.height !== height || y.height !== height) throw new VaultSyncStopped("rpc", `${method}: an answer not at block ${height}`);
     if (x.hash !== y.hash || (blockHash !== "" && x.hash !== blockHash)) throw new VaultSyncStopped("disagree", `${method}: two blocks at height ${height}`);
     blockHash = x.hash;
@@ -267,14 +273,16 @@ function call(vault: string, method: string, a: Record<string, number>, at: { fi
   return { request_type: "call_function", account_id: vault, method_name: method, args_base64: btoa(JSON.stringify(a)), ...at };
 }
 
-/** One RPC's answer to one view call: its bytes, height and block hash, or a stop ("rpc"). */
-async function answer(rpc: VaultSyncRpc, params: Obj, signal?: AbortSignal): Promise<{ bytes: Uint8Array; height: number; hash: string }> {
+/** One RPC's answer to one view call: its bytes, height and block hash, or a stop ("rpc"). A throttle is waited out
+ *  on `t`, the RPC's throttle state for the sync (./throttle.ts). */
+async function answer(rpc: VaultSyncRpc, params: Obj, t: VaultThrottle, signal?: AbortSignal): Promise<{ bytes: Uint8Array; height: number; hash: string }> {
   let a: unknown;
   for (let tries = 0; ; tries++) {
     try {
-      a = await untilAbort(rpc.query(params, signal), signal);
+      a = await vaultAskWaited(() => untilAbort(rpc.query(params, signal), signal), rpc.name, String(params.method_name), t, signal);
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
+      if (e instanceof VaultThrottled) throw new VaultSyncStopped("rpc", e.message);
       throw new VaultSyncStopped("rpc", `${rpc.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
     if (!vaultViewBusy(a)) break;

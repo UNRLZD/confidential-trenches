@@ -2,7 +2,8 @@
  "_note": {
   "good": "The deployed helper (de80994dc, card helper-listed-charts-own-reads round 1 with KEYED_COLD_ONLY) read by this check at 2026-11-16T00:25:43.899Z: BONK 500 bars src chain,coingecko, Base DRB 0x3ec2...6ea2 500 bars src chain,coingecko.",
   "bad": "The deployed helper read by this check in live run 43776130630 (15 Nov 23:56Z). The run keeps no record, so this is its two verdict lines as printed, each chart's nine reads with their src as printed and the bars of the last read only: BONK 500 bars src chain,geckoterminal (a full chart: it passes under the re-cut bar), Base DRB 3 bars, src chain, after 9 reads (a short chart: it fails).",
-  "old_bar_bad": "The previous bad answer (main b1b679c42, no key, 13 Nov 10:50Z): both charts 500 bars, src chain,geckoterminal. It failed the old bar (src naming coingecko) and passes the re-cut one: full charts of our own reads with GeckoTerminal's history before them."
+  "old_bar_bad": "The previous bad answer (main b1b679c42, no key, 13 Nov 10:50Z): both charts 500 bars, src chain,geckoterminal. It failed the old bar (src naming coingecko) and passes the re-cut one: full charts of our own reads with GeckoTerminal's history before them.",
+  "held_bonk": "The deployed helper (f73ef454b) read by this check from the Mac at 2026-11-16T07:02:18Z, the same verdict as live run 43816654565 (job 133130245625, 06:5xZ): BONK 500 bars src geckoterminal after 9 reads, Base 0x22af...6f3b 500 bars src chain,coingecko. BONK is on none of Solana's lists, so its chart is the history source's alone (apps/helper/src/data/solana/trades.ts candles), and held, its re-read is keyless (KEYED_COLD_ONLY, token.ts chartRead): at 07:01Z its 500 bars matched GeckoTerminal's keyless minute bars of its pool 5zpyutJu9ee6jFymDGoK7F6S5Kczqtc9FomP3ueKuyA9 in 499 of 500 (the open minute moved). It failed the bar before card held-chart-names-its-bars and passes it after: a full chart named by its source."
  },
  "good": {
   "base": "https://ct-api.unrealized.trade",
@@ -277,6 +278,97 @@
       "ms": 2241,
       "bars": 500,
       "src": "chain,geckoterminal",
+      "filling": false
+     }
+    ]
+   }
+  ]
+ },
+ "held_bonk": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T07:02:18.730Z",
+  "lists": {
+   "base": 200
+  },
+  "charts": [
+   {
+    "chain": "solana",
+    "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "reads": [
+     {
+      "status": 200,
+      "ms": 271,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 1081,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 1100,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 1083,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 1211,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 1173,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 935,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 991,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     },
+     {
+      "status": 200,
+      "ms": 1283,
+      "bars": 500,
+      "src": "geckoterminal",
+      "filling": false
+     }
+    ]
+   },
+   {
+    "chain": "base",
+    "address": "0x22af33fe49fd1fa80c7149773dde5890d3c76f3b",
+    "reads": [
+     {
+      "status": 200,
+      "ms": 1931,
+      "bars": 500,
+      "src": "chain,coingecko",
       "filling": false
      }
     ]

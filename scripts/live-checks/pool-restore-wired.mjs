@@ -234,7 +234,11 @@ export async function collect({ local, net = false }) {
     });
     const page = await ctx.newPage();
     page.on("console", (m) => {
-      if ((m.type() === "warning" || m.type() === "error") && rec.console.length < 50) rec.console.push(`${m.type()}: ${m.text()}`.slice(0, 600));
+      // the page's own restore lines are kept past the cap (card restore-waits-out-a-near-throttle: on --local each refused
+      // host's request logs an error, and those filled the 50 before the "restore stalled:" line, so a local run's stall
+      // printed no reason)
+      const own = /restore (stalled|ids unread):/.test(m.text());
+      if ((m.type() === "warning" || m.type() === "error") && (rec.console.length < 50 || own)) rec.console.push(`${m.type()}: ${m.text()}`.slice(0, 600));
       // each pool's floor written (src/pool-restore.ts): its chain and when
       const w = m.type() === "info" ? /^restore: (solana|near|base|robinhood) walked$/.exec(m.text()) : null;
       if (w && rec.walked.length < 10) rec.walked.push({ chain: w[1], t: Date.now() });
