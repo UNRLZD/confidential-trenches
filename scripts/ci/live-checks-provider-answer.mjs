@@ -97,7 +97,6 @@ export const NOT_MOVED = Object.freeze([
   "evm-selldelegate-exact-debit.mjs",
   "helper-sender-fee-proof.mjs",
   "money-gate-testnet.mjs",
-  "pool-deposits.mjs",
   "pool-evm-deploy-mainnet.mjs",
   "pool-evm-testnet-run.mjs",
   "pool-sol-deploy-mainnet.mjs",
