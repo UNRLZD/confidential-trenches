@@ -24,7 +24,6 @@
 // DEPOSITED is this file's own (it reaches no package code: check:imports holds it); packages/signpage/test/
 // positions-evm.test.ts holds it equal to keccak256 of the wallet's EVM_POOL_EVENTS.Deposited.
 // Runs: once, the card's Base Sepolia run of 11 Nov read back on two testnet RPCs; a deploy cannot change it, and the mainnet bundle part is signpage-positions-evm's
-// Bundle: out a run record's Base Sepolia buy and sell, and W's balance, on two testnet RPCs; the testnet build's positions pass is held by packages/signpage/test/positions-evm.test.ts (the mainnet build pins no EVM pool)
 //   node scripts/live-checks/signpage-positions-evm-testnet.mjs [--record <file>] [--txs <md>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (a pool RPC gave no answer, provider-answer.mjs: never a
 //   pass). --record writes what the run read, so the check's test can replay it.

@@ -18,7 +18,6 @@
 // WITHDRAW_SELECTOR, WITHDRAWN and WITHDRAW_MARKS are this file's own (it reaches no package code: check:imports holds
 // it); packages/signpage/test/pool-withdraw-evm.test.ts holds each equal to the page's own.
 // Runs: once, its record names only the card's testnet withdraws (Base Sepolia, Robinhood testnet), read on test RPCs (card live-checks-read-mainnet-only); the bundle's EVM withdraw is evm-buy-and-sell-on-mainnet's, and a mainnet withdraw's read-back joins a list once the owner's withdraw taps are recorded
-// Bundle: out a run record's withdraws (each a release and W's onward send) on two testnet RPCs each; on the build, its bundle part is held by packages/signpage/scripts/build-network.test.mjs (the EVM withdraw's release in both builds)
 //   node scripts/live-checks/evm-withdraw-mainnet.mjs [--record <file>] [--txs <md>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (a pool RPC gave no answer, provider-answer.mjs: never a
 //   pass). --record writes what the run read, so the check's test can replay it.
