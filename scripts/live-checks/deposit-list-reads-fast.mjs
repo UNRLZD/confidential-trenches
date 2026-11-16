@@ -2,24 +2,31 @@
 // Live check of card deposit-list-reads-fast (the QA walk of the live app, 16 Nov, item 11: the header's Deposit opened
 // cold filled its asset rows in 3,931 ms on a phone and 3,969 ms on desktop). The signing page's deposit.assets
 // (packages/signpage/src/rules/deposit-dry.ts depositAssetsKind) read 1Click's token list, then sent its three probe
-// quotes, then waited up to 2 s for the pools' floors. It now asks the list, the probes and the floors at once and
-// answers as soon as the list and the probes are back. On SIGN_HOST, at 390 x 844 (phone, touch) and 1440 x 900
-// (desktop), for a fresh account opening the header's Deposit cold:
+// quotes, then waited up to 2 s for the pools' floors. Now deposit.assets asks the list and the probes at once and lists
+// the USDC rows alone, and each pool's own coin is the kit's deposit.coin, one read per chain from the pool's floor
+// (depositCoinKind), which the sheet asks beside it and draws as each lands (apps/terminal/src/screens/deposit).
+// On SIGN_HOST, at 390 x 844 (phone, touch) and 1440 x 900 (desktop), for a fresh account opening the header's Deposit
+// cold:
 //   - every probe quote (the dry quote of DEPOSIT_PROBE_AMOUNT to the public placeholder) leaves before the token list's
-//     answer is back: the reads overlap (the build before: each probe left after it);
-//   - the page answers deposit.assets within ANSWER_SLACK_MS of the last of those reads ending: no wait on a floor;
-//   - the answer holds the three USDC rows, and the sheet's Asset and Chain fill within FILL_MAX_MS of the tap. The fill
-//     time and the read's own times are kept in the answer.
+//     answer is back, and the page answers deposit.assets within ANSWER_SLACK_MS of the last of them: no wait on a floor;
+//   - deposit.assets answers the three USDC rows, and the sheet's Asset and Chain fill within FILL_MAX_MS of the tap;
+//   - the sheet asks deposit.coin for Solana, Base and Robinhood, each answers its row (SOL, ETH, ETH), and the sheet
+//     draws SOL and ETH among its assets and Base and Robinhood among ETH's chains, each within COIN_MAX_MS of the tap:
+//     no row lost (the build of 3eea13901 listed the USDC rows alone).
+// The times are kept in the answer, with Robinhood's floor read: each RPC POST it sent (host, status, times).
 // 1Click busy or down for the list (the answer's busy or down) proves nothing either way: INCONCLUSIVE, exit 3.
+// Deploy order: the app before the signing page. A new app on the old page reads the pool rows from deposit.assets as
+// before (deposit.coin is refused not_allowed there); the old app on the new page would list no pool row.
 // Headless Chromium (scripts/browsers.mjs, sandbox on) opens SIGN_HOST top-level with a CDP virtual authenticator (PRF),
 // signs up with a throwaway passkey (Create passkey, as app-money-sheets-read-right does), opens Discover and presses
 // the header's Deposit. It never presses Get address: the account is new and holds nothing, and the seed stays in the
-// browser's temporary profile, deleted on close. The answer keeps times, row names and counts (public values) only.
-//   --sign-dir <dir>: SIGN_HOST's files answered from a local build (packages/signpage/scripts/build-app.mjs --out),
-//   every other request live: how the good answer is recorded before a deploy.
+// browser's temporary profile, deleted on close. The answer keeps times, hosts, row names and counts (public values).
+//   --sign-dir <dir>: SIGN_HOST's files answered from a local build (packages/signpage/scripts/build-app.mjs --out);
+//   --app-dir <dir>: APP_HOST's from a local build (pnpm --filter terminal build's dist); every other request live: how
+//   the good answer is recorded before a deploy.
 // After: sign
 // Bundle: out a browser and a fresh account on the live hosts
-//   node scripts/live-checks/deposit-list-reads-fast.mjs [--record <file>] [--answer <file>] [--sign-dir <dir>]
+//   node scripts/live-checks/deposit-list-reads-fast.mjs [--record <file>] [--answer <file>] [--sign-dir <dir>] [--app-dir <dir>]
 // PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3.
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -38,6 +45,10 @@ export const PROBE_AMOUNT = "10000000";
 /** The release's three USDC rows (deposit-dry.ts DEPOSIT_ASSET_CHAINS). */
 export const USDC_ROWS = Object.freeze(["USDC near", "USDC solana", "USDC base"]);
 export const WIDTHS = Object.freeze(["phone", "desktop"]);
+/** Each pool's own coin row (deposit-dry.ts DEPOSIT_POOL_COINS), as deposit.coin answers it per chain. */
+export const COIN_ROWS = Object.freeze({ solana: "SOL solana", base: "ETH base", robinhood: "ETH robinhood" });
+/** The sheet's chain names for ETH's two pools (apps/terminal/src/screens/deposit/model.ts CHAIN_NAME). */
+export const ETH_CHAINS = Object.freeze(["Base", "Robinhood"]);
 const VIEW = {
   phone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   desktop: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
@@ -48,6 +59,8 @@ export const ANSWER_SLACK_MS = 500;
 /** The longest the sheet may take to fill after Deposit's tap: the signing page's own deadline for the asset list
  *  (packages/signpage/src/deposit-wire.ts DEPOSIT_READ_DEADLINE_MS, 14 s), so a slow 1Click is the read's own answer. */
 export const FILL_MAX_MS = 14_000;
+/** The longest a pool coin's row may take to be drawn after the tap: the page's read deadline, as FILL_MAX_MS. */
+export const COIN_MAX_MS = 14_000;
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 
 /** The verdict on an answer { widths: { <width>: read } }: { verdict, lines }. */
@@ -85,15 +98,29 @@ export function judge(a) {
     const gap = ans.at - last;
     say(Number.isFinite(gap) && gap <= ANSWER_SLACK_MS, `${w}: the answer posted ${Number.isFinite(gap) ? `${gap} ms` : "an unknown time"} after the last read ended, at most ${ANSWER_SLACK_MS} ms (no wait on a pool's floor)`);
     say(typeof r.fillMs === "number" && r.fillMs <= FILL_MAX_MS, `${w}: Asset and Chain fill ${typeof r.fillMs === "number" ? `${r.fillMs} ms` : "never"} after the tap (at most ${FILL_MAX_MS} ms)`);
+    // the pool coins' rows, each its own read, none lost
+    const coins = r.coins ?? {};
+    for (const [chain, row] of Object.entries(COIN_ROWS)) {
+      const c = coins[chain];
+      const ok = c?.asked === true && c.ok === true && c.row === row;
+      say(ok, `${w}: deposit.coin for ${chain} ${!c?.asked ? "never asked" : c.ok ? `answers ${JSON.stringify(c.row)} at ${c.at} ms` : `refused ${c.code ?? "?"}`}, want ${JSON.stringify(row)}`);
+    }
+    const drawn = r.drawn ?? {};
+    for (const sym of ["SOL", "ETH"]) {
+      const t = drawn[sym];
+      say(typeof t === "number" && t <= COIN_MAX_MS, `${w}: the sheet draws ${sym} among its assets ${typeof t === "number" ? `${t} ms` : "never"} after the tap (at most ${COIN_MAX_MS} ms)`);
+    }
+    const eth = Array.isArray(r.ethChains) ? r.ethChains : [];
+    say(ETH_CHAINS.every((c) => eth.includes(c)), `${w}: ETH's chains read ${JSON.stringify(eth)}, want ${JSON.stringify(ETH_CHAINS)} (no pool row lost)`);
   }
   const bad = lines.some((l) => l.startsWith("BAD"));
   return { verdict: bad ? "FAIL" : quiet ? "INCONCLUSIVE" : lines.length > 0 ? "PASS" : "FAIL", lines };
 }
 
-/** SIGN_HOST's requests answered from `dir` (a path with no file extension: its index.html), every other one live. */
-async function routeSign(ctx, dir) {
+/** `host`'s requests answered from `dir` (a path with no file extension: its index.html), every other one live. */
+async function routeDir(ctx, host, dir) {
   const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".wasm": "application/wasm", ".zkey": "application/octet-stream" };
-  await ctx.route(`${SIGN}/**`, (route) => {
+  await ctx.route(`${host}/**`, (route) => {
     const p = new URL(route.request().url()).pathname;
     let file = path.join(dir, p);
     if (!file.startsWith(dir)) return route.abort();
@@ -108,8 +135,8 @@ async function routeSign(ctx, dir) {
   });
 }
 
-/** In every frame: SIGN_HOST's top page keeps each deposit.assets APP_HOST posts it (id, time), APP_HOST's frame each
- *  answer SIGN_HOST posts it (id, time, rows or code). */
+/** In every frame: SIGN_HOST's top page keeps each deposit.assets and deposit.coin APP_HOST posts it (id, kind, chain,
+ *  time), APP_HOST's frame each answer SIGN_HOST posts it (id, time, rows or code). */
 const WATCH = ({ app, sign }) => {
   window.__asked = [];
   window.__answers = [];
@@ -117,9 +144,9 @@ const WATCH = ({ app, sign }) => {
     "message",
     (e) => {
       const d = e.data;
-      if (location.origin === sign && e.origin === app && d?.v === 1 && d?.type === "deposit.assets") window.__asked.push({ id: d.id, at: Date.now() });
+      if (location.origin === sign && e.origin === app && d?.v === 1 && (d?.type === "deposit.assets" || d?.type === "deposit.coin")) window.__asked.push({ id: d.id, type: d.type, chain: d.chain ?? null, at: Date.now() });
       if (location.origin === app && e.origin === sign && d?.v === 1 && typeof d?.id === "string" && typeof d?.ok === "boolean") {
-        const rows = Array.isArray(d.result?.assets) ? d.result.assets.map((x) => `${x.symbol} ${x.chain}`) : null;
+        const rows = Array.isArray(d.result?.assets) ? d.result.assets.map((x) => `${x.symbol} ${x.chain}`) : d.result?.asset ? [`${d.result.asset.symbol} ${d.result.asset.chain}`] : null;
         window.__answers.push({ id: d.id, at: Date.now(), ok: d.ok, rows, code: d.error?.code ?? null });
       }
     },
@@ -127,16 +154,20 @@ const WATCH = ({ app, sign }) => {
   );
 };
 
-async function readWidth(browser, w, signDir) {
+async function readWidth(browser, w, signDir, appDir) {
   const ctx = await browser.newContext({ ...VIEW[w], reducedMotion: "reduce" });
   const out = { width: w };
   try {
-    if (signDir) await routeSign(ctx, signDir);
+    if (signDir) await routeDir(ctx, SIGN, signDir);
+    if (appDir) await routeDir(ctx, APP, appDir);
     await ctx.addInitScript(WATCH, { app: APP, sign: SIGN });
     // the token list and the probes, by when each left and came back (this machine's clock, as the pages')
     const reads = [];
+    // Robinhood's floor read: each POST to a Robinhood RPC (its host, or the helper's /v1/rpc/robinhood route)
+    const hood = [];
     ctx.on("request", (q) => {
       const url = q.url();
+      if (q.method() === "POST" && (/robinhood/.test(new URL(url).host) || /^\/v1\/rpc\/robinhood/.test(new URL(url).pathname))) hood.push({ q, host: new URL(url).host + (new URL(url).host.startsWith("ct-api.") ? new URL(url).pathname : ""), start: Date.now() });
       if (q.method() !== "POST" || (url !== TOKENS_URL && url !== QUOTE_URL)) return;
       let body = null;
       try {
@@ -146,8 +177,11 @@ async function readWidth(browser, w, signDir) {
       reads.push({ q, kind: url === TOKENS_URL ? "tokens" : `probe ${body.originAsset}`, start: Date.now() });
     });
     const ended = (q) => {
-      const r = reads.find((x) => x.q === q);
-      if (r && r.end === undefined) r.end = Date.now();
+      const r = reads.find((x) => x.q === q) ?? hood.find((x) => x.q === q);
+      if (r && r.end === undefined) {
+        r.end = Date.now();
+        q.response().then((res) => void (r.status = res?.status() ?? null), () => {});
+      }
     };
     ctx.on("requestfinished", ended);
     ctx.on("requestfailed", ended);
@@ -187,11 +221,42 @@ async function readWidth(browser, w, signDir) {
     out.opened = await f.waitForSelector('[data-sheet="deposit"]', { timeout: 5_000 }).then(() => true, () => false);
     if (!out.opened) return out;
     out.fillMs = await f.waitForSelector('[data-sheet="deposit"] select[data-control="deposit-asset"]', { timeout: FILL_MAX_MS + 5_000 }).then(() => Date.now() - t0, () => null);
-    await page.waitForTimeout(500);
+    // when each pool coin's symbol is first drawn among the sheet's assets, polled until both are or COIN_MAX_MS
+    out.drawn = {};
+    while (Date.now() - t0 <= COIN_MAX_MS + 1_000 && !(out.drawn.SOL !== undefined && out.drawn.ETH !== undefined)) {
+      const syms = await f.evaluate(() => [...(document.querySelector('[data-sheet="deposit"] select[data-control="deposit-asset"]')?.options ?? [])].map((o) => o.value || o.textContent.trim())).catch(() => []);
+      for (const sym of ["SOL", "ETH"]) if (out.drawn[sym] === undefined && syms.includes(sym)) out.drawn[sym] = Date.now() - t0;
+      await page.waitForTimeout(100);
+    }
+    // every deposit.coin the sheet asked answered (each by its id), or COIN_MAX_MS from the tap; then ETH picked: its
+    // chains as the sheet draws them
+    while (Date.now() - t0 <= COIN_MAX_MS + 1_000) {
+      const ids = (await page.evaluate(() => window.__asked ?? [])).filter((x) => x.type === "deposit.coin").map((x) => x.id);
+      const got = new Set((await f.evaluate(() => window.__answers ?? [])).map((x) => x.id));
+      if (ids.length >= 3 && ids.every((id) => got.has(id))) break;
+      await page.waitForTimeout(100);
+    }
+    await page.waitForTimeout(300);
+    out.ethChains = await f.locator('[data-sheet="deposit"] select[data-control="deposit-asset"]').selectOption("ETH").then(
+      async () => {
+        await page.waitForTimeout(300);
+        return f.evaluate(() => [...(document.querySelector('[data-sheet="deposit"] select[data-control="deposit-chain"]')?.options ?? [])].map((o) => o.value || o.textContent.trim()));
+      },
+      () => [],
+    );
     // the first deposit.assets the page was asked, its answer and the reads it sent, each relative to the ask
-    const asked = (await page.evaluate(() => window.__asked ?? []))[0];
+    const allAsked = await page.evaluate(() => window.__asked ?? []);
+    const answers = await f.evaluate(() => window.__answers ?? []);
+    const asked = allAsked.find((x) => x.type === "deposit.assets");
     if (!asked) return out;
-    const answer = (await f.evaluate(() => window.__answers ?? [])).find((x) => x.id === asked.id);
+    out.coins = {};
+    for (const chain of Object.keys(COIN_ROWS)) {
+      const q = allAsked.find((x) => x.type === "deposit.coin" && x.chain === chain);
+      const a = q ? answers.find((x) => x.id === q.id) : null;
+      out.coins[chain] = q ? { asked: true, askedAt: q.at - asked.at, ok: a?.ok ?? null, row: a?.rows?.[0] ?? null, code: a?.code ?? null, at: a ? a.at - asked.at : null } : { asked: false };
+    }
+    out.robinhoodRpcs = hood.filter((h) => h.start >= asked.at - 50).map((h) => ({ host: h.host, start: h.start - asked.at, end: typeof h.end === "number" ? h.end - asked.at : null, status: h.status ?? null }));
+    const answer = answers.find((x) => x.id === asked.id);
     const rel = (v) => (typeof v === "number" ? v - asked.at : null);
     out.askedMs = asked.at - t0;
     out.answer = answer ? { at: rel(answer.at), ok: answer.ok, rows: answer.rows, code: answer.code } : null;
@@ -207,13 +272,13 @@ async function readWidth(browser, w, signDir) {
   }
 }
 
-export async function read({ signDir = null } = {}) {
+export async function read({ signDir = null, appDir = null } = {}) {
   const { launchBrowser, browserLabel } = await import("../browsers.mjs");
   const browser = await launchBrowser("chromium");
   try {
     const widths = {};
-    for (const w of WIDTHS) widths[w] = await readWidth(browser, w, signDir ? path.resolve(signDir) : null);
-    return { at: new Date().toISOString(), browser: browserLabel(browser), sign: signDir ? "local build" : "SIGN_HOST", widths };
+    for (const w of WIDTHS) widths[w] = await readWidth(browser, w, signDir ? path.resolve(signDir) : null, appDir ? path.resolve(appDir) : null);
+    return { at: new Date().toISOString(), browser: browserLabel(browser), sign: signDir ? "local build" : "SIGN_HOST", app: appDir ? "local build" : "APP_HOST", widths };
   } finally {
     await browser.close();
   }
@@ -225,11 +290,11 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     return i > 0 ? process.argv[i + 1] : undefined;
   };
   try {
-    const answer = arg("--answer") ? JSON.parse(readFileSync(arg("--answer"), "utf8")) : await read({ signDir: arg("--sign-dir") ?? null });
+    const answer = arg("--answer") ? JSON.parse(readFileSync(arg("--answer"), "utf8")) : await read({ signDir: arg("--sign-dir") ?? null, appDir: arg("--app-dir") ?? null });
     if (arg("--record")) writeFileSync(arg("--record"), `${JSON.stringify(answer)}\n`);
     const v = judge(answer);
     for (const l of v.lines) console.log(l);
-    console.log(`${v.verdict} ${KEY} (${answer.sign ?? "?"})`);
+    console.log(`${v.verdict} ${KEY} (sign ${answer.sign ?? "?"}, app ${answer.app ?? "?"})`);
     process.exit(EXIT[v.verdict]);
   } catch (e) {
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
