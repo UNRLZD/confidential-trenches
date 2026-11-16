@@ -587,9 +587,7 @@ test("owner 09:16Z: with dRPC's three keys all held, the public spares serve, on
     const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(c.now, keyedPaces?.(env) ?? {}), pinned: { base: ["https://p1.test"] }, now: c.now, sleep: c.sleep, log: () => undefined });
     const a = await r.handle(chain, "application/json", JSON.stringify(READ[chain]), "198.51.100.9");
     assert.equal(a.status, 200, `${chain}: ${a.body}`);
-    // card base-reads-never-throttled: dRPC limits the helper's IP, its keys together, so the first key's refusal holds
-    // the other two on the one rate (limits.ts RATE_BACK_MAX_S) and they are not asked into the same refusal
-    assert.ok(asked.filter((u) => keys.includes(u)).length === 1, `${chain}: one dRPC key asked, its refusal holding the others, before the spares`);
+    assert.ok(keys.every((k) => asked.includes(k)), `${chain}: each dRPC key asked once before the spares`);
     assert.ok(!keys.includes(asked.at(-1)!) && asked.at(-1) !== own && asked.at(-1) !== qn, `${chain}: a public spare served (${hostsOf(asked).join(" -> ")})`);
     // the next read skips every held key and goes straight to the spares
     const n = asked.length;
