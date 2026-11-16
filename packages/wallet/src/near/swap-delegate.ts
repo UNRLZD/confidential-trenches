@@ -4,7 +4,8 @@
 //   step hardened, (a, b) from HKDF info "wallet" ‖ 0x03 ‖ l ‖ j (docs/plan1/wallet.md:63 and :98; ../derive/keys.ts
 //   freshWallet). Its id is the hex of its public key, the implicit account the relayer creates by a plain Transfer.
 //   The calls are the kit's nearSwapCalls, checked again here by nearSwapCheck on this module's own copy, right before
-//   W's key signs, so what is signed is what was checked.
+//   W's key signs, so what is signed is what was checked. A Rhea DCL quote (its venue "dcl", card near-dcl-sell): the
+//   kit's dclSwapCalls, checked by dclSwapCheck instead, never by the other venue's check.
 //   Each call is its own delegate (each has its own receiver): nonce = W's key nonce + 1, + 2, ... in the calls' order,
 //   so the relayer can land them only in that order. W's registration on the output token is its own round, signed
 //   alone; the swap is signed only once that registration reads back (the kit's nearSwapCalls and nearSwapCheck); max_block_height = the read's height + the window (the deposit's
@@ -21,8 +22,8 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
+import { dclSwapCheck, type DclQuote, type RheaQuote } from "@blindfill/kit";
 import { nearSwapCheck, type NearSwapCall, type NearSwapRequest } from "../../../kit/src/trade/near/swap.ts";
-import type { RheaQuote } from "../../../kit/src/near/rhea.ts";
 import type { NearSwapWalletState } from "../../../kit/src/trade/near/wallet.ts";
 import { freshWallet } from "../derive/keys.ts";
 import { DEPOSIT_WINDOW, DEPOSIT_WINDOW_MAX, encodeDelegateAction, NEP366_PREFIX, NONCE_RANGE_MULTIPLIER } from "../deposit/delegate.ts";
@@ -71,7 +72,7 @@ export function signNearSwapDelegates(
   j: number,
   given: readonly NearSwapCall[],
   request: NearSwapRequest,
-  quote: RheaQuote,
+  quote: RheaQuote | DclQuote,
   state: NearSwapWalletState,
   bound: string | null,
   window: number = DEPOSIT_WINDOW,
@@ -108,7 +109,9 @@ export function signNearSwapDelegates(
     throw new NearSwapDelegateRefused("input", "the calls are not plain data");
   }
   const own: NearSwapRequest = { network: request.network, side: request.side, token: request.token, amountIn: request.amountIn, wallet: request.wallet, slippageBps: request.slippageBps };
-  nearSwapCheck(calls, own, ctx); // NearSwapRefused (N1-N4, N7) passes through as it is
+  // NearSwapRefused (N1-N4, N7) passes through as it is; each venue's quote is held to its own check
+  if ((quote as Partial<DclQuote>).venue === "dcl") dclSwapCheck(calls, own, { ...ctx, quote: quote as DclQuote });
+  else nearSwapCheck(calls, own, { ...ctx, quote: quote as RheaQuote });
   const height = BigInt(read.height);
   const max_block_height = height + BigInt(window);
   const w = freshWallet(seed64, "near", l, j);
