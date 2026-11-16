@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cents, shareOf, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
-import { busy, unavailable } from "../trade/model.ts";
+import { busy, dryAgainMs, unavailable } from "../trade/model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "../trade/States.tsx";
 import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount } from "./model.ts";
 import { useSellKit } from "./source.tsx";
@@ -39,7 +39,9 @@ export const PREVIEW_AGAIN_MS = 3_000;
  *  holding and no sale runs: the page answers either before it asks any provider (src/pool-sell-dry.ts), so a re-ask
  *  costs no read, and the number comes within about a second of the page having it (devnet runs 11 and 12, 11 Nov). */
 export const PREVIEW_BUSY_MS = 1_000;
-const NOT_NOW: ReadonlySet<string> = new Set(["busy", "down"]);
+/** Not now: the page busy, a provider down, or the kit client's own 10 s passed while the page still read (client_timeout,
+ *  asked again at once: trade/model.ts dryAgainMs, card buy-box-quotes-before-funds). */
+const NOT_NOW: ReadonlySet<string> = new Set(["busy", "down", "client_timeout"]);
 const NOT_YET: ReadonlySet<string> = new Set(["busy", "not_funded"]);
 /** A share's last number is shown again for a "not now" answer this long after it came, so a shown number never flips
  *  to a dash and back while the page is busy. */
@@ -102,6 +104,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
     let live = true;
     let t: ReturnType<typeof setTimeout>;
     let downs = 0;
+    let gaveUp = 0;
     const ask = (first: boolean): void =>
       void sellPreview({ chain: row.chain, token: row.token, amount, share_bps: bps, slippage_bps: slippageBps }).then(
         (a) => {
@@ -112,7 +115,8 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
             setPreview({ amount, p: a.preview });
             return;
           }
-          const again = NOT_YET.has(a.code) ? PREVIEW_BUSY_MS : a.code === "down" && downs++ === 0 ? PREVIEW_AGAIN_MS : null;
+          const timedOut = a.code === "client_timeout" ? dryAgainMs(a.code, gaveUp++) : null;
+          const again = NOT_YET.has(a.code) ? PREVIEW_BUSY_MS : a.code === "down" && downs++ === 0 ? PREVIEW_AGAIN_MS : timedOut;
           if (again !== null) t = setTimeout(() => ask(false), again);
           if (first && (NOT_NOW.has(a.code) || a.code === "not_funded")) return;
           const kept = NOT_NOW.has(a.code) ? recent.current.get(key) : undefined;

@@ -5,6 +5,7 @@
 // The owner's lists: the signed CN rows and the `[owner: round 16]` picks of docs/spec/09-design-brief.md S8, the
 // locked R5 prototype's own labels (research repo design/proto at design-lock-r5: assets/token.js U.ticket and
 // trenches-1440.html's ticket; a label R5 draws through P.dc stays a draft), and src/screens/token/words.ts.
+import { WORDS as DW } from "../deposit/words.ts";
 import { WORDS as PF } from "../portfolio/words.ts";
 
 export interface Word {
@@ -84,6 +85,9 @@ export const WORDS = {
   final: draft("Final", "buy-route-strip-spec.md Words on screen: the tag beside Filled (S8.12)"),
   // every orders place (the Limit and TP/SL tabs, the exit plan): orders are out of the plan for now
   soon: ok("Coming soon", "owner 10 Nov, owner-decisions row \"Order of the returned feature groups\": orders are out of the plan for now, the UI says Coming soon (card app-orders-coming-soon)"),
+  // You receive while the page prices the amount (card buy-box-quotes-before-funds): the deposit sheet's approved word for
+  // its own quote in flight, not a new one
+  quoting: DW.quoting,
   poolBare: ok("Pool", "owner 8 Nov 07:55Z, kept; drafted on card app-buy-route-strip: the pool step's label before an event names the venue (words-pending)"),
 } as const satisfies Record<string, Word>;
 
