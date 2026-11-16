@@ -376,6 +376,13 @@ export function top10Of(a: DataAnswer): { bps: number; at: number } | null {
   }
 }
 
+/** The holders a page lists: the wallets (owners on ed25519) and the burn address; a launch curve's, a pool's, a vault's
+ *  or a locker's account is a program address, off the curve, and no holder (walletsTop10's rule; card
+ *  market-data-matches-the-page: a pump.fun coin's bonding curve was listed first at 100%). */
+export function listedHolders(rows: readonly Holder[]): Holder[] {
+  return rows.filter((h) => h.kind === "burn" || h.addr === INCINERATOR || onCurve(b58decode(h.addr) ?? new Uint8Array()));
+}
+
 export function walletsTop10(rows: readonly Holder[]): number | null {
   const wallets = rows.filter((h) => h.kind !== "burn" && h.addr !== INCINERATOR && h.bps !== null && onCurve(b58decode(h.addr) ?? new Uint8Array()));
   if (wallets.length === 0) return null;
@@ -1077,7 +1084,7 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const r = await rowOf(mint).catch(() => null);
       const total = (r?.row.holders ?? null) as number | null;
       const at = now();
-      const body: Holders = { holders: rows, total, top_bps: m.mint.supply > 0n ? top : null, src: "chain", as_of_ms: at };
+      const body: Holders = { holders: listedHolders(rows), total, top_bps: m.mint.supply > 0n ? top : null, src: "chain", as_of_ms: at };
       return { status: 200, body: JSON.stringify(body), src: "chain", asOfMs: at };
     } catch {
       // the fallback (06b v1.36): no rows, Jupiter's holder count and top-holders share

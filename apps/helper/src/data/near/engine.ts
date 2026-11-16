@@ -185,7 +185,11 @@ export function engineRisk(raw: unknown, row: Row, asOfMs: number): Record<(type
   };
 }
 
-/** The holders answer's rows: account, raw amount, share in bps; at most 100. */
+/** The pool contracts whose accounts hold a NEAR token's pool reserves, never a holder: Ref Finance's v2 pools and its
+ *  DCL pools (read live 16 Nov 20:2xZ first among MLC's and iMeme's holders, card market-data-matches-the-page). */
+export const NEAR_POOL_ACCOUNTS: ReadonlySet<string> = new Set(["v2.ref-finance.near", "dclv2.ref-labs.near"]);
+
+/** The holders answer's rows: account, raw amount, share in bps; at most 100; a pool contract left out. */
 export function engineHolders(answer: unknown): { holders: Holder[]; total: number | null; top_bps: number | null } | null {
   const a = obj(answer);
   if (!Array.isArray(a.holders)) return null;
@@ -194,7 +198,7 @@ export function engineHolders(answer: unknown): { holders: Holder[]; total: numb
     const o = obj(h);
     const addr = nearAccount(o.account);
     const amt = typeof o.balance === "string" && DIGITS.test(o.balance) ? o.balance : null;
-    if (addr === null || amt === null) continue;
+    if (addr === null || amt === null || NEAR_POOL_ACCOUNTS.has(addr)) continue;
     holders.push({ addr, amt, bps: share(o.pct) });
   }
   const top = holders.slice(0, 10).map((h) => h.bps);

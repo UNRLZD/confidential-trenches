@@ -196,10 +196,12 @@ test("holders, trades and candles from the engine: rows, whole-token amounts, US
   const h = JSON.parse((await near.token.holders(T)).body) as { holders: { addr: string; amt: string; bps: number }[]; total: number; top_bps: number; src: string };
   assert.equal(h.src, "unrealized");
   assert.equal(h.total, 86);
-  assert.equal(h.holders.length, 12);
+  // the recording's second row, dclv2.ref-labs.near at 44%, is Ref's DCL pool: no holder (card market-data-matches-the-page)
+  assert.equal(h.holders.length, 11);
+  assert.ok(!h.holders.some((x) => x.addr === "dclv2.ref-labs.near"));
   assert.deepEqual(h.holders[0], { addr: "treasury.sickyak1747.near", amt: h.holders[0]!.amt, bps: 4832 });
   assert.match(h.holders[0]!.amt, /^\d+$/, "raw units, as the other chains' holders");
-  assert.ok(h.top_bps > 9_000 && h.top_bps <= 10_000);
+  assert.ok(h.top_bps > 5_000 && h.top_bps < 6_000, `the ten wallets' share without the pool's 44%: ${h.top_bps}`);
   const t = JSON.parse((await near.trades.trades(T, 50)).body) as { trades: { t_ms: number; side: string; usd: string; amt: string; trader: string | null; tx: string }[]; src: string };
   assert.equal(t.src, "unrealized");
   assert.equal(t.trades.length, 6);
@@ -241,4 +243,24 @@ test("a token's reads are held FRESH_MS: a second page open within it asks the e
   await near.token.page(T);
   await near.trades.trades(T, 50);
   assert.deepEqual(asked, [`/token/${T}`, `/token/${T}/trades`]);
+});
+
+// card market-data-matches-the-page: a pool is no holder. Live 16 Nov 20:2xZ, NEAR holders answered dclv2.ref-labs.near
+// first for MLC (8478 bps) and iMeme (1152), and v2.ref-finance.near third for BLACKDRAGON (481): Ref's DCL and v2 pool
+// contracts hold the pools' reserves. They are left out of the list and of the top 10.
+test("engineHolders: Ref's pool contracts are no holders, in the list or the top 10", async () => {
+  const { engineHolders } = await import("./engine.ts");
+  const answer = {
+    total: 31,
+    holders: [
+      { account: "dclv2.ref-labs.near", balance: "8478", pct: 84.78 },
+      { account: "bnearr.near", balance: "291", pct: 2.91 },
+      { account: "v2.ref-finance.near", balance: "100", pct: 1 },
+      { account: "c56af31c5d7bb1872cee2e81882e03206a4185b6eecba1daad3ff26d22a08101", balance: "268", pct: 2.68 },
+    ],
+  };
+  const h = engineHolders(answer)!;
+  assert.deepEqual(h.holders.map((x) => x.addr), ["bnearr.near", "c56af31c5d7bb1872cee2e81882e03206a4185b6eecba1daad3ff26d22a08101"]);
+  assert.equal(h.top_bps, 291 + 268);
+  assert.equal(h.total, 31);
 });

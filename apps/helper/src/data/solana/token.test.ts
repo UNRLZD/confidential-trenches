@@ -458,10 +458,9 @@ test("holders: 20 rows at most, merged per owner, bps of the supply, the burn ad
   assert.equal(a.status, 200);
   const h = JSON.parse(a.body);
   assert.deepEqual(Object.keys(h), [...HOLDERS_FIELDS]);
-  assert.deepEqual(h.holders, [
-    { addr: OWNER[1], amt: "600000", bps: 6000, kind: "burn" },
-    { addr: OWNER[0], amt: "300000", bps: 3000 },
-  ]);
+  // OWNER[0] (7vfCX..., a program address off the curve) is no holder (card market-data-matches-the-page, listedHolders):
+  // the merged rows keep the burn address alone
+  assert.deepEqual(h.holders, [{ addr: OWNER[1], amt: "600000", bps: 6000, kind: "burn" }]);
   // card token-page-data-complete-and-fast: the top 10 is the wallets' (walletsTop10): the burn address and an owner off
   // the curve (7vfCX..., a program address) are left out, so these rows hold no wallet
   assert.equal(h.top_bps, null);
@@ -1060,4 +1059,20 @@ test("tape: the token's top pool on GeckoTerminal, then its trades for the mint,
   now += TAPE_FRESH_MS - 1;
   await (t as unknown as { tape(m: string): Promise<unknown> }).tape(g.mint);
   assert.equal(urls.length, 2, "held while fresh");
+});
+
+// card market-data-matches-the-page: a launch curve or a pool is no holder. Live 16 Nov 20:2xZ, the pump.fun coin
+// mxfcbbmz...pump's holders answered AzCA3sHh... first at 10000 bps (its bonding curve, an account off ed25519 a program
+// owns), a new coin's WLHv2UAZ... at 9990 bps (its pool); walletsTop10 already left them out of the top 10, the list
+// still showed them. Only wallets (on the curve) and the burn address are listed.
+test("listedHolders: the curve's and the pool's accounts (off ed25519) are left out; wallets and the burn address stay, in order", async () => {
+  const { listedHolders } = await import("./token.ts");
+  const rows = [
+    { addr: "AzCA3sHhhg59vFaH37HqUesCJSpPpehUa9gTajJCmZeG", amt: "1000", bps: 10000 },
+    { addr: "9iYpKAGTuW1hNrf9A9CYvNYPWz21aV2cwq8jFHhrZ1Gz", amt: "5", bps: 0 },
+    { addr: "WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh", amt: "999", bps: 9990 },
+    { addr: "1nc1nerator11111111111111111111111111111111", amt: "3", bps: 0, kind: "burn" as const },
+  ];
+  assert.deepEqual(listedHolders(rows).map((h) => h.addr), ["9iYpKAGTuW1hNrf9A9CYvNYPWz21aV2cwq8jFHhrZ1Gz", "1nc1nerator11111111111111111111111111111111"]);
+  assert.deepEqual(listedHolders([]), []);
 });
