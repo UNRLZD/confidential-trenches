@@ -26,6 +26,7 @@ import type { WalkPort } from "../../wallet/src/restore/walk.ts";
 import { PAGE_NETWORK } from "../src/withdraw/handoff.ts";
 import { vaultScope } from "../src/withdraw/checks.ts";
 import { vaultBalanceOf } from "../src/vault-balance.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 
 beforeEach(() => resetPaces());
 
@@ -381,4 +382,73 @@ test("the rebuild's hook is called only once the notes are written and some note
     .auto()
     .catch(() => {});
   assert.equal(called2, 0, "a failed write: never called");
+});
+
+// ---------- a NEAR provider's rate limit (card restore-waits-out-a-near-throttle) ----------
+// Release 162's sign-in on a fresh device ended stalled: "near vault: vault sync stopped (rpc): https://near.drpc.org:
+// HTTP 429" (pool-restore-wired live, 16 Nov 04:32Z). The kit's nearRpc throws a 429 as rpcHttpError (status 429, its
+// Retry-After kept); the run waits it out within the kit's bound and the same view is asked again.
+const http429 = (retryAfterMs?: number) => Object.assign(new Error("HTTP 429"), { status: 429 }, retryAfterMs === undefined ? {} : { retryAfterMs });
+/** `rpc` answering `refusal` to its first `n` asks that `hit` names, then as it does. */
+function throttled(rpc: VaultSyncRpc, hit: (p: Record<string, unknown>) => boolean, n: number, refusal: () => Error): VaultSyncRpc & { seen: () => number } {
+  let k = 0;
+  return {
+    name: rpc.name,
+    seen: () => k,
+    async query(p, signal) {
+      if (hit(p) && k < n) {
+        k++;
+        throw refusal();
+      }
+      return rpc.query(p, signal);
+    },
+  };
+}
+const probe = (p: Record<string, unknown>) => p.method_name === "state_tree" && p.finality === "final";
+const named = (m: string) => (p: Record<string, unknown>) => p.method_name === m;
+
+test("a NEAR provider's 429 once, with or without Retry-After, on the vault's probe, a page or its config: waited out, the run ends done with every note", async () => {
+  for (const [what, side, hit, refusal] of [
+    ["dRPC's 429 on the probe (release 162's)", 1, probe, () => http429()],
+    ["dRPC's 429 with a Retry-After of 3 s on the deposits page", 1, named("deposits"), () => http429(3_000)],
+    ["FastNEAR's 429 on the leaves page", 0, named("leaves"), () => http429()],
+    ["dRPC's 429 on the config read", 1, named("config"), () => http429()],
+    ["FastNEAR's 429 on the config read", 0, named("config"), () => http429(2_000)],
+  ] as const) {
+    const { v, own } = lived();
+    const st = await device();
+    const ends: { stage: string; why: readonly string[] }[] = [];
+    const t = { seen: () => 0 };
+    const rpcs = (): [VaultSyncRpc, VaultSyncRpc] => {
+      const p = pair(v);
+      const x = throttled(p[side], hit, 1, refusal);
+      t.seen = x.seen;
+      return side === 0 ? [x, p[1]] : [p[0], x];
+    };
+    await onTestClock(() => restoreKind.poolRestore(hostOf(st, rpcs, ends)).auto());
+    assert.equal(t.seen(), 1, `${what}: the throttle was met`);
+    assert.equal(ends.at(-1)?.stage, "done", `${what}: ${ends.at(-1)?.why.join(" | ")}`);
+    assert.deepEqual(sorted(await notesIn(st)), want(own), what);
+  }
+});
+
+test("a NEAR provider that keeps answering 429: the run ends stalled past the kit's bound, its reason naming the provider and HTTP 429, no note written", async () => {
+  for (const [what, hit] of [["the vault's probe", probe], ["the config read", named("config")]] as const) {
+    const { v } = lived();
+    const st = await device();
+    const ends: { stage: string; why: readonly string[] }[] = [];
+    const rpcs = (): [VaultSyncRpc, VaultSyncRpc] => {
+      const p = pair(v);
+      return [p[0], throttled(p[1], hit, Infinity, () => http429())];
+    };
+    await onTestClock(async () => {
+      const t0 = Date.now();
+      await restoreKind.poolRestore(hostOf(st, rpcs, ends)).auto();
+      // 1 + 2 + 4 + 8 + 10 s of waits, then the next would end past 30 s
+      assert.equal(Date.now() - t0 >= 25_000 && Date.now() - t0 < 30_000, true, `${what}: ${Date.now() - t0} ms`);
+    });
+    assert.equal(ends.at(-1)?.stage, "stalled", what);
+    assert.match(ends.at(-1)!.why.join(" | "), new RegExp(`^near vault: .*${NET.drpc.replace(/[.]/g, "\\.")}: HTTP 429 \\(${hit === probe ? "state_tree" : "config"}\\), still throttling after 25 s`), what);
+    assert.deepEqual(await notesIn(st), [], what);
+  }
 });

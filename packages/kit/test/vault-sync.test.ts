@@ -564,7 +564,7 @@ test("R-03: an error that is not the gas cap or dRPC's timeout stops at the firs
   const others: [string, (h: number) => unknown][] = [
     ["another wasm error", (h) => ({ ...GAS_CAP(h), result: { ...GAS_CAP(h).result, error: "wasm execution failed with error: MethodResolveError(MethodNotFound)" } })],
     ["a handler error", () => rpcError("UNKNOWN_BLOCK")],
-    ["dRPC's rate limit", () => ({ id: "blindfill", jsonrpc: "2.0", error: { message: "You reached Public endpoint rate limit, please upgrade to paid plan", code: 15 } })],
+    // (dRPC's rate limit in a 200, code 15, is a throttle since card restore-waits-out-a-near-throttle: waited out below)
     ["code 30, other words", () => ({ ...DRPC_TIMEOUT, error: { ...DRPC_TIMEOUT.error, message: "Internal error" } })],
   ];
   for (const [what, refusal] of others) {
@@ -610,4 +610,118 @@ test("R-03: vaultViewTooHeavy is true for nearcore's gas answer only, vaultViewB
   }
   // the page sizes stay at or under the vault's own cap
   for (const m of LISTS) assert.ok(VAULT_SYNC_PAGE[m] >= 1 && VAULT_SYNC_PAGE[m] <= VAULT_CONSTANTS.PAGE_MAX, m);
+});
+
+// ---------- a provider's rate limit (card restore-waits-out-a-near-throttle) ----------
+// Release 162's sign-in on a fresh device ended stalled on "near vault: vault sync stopped (rpc): https://near.drpc.org:
+// HTTP 429" (pool-restore-wired live, 16 Nov 04:32Z). A throttle is waited out on the wallet's one rule (1 s, doubling,
+// at most 10 s; a longer Retry-After to 10 s) and the same view asked again, one stretch of throttles bounded at
+// VAULT_SYNC_THROTTLE_MS; the byte-for-byte rule is unchanged. On the test clock: the waits set, never the machine's speed.
+const http429 = (retryAfterMs?: number) => Object.assign(new Error("HTTP 429"), { status: 429 }, retryAfterMs === undefined ? {} : { retryAfterMs });
+const RATE_LIMIT_15 = { id: "blindfill", jsonrpc: "2.0", error: { message: "You reached Public endpoint rate limit, please upgrade to paid plan", code: 15 } };
+/** Throttles `n` asks of `method` (and the probe, its state_tree at final, when `method` is "probe") with `refusal`. */
+const throttles = (method: string, n: number, refusal: () => unknown): FakeOpts & { seen: () => number } => {
+  let k = 0;
+  return {
+    seen: () => k,
+    answer: (p, honest) => {
+      const hit = method === "probe" ? p.finality === "final" : p.method_name === method && p.finality !== "final";
+      if (!hit || k >= n) return honest;
+      k++;
+      const r = refusal();
+      if (r instanceof Error) throw r;
+      return r;
+    },
+  };
+};
+
+test("a 429 once from either RPC, with or without Retry-After, on the probe or a page, then the rows: the sync reads whole, as with no throttle, after the rule's wait", async () => {
+  const chain: Chain = new Map([[H, big()]]);
+  const whole = await vaultSync({ vault: VAULT, rpcs: pair(chain), cursor: vaultSyncStart(VAULT) });
+  const cases: [string, () => unknown, number][] = [
+    ["HTTP 429 with no Retry-After (the kit's nearRpc)", () => http429(), 1_000],
+    ["HTTP 429 with a Retry-After of 3 s", () => http429(3_000), 3_000],
+    ["HTTP 429 with a Retry-After of 0: the rule's 1 s still", () => http429(0), 1_000],
+    ["HTTP 429 with a Retry-After of 60 s: held to 10 s", () => http429(60_000), 10_000],
+    ["the exit tool's exitRpc: a plain HTTP 429", () => new Error("HTTP 429"), 1_000],
+    ["dRPC's rate limit in a 200 (code 15)", () => RATE_LIMIT_15, 1_000],
+  ];
+  for (const [what, refusal, waitMs] of cases)
+    for (const side of [0, 1] as const)
+      for (const method of ["probe", "state_tree", "spends"]) {
+        const t = throttles(method, 1, refusal);
+        const rpcs = side === 0 ? pair(chain, t) : pair(chain, {}, t);
+        await onTestClock(async () => {
+          const t0 = Date.now();
+          const r = await vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT) });
+          assert.deepEqual(r, whole, `${what}, rpc ${side}, ${method}`);
+          const took = Date.now() - t0;
+          assert.ok(took >= waitMs && took < waitMs + 1_000, `${what}, rpc ${side}, ${method}: waited ${took} ms, the rule's ${waitMs}`);
+        });
+        assert.equal(t.seen(), 1, `${what}: the throttle was met`);
+        // the same view asked again of the throttled RPC, the page never halved
+        if (method === "spends") assert.deepEqual([...new Set(limits(rpcs[side], "spends"))], [250]);
+      }
+});
+
+test("a provider that keeps answering 429: waited on the rule (1, 2, 4, 8, 10 s), then the sync stops (rpc) at the bound naming it and HTTP 429, never past 30 s", async () => {
+  const chain: Chain = new Map([[H, big()]]);
+  for (const [what, refusal] of [["HTTP 429", () => http429()], ["code 15", () => RATE_LIMIT_15]] as const) {
+    const t = throttles("probe", Infinity, refusal);
+    const rpcs = pair(chain, {}, t);
+    await onTestClock(async () => {
+      const t0 = Date.now();
+      await assert.rejects(vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT) }), (e: unknown) => {
+        assert.ok(e instanceof VaultSyncStopped && e.code === "rpc", String(e));
+        assert.match(e.message, what === "HTTP 429" ? /^vault sync stopped \(rpc\): rpc-b: HTTP 429 \(state_tree\), still throttling after 25 s/ : /rpc-b: a rate limit \(code 15\) \(state_tree\)/);
+        return true;
+      });
+      // 1 + 2 + 4 + 8 + 10 = 25 s waited; the next 10 s would end past 30 s, so none starts
+      assert.equal(Date.now() - t0, 25_000);
+    });
+    assert.equal(t.seen(), 6, `${what}: asked once and after each of 5 waits`);
+  }
+  // a stretch is one provider's throttles with no answer between them: an answer ends it, the pause kept
+  let k = 0;
+  const onOff: FakeOpts = { answer: (p, honest) => (p.method_name === "spends" && k++ % 2 === 0 ? (() => { throw http429(); })() : honest) };
+  const rpcs = pair(chain, onOff);
+  await onTestClock(async () => {
+    const r = await vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT), lists: ["spends"] });
+    assert.equal(r.spends.length, 600);
+  });
+});
+
+test("a throttle and a lie: the RPC waited out still has to give the other's bytes, else the sync stops (disagree)", async () => {
+  const chain: Chain = new Map([[H, big()]]);
+  const t = throttles("state_tree", 1, () => http429());
+  const lie: FakeOpts = { ...t, tamper: (m, _a, v) => (m === "state_tree" ? { ...(v as object), root: "8" } : v) };
+  await onTestClock(async () => {
+    assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(chain, {}, lie), cursor: vaultSyncStart(VAULT) })), "disagree");
+  });
+  assert.equal(t.seen(), 1);
+});
+
+test("an abort during a throttle's wait ends the sync at once with the signal's reason", async () => {
+  const chain: Chain = new Map([[H, big()]]);
+  const ctl = new AbortController();
+  const t = throttles("probe", Infinity, () => http429(10_000));
+  await onTestClock(async () => {
+    const t0 = Date.now();
+    setTimeout(() => ctl.abort(new Error("left")), 2_000);
+    await assert.rejects(vaultSync({ vault: VAULT, rpcs: pair(chain, t), cursor: vaultSyncStart(VAULT), signal: ctl.signal }), /left/);
+    assert.equal(Date.now() - t0, 2_000);
+  });
+});
+
+test("an error that is no throttle is not waited: HTTP 503, a timeout, HTTP 4xx stop (rpc) at once, asked once", async () => {
+  const chain: Chain = new Map([[H, big()]]);
+  for (const e of [Object.assign(new Error("HTTP 503"), { status: 503 }), Object.assign(new Error("HTTP 403"), { status: 403 }), Object.assign(new Error("the operation timed out"), { name: "TimeoutError" })]) {
+    const t = throttles("probe", Infinity, () => e);
+    await onTestClock(async () => {
+      const t0 = Date.now();
+      assert.equal(await code(vaultSync({ vault: VAULT, rpcs: pair(chain, t), cursor: vaultSyncStart(VAULT) })), "rpc", e.message);
+      assert.equal(Date.now() - t0, 0, e.message);
+    });
+    assert.equal(t.seen(), 1, e.message);
+  }
 });
