@@ -1,0 +1,57 @@
+{
+ "good": {
+  "note": "PASS: this branch's build (packages/signpage/scripts/build-app.mjs) served at SIGN_HOST's name, on the box at 2026-11-16T09:08:45.749Z: out as the providers answer, down with the page's dRPC answering 429",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "source": "build nqb-site at SIGN_HOST's name",
+   "at": "2026-11-16T09:08:45.749Z",
+   "browser": "Chrome 156.0.8078.79, sandbox on",
+   "signedIn": true,
+   "coin": "blackdragon.tkn.near",
+   "amount": "5",
+   "asks": [
+    {
+     "as": "providers",
+     "ok": true,
+     "result": {
+      "tap_max": "0",
+      "out": "982130139.47064761144547700493904"
+     }
+    },
+    {
+     "as": "drpc 429",
+     "ok": false,
+     "code": "down"
+    }
+   ]
+  }
+ },
+ "bad": {
+  "note": "FAIL: the live SIGN_HOST (release 165, 9bf0d2829) at 2026-11-16T09:08:29.983Z: out as the providers answer, tap_max alone with dRPC answering 429 (a provider's fault read as the coin's no out)",
+  "run": {
+   "sign": "https://confidential.unrealized.trade",
+   "at": "2026-11-16T09:08:29.983Z",
+   "browser": "Chrome 156.0.8078.79, sandbox on",
+   "signedIn": true,
+   "coin": "blackdragon.tkn.near",
+   "amount": "5",
+   "asks": [
+    {
+     "as": "providers",
+     "ok": true,
+     "result": {
+      "tap_max": "0",
+      "out": "982130139.47064761144547700493904"
+     }
+    },
+    {
+     "as": "drpc 429",
+     "ok": true,
+     "result": {
+      "tap_max": "0"
+     }
+    }
+   ]
+  }
+ }
+}
