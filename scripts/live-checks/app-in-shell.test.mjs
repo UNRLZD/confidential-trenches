@@ -378,3 +378,37 @@ test("planted: a failed visit is the run's error; a shell that never commits is 
   }, null)), /NS_ERROR_CONNECTION_REFUSED/);
   await openApp(visitPage(() => null, null));
 });
+
+// card live-checks-read-mainnet-only: the harness's unanswered fallback aborts as Chrome's ERR_NAME_NOT_RESOLVED (the
+// judges count that as a network refusal), which read as a DNS failure in merge queue runs 43931149891 and 43934230056
+// (the testnet footer read of verify-mount). Each refusal is named, "harness: no answer for <origin><path>".
+test("harness: a request it holds no answer for is refused by name, once per origin and path, and kept on the route's refused", async () => {
+  const { mkdtempSync, copyFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { harnessRoute, refusalOf } = await import("./app-in-shell.mjs");
+  const dir = mkdtempSync(path.join(tmpdir(), "app-in-shell-refusal-"));
+  copyFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), path.join(dir, "_headers"));
+  try {
+    const logged = [];
+    const route = await harnessRoute(dir, "signed", { log: (l) => logged.push(l) });
+    const ask = async (url, body) => {
+      let out = null;
+      await route({ request: () => ({ url: () => url, postData: () => body }), fulfill: async (a) => void (out = { kind: "fulfill", ...a }), abort: async (e) => void (out = { kind: "abort", error: e }) });
+      return out;
+    };
+    const footer = JSON.stringify({ jsonrpc: "2.0", id: "ct-footer", method: "block", params: { finality: "final" } });
+    // the planted unanswered origin: the testnet footer read that failed the queue
+    assert.deepEqual(await ask("https://test.rpc.fastnear.com/", footer), { kind: "abort", error: "namenotresolved" });
+    assert.deepEqual(await ask("https://test.rpc.fastnear.com/", footer), { kind: "abort", error: "namenotresolved" });
+    assert.deepEqual(await ask("https://example.com/a/b?x=1", undefined), { kind: "abort", error: "namenotresolved" });
+    assert.deepEqual(logged, ["harness: no answer for https://test.rpc.fastnear.com/", "harness: no answer for https://example.com/a/b"]);
+    assert.deepEqual(route.refused, ["harness: no answer for https://test.rpc.fastnear.com/", "harness: no answer for https://test.rpc.fastnear.com/", "harness: no answer for https://example.com/a/b"]);
+    assert.equal(refusalOf(new URL("https://example.com/a")), "harness: no answer for https://example.com/a");
+    // an answered read names nothing: the mainnet footer read is the local chain's
+    const answered = await ask("https://rpc.mainnet.fastnear.com/", footer);
+    assert.equal(answered.kind, "fulfill");
+    assert.equal(logged.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

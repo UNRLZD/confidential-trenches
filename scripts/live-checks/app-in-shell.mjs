@@ -618,7 +618,14 @@ export async function kitRefuses(state) {
   }
 }
 
-export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, holds = [], closes = false, near = nearChain() } = {}) {
+/** The harness's own refusal of a request it holds no answer for, named so a browser test's failed-load line (Chrome's
+ *  "net::ERR_NAME_NOT_RESOLVED": the abort the judges count as a network refusal) is read as the harness's, never DNS:
+ *  "harness: no answer for <origin><path>", logged once per origin and path, and kept on the route's `refused`. */
+export const refusalOf = (u) => `harness: no answer for ${u.origin}${u.pathname}`;
+
+/** Playwright's route for the in-shell harness; `log` takes each refusal's line (stderr by default), and the returned
+ *  route's `refused` lists every request it refused, in order. */
+export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, holds = [], closes = false, near = nearChain(), log = (l) => console.error(l) } = {}) {
   // the state the shell sends, as the kit's client reads it: a fixture the real app would drop fails here, by name
   const why = await kitRefuses(state ?? (kind === "tap" ? SIGNED_OUT : SIGNED_IN));
   if (why) throw new Error(`${KEY}: the planted state: ${why}`);
@@ -635,7 +642,9 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
   const pools = await poolAnswers();
   const shellFiles = { "/shell.js": js, "/shell.css": SHELL_CSS };
   const headers = (rules, p, type) => ({ ...Object.fromEntries(headersFor(rules, p)), "content-type": type });
-  return async (route) => {
+  const refused = [];
+  const named = new Set();
+  const answer = async (route) => {
     const u = new URL(route.request().url());
     if (u.origin === SIGN_HOST) {
       const body = shellFiles[u.pathname] ?? shellHtml(js);
@@ -669,8 +678,15 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
       if (!file.startsWith(appBuild + path.sep) || !existsSync(file) || statSync(file).isDirectory()) file = path.join(appBuild, "index.html");
       return route.fulfill({ status: 200, headers: headers(appRules, u.pathname, TYPES[path.extname(file)] ?? "application/octet-stream"), body: readFileSync(file) });
     }
+    const why = refusalOf(u);
+    refused.push(why);
+    if (!named.has(why)) {
+      named.add(why);
+      log(why);
+    }
     return route.abort("namenotresolved");
   };
+  return Object.assign(answer, { refused });
 }
 
 // ------------------------------------------------------------------------------------------------ main
