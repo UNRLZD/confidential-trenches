@@ -9,17 +9,56 @@
 //     Robinhood unanswered by the page in that run.
 //   askAgain: the app that asks a dry again after the kit client's 10 s (client_timeout), SIGN_HOST live at release 159:
 //     PASS on every chain; Solana's and Robinhood's first answers came past 10 s and the box drew the next ones.
-// Planted on thisBuild's quoted coins: each fact taken away FAILs; Solana and Robinhood planted from quoted coins PASS.
+// Those four were read before card app-money-sheets-read-right (922), whose $0 main button is the Deposit offer: each is
+// judged here as read (FAIL on the offer alone where it held every other fact) and with the offer given (offered), so
+// its quote facts keep their verdicts (card buy-box-check-reads-the-deposit-offer).
+//   deposit: release-167 live (APP_HOST and SIGN_HOST): every chain quoted, Max $0 and the amount marked on the pool
+//     chains, Deposit on, its tap opens the deposit sheet and posts no buy: PASS.
+//   checkBefore: the same hosts read by the check before this card (Buy off asked of the offer, run 43962188152's FAIL):
+//     on every chain the main button was on (ctaOff false), the fact it failed on.
+// Planted on deposit: each fact taken away FAILs, an enabled Buy on $0 first.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { CHAINS, judge, quoted } from "./buy-box-quotes-before-funds.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./buy-box-quotes-before-funds.answers.json", import.meta.url), "utf8"));
+/** A line on the main button or its tap (this card's), not on the quote. */
+const OFFER = /: the main button |: the Deposit tap /;
+/** A read before 922, given the Deposit offer and a tap that opened the sheet and sent nothing, on every coin. */
+const offered = (a) => {
+  const b = structuredClone(a);
+  for (const ch of Object.values(b.chains)) for (const c of ch.coins) if (c.box) Object.assign(c, { box: { ...c.box, cta: { text: "Deposit", offer: "deposit", disabled: false } }, tap: { opened: true, sent: [] } });
+  return b;
+};
 const SOL_LATE = "BAD solana 7SL2VnfYsChvog5oQY9Nmtqu1wceaMiQzWoqoLQpump: the page answered an out, You receive reads \"—\"";
 
+test("recorded before 922 (Buy off, no Deposit offer): FAIL on the offer on every chain, as read", () => {
+  for (const k of ["appBefore", "thisBuild", "timeout30", "askAgain"]) {
+    const v = judge(ANSWERS[k]);
+    assert.equal(v.verdict, "FAIL", k);
+    for (const chain of CHAINS) assert.ok(v.lines.some((l) => l.startsWith(`BAD ${chain} `) && l.includes('data-offer null, off; want the Deposit offer')), `${k} ${chain}: ${v.lines.join(" | ")}`);
+  }
+  // askAgain held every other fact: the offer is its only fault
+  assert.deepEqual(judge(ANSWERS.askAgain).lines.filter((l) => l.startsWith("BAD") && !OFFER.test(l)), []);
+});
+
+test("recorded deposit (release-167 live): PASS on every chain, Deposit on, its tap opens the deposit sheet, no buy sent", () => {
+  const v = judge(ANSWERS.deposit);
+  assert.equal(v.verdict, "PASS", v.lines.join("\n"));
+  for (const chain of CHAINS) assert.ok(v.lines.some((l) => l.startsWith(`ok ${chain} `) && l.includes("Deposit on and its tap opens the deposit sheet, no buy sent")), chain);
+});
+
+test("recorded checkBefore (the check before this card, on the same hosts): the main button on with $0 on every chain", () => {
+  for (const chain of CHAINS) {
+    const c = ANSWERS.checkBefore.chains[chain].coins.at(-1);
+    assert.equal(c.box.ctaOff, false, chain);
+    assert.equal(c.box.balance, "$0 available", chain);
+  }
+});
+
 test("recorded appBefore (APP_HOST before half 2): FAIL, no quote asked on the pool chains and NEAR's out dropped", () => {
-  const v = judge(ANSWERS.appBefore);
+  const v = judge(offered(ANSWERS.appBefore));
   assert.equal(v.verdict, "FAIL");
   assert.deepEqual(v.lines, [
     "BAD solana C5xph2yL6gMdxmuLGxJBkGpmuDFfyi5fqkBNhvL6pump: no Fee row",
@@ -33,7 +72,7 @@ test("recorded appBefore (APP_HOST before half 2): FAIL, no quote asked on the p
 });
 
 test("recorded thisBuild: Base and NEAR quoted with Max $0; FAIL on Solana alone (the page's answer past the kit's 10 s)", () => {
-  const v = judge(ANSWERS.thisBuild);
+  const v = judge(offered(ANSWERS.thisBuild));
   assert.equal(v.verdict, "FAIL");
   assert.deepEqual(v.lines.filter((l) => l.startsWith("BAD")), [SOL_LATE]);
   assert.ok(v.lines.some((l) => l.startsWith("ok base ")));
@@ -45,7 +84,7 @@ test("recorded thisBuild: Base and NEAR quoted with Max $0; FAIL on Solana alone
 });
 
 test("recorded askAgain (a dry the client ended at 10 s asked again): PASS on every chain, Solana's quote from the second ask", () => {
-  const v = judge(ANSWERS.askAgain);
+  const v = judge(offered(ANSWERS.askAgain));
   assert.equal(v.verdict, "PASS", v.lines.join("\n"));
   for (const chain of CHAINS) assert.ok(v.lines.some((l) => l.startsWith(`ok ${chain} `)), chain);
   // the Solana coin judged: its first amount ask answered past 10 s (the client had ended it), the next one inside it
@@ -55,40 +94,54 @@ test("recorded askAgain (a dry the client ended at 10 s asked again): PASS on ev
 });
 
 test("recorded timeout30 (experiment): the box draws Solana's quote once the answer is let in; INCONCLUSIVE", () => {
-  const v = judge(ANSWERS.timeout30);
+  const v = judge(offered(ANSWERS.timeout30));
   assert.equal(v.verdict, "INCONCLUSIVE");
   assert.ok(v.lines.some((l) => l.startsWith("ok solana ")));
   assert.equal(v.lines.some((l) => l.startsWith("BAD")), false);
 });
 
-test("planted: quoted coins on every chain PASS; each fact taken away FAILs", () => {
-  const tb = ANSWERS.thisBuild.chains;
-  const solQuoted = ANSWERS.timeout30.chains.solana.coins.find((c) => quoted(c.box.receive));
-  // a Robinhood coin drawn as Base's was (a plant: no recorded Robinhood quote exists)
-  const rhQuoted = { ...tb.base.coins[0], coin: "0xrh" };
-  const good = { chains: { solana: { coins: [solQuoted] }, base: tb.base, robinhood: { coins: [rhQuoted] }, near: tb.near } };
-  assert.equal(judge(good).verdict, "PASS", judge(good).lines.join("\n"));
-  const on = (chain, patch) => {
+test("planted on deposit: each fact taken away FAILs; an enabled Buy on $0 FAILs", () => {
+  const good = ANSWERS.deposit;
+  assert.equal(judge(good).verdict, "PASS");
+  const on = (chain, patch, coinPatch = {}) => {
     const c = good.chains[chain].coins.find((x) => quoted(x.box.receive));
-    return { chains: { ...good.chains, [chain]: { coins: [{ ...c, box: { ...c.box, ...patch } }] } } };
+    return { chains: { ...good.chains, [chain]: { coins: [{ ...structuredClone(c), box: { ...c.box, ...patch }, ...coinPatch }] } } };
   };
+  const bads = (a) => judge(a).lines.filter((l) => l.startsWith("BAD"));
   for (const chain of CHAINS) {
     const c = good.chains[chain].coins.find((x) => quoted(x.box.receive));
     const tag = `${chain} ${c.coin}`;
-    assert.deepEqual(judge(on(chain, { balance: "$12 available" })).lines.filter((l) => l.startsWith("BAD")), [`BAD ${tag}: Bal reads "$12 available", not a fresh account's "$0 available"`]);
-    assert.deepEqual(judge(on(chain, { ctaOff: false })).lines.filter((l) => l.startsWith("BAD")), [`BAD ${tag}: Buy is not off`]);
-    assert.deepEqual(judge(on(chain, { fee: null })).lines.filter((l) => l.startsWith("BAD")), [`BAD ${tag}: no Fee row`]);
-    assert.deepEqual(judge(on(chain, { receive: "—" })).lines.filter((l) => l.startsWith("BAD")), [`BAD ${tag}: the page answered an out, You receive reads "—"`]);
+    // the main button
+    assert.deepEqual(bads(on(chain, { cta: { text: "Buy GG", offer: null, disabled: false } })), [`BAD ${tag}: the main button "Buy GG" is on with $0, a buy that can be tapped; want the Deposit offer`]);
+    assert.deepEqual(bads(on(chain, { cta: { text: "Deposit", offer: null, disabled: false } })), [`BAD ${tag}: the main button "Deposit" is on with $0, a buy that can be tapped; want the Deposit offer`]);
+    assert.deepEqual(bads(on(chain, { cta: { text: "Buy GG", offer: null, disabled: true } })), [`BAD ${tag}: the main button reads "Buy GG", data-offer null, off; want the Deposit offer: Deposit, data-offer "deposit", on`]);
+    assert.deepEqual(bads(on(chain, { cta: { text: "Deposit", offer: "deposit", disabled: true } })), [`BAD ${tag}: the main button reads "Deposit", data-offer "deposit", off; want the Deposit offer: Deposit, data-offer "deposit", on`]);
+    assert.deepEqual(bads(on(chain, { cta: null })), [`BAD ${tag}: the main button reads null, data-offer null, off; want the Deposit offer: Deposit, data-offer "deposit", on`]);
+    // its tap
+    assert.deepEqual(bads(on(chain, {}, { tap: { opened: false, sent: [] } })), [`BAD ${tag}: the Deposit tap did not open the deposit sheet`]);
+    assert.deepEqual(bads(on(chain, {}, { tap: { opened: true, sent: ["pool.buy"] } })), [`BAD ${tag}: the Deposit tap sent ["pool.buy"], want no buy`]);
+    assert.deepEqual(bads(on(chain, {}, { tap: { opened: true, sent: ["buy"] } })), [`BAD ${tag}: the Deposit tap sent ["buy"], want no buy`]);
+    assert.deepEqual(bads(on(chain, {}, { tap: null })), [`BAD ${tag}: the Deposit tap did not open the deposit sheet`, `BAD ${tag}: the Deposit tap sent null, want no buy`]);
+    // the quote, Bal, Max $0 and the over-max mark, kept
+    assert.deepEqual(bads(on(chain, { balance: "$12 available" })), [`BAD ${tag}: Bal reads "$12 available", not a fresh account's "$0 available"`]);
+    assert.deepEqual(bads(on(chain, { fee: null })), [`BAD ${tag}: no Fee row`]);
+    assert.deepEqual(bads(on(chain, { receive: "—" })), [`BAD ${tag}: the page answered an out, You receive reads "—"`]);
     if (chain !== "near") {
-      assert.deepEqual(judge(on(chain, { max: "Max $5" })).lines.filter((l) => l.startsWith("BAD")), [`BAD ${tag}: the line above Buy reads "Max $5", want "Max $0"`]);
-      assert.deepEqual(judge(on(chain, { bad: "false" })).lines.filter((l) => l.startsWith("BAD")), [`BAD ${tag}: the amount 5 is not marked over Max`]);
+      assert.deepEqual(bads(on(chain, { max: "Max $5" })), [`BAD ${tag}: the line above Buy reads "Max $5", want "Max $0"`]);
+      assert.deepEqual(bads(on(chain, { bad: "false" })), [`BAD ${tag}: the amount 5 is not marked over Max`]);
     }
-    // the box asked no quote: FAIL, whatever it draws
-    const noAsk = { chains: { ...good.chains, [chain]: { coins: [{ ...c, dry: c.dry.filter((d) => d.amount === undefined) }] } } };
-    assert.deepEqual(judge(noAsk).lines.filter((l) => l.startsWith("BAD")), [`BAD ${tag}: the box asked no quote of the amount`]);
+    assert.deepEqual(bads(on(chain, {}, { dry: c.dry.filter((d) => d.amount === undefined) })), [`BAD ${tag}: the box asked no quote of the amount`]);
     const { [chain]: _, ...rest } = good.chains;
-    assert.deepEqual(judge({ chains: rest }).lines.filter((l) => l.startsWith("BAD")), [`BAD ${chain}: the box was not read`]);
+    assert.deepEqual(bads({ chains: rest }), [`BAD ${chain}: the box was not read`]);
   }
+});
+
+test("planted on the reads before 922 (given the offer): quoted coins on every chain PASS; a page refusal FAILs", () => {
+  const tb = offered(ANSWERS.thisBuild).chains;
+  const solQuoted = offered(ANSWERS.timeout30).chains.solana.coins.find((c) => quoted(c.box.receive));
+  const rhQuoted = { ...tb.base.coins[0], coin: "0xrh" };
+  const good = { chains: { solana: { coins: [solQuoted] }, base: tb.base, robinhood: { coins: [rhQuoted] }, near: tb.near } };
+  assert.equal(judge(good).verdict, "PASS", judge(good).lines.join("\n"));
   // a page refusal no coin's own read explains (not_funded) is the page's FAIL; quote_check_failed alone INCONCLUSIVE
   const refused = (code) => ({ chains: { ...good.chains, base: { coins: [{ ...tb.base.coins[0], box: { ...tb.base.coins[0].box, receive: "—" }, dry: [{ amount: "0.002", ok: false, code }] }] } } });
   assert.deepEqual(judge(refused("not_funded")).lines.filter((l) => l.startsWith("BAD")), ['BAD base: the page answered the box\'s quote "not_funded": no price for a buy with no pool note']);
