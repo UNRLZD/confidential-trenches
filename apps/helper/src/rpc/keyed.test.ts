@@ -779,10 +779,12 @@ test("review L4: Solana's first key hanging leaves its spares and the public end
 test("review L2: every dRPC URL the helper paces (the three keys and its keyless robinhood.drpc.org, one IP) fits dRPC's free floor of 50,400 CU a minute in the worst minute", () => {
   const env: Record<string, string> = { ...ENV, ...Object.fromEntries(DRPC_MORE.base) };
   const keyless = PROVIDER_PACE["https://robinhood.drpc.org"]!;
-  // one bucket per account: each key's group once (its URLs on every chain share it)
+  // one bucket each: the three accounts' keys draw dRPC's one for the helper's IP (card
+  // helper-base-keyed-holds-under-load, limits.ts DRPC_IP_PACE), each account's day its own
   const keys = new Map<string, Pace>();
-  for (const [u, p] of Object.entries(keyedPaces?.(env) ?? {})) if (/drpc/.test(new URL(u).host)) keys.set(p.group ?? u, p);
-  assert.equal(keys.size, 3, "three dRPC accounts");
+  const accounts = new Set<string>();
+  for (const [u, p] of Object.entries(keyedPaces?.(env) ?? {})) if (/drpc/.test(new URL(u).host)) keys.set(p.rate ?? p.group ?? u, p), accounts.add(p.group ?? u);
+  assert.equal(accounts.size, 3, "three dRPC accounts");
   const all = [...keys.values(), keyless];
   const worstMinute = all.reduce((s, p) => s + (p.perS * 60 + p.burst) * 20, 0); // 20 CU a call (KEYED_COST)
   assert.ok(worstMinute <= 50_400, `${worstMinute} CU in the worst minute from the helper's IP`);
