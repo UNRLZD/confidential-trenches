@@ -441,12 +441,8 @@ test("a NEAR provider that keeps answering 429: the run ends stalled past the ki
       const p = pair(v);
       return [p[0], throttled(p[1], hit, Infinity, () => http429())];
     };
-    await onTestClock(async () => {
-      const t0 = Date.now();
-      await restoreKind.poolRestore(hostOf(st, rpcs, ends)).auto();
-      // 1 + 2 + 4 + 8 + 10 s of waits, then the next would end past 30 s
-      assert.equal(Date.now() - t0 >= 25_000 && Date.now() - t0 < 30_000, true, `${what}: ${Date.now() - t0} ms`);
-    });
+    // its reason names the 1 + 2 + 4 + 8 + 10 s waited (the kit's test reads each wait), the next past 30 s
+    await onTestClock(() => restoreKind.poolRestore(hostOf(st, rpcs, ends)).auto());
     assert.equal(ends.at(-1)?.stage, "stalled", what);
     assert.match(ends.at(-1)!.why.join(" | "), new RegExp(`^near vault: .*${NET.drpc.replace(/[.]/g, "\\.")}: HTTP 429 \\(${hit === probe ? "state_tree" : "config"}\\), still throttling after 25 s`), what);
     assert.deepEqual(await notesIn(st), [], what);
