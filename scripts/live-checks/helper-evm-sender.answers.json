@@ -3,7 +3,8 @@
   "good: a local helper (apps/helper/src/server.ts start(), --base http://127.0.0.1:57041) at commit 02275347ff0b7e4826cc43a169f490104083c62b, read 2026-11-06T13:52:39.015Z (card helper-sender-fee-proof), both EVM testnet pools set in its own process: each withdraw and sell sender key sha256 of a label (a throwaway, never written), the kit's venues with each sell sender pin set to the throwaway sell key, the deployed fee answers' fee recipients (base-sepolia 0x6c830ac1b22d96baf692af4dd17d822ba61c32ec, robinhood-testnet 0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7), POOL_EVM_FEE_COLLECTOR_<NETWORK> the kit's pin, the deployed FeeCollector (base-sepolia 0x9cc4788af51677aaa7770d78277c41fb864b35e1, robinhood-testnet 0xb174f0e859f00a7b593baca38394327e3d6bf638; card evm-fee-collector), POOL_EVM_RPCS_<NETWORK> unset, so the kit's fee providers (feeProviders). Its fee answers name each pool's sell_sender and fee_collector; every plant pays the fee collector, and every plant, route_other_target included, is refused with its own code. Re-recorded on HELPER_HOST once this card's merge is redeployed with both collectors set.",
   "bad_deployed: HELPER_HOST (https://ct-api.unrealized.trade), read again at this commit: it carries no EVM pool yet, so the fee and every plant answer 404.",
   "Each plant is built at run time with a throwaway W key; no key is recorded.",
-  "The sells the helper sent (checkSells) have no recorded answer here yet: each testnet's run through the deployed helper (contracts/pool-evm/script/testnet-run.mjs --sell-helper, its record helper-evm-sender.run.<network>.json) is made after the redeploy. Until then the check fails on each testnet's missing helper sell, as it must."
+  "The sells the helper sent (checkSells) have no recorded answer here yet: each testnet's run through the deployed helper (contracts/pool-evm/script/testnet-run.mjs --sell-helper, its record helper-evm-sender.run.<network>.json) is made after the redeploy. Until then the check fails on each testnet's missing helper sell, as it must.",
+  "mainnet_good: a real run of this check (--record) against the deployed helper https://ct-api.unrealized.trade on 2026-11-16 15:2xZ, X-Helper-Commit fd2f2a6e12a37459d2f975325128d6bca7d25397, on the mainnet pools of contracts/pool-evm/deployments/<network>.json (card helper-mainnet-pools-only: the helper serves no testnet pool); every plant refused before any send, nothing sent, no key of ours. The answers above it were recorded on the testnets' first pool set and are replayed on those pools."
  ],
  "good": {
   "base": "http://127.0.0.1:57041",
@@ -5318,6 +5319,363 @@
        "x-helper-commit": "6832227a805b76174ed1017b0bbd518df2bfd2f3"
       },
       "body": "{\"error\":\"not_found\"}"
+     }
+    ]
+   }
+  ]
+ },
+ "mainnet_good": {
+  "base": "https://ct-api.unrealized.trade",
+  "pools": [
+   {
+    "network": "base",
+    "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-16T15:24:24.488Z",
+      "status": 200,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "380",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:24 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794842640000,\"block\":\"0x378ff4a\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "auth_chain_zero",
+      "readAt": "2026-11-16T15:24:25.220Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "69",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:25 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_authorization\",\"detail\":\"chainId 0, not 8453\"}}"
+     },
+     {
+      "asked": "auth_other_delegate",
+      "readAt": "2026-11-16T15:24:25.460Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:25 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_authorization\",\"detail\":\"address 0x000000000000000000000000000000000000dead, not the pinned delegate 0x37984815725fc0dce72d051d6a8c30eee132285d\"}}"
+     },
+     {
+      "asked": "sell_other_signer",
+      "readAt": "2026-11-16T15:24:25.681Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "105",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:25 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_signature\",\"detail\":\"signed by 0x9a61907197ba5c23ae35b9480b4b2903eb00207f, not W\"}}"
+     },
+     {
+      "asked": "deadline_in_ms",
+      "readAt": "2026-11-16T15:24:25.908Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "91",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:25 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_far\",\"detail\":\"deadline 1794842964489 s, now 1794842665808 ms\"}}"
+     },
+     {
+      "asked": "deadline_near",
+      "readAt": "2026-11-16T15:24:26.163Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "89",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:26 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794842723 s, now 1794842666062 ms\"}}"
+     },
+     {
+      "asked": "sell_other_pool",
+      "readAt": "2026-11-16T15:24:26.379Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "29",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:26 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"not_pool\"}}"
+     },
+     {
+      "asked": "fee_over_cap",
+      "readAt": "2026-11-16T15:24:26.599Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "83",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:26 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"fee_over_cap\",\"detail\":\"fee 30000000000001, cap 30000000000000\"}}"
+     },
+     {
+      "asked": "trailing_byte",
+      "readAt": "2026-11-16T15:24:26.817Z",
+      "status": 400,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:26 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     },
+     {
+      "asked": "route_other_target",
+      "readAt": "2026-11-16T15:24:27.041Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "166",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:26 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_route\",\"detail\":\"bad_target: a sell goes only to base's pinned PoolManager or a listed router, not 0x000000000000000000000000000000000000dead\"}}"
+     }
+    ]
+   },
+   {
+    "network": "robinhood",
+    "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    "reads": [
+     {
+      "asked": "fee",
+      "readAt": "2026-11-16T15:24:27.259Z",
+      "status": 200,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "385",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794842640000,\"block\":\"0x6e7f040\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+     },
+     {
+      "asked": "auth_chain_zero",
+      "readAt": "2026-11-16T15:24:27.478Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "69",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_authorization\",\"detail\":\"chainId 0, not 4663\"}}"
+     },
+     {
+      "asked": "auth_other_delegate",
+      "readAt": "2026-11-16T15:24:27.747Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "168",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_authorization\",\"detail\":\"address 0x000000000000000000000000000000000000dead, not the pinned delegate 0x839da08c78b4adde96192e4e482634ac71dfa306\"}}"
+     },
+     {
+      "asked": "sell_other_signer",
+      "readAt": "2026-11-16T15:24:28.031Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "105",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:27 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_signature\",\"detail\":\"signed by 0x39c938c94741872d12953d0dda67988043ea9bde, not W\"}}"
+     },
+     {
+      "asked": "deadline_in_ms",
+      "readAt": "2026-11-16T15:24:28.317Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "91",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:28 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_far\",\"detail\":\"deadline 1794842967260 s, now 1794842668218 ms\"}}"
+     },
+     {
+      "asked": "deadline_near",
+      "readAt": "2026-11-16T15:24:28.526Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "89",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:28 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"deadline_near\",\"detail\":\"deadline 1794842726 s, now 1794842668429 ms\"}}"
+     },
+     {
+      "asked": "sell_other_pool",
+      "readAt": "2026-11-16T15:24:28.733Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "29",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:28 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"not_pool\"}}"
+     },
+     {
+      "asked": "fee_over_cap",
+      "readAt": "2026-11-16T15:24:28.949Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "83",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:28 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"fee_over_cap\",\"detail\":\"fee 30000000000001, cap 30000000000000\"}}"
+     },
+     {
+      "asked": "trailing_byte",
+      "readAt": "2026-11-16T15:24:29.222Z",
+      "status": 400,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "61",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:29 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_shape\",\"detail\":\"not sell's calldata\"}}"
+     },
+     {
+      "asked": "route_other_target",
+      "readAt": "2026-11-16T15:24:29.450Z",
+      "status": 422,
+      "headers": {
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-length": "171",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Mon, 16 Nov 2026 15:24:29 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "fd2f2a6e12a37459d2f975325128d6bca7d25397"
+      },
+      "body": "{\"error\":{\"code\":\"bad_route\",\"detail\":\"bad_target: a sell goes only to robinhood's pinned PoolManager or a listed router, not 0x000000000000000000000000000000000000dead\"}}"
      }
     ]
    }

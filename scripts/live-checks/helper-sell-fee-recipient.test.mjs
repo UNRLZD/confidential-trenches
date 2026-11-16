@@ -13,15 +13,18 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolSender, evmReadSell } from "../../apps/helper/src/pool/evm.ts";
-import { evmPoolRecords as currentRecords, feeCollectors, FIRST_SET, randomKey } from "./helper-evm-sender.mjs";
+import { evmPoolRecords as currentRecords, feeCollectors as collectorsOf, FIRST_SET, NETWORKS, randomKey, TESTNETS } from "./helper-evm-sender.mjs";
 import { judge as judgeLive, OTHER, read as readLive, SELLS, sellsOf } from "./helper-sell-fee-recipient.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-sell-fee-recipient.answers.json"), "utf8"));
 // The recordings were made 6 Nov on the testnets' first pool set (FIRST_SET), before card pool-evm-buy-pays-revert's
 // pools: a replay judges each on the pools it was recorded on; the live check reads the current set (evmPoolRecords()).
+// The live check reads the mainnet pools (card helper-mainnet-pools-only; mainnet_good is its run on them): the testnet
+// recordings are judged on the testnets' records and collectors.
 const evmPoolRecords = () => currentRecords(undefined, FIRST_SET);
-const judge = (run, records = evmPoolRecords(), collectors) => judgeLive(run, records, collectors);
+const feeCollectors = () => collectorsOf({ networks: TESTNETS });
+const judge = (run, records = evmPoolRecords(), collectors = feeCollectors()) => judgeLive(run, records, collectors);
 const read = (base, fetchFn, records = evmPoolRecords()) => readLive(base, fetchFn, records);
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (run, asked, f, network) => ({ ...run, pools: run.pools.map((p) => (network && p.network !== network ? p : { ...p, reads: p.reads.map((x) => (x.asked === asked ? f(x) : x)) })) });
@@ -31,6 +34,21 @@ test("recorded good run: a local helper at card helper-sender-fee-proof's commit
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.deepEqual(A.good.pools.map((p) => p.network), Object.keys(evmPoolRecords()));
+});
+
+test("recorded mainnet run (the deployed helper, 16 Nov): each mainnet's fee collector is the kit's pin and its deploy record's FeeCollector, each sell answered its own code: PASS; made from it, a collector off the record or a sell taken: FAIL", () => {
+  assert.deepEqual(NETWORKS, ["base", "robinhood"]);
+  assert.deepEqual(Object.fromEntries(A.mainnet_good.pools.map((p) => [p.network, p.pool])), currentRecords(), "the mainnet pools, from their deploy records");
+  const c = collectorsOf();
+  for (const n of NETWORKS) {
+    const rec = JSON.parse(readFileSync(path.join(HERE, `../../contracts/pool-evm/deployments/${n}.json`), "utf8")).contracts.FeeCollector.address.toLowerCase();
+    assert.deepEqual([c[n].pin, c[n].recorded], [rec, rec], `${n}: the pin is the deploy record's FeeCollector`);
+  }
+  const r = judgeLive(A.mainnet_good);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(judgeLive(A.mainnet_good, undefined, { ...c, base: { ...c.base, recorded: "0x00000000000000000000000000000000c011ec70" } }).ok, false, "made: a pin off the deploy record");
+  assert.equal(judgeLive(edit(A.mainnet_good, "pays_other", (x) => ({ ...x, status: 200, body: JSON.stringify({ hash: `0x${"ab".repeat(32)}` }) }), "robinhood")).ok, false, "made: a sell paying another taken");
+  assert.equal(judgeLive({ ...A.mainnet_good, pools: A.mainnet_good.pools.slice(1) }).ok, false, "made: a mainnet pool not read");
 });
 
 test("recorded bad run: a helper that takes a Sell paying the withdraw's fee recipient and names no fee collector: FAIL", () => {

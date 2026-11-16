@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { HOOK, judge, plants, read } from "./evm-sell-hook-converge.mjs";
+import { evmPoolRecords } from "./helper-evm-sender.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-sell-hook-converge.answers.json", import.meta.url), "utf8"));
 
@@ -14,6 +15,17 @@ test("the good answer (the card's helper sender) passes: both plants reach deadl
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   for (const n of ["base-sepolia", "robinhood-testnet"]) assert.ok(r.lines.some((l) => l.startsWith(`ok  [${n} hooked_deadline_near] POST /v1/pool/evm/sell answers 422`)), n);
+});
+
+test("the mainnet answer (the deployed helper, 16 Nov, on each mainnet pool of its deploy record) passes; made from it, the hooked plant refused bad_route on each mainnet fails on those lines alone", () => {
+  assert.deepEqual(Object.fromEntries(A.mainnet_good.pools.map((p) => [p.network, p.pool])), evmPoolRecords(), "the mainnet pools (card helper-mainnet-pools-only)");
+  const r = judge(A.mainnet_good);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const n of ["base", "robinhood"]) assert.ok(r.lines.some((l) => l.startsWith(`ok  [${n} hooked_deadline_near] POST /v1/pool/evm/sell answers 422`)), n);
+  const made = structuredClone(A.mainnet_good);
+  for (const p of made.pools) p.reads.find((x) => x.asked === "hooked_deadline_near").body = '{"error":{"code":"bad_route","detail":"made: a helper before the card"}}';
+  const b = judge(made).lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(b.length, 2, b.join("\n"));
 });
 
 test("the bad answer (HELPER_HOST before the card) fails: the hooked plant refused bad_route, and only that", () => {
