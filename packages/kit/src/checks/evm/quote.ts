@@ -1741,12 +1741,21 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
           if (e instanceof Unreachable) {
             // held as a throttle is: a browser reads rpc.mainnet.chain.robinhood.com's 429 as no connection (its answer
             // carries access-control-allow-origin "*,*", which CORS refuses: sign live run 43693987836, 14 of them)
-            if (spareNext) {
-              if (provider !== undefined) SCAN_HELD.set(provider, performance.now() + EVM_HOLD_MS);
-              throw new ScanRefused("rpc_error", `the scan provider refused a connection: ${e.message}`);
+            if (spareNext && provider !== undefined) SCAN_HELD.set(provider, performance.now() + EVM_HOLD_MS);
+            // a request of more than SCAN_ALONE blocks (a cold scan's depth, which no spare is handed) is asked again
+            // whole after the gate's backoff, as a throttled one is, and the scan stops at the fourth in a row: a true
+            // refusal (card robinhood-quote-answers-cold: as ScanRefused it was asked as its halves, each a post at the
+            // provider's pace of about one getLogs post a second, so one such answer to a 10M-block request was 64 to
+            // 128 posts and every Robinhood dry quote of SIGN_HOST's build ended stale_quote at 30.7 to 38.7 s, 8 of 8
+            // coins, 2026-11-16 02:2xZ; test RHC1, RHC2)
+            const deep = scanBlocksOf(calls) > SCAN_ALONE;
+            if (spareNext && !deep) throw new ScanRefused("rpc_error", `the scan provider refused a connection: ${e.message}`);
+            if (++refused >= SCAN_TRIES) {
+              const m = `the scan provider refused ${refused} connections in a row: ${e.message}`;
+              throw deep ? new ScanStop("rpc_error", m) : new ScanRefused("rpc_error", m);
             }
-            if (++refused >= SCAN_TRIES) throw new ScanRefused("rpc_error", `the scan provider refused ${refused} connections in a row: ${e.message}`);
-            await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));
+            if (deep) throttle(sent, null);
+            else await nap(SCAN_BACKOFF_MS * 2 ** (refused - 1));
             continue;
           }
           // a timeout is a congestion signal too (GitHub's runner, 7d6ec94: 14 of 128 and 7 of 114 of a cold quote's
