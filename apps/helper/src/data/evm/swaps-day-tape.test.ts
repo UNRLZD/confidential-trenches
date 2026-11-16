@@ -75,3 +75,34 @@ test("card helper-listed-charts-own-reads: with the chain's own RPC down, the co
   const newest = REC.logs.v4.reduce((a, l) => (l.b > a.b || (l.b === a.b && l.i > a.i) ? l : a));
   assert.equal(value.last.trades[0].tx, newest.tx, "newest first: the pool's last recorded swap");
 });
+
+// Live run 43785080982 (job 133030981593), two minutes after a restart: Robinhood DELTA's hourly chart answered 200 with
+// no bars and not filling, the coin charting 1,000 hourly bars. The book's first window held no trade and the history
+// before it gave none; the trades the tape reads back were never bars. A chart's first read is our bars or a true
+// filling (the read back going on), and the page's re-reads (apps/terminal/src/screens/token/candles.ts FILL_WAIT_MS)
+// are served the bars the read back finds. No GeckoTerminal here: the history gives no bars, as it gave DELTA none.
+test("card helper-listed-charts-own-reads round 4: a Robinhood coin quiet for 12 minutes, its history giving no bars, charts from the trades our reads read back; its first read is bars or filling, never an empty chart", async () => {
+  const { value } = await onVirtualTime(1_000_000_000, async () => {
+    const { s } = rig();
+    try {
+      const reads: { n: number; filling: unknown; src: unknown }[] = [];
+      let last = JSON.parse((await s.candles(MAG, "1h", null, 500)).body);
+      reads.push({ n: last.candles.length, filling: last.filling, src: last.src });
+      for (let i = 0; i < 40 && last.filling === true; i++) {
+        await new Promise((go) => setTimeout(go, 2_000));
+        await s.tick();
+        last = JSON.parse((await s.candles(MAG, "1h", null, 500)).body);
+        reads.push({ n: last.candles.length, filling: last.filling, src: last.src });
+      }
+      return reads;
+    } finally {
+      s.stop();
+    }
+  });
+  console.log(`reads: ${value.map((r) => `${r.n} bars${r.filling === true ? " filling" : ""}`).join(", ")}`);
+  assert.ok(value.every((r) => r.n > 0 || r.filling === true), `every answer is bars or filling: ${JSON.stringify(value)}`);
+  const end = value.at(-1)!;
+  assert.ok(end.n > 0, "the bars of the trades read back");
+  assert.equal(end.src, "chain");
+  assert.equal(end.filling, undefined, "done reading back");
+});
