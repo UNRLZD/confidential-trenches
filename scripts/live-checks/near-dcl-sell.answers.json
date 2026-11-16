@@ -1,0 +1,20 @@
+{
+ "_note": {
+  "good": "this card's SIGN_HOST build (mainnet) at ee87afe58: index.html and app.js as build-app.mjs --out wrote them, 2026-11-16 09:18Z: PASS (judged with ledger false, no release list cut yet)",
+  "bad": "SIGN_HOST read 2026-11-16T09:18Z, before this card's deploy: FAIL"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BDYbniWOiV1DMCrV43tKFTNcoJsvdj2Kz/5KUIuUx3DnbBvJHpsD423WnM4NWuWn\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-BDYbniWOiV1DMCrV43tKFTNcoJsvdj2Kz/5KUIuUx3DnbBvJHpsD423WnM4NWuWn",
+  "quote": true,
+  "swap": true,
+  "check": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-mYOAS8vZQv1d028he5itDgTnc7CrplqDot3BYV9ScCznHvcT3sn6E/JuhtCRUPmi\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-mYOAS8vZQv1d028he5itDgTnc7CrplqDot3BYV9ScCznHvcT3sn6E/JuhtCRUPmi",
+  "quote": false,
+  "swap": false,
+  "check": false
+ }
+}
