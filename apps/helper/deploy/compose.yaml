@@ -105,10 +105,9 @@ services:
       POOL_SOLANA_FEE_PAYER_KEY_MAINNET: ${POOL_SOLANA_FEE_PAYER_KEY_MAINNET:-}
       POOL_SOLANA_FEE_MAINNET: ${POOL_SOLANA_FEE_MAINNET:-}
       POOL_SOLANA_RPCS_MAINNET: ${POOL_SOLANA_RPCS_MAINNET:-}
+      # devnet's line is read by POST /v1/rpc/solana-devnet's scan alone (src/rpc/rpc.ts RPC_SCAN_PROGRAM_ENV); the
+      # helper serves no devnet pool (card helper-mainnet-pools-only)
       POOL_SOLANA_PROGRAM_DEVNET: ${POOL_SOLANA_PROGRAM_DEVNET:-}
-      POOL_SOLANA_FEE_PAYER_KEY_DEVNET: ${POOL_SOLANA_FEE_PAYER_KEY_DEVNET:-}
-      POOL_SOLANA_FEE_DEVNET: ${POOL_SOLANA_FEE_DEVNET:-}
-      POOL_SOLANA_RPCS_DEVNET: ${POOL_SOLANA_RPCS_DEVNET:-}
       # POST /v1/pool/evm/send per network (src/pool/evm.ts; empty: that network's pool is not carried): the pool, the
       # sender's key (0x + 64 hex, gas only), the fee in the asset's base units, its recipient (empty: the sender) and
       # two RPC URLs of two operators, comma-separated (empty: the kit's fee pair). The first takes every read one
@@ -125,28 +124,14 @@ services:
       POOL_EVM_FEE_ROBINHOOD: ${POOL_EVM_FEE_ROBINHOOD:-}
       POOL_EVM_FEE_RECIPIENT_ROBINHOOD: ${POOL_EVM_FEE_RECIPIENT_ROBINHOOD:-}
       POOL_EVM_RPCS_ROBINHOOD: ${POOL_EVM_RPCS_ROBINHOOD:-}
-      POOL_EVM_ADDRESS_BASE_SEPOLIA: ${POOL_EVM_ADDRESS_BASE_SEPOLIA:-}
-      POOL_EVM_SENDER_KEY_BASE_SEPOLIA: ${POOL_EVM_SENDER_KEY_BASE_SEPOLIA:-}
-      POOL_EVM_FEE_BASE_SEPOLIA: ${POOL_EVM_FEE_BASE_SEPOLIA:-}
-      POOL_EVM_FEE_RECIPIENT_BASE_SEPOLIA: ${POOL_EVM_FEE_RECIPIENT_BASE_SEPOLIA:-}
-      POOL_EVM_RPCS_BASE_SEPOLIA: ${POOL_EVM_RPCS_BASE_SEPOLIA:-}
-      POOL_EVM_ADDRESS_ROBINHOOD_TESTNET: ${POOL_EVM_ADDRESS_ROBINHOOD_TESTNET:-}
-      POOL_EVM_SENDER_KEY_ROBINHOOD_TESTNET: ${POOL_EVM_SENDER_KEY_ROBINHOOD_TESTNET:-}
-      POOL_EVM_FEE_ROBINHOOD_TESTNET: ${POOL_EVM_FEE_ROBINHOOD_TESTNET:-}
-      POOL_EVM_FEE_RECIPIENT_ROBINHOOD_TESTNET: ${POOL_EVM_FEE_RECIPIENT_ROBINHOOD_TESTNET:-}
-      POOL_EVM_RPCS_ROBINHOOD_TESTNET: ${POOL_EVM_RPCS_ROBINHOOD_TESTNET:-}
       # POST /v1/pool/evm/sell per network (src/pool/evm.ts POOL_EVM_SELL_ENV): the sell sender's own key (0x + 64 hex,
       # gas only, never the withdraw sender's key); empty: that network's sells answer 503 not_configured
       POOL_EVM_SELL_KEY_BASE: ${POOL_EVM_SELL_KEY_BASE:-}
       POOL_EVM_SELL_KEY_ROBINHOOD: ${POOL_EVM_SELL_KEY_ROBINHOOD:-}
-      POOL_EVM_SELL_KEY_BASE_SEPOLIA: ${POOL_EVM_SELL_KEY_BASE_SEPOLIA:-}
-      POOL_EVM_SELL_KEY_ROBINHOOD_TESTNET: ${POOL_EVM_SELL_KEY_ROBINHOOD_TESTNET:-}
       # the fee collector each Sell must pay (src/pool/evm.ts POOL_EVM_COLLECTOR_ENV, card helper-sender-fee-proof): its
       # Paid log proves a sale's fee; empty: that network's sells answer 503 not_configured
       POOL_EVM_FEE_COLLECTOR_BASE: ${POOL_EVM_FEE_COLLECTOR_BASE:-}
       POOL_EVM_FEE_COLLECTOR_ROBINHOOD: ${POOL_EVM_FEE_COLLECTOR_ROBINHOOD:-}
-      POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA: ${POOL_EVM_FEE_COLLECTOR_BASE_SEPOLIA:-}
-      POOL_EVM_FEE_COLLECTOR_ROBINHOOD_TESTNET: ${POOL_EVM_FEE_COLLECTOR_ROBINHOOD_TESTNET:-}
       HELPER_RELEASE: ${HELPER_RELEASE:-}
       # the relayers' durable store (src/store/durable.ts): the one writable path in a read-only container
       HELPER_STORE_DIR: /app/data

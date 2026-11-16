@@ -1143,43 +1143,28 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
 export const solanaFeePayerLowMark = (rent: SolanaRent): bigint =>
   solanaRentMin(rent, 0) + solanaPoolReleaseCost(rent) + solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER_LEN) + solanaPoolPriorityBudget(rent, solanaPoolFee(rent));
 
-/** Per cluster: the pool program, the fee payer's key, the fee (lamports) and two RPC URLs ("a,b"). Devnet's program
- *  may be a list, comma apart (solanaPoolPrograms). */
+/** Per cluster: the pool program, the fee payer's key, the fee (lamports) and two RPC URLs ("a,b"). Mainnet only
+ *  (card helper-mainnet-pools-only; owner, 12 Nov: no test networks; pool/mainnet-only.test.ts holds the keys to
+ *  MAINNET_POOL_NETWORKS.solana): a devnet pool's lines left in the host's environment load no sender and refuse no
+ *  start. */
 export const POOL_SOLANA_ENV = {
   mainnet: ["POOL_SOLANA_PROGRAM_MAINNET", "POOL_SOLANA_FEE_PAYER_KEY_MAINNET", "POOL_SOLANA_FEE_MAINNET", "POOL_SOLANA_RPCS_MAINNET"],
-  devnet: ["POOL_SOLANA_PROGRAM_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_DEVNET", "POOL_SOLANA_FEE_DEVNET", "POOL_SOLANA_RPCS_DEVNET"],
 } as const;
 
-/** The pool programs a cluster's POOL_SOLANA_PROGRAM_* names: mainnet exactly one; devnet one or more, comma apart,
- *  so a re-pinned devnet pool and the one before it are served side by side while the signing pages move from one to
- *  the other (card pool-senders-next-page-helper, the expand). Each a program id, none twice, no empty entry. */
-export function solanaPoolPrograms(cluster: string, value: string, name: string): string[] {
-  const list = cluster === "devnet" ? value.split(",") : [value];
-  if (list.some((p) => !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p))) throw new Error(`${name} must be a program id${cluster === "devnet" ? ", or several comma apart" : ""}`);
-  if (new Set(list).size !== list.length) throw new Error(`${name} names a program twice`);
-  return list;
-}
-
-/** The Solana pool senders the host's environment sets, by pool address: one for each program a cluster lists, on that
- *  cluster's one fee payer, fee and RPCs; a cluster with none of its names set is off. A program that two clusters
- *  name throws. */
+/** The Solana pool senders the host's environment sets, by pool address: the program a cluster names, on that
+ *  cluster's fee payer, fee and RPCs; a cluster with none of its names set is off. */
 export function solanaPoolSendersFromEnv(env: Record<string, string | undefined>, fetchFn?: typeof fetch): Map<string, SolanaPoolSender> {
   const out = new Map<string, SolanaPoolSender>();
   for (const [cluster, names] of Object.entries(POOL_SOLANA_ENV)) {
     const [program, key, fee, rpcs] = names.map((n) => env[n] ?? "");
     if (program === "" && key === "" && fee === "" && rpcs === "") continue;
-    const programs = solanaPoolPrograms(cluster, program!, names[0]);
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(program!)) throw new Error(`${names[0]} must be a program id`);
     const urls = rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[3]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u, fetchFn ? { fetch: fetchFn } : {})) as unknown as readonly [SolanaRpc, SolanaRpc];
     if (!/^[1-9][0-9]{0,18}$/.test(fee!)) throw new Error(`${names[2]} must be a whole number of lamports`);
-    for (const p of programs) {
-      const s = solanaPoolSender({ cluster, program: p, feePayerSecret: key!, fee: fee! }, { providers });
-      // one pool, one sender: a program another cluster already serves (both key on the same pool address) would
-      // silently take that cluster's sends to its own fee payer and RPCs, so it stops the start instead
-      if (out.has(s.pool)) throw new Error(`${names[0]} names a program another cluster already serves`);
-      out.set(s.pool, s);
-    }
+    const s = solanaPoolSender({ cluster, program: program!, feePayerSecret: key!, fee: fee! }, { providers });
+    out.set(s.pool, s);
   }
   return out;
 }

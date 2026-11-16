@@ -218,12 +218,13 @@ test("vault-lines.sh: no mainnet-v1.json (only mainnet-test.json), a record that
 
 test("node src/env-check.ts exits 2 on the deploy's half set (a sender key alone), naming its network's variable and never the key; 0 on a whole set", () => {
   const run = (env: Record<string, string>) => spawnSync(process.execPath, [path.join(import.meta.dirname, "env-check.ts")], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", ...env } });
-  const names = POOL_EVM_ENV["base-sepolia"];
+  // card helper-mainnet-pools-only: on Base, the deploy's half set was a test network's before; a test pool loads nothing now
+  const names = POOL_EVM_ENV.base;
   const half = run({ [names[1]]: EVM[1]! });
   assert.equal(half.status, 2, half.stdout + half.stderr);
-  assert.match(half.stderr, /POOL_EVM_[A-Z_]+_BASE_SEPOLIA/);
+  assert.match(half.stderr, /POOL_EVM_[A-Z_]+_BASE\b/);
   assert.ok(!(half.stdout + half.stderr).includes(EVM[1]!.slice(2)), "the key was printed");
-  const whole = run(Object.fromEntries(names.map((n, i) => [n, i === 0 ? PIN_OF("base-sepolia") : EVM[i]!])));
+  const whole = run(Object.fromEntries(names.map((n, i) => [n, i === 0 ? PIN_OF("base") : EVM[i]!])));
   assert.equal(whole.status, 0, whole.stdout + whole.stderr);
 });
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card buy-spends-several-pieces on HELPER_HOST: the helper carries a buy of several pieces (every release
 // first, the buy last) only as one bundle to one W. For each pool the helper must serve (poolsToRead of
-// pool-senders-next-page-helper.mjs: each Solana cluster's deploy record pool, and on devnet each pool of the move) it
+// pool-senders-next-page-helper.mjs: each Solana cluster's deploy record pool, mainnet only) it
 // reads GET /v1/pool/fee and POSTs /v1/pool/solana/pieces three plants built with that check's plant() (the kit's
 // accounts, the published fee, a junk proof, a blockhash no cluster made), each signed by throwaway Ws made here:
 //   - "two_wallets": a tag 2 signed by one W, then a tag 3 signed by another: refused on the bytes, 422 wallets_differ;

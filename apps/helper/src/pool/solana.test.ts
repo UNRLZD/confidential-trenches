@@ -688,28 +688,21 @@ test("pool-senders-next-page: a tag 2 of 10 accounts, a tag 3 whose inner instru
   assert.equal(refusal(withNext(3, { flags: 4 })), "not_pool");
 });
 
-// card pool-senders-next-page-helper (the expand): POOL_SOLANA_PROGRAM_DEVNET may list several devnet programs, comma
-// apart, so the re-pinned devnet pool and the one before it are served side by side, each its own sender on the same fee
-// payer, fee and RPCs; mainnet takes exactly one program, and a list that names one twice or holds an empty entry is refused
-test("the devnet program list: one sender per listed program, keyed by its own pool; mainnet one program; a bad list refused at start", () => {
+// card pool-senders-next-page-helper (the expand) let POOL_SOLANA_PROGRAM_DEVNET list several devnet programs. Card
+// helper-mainnet-pools-only: the helper serves the mainnet pool alone, one program; devnet's lines load nothing and stop
+// nothing, a devnet list naming the mainnet program included
+test("mainnet one program, keyed by its own pool, a list refused at start; devnet's lines beside it load nothing", () => {
   const OLD = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
   const NEW = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
   const down = (async () => new Response("down", { status: 503 })) as unknown as typeof fetch;
   const env = (cluster: "DEVNET" | "MAINNET", program: string) => ({ [`POOL_SOLANA_PROGRAM_${cluster}`]: program, [`POOL_SOLANA_FEE_PAYER_KEY_${cluster}`]: FP.secret, [`POOL_SOLANA_FEE_${cluster}`]: "1300000", [`POOL_SOLANA_RPCS_${cluster}`]: "https://a.invalid,https://b.invalid" });
-  const two = solanaPoolSendersFromEnv(env("DEVNET", `${OLD},${NEW}`), down);
-  assert.deepEqual([...two.keys()].sort(), [solanaPoolAccount(OLD), solanaPoolAccount(NEW)].sort());
-  for (const p of [OLD, NEW]) assert.equal(two.get(solanaPoolAccount(p))!.program, p);
-  for (const s of two.values()) void s.ready.catch(() => {});
-  const one = solanaPoolSendersFromEnv(env("DEVNET", NEW), down);
+  const one = solanaPoolSendersFromEnv(env("MAINNET", NEW), down);
   assert.deepEqual([...one.keys()], [solanaPoolAccount(NEW)]);
   for (const s of one.values()) void s.ready.catch(() => {});
-  for (const bad of [`${NEW},${NEW}`, `${NEW},`, `,${NEW}`, `${OLD} ,${NEW}`]) assert.throws(() => solanaPoolSendersFromEnv(env("DEVNET", bad), down), /POOL_SOLANA_PROGRAM_DEVNET/, bad);
-  assert.throws(() => solanaPoolSendersFromEnv(env("MAINNET", `${OLD},${NEW}`), down), /POOL_SOLANA_PROGRAM_MAINNET must be a program id/);
-  // a devnet list naming the mainnet program (both key on the same pool address) stops the start, never replacing the
-  // mainnet pool's sender with one on the devnet fee payer and RPCs
-  assert.throws(() => solanaPoolSendersFromEnv({ ...env("MAINNET", NEW), ...env("DEVNET", `${OLD},${NEW}`) }, down), /POOL_SOLANA_PROGRAM_DEVNET names a program another cluster already serves/);
-  const both = solanaPoolSendersFromEnv({ ...env("MAINNET", NEW), ...env("DEVNET", OLD) }, down);
-  assert.deepEqual([...both.values()].map((s) => [s.cluster, s.program]).sort(), [["devnet", OLD], ["mainnet", NEW]]);
+  for (const bad of [`${OLD},${NEW}`, `${NEW},`, " ", "not-a-program"]) assert.throws(() => solanaPoolSendersFromEnv(env("MAINNET", bad), down), /POOL_SOLANA_PROGRAM_MAINNET must be a program id/, bad);
+  assert.equal(solanaPoolSendersFromEnv(env("DEVNET", `${OLD},${NEW}`), down).size, 0);
+  const both = solanaPoolSendersFromEnv({ ...env("MAINNET", NEW), ...env("DEVNET", `${OLD},${NEW}`) }, down);
+  assert.deepEqual([...both.values()].map((s) => [s.cluster, s.program]), [["mainnet", NEW]]);
   for (const s of both.values()) void s.ready.catch(() => {});
 });
 

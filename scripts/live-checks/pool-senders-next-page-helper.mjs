@@ -2,9 +2,9 @@
 // Live check of card pool-senders-next-page-helper: HELPER_HOST's Solana pool sender takes the forms the pool program takes
 // since d3edab1 (contracts/pool-solana/src/release.rs:155, buy.rs:155-159): a tag 2 naming the next state page as its
 // ninth account, and a tag 3 with flag bit 1 naming it after the tip account. For each pool the helper must serve
-// (poolsToRead: each Solana cluster's deploy record pool, scripts/ci/helper-live-checks.mjs solanaPools, and on devnet
-// each pool of the move, DEVNET_MOVE, each with its own program) it reads GET /v1/pool/fee for that pool, which must
-// name that program, then POSTs /v1/pool/solana/send three releases it builds with
+// (poolsToRead: each Solana cluster's deploy record pool, scripts/ci/helper-live-checks.mjs solanaPools: mainnet only,
+// card helper-mainnet-pools-only) it reads GET /v1/pool/fee for that pool, then POSTs /v1/pool/solana/send three
+// releases it builds with
 // the kit for that pool and fee payer, each signed by a throwaway W made here, at the published fee, a deadline 270 s
 // away and a junk proof:
 //   - "next_tag2": tag 2 with the release's eight accounts and the next state page (the kit's solanaPoolTag2Accounts);
@@ -47,23 +47,17 @@ export const PLANTS = [
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const DEC = /^[1-9][0-9]{0,18}$/;
 const SHA = /^[0-9a-f]{40}$/;
-/** The devnet pools served side by side while the signing pages move from the one before the re-pin to today's (card
- *  pool-senders-next-page, the expand): a helper that serves one of them FAILs. The contract drops the old one here in
- *  the commit that drops its program from POOL_SOLANA_PROGRAM_DEVNET. */
-export const DEVNET_MOVE = Object.freeze([
+/** The devnet pools the recorded answers were made on (the devnet move of card pool-senders-next-page, each with its
+ *  own program): a replay judges each recording on these; the live run reads poolsToRead(), never a test network's pool
+ *  (card helper-mainnet-pools-only). */
+export const RECORDED_ON = Object.freeze([
   Object.freeze({ program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" }),
   Object.freeze({ program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", pool: "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr" }),
 ]);
-/** Each pool the check reads, { cluster, pool, program } (program null when only the deploy record names the pool):
- *  every cluster's record pool, and on devnet each pool of the move. */
+/** Each pool the check reads, { cluster, pool, program } (program null: only the deploy record names the pool): every
+ *  cluster's record pool. */
 export function poolsToRead(records = solanaPools()) {
-  const out = [];
-  for (const [cluster, pool] of Object.entries(records)) {
-    const move = cluster === "devnet" ? DEVNET_MOVE : [];
-    for (const m of move) out.push({ cluster, pool: m.pool, program: m.program });
-    if (pool && !move.some((m) => m.pool === pool)) out.push({ cluster, pool, program: null });
-  }
-  return out;
+  return Object.entries(records).filter(([, pool]) => pool).map(([cluster, pool]) => ({ cluster, pool, program: null }));
 }
 const json = (t) => {
   try {
@@ -166,7 +160,7 @@ if (import.meta.main) {
     return i < 0 ? undefined : args[i + 1];
   };
   try {
-    // each pool the helper must serve: every cluster's record pool, and on devnet each pool of the move
+    // each pool the helper must serve: every cluster's record pool
     const pools = poolsToRead();
     if (pools.length === 0) throw new Error("no Solana pool record");
     const runs = [];

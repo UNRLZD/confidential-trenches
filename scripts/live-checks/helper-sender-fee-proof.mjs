@@ -15,7 +15,9 @@
 // and, for each network's collector, on its chain's two RPCs of two operators, evm-fee-collector.mjs check() holds: its
 // code is the FeeCollector build pinned to its address with the sink in its one immutable, the sink is the kit's sell
 // sender pin, it has no admin and no owner, and its deploy transaction made it.
-// After: helper
+// Runs: once, no check after a helper deploy since card helper-mainnet-pools-only (it reads the testnet pools' fee
+//   answers, and the helper serves no test pool); on mainnet the fee answer's fee_collector and sell_sender held to the
+//   kit's pins are helper-evm-mainnet-pools' (After: helper), and the collectors' code and sink evm-mainnet-senders'
 //   node scripts/live-checks/helper-sender-fee-proof.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before: the
 //   fee is read through evm-pool-fee-epoch.mjs). --record writes the fee answers and every RPC answer read, the shape
@@ -27,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check as collectorCheck, recordFile } from "./evm-fee-collector.mjs";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
-import { BASE, evmPoolRecords, NETWORKS } from "./helper-evm-sender.mjs";
+import { BASE, evmPoolRecords, FIRST_SET, TESTNETS } from "./helper-evm-sender.mjs";
 import { recorder } from "./pool-evm-deploy.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
 
@@ -45,7 +47,7 @@ const json = (t) => {
 };
 
 /** Each network's FeeCollector deploy record (evm-fee-collector.<network>.json), or null where there is none. */
-export function collectorRecords(networks = NETWORKS) {
+export function collectorRecords(networks = TESTNETS) {
   return Object.fromEntries(networks.map((n) => [n, existsSync(recordFile(n)) ? JSON.parse(readFileSync(recordFile(n), "utf8")) : null]));
 }
 
@@ -72,7 +74,7 @@ export function replayed(answers) {
  * The check on one recorded run: { base, pools: [{ network, pool, fee: { status, headers, body } }], rpc: { network:
  * answers } }, against the commit the helper must run, the pool records, the collector records and the kit's venues.
  */
-export async function judge(run, { commit, records = evmPoolRecords(), collectors = collectorRecords(), venues = evmPoolVenues() } = {}) {
+export async function judge(run, { commit, records = evmPoolRecords(undefined, FIRST_SET), collectors = collectorRecords(), venues = evmPoolVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let quiet = false;
@@ -116,7 +118,7 @@ export async function judge(run, { commit, records = evmPoolRecords(), collector
 }
 
 /** One read of HELPER_HOST and each collector's chain: the fee answers and every RPC answer, for judge(). */
-export async function read(base = BASE, fetchFn = fetch, { records = evmPoolRecords(), collectors = collectorRecords(), rpcFetch = fetch } = {}) {
+export async function read(base = BASE, fetchFn = fetch, { records = evmPoolRecords(undefined, FIRST_SET), collectors = collectorRecords(), rpcFetch = fetch } = {}) {
   const pools = [];
   for (const [network, pool] of Object.entries(records)) {
     // the epoch's fee and, when the helper has no block in it yet, the one before's (evm-pool-fee-epoch.mjs): the first

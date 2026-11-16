@@ -9,23 +9,22 @@
     "headers": {
      "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
-     "x-helper-commit": "124994e76d0ddf663082e7975ce4340074be6eb9"
+     "x-helper-commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9"
     },
-    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"177073\",\"gp\":\"100000000\",\"px\":\"3.52748385145\",\"g_w\":\"92505000000000\",\"valid_until_block\":223767401}"
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"161322\",\"gp\":\"100000000\",\"px\":\"3.213698484859\",\"g_w\":\"92505000000000\",\"valid_until_block\":224834101}"
    },
    {
     "route": "pool-fee",
-    "asked": "/v1/pool/fee?cluster=devnet&pool=92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+    "asked": "/v1/pool/fee?cluster=mainnet&pool=7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
     "status": 200,
     "headers": {
      "access-control-allow-origin": "https://confidential.unrealized.trade",
      "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
-     "x-helper-commit": "124994e76d0ddf663082e7975ce4340074be6eb9"
+     "x-helper-commit": "6194790b71f03faf7e8bf4e6063c1d9adc7095b9"
     },
-    "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb\",\"epoch_ms\":60000,\"epoch_start_ms\":1794227400000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+    "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU\",\"epoch_ms\":60000,\"epoch_start_ms\":1794841020000,\"fee\":\"1300000\",\"step\":\"100000\"}"
    }
-  ],
-  "note": "the deployed helper (X-Helper-Commit 124994e7) read 2026-11-09T12:30:31Z with Origin SIGN_HOST: both fee routes answer 200, Retry-After exposed; PASS"
+  ]
  },
  "good_busy": {
   "base": "http://127.0.0.1:60332",

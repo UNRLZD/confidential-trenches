@@ -14,20 +14,38 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmPoolSender, evmReadSell } from "../../apps/helper/src/pool/evm.ts";
 import { evmPoolSignSellAuthorization, evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { checkSells, evmPoolRecords as currentRecords, FIELDS, FIRST_SET, judge as judgeLive, NETWORKS, PLANTS, plantsOf, randomKey, read as readLive, SELL_GAS, SENDER_FIELD, sendersOf } from "./helper-evm-sender.mjs";
+import { checkSells, evmPoolRecords as currentRecords, FIELDS, FIRST_SET, judge as judgeLive, NETWORKS as MAINNETS, PLANTS, plantsOf, randomKey, read as readLive, SELL_GAS, SENDER_FIELD, sendersOf, TESTNETS } from "./helper-evm-sender.mjs";
 import { replayer } from "./notes-per-pool-evm.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-evm-sender.answers.json"), "utf8"));
 // The recordings were made 6 Nov on the testnets' first pool set (FIRST_SET), before card pool-evm-buy-pays-revert's
 // pools: a replay judges each on the pools it was recorded on; the live check reads the current set (evmPoolRecords()).
+// The live check reads the mainnet pools (card helper-mainnet-pools-only); the recordings of 6 Nov and the sell runs
+// checkSells reads are the testnets', so NETWORKS here is the testnets (TESTNETS), MAINNETS the live list.
+const NETWORKS = TESTNETS;
 const evmPoolRecords = () => currentRecords(undefined, FIRST_SET);
 const judge = (run, o = {}) => judgeLive(run, { records: evmPoolRecords(), ...o });
 const read = (base, fetchFn) => readLive(base, fetchFn, evmPoolRecords());
-test("the recordings name the first set's pools; the live check reads the current set's, each network's newest pool", () => {
+test("the recordings name the first set's pools; the live check reads each mainnet's pool, from its deploy record, and no testnet's", () => {
   assert.deepEqual(Object.fromEntries(A.good.pools.map((p) => [p.network, p.pool])), evmPoolRecords());
-  assert.deepEqual(Object.keys(currentRecords()), Object.keys(evmPoolRecords()));
-  for (const n of NETWORKS) assert.equal(currentRecords()[n], JSON.parse(readFileSync(path.join(HERE, `pool-evm-buy-pays-revert.${n}.json`), "utf8")).contracts.PrivacyPoolSimple.address, n);
+  assert.deepEqual(MAINNETS, ["base", "robinhood"]);
+  assert.deepEqual(Object.keys(currentRecords()), MAINNETS);
+  for (const n of MAINNETS) assert.equal(currentRecords()[n], JSON.parse(readFileSync(path.join(HERE, `../../contracts/pool-evm/deployments/${n}.json`), "utf8")).contracts.PrivacyPoolSimple.address.toLowerCase(), n);
+  assert.deepEqual(Object.fromEntries(A.mainnet_good.pools.map((p) => [p.network, p.pool])), currentRecords());
+});
+
+test("recorded mainnet run (the deployed helper, 16 Nov): each mainnet pool's fee answer names the kit's pinned sell sender and collector, every plant refused with its own code: PASS", () => {
+  const r = judgeLive(A.mainnet_good);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  for (const n of MAINNETS) for (const [asked, status, code] of PLANTS) assert.ok(r.lines.includes(r.lines.find((l) => l.startsWith(`ok  [${n} ${asked}] POST /v1/pool/evm/sell answers ${status} `) && l.includes(`"code":"${code}"`))), `${n} ${asked}`);
+  // made from it, each a fault the check must refuse: a sell sender off the pin, a plant sent, a pool not read, a
+  // testnet pool read in its place
+  const made = (f) => { const g = structuredClone(A.mainnet_good); f(g); return judgeLive(g).ok; };
+  assert.equal(made((g) => { const f = g.pools[0].reads.find((x) => x.asked === "fee"); f.body = JSON.stringify({ ...JSON.parse(f.body), [SENDER_FIELD]: OTHER }); }), false, "a sell sender off the kit's pin");
+  assert.equal(made((g) => { const x = g.pools[1].reads.find((r) => r.asked === "fee_over_cap"); x.status = 200; x.body = JSON.stringify({ hash: `0x${"ab".repeat(32)}` }); }), false, "a plant sent");
+  assert.equal(made((g) => g.pools.pop()), false, "a mainnet pool not read");
+  assert.equal(made((g) => (g.pools[0] = { ...A.good.pools[0] })), false, "a testnet pool read in a mainnet's place");
 });
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 /** The good run with `f` applied to every read named `asked` (on `network`, or on every pool). */

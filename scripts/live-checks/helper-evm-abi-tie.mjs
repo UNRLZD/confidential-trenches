@@ -17,7 +17,10 @@
 // It passes only when every read above holds and every helper answer carries one full-sha X-Helper-Commit, the same on
 // every read of the run (one helper answered all of it, never two builds behind one host). The selectors
 // are this file's strings, which contracts/pool-evm/test/abi-tie.test.mjs holds to contracts/pool-evm/abi.json.
-// After: helper
+// Runs: once, no check after a helper deploy since card helper-mainnet-pools-only (it reads the testnet pools and a
+//   landed testnet withdraw, and the helper serves no test pool); on mainnet the helper's read of the pool's withdraw and
+//   buy is helper-evm-sender-2's (its plants, signed in the pool's ABI, answer their own codes, never bad_shape) and the
+//   pools' code evm-pools-on-mainnet's. Its selectors stay the strings contracts/pool-evm/test/abi-tie.test.mjs reads
 //   node scripts/live-checks/helper-evm-abi-tie.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before:
 //   the fee is read through evm-pool-fee-epoch.mjs, and a pool with no fee to read has no plant sent).

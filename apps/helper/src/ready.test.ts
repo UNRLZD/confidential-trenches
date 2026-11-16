@@ -401,7 +401,7 @@ test("card helper-ready-without-gt: a helper beside a running one whose environm
   const old = openDurableDir(join(dir, "senders"), nodeFs, (d) => d); // the old helper holds the senders: this start is its peer
   t.after(() => old.close());
   const key = `0x${createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest("hex")}`; // pool/evm.test.ts's test key
-  const env = { PATH: process.env.PATH, HELPER_COMMIT: "0123456789abcdef0123456789abcdef01234567", PORT: "0", HELPER_STORE_DIR: dir, JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001", POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key };
+  const env = { PATH: process.env.PATH, HELPER_COMMIT: "0123456789abcdef0123456789abcdef01234567", PORT: "0", HELPER_STORE_DIR: dir, JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001", POOL_EVM_SENDER_KEY_BASE: key }; // card helper-mainnet-pools-only: a test network's half set loads nothing now, so the half set is Base's
   const c = spawn(process.execPath, [join(import.meta.dirname, "server.ts")], { env, stdio: ["ignore", "ignore", "pipe"] });
   let err = "";
   c.stderr.on("data", (d) => (err += d));
@@ -410,7 +410,7 @@ test("card helper-ready-without-gt: a helper beside a running one whose environm
     c.on("exit", (n) => (clearTimeout(timer), done(n ?? "signal")));
   });
   assert.equal(code, 2, `exit ${code}; stderr: ${err.replace(/\(node:\d+\) ExperimentalWarning[^\n]*\n(\(Use[^\n]*\n)?/g, "")}`);
-  assert.match(err, /helper: POOL_EVM_ADDRESS_BASE_SEPOLIA must be an address/);
+  assert.match(err, /helper: POOL_EVM_ADDRESS_BASE must be an address/);
   assert.ok(!err.includes(key.slice(2)), "the key is never printed");
 });
 
@@ -516,9 +516,9 @@ test("MEDIUM-1 poolsChecked: resolves once every Solana and EVM pool's start che
   const evm2 = later();
   const refused2: string[] = [];
   const all2 = state(S.poolsChecked(new Map([["s", { ready: sol2.p }]]), new Map([["e", { ready: () => evm2.p }]]), (e: Error) => refused2.push(e.message), 10) as Promise<void>);
-  evm2.no(new Error("POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer"));
+  evm2.no(new Error("POOL_EVM_RPCS_BASE: 127.0.0.1:1: no answer"));
   await tick();
-  assert.deepEqual([all2.v, refused2], ["rejected", ["POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer"]]);
+  assert.deepEqual([all2.v, refused2], ["rejected", ["POOL_EVM_RPCS_BASE: 127.0.0.1:1: no answer"]]);
   sol2.ok();
   // a Solana refusal the same way
   const sol3 = later();
@@ -589,11 +589,11 @@ test("the helper is never ready before every pool's start check: with the warm-u
   assert.match(refused2[0]!, /the mainnet pool fee must be the kit's fee for this rent, 1300000 lamports/);
   // 3. an EVM pool's check refused, the same way
   const refused3: string[] = [];
-  const c = gateOf(new Map(), new Map([["e", { ready: () => Promise.reject(new Error("POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer")) }]]), refused3);
+  const c = gateOf(new Map(), new Map([["e", { ready: () => Promise.reject(new Error("POOL_EVM_RPCS_BASE: 127.0.0.1:1: no answer")) }]]), refused3);
   const readyOf3 = await health(c.g.ready);
   await c.warm;
   await tick(30);
-  assert.deepEqual([await readyOf3(), c.settled(), refused3], [false, "rejected", ["POOL_EVM_RPCS_BASE_SEPOLIA: 127.0.0.1:1: no answer"]]);
+  assert.deepEqual([await readyOf3(), c.settled(), refused3], [false, "rejected", ["POOL_EVM_RPCS_BASE: 127.0.0.1:1: no answer"]]);
 });
 
 /** The helper's own main on `env` (test keys only), /v1/health read every 50 ms until it exits or `boundMs` passes:

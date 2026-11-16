@@ -15,11 +15,16 @@ import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
 import { solanaPoolAccount } from "../../packages/kit/src/index.ts";
 import { b58encode } from "./helper-pool-senders.mjs";
-import { DEVNET_MOVE, judge, judgeAll, plant, PLANTS, poolsToRead } from "./pool-senders-next-page-helper.mjs";
+import { judge, judgeAll as judgeLive, plant, PLANTS, poolsToRead, RECORDED_ON } from "./pool-senders-next-page-helper.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "pool-senders-next-page-helper.answers.json"), "utf8"));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
+// The recordings were made on the devnet move's two pools (RECORDED_ON): a replay judges each on them; the live run reads
+// poolsToRead(), the mainnet record's pool (card helper-mainnet-pools-only).
+const DEVNET_MOVE = RECORDED_ON;
+const RECORDED = RECORDED_ON.map((m) => ({ cluster: "devnet", pool: m.pool, program: m.program }));
+const judgeAll = (runs) => judgeLive(runs, RECORDED);
 const edit = (runs, asked, f) => runs.map((run) => ({ ...run, reads: run.reads.map((x) => (x.asked === asked ? f(x) : x)) }));
 
 test("recorded good run: both next-page forms reach the simulation, the tenth account is refused on the bytes: PASS", () => {
@@ -45,10 +50,18 @@ test("recorded bad run: a helper serving only one devnet program of the move: FA
   assert.ok(b[0].includes("GET /v1/pool/fee answers 404") && b[0].includes(DEVNET_MOVE[0].pool), b.join("\n"));
 });
 
-test("both pools of the devnet move are read, each its program's pool; a run missing or on another program FAILs", () => {
+test("the live run reads the mainnet record's pool and no test network's; planted: a run missing it FAILs", () => {
+  const rec = JSON.parse(readFileSync(path.join(HERE, "../../contracts/pool-solana/deployments/mainnet.json"), "utf8"));
+  assert.deepEqual(poolsToRead(), [{ cluster: "mainnet", pool: rec.pool, program: null }]);
+  assert.deepEqual(poolsToRead({ mainnet: "P" }), [{ cluster: "mainnet", pool: "P", program: null }]);
+  assert.deepEqual(poolsToRead({ mainnet: null }), [], "no record: no pool");
+  // planted: the devnet recordings alone, judged on what the live run reads, FAIL (no run for the mainnet pool)
+  assert.equal(judgeLive(A.good).ok, false);
+  assert.ok(judgeLive(A.good).lines.some((l) => l.startsWith(`BAD [mainnet] no run for pool ${rec.pool}`)));
+});
+
+test("both pools of the devnet move were recorded, each its program's pool; a run missing or on another program FAILs", () => {
   for (const m of DEVNET_MOVE) assert.equal(solanaPoolAccount(m.program), m.pool, `${m.pool} is ${m.program}'s pool`);
-  assert.deepEqual(poolsToRead({ mainnet: null, devnet: DEVNET_MOVE[0].pool }).map((w) => w.pool), DEVNET_MOVE.map((m) => m.pool));
-  assert.deepEqual(poolsToRead({ mainnet: null, devnet: DEVNET_MOVE[1].pool }).map((w) => w.pool), DEVNET_MOVE.map((m) => m.pool));
   assert.deepEqual(A.good.map((r) => r.pool).sort(), DEVNET_MOVE.map((m) => m.pool).sort());
   for (const m of DEVNET_MOVE) assert.equal(judgeAll(A.good.filter((r) => r.pool !== m.pool)).ok, false, `no run for ${m.pool}`);
   const other = A.good.map((r) => (r.pool === DEVNET_MOVE[0].pool ? { ...r, program: DEVNET_MOVE[1].program } : r));

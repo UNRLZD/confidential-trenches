@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Live check of card helper-evm-sender: HELPER_HOST names its EVM pool sender in each testnet pool's fee answer and
+// Live check of card helper-evm-sender: HELPER_HOST names its EVM pool sender in each mainnet pool's fee answer and
 // refuses a planted bad sell on POST /v1/pool/evm/sell without reading a provider or sending anything
-// (apps/helper/src/pool/evm.ts sellHeld). The pools are the ones pool-evm-deploy's records name
-// (pool-evm-deploy.<network>.json, PrivacyPoolSimple); a network with no record has no pool to check.
+// (apps/helper/src/pool/evm.ts sellHeld). The pools are the ones the mainnet deploy records name
+// (contracts/pool-evm/deployments/<network>.json, PrivacyPoolSimple; card helper-mainnet-pools-only: the helper serves
+// no testnet pool, so the check reads Base and Robinhood, each of which the kit pins a PoolManager and a sell delegate
+// for); a network with no record has no pool to check.
 // For each pool it reads GET /v1/pool/fee?pool=<pool>, then POSTs nine sells it builds with a throwaway W key made at
 // run time, each good but for one field. The sell they are made from passes every static check: W's Sell signed over
 // SellDelegate's digest, W's authorization of the kit's pinned sell delegate (evmPoolSignSellAuthorization), a swap the
@@ -27,12 +29,9 @@
 //     sell sender for the network (evmPoolVenues() sellSender), the sender is that pin (the device sims each sale from
 //     it, so a sale from any other key runs where the sim did not);
 //   - every plant answers its own status and code (PLANTS), so none was sent;
-//   - every answer carries a full-sha X-Helper-Commit;
-//   - each testnet has a run of contracts/pool-evm/script/testnet-run.mjs --sell-helper through this helper
-//     (helper-evm-sender.run.<network>.json), whole on both of its chain's RPCs (pool-evm-testnet-run's check), and
-//     each sell the helper sent was sent by the fee answer's sell_sender, with gas limit 1,000,000, W's authorization of
-//     the pinned delegate on the chain's id, and a fee at least its cost (paid to the caller by the SellDelegate these
-//     runs used; pool-review-3's pays it to the Sell's feeRecipient, the fee answer's fee_recipient).
+//   - every answer carries a full-sha X-Helper-Commit.
+// The testnet sell runs (helper-evm-sender.run.<network>.json, testnet-run.mjs --sell-helper) are no longer read live:
+// they are testnet transactions. checkSells stays exported for evm-testnet-delegate-review3, which reads them.
 // After: helper
 //   node scripts/live-checks/helper-evm-sender.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before: the
@@ -44,8 +43,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolSignSellAuthorization, evmPoolVenues, evmSellRouteOf } from "../../packages/kit/src/index.ts";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
-import { recorder as runRecorder } from "./notes-per-pool-evm.mjs";
-import { poolRecordName } from "./pool-evm-deploy.mjs";
 import { check as runCheck, RPCS as RUN_RPCS } from "./pool-evm-testnet-run.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
 
@@ -56,11 +53,14 @@ const { keccak_256 } = req("@noble/hashes/sha3.js");
 
 export const BASE = "https://ct-api.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-/** The EVM testnets a pool is deployed on, each with its deploy record. */
-export const NETWORKS = ["base-sepolia", "robinhood-testnet"];
-/** The record naming a network's current pool in `dir`: its newest pool set's (pool-evm-deploy.mjs poolRecordName). */
-export const poolRecord = (network, dir = HERE) => poolRecordName(network, dir);
-/** The first set's record of a network (card pool-evm-deploy's), before any pool redeploy. */
+/** The EVM mainnets the helper serves a pool on, each with its deploy record. */
+export const NETWORKS = ["base", "robinhood"];
+/** The testnets the recordings of 6 Nov and the sell runs were made on (FIRST_SET, checkSells): replayed, never read live. */
+export const TESTNETS = ["base-sepolia", "robinhood-testnet"];
+const DEPLOYMENTS = path.join(HERE, "../../contracts/pool-evm/deployments");
+/** The record naming a mainnet's pool, relative to `dir`: contracts/pool-evm/deployments/<network>.json. */
+export const poolRecord = (network, dir = HERE) => path.relative(dir, path.join(DEPLOYMENTS, `${network}.json`));
+/** The first set's record of a testnet (card pool-evm-deploy's), before any pool redeploy: the recordings' pools. */
 export const FIRST_SET = (network) => `pool-evm-deploy.${network}.json`;
 /** The fee answer's field naming the helper's sell sender: an address, or null where no sell key is set */
 export const SENDER_FIELD = "sell_sender";
@@ -91,12 +91,12 @@ const json = (t) => {
   }
 };
 
-/** The pool each network's deploy record names, for the networks with a record (`nameOf`: its current pool set's,
- * poolRecord; FIRST_SET: the first set's, which the helper checks' recordings of 6 Nov were made on). Throws on a bad
- * record. */
-export function evmPoolRecords(dir = HERE, nameOf = poolRecord) {
+/** The pool each network's deploy record names, for the networks with a record (`nameOf`: a mainnet's, poolRecord;
+ * FIRST_SET: a testnet's first set, which the helper checks' recordings of 6 Nov were made on, so its networks are the
+ * testnets). Throws on a bad record. */
+export function evmPoolRecords(dir = HERE, nameOf = poolRecord, networks = nameOf === FIRST_SET ? TESTNETS : NETWORKS) {
   const out = {};
-  for (const network of NETWORKS) {
+  for (const network of networks) {
     const file = path.join(dir, nameOf(network, dir));
     if (!existsSync(file)) continue;
     const rec = json(readFileSync(file, "utf8"));
@@ -108,12 +108,13 @@ export function evmPoolRecords(dir = HERE, nameOf = poolRecord) {
   return out;
 }
 
-/** card evm-fee-collector's deploy record of a network's FeeCollector (its address and sink, read back on two RPCs by
- *  that card's check). */
-export const collectorRecord = (network, dir = HERE) => path.join(dir, `evm-fee-collector.${network}.json`);
+/** The deploy record of a network's FeeCollector (its address and sink): a mainnet's contracts/pool-evm/deployments/
+ *  <network>.json (evm-mainnet-senders reads it back on two RPCs), a testnet's card evm-fee-collector's
+ *  evm-fee-collector.<network>.json (read back by that card's check). */
+export const collectorRecord = (network, dir = HERE) => (NETWORKS.includes(network) ? path.join(DEPLOYMENTS, `${network}.json`) : path.join(dir, `evm-fee-collector.${network}.json`));
 /**
- * Each testnet's fee collector, as the kit pins it (evmPoolVenues() feeCollector, null where it pins none) and as
- * evm-fee-collector.<network>.json records it (its FeeCollector's address and sink, null where there is no record):
+ * Each network's fee collector, as the kit pins it (evmPoolVenues() feeCollector, null where it pins none) and as its
+ * deploy record names it (collectorRecord: its FeeCollector's address and sink, null where there is no record):
  * { network: { pin, recorded, sink } }, every address in lower case. Card helper-sender-fee-proof (review M1): a sale is
  * counted paid by the Paid log of the collector the helper is set with, so the checks hold the fee answer's collector
  * to the pin, and the pin to the deployed collector's record.
@@ -282,7 +283,7 @@ export function plantsOf({ network, pool, feeRecipient, nowMs = Date.now(), wKey
 
 // ---- The sells the helper sent (a run of contracts/pool-evm/script/testnet-run.mjs --sell-helper) ----
 
-/** Each testnet's run through the deployed helper: helper-evm-sender.run.<network>.json, testnet-run.mjs --out */
+/** Each testnet's run through the helper: helper-evm-sender.run.<network>.json, testnet-run.mjs --out (checkSells only) */
 export const sellRunFile = (network, dir = HERE) => path.join(dir, `helper-evm-sender.run.${network}.json`);
 /** The gas limit the helper signs every sale with, the kit's EVM_POOL_SELL_GAS */
 export const SELL_GAS = 1_000_000n;
@@ -342,7 +343,7 @@ export async function checkSells(runs, transportOf, senders) {
       if (lines.slice(before).every((l) => l.startsWith("ok "))) readBack.add(n);
     }
   }
-  for (const n of NETWORKS) {
+  for (const n of TESTNETS) {
     say(readBack.has(n), `[${n}] a sell the helper sent, read back (${path.basename(sellRunFile(n))})`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
@@ -412,13 +413,9 @@ if (import.meta.main) {
   try {
     const run = await read(opt("--base") ?? BASE);
     const r = judge(run);
-    // the sells the helper sent, each run's chain reads recorded with it
-    const runs = NETWORKS.filter((n) => existsSync(sellRunFile(n))).map((n) => ({ record: JSON.parse(readFileSync(sellRunFile(n), "utf8")), rec: runRecorder() }));
-    const s = await checkSells(runs, (x) => x.rec.transport, sendersOf(run));
-    run.sells = runs.map((x) => ({ record: x.record, urls: RUN_RPCS[x.record.chain], log: x.rec.log }));
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
-    for (const l of [...r.lines, ...s.lines]) console.log(l);
-    const verdict = s.ok ? r.verdict : "FAIL";
+    for (const l of r.lines) console.log(l);
+    const verdict = r.verdict;
     console.log(`${verdict} helper-evm-sender`);
     process.exit(EXIT[verdict]);
   } catch (e) {
