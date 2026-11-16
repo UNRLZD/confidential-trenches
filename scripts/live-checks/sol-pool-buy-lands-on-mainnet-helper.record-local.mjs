@@ -1,5 +1,5 @@
 // The recorded answers of sol-pool-buy-lands-on-mainnet-helper.answers.json: the live check's own read() of each pool it
-// reads (poolsToRead: both pools of the devnet move) against this tree's helper senders in process (apps/helper/src/pool/
+// reads (RECORDED_ON: both pools of the devnet move) against this tree's helper senders in process (apps/helper/src/pool/
 // solana.ts solanaPoolSender, one per program), devnet, a throwaway fee payer made here, the fee 1,300,000, and RPCs that
 // answer a simulation as a public mainnet RPC did (read 11 Nov 18:10Z, replaceRecentBlockhash false): with sigVerify,
 // "SignatureFailure" when a signature does not hold; "BlockhashNotFound" for a blockhash they never made; and a
@@ -9,7 +9,7 @@
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
 import { solanaPoolSender } from "../../apps/helper/src/pool/solana.ts";
 import { b58encode } from "./helper-pool-senders.mjs";
-import { poolsToRead, read } from "./pool-senders-next-page-helper.mjs";
+import { read, RECORDED_ON } from "./pool-senders-next-page-helper.mjs";
 
 const commit = process.argv[2];
 if (!/^[0-9a-f]{40}$/.test(commit ?? "")) throw new Error("usage: record-local.mjs <40-hex commit>");
@@ -39,7 +39,7 @@ const rpc = (i) =>
 const k = generateKeyPairSync("ed25519");
 const seed = k.privateKey.export({ format: "der", type: "pkcs8" }).subarray(-32);
 const pub = createPublicKey(k.privateKey).export({ format: "der", type: "spki" }).subarray(-32);
-const want = poolsToRead();
+const want = RECORDED_ON.map((m) => ({ cluster: "devnet", ...m }));
 const senders = new Map();
 for (const w of want) {
   const s = solanaPoolSender(

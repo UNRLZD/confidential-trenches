@@ -3,12 +3,23 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { judgeAll, plants, WANT } from "./buy-spends-several-pieces.mjs";
+import { judgeAll as judgeLive, plants, WANT } from "./buy-spends-several-pieces.mjs";
+import { poolsToRead, RECORDED_ON } from "./pool-senders-next-page-helper.mjs";
 import { SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget } from "../../packages/kit/src/index.ts";
 
 const A = JSON.parse(readFileSync(new URL("./buy-spends-several-pieces.answers.json", import.meta.url), "utf8"));
 const edit = (runs, asked, f) => runs.map((run) => ({ ...run, reads: run.reads.map((x) => (x.asked === asked ? f(x) : x)) }));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
+
+// The recordings were made on the devnet move's two pools (pool-senders-next-page-helper.mjs RECORDED_ON): a replay judges
+// each on them; the live run reads poolsToRead(), the mainnet record's pool (card helper-mainnet-pools-only).
+const RECORDED = RECORDED_ON.map((m) => ({ cluster: "devnet", pool: m.pool }));
+const judgeAll = (runs) => judgeLive(runs, RECORDED);
+
+test("the live run reads the mainnet pool: planted, the devnet recordings alone FAIL it (no run for that pool)", () => {
+  assert.deepEqual(poolsToRead().map((w) => w.cluster), ["mainnet"]);
+  assert.equal(judgeLive(A.good).ok, false);
+});
 
 test("recorded good answer: two wallets refused wallets_differ, one tx bad_shape, one wallet reaches the reads: PASS", () => {
   const r = judgeAll(A.good);

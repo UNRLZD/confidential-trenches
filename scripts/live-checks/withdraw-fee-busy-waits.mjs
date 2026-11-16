@@ -4,7 +4,8 @@
 // 503 upstream for its Retry-After and asks again, bounded; it can read that header cross-origin only when the helper
 // exposes it. This check reads the two fee routes the signing page asks, with Origin SIGN_HOST, as the device does:
 //   - GET /v1/withdraw/fee?token=<mainnet USDC> (the withdrawal's fee, wallet withdraw/relay.ts askWithdrawFee);
-//   - GET /v1/pool/fee?cluster=devnet&pool=<the devnet pool of pool-sol-deploy.devnet.json> (signpage poolRelayFee).
+//   - GET /v1/pool/fee?cluster=mainnet&pool=<the mainnet pool of contracts/pool-solana/deployments/mainnet.json> (signpage
+//     poolRelayFee; card helper-mainnet-pools-only: the helper serves no test network's pool).
 // It passes only when every answer:
 //   - is 200 with the route's answer (the withdraw fee's 7 fields; the pool fee naming the asked pool), or 429
 //     { error: { code: "rate_limited" } } or 503 { error: { code: "upstream" } } with a Retry-After of whole seconds,
@@ -39,8 +40,8 @@ export const BASE = "https://ct-api.unrealized.trade";
 export const SIGN = "https://confidential.unrealized.trade";
 /** Mainnet USDC, the vault's token (relayer-withdraw-fee.mjs TOKENS.mainnet; the test holds them equal). */
 export const MAINNET_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"; // gitleaks:allow (a public account id)
-/** The devnet pool the helper carries: its deploy record, never typed here. */
-export const DEVNET_POOL = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "pool-sol-deploy.devnet.json"), "utf8")).pool;
+/** The mainnet pool the helper carries, { cluster, pool }: its deploy record, never typed here. */
+export const MAINNET_POOL = Object.freeze({ cluster: "mainnet", pool: JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../contracts/pool-solana/deployments/mainnet.json"), "utf8")).pool });
 export const RETRY_AFTER_MAX_S = 75;
 export const TIMEOUT_MS = 15_000;
 const FEE_FIELDS = ["relayer_account", "fee_recipient", "relay_fee", "gp", "px", "g_w", "valid_until_block"];
@@ -53,15 +54,15 @@ export const pinOf = (index) => PIN.exec(index)?.[1];
  *  scripts/ci/bundle-checks.mjs passes the pin of the build it serves instead (its planted copies re-pin their own app.js). */
 export const commitPin = () => pinOf(readFileSync(path.join(signBuilt(), "index.html"), "utf8"));
 
-export const asks = (pool = DEVNET_POOL) => [
+export const asks = (at = MAINNET_POOL) => [
   { route: "withdraw-fee", path: `/v1/withdraw/fee?token=${MAINNET_USDC}` },
-  { route: "pool-fee", path: `/v1/pool/fee?cluster=devnet&pool=${encodeURIComponent(pool)}` },
+  { route: "pool-fee", path: `/v1/pool/fee?cluster=${encodeURIComponent(at.cluster)}&pool=${encodeURIComponent(at.pool)}` },
 ];
 
 /** Reads each ask once with Origin SIGN_HOST: { route, asked, status, headers, body } or { route, asked, noAnswer }. */
-export async function read(base = BASE, fetchFn = fetch, pool = DEVNET_POOL) {
+export async function read(base = BASE, fetchFn = fetch, at = MAINNET_POOL) {
   const reads = [];
-  for (const a of asks(pool)) {
+  for (const a of asks(at)) {
     const url = `${base.replace(/\/$/, "")}${a.path}`;
     try {
       const r = await fetchFn(url, { redirect: "manual", headers: { origin: SIGN, "cache-control": "no-cache" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -88,11 +89,11 @@ const json = (t) => {
 const show = (v) => (v === undefined ? "none" : JSON.stringify(v));
 
 /** The check on one recorded run: { ok, quiet, verdict, lines }. */
-export function judge(run, pool = DEVNET_POOL) {
+export function judge(run, at = MAINNET_POOL) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   let quiet = false;
-  for (const a of asks(pool)) {
+  for (const a of asks(at)) {
     const r = run.reads?.find((x) => x.route === a.route);
     const tag = `[${a.route}]`;
     if (!r) {
@@ -110,7 +111,7 @@ export function judge(run, pool = DEVNET_POOL) {
       if (a.route === "withdraw-fee") {
         const keys = isObj ? Object.keys(b) : [];
         say(keys.length === FEE_FIELDS.length && FEE_FIELDS.every((k) => keys.includes(k)), `${tag} 200 with the fee answer's fields: ${show(keys)}`);
-      } else say(isObj && b.pool === pool && b.chain === "solana" && typeof b.fee === "string", `${tag} 200 with the pool's fee: pool ${show(b?.pool)}, fee ${show(b?.fee)}`);
+      } else say(isObj && b.pool === at.pool && b.cluster === at.cluster && b.chain === "solana" && typeof b.fee === "string", `${tag} 200 with the pool's fee: pool ${show(b?.pool)}, fee ${show(b?.fee)}`);
     } else if (Object.hasOwn(BUSY, r.status)) {
       const code = isObj && Object.keys(b).length === 1 ? b.error?.code : undefined;
       say(code === BUSY[r.status], `${tag} ${r.status} is the helper's busy answer: code ${show(code)}, want ${BUSY[r.status]}`);

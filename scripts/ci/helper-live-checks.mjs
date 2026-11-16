@@ -7,7 +7,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { poolRecordName } from "../live-checks/pool-redeploys.mjs";
 import { headerLines, hostList, readChecks } from "./live-after.mjs";
 
 // The checks are each check's `// After: helper` lines (scripts/ci/live-after.mjs), one run for each; `{commit}` in a
@@ -21,12 +20,13 @@ const CHECK_TEXTS = readChecks(path.resolve(path.dirname(fileURLToPath(import.me
 const headerOf = (word) => Object.entries(CHECK_TEXTS).flatMap(([k, t]) => headerLines(t, word).map((v) => [k, v]));
 
 // helper-pool-senders takes one --pool: it runs once for each Solana cluster the helper may serve (the keys of
-// POOL_SOLANA_ENV in apps/helper/src/pool/solana.ts, a test holds them), with the pool its deploy record names, read from
-// the record's file in the checked-out commit, never typed here. A cluster with no record has no pool to check: it is
-// listed not-applicable with that reason, and the check runs on the clusters that have one.
-export const POOL_SOLANA_CLUSTERS = ["mainnet", "devnet"];
+// POOL_SOLANA_ENV in apps/helper/src/pool/solana.ts, a test holds them: mainnet only, card helper-mainnet-pools-only, as
+// the helper serves no test network's pool), with the pool its deploy record names (contracts/pool-solana/deployments/
+// <cluster>.json, the deploy's own record), read from the record's file in the checked-out commit, never typed here. A
+// cluster with no record has no pool to check: it is listed not-applicable with that reason.
+export const POOL_SOLANA_CLUSTERS = ["mainnet"];
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const poolRecord = (cluster) => `scripts/live-checks/pool-sol-deploy.${cluster}.json`;
+export const poolRecord = (cluster) => `contracts/pool-solana/deployments/${cluster}.json`;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** The pool each cluster's deploy record names under `root`, or null where there is no record. Throws on a bad record. */
@@ -48,16 +48,13 @@ export function solanaPools(root = ROOT) {
   );
 }
 
-// helper-evm-sender-2.mjs runs helper-pool-senders' EVM branch once for each EVM network a pool may be deployed on
-// (card helper-evm-sender-2; the testnets and mainnets of scripts/live-checks/pool-evm-deploy.mjs, CHAINS and MAINNETS,
-// a test holds them), with the PrivacyPoolSimple its deploy record names: a testnet's record is its newest pool set's,
-// scripts/live-checks/<card>.<network>.json for a card of POOL_REDEPLOYS (pool-redeploys.mjs poolRecordName, the one
-// list), else pool-evm-deploy.<network>.json; a mainnet's contracts/pool-evm/deployments/<network>.json
-// (pool-evm-deploy.mjs poolFile, a test holds them equal). A network with no record has no run.
-export const POOL_EVM_NETWORKS = ["base", "robinhood", "base-sepolia", "robinhood-testnet"];
-const EVM_MAINNETS = new Set(["base", "robinhood"]);
-export const evmPoolRecord = (network, root = ROOT) =>
-  EVM_MAINNETS.has(network) ? `contracts/pool-evm/deployments/${network}.json` : `scripts/live-checks/${poolRecordName(network, path.join(root, "scripts/live-checks"))}`;
+// helper-evm-sender-2.mjs runs helper-pool-senders' EVM branch once for each EVM network the helper serves a pool on
+// (card helper-evm-sender-2; the mainnets of scripts/live-checks/pool-evm-deploy.mjs, MAINNETS, a test holds them: card
+// helper-mainnet-pools-only, the helper serves no testnet pool), with the PrivacyPoolSimple its deploy record names,
+// contracts/pool-evm/deployments/<network>.json (pool-evm-deploy.mjs poolFile, a test holds them equal). A network with
+// no record has no run.
+export const POOL_EVM_NETWORKS = ["base", "robinhood"];
+export const evmPoolRecord = (network) => `contracts/pool-evm/deployments/${network}.json`;
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
 
 /** The PrivacyPoolSimple each EVM network's deploy record names under `root`, lower case, or null where there is no
@@ -65,17 +62,17 @@ const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
 export function evmPools(root = ROOT) {
   return Object.fromEntries(
     POOL_EVM_NETWORKS.map((network) => {
-      const file = path.join(root, evmPoolRecord(network, root));
+      const file = path.join(root, evmPoolRecord(network));
       if (!existsSync(file)) return [network, null];
       let rec;
       try {
         rec = JSON.parse(readFileSync(file, "utf8"));
       } catch {
-        throw new Error(`${evmPoolRecord(network, root)} is not JSON`);
+        throw new Error(`${evmPoolRecord(network)} is not JSON`);
       }
-      if (rec?.chain !== network) throw new Error(`${evmPoolRecord(network, root)} names chain ${rec?.chain}, not ${network}`);
+      if (rec?.chain !== network) throw new Error(`${evmPoolRecord(network)} names chain ${rec?.chain}, not ${network}`);
       const pool = rec.contracts?.PrivacyPoolSimple?.address;
-      if (typeof pool !== "string" || !EVM_ADDRESS.test(pool.toLowerCase())) throw new Error(`${evmPoolRecord(network, root)} names no PrivacyPoolSimple address`);
+      if (typeof pool !== "string" || !EVM_ADDRESS.test(pool.toLowerCase())) throw new Error(`${evmPoolRecord(network)} names no PrivacyPoolSimple address`);
       return [network, pool.toLowerCase()];
     }),
   );
