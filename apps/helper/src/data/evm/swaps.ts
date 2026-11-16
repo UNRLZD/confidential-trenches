@@ -3047,7 +3047,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       // names their wait (Server-Timing)
       const lane = newLane(true);
       const began = performance.now();
-      const e = await openWithin(t, lane, client);
+      const opening = openWithin(t, lane, client);
+      // card helper-listed-charts-own-reads round 3: a book still opening and bars held for the token's pool answer now,
+      // filling, and the open goes on; the page reads a filling chart again 2 s on (warm live run of 16 Nov 00:33Z:
+      // Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms). One rule with the Solana charts (../solana/trades.ts).
+      const early = await Promise.race([opening, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+      if (early === null) {
+        const h = await heldChart(t, tf as Tf, to, limit);
+        if (h !== null) {
+          void opening.catch(() => undefined);
+          const body = JSON.parse(h.body) as Record<string, unknown>;
+          return withTiming({ ...h, body: JSON.stringify({ ...body, filling: true }) }, laneTiming(lane, performance.now() - began));
+        }
+      }
+      const e = early ?? (await opening);
       const openMs = performance.now() - began;
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
       // card helper-listed-charts-own-reads: a book still opening past its bound, or not opened while OPEN_MAX books are
