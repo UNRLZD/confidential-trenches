@@ -757,6 +757,9 @@ test("N1a a seeded standard pool is held to the token's real pool the device's o
   assert.equal(asked.length, 2 * 100);
   asked.length = 0;
   assert.deepEqual(await quoteOn(pools, token, seededRoute(token), scanner(5_000_010, [], asked), undefined, "base", 5_000_010), below);
+  // the gap past the kept scan is read once the quote ends (routeSet's `later`): a quote with no round left after its
+  // set ends before it lands (card evm-warm-tap-ends-inside-two-seconds)
+  for (let i = 0; i < 400 && asked.length < 2; i++) await new Promise((go) => setTimeout(go, 5));
   assert.deepEqual(asked, [[5_000_001, 5_000_010], [5_000_001, 5_000_010]]);
   // a scan provider that answers no logs refuses the quote: a source that fails is not skipped
   const broken: EvmRpc = async (calls) => calls.map((c, id) => (c.method === "eth_blockNumber" ? { jsonrpc: "2.0", id, result: "0x4c4b40" } : { jsonrpc: "2.0", id, error: { code: -32701, message: "exceed maximum block range: 50000" } }));
@@ -5433,6 +5436,8 @@ test("SP429 card evm-taps-meet-no-429: a first scan provider that answers a warm
   const second: [number, number][] = [];
   const again = await pairQuote(token, first, scanner(5_000_030, realAt(token, 5_000_005), second), "robinhood", 5_000_030);
   assert.deepEqual(again.v, below);
+  // the gap is read once the quote ends (routeSet's `later`; card evm-warm-tap-ends-inside-two-seconds)
+  for (let i = 0; i < 400 && second.length === 0; i++) await new Promise((go) => setTimeout(go, 5));
   assert.deepEqual(posts.slice(before), [], "the held first was asked again within its hold");
   assert.ok(second.length > 0 && second.every(([a, b]) => a === 5_000_011 && b === 5_000_030), `the second read ${JSON.stringify(second)}`);
   // a new token's first quote within the hold, 9,000 blocks to scan (past one round of the second's 4 x 2,000 as one
@@ -8035,6 +8040,55 @@ test("GF10 forty pools seeded above the market behind swaps that do not fit cost
   const q = await ask(marketRoute(token));
   assert.equal(q.amountOut, AMOUNT / 2n);
 });
+
+// card evm-warm-tap-ends-inside-two-seconds: a warm Robinhood AI tap's fourth round was its swap-fit reads (bestFits,
+// 15 calls, about 250 to 600 ms from the Mac, mainnet 2026-11-15 23:5xZ). The next quote of the token and amount within
+// EVM_WARM_RANGE_S reads them at its own block in its first round; every fit is still read on both providers at the
+// quote's block, and the verdict is the same.
+test("GF12 a second quote of the same token and amount reads the last quote's swap-fit reads in its first round: no round after it, the same verdict", () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000f1f12";
+  // the market at half the amount (it fits, the route asked), and K pools above it whose swaps do not fit
+  const K = 6;
+  const fakes: ModelPool[] = Array.from({ length: K }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => a, gas: 600_000n }));
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  // each post answered 250 ms later on the test clock; a round starts when a post leaves with none out
+  let out = 0;
+  let rounds = 0;
+  let swaps: number[] = [];
+  // the round of the quote's first aggregate3 post (its first round of reads)
+  let reads = 0;
+  const slow = (rpc: EvmRpc, count: boolean): EvmRpc => async (calls) => {
+    if (count) {
+      if (out === 0) rounds++;
+      const data = calls.map((c) => String((c.params[0] as { data?: string } | undefined)?.data));
+      if (reads === 0 && data.some((d) => d.startsWith("0x82ad56cb"))) reads = rounds;
+      swaps.push(data.some((d) => d.startsWith("0x" + SEL_BUY_SWAP)) ? rounds : 0);
+    }
+    out++;
+    try {
+      const a = await rpc(calls);
+      await new Promise((go) => setTimeout(go, 250));
+      return a;
+    } finally {
+      out--;
+    }
+  };
+  const ask = () => evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [slow(chain(pools, 0), true), slow(chain(pools, 1), false)], NOW, scanner(5_000_000, logs));
+  const q1 = await ask();
+  const [rounds1, swaps1, reads1] = [rounds, swaps.filter((r) => r > 0), reads];
+  rounds = 0;
+  reads = 0;
+  swaps = [];
+  const q2 = await ask();
+  const swaps2 = swaps.filter((r) => r > 0);
+  assert.equal(q2.amountOut, q1.amountOut);
+  assert.deepEqual(q2.reference, q1.reference);
+  assert.ok(swaps1.some((r) => r > reads1), `the first quote reads fits after its first round of reads (${reads1}): rounds ${swaps1.join(",")}`);
+  assert.ok(reads > 0 && swaps2.every((r) => r === reads), `the second quote reads every swap fit in its first round of reads (${reads}): rounds ${swaps2.join(",")}`);
+  // no round after the first round of reads in the second quote; the first had one, its fits'
+  assert.ok(rounds1 > reads1 && rounds === reads, `rounds ${rounds1} (reads from ${reads1}) then ${rounds} (reads from ${reads})`);
+}));
 
 test("GF11 out of gas is no fit only for the swap read: the same words to any other read (the hookless read here) refuse rpc_error", async () => {
   const token = "0x00000000000000000000000000000000000f1f11";

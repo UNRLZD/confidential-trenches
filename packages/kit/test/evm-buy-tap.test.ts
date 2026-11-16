@@ -3,6 +3,7 @@
 // rule takes it, and a named refusal when none quotes.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { EVM_BUY_TAP_QUOTES, EvmBuyTapRefused, EvmQuoteError, evmBuyTapReset, evmPoolBuyQuoteTap, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../src/index.ts";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -82,7 +83,8 @@ test("card evm-warm-tap-ends-inside-two-seconds: HOOKR's native_first with no ro
   // HOOKR on Robinhood (read-only mainnet taps from the Mac, 2026-11-15 23:50Z, scratchpad ewt/tr-rh1.txt and ref.mjs):
   // its indexed native pool refused partial_fill (NotEnoughLiquidity) naming the WETH-USDG-HOOKR route, which refused
   // native_first naming none; each kit quote took about 1.8 s and 0.5 s of the tap, every warm tap
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const HOOKR = "0x18e674231a58c239dc7daedcffe15ec3a24cff5c";
   const native = { currency0: ZERO, currency1: HOOKR, fee: 3000, tickSpacing: 60, hooks: ZERO };
   const viaUsdg = { venue: "uniswap-v3" as const, tokens: ["0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", HOOKR], fees: [100, 10_000] };

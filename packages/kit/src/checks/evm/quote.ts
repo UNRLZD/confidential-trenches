@@ -1442,6 +1442,11 @@ const PLANS = new Map<string, { ts: bigint; reads: Read[]; scans: { cs: string[]
 export const EVM_WARM_RANGE_S = 60n;
 /** The most tokens whose reads are kept, the oldest dropped first. */
 const PLANS_MAX = 64;
+/** Per chain, token and amount, the routes whose swap fit the last buy quote read or used, and its block's time: the
+ *  next quote within EVM_WARM_RANGE_S reads them again at its own block beside its first round (evmPoolBuyQuoteWith). */
+const FITS = new Map<string, { ts: bigint; routes: EvmRoute[] }>();
+/** The most fit routes kept a token: one round's worth (a warm Robinhood AI quote asked 15). */
+const EVM_FITS_KEPT = 32;
 const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null, r.state ?? null, r.tx ?? null], (_, x) => (typeof x === "bigint" ? String(x) : x));
 const SCAN_TOKENS = 4096;
 const SCAN_MAX_LOGS = 10_000;
@@ -2417,6 +2422,19 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     return fitReads.get(r)!;
   };
   let ownFit = -1;
+  // The last quote's swap-fit reads for this token and amount (card evm-warm-tap-ends-inside-two-seconds): within
+  // EVM_WARM_RANGE_S of its block, each is read again at this quote's own block beside the first round (used only once
+  // that round's block confirmation passed: bestFits runs after routeSet), so a warm quote's
+  // best route that fits needs no round of its own (its fit reads ran a fourth round, about 250 to 600 ms of a warm
+  // Robinhood AI tap, mainnet from the Mac 2026-11-15 23:5xZ). Each is the same read bestFits would send (fitRead at
+  // the agreed block's hash), on both providers as every read is; what it answers is used only as bestFits would use it
+  const fitsKey = `${chain}:${lower(token)}:${amountIn}`;
+  const fitsKept = FITS.get(fitsKey);
+  // read beside the first round, never in it: a read only this quote's reuse asks never refuses the quote (an answer
+  // that fails or differs leaves its fit unknown, and bestFits asks it as before)
+  let fitsEarly: Promise<{ reads: Read[]; a: Answer[] } | null> = Promise.resolve(null);
+  // the routes whose fits this quote read or used, kept for the next quote (bestFits)
+  const fitsUsed = new Map<string, EvmRoute>();
   const wethStart = !startsNative(route);
   const firstOut = route.venue === "uniswap-v3" ? route.tokens[1]! : route.hops[0]!.currency;
   const firstHop: { at: number; twice: number }[] = [];
@@ -2448,6 +2466,17 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     atBlock: (b) => {
       fitAt = b.hash;
       if (fitOf(route) !== null) ownFit = reads.push(fitOf(route)!) - 1;
+      if (fitsKept !== undefined && b.timestamp >= fitsKept.ts && b.timestamp - fitsKept.ts <= EVM_WARM_RANGE_S) {
+        const sent = new Set(ownFit >= 0 ? [reads[ownFit]!.data] : []);
+        const early: Read[] = [];
+        for (const r of fitsKept.routes) {
+          const x = fitOf(r);
+          if (x === null || sent.has(x.data)) continue;
+          sent.add(x.data);
+          early.push(x);
+        }
+        if (early.length > 0) fitsEarly = readBoth(rpcs, b.hash, early, v.reads).then((a) => ({ reads: early, a }), () => null);
+      }
     },
     beforeFound: () => {
       if (v.nativeFirst && wethStart && v.v4 !== undefined && lower(firstOut) !== lower(token)) {
@@ -2534,9 +2563,15 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   if (ownFit >= 0) fit.set(reads[ownFit]!.data, out(ownFit) !== null);
   const fits = (r: EvmRoute) => {
     const x = fitOf(r);
-    return x === null ? false : fit.get(x.data);
+    if (x === null) return false;
+    const f = fit.get(x.data);
+    if (f !== undefined && r !== route) fitsUsed.set(x.data, r);
+    return f;
   };
   const bestFits = async (lists: readonly { l: readonly Filled[]; band: (c: Filled) => boolean }[]) => {
+    // the early fits, read at this quote's own block (fitOf builds each at its hash): answered as this reads them
+    const early = await fitsEarly;
+    if (early !== null) early.reads.forEach((r, i) => fit.has(r.data) || fit.set(r.data, early.a[i]!.kind === "out"));
     for (let round = 0; ; round++) {
       const ask = new Map<string, Read>();
       for (const { l, band } of lists) {
@@ -2544,9 +2579,18 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
         if (b === null || fits(b.route) !== undefined) continue;
         const unknown = l.filter((c) => fits(c.route) === undefined);
         const first = unknown.filter(band);
-        for (const c of round === 0 && first.length > 0 ? first : unknown) ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
+        for (const c of round === 0 && first.length > 0 ? first : unknown) {
+          ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
+          if (c.route !== route) fitsUsed.set(fitOf(c.route)!.data, c.route);
+        }
       }
-      if (ask.size === 0) return lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
+      if (ask.size === 0) {
+        const r = lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
+        FITS.delete(fitsKey);
+        FITS.set(fitsKey, { ts: block.timestamp, routes: [...fitsUsed.values()].slice(0, EVM_FITS_KEPT) });
+        while (FITS.size > PLANS_MAX) FITS.delete(FITS.keys().next().value!);
+        return r;
+      }
       const asked = [...ask.values()];
       const a = await readBoth(rpcs, block.hash, asked, v.reads);
       asked.forEach((r, i) => fit.set(r.data, a[i]!.kind === "out"));
