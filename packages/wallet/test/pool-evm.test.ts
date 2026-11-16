@@ -3085,6 +3085,61 @@ test("card evm-restore-walk-one-wide-read: a wide source's named cap is kept: a 
   assert.equal(getLogs(wl).filter(([f, t]) => f === Number(PIN.fromBlock) && t === c.finalized).length, 1, "no second wide call");
 });
 
+// card fresh-walk-reads-each-range-once: a run of the wide read stands on a seat of another operator's same bytes, never
+// on the wide source's own word twice. Robinhood's second seat is the helper's keyed route itself (signpage
+// pool-testnet.ts pageEvmPoolRpcs), the very wide source: its answer for a run is the wide read's own word again
+test("card fresh-walk-reads-each-range-once: a wide read the wide source's own seat repeats is no second word: a forged release is refused, the pool's own leaves back", async () => {
+  const c = anyChain();
+  const wl: string[] = [];
+  const w = wideSrc(c, wl, { logs: forgedRelease });
+  const seat0 = rpc(c, { url: "https://chain.example", cap: 100_000 });
+  const spare = rpc(c, { url: "https://pocket.example", cap: 10_000 });
+  const r = await evmTreeSync({ rpcs: [seat0, w, spare], pin: PIN, history: [w], ...noWait }).events();
+  assert.equal(getLogs(wl)[0]?.[1], c.finalized, "the wide read asked");
+  assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
+  // another route of the wide source's host is the same word too: the keyed route names itself "helper" (buy-wallets.ts
+  // evmHelperKeyedRpc), a plain route of its host names no operator but its URL's
+  const plain = rpc(c, { url: "https://helper.example/v1/rpc/robinhood", logs: forgedRelease });
+  const wl2: string[] = [];
+  const r2 = await evmTreeSync({ rpcs: [seat0, spare], pin: PIN, history: [Object.assign(wideSrc(c, wl2, { logs: forgedRelease }), { operator: "helper" }), plain], ...noWait }).events();
+  assert.equal(getLogs(wl2)[0]?.[1], c.finalized, "the wide read asked");
+  assert.deepEqual(r2.events.map((e) => e.bytes), await truth(c), "the plain route's same lie");
+});
+
+// a fresh walk: one run of the wide read stands once one seat of another operator gives its same bytes; it waits on no
+// second seat (a slow or throttled one: rpc.mainnet.chain.robinhood.com's 429 reads as a failed fetch in a page) and
+// asks nothing more of it
+test("card fresh-walk-reads-each-range-once: a run of the wide read stands on the first seat that gives its same bytes; the walk waits on no slow seat", async () => {
+  const c = anyChain();
+  const wl: string[] = [];
+  // slow on the finalized blocks the runs are in (the tail past them is the seats' agreed read, as any round's); its run
+  // pages answered, counted as they come
+  let slowRuns = 0;
+  const fast = rpc(c, { url: "https://publicnode.example", cap: 50_000 });
+  const slow = rpc(c, { url: "https://pocket.example", cap: 10_000, getLogs: ({ to }) => (to <= c.finalized ? 300 : undefined), logs: (l, p) => (p !== undefined && p.to <= c.finalized && slowRuns++, l) });
+  const r = await evmTreeSync({ rpcs: [fast, slow], pin: PIN, history: [wideSrc(c, wl)], ...noWait }).events();
+  const answered = slowRuns;
+  assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
+  assert.equal(getLogs(wl).length, 1, "one wide call");
+  assert.equal(answered, 0, "the walk waited on the slow seat's run pages");
+});
+
+// the other provider asked for a run stops once one agreed: Robinhood's own RPC reads one event a call (three calls a run,
+// EVM_LOG_ONE_VALUE_WIDE), paced, so calls no one waits for would hold the walk's next read on it behind them
+test("card fresh-walk-reads-each-range-once: once a run stands, the other provider asked is asked no more of it", async () => {
+  const c = anyChain();
+  const chainLog: string[] = [];
+  const pocket = rpc(c, { url: "https://pocket.example", cap: 10_000, chainId: 4663n });
+  const chain = rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com", chainId: 4663n, log: chainLog, getLogs: ({ to }) => (to <= c.finalized ? 200 : undefined) });
+  const wl: string[] = [];
+  const r = await evmTreeSync({ rpcs: [chain, pocket], pin: { ...PIN, network: "robinhood" }, history: [wideSrc(c, wl, { chainId: 4663n })], ...noWait }).events();
+  assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
+  await new Promise((s) => setTimeout(s, 1_000));
+  // the runs (blocks 10, 1,100,000, 1,200,000, 1,990,000): at most the one call each it was asked before the run stood
+  const runCalls = getLogs(chainLog).filter(([, t]) => t <= c.finalized).length;
+  assert.ok(runCalls <= 4, `the chain's RPC was asked ${runCalls} run calls`);
+});
+
 // review of 0b379bf4, P1-1: two URLs, or a relay of one, are one operator's word; the helper counts only in its keyed-only
 // mode (evmSourceOperator "helper"), never through a relay that names no operator
 const forgedRelease = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : x));
