@@ -272,8 +272,12 @@ export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc,
         );
       find([replay(0), replay(1)], read(), token).then(half, () => {});
     };
+    // a scan or ranking call the kit gave up on at its own bound (SCAN_TIMEOUT_MS, a plain error) while the page's lane
+    // still holds it is that provider's no answer, a timeout fault, never "no pools" (pageReference throws it); a
+    // provider's own fault is thrown as the kit threw it (card pool-buy-waits-out-a-throttle)
+    const w = readWatch("the scan");
     const pair = scan().map((rpc, i) =>
-      solanaWrappedRpc(rpc, async (method, params) => {
+      w.watch(rpc, async (method, params) => {
         const answer = await rpc(method, params);
         if (method === "getProgramAccounts" && scannedList(answer) !== null) {
           answers[i]!.set(JSON.stringify(params), answer);
@@ -282,7 +286,10 @@ export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc,
         return answer;
       }),
     ) as unknown as readonly [SolanaRpc, SolanaRpc];
-    const pools = find(pair, read(), token);
+    const ranks = read();
+    const pools = find(pair, [w.watch(ranks[0]), w.watch(ranks[1])], token).catch((e: unknown) => {
+      throw e instanceof SolanaRpcTransportError ? e : (w.fault() ?? e);
+    });
     // the union when it comes first; none when it fails before any half (as pageReference reads a failed finder)
     const early = new Promise<readonly string[]>((ok) => {
       halfIn.then(ok);
@@ -323,28 +330,42 @@ export function pinnedPoolFinders(finders: PoolFinders | null, tables: Readonly<
   return kept.length === 0 ? null : Object.freeze(Object.fromEntries(kept.map((k) => [k, finders[k]])) as PoolFinders);
 }
 
-async function readReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<SolanaReference | null> {
+/** One read's providers watched (a reference's read, a finder's scan): the first provider fault any call threw, and
+ *  each provider's calls still in flight. `fault` is the read's own fault once the kit's reader gave up: that provider
+ *  fault, else a timeout naming a provider whose call is still unanswered (the kit gave up on it at its own bound,
+ *  with a plain error), else null. */
+function readWatch(what: string): { watch: (rpc: SolanaRpc, call?: (method: string, params: readonly unknown[]) => Promise<unknown>) => SolanaRpc; fault: () => SolanaRpcTransportError | null } {
   let fault: SolanaRpcTransportError | null = null;
   // the calls still in flight, by the provider's host
   const inFlight = new Map<string, number>();
-  const watch = (rpc: SolanaRpc): SolanaRpc => {
-    const host = rpc.url === undefined ? "a provider" : new URL(rpc.url).host;
-    return solanaWrappedRpc(rpc, async (method, params) => {
-      inFlight.set(host, (inFlight.get(host) ?? 0) + 1);
-      try {
-        return await rpc(method, params);
-      } catch (e) {
-        if (e instanceof SolanaRpcTransportError) fault ??= e;
-        throw e;
-      } finally {
-        inFlight.set(host, inFlight.get(host)! - 1);
-      }
-    });
+  return {
+    watch: (rpc, call = (method, params) => rpc(method, params)) => {
+      const host = rpc.url === undefined ? "a provider" : new URL(rpc.url).host;
+      return solanaWrappedRpc(rpc, async (method, params) => {
+        inFlight.set(host, (inFlight.get(host) ?? 0) + 1);
+        try {
+          return await call(method, params);
+        } catch (e) {
+          if (e instanceof SolanaRpcTransportError) fault ??= e;
+          throw e;
+        } finally {
+          inFlight.set(host, inFlight.get(host)! - 1);
+        }
+      });
+    },
+    fault: () => {
+      if (fault !== null) return fault;
+      const waiting = [...inFlight].find(([, n]) => n > 0)?.[0];
+      return waiting === undefined ? null : new SolanaRpcTransportError("timeout", `no answer before ${what} was given up`, 1, waiting);
+    },
   };
-  const ref = await readSolanaReference([watch(rpcs[0]), watch(rpcs[1])], req);
+}
+
+async function readReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest): Promise<SolanaReference | null> {
+  const w = readWatch("the reference's read");
+  const ref = await readSolanaReference([w.watch(rpcs[0]), w.watch(rpcs[1])], req);
   if (ref !== null) return ref;
+  const fault = w.fault();
   if (fault !== null) throw fault;
-  const waiting = [...inFlight].find(([, n]) => n > 0)?.[0];
-  if (waiting !== undefined) throw new SolanaRpcTransportError("timeout", "no answer before the reference's read was given up", 1, waiting);
   return null;
 }
