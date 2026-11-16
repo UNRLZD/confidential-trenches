@@ -53,4 +53,9 @@ test("planted in a bundle: each mark broken in place FAILs", () => {
   const kept = js.replace("e.exit&&(n=await e.exit(E[0].w)),", "e.exit&&(n=i.to??=await e.exit(E[0].w)),");
   assert.equal(at(kept).runs, 2, "the kept answer still asked with the first W");
   assert.equal(at(kept.replace("i.to??=await e.exit(E[0].w)", "i.to??=await e.exit(E[1].w)")).runs, 1, "a kept answer for another W than the first");
+  // the EVM plan step's answer kept by its first W (card evm-withdraw-waits-out-a-throttle), as this card's build minified it
+  const byW = js.replace("e.exit&&(n=await e.exit(S[0])),", "e.exit&&(n=i[S[0]]??=await e.exit(S[0])),");
+  assert.equal(at(byW).runs, 2, "the answer kept by the W it was asked with");
+  assert.equal(at(byW.replace("i[S[0]]??=", "i[T[0]]??=")).runs, 1, "an answer kept under another W than the one asked: a rerun for that W reuses a quote never asked for it");
+  assert.equal(at(byW.replace("e.exit(S[0])", "e.exit(S[1])")).runs, 1, "kept by W, asked with another W than the first");
 });
