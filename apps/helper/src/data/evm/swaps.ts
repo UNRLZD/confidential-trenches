@@ -169,6 +169,10 @@ export const ROBINHOOD_VENUES = {
   // 2026-11-05 04:2xZ on rpc-robinhood.blockmachine.io: getPool(0x39dbed3a..., USDG, 50) = 0xf2a0be59..., the pool
   // Discover lists for 0x39dbed3a (tickSpacing() 50, fee() 1400), which logs Uniswap v3's Swap (43 in 4,000 blocks)
   cl: "0xe0c4ceb92d08ca985bb70fe0a22feb121a9854a8",
+  // Uniswap v2 (card robinhood-trades-finish-filling): read 2026-11-16 14:0xZ on rpc.mainnet.chain.robinhood.com, the
+  // factory() of 0x02d356ac... (WETH / 0x5d102d1e..., uniswap-v2-robinhood on GeckoTerminal), its getPair(WETH,
+  // 0x5d102d1e...) names the pair back and allPairsLength() is 150,503; the pair logs Uniswap v2's Swap and Sync
+  uniswapV2: "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f",
 } as const;
 export const ROBINHOOD_REF_POOL_ID = "0x387bf619da4d3fb62bb276482693dba1b9b3520f573cabdfe033384a24125982";
 
@@ -258,12 +262,12 @@ export const VENUES: Readonly<Record<EvmChain, Venues>> = {
     poolManager: ROBINHOOD_VENUES.poolManager,
     positionManager: ROBINHOOD_VENUES.positionManager,
     v3: [ROBINHOOD_VENUES.uniswapV3, ROBINHOOD_VENUES.cl],
-    v2: [],
+    v2: [ROBINHOOD_VENUES.uniswapV2],
     // read 2026-11-05 04:5xZ on rpc-robinhood.blockmachine.io: getPool(token0, token1, fee() 3000) of 0x1f7d7550 names
     // 0x020bfc65's pool 0xd42a4910; the CL factory's getPool(.., tickSpacing() 50) names 0x39dbed3a's 0xf2a0be59
-    getPool: { [ROBINHOOD_VENUES.uniswapV3]: "fee", [ROBINHOOD_VENUES.cl]: "tickSpacing" },
+    getPool: { [ROBINHOOD_VENUES.uniswapV3]: "fee", [ROBINHOOD_VENUES.cl]: "tickSpacing", [ROBINHOOD_VENUES.uniswapV2]: "pair" },
     pancake: [],
-    uniV2: [],
+    uniV2: [ROBINHOOD_VENUES.uniswapV2],
     usd: ROBINHOOD_VENUES.usdg,
     weth: ROBINHOOD_VENUES.weth,
     refPoolId: ROBINHOOD_REF_POOL_ID,
@@ -518,6 +522,9 @@ export const TRADES_MAX = 50;
 /** Failed steps in a row that end a tape's read back (readBack). [design: 3, three ticks: a provider pair that cannot
  *  answer a step three times running is down for the forward reads too; the tape is then what it holds.] */
 export const BACK_FAILS_MAX = 3;
+/** The most swap blocks a read back keeps from its one wide read of the day (locate). [design: 10,000, 80 KB a book; a
+ *  pool busier than that fills its tape in its first step, and past it the steps read every block, as before.] */
+export const MARKS_MAX = 10_000;
 export const CANDLES_MAX = 500;
 /** History before our first bar never changes: kept this long. */
 const GT_FRESH_MS = 3_600_000;
@@ -1947,7 +1954,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  before ours are CoinGecko's or GeckoTerminal's), and whether the read back is done (TRADES_MAX trades held, or
    *  VENUES[chain].tapeBack blocks read). */
   /** `located`: a backOnly chain's (VENUES) one wide read of the whole tapeBack done (locate). */
-  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true };
+  /** `marks`: the blocks below `lo` that hold a swap of the pool, newest first, as the one wide read of the day (locate)
+   *  named them: each step reads from the newest of them, and none left is the read back done (card
+   *  robinhood-trades-finish-filling). */
+  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[] };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -2167,7 +2177,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         e.back = fails >= BACK_FAILS_MAX ? unlocated : { ...back, fails };
         return;
       }
-      e.back = at === "held" ? unlocated : at === null ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at + 1 };
+      e.back = at === "held" ? unlocated : at.length === 0 ? { ...back, located: true, fails: 0, done: true } : { ...back, located: true, fails: 0, lo: at[0]! + 1, ...(at.length > MARKS_MAX ? {} : { marks: at }) };
       return;
     }
     const hi = back.lo - 1;
@@ -2201,14 +2211,21 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     }
     const all = logs.concat(back.logs);
     tradersAhead(e.pool, logs);
-    e.back = { lo, logs: all, tape: backBook(e, all), done: lo <= end || born };
+    // card robinhood-trades-finish-filling: a located read back keeps what the one wide read named and goes on from the
+    // newest swap below this step, never reading the day again before each step (live 16 Nov 13:5xZ: it read the whole
+    // day on the chain's own RPC, one post a second, before every step, and stood 15.7 s between two steps whenever that
+    // read found the post taken); no swap named below it, the read back is done
+    const marks = back.marks?.filter((b) => b < lo);
+    const next = marks === undefined ? lo : marks.length > 0 ? Math.max(end, marks[0]! + 1) : end;
+    e.back = { lo: next, logs: all, tape: backBook(e, all), done: lo <= end || born || marks?.length === 0, ...(marks === undefined ? {} : { located: true as const, marks }) };
   }
-  /** The newest block in `lo` to `hi` that holds a swap of `e`'s pool, as BACK_LOCATE answers one read of the whole
-   *  range: null when none, "held" when no such provider is free, undefined when it did not answer. */
-  async function locate(e: Entry, lo: number, hi: number): Promise<number | null | "held" | undefined> {
-    if (lo > hi) return null;
+  /** The blocks in `lo` to `hi` that hold a swap of `e`'s pool, newest first (none: an empty list), as BACK_LOCATE answers one read of the whole
+   *  range: "held" when no such provider is free, undefined when it did not answer. Past MARKS_MAX blocks readBack keeps
+   *  the newest alone, and the steps read every block below it, as before (card robinhood-trades-finish-filling). */
+  async function locate(e: Entry, lo: number, hi: number): Promise<number[] | "held" | undefined> {
+    if (lo > hi) return [];
     const [main] = poolFilters(e.pool, lo, hi, chain);
-    if (main === undefined) return null;
+    if (main === undefined) return [];
     const u = BACK_LOCATE.find((x) => rpcs.includes(x) && usable([x]).length > 0);
     if (u === undefined) return "held";
     // one value per topic position: the chain's own RPC takes 100,000 blocks at most for a filter with several in one
@@ -2220,7 +2237,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     if (r === null || got.length === 0 || got.some((x) => x === null)) return undefined;
     const logs = (got as Log[][]).flat();
     const blocks = logs.filter((l) => l.block >= lo && l.block <= hi && decodeSwap(e.pool, l, chain) !== null).map((l) => l.block);
-    return blocks.length === 0 ? null : Math.max(...blocks);
+    return [...new Set(blocks)].sort((a, b) => b - a);
   }
   /** A short tape's read back, step after step, while its book is open and each step reads (a failed one is read again
    *  at a later tick). */
