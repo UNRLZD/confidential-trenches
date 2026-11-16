@@ -527,7 +527,7 @@ export async function onwardReceipt(rpcs: readonly [EvmRpc, EvmRpc], hash: strin
 /** An EVM withdraw's plan step: the notes, the plan at a plain send's cost, To (the exit's deposit address for another
  *  chain) read on both RPCs and the plan again at its cost, the Max fee's check. Nothing in it is signed, so a provider's
  *  throttle makes it again from its first read (stepWaited). */
-async function evmPlanStep(h: EvmWithdrawHost, to: string, amount: bigint, maxFee: bigint) {
+async function evmPlanStep(h: EvmWithdrawHost, to: string, amount: bigint, maxFee: bigint, asked: { w?: string; to?: string }) {
   const notes = await h.notes();
   const owed = (await h.owedNotes?.()) ?? new Set<string>();
   // UNSPENT and HELD notes (a HELD one any tab's proof queue holds lets go: free()), less the owed and kept-out ones
@@ -553,7 +553,11 @@ async function evmPlanStep(h: EvmWithdrawHost, to: string, amount: bigint, maxFe
   const ws = await wsOf(plan0!);
   // another chain (card pool-withdraws-to-any-chain): To is the checked quote's deposit address on this chain, its
   // refund the first W, which must stay the run's first W (no re-plan below)
-  if (h.exit) to = await h.exit(ws[0]!);
+  // asked once a run for its W (`asked`): a step made again after a throttle asks it again only for another W
+  if (h.exit) {
+    if (asked.w !== ws[0]) asked.to = await h.exit(ws[0]!), asked.w = ws[0];
+    to = asked.to!;
+  }
   if (evmToRefused(to, h.pin, ws)) stop("to");
   // To read on both RPCs before any note moves: a To with code is run from the first part's W, or refused
   const costs = await evmWithdrawCosts(h, { to, from: ws[0]!, value: plan0![0]!.part }, first.fee);
@@ -589,7 +593,8 @@ export async function runEvmPoolWithdraw(h: EvmWithdrawHost, ask: PoolAsk, to: s
     if (h.pin.network !== network) stop("pin");
     if (typeof maxFee !== "bigint" || maxFee < 0n) stop("max_fee");
     // the plan, its costs and To, read again from the first read after a provider's throttle (stepWaited)
-    const { notes, plan, costs, wCap, dest } = await stepWaited(h, () => evmPlanStep(h, to, amount, maxFee), evmStepWaitsOn);
+    const asked: { w?: string; to?: string } = {};
+    const { notes, plan, costs, wCap, dest } = await stepWaited(h, () => evmPlanStep(h, to, amount, maxFee, asked), evmStepWaitsOn);
     to = dest;
     // from here to the run's end no proof queue (any tab's) takes a planned note; each part moves the deadline on
     const keepOut = async (): Promise<void> => h.keepOut?.(plan!.map((x) => x.noteId), evmKeepSpan(h.pool));
@@ -838,7 +843,9 @@ async function onePart(h: EvmWithdrawHost, ask: PoolAsk, notes: NoteStore, p: Wi
     return { end: "stopped", tx: "", l: 0n, j: 0, cause: legCause(e) };
   } finally {
     (key as Uint8Array | null)?.fill(0);
-    if (attempt !== null && !reserved) await notes.move(p.noteId, "HELD", "UNSPENT", { attempt }).catch(() => {});
+    // a free that fails ends the run at once naming it: the step is never made again over a note it still holds HELD
+    // (the Solana part's, pool-withdraw.ts onePart)
+    if (attempt !== null && !reserved && !(await notes.move(p.noteId, "HELD", "UNSPENT", { attempt }).then(() => true, () => false))) stop("free");
   }
 }
 

@@ -28,6 +28,9 @@ import { EVM_BUY_HEAD_SPREAD, EVM_BUY_LAG_BLOCKS, EVM_BUY_LAG_MS } from "../src/
 import { EVM_SELL_LAG_BLOCKS } from "../src/pool-sell-evm.ts";
 import { EVM_BUY_LOG_SPAN } from "../src/evm-send.ts";
 import { EVM_LIFE_MS } from "../../wallet/src/pool/evm.ts";
+// static, never a top-level await between tests: the file's after() (closers) runs once the tests before it end
+import { EvmLagError, EvmUnansweredError } from "../../wallet/src/pool/evm.ts";
+import { ReadBusy } from "../src/read-waits.ts";
 import { evmReleaseOf, evmToRefused, evmWithdrawCosts, evmWithdrawMinPart, finishEvmOnward, onwardReceipt, runEvmPoolWithdraw, EVM_ONWARD_TIP, EVM_ONWARD_L1_BYTES, type EvmHeldOnW, type EvmPendingOnward, type EvmWithdrawHost } from "../src/pool-withdraw-evm.ts";
 import { EVM_ONWARD_GAS, evmOnwardCodeGas, withdrawNoteFloor } from "../src/rules/pool.ts";
 
@@ -1354,12 +1357,12 @@ test("card evm-trees-from-one-verified-source: with one log-serving operator lef
 // page's one wait (pool-withdraw.ts stepWaited: from 1 s, doubling, at most 10 s, 30 s a step), on the EVM reads' own
 // faults (EvmUnansweredError, EvmLagError) and the exit's busy answer (ReadBusy); a fault once W signed is never made
 // again; a sign out ends the wait. Waits run on mocked timers (./mock-timers.ts), the world's clock moved by each.
-const { EvmLagError, EvmUnansweredError } = await import("../../wallet/src/pool/evm.ts");
-const { ReadBusy } = await import("../src/read-waits.ts");
 /** Mocked timers, the run's waits on them (each one's ms kept and the world's clock moved), the run driven to its end. */
-function waitsOn(t: import("node:test").TestContext, w: Awaited<ReturnType<typeof runWorld>>) {
+async function waitsOn(t: import("node:test").TestContext) {
+  // mocked before the world opens its stores, as the Solana withdraw's tests do (test/pool-withdraw-throttle.test.ts)
   enableTimers(t.mock.timers, { apis: ["setTimeout"] });
   t.after(() => resetTimers(t.mock.timers));
+  const w = await runWorld();
   const waits: number[] = [];
   w.h.wait = (ms) => (waits.push(ms), (w.clock.ms += BigInt(ms)), new Promise<void>((ok) => setTimeout(ok, ms)));
   const drive = async <T>(p: Promise<T>): Promise<{ v: T; ms: number }> => {
@@ -1375,7 +1378,7 @@ function waitsOn(t: import("node:test").TestContext, w: Awaited<ReturnType<typeo
     assert.ok(done, "the run never ended");
     return { v, ms };
   };
-  return { waits, drive };
+  return { w, waits, drive };
 }
 /** The world's pair with `fault(k, method)` thrown in place of an answer when it names one. */
 const faultyRpcs = (h: EvmWithdrawHost, fault: (k: 0 | 1, method: string) => Error | null): EvmWithdrawHost["rpcs"] =>
@@ -1386,11 +1389,11 @@ const faultyRpcs = (h: EvmWithdrawHost, fault: (k: 0 | 1, method: string) => Err
   })) as unknown as EvmWithdrawHost["rpcs"];
 const unanswered = (): Error => new EvmUnansweredError("no answer in time", new Error("HTTP 429"));
 
-test("(card evm-withdraw-waits-out-a-throttle) the plan's gas read unanswered once: the run waits, reads its plan again and sends", async (t) => {
-  const w = await runWorld();
-  const c = waitsOn(t, w);
+test("(card evm-withdraw-waits-out-a-throttle) the plan's head block read unanswered once: the run waits, reads its plan again and sends", async (t) => {
+  const c = await waitsOn(t);
+  const w = c.w;
   let n = 0;
-  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_estimateGas" && n++ === 0 ? unanswered() : null));
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_getBlockByNumber" && n++ === 0 ? unanswered() : null));
   const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
   assert.equal(got.stage, "sent", got.cause);
   assert.equal(w.chain.sends, 1);
@@ -1398,8 +1401,8 @@ test("(card evm-withdraw-waits-out-a-throttle) the plan's gas read unanswered on
 });
 
 test("(card evm-withdraw-waits-out-a-throttle) a part's head read lagging once before W signs: the part is bound and proved again, one send, the note never left held", async (t) => {
-  const w = await runWorld();
-  const c = waitsOn(t, w);
+  const c = await waitsOn(t);
+  const w = c.w;
   let n = 0;
   w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 1 && m === "eth_blockNumber" && w.chain.bound.length > 0 && n++ === 0 ? new EvmLagError("the heads are apart") : null));
   const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
@@ -1411,8 +1414,8 @@ test("(card evm-withdraw-waits-out-a-throttle) a part's head read lagging once b
 });
 
 test("(card evm-withdraw-waits-out-a-throttle) the exit's deposit address busy once (ReadBusy): asked again after the wait, the run sends", async (t) => {
-  const w = await runWorld();
-  const c = waitsOn(t, w);
+  const c = await waitsOn(t);
+  const w = c.w;
   let asked = 0;
   w.h.exit = async () => {
     if (asked++ === 0) throw new ReadBusy(429);
@@ -1425,20 +1428,20 @@ test("(card evm-withdraw-waits-out-a-throttle) the exit's deposit address busy o
 });
 
 test("(card evm-withdraw-waits-out-a-throttle) unanswered for good: the waits double to their 30 s bound, then the run stops with nothing bound or sent", async (t) => {
-  const w = await runWorld();
-  const c = waitsOn(t, w);
-  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_estimateGas" ? unanswered() : null));
+  const c = await waitsOn(t);
+  const w = c.w;
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_getBlockByNumber" ? unanswered() : null));
   const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
   assert.equal(got.stage, "stopped");
-  assert.match(got.cause ?? "", /^EvmUnansweredError unanswered/);
+  assert.match(got.cause ?? "", /^EvmUnansweredError\b/);
   assert.deepEqual(c.waits, [1_000, 2_000, 4_000, 8_000, 10_000]);
   assert.equal(w.chain.binds.length, 0);
   assert.equal(w.chain.sends, 0);
 });
 
 test("(card evm-withdraw-waits-out-a-throttle) a fault once W signed is never made again: the claim unanswered, stopped, one bind, nothing sent", async (t) => {
-  const w = await runWorld();
-  const c = waitsOn(t, w);
+  const c = await waitsOn(t);
+  const w = c.w;
   w.h.claim = async () => {
     throw unanswered();
   };
@@ -1451,14 +1454,51 @@ test("(card evm-withdraw-waits-out-a-throttle) a fault once W signed is never ma
 });
 
 test("(card evm-withdraw-waits-out-a-throttle) a sign out during the wait ends it: stopped, nothing bound, before the wait's end", async (t) => {
-  const w = await runWorld();
-  const c = waitsOn(t, w);
+  const c = await waitsOn(t);
+  const w = c.w;
   const out = new AbortController();
   w.h.stop = out.signal;
-  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_estimateGas" ? (setTimeout(() => out.abort(), 250), unanswered()) : null));
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_getBlockByNumber" ? (setTimeout(() => out.abort(), 250), unanswered()) : null));
   const { v: got, ms } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
   assert.equal(got.stage, "stopped");
   assert.match(got.cause ?? "", /^ReadStopped/);
   assert.equal(w.chain.binds.length, 0);
   assert.ok(ms < 1_000, `the wait outlived the sign out (${ms} ms)`);
+});
+
+test("(card evm-withdraw-waits-out-a-throttle) the exit answered, then To's code read unanswered once: the plan is made again, the exit asked once", async (t) => {
+  const c = await waitsOn(t);
+  const w = c.w;
+  let asked = 0;
+  w.h.exit = async () => (asked++, TO);
+  let n = 0;
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 0 && m === "eth_getCode" && n++ === 0 ? unanswered() : null));
+  const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
+  assert.equal(got.stage, "sent", got.cause);
+  assert.equal(n > 1, true, "To's code read again");
+  assert.equal(asked, 1, "the exit asked once for the same W");
+  assert.deepEqual(c.waits, [1_000]);
+});
+
+test("(card evm-withdraw-waits-out-a-throttle) a part throttled after it held its note, whose free then fails: the run stops at once naming the failed free, never a wait over a note it holds", async (t) => {
+  const c = await waitsOn(t);
+  const w = c.w;
+  const real = await w.h.notes();
+  let frees = 0;
+  const store = new Proxy(real, {
+    get: (o, k) =>
+      k === "move"
+        ? (id: string, from: string, to: string, x: unknown) =>
+            from === "HELD" && to === "UNSPENT" && frees++ === 0 ? Promise.reject(new Error("the note store is closed")) : (o.move as (...a: unknown[]) => unknown).call(o, id, from, to, x)
+        : Reflect.get(o, k),
+  });
+  w.h.notes = async () => store;
+  let n = 0;
+  w.h.rpcs = faultyRpcs(w.h, (k, m) => (k === 1 && m === "eth_blockNumber" && w.chain.bound.length > 0 && n++ === 0 ? new EvmLagError("the heads are apart") : null));
+  const { v: got } = await c.drive(runEvmPoolWithdraw(w.h, RUN_ASK, TO, PART, MAX));
+  assert.equal(got.stage, "stopped");
+  assert.match(got.cause ?? "", /\bfree\b/, `the cause names the failed free: ${got.cause}`);
+  assert.deepEqual(c.waits, [], "no wait over a note the part still holds");
+  assert.equal(w.chain.binds.length, 1);
+  assert.equal(w.chain.sends, 0);
 });
