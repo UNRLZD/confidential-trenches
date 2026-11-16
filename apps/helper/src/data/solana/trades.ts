@@ -53,7 +53,7 @@
 // is the token, bounded books, subscriptions and caches.
 import { change4h, createBook, fixed, PRICE_SCALE, TF_SECONDS, TFS, VALUE_SCALE, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
-import { type DataAnswer } from "./token.ts";
+import { HELD_WAIT_MS, type DataAnswer } from "./token.ts";
 import { cutTrades, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
 import { CREDITS, type Slot } from "../../rpc/slot.ts";
 
@@ -1020,7 +1020,21 @@ export function createSolanaTrades(deps: {
       if (mint === null || !(TFS as readonly string[]).includes(tf) || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       // a mint the lists do not hold has no bars of ours: its candles are the history source's own answer, as before
       if (!entries.has(mint) && deps.history !== undefined && (await deps.listed(mint)) !== true) return deps.history(mint, tf, to, limit, client);
-      const e = await open(mint);
+      const opening = open(mint);
+      // card helper-listed-charts-own-reads round 3: a walk still opening (its first round waits up to COLD_WAIT_MS) and
+      // the history's bars held answer now, filling, and the walk goes on; the page reads a filling chart again 2 s on
+      // (warm live run of 16 Nov 00:33Z: Solana's listed charts p95 4,241 ms)
+      const quick = <T,>(p: Promise<T>) => Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), HELD_WAIT_MS).unref?.())]);
+      if (deps.history !== undefined && tf !== "1s" && (await quick(opening)) === null) {
+        const h = await quick(deps.history(mint, tf, to, limit, client).catch(() => null));
+        const hb = h?.status === 200 ? (JSON.parse(h.body) as { candles?: Candle[]; filling?: boolean }) : null;
+        if (h != null && (hb?.candles?.length ?? 0) > 0) {
+          opening.catch(() => undefined);
+          const src = h.src ?? "geckoterminal";
+          return { ...h, body: JSON.stringify({ tf, candles: hb!.candles!.slice(-limit), src, filling: true, as_of_ms: h.asOfMs ?? now() }), src };
+        }
+      }
+      const e = await opening;
       // card helper-candles-never-refuse-a-listed-coin: a token whose walk cannot open (OPEN_MAX walks open, its 429; or
       // nothing held yet, 503) is served the history source's chart, held ahead for every listed coin off our venues
       // (token.ts ahead), as a token off the lists is, never a refusal while those bars answer

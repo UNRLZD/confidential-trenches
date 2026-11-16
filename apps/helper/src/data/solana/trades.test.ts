@@ -1012,3 +1012,37 @@ test("card helper-listed-charts-own-reads: a transaction a read back cannot read
   assert.equal(last.candles.reduce((sum: bigint, c: string[]) => sum + scale(c[5]!), 0n), vol, "every trade newer than the unread one, none older");
   assert.ok(tape.trades.length > 0);
 });
+
+// card helper-listed-charts-own-reads round 3: a listed coin's first chart read waits on no read while bars are held.
+// The warm live run of 16 Nov 00:33Z: Solana's listed charts p50 1,528 ms, p95 4,241 ms; a first read waited for its
+// walk's first round (COLD_WAIT_MS 3 s) before the history's bars, held, were served.
+test("card helper-listed-charts-own-reads: a listed coin's first chart read with its walk still reading answers the history's held bars at once, filling, then ours joined once the walk is in", async () => {
+  let walked = false;
+  let release = () => undefined as void;
+  const gate = new Promise<void>((r) => (release = r));
+  const fast = rpcFetch({ sigs: () => [{ signature: BUY.signature, slot: 465_000_000, err: null }], txs: { [BUY.signature]: BUY.result }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 });
+  const held = [[TS - 7_200, "1", "1", "1", "1", "5"], [TS - 3_600, "1", "1", "1", "1", "5"]];
+  const t = createSolanaTrades({
+    fetch: async (url, init) => {
+      if (JSON.parse(String(init.body)).method === "getSignaturesForAddress") await gate, (walked = true);
+      return fast(url, init);
+    },
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => ({ status: 200, body: JSON.stringify({ tf: "1h", candles: held, src: "coingecko", as_of_ms: TS * 1000 - 60_000 }), src: "coingecko", asOfMs: TS * 1000 - 60_000 }),
+    // the first read's bound, as COLD_WAIT_MS is, 0.5 s here
+    coldWait: () => new Promise((r) => setTimeout(r, 500)),
+    tickMs: 0,
+  });
+  const first = JSON.parse((await t.candles(MINT, "1h", null, 500)).body);
+  assert.equal(walked, false, "answered before the walk read a signature");
+  assert.deepEqual([first.candles, first.src, first.filling], [held, "coingecko", true], "the history's held bars, filling while our walk reads");
+  release();
+  await settle();
+  const next = JSON.parse((await t.candles(MINT, "1h", null, 500)).body);
+  t.stop();
+  assert.equal(next.src, "chain,coingecko");
+  assert.equal(next.candles.length, 3, "the history's two and our walk's one");
+});
