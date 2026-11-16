@@ -559,12 +559,12 @@ interface Ready {
 
 /** The box with the safety grid under it: the desktop column and the phone sheet draw the same, from the page's one
  *  trade state (TokenPage's useTrade), so a buy started at one width is the buy the other width draws. */
-function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
+function Ticket({ r, t, tape, toast }: { r: Ready; t: Trade; tape: Tape; toast?: boolean }) {
   const { row, risk } = r.data;
   return (
     <>
       <TradeView t={t} symbol={row.symbol} toast={toast} logo={{ chain: row.chain, token: row.token, icon: row.icon === true }} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />
-      <About row={row} links={r.data.links} />
+      <About row={row} tape={tape} links={r.data.links} />
     </>
   );
 }
@@ -640,7 +640,7 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
         <LowerPanel row={r?.data.row ?? null} decimals={r?.data.decimals ?? null} tape={tape} />
       </div>
       <aside className="tkp-trade" data-slot="trade">
-        {r ? <Ticket r={r} t={t} /> : <span className="tkp-sk tkp-tradesk" />}
+        {r ? <Ticket r={r} t={t} tape={tape} /> : <span className="tkp-sk tkp-tradesk" />}
       </aside>
     </div>
   );
@@ -757,7 +757,7 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
       )}
       {v && r && (
         <TradeSheet state={sheet.state} onClose={sheet.close} label={`${WORDS.buy.text} ${v.symbol}`} closeLabel={signinWord("close")} head={<SheetHead v={v} />}>
-          <Ticket r={r} t={t} toast={false} />
+          <Ticket r={r} t={t} tape={tape} toast={false} />
         </TradeSheet>
       )}
       {v && <TradeToast t={t} symbol={v.symbol} sheetOpen={sheet.state.open} />}

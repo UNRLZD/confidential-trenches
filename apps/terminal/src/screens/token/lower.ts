@@ -16,7 +16,8 @@ import type { MarketChain, MarketRow } from "../discover/fields.ts";
 import { age, compact, count, DASH, price, usd } from "../discover/format.ts";
 import { pct } from "../trade/safety.ts";
 import { change24 } from "./model.ts";
-import type { Trade } from "./trades.ts";
+import { TRADES_LIMIT } from "./trades.ts";
+import type { Tape, Trade } from "./trades.ts";
 
 const BASE = "https://ct-api.unrealized.trade";
 export const HOLDERS_URL = (chain: MarketChain, token: string): string => `${BASE}/v1/market/holders?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(token)}`;
@@ -237,23 +238,60 @@ function signedUsd(v: string | null | undefined): { text: string; tone: Tone } {
   return { text: `${neg ? MINUS : "+"}${usd(v.replace(/^-/, ""))}`, tone: neg ? "sell" : "acc" };
 }
 
-/** About from the token row: R5's 5M 1H 4H 1D change tiles, the 5m tiles (vol, buys, sells, net), the 24h flow. */
-export function aboutView(row: MarketRow): AboutView {
+const WINDOW_MS = { "24h": 86_400_000, "1h": 3_600_000, "5m": 300_000 } as const;
+type Win = keyof typeof WINDOW_MS;
+
+/** How far back the tape holds every trade (card token-stats-count-every-trade), or null when it claims none: the
+ *  helper's reach (`whole_ms`), raised past the oldest row when the tape holds as many rows as the page asks (older
+ *  ones are cut). Never while it is not read or still filling. */
+export function tapeReach(tape: Tape | undefined): number | null {
+  if (tape === undefined || tape.status !== "ready" || tape.filling === true || tape.whole_ms === undefined) return null;
+  const cut = tape.trades.length >= TRADES_LIMIT ? Math.min(...tape.trades.map((t) => t.t_ms)) + 1_000 : 0;
+  return Math.max(tape.whole_ms, cut);
+}
+
+/** A window's buys, sells and USD from the page's own trades list, or null when the window starts before the list's
+ *  reach (tapeReach): its trades are then not all in the list, and the row's numbers stand. */
+function tapeWindow(tape: Tape | undefined, w: Win, nowMs: number): { buys: number; sells: number; buyUsd: number; sellUsd: number } | null {
+  const reach = tapeReach(tape);
+  const from = nowMs - WINDOW_MS[w];
+  if (reach === null || reach > from) return null;
+  const out = { buys: 0, sells: 0, buyUsd: 0, sellUsd: 0 };
+  for (const t of tape!.trades) {
+    if (t.t_ms < from) continue;
+    if (t.side === "buy") (out.buys++, (out.buyUsd += Number(t.usd)));
+    else (out.sells++, (out.sellUsd += Number(t.usd)));
+  }
+  return out;
+}
+
+/** About from the token row and the page's trades list: R5's 5M 1H 4H 1D change tiles, the 5m tiles (vol, buys, sells,
+ *  net), the 24h flow and the flows of 24h, 1h and 5m. Each window inside the list's reach is counted from the list at
+ *  `nowMs`, so the stats agree with the Trades tab; a window before it keeps the row's numbers. */
+export function aboutView(row: MarketRow, tape?: Tape, nowMs: number = Date.now()): AboutView {
   const win = (id: AboutView["windows"][number]["id"], bps: number | null | undefined) => {
     const c = change24(bps);
     return { id, text: c.text, tone: (c.dir === "up" ? "acc" : c.dir === "down" ? "sell" : "none") as Tone };
   };
-  const net = signedUsd(row.net_5m_usd);
-  const b = countOf(row.buys_24h) ? row.buys_24h : null;
-  const s = countOf(row.sells_24h) ? row.sells_24h : null;
+  const t5 = tapeWindow(tape, "5m", nowMs);
+  const dollars = (n: number): string => n.toFixed(6);
+  const net = signedUsd(t5 ? dollars(t5.buyUsd - t5.sellUsd) : row.net_5m_usd);
+  const rowFlow = { "24h": [row.buys_24h, row.sells_24h], "1h": [row.buys_1h, row.sells_1h], "5m": [row.buys_5m, row.sells_5m] } as const;
+  const flowOf = (w: Win): { buys: number | null; sells: number | null } => {
+    const t = tapeWindow(tape, w, nowMs);
+    if (t) return { buys: t.buys, sells: t.sells };
+    const [bv, sv] = rowFlow[w];
+    return { buys: countOf(bv) ? bv : null, sells: countOf(sv) ? sv : null };
+  };
+  const bar = (x: number | null, y: number | null): number | null => (x !== null && y !== null && x + y > 0 ? Number(((x / (x + y)) * 100).toFixed(1)) : null);
+  const f24 = flowOf("24h");
   return {
     windows: [win("5M", row.chg_5m_bps), win("1H", row.chg_1h_bps), win("4H", row.chg_4h_bps), win("1D", row.chg_24h_bps)],
-    five: { vol: usd(row.vol_5m_usd), buys: count(row.buys_5m), sells: count(row.sells_5m), net: net.text, netTone: net.tone },
-    flow: { buys: count(b), sells: count(s), buyPct: b !== null && s !== null && b + s > 0 ? Number(((b / (b + s)) * 100).toFixed(1)) : null },
-    flows: ([["24h", row.buys_24h, row.sells_24h], ["1h", row.buys_1h, row.sells_1h], ["5m", row.buys_5m, row.sells_5m]] as const).map(([win, bv, sv]) => {
-      const x = countOf(bv) ? bv! : null;
-      const y = countOf(sv) ? sv! : null;
-      return { win, buys: count(x), sells: count(y), buyPct: x !== null && y !== null && x + y > 0 ? Number(((x / (x + y)) * 100).toFixed(1)) : null };
+    five: { vol: usd(t5 ? dollars(t5.buyUsd + t5.sellUsd) : row.vol_5m_usd), buys: count(t5 ? t5.buys : row.buys_5m), sells: count(t5 ? t5.sells : row.sells_5m), net: net.text, netTone: net.tone },
+    flow: { buys: count(f24.buys), sells: count(f24.sells), buyPct: bar(f24.buys, f24.sells) },
+    flows: (["24h", "1h", "5m"] as const).map((w) => {
+      const f = flowOf(w);
+      return { win: w, buys: count(f.buys), sells: count(f.sells), buyPct: bar(f.buys, f.sells) };
     }),
   };
 }

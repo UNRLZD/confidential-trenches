@@ -185,8 +185,10 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
  *  origin line (Launched on {pad} by {creator}), the curve bar on a curve token or Liquidity and 24h vol on a pool one,
  *  the four change windows, the 5m tiles, a buys / sells flow bar per window the row serves (24h, 1h, 5m), and the
  *  token's links (Website, Twitter, Telegram, Search on X). Only what the helper serves: an unknown value is the dash. */
-export function About({ row, links = {} }: { row: MarketRow; links?: SocialLinks }) {
-  const a = aboutView(row);
+export function About({ row, tape, links = {} }: { row: MarketRow; tape: Tape; links?: SocialLinks }) {
+  // the buys, sells and volume of each window inside the trades list's reach are the list's own (aboutView), on a clock
+  // that ticks each second while the list holds rows
+  const a = aboutView(row, tape, useNow(tape.trades.length > 0));
   const five = [
     ["vol5m", a.five.vol, "plain"],
     ["buys5m", a.five.buys, "acc"],

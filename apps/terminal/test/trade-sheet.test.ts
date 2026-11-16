@@ -54,7 +54,7 @@ test("the token page opens the one sheet with the box and the safety grid in it,
   assert.match(s, /<TradeSheet [^>]*state=\{sheet\.state\}/);
   // the box inside the sheet is the desktop's Ticket: TradeBox with the safety grid as its footer
   // (its fill toast is the page's TradeToast, card app-quick-buy-one-tap)
-  assert.match(s, /<TradeSheet[\s\S]*?<Ticket r=\{r\} t=\{t\} toast=\{false\} \/>[\s\S]*?<\/TradeSheet>/);
+  assert.match(s, /<TradeSheet[\s\S]*?<Ticket r=\{r\} t=\{t\} tape=\{tape\} toast=\{false\} \/>[\s\S]*?<\/TradeSheet>/);
   const bar = s.slice(s.indexOf('className="tkp-bottom"'));
   // Sell and Buy open the sheet, Sell on the sell side with a position held, Buy on the buy side (card app-sell-mount)
   assert.equal((bar.match(/sheet\.open\(\); \}\}/g) ?? []).length, 2, "Sell and Buy open the sheet");
@@ -78,7 +78,7 @@ test("the token page holds one trade state and both widths draw it: a buy starte
   assert.match(page, /<Desktop [^>]*t=\{trade\}/);
   assert.match(page, /<Phone [^>]*t=\{trade\}/);
   assert.match(page, /<TradeView t=\{t\}/);
-  assert.equal((page.match(/<Ticket r=\{r\} t=\{t\}( toast=\{false\})? \/>/g) ?? []).length, 2, "the desktop column and the sheet draw the same state");
+  assert.equal((page.match(/<Ticket r=\{r\} t=\{t\} tape=\{tape\}( toast=\{false\})? \/>/g) ?? []).length, 2, "the desktop column and the sheet draw the same state");
   // the box is its state (useTrade, one quote and one follow of the kit per state) and its view (TradeView)
   const box = src("screens/trade/TradeBox.tsx");
   assert.match(box, /export function useTrade\(at: TradeAt \| null/);
