@@ -224,7 +224,8 @@ export const POOL_LOGS_CLIENT = "pool-logs";
  * each of the three dRPC keys, a quarter of their 8 (limits.ts KEYED_PACE), so the market-data reads on the same keys
  * keep the rest. Base's pool from its deploy block (54,325,671) to the finalized head of 16 Nov (about 57,973,600) is
  * 36,480 pages of dRPC's 100 blocks: about 101 min and 729,600 CU (20 a call, KEYED_COST) once, of the three keys'
- * 21,000,000 a day; then about 432 pages a day as the chain grows (a block every 2 s). With HELPER_STORE_DIR set the
+ * 21,000,000 a day; then 4,320 pages a day as the chain grows (a block every 200 ms, read 16 Nov 00:1xZ on
+ * base-rpc.publicnode.com: 100,000 blocks in 20,000 s), 12 min of fill and 86,400 CU. With HELPER_STORE_DIR set the
  * store is kept there, so a restart starts warm. Robinhood's first keyed URL (ROBINHOOD_RPC_URL, Alchemy, no span named)
  * takes the whole range in one page.]
  */

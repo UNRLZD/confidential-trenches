@@ -1,0 +1,1085 @@
+{
+ "good": {
+  "note": "card/helper-keyed-logs-serve-a-whole-pool-range at 4e272b540: this branch's relay (apps/helper/src/rpc/rpc.ts createRpc, handle() as server.ts calls it, ?keyed=only) on a Mac, its Base keyed list four in-process stand-ins shaped as the deployed one (BASE_RPC_URL_QUICKNODE capping eth_getLogs at 5 blocks in its trial words; BASE_RPC_URL_DRPC_1..3 answering HTTP 400 code 35 past 100 blocks), each answering a log page inside its span with the Base pool's real logs (base-rpc.publicnode.com, read in 50,000-block pages at 00:1xZ, a page past that read live there) and the finalized head live there; the first wide read answered the cap with \"pool logs kept to block 54325670\" and started the fill: 36,613 pages of 100 blocks on the dRPC stand-ins, no hold, 6,100 s of the fill's pace on a virtual clock (deps.now, deps.sleep: 38 s wall); then this run; read 2026-11-16 00:26Z",
+  "base": "http://127.0.0.1:63554",
+  "to": 57985873,
+  "reads": [
+   {
+    "who": "head",
+    "readAt": "2026-11-16T00:25:42.316Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"hash\":\"0xd8902b7f3d0c3bb3d80c2e6cd638213397c44b9cfe90bd662a839b06734a2be4\",\"parentHash\":\"0xdcbd51782bca83458cb9371f8620f7eb643de44c3cba8a750b27321b096e4704\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"miner\":\"0x4200000000000000000000000000000000000011\",\"stateRoot\":\"0xe032f55456131ddf0b8370e1d45a0eb50d1ea3be01bcd069e3108b074726fe5b\",\"transactionsRoot\":\"0x180eaeee33f521f8e2c87b77860249e03ae7a1ad36943be2fe6eba8082fbe846\",\"receiptsRoot\":\"0xf6499543b2c3e750a71bd0b094e7bf14dc918587fa621472ad22138ad66ee6f1\",\"logsBloom\":\"0x1421060018001860140012018a8814a0282c240040042000412684c00100000020284910104981020002c21110025001001898040405000082030640a2acd0040401604900540000300004088020822000602008104c102020a00219b0000000008100031a48003002020024e4243e00a200500e300700000020801240203408082804ce2900d008c000008a702010000000804004a81809103ca4c4248004010244042802b0000882440112000802007a18908204310048011782081404008428149802400200610901810001288282408921a0102c601240020118102060648012b80005069160204200a050c18082a4000400828000111a85800000100400\",\"difficulty\":\"0x0\",\"number\":\"0x374cf39\",\"gasLimit\":\"0x2625a00\",\"gasUsed\":\"0x5483fa\",\"timestamp\":\"0x6afa49a6\",\"extraData\":\"0x01000003e80000000500000000004c4b40\",\"mixHash\":\"0x1a4c6c56248c5dfcad56d990b741c5bfb807921aea63411b698671e49b11b93f\",\"nonce\":\"0x0000000000000000\",\"baseFeePerGas\":\"0x4c4b40\",\"withdrawalsRoot\":\"0xb0ebdfe1d837da4dcaf3edfe40f8c11ee83f467b867ddc19c8535a4278d729bf\",\"blobGasUsed\":\"0x81d34\",\"excessBlobGas\":\"0x0\",\"parentBeaconBlockRoot\":\"0x82718ed7c1609f1c7bbb897a39b6be854e6a965b9377ffb376b7fb8dae92f6d2\",\"requestsHash\":\"0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":\"0x2f6f\",\"timestampMs\":\"0x1a1e1afb138\",\"uncles\":[],\"transactions\":[\"0x919a177ba5dcc8411462d34c176e2d68905139735c07b84a76590b23f6bcf279\",\"0x4a5678ac0d24026b5ea4e967f14eb182c9e161cbb0753e7f6be17c0b5d3e2df1\",\"0x8bb3c2fe2d1e0450c87711282382bec4096452c44f8ab6061f8d260d92c0bab5\",\"0x766bf732eb563f43b33e83cc9bbcf99f453c1750f707bd5f61b6bbae012a7422\",\"0xffcb44264e97fcd386622cb71c3f5bc3f26018383cb35b2a4ea1bd89e1b9a543\",\"0xaea9eb2f6b92c90a2abaf5652abe3481de88e80838afb1d015f535b5323fb176\",\"0x4b6b7e080375f0f7bd80ad179f3e8cab554359ad01dbada7474c814c46658f34\",\"0x45bcd91e3c806e7f9b65956d710af48b133e2ae69b45dc1fa06bc37c66b5385d\",\"0xc7178d127bdecfffe32238d7738c5f47a7f46776511e758a610a4da513568e2d\",\"0x77f54b6d81121df2d72938bd177bfa4762db904019c07825258f9ed5888e9d0b\",\"0x6623fd117cb1f5672c78371539c2183eac94d38ae9fb952a5829c26d8d13d826\",\"0x5a3287abed203063bdb7f26008053f64d406c13600c44eccccc927a11debecbb\",\"0xf9ebec4d94b10f2509ee16e52ed96f802c8528128a0367499a7e31f7f5a852ab\",\"0xaf15b98efb6089f1b401c526878ca896490ca2fc0b0332b9621ecfb80226630f\",\"0x6656c4cb0ff19db9637a032e674498d6c12be195a68e83634dcecf0e66068b7d\"],\"withdrawals\":[]}}\n"
+   },
+   {
+    "who": "helper",
+    "readAt": "2026-11-16T00:25:42.323Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000010d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f377330d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f37733\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xa\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000013011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec3011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xb\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000e1234c4f138be97dea0ff90a79d38167114596a2\"],\"data\":\"0x0d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f377333011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec000000000000000000000000000000000000000000000000002386f26fc100002b4d6196a2bc5cc57dc23851723ad0f35a156de9f59c5d0ce2a4c2cf0378d128\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xc\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000021067b47936ca26b3df44332e2d0bae68da1c8e98e2f5aca2d9bf9d3e8348e7dc1542f7928c494fac9b2c6100a84e4d58883907858880f3cbcb112868edcc6aca\",\"blockHash\":\"0x4a270e730ffc86a70a233b92025bd625517197c7521de61ed2d94be1577e3c86\",\"blockNumber\":\"0x36d4913\",\"blockTimestamp\":\"0x6af8c86b\",\"transactionHash\":\"0x5bcd08c70832769eadd3263cea11b7cfe2cada7398e311e8a97b0dc5c184bc4c\",\"transactionIndex\":\"0xd\",\"logIndex\":\"0x26\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcee388\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x0000000000000000000000004611338bf66389a2d2d3e67301dbb7ac9fb1fb9d000000000000000000000000000000000000000000000000002386f26fc10000000000000000000000000000000000000000000000000000000012309ce5400028aa8cfd675302cf1b639bff5e1267da64b317b7f75b387c66b9fcd75972cf9e1067b47936ca26b3df44332e2d0bae68da1c8e98e2f5aca2d9bf9d3e8348e7dc\",\"blockHash\":\"0x4a270e730ffc86a70a233b92025bd625517197c7521de61ed2d94be1577e3c86\",\"blockNumber\":\"0x36d4913\",\"blockTimestamp\":\"0x6af8c86b\",\"transactionHash\":\"0x5bcd08c70832769eadd3263cea11b7cfe2cada7398e311e8a97b0dc5c184bc4c\",\"transactionIndex\":\"0xd\",\"logIndex\":\"0x27\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcee388\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000329ec1f224610fc3d3dc041bb4d94f0927ab921113821ebca5b77701127b4f6891164a46f83034907d465ba6728f28564014b3d4506ca963027d787143ca451a6\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x3\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000020325fb24cc49ad57aefebbe011e69afba23610ef5edaa88676e00a8b3436accf13cd1a2cb0ba5482a8b224c741e482893470b28192614f078a4305bb94694699\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x4\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x29ec1f224610fc3d3dc041bb4d94f0927ab921113821ebca5b77701127b4f6890325fb24cc49ad57aefebbe011e69afba23610ef5edaa88676e00a8b3436accf0000000000000000000000000000000000000000000000000011c37937e080001cd271fdc08043073eab717e977f0f3f4ee2b93f5888981035aeccd6fe825bb5\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x5\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x0000000000000000000000000000000000000000000000000000000000000004209da926fa8fff546eb9305155f6166e9fb02fc1047ad1f14afd4a58b87f2c4b2a2fd6e7bcbc8ff6f8cb57b2fe038c317e9162e981dd6606454feb660d13af39\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x3\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x0000000000000000000000000000000000000000000000000000000000000003037806f512f0a6fd82b368ace9e6d5f282206094fbb4c268911960541c86d7b41c732bae20db4da541c8eb75b240d41c5aded350a4fb0637c9c013c739f97205\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x4\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x209da926fa8fff546eb9305155f6166e9fb02fc1047ad1f14afd4a58b87f2c4b037806f512f0a6fd82b368ace9e6d5f282206094fbb4c268911960541c86d7b400000000000000000000000000000000000000000000000000071afd498d00001edf064d12a373064e735bf00e4e1ee5c828810cec3327f3db476138727030f0\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x5\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000506014ff78c94307e8991a9444a739f58ff738f52e2fc352917db4c92ef110a6b0dbbd1e1f213a7ecc0e52d1be3478dd4f3de06eab52723c3db4ebcdcc2eafc82\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x0\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000416a902cba6355f9a6284f2e1ed0a5d6e672d52bdbb6ac9b657bd2baa1387a2c62c9e4fc9dcadcb547839bc501d4f8cbd6fef0c511e9e8b333f098aa1a3262365\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x1\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x06014ff78c94307e8991a9444a739f58ff738f52e2fc352917db4c92ef110a6b16a902cba6355f9a6284f2e1ed0a5d6e672d52bdbb6ac9b657bd2baa1387a2c600000000000000000000000000000000000000000000000000071afd498d000013abb0248bbfdd18d6ca9e445693fb64ad3ef49cc72e814359f9763fd0b38529\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x2\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"}]}",
+    "ms": 5
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:42.666Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 0
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:43.187Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 1
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:43.503Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 2
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:43.814Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 3
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:44.099Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 4
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:44.351Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 5
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:44.635Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 6
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:44.903Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 7
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:45.179Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 8
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:45.550Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 9
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:45.883Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 10
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:46.168Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 11
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:46.554Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 12
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:46.891Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 13
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:47.279Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 14
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:47.689Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 15
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:48.069Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 16
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:48.434Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 17
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:48.800Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 18
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:49.103Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 19
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:49.463Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 20
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:49.775Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 21
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:50.056Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 22
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:50.368Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 23
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:50.675Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 24
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:51.011Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 25
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:51.416Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 26
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:51.827Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 27
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:52.251Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 28
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:52.595Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 29
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:52.923Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 30
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:53.220Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 31
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:53.499Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 32
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:53.898Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 33
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:54.179Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 34
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:54.659Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 35
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:55.035Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 36
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:55.331Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 37
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:55.631Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 38
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:55.936Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 39
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:25:59.157Z",
+    "status": 429,
+    "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32005,\"message\":\"Rate limit exceeded. To obtain higher limits, please request a personal token or a dedicated node: https://www.allnodes.com/publicnode\"},\"id\":1}",
+    "page": 40
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:00.480Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 40
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:01.263Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 41
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:01.583Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 42
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:02.173Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 43
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:02.627Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 44
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:02.934Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 45
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:03.216Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 46
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:03.704Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 47
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:04.081Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 48
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:04.395Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 49
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:04.702Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 50
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:04.995Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 51
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:05.335Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 52
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:05.699Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 53
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:06.079Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 54
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:06.387Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 55
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:06.680Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000010d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f377330d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f37733\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xa\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000013011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec3011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xb\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000e1234c4f138be97dea0ff90a79d38167114596a2\"],\"data\":\"0x0d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f377333011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec000000000000000000000000000000000000000000000000002386f26fc100002b4d6196a2bc5cc57dc23851723ad0f35a156de9f59c5d0ce2a4c2cf0378d128\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xc\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"}]}\n",
+    "page": 56
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:07.003Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 57
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:07.303Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 58
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:07.587Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 59
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:07.867Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 60
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:08.304Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 61
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:08.587Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 62
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:08.956Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000021067b47936ca26b3df44332e2d0bae68da1c8e98e2f5aca2d9bf9d3e8348e7dc1542f7928c494fac9b2c6100a84e4d58883907858880f3cbcb112868edcc6aca\",\"blockHash\":\"0x4a270e730ffc86a70a233b92025bd625517197c7521de61ed2d94be1577e3c86\",\"blockNumber\":\"0x36d4913\",\"blockTimestamp\":\"0x6af8c86b\",\"transactionHash\":\"0x5bcd08c70832769eadd3263cea11b7cfe2cada7398e311e8a97b0dc5c184bc4c\",\"transactionIndex\":\"0xd\",\"logIndex\":\"0x26\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcee388\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x0000000000000000000000004611338bf66389a2d2d3e67301dbb7ac9fb1fb9d000000000000000000000000000000000000000000000000002386f26fc10000000000000000000000000000000000000000000000000000000012309ce5400028aa8cfd675302cf1b639bff5e1267da64b317b7f75b387c66b9fcd75972cf9e1067b47936ca26b3df44332e2d0bae68da1c8e98e2f5aca2d9bf9d3e8348e7dc\",\"blockHash\":\"0x4a270e730ffc86a70a233b92025bd625517197c7521de61ed2d94be1577e3c86\",\"blockNumber\":\"0x36d4913\",\"blockTimestamp\":\"0x6af8c86b\",\"transactionHash\":\"0x5bcd08c70832769eadd3263cea11b7cfe2cada7398e311e8a97b0dc5c184bc4c\",\"transactionIndex\":\"0xd\",\"logIndex\":\"0x27\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcee388\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000329ec1f224610fc3d3dc041bb4d94f0927ab921113821ebca5b77701127b4f6891164a46f83034907d465ba6728f28564014b3d4506ca963027d787143ca451a6\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x3\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000020325fb24cc49ad57aefebbe011e69afba23610ef5edaa88676e00a8b3436accf13cd1a2cb0ba5482a8b224c741e482893470b28192614f078a4305bb94694699\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x4\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x29ec1f224610fc3d3dc041bb4d94f0927ab921113821ebca5b77701127b4f6890325fb24cc49ad57aefebbe011e69afba23610ef5edaa88676e00a8b3436accf0000000000000000000000000000000000000000000000000011c37937e080001cd271fdc08043073eab717e977f0f3f4ee2b93f5888981035aeccd6fe825bb5\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x5\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x0000000000000000000000000000000000000000000000000000000000000004209da926fa8fff546eb9305155f6166e9fb02fc1047ad1f14afd4a58b87f2c4b2a2fd6e7bcbc8ff6f8cb57b2fe038c317e9162e981dd6606454feb660d13af39\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x3\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x0000000000000000000000000000000000000000000000000000000000000003037806f512f0a6fd82b368ace9e6d5f282206094fbb4c268911960541c86d7b41c732bae20db4da541c8eb75b240d41c5aded350a4fb0637c9c013c739f97205\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x4\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x209da926fa8fff546eb9305155f6166e9fb02fc1047ad1f14afd4a58b87f2c4b037806f512f0a6fd82b368ace9e6d5f282206094fbb4c268911960541c86d7b400000000000000000000000000000000000000000000000000071afd498d00001edf064d12a373064e735bf00e4e1ee5c828810cec3327f3db476138727030f0\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x5\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000506014ff78c94307e8991a9444a739f58ff738f52e2fc352917db4c92ef110a6b0dbbd1e1f213a7ecc0e52d1be3478dd4f3de06eab52723c3db4ebcdcc2eafc82\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x0\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000416a902cba6355f9a6284f2e1ed0a5d6e672d52bdbb6ac9b657bd2baa1387a2c62c9e4fc9dcadcb547839bc501d4f8cbd6fef0c511e9e8b333f098aa1a3262365\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x1\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x06014ff78c94307e8991a9444a739f58ff738f52e2fc352917db4c92ef110a6b16a902cba6355f9a6284f2e1ed0a5d6e672d52bdbb6ac9b657bd2baa1387a2c600000000000000000000000000000000000000000000000000071afd498d000013abb0248bbfdd18d6ca9e445693fb64ad3ef49cc72e814359f9763fd0b38529\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x2\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"}]}\n",
+    "page": 63
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:09.364Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 64
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:09.691Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 65
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:09.965Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 66
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:10.311Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 67
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:10.659Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 68
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:10.966Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 69
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:11.300Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 70
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:11.607Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 71
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:11.963Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 72
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:26:12.200Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 73
+   }
+  ]
+ },
+ "bad": {
+  "note": "the live helper (release 158, HELPER_HOST), 2026-11-16 00:2xZ: its range cap on the pool's whole finalized range",
+  "base": "https://ct-api.unrealized.trade",
+  "to": 57980117,
+  "reads": [
+   {
+    "who": "head",
+    "readAt": "2026-11-16T00:12:32.582Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"hash\":\"0x65d5f0370737fd1f82f1d2646aff1fe3764d602ab804e3768db895d768d5d7e4\",\"parentHash\":\"0x27915684abc535daf4217f7d7c69a7ef829c4cf32012c89c4e299f066726f625\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"miner\":\"0x4200000000000000000000000000000000000011\",\"stateRoot\":\"0xb6d11db393f779b3728d3de826176598953994fac40a757b6b0506a3165b443a\",\"transactionsRoot\":\"0x8825b619496bd0b8d6b022de83f774ce34f7a6e0962cdb3c09778c6671edad21\",\"receiptsRoot\":\"0x712a83ac1508d38f8792a79af322138c1ed82b13ac541f4f96211e84d2d99858\",\"logsBloom\":\"0x00400000000010000000000000000000040000000000100000040000000000000008200000020000000000110002101804000000000020808000020200000000060020000040000800000008000000000040000018080000000080100000004000800010020800000000000000000800000000000000020000020010000800000000000020001009000204000000000000804048002000004008000004000000000000000000000800440000000004000204000000000000000012002000000002308002000800c00001000000020000020000400020000040000000000020040000000000000000000000000000000280000000000000000000000000004000\",\"difficulty\":\"0x0\",\"number\":\"0x374b8bd\",\"gasLimit\":\"0x2625a00\",\"gasUsed\":\"0x11a94e\",\"timestamp\":\"0x6afa4527\",\"extraData\":\"0x01000003e80000000500000000004c4b40\",\"mixHash\":\"0x50ecb29dc2cf9ce2d2da53da2f533040d85234de9a0b3701b857d1b329711ea4\",\"nonce\":\"0x0000000000000000\",\"baseFeePerGas\":\"0x4c4d04\",\"withdrawalsRoot\":\"0xb0ebdfe1d837da4dcaf3edfe40f8c11ee83f467b867ddc19c8535a4278d729bf\",\"blobGasUsed\":\"0x251bc\",\"excessBlobGas\":\"0x0\",\"parentBeaconBlockRoot\":\"0xe58d8b72300a135f6d53032655906a98b9894bcdd7e82e8b1b1c87a830eec4ae\",\"requestsHash\":\"0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":\"0xe3d\",\"timestampMs\":\"0x1a1e19e2058\",\"uncles\":[],\"transactions\":[\"0x9e94c7237a5c0b3cf959c5b45bf9613a3829c655270189f664579bf61cb8ce5a\",\"0x4be965cd458a60e1056892adee6cbd69f67418c47c3e8d2afca989c5b30bf22e\",\"0x3f34336cb806279b1beac6d326e491a0d1ffc15d7b71073bc752aa24337bb1a7\",\"0x477a96f7606521ad8f0243e9d8a05eb5fdea73a2fd7f6631b878f312bdbd8752\",\"0xe8b5c97ccceb20d88d8cd4a633b1dad62d39d256f7713c4d722f6bedbceaba87\",\"0xba9c477aeffdb6c8e5fe97fb3d84fb8636809ab517356df99db77709f51b37a1\",\"0xce5eb9d1b56585b9645944e7c349f1ebffdd3b63dde735f640e79f78ed9d4291\",\"0x80f11dea472c3b5b0c4bbfdb40715de50219807bfaa36d964094692f16255824\"],\"withdrawals\":[]}}\n"
+   },
+   {
+    "who": "helper",
+    "readAt": "2026-11-16T00:12:33.383Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"eth_getLogs range too wide, maximum block range: 10000\"}}",
+    "ms": 800
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:33.705Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 0
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:34.091Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 1
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:34.463Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 2
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:34.746Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 3
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:35.040Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 4
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:35.303Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 5
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:35.568Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 6
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:35.838Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 7
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:36.117Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 8
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:36.422Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 9
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:36.703Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 10
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:36.994Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 11
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:37.274Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 12
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:37.586Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 13
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:37.897Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 14
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:38.243Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 15
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:38.550Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 16
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:38.866Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 17
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:39.214Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 18
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:39.520Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 19
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:39.809Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 20
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:40.098Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 21
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:40.384Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 22
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:40.643Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 23
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:40.954Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 24
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:41.230Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 25
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:41.588Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 26
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:41.849Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 27
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:42.169Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 28
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:42.464Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 29
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:42.786Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 30
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:43.112Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 31
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:43.393Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 32
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:43.693Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 33
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:44.195Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 34
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:44.512Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 35
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:44.798Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 36
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:45.179Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 37
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:45.479Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 38
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:45.814Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 39
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:46.094Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 40
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:46.386Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 41
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:46.708Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 42
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:47.043Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 43
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:47.462Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 44
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:47.750Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 45
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:48.258Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 46
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:48.602Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 47
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:49.050Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 48
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:49.422Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 49
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:49.830Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 50
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:50.106Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 51
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:50.497Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 52
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:50.794Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 53
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:51.250Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 54
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:51.599Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 55
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:51.963Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000010d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f377330d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f37733\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xa\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000013011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec3011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xb\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000e1234c4f138be97dea0ff90a79d38167114596a2\"],\"data\":\"0x0d50db4cb324042d4a50a891f9eb88b868abed114b701cd109b9923b11f377333011717641d363be87195faeaacc16fddaa2a817564a570f78f67507c3bc1bec000000000000000000000000000000000000000000000000002386f26fc100002b4d6196a2bc5cc57dc23851723ad0f35a156de9f59c5d0ce2a4c2cf0378d128\",\"blockHash\":\"0xad5d458603e0366698f91d48ff8b10343568c9bb1126d1fcf48d29dc17e198de\",\"blockNumber\":\"0x3686a66\",\"blockTimestamp\":\"0x6af7cf15\",\"transactionHash\":\"0xd09e78e6eed3391d48f8cf49c2b9b7afa7c0873c824eb4a9883f08bb9e65a98f\",\"transactionIndex\":\"0xc\",\"logIndex\":\"0xc\",\"removed\":false,\"blockTimestampMs\":\"0x1a1d800ec60\"}]}\n",
+    "page": 56
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:52.404Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 57
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:52.690Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 58
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:53.073Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 59
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:53.399Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 60
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:53.854Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 61
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:54.183Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 62
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:54.641Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000021067b47936ca26b3df44332e2d0bae68da1c8e98e2f5aca2d9bf9d3e8348e7dc1542f7928c494fac9b2c6100a84e4d58883907858880f3cbcb112868edcc6aca\",\"blockHash\":\"0x4a270e730ffc86a70a233b92025bd625517197c7521de61ed2d94be1577e3c86\",\"blockNumber\":\"0x36d4913\",\"blockTimestamp\":\"0x6af8c86b\",\"transactionHash\":\"0x5bcd08c70832769eadd3263cea11b7cfe2cada7398e311e8a97b0dc5c184bc4c\",\"transactionIndex\":\"0xd\",\"logIndex\":\"0x26\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcee388\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x0000000000000000000000004611338bf66389a2d2d3e67301dbb7ac9fb1fb9d000000000000000000000000000000000000000000000000002386f26fc10000000000000000000000000000000000000000000000000000000012309ce5400028aa8cfd675302cf1b639bff5e1267da64b317b7f75b387c66b9fcd75972cf9e1067b47936ca26b3df44332e2d0bae68da1c8e98e2f5aca2d9bf9d3e8348e7dc\",\"blockHash\":\"0x4a270e730ffc86a70a233b92025bd625517197c7521de61ed2d94be1577e3c86\",\"blockNumber\":\"0x36d4913\",\"blockTimestamp\":\"0x6af8c86b\",\"transactionHash\":\"0x5bcd08c70832769eadd3263cea11b7cfe2cada7398e311e8a97b0dc5c184bc4c\",\"transactionIndex\":\"0xd\",\"logIndex\":\"0x27\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcee388\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000329ec1f224610fc3d3dc041bb4d94f0927ab921113821ebca5b77701127b4f6891164a46f83034907d465ba6728f28564014b3d4506ca963027d787143ca451a6\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x3\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x00000000000000000000000000000000000000000000000000000000000000020325fb24cc49ad57aefebbe011e69afba23610ef5edaa88676e00a8b3436accf13cd1a2cb0ba5482a8b224c741e482893470b28192614f078a4305bb94694699\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x4\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x29ec1f224610fc3d3dc041bb4d94f0927ab921113821ebca5b77701127b4f6890325fb24cc49ad57aefebbe011e69afba23610ef5edaa88676e00a8b3436accf0000000000000000000000000000000000000000000000000011c37937e080001cd271fdc08043073eab717e977f0f3f4ee2b93f5888981035aeccd6fe825bb5\",\"blockHash\":\"0x90898b21b5e9bb9cb9ebd306ea30a06f8df87446550ac9fc58dfa86392ce7d98\",\"blockNumber\":\"0x36d4a26\",\"blockTimestamp\":\"0x6af8c8a2\",\"transactionHash\":\"0xc7b73468c3b894e145aff46e53dd9f16c9097ad59852a1938841fbf83edd3ee0\",\"transactionIndex\":\"0x3\",\"logIndex\":\"0x5\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfba60\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x0000000000000000000000000000000000000000000000000000000000000004209da926fa8fff546eb9305155f6166e9fb02fc1047ad1f14afd4a58b87f2c4b2a2fd6e7bcbc8ff6f8cb57b2fe038c317e9162e981dd6606454feb660d13af39\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x3\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x0000000000000000000000000000000000000000000000000000000000000003037806f512f0a6fd82b368ace9e6d5f282206094fbb4c268911960541c86d7b41c732bae20db4da541c8eb75b240d41c5aded350a4fb0637c9c013c739f97205\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x4\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x209da926fa8fff546eb9305155f6166e9fb02fc1047ad1f14afd4a58b87f2c4b037806f512f0a6fd82b368ace9e6d5f282206094fbb4c268911960541c86d7b400000000000000000000000000000000000000000000000000071afd498d00001edf064d12a373064e735bf00e4e1ee5c828810cec3327f3db476138727030f0\",\"blockHash\":\"0x9b8c905e42600ad0f7f5a3648de08eddd796a7673323590c0d195002ca58afd7\",\"blockNumber\":\"0x36d4a53\",\"blockTimestamp\":\"0x6af8c8ab\",\"transactionHash\":\"0x2a75d33fa69f8e376c0707df7b299f92750b7e3f1b5a01209a470830236b4bbc\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x5\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbcfdd88\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xcb249c8292372bd11f567786635483fca9e635030baafca55ff1a8940141d221\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000506014ff78c94307e8991a9444a739f58ff738f52e2fc352917db4c92ef110a6b0dbbd1e1f213a7ecc0e52d1be3478dd4f3de06eab52723c3db4ebcdcc2eafc82\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x0\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0x47c32b8f6c44fc99b90e5d365d4246c85f2e4a8790b01ad703f48665784e9489\"],\"data\":\"0x000000000000000000000000000000000000000000000000000000000000000416a902cba6355f9a6284f2e1ed0a5d6e672d52bdbb6ac9b657bd2baa1387a2c62c9e4fc9dcadcb547839bc501d4f8cbd6fef0c511e9e8b333f098aa1a3262365\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x1\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"},{\"address\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"topics\":[\"0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549\",\"0x000000000000000000000000c30ba401e2da5be1d1ef1c81d2a1979e7548d1e1\"],\"data\":\"0x06014ff78c94307e8991a9444a739f58ff738f52e2fc352917db4c92ef110a6b16a902cba6355f9a6284f2e1ed0a5d6e672d52bdbb6ac9b657bd2baa1387a2c600000000000000000000000000000000000000000000000000071afd498d000013abb0248bbfdd18d6ca9e445693fb64ad3ef49cc72e814359f9763fd0b38529\",\"blockHash\":\"0xf1109f5c7576299ad3d66e4c192d8bf6c6b49511f026708dfab24cdee99e54e3\",\"blockNumber\":\"0x36d4a8d\",\"blockTimestamp\":\"0x6af8c8b7\",\"transactionHash\":\"0xf4da9b7ce7610f7ed8fea9f0d46e3eeb855ef2be7ea615375b21907e8fa13497\",\"transactionIndex\":\"0x4\",\"logIndex\":\"0x2\",\"removed\":false,\"blockTimestampMs\":\"0x1a1dbd00ad8\"}]}\n",
+    "page": 63
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:55.026Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 64
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:55.383Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 65
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:55.677Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 66
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:56.082Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 67
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:56.382Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 68
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:56.654Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 69
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:56.960Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 70
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:57.278Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 71
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:57.586Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 72
+   },
+   {
+    "who": "reference",
+    "readAt": "2026-11-16T00:12:57.806Z",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}\n",
+    "page": 73
+   }
+  ]
+ }
+}
