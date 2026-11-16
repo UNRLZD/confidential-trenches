@@ -13,7 +13,6 @@
 //     and the precommitment (the kit's vaultCommitment), with a nonzero root; the run's recorded commitment must be it;
 //   - U holds 0 lamports: the deposit spent all of it, rung and costs.
 // Runs: once, its devnet deposit run is a record no deploy changes, read on devnet RPCs (card live-checks-read-mainnet-only: a listed check reads no test network; the money gate reads its Tx lines back); SIGN_HOST's mainnet build with no testnet pin is pool-deposits's check, after every sign deploy
-// Bundle: out devnet RPC reads of the run
 //   node scripts/live-checks/signpage-pool-notes.mjs [--precommitment <hex>] [--record <file>]
 // --precommitment reads another precommitment in the run's place (the recorded bad answer). PASS exit 0, FAIL exit 1,
 // error exit 2.
