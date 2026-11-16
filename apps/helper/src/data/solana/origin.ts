@@ -308,9 +308,21 @@ export type Ask = { mint: string; hint: Hint | undefined; createdS: number | nul
  */
 export function createOrigins(getAccounts: GetAccounts) {
   const known = new Map<string, Origin | null>();
-  const keep = (mint: string, o: Origin | null) => {
-    if (!known.has(mint) && known.size >= ORIGIN_MAX) known.delete(known.keys().next().value!);
+  /** The graduated pool the hint named when a token was settled as none (card helper-listed-charts-own-reads): a
+   *  LaunchLab token on its curve against another quote is found only through the pool it graduates to (firstRound),
+   *  so a none settled before Jupiter names that pool is read again once it does. Live run 43776130630: FLOTI, made
+   *  23:44:38Z against another quote, graduated 23:45:56Z, was kept untagged for good. Jupiter's word only asks a read
+   *  again; the chain's read decides. */
+  const noneWith = new Map<string, string | null>();
+  const keep = (mint: string, o: Origin | null, hint: Hint | undefined) => {
+    if (!known.has(mint) && known.size >= ORIGIN_MAX) {
+      const old = known.keys().next().value!;
+      known.delete(old);
+      noneWith.delete(old);
+    }
     known.set(mint, o);
+    if (o === null) noneWith.set(mint, hint?.graduated ?? null);
+    else noneWith.delete(mint);
   };
 
   /** `get`: the reads' path for this refresh (a token page reads on its caller's share). */
@@ -322,9 +334,9 @@ export function createOrigins(getAccounts: GetAccounts) {
       if (seen.has(a.mint)) continue;
       seen.add(a.mint);
       const o = known.get(a.mint);
-      if (o === undefined) {
+      if (o === undefined || (o === null && (a.hint?.graduated ?? null) !== null && a.hint!.graduated !== noneWith.get(a.mint))) {
         if (fresh.length < ORIGIN_ASKS_PER_TICK) fresh.push(a);
-      }      else if (o !== null && o.curveBps !== 10_000) moving.push([a.mint, o]);
+      } else if (o !== null && o.curveBps !== 10_000) moving.push([a.mint, o]);
     }
     const progress = async () => {
       if (moving.length === 0) return;
@@ -345,7 +357,7 @@ export function createOrigins(getAccounts: GetAccounts) {
         const o = got.get(a.mint);
         if (o === undefined) continue; // the read failed: read again next refresh
         if (o === null && (a.createdS === null || nowMs / 1000 - a.createdS < SETTLE_S)) continue; // too new to call it none
-        keep(a.mint, o);
+        keep(a.mint, o, a.hint);
       }
     };
     await Promise.all([progress(), launches()]);

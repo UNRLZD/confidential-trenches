@@ -177,3 +177,16 @@ test("hints: Jupiter's launchpad, partnerConfig and graduatedPool, each checked 
   assert.equal(h.size, 2);
   assert.equal(hintsOf({ not: "a list" }).size, 0);
 });
+
+test("card helper-listed-charts-own-reads: a token settled as none before Jupiter names the pool it graduated to is read again once it does, and tagged from the chain (live run 43776130630: FLOTI, a LaunchLab token against another quote, kept untagged for good)", async () => {
+  const [t] = FX.tokens.filter((x) => x.case === "stonkfun" && x.mint.startsWith("SCGBBnSw"));
+  const o = createOrigins(recorded());
+  const nowS = AT / 1000;
+  const before = { mint: t!.mint, hint: { ...t!.hint!, graduated: null }, createdS: nowS - 3_600 };
+  await o.refresh([before], AT);
+  assert.equal(o.get(t!.mint), null, "on its curve against another quote: no launch found");
+  await o.refresh([before], AT + 12_000);
+  assert.equal(o.get(t!.mint), null, "the same hint: not read again");
+  await o.refresh([{ ...before, hint: t!.hint }], AT + 24_000);
+  assert.deepEqual(o.get(t!.mint), t!.origin, "the graduated pool named: read again, the launch found");
+});
