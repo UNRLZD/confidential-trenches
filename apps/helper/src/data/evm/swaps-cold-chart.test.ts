@@ -203,8 +203,10 @@ test("card helper-listed-charts-own-reads: bars of ours with the history before 
 // run of 16 Nov 00:33Z: Base's listed charts p95 4,997 ms, Robinhood's 3,042 ms). One rule with the Solana charts.
 test("card helper-listed-charts-own-reads: with a call free and GeckoTerminal slow (1.5 s), a chart's held bars answer at once and the read goes on; the next answer is the fresh read", async () => {
   let slow = false;
+  // GeckoTerminal's slow answers come 1.5 s on; `answered` counts those that came
+  let answered = 0;
   const answer = (async () => {
-    if (slow) await new Promise((go) => setTimeout(go, 1_500));
+    if (slow) await new Promise((go) => setTimeout(go, 1_500)), answered++;
     return new Response(BARS, { status: 200 });
   }) as unknown as (url: string) => Response;
   const { s, clock, gt } = cold(answer);
@@ -214,11 +216,9 @@ test("card helper-listed-charts-own-reads: with a call free and GeckoTerminal sl
   clock.t += 2 * 3_600_000; // past every freshness of the bars held
   slow = true;
   const n = gt.length;
-  const began = performance.now();
   const a = await s.candles(ICNT, "1h", null, 500);
-  const ms = performance.now() - began;
   assert.equal(a.status, 200, a.body);
-  assert.ok(ms < 500, `held bars answered in ${ms.toFixed(0)} ms: waited on GeckoTerminal`);
+  assert.equal(answered, 0, "the held bars' answer waited on GeckoTerminal's");
   assert.deepEqual(JSON.parse(a.body).candles, JSON.parse(first.body).candles, "the held bars");
   assert.equal(gt.length, n + 1, "the read goes on");
   await new Promise((go) => setTimeout(go, 1_700));

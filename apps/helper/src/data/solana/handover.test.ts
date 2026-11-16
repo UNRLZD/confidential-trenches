@@ -462,16 +462,17 @@ test("card helper-listed-charts-own-reads: with a call free and GeckoTerminal sl
   const old = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: gt.fetch as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
   assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
   const st = JSON.parse(JSON.stringify(old.state()));
-  const slow = async (url: string) => (await new Promise((go) => setTimeout(go, 1_500)), gt.fetch(url));
+  // GeckoTerminal's answers come 1.5 s on; `answered` counts those that came
+  let answered = 0;
+  const slow = async (url: string) => (await new Promise((go) => setTimeout(go, 1_500)), answered++, gt.fetch(url));
   for (const [late, filling] of [[2 * 60_000, undefined], [16 * 60_000, true]] as const) {
     t = NOW + late;
     const next = createSolanaToken(jupiter(() => false), chain(() => false), { now, fetch: slow as never, gecko: geckoBudget(now), holdersRpc: chain(() => false) });
     next.restore(st);
-    const began = performance.now();
+    const n = answered;
     const a = await next.candles(PUMP, "1m", null, 24);
-    const ms = performance.now() - began;
     assert.equal(a.status, 200);
-    assert.ok(ms < 500, `held bars ${late / 60_000} min old answered in ${ms.toFixed(0)} ms: waited on the vendor`);
+    assert.equal(answered, n, `held bars ${late / 60_000} min old: the answer waited on the vendor's`);
     assert.deepEqual([a.asOfMs, JSON.parse(a.body).filling], [NOW, filling], "the held bars, dated by their read");
     assert.ok(JSON.parse(a.body).candles.length > 0);
     // the read goes on: past the pools' freshness its top pool is read first, then its bars, 1.5 s each
