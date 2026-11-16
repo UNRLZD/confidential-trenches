@@ -103,7 +103,7 @@ export async function quoteDcl(token, dcl, fetchFn = fetch) {
     .map((p) => p.id)
     .filter((id) => FEES.includes(Number(id.split("|")[2])))
     .slice(0, 8);
-  const rpcs = RPCS.map((url) => ({ name: url, query: (params) => rpc(fetchFn, url, "query", params).then((result) => ({ jsonrpc: "2.0", id: 1, result })) }));
+  const rpcs = RPCS.map((url) => ({ name: url, query: (params) => rpc(fetchFn, url, "query", params).then((result) => ({ result })) }));
   // a provider's refusal (its rate limit after the page reads, a lag) is asked again, up to QUOTE_TRIES, QUOTE_GAP_MS apart
   let last = null;
   for (let i = 0; i < QUOTE_TRIES; i++) {
