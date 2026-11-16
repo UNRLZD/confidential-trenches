@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { EXIT } from "./provider-answer.mjs";
+import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 export const SIGN = "https://confidential.unrealized.trade";
 export const CHAINS = Object.freeze(["base", "robinhood"]);
@@ -53,14 +53,11 @@ export async function read(sign = SIGN, site = null, venues = evmPoolVenues()) {
   const run = { sign, site: site === null ? null : "a build folder at SIGN_HOST's name", at: new Date().toISOString(), snapshots: {} };
   for (const chain of CHAINS) {
     const v = venues[chain];
-    const post = (url, body) => fetch(url, { method: "POST", headers: { "content-type": "application/json", origin: sign }, body, signal: AbortSignal.timeout(READ_MS) });
     let head = null;
     for (const url of v.providers) {
-      const j = await post(url, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }))
-        .then((r) => r.json())
-        .catch(() => null);
-      if (typeof j?.result === "string" && /^0x[0-9a-f]+$/i.test(j.result)) {
-        head = Number(j.result);
+      const a = await rpcAnswer(url, "eth_blockNumber", [], { headers: { origin: sign }, timeoutMs: READ_MS });
+      if (typeof a.result === "string" && /^0x[0-9a-f]+$/i.test(a.result)) {
+        head = Number(a.result);
         break;
       }
     }
