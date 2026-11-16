@@ -8,7 +8,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { fromLogs } from "./decode.ts";
-import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, joinBars, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { joinBars } from "../candles.ts";
+import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

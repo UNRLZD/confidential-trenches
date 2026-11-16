@@ -51,7 +51,7 @@
 // Display only: nothing here feeds a signature. Every provider value is hostile: bounded answers, decoders that check
 // every byte they read (decode.ts), PumpSwap pools taken only when the PumpSwap program owns them and their base mint
 // is the token, bounded books, subscriptions and caches.
-import { change4h, createBook, fixed, PRICE_SCALE, TF_SECONDS, TFS, VALUE_SCALE, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
+import { change4h, createBook, joinBars, TF_SECONDS, TFS, type Book, type Candle, type Event, type Swap, type Tf } from "../candles.ts";
 import { address } from "./lists.ts";
 import { HELD_WAIT_MS, type DataAnswer } from "./token.ts";
 import { cutTrades, fromLogs, poolMints, poolPair, PUMP_AMM, USDC, WSOL, type RawTrade } from "./decode.ts";
@@ -376,24 +376,6 @@ type Entry = {
   back?: Back;
 };
 type Back = { before: string | null; events: Swap[]; book: Book | null; done: boolean; txs: number; n: number; want: { tf: Tf; limit: number } };
-
-/** A decimal answer's value times 10^scale. */
-const scaled = (v: string, scale: number): bigint => {
-  const [w, f = ""] = v.split(".");
-  return BigInt(`${w}${f.padEnd(scale, "0").slice(0, scale)}`);
-};
-/** Bars read back, then ours after them: a bucket both hold is one bar (its open the older's, its close ours). */
-export function joinBars(older: Candle[], ours: Candle[]): Candle[] {
-  if (older.length === 0 || ours.length === 0) return older.length === 0 ? ours : older;
-  const head = older.filter((c) => c[0] < ours[0]![0]);
-  const same = older.find((c) => c[0] === ours[0]![0]);
-  if (same === undefined) return head.concat(ours);
-  const o = ours[0]!;
-  const max = (a: string, b: string) => (scaled(a, PRICE_SCALE) >= scaled(b, PRICE_SCALE) ? a : b);
-  const min = (a: string, b: string) => (scaled(a, PRICE_SCALE) <= scaled(b, PRICE_SCALE) ? a : b);
-  const bar: Candle = [o[0], same[1], max(same[2], o[2]), min(same[3], o[3]), o[4], fixed(scaled(same[5], VALUE_SCALE) + scaled(o[5], VALUE_SCALE), VALUE_SCALE)];
-  return head.concat([bar], ours.slice(1));
-}
 
 export function createSolanaTrades(deps: {
   fetch?: Fetch;

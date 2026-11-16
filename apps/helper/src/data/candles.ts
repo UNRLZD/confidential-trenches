@@ -97,6 +97,24 @@ export function fixed(v: bigint, scale: number): string {
   const frac = s.slice(s.length - scale).replace(/0+$/, "");
   return `${neg ? "-" : ""}${whole}${frac === "" ? "" : `.${frac}`}`;
 }
+/** A decimal answer's value times 10^scale. */
+const scaled = (v: string, scale: number): bigint => {
+  const [w, f = ""] = v.split(".");
+  return BigInt(`${w}${f.padEnd(scale, "0").slice(0, scale)}`);
+};
+/** Bars read back, then ours after them (card helper-listed-charts-own-reads: a Solana chart's signatures read back,
+ *  solana/trades.ts, and an EVM book's tape read back, evm/swaps.ts, one rule for both): a bucket both hold is one bar (its open the older's, its close ours). */
+export function joinBars(older: Candle[], ours: Candle[]): Candle[] {
+  if (older.length === 0 || ours.length === 0) return older.length === 0 ? ours : older;
+  const head = older.filter((c) => c[0] < ours[0]![0]);
+  const same = older.find((c) => c[0] === ours[0]![0]);
+  if (same === undefined) return head.concat(ours);
+  const o = ours[0]!;
+  const max = (a: string, b: string) => (scaled(a, PRICE_SCALE) >= scaled(b, PRICE_SCALE) ? a : b);
+  const min = (a: string, b: string) => (scaled(a, PRICE_SCALE) <= scaled(b, PRICE_SCALE) ? a : b);
+  const bar: Candle = [o[0], same[1], max(same[2], o[2]), min(same[3], o[3]), o[4], fixed(scaled(same[5], VALUE_SCALE) + scaled(o[5], VALUE_SCALE), VALUE_SCALE)];
+  return head.concat([bar], ours.slice(1));
+}
 
 /** The swap's USD value (times 10^VALUE_SCALE) and price, or null when it cannot be priced: an ETH quote with no
  *  ETH price yet, a zero leg, or a price that floors to zero. */
