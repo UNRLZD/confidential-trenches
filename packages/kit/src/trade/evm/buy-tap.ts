@@ -2,7 +2,7 @@
 // and any app or check: the route order a tap asks the kit's evmPoolBuyQuote in, and the device's pool index sync that
 // serves the quote (checks/evm/pool-index.ts, on the venue's two index readers, never the helper). The quote it returns
 // is the kit's own, checked as every quote is; the order only decides which route the kit is asked first.
-import { evmJsonRpc, evmPoolBuyQuote, evmPoolIndexPools, evmPoolIndexUse, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../checks/evm/quote.ts";
+import { evmHeldHead, evmJsonRpc, evmPoolBuyQuote, evmPoolIndexPools, evmPoolIndexUse, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest, type EvmPoolKey } from "../../checks/evm/quote.ts";
 import { evmPoolIndexSync, type EvmPoolIndexData, type EvmPoolIndexSync } from "../../checks/evm/pool-index.ts";
 import { evmPoolVenues, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "./buy-unpinned.ts";
 import { evmHookListed } from "./sell-unpinned.ts";
@@ -45,12 +45,23 @@ export type EvmBuyTapHost = {
   readonly venues?: EvmPoolVenueList;
   /** The kit's evmPoolIndexPools otherwise (null where no index is served). */
   readonly indexPools?: (chain: EvmPoolChain, token: string) => readonly EvmPoolKey[] | null;
+  /** The kit's evmHeldHead otherwise: the hash of the block a quote reads at now with no read of its own, or null. */
+  readonly held?: (chain: EvmPoolChain) => string | null;
 };
 
 /** The route that last quoted per chain and token, this module's life: a tap asks it first (one quote a tap). */
 const LAST_ROUTE = new Map<string, EvmRoute>();
-/** Forgets every token's last route (tests). */
-export const evmBuyTapReset = (): void => LAST_ROUTE.clear();
+/** Each route's refusal per chain, token, amount and slippage, for the one held block it was read at (card
+ *  evm-warm-tap-ends-inside-two-seconds): a route refused at a block is refused again at that block (the same reads of
+ *  the same block hash), so a tap at that same held block takes the refusal again with no kit quote, and one at any
+ *  other block asks it as before. Held only where the held head was the same block before and after the quote, so the
+ *  quote read at it; a provider's fault is never held. HOOKR on Robinhood (mainnet from the Mac, 2026-11-15 23:50Z):
+ *  its indexed native pool's partial_fill, then the reference's native_first, about 1.8 s and 0.5 s again each warm tap. */
+const REFUSED = new Map<string, { readonly at: string; readonly routes: Map<string, unknown> }>();
+const REFUSED_KEPT = 256;
+/** Forgets every token's last route and held refusals (tests). */
+export const evmBuyTapReset = (): void => (LAST_ROUTE.clear(), REFUSED.clear());
+const FAULTS = new Set(["rpc_error", "rpc_disagree", "stale_quote"]);
 
 /** A buy tap's quote, EVM_BUY_TAP_QUOTES kit quotes at most:
  *  - first, the route that last quoted for the token; else, with the chain's pool index served, the first of the token's
@@ -90,10 +101,29 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
     const k = JSON.stringify(r);
     return !seen.has(k) && (seen.add(k), true);
   });
+  const held = h.held ?? evmHeldHead;
+  const refusedKey = `${known}:${amountIn}:${slippageBps}`;
   const ask = async (route: EvmRoute) => {
-    const q = await quote({ chain, token, amountIn, slippageBps, route });
-    LAST_ROUTE.set(known, q.route);
-    return q;
+    const k = JSON.stringify(route);
+    const pre = held(chain);
+    const kept = REFUSED.get(refusedKey);
+    if (pre !== null && kept !== undefined && kept.at === pre && kept.routes.has(k)) throw kept.routes.get(k);
+    try {
+      const q = await quote({ chain, token, amountIn, slippageBps, route });
+      LAST_ROUTE.set(known, q.route);
+      return q;
+    } catch (e) {
+      const code = (e as { code?: unknown })?.code;
+      if (pre !== null && typeof code === "string" && !FAULTS.has(code) && held(chain) === pre) {
+        const at = REFUSED.get(refusedKey);
+        const routes = at !== undefined && at.at === pre ? at.routes : new Map<string, unknown>();
+        routes.set(k, e);
+        REFUSED.delete(refusedKey);
+        REFUSED.set(refusedKey, { at: pre, routes });
+        if (REFUSED.size > REFUSED_KEPT) REFUSED.delete(REFUSED.keys().next().value!);
+      }
+      throw e;
+    }
   };
   const takes = (r: EvmRoute) =>
     r.venue === "uniswap-v3" || ((r.currencyIn === ZERO || lower(r.currencyIn) === weth) && r.hops.every((p) => p.hooks === ZERO || evmHookListed(chain, p.hooks, p.fee, p.tickSpacing)));
@@ -122,6 +152,13 @@ export async function evmPoolBuyQuoteTap(req: { readonly chain: EvmPoolChain; re
         if (err?.code === "rpc_error" || err?.code === "rpc_disagree" || err?.code === "stale_quote") throw e;
         const next = typeof err?.code === "string" && REQUOTE.has(err.code) && err.reference && takes(err.reference.route) ? err.reference.route : null;
         if (err?.reference && !takes(err.reference.route)) untakeable = true;
+        // native_first with no route the tap may take in its place: the coin's only routes start from WETH, which the
+        // kit refuses while a native pool exists, and no native route fills: no route a buy may take (HOOKR and TIBBIR
+        // on Robinhood, mainnet 2026-11-15 23:50Z: the WETH-USDG-coin route behind a native pool that cannot fill)
+        if (err?.code === "native_first" && next === null) {
+          untakeable = true;
+          if (followed) throw new EvmBuyTapRefused("not_allowed", e);
+        }
         if (!((err?.code === "no_quote" || err?.code === "no_reference") && !err.reference)) none = false;
         // the kit's own best route refused for another reason than a better one: its name is the tap's
         if (next === null && followed) throw e;

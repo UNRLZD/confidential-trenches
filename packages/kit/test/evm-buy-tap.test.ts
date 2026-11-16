@@ -77,3 +77,76 @@ test("a reference quoted again and refused for a better one is followed inside t
   );
   assert.equal(n, EVM_BUY_TAP_QUOTES);
 });
+
+test("card evm-warm-tap-ends-inside-two-seconds: HOOKR's native_first with no route the tap may take is not_allowed, and a tap at the same held block asks no route that refused there", async (t) => {
+  // HOOKR on Robinhood (read-only mainnet taps from the Mac, 2026-11-15 23:50Z, scratchpad ewt/tr-rh1.txt and ref.mjs):
+  // its indexed native pool refused partial_fill (NotEnoughLiquidity) naming the WETH-USDG-HOOKR route, which refused
+  // native_first naming none; each kit quote took about 1.8 s and 0.5 s of the tap, every warm tap
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const HOOKR = "0x18e674231a58c239dc7daedcffe15ec3a24cff5c";
+  const native = { currency0: ZERO, currency1: HOOKR, fee: 3000, tickSpacing: 60, hooks: ZERO };
+  const viaUsdg = { venue: "uniswap-v3" as const, tokens: ["0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", HOOKR], fees: [100, 10_000] };
+  let block = "0xb1";
+  const asked: string[] = [];
+  const quote = async (r: EvmPoolBuyQuoteRequest): Promise<EvmPoolBuyQuote> => {
+    asked.push(JSON.stringify(r.route));
+    const v3 = r.route.venue === "uniswap-v3";
+    await new Promise((go) => setTimeout(go, v3 ? 500 : 1_800));
+    if (!v3) throw new EvmQuoteError("partial_fill", "a hookless hop runs out of liquidity (NotEnoughLiquidity)", { amountOut: 177696018052208568545n, route: viaUsdg });
+    throw new EvmQuoteError("native_first", "robinhood's WETH is behind an upgradeable proxy and a native route quotes at least as much", null);
+  };
+  const hookr = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: HOOKR, amountIn: 980_000_000_000_000n, slippageBps: 300 }, { quote, indexPools: () => [native], held: () => block });
+  // the tap's time on the mock clock: 100 ms ticks until it ends
+  const timed = async (p: Promise<unknown>) => {
+    let end: { e?: unknown } | null = null;
+    p.then(() => (end = {}), (e: unknown) => (end = { e }));
+    let ms = 0;
+    for (; end === null && ms < 60_000; ms += 100) {
+      await new Promise((go) => setImmediate(go));
+      if (end === null) t.mock.timers.tick(100);
+    }
+    return { ms, e: (end as { e?: unknown } | null)?.e };
+  };
+  const named = (e: unknown) => e instanceof EvmBuyTapRefused && e.code === "not_allowed";
+  evmBuyTapReset();
+  const cold = await timed(hookr());
+  assert.ok(named(cold.e), String(cold.e));
+  assert.equal(asked.length, 2);
+  assert.ok(cold.ms >= 2_300, `${cold.ms} ms`);
+  // the next tap at the same held block: the same refusal, no kit quote, inside 2 s
+  const warm = await timed(hookr());
+  assert.ok(named(warm.e), String(warm.e));
+  assert.equal(asked.length, 2, asked.join("\n"));
+  assert.ok(warm.ms < 2_000, `${warm.ms} ms`);
+  // at a new block each route is asked again, as before
+  block = "0xb2";
+  const next = await timed(hookr());
+  assert.ok(named(next.e), String(next.e));
+  assert.equal(asked.length, 4);
+  // no held block (no head held fresh): nothing is held
+  evmBuyTapReset();
+  const none = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: HOOKR, amountIn: 980_000_000_000_000n, slippageBps: 300 }, { quote, indexPools: () => [native], held: () => null });
+  await timed(none());
+  await timed(none());
+  assert.equal(asked.length, 8);
+});
+
+test("card evm-warm-tap-ends-inside-two-seconds: a provider's fault is never held, and a refusal read while the held block moved is not held", async () => {
+  evmBuyTapReset();
+  let n = 0;
+  const fault = async (): Promise<EvmPoolBuyQuote> => (n++, Promise.reject(new EvmQuoteError("rpc_error", "a provider did not answer")));
+  const one = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote: fault, indexPools: () => spam(1), held: () => "0xb1" });
+  await assert.rejects(one(), (e) => e instanceof EvmQuoteError && e.code === "rpc_error");
+  await assert.rejects(one(), (e) => e instanceof EvmQuoteError && e.code === "rpc_error");
+  assert.equal(n, 2);
+  evmBuyTapReset();
+  let at = 0;
+  let m = 0;
+  const moving = () => `0xb${at++}`;
+  const refuse = async (): Promise<EvmPoolBuyQuote> => (m++, Promise.reject(new EvmQuoteError("no_quote", "x")));
+  const two = () => evmPoolBuyQuoteTap({ chain: "robinhood", token: TOKEN, amountIn: 10n ** 15n, slippageBps: 300 }, { quote: refuse, indexPools: () => spam(1), held: moving });
+  await assert.rejects(two(), (e) => e instanceof EvmBuyTapRefused);
+  const first = m;
+  await assert.rejects(two(), (e) => e instanceof EvmBuyTapRefused);
+  assert.equal(m, 2 * first);
+});

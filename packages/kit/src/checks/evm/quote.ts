@@ -1185,6 +1185,10 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
 // the pinned providers' held heads, one per chain, made at a chain's first quote (no top-level call: the kit's index
 // reaches the signing page's bundle)
 const WATCHES = new Map<EvmPoolChain, EvmHeadWatch>();
+/** The hash of the block a quote on `chain` would read at now with no read of its own (the held head while fresh,
+ *  evmHeadWatch peek), or null (card evm-warm-tap-ends-inside-two-seconds: the buy tap holds a route's refusal for
+ *  that block alone). Not in the index. */
+export const evmHeldHead = (chain: EvmPoolChain): string | null => WATCHES.get(chain)?.peek(Date.now())?.hash ?? null;
 
 const v3Direct = (weth: string, token: string, fee: number): EvmV3Route => ({ venue: "uniswap-v3", tokens: [weth, token], fees: [fee] });
 const v4Direct = (from: string, to: string, [fee, tickSpacing]: readonly [number, number]): EvmV4Route => ({
