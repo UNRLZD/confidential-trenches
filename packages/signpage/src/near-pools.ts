@@ -18,6 +18,7 @@
 //   pages are bounded (NEAR_POOLS_MAX).
 import { NEAR_NETWORKS, type NearNetwork, type NearRpc } from "../../kit/src/near/networks.ts";
 import { NEAR_RHEA, RHEA_QUOTE_POOLS_MAX } from "../../kit/src/near/rhea.ts";
+import { NEAR_DCL } from "../../kit/src/near/dcl.ts";
 
 /** One get_pools page. */
 export const NEAR_POOLS_PAGE = 2000;
@@ -113,6 +114,25 @@ function ranked(network: NearNetwork, rows: readonly Row[], token: string): { ow
   // the token's own pools with USDC or wrapped NEAR, by the token's reserve in each
   const own = deepest(token === wrap ? [[token, usdc]] : [[token, usdc], [token, wrap]], token, RHEA_QUOTE_POOLS_MAX);
   return { own, bridge };
+}
+
+/** Rhea DCL's fee tiers, in millionths (dcl.ts dclPoolOf): the four DCL pools a pair may have. */
+export const NEAR_DCL_FEES = [100, 400, 2000, 10000] as const;
+
+/**
+ * Rhea DCL's candidate pool ids for a buy or sell of `token` against USDC (card near-dcl-sell), made on the device from
+ * the token alone, never taken from a server's list: the token with wrapped NEAR and USDC with wrapped NEAR, each at
+ * NEAR_DCL_FEES, each id "<lower>|<higher>|<fee>" (DCL_QUOTE_POOLS_MAX, 8, in all). An id with no pool reads null and
+ * dclQuote leaves it out; so the list says nothing of which pools exist, and asks nothing that names the token.
+ * DCL is on mainnet only; wrapped NEAR itself: USDC's four alone; USDC: none.
+ */
+export function dclCandidates(network: NearNetwork, token: string): string[] {
+  if (!(network in NEAR_DCL)) return [];
+  const wrap = NEAR_DCL[network as "mainnet"].wrap;
+  const usdc = NEAR_NETWORKS[network].usdc;
+  if (token === usdc) return [];
+  const ids = (a: string, b: string) => NEAR_DCL_FEES.map((f) => `${a < b ? a : b}|${a < b ? b : a}|${f}`);
+  return [...(token === wrap ? [] : ids(token, wrap)), ...ids(usdc, wrap)];
 }
 
 /** The session's candidates per network: the pools read once on each of the two providers (a provider's read again

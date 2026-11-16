@@ -4,7 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { NEAR_NETWORKS, type NearRpc } from "../../kit/src/near/networks.ts";
 import { RHEA_QUOTE_POOLS_MAX } from "../../kit/src/near/rhea.ts";
-import { NEAR_POOLS_BRIDGE, NEAR_POOLS_PAGE, readRheaPools, rheaCandidates, rheaCandidatesOf, rheaPoolsKept } from "../src/near-pools.ts";
+import { dclCandidates, NEAR_POOLS_BRIDGE, NEAR_POOLS_PAGE, readRheaPools, rheaCandidates, rheaCandidatesOf, rheaPoolsKept } from "../src/near-pools.ts";
+import { DCL_QUOTE_POOLS_MAX, dclPoolOf } from "../../kit/src/near/dcl.ts";
 
 const USDC = NEAR_NETWORKS.mainnet.usdc;
 const WRAP = "wrap.near";
@@ -135,3 +136,22 @@ test("F7 one provider failing leaves the other's list; it is read again on the n
   await assert.rejects(rheaPoolsKept("mainnet", () => [dead, dead])(TOKEN), /503/);
 });
 
+
+// card near-dcl-sell: Rhea DCL's candidates are made on the device from the token alone, never a server's list
+test("the DCL candidates: the token with wNEAR and USDC with wNEAR, each at fees 100, 400, 2000 and 10000, lower first", () => {
+  const HOODL = "hoodl-95275b.launchpad.justhoot.near";
+  const c = dclCandidates("mainnet", HOODL);
+  assert.deepEqual(c, [
+    `${HOODL}|wrap.near|100`, `${HOODL}|wrap.near|400`, `${HOODL}|wrap.near|2000`, `${HOODL}|wrap.near|10000`,
+    `${USDC}|wrap.near|100`, `${USDC}|wrap.near|400`, `${USDC}|wrap.near|2000`, `${USDC}|wrap.near|10000`,
+  ]);
+  assert.equal(c.length, DCL_QUOTE_POOLS_MAX);
+  // a token above wrap.near in order is written second: every id is one dclQuote takes
+  const z = dclCandidates("mainnet", "zzz.near");
+  assert.equal(z[0], "wrap.near|zzz.near|100");
+  for (const id of [...c, ...z]) assert.notEqual(dclPoolOf(id), null, id);
+  // wNEAR itself: USDC's four alone; no DCL on testnet; never USDC
+  assert.deepEqual(dclCandidates("mainnet", WRAP), c.slice(4));
+  assert.deepEqual(dclCandidates("testnet", HOODL), []);
+  assert.deepEqual(dclCandidates("mainnet", USDC), []);
+});
