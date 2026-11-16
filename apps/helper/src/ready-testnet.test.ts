@@ -10,9 +10,9 @@ import { test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { evmPoolVenues } from "@blindfill/kit";
 import { base58 } from "./bind/checks.ts";
-import { POOL_EVM_ENV } from "./pool/evm.ts";
-import { POOL_SOLANA_ENV } from "./pool/solana.ts";
-import { poolsChecked, poolsFromEnv, readyGate } from "./server.ts";
+import { evmPoolSendersFromEnv, POOL_EVM_ENV } from "./pool/evm.ts";
+import { POOL_SOLANA_ENV, solanaPoolSendersFromEnv } from "./pool/solana.ts";
+import { poolsChecked, readyGate } from "./server.ts";
 
 const KEY = "0x" + "11".repeat(32);
 const FEE_PAYER = ((seed) => base58(Uint8Array.from([...seed, ...ed25519.getPublicKey(seed)])))(new Uint8Array(createHash("sha256").update("helper-ready-testnet/FP").digest()));
@@ -41,8 +41,8 @@ test("card helper-ready-never-waits-on-a-testnet-pool: every test network's pool
   }
   const [program, feePayer, fee, urls] = POOL_SOLANA_ENV.devnet;
   Object.assign(env, { [program]: PROGRAM, [feePayer]: FEE_PAYER, [fee]: "1300000", [urls]: "https://a.devnet.example,https://b.devnet.example" });
-  // the main's own composition: every pool the environment sets loads (the live checks still read the test ones)
-  const { pools, evmPools } = poolsFromEnv(env);
+  // the main's own readers (server.ts main): every pool the environment sets loads (the live checks still read the test ones)
+  const [pools, evmPools] = [solanaPoolSendersFromEnv(env), evmPoolSendersFromEnv(env)];
   assert.deepEqual([pools.size, evmPools.size], [1, 2]);
   // each EVM check as the main runs it, its waits passing on the next turn so it reaches its 90 s bound at once
   const quick = () => new Promise<void>((go) => setImmediate(go));

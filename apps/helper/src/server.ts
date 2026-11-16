@@ -1222,14 +1222,6 @@ export function poolsChecked(pools: ReadonlyMap<string, Pick<SolanaPoolSender, "
 }
 
 /**
- * The pool senders the helper's start loads from `env`, every network's (each reader's refusal of a value stops the
- * start, exit 2); which of them ready waits for is poolsChecked's (card helper-ready-never-waits-on-a-testnet-pool).
- */
-export function poolsFromEnv(env: Record<string, string | undefined>, holds?: ProviderHolds): { pools: Map<string, SolanaPoolSender>; evmPools: Map<string, EvmPoolSender> } {
-  return { pools: solanaPoolSendersFromEnv(env), evmPools: evmPoolSendersFromEnv(env, undefined, holds) };
-}
-
-/**
  * The helper's ready (health.ts): true once the warm-up (warmUntilReady) and every pool's start check (poolsChecked)
  * have both passed, never before either. `warmed` settles with them: it rejects on a refused start check.
  */
@@ -1371,12 +1363,13 @@ if (import.meta.main) {
     const bind = bindSenderFromEnv(process.env, watches);
     // a Solana pool whose configured fee is not the kit's for the rent both providers read stops the helper (at the
     // pool's first good read, pool/solana.ts ready); a read that fails takes down only that pool (503), never the rest
+    const pools = solanaPoolSendersFromEnv(process.env);
     // card helper-ready-without-gt: every part read from the environment is read here, at the start, so a value the
     // helper refuses stops it at once (exit 2, naming the variable). Left to handler()'s defaults they were read only at
     // listen(), which a peer runs once warm, inside a promise: an unhandled rejection, exit 1 with no line of ours, and
     // a restart loop until redeploy.sh's bound (18:55-18:58Z: a partial POOL_EVM_*_BASE_SEPOLIA set)
     // card robinhood-mainnet-rpcs: the senders' reads draw on the one pace per provider the swap, maker and /v1/rpc reads do
-    const { pools, evmPools } = poolsFromEnv(process.env, holds);
+    const evmPools = evmPoolSendersFromEnv(process.env, undefined, holds);
     const release = releaseOf(process.env);
     // card evm-buy-hookdata-fee: an EVM pool RPC that cannot answer the fee's state reads 10 min back stops the start;
     // both pool kinds' start checks run from here, and ready (below) waits for the mainnet pools' (card
