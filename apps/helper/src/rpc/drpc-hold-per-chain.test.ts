@@ -13,7 +13,7 @@ import { keyedPaces } from "./rpc.ts";
 const key = (c: string, n: number) => `planted${c}dr${n}key123456789abcd`;
 const BASE = [1, 2, 3].map((n) => `https://lb.drpc.live/base/${key("BASE", n)}`);
 const ROBINHOOD = [1, 2, 3].map((n) => `https://lb.drpc.live/robinhood/${key("RH", n)}`);
-const NEAR = `https://lb.drpc.live/near/${key("NEAR", 1)}`;
+const NEAR = "https://lb.drpc.live/near/plantedNEARdr1key123456789abcd";
 const ENV: Record<string, string> = {
   ...Object.fromEntries(BASE.map((u, i) => [`BASE_RPC_URL_DRPC_${i + 1}`, u])),
   ...Object.fromEntries(ROBINHOOD.map((u, i) => [`ROBINHOOD_RPC_URL_DRPC_${i + 1}`, u])),

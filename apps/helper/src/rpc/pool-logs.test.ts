@@ -304,6 +304,32 @@ test("the fill never ends on a failed head read: every provider's head read refu
   }
 });
 
+// card base-reads-never-throttled (E2, the wallet's restore 16 Nov 11:59-12:06Z): a fill that ended at the head left the
+// store behind as the chain moved, so a device's whole-range read had a tail past the store wider than the route's 10,000
+// blocks and was answered "maximum block range: 10000", paging to the head 10,000 at a time. At the head the fill
+// follows it while pool reads come, and the read is answered from the store
+test("at the head the fill follows it: the chain moves 15,000 blocks with no device read, and the next whole-range read is answered from the store, no range cap, no caller page", async () => {
+  FINAL = FROM + 29_999;
+  const clock = scheduler();
+  const w = world();
+  const r = createRpc(BASE_ENV, { ...w.deps, now: clock.now, sleep: clock.sleep });
+  const cold = read(r, wideBody(1, FROM, FINAL));
+  for (let i = 0; i < 2_000 && !w.lines.some((l) => l.startsWith("rpc pool-logs base covered to")); i++) await clock.step(100);
+  assert.ok(w.lines.includes(`rpc pool-logs base covered to ${FINAL}`), w.lines.slice(-3).join("\n"));
+  void (await cold);
+  // the chain moves on past the route's reach; no device reads for three minutes
+  FINAL += 15_000;
+  for (let i = 0; i < 1_800; i++) await clock.step(100);
+  const callers = w.callers().length;
+  const a = await Promise.race([read(r, wideBody(2, FROM, FINAL)), (async () => {
+    for (let i = 0; i < 100; i++) await clock.step(50);
+    return { status: 0, body: "{}" };
+  })()]);
+  assert.equal(a.status, 200, a.body.slice(0, 300));
+  assert.deepEqual(resultOf(a).result, logsIn(FROM, FINAL), "every log to the new head, from the store");
+  assert.equal(w.callers().length, callers, "no caller page: the store followed the head");
+});
+
 // live 16 Nov 02:48-03:12Z (run 43794383970): the fill's 429s held dRPC's keys, the helper's own head read was held with
 // them, and the store's part was skipped: the whole-range read got the route's bare cap, no `data`, which the check reads
 // as FAIL. A whole-range pool read never answers a range error without the store's progress
