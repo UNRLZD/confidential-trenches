@@ -534,18 +534,21 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   // a provider whose known cap is under `span` (more pages than one for it)
   const narrow = (i: number, span: bigint | null) => span !== null && capOf[i] !== null && capOf[i]! < span;
   // the provider seat k moves to: the next one in list order after its own, free for it, rested, not asked in this
-  // call, and with no cap known under `span`; `held`: only one already held to its side in the reads in flight
-  const next = (k: number, span: bigint | null, asked: ReadonlyMap<number, unknown>, held = false): number | null => {
+  // call, and with no cap known under `span`; `held`: only one already held to its side in the reads in flight; `logs`
+  // (an eth_getLogs call): never a member that pages no logs (card sign-in-restore-never-stalls: a walk off the helper's
+  // refused page onto mainnet.base.org left the seat there, so each next page was asked of the helper at
+  // mainnet.base.org's page size, 800,000 and 400,000 blocks in turn without end, 3 a second for minutes)
+  const next = (k: number, span: bigint | null, asked: ReadonlyMap<number, unknown>, held = false, logs = false): number | null => {
     for (let s = 1; s < list.length; s++) {
       const i = (at[k]! + s) % list.length;
-      if (free(k, i) && rested(i) && !asked.has(i) && !narrow(i, span) && (!held || sides[k]!.has(i))) return i;
+      if (free(k, i) && rested(i) && !asked.has(i) && !narrow(i, span) && (!held || sides[k]!.has(i)) && !(logs && logless(i))) return i;
     }
     return null;
   };
-  // the resting provider free for seat k whose rest ends first
-  const soonest = (k: number): number | null => {
+  // the resting provider free for seat k whose rest ends first (`logs`: as next's)
+  const soonest = (k: number, logs = false): number | null => {
     let best: number | null = null;
-    for (let i = 0; i < list.length; i++) if (free(k, i) && !rested(i) && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
+    for (let i = 0; i < list.length; i++) if (free(k, i) && !rested(i) && !(logs && logless(i)) && (best === null || restUntil[i]! < restUntil[best]!)) best = i;
     return best;
   };
   // a page of `span` blocks on provider i (ms): its rest left, then its pages for the span at its last call's time, a
@@ -560,7 +563,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
     let best: number | null = null;
     for (let s = 0; s < list.length; s++) {
       const i = (at[k]! + s) % list.length;
-      if (!free(k, i) || (rested(i) ? !narrow(i, span) : answered[i] === null)) continue;
+      if (!free(k, i) || logless(i) || (rested(i) ? !narrow(i, span) : answered[i] === null)) continue;
       if (best === null || costOf(i, span) < costOf(best, span)) best = i;
     }
     return best;
@@ -579,6 +582,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
   const seat = (k: number): EvmRpc => {
     const call = async (method: string, params: readonly unknown[]): Promise<unknown> => {
       const span = method === "eth_getLogs" ? spanOf(params) : null;
+      const logs = method === "eth_getLogs";
       // each provider asked at most once in one call, its error kept (review of 8cdf6ee8, MEDIUM: as the helper's
       // callEvm): a call ends after at most one ask of each provider in the list
       const asked = new Map<number, unknown>();
@@ -587,15 +591,15 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
       // its side already, unless it took that provider narrow for want of a wider one
       const c = capOf[at[k]!]!;
       const home = at[k]!;
-      if (!rested(at[k]!)) at[k] = next(k, span, asked) ?? at[k]!;
-      else if (span !== null && c !== null) at[k] = next(k, c + 1n, asked, paged[k]!.has(at[k]!) && narrowed[k] !== at[k]) ?? at[k]!;
+      if (!rested(at[k]!)) at[k] = next(k, span, asked, false, logs) ?? at[k]!;
+      else if (span !== null && c !== null) at[k] = next(k, c + 1n, asked, paged[k]!.has(at[k]!) && narrowed[k] !== at[k], logs) ?? at[k]!;
       for (;;) {
         const i = at[k]!;
         if (asked.has(i)) throw asked.get(i);
         // a member that pages no logs is never asked one: the seat walks on for this call, or the call is refused here
         if (method === "eth_getLogs" && logless(i)) {
           asked.set(i, new Error(`${(list[i] as { url?: string }).url ?? "this provider"} pages no logs`));
-          const n = next(k, span, asked);
+          const n = next(k, span, asked, false, logs);
           if (n === null) throw asked.get(i);
           at[k] = n;
           continue;
@@ -622,15 +626,20 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           const backend = !capped && span !== null && cap !== null && cap >= 1n && cap < span;
           if (backend) {
             if (at[k] !== i) continue; // another call on this seat moved it already
-            const n = next(k, span, asked);
+            const n = next(k, span, asked, false, logs);
             if (n === null) throw e;
             at[k] = n;
             continue;
           }
+          // a log page with no answer in time goes up when it names no span or is wider than this provider answered in
+          // full: the pager takes it back to that width there (readLogs). A page of a span it never answered, or no wider
+          // than it did (card sign-in-restore-never-stalls: Pocket silent to the Base pool's first page held the walk
+          // 86 s, asked 7 times, the helper's route free behind it), is a throttle to the seat: that provider rested and
+          // the page asked of a free one at once; with none free the error goes up as before
           if (capped) {
             capOf[i] = cap;
             restUntil[i] = 0; // it answers: no longer resting
-          } else if (t === null || (t.kind === "slow" && method === "eth_getLogs")) throw e;
+          } else if (t === null || (t.kind === "slow" && method === "eth_getLogs" && (span === null || (answered[i] !== null && span > answered[i]!)))) throw e;
           else {
             restUntil[i] = Date.now() + Math.max(t.afterMs ?? 0, EVM_SPARE_REST_MS);
             named[i] = (t.afterMs ?? 0) > EVM_SPARE_REST_MS;
@@ -643,7 +652,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
           if (capped && paged[k]!.has(i)) throw e;
           // a free provider, rested and wide enough: the call again there at once, the seat's own from the call's start
           // first (a move back that failed returns to it, never on to a provider the other seat may need)
-          const n = home !== i && free(k, home) && rested(home) && !asked.has(home) && !narrow(home, span) ? home : next(k, span, asked);
+          const n = home !== i && free(k, home) && rested(home) && !asked.has(home) && !narrow(home, span) ? home : next(k, span, asked, false, logs);
           if (n !== null) {
             at[k] = n;
             continue;
@@ -663,7 +672,7 @@ export function evmPair(list: readonly EvmRpc[], what = "rpcs"): Rpcs {
             throw Object.assign(new Error(String((c as Error)?.message ?? c), { cause: c }), { name: "EvmRestingError", afterMs: afterOf(x) });
           }
           // nothing free: the provider whose rest ends first, and the read's wait is for it
-          const s = soonest(k) ?? i;
+          const s = soonest(k, logs) ?? i;
           at[k] = s;
           if (s === i) throw e;
           throw Object.assign(new Error(String((e as Error)?.message ?? e), { cause: e }), { name: (e as Error)?.name ?? "Error", fault: (e as { fault?: unknown })?.fault, afterMs: afterOf(s) });
