@@ -12,6 +12,7 @@
 // field in its form, the key list W's alone, the bounds' min at most NEAR_SWAP_STORAGE_MAX.
 import { NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../../near/networks.ts";
 import { answer, equalBytes, finalOf, json, NEAR_RHEA, nearFinal, rheaQuote, RheaQuoteRefused, view, type Answer, type NearFinal, type RheaQuote, type RheaQuoteArgs } from "../../near/rhea.ts";
+import { dclQuote, type DclQuote } from "../../near/dcl.ts";
 import { deepFreeze } from "../../freeze.ts";
 import { NEAR_SWAP_STORAGE_MAX } from "./swap.ts";
 
@@ -133,7 +134,12 @@ export async function readNearSwapWallet(a: NearSwapWalletArgs): Promise<NearSwa
 }
 
 /** W and the quote at one block: what W signs from and what it signs against. */
-export type NearSwapPair = { state: NearSwapWalletState; quote: RheaQuote; /** with `baseline`: what W holds of it at the block */ baseline?: bigint };
+export type NearSwapPair<Q extends RheaQuote | DclQuote = RheaQuote> = { state: NearSwapWalletState; quote: Q; /** with `baseline`: what W holds of it at the block */ baseline?: bigint };
+type NearSwapPairArgs = NearSwapWalletArgs & Pick<RheaQuoteArgs, "amountIn" | "pools"> & { baseline?: string };
+/** A venue skipped when the other pays: it has no pool for the pair, or no path that pays anything. */
+const SKIPPED: ReadonlySet<string> = new Set(["no-pool", "liquidity"]);
+/** A pair's quote on Rhea DCL (its `venue` "dcl"), else on Rhea classic. */
+export const isDclQuote = (q: RheaQuote | DclQuote): q is DclQuote => (q as Partial<DclQuote>).venue === "dcl";
 
 /**
  * W read and the quote of `amountIn` at ONE block (card near-quote-under-the-pace): the two providers' final heights read
@@ -142,15 +148,33 @@ export type NearSwapPair = { state: NearSwapWalletState; quote: RheaQuote; /** w
  * it, at any request pace (before, a read and a quote read one after the other on a paced provider were 26 or more blocks
  * apart, past the signer's NEAR_SWAP_READ_AGE_MAX, and the buy never got a pair). `baseline`: a token whose balance of
  * W's is read at the same block (a buy's floor is measured from it).
+ * `dclPools` (card near-dcl-sell): Rhea DCL's candidate pool ids, quoted at the same block on the same pair (dclQuote);
+ * the venue whose quote pays more (amountOut; a tie, Rhea classic) is the pair's quote, `venue` "dcl" for DCL, so the
+ * caller builds its calls with nearSwapCalls or dclSwapCalls to match. A venue refused for no pool or no liquidity is
+ * skipped; both refused, the classic refusal (DCL's with no classic candidates); any other refusal refuses the pair, so
+ * a provider that fails or lies on one venue never hands the trade to the other.
  */
-export async function readNearSwapPair(a: NearSwapWalletArgs & Pick<RheaQuoteArgs, "amountIn" | "pools"> & { baseline?: string }): Promise<NearSwapPair> {
+export function readNearSwapPair(a: NearSwapPairArgs & { dclPools?: never }): Promise<NearSwapPair>;
+export function readNearSwapPair(a: NearSwapPairArgs & { dclPools?: readonly string[] }): Promise<NearSwapPair<RheaQuote | DclQuote>>;
+export async function readNearSwapPair(a: NearSwapPairArgs & { dclPools?: readonly string[] }): Promise<NearSwapPair<RheaQuote | DclQuote>> {
   const { network, rpcs, wallet, side, token, amountIn, pools, signal } = a;
   const final = await nearFinal(network, rpcs, signal);
-  const [state, quote, baseline] = await Promise.all([
+  const settle = <T>(p: Promise<T>): Promise<{ v: T } | { e: unknown }> => p.then((v) => ({ v }), (e: unknown) => ({ e }));
+  const dcl = a.dclPools !== undefined && a.dclPools.length > 0;
+  const [state, classic, onDcl, baseline] = await Promise.all([
     readNearSwapWallet({ network, rpcs, wallet, side, token, final, ...(signal ? { signal } : {}) }),
-    rheaQuote({ network, rpcs, side, token, amountIn, pools, final, ...(signal ? { signal } : {}) }),
+    dcl && pools.length === 0 ? null : settle(rheaQuote({ network, rpcs, side, token, amountIn, pools, final, ...(signal ? { signal } : {}) })),
+    dcl ? settle(dclQuote({ network, rpcs, side, token, amountIn, pools: a.dclPools!, final, ...(signal ? { signal } : {}) })) : null,
     a.baseline === undefined ? Promise.resolve(undefined) : readNearHeld({ network, rpcs, wallet, token: a.baseline, final, ...(signal ? { signal } : {}) }),
   ]);
+  const quotes: (RheaQuote | DclQuote)[] = [];
+  for (const s of [classic, onDcl]) {
+    if (s === null) continue;
+    if ("v" in s) quotes.push(s.v);
+    else if (!(s.e instanceof RheaQuoteRefused && SKIPPED.has(s.e.code))) throw s.e;
+  }
+  if (quotes.length === 0) throw classic !== null && "e" in classic ? classic.e : (onDcl as { e: unknown }).e;
+  const quote = quotes.reduce((best, q) => (q.amountOut > best.amountOut ? q : best));
   if (state.height !== quote.height || state.blockHash !== quote.blockHash || (baseline !== undefined && (baseline.height !== state.height || baseline.blockHash !== state.blockHash)))
     throw new RheaQuoteRefused("disagree", "W's read and the quote are not of one block");
   return deepFreeze({ state, quote, ...(baseline === undefined ? {} : { baseline: baseline.held }) });
