@@ -9,7 +9,9 @@
 //   - race: the first two of them asked at once, the rest only once both fail;
 //   - stands: the first to agree ends the run's read (the rest aborted), so the walk waits on no slow provider
 //     (release 161: Robinhood walked 11.5-11.7 s after Solana on its build, 5.4-6.1 s on release 159's, as the run
-//     waited on both seats).
+//     waited on both seats);
+//   - gated: each provider's calls of a run go one after another, none once the run stands, so a paced provider's
+//     queue (Robinhood's own RPC reads one event a call, three a run) holds no call no one waits for.
 // What each does is held by the card's tests (packages/wallet/test/pool-evm.test.ts, "fresh-walk-reads-each-range-
 // once"); the recorded answers are facts() over each build's packages/signpage index.html and app.js (this file reaches
 // no package code: the import check holds it). How fast a fresh sign-in walks is first-sign-in-reads-fast's, and what
@@ -39,14 +41,17 @@ export function facts(index, js) {
   const race = new RegExp(`for\\(let (${N})=0;\\1<(${N})\\.length;\\1\\+=\\1===0\\?2:1\\)\\{let ${N}=\\2\\.slice\\(\\1,\\1===0\\?2:\\1\\+1\\)`).test(js);
   // the run's read ended once one agreed
   const stands = new RegExp(`finally\\{${N}\\.abort\\(Error\\(${Q}the run stands${Q}\\)\\)`).test(js);
-  return { index, sha384: sha384(js), others, race, stands };
+  // `let last = Promise.resolve(); ... last.then(() => (ac.signal.throwIfAborted(), r(method, params)))`
+  const gated = new RegExp(`let (${N})=Promise\\.resolve\\(\\);return Object\\.assign\\(\\((${N}),(${N})\\)=>\\{let (${N})=\\1\\.then\\(\\(\\)=>\\(${N}\\.signal\\.throwIfAborted\\(\\),(${N})\\(\\2,\\3\\)\\)\\);return \\1=\\4\\.catch\\(\\(\\)=>\\{\\}\\),\\4\\},\\{url:\\5\\.url\\}\\)`).test(js);
+  return { index, sha384: sha384(js), others, race, stands, gated };
 }
 
 const NO_OTHERS = "BAD a run of the wide read stands on a seat, so the wide source's own route can give its word twice";
 const NO_RACE = "BAD a run of the wide read is not asked of two other operators at once";
 const NO_STANDS = "BAD a run of the wide read waits on every provider asked, the slowest included";
+const NO_GATED = "BAD a run's calls still go out once the run stands, holding a paced provider's next read behind them";
 
-/** The verdict on an answer { index, sha384, others, race, stands }. */
+/** The verdict on an answer { index, sha384, others, race, stands, gated }. */
 export function judge(a) {
   const lines = [];
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
@@ -55,6 +60,7 @@ export function judge(a) {
   if (a?.others !== true) lines.push(NO_OTHERS);
   if (a?.race !== true) lines.push(NO_RACE);
   if (a?.stands !== true) lines.push(NO_STANDS);
+  if (a?.gated !== true) lines.push(NO_GATED);
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 

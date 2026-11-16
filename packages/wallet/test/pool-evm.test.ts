@@ -3124,6 +3124,22 @@ test("card fresh-walk-reads-each-range-once: a run of the wide read stands on th
   assert.ok(ms < 3_000, `the walk waited ${ms} ms on the slow seat`);
 });
 
+// the other provider asked for a run stops once one agreed: Robinhood's own RPC reads one event a call (three calls a run,
+// EVM_LOG_ONE_VALUE_WIDE), paced, so calls no one waits for would hold the walk's next read on it behind them
+test("card fresh-walk-reads-each-range-once: once a run stands, the other provider asked is asked no more of it", async () => {
+  const c = anyChain();
+  const chainLog: string[] = [];
+  const pocket = rpc(c, { url: "https://pocket.example", cap: 10_000, chainId: 4663n });
+  const chain = rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com", chainId: 4663n, log: chainLog, getLogs: ({ to }) => (to <= c.finalized ? 200 : undefined) });
+  const wl: string[] = [];
+  const r = await evmTreeSync({ rpcs: [chain, pocket], pin: { ...PIN, network: "robinhood" }, history: [wideSrc(c, wl, { chainId: 4663n })], ...noWait }).events();
+  assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
+  await new Promise((s) => setTimeout(s, 1_000));
+  // the runs (blocks 10, 1,100,000, 1,200,000, 1,990,000): at most the one call each it was asked before the run stood
+  const runCalls = getLogs(chainLog).filter(([, t]) => t <= c.finalized).length;
+  assert.ok(runCalls <= 4, `the chain's RPC was asked ${runCalls} run calls`);
+});
+
 // review of 0b379bf4, P1-1: two URLs, or a relay of one, are one operator's word; the helper counts only in its keyed-only
 // mode (evmSourceOperator "helper"), never through a relay that names no operator
 const forgedRelease = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : x));

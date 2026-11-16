@@ -2154,8 +2154,22 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const ac = new AbortController();
         const stop = () => ac.abort(signal!.reason);
         signal?.addEventListener("abort", stop, { once: true });
+        // each provider's calls of the run one after another, none asked once the run stands: a paced provider's queue
+        // (a one-event-a-call read's three calls) never holds the walk's next read behind calls no one waits for
+        const gated = (r: EvmRpc): EvmRpc => {
+          let last: Promise<unknown> = Promise.resolve();
+          const call = (method: string, params: readonly unknown[]): Promise<unknown> => {
+            const go = last.then(() => {
+              ac.signal.throwIfAborted();
+              return r(method, params);
+            });
+            last = go.catch(() => {});
+            return go;
+          };
+          return Object.assign(call, { url: (r as { url?: unknown }).url }) as EvmRpc;
+        };
         const agrees = (s: { rpc: EvmRpc }, i: number): Promise<boolean> =>
-          readLogs(s.rpc, i, poolFilter, poolDecode, f, t, sourcePager, ac.signal, sleep).then((l) => l.length === mine.length && l.every((e, j) => e.bytes === mine[j]!.bytes), () => false);
+          readLogs(gated(s.rpc), i, poolFilter, poolDecode, f, t, sourcePager, ac.signal, sleep).then((l) => l.length === mine.length && l.every((e, j) => e.bytes === mine[j]!.bytes), () => false);
         try {
           for (let i = 0; i < wideOthers.length; i += i === 0 ? 2 : 1) {
             const asked = wideOthers.slice(i, i === 0 ? 2 : i + 1).map((s, j) => agrees(s, i + j));
