@@ -62,7 +62,9 @@ test("GET /v1/market/trades?chain=base: the tape newest first in the frozen fiel
   assert.equal(r.headers["x-helper-commit"], COMMIT);
   assert.equal(r.headers["access-control-allow-origin"], APP);
   const b = JSON.parse(r.body);
-  assert.deepEqual(Object.keys(b), ["trades", "src", "as_of_ms"]);
+  // whole_ms: how far back the tape holds every trade (card token-stats-count-every-trade), a whole ms up to the read
+  assert.deepEqual(Object.keys(b), ["trades", "whole_ms", "src", "as_of_ms"]);
+  assert.ok(Number.isSafeInteger(b.whole_ms) && b.whole_ms >= 0 && b.whole_ms <= b.as_of_ms + 60_000, String(b.whole_ms));
   assert.equal(b.trades.length, 20);
   for (const t of b.trades) {
     assert.deepEqual(Object.keys(t), ["t_ms", "side", "usd", "amt", "trader", "tx"]);
