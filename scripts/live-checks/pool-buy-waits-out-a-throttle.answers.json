@@ -1,8 +1,8 @@
 {
- "_note": "good: this card branch f7b0c1045 SIGN_HOST build (packages/signpage index.html and public/app.js, build-app.mjs); bad: the base 125a32cc6 build (main with PR 863), whose withdraw waits on nothing and whose pool scan fault reads as no pools",
+ "_note": "good: this card branch cabadce90 SIGN_HOST build (main with PRs 863 and 870 merged; packages/signpage index.html and public/app.js, build-app.mjs); bad: the base 125a32cc6 build (main with PR 863), whose withdraw waits on nothing and whose pool scan fault reads as no pools",
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-JB3XCTEbKm/Zd8TNeHKRACF5vJsBcgqP8sGt0iheFmcG+GpeLiZr5HNL8sMRK6/U\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-JB3XCTEbKm/Zd8TNeHKRACF5vJsBcgqP8sGt0iheFmcG+GpeLiZr5HNL8sMRK6/U",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-uuqRBCUmhBQJAf9F5qmUYPNOTF0DpkXMrwAjzA2oQ5PhXkabtv8QohlIQQ1Sywdh\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-uuqRBCUmhBQJAf9F5qmUYPNOTF0DpkXMrwAjzA2oQ5PhXkabtv8QohlIQQ1Sywdh",
   "step": true,
   "faults": true,
   "wired": {
