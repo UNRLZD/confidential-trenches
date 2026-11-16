@@ -1,31 +1,27 @@
 #!/usr/bin/env node
-// Live check of card pool-buy-send-fast: the signing page's second Solana provider on each network is HELPER_HOST's
-// RPC route (mainnet /v1/rpc/solana, the testnet build /v1/rpc/solana-devnet: packages/signpage/src/pool-testnet.ts
-// TESTNET_RPCS), and it serves a pool buy's reads at the pace the buy asks them. Before this card the testnet build's
-// second provider was a public devnet endpoint answering 1 request a second (the 5 Nov 13:50:55Z buy waited 11.2 s on
-// its 429s, tap to sent 19.88 s, past the kit client's 10 s), and the helper's route refused five reads the pool path
-// makes. With Origin SIGN_HOST it passes only when:
-//   - devnet: getAccountInfo of the devnet pool's account answers 200 owned by the devnet pool program (the route reads
-//     devnet, not mainnet); both are today's deploy record's (pool-sol-deploy.devnet.json, read by devnetPin), for a
-//     replay too, so a recording of another program or pool FAILs;
-//   - on both routes, each read the pool path makes beyond the original list (getSlot, getBlockTime,
-//     getSignaturesForAddress, getFeeForMessage) is forwarded: 200 with a JSON-RPC answer for its own id, never 400
-//     method_not_allowed (a provider's JSON-RPC error for the planted arguments still counts);
-//   - on both routes, a getProgramAccounts scan with a dataSize filter alone (not the note restore's shape: no memcmp)
-//     is refused 400 method_not_allowed (review L-2: the helper forwards a scan only on its own pinned pool program with
-//     a dataSize and a memcmp filter, so no caller spends the keyed provider's quota on an open scan);
-//   - devnet: the note restore's exact scan (restoreScan, packages/wallet/src/pool/solana-restore.ts solanaMarksListed: the
-//     spent marks' bucket 0 of the devnet pool program) is forwarded: 200 with { context, value: [...] } for its own id
-//     (the box's POOL_SOLANA_PROGRAM_DEVNET is the devnet pool program, else the helper refuses it 400);
-//   - devnet pace: PACE_READS getSlot reads one after another each answer 200 with a slot, none 429, and their median is
-//     under PACE_P50_MS (the page's buy reads its two providers this way, one step after another);
+// Live check of card pool-buy-send-fast: the signing page's second Solana provider is HELPER_HOST's RPC route (mainnet
+// /v1/rpc/solana), and it serves a pool buy's reads at the pace the buy asks them. Before this card the testnet build's
+// second provider was a public endpoint answering 1 request a second (the 5 Nov 13:50:55Z buy waited 11.2 s on its 429s,
+// tap to sent 19.88 s, past the kit client's 10 s), and the helper's route refused five reads the pool path makes. It
+// reads the mainnet route and the mainnet pool only (card live-checks-read-mainnet-only: a listed check reads no test
+// network; contracts/pool-solana/deployments/mainnet.json, read by mainnetPin). With Origin SIGN_HOST it passes only when:
+//   - getAccountInfo of the pool's account answers 200 owned by the pool program (the route reads the pool's cluster);
+//   - each read the pool path makes beyond the original list (getSlot, getBlockTime, getSignaturesForAddress,
+//     getFeeForMessage) is forwarded: 200 with a JSON-RPC answer for its own id, never 400 method_not_allowed (a
+//     provider's JSON-RPC error for the planted arguments still counts);
+//   - a getProgramAccounts scan with a dataSize filter alone (not the note restore's shape: no memcmp) is refused 400
+//     method_not_allowed (review L-2: the helper forwards a scan only on its own pinned pool program with a dataSize and
+//     a memcmp filter, so no caller spends the keyed provider's quota on an open scan);
+//   - the note restore's exact scan (restoreScan, packages/wallet/src/pool/solana-restore.ts solanaMarksListed: the spent
+//     marks' bucket 0 of the pool program) is forwarded: 200 with { context, value: [...] } for its own id;
+//   - pace: PACE_READS getSlot reads one after another each answer 200 with a slot, none 429, and their median is under
+//     PACE_P50_MS (the page's buy reads its two providers this way, one step after another);
 //   - every answer carries a full-sha X-Helper-Commit and echoes SIGN_HOST in Access-Control-Allow-Origin.
 // After: helper
 //   node scripts/live-checks/pool-buy-send-fast.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
-import { writeFileSync } from "node:fs";
-import { devnetPin } from "./pool-sol-deploy.mjs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const KEY = "pool-buy-send-fast";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -48,10 +44,17 @@ export const poolReads = (pin) => [
   { method: "getFeeForMessage", params: [FEE_MESSAGE, { commitment: "confirmed" }] },
   { method: "getProgramAccounts", params: [pin.program, { encoding: "base64", commitment: "finalized", filters: [{ dataSize: 1 }] }], refused: true },
 ];
-/** Today's: the reads a live run makes. */
-export const POOL_READS = poolReads(devnetPin());
-export const ROUTES = ["solana-devnet", "solana"];
-/** The restore's request for the devnet pool's spent marks, bucket 0, as the wallet's lister sends it (no minContextSlot
+/** The mainnet pool's program and pool: its deploy record (contracts/pool-solana/deployments/mainnet.json). */
+export function mainnetPin() {
+  const record = JSON.parse(readFileSync(new URL("../../contracts/pool-solana/deployments/mainnet.json", import.meta.url), "utf8"));
+  return { program: record.program_id, pool: record.pool, record };
+}
+/** The helper's mainnet route, the one route read. */
+export const ROUTE = "solana";
+export const ROUTES = [ROUTE];
+/** What a live run reads: the mainnet pin, its route for every read. */
+export const MAINNET = Object.freeze({ pin: mainnetPin(), routes: ROUTES, home: ROUTE });
+/** The restore's request for the pool's spent marks, bucket 0, as the wallet's lister sends it (no minContextSlot
  *  on a first read; the addresses alone). */
 export const restoreScan = (pin) => [pin.program, { commitment: "finalized", encoding: "base64", withContext: true, dataSlice: { offset: 0, length: 0 }, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
 
@@ -65,10 +68,10 @@ const json = (t) => {
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)];
 
 /** The check on one recorded run: { deployment, reads: [{ route, kind: "pool" | "owner" | "pace" | "restore", method, id, ms, status, headers, body }] },
- *  against today's devnet pin (devnetPin()), the one a live run reads: a recorded run is judged on it too, so reads of
- *  another program or pool FAIL; its own `deployment` is what it was read for, never its judge. */
-export function judge({ reads }) {
-  const pin = devnetPin();
+ *  against `pin` (the mainnet record, the one a live run reads): a recorded run is judged on it too, so reads of another
+ *  program or pool FAIL; its own `deployment` is what it was read for, never its judge. The pool reads run on each of
+ *  `routes`; the owner, restore and pace reads on `home`. */
+export function judge({ reads }, { pin, routes, home } = MAINNET) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const headersOk = (r, tag) => {
@@ -76,15 +79,15 @@ export function judge({ reads }) {
     say(SHA.test(h["x-helper-commit"] ?? ""), `${tag} X-Helper-Commit: ${h["x-helper-commit"] ?? "none"}`);
     say(h["access-control-allow-origin"] === SIGN, `${tag} CORS allow-origin ${h["access-control-allow-origin"] ?? "none"}`);
   };
-  const owner = reads.find((x) => x.route === "solana-devnet" && x.kind === "owner");
-  if (!owner) say(false, "[solana-devnet getAccountInfo] no read");
+  const owner = reads.find((x) => x.route === home && x.kind === "owner");
+  if (!owner) say(false, `[${home} getAccountInfo] no read`);
   else {
     const b = json(owner.body);
-    say(owner.status === 200 && b?.id === owner.id && b?.result?.value?.owner === pin.program, `[solana-devnet getAccountInfo] the devnet pool ${pin.pool}, owned by ${pin.program}: ${owner.status} ${String(b?.result?.value?.owner ?? owner.body.slice(0, 100))}`);
-    headersOk(owner, "[solana-devnet getAccountInfo]");
+    say(owner.status === 200 && b?.id === owner.id && b?.result?.value?.owner === pin.program, `[${home} getAccountInfo] the pool ${pin.pool}, owned by ${pin.program}: ${owner.status} ${String(b?.result?.value?.owner ?? owner.body.slice(0, 100))}`);
+    headersOk(owner, `[${home} getAccountInfo]`);
   }
-  for (const route of ROUTES)
-    for (const { method, refused } of POOL_READS) {
+  for (const route of routes)
+    for (const { method, refused } of poolReads(pin)) {
       const tag = `[${route} ${method}]`;
       const r = reads.find((x) => x.route === route && x.kind === "pool" && x.method === method);
       if (!r) {
@@ -96,26 +99,25 @@ export function judge({ reads }) {
       else say(r.status === 200 && b?.jsonrpc === "2.0" && b.id === r.id && (Object.hasOwn(b, "result") || Object.hasOwn(b, "error")), `${tag} forwarded: ${r.status} ${r.body.slice(0, 100)}`);
       headersOk(r, tag);
     }
-  const restore = reads.find((x) => x.route === "solana-devnet" && x.kind === "restore");
-  if (!restore) say(false, "[solana-devnet restore scan] no read");
+  const restore = reads.find((x) => x.route === home && x.kind === "restore");
+  if (!restore) say(false, `[${home} restore scan] no read`);
   else {
     const b = json(restore.body);
-    say(restore.status === 200 && b?.id === restore.id && Number.isSafeInteger(b?.result?.context?.slot) && Array.isArray(b?.result?.value), `[solana-devnet restore scan] forwarded, a list of the pool's marks: ${restore.status} ${restore.body.slice(0, 100)}`);
-    headersOk(restore, "[solana-devnet restore scan]");
+    say(restore.status === 200 && b?.id === restore.id && Number.isSafeInteger(b?.result?.context?.slot) && Array.isArray(b?.result?.value), `[${home} restore scan] forwarded, a list of the pool's marks: ${restore.status} ${restore.body.slice(0, 100)}`);
+    headersOk(restore, `[${home} restore scan]`);
   }
-  const pace = reads.filter((x) => x.route === "solana-devnet" && x.kind === "pace");
-  say(pace.length === PACE_READS, `[solana-devnet pace] ${pace.length} of ${PACE_READS} reads`);
+  const pace = reads.filter((x) => x.route === home && x.kind === "pace");
+  say(pace.length === PACE_READS, `[${home} pace] ${pace.length} of ${PACE_READS} reads`);
   const slots = pace.map((r) => ({ r, b: json(r.body) }));
-  say(slots.every(({ r, b }) => r.status === 200 && b?.id === r.id && Number.isSafeInteger(b?.result) && b.result > 0), `[solana-devnet pace] every read a slot: ${pace.map((r) => r.status).join(" ")}`);
-  say(pace.every((r) => r.status !== 429), `[solana-devnet pace] no 429`);
+  say(slots.every(({ r, b }) => r.status === 200 && b?.id === r.id && Number.isSafeInteger(b?.result) && b.result > 0), `[${home} pace] every read a slot: ${pace.map((r) => r.status).join(" ")}`);
+  say(pace.every((r) => r.status !== 429), `[${home} pace] no 429`);
   const p50 = pace.length ? median(pace.map((r) => r.ms)) : Infinity;
-  say(p50 < PACE_P50_MS, `[solana-devnet pace] median ${p50} ms, under ${PACE_P50_MS} ms (${pace.map((r) => r.ms).join(", ")})`);
+  say(p50 < PACE_P50_MS, `[${home} pace] median ${p50} ms, under ${PACE_P50_MS} ms (${pace.map((r) => r.ms).join(", ")})`);
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
-/** The run's reads on HELPER_HOST `base` for today's devnet pin (devnetPin()), as judge reads them. */
-export async function read(base = BASE, fetchFn = fetch) {
-  const pin = devnetPin();
+/** The run's reads on HELPER_HOST `base` for `pin` on `routes` and `home` (the mainnet ones live), as judge reads them. */
+export async function read(base = BASE, fetchFn = fetch, { pin, routes, home } = MAINNET) {
   const reads = [];
   let id = 1;
   const one = async (route, kind, method, params) => {
@@ -135,10 +137,10 @@ export async function read(base = BASE, fetchFn = fetch) {
     reads.push({ route, kind, method, id, readAt: new Date().toISOString(), ms, status: r.status, headers, body: body.length > keep ? body.slice(0, keep) : body });
     id++;
   };
-  await one("solana-devnet", "owner", "getAccountInfo", [pin.pool, { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 8 } }]);
-  for (let i = 0; i < PACE_READS; i++) await one("solana-devnet", "pace", "getSlot", [{ commitment: "confirmed" }]);
-  for (const route of ROUTES) for (const { method, params } of poolReads(pin)) await one(route, "pool", method, params);
-  await one("solana-devnet", "restore", "getProgramAccounts", restoreScan(pin));
+  await one(home, "owner", "getAccountInfo", [pin.pool, { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 8 } }]);
+  for (let i = 0; i < PACE_READS; i++) await one(home, "pace", "getSlot", [{ commitment: "confirmed" }]);
+  for (const route of routes) for (const { method, params } of poolReads(pin)) await one(route, "pool", method, params);
+  await one(home, "restore", "getProgramAccounts", restoreScan(pin));
   return { base, deployment: pin.record, reads };
 }
 

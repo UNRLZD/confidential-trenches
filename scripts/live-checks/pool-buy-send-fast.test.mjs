@@ -1,5 +1,9 @@
 // node --test scripts/live-checks/pool-buy-send-fast.test.mjs: the live check replays recorded runs
-// (pool-buy-send-fast.answers.json). good_local: apps/helper at this card run on a Mac: PASS. bad_deployed: HELPER_HOST
+// (pool-buy-send-fast.answers.json). The live check reads the helper's mainnet route and the mainnet pool only (card
+// live-checks-read-mainnet-only). good_live: the deployed HELPER_HOST on 16 Nov, a real run (--record): PASS, replayed
+// through read() too; bad_deployed's mainnet route (real, the pool path's reads refused 400): FAIL; made from good_live:
+// a pool owned by another program, every other pace read 429: FAIL. The recordings below read the devnet route and
+// pool and replay under DEVNET, the pin and routes they were read with. good_local: apps/helper at this card run on a Mac: PASS. bad_deployed: HELPER_HOST
 // before this card, with no /v1/rpc/solana-devnet route and the pool path's reads refused: FAIL. bad_open_scan: this
 // card's helper with no devnet pool pinned, refusing the restore's scan: FAIL. Made from the good run: a devnet
 // route that throttles like the public endpoint it replaces (1 request a second: every other read 429), one that reads
@@ -10,11 +14,16 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BASE, judge, PACE_P50_MS, POOL_READS, read, SIGN } from "./pool-buy-send-fast.mjs";
+import { BASE, judge as judgeLive, MAINNET, PACE_P50_MS, poolReads, read as readLive, SIGN } from "./pool-buy-send-fast.mjs";
 import { devnetPin } from "./pool-sol-deploy.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "pool-buy-send-fast.answers.json"), "utf8"));
+/** What the older recordings were read with: today's devnet pin, the devnet route and the mainnet one, the devnet route home. */
+const DEVNET = { pin: devnetPin(), routes: ["solana-devnet", "solana"], home: "solana-devnet" };
+const judge = (rec) => judgeLive(rec, DEVNET);
+const read = (base, fetchFn) => readLive(base, fetchFn, DEVNET);
+const POOL_READS = poolReads(DEVNET.pin);
 
 // a fetch that answers each call with the recorded read for it, after checking the check asked the right thing
 const replay = (run) => async (url, init) => {
@@ -32,6 +41,26 @@ const replay = (run) => async (url, init) => {
 const run = async (rec) => judge(await read(BASE, replay(rec)));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (rec, f) => ({ ...rec, reads: rec.reads.map((x, i) => f(x, i) ?? x) });
+
+test("the live check reads the mainnet route and pool only: good_live PASSes; bad_deployed's mainnet route and made faults FAIL", async () => {
+  assert.deepEqual(MAINNET.routes, ["solana"]);
+  assert.equal(A.good_live.deployment.cluster, "mainnet");
+  const g = judgeLive(A.good_live);
+  assert.equal(g.ok, true, g.lines.join("\n"));
+  assert.equal(g.lines.length, 3 + poolReads(MAINNET.pin).length * 3 + 3 + 4);
+  assert.ok(!g.lines.some((l) => /devnet/.test(l)));
+  const sent = [];
+  const replaying = replay(A.good_live);
+  assert.equal(judgeLive(await readLive(BASE, async (u, i) => (sent.push(u), replaying(u, i)))).ok, true, "read() over the replay");
+  assert.deepEqual([...new Set(sent)], [`${BASE}/v1/rpc/solana`]);
+  const d = judgeLive(A.bad_deployed);
+  assert.ok(bad(d).some((l) => l.startsWith("BAD [solana getSlot] forwarded: 400")), bad(d).join("\n"));
+  // made from good_live: the pool read owned by another program; every other pace read 429
+  const other = edit(A.good_live, (x) => (x.kind === "owner" ? { ...x, body: x.body.replace(MAINNET.pin.program, DEVNET.pin.program) } : undefined));
+  assert.ok(bad(judgeLive(other)).some((l) => l.startsWith("BAD [solana getAccountInfo]")));
+  const throttled = edit(A.good_live, (x) => (x.kind === "pace" && x.id % 2 === 0 ? { ...x, status: 429, body: "Too Many Requests" } : undefined));
+  assert.ok(bad(judgeLive(throttled)).some((l) => l.includes("no 429")));
+});
 
 test("recorded good run: the devnet route reads the devnet pool, forwards the pool path's reads on both routes, paces under 1 s: PASS", async () => {
   const r = await run(A.good_local);
@@ -106,8 +135,8 @@ test("the pin is today's: the good recording is of today's pool; its pool read o
     assert.equal(r.ok, false);
     const b = bad(r);
     assert.equal(b.length, 1, b.join("\n"));
-    assert.ok(b[0].startsWith(`BAD [solana-devnet getAccountInfo] the devnet pool ${now.pool}, owned by ${now.program}: 200 ${BEFORE}`), b[0]);
+    assert.ok(b[0].startsWith(`BAD [solana-devnet getAccountInfo] the pool ${now.pool}, owned by ${now.program}: 200 ${BEFORE}`), b[0]);
   }
-  // a live run's reads name today's pool and program
+  // the devnet replay's reads name today's devnet pool and program (a live run's, mainnet's: the first test)
   assert.ok(JSON.stringify(POOL_READS).includes(now.pool) && JSON.stringify(POOL_READS).includes(now.program));
 });
