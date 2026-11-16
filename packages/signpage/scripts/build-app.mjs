@@ -110,13 +110,16 @@ export function copyServed(out, list = SERVED) {
   // what is uploaded is read back against the pins by the deploy gate (deploy.mjs checkProver), after this copy
 }
 
-/** The page around the script: no inline script or style, nothing but the one module script with its integrity. */
+/** The page around the script: no inline script or style, nothing but the one module script with its integrity, and
+ *  the framed app's own title (apps/terminal/index.html), the browser tab's name on every page since this page is the
+ *  top window (card signpage-tab-title-and-origin). */
 export const page = (integrity) => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
+    <title>Confidential Trenches</title>
     <script type="module" src="/app.js" integrity="${integrity}"></script>
   </head>
   <body></body>
