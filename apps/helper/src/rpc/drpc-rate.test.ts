@@ -155,7 +155,8 @@ test("under a dRPC that refuses a second after each refusal, at 5 a second, with
   const x = await load({ served: 5, penalty: true, pagedEvery: 5, pagedAtOnce: 3 });
   // at 841265f75: dRPC refused 1,078 sends in the last 2 min (1,381 of 1,566), 1,348 caller hold lines, the fill 5 pages
   assert.ok(x.late <= 3 * x.minutes, `dRPC refused ${x.late} sends in the last ${x.minutes} min (${x.refused} of ${x.sends} in all): the helper must stop sending into a refusal`);
-  assert.ok(x.callerHolds <= 4 * (x.minutes + 1), `${x.callerHolds} caller hold lines in 3 min`);
+  // 12 at bf2dc1447, each a refusal that teaches the pace or one of its climbs; 1,348 before the card
+  assert.ok(x.callerHolds <= 20, `${x.callerHolds} caller hold lines in 3 min`);
   const plain = x.bad.filter((g) => g.what.startsWith("caller"));
   assert.deepEqual(plain.slice(0, 8).map((g) => `${g.what}: ${g.status} ${g.why ?? ""} ${g.body.slice(0, 100)}`), [], `${plain.length} plain callers not answered`);
   assert.ok(x.lateFills >= 10, `the fill moved ${x.lateFills} pages in the last ${x.minutes} min`);
