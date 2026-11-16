@@ -219,16 +219,16 @@ test("HELPER_STORE_DIR: a restart starts warm from the store's file (no upstream
   assert.ok(w3.lines.includes("rpc pool-logs base no store kept"));
 });
 
-test("the cold fill, named: Base's pool on 16 Nov is 36,480 pages of 100 blocks, about 101 min at POOL_FILL_PER_S, 729,600 dRPC CU once, under 4% of the three keys' day", () => {
+test("the cold fill, named: Base's pool on 16 Nov is 36,480 pages of 100 blocks, about 61 min at POOL_FILL_PER_S, 729,600 dRPC CU once, under 4% of the three keys' day", () => {
   const blocks = 3_647_944; // 54,325,671 to the finalized head the wallet lead's run read (the brief, 16 Nov)
   const pages = Math.ceil(blocks / 100);
   assert.equal(pages, 36_480);
-  assert.equal(POOL_FILL_PER_S, 6);
-  assert.equal(Math.round(pages / POOL_FILL_PER_S! / 60), 101);
+  assert.equal(POOL_FILL_PER_S, 10);
+  assert.equal(Math.round(pages / POOL_FILL_PER_S! / 60), 61);
   assert.ok(pages * 20 < 0.04 * 3 * 7_000_000);
 });
 
-test("the fill never costs a caller a 429: callers at 140 reads a 10 s on Base's keyed route (its total 155) from six addresses, each under its share, while the store fills, are all answered; the fill draws none of the route's total and still moves", async () => {
+test("the fill never costs a caller a 429: callers at 120 reads a 10 s on Base's keyed route (its total 135: QuickNode's 35 and dRPC's one bucket's 100) from six addresses, each under its share, while the store fills, are all answered; the fill draws none of the route's total and still moves", async () => {
   FINAL = FROM + 29_999;
   // a fake clock whose timers fire only as the test moves it (the fill and the callers wait on the same clock)
   let clock = 1_800_000_000_000;
@@ -252,17 +252,18 @@ test("the fill never costs a caller a 429: callers at 140 reads a 10 s on Base's
   const answers: Promise<{ status: number; body: string }>[] = [];
   const clients = ["203.0.113.21", "203.0.113.22", "203.0.113.23", "203.0.113.24", "203.0.113.25", "203.0.113.26"];
   for (let s = 0; s < 30; s++) {
-    // 14 reads in each second, spread over it, each client 14 / 6 a second (about 23 a 10 s, under its share of 30)
-    for (let k = 0; k < 14; k++) {
-      answers.push(r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: s * 100 + k, method: "eth_blockNumber", params: [] }), clients[(s * 14 + k) % clients.length], false, true));
-      await step(70);
+    // 12 reads in each second, spread over it, each client 2 a second (20 a 10 s, under its share of 30), the helper's
+    // own head reads on the same total
+    for (let k = 0; k < 12; k++) {
+      answers.push(r.handle("base", "application/json", JSON.stringify({ jsonrpc: "2.0", id: s * 100 + k, method: "eth_blockNumber", params: [] }), clients[(s * 12 + k) % clients.length], false, true));
+      await step(80);
     }
-    await step(20);
+    await step(40);
   }
   for (let i = 0; i < 400; i++) await step(10);
   const got = await Promise.all(answers);
   const refused = got.map((a, i) => [i, a.status, a.body] as const).filter(([, s]) => s !== 200);
-  assert.deepEqual(refused.slice(0, 5), [], `${refused.length} of ${got.length} caller reads refused`);
+  assert.deepEqual(refused.slice(0, 5).map(([i, s]) => `${i} ${s} ${(got[i] as { why?: string }).why}`), [], `${refused.length} of ${got.length} caller reads refused`);
   assert.ok(w.fills().length - pages0 >= 100, `the fill moved on meanwhile (${w.fills().length - pages0} pages in 30 s)`);
 });
 
@@ -319,7 +320,10 @@ test("a provider's own range cap on the tail past the store is never passed thro
   const b = resultOf(await read(r2, wideBody(4, FROM, FINAL)));
   assert.equal(b.error?.code, -32602, JSON.stringify(b).slice(0, 300));
   assert.match(b.error!.message, /^eth_getLogs range too wide, maximum block range: 50$/, "the provider's span in the route's words, never its own");
-  assert.equal(b.error?.data, `pool logs kept to block ${FROM + 29_999}`);
+  // how far the store is when the answer is made: the fill, started by the read, may have kept a page more meanwhile
+  // (card helper-base-keyed-holds-under-load: it no longer sits out a caller's draw)
+  const kept = Number(FILLING.exec(b.error?.data ?? "")?.[1]);
+  assert.ok(kept >= FROM + 29_999 && kept < FINAL, `the filling shape, how far the store is (${b.error?.data})`);
 });
 
 // live 16 Nov: about 80 "rpc hold base drpc.live background 1 s pool-logs" lines a minute, each holding the key for every

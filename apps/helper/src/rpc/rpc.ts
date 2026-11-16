@@ -216,22 +216,26 @@ const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
  */
 export const POOL_LOGS_CLIENT = "pool-logs";
 /**
- * The pool store's fill (card helper-keyed-logs-serve-a-whole-pool-range, pool-logs.ts): the pages it sends a second on a
- * chain, all its providers together, one at a time. A page draws nothing of the route's total (the chain's /v1/rpc
+ * The pool store's fill (card helper-keyed-logs-serve-a-whole-pool-range, pool-logs.ts): the pages it sends a second,
+ * every chain's fill and all their providers together, one at a time. A page draws nothing of the route's total (the chain's /v1/rpc
  * budget, keyedBudget and summedTotal: KEYED_ROUTE_SHARE of each key's pace, which is the callers'), so a fill never
  * costs a caller a 429: on 16 Nov 01:14-01:53Z (release with PR 865) its 6 a second were 60 of Base's 155 a 10 s, and
  * callers had 95 left. It draws only its provider's pace and day as a background read (limits.ts take): under
  * CALLER_ROOM of the bucket, and none for CALLER_HOLD_MS after a caller's draw there, so it takes only the room callers
  * leave, from the keys' other half (KEYED_ROUTE_SHARE); a provider's 429 or throttle holds that provider for every path,
- * as any read's does. [design: 6: 2 a second on each of the three dRPC keys, a quarter of their 8 (limits.ts
- * KEYED_PACE), so the market-data reads on that other half keep the rest. Base's pool from its deploy block (54,325,671) to the finalized head of 16 Nov (about 57,973,600) is
- * 36,480 pages of dRPC's 100 blocks: about 101 min and 729,600 CU (20 a call, KEYED_COST) once, of the three keys'
- * 21,000,000 a day; then 4,320 pages a day as the chain grows (a block every 200 ms, read 16 Nov 00:1xZ on
- * base-rpc.publicnode.com: 100,000 blocks in 20,000 s), 12 min of fill and 86,400 CU. With HELPER_STORE_DIR set the
+ * as any read's does. The bucket it draws is dRPC's one for the helper's IP (limits.ts DRPC_IP_PACE, 20 a second), so a
+ * caller's draw on any key stops the fill on every key for CALLER_HOLD_MS (card helper-base-keyed-holds-under-load).
+ * [design: 10: half of that bucket, sent one page at a time (about 100 ms an answer on dRPC's Base keys), so callers
+ * and the market-data reads keep the other half whenever they want it. Base's pool from its deploy block (54,325,671)
+ * to the finalized head of 16 Nov (about 57,973,600) is 36,480 pages of dRPC's 100 blocks: about 61 min and 729,600 CU
+ * (20 a call, KEYED_COST) once, of the three keys' 21,000,000 a day; then 4,320 pages a day as the chain grows (a block
+ * every 200 ms, read 16 Nov 00:1xZ on base-rpc.publicnode.com: 100,000 blocks in 20,000 s), 7 min of fill and 86,400
+ * CU. Live at 6 a second it moved 0.62 pages a second (223,000 blocks in about an hour, 16 Nov 03:2x-04:3xZ), each
+ * key backed off up to 256 s on dRPC's 429s (POOL_BACK_MAX). With HELPER_STORE_DIR set the
  * store is kept there, so a restart starts warm. Robinhood's first keyed URL (ROBINHOOD_RPC_URL, Alchemy, no span named)
  * takes the whole range in one page.]
  */
-export const POOL_FILL_PER_S = 6;
+export const POOL_FILL_PER_S = 10;
 /** The fill stops after this many pages in a row no provider served (down, refused, out of its day); the next pool read
  *  past what is kept starts it again. [design: 20, about 3 s of pages at POOL_FILL_PER_S.] */
 export const POOL_FILL_FAILS = 20;
@@ -241,8 +245,10 @@ export const POOL_WRITE_MS = 60_000;
 /** A provider's refusal of a fill page (its 429 or rate error) holds that provider for the fill alone, never for a
  *  caller: the wait it names or 2^k s, whichever is longer, k its refusals of the fill in a row less its pages served
  *  since, at most this many. [design: live 16 Nov 02:50-03:17Z the fill's 429s held dRPC's keys for every caller, about
- *  80 times a minute, and callers were refused "every provider held"; 8: at most 256 s between asks.] */
-export const POOL_BACK_MAX = 8;
+ *  80 times a minute, and callers were refused "every provider held"; 4: at most 16 s between asks. At 8 (256 s) the
+ *  three keys sat out 256 s 14 times and 128 s 9 times in 16 Nov 03:59-04:33Z, and the fill moved 0.62 pages a second;
+ *  under dRPC's IP bucket (DRPC_IP_PACE) a refusal is a passing one, so the fill is back within seconds.] */
+export const POOL_BACK_MAX = 4;
 /** A request the finalized-logs cache may keep (LOG_CACHE_ENTRIES): one eth_getLogs, one filter with numbers for both ends
  *  and no blockHash; its key (the chain and the exact params as sent), its toBlock, and whether its address is the
  *  chain's pool (`pool`, the kit's pin, lowercase), alone. Anything else: null. */
@@ -441,8 +447,8 @@ function evmCapSpan(chain: RpcChain, answer: unknown): bigint | null {
  *  names its own as a third number). Not the public endpoint's share: there 42 of one method would leave others none. */
 export const keyedBudget = (chain: RpcChain): BudgetLimits => ({ total: RPC_BUDGETS[chain].total, perClient: RPC_PAGE_NEED[chain] ?? RPC_CLIENT_MAX });
 /**
- * The part of each company key's 10 s pace (limits.ts KEYED_PACE: QuickNode 7 a second, each dRPC key 8) a route's
- * total counts (card helper-serves-many-users-at-once). [design: half: the same keys serve the market-data reads (the
+ * The part of each company key's 10 s pace (limits.ts KEYED_PACE: QuickNode 7 a second, dRPC's three keys 20 together,
+ * one bucket, counted once) a route's total counts (card helper-serves-many-users-at-once). [design: half: the same keys serve the market-data reads (the
  * EVM swap and maker reads, server.ts evmSwapRpcs; Solana's trade walks, solanaTradesRpcs) and Solana's mark list
  * (solana-marks), which draw their buckets first come (limits.ts take), so /v1/rpc's callers may take at most half and
  * the token page always finds the other half.]
@@ -460,7 +466,13 @@ export function summedTotal(chain: RpcChain, keyed: readonly { env: string }[], 
   const companies = keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined);
   if (!SUMMED.has(chain) || companies.length === 0) return own;
   const plan = keyed.some((k) => KEYED_PROVIDER[k.env] === undefined) ? own : 0;
-  const room = companies.reduce((n, k) => n + Math.floor(KEYED_PACE[KEYED_PROVIDER[k.env]!].perS * (LIMIT_WINDOW_MS / 1000) * KEYED_ROUTE_SHARE), 0);
+  // each bucket once: keys on one rate (dRPC's three on its per-IP bucket, limits.ts DRPC_IP_PACE) are one pace
+  const buckets = new Map<string, number>();
+  for (const k of companies) {
+    const p: Pace = KEYED_PACE[KEYED_PROVIDER[k.env]!];
+    buckets.set(p.rate ?? keyedAccountOf(k.env)!, p.perS);
+  }
+  const room = [...buckets.values()].reduce((n, perS) => n + Math.floor(perS * (LIMIT_WINDOW_MS / 1000) * KEYED_ROUTE_SHARE), 0);
   return Math.max(plan + room, share + RPC_RESERVE[chain] + 1);
 }
 /** The least share RPC_BUDGET_<CHAIN> (a keyed plan's) may name: a full batch, and what one page draws (RPC_PAGE_NEED). */
@@ -1114,7 +1126,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const held = holdsAll.heldMs(url);
     if (held > 0) return held;
     // the provider's pace only, as a background read: never the route's total (/v1/rpc's callers'), see POOL_FILL_PER_S
-    const room = holdsAll.take(url, 1, true);
+    // a background page: behind any caller's read waiting for the bucket, else on what callers leave (limits.ts take)
+    const room = holdsAll.take(url, 1, true, false, false, true);
     if (room > 0) return room;
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: pool, fromBlock: hexOf(a), toBlock: hexOf(b) }] });
     let r: Response;
@@ -1153,6 +1166,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * POOL_FILL_FAILS pages in a row unserved, or at the store's bound (POOL_LOGS_BYTES), and a pool read past what is
    * kept starts it again.
    */
+  // when the last fill page of any chain went (POOL_FILL_PER_S is the fills' together)
+  const fillLast = { at: -Infinity };
   const fillPool = (c: RpcChain, own: readonly string[]): void => {
     const s = storeOf(c);
     if (s === undefined || fills.has(c)) return;
@@ -1172,7 +1187,6 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let wide = whole.length > 0;
       let fails = 0;
       let turn = 0;
-      let last = -Infinity;
       let waits = 0;
       let soonest = Infinity;
       let wrote = now();
@@ -1185,9 +1199,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (list.length === 0) break;
         const a = s.covered + 1n;
         const b = wide || a + w - 1n > head ? head : a + w - 1n;
-        const gap = last + 1000 / POOL_FILL_PER_S - now();
+        // POOL_FILL_PER_S for every chain's fill together: Base's and Robinhood's run on the same dRPC bucket
+        // (each page's turn booked before its wait, so two fills never wake into one turn)
+        fillLast.at = Math.max(now(), fillLast.at + 1000 / POOL_FILL_PER_S);
+        const gap = fillLast.at - now();
         if (gap > 0) await fillSleep(gap);
-        last = now();
         const got = await fillSend(c, list[turn++ % list.length]!, s.pool, a, b);
         // a provider held or out of room: the next one is asked; every one of them waiting, the soonest wait is slept
         if (typeof got === "number") {
@@ -1458,7 +1474,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       let a: Answer = UPSTREAM();
       // a page its provider did not serve (down, held, its second taken by other reads) is asked of the whole list
       for (let t = 0; t < LOGS_PAGE_TRIES && !stop && by - now() > WALK_SEND_MIN_MS; t++) {
-        a = await callList(c, t === 0 ? [mine] : list, pageBody(i), ["eth_getLogs"], client, reserved, by, null);
+        a = await callList(c, t === 0 ? [mine] : list, pageBody(i), ["eth_getLogs"], client, reserved, by, null, undefined, true);
         if (a.status === 200) break;
       }
       if (a.status !== 200) return void (done[i] = { fail: a });
@@ -1537,7 +1553,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   // after its first keyed one). `key`: the budget the read draws on, the chain's by default; null when it already drew
   // (Solana's first key failed it after its draw). `by`: the read's walk's end (WALK_MS, review L4)
   // `admit`: a last check once the share admitted the read (the NEAR seat's day, taken there); false refuses it
-  async function callList(c: RpcChain, providers: readonly string[], forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = c, admit?: () => boolean): Promise<Answer> {
+  // `page`: one page of a caller's paged read (pagedLogs), which waits behind other callers' reads for a bucket (limits.ts take)
+  async function callList(c: RpcChain, providers: readonly string[], forward: string, methods: string[], client: string | undefined, reserved: boolean, by: number, key: string | null = c, admit?: () => boolean, page = false): Promise<Answer> {
     const holds = holdsAll;
     // review L4: a read that drew on the chain's budget before (Solana's first key failed it) draws its retry on the
     // spares' budget, never the chain's, which that key's 429 holds
@@ -1591,7 +1608,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           soonestMs = Math.min(soonestMs, gate);
           continue;
         }
-        const room = holds.take(url, methods.length, false);
+        const room = holds.take(url, methods.length, false, false, false, page);
         if (room > 0) {
           soonestMs = Math.min(soonestMs, room);
           continue;
@@ -1671,7 +1688,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       // none could take it: the soonest provider's short hold or pace wait is waited out, and the read asked again (a
       // read sent and refused draws on the budget once more, as any send does)
       const waitMs = soonestMs + HOLD_MARGIN_MS;
-      if (tries < 2 && soonestMs <= HOLD_WAIT_MS && now() + waitMs <= deadline) {
+      // a page waits for its bucket as often as the deadline allows: its read's pages share dRPC's one bucket (limits.ts
+      // DRPC_IP_PACE), so a worker woken for a refill another took waits again, never failing the page for it
+      if ((page || tries < 2) && soonestMs <= HOLD_WAIT_MS && now() + waitMs <= deadline) {
         await waitFor(waitMs);
         if (!sent) continue;
         const again = budget.takeEach(drawsOf(bk, methods), client, false, reserved);

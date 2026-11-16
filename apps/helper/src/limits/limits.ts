@@ -139,8 +139,13 @@ export type ProviderHolds = {
   heldFor(url: string): number;
   heldMs(url: string): number;
   hold(url: string, seconds: number): void;
-  /** `probe`: a keyed URL's identity read (rpc.ts probe), the one draw on PROBE_DAY_SHARE of its day. */
-  take(url: string, calls: number, background: boolean, sender?: boolean, probe?: boolean): number;
+  /** `probe`: a keyed URL's identity read (rpc.ts probe), the one draw on PROBE_DAY_SHARE of its day. `page`: one page of
+   *  a caller's paged read (rpc.ts pagedLogs), or with `background` of the pool fill (rpc.ts fillSend), which waits
+   *  while any other caller's read waits for the bucket and only then (card helper-base-keyed-holds-under-load: pages
+   *  that took each refill as it came left the signing page's batch of 3, chainId, finalized block and block by hash,
+   *  never 3 units at once, and it was answered 429, live run 43801531833; a fill held off for CALLER_HOLD_MS after every
+   *  caller's draw, now on one bucket for dRPC's three keys, would stand still whenever one caller reads a second). */
+  take(url: string, calls: number, background: boolean, sender?: boolean, probe?: boolean, page?: boolean): number;
   /** True when `url`'s daily budget (Pace day) cannot fit `calls` more today: out for the rest of the UTC day, which is
    *  no wait (review M3 of 424dce1e: a walk counts it down, so every provider failing is 503, never a 429). */
   dayOut(url: string, calls: number): boolean;
@@ -154,8 +159,10 @@ export type ProviderHolds = {
  *  that company draws from, where its limit is the account's across chains (card rpc-keyed-lists: one key per company,
  *  so its Base, Robinhood and Solana endpoints share it); `batch`, the most requests one post may carry; `day`, the
  *  units the group (else the URL) may spend in one UTC day, and `cost`, the units one call spends (1 when unset): its
- *  plan's month, credit- or compute-metered, as a daily budget (KEYED_DAY). */
-export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number; group?: string; batch?: number; day?: number; cost?: number };
+ *  plan's month, credit- or compute-metered, as a daily budget (KEYED_DAY); `rate`, the one bucket (and caller wait)
+ *  every URL of that name draws from when the company limits a rate wider than one account, such as dRPC's per IP
+ *  (DRPC_IP_PACE), each URL's day still its `group`'s. */
+export type Pace = { perS: number; burst: number; unit: "post" | "call"; inflight?: number; group?: string; batch?: number; day?: number; cost?: number; rate?: string };
 /**
  * Each paced provider, set under the point where it refuses (reads cited):
  *   - robinhood.daybreak-rpc.network: refuses two ways. -32005 "rate limited" with Retry-After 10 at 61 to 72 posts in
@@ -204,6 +211,20 @@ export type Pace = { perS: number; burst: number; unit: "post" | "call"; infligh
  *     reply. Paced at one call every 2 s, each token's answer held 10 min.
  */
 export const HOST_PACE_MS: Readonly<Record<string, number>> = { "api.unrealized.trade": 250, "api.gopluslabs.io": 2_000 };
+/**
+ * dRPC's free tier for the owner's three keys (KEYED_PACE drpc), all sent from the helper's one IP (card
+ * helper-base-keyed-holds-under-load): they draw this one bucket. dRPC
+ * names "Under normal conditions for the free tier, we have a limit of 25 RPS" and "The Free Tier includes 50 million
+ * Compute Units (CU) per 30-day period" (drpc.org/docs/howitworks/ratelimiting, read 2026-11-16 04:35Z; on 7 Nov the same
+ * page named "120,000 CUs per minute per IP"). Paced per key at 8 a second and 8 at once (up to 48 in one second from the
+ * three, and 30 more keyless), dRPC answered the helper 429 607 times on callers' reads and 96 on the pool fill's, 16 Nov
+ * 03:59-04:33Z (helper.sh docker logs, `rpc hold base drpc.live`); a key's 16 in a second at most is under 25, so the
+ * limit those 429s hit is the keys' together, not one key's. The keyless robinhood.drpc.org keeps its own pace
+ * (PROVIDER_PACE): no read shows dRPC counting a keyless public node with the keys, and the pool senders' withdraw reads
+ * on it are timed at that pace (pool/evm.test.ts review M-3). [design: 20 calls a second, 4 at once: at most 24 in any
+ * second, one under the 25.]
+ */
+export const DRPC_IP_PACE = { perS: 20, burst: 4, unit: "call", rate: "drpc-ip" } as const satisfies Pace;
 export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
   "https://robinhood.daybreak-rpc.network": { perS: 7, burst: 7, unit: "post", inflight: 3 },
   "https://rpc-robinhood.blockmachine.io": { perS: 0.5, burst: 25, unit: "call" },
@@ -230,9 +251,9 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
  *     items", and Pay as You Go "100 RPS" (drpc.org/docs/howitworks/ratelimiting and /docs/pricing/requests, read
  *     2026-11-07 07:29Z). The limit is per IP, and the owner's three keys (three accounts, rpc.ts keyedAccountOf) all
  *     send from the helper's one, as does its keyless robinhood.drpc.org (PROVIDER_PACE, 15 a second, 15 at once),
- *     which dRPC may count with them (review L2 of 424dce1e; no page says either way): each key paced at 8 calls a
- *     second, 8 at once, 3 a post. The worst minute, every bucket full at its start, is 3 x (8 x 60 + 8) + (15 x 60 +
- *     15) = 2,379 calls, 47,580 CU at 20 a call (KEYED_COST), under the free floor's 50,400 (a test holds the sum).
+ *     which dRPC may count with them (review L2 of 424dce1e; no page says either way). Read again 2026-11-16 04:35Z, the
+ *     page names 25 RPS for the free tier, and the keys' 429s live show it binds them together (DRPC_IP_PACE): the three
+ *     keys draw that one bucket, 3 a post, each key's day its own account's.
  *   - FastNear: the paid plans name requests a month only, "Dev Plan $69 /month 10M RPC requests/month", Pro 36M,
  *     Business 100M, and no rate (fastnear.com, read 2026-11-07 07:29Z; docs.fastnear.com/auth names none). Paced at
  *     5 calls a second, 5 at once (10 in any second, the chain's RPC_CHAIN_MAX 100 per 10 s). That pace all month long
@@ -240,7 +261,7 @@ export const PROVIDER_PACE: Readonly<Record<string, Pace>> = {
  */
 export const KEYED_PACE = {
   quicknode: { perS: 7, burst: 7, unit: "call", group: "quicknode" },
-  drpc: { perS: 8, burst: 8, unit: "call", group: "drpc", batch: 3 },
+  drpc: { ...DRPC_IP_PACE, group: "drpc", batch: 3 },
   fastnear: { perS: 5, burst: 5, unit: "call", group: "fastnear" },
 } as const satisfies Readonly<Record<string, Pace>>;
 export type KeyedProvider = keyof typeof KEYED_PACE;
@@ -317,6 +338,9 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
    *  6.4 s on the paces alone). Cleared by the caller's draw; a caller that asks another provider instead leaves it to
    *  end on its own, at most the wait it was named. */
   const callerWaits = new Map<string, number>();
+  /** Per bucket: until when a caller's read (not a page of a paged one) that found no room waits for it; pages draw none
+   *  of it meanwhile (take's `page`), so a batch's refill is its own. Cleared by that caller's draw. */
+  const shortWaits = new Map<string, number>();
   /** The providers a pool sender reads, whose SENDER_ROOM callers leave (fold A). */
   const reserved = new Set<string>();
   /** Per group (else URL) with a daily budget: the UTC day and the units spent in it (Pace day, cost). */
@@ -376,10 +400,12 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
     return probe ? p.day : p.day - Math.floor((p.day * PROBE_DAY_SHARE) / cost) * cost;
   };
   const dayOut = (k: string, p: Pace, calls: number, t: number, probe = false): boolean => p.day !== undefined && usedToday(k, t) + Math.max(calls, 1) * (p.cost ?? 1) > dayCap(p, probe);
-  // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists)
+  // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists), or the company's rate's
+  // (Pace rate: dRPC's per IP, card helper-base-keyed-holds-under-load)
+  const rateOf = (url: string, p: Pace): string => p.rate ?? p.group ?? url;
   const fill = (url: string, p: Pace) => {
     const t = now();
-    const k = p.group ?? url;
+    const k = rateOf(url, p);
     const b = buckets.get(k) ?? { tokens: p.burst, at: t };
     b.tokens = Math.min(p.burst, b.tokens + ((t - b.at) * p.perS) / 1000);
     b.at = t;
@@ -387,7 +413,7 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
     return b;
   };
   return {
-    take(url, calls, background, sender = false, probe = false) {
+    take(url, calls, background, sender = false, probe = false, page = false) {
       const p = pace[url];
       if (p === undefined) return 0;
       const b = fill(url, p);
@@ -404,21 +430,28 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
         spent.set(k, { day, units: (s !== undefined && s.day === day ? s.units : 0) + need });
         saveSoon(day, t);
       };
-      const waiting = (callerWaits.get(k) ?? 0) - t;
-      if (background && waiting > 0) return Math.max(1, Math.ceil(waiting));
+      const rk = rateOf(url, p);
+      const waiting = (callerWaits.get(rk) ?? 0) - t;
+      if (background && !page && waiting > 0) return Math.max(1, Math.ceil(waiting));
+      // a page goes behind any caller's read waiting for this bucket (shortWaits), and only it: a background page (the
+      // pool fill) takes what callers leave, never the CALLER_HOLD_MS after each caller's draw
+      const short = (shortWaits.get(rk) ?? 0) - t;
+      if (page && short > 0) return Math.max(1, Math.ceil(short));
       const floor = background ? p.burst * CALLER_ROOM : sender || !reserved.has(url) ? 0 : p.burst * SENDER_ROOM;
       // a post larger than the bucket waits for a full one
       const units = Math.min(p.unit === "post" ? 1 : Math.max(calls, 1), p.burst - floor);
       // a caller's draw, or its wait, keeps the bucket's refill for callers CALLER_HOLD_MS on (or until its wait ends)
-      const keep = (ms: number) => callerWaits.set(k, Math.max(callerWaits.get(k) ?? 0, t + ms));
+      const keep = (ms: number) => callerWaits.set(rk, Math.max(callerWaits.get(rk) ?? 0, t + ms));
       if (b.tokens - units >= floor) {
         b.tokens -= units;
         spend();
         if (!background) keep(CALLER_HOLD_MS);
+        if (!background && !page) shortWaits.delete(rk);
         return 0;
       }
       const w = Math.max(1, Math.ceil(((units + floor - b.tokens) * 1000) / p.perS));
       if (!background) keep(Math.max(w, CALLER_HOLD_MS));
+      if (!background && !page) shortWaits.set(rk, Math.max(shortWaits.get(rk) ?? 0, t + w));
       return w;
     },
     dayOut(url, calls) {
