@@ -729,12 +729,19 @@ else {
     // every start and end of a pool trade of this page: nothing a preview read before it is used after it
     trades: () => buys.edges() + sells.edges() + deposits.edges() + withdraws.edges(),
   });
-  // Max for the coin on screen (src/pools.ts poolBuyDryKind): state.pools' tap_max on the coin's own venue, read on the
-  // same paced pair as background reads, never while a trade runs; the notes and ready proofs as state.pools reads them
+  // Max for the coin on screen (src/pools.ts poolBuyDryKind): state.pools' tap_max on the coin's own venue, never while
+  // a trade runs; the notes and ready proofs as state.pools reads them
   const poolBuyDry = poolBuyDryKind({
     pools: PAGE_POOLS,
     finders: dryFinders,
-    rpcs: dryPair,
+    // a preview: each kind's pools as soon as one provider's scan names them (card solana-quote-reads-found-pools-once);
+    // tapDry below, the tap's own, waits for both providers' scans
+    early: true,
+    // the quote the user waits on, read as a trade's own on each host, as the tap's quote is (card
+    // solana-quote-reads-found-pools-once): on the background passes' budget (dryPair) a fresh account's restore walk
+    // held its reads 4-15 s, some past their 10 s bound (16 Nov). It runs only while no trade of the page runs (busy),
+    // and the box asks it once per settled amount (TradeBox FEE_ASK_SETTLE_MS)
+    rpcs: () => (PAGE_SOL_PIN === undefined ? null : pageSolanaRpcs("trade")),
     rent: () => (hasSolana ? rent.get() : null),
     ready: async () => {
       if (!testnet || !(await fs.state()).signed_in) return null;

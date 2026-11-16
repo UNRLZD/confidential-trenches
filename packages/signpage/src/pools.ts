@@ -128,6 +128,10 @@ export async function readCoinVenue(rpcs: readonly [SolanaRpc, SolanaRpc], token
   }
 }
 
+/** Each kind's early finder (page-rpc.ts PoolsOf.early) in its place, a kind with none as it is. */
+const earlyFinders = (f: PoolFinders | null): PoolFinders | null =>
+  f === null ? null : Object.freeze(Object.fromEntries(Object.entries(f).map(([k, find]) => [k, find?.early ?? find])) as PoolFinders);
+
 /** How many coins' venues pool.buy.dry keeps, and for how long: an ask of a venue COIN_VENUE_KEEP_MS old reads it
  *  again, so a flag the coin's accounts change (its cashback) reaches the next ask after a minute, never only a reload. */
 export const COIN_VENUES_KEPT = 256;
@@ -158,6 +162,10 @@ export type PoolBuyDryDeps = {
    *  (cashFirst, sized by solanaMoveShort); null when Cash cannot move it. None: an amount above tap_max answers tap_max
    *  alone. */
   moved?(short: bigint): Promise<bigint | null>;
+  /** A preview (card solana-quote-reads-found-pools-once): the coin's venue and quote read on each kind's pools as soon
+   *  as one provider's scan names them (page-rpc.ts PoolsOf.early), never waiting for the slower provider's half; the
+   *  tap's own read (main.ts tapDry, src/pool-buy.ts) waits for both. */
+  early?: boolean;
 };
 
 /**
@@ -264,7 +272,7 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): PoolBuyDryKind {
   const venueOf = async (rpcs: readonly [SolanaRpc, SolanaRpc], token: string): Promise<CoinVenue> => {
     const kept = venues.get(token);
     if (kept !== undefined && now() - kept.at < COIN_VENUE_KEEP_MS) return kept.v;
-    const v = await readCoinVenue(rpcs, token, d.finders ?? null);
+    const v = await readCoinVenue(rpcs, token, d.early ? earlyFinders(d.finders ?? null) : (d.finders ?? null));
     venues.delete(token);
     if (venues.size >= COIN_VENUES_KEPT) venues.clear();
     venues.set(token, { v, at: now() });
@@ -305,7 +313,7 @@ export function poolBuyDryKind(d: PoolBuyDryDeps): PoolBuyDryKind {
     if (d.trading()) return { error: "busy" };
     // the quote for `out`, beside the proofs and the venue (never awaited before them); a failed read is no out
     const token = params.token;
-    const quote = amount !== null && amount > 0n ? pageReference(pair, { side: "buy", token, amount }).catch(() => null) : null;
+    const quote = amount !== null && amount > 0n ? pageReference(pair, { side: "buy", token, amount }, undefined, { early: d.early === true }).catch(() => null) : null;
     const r = await read(pair, token, sol);
     if ("error" in r) return r;
     const { tap, tapL, venue, rent, live, valueOf } = r;

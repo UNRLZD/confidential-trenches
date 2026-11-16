@@ -18,7 +18,8 @@
 //   SOLANA_RPC_WINDOW_RETRY), whatever the host answers; a seat (seatRpc) adds its next member's own once a member
 //   faults.
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
-import { readSolanaDlmmPairs } from "../../kit/src/trade/solana/dlmm.ts";
+import { base58 } from "@scure/base";
+import { readSolanaDlmmPairs, SOLANA_DLMM_MAX_PAIRS, SOLANA_DLMM_SCAN_MAX } from "../../kit/src/trade/solana/dlmm.ts";
 import { readSolanaCpmmPools } from "../../kit/src/trade/solana/cpmm.ts";
 import { readSolanaAmmV4Pools } from "../../kit/src/trade/solana/amm-v4.ts";
 import { SOLANA_POOL_BUY_VENUES } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -183,14 +184,16 @@ export const pageHelperRpcStopped = (origin: string, signal: AbortSignal, kind: 
  * READ_TIMEOUT_MS in kit pool.ts, met while the page's lane held it for a paused host: the review of 507431c0, P2) is a
  * failed read too: a null resting on it is that provider's no answer, a timeout fault, never "no reference pool".
  */
-export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest, finders: PoolFinders | null = pageFinders): Promise<SolanaReference | null> {
+export async function pageReference(rpcs: readonly [SolanaRpc, SolanaRpc], req: SolanaReferenceRequest, finders: PoolFinders | null = pageFinders, o: { early?: boolean } = {}): Promise<SolanaReference | null> {
   if (solanaSameProvider(rpcs[0], rpcs[1])) throw new Error("the two providers are the same provider: a reference must never rest on one provider's word");
   // the coin's DLMM pairs and Raydium CPMM and AMM v4 pools (card solana-buy-reaches-raydium-and-meteora), found beside
   // the pump venues' read: a coin with none costs no wait; one with some is read again with them, every venue judged on
   // the same reads' rules. A request that names a kind's pools is read with those, that kind's finder never asked.
+  // `early` (a preview, card solana-quote-reads-found-pools-once): each kind's pools as soon as one provider's scan names
+  // them (PoolsOf.early), never waiting for the slower provider's half; a tap's own read waits for both (the finder)
   const kinds = FINDER_KINDS.filter((k) => req[k] === undefined && finders?.[k]);
   if (kinds.length > 0) {
-    const found = Promise.all(kinds.map((k) => finders![k]!(req.token).catch(() => [] as readonly string[])));
+    const found = Promise.all(kinds.map((k) => ((o.early ? finders![k]!.early : undefined) ?? finders![k]!)(req.token).catch(() => [] as readonly string[])));
     const pump = readReference(rpcs, req);
     const lists = await found;
     if (lists.every((l) => l.length === 0)) return pump;
@@ -207,8 +210,11 @@ export const bestVenuePool = (ref: SolanaReference | null | undefined): SolanaRe
   ref?.pools.filter((p) => SOLANA_POOL_BUY_VENUES.includes(p.venue)).sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
 
 /** Finds a coin's SOL pools of one venue for a reference (the kit's readSolanaDlmmPairs, readSolanaCpmmPools or
- *  readSolanaAmmV4Pools on the page's providers). */
-export type PoolsOf = (token: string) => Promise<readonly string[]>;
+ *  readSolanaAmmV4Pools on the page's providers): both providers' scans, their union (a tap's reference waits for it).
+ *  `early` (card solana-quote-reads-found-pools-once), for a preview: the same scan's list as soon as one provider's
+ *  half of it is whole (keptPools), so a dry never waits for the slower provider (the page's public scan seat answers
+ *  one call each 1.25 s, and a coin's scans are six calls on it: 6.6 s, measured 16 Nov). */
+export type PoolsOf = ((token: string) => Promise<readonly string[]>) & { readonly early?: (token: string) => Promise<readonly string[]> };
 /** The reference request's field each finder fills, and the venue whose pools it names. */
 export const POOL_FINDER_VENUES = Object.freeze({ dlmmPairs: "dlmm", cpmmPools: "raydium-cpmm", ammV4Pools: "raydium-amm-v4" } as const);
 export type PoolFinderKind = keyof typeof POOL_FINDER_VENUES;
@@ -229,17 +235,59 @@ const FIND: Readonly<Record<PoolFinderKind, ScanRead>> = Object.freeze({ dlmmPai
  * reference asks again; one read at a time per coin.
  */
 export function keptPools(kind: PoolFinderKind, scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now: () => number = () => performance.now()): PoolsOf {
-  const kept = new Map<string, { at: number; pools: Promise<readonly string[]> }>();
+  type Kept = { at: number; pools: Promise<readonly string[]>; early: Promise<readonly string[]> };
+  const kept = new Map<string, Kept>();
   const find = FIND[kind];
-  return (token) => {
+  const of = (token: string): Kept => {
     const k = kept.get(token);
-    if (k !== undefined && now() - k.at < POOLS_KEEP_MS) return k.pools;
+    if (k !== undefined && now() - k.at < POOLS_KEEP_MS) return k;
     if (kept.size >= POOLS_KEPT) kept.clear();
-    const pools = find(scan(), read(), token);
-    kept.set(token, { at: now(), pools });
-    pools.catch(() => kept.get(token)?.pools === pools && kept.delete(token));
-    return pools;
+    // the same scan, each provider's answers seen as they come: the first provider whose two scans (the coin first and
+    // second) both answered a list, at most SOLANA_DLMM_MAX_PAIRS long, names the early list (past that, the union's
+    // ranking by depth is needed, so early waits for the union); no second scan is ever sent
+    let half: (pools: readonly string[]) => void = () => {};
+    const halfIn = new Promise<readonly string[]>((ok) => (half = ok));
+    const lists: string[][][] = [[], []];
+    const pair = scan().map((rpc, i) =>
+      solanaWrappedRpc(rpc, async (method, params) => {
+        const answer = await rpc(method, params);
+        const list = method === "getProgramAccounts" ? scannedList(answer) : null;
+        if (list !== null && (lists[i]!.push(list), lists[i]!.length === 2)) {
+          const all = [...new Set(lists[i]!.flat())].sort();
+          if (all.length <= SOLANA_DLMM_MAX_PAIRS) half(all);
+        }
+        return answer;
+      }),
+    ) as unknown as readonly [SolanaRpc, SolanaRpc];
+    const pools = find(pair, read(), token);
+    // the union when it comes first; none when it fails before any half (as pageReference reads a failed finder)
+    const early = new Promise<readonly string[]>((ok) => {
+      halfIn.then(ok);
+      pools.then(ok, () => ok([]));
+    });
+    const k2 = { at: now(), pools, early };
+    kept.set(token, k2);
+    pools.catch(() => kept.get(token) === k2 && kept.delete(token));
+    return k2;
   };
+  return Object.assign((token: string) => of(token).pools, { early: (token: string) => of(token).early });
+}
+/** A scan's answer as the kit's scan reads it (dlmm.ts scanOn): a list of at most SOLANA_DLMM_SCAN_MAX addresses, or
+ *  null for any other answer (the kit then refuses it, and the early list waits for the other provider). */
+function scannedList(a: unknown): string[] | null {
+  const v = Array.isArray(a) ? a : (a as { value?: unknown } | null)?.value;
+  if (!Array.isArray(v) || v.length > SOLANA_DLMM_SCAN_MAX) return null;
+  const out: string[] = [];
+  for (const e of v) {
+    const k = (e as { pubkey?: unknown } | null)?.pubkey;
+    try {
+      if (typeof k !== "string" || k.length > 44 || base58.decode(k).length !== 32) return null;
+    } catch {
+      return null;
+    }
+    out.push(k);
+  }
+  return out;
 }
 /** Every venue's kept finder on the same providers. */
 export const keptPoolFinders = (scan: () => readonly [SolanaRpc, SolanaRpc], read: () => readonly [SolanaRpc, SolanaRpc], now?: () => number): PoolFinders =>
