@@ -13,7 +13,7 @@
 export const FILLED_MS = 45_000;
 export const FILL_POLL_MS = 2_000;
 
-/** The first thing wrong with a trades answer's own fields, or null: exactly, in their wire order, trades, `filling`
+/** The first thing wrong with a trades answer's own fields, or null: exactly, in the helper's wire order on every chain, trades, `filling`
  *  (only true, while the helper still reads its older trades), `whole_ms` (card token-stats-count-every-trade: how far
  *  back the tape holds every trade, claimed only by a tape not filling, a whole ms from 0 to its as_of_ms plus a
  *  minute), src, as_of_ms. Every check that freezes the trades fields reads them here, so a field the helper adds is

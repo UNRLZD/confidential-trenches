@@ -36,7 +36,7 @@ test("readFilled reads again until the mark goes, or a read fails, or its bound;
   assert.equal(filledVerdict({ status: 200, filling: false, shape: "tape", ms: FILLED_MS + 1, reads: 3 }).ok, false, "filled past the bound");
 });
 
-test("tapeFieldsFault: the trades fields in wire order, whole_ms only on a settled tape and within its read (card trades-checks-pass-on-177: release 177's answers pass, the lists the checks froze before it are no longer the rule)", () => {
+test("tapeFieldsFault: the trades fields in the helper's wire order, whole_ms only on a settled tape and within its read (card trades-checks-pass-on-177: release 177's answers pass, the lists the checks froze before it are no longer the rule)", () => {
   // live run 43977576335's answers, release 177 (ad9337504): a settled tape with its reach, a filling one without
   assert.equal(tapeFieldsFault({ trades: [], whole_ms: 1794871805000, src: "chain", as_of_ms: 1794872356048 }), null);
   assert.equal(tapeFieldsFault({ trades: [], filling: true, src: "chain", as_of_ms: 1 }), null);
@@ -48,6 +48,8 @@ test("tapeFieldsFault: the trades fields in wire order, whole_ms only on a settl
   assert.match(tapeFieldsFault({ trades: [], whole_ms: 1.5, src: "chain", as_of_ms: 10 }), /^whole_ms 1.5$/);
   assert.match(tapeFieldsFault({ trades: [], whole_ms: -1, src: "chain", as_of_ms: 10 }), /^whole_ms -1$/);
   assert.match(tapeFieldsFault({ whole_ms: 1, trades: [], src: "chain", as_of_ms: 10 }), /^keys /);
+  assert.match(tapeFieldsFault({ trades: [], src: "chain", as_of_ms: 1, filling: true }), /^keys /);
+  assert.match(tapeFieldsFault({ trades: [], as_of_ms: 10 }), /^keys /);
   assert.match(tapeFieldsFault({ trades: [], src: "chain", as_of_ms: 10, extra: 1 }), /^keys /);
   assert.match(tapeFieldsFault({ trades: [], filling: false, src: "chain", as_of_ms: 10 }), /^keys /);
   assert.match(tapeFieldsFault({ trades: [], src: "chain", as_of_ms: "1" }), /^as_of_ms /);

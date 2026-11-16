@@ -373,6 +373,28 @@ test("card helper-deploy-reads-fast: read() keeps the lists read and each listed
   assert.ok(Number.isFinite(got.tried[0].candles.ms));
 });
 
+test("card trades-checks-pass-on-177: read() passes over a listed token whose tape a vendor serves (X-Helper-Source not chain) and judges the next, our own reads' (live run 43977576335 judged 0x8f6ad36c, src coingecko); every candidate a vendor's, the first is judged and fails", async () => {
+  const VENDOR = "0x00000000000000000000000000000000000000a3";
+  const list = { lists: { new: [{ token: VENDOR }, { token: A.good.coin }] } };
+  const vendor = (url) => {
+    if (url.includes("/v1/market/candles")) return new Response(JSON.stringify({ tf: "1m", candles: [[60, "1", "1", "1", "1", "1"]], src: "coingecko", as_of_ms: 1 }), { status: 200, headers: { "content-type": "application/json", "x-helper-source": "coingecko" } });
+    return new Response(JSON.stringify({ trades: [{ t_ms: 1_000, side: "b", usd: "1", amt: "1", trader: null, tx: `0x${"ab".repeat(32)}` }], whole_ms: 0, src: "coingecko", as_of_ms: 1 }), { status: 200, headers: { "content-type": "application/json", "x-helper-source": "coingecko" } });
+  };
+  const fetchFn = async (url, init) => {
+    if (url.endsWith("/v1/market/lists?chain=base")) return new Response(JSON.stringify(list), { status: 200 });
+    if (url.includes(VENDOR)) return vendor(url);
+    return replay(A.good)(url, init);
+  };
+  const got = await read("https://ct-api.unrealized.trade", undefined, fetchFn);
+  assert.equal(got.coin, A.good.coin, "a vendor-served token judged");
+  assert.deepEqual(got.tried.map((t) => t.token), [VENDOR]);
+  const only = { lists: { new: [{ token: VENDOR }] } };
+  const vendorOnly = async (url) => (url.endsWith("/v1/market/lists?chain=base") ? new Response(JSON.stringify(only), { status: 200 }) : vendor(url));
+  const r = await read("https://ct-api.unrealized.trade", undefined, vendorOnly, []);
+  assert.equal(r.coin, VENDOR);
+  assert.equal(judge(r).ok, false, "a vendor's tape passed");
+});
+
 const EP06 = "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789";
 const BUNDLER = A.bundle_base?.bundler ?? "0x4b5c33c3c7a31bd108f5a99b64683b0056a62226";
 const word = (a) => `0x${"0".repeat(24)}${a.slice(2)}`;
