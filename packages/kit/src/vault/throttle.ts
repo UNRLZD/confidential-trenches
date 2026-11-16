@@ -5,9 +5,10 @@
 // more cost the user the whole vault.
 //
 // - A throttle: HTTP 429 (the kit's nearRpc throws rpcHttpError, status 429 and its Retry-After kept; the exit tool's
-//   exitRpc throws "HTTP 429"), or dRPC's rate limit inside a 200 (`error.code` 15, "You reached Public endpoint rate
-//   limit", the shape kit send.ts RPC_THROTTLE_CODES takes on Solana). Nothing else: a 5xx, a timeout or any other
-//   error is a fault as before.
+//   exitRpc throws "HTTP 429"), or a rate limit inside a 200: dRPC's `error.code` 15 ("You reached Public endpoint rate
+//   limit", which kit send.ts RPC_THROTTLE_CODES takes on Solana) or FastNEAR's -429 ("Rate limits exceeded", the body
+//   of its 429, which the wallet's IdReader takes as busy: ../../../wallet/src/restore/id-reader.ts busyAnswer).
+//   Nothing else: a 5xx, a timeout or any other error is a fault as before.
 // - The wait: the one throttle rule (../throttle.ts throttleWaitMs, which the wallet gives on: 1 s, doubling, at most
 //   10 s, a longer Retry-After honoured up to 10 s; signpage read-waits.ts takes it for a kind's reads), then the
 //   same query asked again of the same provider. The byte-for-byte rule is the caller's and is unchanged: a query
@@ -47,10 +48,12 @@ function thrownThrottle(e: unknown): { words: string; afterMs: number | null } |
   const after = (e as { retryAfterMs?: unknown }).retryAfterMs;
   return { words: "HTTP 429", afterMs: typeof after === "number" ? after : null };
 }
-/** An answer that is a throttle: dRPC's rate limit in a 200 (code 15); else null. */
+/** The JSON-RPC codes of a rate limit in a 200 (see the header): dRPC's 15, FastNEAR's -429 (and 429). */
+const RATE_LIMIT_CODES: ReadonlySet<unknown> = new Set([15, -429, 429]);
+/** An answer that is a throttle: a rate limit in a 200 (RATE_LIMIT_CODES); else null. */
 function answerThrottle(a: unknown): { words: string; afterMs: null } | null {
-  if (!isObj(a) || !isObj(a.error) || a.error.code !== 15 || typeof a.error.message !== "string" || !a.error.message.includes("rate limit")) return null;
-  return { words: "a rate limit (code 15)", afterMs: null };
+  if (!isObj(a) || !isObj(a.error) || !RATE_LIMIT_CODES.has(a.error.code)) return null;
+  return { words: `a rate limit (code ${String(a.error.code)})`, afterMs: null };
 }
 
 /** `ms`, or until `signal` aborts (its reason thrown), the timer cleared either way. */

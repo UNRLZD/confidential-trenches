@@ -619,6 +619,8 @@ test("R-03: vaultViewTooHeavy is true for nearcore's gas answer only, vaultViewB
 // VAULT_SYNC_THROTTLE_MS; the byte-for-byte rule is unchanged. On the test clock: the waits set, never the machine's speed.
 const http429 = (retryAfterMs?: number) => Object.assign(new Error("HTTP 429"), { status: 429 }, retryAfterMs === undefined ? {} : { retryAfterMs });
 const RATE_LIMIT_15 = { id: "blindfill", jsonrpc: "2.0", error: { message: "You reached Public endpoint rate limit, please upgrade to paid plan", code: 15 } };
+// FastNEAR's 429 body (wallet id-reader.ts BUSY_* notes, 9 Nov 01:37Z), here inside a 200
+const RATE_LIMIT_FASTNEAR = { jsonrpc: "2.0", id: "blindfill", error: { code: -429, message: "Rate limits exceeded. Please try again later." } };
 /** Throttles `n` asks of `method` (and the probe, its state_tree at final, when `method` is "probe") with `refusal`. */
 const throttles = (method: string, n: number, refusal: () => unknown): FakeOpts & { seen: () => number } => {
   let k = 0;
@@ -645,6 +647,7 @@ test("a 429 once from either RPC, with or without Retry-After, on the probe or a
     ["HTTP 429 with a Retry-After of 60 s: held to 10 s", () => http429(60_000), 10_000],
     ["the exit tool's exitRpc: a plain HTTP 429", () => new Error("HTTP 429"), 1_000],
     ["dRPC's rate limit in a 200 (code 15)", () => RATE_LIMIT_15, 1_000],
+    ["FastNEAR's rate limit in a 200 (code -429)", () => RATE_LIMIT_FASTNEAR, 1_000],
   ];
   for (const [what, refusal, waitMs] of cases)
     for (const side of [0, 1] as const)
@@ -673,7 +676,7 @@ test("a provider that keeps answering 429: waited on the rule (1, 2, 4, 8, 10 s)
       const t0 = Date.now();
       await assert.rejects(vaultSync({ vault: VAULT, rpcs, cursor: vaultSyncStart(VAULT) }), (e: unknown) => {
         assert.ok(e instanceof VaultSyncStopped && e.code === "rpc", String(e));
-        assert.match(e.message, what === "HTTP 429" ? /^vault sync stopped \(rpc\): rpc-b: HTTP 429 \(state_tree\), still throttling after 25 s/ : /rpc-b: a rate limit \(code 15\) \(state_tree\)/);
+        assert.match(e.message, what === "HTTP 429" ? /^vault sync stopped \(rpc\): rpc-b: HTTP 429 \(state_tree\), still throttling after 25 s/ : /^vault sync stopped \(rpc\): rpc-b: a rate limit \(code 15\) \(state_tree\), still throttling after 25 s/);
         return true;
       });
       // 1 + 2 + 4 + 8 + 10 = 25 s waited; the next 10 s would end past 30 s, so none starts
