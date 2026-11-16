@@ -1,0 +1,17 @@
+{
+ "about": "facts() over each build's packages/signpage index.html and app.js: good = this card's build, bad = main d01e8334d's (release 161's packages)",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-091hL8NfzQABYsoqVJpVqBxWfd3KgggAZluI7EGA0IW2jpqKjT1QHoBzT32+6lHU\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-091hL8NfzQABYsoqVJpVqBxWfd3KgggAZluI7EGA0IW2jpqKjT1QHoBzT32+6lHU",
+  "others": true,
+  "race": true,
+  "stands": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-lsd03G6pGGORQVOb48JjKXy6j7PINU7sNANXv9vp6hzH4qYBmepAZPODk9IA7/PU\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-lsd03G6pGGORQVOb48JjKXy6j7PINU7sNANXv9vp6hzH4qYBmepAZPODk9IA7/PU",
+  "others": false,
+  "race": false,
+  "stands": false
+ }
+}

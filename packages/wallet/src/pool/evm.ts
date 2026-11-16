@@ -1762,6 +1762,13 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   // (EvmWideSource), asked first on a walk; off for this sync once one of its answers is refused or not the pool's
   const wide = (a.history ?? []).find((r) => typeof r === "function" && (r as { wide?: unknown }).wide === true && evmSourceOperator(r) !== null && !SEATS.has(r));
   let wideOff = false;
+  // card fresh-walk-reads-each-range-once: the sources of another operator than the wide source's, the pool list's
+  // providers first (the seats' own, in their order), then the history's: where a run of the wide read is confirmed
+  // (its own name, "helper", and its URL's company alike: another route of the same host is the same word)
+  const wideOp = wide === undefined ? null : evmSourceOperator(wide);
+  const hostOp = (r: EvmRpc): string | null => (typeof (r as { url?: unknown }).url === "string" ? evmRpcOperator((r as { url: string }).url) : null);
+  const wideHost = wide === undefined ? null : hostOp(wide);
+  const wideOthers = [...sources.filter((s) => a.rpcs.includes(s.rpc)), ...sources.filter((s) => !a.rpcs.includes(s.rpc))].filter((s) => wide !== undefined && s.op !== wideOp && (wideHost === null || hostOp(s.rpc) !== wideHost) && !solanaSameProvider(s.rpc, wide));
   // each source's logs from a round's first block up to its finalized anchor, by operator: a later round's read of that
   // source starts past them
   const kept = new Map<string, { from: bigint; to: bigint; logs: Ev[] }>();
@@ -2096,11 +2103,11 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     // card evm-restore-walk-one-wide-read: the pool's logs past `b` up to the finalized anchor in one call of the wide
     // source (EvmWideSource), the tail past it on the seats as any round's; taken only when the trees from them are the
     // pool's at the anchor on the two seats (its root binds every leaf and its order: a leaf dropped, added, changed or
-    // moved is refused) and each run of its logs within one page's span (EVM_LOG_PAGE_BLOCKS) is the very bytes both
-    // seats page there (the fields no root binds, a release's nullifier, W, value and token, never one operator's word:
-    // evmTreeSync's comment). Null for any refusal, any log out of its shape or order, any mismatch: the round pages
-    // as before, from the same place. The comment's rule holds: a leaf's every field is two operators' word (the wide
-    // source's and a seat's same bytes) and the pool's root's.
+    // moved is refused) and each run of its logs within one page's span (EVM_LOG_PAGE_BLOCKS) is the very bytes a
+    // provider of another operator pages there (wideOthers; the fields no root binds, a release's nullifier, W, value
+    // and token, never one operator's word: evmTreeSync's comment). Null for any refusal, any log out of its shape or
+    // order, any mismatch: the round pages as before, from the same place. The comment's rule holds: a leaf's every
+    // field is two operators' word (the wide source's and another operator's same bytes) and the pool's root's.
     const wideOf = async (b: { events: Ev[]; to: bigint }): Promise<ReturnType<typeof build> | null> => {
       const from = b.to + 1n;
       const to = fin.number;
@@ -2139,15 +2146,39 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       }
       let next = 0;
       let same = true;
+      // card fresh-walk-reads-each-range-once: a run stands on one provider of another operator than the wide source's
+      // giving its same bytes, read on that provider itself (a source, never a seat: a seat moves between providers,
+      // and Robinhood's second seat is the wide source's own route, whose answer is the wide read's word again); the
+      // first two asked at once, the first to agree ends the run's read, and the others only once both fail
+      const confirm = async (f: bigint, t: bigint, mine: Ev[]): Promise<boolean> => {
+        const ac = new AbortController();
+        const stop = () => ac.abort(signal!.reason);
+        signal?.addEventListener("abort", stop, { once: true });
+        const agrees = (s: { rpc: EvmRpc }, i: number): Promise<boolean> =>
+          readLogs(s.rpc, i, poolFilter, poolDecode, f, t, sourcePager, ac.signal, sleep).then((l) => l.length === mine.length && l.every((e, j) => e.bytes === mine[j]!.bytes), () => false);
+        try {
+          for (let i = 0; i < wideOthers.length; i += i === 0 ? 2 : 1) {
+            const asked = wideOthers.slice(i, i === 0 ? 2 : i + 1).map((s, j) => agrees(s, i + j));
+            const ok = await new Promise<boolean>((done) => {
+              let left = asked.length;
+              for (const p of asked) void p.then((x) => (x ? done(true) : --left === 0 && done(false)));
+            });
+            signal?.throwIfAborted();
+            if (ok) return true;
+          }
+          return false;
+        } finally {
+          // the rest of a run's read once one agreed: no page after it
+          ac.abort(new Error("the run stands"));
+          signal?.removeEventListener("abort", stop);
+        }
+      };
       const reader = async (): Promise<void> => {
         while (same && next < runs.length) {
           const [f, t] = runs[next++]!;
           const mine = logs.filter((e) => e.block >= f && e.block <= t);
-          // a seat that refuses the run or answers it otherwise (a pruned one's empty page) is passed over: one seat's
-          // same bytes are a second operator's
-          const pair = await both(rpcs, (rpc, k, sig) => readLogs(rpc, k, poolFilter, poolDecode, f, t, pager, sig, sleep).then((s) => s.length === mine.length && s.every((e, j) => e.bytes === mine[j]!.bytes), () => false), signal);
-          signal?.throwIfAborted();
-          if (!pair.some((x) => x)) same = false;
+          // a provider that refuses the run or answers it otherwise (a pruned one's empty page) is passed over
+          if (!(await confirm(f, t, mine))) same = false;
         }
       };
       await Promise.all(Array.from({ length: Math.min(EVM_POOL_LOG_PAGES_IN_FLIGHT, runs.length) }, reader));
