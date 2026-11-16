@@ -219,9 +219,10 @@ test("a filling tape with no row stays loading and is read again at TRADES_POLL_
   assert.equal(await c.tick(), TRADES_POLL_MS, "a filling push keeps the read at TRADES_POLL_MS");
   assert.deepEqual(tapes, [], "the second filling read: loading");
   assert.equal(await c.tick(), TRADES_POLL_MS);
-  assert.deepEqual(tapes.at(-1), { trades: [a], status: "ready" }, "the rows so far, drawn");
+  assert.deepEqual(tapes.at(-1), { trades: [a], status: "ready", filling: true }, "the rows so far, drawn, and said to be filling (About counts no window from them)");
   assert.equal(await c.tick(), TRADES_POLL_MS);
-  assert.deepEqual(tapes.map((t) => t.status), ["ready"], "filled: the same rows, nothing redrawn");
+  assert.deepEqual(tapes.map((t) => t.status), ["ready", "ready"], "filled: the same rows, handed on once more without filling");
+  assert.deepEqual(tapes.at(-1), { trades: [a], status: "ready" });
   assert.deepEqual(c.pending(), [TRADES_PUSHED_POLL_MS], "filled with the socket sending: back to its pace");
 });
 

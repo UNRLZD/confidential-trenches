@@ -1,0 +1,510 @@
+{
+ "_about": {
+  "bad_deployed": "the deployed helper before the card, read 2026-11-16T20:51:09.557Z with --record (main d3ae40db4 code): every settled tape on the four chains claims no reach",
+  "good": "MADE from bad_deployed: each settled tape claims the second after its oldest row (the engine and vendor tapes' rule, and the EVM book's off a fixed clock; swaps.ts wholeOf), as the card's helper answers; re-record it after the helper deploy with --record"
+ },
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T20:51:09.557Z",
+  "chains": {
+   "solana": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",
+      "reads": [
+       {
+        "status": 200,
+        "n": 4,
+        "oldest_ms": 1794862218000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862234748
+       },
+       {
+        "status": 200,
+        "n": 4,
+        "oldest_ms": 1794862218000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862237758,
+        "whole_ms": 1794862219000
+       }
+      ]
+     },
+     {
+      "coin": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+      "reads": [
+       {
+        "status": 200,
+        "n": 1,
+        "oldest_ms": 1794862229000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862238442
+       },
+       {
+        "status": 200,
+        "n": 3,
+        "oldest_ms": 1794862195000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862241760,
+        "whole_ms": 1794862196000
+       }
+      ]
+     },
+     {
+      "coin": "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb",
+      "reads": [
+       {
+        "status": 200,
+        "n": 3,
+        "oldest_ms": 1794862241000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862243688
+       },
+       {
+        "status": 200,
+        "n": 7,
+        "oldest_ms": 1794862241000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862246913,
+        "whole_ms": 1794862242000
+       }
+      ]
+     }
+    ]
+   },
+   "base": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794862113000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862247782,
+        "whole_ms": 1794862114000
+       }
+      ]
+     },
+     {
+      "coin": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794862111000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862248990,
+        "whole_ms": 1794862112000
+       }
+      ]
+     },
+     {
+      "coin": "0xb200000000000000000000fd2f87532b90095211",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794862050000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862249686,
+        "whole_ms": 1794862051000
+       }
+      ]
+     }
+    ]
+   },
+   "robinhood": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "reads": [
+       {
+        "status": 200,
+        "n": 12,
+        "oldest_ms": 1794861948000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862250657
+       },
+       {
+        "status": 200,
+        "n": 12,
+        "oldest_ms": 1794861948000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862253541
+       },
+       {
+        "status": 200,
+        "n": 12,
+        "oldest_ms": 1794861948000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862256552,
+        "whole_ms": 1794861949000
+       }
+      ]
+     },
+     {
+      "coin": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "reads": [
+       {
+        "status": 200,
+        "n": 4,
+        "oldest_ms": 1794862005000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862257446
+       },
+       {
+        "status": 200,
+        "n": 4,
+        "oldest_ms": 1794862005000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862260599,
+        "whole_ms": 1794862006000
+       }
+      ]
+     },
+     {
+      "coin": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "reads": [
+       {
+        "status": 200,
+        "n": 40,
+        "oldest_ms": 1794861953000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862260975
+       },
+       {
+        "status": 200,
+        "n": 40,
+        "oldest_ms": 1794861953000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862263582
+       },
+       {
+        "status": 200,
+        "n": 40,
+        "oldest_ms": 1794861953000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862267554,
+        "whole_ms": 1794861954000
+       }
+      ]
+     }
+    ]
+   },
+   "near": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "token.rhealab.near",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794859729557,
+        "filling": false,
+        "src": "unrealized",
+        "as_of_ms": 1794862268639,
+        "whole_ms": 1794859730557
+       }
+      ]
+     },
+     {
+      "coin": "zec.omft.near",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794861572989,
+        "filling": false,
+        "src": "unrealized",
+        "as_of_ms": 1794862269152,
+        "whole_ms": 1794861573989
+       }
+      ]
+     },
+     {
+      "coin": "blackdragon.tkn.near",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794804995525,
+        "filling": false,
+        "src": "unrealized",
+        "as_of_ms": 1794859143489,
+        "whole_ms": 1794804996525
+       }
+      ]
+     }
+    ]
+   }
+  }
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-16T20:51:09.557Z",
+  "chains": {
+   "solana": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",
+      "reads": [
+       {
+        "status": 200,
+        "n": 4,
+        "oldest_ms": 1794862218000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862234748
+       },
+       {
+        "status": 200,
+        "n": 4,
+        "oldest_ms": 1794862218000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862237758
+       }
+      ]
+     },
+     {
+      "coin": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+      "reads": [
+       {
+        "status": 200,
+        "n": 1,
+        "oldest_ms": 1794862229000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862238442
+       },
+       {
+        "status": 200,
+        "n": 3,
+        "oldest_ms": 1794862195000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862241760
+       }
+      ]
+     },
+     {
+      "coin": "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb",
+      "reads": [
+       {
+        "status": 200,
+        "n": 3,
+        "oldest_ms": 1794862241000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862243688
+       },
+       {
+        "status": 200,
+        "n": 7,
+        "oldest_ms": 1794862241000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862246913
+       }
+      ]
+     }
+    ]
+   },
+   "base": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "0xb20000000000000000000078ee7ce2fe4908108c",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794862113000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862247782
+       }
+      ]
+     },
+     {
+      "coin": "0x07b3d902783c3c12b077508c3b5c00113d1291d0",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794862111000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862248990
+       }
+      ]
+     },
+     {
+      "coin": "0xb200000000000000000000fd2f87532b90095211",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794862050000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862249686
+       }
+      ]
+     }
+    ]
+   },
+   "robinhood": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+      "reads": [
+       {
+        "status": 200,
+        "n": 12,
+        "oldest_ms": 1794861948000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862250657
+       },
+       {
+        "status": 200,
+        "n": 12,
+        "oldest_ms": 1794861948000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862253541
+       },
+       {
+        "status": 200,
+        "n": 12,
+        "oldest_ms": 1794861948000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862256552
+       }
+      ]
+     },
+     {
+      "coin": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "reads": [
+       {
+        "status": 200,
+        "n": 4,
+        "oldest_ms": 1794862005000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862257446
+       },
+       {
+        "status": 200,
+        "n": 4,
+        "oldest_ms": 1794862005000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862260599
+       }
+      ]
+     },
+     {
+      "coin": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "reads": [
+       {
+        "status": 200,
+        "n": 40,
+        "oldest_ms": 1794861953000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862260975
+       },
+       {
+        "status": 200,
+        "n": 40,
+        "oldest_ms": 1794861953000,
+        "filling": true,
+        "src": "chain",
+        "as_of_ms": 1794862263582
+       },
+       {
+        "status": 200,
+        "n": 40,
+        "oldest_ms": 1794861953000,
+        "filling": false,
+        "src": "chain",
+        "as_of_ms": 1794862267554
+       }
+      ]
+     }
+    ]
+   },
+   "near": {
+    "lists_status": 200,
+    "tapes": [
+     {
+      "coin": "token.rhealab.near",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794859729557,
+        "filling": false,
+        "src": "unrealized",
+        "as_of_ms": 1794862268639
+       }
+      ]
+     },
+     {
+      "coin": "zec.omft.near",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794861572989,
+        "filling": false,
+        "src": "unrealized",
+        "as_of_ms": 1794862269152
+       }
+      ]
+     },
+     {
+      "coin": "blackdragon.tkn.near",
+      "reads": [
+       {
+        "status": 200,
+        "n": 50,
+        "oldest_ms": 1794804995525,
+        "filling": false,
+        "src": "unrealized",
+        "as_of_ms": 1794859143489
+       }
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

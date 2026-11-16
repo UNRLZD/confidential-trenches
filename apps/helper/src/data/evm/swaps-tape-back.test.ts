@@ -82,6 +82,8 @@ const ticks = async (s: ReturnType<typeof B.open>, n: number) => {
     for (let k = 0; k < 40; k++) await new Promise((ok) => setTimeout(ok, 5));
   }
 };
+/** The tape's reach (whole_ms, card token-stats-count-every-trade), or undefined when it claims none. */
+const reach = async (s: ReturnType<typeof B.open>, tok: string) => JSON.parse((await s.trades(tok, 50)).body).whole_ms as number | undefined;
 /** Whether the tape's answer says it is filling (its older trades still being read). */
 const filling = async (s: ReturnType<typeof B.open>, tok: string) => JSON.parse((await s.trades(tok, 50)).body).filling === true;
 const rows = async (s: ReturnType<typeof B.open>, tok: string) => {
@@ -110,6 +112,9 @@ test("a token whose only trade lies past the cold window: its first open has non
   await ticks(s, 3);
   assert.equal(asked.filter((b) => b < first).length, asked.slice(0, n).filter((b) => b < first).length, "done: no step back once TAPE_BACK is read");
   assert.equal(await filling(s, PCS.asset0), false, "done: not filling");
+  // card token-stats-count-every-trade: every trade from the second after the lowest block read is on the tape, Base's
+  // blocks on a fixed clock (BLOCK_CLOCK)
+  assert.equal(await reach(s, PCS.asset0), S.blockSecondMs("base", first - TAPE_BACK)! + 1_000);
   s.stop();
 });
 
@@ -143,10 +148,13 @@ test("guard: a read back whose steps fail BACK_FAILS_MAX times in a row ends: th
   const first = head - VENUES.base.cold + 1;
   const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, head - VENUES.base.cold - 300, first);
   assert.equal(await filling(s, PCS.asset0), true);
+  assert.equal(await reach(s, PCS.asset0), undefined, "no reach while it fills");
   const max = (S as unknown as Record<string, number>).BACK_FAILS_MAX ?? 3;
   await ticks(s, max + 2);
   assert.equal(await filling(s, PCS.asset0), false);
   assert.deepEqual(await rows(s, PCS.asset0), []);
+  // nothing read back: the reach is the book's own first block, never the hour it failed to read
+  assert.equal(await reach(s, PCS.asset0), S.blockSecondMs("base", first)! + 1_000);
   // one step a tick while failing, then none: each failed step asked its spans of both providers, max times
   const n = asked.filter((b) => b < first).length;
   await ticks(s, 2);
@@ -189,8 +197,20 @@ test("a pool born inside the hour: its read back ends at the step that holds its
   await ticks(s, 3);
   assert.deepEqual(await rows(s, PCS.asset0), [["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash]]);
   assert.equal(await filling(s, PCS.asset0), false, "done at its birth: not filling");
+  assert.equal(await reach(s, PCS.asset0), 0, "the tape holds every trade since the pool's birth");
   const back = asked.filter((b) => b < first);
   console.log(`read back of a pool born ${first - born} blocks before the first read: ${back.length} pool reads, the oldest from block ${Math.min(...back)} (born ${born})`);
   assert.ok(Math.min(...back) >= born - V.step, `no step read wholly before its birth: the oldest read from ${Math.min(...back)}, born ${born}`);
   s.stop();
+});
+
+test("card token-stats-count-every-trade: a block's second on Base's fixed clock (BLOCK_CLOCK), none on Robinhood's", () => {
+  // the 200 ms era's first block at its own time, five blocks a second after it; the 2 s era before it
+  assert.equal(S.blockSecondMs("base", 53_556_127), 1_793_901_601_000);
+  assert.equal(S.blockSecondMs("base", 53_556_131), 1_793_901_601_000);
+  assert.equal(S.blockSecondMs("base", 53_556_132), 1_793_901_602_000);
+  assert.equal(S.blockSecondMs("base", 0), 1_686_789_347_000);
+  assert.equal(S.blockSecondMs("base", 1), 1_686_789_349_000);
+  assert.equal(S.blockSecondMs("robinhood", 53_556_127), null);
+  assert.equal(S.blockSecondMs("base", -1), null);
 });

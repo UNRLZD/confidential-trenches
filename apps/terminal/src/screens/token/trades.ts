@@ -71,9 +71,12 @@ export function toTrades(body: unknown): Trade[] | null {
   return out;
 }
 
-/** A tape as read: its trades, and whether the helper said its older trades are still being read (`filling` true:
- *  the helper's cold tape, apps/helper/src/data/solana/trades.ts and ../evm/swaps.ts). */
-type Read = { trades: Trade[]; filling: boolean };
+/** A tape as read: its trades, whether the helper said its older trades are still being read (`filling` true: the
+ *  helper's cold tape, apps/helper/src/data/solana/trades.ts and ../evm/swaps.ts), and how far back it holds every trade
+ *  (`whole_ms`, card token-stats-count-every-trade: null when the helper claims none). */
+type Read = { trades: Trade[]; filling: boolean; whole: number | null };
+/** A reach the helper may claim: a whole ms at or after 0 (the pool's birth), never in the future of the read. */
+const reachOf = (v: unknown): number | null => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= Date.now() + 60_000 ? v : null);
 
 /** A tape's text, a read's body or a pushed message: null when it is over BODY_MAX, not JSON or not of the shape. */
 function parseTape(text: string): Read | null {
@@ -81,7 +84,7 @@ function parseTape(text: string): Read | null {
   try {
     const body = JSON.parse(text) as unknown;
     const trades = toTrades(body);
-    return trades === null ? null : { trades, filling: isObject(body) && body.filling === true };
+    return trades === null ? null : { trades, filling: isObject(body) && body.filling === true, whole: isObject(body) ? reachOf(body.whole_ms) : null };
   } catch {
     return null;
   }
@@ -114,8 +117,15 @@ const NONE: readonly Trade[] = [];
 export interface Tape {
   trades: readonly Trade[];
   status: "loading" | "ready" | "none";
+  /** The helper said its older trades are still being read (set only when true): the rows are not the whole of any window. */
+  filling?: true;
+  /** How far back the tape holds every trade, in ms (the helper's `whole_ms`, set only when it claims one): the page
+   *  counts a window's buys, sells and volume from the rows when the window starts at or after it (lower.ts aboutView). */
+  whole_ms?: number;
 }
 const LOADING: Tape = { trades: NONE, status: "loading" };
+/** A read with rows as the page draws it: ready, with its filling mark and its reach when the helper gave them. */
+const readyTape = (t: Read): Tape => ({ trades: t.trades, status: "ready", ...(t.filling ? { filling: true as const } : {}), ...(t.whole === null ? {} : { whole_ms: t.whole }) });
 
 // ------------------------------------------------------------------------------------------------------------- push
 // The tape is pushed (card market-data-push): the helper's push socket (GET /v1/market/push, a WebSocket that answers
@@ -181,7 +191,7 @@ export function followTape(chain: MarketChain, token: string, onTape: (t: Tape) 
   let cancelOpen: () => void = () => undefined;
 
   const show = (t: Tape) => {
-    if (t.status === cur.status && (t.trades === cur.trades || same(t.trades, cur.trades))) return;
+    if (t.status === cur.status && t.filling === cur.filling && t.whole_ms === cur.whole_ms && (t.trades === cur.trades || same(t.trades, cur.trades))) return;
     cur = t;
     onTape(t);
   };
@@ -202,7 +212,7 @@ export function followTape(chain: MarketChain, token: string, onTape: (t: Tape) 
     // goes back to TRADES_POLL_MS. A filling tape (the helper still reads its older trades) is loading while it has no
     // row, and is read again at TRADES_POLL_MS whatever the socket sends, until the helper's mark goes
     fails = t === null ? fails + 1 : 0;
-    if (t !== null) show(t.filling && t.trades.length === 0 ? LOADING : { trades: t.trades, status: "ready" });
+    if (t !== null) show(t.filling && t.trades.length === 0 ? LOADING : readyTape(t));
     else if (!pushed) show({ trades: NONE, status: "none" });
     readIn(t?.filling === true ? TRADES_POLL_MS : pushed ? TRADES_PUSHED_POLL_MS : nextWait(fails));
   }
@@ -241,7 +251,7 @@ export function followTape(chain: MarketChain, token: string, onTape: (t: Tape) 
       out?.abort();
       out = null;
       readIn(t.filling ? TRADES_POLL_MS : TRADES_PUSHED_POLL_MS);
-      show(t.filling && t.trades.length === 0 ? LOADING : { trades: t.trades, status: "ready" });
+      show(t.filling && t.trades.length === 0 ? LOADING : readyTape(t));
     };
   }
 

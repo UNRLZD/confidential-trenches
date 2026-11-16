@@ -80,7 +80,7 @@ import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, tak
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
 import { HELD_WAIT_MS, isBars, KEPT_HANDOVER_MS, TAPE_FRESH_MS, TAPE_MAX, toCandles, toTape, TF as GT_TF, type DataAnswer, type TapeIds, type TapeRow } from "../solana/token.ts";
-import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
+import { BATCH_MAX, BLOCK_CLOCK, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { CG_SRC, type ChartSrc, type Keyed } from "../coingecko.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
 import { exactRow, receiptFacts, type Facts } from "./vendor-rows.ts";
@@ -2026,7 +2026,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** `marks`: the blocks below `lo` that hold a swap of the pool, newest first, as the one wide read of the day (locate)
    *  named them: each step reads from the newest of them, and none left is the read back done (card
    *  robinhood-trades-finish-filling). */
-  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[]; until?: number };
+  /** `born`: the step that held the pool's birth was read, so no swap of the pool lies before the tape (wholeOf). */
+  type Back = { lo: number; logs: Log[]; tape: Book | null; done: boolean; fails?: number; located?: true; marks?: readonly number[]; until?: number; born?: true };
   const books = new Map<string, Entry>();
   // the ETH price: its swaps over the blocks the books need
   let refEvents: Ref[] = [];
@@ -2296,7 +2297,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // read found the post taken); no swap named below it, the read back is done
     const marks = back.marks?.filter((b) => b < lo);
     const next = marks === undefined ? lo : marks.length > 0 ? Math.max(end, marks[0]! + 1) : end;
-    e.back = { lo: next, logs: all, tape: backBook(e, all), done: lo <= end || born || marks?.length === 0, ...(marks === undefined ? {} : { located: true as const, marks }) };
+    e.back = { lo: next, logs: all, tape: backBook(e, all), done: lo <= end || born || marks?.length === 0, ...(marks === undefined ? {} : { located: true as const, marks }), ...(born ? { born: true as const } : {}) };
   }
   /** The blocks in `lo` to `hi` that hold a swap of `e`'s pool, newest first (none: an empty list), as BACK_LOCATE answers one read of the whole
    *  range: "held" when no such provider is free, undefined when it did not answer. Past MARKS_MAX blocks readBack keeps
@@ -2340,6 +2341,20 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   /** Whether a book's tape is still reading back (readBack): the answer says `filling`, so the page shows it loading,
    *  not empty, and reads it again every TRADES_POLL_MS (apps/terminal/src/screens/token/trades.ts) until it is done. */
   const backing = (e: Entry): boolean => canBack && e.from !== undefined && e.back?.done !== true && tapeOf(e, TRADES_MAX).length < TRADES_MAX;
+  /** How far back a settled tape holds every swap of its pool (card token-stats-count-every-trade): the trades answer's
+   *  `whole_ms`, from which the page counts its buys, sells and volume for each window inside it. 0 when the read back
+   *  reached the pool's birth; on a chain with a fixed block clock (BLOCK_CLOCK: Base) the second after the lowest block
+   *  read, since the book and its read back hold every block from it to the head; else the second after the oldest
+   *  trade held, every trade after it being held. None while the tape fills, or for an empty tape off a fixed clock. */
+  function wholeOf(e: Entry): number | undefined {
+    if (backing(e) || e.from === undefined) return undefined;
+    if (e.back?.born === true) return 0;
+    const low = e.back?.lo ?? e.from;
+    const clocked = e.back?.located === true ? null : blockSecondMs(chain, low);
+    if (clocked !== null) return clocked + 1_000;
+    const oldest = tapeOf(e, TRADES_MAX).at(-1);
+    return oldest === undefined ? undefined : oldest.t_ms + 1_000;
+  }
   /** A book's tape, then the trades read back before it (readBack): newest first, at most `limit`. */
   function tapeOf(e: Entry, limit: number): ReturnType<Book["tape"]> {
     const own = e.book.tape(limit);
@@ -2595,7 +2610,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const rows = h.rows.slice(0, limit);
       await within(lanes.run(lane, () => exacting(token, rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const { trades, waiting } = exactOf(token, rows);
-      return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at };
+      // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade)
+      const oldest = h.rows.at(-1);
+      const whole = waiting || oldest === undefined ? {} : { whole_ms: oldest.t_ms + 1_000 };
+      return { status: 200, body: JSON.stringify({ trades, ...(waiting ? { filling: true } : {}), ...whole, src: h.src, as_of_ms: h.at }), src: h.src, asOfMs: h.at };
     };
     const owed = async (): Promise<DataAnswer> => (held !== undefined ? serve(held) : empty({ trades: [], filling: true }));
     if (held !== undefined && now() - held.at < TAPE_FRESH_MS) return serve(held);
@@ -3256,8 +3274,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       await within(lanes.run(lane, () => tradersOf(rows.map((r) => r.tx))), Math.max(0, until - performance.now()));
       const at = e.readAt ?? now();
       const trades = rows.map((r) => ({ t_ms: r.t_ms, side: r.side, usd: r.usd, amt: r.amt, trader: traderAt(traders.get(r.tx), r.index), tx: r.tx }));
-      return timed({ status: 200, body: JSON.stringify({ trades, ...(backing(e) ? { filling: true } : {}), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
+      const whole = wholeOf(e);
+      return timed({ status: 200, body: JSON.stringify({ trades, ...(backing(e) ? { filling: true } : {}), ...(whole === undefined ? {} : { whole_ms: whole }), src: "chain", as_of_ms: at }), src: "chain", asOfMs: at });
     },
   };
 }
 export type EvmSwaps = ReturnType<typeof createSwaps>;
+
+/** The start of block `n`'s second on a chain with a fixed block clock (BLOCK_CLOCK), in ms; null off one. Every block in
+ *  an era is `blockMs` after the one before (card token-stats-count-every-trade: the tape's reach, wholeOf). */
+export function blockSecondMs(chain: EvmChain, n: number): number | null {
+  const eras = BLOCK_CLOCK[chain];
+  if (eras === null || !Number.isSafeInteger(n) || n < 0) return null;
+  const era = eras.findLast((x) => x.fromBlock <= n)!;
+  return Math.floor((era.atMs + (n - era.fromBlock) * era.blockMs) / 1_000) * 1_000;
+}

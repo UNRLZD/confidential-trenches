@@ -374,6 +374,11 @@ type Entry = {
   oldest?: string | null;
   /** Its own signatures read back (BACK_SPAN_S), or undefined when none was asked. */
   back?: Back;
+  /** How far back the tape holds every trade of the venues it decodes, in ms (card token-stats-count-every-trade, the
+   *  trades answer's `whole_ms`): 0 when the first walk listed the mint's first signature; else the second after the
+   *  oldest it read, or after a transaction a walk could not read, or after the oldest a gap's walk reached at REFILL_MAX
+   *  (an unread gap lies below it). Undefined until the first walk ends. */
+  whole?: number;
 };
 type Back = { before: string | null; events: Swap[]; book: Book | null; done: boolean; txs: number; n: number; want: { tf: Tf; limit: number } };
 
@@ -637,10 +642,15 @@ export function createSolanaTrades(deps: {
    *  walk (card token-page-data-complete-and-fast: 30 reads at 5 a time held a cold tape 3.8 to 7.9 s on public
    *  endpoints). */
   async function walk(e: Entry, until: string | null, round?: () => void): Promise<void> {
-    const sigs: { signature: string; slot: number; err: unknown }[] = [];
+    const sigs: { signature: string; slot: number; err: unknown; t: number | null }[] = [];
     const ok = (s: { err: unknown }): boolean => s.err === null || s.err === undefined;
     let before: string | undefined;
     const cold = until === null;
+    // whether the list ran out (the mint's first signature, or a gap's start, reached), and the newest second below which
+    // a trade may be missing (whole)
+    let listedAll = false;
+    const gap: { t: number | null } = { t: null };
+    const below = (t: number | null): void => void (gap.t = Math.max(gap.t ?? 0, t ?? Math.floor(now() / 1000)));
     while (cold ? sigs.filter(ok).length < COLD_SIGS : sigs.length < REFILL_MAX) {
       // a first read's newest COLD_SIGS, then once, when they were not all successful, one COLD_PAGE before them: a
       // bot-flooded token's newest signatures are failed transactions, and a first read of them alone held no trade
@@ -649,8 +659,9 @@ export function createSolanaTrades(deps: {
       const page = (await rpc("getSignaturesForAddress", [e.mint, { limit, commitment: "confirmed", ...(until !== null ? { until } : {}), ...(before !== undefined ? { before } : {}) }])) as unknown;
       if (!Array.isArray(page)) throw new Error("signatures");
       for (const s of page as Record<string, unknown>[]) {
-        if (typeof s?.signature === "string" && Number.isSafeInteger(s.slot)) sigs.push({ signature: s.signature, slot: s.slot as number, err: s.err });
+        if (typeof s?.signature === "string" && Number.isSafeInteger(s.slot)) sigs.push({ signature: s.signature, slot: s.slot as number, err: s.err, t: Number.isSafeInteger(s.blockTime) && (s.blockTime as number) > 0 ? (s.blockTime as number) : null });
       }
+      if (page.length < limit) listedAll = true;
       if (page.length < limit || sigs.length === 0 || (cold && before !== undefined)) break;
       before = sigs[sigs.length - 1]!.signature;
     }
@@ -661,13 +672,15 @@ export function createSolanaTrades(deps: {
       .filter((s) => ok(s) && !e.held.has(s.signature))
       .slice(cold ? -COLD_SIGS : 0)
       .map((s) => ({ ...s, order: ++seq }));
+    // a first walk that listed the mint's every signature and reads each successful one not held: the tape from its birth
+    const everyOne = cold && listedAll && todo.length === sigs.filter((x) => ok(x) && !e.held.has(x.signature)).length;
     // the read back starts before the oldest the first walk reads (its older page's signatures not read included)
     if (cold) e.oldest = todo[0]?.signature ?? sigs[0]?.signature ?? null;
     for (let k = todo.length; k > 0; k -= TX_PARALLEL) {
       await Promise.all(
         todo.slice(Math.max(0, k - TX_PARALLEL), k).map(async (s) => {
           const r = (await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 1, commitment: "confirmed" }])) as Record<string, unknown> | null;
-          if (r === null) return;
+          if (r === null) return below(s.t);
           e.seen++;
           const meta = (r.meta ?? {}) as Record<string, unknown>;
           const f = fromLogs(meta.logMessages);
@@ -681,6 +694,12 @@ export function createSolanaTrades(deps: {
       }
     }
     for (const s of sigs) e.covered = Math.max(e.covered, s.slot);
+    // the reach (Entry.whole): a first walk's oldest read, 0 when it read every successful signature the mint has; a gap's
+    // walk that stopped at REFILL_MAX leaves the signatures below its oldest unread
+    if (cold) {
+      if (!everyOne) below(todo[0]?.t ?? sigs[0]?.t ?? null);
+    } else if (!listedAll && sigs.length > 0) below(sigs[0]!.t);
+    if (gap.t !== null || cold) e.whole = Math.max(e.whole ?? 0, gap.t === null ? 0 : gap.t * 1_000 + 1_000);
     // a walk runs while the stream's trades already arrive: the newest signature held is then the stream's
     if (sigs.length > 0 && e.lastSig === until) e.lastSig = sigs[sigs.length - 1]!.signature;
   }
@@ -773,10 +792,14 @@ export function createSolanaTrades(deps: {
   async function poolTape(mint: string, limit: number, e: Entry | null): Promise<DataAnswer> {
     const v = await deps.tape!(mint).catch(() => null);
     if (v !== null && v.status === 200) {
-      const got = (JSON.parse(v.body) as unknown[]).slice(0, limit);
+      const all = JSON.parse(v.body) as unknown[];
+      const got = all.slice(0, limit);
       const src = v.src ?? "geckoterminal";
       const at = v.asOfMs ?? now();
-      return { status: 200, body: JSON.stringify({ trades: got, src, as_of_ms: at }), src, asOfMs: at };
+      // the vendor's newest trades of the pool, every one after its oldest (card token-stats-count-every-trade)
+      const oldest = (all.at(-1) as { t_ms?: unknown } | undefined)?.t_ms;
+      const whole = typeof oldest === "number" && Number.isSafeInteger(oldest) ? { whole_ms: oldest + 1_000 } : {};
+      return { status: 200, body: JSON.stringify({ trades: got, ...whole, src, as_of_ms: at }), src, asOfMs: at };
     }
     if (e === null && v !== null && v.status === 404) return NOT_FOUND;
     const at = e?.readAt ?? now();
@@ -830,6 +853,8 @@ export function createSolanaTrades(deps: {
         }
       }
       if (e.state === "cold") e.state = "live";
+      // a first walk that never ended: the stream's trades alone, every one since the subscription held
+      e.whole ??= Math.floor((e.readAt ?? now()) / 1_000) * 1_000 + 1_000;
       fold(e);
     })();
     // the first answer waits for the walk's first round that holds a trade (its newest trades), the whole walk, or
@@ -1085,7 +1110,9 @@ export function createSolanaTrades(deps: {
       // `filling` while the cold walk still reads the token's older trades (first() answered at COLD_WAIT_MS or its first
       // round): the rows so far, more to come; the Base and Robinhood tapes answer the same at their bound (../evm/swaps.ts)
       const fill = e.state === "cold" && rows.length < limit ? { filling: true } : {};
-      return { status: 200, body: JSON.stringify({ trades, ...fill, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
+      // how far back the tape holds every trade (Entry.whole), only while no gap is being walked
+      const whole = e.state === "live" && e.whole !== undefined ? { whole_ms: e.whole } : {};
+      return { status: 200, body: JSON.stringify({ trades, ...fill, ...whole, src: "chain", as_of_ms: at }), src: "chain", asOfMs: at };
     },
   };
 
