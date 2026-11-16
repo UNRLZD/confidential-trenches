@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
-import { chgBps, createNearLists, liqOf, mainsOf, parsePools, priceOf, priceText, toMeta, usdText, wnearFlow } from "./lists.ts";
+import { chgBps, createNearLists, liqOf, LIQ_MIN_USD, mainsOf, NEAR_USDC, parsePools, priceOf, priceText, routed, routesOf, toMeta, usdText, wnearFlow } from "./lists.ts";
 import { createNearToken } from "./token.ts";
 import { HOLD_MS, HOST_GAP_MS, nearAccount, NEAR_RPCS, PAST_RPCS, pacedFetch, WAIT_MAX_MS } from "./views.ts";
 import { fixtureFetch } from "./fixtures/replay.ts";
@@ -54,6 +54,32 @@ test("mainsOf and the price: the token's deepest wNEAR pool, NEAR's price from t
   assert.equal(chgBps(110n, 100n), 1000);
   assert.equal(chgBps(110n, null), null);
   assert.equal(mainsOf([pools[2]!]).nearUsd, null);
+});
+
+test("routesOf and routed (card near-listed-coin-quotes): a token's deepest simple pool with wNEAR or USDC, as the device's NEAR quote routes it; none for a token in no such pool", () => {
+  const N = 10n ** 24n;
+  const pools = [
+    { id: 1, tokens: [NEAR_USDC, "wrap.near"] as [string, string], amounts: [3_000_000_000n, 1000n * N] as [bigint, bigint] }, // $3 a NEAR
+    { id: 2, tokens: ["t.near", "wrap.near"] as [string, string], amounts: [5n, 100n * N] as [bigint, bigint] }, // $600
+    { id: 3, tokens: ["wrap.near", "t.near"] as [string, string], amounts: [400n * N, 5n] as [bigint, bigint] }, // $2,400, the deepest
+    { id: 4, tokens: ["u.near", NEAR_USDC] as [string, string], amounts: [7n, 700_000_000n] as [bigint, bigint] }, // USDC only: $1,400
+    { id: 5, tokens: ["dust.near", "wrap.near"] as [string, string], amounts: [9n, N / 1000n] as [bigint, bigint] }, // 0.001 NEAR
+    { id: 6, tokens: ["empty.near", "wrap.near"] as [string, string], amounts: [0n, 500n * N] as [bigint, bigint] }, // pays nothing
+    { id: 7, tokens: ["v.near", "other.near"] as [string, string], amounts: [1n * N, 1n * N] as [bigint, bigint] }, // no USDC or wNEAR side
+  ];
+  const { nearUsd } = mainsOf(pools);
+  const r = routesOf(pools, nearUsd);
+  assert.equal(usdText(r.get("t.near")!), "2400");
+  assert.equal(usdText(r.get("u.near")!), "1400");
+  assert.equal(r.get("dust.near"), 6n * 10n ** 15n);
+  for (const t of ["empty.near", "v.near", "dcl-only.near"]) assert.equal(r.has(t), false, t);
+  assert.deepEqual(
+    ["t.near", "u.near", "dust.near", "empty.near", "v.near", "dcl-only.near", NEAR_USDC, "wrap.near"].filter((t) => routed({ routes: r }, t)),
+    ["t.near", "u.near", "wrap.near"],
+    `at least LIQ_MIN_USD (${LIQ_MIN_USD}); USDC is what pays`,
+  );
+  // NEAR's price not read: a wNEAR side has no value yet, a USDC side does
+  assert.deepEqual([...routesOf(pools.slice(1), null).keys()], ["u.near"]);
 });
 
 test("toMeta: hostile metadata bounded or refused", () => {

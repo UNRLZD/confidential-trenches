@@ -30,8 +30,10 @@ import { block, nearAccount, NEAR_RPCS, PAST_RPCS, pacedFetch, view, type At, ty
 export const REF = "v2.ref-finance.near";
 export const WNEAR = "wrap.near";
 export const WNEAR_DECIMALS = 24;
+/** Circle's NEAR USDC, what a NEAR buy pays with (the vault's asset: packages/kit/src/near/networks.ts mainnet usdc). */
+export const NEAR_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 /** The dollar stablecoins NEAR's price is read against, each with its decimals (their own ft_metadata: 6 and 6). */
-export const USD_TOKENS: Readonly<Record<string, number>> = { "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": 6, "usdt.tether-token.near": 6 };
+export const USD_TOKENS: Readonly<Record<string, number>> = { [NEAR_USDC]: 6, "usdt.tether-token.near": 6 };
 /** Pools a `get_pools` page holds [design: 500 answered in 0.43 s from a Mac, 2026-11-11 18:2xZ]. */
 export const PAGE = 500;
 /** The most pools read [design: 9,014 on 2026-11-11; past this the answer is refused, never a longer read]. */
@@ -56,7 +58,8 @@ export type Pool = { id: number; tokens: [string, string]; amounts: [bigint, big
 /** A token's main pool: its id, the token's and wNEAR's amounts in it, and wNEAR's place in its two tokens. */
 export type Main = { pool: number; amt: bigint; wnear: bigint; w: number };
 export type Meta = { symbol: string; name: string; decimals: number };
-export type Scan = { height: number; t_ms: number; mains: Map<string, Main>; nearUsd: bigint | null };
+/** `routes`: each token's deepest route a NEAR buy can quote (routesOf). */
+export type Scan = { height: number; t_ms: number; mains: Map<string, Main>; nearUsd: bigint | null; routes: Map<string, bigint> };
 
 const DIGITS = /^\d{1,40}$/;
 const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
@@ -97,6 +100,34 @@ export function mainsOf(pools: readonly Pool[]): { mains: Map<string, Main>; nea
   const nearUsd = usd === null ? null : (usd.stable * pow10(VALUE_SCALE) * pow10(WNEAR_DECIMALS)) / (usd.wnear * pow10(usd.decimals));
   return { mains, nearUsd: nearUsd === null || nearUsd <= 0n ? null : nearUsd };
 }
+
+/**
+ * Each token's deepest route the device's NEAR buy quotes (card near-listed-coin-quotes): the kit's rheaQuote reads Rhea
+ * classic SIMPLE_POOLs only, joining the token to USDC directly or through wNEAR (packages/kit/src/near/rhea.ts, its
+ * candidates packages/signpage/src/near-pools.ts rheaCandidates), so a route is the token's simple pool with wNEAR or
+ * with USDC, both reserves above 0, valued at twice that side in USD (times 10^VALUE_SCALE; a wNEAR side only once
+ * NEAR's price is read). A token held only elsewhere (Rhea DCL, a launchpad's curve, a stable pool) has none: on
+ * 2026-11-16 30 of the 57 NEAR coins the engine listed traded only on DCL, hoodl-95275b.launchpad.justhoot.near among them.
+ */
+export function routesOf(pools: readonly Pool[], nearUsd: bigint | null): Map<string, bigint> {
+  const out = new Map<string, bigint>();
+  for (const p of pools) {
+    if (p.amounts[0] <= 0n || p.amounts[1] <= 0n) continue;
+    for (const k of [0, 1] as const) {
+      const other = p.tokens[1 - k]!;
+      const side = p.amounts[1 - k]!;
+      const usd = other === NEAR_USDC ? (2n * side * pow10(VALUE_SCALE)) / pow10(USD_TOKENS[NEAR_USDC]!) : other === WNEAR && nearUsd !== null ? (2n * side * nearUsd) / pow10(WNEAR_DECIMALS) : null;
+      const t = p.tokens[k]!;
+      if (usd !== null && usd > (out.get(t) ?? -1n)) out.set(t, usd);
+    }
+  }
+  return out;
+}
+
+/** A coin the NEAR lists may offer: one a NEAR buy quotes, through a route of at least LIQ_MIN_USD (a pool of a few
+ *  dollars prices a buy at almost nothing: hoot-8ecf65's classic pool held 41 NEAR on 2026-11-16 while its market sat
+ *  on DCL). USDC itself is what pays. */
+export const routed = (s: Pick<Scan, "routes">, token: string): boolean => token !== NEAR_USDC && (s.routes.get(token) ?? 0n) >= LIQ_MIN_USD * pow10(VALUE_SCALE);
 
 /** The token's USD price times 10^PRICE_SCALE from its main pool's amounts, or null. */
 export function priceOf(m: Main, decimals: number, nearUsd: bigint): bigint | null {
@@ -313,7 +344,7 @@ export function createNearLists(deps: NearDeps = {}) {
     const head = await block(fetchFn, { finality: "final" }, rpcs);
     const pools = await readPools({ block_id: head.height }, rpcs);
     const { mains, nearUsd } = mainsOf(pools);
-    const s: Scan = { height: head.height, t_ms: head.t_ms, mains, nearUsd };
+    const s: Scan = { height: head.height, t_ms: head.t_ms, mains, nearUsd, routes: routesOf(pools, nearUsd) };
     const c = candidates(s);
     const tokens = [...new Set([...c.newest, ...c.deepest])];
     await each(tokens, metaOf);

@@ -33,6 +33,7 @@ import { dec, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { NOT_FOUND, type DataAnswer, type Field, type Holder, type RISK_FIELDS } from "../solana/token.ts";
 import { TF_SECONDS } from "../candles.ts";
 import { nearAccount, pacedFetch, type Fetch } from "./views.ts";
+import { routed, type Scan } from "./lists.ts";
 import type { NearMarket } from "./token.ts";
 
 export const ENGINE = "https://api.unrealized.trade/v1";
@@ -299,7 +300,12 @@ export function createEngineNear(deps: EngineDeps = {}) {
   let last: { body: string; gzip: Buffer; asOfMs: number } | null = null;
   let running: Promise<void> | null = null;
 
-  async function readLists(pools: () => Record<string, string>): Promise<void> {
+  async function readLists(rhea: () => Scan | null): Promise<void> {
+    // only coins a NEAR buy quotes (card near-listed-coin-quotes): the engine lists Rhea DCL's and the launchpads'
+    // curves' coins too, which the device's quote does not read (lists.ts routesOf); before Rhea's first pool read no
+    // route is known, so Rhea's own lists serve
+    const s = rhea();
+    if (s === null) throw new Error("engine lists: no Rhea pool read yet");
     const at = now();
     const [fresh, grad, t5, t1] = await Promise.all([
       get(`/discover?column=new&limit=${LIST_MAX}`),
@@ -309,8 +315,10 @@ export function createEngineNear(deps: EngineDeps = {}) {
     ]);
     const lists = [fresh, grad, t5, t1].map((a) => engineRows(a, at));
     if (lists.some((l) => l === null)) throw new Error("engine lists: shape");
-    const [n, g, tr5, tr1] = lists as Row[][];
-    const body = JSON.stringify({ chain: "near", lists: { new: n, trending: tr1, trending_5m: tr5, trending_1h: tr1, graduating: g }, as_of_ms: at, unsettled: [], pools: pools() });
+    const [n, g, tr5, tr1] = (lists as Row[][]).map((l) => l.filter((r) => routed(s, r.token as string)));
+    const pools: Record<string, string> = {};
+    for (const [t, m] of s.mains) pools[t] = String(m.pool);
+    const body = JSON.stringify({ chain: "near", lists: { new: n, trending: tr1, trending_5m: tr5, trending_1h: tr1, graduating: g }, as_of_ms: at, unsettled: [], pools });
     last = { body, gzip: gzipSync(body), asOfMs: at };
   }
 
@@ -334,9 +342,10 @@ export function createEngineNear(deps: EngineDeps = {}) {
   };
 
   return {
-    /** Reads the lists now (one at a time); `pools` names each token's Rhea pool where the Rhea read holds one. */
-    refresh(pools: () => Record<string, string> = () => ({})): Promise<void> {
-      return (running ??= readLists(pools)
+    /** Reads the lists now (one at a time), keeping the coins Rhea's latest pool read routes (`rhea`, lists.ts scan);
+     *  the answer's `pools` names each token's Rhea pool where that read holds one. */
+    refresh(rhea: () => Scan | null): Promise<void> {
+      return (running ??= readLists(rhea)
         .catch(() => undefined)
         .finally(() => (running = null)));
     },
@@ -389,17 +398,12 @@ export type EngineNear = ReturnType<typeof createEngineNear>;
 /** chain=near's market: each read the engine's when it has a good answer, else Rhea's (lists.ts, token.ts, trades.ts).
  *  `warm` reads the engine's lists now and every LISTS_MS; Rhea's keep their own cadence (lists.ts warm). */
 export function engineFirst(rhea: NearMarket, engine: EngineNear): NearMarket & { warm(): () => void } {
-  const pools = (): Record<string, string> => {
-    const s = rhea.lists.scan();
-    const out: Record<string, string> = {};
-    if (s !== null) for (const [t, m] of s.mains) out[t] = String(m.pool);
-    return out;
-  };
+  const scan = () => rhea.lists.scan();
   return {
     lists: {
       ...rhea.lists,
       async get() {
-        return engine.lists() ?? (await engine.refresh(pools), engine.lists()) ?? rhea.lists.get();
+        return engine.lists() ?? (await engine.refresh(scan), engine.lists()) ?? rhea.lists.get();
       },
     },
     token: {
@@ -411,8 +415,8 @@ export function engineFirst(rhea: NearMarket, engine: EngineNear): NearMarket & 
       candles: async (t, tf, to, limit) => (await engine.candles(t, tf, to, limit)) ?? rhea.trades.candles(t, tf, to, limit),
     },
     warm() {
-      void engine.refresh(pools);
-      const t = setInterval(() => void engine.refresh(pools), LISTS_MS);
+      void engine.refresh(scan);
+      const t = setInterval(() => void engine.refresh(scan), LISTS_MS);
       t.unref?.();
       return () => clearInterval(t);
     },
