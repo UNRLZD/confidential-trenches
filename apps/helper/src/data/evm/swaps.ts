@@ -1329,7 +1329,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         }),
       );
     };
-    const ok = ranked(usable(rpcs));
+    // a header-timed provider (HEADER_TIMED) is asked a head last and never joins the head's `with`: `with` leads every
+    // later read of the tapes, and a provider with one post a second asked first by each tape was the burst's slowest
+    // step (card robinhood-trades-finish-filling: 8 cold tapes in the helper's container 16 Nov, the chain's own RPC at
+    // 0.86-0.97 posts a second in every run, 85-90% of its calls ordinary logs and their headers)
+    const ok = ((r) => [...r.filter((u) => !headerTimed.has(u)), ...r.filter((u) => headerTimed.has(u))])(ranked(usable(rpcs)));
     // a provider still out after HEDGE_MS is left to answer while the next is asked; before the patient round every
     // read out is waited for (each bounded by TIMEOUT_MS), so its answer still counts
     const reads: Promise<void>[] = [];
@@ -1357,7 +1361,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const sorted = best();
     if (sorted.length < 2) return null;
     const agreed = sorted[1]![1].n; // the newest block at least two providers have
-    const withIt = [...heads].filter(([, h]) => h.n >= agreed).map(([u]) => u);
+    const withIt = [...heads].filter(([u, h]) => h.n >= agreed && !headerTimed.has(u)).map(([u]) => u);
     return { n: agreed, t: sorted[1]![1].t, with: withIt };
   }
 
@@ -1374,9 +1378,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  Returns each request's answer that two providers gave alike (`same` says what alike is), else null. Each next one,
    *  of the rest and the wide ones (WIDE_SPAN) of the first two (a read past its pace's or queue's wait or held answers
    *  nothing at once), is ranked when it is asked, by expected answer time with the requests still left (fold 4). */
-  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true, only = false, skip?: ReadonlySet<string>): Promise<(A | null)[]> {
-    // `only`: none but `urls` (the index's chain-wide read, which the others refuse); `skip`: never these
-    const order = askOrder(urls, wideFirst, n, only, skip);
+  async function agreed<A>(urls: readonly string[], n: number, ask: (u: string, idx: number[], patient: boolean) => Promise<(A | null)[]>, same: (a: A, b: A) => boolean, wideFirst = true, only = false, skip?: ReadonlySet<string>, third?: ReadonlySet<string>): Promise<(A | null)[]> {
+    // `only`: none but `urls` (the index's chain-wide read, which the others refuse); `skip`: never these; `third`: never
+    // in the first two while two others can be asked, and the first tie-break when those two disagree (agreedLogs: the
+    // header-timed providers)
+    const asked = askOrder(urls, wideFirst, n, only, skip);
+    const others = third === undefined ? asked : asked.filter((u) => !third.has(u));
+    const order = third === undefined || others.length < 2 ? asked : [...others.slice(0, 2), ...asked.filter((u) => third.has(u)), ...others.slice(2)];
     const passedBefore = new Map(order.map((u) => [u, paced.get(u) ?? 0]));
     // review M1 of 424dce1e: an answer counts with its company (operatorOf), and two alike count only from two companies:
     // two keys of one company are one operator answering twice
@@ -1413,9 +1421,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the next one is ranked when it is asked, not when the read began: a dozen tapes ranked at once saw no queue yet,
     // and all asked daybreak next, 37 slow posts in its 3 slots (fold 4)
     const tier = [...rest, ...order.slice(0, 2).filter(wide)];
+    const thirds = rest.filter((u) => third?.has(u) === true);
     while (tier.length > 0 && answered.size < PROVIDERS_MAX && !all.every((i) => pick(i) !== null)) {
       const want = all.filter((i) => pick(i) === null);
-      const u = ranked(tier, wideFirst, want.length)[0]!;
+      const u = tier.find((v) => thirds.includes(v)) ?? ranked(tier, wideFirst, want.length)[0]!;
       tier.splice(tier.indexOf(u), 1);
       const left = want.filter((i) => !by[i]!.has(operatorOf(u)));
       if (left.length > 0) await hedged(launch(u, left), [u]);
@@ -1489,6 +1498,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       true,
       only,
       LOGS_REFUSED,
+      headerTimed,
     );
   }
 
