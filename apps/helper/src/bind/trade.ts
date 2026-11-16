@@ -46,7 +46,7 @@
 //      side rules (a registration at the cap, three swaps and a claim a side): 0.00894 + 0.01281 + 2 x (3 x 0.00164 +
 //      0.0003) = 0.03219 N, and at most 0.05545 N counted while its last swap and claim are in flight at their worst.
 //      A W the vault never paid gets nothing.
-//      W is never registered on Rhea DCL (card near-dcl-helper-relay, CO 16 Nov): DCL's storage minimum is 0.5 N
+//      W is never registered on Rhea DCL (card near-dcl-helper-relay): DCL's storage minimum is 0.5 N
 //      (storage_balance_bounds, read on dRPC at block 224795084 and near.org at 224795090), which the relayer would
 //      attach as W's delegate's deposit, and DCL pays it back to W (storage_withdraw, storage_unregister), whose key is
 //      the device's, so anyone with a vault payout could collect 0.5 N a W from the gas account, past this rule's 0.09 N.
