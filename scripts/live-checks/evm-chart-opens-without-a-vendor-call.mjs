@@ -64,7 +64,9 @@ export function candlesFault(r) {
     return "not JSON";
   }
   const keys = isObj(c) ? Object.keys(c) : [];
-  if (!["tf", "candles", "src", "as_of_ms"].every((k) => keys.includes(k)) || !keys.every((k) => ["tf", "candles", "src", "own_from_s", "as_of_ms"].includes(k))) return `keys ${show(keys)}`;
+  if (!["tf", "candles", "src", "as_of_ms"].every((k) => keys.includes(k)) || !keys.every((k) => ["tf", "candles", "src", "own_from_s", "filling", "as_of_ms"].includes(k))) return `keys ${show(keys)}`;
+  // `filling` true: the chart's fill goes on (apps/helper/src/data/evm/swaps.ts candles); the page draws the bars and reads again
+  if (keys.includes("filling") && c.filling !== true) return `filling ${show(c.filling)}`;
   if (c.tf !== "15m") return `tf ${show(c.tf)}`;
   if (!SOURCES.includes(c.src) || r.headers?.["x-helper-source"] !== c.src) return `src ${show(c.src)}, X-Helper-Source ${show(r.headers?.["x-helper-source"])}`;
   if (!Number.isSafeInteger(c.as_of_ms)) return `as_of_ms ${show(c.as_of_ms)}`;

@@ -26,6 +26,7 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { KEYED_PACE } from "../../apps/helper/src/limits/limits.ts";
 
 const KEY = "base-reads-never-throttled";
 export const BASE = "https://ct-api.unrealized.trade";
@@ -36,8 +37,12 @@ export const CHAINS = ["base", "robinhood"];
 export const HEALTH_CHAINS = ["base", "robinhood", "near"];
 /** A shown read's longest send to answer (base-reads-never-starve-max's SHOWN_MS). */
 export const SHOWN_MS = 3_000;
-/** The longest the helper may hold a read before its send: a pace's turn, never a hold's second. [design: half a second.] */
-export const WAIT_MAX_MS = 500;
+/** The longest the helper may hold a read before its send: one pace turn, never a hold's seconds. A caller waits at most
+ *  one refill of its provider's pace behind any crowd (apps/helper/src/limits/limits.ts CALLER_ROOM's design, 1/perS),
+ *  so the bound is a turn of the slowest keyed company pace the routes draw: dRPC's free 0.8 a second, 1,250 ms (live
+ *  run 43930146683, 16 Nov 18:48Z: a keyed Base eth_getLogs waited 840 ms, one turn; the 500 ms before was written at
+ *  20 a second). A paid plan's faster pace (RPC_PACE_<COMPANY>, on the box) only shortens the turns. */
+export const WAIT_MAX_MS = Math.ceil(1000 / Math.min(...Object.values(KEYED_PACE).map((p) => p.perS)));
 export const ROUNDS = 3;
 export const ROUND_GAP_MS = 2_000;
 /** How far under the head the logs page ends: past the newest blocks a provider may not hold yet. */
