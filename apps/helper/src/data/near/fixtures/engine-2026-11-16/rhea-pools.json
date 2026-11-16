@@ -3,7 +3,7 @@
  "rpc": "https://rpc.mainnet.fastnear.com",
  "height": 224789002,
  "number_of_pools": 9021,
- "note": "every SIMPLE_POOL of Rhea classic (v2.ref-finance.near get_pools) holding a cut token, and the wNEAR/USDC pool holding the most wNEAR, at one final block",
+ "note": "every SIMPLE_POOL of Rhea classic (v2.ref-finance.near get_pools) holding a cut token, and the wNEAR/USDC pool holding the most wNEAR, at one final block; each row cut to the fields lists.ts parsePools reads (pool_kind, token_account_ids, amounts) and its id",
  "pools": [
   {
    "id": 8812,
@@ -15,10 +15,7 @@
    "amounts": [
     "41521731399684656694786870",
     "119536051367652819817825"
-   ],
-   "total_fee": 2000,
-   "shares_total_supply": "332740252868750909487412",
-   "amp": 0
+   ]
   },
   {
    "id": 8813,
@@ -30,10 +27,7 @@
    "amounts": [
     "0",
     "0"
-   ],
-   "total_fee": 2000,
-   "shares_total_supply": "0",
-   "amp": 0
+   ]
   },
   {
    "id": 8814,
@@ -45,10 +39,7 @@
    "amounts": [
     "0",
     "0"
-   ],
-   "total_fee": 2000,
-   "shares_total_supply": "0",
-   "amp": 0
+   ]
   },
   {
    "id": 8815,
@@ -60,10 +51,7 @@
    "amounts": [
     "1360631564351846392937768",
     "3938604466701683845103"
-   ],
-   "total_fee": 500,
-   "shares_total_supply": "132010951769581708698019",
-   "amp": 0
+   ]
   },
   {
    "id": 8816,
@@ -75,10 +63,7 @@
    "amounts": [
     "0",
     "0"
-   ],
-   "total_fee": 500,
-   "shares_total_supply": "0",
-   "amp": 0
+   ]
   },
   {
    "id": 8817,
@@ -90,10 +75,7 @@
    "amounts": [
     "0",
     "0"
-   ],
-   "total_fee": 500,
-   "shares_total_supply": "0",
-   "amp": 0
+   ]
   },
   {
    "id": 8818,
@@ -105,10 +87,7 @@
    "amounts": [
     "0",
     "0"
-   ],
-   "total_fee": 500,
-   "shares_total_supply": "0",
-   "amp": 0
+   ]
   },
   {
    "id": 8825,
@@ -120,10 +99,7 @@
    "amounts": [
     "0",
     "0"
-   ],
-   "total_fee": 60,
-   "shares_total_supply": "0",
-   "amp": 0
+   ]
   },
   {
    "id": 8915,
@@ -135,10 +111,7 @@
    "amounts": [
     "32956842301434385579562",
     "175951681695962949648750"
-   ],
-   "total_fee": 1000,
-   "shares_total_supply": "12331868619479746590840",
-   "amp": 0
+   ]
   },
   {
    "id": 8943,
@@ -150,10 +123,7 @@
    "amounts": [
     "169596468813326072204108329",
     "293016517872527700713790069"
-   ],
-   "total_fee": 10,
-   "shares_total_supply": "1001930872122154044997301",
-   "amp": 0
+   ]
   },
   {
    "id": 9004,
@@ -165,10 +135,7 @@
    "amounts": [
     "98550461545035245413",
     "1103232751055373829855"
-   ],
-   "total_fee": 1000,
-   "shares_total_supply": "215943441669784648145",
-   "amp": 0
+   ]
   },
   {
    "id": 9010,
@@ -180,10 +147,7 @@
    "amounts": [
     "93948057674",
     "1540368497"
-   ],
-   "total_fee": 30,
-   "shares_total_supply": "38298399875721616676137836",
-   "amp": 0
+   ]
   },
   {
    "id": 9020,
@@ -195,10 +159,7 @@
    "amounts": [
     "581674904060000000000",
     "1501015560030000000000"
-   ],
-   "total_fee": 30,
-   "shares_total_supply": "1000000000000000000000000",
-   "amp": 0
+   ]
   },
   {
    "id": 4512,
@@ -210,10 +171,7 @@
    "amounts": [
     "904268186136",
     "283294047776940368192457855923"
-   ],
-   "total_fee": 30,
-   "shares_total_supply": "93906238172907371644846823764",
-   "amp": 0
+   ]
   }
  ]
 }
