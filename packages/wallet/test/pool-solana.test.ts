@@ -1204,6 +1204,10 @@ test("R4: a state tree that holds one commitment twice stops the restore", () =>
   const c = noteCommitment(10_000_000n, label, P);
   const marks = { pre: new Map([[solanaMarkOf(PROGRAM, "pre", P), { value: 10_000_000n, nonce: 1n }]]), spent: new Map<string, SolanaSpentMark>(), slot: 1 };
   assert.equal(solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c], labelLeaves: [label], marks, gap: 2 }).notes.length, 1);
+  // card restore-walk-rewalks-a-bad-lane: every lane handed in wrong (empty, ended at its first index): each is walked
+  // again on BigInt and the restore is the one walked here, its note included
+  const wrong = Array.from({ length: RESTORE_LANES }, (_, lane) => ({ found: [], last: lane, lastPrecommitment: 0n }));
+  assert.deepEqual(solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c], labelLeaves: [label], marks, gap: 2, lanes: wrong }), solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c], labelLeaves: [label], marks, gap: 2 }));
   assert.throws(() => solanaRestore({ seed64: SEED, program: PROGRAM, scope: SCOPE, stateLeaves: [c, c], labelLeaves: [label], marks, gap: 2 }), /state leaf 1 repeats/);
 });
 

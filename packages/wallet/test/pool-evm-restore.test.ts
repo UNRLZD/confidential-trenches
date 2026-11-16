@@ -575,6 +575,10 @@ test("evmRestore refuses what a correct pool cannot make: a precommitment twice,
   // a change that is not the release's is no refusal: the release is listed elsewhere and the change not kept
   const r = run((e) => e.map((x, k) => (k === 4 ? { ...x, state: 99n } : x)));
   assert.deepEqual(r.elsewhere.map((x) => x.changeOurs), [false]);
+  // card restore-walk-rewalks-a-bad-lane: every lane handed in wrong (empty, ended at its first index): each is walked
+  // again on BigInt and the restore is the one walked here, its 10 notes
+  const wrong = Array.from({ length: RESTORE_LANES }, (_, lane) => ({ found: [], last: lane, lastPrecommitment: 0n }));
+  assert.deepEqual(evmRestore({ seed64: SEED, scope: SCOPE, events: evs, gap: 4, lanes: wrong }), run((e) => e));
 });
 
 // ---- card wallet-rpc-hex-case: an RPC's hex in either case ----
