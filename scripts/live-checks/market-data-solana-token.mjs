@@ -20,6 +20,9 @@
 //     mint the lists do not hold, else "chain", "chain,geckoterminal" or "chain,coingecko" (the helper's own bars, the
 //     vendor's only before them,
 //     apps/helper/src/data/solana/trades.ts); when the bars include ours, own_from_s (before as_of_ms) is our first bar.
+//     A chart whose fill goes on (the history's held bars, or ours short of the limit) carries `filling` true after src
+//     or own_from_s, before as_of_ms (trades.ts candles, card helper-listed-charts-own-reads); the page draws its bars and
+//     reads it again.
 // The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
 // one 75 s span; a 429 still standing after it, or a 200 with no bars, is BAD as any other answer.
 // After: helper
@@ -105,7 +108,10 @@ export function holdersFault(h) {
 /** The first thing wrong with a Candles answer for tf 1h, or null. */
 export function candlesFault(c) {
   const own = isObj(c) && Object.hasOwn(c, "own_from_s");
-  if (!isObj(c) || !same(Object.keys(c), own ? ["tf", "candles", "src", "own_from_s", "as_of_ms"] : CANDLES)) return `keys ${show(isObj(c) ? Object.keys(c) : c)}`;
+  const fill = isObj(c) && Object.hasOwn(c, "filling");
+  const keys = ["tf", "candles", "src", ...(own ? ["own_from_s"] : []), ...(fill ? ["filling"] : []), "as_of_ms"];
+  if (!isObj(c) || !same(Object.keys(c), keys)) return `keys ${show(isObj(c) ? Object.keys(c) : c)}`;
+  if (fill && c.filling !== true) return `filling ${show(c.filling)}`;
   if (c.tf !== "1h" || !CANDLE_SOURCES.includes(c.src) || !Number.isSafeInteger(c.as_of_ms)) return `tf ${show(c.tf)}, src ${show(c.src)}`;
   if (own && (!c.src.startsWith("chain") || !Array.isArray(c.candles) || !c.candles.some((b) => Array.isArray(b) && b[0] === c.own_from_s))) return `own_from_s ${show(c.own_from_s)} with src ${show(c.src)}`;
   if (!Array.isArray(c.candles) || c.candles.length === 0 || c.candles.length > 24) return `candles ${Array.isArray(c.candles) ? c.candles.length : "not a list"}`;

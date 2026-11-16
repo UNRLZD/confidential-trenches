@@ -98,3 +98,23 @@ test("card charts-say-coingecko: ten trending Base charts from CoinGecko's paid 
   c1.headers["x-helper-source"] = "coingecko";
   assert.ok(bad(judge(alone)).some((l) => /own_from_s on a vendor-only chart/.test(l)), bad(judge(alone)).join("\n"));
 });
+
+// card base-reads-never-throttled: a chart whose fill goes on (ours short of the limit, or the history's still coming)
+// carries `filling` true before as_of_ms (apps/helper/src/data/evm/swaps.ts candles, card helper-listed-charts-own-reads);
+// the page draws its bars and reads again. Made from the recorded good answer: its first chart with `filling` added.
+test("a chart still filling (made from the good answer): filling true before as_of_ms PASSes; filling false FAILs by name", () => {
+  const withFill = (v) => {
+    const run = structuredClone(A.good);
+    const c = JSON.parse(run.candles[0].body);
+    const as = c.as_of_ms;
+    delete c.as_of_ms;
+    Object.assign(c, { filling: v, as_of_ms: as });
+    run.candles[0].body = JSON.stringify(c);
+    return run;
+  };
+  const ok = judge(withFill(true));
+  assert.deepEqual(bad(ok), []);
+  const no = judge(withFill(false));
+  assert.equal(no.ok, false);
+  assert.ok(bad(no).some((l) => /filling false/.test(l)), bad(no).join("\n"));
+});

@@ -121,6 +121,41 @@ test("candles from the helper's own bars: \"chain\" or \"chain,geckoterminal\", 
   }
 });
 
+// card base-reads-never-throttled (live run 43930146683, 16 Nov 18:40:11Z, helper e44158fd4): the helper answered a
+// listed coin's chart with its held bars and `filling` true, keys ["tf","candles","src","filling","as_of_ms"]
+// (apps/helper/src/data/solana/trades.ts, card helper-listed-charts-own-reads), and the check refused the field. The
+// cases are made from the recorded good answer (the live body itself was not kept): `filling` placed as the helper
+// places it, after src or own_from_s and before as_of_ms.
+test("candles still filling (made from the good answer, the live keys of run 43930146683): filling true before as_of_ms PASSes, with or without own_from_s; filling not true, or out of place, FAILs", async () => {
+  const fill = (v, own, at = "before") => edit("candles", (c) => {
+    const as = c.as_of_ms;
+    delete c.as_of_ms;
+    if (at === "first") {
+      const rest = { ...c };
+      for (const k of Object.keys(c)) delete c[k];
+      Object.assign(c, { filling: v }, rest);
+    }
+    if (own) {
+      c.src = "chain,geckoterminal";
+      c.own_from_s = c.candles.at(-1)[0];
+    }
+    if (at === "before") c.filling = v;
+    c.as_of_ms = as;
+    if (at === "after") c.filling = v;
+  }, own ? { "x-helper-source": "chain,geckoterminal" } : undefined);
+  for (const own of [false, true]) {
+    const r = await run(fill(true, own));
+    assert.equal(r.ok, true, `own ${own}\n${bad(r).join("\n")}`);
+  }
+  assert.deepEqual(Object.keys(JSON.parse(fill(true, false).reads.candles.body)), ["tf", "candles", "src", "filling", "as_of_ms"], "the live run's keys");
+  for (const [rec, why] of [[fill(false, false), "filling false"], [fill("yes", true), "filling a string"], [fill(true, false, "after"), "filling after as_of_ms"], [fill(true, false, "first"), "filling first"]]) {
+    const r = await run(rec);
+    assert.equal(r.ok, false, why);
+    assert.equal(bad(r).length, 1, `${why}\n${bad(r).join("\n")}`);
+    assert.ok(bad(r)[0].startsWith("BAD candles: exactly the frozen fields in their wire forms: "), `${why}\n${bad(r)[0]}`);
+  }
+});
+
 test("made from the good answer: each fault FAILs on its own line", async () => {
   const cases = [
     [edit("token", (p) => delete p.risk.tax), "BAD token: exactly the frozen fields in their wire forms: risk keys"],
