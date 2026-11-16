@@ -111,6 +111,56 @@ export function cashPlanFee(notes: readonly CashNote[], read: CashFeeRead): bigi
   throw read.error;
 }
 
+/** The reads a plan over Cash is made on (card buy-quote-before-any-note, round 2): Cash's notes first (the device's own
+ *  store), then, only with a note, the fee, the pool's floor and 1Click's least, side by side. With no Cash note none of
+ *  them is read or waited on: a plan over no note moves nothing (fee 0n, cashPlanFee), and a fresh account's dry waited
+ *  27 s on Robinhood's floor read for it (16 Nov). A failed fee read with a note throws, as cashPlanFee. */
+export async function cashPlanReads<F, L>(notes: () => Promise<readonly CashNote[]>, rest: () => readonly [Promise<CashFeeRead>, Promise<F>, Promise<L>]): Promise<{ notes: readonly CashNote[]; fee: bigint; floor: F | null; leastIn: L | null }> {
+  const all = await notes();
+  if (all.length === 0) return { notes: all, fee: 0n, floor: null, leastIn: null };
+  const [read, floor, leastIn] = await Promise.all(rest());
+  return { notes: all, fee: cashPlanFee(all, read), floor, leastIn };
+}
+
+/** One Base or Robinhood dry's reads over Cash (card buy-quote-before-any-note, round 2): Cash's notes read once (the
+ *  device's own store); from that one read, the plan over them (its fee, floor and least) and, only with a note, the
+ *  epoch's fee, side by side, so a dry with Cash waits for the slower of the two, never their sum (Robinhood's floor
+ *  read took 27-30 s on 16 Nov), and one with none reads no fee. Each read once per dry, however many deps ask it. */
+export function evmDryCashReads<P>(notes: () => Promise<readonly CashNote[]>, plan: (notes: readonly CashNote[]) => Promise<P>, fee: () => Promise<bigint | null>): { plan: () => Promise<P>; fee: () => Promise<bigint | null> } {
+  let read: Promise<readonly CashNote[]> | undefined;
+  let planRead: Promise<P> | undefined;
+  let feeRead: Promise<bigint | null> | undefined;
+  const notesOnce = () => (read ??= notes());
+  return {
+    plan: () => (planRead ??= notesOnce().then(plan)),
+    fee: () => (feeRead ??= notesOnce().then((n) => (n.length === 0 ? null : fee()))),
+  };
+}
+
+/** A plan over no Cash note (cashPlanReads with none): no part, no rung, no cost, nothing on top of the tap. */
+export const NO_CASH_EVM_PLAN: EvmCashPlan = Object.freeze({ parts: () => null, rungs: () => null, cost: () => null, top: 0n });
+
+/** pool.buy.dry with with_cash on Solana (card buy-quote-before-any-note, round 2): the dry `r` and Cash's reads `cash`
+ *  side by side, so the answer comes at the slower of the two, never their sum; with_cash only on a dry's result and a
+ *  `cash` that gives one (a read that fails leaves it out). */
+export function dryBesideCash(r: Running<"pool.buy.dry">, cash: Promise<((tapMax: string) => string | null) | null>): Running<"pool.buy.dry"> {
+  let extra: string | null = null;
+  const after = Promise.all([r.after, cash])
+    .then(([, of]) => {
+      const a = r.answer();
+      if (a !== null && "result" in a && of !== null) extra = of(a.result.tap_max);
+    })
+    .catch(() => {});
+  return {
+    running: true as const,
+    after,
+    answer: () => {
+      const a = r.answer();
+      return a !== null && "result" in a && extra !== null ? { ...a, result: { ...a.result, with_cash: extra } } : a;
+    },
+  };
+}
+
 /** Each pool's coin: its decimals and the least rung its deposit ladder splits into (what a 1-2-5 split may leave at
  *  U_X under it): SOL on Solana, ETH on Base and Robinhood. */
 const POOL_DECIMALS: Readonly<Record<PoolChain, number>> = { solana: 9, base: 18, robinhood: 18 };
